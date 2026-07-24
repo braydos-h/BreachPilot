@@ -1,0 +1,17 @@
+.git
+.venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+reports
+research_workspace
+exploit_workspace
+test_workspace*
+secr.json
+.env
+*.log
+Dockerfile

@@ -1,0 +1,312 @@
+Metadata-Version: 2.4
+Name: netattackai
+Version: 0.49.2
+Summary: AI-driven, locally-run penetration testing / bug bounty research agent
+Author: NetAttackAI Team
+License: GPL-3.0-only
+Keywords: security,penetration-testing,nmap,ai,mcp
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Information Technology
+Classifier: License :: OSI Approved :: GNU General Public License v3 (GPLv3)
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Security
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: ollama>=0.6.1
+Requires-Dist: mcp>=1.27.0
+Requires-Dist: PyYAML>=6.0.2
+Requires-Dist: uvicorn>=0.30.0
+Requires-Dist: starlette>=0.37.0
+Requires-Dist: websockets>=12.0
+Requires-Dist: questionary>=2.0.0
+Requires-Dist: textual>=2.0.0
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: cryptography>=42.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.23.0; extra == "dev"
+Requires-Dist: coverage>=7.3.0; extra == "dev"
+Requires-Dist: ruff>=0.6.0; extra == "dev"
+Dynamic: license-file
+
+# NetAttackAI
+
+**AI-driven, local-first penetration testing & bug bounty research agent.**
+
+NetAttackAI is a local-first Python application that uses Ollama LLMs to plan and
+execute authorized security assessments. It couples a defensive, scope-gated MCP
+scanning server with a permissive, target-locked exploit MCP server, a multi-agent
+swarm, an autonomous campaign orchestrator, a Textual TUI, and an interactive menu —
+all driven by local models on the operator's own machine.
+
+> **Status:** Beta (`0.49.2`) · **License:** GPL-3.0 · **Python:** 3.10–3.12
+
+---
+
+## ⚠️ Authorization & responsible use
+
+NetAttackAI is an offensive security tool. **Run it only against networks, systems,
+and applications you own or are explicitly authorized to test in writing.** Unauthorized
+scanning or exploitation of systems you do not own or have no permission to test is
+illegal and unethical.
+
+By using this software you accept full responsibility for your actions. The authors
+and contributors disclaim all liability for misuse. Treat the output as advisory and
+verify every finding before acting on it. If in doubt, do not run it.
+
+This is a **lab-only build**: the attack path is unrestricted but target-locked to a
+single operator-specified IP (see [Safety & scope model](#safety--scope-model)). Recon
+remains fully scope-gated and propose-only.
+
+---
+
+## What it is
+
+NetAttackAI has two surfaces over the same core:
+
+- **Exploitation engine** (`main.py` / `app.py`) — the modern, async, MCP-based path
+  the operator actually runs. Opens an MCP exploit session, dispatches tool calls, and
+  can drive a multi-agent swarm or a persistent autonomous campaign.
+- **Legacy research loop** (`cli.py` + `agent_loop.py`) — a database-driven,
+  scope-gated, headless/CI-friendly workflow using SQLite (`research_workspace/`).
+
+Both share the same mission/scope schemas. Scope, command, and search safety are
+enforced in Python code, not just in prompts.
+
+## Features
+
+- **MCP exploit engine** — a permissive exploit MCP server (`mcp_exploit_server.py`)
+  exposing terminal execution, Python file write/run, searchsploit, Metasploit,
+  msfvenom, impacket lateral movement, credential dumping, and more — gated at the
+  policy layer.
+- **Defensive MCP server** (`mcp_server.py`) — scope-gated Nmap scanning, sanitized
+  vulnerability search, and NVD CVE lookup.
+- **Multi-agent swarm** (`tools/swarm/`) — 6 specialist agents (recon, vuln, exploit,
+  post-exploit, critic, reflection) with a shared blackboard and parallel dispatch.
+- **Autonomous orchestrator** (`tools/autonomous_orchestrator.py`) — persistent
+  multi-phase campaigns with adaptive aggression, auto-retry, and vulnerability chaining.
+- **Textual TUI** (`python -m tui`) — 18-screen dashboard with missions, tasks, findings,
+  evidence, scope, targets, target graph, reports, logs, settings, swarm, skills, and memory.
+- **Interactive menu** — arrow-key-driven launcher (the default no-args behavior).
+- **Runtime skills** — advisory prompt-context layer over a curated skill catalog, with
+  semantic matching, mid-run re-selection, and cross-mission feedback.
+- **Multi-model consultation** — optional advisory peer-model consultation when crafting
+  exploits or recovering from repeated failures.
+- **Long-session mode** — opt-in multi-hour attack runs with crash-safe resume.
+- **Recon pipeline** — host discovery, service identification, enrichment, and
+  recon-driven goal suggestion.
+- **NVD CVE lookup** — circuit-breakered, rate-limited CVE intelligence.
+- **Reporting** — per-run timelines, CVSS, vulnerability chains, and findings export.
+
+## Architecture
+
+A single assessment controller opens an MCP exploit session and dispatches tool calls
+through a model router (Ollama). Recon flows through a defensive, scope-gated server;
+attack flows through the permissive, target-locked exploit server. An optional swarm
+decomposes work across specialist agents, and an autonomous orchestrator drives
+persistent multi-phase campaigns. See [`docs/architecture.md`](docs/architecture.md)
+and [`docs/runtime-flows.md`](docs/runtime-flows.md) for the full picture.
+
+## Requirements
+
+- **Python 3.10+** (3.10–3.12 supported).
+- **nmap** on `PATH` (or set `nmap.path` in `config.yaml`). On Linux, `-O`/`-sS` need
+  root — set `nmap.sudo: true` (uses `sudo -n`) or run as root; otherwise the defensive
+  server auto-downgrades those flags.
+- **Ollama** running at `http://localhost:11434` with the default model
+  `glm-5.2:cloud` pulled (`ollama show glm-5.2:cloud`).
+- **Optional Kali tooling** on Linux for the full arsenal: Metasploit (`msfconsole`),
+  `searchsploit`, `tmux`, `hydra`, `impacket`. On Windows the attacker is Python-only.
+
+## Installation
+
+**Linux / macOS**
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+nmap --version                               # must be on PATH or set nmap.path
+ollama show glm-5.2:cloud                    # default model — verify reachable
+```
+
+**Windows (PowerShell)**
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+nmap --version
+ollama show glm-5.2:cloud
+```
+
+Convenience helpers:
+
+```bash
+make install          # venv + pip install -r requirements.txt
+make doctor           # python main.py --doctor
+./scripts/setup-linux.sh   # one-shot venv + deps + doctor check
+```
+
+For editable package metadata and dev extras (pytest, coverage, ruff):
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+## Quick start
+
+```bash
+python main.py                               # interactive menu (default no-args)
+python main.py --menu                        # same interactive menu, explicit
+python main.py --tui                         # launch the Textual TUI dashboard
+python -m tui                                # same TUI, alternate entry
+
+python main.py --target 10.0.0.50 --mode recon --recon-first
+python main.py --target 10.0.0.50 --mode attack --goal backdoor
+python main.py --target 10.0.0.50 --mode attack --swarm --critic --reflection --adaptive-exploits
+
+python main.py --exploit --exploit-mode standalone --exploit-target 10.0.0.50 \
+    --exploit-cve CVE-2021-44228 --exploit-permission full_access
+```
+
+Smoke checks:
+
+```bash
+python main.py --version                     # NetAttackAI 0.49.2
+python main.py --doctor                      # environment + config diagnostics
+python main.py --self-test                   # safe localhost smoke test
+```
+
+### Legacy research CLI (writes to `research_workspace/research.db`)
+
+```bash
+python cli.py init-mission --config mission.yaml
+python cli.py next-task
+python cli.py run-task T-00001
+python cli.py list-findings
+python cli.py generate-report F-00001
+python cli.py status
+```
+
+## Configuration
+
+All behavior-defining settings live in **`config.yaml`**. Mission scope (allowed /
+disallowed assets, forbidden actions, risk profile, testing modes, rate limits) lives
+in **`mission.yaml`**, loaded by `cli.py` / `mission.py`.
+
+Important `config.yaml` defaults (lab build):
+
+- `exploit.permission: full_access` — lab attack posture (recon still resolves to
+  `read_only` via the missing-key fallback).
+- `exploit.attack_mode: true`
+- `exploit.require_explicit_allowlist: true` — the runtime `--target` is unioned in via
+  `EXPLOIT_TARGET`; this is the target-IP lock.
+- `exploit.allowed_targets: []`
+- `swarm.enabled: true`
+- `memory.semantic_enabled: true`
+- `ollama.model: glm-5.2:cloud` (976K context)
+
+Provider API keys are read from env vars referenced in `config.yaml`
+(`NVD_API_KEY`, `OLLAMA_API_KEY`, `SERPAPI_API_KEY`); see [`.env.example`](.env.example).
+A local key file (`secr.json`, gitignored) can be populated via
+`python main.py --setup-api-keys`.
+
+## CLI reference
+
+| Flag | Purpose |
+|------|---------|
+| `--target <ip>` | Target IP to recon or attack. |
+| `--mode {recon,attack}` | `recon` = gather intel, `attack` = full exploitation. |
+| `--goal <name>` | Preset goal (`backdoor`, `initial_access`, `privilege_escalation`, …). |
+| `--custom-goal <text>` | Custom goal description. |
+| `--recon-first` | Recon-then-attack flow. |
+| `--tui` / `--menu` | Launch the TUI dashboard / force the interactive menu. |
+| `--swarm` | Enable multi-agent swarm mode. |
+| `--critic` / `--reflection` | Critic pre-approval / reflection agent (require `--swarm`). |
+| `--adaptive-exploits` | Adaptive exploit selection. |
+| `--long-session` | Opt-in multi-hour attack mode with crash-safe resume. |
+| `--model <alias>` | Override default model alias (`glm`/`kimi`/`deepseek`/`deepseek_flash`/`minimax`). |
+| `--mcp-transport {stdio,http}` | Exploit MCP transport. |
+| `--skills {on,off,hints,lookup}` | Runtime skills mode. |
+| `--multi-model-consult` | Enable advisory peer-model consultation. |
+| `--exploit ...` | Standalone exploit subcommand (`--exploit-target`, `--exploit-cve`, `--exploit-permission`). |
+| `--doctor` / `--self-test` | Environment diagnostics / safe localhost smoke test. |
+| `--resume` | Resume from a prior session's checkpoint. |
+| `--version` | Print version and exit. |
+
+## Safety & scope model
+
+- **Recon** is fully scope-gated and propose-only (`read_only`): the agent gathers intel
+  and proposes attacks without executing them. A post-session `SafetyReviewer` runs on
+  every tool call.
+- **Attack** is **target-locked**: the AI may do whatever it takes to the one target IP,
+  but cannot pivot to other hosts. The lock is enforced at the MCP tool layer by
+  extracting every destination (URL authorities, `/dev/tcp` hosts, LHOST/RHOST, scanner
+  targets, bare IPs) and refusing any not in the allowlist (`exploit.allowed_targets`
+  ∪ the runtime `--target`).
+- **Three permission levels** (`tools/exploit_agent/policy.py`): `full_access` (lab),
+  `approve_only` (every action needs `ALLOW <ip>`), `read_only` (propose only).
+- **Hard-forbidden actions** regardless of config (`scope_gate.py`): denial of service,
+  destructive exploit, social engineering, physical attack, malware, credential theft.
+- **Full JSONL audit trail** (`exploit_audit.jsonl`) with SHA256 of generated code.
+
+See [`docs/safety-model.md`](docs/safety-model.md) for the full scope/risk/permission
+model and secure-development rules.
+
+## Project layout
+
+```
+main.py / app.py        assessment controller (Flow A entry points)
+cli.py                  legacy research CLI (Flow B entry point)
+mcp_server.py           defensive, scope-gated MCP server
+mcp_exploit_server.py   permissive, target-locked exploit MCP server
+config.yaml             runtime configuration
+mission.yaml            mission scope + risk profile
+tools/                  exploit agent, swarm, autonomous orchestrator, MCP tools,
+                        recon pipeline, attack modules, skills, reporting, …
+tui/                    Textual TUI (18 screens)
+tests/                  ~80 test files (all mock subprocess / network)
+docs/                   engineering docs (architecture, flows, safety, extension, …)
+skills-to-add/          curated runtime skill catalog
+```
+
+## Testing
+
+```bash
+python -m pytest tests/ -v
+python -m pytest tests/test_scope_gate.py -v                 # single file
+python -m pytest tests/ -v -k "scope"                        # by keyword
+```
+
+Tests mock subprocess and network — no live Nmap fixtures. For safety-sensitive
+changes also run `python main.py --doctor` and `python main.py --self-test`.
+See [`docs/testing-guide.md`](docs/testing-guide.md).
+
+## Documentation
+
+Full engineering docs are in [`docs/`](docs/README.md): getting started, architecture,
+runtime flows, module guide, extension guide, safety model, testing guide, and skills.
+
+## Contributing
+
+Contributions are welcome. Read [`docs/`](docs/README.md) first, add focused tests in
+`tests/` for any change, and run `python -m pytest tests/ -v` before opening a PR.
+Safety-sensitive changes need regression tests in `test_scope_gate.py`,
+`test_safety_reviewer.py`, or `test_validation_utils.py`.
+
+## License
+
+NetAttackAI is licensed under the [GNU General Public License v3 (GPL-3.0)](LICENSE).
+Copyright (c) 2026 NetAttackAI contributors.
+
+## Disclaimer
+
+This software is provided for authorized security testing and educational purposes
+only. **Run it only against systems you own or are explicitly authorized to test.**
+The authors and contributors disclaim all liability for misuse. You are solely
+responsible for ensuring your use complies with all applicable laws and authorization.

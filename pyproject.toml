@@ -1,0 +1,102 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "netattackai"
+version = "0.49.2"
+description = "AI-driven, locally-run penetration testing / bug bounty research agent"
+readme = "README.md"
+license = {text = "GPL-3.0-only"}
+requires-python = ">=3.10"
+authors = [
+    {name = "NetAttackAI Team"},
+]
+keywords = ["security", "penetration-testing", "nmap", "ai", "mcp"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+]
+
+dependencies = [
+    "ollama>=0.6.1",
+    "mcp>=1.27.0",
+    "PyYAML>=6.0.2",
+    "uvicorn>=0.30.0",
+    "starlette>=0.37.0",
+    "websockets>=12.0",
+    "questionary>=2.0.0",
+    "textual>=2.0.0",
+    "numpy>=1.24.0",
+    "cryptography>=42.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "coverage>=7.3.0",
+    "ruff>=0.6.0",
+]
+
+[project.scripts]
+netattackai = "main:main"
+
+[tool.setuptools]
+py-modules = [
+    "agent_loop",
+    "app",
+    "cli",
+    "db",
+    "evidence",
+    "executor",
+    "finding_verifier",
+    "main",
+    "mcp_exploit_server",
+    "mcp_server",
+    "memory",
+    "mission",
+    "observer",
+    "planner",
+    "report_generator",
+    "risk_controller",
+    "scope_gate",
+    "summarizer",
+    "target_graph",
+    "task_queue",
+    "tool_router",
+]
+
+[tool.setuptools.packages.find]
+include = ["tools*", "tui*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["tools", "tui", "main.py", "cli.py"]
+omit = [
+    "*/tests/*",
+    "*/venv/*",
+    "*/.venv/*",
+]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true

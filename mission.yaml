@@ -1,0 +1,90 @@
+# Mission Configuration — Authorized Bug Bounty Research
+#
+# This file defines the scope, rules, and constraints for an authorized
+# security research engagement. The agent will ONLY operate within these
+# boundaries. Out-of-scope assets and forbidden actions are hard-blocked.
+#
+# Risk Profile: "high_authorized_testing"
+#   - Allows exploitation, pivoting, credential testing on owned infrastructure
+#   - Only use this against infrastructure you OWN or have explicit authorization
+#
+# For standard bug bounty programs, use:
+#   risk_profile: "standard_authorized"
+#
+# For safe recon-only engagements, use:
+#   risk_profile: "low_noise_non_destructive"
+
+program_name: "Example Authorized Program"
+
+objective: "Find valid, in-scope, non-destructive, reproducible vulnerabilities with evidence."
+
+# Valid risk_profiles:
+#   low_noise_non_destructive    — recon + analysis only, no exploitation
+#   standard_authorized          — authorized bug bounty: all phases except exploit/pivot
+#   high_authorized_testing      — full testing including exploitation (OWNED INFRASTRUCTURE ONLY)
+risk_profile: "high_authorized_testing"
+
+# Allowed assets — exact domain, wildcard, IP, or CIDR
+allowed_assets:
+  - "example.com"
+  - "*.example.com"
+  - "192.168.1.1"
+  - "10.0.0.0/24"
+
+# Assets explicitly excluded from scope
+disallowed_assets:
+  - "payments.example.com"
+  - "admin.internal.example.com"
+  - "third-party.example.net"
+  - "192.168.1.254"  # network gateway
+  - "192.168.1.1"    # router — excluded even from allowed IP range
+  # Uncomment to exclude production:
+  # - "*.prod.example.com"
+
+# Actions that are ALWAYS forbidden.
+# 'denial_of_service', 'destructive_exploit', 'social_engineering',
+# 'physical_attack', and 'malware' are hard-blocked regardless of config.
+forbidden_actions:
+  - "denial_of_service"
+  - "destructive_exploit"
+  - "credential_theft"
+  - "social_engineering"
+  - "physical_attack"
+  - "persistence"
+  - "malware"
+  - "uncontrolled_fuzzing"
+  - "data_exfiltration"  # remove this if minimal PoC exfiltration is allowed
+
+# Rate limits — applied per-target, per-action type
+rate_limits:
+  default_requests_per_second: 2
+  max_concurrent_requests: 3
+  search_rate_limit_per_minute: 10  # NVD/web search rate limiting
+
+# Testing modes — which phases are permitted
+# 'recon', 'analysis', 'test', 'validate', 'exploit', 'report'
+testing_modes:
+  - "recon"
+  - "analysis"
+  - "test"
+  - "validate"
+  - "exploit"
+  - "report"
+
+# Accounts — any provided credentials for authenticated testing
+accounts:
+  # - type: "test_user"
+  #   username: "tester@example.com"
+  #   password: "${TEST_ACCOUNT_PASSWORD}"
+  #   role: "user"
+
+# Notes — any context, program rules, or special instructions
+notes: |
+  This is an example authorized mission config.
+  
+  Rules:
+  - Do NOT test production systems.
+  - Do NOT test third-party integrations.
+  - Do NOT perform DoS or destructive testing.
+  - All findings must include reproduction steps and evidence.
+  - Stop immediately if you encounter out-of-scope assets.

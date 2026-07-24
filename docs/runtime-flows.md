@@ -1,0 +1,133 @@
+# Runtime Flows
+
+## Mission Creation Flow
+
+```text
+mission.yaml or UI form
+  -> mission.Mission.from_yaml_or_dict
+  -> Mission.validate
+  -> MissionController.create_from_config
+  -> db.DatabaseManager.create_mission
+  -> scope rules persisted
+  -> workspace/evidence/report directories initialized
+```
+
+Use this flow when changing mission schema, risk profiles, scope behavior, or the TUI mission setup wizard.
+
+## Database-Backed Research Loop
+
+`agent_loop.py` is the clearest description of the original agent workflow:
+
+```text
+MissionController
+  -> ScopeGate
+  -> PlannerAgent
+  -> TaskQueue
+  -> ExecutorAgent
+  -> ToolRouter
+  -> ObserverAgent
+  -> EvidenceStore
+  -> MemoryManager
+  -> TargetGraph
+  -> FindingVerifier
+  -> ReportGenerator
+```
+
+Key rules:
+
+- Planner creates scoped, phase-based tasks.
+- TaskQueue chooses pending work by priority.
+- Executor only executes approved tasks and delegates scope enforcement to ToolRouter.
+- Observer extracts facts and possible findings, but does not validate vulnerabilities.
+- FindingVerifier owns validation state.
+- EvidenceStore keeps raw outputs linked to tasks/findings.
+
+## Recon-First Flow
+
+`main.py --recon-first` or default recon-first behavior:
+
+```text
+target
+  -> tools.recon_pipeline
+  -> service/OS/port findings
+  -> tools.goal_suggester
+  -> operator chooses or confirms goal
+  -> exploit/recon session continues with selected goal
+```
+
+Use this path when working on target fingerprinting, goal suggestions, or first-run operator experience.
+
+## Exploit Session Flow
+
+```text
+main.py
+  -> load config
+  -> select model with tools.model_router
+  -> start/connect mcp_exploit_server.py
+  -> build tool list for Ollama
+  -> tools.exploit_agent.run_exploit_agent
+  -> optional consult_peer_models advisory calls when multi_model is enabled
+  -> tools.model_router records metadata-only LLM usage telemetry
+  -> ExploitPolicy evaluates requested tool calls
+  -> MCP tool executes if permitted
+  -> result is sanitized, summarized, audited, and returned to model
+```
+
+Important controls:
+
+- `config.yaml` controls `exploit.permission`, `attack_mode`, command limits, round limits, target allowlist, and workspace paths.
+- `multi_model.enabled` or `--multi-model-consult` exposes an advisory peer-model tool; peer models receive no tool schemas and cannot execute commands.
+- Model telemetry is written to `research_workspace/logs/llm_usage.jsonl`.
+- `ExploitPermission` supports `read_only`, `approve_only`, and `full_access`.
+- `ExploitPolicy` is the place to update approval rules for exploit tools.
+- `mcp_exploit_server.py` exposes powerful primitives and should not be treated as a safety boundary by itself.
+
+## Defensive MCP Flow
+
+```text
+MCP client
+  -> mcp_server.py
+  -> allowlist normalization
+  -> target validation
+  -> nmap or limited terminal command
+  -> structured result
+```
+
+Defensive tools include ping sweep, triage scan, basic scan, service scan, vuln scan, limited terminal, vulnerability intel, and CVE intel. This server is the safer integration surface for scan-only clients.
+
+## TUI Flow
+
+```text
+python -m tui
+  -> tui.app.ResearchTUI
+  -> tui.services.ServiceRegistry
+  -> backend services loaded lazily
+  -> screens query services and update widgets
+```
+
+Screen routing lives in `tui/app.py`. Backend integration lives in `tui/services.py`. Most screens should call the service registry rather than constructing backend classes directly.
+
+## Swarm Flow
+
+```text
+task/context
+  -> tools.swarm.orchestrator.SwarmOrchestrator
+  -> critic pre-check where enabled
+  -> specialist agent selected by task type
+  -> blackboard and battle log updated
+  -> optional reflection pass
+```
+
+Use the swarm path for multi-agent strategy, parallel routing, blackboard state, and battle-log UI changes.
+
+## Report Flow
+
+```text
+validated finding
+  -> FindingVerifier marks report_ready
+  -> ReportGenerator.generate_report
+  -> ReportGenerator.export_report
+  -> reports/ markdown output
+```
+
+Report generation should stay evidence-linked, reproducible, and conservative in severity wording.

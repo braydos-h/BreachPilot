@@ -1,0 +1,55 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+.venv/
+venv/
+env/
+node_modules/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+reports/
+exploit_workspace/
+research_workspace/
+test_workspace*/
+tui_workspace/
+swarm_workspace/
+
+_analysis_output.json
+_cycles_output.json
+_analyze_*.py
+main-backup.py
+main.py.truncated
+test_spinner*.log
+
+# Local secrets / editor-local config (never commit)
+.webui_secret_key
+opencode.json
+secr.json
+.env
+.env.*
+!.env.example
+
+# Agent / editor-internal state (never commit)
+.claude/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Log directories
+logs/

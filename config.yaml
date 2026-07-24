@@ -1,0 +1,245 @@
+ollama:
+  host: http://localhost:11434
+  model: glm-5.2:cloud
+models:
+  registry:
+    kimi: kimi-k2.6:cloud
+    deepseek: deepseek-v4-pro:cloud
+    deepseek_flash: deepseek-v4-flash:cloud
+    glm: glm-5.2:cloud
+    minimax: minimax-m3:cloud
+  default_alias: glm
+  info:
+    kimi:
+      label: Kimi K2.6
+      context_window: 256000
+      description: "Moonshot Kimi K2.6 \u2014 strong long-form reasoning, 256K context."
+    deepseek:
+      label: DeepSeek V4 Pro
+      context_window: 1000000
+      description: "DeepSeek V4 Pro \u2014 1M token context, deep code reasoning."
+    deepseek_flash:
+      label: DeepSeek V4 Flash
+      context_window: 1000000
+      description: "DeepSeek V4 Flash - 1M token context, fast DeepSeek option for lower-latency work."
+    glm:
+      label: GLM-5.2
+      context_window: 976000
+      description: "Zhipu GLM-5.2 \u2014 976K context, the smartest/newest GLM for\
+        \ deep reasoning + coding."
+    minimax:
+      label: Minimax M3
+      context_window: 512000
+      description: "Minimax M3 (cloud) \u2014 512K context, balanced coding + reasoning."
+mcp:
+  default_transport: stdio
+# Linux-friendly nmap invocation. `path` overrides the binary when nmap is not
+# on PATH; `sudo` runs nmap via `sudo -n` so root-only scans (-O, -sS) work
+# from a non-root shell; `priv_fallback` auto-downgrades those flags instead of
+# failing when unprivileged and sudo is off. No-op on Windows.
+nmap:
+  path: nmap
+  sudo: false
+  priv_fallback: true
+exploit:
+  enabled: true
+  mode: standalone
+  # LAB BUILD: attack mode is unrestricted. Default full_access + attack_mode
+  # auto-approves every action; the only remaining gate is the target-IP lock
+  # (require_explicit_allowlist unions the runtime --target via EXPLOIT_TARGET
+  # env, see tools/mcp_shared._check_allowlist). Recon mode keeps its own
+  # safety (read_only propose-only, post-session SafetyReviewer) — recon never
+  # enters the full_access auto-approve branch. Operator-box filesystem is
+  # unrestricted (no workspace path-traversal protection) — only run this on a
+  # throwaway lab VM.
+  permission: full_access
+  attack_mode: true
+  terminal: visible
+  command_timeout_seconds: 300
+  max_commands_per_session: 9999
+  max_rounds: 200
+  attack_max_commands: 150
+  attack_max_rounds: 50
+  attack_max_duration_minutes: 360
+  context_summarize_every: 50
+  auto_post_exploit: true
+  max_pivot_depth: 2
+  workspace_dir: exploit_workspace
+  loot_workspace: exploit_workspace/loot
+  attacker_os: auto
+  searchsploit_path: searchsploit
+  # Linux: shell used by run_exploit_terminal (default bash; cmd.exe on Windows).
+  # msfconsole_path overrides the Metasploit console binary when not on PATH.
+  shell: bash
+  msfconsole_path: msfconsole
+  web_search: true
+  max_query_chars: 200
+  cache_ttl_seconds: 3600
+  cache_max_entries: 50
+  require_explicit_allowlist: true
+  # Empty by design: the runtime --target IP is injected via the EXPLOIT_TARGET
+  # env var (set in tools/mcp_session.open_exploit_mcp_session) and unioned into
+  # the allowlist at check time (tools/mcp_shared._check_allowlist). This keeps
+  # the AI locked to the single target IP without per-run config edits. Add
+  # extra operator-authorized hosts here (e.g. a callback/C2 listener) to permit
+  # them in addition to the runtime target.
+  allowed_targets: []
+  # H10: Flow A (exploit engine) reads its scope rules HERE, not from
+  # mission.yaml (which is Flow B's config). Previously these keys were absent,
+  # so _build_exploit_scope_gate in main.py always passed empty lists and the
+  # mission deny/forbidden rules never applied on the full_access auto-approve
+  # path. Listed categories are matched against the tool->action-category map in
+  # tools/exploit_agent.py::_TOOL_ACTION_CATEGORY. Defaults are intentionally
+  # empty: the hard-forbidden actions (denial_of_service, destructive_exploit,
+  # social_engineering, physical_attack, malware) are already always blocked by
+  # scope_gate._HARD_FORBIDDEN_ACTIONS, and the exploit engine's offensive tools
+  # (dump_credentials, lateral_exec, ...) are available in full_access by
+  # design. Add a category here to opt OUT of it, e.g.:
+  #   forbidden_actions: ["credential_dumping", "lateral_movement"]
+  disallowed_assets: []
+  forbidden_actions: []
+stealth:
+  rotate_ua: false
+  dns_over_https: false
+  doh_provider: cloudflare
+cve_lookup:
+  enabled: true
+  max_results: 5
+  rate_limit_seconds: 6.0
+  timeout_seconds: 30
+  cache_ttl_seconds: 3600
+  cache_max_entries: 100
+  api_key_env: NVD_API_KEY
+  circuit_failure_threshold: 5
+  circuit_recovery_timeout: 60.0
+  search_rate_limit_per_minute: 10
+research:
+  enabled: true
+  provider: ollama
+  fallback_provider: serpapi
+  timeout_seconds: 15
+  max_results: 8
+  max_fetch_depth: 5
+  max_content_chars: 12000
+  cache_ttl_seconds: 1800
+  cache_max_entries: 250
+  min_source_quality: medium
+  require_api_key_for_mcp_tools: true
+  allow_local_fetch: false
+  ollama:
+    api_key_env: OLLAMA_API_KEY
+    max_results: 8
+    use_web_search: true
+    use_web_fetch: true
+  serpapi:
+    api_key_env: SERPAPI_API_KEY
+    endpoint: https://serpapi.com/search.json
+    engine: duckduckgo
+    region: us-en
+swarm:
+  enabled: true
+  agents:
+  - recon
+  - vuln
+  - exploit
+  - post_exploit
+  - critic
+  - reflection
+  max_parallel_agents: 3
+
+# Long-session mode — opt-in via ``--long-session`` flag or ``enabled: true``.
+# Lets a multi-hour attack run actually sustain itself: sends the model's real
+# context window (num_ctx) to Ollama, bounds each LLM call with an httpx
+# timeout, raises the round/command/duration budgets, lifts the 300s swarm cap,
+# and checkpoints the compacted conversation so a crashed run resumes with real
+# context instead of a 300-char-condensed snippet. Absent/false = current
+# behavior; first-run defaults are unchanged.
+long_session:
+  enabled: false
+  request_timeout_seconds: 600        # per-LLM-call httpx timeout (bounds hung generations)
+  swarm_session_timeout_minutes: 30   # overrides the 300s swarm cap when long-session active
+  attack_max_rounds: 200
+  attack_max_commands: 1000
+  attack_max_duration_minutes: 720    # 12h wall clock
+  persist_messages: true             # checkpoint compacted messages to session_state.json
+reasoning:
+  chain_of_thought: true
+  reflection_every_n_actions: 10
+  critic_enabled: true
+  observer_mode: hybrid
+  ultrathink: false
+  ultrathink_reflection_interval: 3
+  # LLM-driven reflection inside run_exploit_agent (Phase 1b). Default off so
+  # the hot loop makes no extra LLM calls unless explicitly opted in. When off,
+  # the heuristic _generate_reflection is used. Advisory-only; never feeds the
+  # Bayesian ExperienceStore.
+  llm_reflection: false
+  # Phase 1c: auto-trigger consult_peer_models after N consecutive exploit
+  # failures (in-process, advisory-only — peers have no tool schemas). 0
+  # disables the auto-consult (manual consult_peer_models still works). The
+  # shared per-run max_consultations budget (multi_model.max_consultations) is
+  # honored via the single _consultation_count counter. No effect when
+  # multi_model.enabled is false or permission is read_only (nothing executes).
+  peer_consult_on_failure_threshold: 3
+memory:
+  semantic_enabled: true
+  embedding_model: nomic-embed-text
+  cross_mission_learning: true
+  attack_memory_enabled: true
+  attack_memory_max_context_chars: 6000
+  experience_min_samples: 3
+  experience_time_decay_days: 90
+adaptive_exploits:
+  enabled: true
+  max_mutations: 5
+  mutation_strategies:
+  - parameter_tweak
+  - encoding_change
+  - delivery_swap
+  - context_aware
+multi_model:
+  enabled: true
+  consult_aliases:
+  - kimi
+  - deepseek
+  - deepseek_flash
+  - glm
+  - minimax
+  max_consultations: 10
+  max_question_chars: 4000
+  max_answer_chars: 8000
+skills:
+  enabled: true
+  roots:
+  - skills-to-add
+  default_enabled:
+  - scanning-network-with-nmap-advanced
+  - conducting-network-penetration-test
+  - executing-red-team-engagement-planning
+  - auditing-mcp-servers-for-tool-poisoning
+  - securing-agentic-ai-tool-invocation
+  include_tags: []
+  exclude_names: []
+  maybe_enabled: false
+  allow_model_lookup: true
+  inject_startup_context: false
+  max_active_skills: 6
+  max_chars_per_skill: 2500
+  max_total_chars: 9000
+  min_contextual_skills: 3
+  default_skill_weight: 12
+  context_skill_weight: 24
+  reselect_mid_run: true
+  reselect_max_per_run: 3
+  reselect_min_interval_actions: 5
+  reselect_sticky_defaults: true
+  swarm_inject: true
+  swarm_phase_hints_only: true
+  feedback_enabled: true
+  feedback_skill_weight: 8
+  feedback_min_observations: 3
+  semantic_matching: true
+  semantic_skill_weight: 16
+  semantic_model: nomic-embed-text
+  include_metadata: false
+  allow_reference_listing: true

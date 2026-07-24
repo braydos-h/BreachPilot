@@ -1,0 +1,190 @@
+"""Embedding-based runtime skill ranking (Tier 2.2).
+
+Embeds each skill's search text and ranks skills against the run context by
+cosine similarity over ``nomic-embed-text`` vectors. **Default-on with
+graceful fallback**: when embeddings are unavailable (Ollama unreachable,
+model missing, semantic memory off, offline) the selector logs a single
+``[WARN] skills: embeddings unavailable, falling back to tag matching`` and
+skips the semantic term -- deterministic tag matching remains the floor.
+
+Vectors are cached per-process on the :class:`SkillEmbedder` (text -> vector)
+so the 138-skill catalog is embedded once across a run, not per selection.
+Advisory only: semantic results only nudge ranking; they never grant
+execution authority or change scope/permission/audit.
+"""
+
+from __future__ import annotations
+
+import math
+import threading
+from typing import Any
+
+from tools.skill_registry import LoadedSkill, normalized_skill_tags
+
+_WARNED_NO_EMBEDDER = False
+_WARN_LOCK = threading.Lock()
+
+
+def _embed_search_text(skill: LoadedSkill) -> str:
+    """Lightweight text used for embedding a skill.
+
+    Name + description + domain + subdomain + normalized tags. Deliberately
+    excludes the multi-KB body so embedding the 138-skill catalog stays cheap;
+    the body is what the model reads via ``load_runtime_skill`` anyway.
+    """
+    parts = [
+        skill.metadata.name,
+        skill.metadata.description,
+        skill.metadata.domain,
+        skill.metadata.subdomain,
+        " ".join(sorted(normalized_skill_tags(skill.metadata.tags))),
+    ]
+    return " ".join(p for p in parts if p).strip().lower()
+
+
+def _cosine(a: list[float] | tuple[float, ...], b: list[float] | tuple[float, ...]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = 0.0
+    na = 0.0
+    nb = 0.0
+    for x, y in zip(a, b):
+        dot += float(x) * float(y)
+        na += float(x) * float(x)
+        nb += float(y) * float(y)
+    if na <= 0.0 or nb <= 0.0:
+        return 0.0
+    sim = dot / (math.sqrt(na) * math.sqrt(nb))
+    # Clamp into [0, 1]; negative cosine is not meaningful for ranking here.
+    return max(0.0, min(1.0, sim))
+
+
+class SkillEmbedder:
+    """Wraps a :class:`SemanticMemoryManager` (or any object with an
+    ``embed(text) -> list[float] | None`` method) with a per-process
+    text->vector cache so each skill's search text is embedded once.
+    """
+
+    def __init__(self, semantic_memory: Any | None) -> None:
+        self._sm = semantic_memory
+        self._cache: dict[str, list[float]] = {}
+
+    def available(self) -> bool:
+        return self._sm is not None and hasattr(self._sm, "embed")
+
+    def embed_text(self, text: str) -> list[float] | None:
+        if not self.available() or not text:
+            return None
+        cached = self._cache.get(text)
+        if cached is not None:
+            return cached
+        try:
+            vec = self._sm.embed(text)
+        except Exception:
+            vec = None
+        if vec:
+            self._cache[text] = list(vec)
+        return list(vec) if vec else None
+
+
+def semantic_rank(
+    query_text: str,
+    registry: Any,
+    embedder: SkillEmbedder | None,
+    *,
+    top_k: int = 20,
+) -> list[tuple[LoadedSkill, float]]:
+    """Rank skills by cosine similarity to ``query_text``.
+
+    Returns ``[]`` when embeddings are unavailable (no embedder, embedder not
+    available, or the query vector could not be generated) so the caller falls
+    back to deterministic tag matching. Each skill's search text is embedded
+    lazily and cached on the embedder.
+    """
+    if embedder is None or not embedder.available() or not query_text:
+        _warn_no_embedder_once()
+        return []
+    qvec = embedder.embed_text(query_text)
+    if qvec is None:
+        _warn_no_embedder_once()
+        return []
+
+    scored: list[tuple[LoadedSkill, float]] = []
+    for skill in registry.list_skills():
+        svec = embedder.embed_text(_embed_search_text(skill))
+        if not svec:
+            continue
+        sim = _cosine(qvec, svec)
+        if sim > 0.0:
+            scored.append((skill, sim))
+    scored.sort(key=lambda pair: (-pair[1], pair[0].name))
+    return scored[:top_k]
+
+
+def _warn_no_embedder_once() -> None:
+    """Emit the fallback warning at most once per process."""
+    global _WARNED_NO_EMBEDDER
+    with _WARN_LOCK:
+        if _WARNED_NO_EMBEDDER:
+            return
+        _WARNED_NO_EMBEDDER = True
+    print(
+        "[WARN] skills: embeddings unavailable, falling back to tag matching",
+        flush=True,
+    )
+
+
+def reset_warn_flag() -> None:
+    """Reset the one-shot fallback warning flag (tests use this)."""
+    global _WARNED_NO_EMBEDDER
+    with _WARN_LOCK:
+        _WARNED_NO_EMBEDDER = False
+
+
+# ── Shared embedder accessor ─────────────────────────────────────────────
+
+_shared_embedder: SkillEmbedder | None = None
+_shared_embedder_lock = threading.Lock()
+
+
+def get_shared_skill_embedder(config: dict[str, Any] | None) -> SkillEmbedder:
+    """Lazily build and cache a process-wide :class:`SkillEmbedder`.
+
+    Backed by a :class:`SemanticMemoryManager` over the default DB when
+    ``memory.semantic_enabled`` is true and a DB is reachable; otherwise an
+    embedder wrapping ``None`` (``available()`` is False -> callers fall back
+    to tag matching with the one-shot warning). Cached so the per-process
+    text->vector cache survives across selections in a run.
+    """
+    global _shared_embedder
+    with _shared_embedder_lock:
+        if _shared_embedder is not None:
+            return _shared_embedder
+        sm: Any | None = None
+        try:
+            mem_cfg = (config or {}).get("memory", {}) or {}
+            if mem_cfg.get("semantic_enabled", False):
+                from db import get_default_db
+                from tools.semantic_memory import SemanticMemoryManager
+
+                model = str(mem_cfg.get("embedding_model") or mem_cfg.get("semantic_model") or "nomic-embed-text")
+                host = str((config or {}).get("ollama", {}).get("host", "http://localhost:11434"))
+                sm = SemanticMemoryManager(get_default_db(), ollama_host=host, embedding_model=model)
+        except Exception:
+            sm = None
+        embedder = SkillEmbedder(sm)
+        # One-shot reachability probe: if Ollama is down / model missing, the
+        # embedder is marked unavailable now (one failed call) instead of
+        # failing 138 times during the first semantic_rank. Cached thereafter.
+        if embedder.available():
+            if embedder.embed_text("probe") is None:
+                embedder = SkillEmbedder(None)
+        _shared_embedder = embedder
+        return _shared_embedder
+
+
+def reset_shared_skill_embedder() -> None:
+    """Clear the cached shared embedder (tests use this between cases)."""
+    global _shared_embedder
+    with _shared_embedder_lock:
+        _shared_embedder = None
