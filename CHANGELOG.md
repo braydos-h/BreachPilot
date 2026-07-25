@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.49.3 (2026-07-25) — Best-effort installer + `natai` command; MCP HTTP soft-fail fixes
+
+### Added
+- **One-command install + global `natai` launcher.** `./install.sh` is now best-effort end-to-end: it installs OS prerequisites, Ollama, the venv, pulls models, runs `--doctor`, and drops a `natai` command in `~/.local/bin` that always runs from the repo root (so `config.yaml`/`mission.yaml`/`reports/` resolve from any cwd). `./install.sh --uninstall` removes the launcher and the guarded PATH block.
+- **Installer env knobs:** `ADD_TO_PATH=0` (skip the launcher), `INSTALL_KALI_TOOLS=0` (skip Kali-only packages), `SKIP_MODEL_PULL=1` (skip model downloads).
+- **README quick-install section** documenting the `natai` flow alongside the manual install steps.
+
+### Fixed
+- **MCP exploit server path resolution.** `open_exploit_mcp_session` located `mcp_exploit_server.py` with `Path(__file__).with_name(...)`, which resolves inside `tools/` and misses the repo-root server. Now walks up to the parent directory.
+- **Three HTTP-transport soft-fail gaps** in `open_exploit_mcp_session` (`transport="http"`). The stdio branch was hardened against `BaseExceptionGroup` (Bug #20/#21/M19) but the HTTP branch was not — a group from `start_exploit_http_server` (port in use / `Popen` OSError), from `streamable_http_client`/`ClientSession` entry, or from `ClientSession.initialize()` (server dying mid-handshake) propagated past `soft_fail` and crashed the recon-first path instead of degrading to a `None` session. All three now yield `None` with `soft_fail=True`, emit `[WARN]`, and never print `[ERROR]`, using `_EXC_GROUP_CATCH` + `_log_nested_exceptions` as required.
+- **HTTP soft-fail regression tests** (`TestHttpTransportSoftFail`) covering all three sites; fixed the boot-spinner count assertion to count the spinner form rather than the coexisting `boot_step` checklist lines.
+
 ## v0.49.2 (2026-07-24) — First public release
 
 Initial public release of NetAttackAI (the "AI Target Exploitation Engine"), a
