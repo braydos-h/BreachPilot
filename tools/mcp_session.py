@@ -137,7 +137,11 @@ async def open_exploit_mcp_session(
             "The MCP Python SDK is not installed. Run: python -m pip install -r requirements.txt"
         ) from exc
 
-    server_path = Path(__file__).with_name("mcp_exploit_server.py").resolve()
+    # ``mcp_exploit_server.py`` lives at the repo root, one level above this
+    # module (``tools/``). ``with_name`` would resolve to ``tools/`` and miss
+    # it, so walk up to the parent directory.
+    server_path = Path(__file__).parent.parent / "mcp_exploit_server.py"
+    server_path = server_path.resolve()
     env = os.environ.copy()
     env["EXPLOIT_TARGET"] = target_ip
     env["EXPLOIT_WORKSPACE"] = str(workspace.resolve())
@@ -255,13 +259,33 @@ async def open_exploit_mcp_session(
     _http_start_label = f"Starting MCP HTTP server on port {exploit_port}"
     ui.boot_step(_http_start_label, ok=False)
     with ui.spinner(f"Starting MCP HTTP server on port {exploit_port}...", soft_fail=soft_fail, soft_fail_flag=boot_failed):
-        process, log_handle = start_exploit_http_server(
-            server_path=server_path,
-            config_path=config_path,
-            port=exploit_port,
-            workspace=workspace,
-            env=env,
-        )
+        try:
+            process, log_handle = start_exploit_http_server(
+                server_path=server_path,
+                config_path=config_path,
+                port=exploit_port,
+                workspace=workspace,
+                env=env,
+            )
+        except (OSError, RuntimeError) as exc:
+            # The HTTP server failed to start — ``port_is_open`` raised
+            # ``RuntimeError`` (port already in use, e.g. an orphaned server
+            # from a previous run) or ``Popen`` raised ``OSError`` (bad env,
+            # ENOEXEC, OOM). The spinner's own ``except BaseException``
+            # branch prints a tail line and re-raises, so without this guard
+            # the exception propagates out of the async generator BEFORE any
+            # ``yield`` — the caller's ``async with`` sees it directly and
+            # the recon-first path crashes instead of degrading to a ``None``
+            # session (M19: an asynccontextmanager must yield before
+            # returning). Mirror the stdio soft-fail contract.
+            if soft_fail:
+                ui.warning(f"MCP HTTP server failed to start on port {exploit_port}: {exc}")
+                boot_failed[0] = True
+                ui.boot_step(_http_start_label, failed=True)
+                yield None
+                return
+            ui.error(f"MCP HTTP server failed to start on port {exploit_port}: {exc}")
+            raise
     ui.boot_step(_http_start_label, ok=not boot_failed[0], failed=boot_failed[0])
     try:
         _http_port_label = f"Waiting for MCP HTTP port {exploit_port}"
@@ -329,6 +353,33 @@ async def open_exploit_mcp_session(
                             f"MCP HTTP session init timed out after "
                             f"{MCP_BOOT_TIMEOUT_SECONDS:.0f}s"
                         )
+                    except _EXC_GROUP_CATCH as exc:
+                        # The server died mid-handshake. anyio's task group
+                        # raises ``BaseExceptionGroup`` — which is NOT an
+                        # ``Exception`` subclass and NOT a ``TimeoutError`` —
+                        # so the ``except asyncio.TimeoutError`` above
+                        # silently misses it. This is the exact bug class
+                        # CLAUDE.md warns about for ``ClientSession.initialize()``:
+                        # bare ``except Exception`` (or ``except TimeoutError``)
+                        # lets the group propagate past ``soft_fail`` and
+                        # crashes recon-first. Mirror the stdio branch's
+                        # ``_EXC_GROUP_CATCH`` handling.
+                        if soft_fail:
+                            ui.warning(f"MCP HTTP session init failed: {exc}")
+                            if _is_exception_group(exc):
+                                _log_nested_exceptions(exc)
+                            boot_failed[0] = True
+                            ui.boot_step(_http_init_label, failed=True)
+                            yield None
+                            return
+                        ui.error(f"MCP HTTP session init failed: {exc}")
+                        if _is_exception_group(exc):
+                            ui.error(
+                                "Detected ExceptionGroup / BaseExceptionGroup. "
+                                "Unpacking nested exceptions:"
+                            )
+                            _log_nested_exceptions(exc)
+                        raise
                     try:
                         yield session
                     except _EXC_GROUP_CATCH as exc:
@@ -339,6 +390,33 @@ async def open_exploit_mcp_session(
                             boot_failed[0] = True
                             return
                         raise RuntimeError(f"MCP session closed due to error: {exc}") from exc
+    except _EXC_GROUP_CATCH as exc:
+        # Transport-level failure: ``streamable_http_client`` or
+        # ``ClientSession`` entry raised ``BaseExceptionGroup`` (anyio's task
+        # group on a dead/reset connection — ``wait_for_port`` only confirms
+        # a listening socket, not that the MCP handler is live, so a crash in
+        # the narrow window between the port check and the HTTP upgrade is a
+        # real race). The stdio branch wraps its whole ``stdio_client`` /
+        # ``ClientSession`` block in ``except _EXC_GROUP_CATCH``; the HTTP
+        # branch used to have only a cleanup ``finally`` here, so the group
+        # propagated straight out of ``open_exploit_mcp_session`` and bypassed
+        # ``soft_fail``. Mirror the stdio handling (the ``finally`` below
+        # still runs to tear down the subprocess and close the log handle).
+        if soft_fail:
+            ui.warning(f"MCP HTTP session failed: {exc}")
+            if _is_exception_group(exc):
+                _log_nested_exceptions(exc)
+            boot_failed[0] = True
+            yield None
+            return
+        ui.error(f"MCP HTTP session failed: {exc}")
+        if _is_exception_group(exc):
+            ui.error(
+                "Detected ExceptionGroup / BaseExceptionGroup. "
+                "Unpacking nested exceptions:"
+            )
+            _log_nested_exceptions(exc)
+        raise
     finally:
         stop_process(process)
         log_handle.close()

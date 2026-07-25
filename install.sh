@@ -8,14 +8,35 @@
 #
 # Idempotent: safe to re-run. Run from the repository root:
 #     ./install.sh
+#     ./install.sh --uninstall   # remove the `natai` command + PATH line
 #
 # Env knobs: PYTHON=python3  VENV=.venv  INSTALL_KALI_TOOLS=1  SKIP_MODEL_PULL=1
+#            ADD_TO_PATH=1            # 0 skips installing the `natai` command
 set -euo pipefail
+
+# --- --uninstall (run before anything else) --------------------------------
+if [[ "${1:-}" == "--uninstall" ]]; then
+    BIN_DIR="$HOME/.local/bin"
+    echo "==> Removing the \`natai\` command"
+    rm -f "$BIN_DIR/natai" && echo "  [OK] removed $BIN_DIR/natai" || echo "  [--] $BIN_DIR/natai was not present"
+    # Strip the guarded PATH block from any rc file we may have touched.
+    for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+        [[ -f "$rc" ]] || continue
+        if grep -q "Added by NetAttackAi install.sh" "$rc"; then
+            sed -i '/# >>> Added by NetAttackAi install.sh >>>/,/# <<< Added by NetAttackAi install.sh <<</d' "$rc"
+            echo "  [OK] removed PATH block from $rc"
+        fi
+    done
+    echo
+    echo "Uninstalled. Open a new terminal (or \`source ~/.bashrc\`) for PATH changes to take effect."
+    exit 0
+fi
 
 PYTHON="${PYTHON:-python3}"
 VENV="${VENV:-.venv}"
 INSTALL_KALI_TOOLS="${INSTALL_KALI_TOOLS:-1}"
 SKIP_MODEL_PULL="${SKIP_MODEL_PULL:-0}"
+ADD_TO_PATH="${ADD_TO_PATH:-1}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
@@ -35,40 +56,50 @@ fi
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# --- 1. OS-level prerequisites ----------------------------------------------
+# --- 1. OS-level prerequisites (best-effort; never aborts the install) -----
 echo "==> Installing OS-level prerequisites ($OS_KIND)"
 case "$OS_KIND" in
     debian)
-        sudo apt-get update
-        sudo apt-get install -y nmap python3-venv tmux curl
+        # Only hit apt if something's actually missing — avoids a sudo prompt
+        # (and a non-interactive sudo failure aborting the whole script) when
+        # nmap/python3-venv/tmux/curl are already installed.
+        if have nmap && "$PYTHON" -c "import venv" >/dev/null 2>&1 && have tmux && have curl; then
+            echo "  [OK] nmap, python3-venv, tmux, curl already present — skipping apt-get"
+        else
+            sudo apt-get update \
+                || echo "  [!] apt-get update failed (sudo password? network?). Continuing — install missing prereqs manually if needed."
+            sudo apt-get install -y nmap python3-venv tmux curl \
+                || echo "  [!] apt-get install failed (sudo password? network?). Continuing — install missing prereqs manually if needed."
+        fi
         if [[ "$INSTALL_KALI_TOOLS" == "1" ]]; then
             # Only present on Kali; missing packages are tolerated so this stays
-            # safe on plain Ubuntu/Debian.
+            # safe on plain Ubuntu/Debian. Best-effort: never aborts.
             sudo apt-get install -y metasploit-framework exploitdb hydra \
                 crackmapexec impacket-scripts 2>/dev/null \
                 || echo "  [--] some Kali-only packages unavailable on this distro (fine if staying in read_only)"
         fi
         ;;
     macos)
-        have brew || {
-            echo "  [!] Homebrew not found. Install it first:  https://brew.sh"
-            exit 1
-        }
-        brew install nmap python tmux curl
+        if have brew; then
+            brew install nmap python tmux curl \
+                || echo "  [!] brew install failed. Continuing — install missing prereqs manually if needed."
+        else
+            echo "  [!] Homebrew not found (https://brew.sh). Install nmap/python/tmux/curl manually, then re-run."
+        fi
         ;;
     *)
-        echo "  [!] Unsupported or unknown OS. Install manually: nmap, python3-venv, tmux, ollama."
-        echo "      Then re-run this script."
-        exit 1
+        echo "  [!] Unknown OS — skipping OS-package install. Ensure nmap + python3-venv are installed,"
+        echo "      then continue. (The venv + \`natai\` steps below will still run if python3 is present.)"
         ;;
 esac
 
-# --- 2. Ollama -------------------------------------------------------------
+# --- 2. Ollama (best-effort) -----------------------------------------------
 echo "==> Ensuring Ollama is installed and running"
 if ! have ollama; then
     case "$OS_KIND" in
-        debian) curl -fsSL https://ollama.com/install.sh | sh ;;
-        macos)  brew install ollama ;;
+        debian) curl -fsSL https://ollama.com/install.sh | sh \
+                    || echo "  [!] ollama install failed — install it manually from https://ollama.com" ;;
+        macos)  have brew && { brew install ollama || echo "  [!] brew install ollama failed"; } ;;
     esac
 fi
 # Start the daemon if it isn't up (best-effort; non-fatal if already running).
@@ -87,21 +118,35 @@ else
     echo "  [!] ollama still not on PATH — AI-backed flows will fail until you install it."
 fi
 
-# --- 3. Python venv + requirements -----------------------------------------
+# --- 3. Python venv + requirements (resilient) ----------------------------
+# python3 itself is the one true hard requirement: without it nothing works.
 if ! have "$PYTHON"; then
     echo "  [!] '$PYTHON' not found. Install Python 3.10+ and re-run (or set PYTHON=...)."
     exit 1
 fi
 echo "==> Creating venv ($VENV) with $($PYTHON --version)"
-"$PYTHON" -m venv "$VENV"
-# shellcheck disable=SC1091
-source "$VENV/bin/activate"
+VENV_OK=1
+if ! "$PYTHON" -m venv "$VENV"; then
+    echo "  [!] venv creation failed (is python3-venv installed? Debian/Ubuntu: sudo apt-get install python3-venv)."
+    echo "      Continuing — \`natai\` will fall back to system python3, but deps may be missing."
+    VENV_OK=0
+fi
+# Use the venv interpreter directly when available (no `source activate` needed,
+# so a failed venv doesn't abort the script under `set -e`).
+VENV_PY="$REPO_ROOT/$VENV/bin/python"
+RUN_PY="$PYTHON"
+if [[ "$VENV_OK" == "1" ]] && [[ -x "$VENV_PY" ]]; then
+    RUN_PY="$VENV_PY"
+    echo "==> Upgrading pip + installing requirements"
+    "$RUN_PY" -m pip install --upgrade pip \
+        || echo "  [!] pip upgrade failed — continuing"
+    "$RUN_PY" -m pip install -r requirements.txt \
+        || echo "  [!] pip install -r requirements.txt failed (network?). Re-run install.sh once available — \`natai\` still installs."
+else
+    echo "  [!] no usable venv interpreter; skipping pip install. \`natai\` will use system python3."
+fi
 
-echo "==> Upgrading pip + installing requirements"
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-
-# --- 4. Pull models --------------------------------------------------------
+# --- 4. Pull models (best-effort) -----------------------------------------
 if [[ "$SKIP_MODEL_PULL" != "1" ]] && have ollama; then
     echo "==> Pulling default model + embedding model (best-effort)"
     ollama pull glm-5.2:cloud        || echo "  [--] glm-5.2:cloud pull failed (daemon running? reachable?)"
@@ -110,15 +155,71 @@ else
     echo "==> Skipping model pull (SKIP_MODEL_PULL=1 or ollama absent)"
 fi
 
-# --- 5. Doctor ------------------------------------------------------------
+# --- 5. Doctor (best-effort) ----------------------------------------------
 echo "==> Running --doctor"
-python main.py --doctor || echo "  [!] --doctor reported failures above; fix them before running the engine."
+"$RUN_PY" main.py --doctor || echo "  [!] --doctor reported failures above; fix them before running the engine."
+
+# --- 6. Install the `natai` command to ~/.local/bin -----------------------
+BIN_DIR="$HOME/.local/bin"
+if [[ "$ADD_TO_PATH" == "1" ]]; then
+    echo "==> Installing \`natai\` command"
+    mkdir -p "$BIN_DIR"
+    # Write a tiny launcher that always runs from the repo root, so
+    # config.yaml / mission.yaml / reports/ resolve regardless of cwd.
+    cat > "$BIN_DIR/natai" <<EOF
+#!/usr/bin/env bash
+# natai — NetAttackAi launcher (generated by install.sh)
+# Always runs from the repo root so config.yaml/mission.yaml/reports/ resolve.
+cd "$REPO_ROOT" || { echo "natai: repo not found at $REPO_ROOT" >&2; exit 1; }
+# Use the venv interpreter when it exists, else fall back to system python3.
+if [[ -x "$REPO_ROOT/$VENV/bin/python" ]]; then
+    PY="$REPO_ROOT/$VENV/bin/python"
+else
+    PY="python3"
+fi
+exec "\$PY" "$REPO_ROOT/main.py" "\$@"
+EOF
+    chmod +x "$BIN_DIR/natai"
+    echo "  [OK] natai -> $BIN_DIR/natai"
+
+    # --- 7. Ensure ~/.local/bin is on PATH (guarded, idempotent) -----------
+    case ":$PATH:" in
+        *":$BIN_DIR:"*) echo "  [OK] $BIN_DIR already on PATH" ;;
+        *)
+            # Pick the rc file matching the user's shell.
+            RC_FILE=""
+            case "${SHELL:-}" in
+                */zsh)  RC_FILE="$HOME/.zshrc" ;;
+                */bash) RC_FILE="$HOME/.bashrc" ;;
+                *)      RC_FILE="$HOME/.profile" ;;
+            esac
+            if [[ -z "$RC_FILE" ]]; then
+                echo "  [!] could not detect shell (\$SHELL empty). Add $BIN_DIR to PATH manually."
+            elif grep -q "Added by NetAttackAi install.sh" "$RC_FILE" 2>/dev/null; then
+                # Block already present from a prior run — don't duplicate it.
+                echo "  [OK] $BIN_DIR already wired into $RC_FILE (left as-is)"
+            else
+                # Guarded block so re-runs never duplicate the PATH entry.
+                cat >> "$RC_FILE" <<'EOF'
+
+# >>> Added by NetAttackAi install.sh >>>
+case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH";; esac
+# <<< Added by NetAttackAi install.sh <<<
+EOF
+                echo "  [OK] added $BIN_DIR to PATH in $RC_FILE"
+                echo "       run \`source $RC_FILE\` (or open a new terminal) before first use"
+            fi
+            ;;
+    esac
+else
+    echo "==> Skipping \`natai\` command install (ADD_TO_PATH=0)"
+fi
 
 echo
 echo "Done. Next steps:"
-echo "  source $VENV/bin/activate"
-echo "  python main.py            # interactive menu"
-echo "  python main.py --doctor   # re-check environment"
-echo "  python -m tui             # dashboard"
+echo "  natai                      # interactive menu (after \`source ~/.bashrc\` / new terminal)"
+echo "  natai --target 10.0.0.50 --mode attack --goal backdoor"
+echo "  natai --tui                # dashboard"
+echo "  (or, inside the venv)  python main.py ..."
 echo
 echo "Reminder: only run against networks you own or are explicitly authorized to test."

@@ -89,6 +89,28 @@ and [`docs/runtime-flows.md`](docs/runtime-flows.md) for the full picture.
 
 ## Installation
 
+### Quick install (Linux / macOS)
+
+One script installs everything and puts a global `natai` command on your PATH:
+
+```bash
+./install.sh          # OS deps + Ollama + venv + models + doctor, then installs `natai`
+source ~/.bashrc      # or open a new terminal, so `natai` is on PATH
+natai                 # interactive menu — works from any directory
+```
+
+`natai` always `cd`s into the repo root before running, so `config.yaml`, `mission.yaml`,
+and `reports/` resolve regardless of where you call it from. To remove it later:
+
+```bash
+./install.sh --uninstall   # removes `natai` and the PATH line from your shell rc
+```
+
+Env knobs: `INSTALL_KALI_TOOLS=0` (skip Kali-only packages), `SKIP_MODEL_PULL=1` (skip
+model downloads), `ADD_TO_PATH=0` (don't install the `natai` command).
+
+### Manual install
+
 **Linux / macOS**
 
 ```bash

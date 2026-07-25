@@ -1703,7 +1703,15 @@ class TestReconFirstBootStuckShowsProgress:
         assert "Booting MCP server (stdio)..." in combined, (
             f"expected the boot spinner label, got: {combined!r}"
         )
-        assert combined.count("Booting MCP server") == 1, (
+        # Exactly one *spinner outcome* line. The ``boot_step`` checklist
+        # also prints ``[BOOT]``/``[FAILED] Booting MCP server (stdio)``
+        # (no trailing ``...``) by design — those are the grep-able
+        # checklist lines, not spinner outcomes — so count the spinner
+        # form (with ``...``) rather than the bare label. The Bug #21 /
+        # M19 soft-fail guards below (``session is None``, no ``[ERROR]``,
+        # ``[WARN]`` present, elapsed marker visible) are what actually
+        # protect the regression contract.
+        assert combined.count("Booting MCP server (stdio)...") == 1, (
             f"expected one boot spinner outcome line, got: {combined!r}"
         )
         # And the formatter output — the (s) suffix — must appear at
@@ -1722,3 +1730,211 @@ class TestReconFirstBootStuckShowsProgress:
         assert "[WARN]" in combined, (
             f"expected [WARN] line for boot timeout, got: {combined!r}"
         )
+
+
+# ── HTTP transport soft-fail regression ──────────────────────────────────────
+
+
+class TestHttpTransportSoftFail:
+    """Regression for the three HTTP-transport soft-fail gaps in
+    ``open_exploit_mcp_session`` (``transport="http"``).
+
+    The stdio branch was hardened against ``BaseExceptionGroup`` (Bug #20 /
+    #21 / M19 — see the inline comments in ``tools/mcp_session.py``), but the
+    HTTP branch was not. A ``BaseExceptionGroup`` from any of these three
+    sites used to propagate past ``soft_fail`` and crash the recon-first path
+    instead of degrading to a ``None`` session:
+
+    1. ``start_exploit_http_server`` raising (port already in use / Popen
+       failure) — raised before any ``yield``.
+    2. ``streamable_http_client`` / ``ClientSession`` entry raising a
+       ``BaseExceptionGroup`` (anyio task group on a dead/reset connection)
+       — the surrounding ``try`` had only a cleanup ``finally``, no ``except``.
+    3. ``ClientSession.initialize()`` raising a ``BaseExceptionGroup`` when
+       the server dies mid-handshake — only ``except asyncio.TimeoutError``
+       guarded it, which silently misses the group (the exact bug class
+       ``CLAUDE.md`` warns about for ``ClientSession.initialize()``).
+
+    Each path must now yield ``None`` with ``soft_fail=True``, emit a
+    ``[WARN]`` line, and never print ``[ERROR]``.
+    """
+
+    def _patch_http(self, monkeypatch, *, start_returns=None, start_raises=None,
+                    streamable_factory=None, client_session_factory=None):
+        import tools.mcp_session as ms
+
+        if start_raises is not None:
+            def _start(*_a, **_k):
+                raise start_raises
+            monkeypatch.setattr(ms, "start_exploit_http_server", _start)
+        elif start_returns is not None:
+            monkeypatch.setattr(
+                ms, "start_exploit_http_server",
+                lambda *_a, **_k: start_returns,
+            )
+
+        # Skip the real 15 s port wait.
+        async def _no_wait(*_a, **_k):
+            return None
+        monkeypatch.setattr(ms, "wait_for_port", _no_wait)
+
+        if streamable_factory is not None:
+            import mcp.client.streamable_http as sh
+            monkeypatch.setattr(sh, "streamable_http_client", streamable_factory)
+
+        if client_session_factory is not None:
+            import mcp
+            monkeypatch.setattr(mcp, "ClientSession", client_session_factory)
+
+    def _drive(self, ms, tmp_path):
+        async def _run():
+            async with ms.open_exploit_mcp_session(
+                transport="http",
+                config_path=Path("config.yaml"),
+                target_ip="10.0.0.50",
+                exploit_port=8001,
+                workspace=tmp_path,
+                soft_fail=True,
+            ) as session:
+                return session
+        return _run
+
+    def test_start_server_port_in_use_soft_fails(self, monkeypatch, capsys, tmp_path):
+        """Bug 1a: ``port_is_open`` RuntimeError must soft-fail to ``None``."""
+        import tools.mcp_session as ms
+
+        self._patch_http(
+            monkeypatch,
+            start_raises=RuntimeError(
+                "Exploit MCP HTTP port 8001 is already in use."
+            ),
+        )
+
+        session = asyncio.run(self._drive(ms, tmp_path)())
+        assert session is None, (
+            f"port-in-use soft_fail should yield None, got {session!r}"
+        )
+        captured = capsys.readouterr()
+        combined = captured.out + captured.err
+        assert "[WARN]" in combined, f"expected [WARN], got: {combined!r}"
+        assert "[ERROR]" not in combined, (
+            f"soft_fail must not print [ERROR], got: {combined!r}"
+        )
+        assert "8001" in combined
+
+    def test_start_server_popen_oserror_soft_fails(self, monkeypatch, capsys, tmp_path):
+        """Bug 1b: ``Popen`` OSError must soft-fail to ``None``."""
+        import tools.mcp_session as ms
+
+        self._patch_http(monkeypatch, start_raises=OSError("ENOEXEC"))
+
+        session = asyncio.run(self._drive(ms, tmp_path)())
+        assert session is None, f"OSError soft_fail should yield None, got {session!r}"
+        captured = capsys.readouterr()
+        combined = captured.out + captured.err
+        assert "[WARN]" in combined, f"expected [WARN], got: {combined!r}"
+        assert "[ERROR]" not in combined, (
+            f"soft_fail must not print [ERROR], got: {combined!r}"
+        )
+
+    def test_streamable_http_entry_group_soft_fails(self, monkeypatch, capsys, tmp_path):
+        """Bug 2: a ``BaseExceptionGroup`` raised on ``streamable_http_client``
+        entry (anyio task group on a dead connection) must soft-fail to ``None``,
+        not bypass ``soft_fail`` via the cleanup-only ``finally``."""
+
+        import tools.mcp_session as ms
+
+        @contextlib.asynccontextmanager
+        async def _boom_transport(_url):
+            # Raise on entry, before yielding streams.
+            raise BaseExceptionGroup(
+                "http transport died", [ConnectionError("connection reset")]
+            )
+            yield  # pragma: no cover - unreachable
+
+        self._patch_http(
+            monkeypatch,
+            start_returns=(MagicMock(), MagicMock()),
+            streamable_factory=_boom_transport,
+        )
+
+        session = asyncio.run(self._drive(ms, tmp_path)())
+        assert session is None, (
+            f"transport-entry group soft_fail should yield None, got {session!r}"
+        )
+        captured = capsys.readouterr()
+        combined = captured.out + captured.err
+        assert "[WARN]" in combined, f"expected [WARN], got: {combined!r}"
+        assert "[ERROR]" not in combined, (
+            f"soft_fail must not print [ERROR], got: {combined!r}"
+        )
+
+    def test_init_handshake_group_soft_fails(self, monkeypatch, capsys, tmp_path):
+        """Bug 3: a ``BaseExceptionGroup`` from ``ClientSession.initialize()``
+        (server dies mid-handshake) must soft-fail to ``None``. A bare
+        ``except asyncio.TimeoutError`` silently misses it."""
+
+        import tools.mcp_session as ms
+
+        @contextlib.asynccontextmanager
+        async def _streams(_url):
+            yield ("read", "write", None)
+
+        class DyingSession:
+            async def initialize(self):
+                raise BaseExceptionGroup(
+                    "init died", [RuntimeError("server crash mid-handshake")]
+                )
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_exc_info):
+                return False
+
+        self._patch_http(
+            monkeypatch,
+            start_returns=(MagicMock(), MagicMock()),
+            streamable_factory=_streams,
+            client_session_factory=lambda _r, _w: DyingSession(),
+        )
+
+        session = asyncio.run(self._drive(ms, tmp_path)())
+        assert session is None, (
+            f"init-handshake group soft_fail should yield None, got {session!r}"
+        )
+        captured = capsys.readouterr()
+        combined = captured.out + captured.err
+        assert "[WARN]" in combined, f"expected [WARN], got: {combined!r}"
+        assert "[ERROR]" not in combined, (
+            f"soft_fail must not print [ERROR], got: {combined!r}"
+        )
+
+    def test_start_server_port_in_use_hard_fails_without_soft_fail(
+        self, monkeypatch, tmp_path
+    ):
+        """Without ``soft_fail``, the port-in-use ``RuntimeError`` must still
+        propagate (soft-fail is opt-in, not a silent swallow)."""
+
+        import tools.mcp_session as ms
+
+        self._patch_http(
+            monkeypatch,
+            start_raises=RuntimeError(
+                "Exploit MCP HTTP port 8001 is already in use."
+            ),
+        )
+
+        async def _run():
+            async with ms.open_exploit_mcp_session(
+                transport="http",
+                config_path=Path("config.yaml"),
+                target_ip="10.0.0.50",
+                exploit_port=8001,
+                workspace=tmp_path,
+                soft_fail=False,
+            ) as session:
+                return session
+
+        with pytest.raises(RuntimeError, match="already in use"):
+            asyncio.run(_run())
