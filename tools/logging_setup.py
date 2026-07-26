@@ -13,7 +13,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 # ── Constants ──────────────────────────────────────────────────────────────
 
 DEFAULT_LOG_DIR = Path(os.environ.get("RESEARCH_WORKSPACE", "research_workspace")) / "logs"
@@ -73,28 +72,9 @@ def setup_logging(
     if log_dir is None:
         log_dir = DEFAULT_LOG_DIR
 
-    log_path = Path(log_dir)
-    log_path.mkdir(parents=True, exist_ok=True)
-
     logger = logging.getLogger("ai_bug_bounty")
     logger.setLevel(level)
     logger.handlers.clear()
-
-    # File handler with rotation
-    if file_output:
-        file_handler = logging.handlers.RotatingFileHandler(
-            log_path / log_file,
-            maxBytes=MAX_LOG_BYTES,
-            backupCount=BACKUP_COUNT,
-            encoding="utf-8",
-        )
-        file_handler.setLevel(level)
-        file_formatter = logging.Formatter(
-            "%(asctime)s [%(levelname)-8s] %(name)s:%(funcName)s:%(lineno)d — %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
-        file_handler.setFormatter(file_formatter)
-        logger.addHandler(file_handler)
 
     # Console handler
     if console:
@@ -106,8 +86,41 @@ def setup_logging(
         console_handler.setFormatter(console_formatter)
         logger.addHandler(console_handler)
 
+    log_path = Path(log_dir)
+    file_logging_enabled = False
+
+    # This function runs during MCP module imports. A stale or root-owned
+    # workspace must not prevent either server transport from starting.
+    if file_output:
+        try:
+            log_path.mkdir(parents=True, exist_ok=True)
+            file_handler = logging.handlers.RotatingFileHandler(
+                log_path / log_file,
+                maxBytes=MAX_LOG_BYTES,
+                backupCount=BACKUP_COUNT,
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            logger.warning(
+                "File logging disabled; cannot write to %s: %s",
+                log_path,
+                exc,
+            )
+        else:
+            file_handler.setLevel(level)
+            file_formatter = logging.Formatter(
+                "%(asctime)s [%(levelname)-8s] %(name)s:%(funcName)s:%(lineno)d — %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+            file_handler.setFormatter(file_formatter)
+            logger.addHandler(file_handler)
+            file_logging_enabled = True
+
     _logger = logger
-    logger.info("Logging initialized. Log file: %s", log_path / log_file)
+    if file_logging_enabled:
+        logger.info("Logging initialized. Log file: %s", log_path / log_file)
+    else:
+        logger.info("Logging initialized without file output.")
     return logger
 
 
