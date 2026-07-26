@@ -93,6 +93,7 @@ def semantic_rank(
     embedder: SkillEmbedder | None,
     *,
     top_k: int = 20,
+    min_similarity: float = 0.0,
 ) -> list[tuple[LoadedSkill, float]]:
     """Rank skills by cosine similarity to ``query_text``.
 
@@ -115,7 +116,7 @@ def semantic_rank(
         if not svec:
             continue
         sim = _cosine(qvec, svec)
-        if sim > 0.0:
+        if sim > 0.0 and sim >= min_similarity:
             scored.append((skill, sim))
     scored.sort(key=lambda pair: (-pair[1], pair[0].name))
     return scored[:top_k]
@@ -167,7 +168,13 @@ def get_shared_skill_embedder(config: dict[str, Any] | None) -> SkillEmbedder:
                 from db import get_default_db
                 from tools.semantic_memory import SemanticMemoryManager
 
-                model = str(mem_cfg.get("embedding_model") or mem_cfg.get("semantic_model") or "nomic-embed-text")
+                skills_cfg = (config or {}).get("skills", {}) or {}
+                model = str(
+                    skills_cfg.get("semantic_model")
+                    or mem_cfg.get("embedding_model")
+                    or mem_cfg.get("semantic_model")
+                    or "nomic-embed-text"
+                )
                 host = str((config or {}).get("ollama", {}).get("host", "http://localhost:11434"))
                 sm = SemanticMemoryManager(get_default_db(), ollama_host=host, embedding_model=model)
         except Exception:

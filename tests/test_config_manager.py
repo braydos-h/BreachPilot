@@ -314,6 +314,8 @@ def test_validate_skills_warnings(tmp_path: Path):
             "min_contextual_skills": 0,
             "default_skill_weight": "high",
             "context_skill_weight": 0,
+            "semantic_min_similarity": 2,
+            "diversity_penalty": -1,
         },
     }, config_path.open("w", encoding="utf-8"))
 
@@ -329,6 +331,8 @@ def test_validate_skills_warnings(tmp_path: Path):
     assert "skills.min_contextual_skills" in joined
     assert "skills.default_skill_weight" in joined
     assert "skills.context_skill_weight" in joined
+    assert "skills.semantic_min_similarity" in joined
+    assert "skills.diversity_penalty" in joined
 
 
 def test_save_config():

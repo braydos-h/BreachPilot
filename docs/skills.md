@@ -31,17 +31,20 @@ tools/skill_pipeline.build_skill_selection_for_context
 
 - configured `default_enabled` skills (weight `default_skill_weight`),
 - configured `include_tags` (`context_skill_weight`),
-- dynamic tags derived from goal / mode / discovered services / CVEs / recent
+- dynamic tags derived from goal / discovered services / CVEs / recent
   tools,
-- a name/query text search for sparse-tag skills,
+- token-aware, field-weighted lexical search for sparse-tag skills,
 - a **boost-only** cross-mission feedback term (see §3), and
 - a **semantic** cosine-similarity term over `nomic-embed-text` embeddings
   (see §4).
 
 Attack-only skills (tags like `exploit`, `credential`, `post-exploit`) are
-excluded in `recon` mode. The top `max_active_skills` are rendered into the
-`skill_hints` / `active_skills` / `skill_context` fields of the target
-context.
+excluded in `recon` mode. Mode itself is not treated as goal evidence, so a
+reporting task in recon mode does not fill its slots with generic recon
+skills. A tag-overlap diversity penalty keeps near-duplicate methodologies
+from consuming the context budget. The top `max_active_skills` are rendered
+into the `skill_hints` / `active_skills` / `skill_context` fields of the
+target context.
 
 ### 2. Mid-run re-selection
 
@@ -144,7 +147,9 @@ gating applies to semantic hits too.
 | `feedback_min_observations` | `3` | Min observations before the boost applies. |
 | `semantic_matching` | `true` | Embedding-based ranking (with graceful fallback). |
 | `semantic_skill_weight` | `16` | Semantic score weight. |
+| `semantic_min_similarity` | `0.35` | Ignore weak semantic matches below this cosine score. |
 | `semantic_model` | `nomic-embed-text` | Embedding model. |
+| `diversity_penalty` | `12` | Penalize redundant skills with heavily overlapping tags. |
 | `include_metadata` | `false` | Append References/NIST/MITRE summaries in rendered context. |
 | `allow_reference_listing` | `true` | Allow the `list_skill_references` MCP tool. |
 

@@ -10,8 +10,10 @@ from tools.skill_registry import LoadedSkill, SkillRegistry, normalized_skill_ta
 
 
 _SERVICE_TAGS: dict[str, set[str]] = {
-    "http": {"web", "web-application", "api", "http", "security-headers"},
-    "https": {"web", "web-application", "api", "tls", "ssl", "http"},
+    "http": {"web", "web-application", "http", "security-headers"},
+    # HTTPS is primarily a web-service signal. TLS methodology is selected
+    # when TLS/certificate evidence is explicit, not for every HTTPS target.
+    "https": {"web", "web-application", "http"},
     "api": {"api", "web", "owasp"},
     "graphql": {"graphql", "api"},
     "smb": {"smb", "active-directory", "windows", "network-security"},
@@ -55,6 +57,18 @@ _ATTACK_ONLY_TERMS = {
     "dump",
     "metasploit",
     "adcs",
+    "post-exploit",
+    "post-exploitation",
+    "red-team",
+}
+_ATTACK_ONLY_NAME_TERMS = {
+    "attack",
+    "attacking",
+    "exploit",
+    "exploiting",
+    "exploitation",
+    "bypass",
+    "dumping",
     "post-exploit",
     "post-exploitation",
     "red-team",
@@ -169,7 +183,10 @@ def select_runtime_skills(
     service_values = [str(s) for s in (services or [])]
     cve_values = [str(cve) for cve in (known_cves or [])]
     tool_values = [str(tool) for tool in (recent_tools or [])]
-    goal_text = " ".join([goal_name, goal_description, mode]).lower()
+    # Mode is a safety/routing boundary, not evidence of user intent. Folding
+    # "recon" into every recon-mode query previously caused recon skills to
+    # dominate reporting, API, and triage goals.
+    goal_text = " ".join([goal_name, goal_description]).lower()
     service_text = " ".join(service_values).lower()
     cve_text = " ".join(cve_values).lower()
     tool_text = " ".join(tool_values).lower()
@@ -186,12 +203,28 @@ def select_runtime_skills(
     )
     for tag, signals in dynamic_tags.items():
         source = _source_from_signals(signals)
-        for skill in registry.search(tags=[tag], include_maybe=include_maybe, limit=4):
+        source_bonus = {
+            "cve": 6,
+            "goal": 4,
+            "tool": 4,
+            "service": 0,
+            "context": 0,
+        }.get(source, 0)
+        tag_matches = registry.search(
+            tags=[tag],
+            include_maybe=include_maybe,
+            limit=max(1, len(registry.skills)),
+        )
+        # Rare, precise tags carry more information than broad catalog tags.
+        # This lifts an exact nmap/graphql/etc. methodology over a crowd of
+        # generic "network-security" or "web" skills.
+        rarity_bonus = max(0, 6 - min(6, len(tag_matches) // 2))
+        for skill in tag_matches[:4]:
             if mode != "attack" and _looks_attack_only(skill):
                 continue
             add(
                 skill,
-                context_weight + min(len(signals), 4) * 2,
+                context_weight + source_bonus + rarity_bonus + min(len(signals), 4) * 2,
                 f"Matched runtime context tag '{tag}'.",
                 source,
                 [tag],
@@ -199,15 +232,20 @@ def select_runtime_skills(
             )
 
     # Name/query search catches skills whose tags are sparse but title matches.
-    for skill in registry.search(text, include_maybe=include_maybe, limit=max_active * 2):
+    for skill, lexical_score in registry.search_scored(
+        text,
+        include_maybe=include_maybe,
+        limit=max_active * 2,
+    ):
         if mode != "attack" and _looks_attack_only(skill):
             continue
+        scaled_score = max(8, min(context_weight, 6 + lexical_score // 2))
         add(
             skill,
-            max(8, context_weight // 2),
+            scaled_score,
             "Matched current goal, services, CVEs, or tool activity.",
             "search",
-            signals=["query:text"],
+            signals=[f"query:score:{lexical_score}"],
         )
 
     # ── Tier 2.2: embedding-based semantic matching (default-on, fallback) ──
@@ -222,7 +260,14 @@ def select_runtime_skills(
         from tools.skill_embeddings import semantic_rank
 
         sem_weight = _positive_int(cfg.get("semantic_skill_weight", 16), 16)
-        for skill, sim in semantic_rank(text, registry, skill_embedder, top_k=max_active * 3):
+        min_similarity = _bounded_float(cfg.get("semantic_min_similarity"), 0.35, 0.0, 1.0)
+        for skill, sim in semantic_rank(
+            text,
+            registry,
+            skill_embedder,
+            top_k=max_active * 3,
+            min_similarity=min_similarity,
+        ):
             if mode != "attack" and _looks_attack_only(skill):
                 continue
             add(
@@ -266,7 +311,8 @@ def select_runtime_skills(
                     item.reasons.append(f"Cross-mission feedback boost (prior={prior:.2f}).")
                     item.signals.add("feedback:prior")
 
-    ranked_all = sorted(candidates.values(), key=lambda item: (-item.score, item.skill.name))
+    diversity_penalty = _non_negative_int(cfg.get("diversity_penalty"), 12)
+    ranked_all = _diversified_rank(candidates.values(), diversity_penalty)
     contextual = [item for item in ranked_all if _is_contextual(item)]
     default_names = {
         str(name).strip()
@@ -341,20 +387,14 @@ def _tag_signals(
 
     mark("safety", "context:safety")
     mark("mcp", "context:mcp")
-    if mode == "recon":
-        for tag in ("reconnaissance", "nmap", "network-security"):
-            mark(tag, "mode:recon")
-    elif mode == "attack":
-        for tag in ("exploit-research", "vulnerability-scanning"):
-            mark(tag, "mode:attack")
     for key, mapped in _GOAL_TAGS.items():
-        if key in goal_text:
+        if _keyword_present(goal_text, key):
             for tag in mapped:
                 mark(tag, f"goal:{key}")
     for service in service_values:
-        service_text = str(service).lower()
+        service_terms = _context_terms(str(service))
         for key, mapped in _SERVICE_TAGS.items():
-            if key in service_text:
+            if key in service_terms:
                 for tag in mapped:
                     mark(tag, f"service:{key}")
     for cve in re.findall(r"\bcve-\d{4}-\d+\b", cve_text + " " + context_text):
@@ -371,8 +411,79 @@ def _tag_signals(
 
 
 def _looks_attack_only(skill: LoadedSkill) -> bool:
-    haystack = " ".join([skill.name, *normalized_skill_tags(skill.metadata.tags)]).lower()
-    return any(term in haystack for term in _ATTACK_ONLY_TERMS)
+    name = skill.name.lower()
+    tags = normalized_skill_tags(skill.metadata.tags)
+    return (
+        any(term in name for term in _ATTACK_ONLY_NAME_TERMS)
+        or bool(tags & _ATTACK_ONLY_TERMS)
+    )
+
+
+def _context_terms(text: str) -> set[str]:
+    terms: set[str] = set()
+    for raw in re.findall(r"[a-zA-Z0-9_.+-]{2,}", text.lower()):
+        terms.add(raw)
+        terms.update(
+            part
+            for part in re.split(r"[_.+-]+", raw)
+            if len(part) >= 2
+        )
+    return terms
+
+
+def _keyword_present(text: str, keyword: str) -> bool:
+    terms = _context_terms(text)
+    variants = {
+        keyword,
+        f"{keyword}s",
+        f"{keyword}ing",
+        f"{keyword}ed",
+    }
+    if keyword == "recon":
+        variants.add("reconnaissance")
+    elif keyword == "verify":
+        variants.update({"validate", "validation", "validated"})
+    elif keyword == "report":
+        variants.update({"reporting", "remediation"})
+    elif keyword == "credential":
+        variants.add("credentials")
+    elif keyword == "cve":
+        variants.update({"cves", "vulnerability", "vulnerabilities"})
+    return bool(terms & variants)
+
+
+def _diversified_rank(
+    candidates: Iterable[_Candidate],
+    penalty: int,
+) -> list[_Candidate]:
+    """Greedy relevance/diversity ranking over normalized skill tags."""
+
+    remaining = list(candidates)
+    selected: list[_Candidate] = []
+    tag_cache = {
+        item.skill.name: normalized_skill_tags(item.skill.metadata.tags)
+        for item in remaining
+    }
+    while remaining:
+        def rank_key(item: _Candidate) -> tuple[float, int, str]:
+            tags = tag_cache[item.skill.name]
+            max_overlap = 0.0
+            for chosen in selected:
+                chosen_tags = tag_cache[chosen.skill.name]
+                union = tags | chosen_tags
+                if union:
+                    overlap = len(tags & chosen_tags) / len(union)
+                    # Only penalize true near-duplicates. Partial topical
+                    # overlap is useful corroborating coverage, not redundancy.
+                    if overlap >= 0.6:
+                        max_overlap = max(max_overlap, overlap)
+            adjusted = item.score - penalty * max_overlap
+            return (-adjusted, -item.score, item.skill.name)
+
+        winner = min(remaining, key=rank_key)
+        selected.append(winner)
+        remaining.remove(winner)
+    return selected
 
 
 def _is_contextual(candidate: _Candidate) -> bool:
@@ -401,3 +512,19 @@ def _positive_int(value: Any, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0 else default
+
+
+def _non_negative_int(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= 0 else default
+
+
+def _bounded_float(value: Any, default: float, minimum: float, maximum: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, parsed))

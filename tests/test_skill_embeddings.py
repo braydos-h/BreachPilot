@@ -10,6 +10,7 @@ import pytest
 from tools.skill_embeddings import (
     SkillEmbedder,
     _cosine,
+    get_shared_skill_embedder,
     reset_shared_skill_embedder,
     reset_warn_flag,
     semantic_rank,
@@ -95,6 +96,36 @@ def test_skill_embedder_unavailable_wrapping_none():
     assert emb.embed_text("anything") is None
 
 
+def test_shared_embedder_honors_skills_semantic_model(monkeypatch):
+    import db
+    import tools.semantic_memory as semantic_memory
+
+    captured: dict[str, str] = {}
+
+    class _CapturingManager:
+        def __init__(self, _db, *, ollama_host: str, embedding_model: str):
+            captured["host"] = ollama_host
+            captured["model"] = embedding_model
+
+        def embed(self, _text: str) -> list[float]:
+            return [1.0, 0.0]
+
+    monkeypatch.setattr(db, "get_default_db", lambda: object())
+    monkeypatch.setattr(semantic_memory, "SemanticMemoryManager", _CapturingManager)
+
+    embedder = get_shared_skill_embedder({
+        "memory": {"semantic_enabled": True, "embedding_model": "memory-default"},
+        "skills": {"semantic_model": "skill-specific-model"},
+        "ollama": {"host": "http://embedder.test:11434"},
+    })
+
+    assert embedder.available()
+    assert captured == {
+        "host": "http://embedder.test:11434",
+        "model": "skill-specific-model",
+    }
+
+
 # ── semantic_rank ────────────────────────────────────────────────────────
 
 
@@ -105,6 +136,26 @@ def test_semantic_rank_orders_by_cosine(tmp_path: Path):
     ranked = semantic_rank("alpha", registry, emb, top_k=10)
     names = [s.name for s, _ in ranked]
     assert names == ["alpha-skill"]  # beta is orthogonal (sim 0) -> excluded
+
+
+def test_semantic_rank_filters_weak_similarity(tmp_path: Path):
+    registry = _registry(tmp_path)
+    sm = _FakeSM({
+        "query": [1.0, 0.0],
+        "alpha": [0.2, 0.979795897],
+        "beta": [0.0, 1.0],
+    })
+    emb = SkillEmbedder(sm)
+
+    ranked = semantic_rank(
+        "query",
+        registry,
+        emb,
+        top_k=10,
+        min_similarity=0.35,
+    )
+
+    assert ranked == []
 
 
 def test_semantic_rank_empty_when_no_embedder(tmp_path: Path, capsys):

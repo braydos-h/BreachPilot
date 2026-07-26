@@ -89,6 +89,45 @@ def test_registry_search_matches_tag_aliases(tmp_path: Path):
     assert registry.search(tags=["api"])[0].name == "conducting-api-security-testing"
 
 
+def test_registry_search_uses_exact_tokens_not_substrings(tmp_path: Path):
+    from tools.skill_registry import load_skill_registry
+
+    _write_skill(tmp_path, "rapid-incident-response", tags=["incident-response"])
+    _write_skill(tmp_path, "testing-api-authorization", tags=["api"])
+    registry = load_skill_registry([tmp_path], base_dir=tmp_path)
+
+    assert [skill.name for skill in registry.search("api")] == [
+        "testing-api-authorization"
+    ]
+
+
+def test_registry_search_ignores_generic_assessment_prose(tmp_path: Path):
+    from tools.skill_registry import load_skill_registry
+
+    _write_skill(tmp_path, "unrelated-skill", tags=["unrelated"])
+    registry = load_skill_registry([tmp_path], base_dir=tmp_path)
+
+    assert registry.search("run authorized assessment") == []
+
+
+def test_registry_search_scored_prefers_name_and_tags(tmp_path: Path):
+    from tools.skill_registry import load_skill_registry
+
+    _write_skill(tmp_path, "graphql-testing", tags=["graphql", "api"])
+    _write_skill(
+        tmp_path,
+        "generic-web-testing",
+        tags=["web"],
+        body="A GraphQL endpoint may be encountered during broader testing.",
+    )
+    registry = load_skill_registry([tmp_path], base_dir=tmp_path)
+
+    ranked = registry.search_scored("graphql")
+
+    assert ranked[0][0].name == "graphql-testing"
+    assert ranked[0][1] > ranked[1][1]
+
+
 def _write_skill_body(root: Path, name: str, body: str, *, tags: list[str] | None = None) -> Path:
     skill_dir = root / name
     skill_dir.mkdir(parents=True)

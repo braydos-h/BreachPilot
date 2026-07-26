@@ -261,7 +261,9 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "feedback_min_observations": 3,
         "semantic_matching": True,
         "semantic_skill_weight": 16,
+        "semantic_min_similarity": 0.35,
         "semantic_model": "nomic-embed-text",
+        "diversity_penalty": 12,
         "include_metadata": False,
         "allow_reference_listing": True,
     },
@@ -559,6 +561,7 @@ class ConfigValidator:
                     "feedback_skill_weight",
                     "feedback_min_observations",
                     "semantic_skill_weight",
+                    "diversity_penalty",
                 ):
                     value = skills.get(int_key)
                     if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 0):
@@ -566,6 +569,15 @@ class ConfigValidator:
                 sem_model = skills.get("semantic_model")
                 if sem_model is not None and (not isinstance(sem_model, str) or not sem_model.strip()):
                     result.warnings.append("skills.semantic_model must be a non-empty string.")
+                sem_threshold = skills.get("semantic_min_similarity")
+                if sem_threshold is not None and (
+                    isinstance(sem_threshold, bool)
+                    or not isinstance(sem_threshold, (int, float))
+                    or not 0 <= sem_threshold <= 1
+                ):
+                    result.warnings.append(
+                        "skills.semantic_min_similarity must be a number between 0 and 1."
+                    )
                 for key in ("roots", "default_enabled", "include_tags", "exclude_names"):
                     value = skills.get(key)
                     if value is not None and (

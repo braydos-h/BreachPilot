@@ -64,6 +64,31 @@ _TAG_ALIASES: dict[str, tuple[str, ...]] = {
     "ssl": ("tls",),
     "certificate-transparency": ("certificate", "tls", "osint"),
 }
+_SEARCH_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "assessment",
+    "authorized",
+    "current",
+    "for",
+    "from",
+    "goal",
+    "in",
+    "is",
+    "mode",
+    "of",
+    "on",
+    "or",
+    "run",
+    "service",
+    "services",
+    "the",
+    "to",
+    "use",
+    "with",
+}
 
 
 @dataclass(frozen=True)
@@ -93,10 +118,23 @@ class LoadedSkill:
 
 
 @dataclass(frozen=True)
+class _SkillSearchDocument:
+    name_tokens: frozenset[str]
+    description_tokens: frozenset[str]
+    classification_tokens: frozenset[str]
+    body_tokens: frozenset[str]
+
+
+@dataclass(frozen=True)
 class SkillRegistry:
     roots: tuple[Path, ...]
     skills: dict[str, LoadedSkill]
     errors: tuple[str, ...] = ()
+    _search_index: dict[str, _SkillSearchDocument] = field(
+        default_factory=dict,
+        repr=False,
+        compare=False,
+    )
 
     def list_skills(self) -> list[LoadedSkill]:
         return sorted(self.skills.values(), key=lambda skill: skill.name)
@@ -112,31 +150,72 @@ class SkillRegistry:
         include_maybe: bool = False,
         limit: int = 10,
     ) -> list[LoadedSkill]:
-        terms = _tokenize(query)
+        return [
+            skill
+            for skill, _ in self.search_scored(
+                query,
+                tags=tags,
+                include_maybe=include_maybe,
+                limit=limit,
+            )
+        ]
+
+    def search_scored(
+        self,
+        query: str = "",
+        *,
+        tags: Iterable[str] | None = None,
+        include_maybe: bool = False,
+        limit: int = 10,
+    ) -> list[tuple[LoadedSkill, int]]:
+        """Return lexical matches with transparent relevance scores.
+
+        Matching is token-aware and field-weighted so common prose and partial
+        substrings do not outrank exact skill names, tags, and descriptions.
+        ``search`` remains the compatibility wrapper for callers that only
+        need the ordered skills.
+        """
+
+        terms = [term for term in _tokenize(query) if term not in _SEARCH_STOPWORDS]
         wanted_tags = _normalized_tag_set(tags or [])
         scored: list[tuple[int, str, LoadedSkill]] = []
         for skill in self.skills.values():
             if skill.metadata.maybe and not include_maybe:
                 continue
-            haystack = _skill_search_text(skill)
             skill_tags = _normalized_tag_set(skill.metadata.tags)
             score = 0
-            for term in terms:
-                if term in skill.metadata.name.lower():
-                    score += 8
-                if term in skill_tags:
-                    score += 6
-                if term in haystack:
-                    score += 2
+            matched_terms = 0
+            if terms:
+                document = self._search_index.get(skill.name)
+                if document is None:
+                    document = _build_search_document(skill)
+                    self._search_index[skill.name] = document
+                for term in terms:
+                    field_score = 0
+                    if term in document.name_tokens:
+                        field_score = max(field_score, 12)
+                    if term in skill_tags:
+                        field_score = max(field_score, 10)
+                    if term in document.description_tokens:
+                        field_score = max(field_score, 5)
+                    if term in document.classification_tokens:
+                        field_score = max(field_score, 4)
+                    if term in document.body_tokens:
+                        field_score = max(field_score, 1)
+                    if field_score:
+                        score += field_score
+                        matched_terms += 1
             if wanted_tags:
                 matches = len(wanted_tags & skill_tags)
                 if matches == 0:
                     continue
                 score += matches * 10
+            if terms and matched_terms:
+                score += round(8 * matched_terms / len(terms))
             if score > 0 or (not terms and wanted_tags):
                 scored.append((score, skill.name, skill))
         scored.sort(key=lambda row: (-row[0], row[1]))
-        return [skill for _, _, skill in scored[: max(1, int(limit))]]
+        return [(skill, score) for score, _, skill in scored[: max(1, int(limit))]]
 
 
 def load_skill_registry(
@@ -395,18 +474,15 @@ def _wrap_untrusted(body: str) -> str:
 _UNTRUSTED_OVERHEAD = len(_wrap_untrusted(""))
 
 
-def _skill_search_text(skill: LoadedSkill) -> str:
-    expanded_tags = sorted(_normalized_tag_set(skill.metadata.tags))
-    return " ".join(
-        [
-            skill.metadata.name,
-            skill.metadata.description,
-            skill.metadata.domain,
-            skill.metadata.subdomain,
-            " ".join(expanded_tags),
-            skill.body[:8000],
-        ]
-    ).lower()
+def _build_search_document(skill: LoadedSkill) -> _SkillSearchDocument:
+    return _SkillSearchDocument(
+        name_tokens=frozenset(_tokenize(skill.metadata.name)),
+        description_tokens=frozenset(_tokenize(skill.metadata.description)),
+        classification_tokens=frozenset(
+            _tokenize(" ".join([skill.metadata.domain, skill.metadata.subdomain]))
+        ),
+        body_tokens=frozenset(_tokenize(skill.body[:8000])),
+    )
 
 
 def _normalized_tag_set(tags: Iterable[str]) -> set[str]:
@@ -421,7 +497,16 @@ def _normalized_tag_set(tags: Iterable[str]) -> set[str]:
 
 
 def _tokenize(text: str) -> list[str]:
-    return [tok.lower() for tok in re.findall(r"[a-zA-Z0-9_.+-]{2,}", text or "")]
+    tokens: list[str] = []
+    for raw in re.findall(r"[a-zA-Z0-9_.+-]{2,}", text or ""):
+        value = raw.lower()
+        tokens.append(value)
+        tokens.extend(
+            part
+            for part in re.split(r"[_.+-]+", value)
+            if len(part) >= 2
+        )
+    return list(dict.fromkeys(tokens))
 
 
 def _normalize_ws(text: str) -> str:

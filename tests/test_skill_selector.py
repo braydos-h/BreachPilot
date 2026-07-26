@@ -174,3 +174,87 @@ def test_attack_mode_can_select_attack_skill_and_excludes_win(tmp_path: Path):
 
     assert "exploiting-active-directory-with-bloodhound" in [s.name for s in selected.skills]
     assert "exploiting-active-directory-with-bloodhound" not in [s.name for s in excluded.skills]
+
+
+def test_mode_is_not_treated_as_goal_evidence(tmp_path: Path):
+    from tools.skill_selector import select_runtime_skills
+
+    selection = select_runtime_skills(
+        _registry(tmp_path),
+        config={"skills": {"enabled": True, "default_enabled": [], "max_active_skills": 4}},
+        goal_name="report",
+        goal_description="Prioritize remediation for verified findings",
+        mode="recon",
+    )
+
+    assert "scanning-network-with-nmap-advanced" not in [s.name for s in selection.skills]
+
+
+def test_https_does_not_automatically_select_tls_methodology(tmp_path: Path):
+    from tools.skill_registry import load_skill_registry
+    from tools.skill_selector import select_runtime_skills
+
+    _write_skill(tmp_path, "api-authorization-review", ["api", "web"])
+    _write_skill(tmp_path, "tls-cipher-audit", ["tls", "ssl", "certificate"])
+    registry = load_skill_registry([tmp_path], base_dir=tmp_path)
+
+    selection = select_runtime_skills(
+        registry,
+        config={"skills": {"enabled": True, "default_enabled": [], "max_active_skills": 2}},
+        goal_name="api",
+        goal_description="Review API authorization",
+        mode="recon",
+        services=["https 443"],
+    )
+
+    names = [s.name for s in selection.skills]
+    assert "api-authorization-review" in names
+    assert "tls-cipher-audit" not in names
+
+
+def test_attack_named_skill_is_gated_in_recon(tmp_path: Path):
+    from tools.skill_registry import load_skill_registry
+    from tools.skill_selector import select_runtime_skills
+
+    _write_skill(tmp_path, "performing-graphql-depth-limit-attack", ["graphql", "api"])
+    registry = load_skill_registry([tmp_path], base_dir=tmp_path)
+
+    selection = select_runtime_skills(
+        registry,
+        config={"skills": {"enabled": True, "default_enabled": [], "max_active_skills": 2}},
+        goal_name="api",
+        goal_description="Review a GraphQL API",
+        mode="recon",
+        services=["graphql api"],
+    )
+
+    assert selection.skills == ()
+
+
+def test_diversity_reranking_avoids_duplicate_skill_slots(tmp_path: Path):
+    from tools.skill_registry import load_skill_registry
+    from tools.skill_selector import select_runtime_skills
+
+    _write_skill(tmp_path, "api-a", ["api", "web"])
+    _write_skill(tmp_path, "api-b", ["api", "web"])
+    _write_skill(tmp_path, "dns-c", ["dns"])
+    registry = load_skill_registry([tmp_path], base_dir=tmp_path)
+
+    selection = select_runtime_skills(
+        registry,
+        config={
+            "skills": {
+                "enabled": True,
+                "default_enabled": [],
+                "max_active_skills": 2,
+                "min_contextual_skills": 2,
+                "diversity_penalty": 12,
+                "include_tags": ["api", "dns"],
+            }
+        },
+        goal_name="",
+        goal_description="",
+        mode="recon",
+    )
+
+    assert [s.name for s in selection.skills] == ["api-a", "dns-c"]
