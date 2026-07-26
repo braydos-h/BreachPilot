@@ -1128,18 +1128,17 @@ class AttackUi:
         current_model = getattr(args, "model", None) or "glm"
         args.model = await self.ask_model(router, default=current_model)
 
-        # Model strategy
-        current_strategy = getattr(args, "model_strategy", None) or "default"
-        args.model_strategy = await self.ask_model_strategy(default=current_strategy)
+        # Model strategy is intentionally fixed: every run uses the selected
+        # model rather than rotating or randomly selecting alternatives.
+        args.model_strategy = "default"
 
         # Peer consultation
         args.multi_model_consult = await self.ask_multi_model_consult(
             default=bool(getattr(args, "multi_model_consult", False))
         )
 
-        # MCP transport
-        current_transport = getattr(args, "mcp_transport", None) or "stdio"
-        args.mcp_transport = await self.ask_mcp_transport(default=current_transport)
+        # MCP transport is intentionally fixed to the local HTTP server.
+        args.mcp_transport = "http"
 
         # HTTP port
         if args.mcp_transport == "http":

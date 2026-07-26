@@ -464,6 +464,9 @@ async def async_main(args: argparse.Namespace) -> int:
     else:
         model_client = router.get_client(model_alias)
 
+    # Always use the local HTTP MCP server. This is fixed even for
+    # non-interactive invocations or callers that provide --mcp-transport.
+    args.mcp_transport = "http"
     mcp_transport = args.mcp_transport
     http_port = int(args.http_port or config.get("mcp", {}).get("http_port", 8001))
     exploit_port = http_port
