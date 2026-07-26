@@ -189,58 +189,13 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if not port_list:
             return "BLOCKED: no valid ports provided."
 
-        results: list[str] = [f"QUICK_SCAN_RESULTS: {target_ip}", ""]
-        open_count = 0
-        for port in port_list:
-            s = None
-            try:
-                import socket
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(3)
-                result = s.connect_ex((target_ip, port))
-                if result == 0:
-                    open_count += 1
-                    banner = ""
-                    try:
-                        s.settimeout(2)
-                        banner_bytes = s.recv(512)
-                        banner = banner_bytes.decode("utf-8", errors="replace").strip()[:200]
-                    except Exception:
-                        pass
-                    service_guess = ""
-                    if port == 22:
-                        service_guess = "ssh"
-                    elif port == 80:
-                        service_guess = "http"
-                    elif port == 443:
-                        service_guess = "https"
-                    elif port == 445:
-                        service_guess = "smb"
-                    elif port == 3389:
-                        service_guess = "rdp"
-                    elif port == 8080:
-                        service_guess = "http-proxy"
-                    elif port == 135:
-                        service_guess = "msrpc"
-                    elif port == 139:
-                        service_guess = "netbios"
-                    results.append(f"  Port {port}/tcp OPEN ({service_guess}) - {banner if banner else '(no banner)'}")
-            except Exception:
-                pass
-            finally:
-                if s is not None:
-                    try:
-                        s.close()
-                    except Exception:
-                        pass
+        # Delegate to the shared native socket scanner (also used by the recon
+        # pipeline's no-privilege fallback tier) so there is one implementation
+        # of the TCP-connect + banner-grab logic.
+        from tools.socket_scan import format_socket_scan_results, socket_scan_sync
 
-        results.append("")
-        results.append(f"SUMMARY: {open_count}/{len(port_list)} ports open")
-        if open_count == 0:
-            results.append("NOTE: No ports responded. Target may be down, firewalled, or blocking scans.")
-        else:
-            results.append("NEXT STEPS: Research CVEs for discovered services, then write Python exploits with write_python_file.")
-        return "\n".join(results)
+        results = socket_scan_sync(target_ip, port_list)
+        return format_socket_scan_results(target_ip, results)
 
     # Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
     # 1. Reconnaissance & Intelligence (tools.recon_pipeline)
@@ -279,7 +234,7 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
         agg_level = aggression_map.get(aggression.lower(), "normal")
 
         try:
-            recon_config = ReconConfig(aggression_level=agg_level)
+            recon_config = ReconConfig.from_config(config, aggression_level=agg_level)
             pipeline = ReconPipeline(recon_config)
             result: HostReconResult = await pipeline.recon_host(target_ip)
 

@@ -118,56 +118,17 @@ _NMAP_BINARY: str = "nmap"
 _NMAP_USE_SUDO: bool = False
 _NMAP_PRIV_FALLBACK: bool = True
 
-# nmap flags that require root / CAP_NET_RAW on Linux. Everything the defensive
-# server emits today is connect-scan + service/script detection except ``-O``
-# (OS detection) in run_nmap_service_scan. The SYN/Xmas/Null/etc. family is
-# covered too so the helper stays correct if new scan tools are added.
-_NMAP_ROOT_FLAGS: set[str] = {"-O", "-sS", "-sX", "-sN", "-sF", "-sA", "-sM"}
-
-
-def _is_privileged() -> bool:
-    """True if the process may use raw-packet nmap scans.
-
-    On POSIX this means euid 0 (root). Windows has no root concept, so nmap
-    on Windows does its own socket handling and is treated as privileged.
-    """
-    if os.name == "nt":
-        return True
-    try:
-        return os.geteuid() == 0
-    except AttributeError:
-        return True
-
-
-def _downgrade_unprivileged_args(args: list[str]) -> tuple[list[str], str]:
-    """Return (args, note). Strip root-requiring nmap flags when unprivileged.
-
-    If ``args`` contains a SYN scan flag, replace it with ``-sT`` (TCP connect
-    scan, no root needed) so port coverage is preserved. ``-O`` and the other
-    raw-packet scan types are simply removed. The returned note explains what
-    was downgraded so the caller can surface it to the operator.
-    """
-    out: list[str] = []
-    removed: list[str] = []
-    has_syn = False
-    for tok in args:
-        if tok in _NMAP_ROOT_FLAGS:
-            removed.append(tok)
-            if tok == "-sS":
-                has_syn = True
-        else:
-            out.append(tok)
-    if not removed:
-        return args, ""
-    if has_syn:
-        out.append("-sT")
-    note = (
-        "nmap: removed root-requiring flags "
-        + ",".join(removed)
-        + " (needs root). Rerun as root or set nmap.sudo: true in config.yaml "
-        "to enable OS/SYN scans. SYN scan was replaced with -sT (connect scan)."
-    )
-    return out, note
+# The privilege/downgrade helpers live in the shared ``tools.nmap_priv`` module
+# so the defensive server and the exploit recon pipeline apply the SAME
+# behaviour. Re-exported here so existing ``from mcp_server import ...`` imports
+# (see tests/test_linux_support.py) keep working.
+from tools.nmap_priv import (  # noqa: E402,F401  (re-exported for back-comat)
+    _NMAP_ROOT_FLAGS,
+    _downgrade_unprivileged_args,
+    _is_privileged,
+    apply_nmap_privilege,
+    is_privilege_error,
+)
 
 
 async def _run_nmap(args: list[str], timeout: int = 300) -> dict[str, Any]:
@@ -184,16 +145,9 @@ async def _run_nmap(args: list[str], timeout: int = 300) -> dict[str, Any]:
     instead of hanging on a password prompt).
     """
     start = time.time()
-    downgrade_note = ""
-    effective_args = list(args)
-
-    use_sudo = _NMAP_USE_SUDO and os.name != "nt"
-    if use_sudo and not _is_privileged():
-        argv = ["sudo", "-n", _NMAP_BINARY, *effective_args]
-    else:
-        if not _is_privileged() and _NMAP_PRIV_FALLBACK and os.name != "nt":
-            effective_args, downgrade_note = _downgrade_unprivileged_args(effective_args)
-        argv = [_NMAP_BINARY, *effective_args]
+    argv, downgrade_note = apply_nmap_privilege(
+        [_NMAP_BINARY, *args], sudo=_NMAP_USE_SUDO, priv_fallback=_NMAP_PRIV_FALLBACK
+    )
 
     try:
         proc = await asyncio.to_thread(

@@ -9,6 +9,7 @@ from __future__ import annotations
 import ipaddress
 import re
 import shutil
+import socket
 from typing import Any
 
 # Strict IPv4 regex: four octets 0-255 separated by dots, anchored.
@@ -129,6 +130,56 @@ def sanitize_target_in_command(command: str) -> tuple[str, list[dict[str, Any]]]
 
     sanitized = "".join(new_tokens)
     return sanitized, corrections
+
+
+def is_local_target(target_ip: str) -> bool:
+    """True when the target is the operator's own host (loopback or a local IF IP).
+
+    When the target is local, filesystem reads and local enumeration are cheaper
+    and safer than network brute-force -- the agent already has the box. This
+    drives the LOCAL TARGET PLAYBOOK injected by ``build_exploit_system_prompt``:
+    it tells the model to read ``/etc/shadow``, ``~/.ssh/``, SUID binaries, etc.
+    BEFORE spraying its own SSH listener.
+
+    Returns True for:
+      - ``localhost`` (case-insensitive)
+      - any loopback IP (127.0.0.0/8, ::1) per ``ipaddress.is_loopback``
+      - any IP bound on a local interface (``socket.getaddrinfo`` of the
+        hostname) -- e.g. the box's own 192.168.x.x / 10.x.x.x address
+    Best-effort: any parse error returns False (treat as remote, the safe
+    default for the network playbook).
+    """
+    if not target_ip or not isinstance(target_ip, str):
+        return False
+    s = target_ip.strip()
+    if not s:
+        return False
+    if s.lower() == "localhost":
+        return True
+    # Loopback (127.0.0.0/8, ::1)
+    try:
+        if ipaddress.ip_address(s).is_loopback:
+            return True
+    except ValueError:
+        pass
+    # Matches a non-loopback IP bound on a local interface (e.g. 192.168.1.5).
+    try:
+        local_ips: set[str] = set()
+        host = socket.gethostname()
+        try:
+            local_ips.add(socket.gethostbyname(host).split("%")[0])
+        except OSError:
+            pass
+        for info in socket.getaddrinfo(host, None):
+            try:
+                local_ips.add(info[4][0].split("%")[0])
+            except (IndexError, TypeError):
+                continue
+        if s in local_ips:
+            return True
+    except OSError:
+        pass
+    return False
 
 
 def is_tool_installed(tool_name: str) -> bool:

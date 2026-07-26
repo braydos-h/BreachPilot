@@ -46,5 +46,20 @@ def register_research_tools(mcp: Any, *, ctx: ToolContext) -> None:
         entries = nvd.search_sync(query)
         return format_cve_results(entries, query)
 
+    @mcp.tool()
+    def cve_to_poc(cve_id: str) -> str:
+        """Resolve a CVE ID to VERIFIED PoC URLs only (GitHub Search API + searchsploit --cve + NVD references, each HTTP-existence-checked). Returns CVE_TO_POC_RESULTS with verified URLs, or NO_VERIFIED_POC_FOUND if none verify. NEVER fabricate or guess a PoC/clone URL — always call this tool first and use ONLY the URLs it returns; if it returns NO_VERIFIED_POC_FOUND, write a workspace-contained exploit from the CVE details (cve_to_exploit_synth) instead of inventing a URL."""
+        # Gather NVD reference URLs (best-effort) to feed the resolver so
+        # NVD-listed PoC refs are also HTTP-verified and surfaced.
+        nvd_refs: list[str] = []
+        try:
+            for entry in nvd.search_sync(cve_id):
+                for ref in getattr(entry, "references", []) or []:
+                    if isinstance(ref, str) and ref:
+                        nvd_refs.append(ref)
+        except Exception:
+            pass
+        return search.cve_to_poc(cve_id, nvd_refs=nvd_refs)
+
 
 

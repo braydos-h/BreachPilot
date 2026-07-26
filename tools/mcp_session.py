@@ -224,6 +224,15 @@ async def open_exploit_mcp_session(
                                 f"MCP server boot timed out after "
                                 f"{MCP_BOOT_TIMEOUT_SECONDS:.0f}s"
                             )
+                        # The boot spinner's ``with`` block encloses ``yield session``
+                        # below, so without this the redraw thread would keep printing
+                        # ``[STATUS] Booting MCP server (stdio)... X.Xs`` for the
+                        # ENTIRE session. The server has finished booting now — stop
+                        # the heartbeat. The ``with`` block's own exit tail line (the
+                        # static ``[SUCCESS]`` message) still fires on exit; this only
+                        # stops the recurring elapsed-seconds redraw. See
+                        # ``AttackUi.release_active_spinner``.
+                        ui.release_active_spinner()
                         try:
                             yield session
                         except _EXC_GROUP_CATCH as exc:
@@ -380,6 +389,11 @@ async def open_exploit_mcp_session(
                             )
                             _log_nested_exceptions(exc)
                         raise
+                    # Stop the heartbeat redraw thread now that the session is
+                    # initialized — see the matching comment in the stdio branch.
+                    # Without this ``[STATUS] Initializing MCP session... X.Xs``
+                    # would keep ticking for the whole session.
+                    ui.release_active_spinner()
                     try:
                         yield session
                     except _EXC_GROUP_CATCH as exc:

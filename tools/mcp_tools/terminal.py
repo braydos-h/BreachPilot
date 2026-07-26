@@ -403,8 +403,44 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
         result_lines.append(f"SUMMARY: {len(installed)}/{len(check_list)} tools available")
         if missing:
             result_lines.append(f"MISSING: {', '.join(missing)}")
-            result_lines.append("HINT: Use install_package or apt_install to install missing tools.")
+            # Issue 4: sudo-aware hint. On a box without passwordless sudo,
+            # apt_install/install_package will fail -- steer the agent to the
+            # preflight_env_check tool (which gives a per-tool fallback plan)
+            # and to write_python_file Python implementations instead of a
+            # dead-end install attempt.
+            try:
+                from tools.env_probe import _can_passwordless_sudo
+
+                _has_sudo = _can_passwordless_sudo()
+            except Exception:
+                _has_sudo = True  # unknown; keep the legacy hint
+            if _has_sudo:
+                result_lines.append(
+                    "HINT: Use install_package or apt_install to install missing tools,"
+                    " or call preflight_env_check for a per-tool fallback plan."
+                )
+            else:
+                result_lines.append(
+                    "HINT: sudo unavailable — apt_install/install_package will fail. "
+                    "Call preflight_env_check for a per-tool fallback plan, then pivot to "
+                    "write_python_file Python implementations for missing tools."
+                )
         return "\n".join(result_lines)
+
+    @mcp.tool()
+    def preflight_env_check() -> str:
+        """Probe installed pentest tools, sudo/pip installability, and the
+        recommended fallback (install_via_apt / install_via_pip / write_python_fallback)
+        for each MISSING tool. Call once at session start (the system prompt
+        already carries the startup probe) or after installing a tool to
+        re-probe. Local-only; touches no target."""
+        try:
+            from tools.env_probe import preflight_env_probe, render_env_context
+
+            rendered = render_env_context(preflight_env_probe())
+        except Exception as exc:  # pragma: no cover - defensive
+            return f"PREFLIGHT_ENV_CHECK_ERROR: {exc}"
+        return rendered or "ENV_OK: all standard pentest tools present."
 
     @mcp.tool()
     @audit_tool

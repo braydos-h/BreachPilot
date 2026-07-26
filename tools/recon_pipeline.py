@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Coroutine
 
 from tools.logging_setup import get_logger
+from tools.nmap_priv import apply_nmap_privilege, is_privilege_error
 from tools.validation_utils import validate_ipv4
 
 logger = get_logger()
@@ -214,6 +215,27 @@ class ReconConfig:
     fallback_enabled: bool = True
     parallel_secondary: bool = True
     max_concurrent_secondary: int = 3
+    # Nmap privilege handling (mirrors config.yaml ``nmap.sudo`` /
+    # ``nmap.priv_fallback``). When unprivileged: ``sudo`` runs nmap via
+    # ``sudo -n``; otherwise ``priv_fallback`` downgrades ``-sS``/``-O`` to
+    # ``-sT`` instead of failing. See ``tools.nmap_priv``.
+    sudo: bool = False
+    priv_fallback: bool = True
+
+    @classmethod
+    def from_config(cls, config: dict | None, **overrides: Any) -> "ReconConfig":
+        """Build a ReconConfig from a config dict, reading the ``nmap`` section
+        for path/sudo/priv_fallback. Extra keyword overrides (e.g.
+        ``aggression_level``) are applied on top so callers don't lose fields
+        they used to pass positionally."""
+        nmap = ((config or {}).get("nmap") or {})
+        fields: dict[str, Any] = dict(
+            nmap_path=nmap.get("path") or "nmap",
+            sudo=bool(nmap.get("sudo", False)),
+            priv_fallback=bool(nmap.get("priv_fallback", True)),
+        )
+        fields.update(overrides)
+        return cls(**fields)
 
 
 # ---------------------------------------------------------------------------
@@ -309,6 +331,13 @@ async def run_command(
             else:
                 last_error = f"Exit code {proc.returncode}: {stderr[:500]}"
                 logger.warning(f"Command failed (attempt {attempt+1}): {last_error}")
+                # A raw-socket scan that fails for lack of root fails
+                # identically on every retry. Don't burn the retry budget --
+                # return now so the caller can downgrade the argv (``-sS`` ->
+                # ``-sT``) and retry once with the corrected command.
+                if is_privilege_error(stderr):
+                    logger.warning(f"Privilege-related failure, not retrying: {last_error}")
+                    return False, stdout, stderr, elapsed
 
         except asyncio.TimeoutError:
             last_error = f"Timeout after {timeout}s"
@@ -388,6 +417,40 @@ class PrimaryReconScanner:
             elif mass_result:
                 result.errors.extend(mass_result.errors)
 
+        # Final fallback: native Python socket scan (no privileges needed).
+        # Used when nmap/rustscan/masscan are unavailable OR failed for lack of
+        # root (a non-root operator box). Covers a conservative common-ports
+        # set rather than ``-p-`` so it stays fast.
+        if self._config.fallback_enabled and not result.open_ports:
+            logger.info(f"Falling back to native Python socket scan for {target}")
+            try:
+                from tools.socket_scan import COMMON_PORTS, socket_scan
+
+                sock_results = await socket_scan(target, COMMON_PORTS)
+                open_results = [r for r in sock_results if r["open"]]
+                if open_results:
+                    result.open_ports = [r["port"] for r in open_results]
+                    result.scan_tool = "python_socket"
+                    for r in open_results:
+                        result.services.append(
+                            ServiceInfo(
+                                port=r["port"],
+                                service=r["service_guess"] or "unknown",
+                                banner=r.get("banner", ""),
+                            )
+                        )
+                    result.warnings.append(
+                        "Native socket scan used (nmap/rustscan/masscan "
+                        "unavailable or failed). Service versions are guesses."
+                    )
+                    result.scan_duration = max(time.monotonic() - start_time, 0.0001)
+                    logger.info(
+                        f"Socket scan complete: {len(result.open_ports)} ports on {target}"
+                    )
+                    return result
+            except Exception as exc:
+                result.errors.append(f"Socket scan fallback failed: {exc}")
+
         # If all failed, return empty result with errors
         result.scan_duration = max(time.monotonic() - start_time, 0.0001)
         if not result.errors:
@@ -426,12 +489,37 @@ class PrimaryReconScanner:
                 target,
             ]
 
+        # Apply sudo-prefix / unprivileged downgrade (``-sS``/``-O`` -> ``-sT``)
+        # up front so a non-root operator box does not fail on raw-packet scans.
+        cmd, note = apply_nmap_privilege(
+            cmd, sudo=self._config.sudo, priv_fallback=self._config.priv_fallback
+        )
+        if note:
+            result.warnings.append(note)
+
         success, stdout, stderr, elapsed = await run_command(
             cmd,
             timeout=self._config.timeout_seconds,
             max_retries=self._config.max_retries,
             retry_delay=self._config.retry_delay,
         )
+
+        # If the operator ran unprivileged with priv_fallback OFF, the first
+        # attempt keeps ``-sS``/``-O`` and fails with a privilege error.
+        # run_command returns immediately on privilege errors (no retry), so
+        # downgrade once and retry a single time instead of aborting recon.
+        if not success and is_privilege_error(stderr) and not note:
+            cmd2, note2 = apply_nmap_privilege(
+                cmd, sudo=self._config.sudo, priv_fallback=True
+            )
+            if note2:
+                result.warnings.append(note2)
+            success, stdout, stderr, elapsed = await run_command(
+                cmd2,
+                timeout=self._config.timeout_seconds,
+                max_retries=0,
+            )
+            cmd = cmd2
 
         result.scan_duration = elapsed
         result.raw_output = stdout + "\n" + stderr
@@ -497,6 +585,9 @@ class PrimaryReconScanner:
             "-oX", "-",
             target,
         ]
+        nmap_cmd, _ = apply_nmap_privilege(
+            nmap_cmd, sudo=self._config.sudo, priv_fallback=self._config.priv_fallback
+        )
 
         nmap_success, nmap_stdout, nmap_stderr, nmap_elapsed = await run_command(
             nmap_cmd,
@@ -560,6 +651,9 @@ class PrimaryReconScanner:
                 "-oX", "-",
                 target,
             ]
+            nmap_cmd, _ = apply_nmap_privilege(
+                nmap_cmd, sudo=self._config.sudo, priv_fallback=self._config.priv_fallback
+            )
             nmap_success, nmap_stdout, nmap_stderr, nmap_elapsed = await run_command(
                 nmap_cmd,
                 timeout=self._config.timeout_seconds,

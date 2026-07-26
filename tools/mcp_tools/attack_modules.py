@@ -771,11 +771,26 @@ if __name__ == "__main__":
         except Exception as e:
             result_lines.append(f"CVE lookup warning: {e}")
 
-        # Search for existing PoCs
+        # Search for existing PoCs. Issue 3: use the VERIFIED cve_to_poc
+        # resolver (GitHub Search API + searchsploit --cve + NVD refs, each
+        # HTTP-existence-checked) instead of raw search_web_exploit, which fed
+        # the model unverified URLs and led it to hallucinate+git_clone
+        # non-existent repos. Fall back to web search only if cve_to_poc is
+        # unavailable on this object.
         try:
-            poc_results = search.search_web_exploit(f"{cve} exploit PoC python")
+            if hasattr(search, "cve_to_poc"):
+                # NVD refs gathered above are already in `entries`; pass them
+                # through so NVD-listed PoC refs get HTTP-verified too.
+                _poc_refs: list[str] = []
+                for _e in entries:
+                    for _r in getattr(_e, "references", []) or []:
+                        if isinstance(_r, str) and _r:
+                            _poc_refs.append(_r)
+                poc_results = search.cve_to_poc(cve, nvd_refs=_poc_refs)
+            else:
+                poc_results = search.search_web_exploit(f"{cve} exploit PoC python")
             result_lines.append("")
-            result_lines.append("--- Web Search Results ---")
+            result_lines.append("--- Verified PoC Sources ---")
             result_lines.append(poc_results[:1500])
         except Exception:
             pass
