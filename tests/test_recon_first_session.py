@@ -1735,6 +1735,67 @@ class TestReconFirstBootStuckShowsProgress:
 # ── HTTP transport soft-fail regression ──────────────────────────────────────
 
 
+class TestHttpPortReadiness:
+    """The HTTP readiness loop must distinguish a slow boot from a dead child."""
+
+    def test_wait_for_port_reports_child_exit_and_log_tail(self, tmp_path):
+        import tools.mcp_session as ms
+
+        log_path = tmp_path / "mcp_exploit_server.log"
+        log_path.write_text(
+            "Traceback (most recent call last):\n"
+            "ModuleNotFoundError: No module named 'uvicorn'\n",
+            encoding="utf-8",
+        )
+
+        class ExitedProcess:
+            def poll(self):
+                return 7
+
+        async def _run():
+            await ms.wait_for_port(
+                "127.0.0.1",
+                8001,
+                timeout_seconds=5,
+                process=ExitedProcess(),
+                log_path=log_path,
+            )
+
+        with pytest.raises(RuntimeError) as exc_info:
+            asyncio.run(_run())
+
+        message = str(exc_info.value)
+        assert "exited with code 7" in message
+        assert "ModuleNotFoundError" in message
+        assert str(log_path) in message
+
+    def test_wait_for_port_timeout_includes_log_tail(self, tmp_path):
+        import tools.mcp_session as ms
+
+        log_path = tmp_path / "mcp_exploit_server.log"
+        log_path.write_text("still importing attack modules\n", encoding="utf-8")
+
+        class RunningProcess:
+            def poll(self):
+                return None
+
+        async def _run():
+            await ms.wait_for_port(
+                "127.0.0.1",
+                0,
+                timeout_seconds=0,
+                process=RunningProcess(),
+                log_path=log_path,
+            )
+
+        with pytest.raises(TimeoutError) as exc_info:
+            asyncio.run(_run())
+
+        message = str(exc_info.value)
+        assert "still importing attack modules" in message
+        assert str(log_path) in message
+
+
 class TestHttpTransportSoftFail:
     """Regression for the three HTTP-transport soft-fail gaps in
     ``open_exploit_mcp_session`` (``transport="http"``).

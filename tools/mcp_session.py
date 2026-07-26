@@ -267,7 +267,11 @@ async def open_exploit_mcp_session(
 
     _http_start_label = f"Starting MCP HTTP server on port {exploit_port}"
     ui.boot_step(_http_start_label, ok=False)
-    with ui.spinner(f"Starting MCP HTTP server on port {exploit_port}...", soft_fail=soft_fail, soft_fail_flag=boot_failed):
+    with ui.spinner(
+        f"Starting MCP HTTP server on port {exploit_port}...",
+        soft_fail=soft_fail,
+        soft_fail_flag=boot_failed,
+    ):
         try:
             process, log_handle = start_exploit_http_server(
                 server_path=server_path,
@@ -300,10 +304,27 @@ async def open_exploit_mcp_session(
         _http_port_label = f"Waiting for MCP HTTP port {exploit_port}"
         ui.boot_step(_http_port_label, ok=False)
         try:
-            with ui.spinner(f"Waiting for MCP HTTP port {exploit_port}...", soft_fail=soft_fail, soft_fail_flag=boot_failed):
-                await wait_for_port("127.0.0.1", exploit_port, timeout_seconds=15)
+            with ui.spinner(
+                f"Waiting for MCP HTTP port {exploit_port}...",
+                soft_fail=soft_fail,
+                soft_fail_flag=boot_failed,
+            ):
+                # Use the same cold-start budget as stdio. Both transports
+                # construct the identical (and import-heavy) exploit server;
+                # limiting HTTP to 15 seconds made healthy cold boots fail
+                # while stdio was allowed the full 30 seconds. Pass the child
+                # and its log so an early subprocess crash is reported
+                # immediately with the real cause instead of masquerading as
+                # a generic port timeout.
+                await wait_for_port(
+                    "127.0.0.1",
+                    exploit_port,
+                    timeout_seconds=MCP_BOOT_TIMEOUT_SECONDS,
+                    process=process,
+                    log_path=Path(log_handle.name),
+                )
             ui.boot_step(_http_port_label, ok=True)
-        except (OSError, asyncio.TimeoutError) as exc:
+        except (OSError, asyncio.TimeoutError, RuntimeError) as exc:
             if soft_fail:
                 ui.warning(f"MCP HTTP server did not start on port {exploit_port}: {exc}")
                 # M19: an asynccontextmanager MUST yield before returning. The
@@ -477,15 +498,58 @@ def start_exploit_http_server(
     return process, log_handle
 
 
-async def wait_for_port(host: str, port: int, timeout_seconds: int) -> None:
+def _server_log_tail(log_path: Path | None, *, max_lines: int = 20, max_chars: int = 4000) -> str:
+    """Return a bounded server-log excerpt suitable for a startup error."""
+    if log_path is None:
+        return ""
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as exc:
+        return f"\nServer log: {log_path} (could not read: {exc})"
+    excerpt = "\n".join(lines[-max_lines:])
+    if len(excerpt) > max_chars:
+        excerpt = excerpt[-max_chars:]
+    if not excerpt:
+        excerpt = "(empty)"
+    return f"\nServer log: {log_path}\n--- log tail ---\n{excerpt}"
+
+
+async def wait_for_port(
+    host: str,
+    port: int,
+    timeout_seconds: float,
+    *,
+    process: subprocess.Popen[str] | None = None,
+    log_path: Path | None = None,
+) -> None:
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
+        if process is not None:
+            returncode = process.poll()
+            if returncode is not None:
+                raise RuntimeError(
+                    f"MCP HTTP server exited with code {returncode} before "
+                    f"opening {host}:{port}."
+                    f"{_server_log_tail(log_path)}"
+                )
         try:
             with socket.create_connection((host, port), timeout=0.5):
                 return
         except OSError:
             await asyncio.sleep(0.2)
-    raise TimeoutError(f"Timed out waiting for MCP HTTP server on {host}:{port}.")
+    if process is not None:
+        returncode = process.poll()
+        if returncode is not None:
+            raise RuntimeError(
+                f"MCP HTTP server exited with code {returncode} before "
+                f"opening {host}:{port}."
+                f"{_server_log_tail(log_path)}"
+            )
+    raise TimeoutError(
+        f"Timed out after {timeout_seconds:g}s waiting for MCP HTTP server "
+        f"on {host}:{port}."
+        f"{_server_log_tail(log_path)}"
+    )
 
 
 def stop_process(process: subprocess.Popen[str]) -> None:
