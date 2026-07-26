@@ -38,11 +38,13 @@ def configured_api_key_env_names(config: dict[str, Any]) -> list[str]:
     ollama = research.get("ollama", {}) or {}
     serpapi = research.get("serpapi", {}) or {}
     cve_lookup = config.get("cve_lookup", {}) or {}
+    github = cve_lookup.get("github", {}) or {}
 
     for value in (
         ollama.get("api_key_env", "OLLAMA_API_KEY"),
         serpapi.get("api_key_env", "SERPAPI_API_KEY"),
         cve_lookup.get("api_key_env", "NVD_API_KEY"),
+        github.get("token_env", "GITHUB_TOKEN"),
     ):
         name = str(value or "").strip()
         if name and name not in names:

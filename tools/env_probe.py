@@ -21,12 +21,20 @@ import subprocess
 from typing import Any
 
 # Curated tool list the exploit agent commonly relies on. Probed via PATH.
-_ENV_TOOLS: list[str] = [
+# This is the single source of truth for "which pentest tools does this box
+# have?" -- ``check_environment``'s default list (tools/mcp_tools/terminal.py)
+# derives from it. ``ReconConfig``'s per-tool ``*_path`` fields are a SEPARATE
+# concern (binary-path overrides for the recon pipeline), not a presence
+# registry, and are intentionally not unified here.
+ENV_TOOLS: list[str] = [
     "nmap", "searchsploit", "hydra", "sqlmap", "msfconsole", "gobuster",
     "nikto", "enum4linux", "smbclient", "impacket-secretsdump",
     "crackmapexec", "hashcat", "john", "gcc", "pip", "python3", "curl",
     "git", "nc", "netcat",
 ]
+# Backward-compat alias so existing patch sites that reference ``_ENV_TOOLS``
+# keep working (it is the same list object).
+_ENV_TOOLS = ENV_TOOLS
 
 # Tools that have a straightforward workspace-Python replacement. When one of
 # these is missing AND sudo is unavailable, the probe flags it as

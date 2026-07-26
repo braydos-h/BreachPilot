@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64 as _base64
 import datetime
 import hashlib
 import os
@@ -28,8 +29,10 @@ def register_workspace_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
     @mcp.tool()
     @audit_tool
-    def write_python_file(filename: str, code: str) -> str:
-        """Write an AI-generated Python exploit script. The script will receive --target <ip> and ACTIVE_CHECK_TARGET env var. Use only standard library imports (socket, ssl, http, json, etc.) or common pip packages. Pass a bare .py name to save into the workspace, or an absolute path to write anywhere on the operator box (LAB BUILD: unrestricted)."""
+    def write_python_file(filename: str, code: str, binary: bool = False) -> str:
+        """Write an AI-generated Python exploit script. The script will receive --target <ip> and ACTIVE_CHECK_TARGET env var. Use only standard library imports (socket, ssl, http, json, etc.) or common pip packages. Pass a bare .py name to save into the workspace, or an absolute path to write anywhere on the operator box (LAB BUILD: unrestricted).
+
+        With binary=True, ``code`` is a base64 payload and the file is written as raw bytes (no shell interpolation, no UTF-8 re-encoding). Use this to materialize a private key / PEM / binary blob that must be byte-exact -- then `chmod 600` it via run_exploit_terminal. Never paste keys through a shell heredoc."""
         if not filename or not filename.strip():
             return "BLOCKED: empty filename."
         if not code or not code.strip():
@@ -47,15 +50,35 @@ def register_workspace_tools(mcp: Any, *, ctx: ToolContext) -> None:
         else:
             script_path = attempt_dir / (raw_path.name if raw_path else "")
         script_path.parent.mkdir(parents=True, exist_ok=True)
-        script_path.write_text(code, encoding="utf-8")
-        code_sha = hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+        if binary:
+            # Byte-exact channel for key/PEM/binary materialization. base64 is
+            # the safe wire format for arbitrary bytes through the MCP JSON
+            # schema (which is str-typed); a non-base64 / non-UTF-8 key pasted
+            # as text would be corrupted by write_text (libcrypto "no start
+            # line"). Validate strictly so a malformed payload fails loudly
+            # instead of silently writing garbage.
+            try:
+                payload = _base64.b64decode(code, validate=True)
+            except (ValueError, TypeError) as exc:
+                return f"BLOCKED: binary=True requires valid base64 ({exc})."
+            script_path.write_bytes(payload)
+            code_sha = hashlib.sha256(payload).hexdigest()
+            size_note = f"SIZE: {len(payload)} bytes"
+            mode_note = "binary"
+        else:
+            script_path.write_text(code, encoding="utf-8")
+            code_sha = hashlib.sha256(code.encode("utf-8")).hexdigest()
+            size_note = f"SIZE: {len(code)} chars"
+            mode_note = "text"
 
         return (
             f"PYTHON_FILE_WRITTEN: {script_path.name}\n"
             f"ATTEMPT_ID: {attempt_id}\n"
             f"PATH: {script_path}\n"
+            f"MODE: {mode_note}\n"
             f"SHA256: {code_sha}\n"
-            f"SIZE: {len(code)} chars\n"
+            f"{size_note}\n"
         )
 
     @mcp.tool()

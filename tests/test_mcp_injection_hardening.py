@@ -382,6 +382,10 @@ async def test_run_as_root_allows_destructive_in_lab(monkeypatch, tmp_path: Path
     because the destructive gate was removed. Only the target-IP lock remains,
     and it is off here (require_explicit_allowlist=False)."""
     captured = _patch_pgrp(monkeypatch)
+    # Gap 3: run_as_root now short-circuits to a pivot when passwordless sudo is
+    # unavailable (e.g. on the Windows test host, where _can_passwordless_sudo
+    # returns False). This test exercises the run path, so force sudo available.
+    monkeypatch.setattr("tools.env_probe._can_passwordless_sudo", lambda: True)
     mcp = _make_server(tmp_path)
     text = _text(await mcp.call_tool(
         "run_as_root", {"command": "rm -rf /tmp"}
@@ -473,6 +477,9 @@ async def test_run_as_root_uses_argv_no_shell(monkeypatch, tmp_path: Path) -> No
     bash -c but the input is the original command (operator-controlled), not a
     string built from untrusted args."""
     captured = _patch_pgrp(monkeypatch)
+    # Gap 3: force passwordless sudo available so the run path (not the pivot)
+    # is exercised here; the argv-list behavior is what this test asserts.
+    monkeypatch.setattr("tools.env_probe._can_passwordless_sudo", lambda: True)
     mcp = _make_server(tmp_path)
     text = _text(await mcp.call_tool(
         "run_as_root", {"command": "whoami"}

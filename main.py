@@ -8,7 +8,7 @@ Usage:
 
 from __future__ import annotations
 
-__version__ = "0.49.3"
+__version__ = "0.49.5"
 
 import argparse
 import asyncio

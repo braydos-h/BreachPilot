@@ -87,3 +87,35 @@ def test_prompt_without_env_context_unchanged():
 
     prompt = build_exploit_system_prompt(attacker_os="Linux", target_ip="10.0.0.5")
     assert "PRE-FLIGHT ENVIRONMENT" not in prompt
+
+
+# ── Gap 5: single source of truth for the required-tool registry ────────────
+
+
+def test_env_tools_public_and_alias_backward_compat():
+    """ENV_TOOLS is the public registry; _ENV_TOOLS is the same list object."""
+    from tools.env_probe import ENV_TOOLS, _ENV_TOOLS
+
+    assert ENV_TOOLS is _ENV_TOOLS
+    # Sanity: a few core pentest tools are present.
+    for t in ("nmap", "hydra", "searchsploit", "msfconsole"):
+        assert t in ENV_TOOLS
+
+
+def test_check_environment_default_derives_from_env_tools():
+    """check_environment's default list = ENV_TOOLS + explicit extras (no dup)."""
+    from tools.env_probe import ENV_TOOLS
+    from tools.mcp_tools.terminal import _check_env_default_tools
+
+    default = _check_env_default_tools()
+    # Every curated tool is surfaced.
+    for t in ENV_TOOLS:
+        assert t in default, f"{t} missing from check_environment default"
+    # The explicit extras are present too.
+    for t in ("masscan", "rustscan", "feroxbuster", "nuclei", "metasploit-framework"):
+        assert t in default
+    # No duplicates.
+    assert len(default) == len(set(default))
+    # ldapsearch is an extra (not in ENV_TOOLS) but is in the default list.
+    assert "ldapsearch" in default
+    assert "ldapsearch" not in ENV_TOOLS

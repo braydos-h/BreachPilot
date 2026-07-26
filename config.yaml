@@ -113,6 +113,10 @@ cve_lookup:
   circuit_failure_threshold: 5
   circuit_recovery_timeout: 60.0
   search_rate_limit_per_minute: 10
+  # GitHub Search API token for cve_to_poc (optional). Absent = unauth 60/hr
+  # rate limit; cve_to_poc still works (falls through to searchsploit/NVD).
+  github:
+    token_env: GITHUB_TOKEN
 research:
   enabled: true
   provider: ollama

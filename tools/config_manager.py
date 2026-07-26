@@ -142,6 +142,13 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "circuit_recovery_timeout": 60.0,
         # Tier 1.8: process-wide shared NVD rate budget (per minute); 0 disables.
         "search_rate_limit_per_minute": 10,
+        # Gap 6: GitHub Search API token for cve_to_poc (CVE->verified-PoC URL
+        # resolution). OPTIONAL -- absent = unauthenticated 60/hr rate limit;
+        # cve_to_poc still works (falls through to searchsploit/NVD on rate-limit).
+        # Mirrored into env at boot via api_key_store alongside NVD_API_KEY.
+        "github": {
+            "token_env": "GITHUB_TOKEN",
+        },
     },
     "research": {
         "enabled": True,

@@ -31,6 +31,7 @@ from typing import Any, Callable
 
 from tools.logging_setup import get_logger
 from tools.recon_pipeline import ReconPipeline, ReconConfig, HostReconResult
+from tools.validation_utils import is_local_target
 from tools.attack_modules import (
     AttackModule,
     ModuleContext,
@@ -822,6 +823,23 @@ class AutonomousOrchestrator:
         logger.info(f"Starting attack lifecycle for {target} (pivot depth {_depth})")
         state.add_timeline_event("campaign_start", f"Attack campaign started against {target}")
 
+        # Gap 2: local-target short-circuit. If the target is the operator's
+        # own host (loopback / a local interface), the network-brute-force
+        # phase would attack our own listeners -- recon, exploit, and lateral
+        # movement are all the wrong shape for "you are already on the box."
+        # Run the local-takeover playbook (filesystem reads + privesc) instead.
+        # The scope gate is NOT bypassed: _phase_privilege_escalation routes
+        # through AttackModuleExecutor.execute -> scope_gate.check_scope(
+        # asset=task.target) per CLAUDE.md -- the local shortcut only adds a
+        # locality branch before the existing phase calls.
+        if is_local_target(state.target):
+            await self._phase_local_takeover(state)
+            await self._phase_validation(state)
+            state.add_timeline_event(
+                "campaign_end", "Local-takeover campaign completed for local target"
+            )
+            return {"status": "complete", "state": state.to_dict()}
+
         # Phase 1: Deep reconnaissance
         await self._phase_reconnaissance(state)
         if not state.recon_result or not state.recon_result.open_ports:
@@ -850,6 +868,64 @@ class AutonomousOrchestrator:
         return {"status": "complete", "state": state.to_dict()}
 
     # ── Phase handlers ───────────────────────────────────────────────────
+
+    async def _phase_local_takeover(self, state: AttackState) -> None:
+        """Local-target playbook (Gap 2): the operator box IS the target.
+
+        The network-brute-force phase (recon -> exploit -> lateral) attacks the
+        box's own listeners -- the wrong shape when the operator is already on
+        the host. Instead, read the local filesystem FIRST (the LOCAL TARGET
+        PLAYBOOK from ``tools/exploit_agent/prompt.py``), then go straight to
+        privilege escalation. The privesc modules (``LinuxPrivescCheck``,
+        ``SUIDEnumeration``, ``KernelExploitCheck``, ``ContainerBreakout``) do
+        their own local enumeration and still route through
+        ``AttackModuleExecutor.execute`` -> ``scope_gate.check_scope``.
+
+        The raw local-read commands run via the optional ``tool_executor``
+        callback when wired; if it is None (standalone orchestrator), the reads
+        are skipped and only the privesc modules run.
+        """
+        logger.info(
+            f"[LOCAL] Target {state.target} is this host -- local-takeover phase"
+        )
+        state.current_phase = AttackPhase.PRIVILEGE_ESCALATION
+        state.add_timeline_event(
+            "local_takeover",
+            "Local-target playbook: filesystem enumeration + privilege escalation",
+        )
+
+        # The playbook's local-read commands (mirrors exploit_agent/prompt.py
+        # LOCAL TARGET PLAYBOOK). Best-effort: a failure in one command does
+        # not abort the phase.
+        local_cmds = [
+            "cat /etc/passwd",
+            "sudo -n cat /etc/shadow 2>/dev/null",
+            "ls -la /home/*/.ssh /root/.ssh 2>/dev/null",
+            "find / -perm -4000 -type f 2>/dev/null",
+            "find / -perm -2000 -type f 2>/dev/null",
+            "find / -writable -type d 2>/dev/null | head",
+            "cat /etc/crontab; ls -la /etc/cron.*; crontab -l 2>/dev/null",
+            "ls -la /opt /srv /var/www /etc/mysql",
+            "grep -rIl 'password' /etc/ 2>/dev/null | head",
+            "env; cat ~/.bash_history ~/.zsh_history 2>/dev/null",
+        ]
+        if self._tool_executor:
+            for cmd in local_cmds:
+                try:
+                    out = self._tool_executor(cmd, {"target": state.target})
+                    state.add_timeline_event(
+                        "local_read", cmd, {"output_len": len(str(out or ""))}
+                    )
+                except Exception as exc:  # noqa: BLE001 -- best-effort reads
+                    state.add_timeline_event("local_read_err", f"{cmd}: {exc}")
+        else:
+            state.add_timeline_event(
+                "local_read_skipped",
+                "No tool_executor wired -- privesc modules still run local enumeration",
+            )
+
+        # Privesc modules do their own local enumeration (SUID, kernel, container).
+        await self._phase_privilege_escalation(state)
 
     async def _phase_reconnaissance(self, state: AttackState) -> None:
         """Run deep reconnaissance and store results.
@@ -987,6 +1063,17 @@ class AutonomousOrchestrator:
         logger.info(f"[LATERAL] Starting lateral movement from {state.target} (pivot depth {_depth})")
         state.current_phase = AttackPhase.LATERAL_MOVEMENT
         state.add_timeline_event("phase_start", "Lateral movement phase started")
+
+        # Gap 2: defense-in-depth. A local target has no internal network to
+        # pivot to from itself; even if pivot_targets somehow got populated,
+        # never recurse from a local host.
+        if is_local_target(state.target):
+            state.add_timeline_event(
+                "lateral_skip_local",
+                "Skipping lateral movement -- target is this host (no pivot from self)",
+            )
+            logger.info(f"[LATERAL] Skipping lateral movement for local target {state.target}")
+            return
 
         for pivot in state.pivot_targets[:5]:  # Limit to 5 pivot targets per level
             if pivot in self._states:

@@ -1,5 +1,148 @@
 # Changelog
 
+## v0.49.5 (2026-07-26) — Tool-layer hardening: binary writes, local-target autonomous path, sudo-pivot, git_clone preflight, unified env registry, GITHUB_TOKEN bootstrap
+
+Six residual gaps that remained even at v0.49.4 after the `127.0.0.1` run. All are
+tool-layer, low-risk, and **none touch Flow B** (`cli.py` / `agent_loop.py` /
+`scope_gate.py` / `mission.py` / `db.py`) or weaken the target-IP lock. 43 new
+regression tests; full suite green apart from pre-existing Windows-only
+`PermissionError`/offline-Ollama environmental failures (verified identical on a
+clean `v0.49.4` checkout with these changes stashed).
+
+### Added
+- **`write_python_file(..., binary=True)`** (`tools/mcp_tools/workspace.py`). When
+  `binary=True`, `code` is base64-decoded and `write_bytes`'d verbatim — so SSH-key
+  / payload materialization no longer corrupts non-UTF-8 bytes via `write_text`.
+  Default path (`binary=False`) is byte-identical to existing callers. Invalid
+  base64 returns `BLOCKED: binary=True requires valid base64 (...)`. The agent
+  prompt (`tools/exploit_agent/prompt.py`) and FastMCP `instructions`
+  (`mcp_exploit_server.py`) now point at `write_python_file(..., binary=True)`
+  with a base64 payload instead of the old "writes bytes verbatim" claim that the
+  text-mode implementation didn't honor. Verified by `tests/test_workspace_binary_write.py`.
+- **Local-target short-circuit in the autonomous orchestrator** (`tools/autonomous_orchestrator.py`).
+  The LOCAL TARGET PLAYBOOK added in v0.49.4 only influenced the LLM `exploit_agent`
+  path; the autonomous orchestrator against `127.0.0.1` still led with network
+  brute-force of its own listeners. `_attack_target` now detects
+  `is_local_target(state.target)` and runs a new `_phase_local_takeover` (the
+  playbook's local-read commands — `/etc/passwd`, `sudo -n cat /etc/shadow`,
+  `~/.ssh`, SUID/SGID, cron, service secrets — via `self._tool_executor` when
+  wired, best-effort) then `_phase_privilege_escalation` and `_phase_validation`,
+  returning before recon/network-exploit. `_phase_lateral_movement` returns early
+  when local. The `scope_gate.check_scope(asset=task.target)` call inside
+  `AttackModuleExecutor.execute` is **preserved** — the local branch only adds a
+  locality path before the existing phase calls, it does not bypass the Path-B
+  target lock. Verified by `tests/test_autonomous_local_target.py`.
+- **`git_clone` existence preflight** (`tools/mcp_tools/terminal.py`). For `http(s)`
+  URLs only, `git_clone` now calls the new module-level
+  `tools/exploit_search.url_exists(url, timeout) -> (ok, reason)` before cloning.
+  **Never hard-blocks** (private/auth-gated repos 404 to unauthenticated HEAD) —
+  emits a `PREFLIGHT_WARNING` on `not_found` or `connection_error` and lets the
+  clone proceed (it fails cleanly on its own if the URL is genuinely bad). Skipped
+  for `ssh://` / `git://`. `url_exists` is the refactored-out core of
+  `ExploitSearch._url_exists` (HEAD then 1-byte ranged-GET; never raises).
+  Defense-in-depth behind `cve_to_poc`, which remains the upstream gate.
+  Verified by `tests/test_git_clone_preflight.py`.
+- **Optional `GITHUB_TOKEN` bootstrap.** `cve_to_poc` reads `os.getenv("GITHUB_TOKEN")`
+  for the GitHub Search API rate limit (60/hr unauth → 5000/hr authed) but the
+  token wasn't threaded through the key bootstrap. Now mirrored exactly on
+  `NVD_API_KEY` handling and kept **optional** (`cve_to_poc` falls through to
+  searchsploit / NVD refs on rate-limit — confirmed): `.env.example` documents it,
+  `tools/config_manager.py` adds `cve_lookup.github.token_env: "GITHUB_TOKEN"`,
+  `tools/api_key_store.py:configured_api_key_env_names` appends it, and
+  `config.yaml` carries the matching block for discoverability. No change to
+  `exploit_search.py` — `bootstrap_api_keys` now loads it into env and the existing
+  `os.getenv` picks it up. Verified by `tests/test_github_token_bootstrap.py`.
+
+### Fixed
+- **`apt_install` / `install_package` / `run_as_root` no longer hang on sudo-less
+  boxes.** These tools unconditionally built `sudo ...` via `bash -c` with no `-n`
+  and no precheck; on a password-required box the subprocess hung on an interactive
+  password prompt. New shared helper `tools/mcp_tools/terminal.py::_require_sudo_or_pivot`
+  short-circuits *before* spawning the subprocess using the existing
+  `_can_passwordless_sudo` probe: if unavailable it returns
+  `BLOCKED: <tool> requires passwordless sudo ... PIVOT: call preflight_env_check,
+  then implement <payload> as a workspace Python script via write_python_file +
+  run_python_file. Do not retry.` The `BLOCKED:` prefix makes the agent's existing
+  BLOCKED-result detection treat it as a hard constraint. Wired into `apt_install`
+  (after validation), `run_as_root` (after the target-lock check so the lock still
+  reports first), and the apt/snap branches of `install_package`. Windows gets the
+  pivot message instead of a bogus `sudo` spawn. Verified by `tests/test_sudo_pivot.py`
+  (the existing `test_run_as_root_*` tests patch `_can_passwordless_sudo→True` to
+  keep exercising the run path on a Windows host).
+- **`write_python_file` text/binary mismatch** (the v0.49.4 issue-6 guidance leak).
+  The prompt told the agent `write_python_file` "writes bytes verbatim" for SSH-key
+  materialization, but the implementation used `write_text(code, encoding="utf-8")`
+  — non-UTF-8 key bytes corrupted. Fixed by the `binary=True` path above; the
+  prompt/instructions now name the real signature.
+
+### Changed
+- **Single required-tool registry.** `tools/env_probe.py:_ENV_TOOLS`,
+  `terminal.py:check_environment`'s `default_tools` literal, and
+  `recon_pipeline.py:ReconConfig`'s `*_path` fields were three different lists, so
+  the agent could see three different "missing tools" answers. `env_probe.py` is now
+  the single source of truth: `_ENV_TOOLS` renamed to public `ENV_TOOLS` (with
+  `_ENV_TOOLS = ENV_TOOLS` alias kept for patch-site compatibility), and
+  `check_environment`'s default list derives from `ENV_TOOLS` plus an explicit
+  `_CHECK_ENV_EXTRAS` (masscan, rustscan, feroxbuster, nuclei, …) with dedup via
+  `_check_env_default_tools()`. `ReconConfig`'s `*_path` fields are intentionally
+  **not** unified — they are binary-path overrides, a separate concern. Verified by
+  `tests/test_env_probe.py`.
+
+### Safety
+- No change to `ExploitPermission` defaults, the target-IP allowlist lock,
+  `scope_gate.py`, `safety_reviewer.py`, or any Flow B file. The autonomous
+  orchestrator's Path-B `scope_gate.check_scope(asset=task.target)` target lock is
+  preserved on the new local-takeover branch (asserted by
+  `test_scope_gate_still_enforced_on_local_path`). `git_clone`'s preflight is
+  warn-only and never hard-blocks. `GITHUB_TOKEN` is optional and never gates
+  `cve_to_poc` correctness.
+
+## v0.49.4 (2026-07-26) — verified CVE→PoC resolution, local-target playbook, unprivileged recon fallback, transport/parse split
+
+Reliability + safety hardening for the exploit agent and recon pipeline (shipped in
+commit `9996d39`; no CHANGELOG entry was cut at the time — backfilled here for history).
+
+### Added
+- **CVE→PoC (no more hallucinated clone URLs).** `tools/exploit_search.py:ExploitSearch.cve_to_poc`
+  resolves a CVE to VERIFIED PoC URLs only — GitHub Search API + `searchsploit --cve`
+  + NVD refs, each HTTP-existence-checked (HEAD / ranged-GET). Returns
+  `NO_VERIFIED_POC_FOUND` when none verify, so the model writes a workspace-contained
+  exploit instead of inventing a repo URL. New MCP tool `cve_to_poc`
+  (`tools/mcp_tools/research.py`); `cve_to_exploit_synth` (`attack_modules.py`) now
+  uses the verified resolver. Agent + server prompts forbid fabricating clone URLs.
+- **Local-target playbook + key handling.** `tools/validation_utils.py:is_local_target`
+  detects loopback / local-interface IPs. `tools/exploit_agent/prompt.py` injects a
+  LOCAL TARGET PLAYBOOK (read `/etc/shadow`, `~/.ssh`, SUID, cron before network
+  brute-force) and a FILE & KEY HANDLING rule (never paste keys into a heredoc;
+  reference or `write_python_file` + `chmod 600`). Mirrored in `mcp_exploit_server.py`.
+- **Unprivileged recon fallback (non-root operator box).** `tools/nmap_priv.py`:
+  shared privilege/downgrade helpers; the recon pipeline applies the `sudo`/`-sT`
+  downgrade and stops retrying on privilege errors. `tools/socket_scan.py`: native
+  TCP-connect + banner scanner used as the final fallback tier when nmap/rustscan/
+  masscan are unavailable or fail for lack of root. `ReconConfig.from_config()` reads
+  `nmap.sudo` / `nmap.priv_fallback`.
+- **Pre-flight environment probe (Issue 4).** `tools/env_probe.py`: stdlib-only
+  startup probe of tool availability + installability; renders a PRE-FLIGHT
+  ENVIRONMENT block into the system prompt (`loop.py`) so the model pivots to
+  Python fallbacks instead of a doomed `apt_install` on a sudo-less box. New
+  `preflight_env_check` MCP tool.
+
+### Fixed
+- **`cannot access local variable 'result'` (transport/parse split).**
+  `tools/exploit_agent/loop.py` had a single `try` around both the MCP transport
+  call (`session.call_tool`) and the result parsing (`result.content`); when
+  `call_tool` raised, `result` was never bound and the shared `except` referenced
+  it → `UnboundLocalError`, and a parse failure was mis-reported as a transport
+  failure. The try was split: `result` is bound by the transport try before the
+  parse try runs; a parse failure now surfaces as `INTERNAL_PARSE_ERROR:` (tool
+  role, no blocked-accounting) instead of crashing. Verified by
+  `tests/test_tool_call_parse_split.py`.
+- **`[STATUS] Booting MCP server (stdio)...` spam.** `tools/mcp_session.py`'s
+  `with ui.spinner(...)` enclosed `yield session`, so the redraw thread kept
+  printing the elapsed-seconds line at 1 Hz for the entire exploit run.
+  `ui.release_active_spinner()` is now called between `session.initialize()`
+  success and `yield session`. Verified by `tests/test_spinner_release.py`.
+
 ## v0.49.3 (2026-07-25) — Best-effort installer + `natai` command; MCP HTTP soft-fail fixes
 
 ### Added

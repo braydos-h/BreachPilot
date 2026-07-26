@@ -56,6 +56,68 @@ def _target_lock_block(command: str, config: Any) -> str | None:
     return None
 
 
+def _require_sudo_or_pivot(tool_name: str, payload: str) -> str | None:
+    """Return a ``BLOCKED:`` pivot message if passwordless sudo is unavailable,
+    else None (caller proceeds to spawn the subprocess).
+
+    Gap 3: ``apt_install`` / ``install_package`` (apt branch) / ``run_as_root``
+    unconditionally prepend ``sudo`` via ``bash -c`` with no ``-n`` and no
+    precheck, so on a sudo-less / password-required operator box the subprocess
+    HANGS on an interactive password prompt. The env_probe prompt tells the
+    LLM to pivot, but if the LLM ignores it the call still hangs. This helper
+    short-circuits BEFORE the subprocess is spawned -- no hang, and the
+    ``BLOCKED:`` prefix makes the LLM's existing BLOCKED-result detection
+    (``exploit_agent/prompt.py`` RULES) treat it as a hard constraint.
+
+    Never raises: an inability to determine sudo status falls through to the
+    legacy spawn path (returns None). On Windows ``_can_passwordless_sudo``
+    returns False, so Windows callers get the pivot message instead of a
+    bogus ``sudo`` spawn.
+    """
+    try:
+        from tools.env_probe import _can_passwordless_sudo
+        if _can_passwordless_sudo():
+            return None
+    except Exception:
+        # Could not determine sudo status -- do not block; let the existing
+        # path run and surface whatever it surfaces (legacy behavior).
+        return None
+    return (
+        f"BLOCKED: {tool_name} requires passwordless sudo, which is unavailable "
+        f"on this box. PIVOT: call preflight_env_check for a per-tool fallback "
+        f"plan, then implement {payload!r} as a workspace Python script via "
+        f"write_python_file + run_python_file. Do not retry "
+        f"apt_install/install_package/run_as_root -- they will hang or fail opaquely."
+    )
+
+
+def _check_env_default_tools() -> list[str]:
+    """Default tool list for ``check_environment`` (Gap 5).
+
+    Derived from the single source of truth ``tools.env_probe.ENV_TOOLS`` plus an
+    explicit extras set (secondary scanners / language runtimes / package
+    managers worth surfacing that are not in the curated env_probe list), with
+    dedup so the agent never sees two different "missing tools" answers from
+    ``check_environment`` vs ``preflight_env_check``. ReconConfig's per-tool
+    ``*_path`` fields are a separate concern (binary-path overrides) and are
+    intentionally not unified here.
+    """
+    from tools.env_probe import ENV_TOOLS
+
+    _CHECK_ENV_EXTRAS = [
+        "masscan", "rustscan", "feroxbuster", "nuclei", "metasploit-framework",
+        "ldapsearch", "aircrack-ng", "wireshark", "tcpdump", "wget",
+        "ruby", "gem", "npm", "go", "cargo", "snap",
+    ]
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in list(ENV_TOOLS) + _CHECK_ENV_EXTRAS:
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+
 def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
     workspace = ctx.workspace
     config = ctx.config
@@ -237,6 +299,11 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
         pkg_list = [p.strip() for p in packages.split() if p.strip() and re.fullmatch(r"[a-zA-Z0-9_.+-]{1,60}", p.strip())]
         if not pkg_list:
             return "BLOCKED: invalid package names."
+        # Gap 3: short-circuit before spawning sudo on a sudo-less box (would
+        # hang on an interactive password prompt). PIVOT to a Python fallback.
+        _pivot = _require_sudo_or_pivot("apt_install", " ".join(pkg_list))
+        if _pivot:
+            return _pivot
         cmd = f"sudo apt install -y {' '.join(pkg_list)} 2>&1"
         try:
             proc = subprocess.run(
@@ -269,6 +336,29 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
         clone_dir = workspace / dir_name
         if not _is_inside_workspace(workspace, clone_dir.resolve()):
             return f"BLOCKED: clone target {clone_dir} escapes the exploit workspace."
+
+        # Gap 4: defense-in-depth existence preflight. cve_to_poc is the upstream
+        # gate against hallucinated PoC URLs, but if a URL slips through we
+        # surface a warning BEFORE the (slow) clone attempt. We never hard-block:
+        # private/auth-gated repos 404 to unauthenticated HEAD, so a 404 here is
+        # not proof the URL is fake. The clone proceeds regardless; the warning
+        # steers the LLM back to cve_to_poc if the clone then fails. Only http(s)
+        # is checked -- ssh:// and git:// clones are unaffected.
+        preflight_note = ""
+        if url.lower().startswith(("http://", "https://")):
+            try:
+                from tools.exploit_search import url_exists as _url_exists_check
+                _ok, _reason = _url_exists_check(url, timeout=8)
+            except Exception:
+                _ok, _reason = True, None  # import/probe failure -> don't block
+            if not _ok:
+                preflight_note = (
+                    f"PREFLIGHT_WARNING: URL existence check failed ({_reason}); "
+                    f"if this is a private/auth-gated repo the clone may still "
+                    f"succeed. If the clone fails, use cve_to_poc instead of "
+                    f"guessing URLs.\n"
+                )
+
         # H3: argv list (no shell) so url/dir_name are literal arguments.
         try:
             returncode, out, err = _run_with_pgrp_timeout(
@@ -280,11 +370,14 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
             )
             output = (out + "\n" + err)[-3000:]
             status = "completed" if returncode == 0 else "failed"
-            return f"GIT_CLONE_RESULT: {status} (exit_code={returncode})\nREPO: {url}\nPATH: {clone_dir}\nOUTPUT:\n{output}"
+            return (
+                f"{preflight_note}GIT_CLONE_RESULT: {status} (exit_code={returncode})\n"
+                f"REPO: {url}\nPATH: {clone_dir}\nOUTPUT:\n{output}"
+            )
         except subprocess.TimeoutExpired:
-            return f"GIT_CLONE_RESULT: timed_out\nREPO: {url}"
+            return f"{preflight_note}GIT_CLONE_RESULT: timed_out\nREPO: {url}"
         except Exception as exc:
-            return f"GIT_CLONE_RESULT: error - {exc}"
+            return f"{preflight_note}GIT_CLONE_RESULT: error - {exc}"
 
     @mcp.tool()
     @audit_tool
@@ -327,6 +420,13 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return (
                 f"ROOT_CMD_RESULT: blocked (target lock: {_lock_reason})"
             )
+        # Gap 3: short-circuit before spawning sudo on a sudo-less box. The
+        # target-IP lock above has already run (and would have blocked an
+        # off-target command), so the pivot only fires for in-scope commands
+        # that still need root the box cannot provide.
+        _pivot = _require_sudo_or_pivot("run_as_root", original_command)
+        if _pivot:
+            return _pivot
         cmd = f"sudo {command} 2>&1"
         # Note: the @audit_tool decorator already writes started/completed audit
         # records with the (redacted) command arg, so a manual _audit_log here
@@ -354,14 +454,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
         or leave empty to check a default set of common pentesting tools.
         Returns version info and install status for each tool, plus OS details.
         """
-        default_tools = [
-            "nmap", "masscan", "rustscan", "nikto", "gobuster", "feroxbuster",
-            "hydra", "sqlmap", "enum4linux", "smbclient", "ldapsearch",
-            "nuclei", "metasploit-framework", "msfconsole", "searchsploit",
-            "hashcat", "john", "aircrack-ng", "wireshark", "tcpdump",
-            "netcat", "nc", "curl", "wget", "git", "python3", "pip", "ruby",
-            "gem", "npm", "go", "cargo", "snap",
-        ]
+        default_tools = _check_env_default_tools()
         check_list = [t.strip() for t in tools.split() if t.strip()] if tools else default_tools
 
         result_lines = ["ENVIRONMENT_CHECK:", ""]
@@ -486,6 +579,15 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
             timeout = 600
         else:
             return f"BLOCKED: unsupported manager '{mgr}'. Supported: apt, pip, gem, npm, go, cargo, snap."
+
+        # Gap 3: the apt and snap branches prepend ``sudo``; on a sudo-less box
+        # the subprocess would hang on an interactive password prompt. Short-
+        # circuit to a Python-fallback pivot BEFORE spawning. pip/gem/npm/go/
+        # cargo do not use sudo and are unaffected.
+        if cmd.startswith("sudo "):
+            _pivot = _require_sudo_or_pivot(f"install_package({mgr})", " ".join(pkg_list))
+            if _pivot:
+                return _pivot
 
         try:
             proc = subprocess.run(
