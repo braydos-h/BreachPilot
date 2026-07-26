@@ -204,7 +204,93 @@ python cli.py status
 
 ### MCP surfaces
 
+<<<<<<< Updated upstream
 NetAttackAI includes a defensive, scope-aware MCP server and a separate exploit MCP server for the modern engine. Both default to stdio; start them explicitly when integrating from another MCP client.
+=======
+All behavior-defining settings live in **`config.yaml`**. Mission scope (allowed /
+disallowed assets, forbidden actions, risk profile, testing modes, rate limits) lives
+in **`mission.yaml`**, loaded by `cli.py` / `mission.py`.
+
+Important `config.yaml` defaults (lab build):
+
+- `exploit.permission: full_access` — lab attack posture (recon still resolves to
+  `read_only` via the missing-key fallback).
+- `exploit.attack_mode: true`
+- `exploit.require_explicit_allowlist: true` — the runtime `--target` is unioned in via
+  `EXPLOIT_TARGET`; this is the target-IP lock.
+- `exploit.allowed_targets: []`
+- `swarm.enabled: true`
+- `memory.semantic_enabled: true`
+- `ollama.model: glm-5.2:cloud` (976K context)
+
+Provider API keys are read from env vars referenced in `config.yaml`
+(`NVD_API_KEY`, `OLLAMA_API_KEY`, `SERPAPI_API_KEY`, and the optional
+`GITHUB_TOKEN` that lifts the `cve_to_poc` GitHub Search API rate limit from
+60/hr to 5000/hr); see [`.env.example`](.env.example).
+A local key file (`secr.json`, gitignored) can be populated via
+`python main.py --setup-api-keys`.
+
+## CLI reference
+
+| Flag | Purpose |
+|------|---------|
+| `--target <ip>` | Target IP to recon or attack. |
+| `--mode {recon,attack}` | `recon` = gather intel, `attack` = full exploitation. |
+| `--goal <name>` | Preset goal (`backdoor`, `initial_access`, `privilege_escalation`, …). |
+| `--custom-goal <text>` | Custom goal description. |
+| `--recon-first` | Recon-then-attack flow. |
+| `--tui` / `--menu` | Launch the TUI dashboard / force the interactive menu. |
+| `--swarm` | Enable multi-agent swarm mode. |
+| `--critic` / `--reflection` | Critic pre-approval / reflection agent (require `--swarm`). |
+| `--adaptive-exploits` | Adaptive exploit selection. |
+| `--long-session` | Opt-in multi-hour attack mode with crash-safe resume. |
+| `--model <alias>` | Override default model alias (`glm`/`kimi`/`deepseek`/`deepseek_flash`/`minimax`). |
+| `--mcp-transport {stdio,http}` | Exploit MCP transport. |
+| `--skills {on,off,hints,lookup}` | Runtime skills mode. |
+| `--multi-model-consult` | Enable advisory peer-model consultation. |
+| `--exploit ...` | Standalone exploit subcommand (`--exploit-target`, `--exploit-cve`, `--exploit-permission`). |
+| `--doctor` / `--self-test` | Environment diagnostics / safe localhost smoke test. |
+| `--resume` | Resume from a prior session's checkpoint. |
+| `--version` | Print version and exit. |
+
+## Safety & scope model
+
+- **Recon** is fully scope-gated and propose-only (`read_only`): the agent gathers intel
+  and proposes attacks without executing them. A post-session `SafetyReviewer` runs on
+  every tool call.
+- **Attack** is **target-locked**: the AI may do whatever it takes to the one target IP,
+  but cannot pivot to other hosts. The lock is enforced at the MCP tool layer by
+  extracting every destination (URL authorities, `/dev/tcp` hosts, LHOST/RHOST, scanner
+  targets, bare IPs) and refusing any not in the allowlist (`exploit.allowed_targets`
+  ∪ the runtime `--target`).
+- **Three permission levels** (`tools/exploit_agent/policy.py`): `full_access` (lab),
+  `approve_only` (every action needs `ALLOW <ip>`), `read_only` (propose only).
+- **Hard-forbidden actions** regardless of config (`scope_gate.py`): denial of service,
+  destructive exploit, social engineering, physical attack, malware, credential theft.
+- **Full JSONL audit trail** (`exploit_audit.jsonl`) with SHA256 of generated code.
+
+See [`docs/safety-model.md`](docs/safety-model.md) for the full scope/risk/permission
+model and secure-development rules.
+
+## Project layout
+
+```
+main.py / app.py        assessment controller (Flow A entry points)
+cli.py                  legacy research CLI (Flow B entry point)
+mcp_server.py           defensive, scope-gated MCP server
+mcp_exploit_server.py   permissive, target-locked exploit MCP server
+config.yaml             runtime configuration
+mission.yaml            mission scope + risk profile
+tools/                  exploit agent, swarm, autonomous orchestrator, MCP tools,
+                        recon pipeline, attack modules, skills, reporting, …
+tui/                    Textual TUI (18 screens)
+tests/                  ~80 test files (all mock subprocess / network)
+docs/                   engineering docs (architecture, flows, safety, extension, …)
+skills-to-add/          curated runtime skill catalog
+```
+
+## Testing
+>>>>>>> Stashed changes
 
 ```bash
 python mcp_server.py --transport stdio
