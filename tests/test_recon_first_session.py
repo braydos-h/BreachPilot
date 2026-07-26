@@ -1735,10 +1735,10 @@ class TestReconFirstBootStuckShowsProgress:
 # ── HTTP transport soft-fail regression ──────────────────────────────────────
 
 
-class TestHttpPortReadiness:
+class TestHttpMcpReadiness:
     """The HTTP readiness loop must distinguish a slow boot from a dead child."""
 
-    def test_wait_for_port_reports_child_exit_and_log_tail(self, tmp_path):
+    def test_readiness_reports_child_exit_and_log_tail(self, tmp_path):
         import tools.mcp_session as ms
 
         log_path = tmp_path / "mcp_exploit_server.log"
@@ -1753,9 +1753,8 @@ class TestHttpPortReadiness:
                 return 7
 
         async def _run():
-            await ms.wait_for_port(
-                "127.0.0.1",
-                8001,
+            await ms.wait_for_mcp_http_ready(
+                "http://127.0.0.1:8001/mcp",
                 timeout_seconds=5,
                 process=ExitedProcess(),
                 log_path=log_path,
@@ -1769,7 +1768,7 @@ class TestHttpPortReadiness:
         assert "ModuleNotFoundError" in message
         assert str(log_path) in message
 
-    def test_wait_for_port_timeout_includes_log_tail(self, tmp_path):
+    def test_readiness_timeout_includes_log_tail(self, tmp_path):
         import tools.mcp_session as ms
 
         log_path = tmp_path / "mcp_exploit_server.log"
@@ -1780,15 +1779,14 @@ class TestHttpPortReadiness:
                 return None
 
         async def _run():
-            await ms.wait_for_port(
-                "127.0.0.1",
-                0,
+            await ms.wait_for_mcp_http_ready(
+                "http://127.0.0.1:0/mcp",
                 timeout_seconds=0,
                 process=RunningProcess(),
                 log_path=log_path,
             )
 
-        with pytest.raises(TimeoutError) as exc_info:
+        with pytest.raises(RuntimeError) as exc_info:
             asyncio.run(_run())
 
         message = str(exc_info.value)
@@ -1834,10 +1832,12 @@ class TestHttpTransportSoftFail:
                 lambda *_a, **_k: start_returns,
             )
 
-        # Skip the real 15 s port wait.
+        # Skip the real readiness wait; transport/session behavior is the
+        # subject of these tests, while handshake retries have focused coverage
+        # in test_mcp_http_lifecycle.py.
         async def _no_wait(*_a, **_k):
             return None
-        monkeypatch.setattr(ms, "wait_for_port", _no_wait)
+        monkeypatch.setattr(ms, "wait_for_mcp_http_ready", _no_wait)
 
         if streamable_factory is not None:
             import mcp.client.streamable_http as sh
@@ -1856,6 +1856,7 @@ class TestHttpTransportSoftFail:
                 exploit_port=8001,
                 workspace=tmp_path,
                 soft_fail=True,
+                fallback_to_stdio=False,
             ) as session:
                 return session
         return _run
@@ -1994,6 +1995,7 @@ class TestHttpTransportSoftFail:
                 exploit_port=8001,
                 workspace=tmp_path,
                 soft_fail=False,
+                fallback_to_stdio=False,
             ) as session:
                 return session
 

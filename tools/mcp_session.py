@@ -5,10 +5,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import re
+import signal
 import socket
 import subprocess
 import sys
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any, AsyncIterator
 
@@ -26,6 +29,9 @@ ui = get_ui()
 # 30 seconds is generous: any healthy boot completes in < 15 s on developer
 # hardware, and a hung subprocess is exactly what we want to detect here.
 MCP_BOOT_TIMEOUT_SECONDS: float = 30.0
+MCP_HTTP_PROBE_TIMEOUT_SECONDS: float = 5.0
+MCP_HTTP_RETRY_INITIAL_SECONDS: float = 0.2
+MCP_HTTP_RETRY_MAX_SECONDS: float = 1.0
 
 
 class _RunHeartbeat:
@@ -95,6 +101,19 @@ def _filter_env_for_log(env: dict[str, str]) -> dict[str, str]:
     return safe
 
 
+def _sensitive_env_values(env: dict[str, str]) -> tuple[str, ...]:
+    """Return non-trivial secret values for exact-match log redaction."""
+    values = []
+    for key, value in env.items():
+        lower = key.lower()
+        if (
+            len(value) >= 4
+            and any(part in lower for part in ("key", "secret", "token", "password", "passwd", "api", "auth"))
+        ):
+            values.append(value)
+    return tuple(values)
+
+
 @contextlib.asynccontextmanager
 async def open_exploit_mcp_session(
     *,
@@ -106,8 +125,87 @@ async def open_exploit_mcp_session(
     multi_model_enabled: bool | None = None,
     active_model_alias: str = "",
     soft_fail: bool = False,
+    fallback_to_stdio: bool = True,
 ) -> AsyncIterator[Any]:
-    """Open an MCP client session against the exploit server.
+    """Open the requested transport, falling back during HTTP startup only.
+
+    A live HTTP session is never replaced after it has been yielded: doing so
+    could repeat a partially completed tool call.  The fallback is limited to
+    startup/readiness/initialization failures and keeps the same loopback-only
+    server environment and target scope. ``soft_fail=True`` still yields
+    ``None`` only when both the requested transport and any fallback fail.
+    """
+    common = {
+        "config_path": config_path,
+        "target_ip": target_ip,
+        "exploit_port": exploit_port,
+        "workspace": workspace,
+        "multi_model_enabled": multi_model_enabled,
+        "active_model_alias": active_model_alias,
+        "soft_fail": soft_fail,
+    }
+    if transport != "http" or not fallback_to_stdio:
+        async with _open_exploit_mcp_session_once(
+            transport=transport,
+            startup_soft_fail=soft_fail,
+            **common,
+        ) as session:
+            yield session
+        return
+
+    http_session_started = False
+    http_startup_errors: list[BaseException] = []
+    async with _open_exploit_mcp_session_once(
+        transport="http",
+        # An HTTP startup error is recoverable until stdio has also failed.
+        # Keep it a warning even for attack mode; post-yield failures still use
+        # the caller's real soft_fail setting inside the one-shot context.
+        startup_soft_fail=True,
+        startup_errors=http_startup_errors,
+        **common,
+    ) as session:
+        if session is not None:
+            http_session_started = True
+            yield session
+    if http_session_started:
+        return
+
+    ui.warning("Local MCP HTTP startup failed; falling back to stdio transport.")
+    stdio_session_started = False
+    try:
+        async with _open_exploit_mcp_session_once(
+            transport="stdio",
+            startup_soft_fail=soft_fail,
+            **common,
+        ) as session:
+            if session is not None:
+                stdio_session_started = True
+            yield session
+    except _EXC_GROUP_CATCH as exc:
+        if stdio_session_started or not http_startup_errors:
+            raise
+        http_detail = _concise_startup_error(http_startup_errors[-1])
+        raise RuntimeError(
+            f"MCP HTTP startup failed ({http_detail}); stdio fallback also failed "
+            f"({_concise_startup_error(exc)})."
+        ) from exc
+
+
+@contextlib.asynccontextmanager
+async def _open_exploit_mcp_session_once(
+    *,
+    transport: str,
+    config_path: Path,
+    target_ip: str,
+    exploit_port: int,
+    workspace: Path,
+    multi_model_enabled: bool | None = None,
+    active_model_alias: str = "",
+    soft_fail: bool = False,
+    startup_soft_fail: bool | None = None,
+    startup_errors: list[BaseException] | None = None,
+) -> AsyncIterator[Any]:
+    """Open one MCP client session without transport fallback.
 
     ``soft_fail`` (default ``False``): when True, any error during boot OR
     inside the caller's ``async with`` body is swallowed and the context
@@ -121,11 +219,16 @@ async def open_exploit_mcp_session(
     the alarming ``[ERROR]`` that would otherwise suggest the whole
     session is about to abort.
     """
+    if startup_soft_fail is None:
+        startup_soft_fail = soft_fail
+    if startup_errors is None:
+        startup_errors = []
     try:
         from mcp import ClientSession, StdioServerParameters
         from mcp.client.stdio import stdio_client
     except ImportError as exc:
-        if soft_fail:
+        startup_errors.append(exc)
+        if startup_soft_fail:
             # The recon-first path explicitly tolerates MCP being unavailable;
             # surface a single WARN line and yield None so the caller can
             # degrade. We do NOT yield when the import itself failed (a real
@@ -165,6 +268,7 @@ async def open_exploit_mcp_session(
     ui.boot_section("MCP exploit session boot sequence")
 
     if transport == "stdio":
+        stdio_yielded = False
         server_params = StdioServerParameters(
             command=sys.executable,
             args=[
@@ -179,8 +283,8 @@ async def open_exploit_mcp_session(
         _stdio_label = "Booting MCP server (stdio)"
         ui.boot_step(_stdio_label, ok=False)
         with ui.spinner(
-            f"Booting MCP server (stdio)...",
-            soft_fail=soft_fail,
+            "Booting MCP server (stdio)...",
+            soft_fail=startup_soft_fail,
             # Show elapsed seconds on the boot spinner. The MCP server
             # imports several heavy modules (see ``MCP_BOOT_TIMEOUT_SECONDS``
             # docstring) which can take 5–15 s on a cold start. Without
@@ -209,8 +313,9 @@ async def open_exploit_mcp_session(
                                 timeout=MCP_BOOT_TIMEOUT_SECONDS,
                             )
                             ui.boot_step(_stdio_label, ok=True)
-                        except asyncio.TimeoutError:
-                            if soft_fail:
+                        except asyncio.TimeoutError as exc:
+                            startup_errors.append(exc)
+                            if startup_soft_fail:
                                 ui.warning(
                                     f"MCP server boot timed out after "
                                     f"{MCP_BOOT_TIMEOUT_SECONDS:.0f}s — "
@@ -218,6 +323,7 @@ async def open_exploit_mcp_session(
                                 )
                                 boot_failed[0] = True
                                 ui.boot_step(_stdio_label, failed=True)
+                                stdio_yielded = True
                                 yield None
                                 return
                             raise RuntimeError(
@@ -234,6 +340,7 @@ async def open_exploit_mcp_session(
                         # ``AttackUi.release_active_spinner``.
                         ui.release_active_spinner()
                         try:
+                            stdio_yielded = True
                             yield session
                         except _EXC_GROUP_CATCH as exc:
                             if soft_fail:
@@ -244,11 +351,12 @@ async def open_exploit_mcp_session(
                                 return
                             raise RuntimeError(f"MCP session closed due to error: {exc}") from exc
             except _EXC_GROUP_CATCH as exc:
+                startup_errors.append(exc)
                 # Log the exact error before re-raising so the user always sees it.
                 # anyio's task groups (used by ``stdio_client``) raise
                 # ``BaseExceptionGroup`` on subprocess failure — that is *not* an
                 # ``Exception`` subclass, so we MUST catch the group explicitly.
-                if soft_fail:
+                if startup_soft_fail:
                     ui.warning(f"MCP stdio session failed: {exc}")
                     if _is_exception_group(exc):
                         _log_nested_exceptions(exc)
@@ -256,7 +364,9 @@ async def open_exploit_mcp_session(
                     # to give the caller a ``None`` session.
                     boot_failed[0] = True
                     ui.boot_step(_stdio_label, failed=True)
-                    yield None
+                    if not stdio_yielded:
+                        stdio_yielded = True
+                        yield None
                     return
                 ui.error(f"MCP stdio session failed: {exc}")
                 if _is_exception_group(exc):
@@ -269,7 +379,7 @@ async def open_exploit_mcp_session(
     ui.boot_step(_http_start_label, ok=False)
     with ui.spinner(
         f"Starting MCP HTTP server on port {exploit_port}...",
-        soft_fail=soft_fail,
+        soft_fail=startup_soft_fail,
         soft_fail_flag=boot_failed,
     ):
         try:
@@ -281,6 +391,7 @@ async def open_exploit_mcp_session(
                 env=env,
             )
         except (OSError, RuntimeError) as exc:
+            startup_errors.append(exc)
             # The HTTP server failed to start — ``port_is_open`` raised
             # ``RuntimeError`` (port already in use, e.g. an orphaned server
             # from a previous run) or ``Popen`` raised ``OSError`` (bad env,
@@ -291,7 +402,7 @@ async def open_exploit_mcp_session(
             # the recon-first path crashes instead of degrading to a ``None``
             # session (M19: an asynccontextmanager must yield before
             # returning). Mirror the stdio soft-fail contract.
-            if soft_fail:
+            if startup_soft_fail:
                 ui.warning(f"MCP HTTP server failed to start on port {exploit_port}: {exc}")
                 boot_failed[0] = True
                 ui.boot_step(_http_start_label, failed=True)
@@ -300,13 +411,16 @@ async def open_exploit_mcp_session(
             ui.error(f"MCP HTTP server failed to start on port {exploit_port}: {exc}")
             raise
     ui.boot_step(_http_start_label, ok=not boot_failed[0], failed=boot_failed[0])
+    http_log_path = Path(log_handle.name)
+    http_log_secrets = _sensitive_env_values(env)
+    http_initialized = False
     try:
-        _http_port_label = f"Waiting for MCP HTTP port {exploit_port}"
+        _http_port_label = f"Waiting for MCP HTTP readiness on port {exploit_port}"
         ui.boot_step(_http_port_label, ok=False)
         try:
             with ui.spinner(
-                f"Waiting for MCP HTTP port {exploit_port}...",
-                soft_fail=soft_fail,
+                f"Waiting for MCP HTTP readiness on port {exploit_port}...",
+                soft_fail=startup_soft_fail,
                 soft_fail_flag=boot_failed,
             ):
                 # Use the same cold-start budget as stdio. Both transports
@@ -316,16 +430,18 @@ async def open_exploit_mcp_session(
                 # and its log so an early subprocess crash is reported
                 # immediately with the real cause instead of masquerading as
                 # a generic port timeout.
-                await wait_for_port(
-                    "127.0.0.1",
-                    exploit_port,
+                await wait_for_mcp_http_ready(
+                    f"http://127.0.0.1:{exploit_port}/mcp",
                     timeout_seconds=MCP_BOOT_TIMEOUT_SECONDS,
                     process=process,
-                    log_path=Path(log_handle.name),
+                    log_path=http_log_path,
+                    token=env.get("MCP_HTTP_TOKEN", "").strip(),
+                    secret_values=http_log_secrets,
                 )
             ui.boot_step(_http_port_label, ok=True)
         except (OSError, asyncio.TimeoutError, RuntimeError) as exc:
-            if soft_fail:
+            startup_errors.append(exc)
+            if startup_soft_fail:
                 ui.warning(f"MCP HTTP server did not start on port {exploit_port}: {exc}")
                 # M19: an asynccontextmanager MUST yield before returning. The
                 # stdio soft-fail branches (281/307) already yield None; the HTTP
@@ -338,9 +454,10 @@ async def open_exploit_mcp_session(
                 yield None
                 return
             raise
-        from mcp.client.streamable_http import streamable_http_client
-
-        async with streamable_http_client(f"http://127.0.0.1:{exploit_port}/mcp") as (
+        async with _streamable_http_transport(
+            f"http://127.0.0.1:{exploit_port}/mcp",
+            token=env.get("MCP_HTTP_TOKEN", "").strip(),
+        ) as (
             read_stream,
             write_stream,
             _,
@@ -349,7 +466,7 @@ async def open_exploit_mcp_session(
             ui.boot_step(_http_init_label, ok=False)
             with ui.spinner(
                 "Initializing MCP session...",
-                soft_fail=soft_fail,
+                soft_fail=startup_soft_fail,
                 heartbeat_seconds=1.0,
                 format_message=lambda t: f"Initializing MCP session... {t:.1f}s",
                 soft_fail_flag=boot_failed,
@@ -367,11 +484,13 @@ async def open_exploit_mcp_session(
                             timeout=MCP_BOOT_TIMEOUT_SECONDS,
                         )
                         ui.boot_step(_http_init_label, ok=True)
-                    except asyncio.TimeoutError:
-                        if soft_fail:
+                    except asyncio.TimeoutError as exc:
+                        startup_errors.append(exc)
+                        if startup_soft_fail:
                             ui.warning(
                                 f"MCP HTTP session init timed out after "
                                 f"{MCP_BOOT_TIMEOUT_SECONDS:.0f}s."
+                                f"{_server_log_tail(http_log_path, secret_values=http_log_secrets)}"
                             )
                             # M19: yield before returning (see the matching
                             # comment on the HTTP-start soft-fail branch above).
@@ -382,8 +501,10 @@ async def open_exploit_mcp_session(
                         raise RuntimeError(
                             f"MCP HTTP session init timed out after "
                             f"{MCP_BOOT_TIMEOUT_SECONDS:.0f}s"
+                            f"{_server_log_tail(http_log_path, secret_values=http_log_secrets)}"
                         )
                     except _EXC_GROUP_CATCH as exc:
+                        startup_errors.append(exc)
                         # The server died mid-handshake. anyio's task group
                         # raises ``BaseExceptionGroup`` — which is NOT an
                         # ``Exception`` subclass and NOT a ``TimeoutError`` —
@@ -394,15 +515,21 @@ async def open_exploit_mcp_session(
                         # lets the group propagate past ``soft_fail`` and
                         # crashes recon-first. Mirror the stdio branch's
                         # ``_EXC_GROUP_CATCH`` handling.
-                        if soft_fail:
-                            ui.warning(f"MCP HTTP session init failed: {exc}")
+                        if startup_soft_fail:
+                            ui.warning(
+                                f"MCP HTTP session init failed: {exc}"
+                                f"{_server_log_tail(http_log_path, secret_values=http_log_secrets)}"
+                            )
                             if _is_exception_group(exc):
                                 _log_nested_exceptions(exc)
                             boot_failed[0] = True
                             ui.boot_step(_http_init_label, failed=True)
                             yield None
                             return
-                        ui.error(f"MCP HTTP session init failed: {exc}")
+                        ui.error(
+                            f"MCP HTTP session init failed: {exc}"
+                            f"{_server_log_tail(http_log_path, secret_values=http_log_secrets)}"
+                        )
                         if _is_exception_group(exc):
                             ui.error(
                                 "Detected ExceptionGroup / BaseExceptionGroup. "
@@ -410,6 +537,7 @@ async def open_exploit_mcp_session(
                             )
                             _log_nested_exceptions(exc)
                         raise
+                    http_initialized = True
                     # Stop the heartbeat redraw thread now that the session is
                     # initialized — see the matching comment in the stdio branch.
                     # Without this ``[STATUS] Initializing MCP session... X.Xs``
@@ -428,23 +556,30 @@ async def open_exploit_mcp_session(
     except _EXC_GROUP_CATCH as exc:
         # Transport-level failure: ``streamable_http_client`` or
         # ``ClientSession`` entry raised ``BaseExceptionGroup`` (anyio's task
-        # group on a dead/reset connection — ``wait_for_port`` only confirms
-        # a listening socket, not that the MCP handler is live, so a crash in
-        # the narrow window between the port check and the HTTP upgrade is a
-        # real race). The stdio branch wraps its whole ``stdio_client`` /
+        # group on a dead/reset connection. Even after a successful MCP
+        # readiness probe, the child can crash in the narrow window before the
+        # live HTTP session connects. The stdio branch wraps its whole client /
         # ``ClientSession`` block in ``except _EXC_GROUP_CATCH``; the HTTP
         # branch used to have only a cleanup ``finally`` here, so the group
         # propagated straight out of ``open_exploit_mcp_session`` and bypassed
         # ``soft_fail``. Mirror the stdio handling (the ``finally`` below
         # still runs to tear down the subprocess and close the log handle).
-        if soft_fail:
-            ui.warning(f"MCP HTTP session failed: {exc}")
+        failure_is_soft = soft_fail if http_initialized else startup_soft_fail
+        if not http_initialized:
+            startup_errors.append(exc)
+        startup_log_tail = (
+            ""
+            if http_initialized
+            else _server_log_tail(http_log_path, secret_values=http_log_secrets)
+        )
+        if failure_is_soft:
+            ui.warning(f"MCP HTTP session failed: {exc}{startup_log_tail}")
             if _is_exception_group(exc):
                 _log_nested_exceptions(exc)
             boot_failed[0] = True
             yield None
             return
-        ui.error(f"MCP HTTP session failed: {exc}")
+        ui.error(f"MCP HTTP session failed: {exc}{startup_log_tail}")
         if _is_exception_group(exc):
             ui.error(
                 "Detected ExceptionGroup / BaseExceptionGroup. "
@@ -453,8 +588,10 @@ async def open_exploit_mcp_session(
             _log_nested_exceptions(exc)
         raise
     finally:
-        stop_process(process)
-        log_handle.close()
+        try:
+            stop_process(process)
+        finally:
+            log_handle.close()
 
 
 def start_exploit_http_server(
@@ -474,6 +611,15 @@ def start_exploit_http_server(
     log_path = workspace / "mcp_exploit_server.log"
     log_handle = log_path.open("a", encoding="utf-8")
     try:
+        popen_kwargs: dict[str, Any] = {}
+        if os.name == "nt":
+            # Isolate the server in its own console process group so shutdown
+            # can signal it independently and taskkill can remove descendants.
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            # Gives POSIX shutdown a process group to terminate, including any
+            # tool subprocesses that are still alive when the session closes.
+            popen_kwargs["start_new_session"] = True
         process = subprocess.Popen(
             [
                 sys.executable,
@@ -489,6 +635,7 @@ def start_exploit_http_server(
             stdout=log_handle,
             stderr=subprocess.STDOUT,
             text=True,
+            **popen_kwargs,
         )
     except BaseException:
         # Bug #20: if Popen raises (e.g. bad env, OOM), the log handle we
@@ -498,68 +645,236 @@ def start_exploit_http_server(
     return process, log_handle
 
 
-def _server_log_tail(log_path: Path | None, *, max_lines: int = 20, max_chars: int = 4000) -> str:
+_SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)\b([A-Z0-9_.-]*(?:api[_-]?key|key|secret|token|password|passwd|auth)[A-Z0-9_.-]*)"
+    r"(\s*[:=]\s*)([\"']?)([^\s,\"']+|[^\"']*)([\"']?)"
+)
+_BEARER_RE = re.compile(r"(?i)(authorization\s*:\s*bearer\s+|bearer\s+)[^\s,;]+")
+_URL_CREDENTIAL_RE = re.compile(r"(?i)([a-z][a-z0-9+.-]*://[^/\s:@]+:)[^@\s/]+@")
+
+
+def _redact_startup_text(text: str, *, secret_values: tuple[str, ...] = ()) -> str:
+    """Redact common credential forms before startup diagnostics are shown."""
+    for value in sorted(set(secret_values), key=len, reverse=True):
+        if len(value) >= 4:
+            text = text.replace(value, "[REDACTED]")
+    text = _BEARER_RE.sub(r"\1[REDACTED]", text)
+    text = _URL_CREDENTIAL_RE.sub(r"\1[REDACTED]@", text)
+
+    def _replace_assignment(match: re.Match[str]) -> str:
+        return f"{match.group(1)}{match.group(2)}[REDACTED]"
+
+    return _SECRET_ASSIGNMENT_RE.sub(_replace_assignment, text)
+
+
+def _server_log_tail(
+    log_path: Path | None,
+    *,
+    max_lines: int = 20,
+    max_chars: int = 4000,
+    secret_values: tuple[str, ...] = (),
+) -> str:
     """Return a bounded server-log excerpt suitable for a startup error."""
     if log_path is None:
         return ""
     try:
-        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        with log_path.open("r", encoding="utf-8", errors="replace") as handle:
+            lines = deque(handle, maxlen=max_lines)
     except OSError as exc:
         return f"\nServer log: {log_path} (could not read: {exc})"
-    excerpt = "\n".join(lines[-max_lines:])
+    excerpt = "".join(lines).rstrip("\r\n")
     if len(excerpt) > max_chars:
         excerpt = excerpt[-max_chars:]
+    excerpt = _redact_startup_text(excerpt, secret_values=secret_values)
     if not excerpt:
         excerpt = "(empty)"
     return f"\nServer log: {log_path}\n--- log tail ---\n{excerpt}"
 
 
-async def wait_for_port(
-    host: str,
-    port: int,
+@contextlib.asynccontextmanager
+async def _streamable_http_transport(
+    url: str,
+    *,
+    token: str = "",
+) -> AsyncIterator[tuple[Any, Any, Any]]:
+    """Open the SDK HTTP transport with the configured local bearer token."""
+    from mcp.client.streamable_http import streamable_http_client
+
+    if not token:
+        async with streamable_http_client(url) as streams:
+            yield streams
+        return
+
+    from mcp.shared._httpx_utils import create_mcp_http_client
+
+    headers = {"Authorization": f"Bearer {token}"}
+    async with create_mcp_http_client(headers=headers) as http_client:
+        async with streamable_http_client(url, http_client=http_client) as streams:
+            yield streams
+
+
+async def _probe_mcp_http(url: str, *, token: str, timeout_seconds: float) -> None:
+    """Complete an MCP initialize + tool-discovery handshake and close it."""
+    from mcp import ClientSession
+
+    async def _handshake() -> None:
+        async with _streamable_http_transport(url, token=token) as (
+            read_stream,
+            write_stream,
+            _,
+        ):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                await session.list_tools()
+
+    await asyncio.wait_for(_handshake(), timeout=timeout_seconds)
+
+
+def _contains_fatal_base_exception(exc: BaseException) -> bool:
+    if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
+        return True
+    if _is_exception_group(exc):
+        return any(_contains_fatal_base_exception(item) for item in exc.exceptions)
+    return False
+
+
+def _child_exit_error(
+    process: subprocess.Popen[str] | None,
+    *,
+    endpoint: str,
+    log_path: Path | None,
+    secret_values: tuple[str, ...] = (),
+) -> RuntimeError | None:
+    if process is None:
+        return None
+    returncode = process.poll()
+    if returncode is None:
+        return None
+    return RuntimeError(
+        f"MCP HTTP server exited with code {returncode} before becoming ready at "
+        f"{endpoint}.{_server_log_tail(log_path, secret_values=secret_values)}"
+    )
+
+
+def _concise_startup_error(exc: BaseException, *, max_chars: int = 1000) -> str:
+    message = _redact_startup_text(str(exc).replace("\r", " ").replace("\n", " "))
+    rendered = f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+    if len(rendered) > max_chars:
+        rendered = rendered[:max_chars] + "..."
+    return rendered
+
+
+async def wait_for_mcp_http_ready(
+    url: str,
     timeout_seconds: float,
     *,
     process: subprocess.Popen[str] | None = None,
     log_path: Path | None = None,
+    token: str = "",
+    secret_values: tuple[str, ...] = (),
+    retry_initial_seconds: float = MCP_HTTP_RETRY_INITIAL_SECONDS,
 ) -> None:
+    """Retry a real MCP handshake within one bounded cold-start budget."""
     deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        if process is not None:
-            returncode = process.poll()
-            if returncode is not None:
-                raise RuntimeError(
-                    f"MCP HTTP server exited with code {returncode} before "
-                    f"opening {host}:{port}."
-                    f"{_server_log_tail(log_path)}"
-                )
+    delay = max(0.0, retry_initial_seconds)
+    attempts = 0
+    last_error: BaseException | None = None
+
+    while True:
+        child_error = _child_exit_error(
+            process,
+            endpoint=url,
+            log_path=log_path,
+            secret_values=secret_values,
+        )
+        if child_error is not None:
+            raise child_error
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+
+        attempts += 1
+        attempt_timeout = min(MCP_HTTP_PROBE_TIMEOUT_SECONDS, remaining)
         try:
-            with socket.create_connection((host, port), timeout=0.5):
-                return
-        except OSError:
-            await asyncio.sleep(0.2)
-    if process is not None:
-        returncode = process.poll()
-        if returncode is not None:
-            raise RuntimeError(
-                f"MCP HTTP server exited with code {returncode} before "
-                f"opening {host}:{port}."
-                f"{_server_log_tail(log_path)}"
+            await _probe_mcp_http(
+                url,
+                token=token,
+                timeout_seconds=attempt_timeout,
             )
-    raise TimeoutError(
-        f"Timed out after {timeout_seconds:g}s waiting for MCP HTTP server "
-        f"on {host}:{port}."
-        f"{_server_log_tail(log_path)}"
+            return
+        except _EXC_GROUP_CATCH as exc:
+            if _contains_fatal_base_exception(exc):
+                raise
+            last_error = exc
+
+        child_error = _child_exit_error(
+            process,
+            endpoint=url,
+            log_path=log_path,
+            secret_values=secret_values,
+        )
+        if child_error is not None:
+            raise child_error
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        await asyncio.sleep(min(delay, remaining))
+        delay = min(
+            MCP_HTTP_RETRY_MAX_SECONDS,
+            max(MCP_HTTP_RETRY_INITIAL_SECONDS, delay * 2),
+        )
+
+    detail = (
+        f" Last probe error: {_concise_startup_error(last_error)}."
+        if last_error is not None
+        else ""
+    )
+    raise RuntimeError(
+        f"Timed out after {timeout_seconds:g}s waiting for MCP initialize/list-tools "
+        f"readiness at {url} ({attempts} attempts).{detail}"
+        f"{_server_log_tail(log_path, secret_values=secret_values)}"
     )
 
 
 def stop_process(process: subprocess.Popen[str]) -> None:
     if process.poll() is not None:
         return
-    process.terminate()
+    if os.name == "nt":
+        try:
+            process.send_signal(signal.CTRL_BREAK_EVENT)
+            process.wait(timeout=3)
+            return
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        # terminate()/kill() affect only the direct child on Windows. taskkill
+        # /T is the stdlib-accessible way to remove its descendant tree too.
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=5,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            # Fall through to direct-child kill below. This cannot guarantee
+            # descendant cleanup, but still prevents shutdown from hanging.
+            process.kill()
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except (OSError, ProcessLookupError):
+            process.terminate()
     try:
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
-        process.kill()
+        if os.name != "nt":
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except (OSError, ProcessLookupError):
+                process.kill()
+        else:
+            process.kill()
         process.wait(timeout=5)
 
 
