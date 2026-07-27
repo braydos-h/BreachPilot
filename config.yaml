@@ -77,12 +77,10 @@ exploit:
   cache_ttl_seconds: 3600
   cache_max_entries: 50
   require_explicit_allowlist: true
-  # Empty by design: the runtime --target IP is injected via the EXPLOIT_TARGET
-  # env var (set in tools/mcp_session.open_exploit_mcp_session) and unioned into
-  # the allowlist at check time (tools/mcp_shared._check_allowlist). This keeps
-  # the AI locked to the single target IP without per-run config edits. Add
-  # extra operator-authorized hosts here (e.g. a callback/C2 listener) to permit
-  # them in addition to the runtime target.
+  # IPs entered through Start New Session are saved here automatically. The
+  # runtime --target is also injected via EXPLOIT_TARGET and unioned at check
+  # time (tools/mcp_shared._check_allowlist). Add extra operator-authorized
+  # hosts here (e.g. a callback/C2 listener) to permit them as well.
   allowed_targets: []
   # H10: Flow A (exploit engine) reads its scope rules HERE, not from
   # mission.yaml (which is Flow B's config). Previously these keys were absent,

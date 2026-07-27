@@ -92,7 +92,7 @@ Important defaults in `config.yaml`:
 - `exploit.permission: full_access` (lab build; recon still resolves to `read_only`)
 - `exploit.attack_mode: true`
 - `exploit.require_explicit_allowlist: true`
-- `exploit.allowed_targets: []` (the runtime `--target` is unioned in via `EXPLOIT_TARGET`)
+- `exploit.allowed_targets: []` initially (a target entered in Start New Session is saved here; the runtime `--target` is also unioned in via `EXPLOIT_TARGET`)
 - `swarm.enabled: true`
 - `memory.semantic_enabled: true`
 - `outcome_judgment.max_inconclusive_attempts: 3`

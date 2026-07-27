@@ -122,7 +122,7 @@ exploit:
   permission: full_access
   attack_mode: true
   require_explicit_allowlist: true   # the target-IP lock
-  allowed_targets: []               # the runtime --target is injected via EXPLOIT_TARGET
+  allowed_targets: []               # Start New Session saves targets here; runtime --target is also injected via EXPLOIT_TARGET
   disallowed_assets: []
   forbidden_actions: []
 multi_model:

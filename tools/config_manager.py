@@ -115,10 +115,11 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "max_query_chars": 200,
         "cache_ttl_seconds": 3600,
         "cache_max_entries": 50,
-        # Target-IP lock. Empty allowed_targets is the lab default: the runtime
-        # --target is injected via EXPLOIT_TARGET env (see mcp_session.py) and
-        # unioned in at check time (mcp_shared._check_allowlist). Add hosts here
-        # to authorize them in addition to the runtime target.
+        # Target-IP lock. Interactive Start New Session saves entered IPs in
+        # allowed_targets; the runtime --target is also injected via
+        # EXPLOIT_TARGET (see mcp_session.py) and unioned at check time
+        # (mcp_shared._check_allowlist). Add hosts here to authorize them in
+        # addition to the runtime target.
         "require_explicit_allowlist": True,
         "allowed_targets": [],
         "disallowed_assets": [],

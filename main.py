@@ -571,6 +571,28 @@ async def async_main(args: argparse.Namespace) -> int:
         ui.error(f"Invalid IP address: {target_ip}")
         return 1
 
+    # A target entered through Start New Session is an operator-approved asset.
+    # Persist it before any assessment work begins so the current and future
+    # sessions both enforce the same explicit allowlist.
+    if interactive_session:
+        try:
+            added_to_allowlist = _config_cli.add_target_to_allowlist(config_path, target_ip)
+        except (OSError, ValueError) as exc:
+            ui.error(f"Could not save {target_ip} to the config allowlist: {exc}")
+            return 1
+
+        # Keep the in-memory config synchronized with the persisted allowlist
+        # too. This matters for equivalent IPv6 spellings, where a string
+        # comparison alone would otherwise make this session see a duplicate.
+        persisted_config = _config_cli.load_config(config_path)
+        persisted_exploit = persisted_config.get("exploit", {})
+        persisted_allowed_targets = persisted_exploit.get("allowed_targets", [])
+        exploit_config = config.setdefault("exploit", {})
+        exploit_config["allowed_targets"] = list(persisted_allowed_targets)
+        normalized_target = str(target_addr)
+        if added_to_allowlist:
+            ui.status(f"Saved {normalized_target} to {config_path} exploit.allowed_targets.")
+
     if not target_addr.is_private:
         ui.status("WARNING: Target is a PUBLIC IP. Ensure you OWN this infrastructure.")
 
