@@ -155,6 +155,10 @@ Evidence and auditability are part of the safety model:
 
 - `EvidenceStore` records raw output, metadata, hashes, task IDs, findings, and targets.
 - `DatabaseManager.log_audit` records important state transitions and actions.
+- `OutcomeJudge` records an operator-visible, evidence-linked assessment after
+  observation. It can terminate or redirect an investigation path, but it
+  cannot authorize a task, change scope, approve risk, unlock a target, or call
+  a tool.
 - `ActivityLogger` and enhanced reporting capture exploit-session timelines.
 - Credential handling should go through `tools/credential_store.py` and avoid printing secrets by default.
 
@@ -166,4 +170,8 @@ Evidence and auditability are part of the safety model:
 - Default new *recon* features to read-only behavior; new *attack* features inherit the unrestricted-but-locked posture.
 - Do not add new network, shell, package install, or file-write paths without tests.
 - Keep output sanitization and secret redaction near the boundary where output enters logs, model context, or reports.
+- Keep evidential status separate from execution status. New outcome rules may
+  reduce/reprioritize activity only; they must remain downstream of the
+  existing scope, risk, approval, permission, target-lock, rate-limit, audit,
+  and workspace controls.
 - For tests, prefer localhost, mocks, and temporary workspaces.

@@ -63,6 +63,7 @@ py-modules = [
     "memory",
     "mission",
     "observer",
+    "outcome_judge",
     "planner",
     "report_generator",
     "risk_controller",

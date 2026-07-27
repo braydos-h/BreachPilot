@@ -24,7 +24,7 @@ NetAttackAI combines reconnaissance, model-guided investigation, evidence collec
 | Recon and research | Nmap-based discovery, service enrichment, CVE intelligence, web research, goal suggestions, and runtime skill selection. |
 | AI-assisted operations | Ollama model routing, configurable model aliases, optional peer-model consultation, adaptive strategies, and resumable long sessions. |
 | Operator experiences | Guided terminal menu, direct CLI, a Textual dashboard, and MCP servers for client integrations. |
-| Assessment workflow | Missions, scope and risk controls, queued tasks, observations, target graphs, memory, evidence, findings, and Markdown reports. |
+| Assessment workflow | Missions, scope and risk controls, queued tasks, evidence-grounded hypothesis judgment, target graphs, memory, findings, and Markdown reports. |
 | Specialist swarm | Optional recon, vulnerability, exploit, post-exploit, critic, and reflection agents coordinated through shared state. |
 
 ## Quick start
@@ -156,12 +156,19 @@ flowchart LR
     C --> A
 ```
 
-The codebase also includes a structured, database-backed research loop:
+The codebase also includes a structured, database-backed research loop. Tool
+execution and evidential outcome are deliberately separate:
 
 ```text
 Mission → Scope and risk gates → Planner → Task queue → Executor/tools
-        → Observer → Memory, graph, and evidence → Finding verifier → Report
+        → Observer → OutcomeJudge → hypothesis state and learning
+        → Memory, graph, and evidence → Finding verifier → Report
 ```
+
+`OutcomeJudge` evaluates task success criteria and stop conditions only from
+structured observations and persisted evidence references. A command that ran
+successfully can remain evidentially inconclusive, and an execution error does
+not by itself refute the hypothesis.
 
 <details>
 <summary><strong>Project map</strong></summary>

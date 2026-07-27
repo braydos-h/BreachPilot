@@ -15,14 +15,12 @@ for the Finding Verifier to evaluate.
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from db import DatabaseManager, _new_id, _now_iso
-
+if TYPE_CHECKING:
+    from tools.semantic_memory import SemanticMemoryManager
 
 @dataclass
 class Observation:
@@ -50,6 +48,12 @@ class Observation:
     memory_updates: list[dict[str, Any]] = field(default_factory=list)
     graph_updates: list[dict[str, Any]] = field(default_factory=list)
     evidence_refs: list[str] = field(default_factory=list)
+    # Explicit structured claims for OutcomeJudge. Entries use
+    # {"polarity": "supports"|"contradicts", "claim": ..., "confidence": ...}.
+    # The heuristic parsers intentionally do not manufacture these from raw
+    # words such as "success"; tools or higher-level observers must provide a
+    # concrete claim.
+    hypothesis_evidence: list[dict[str, Any]] = field(default_factory=list)
 
     confidence: float = 0.0
     usefulness: int = 0
@@ -75,6 +79,7 @@ class Observation:
             "memory_updates": self.memory_updates,
             "graph_updates": self.graph_updates,
             "evidence_refs": self.evidence_refs,
+            "hypothesis_evidence": self.hypothesis_evidence,
             "confidence": self.confidence,
             "usefulness": self.usefulness,
         }
@@ -116,7 +121,6 @@ class ObserverAgent:
         """
         task_id = task.get("task_id", task.get("id", ""))
         target = task.get("target", "")
-        phase = task.get("phase", "recon")
 
         # Basic metadata
         obs = Observation(

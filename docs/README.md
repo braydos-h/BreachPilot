@@ -24,7 +24,7 @@ This project is a locally run, AI-assisted security research agent. It has sever
 
 The shared domain model is:
 
-`Mission -> Scope/Risk gates -> Planner -> TaskQueue -> Executor/Tools -> Observer -> Memory/Graph/Evidence -> FindingVerifier -> ReportGenerator`
+`Mission -> Scope/Risk gates -> Planner -> TaskQueue -> Executor/Tools -> Observer -> OutcomeJudge/Hypothesis state -> Memory/Graph/Evidence -> FindingVerifier -> ReportGenerator`
 
 ## Generated Directories
 

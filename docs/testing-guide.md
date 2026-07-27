@@ -36,6 +36,7 @@ python tests/test_new_modules.py
 | Scope matching/rate limits | `tests/test_scope_gate.py` |
 | Risk budgets/approval | `tests/test_risk_controller.py` |
 | Task lifecycle/planning | `tests/test_task_queue.py`, `tests/test_agent_loop.py` |
+| Hypothesis/outcome judgment | `tests/test_outcome_judge.py`, `tests/test_cross_mission_wiring.py` |
 | Evidence/finding/reporting | `tests/test_evidence.py`, `tests/test_finding_verifier.py`, `tests/test_report_generator.py` |
 | Recon pipeline | `tests/test_recon_pipeline.py`, `tests/test_recon_first_session.py` |
 | MCP workspace/tool behavior | `tests/test_mcp_workspace.py`, relevant safety tests |
@@ -66,6 +67,16 @@ Some runtime features require tools that may not be present on every developer m
 - Unix session tooling
 
 Unit tests should mock these where possible. `--doctor` and `--self-test` are the right place to validate local machine readiness.
+
+## Outcome-Judgment Regressions
+
+`tests/test_outcome_judge.py` is deterministic and requires no network tools or
+model. It covers execution/evidence separation, matching and contradictory
+structured evidence, single versus repeated inconclusive attempts, duplicate
+check rejection, terminal-state planning guards, restart persistence, and
+version-3 database migration. Existing scope, approval, target-lock, and risk
+tests remain the safety regression suite; outcome judgment does not replace
+those gates.
 
 ## Before Handoff
 

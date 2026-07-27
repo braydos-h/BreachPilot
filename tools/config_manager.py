@@ -212,6 +212,14 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "experience_min_samples": 3,
         "experience_time_decay_days": 90,
     },
+    "outcome_judgment": {
+        # Only materially different checks count. A minimum of two ensures one
+        # failed command cannot exhaust a hypothesis.
+        "max_inconclusive_attempts": 3,
+        "confirmation_threshold": 0.75,
+        "refutation_threshold": 0.75,
+        "min_evidence_references": 1,
+    },
     "adaptive_exploits": {
         "enabled": True,
         "max_mutations": 5,
@@ -472,6 +480,41 @@ class ConfigValidator:
                 if amc is not None and (not isinstance(amc, int) or amc < 1000):
                     result.warnings.append(
                         "memory.attack_memory_max_context_chars must be an integer >= 1000."
+                    )
+
+        # Validate deterministic evidence-grounded outcome judgment.
+        if "outcome_judgment" in self._config:
+            judgment = self._config["outcome_judgment"]
+            if not isinstance(judgment, dict):
+                result.errors.append("'outcome_judgment' must be a mapping.")
+            else:
+                max_attempts = judgment.get("max_inconclusive_attempts")
+                if max_attempts is not None and (
+                    not isinstance(max_attempts, int)
+                    or isinstance(max_attempts, bool)
+                    or max_attempts < 2
+                ):
+                    result.warnings.append(
+                        "outcome_judgment.max_inconclusive_attempts must be an integer >= 2."
+                    )
+                for key in ("confirmation_threshold", "refutation_threshold"):
+                    value = judgment.get(key)
+                    if value is not None and (
+                        isinstance(value, bool)
+                        or not isinstance(value, (int, float))
+                        or not 0.5 <= value <= 1.0
+                    ):
+                        result.warnings.append(
+                            f"outcome_judgment.{key} must be between 0.5 and 1.0."
+                        )
+                min_refs = judgment.get("min_evidence_references")
+                if min_refs is not None and (
+                    not isinstance(min_refs, int)
+                    or isinstance(min_refs, bool)
+                    or min_refs < 1
+                ):
+                    result.warnings.append(
+                        "outcome_judgment.min_evidence_references must be a positive integer."
                     )
 
         # Validate reasoning section

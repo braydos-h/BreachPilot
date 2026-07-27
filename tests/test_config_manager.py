@@ -11,9 +11,8 @@ import yaml
 def test_config_validator_import():
     """Verify the config_manager module can be imported."""
     from tools.config_manager import (
-        ConfigValidator, ConfigValidationResult,
-        validate_config_file, load_validated_config,
-        CONFIG_SCHEMA, KNOWN_TOP_KEYS,
+        CONFIG_SCHEMA,
+        KNOWN_TOP_KEYS,
     )
     assert CONFIG_SCHEMA is not None
     assert "ollama" in CONFIG_SCHEMA
@@ -356,3 +355,43 @@ def test_save_config():
         assert reloaded["new_key"] == "new_value"
     finally:
         Path(temp_path).unlink(missing_ok=True)
+
+
+def test_outcome_judgment_defaults_and_validation(tmp_path):
+    from tools.config_manager import ConfigValidator
+
+    path = tmp_path / "outcome-config.yaml"
+    path.write_text(
+        """
+ollama:
+  host: http://localhost:11434
+models:
+  registry: {glm: glm-5.2:cloud}
+  default_alias: glm
+mcp:
+  default_transport: stdio
+exploit:
+  enabled: true
+outcome_judgment:
+  max_inconclusive_attempts: 1
+  confirmation_threshold: 1.5
+  refutation_threshold: 0.25
+  min_evidence_references: 0
+""",
+        encoding="utf-8",
+    )
+    validator = ConfigValidator(path)
+    _, result = validator.load_and_validate()
+    assert result.is_valid
+    assert any("max_inconclusive_attempts" in warning for warning in result.warnings)
+    assert any("confirmation_threshold" in warning for warning in result.warnings)
+    assert any("refutation_threshold" in warning for warning in result.warnings)
+    assert any("min_evidence_references" in warning for warning in result.warnings)
+
+    defaults = validator._build_defaults()["outcome_judgment"]
+    assert defaults == {
+        "max_inconclusive_attempts": 3,
+        "confirmation_threshold": 0.75,
+        "refutation_threshold": 0.75,
+        "min_evidence_references": 1,
+    }

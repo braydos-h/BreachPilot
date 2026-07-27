@@ -16,7 +16,7 @@ import json
 from typing import Any
 
 from db import DatabaseManager, _new_id, _now_iso
-
+from outcome_judge import HypothesisRepository
 
 VALID_TASK_PHASES = frozenset({
     "recon",
@@ -48,11 +48,14 @@ class TaskQueue:
     def __init__(self, db: DatabaseManager, mission_id: str) -> None:
         self._db = db
         self._mission_id = mission_id
+        self._hypotheses = HypothesisRepository(db, mission_id)
 
     # ── CRUD ────────────────────────────────────────────────────────────
 
     def create_task(self, task_data: dict[str, Any]) -> str:
         """Insert a new task. Returns the task_id."""
+        hypothesis_state, check_fingerprint = self._hypotheses.prepare_task(task_data)
+        hypothesis_id = hypothesis_state.hypothesis_id if hypothesis_state else ""
         if "task_id" in task_data:
             tid = task_data["task_id"]
         elif "id" in task_data:
@@ -84,8 +87,9 @@ class TaskQueue:
                     hypothesis, preconditions_json, allowed_tools_json,
                     risk_level, priority, required_human_approval,
                     success_criteria_json, stop_conditions_json,
-                    status, result_summary, evidence_refs_json, created_at, updated_at)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    status, result_summary, evidence_refs_json,
+                    hypothesis_id, check_fingerprint, created_at, updated_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     tid,
                     self._mission_id,
@@ -104,6 +108,8 @@ class TaskQueue:
                     status,
                     task_data.get("result_summary", ""),
                     json.dumps(task_data.get("evidence_refs", [])),
+                    hypothesis_id,
+                    check_fingerprint,
                     _now_iso(),
                     _now_iso(),
                 ),
@@ -111,15 +117,18 @@ class TaskQueue:
         return tid
 
     def get_next_task(self, target: str = "") -> dict[str, Any] | None:
-        """Return the highest-priority pending task, optionally filtered by target."""
-        query = """SELECT * FROM tasks WHERE mission_id=? AND status='pending'"""
+        """Return the highest-priority pending task with a non-terminal hypothesis."""
+        query = """SELECT t.* FROM tasks t
+                   LEFT JOIN hypotheses h ON h.id=t.hypothesis_id
+                   WHERE t.mission_id=? AND t.status='pending'
+                     AND (h.id IS NULL OR h.status IN ('open','inconclusive'))"""
 
         params: list[Any] = [self._mission_id]
         if target:
-            query += " AND target=?"
+            query += " AND t.target=?"
             params.append(target)
 
-        query += " ORDER BY priority DESC, created_at ASC LIMIT 1"
+        query += " ORDER BY t.priority DESC, t.created_at ASC LIMIT 1"
 
         with self._db.connection() as conn:
             cur = conn.execute(query, params)
@@ -338,6 +347,19 @@ class TaskQueue:
         if isinstance(confidence, (int, float)):
             score += int(float(confidence) * 10)
 
+        # Evidence-directed hypotheses favor high-value, discriminating checks
+        # while steadily reducing priority for paths that already consumed
+        # several independent attempts.
+        information_value = task.get("expected_information_value", 0.0)
+        if isinstance(information_value, (int, float)):
+            score += int(max(0.0, min(float(information_value), 1.0)) * 20)
+        attempts = task.get("hypothesis_attempt_count", 0)
+        if isinstance(attempts, int) and not isinstance(attempts, bool):
+            score -= min(attempts, 5) * 5
+        estimated_cost = task.get("estimated_cost", 0.0)
+        if isinstance(estimated_cost, (int, float)):
+            score -= int(max(0.0, min(float(estimated_cost), 1.0)) * 10)
+
         # Duplicate penalty (slightly reduce lower-ID tasks in same group)
         # Handled during dedup; base penalty applied to generic tasks
         if "scan" in obj_text and "all" in obj_text:
@@ -367,6 +389,14 @@ class TaskQueue:
             )
             return {row["status"]: row["cnt"] for row in cur.fetchall()}
 
+    def count_total(self) -> int:
+        with self._db.connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM tasks WHERE mission_id=?",
+                (self._mission_id,),
+            ).fetchone()
+        return int(row["cnt"]) if row else 0
+
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -391,6 +421,8 @@ def _row_to_task(data: dict[str, Any]) -> dict[str, Any]:
         "result_summary": data.get("result_summary", ""),
         "block_reason": data.get("block_reason", ""),
         "evidence_refs": _json_load(data.get("evidence_refs_json", "[]"), []),
+        "hypothesis_id": data.get("hypothesis_id", ""),
+        "check_fingerprint": data.get("check_fingerprint", ""),
         "created_at": data.get("created_at", ""),
         "updated_at": data.get("updated_at", ""),
     }

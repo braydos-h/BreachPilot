@@ -13,30 +13,29 @@ Covers:
 
 from __future__ import annotations
 
-import json
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from tools.validation_utils import (
-    validate_ipv4,
-    sanitize_ipv4,
-    sanitize_target_in_command,
-    preflight_command_check,
-    parse_service_banners,
-    is_target_in_allowlist,
-)
+import pytest
+
 from tools.exploit_agent import (
-    _filter_and_validate_tool_calls,
-    _attempt_retry_correction,
-    _PhaseTracker,
-    run_exploit_agent,
+    ExploitPermission,
     ExploitPolicy,
     ExploitSettings,
-    ExploitPermission,
+    _attempt_retry_correction,
+    _filter_and_validate_tool_calls,
+    _PhaseTracker,
+    run_exploit_agent,
 )
-
+from tools.validation_utils import (
+    is_target_in_allowlist,
+    parse_service_banners,
+    preflight_command_check,
+    sanitize_ipv4,
+    sanitize_target_in_command,
+    validate_ipv4,
+)
 
 # ── IPv4 Validation Tests ──────────────────────────────────────────────────
 
@@ -425,7 +424,7 @@ async def test_run_exploit_agent_retries_on_syntax_error() -> None:
             "role": "assistant",
             "content": "Final summary.",
         }
-        result = await run_exploit_agent(
+        await run_exploit_agent(
             client=client,
             model="test-model",
             session=session,
@@ -495,7 +494,7 @@ async def test_run_exploit_agent_phase_enforcement_prevents_early_exit() -> None
 
 class TestAgentLoopReplanning:
     def test_failure_driven_replanning_creates_retry_task(self) -> None:
-        """Planner should create a retry task with the failure reason embedded."""
+        """Planner should retry only when it can select a different check."""
         from planner import PlannerAgent
 
         planner = PlannerAgent(risk_profile="standard_authorized")
@@ -505,7 +504,7 @@ class TestAgentLoopReplanning:
             asset_type="host",
             objective="Test recon",
             hypothesis="Test",
-            allowed_tools=["nmap_basic"],
+            allowed_tools=["nmap_basic", "check_os"],
             risk_level="low",
         )
         retry = planner.plan_retry_with_modifications(
@@ -516,6 +515,7 @@ class TestAgentLoopReplanning:
         assert retry is not None
         assert "RETRY 1" in retry.get("objective", "")
         assert retry["phase"] == "recon"
+        assert retry["allowed_tools"][0] == "check_os"
 
     def test_failure_driven_replanning_refuses_permanent_errors(self) -> None:
         """Permanent errors should not generate retry tasks."""
@@ -540,8 +540,8 @@ class TestAgentLoopReplanning:
 
     def test_phase_minima_on_agent_loop(self, tmp_path: Path) -> None:
         """Phase minima should prevent early termination."""
+
         from agent_loop import AgentLoop
-        from unittest.mock import MagicMock, patch
 
         mission_config = {
             "program_name": "Test Program",
@@ -593,8 +593,8 @@ class TestAgentLoopReplanning:
 async def test_mcp_run_exploit_terminal_blocked_when_allowlist_required(tmp_path: Path) -> None:
     """Terminal command should be blocked if target IP is not in allowlist."""
     from mcp_exploit_server import create_mcp_server
+    from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
-    from tools.cve_lookup import NVDClient, CVESearchSettings
     from tools.web_researcher import WebResearcher, WebResearcherSettings
 
     search = ExploitSearch(ExploitSearchSettings())
@@ -617,8 +617,8 @@ async def test_mcp_run_exploit_terminal_blocked_when_allowlist_required(tmp_path
 async def test_mcp_run_exploit_terminal_allowed_when_in_allowlist(tmp_path: Path) -> None:
     """Terminal command should proceed if target IP is in allowlist."""
     from mcp_exploit_server import create_mcp_server
+    from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
-    from tools.cve_lookup import NVDClient, CVESearchSettings
     from tools.web_researcher import WebResearcher, WebResearcherSettings
 
     search = ExploitSearch(ExploitSearchSettings())

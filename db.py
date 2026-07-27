@@ -1,7 +1,7 @@
 """Persistent SQLite database for the authorized bug bounty research agent.
 
-Schema: missions, scope_rules, tasks, observations, graph_nodes,
-graph_edges, evidence, findings, audit_logs, memories.
+Schema: missions, scope_rules, tasks, hypotheses, outcome assessments,
+observations, graph_nodes, graph_edges, evidence, findings, audit logs, memories.
 
 All IDs use a consistent format: {prefix}-{sequence}. Timestamps are ISO8601 UTC.
 JSON fields are stored as TEXT and deserialized on read.
@@ -18,9 +18,9 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Generator, Sequence
+from typing import Any, Generator
 
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 _MIGRATIONS_TABLE = "_migrations"
 
 
@@ -92,9 +92,62 @@ CREATE TABLE IF NOT EXISTS tasks (
     result_summary TEXT NOT NULL DEFAULT '',
     block_reason TEXT NOT NULL DEFAULT '',
     evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    hypothesis_id TEXT NOT NULL DEFAULT '',
+    check_fingerprint TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS hypotheses (
+    id TEXT PRIMARY KEY,
+    mission_id TEXT NOT NULL,
+    hypothesis_key TEXT NOT NULL,
+    statement TEXT NOT NULL DEFAULT '',
+    target TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open' CHECK(status IN (
+        'open','confirmed','refuted','inconclusive','exhausted'
+    )),
+    confidence REAL NOT NULL DEFAULT 0.5,
+    evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    independent_check_count INTEGER NOT NULL DEFAULT 0,
+    check_history_json TEXT NOT NULL DEFAULT '[]',
+    candidate_checks_json TEXT NOT NULL DEFAULT '[]',
+    last_information_value REAL NOT NULL DEFAULT 0.0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_assessed_at TEXT NOT NULL DEFAULT '',
+    UNIQUE(mission_id, hypothesis_key),
+    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS outcome_assessments (
+    id TEXT PRIMARY KEY,
+    mission_id TEXT NOT NULL,
+    task_id TEXT NOT NULL UNIQUE,
+    hypothesis_id TEXT NOT NULL,
+    execution_outcome TEXT NOT NULL CHECK(execution_outcome IN (
+        'succeeded','failed','blocked'
+    )),
+    hypothesis_status TEXT NOT NULL CHECK(hypothesis_status IN (
+        'open','confirmed','refuted','inconclusive','exhausted'
+    )),
+    confidence REAL NOT NULL DEFAULT 0.5,
+    satisfied_criteria_json TEXT NOT NULL DEFAULT '[]',
+    unsatisfied_criteria_json TEXT NOT NULL DEFAULT '[]',
+    triggered_stop_conditions_json TEXT NOT NULL DEFAULT '[]',
+    evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    reasoning TEXT NOT NULL DEFAULT '',
+    information_value REAL NOT NULL DEFAULT 0.0,
+    another_investigation_justified INTEGER NOT NULL DEFAULT 0,
+    check_fingerprint TEXT NOT NULL DEFAULT '',
+    independent_check INTEGER NOT NULL DEFAULT 0,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY (hypothesis_id) REFERENCES hypotheses(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS observations (
@@ -119,6 +172,7 @@ CREATE TABLE IF NOT EXISTS observations (
     memory_updates_json TEXT NOT NULL DEFAULT '[]',
     graph_updates_json TEXT NOT NULL DEFAULT '[]',
     evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    hypothesis_evidence_json TEXT NOT NULL DEFAULT '[]',
     confidence REAL NOT NULL DEFAULT 0.0,
     usefulness INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
@@ -237,6 +291,10 @@ CREATE INDEX IF NOT EXISTS idx_scope_rules_mission ON scope_rules(mission_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_mission ON tasks(mission_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, priority);
 CREATE INDEX IF NOT EXISTS idx_tasks_target ON tasks(target, status);
+CREATE INDEX IF NOT EXISTS idx_hypotheses_mission ON hypotheses(mission_id, status);
+CREATE INDEX IF NOT EXISTS idx_hypotheses_target ON hypotheses(mission_id, target, status);
+CREATE INDEX IF NOT EXISTS idx_outcome_assessments_hypothesis
+    ON outcome_assessments(hypothesis_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_observations_task ON observations(task_id);
 CREATE INDEX IF NOT EXISTS idx_graph_nodes_mission ON graph_nodes(mission_id);
 CREATE INDEX IF NOT EXISTS idx_graph_edges_mission ON graph_edges(mission_id);
@@ -334,6 +392,8 @@ class DatabaseManager:
             self._migrate_v2_task_phases(conn)
         if version == 3:
             self._migrate_v3_indexes(conn)
+        if version == 4:
+            self._migrate_v4_outcome_judgment(conn)
         conn.execute(
             f"INSERT INTO {_MIGRATIONS_TABLE}(version, applied_at) VALUES(?,?)",
             (version, _now_iso()),
@@ -443,6 +503,188 @@ class DatabaseManager:
                 ON tasks(phase);
             CREATE INDEX IF NOT EXISTS idx_graph_nodes_type
                 ON graph_nodes(type);
+            """
+        )
+
+    # ------------------------------------------------------------------
+    def _migrate_v4_outcome_judgment(self, conn: sqlite3.Connection) -> None:
+        """Add hypothesis state, assessment persistence, and task check identity."""
+        task_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()
+        }
+        if "hypothesis_id" not in task_columns:
+            conn.execute(
+                "ALTER TABLE tasks ADD COLUMN hypothesis_id TEXT NOT NULL DEFAULT ''"
+            )
+        if "check_fingerprint" not in task_columns:
+            conn.execute(
+                "ALTER TABLE tasks ADD COLUMN check_fingerprint TEXT NOT NULL DEFAULT ''"
+            )
+
+        observation_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(observations)").fetchall()
+        }
+        if "hypothesis_evidence_json" not in observation_columns:
+            conn.execute(
+                "ALTER TABLE observations ADD COLUMN "
+                "hypothesis_evidence_json TEXT NOT NULL DEFAULT '[]'"
+            )
+
+        # DDL creates these tables before migrations run. Repeating the
+        # definitions here makes this migration independently idempotent for
+        # databases assembled from a partial historical schema.
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS hypotheses (
+                id TEXT PRIMARY KEY,
+                mission_id TEXT NOT NULL,
+                hypothesis_key TEXT NOT NULL,
+                statement TEXT NOT NULL DEFAULT '',
+                target TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'open' CHECK(status IN (
+                    'open','confirmed','refuted','inconclusive','exhausted'
+                )),
+                confidence REAL NOT NULL DEFAULT 0.5,
+                evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                independent_check_count INTEGER NOT NULL DEFAULT 0,
+                check_history_json TEXT NOT NULL DEFAULT '[]',
+                candidate_checks_json TEXT NOT NULL DEFAULT '[]',
+                last_information_value REAL NOT NULL DEFAULT 0.0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_assessed_at TEXT NOT NULL DEFAULT '',
+                UNIQUE(mission_id, hypothesis_key),
+                FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS outcome_assessments (
+                id TEXT PRIMARY KEY,
+                mission_id TEXT NOT NULL,
+                task_id TEXT NOT NULL UNIQUE,
+                hypothesis_id TEXT NOT NULL,
+                execution_outcome TEXT NOT NULL CHECK(execution_outcome IN (
+                    'succeeded','failed','blocked'
+                )),
+                hypothesis_status TEXT NOT NULL CHECK(hypothesis_status IN (
+                    'open','confirmed','refuted','inconclusive','exhausted'
+                )),
+                confidence REAL NOT NULL DEFAULT 0.5,
+                satisfied_criteria_json TEXT NOT NULL DEFAULT '[]',
+                unsatisfied_criteria_json TEXT NOT NULL DEFAULT '[]',
+                triggered_stop_conditions_json TEXT NOT NULL DEFAULT '[]',
+                evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+                reasoning TEXT NOT NULL DEFAULT '',
+                information_value REAL NOT NULL DEFAULT 0.0,
+                another_investigation_justified INTEGER NOT NULL DEFAULT 0,
+                check_fingerprint TEXT NOT NULL DEFAULT '',
+                independent_check INTEGER NOT NULL DEFAULT 0,
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+                FOREIGN KEY (hypothesis_id) REFERENCES hypotheses(id) ON DELETE CASCADE
+            );
+            """
+        )
+        assessment_columns = {
+            row["name"]
+            for row in conn.execute(
+                "PRAGMA table_info(outcome_assessments)"
+            ).fetchall()
+        }
+        if "attempt_count" not in assessment_columns:
+            conn.execute(
+                "ALTER TABLE outcome_assessments "
+                "ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0"
+            )
+
+        # Backfill identity for historical tasks without inferring evidential
+        # success from their execution status.
+        from outcome_judge import build_check_fingerprint, build_hypothesis_key
+
+        rows = conn.execute(
+            """SELECT id, mission_id, target, phase, objective, hypothesis,
+                      allowed_tools_json, success_criteria_json
+               FROM tasks WHERE hypothesis<>''"""
+        ).fetchall()
+        now = _now_iso()
+        for row in rows:
+            task = dict(row)
+            try:
+                allowed_tools = json.loads(task.get("allowed_tools_json") or "[]")
+            except (json.JSONDecodeError, TypeError):
+                allowed_tools = []
+            try:
+                criteria = json.loads(task.get("success_criteria_json") or "[]")
+            except (json.JSONDecodeError, TypeError):
+                criteria = []
+            task_data = {
+                "phase": task.get("phase", ""),
+                "objective": task.get("objective", ""),
+                "hypothesis": task.get("hypothesis", ""),
+                "target": task.get("target", ""),
+                "allowed_tools": allowed_tools,
+                "success_criteria": criteria,
+            }
+            key = build_hypothesis_key(
+                str(task.get("hypothesis", "")),
+                str(task.get("target", "")),
+            )
+            existing = conn.execute(
+                "SELECT id, candidate_checks_json FROM hypotheses "
+                "WHERE mission_id=? AND hypothesis_key=?",
+                (task["mission_id"], key),
+            ).fetchone()
+            if existing is None:
+                hypothesis_id = _new_id("HYP")
+                conn.execute(
+                    """INSERT INTO hypotheses(
+                        id, mission_id, hypothesis_key, statement, target, status,
+                        confidence, evidence_refs_json, attempt_count,
+                        independent_check_count, check_history_json,
+                        candidate_checks_json, last_information_value,
+                        created_at, updated_at, last_assessed_at)
+                       VALUES(?,?,?,?,?,'open',0.5,'[]',0,0,'[]',?,0.0,?,?,?)""",
+                    (
+                        hypothesis_id,
+                        task["mission_id"],
+                        key,
+                        task["hypothesis"],
+                        task["target"],
+                        json.dumps(allowed_tools),
+                        now,
+                        now,
+                        "",
+                    ),
+                )
+            else:
+                hypothesis_id = existing["id"]
+                try:
+                    candidates = json.loads(existing["candidate_checks_json"] or "[]")
+                except (json.JSONDecodeError, TypeError):
+                    candidates = []
+                for tool in allowed_tools:
+                    if tool not in candidates:
+                        candidates.append(tool)
+                conn.execute(
+                    "UPDATE hypotheses SET candidate_checks_json=?, updated_at=? WHERE id=?",
+                    (json.dumps(candidates), now, hypothesis_id),
+                )
+            conn.execute(
+                "UPDATE tasks SET hypothesis_id=?, check_fingerprint=? WHERE id=?",
+                (hypothesis_id, build_check_fingerprint(task_data), task["id"]),
+            )
+
+        conn.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS idx_tasks_hypothesis
+                ON tasks(mission_id, hypothesis_id, check_fingerprint);
+            CREATE INDEX IF NOT EXISTS idx_hypotheses_mission
+                ON hypotheses(mission_id, status);
+            CREATE INDEX IF NOT EXISTS idx_hypotheses_target
+                ON hypotheses(mission_id, target, status);
+            CREATE INDEX IF NOT EXISTS idx_outcome_assessments_hypothesis
+                ON outcome_assessments(hypothesis_id, created_at);
             """
         )
 

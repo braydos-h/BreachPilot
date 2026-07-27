@@ -6,7 +6,7 @@ primitives into live runtime behavior across the three control flows:
 - Flow A (run_exploit_agent): ExploitMutator writes real-embedding lessons on
   every exploit outcome; PayloadCrafter.generate folds cross-mission similar
   lessons into the generation prompt.
-- Flow B (AgentLoop): task success/failure/reflection write outcomes + lessons;
+- Flow B (AgentLoop): evidence-confirmed/refuted judgments write outcomes + lessons;
   planning recalls similar lessons + cross-mission memory; run() end distills
   episodic memories into a semantic lesson.
 - Swarm: reflection_agent persists its reflection as a cross-mission lesson +
@@ -18,16 +18,19 @@ filter, failure logging) is covered in ``test_semantic_memory.py``.
 
 from __future__ import annotations
 
-import json
 import shutil
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from tools.payload_crafter import PayloadCrafter, CraftedPayload
+from outcome_judge import (
+    ExecutionOutcome,
+    HypothesisStatus,
+    OutcomeAssessment,
+)
 from tools.exploit_mutator import ExploitMutator
-
+from tools.payload_crafter import CraftedPayload, PayloadCrafter
 
 # ── Fakes ─────────────────────────────────────────────────────────────────
 
@@ -252,7 +255,16 @@ def test_flowb_record_outcome_and_lesson_success_writes_both(tmp_path):
     loop._semantic_memory = sem  # spy on the semantic write
     task = {"task_id": "T-1", "phase": "exploit", "target": "10.0.0.5",
             "objective": "brute ssh"}
-    loop._record_outcome_and_lesson(task, success=True)
+    assessment = OutcomeAssessment(
+        task_id="T-1",
+        hypothesis_id="H-1",
+        execution_outcome=ExecutionOutcome.SUCCEEDED,
+        hypothesis_status=HypothesisStatus.CONFIRMED,
+        confidence=0.9,
+        evidence_refs=["E-1"],
+        reasoning="Evidence confirmed the hypothesis.",
+    )
+    loop._record_outcome_and_lesson(task, assessment)
     # Bayesian outcome recorded on the real ExperienceStore (Beta(2,1)=0.667)
     assert loop._experience.get_confidence("10.0.0.5", "exploit:brute ssh") > 0.5
     # Real-embedding semantic lesson written with the right signature/action
@@ -269,8 +281,16 @@ def test_flowb_record_outcome_and_lesson_failure_includes_why(tmp_path):
     loop._semantic_memory = sem
     task = {"task_id": "T-2", "phase": "exploit", "target": "10.0.0.5",
             "objective": "x"}
-    loop._record_outcome_and_lesson(task, success=False,
-                                    failure_output="Connection refused")
+    assessment = OutcomeAssessment(
+        task_id="T-2",
+        hypothesis_id="H-2",
+        execution_outcome=ExecutionOutcome.SUCCEEDED,
+        hypothesis_status=HypothesisStatus.REFUTED,
+        confidence=0.9,
+        evidence_refs=["E-2"],
+        reasoning="Evidence refuted the hypothesis: Connection refused.",
+    )
+    loop._record_outcome_and_lesson(task, assessment)
     assert loop._experience.get_confidence("10.0.0.5", "exploit:x") < 0.5
     assert sem.lessons[0]["outcome"] == "failure"
     assert "Connection refused" in sem.lessons[0]["text"]
@@ -282,8 +302,39 @@ def test_flowb_record_outcome_no_semantic_bayesian_only(tmp_path):
     assert loop._semantic_memory is None
     task = {"task_id": "T-3", "phase": "recon", "target": "10.0.0.5",
             "objective": "x"}
-    loop._record_outcome_and_lesson(task, success=True)  # must not raise
+    assessment = OutcomeAssessment(
+        task_id="T-3",
+        hypothesis_id="H-3",
+        execution_outcome=ExecutionOutcome.SUCCEEDED,
+        hypothesis_status=HypothesisStatus.CONFIRMED,
+        confidence=0.9,
+        evidence_refs=["E-3"],
+    )
+    loop._record_outcome_and_lesson(task, assessment)  # must not raise
     assert loop._experience.get_confidence("10.0.0.5", "recon:x") > 0.5
+
+
+def test_flowb_inconclusive_judgment_does_not_write_learning(tmp_path):
+    loop = _make_flowb_loop(tmp_path)
+    sem = FakeSemantic()
+    loop._semantic_memory = sem
+    task = {
+        "task_id": "T-INC",
+        "phase": "recon",
+        "target": "10.0.0.5",
+        "objective": "x",
+    }
+    assessment = OutcomeAssessment(
+        task_id="T-INC",
+        hypothesis_id="H-INC",
+        execution_outcome=ExecutionOutcome.SUCCEEDED,
+        hypothesis_status=HypothesisStatus.INCONCLUSIVE,
+        confidence=0.5,
+        evidence_refs=["E-INC"],
+    )
+    loop._record_outcome_and_lesson(task, assessment)
+    assert loop._experience.observation_count("10.0.0.5", "recon:x") == 0
+    assert sem.lessons == []
 
 
 def test_flowb_distill_episode_factual_fallback(tmp_path):

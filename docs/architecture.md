@@ -12,6 +12,7 @@ User
   -> PlannerAgent + TaskQueue
   -> ExecutorAgent + ToolRouter + MCP/tools
   -> ObserverAgent
+  -> OutcomeJudge + HypothesisRepository
   -> MemoryManager + TargetGraph + EvidenceStore
   -> FindingVerifier
   -> ReportGenerator
@@ -86,6 +87,8 @@ The exploit server intentionally says its tools are gated at the policy layer, n
 - missions
 - scope rules
 - tasks
+- hypotheses and materially distinct check history
+- outcome assessments
 - observations
 - graph nodes and edges
 - evidence metadata
@@ -122,10 +125,28 @@ Long-running exploit and campaign state is handled by:
 - `task_queue.py`: task lifecycle, phase normalization, priority scoring, deduplication.
 - `executor.py`: executes approved tasks through `ToolRouter` and summarizes results.
 - `observer.py`: turns tool output into structured observations and follow-up signals.
+- `outcome_judge.py`: deterministically separates execution outcome from
+  evidential outcome, evaluates task criteria/stop conditions, persists
+  hypothesis state and assessments, and rejects terminal or repeated paths.
 - `memory.py`: working, episodic, semantic, target, hypothesis, dead-end, and finding-note memory.
 - `target_graph.py`: attack surface graph of assets, services, endpoints, evidence, and findings.
 - `finding_verifier.py`: finding lifecycle and validation scoring.
 - `report_generator.py`: Markdown report generation.
+
+## Hypothesis and Outcome Boundary
+
+`ExecutionResult.success` describes whether a tool invocation completed. It is
+not a finding or investigation result. After every executed check,
+`ObserverAgent` produces structured fields and `OutcomeJudge` evaluates those
+fields against the task's `success_criteria` and `stop_conditions`. Raw output
+words such as `success` are not proof.
+
+The persisted hypothesis ledger owns statement/target identity, status,
+confidence, evidence references, attempt counts, independent check history, and
+timestamps. Confirmed, refuted, and exhausted states are terminal for planning.
+Inconclusive states can continue only through a new check fingerprint. Outcome
+judgment may stop or redirect work, but it never bypasses scope, risk,
+permission, approval, target-lock, or tool-routing controls.
 
 ## Tooling Layer
 

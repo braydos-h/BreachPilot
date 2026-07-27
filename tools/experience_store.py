@@ -94,6 +94,52 @@ class ExperienceStore:
             )
         return rid
 
+    def record_evidential_outcome(
+        self,
+        target_signature: str,
+        action_type: str,
+        hypothesis_status: str,
+        *,
+        confidence: float,
+        evidence_refs: list[str],
+        metadata: dict[str, Any] | None = None,
+    ) -> str | None:
+        """Record learning only for evidence-supported confirmation/refutation.
+
+        Operational success/failure is intentionally not accepted here.
+        Inconclusive, open, and exhausted hypotheses return ``None`` so they
+        cannot reinforce a tool or strategy.
+        """
+        normalized_status = str(hypothesis_status).strip().lower()
+        outcome_by_status = {
+            "confirmed": "success",
+            "refuted": "failure",
+        }
+        outcome = outcome_by_status.get(normalized_status)
+        if outcome is None:
+            return None
+        try:
+            calibrated_confidence = max(0.0, min(float(confidence), 1.0))
+        except (TypeError, ValueError):
+            calibrated_confidence = 0.5
+        if not evidence_refs:
+            return None
+        evidence_metadata = dict(metadata or {})
+        evidence_metadata.update(
+            {
+                "hypothesis_status": normalized_status,
+                "judgment_confidence": calibrated_confidence,
+                "evidence_refs": list(dict.fromkeys(str(ref) for ref in evidence_refs if ref)),
+                "evidence_grounded": True,
+            }
+        )
+        return self.record_outcome(
+            target_signature,
+            action_type,
+            outcome,
+            evidence_metadata,
+        )
+
     # ── Bayesian confidence query ───────────────────────────────────────
 
     def get_confidence(

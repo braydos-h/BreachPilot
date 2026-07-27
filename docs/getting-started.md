@@ -84,7 +84,7 @@ python cli.py next-task
 
 ## Configuration Files
 
-- `config.yaml`: runtime configuration for Ollama, model aliases, MCP transport, exploit behavior, stealth options, CVE lookup, research, swarm, reasoning, memory, adaptive exploit settings, and optional peer-model consultation.
+- `config.yaml`: runtime configuration for Ollama, model aliases, MCP transport, exploit behavior, stealth options, CVE lookup, research, swarm, reasoning, memory, outcome judgment, adaptive exploit settings, and optional peer-model consultation.
 - `mission.yaml`: sample mission definition. This is where allowed assets, disallowed assets, forbidden actions, testing modes, rate limits, accounts, and notes are defined.
 
 Important defaults in `config.yaml`:
@@ -95,6 +95,16 @@ Important defaults in `config.yaml`:
 - `exploit.allowed_targets: []` (the runtime `--target` is unioned in via `EXPLOIT_TARGET`)
 - `swarm.enabled: true`
 - `memory.semantic_enabled: true`
+- `outcome_judgment.max_inconclusive_attempts: 3`
+- `outcome_judgment.confirmation_threshold: 0.75`
+- `outcome_judgment.refutation_threshold: 0.75`
+- `outcome_judgment.min_evidence_references: 1`
+
+Only materially different inconclusive checks count toward the attempt cap, and
+the configured minimum is two so one failed command cannot exhaust a
+hypothesis. Thresholds must be between `0.5` and `1.0`; evidence references must
+be at least one for a confirmed/refuted terminal judgment. These settings only
+control interpretation and replanning—they do not grant execution authority.
 
 ## Main Entry Points
 

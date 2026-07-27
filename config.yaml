@@ -193,6 +193,13 @@ memory:
   attack_memory_max_context_chars: 6000
   experience_min_samples: 3
   experience_time_decay_days: 90
+outcome_judgment:
+  # Only materially different checks count. At least 2 prevents one failed
+  # command from exhausting a hypothesis.
+  max_inconclusive_attempts: 3
+  confirmation_threshold: 0.75
+  refutation_threshold: 0.75
+  min_evidence_references: 1
 adaptive_exploits:
   enabled: true
   max_mutations: 5

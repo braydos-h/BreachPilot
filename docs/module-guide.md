@@ -17,6 +17,7 @@
 | `executor.py` | Task execution through `ToolRouter`, with compact execution results. |
 | `tool_router.py` | Routes approved tool requests and applies scope-aware execution rules. |
 | `observer.py` | Parses tool output into structured observations and possible follow-up work. |
+| `outcome_judge.py` | Typed deterministic outcome assessment, hypothesis persistence, terminal/duplicate check guards. |
 | `summarizer.py` | Condenses nmap, HTTP, search, MSF, Python, terminal, and generic output. |
 | `memory.py` | Persistent memories and semantic memory bridge. |
 | `target_graph.py` | Graph model for assets, services, endpoints, parameters, evidence, and findings. |
@@ -86,7 +87,7 @@ When adding a screen:
 
 Tests are organized by module or feature. Examples:
 
-- Core workflow: `test_mission.py`, `test_scope_gate.py`, `test_risk_controller.py`, `test_task_queue.py`, `test_agent_loop.py`
+- Core workflow: `test_mission.py`, `test_scope_gate.py`, `test_risk_controller.py`, `test_task_queue.py`, `test_outcome_judge.py`, `test_agent_loop.py`
 - Persistence/reporting: `test_evidence.py`, `test_finding_verifier.py`, `test_report_generator.py`
 - Exploit tooling: `test_attack_modules.py`, `test_mcp_workspace.py`, `test_retry_logic.py`, `test_lateral_tools.py`
 - Safety/config: `test_safety_reviewer.py`, `test_config_manager.py`, `test_command_analyzer.py`, `test_audit_redaction.py`

@@ -52,6 +52,7 @@ class ExecutionResult:
     execution_time: float = 0.0
     scope_gate_passed: bool = False
     risk_gate_passed: bool = False
+    raw_output: str = ""
 
 
 class ExecutorAgent:
@@ -152,6 +153,7 @@ class ExecutorAgent:
             execution_time=elapsed,
             scope_gate_passed=result.allowed,
             risk_gate_passed=result.allowed,
+            raw_output=result.output,
         )
 
     # ── Helpers ─────────────────────────────────────────────────────────

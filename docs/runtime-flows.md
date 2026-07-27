@@ -26,6 +26,8 @@ MissionController
   -> ExecutorAgent
   -> ToolRouter
   -> ObserverAgent
+  -> OutcomeJudge
+  -> HypothesisRepository
   -> EvidenceStore
   -> MemoryManager
   -> TargetGraph
@@ -39,8 +41,36 @@ Key rules:
 - TaskQueue chooses pending work by priority.
 - Executor only executes approved tasks and delegates scope enforcement to ToolRouter.
 - Observer extracts facts and possible findings, but does not validate vulnerabilities.
+- OutcomeJudge evaluates structured facts against task criteria after both
+  successful and failed executions. Execution status remains on the task;
+  hypothesis status is persisted separately.
+- Confirmed, refuted, and exhausted hypotheses block pending/replanned checks.
+  An inconclusive hypothesis can continue only with a materially different
+  check fingerprint.
+- The learning loop records positive experience for confirmed hypotheses and
+  negative experience for refuted hypotheses only. Inconclusive/exhausted
+  judgments do not reinforce tools or strategies, and learning metadata keeps
+  the evidence references.
 - FindingVerifier owns validation state.
 - EvidenceStore keeps raw outputs linked to tasks/findings.
+
+The judgment sequence is:
+
+```text
+ExecutionResult (succeeded / failed / blocked)
+  + structured Observation
+  + task success_criteria / stop_conditions
+  + evidence references
+  -> OutcomeAssessment
+  -> hypothesis status (open / confirmed / refuted / inconclusive / exhausted)
+  -> operator event + audit record
+  -> optional evidence-supported experience
+  -> next planning cycle
+```
+
+Blocked checks are normally handled before observation and do not consume a
+hypothesis attempt. A failed command can still yield useful structured evidence,
+but the error itself is never treated as a refutation.
 
 ## Recon-First Flow
 
