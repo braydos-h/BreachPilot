@@ -227,14 +227,40 @@ def load_skill_registry(
 
     Relative roots are resolved from ``base_dir`` or the current working
     directory. Files that fail to parse are skipped and reported in ``errors``.
+
+    Plugin-contributed skill directories (registered via
+    ``PLUGIN_REGISTRY.register_skill_dir``) are appended to the roots list and
+    walked the same way. Duplicate roots (a plugin dir already in ``roots``) are
+    skipped so a plugin skill dir is never double-walked.
     """
 
     base = Path(base_dir or ".").resolve()
+
+    # Merge plugin-contributed skill dirs into the roots list (best-effort;
+    # a plugins-module import failure never breaks skill loading).
+    merged: list[str | Path] = list(roots)
+    seen: set[str] = set()
+    for r in merged:
+        try:
+            seen.add(str(Path(r)))
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        from tools.plugins import PLUGIN_REGISTRY
+        for extra in PLUGIN_REGISTRY.skill_dirs:
+            key = str(extra)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(extra)
+    except Exception:  # noqa: BLE001 -- plugins import is best-effort
+        pass
+
     resolved_roots: list[Path] = []
     skills: dict[str, LoadedSkill] = {}
     errors: list[str] = []
 
-    for root_value in roots:
+    for root_value in merged:
         root = Path(root_value)
         if not root.is_absolute():
             root = base / root

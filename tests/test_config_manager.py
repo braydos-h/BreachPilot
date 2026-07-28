@@ -394,4 +394,6 @@ outcome_judgment:
         "confirmation_threshold": 0.75,
         "refutation_threshold": 0.75,
         "min_evidence_references": 1,
+        # Phase 1.2: Flow A exploit-engine outcome judgment toggle (opt-in, default OFF).
+        "flow_a": False,
     }

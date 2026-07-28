@@ -73,8 +73,23 @@ class ExperienceStore:
         action_type: str,
         outcome: str,  # 'success', 'failure', 'partial'
         metadata: dict[str, Any] | None = None,
+        *,
+        action_suffix: str = "",
     ) -> str:
-        """Record an outcome observation. Returns the record ID."""
+        """Record an outcome observation. Returns the record ID.
+
+        ``action_suffix`` is an optional free-form tag (e.g. ``"shell"``,
+        ``"creds"``, ``"partial"``) appended to ``action_type`` as
+        ``f"{action_type}:{action_suffix}"`` for storage and querying. This
+        lets the Bayesian posterior condition on the distinct outcome class —
+        a shell compromise (``"module:strategy:shell"``) is scored
+        independently from a credential dump (``"module:strategy:creds"``)
+        or a bare operational outcome (``"module:strategy"``), instead of all
+        three collapsing into one Beta distribution. Empty / falsy
+        ``action_suffix`` preserves the original behavior (callers that pass
+        a bare ``action_type`` are byte-identical to pre-1.1 runs).
+        """
+        stored_action = f"{action_type}:{action_suffix}" if action_suffix else action_type
         rid = _new_id("EXP")
         with self._db.connection(write=True) as conn:
             conn.execute(
@@ -82,9 +97,9 @@ class ExperienceStore:
                    VALUES(?,?,?,?,?,?,?,?,?)""",
                 (
                     rid,
-                    f"{target_signature}:{action_type}",
+                    f"{target_signature}:{stored_action}",
                     target_signature,
-                    action_type,
+                    stored_action,
                     outcome,
                     0.5,  # initial confidence
                     "[]",

@@ -22,6 +22,8 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
 
+from tools.opsec import process_user_agent
+
 from tools.reliability import CircuitBreaker, RateLimiter
 
 
@@ -224,7 +226,7 @@ class NVDClient:
         # UA so the request is not filtered/blocked at the edge.
         request = urllib.request.Request(
             url,
-            headers={"User-Agent": "netattackai-cve-lookup/1.0"},
+            headers={"User-Agent": process_user_agent("netattackai-cve-lookup/1.0")},
         )
         try:
             response = urllib.request.urlopen(request, timeout=self.settings.timeout_seconds)

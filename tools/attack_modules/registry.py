@@ -26,6 +26,9 @@ from tools.attack_modules.modules import (
     SUIDEnumeration,
     KernelExploitCheck,
     ContainerBreakout,
+    LinuxPersistence,
+    WindowsPersistence,
+    WebShellPersistence,
     FTPAnonymous,
     RedisExploit,
     ElasticsearchExploit,
@@ -45,6 +48,30 @@ from tools.attack_modules.modules import (
     CVEToExploit,
     DiffPatchAnalysis,
     FuzzToExploit,
+    SSRFProbe,
+    XXEProbe,
+    LFITraversal,
+    ASREPRoast,
+    Kerberoasting,
+    DCSyncAttack,
+    ADLDAPEnum,
+    WeaponizedExploit,
+    CloudPrivesc,
+    K8sPrivesc,
+    ModbusEnum,
+    DNP3Enum,
+    S7Enum,
+    BACnetEnum,
+    HMIDefaultCred,
+    IoTDefaultCred,
+    ExposedVCS,
+    CICDMisconfig,
+    DependencyConfusion,
+    ArtifactExposure,
+    SupplyChainRecon,
+    DetectionCoverageProbe,
+    LogSourceEnum,
+    OPSECPostureReport,
 )
 
 _MODULE_CLASSES: list[type[AttackModule]] = [
@@ -68,6 +95,9 @@ _MODULE_CLASSES: list[type[AttackModule]] = [
     SUIDEnumeration,
     KernelExploitCheck,
     ContainerBreakout,
+    LinuxPersistence,
+    WindowsPersistence,
+    WebShellPersistence,
     FTPAnonymous,
     RedisExploit,
     ElasticsearchExploit,
@@ -91,12 +121,62 @@ _MODULE_CLASSES: list[type[AttackModule]] = [
     CVEToExploit,
     DiffPatchAnalysis,
     FuzzToExploit,
+    # ── NEW: SSRF / XXE / LFI ──
+    SSRFProbe,
+    XXEProbe,
+    LFITraversal,
+    # ── NEW: Active Directory / Kerberos ──
+    ASREPRoast,
+    Kerberoasting,
+    DCSyncAttack,
+    ADLDAPEnum,
+    # ── NEW: Weaponized exploit synthesis ──
+    WeaponizedExploit,
+    # ── NEW: Cloud / Kubernetes privilege escalation ──
+    CloudPrivesc,
+    K8sPrivesc,
+    # --- Phase 6.3: ICS/SCADA/IoT enumeration (read-only) ---
+    ModbusEnum,
+    DNP3Enum,
+    S7Enum,
+    BACnetEnum,
+    HMIDefaultCred,
+    IoTDefaultCred,
+    # --- Phase 6.4: Supply-chain / CI-CD reconnaissance ---
+    ExposedVCS,
+    CICDMisconfig,
+    DependencyConfusion,
+    ArtifactExposure,
+    SupplyChainRecon,
+    # --- Phase 6.2: Detection-coverage / OPSEC posture (read-only) ---
+    DetectionCoverageProbe,
+    LogSourceEnum,
+    OPSECPostureReport,
 ]
+
+
+def _plugin_extra_module_classes() -> list[type]:
+    """Return plugin-registered AttackModule subclasses, if any.
+
+    Lazy import of ``tools.plugins`` wrapped so a plugins-module import
+    failure never breaks the built-in registry -- the consult is additive.
+    """
+    try:
+        from tools.plugins import PLUGIN_REGISTRY
+        return list(PLUGIN_REGISTRY.extra_module_classes)
+    except Exception:  # noqa: BLE001 -- best-effort plugin consult
+        return []
 
 
 def list_modules() -> list[AttackModule]:
     """Return instantiated copies of all registered modules."""
-    return [cls() for cls in _MODULE_CLASSES]
+    modules = [cls() for cls in _MODULE_CLASSES]
+    for cls in _plugin_extra_module_classes():
+        try:
+            modules.append(cls())
+        except Exception:  # noqa: BLE001 -- one bad plugin module never breaks the rest
+            pass
+    return modules
 
 
 def find_modules(
@@ -229,4 +309,10 @@ def get_module(name: str) -> AttackModule | None:
     for cls in _MODULE_CLASSES:
         if cls.name.lower() == name.lower():
             return cls()
+    for cls in _plugin_extra_module_classes():
+        try:
+            if cls.name.lower() == name.lower():
+                return cls()
+        except Exception:  # noqa: BLE001 -- best-effort plugin consult
+            pass
     return None

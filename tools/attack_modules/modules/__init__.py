@@ -12,6 +12,9 @@ from tools.attack_modules.modules.web import (
     RaceRequest,
     TimingOracle,
     RequestSmuggling,
+    SSRFProbe,
+    XXEProbe,
+    LFITraversal,
 )
 from tools.attack_modules.modules.network_smb import (
     SMBGhost,
@@ -38,6 +41,10 @@ from tools.attack_modules.modules.auth_creds import (
     CredentialSpray,
     PasswordSpray,
     HashCrack,
+    ASREPRoast,
+    Kerberoasting,
+    DCSyncAttack,
+    ADLDAPEnum,
 )
 from tools.attack_modules.modules.privesc import (
     LinuxPrivescCheck,
@@ -45,6 +52,13 @@ from tools.attack_modules.modules.privesc import (
     SUIDEnumeration,
     KernelExploitCheck,
     ContainerBreakout,
+    CloudPrivesc,
+    K8sPrivesc,
+)
+from tools.attack_modules.modules.persistence import (
+    LinuxPersistence,
+    WindowsPersistence,
+    WebShellPersistence,
 )
 from tools.attack_modules.modules.crypto_jwt import JWTTamper
 from tools.attack_modules.modules.deserialize import DeserializeAttack
@@ -52,6 +66,27 @@ from tools.attack_modules.modules.synthesis import (
     CVEToExploit,
     DiffPatchAnalysis,
     FuzzToExploit,
+    WeaponizedExploit,
+)
+from tools.attack_modules.modules.ics_iot import (
+    ModbusEnum,
+    DNP3Enum,
+    S7Enum,
+    BACnetEnum,
+    HMIDefaultCred,
+    IoTDefaultCred,
+)
+from tools.attack_modules.modules.supply_chain import (
+    ExposedVCS,
+    CICDMisconfig,
+    DependencyConfusion,
+    ArtifactExposure,
+    SupplyChainRecon,
+)
+from tools.attack_modules.modules.detection import (
+    DetectionCoverageProbe,
+    LogSourceEnum,
+    OPSECPostureReport,
 )
 
 __all__ = [
@@ -75,6 +110,9 @@ __all__ = [
     "SUIDEnumeration",
     "KernelExploitCheck",
     "ContainerBreakout",
+    "LinuxPersistence",
+    "WindowsPersistence",
+    "WebShellPersistence",
     "FTPAnonymous",
     "RedisExploit",
     "ElasticsearchExploit",
@@ -93,5 +131,29 @@ __all__ = [
     "DumpHashes",
     "CVEToExploit",
     "DiffPatchAnalysis",
-    "FuzzToExploit"
+    "FuzzToExploit",
+    "SSRFProbe",
+    "XXEProbe",
+    "LFITraversal",
+    "ASREPRoast",
+    "Kerberoasting",
+    "DCSyncAttack",
+    "ADLDAPEnum",
+    "WeaponizedExploit",
+    "CloudPrivesc",
+    "K8sPrivesc",
+    "ModbusEnum",
+    "DNP3Enum",
+    "S7Enum",
+    "BACnetEnum",
+    "HMIDefaultCred",
+    "IoTDefaultCred",
+    "ExposedVCS",
+    "CICDMisconfig",
+    "DependencyConfusion",
+    "ArtifactExposure",
+    "SupplyChainRecon",
+    "DetectionCoverageProbe",
+    "LogSourceEnum",
+    "OPSECPostureReport",
 ]

@@ -405,3 +405,153 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
 
 
+
+    # ======================================================================
+    # 1b. Reconnaissance & Intelligence (Phase 3 Round 2: UDP / OSINT / diff)
+    # ======================================================================
+
+    @mcp.tool()
+    @require_allowlist()
+    async def run_udp_recon(target_ip: str, top_ports: int = 100) -> str:
+        """Run a UDP port scan against the single target.
+
+        Uses nmap -sU --top-ports <N> -sV (UDP requires root/sudo; the pipeline
+        auto-downgrades on privilege errors). Targets ONLY the single authorized
+        target_ip. Results are returned inline (UDP ports + udp services); this
+        is additive to the TCP run_full_recon path.
+
+        Args:
+            target_ip: IPv4 address of the single authorized target.
+            top_ports: Number of most-common UDP ports to scan (default 100).
+
+        Returns:
+            UDP_PORTS summary listing the discovered UDP ports and services.
+        """
+        if not validate_ipv4(target_ip):
+            return "ERROR: Invalid IPv4 address."
+        if not isinstance(top_ports, int) or top_ports <= 0:
+            top_ports = 100
+        try:
+            recon_config = ReconConfig.from_config(config)
+            pipeline = ReconPipeline(recon_config)
+            result: HostReconResult = await pipeline.recon_udp(target_ip, top_ports=top_ports)
+
+            udp_services = [s for s in result.services if s.protocol == "udp"]
+            lines = [
+                "UDP_PORTS: completed",
+                f"TARGET: {target_ip}",
+                f"SCAN_TOOL: {result.scan_tool}",
+                f"UDP_PORT_COUNT: {len(result.udp_ports)}",
+                f"UDP_PORTS: {result.udp_ports}",
+                "",
+                "UDP_SERVICES:",
+            ]
+            for svc in udp_services:
+                lines.append(
+                    f"  {svc.port}/udp - {svc.service}"
+                    f"{' (' + svc.banner[:60] + '...)' if svc.banner else ''}"
+                )
+            if result.warnings:
+                lines.append(f"\nWARNINGS: {'; '.join(result.warnings[:5])}")
+            if result.errors:
+                lines.append(f"ERRORS: {'; '.join(result.errors[:5])}")
+            return "\n".join(lines)
+        except Exception as exc:
+            return f"ERROR: UDP recon failed - {exc}"
+
+    @mcp.tool()
+    @require_allowlist()
+    def run_osint_recon(target_ip: str) -> str:
+        """Run passive OSINT aggregation against the single target.
+
+        PASSIVE ONLY: queries PUBLIC data sources (reverse DNS, DNS AAAA for
+        IPv6, crt.sh certificate transparency, optional Shodan) about the single
+        target. No active scanning, no third-party submissions. IPv6 is PASSIVE
+        ONLY (DNS AAAA lookup; no active IPv6 scan).
+
+        Args:
+            target_ip: IPv4 address of the single authorized target.
+
+        Returns:
+            OSINT summary: ipv6 addresses, reverse dns, cert-transparency count,
+            shodan enabled/disabled.
+        """
+        if not validate_ipv4(target_ip):
+            return "ERROR: Invalid IPv4 address."
+        from tools.recon_osint import run_osint
+
+        try:
+            osint = run_osint(target_ip)
+            if not isinstance(osint, dict):
+                return "OSINT: no result"
+            ipv6 = osint.get("ipv6_addresses") or []
+            rev = osint.get("reverse_dns") or ""
+            ct = osint.get("cert_transparency") or {}
+            ct_count = ct.get("count", 0) if isinstance(ct, dict) else 0
+            shodan = osint.get("shodan") or {}
+            shodan_enabled = bool(shodan.get("enabled", False)) if isinstance(shodan, dict) else False
+            hostname = osint.get("hostname") or ""
+            lines = [
+                "OSINT: completed",
+                f"TARGET: {target_ip}",
+                f"HOSTNAME: {hostname or '(none)'}",
+                f"REVERSE_DNS: {rev or '(none)'}",
+                f"IPV6_ADDRESSES: {ipv6 if ipv6 else '(none)'}",
+                f"CERT_TRANSPARENCY: {ct_count} certs",
+                f"SHODAN: {'enabled' if shodan_enabled else 'disabled'}",
+            ]
+            if isinstance(shodan, dict) and shodan.get("error"):
+                lines.append(f"SHODAN_ERROR: {shodan['error']}")
+            return "\n".join(lines)
+        except Exception as exc:
+            return f"ERROR: OSINT recon failed - {exc}"
+
+    @mcp.tool()
+    @require_allowlist()
+    def diff_recon_runs(old_path: str, new_path: str) -> str:
+        """Compare two persisted recon_result.json snapshots.
+
+        This tool does NOT scan; it loads two JSON files produced by prior
+        run_full_recon runs and reports added/removed ports, changed services,
+        new/lost CVEs, and OS changes. require_allowlist is applied for
+        audit-trail consistency even though no target is touched.
+
+        Args:
+            old_path: Filesystem path to the older recon_result.json.
+            new_path: Filesystem path to the newer recon_result.json.
+
+        Returns:
+            RECON_DIFF summary of the changes between the two snapshots.
+        """
+        from tools.recon_diff import diff_recon_files
+
+        if not old_path or not new_path:
+            return "ERROR: both old_path and new_path are required."
+        try:
+            diff = diff_recon_files(old_path, new_path)
+            if not isinstance(diff, dict):
+                return "RECON_DIFF: no result"
+            if diff.get("error"):
+                return f"RECON_DIFF: error - {diff['error']}"
+            target = diff.get("target_ip") or "(unknown)"
+            added = diff.get("added_ports") or []
+            removed = diff.get("removed_ports") or []
+            changed = diff.get("changed_services") or []
+            new_cves = diff.get("new_cves") or []
+            lost_cves = diff.get("lost_cves") or []
+            os_changed = diff.get("os_changed")
+            summary = diff.get("summary") or "no changes"
+            lines = [
+                "RECON_DIFF: completed",
+                f"TARGET: {target}",
+                f"SUMMARY: {summary}",
+                f"ADDED_PORTS: {added}",
+                f"REMOVED_PORTS: {removed}",
+                f"CHANGED_SERVICES: {len(changed)}",
+                f"NEW_CVES: {new_cves}",
+                f"LOST_CVES: {lost_cves}",
+                f"OS_CHANGED: {os_changed}",
+            ]
+            return "\n".join(lines)
+        except Exception as exc:
+            return f"ERROR: recon diff failed - {exc}"

@@ -149,6 +149,54 @@ swarm:
   - reflection
   max_parallel_agents: 3
 
+# Autonomous orchestrator Phase 2 capabilities — opt-in. All keys default OFF / 0
+# so default behavior is unchanged; the new attack-path capabilities must be
+# explicitly enabled per the CLAUDE.md opt-in rule. The orchestrator reads these
+# from mission_config, not ExploitSettings.
+autonomous:
+  persistence_phase: false        # Phase 2.2: run PERSISTENCE phase after access achieved
+  checkpoint_every: 0             # Phase 2.3: save attack_states.json every N completed targets (0 = off)
+  adaptive_replan: false          # Phase 2.4: per-target multi-round replan + vuln-chaining
+  max_cycles: 100                 # round cap when adaptive_replan is on
+  max_pivot_depth: 0              # already consumed by the orchestrator (single-IP lock default)
+
+# Recon coverage & depth (Phase 3). Gates the additive enumerators (TLS/SSL
+# cert parse, SMTP/DB banner parse, web spider, passive OSINT + IPv6 AAAA
+# lookup) and the UDP top-ports scan. The TCP scan_host path is unchanged
+# regardless. IPv6 stays PASSIVE-ONLY (AAAA lookup) -- the target-IP allowlist
+# lock is untouched.
+recon:
+  extended_enumerators: true      # enable TLS/SMTP/DB/spider/OSINT additive enumerators
+  udp_top_ports: 100              # nmap -sU --top-ports N for run_udp_recon / recon_udp
+
+# OPSEC / detection-evasion (Phase 6.2). The agent's OWN operational hardening
+# (pacing/jitter/UA-rotation/DNS-over-HTTPS/quiet-commands) so an authorized
+# assessment can simulate a low-noise adversary, plus detection-coverage testing
+# (canary probes + read-only footprint summary). NOT active evasion of the
+# target's defenses -- no log-clearing/timestomping/EDR defeat; the append-only
+# tamper-evident audit chain is untouched. Defaults OFF (opt-in); when enabled,
+# AggressionLevel.STEALTH becomes load-bearing.
+opsec:
+  enabled: false                  # master switch (opt-in)
+  ua_rotation: false              # rotate User-Agent across HTTP egress
+  doh: false                      # resolve via DNS-over-HTTPS
+  doh_provider: cloudflare        # cloudflare | google
+  min_gap_seconds: 0.0            # base pacing gap between actions
+  jitter_seconds: 0.0             # +/- random jitter on the gap
+  rate_per_minute: 0              # 0 = no token-bucket cap
+  quiet_command_patterns: []      # substrings to refuse when enabled
+  noise_budget: 0                 # max noisy commands allowed (0 = unlimited)
+
+# Eval/benchmark harness config. The --eval CLI flag still works when
+# ``enabled`` is false, but this block gates the defaults used by the eval
+# runner (output location, round budget, report formats).
+eval:
+  enabled: true                   # eval/benchmark harness enable (the --eval flag still works when false, but the config gates defaults)
+  output_dir: reports/eval        # where reports/eval/<run_id>/ trees are written
+  max_rounds: 30                  # attack_max_rounds for an eval run
+  write_markdown: true            # emit eval_report.md alongside the JSON
+  write_html: true                # emit eval_report.html alongside the JSON
+
 # Long-session mode — opt-in via ``--long-session`` flag or ``enabled: true``.
 # Lets a multi-hour attack run actually sustain itself: sends the model's real
 # context window (num_ctx) to Ollama, bounds each LLM call with an httpx
@@ -198,6 +246,11 @@ outcome_judgment:
   confirmation_threshold: 0.75
   refutation_threshold: 0.75
   min_evidence_references: 1
+  # Phase 1.2: wire OutcomeJudge into Flow A (exploit engine). Default OFF --
+  # first-run behavior is unchanged (shallow exit_code==0 success). When true,
+  # the exploit loop runs classify_exploit_result + OutcomeJudge.judge and uses
+  # the evidence-grounded HypothesisStatus to override the success flag.
+  flow_a: false
 adaptive_exploits:
   enabled: true
   max_mutations: 5

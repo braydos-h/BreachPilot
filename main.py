@@ -8,7 +8,7 @@ Usage:
 
 from __future__ import annotations
 
-__version__ = "0.49.7"
+__version__ = "0.49.12"
 
 import argparse
 import asyncio
@@ -380,6 +380,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                         help="Skip the ready-to-begin confirmation gate (use with caution)")
     parser.add_argument("--self-test", action="store_true",
                         help="Run a safe localhost smoke test against 127.0.0.1 and exit")
+    parser.add_argument("--eval", action="store_true",
+                        help="Run the eval/benchmark harness against --target and write reports/eval/<run_id>/")
     parser.add_argument("--ultrathink", action="store_true",
                         help="Enable deep reasoning mode: verbose chain-of-thought and frequent reflection")
     # ── Runtime skills flags (advisory prompt-context layer) ──
@@ -394,6 +396,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                         help="Exclude a skill by name for this run. Repeatable.")
     parser.add_argument("--no-skills-reselect", action="store_true",
                         help="Disable mid-run skill re-selection for this run")
+    # ── Plugin ecosystem flags ──
+    parser.add_argument("--list-plugins", dest="list_plugins", action="store_true",
+                        help="Print discovered plugins (name/version/capabilities/loaded) and exit")
     parsed = parser.parse_args(argv)
     return parsed
 
@@ -420,6 +425,15 @@ async def async_main(args: argparse.Namespace) -> int:
     # skill selection is built. Advisory only (hints/selection, never
     # permission/scope/audit).
     config = apply_skills_cli_overrides(config, args)
+    # Load plugins once during boot, BEFORE the MCP exploit server is created
+    # so plugin-contributed attack modules + MCP tool factories are registered
+    # before create_mcp_server runs. Best-effort: a plugin load failure never
+    # blocks boot.
+    try:
+        from tools.plugins import load_plugins
+        load_plugins(config)
+    except Exception:  # noqa: BLE001 -- plugin load must not block boot
+        ui.info("Plugin load skipped (plugins module unavailable or failed).")
     bootstrap_startup_api_keys(args, prompt=False)
     multi_model_cfg = config.get("multi_model", {}) or {}
     if getattr(args, "multi_model_consult", None) is None:
@@ -1347,7 +1361,8 @@ def main(argv: list[str] | None = None) -> int:
         interactive_startup = args.menu or (len(raw_argv) == 0 and not args.target.strip())
         bootstrap_startup_api_keys(
             args,
-            prompt=interactive_startup and not args.doctor and not getattr(args, "self_test", False),
+            prompt=interactive_startup and not args.doctor and not getattr(args, "self_test", False)
+            and not getattr(args, "eval", False),
         )
         setup_only = bool(args.setup_api_keys) and not any(
             [
@@ -1359,6 +1374,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.tui,
                 args.doctor,
                 getattr(args, "self_test", False),
+                getattr(args, "eval", False),
                 args.demo,
             ]
         )
@@ -1375,6 +1391,11 @@ def main(argv: list[str] | None = None) -> int:
             from tools.self_test import run_self_test
             return asyncio.run(run_self_test(args))
 
+        # --eval: run the eval/benchmark harness against --target and exit.
+        if getattr(args, "eval", False):
+            from tools.eval_harness import run_eval
+            return asyncio.run(run_eval(args))
+
         # --demo: run against a local sandbox target (DVWA-style).
         if args.demo:
             from tools.demo_mode import run_demo
@@ -1384,6 +1405,26 @@ def main(argv: list[str] | None = None) -> int:
         if getattr(args, "skills_list", False):
             config = load_config(args.config)
             return print_skills_catalog(config)
+
+        # --list-plugins: print discovered plugins and exit.
+        if getattr(args, "list_plugins", False):
+            from tools.plugins import list_discovered_plugins
+            config = load_config(args.config)
+            try:
+                from tools.plugins import load_plugins
+                load_plugins(config, entry_point_loader=lambda group: [])
+            except Exception:  # noqa: BLE001 -- listing must not crash boot
+                pass
+            plugins = list_discovered_plugins()
+            if not plugins:
+                ui.info("No plugins discovered.")
+                return 0
+            ui.info(f"Discovered {len(plugins)} plugin(s):")
+            for p in plugins:
+                state = "loaded" if p.get("loaded") else "discovered"
+                caps = ",".join(p.get("capabilities", []) or []) or "-"
+                print(f"  {p['name']} v{p.get('version', '?')} [{state}] caps={caps} - {p.get('description', '')}")
+            return 0
 
         # --tui flag: launch the full TUI dashboard
         if args.tui:

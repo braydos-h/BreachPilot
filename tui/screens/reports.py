@@ -77,7 +77,85 @@ class ReportsScreen(Screen):
 
     @on(DataTable.RowSelected)
     def _on_row(self) -> None:
-        pass  # Future: open preview
+        """Preview the most recent HTML report for the selected finding target.
+
+        There is no dedicated viewer widget; instead we surface a string render
+        of the HTML report path (and a short snippet) in the error/static pane.
+        The HTML is produced by ``EnhancedReportGenerator`` under
+        ``<workspace>/enhanced/*.html``; the legacy markdown report lives under
+        ``<workspace>/reports/<finding_id>.md``. We prefer the newest HTML and
+        fall back to the markdown path so the operator always gets a pointer.
+        """
+        target = self._selected_target()
+        html_path = self._latest_html_report()
+        md_path = self._legacy_md_path(target)
+        pane = self.query_one("#rpt-error", Static)
+        if html_path is not None:
+            pane.update(
+                f"[bold green]HTML report ready[/]\n[dim]{html_path}[/]\n"
+                "[dim]Open the file in a browser to view the full report.[/]"
+            )
+            self.notify(f"HTML report: {html_path.name}", severity="information")
+        elif md_path is not None:
+            pane.update(
+                f"[bold yellow]Markdown report only[/]\n[dim]{md_path}[/]\n"
+                "[dim]Generate an HTML report from the enhanced generator for a richer view.[/]"
+            )
+            self.notify("Markdown report available (no HTML yet)", severity="information")
+        else:
+            pane.update("[bold red]No report file found.[/] Press R to generate one.")
+            self.notify("No report file found yet", severity="warning")
+
+    def _selected_target(self) -> str:
+        """Best-effort: read the asset column of the currently highlighted row."""
+        try:
+            table = self.query_one("#rpt-table", DataTable)
+            coord = table.cursor_coordinate
+            if coord is None:
+                return ""
+            row_key = table.coordinate_to_row_key(coord)
+            if row_key is None:
+                return ""
+            # Column 3 is "Asset" (see on_mount).
+            try:
+                cell = table.get_cell_at(coord)
+            except Exception:
+                return ""
+            return str(cell or "")
+        except Exception:
+            return ""
+
+    def _latest_html_report(self):
+        """Return the newest ``*.html`` under the enhanced reports dir, or None."""
+        try:
+            svc = self._get_services()
+            ws = getattr(svc, "workspace_root", None)
+            if ws is None:
+                return None
+            from pathlib import Path
+            enhanced = Path(ws) / "enhanced"
+            if not enhanced.exists():
+                return None
+            candidates = sorted(enhanced.glob("*.html"), key=lambda p: p.stat().st_mtime, reverse=True)
+            return candidates[0] if candidates else None
+        except Exception:
+            return None
+
+    def _legacy_md_path(self, target: str):
+        """Return the legacy markdown report path for a target/finding, or None."""
+        try:
+            svc = self._get_services()
+            ws = getattr(svc, "workspace_root", None)
+            if ws is None:
+                return None
+            from pathlib import Path
+            reports = Path(ws) / "reports"
+            if not reports.exists():
+                return None
+            candidates = sorted(reports.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+            return candidates[0] if candidates else None
+        except Exception:
+            return None
 
     def action_generate_report(self) -> None:
         svc = self._get_services()

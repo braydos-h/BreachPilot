@@ -1,0 +1,7 @@
+name: example_recon_report
+version: 0.1.0
+description: Example plugin - a read-only recon-report attack module + plugin_info MCP tool
+author: NetAttackAi
+capabilities: [attack_module, mcp_tool]
+# opt-in: plugins default to disabled; enable via config plugins.enabled list
+enabled: false

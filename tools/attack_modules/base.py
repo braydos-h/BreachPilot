@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 
 @dataclass
@@ -17,14 +17,155 @@ class ModuleContext:
     workspace: Path = Path("exploit_workspace")
 
 
+# Status values a module's run() may legitimately return. Kept loose (str) on
+# the dataclass so legacy modules that return ad-hoc strings ("exploited",
+# "executed", ...) still round-trip through ``to_result`` without raising.
+ModuleStatus = Literal["info", "script_generated", "success", "failed", "blocked"]
+
+
+@dataclass
+class ModuleResult:
+    """Structured outcome of an attack module run (Phase 2.1).
+
+    The legacy contract is ``dict[str, Any]`` (``AttackModule.run`` still
+    returns that). ``ModuleResult`` is the typed shape the autonomous
+    orchestrator and the MCP renderer want to read -- it carries the keys
+    ``AttackState.record_success`` actually consumes (``shell_type``,
+    ``privilege_level``, ``credentials``, ``loot``, ``pivot_targets``) plus
+    evidence/references for the audit trail. Use ``to_result(d)`` to adapt a
+    module's existing dict return into a ``ModuleResult`` so existing modules
+    keep working unchanged.
+    """
+
+    status: str = "executed"
+    module: str = ""
+    script: str = ""
+    note: str = ""
+    suggested_command: str = ""
+    suggested_msf: str = ""
+    # Compromise signals -- only set when a real shell / foothold is achieved.
+    shell_type: str = ""  # none|reverse|bind|webshell|meterpreter|sh|cmd
+    privilege_level: str = ""  # ""|user|admin|system|root
+    credentials_found: list[str] = field(default_factory=list)
+    evidence: list[str] = field(default_factory=list)
+    references: list[str] = field(default_factory=list)
+    # Extra keys a module may pass through that are not first-class fields
+    # (e.g. ``techniques``, ``workflow``, ``prompt_template``). Preserved so the
+    # MCP renderer's existing dict access (``result.get("suggested_command")``
+    # etc.) and downstream consumers keep seeing them after adaptation.
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to the dict shape the legacy renderer / record_success expect.
+
+        Drops empty optional fields (mirrors the renderer's ``if result.get(...)``
+        guards) but always includes ``status`` and ``module``. Merges ``extra``
+        so pass-through keys surface as top-level dict entries.
+        """
+        out: dict[str, Any] = {
+            "status": self.status or "executed",
+            "module": self.module,
+        }
+        if self.script:
+            out["script"] = self.script
+        if self.note:
+            out["note"] = self.note
+        if self.suggested_command:
+            out["suggested_command"] = self.suggested_command
+        if self.suggested_msf:
+            out["suggested_msf"] = self.suggested_msf
+        if self.shell_type:
+            out["shell_type"] = self.shell_type
+        if self.privilege_level:
+            out["privilege_level"] = self.privilege_level
+        if self.credentials_found:
+            # record_success reads result["credentials"] as a list[dict[str,str]];
+            # accept both str entries (this dataclass) and dict entries (legacy).
+            out["credentials"] = list(self.credentials_found)
+        if self.evidence:
+            out["evidence"] = list(self.evidence)
+        if self.references:
+            out["references"] = list(self.references)
+        # Pass-through extra keys win over the typed defaults only when the
+        # module set them explicitly (modules that return dicts with extra
+        # workflow/prompt_template data keep that data).
+        for k, v in self.extra.items():
+            if k not in out and v not in (None, "", [], {}):
+                out[k] = v
+        return out
+
+    @classmethod
+    def to_result(cls, d: dict[str, Any] | "ModuleResult") -> "ModuleResult":
+        """Adapt a module's existing dict return (or a ModuleResult) into a
+        ``ModuleResult``. Existing dict keys map 1:1; unknown keys are stashed
+        in ``extra`` so they survive a round-trip via ``to_dict``.
+        """
+        if isinstance(d, ModuleResult):
+            return d
+        if not isinstance(d, dict):
+            # Defensive: a misbehaving module returned a non-dict; degrade to
+            # an info-stub so the caller never crashes.
+            return cls(status="info", note=f"non-dict module return: {type(d).__name__}")
+
+        known = {
+            "status", "module", "script", "note", "suggested_command",
+            "suggested_msf", "shell_type", "privilege_level",
+            "credentials_found", "evidence", "references", "extra",
+        }
+        # Modules historically used "credentials" (list[dict]) not
+        # "credentials_found" (list[str]); normalize both onto the dataclass.
+        creds = d.get("credentials_found") or d.get("credentials") or []
+        if isinstance(creds, dict):
+            creds = [creds]
+        creds_list: list[str] = []
+        for c in creds:
+            if isinstance(c, str):
+                creds_list.append(c)
+            elif isinstance(c, dict):
+                # Flatten single-cred dicts to "user=... password=..." style.
+                creds_list.append(" ".join(f"{k}={v}" for k, v in c.items()))
+        extra = {k: v for k, v in d.items() if k not in known and k != "credentials"}
+        return cls(
+            status=str(d.get("status", "executed") or "executed"),
+            module=str(d.get("module", "") or ""),
+            script=str(d.get("script", "") or ""),
+            note=str(d.get("note", "") or ""),
+            suggested_command=str(d.get("suggested_command", "") or ""),
+            suggested_msf=str(d.get("suggested_msf", "") or ""),
+            shell_type=str(d.get("shell_type", "") or ""),
+            privilege_level=str(d.get("privilege_level", "") or ""),
+            credentials_found=creds_list,
+            evidence=list(d.get("evidence", []) or []),
+            references=list(d.get("references", []) or []),
+            extra=extra,
+        )
+
+
 class AttackModule(ABC):
-    """Base class for pre-packaged attack modules the AI can call via MCP."""
+    """Base class for pre-packaged attack modules the AI can call via MCP.
+
+    ``target_versions`` maps a lowercased service name to a list of
+    version-substring patterns that are known-vulnerable for this module. The
+    default (empty dict) means "no version constraint" -- the module's
+    applicability is computed purely from service/port/CVE matching, so every
+    existing module with ``target_versions={}`` behaves exactly as before.
+
+    When a module declares ``target_versions`` and a service present in
+    ``ctx.services`` both (a) has its lowercased name as a key and (b) reports a
+    version string containing any of the declared patterns (case-insensitive
+    substring match), ``applicability`` adds a single +25 bonus ONCE per module
+    (not per pattern, not per service -- a flat +25 if any declared vulnerable
+    version is observed). The bonus is applied AFTER the existing
+    service/port/CVE scoring and BEFORE the ``min(score, 100)`` cap, so it can
+    never push a module past 100.
+    """
 
     name: str = ""
     description: str = ""
     target_services: list[str] = []
     target_ports: list[int] = []
     required_cves: list[str] = []
+    target_versions: dict[str, list[str]] = {}
 
     def applicability(self, ctx: ModuleContext) -> int:
         """Return 0-100 score indicating how applicable this module is.
@@ -43,6 +184,25 @@ class AttackModule(ABC):
         for cve in self.required_cves:
             if cve.upper() in cve_upper:
                 score += 40
+
+        # Version-aware bonus (Phase 4): if this module declares known-vulnerable
+        # version patterns and ANY service present in ctx.services matches one of
+        # them (case-insensitive substring), add a single flat +25. Empty
+        # target_versions (the default) short-circuits and changes nothing.
+        if self.target_versions:
+            version_bonus = False
+            for s in ctx.services:
+                svc = s.get("service", "").lower()
+                patterns = self.target_versions.get(svc)
+                if not patterns:
+                    continue
+                version = (s.get("version", "") or "").lower()
+                if any(p.lower() in version for p in patterns):
+                    version_bonus = True
+                    break
+            if version_bonus:
+                score += 25
+
         return min(score, 100)
 
     @abstractmethod

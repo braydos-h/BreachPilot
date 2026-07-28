@@ -78,7 +78,7 @@ from tools.validation_utils import (
     validate_ipv4,
 )
 from tools.web_researcher import WebResearcher
-from db import DatabaseManager
+from db import DatabaseManager, get_default_db
 
 _ORIGINAL_SUBPROCESS_RUN = subprocess.run
 
@@ -343,6 +343,7 @@ __all__ = [
     "disabled_research_tools_message",
     "extract_ips_from_command",
     "format_cve_results",
+    "get_default_db",
     "get_metasploit_bridge",
     "get_module",
     "get_session_manager",

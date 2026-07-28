@@ -39,6 +39,7 @@ from tui.screens.memory_browser import MemoryBrowserScreen
 from tui.screens.graph import GraphScreen
 from tui.screens.swarm import SwarmScreen
 from tui.screens.skills_screen import SkillsScreen
+from tui.screens.eval import EvalScreen
 
 
 # ── Reusable widgets ───────────────────────────────────────────────────────
@@ -78,6 +79,7 @@ class _AppSidebar(ListView):
         yield ListItem(Static("  --- System ---"), id="nav-sep-system")
         yield ListItem(Static("  L  Logs"), id="nav-logs")
         yield ListItem(Static("  ?  Settings"), id="nav-settings")
+        yield ListItem(Static("  V  Eval"), id="nav-eval")
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if event.item is None:
@@ -129,6 +131,7 @@ def _screen_map():
             "help": HelpScreen,
             "settings": SettingsScreen,
             "skills": SkillsScreen,
+            "eval": EvalScreen,
         })
     return _SCREEN_MAP
 
@@ -155,6 +158,7 @@ class ResearchTUI(App):
         Binding("g", "goto_graph", "Graph"),
         Binding("l", "goto_logs", "Logs"),
         Binding("k", "goto_skills", "Skills"),
+        Binding("v", "goto_eval", "Eval"),
     ]
 
     TITLE = "AI Bug Bounty Research Agent"
@@ -225,6 +229,9 @@ class ResearchTUI(App):
     def action_goto_skills(self) -> None:
         self.push_screen(SkillsScreen())
 
+    def action_goto_eval(self) -> None:
+        self.push_screen(EvalScreen())
+
     def action_toggle_help(self) -> None:
         self.push_screen(HelpScreen())
 
@@ -275,6 +282,8 @@ class ResearchTUI(App):
             self.push_screen(TargetsScreen())
         elif item == "nav-settings":
             self.push_screen(SettingsScreen())
+        elif item == "nav-eval":
+            self.push_screen(EvalScreen())
 
     def _update_status(self) -> None:
         svc = self._services

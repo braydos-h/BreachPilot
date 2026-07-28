@@ -21,11 +21,14 @@ NetAttackAI combines reconnaissance, model-guided investigation, evidence collec
 
 | Area | What it provides |
 | --- | --- |
-| Recon and research | Nmap-based discovery, service enrichment, CVE intelligence, web research, goal suggestions, and runtime skill selection. |
+| Recon and research | Nmap-based discovery (TCP + UDP top-ports), TLS/SSL cert parsing, SMTP/DB banner parsing, off-site-bounded web spider, passive OSINT (reverse DNS, crt.sh certificate transparency, optional Shodan, IPv6 AAAA lookup), recon-run diffing, service enrichment, CVE intelligence, web research, goal suggestions, and runtime skill selection. |
 | AI-assisted operations | Ollama model routing, configurable model aliases, optional peer-model consultation, adaptive strategies, and resumable long sessions. |
+| OPSEC / detection-evasion | Opt-in agent self-hardening: aggression-scaled jittered pacing (STEALTH→MAXIMUM), User-Agent rotation across HTTP egress, DNS-over-HTTPS, noisy-command scoring + low-noise rewrite suggestions, and a quiet-command denylist — making `AggressionLevel.STEALTH` load-bearing. Plus detection-coverage testing: canary-action planning and a read-only audit-footprint summary. This is OPSEC hardening of the agent and detection-coverage validation, not active evasion of the target's defenses; the tamper-evident audit chain is untouched. |
 | Operator experiences | Guided terminal menu, direct CLI, a Textual dashboard, and MCP servers for client integrations. |
 | Assessment workflow | Missions, scope and risk controls, queued tasks, evidence-grounded hypothesis judgment, target graphs, memory, findings, and Markdown reports. |
 | Specialist swarm | Optional recon, vulnerability, exploit, post-exploit, critic, and reflection agents coordinated through shared state. |
+| Plugin ecosystem | Opt-in, no-recompile extensions discovered from a `plugins/` directory or Python entry points. A plugin contributes attack modules, MCP tools, skill directories, and config sections through a small registration API. Plugin MCP tools must stack the same `@require_allowlist()` / `@audit_tool` safety decorators as built-ins, so the target-IP allowlist lock and audit trail apply automatically. Disabled by default; list with `--list-plugins`. |
+| Pre-packaged attack modules | 66 ranked recipes the AI can dispatch via `run_attack_module` / `list_attack_modules`: web (SQLi, XSS, SSTI, GraphQL, SSRF, XXE, LFI, request smuggling, race/timing), AD/Kerberos (AS-REP roasting, kerberoasting, DCSync, LDAP enum), credential amplifiers, privesc (Linux/Windows/kernel/container/cloud-IMDS/k8s), persistence, ICS/SCADA/IoT enumeration (Modbus/DNP3/S7/BACnet + HMI/IoT default-cred — read-only, non-disruptive), supply-chain/CI-CD recon (exposed VCS, CI misconfig, dependency-confusion detection, artifact exposure), detection-coverage/OPSEC posture (canary probes, log-source enum, posture report — read-only), and AI-assisted CVE→exploit synthesis. Modules are ranked by service/port/CVE applicability plus a version-match bonus and cross-mission Bayesian experience. |
 
 ## Quick start
 
@@ -94,9 +97,11 @@ Useful commands:
 | `python main.py --doctor` | Check Python, dependencies, Nmap, Ollama, models, configuration, workspaces, and ports. |
 | `python main.py --self-test` | Run the localhost-only, read-only smoke test. |
 | `python main.py --skills-list` | View the runtime-skill catalog. |
+| `python main.py --list-plugins` | List discovered plugins (name/version/capabilities/loaded) and exit. |
 | `python main.py --tui` | Launch the Textual dashboard from the main launcher. |
 | `python main.py --swarm --critic --reflection` | Enable specialist-agent coordination and review for a compatible run. |
 | `python main.py --long-session --resume <RUN_OR_SESSION_ID>` | Run or resume a checkpointed session. |
+| `python main.py --eval --target <AUTHORIZED_LAB_IP>` | Run the eval/benchmark harness against a target and write `reports/eval/<run_id>/`. |
 | `python main.py --help` | Show the complete CLI reference. |
 
 ### Structured research workflow
@@ -127,6 +132,14 @@ Provider values are read from the environment; `.env.example` is a template, not
 ```bash
 python main.py --setup-api-keys
 ```
+
+The `eval` top-level block in [`config.yaml`](config.yaml) gates the benchmark harness defaults (the `--eval` flag still runs when `enabled` is false):
+
+- `enabled` — eval/benchmark harness enable (gates defaults, not the flag itself).
+- `output_dir` — where `reports/eval/<run_id>/` trees are written (default `reports/eval`).
+- `max_rounds` — `attack_max_rounds` budget for an eval run (default 30).
+- `write_markdown` — emit `eval_report.md` alongside the JSON (default true).
+- `write_html` — emit `eval_report.html` alongside the JSON (default true).
 
 Before assessing anything beyond localhost, review the `exploit` section in [`config.yaml`](config.yaml), pass one explicit `--target`, and confirm the run summary. Do not use `--yes` to bypass your own authorization checks.
 
@@ -186,6 +199,19 @@ not by itself refute the hypothesis.
 
 </details>
 
+## Workspace layout
+
+The runtime writes to a few well-defined locations under the project root:
+
+| Path | Contents |
+| --- | --- |
+| `reports/<run_id>/` | Per-run artifacts: activity log, raw/XML nmap output, host and network summaries, findings, and the exploit workspace. |
+| `reports/eval/<run_id>/` | Eval/benchmark harness output: `eval_report.json` plus optional `eval_report.md` and `eval_report.html`. |
+| `reports/self_test_<run_id>/` | `--self-test` diagnostic artifacts. |
+| `research_workspace/<mission_id>/` | Database-backed mission data (`research.db`, evidence, reports). |
+| `exploit_workspace/<target_ip>/<attempt_id>/` | Per-attempt exploit scripts, terminal/python/msf logs, and `exploit_audit.jsonl`. |
+| `tui_workspace/`, `swarm_workspace/` | Created on demand by `main.py` for TUI and swarm runs. |
+
 ## MCP servers
 
 Both servers use stdio by default and can be started explicitly for an MCP client:
@@ -212,7 +238,7 @@ Run a focused test while working:
 python -m pytest tests/test_scope_gate.py
 ```
 
-On Unix-like systems, the [`Makefile`](Makefile) provides equivalent shortcuts such as `make install-dev`, `make test`, and `make test-one F=tests/test_scope_gate.py`.
+On Unix-like systems, the [`Makefile`](Makefile) provides equivalent shortcuts such as `make install-dev`, `make test`, `make test-one F=tests/test_scope_gate.py`, and `make eval` to run the benchmark harness.
 
 ## Documentation
 
@@ -221,6 +247,7 @@ On Unix-like systems, the [`Makefile`](Makefile) provides equivalent shortcuts s
 - [Runtime Flows](docs/runtime-flows.md) — recon, assessment, swarm, TUI, and report lifecycles.
 - [Module Guide](docs/module-guide.md) — ownership across modules, tools, TUI, and tests.
 - [Extension Guide](docs/extension-guide.md) — safe edit points for integrations and new capabilities.
+- [Plugin Development](docs/plugin-development.md) — authoring opt-in plugins (attack modules, MCP tools, skills, config sections) discovered from `plugins/` or entry points.
 - [Safety Model](docs/safety-model.md) — scope, permissions, audits, and lab boundaries.
 - [Testing Guide](docs/testing-guide.md) — focused test commands and verification expectations.
 - [Runtime Skills](docs/skills.md) — skill catalog, selection, and extension behavior.

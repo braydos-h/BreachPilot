@@ -245,3 +245,177 @@ def _json_load(raw: Any, default: Any = None) -> Any:
     if default is None:
         return {}
     return default
+
+
+# ── Flow A <-> Flow B evidence bridge ───────────────────────────────────────
+#
+# Phase 1.3 of the self-verification core. Flow A (the exploit engine) writes
+# its artifact stream to ``exploit_workspace/<ip>/exploit_audit.jsonl`` -- a
+# tamper-evident append-only log of ExploitRecord + MCP-tool rows (see
+# tools/mcp_shared._audit_log and tools/exploit_agent/policy.ExploitRecord).
+# Flow B (the legacy research loop) persists evidence through EvidenceStore.
+#
+# The bridge lets Flow A's audit entries be promoted into the shared
+# EvidenceStore so downstream verification / reporting / findings flows that
+# already read from EvidenceStore can see them. It is purely additive: the
+# existing Flow B write path (tool_router -> EvidenceStore.save) is untouched,
+# and the bridge functions only read the audit JSONL -- they never mutate it.
+
+
+def _audit_row_kind(row: dict[str, Any]) -> str:
+    """Classify an audit JSONL row as ``"mcp"``, ``"flow_a"``, or ``"unknown"``.
+
+    Distinguishing keys (per the grounding contract):
+    * MCP-tool rows carry ``tool_name`` + ``args``.
+    * Flow A ExploitRecord rows carry ``action`` + ``full_args`` + ``hash``.
+    """
+    if "tool_name" in row and "args" in row:
+        return "mcp"
+    if "action" in row and "full_args" in row:
+        return "flow_a"
+    return "unknown"
+
+
+def _audit_hash_of(row: dict[str, Any]) -> str:
+    """Pick the strongest available integrity tag from an audit row."""
+    for key in ("hash", "code_sha256", "prev_hash"):
+        value = row.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def promote_exploit_audit(
+    evidence_store: "EvidenceStore",
+    audit_path: "Path",
+    mission_id: str,
+    target_ip: str,
+) -> list[str]:
+    """Promote ``exploit_audit.jsonl`` entries into the shared EvidenceStore.
+
+    Reads the JSONL audit log at ``audit_path`` and writes one
+    ``structured_json`` evidence row per entry, tagged with the audit hash so
+    downstream consumers can join back to the original record. Rows that fail
+    to parse or are missing a usable payload are skipped (never raise).
+
+    Args:
+        evidence_store: The ``EvidenceStore`` to write into (its bound
+            ``mission_id`` is used for the DB row; ``mission_id`` here is
+            stamped into metadata for traceability).
+        audit_path: Path to ``exploit_audit.jsonl``.
+        mission_id: Mission id to record in evidence metadata.
+        target_ip: The target IP the audit entries belong to.
+
+    Returns:
+        The list of evidence ids created (one per successfully promoted row).
+    """
+    if evidence_store is None:
+        return []
+    audit_path = Path(audit_path) if not isinstance(audit_path, Path) else audit_path
+    if not audit_path.exists():
+        return []
+
+    created: list[str] = []
+    with audit_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(row, dict):
+                continue
+            kind = _audit_row_kind(row)
+            if kind == "unknown":
+                continue
+            try:
+                eid = _promote_one_row(evidence_store, row, kind, mission_id, target_ip)
+            except Exception:
+                # Never let a single bad row abort promotion of the rest.
+                continue
+            if eid:
+                created.append(eid)
+    return created
+
+
+def _promote_one_row(
+    evidence_store: "EvidenceStore",
+    row: dict[str, Any],
+    kind: str,
+    mission_id: str,
+    target_ip: str,
+) -> str:
+    """Write a single audit row into the evidence store as structured_json."""
+    audit_hash = _audit_hash_of(row)
+    # Use the row verbatim as the evidence payload so nothing is lost, then
+    # stamp the join keys into metadata.
+    content = json.dumps(row, default=str, indent=2)
+    metadata: dict[str, Any] = {
+        "source": "exploit_audit",
+        "audit_kind": kind,
+        "audit_hash": audit_hash,
+        "mission_id": mission_id,
+        "target_ip": target_ip,
+        "row_timestamp": row.get("timestamp", ""),
+        "row_status": row.get("status", ""),
+        "row_attempt_id": row.get("attempt_id", ""),
+        # Carry the Flow A action / MCP tool_name as the action label so
+        # report generators can group evidence by tool without re-parsing.
+        "action": row.get("action") or row.get("tool_name") or "",
+    }
+    # NOTE: ``task_id`` is intentionally left empty -- the evidence table's
+    # task_id FK targets the ``tasks`` table, but audit ``attempt_id`` values
+    # are Flow A attempt ids, not Flow B task ids. The attempt id is preserved
+    # in ``metadata["row_attempt_id"]`` for traceability instead.
+    return evidence_store.save(
+        evidence_type="structured_json",
+        content=content,
+        metadata=metadata,
+        task_id="",
+        target=target_ip,
+    )
+
+
+def record_run_output(
+    evidence_store: "EvidenceStore",
+    mission_id: str,
+    target_ip: str,
+    action: str,
+    output_text: str,
+    *,
+    audit_hash: str = "",
+) -> str:
+    """Convenience wrapper: persist a single run output as raw evidence.
+
+    Useful for callers that have a tool result in hand (e.g. the PoE verifier)
+    and want a single evidence row without reading the full audit JSONL. The
+    optional ``audit_hash`` ties the row back to its originating audit entry.
+
+    Args:
+        evidence_store: The ``EvidenceStore`` to write into.
+        mission_id: Mission id to record in evidence metadata.
+        target_ip: Target asset the output was collected from.
+        action: Tool / action label that produced the output.
+        output_text: The raw output text to persist.
+        audit_hash: Optional integrity tag from the originating audit row.
+
+    Returns:
+        The evidence id, or ``""`` if the store is missing or the output empty.
+    """
+    if evidence_store is None or not output_text:
+        return ""
+    metadata: dict[str, Any] = {
+        "source": "run_output",
+        "mission_id": mission_id,
+        "target_ip": target_ip,
+        "action": action,
+        "audit_hash": audit_hash,
+    }
+    return evidence_store.save(
+        evidence_type="raw_output",
+        content=output_text,
+        metadata=metadata,
+        target=target_ip,
+    )

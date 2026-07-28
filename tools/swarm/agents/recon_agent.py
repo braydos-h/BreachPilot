@@ -152,7 +152,9 @@ class ReconAgent(Agent):
             recon_cfg = ReconConfig(
                 target=target,
                 ports=task.get("ports", "top1000"),
-                stealth=context.get("stealth", False),
+                # ReconConfig has no ``stealth`` field (it uses ``aggression_level``);
+                # map the legacy stealth flag onto the stealth aggression level.
+                aggression_level="stealth" if context.get("stealth", False) else "normal",
             )
             pipeline = ReconPipeline(recon_cfg, tool_router)
             result = pipeline.run()

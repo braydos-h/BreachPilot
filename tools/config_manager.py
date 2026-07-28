@@ -182,6 +182,55 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "agents": ["recon", "vuln", "exploit", "post_exploit", "critic", "reflection"],
         "max_parallel_agents": 3,
     },
+    # Autonomous orchestrator Phase 2 capabilities (opt-in). All keys default
+    # OFF / 0 so default behavior is unchanged -- the new attack-path
+    # capabilities must be explicitly enabled per the CLAUDE.md opt-in rule.
+    "autonomous": {
+        "persistence_phase": False,     # Phase 2.2: run PERSISTENCE phase after access achieved
+        "checkpoint_every": 0,          # Phase 2.3: save attack_states.json every N completed targets (0 = off)
+        "adaptive_replan": False,       # Phase 2.4: per-target multi-round replan + vuln-chaining
+        "max_cycles": 100,              # round cap when adaptive_replan is on
+        "max_pivot_depth": 0,           # already consumed by the orchestrator (single-IP lock default)
+    },
+    # Recon coverage & depth (Phase 3). These gate the additive enumerators
+    # (TLS/SSL cert parse, SMTP/DB banner parse, web spider, passive OSINT +
+    # IPv6 AAAA lookup) and the UDP top-ports scan added in Phase 3. The TCP
+    # ``scan_host`` path is unchanged regardless of these settings. IPv6 stays
+    # PASSIVE-ONLY (AAAA lookup) -- the target-IP allowlist lock is untouched.
+    "recon": {
+        "extended_enumerators": True,   # enable TLS/SMTP/DB/spider/OSINT additive enumerators
+        "udp_top_ports": 100,           # nmap -sU --top-ports N for run_udp_recon / recon_udp
+    },
+    # OPSEC / detection-evasion (Phase 6.2). This is the agent's OWN operational
+    # hardening (pacing/jitter/UA-rotation/DNS-over-HTTPS/quiet-commands) so an
+    # authorized assessment can simulate a low-noise adversary, plus detection-
+    # coverage testing (canary probes + read-only footprint summary). It is NOT
+    # active evasion of the target's defenses: no log-clearing, timestomping, or
+    # EDR/SIEM defeat; the append-only tamper-evident audit chain is untouched.
+    # Defaults OFF per the CLAUDE.md opt-in rule -- first-run behavior is
+    # unchanged. When enabled, AggressionLevel.STEALTH becomes load-bearing
+    # (max jitter + min-gap + UA rotation + quiet-command denylist).
+    "opsec": {
+        "enabled": False,
+        "ua_rotation": False,           # rotate User-Agent across HTTP egress
+        "doh": False,                   # resolve via DNS-over-HTTPS (cloudflare/google)
+        "doh_provider": "cloudflare",   # "cloudflare" | "google"
+        "min_gap_seconds": 0.0,         # base pacing gap between actions
+        "jitter_seconds": 0.0,          # +/- random jitter on the gap
+        "rate_per_minute": 0,           # 0 = no token-bucket cap
+        "quiet_command_patterns": [],   # substrings to refuse when enabled (e.g. ["masscan", "nuclei"])
+        "noise_budget": 0,              # max noisy commands allowed (0 = unlimited)
+    },
+    # Eval/benchmark harness config. The --eval CLI flag still works when
+    # ``enabled`` is false, but this block gates the defaults used by the
+    # eval runner (output location, round budget, report formats).
+    "eval": {
+        "enabled": True,              # eval/benchmark harness enable (the --eval flag still works when false, but the config gates defaults)
+        "output_dir": "reports/eval",  # where reports/eval/<run_id>/ trees are written
+        "max_rounds": 30,             # attack_max_rounds for an eval run
+        "write_markdown": True,       # emit eval_report.md alongside the JSON
+        "write_html": True,           # emit eval_report.html alongside the JSON
+    },
     # Long-session mode (opt-in). Absent/false = current behavior; the keys here
     # are the defaults applied when --long-session is passed or enabled: true.
     "long_session": {
@@ -220,6 +269,12 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "confirmation_threshold": 0.75,
         "refutation_threshold": 0.75,
         "min_evidence_references": 1,
+        # Phase 1.2: wire OutcomeJudge into Flow A (exploit engine). Default OFF
+        # per the CLAUDE.md opt-in rule -- first-run behavior is unchanged. When
+        # true, the exploit loop runs classify_exploit_result + OutcomeJudge.judge
+        # to produce an evidence-grounded verdict that overrides the shallow
+        # ``exit_code == 0`` success flag.
+        "flow_a": False,
     },
     "adaptive_exploits": {
         "enabled": True,
@@ -276,10 +331,26 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "include_metadata": False,
         "allow_reference_listing": True,
     },
+    # Plugin/extension ecosystem (opt-in; defaults OFF). Plugins are trusted
+    # Python with full operator-box privileges (lab build, same as built-ins).
+    # ``enabled`` explicitly loads the named plugins; ``disabled`` hard-blocks
+    # them regardless of manifest enablement; ``search_paths`` are the
+    # filesystem dirs scanned for plugin.yaml manifests; ``entry_points`` gates
+    # importlib entry-point discovery in the ``netattackai.plugins`` group.
+    "plugins": {
+        "enabled": [],
+        "disabled": [],
+        "search_paths": ["plugins"],
+        "entry_points": True,
+    },
 }
 
 # Known top-level keys
 KNOWN_TOP_KEYS = set(CONFIG_SCHEMA.keys())
+
+# Alias for the schema-with-defaults dict, used by tests and downstream code
+# that refers to it as the default config.
+DEFAULT_CONFIG = CONFIG_SCHEMA
 
 
 class ConfigValidationResult:
@@ -349,9 +420,16 @@ class ConfigValidator:
             return result
 
         # Check for unknown top-level keys
+        plugin_sections: set[str] = set()
+        try:
+            from tools.plugins import PLUGIN_REGISTRY
+            plugin_sections = set(PLUGIN_REGISTRY.config_sections.keys())
+        except Exception:  # noqa: BLE001 -- plugins import must not break validation
+            plugin_sections = set()
         for key in self._config:
-            if key not in KNOWN_TOP_KEYS:
-                result.unknown_keys.append(key)
+            if key in KNOWN_TOP_KEYS or key in plugin_sections:
+                continue
+            result.unknown_keys.append(key)
 
         # Validate required sections exist
         for section in ("ollama", "models", "mcp", "exploit"):
@@ -517,6 +595,9 @@ class ConfigValidator:
                     result.warnings.append(
                         "outcome_judgment.min_evidence_references must be a positive integer."
                     )
+                flow_a = judgment.get("flow_a")
+                if flow_a is not None and not isinstance(flow_a, bool):
+                    result.warnings.append("outcome_judgment.flow_a must be a boolean.")
 
         # Validate reasoning section
         if "reasoning" in self._config:
@@ -640,6 +721,28 @@ class ConfigValidator:
                     value = skills.get(key)
                     if value is not None and (not isinstance(value, int) or value < 1):
                         result.warnings.append(f"skills.{key} must be a positive integer.")
+
+        # Validate eval/benchmark harness section
+        if "eval" in self._config:
+            ev = self._config["eval"]
+            if not isinstance(ev, dict):
+                result.errors.append("'eval' must be a mapping.")
+            else:
+                enabled = ev.get("enabled")
+                if enabled is not None and not isinstance(enabled, bool):
+                    result.errors.append("eval.enabled must be a boolean.")
+                output_dir = ev.get("output_dir")
+                if output_dir is not None and (not isinstance(output_dir, str) or not output_dir.strip()):
+                    result.errors.append("eval.output_dir must be a non-empty string.")
+                max_rounds = ev.get("max_rounds")
+                if max_rounds is not None and (
+                    not isinstance(max_rounds, int) or isinstance(max_rounds, bool) or max_rounds < 0
+                ):
+                    result.errors.append("eval.max_rounds must be a non-negative integer.")
+                for key in ("write_markdown", "write_html"):
+                    value = ev.get(key)
+                    if value is not None and not isinstance(value, bool):
+                        result.errors.append(f"eval.{key} must be a boolean.")
 
         return result
 

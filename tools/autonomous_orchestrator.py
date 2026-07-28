@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -35,6 +36,7 @@ from tools.validation_utils import is_local_target
 from tools.attack_modules import (
     AttackModule,
     ModuleContext,
+    ModuleResult,
     find_modules,
     get_module,
     list_modules,
@@ -171,6 +173,10 @@ class AttackState:
     pivot_targets: list[str] = field(default_factory=list)
     timeline: list[dict[str, Any]] = field(default_factory=list)
     recon_result: HostReconResult | None = None
+    # Phase 2.2: persistence methods confirmed installed on the target
+    # (e.g. ["cron", "schtask", "webshell"]). Populated only by the opt-in
+    # _phase_persistence handler; empty when the persistence phase is off.
+    persistence_established: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -188,6 +194,7 @@ class AttackState:
             "pivot_targets": self.pivot_targets,
             "timeline": self.timeline,
             "recon_result": self.recon_result.to_dict() if self.recon_result else None,
+            "persistence_established": self.persistence_established,
         }
 
     @classmethod
@@ -227,6 +234,7 @@ class AttackState:
             pivot_targets=list(data.get("pivot_targets", []) or []),
             timeline=list(data.get("timeline", []) or []),
             recon_result=recon,
+            persistence_established=list(data.get("persistence_established", []) or []),
         )
 
     def add_timeline_event(self, event_type: str, description: str, metadata: dict[str, Any] | None = None) -> None:
@@ -372,10 +380,31 @@ class AttackModuleExecutor:
         model_client: Any = None,
         critic_agent: Any = None,
         reflection_agent: Any = None,
+        tool_executor: Callable[[str, dict[str, Any]], str] | None = None,
+        opsec_manager: Any | None = None,
     ) -> None:
         self._scope_gate = scope_gate
         self._risk_controller = risk_controller
         self._evidence_store = evidence_store
+        # Phase 6.2: optional OpsecManager. When wired (AutonomousOrchestrator
+        # builds one from the ``opsec`` config block), execute() awaits
+        # ``acquire_pacing(task.aggression.value)`` before each module run so
+        # AggressionLevel.STEALTH becomes load-bearing (max jitter + min-gap +
+        # rate bucket). Unwired / disabled profile -> pacing_delay is 0.0 and
+        # acquire_pacing is a no-op, so legacy callers and tests are unchanged.
+        self._opsec = opsec_manager
+        # Phase 2.1: the optional tool_executor lets execute() actually DISPATCH
+        # a module's suggested_command / generated script and capture the real
+        # output, instead of treating the module's dict as dead data. When wired
+        # (AutonomousOrchestrator passes its own _tool_executor through), a
+        # script/suggested_command is run, the output is classified via
+        # ``classify_exploit_result``, and ``shell_type`` / ``privilege_level``
+        # are only set when a real compromise marker (meterpreter / uid=0 / NT
+        # AUTHORITY\SYSTEM) appears -- so ``access_achieved`` and the downstream
+        # privesc/lateral phases only fire on a verified foothold. Unwired
+        # (legacy callers, most tests) -> behaves exactly as before: module
+        # dicts pass through unchanged.
+        self._tool_executor: Callable[[str, dict[str, Any]], str] | None = tool_executor
         # Swarm integration (Tier 0 item 0.6b): the autonomous attack path
         # previously ran modules with only inline scope/risk checks and NO
         # multi-layer critic, NO reflection, and NO shared blackboard -- so the
@@ -475,6 +504,16 @@ class AttackModuleExecutor:
             ],
         )
 
+        # Phase 6.2: OPSEC pacing. Await the profile's pacing delay (jittered,
+        # aggression-scaled) + optional rate bucket before the module runs. A
+        # disabled profile or unwired manager makes this a no-op. Wrapped so an
+        # OPSEC hiccup can never block an authorized attack step.
+        if self._opsec is not None:
+            try:
+                await self._opsec.acquire_pacing(task.aggression.value)
+            except Exception as exc:  # noqa: BLE001 -- pacing is best-effort
+                logger.debug(f"OPSEC pacing skipped for {task.module_name}: {exc}")
+
         # Execute with timeout
         try:
             timeout = task.parameters.get("timeout", 300)
@@ -486,6 +525,74 @@ class AttackModuleExecutor:
                     module_run.close()
                 raise
 
+            # Phase 2.1: adapt the module's dict return into a typed
+            # ModuleResult, then -- when a tool_executor is wired -- actually
+            # DISPATCH any runnable artifact (suggested_command or generated
+            # script) and classify the real output. Previously the module's
+            # suggested_command / script keys were dead data on Path B (counted
+            # as succeeded but never executed), so ``access_achieved`` was never
+            # set and the downstream privesc / lateral phases never fired. Now a
+            # real shell marker (meterpreter / uid=0 / NT AUTHORITY\SYSTEM) in
+            # the dispatch output sets ``shell_type`` / ``privilege_level``, and
+            # ``record_success`` flips ``access_achieved`` only on that verified
+            # signal. Info-stub modules (status=info with no runnable script)
+            # skip dispatch and stay info-stubs, so they never falsely set
+            # access_achieved. Unwired (no tool_executor) -> the module's own
+            # dict passes through unchanged, preserving legacy behavior.
+            mresult = ModuleResult.to_result(result)
+            dispatch_failure = False
+            if self._tool_executor is not None and mresult.status not in ("info",):
+                dispatch_out = self._dispatch_module_artifact(module, mresult, ctx, task, state)
+                if dispatch_out is not None:
+                    output, classification = dispatch_out
+                    # Merge real-output evidence onto the typed result.
+                    if classification.get("evidence"):
+                        mresult.evidence.extend(classification["evidence"])
+                    outcome = str(classification.get("outcome", "unknown")).lower()
+                    if outcome == "compromise":
+                        # Verified shell -- set the keys record_success reads.
+                        if classification.get("shell_type"):
+                            mresult.shell_type = str(classification["shell_type"])
+                        if classification.get("privilege_level"):
+                            mresult.privilege_level = str(classification["privilege_level"])
+                        state.add_timeline_event(
+                            "compromise_verified",
+                            f"{task.module_name} produced verified shell "
+                            f"({mresult.shell_type or 'shell'}) against {task.target}",
+                            {"outcome": outcome, "evidence": classification.get("evidence", [])},
+                        )
+                    elif outcome == "cred_dump":
+                        # Credentials marker -- record as a credential string so
+                        # record_success picks it up via result["credentials"].
+                        mresult.credentials_found.append(
+                            f"dump:{task.module_name}:{classification.get('evidence', ['creds'])[0]}"
+                        )
+                        state.add_timeline_event(
+                            "cred_dump_verified",
+                            f"{task.module_name} produced a credential dump against {task.target}",
+                            {"evidence": classification.get("evidence", [])},
+                        )
+                    elif outcome == "failure":
+                        # The dispatched artifact ran but explicitly failed -- do
+                        # NOT count this as a succeeded module. The script may
+                        # have been generated (status=script_generated) but the
+                        # actual exploit failed, so mark it failed for retry.
+                        dispatch_failure = True
+                        if not mresult.note:
+                            mresult.note = "Dispatched artifact reported failure markers"
+                        state.add_timeline_event(
+                            "dispatch_failure",
+                            f"{task.module_name} dispatch output signalled failure",
+                            {"evidence": classification.get("evidence", [])},
+                        )
+                    # 'partial' / 'unknown' -> ran but no verified compromise;
+                    # leave shell_type empty so access_achieved stays False.
+
+            # Convert the (possibly enriched) ModuleResult back to the dict shape
+            # the renderer / record_success / task.result expect. Pass-through
+            # extra keys are preserved by to_dict().
+            result = mresult.to_dict()
+
             # Process result
             task.result = result
             # A module that ran but did not achieve exploitation is NOT a success:
@@ -494,7 +601,10 @@ class AttackModuleExecutor:
             # result["success"] / task.status, so a ran-but-failed module must
             # report success=False and TaskStatus.FAILED -- otherwise failed
             # modules are counted as completed and never retried.
-            _succeeded = result.get("status") in ("success", "exploited", "script_generated", "info")
+            _succeeded = (
+                result.get("status") in ("success", "exploited", "script_generated", "info")
+                and not dispatch_failure
+            )
             task.status = TaskStatus.COMPLETED if _succeeded else TaskStatus.FAILED
             task.completed_at = time.monotonic()
 
@@ -540,6 +650,103 @@ class AttackModuleExecutor:
             logger.exception(f"Module {task.module_name} failed against {task.target}")
             self._record_failure_on_blackboard(task.module_name)
             return {"success": False, "error": task.error}
+
+    # ── Phase 2.1 dispatch helper ───────────────────────────────────────────
+
+    def _dispatch_module_artifact(
+        self,
+        module: AttackModule,
+        mresult: ModuleResult,
+        ctx: ModuleContext,
+        task: AttackTask,
+        state: AttackState,
+    ) -> tuple[str, dict[str, Any]] | None:
+        """Dispatch a module's runnable artifact through ``self._tool_executor``.
+
+        Resolves the artifact to a shell command in priority order:
+
+        1. ``mresult.suggested_command`` -- a ready-to-run shell command
+           (e.g. ``sqlmap -u ...``). Used as-is.
+        2. ``mresult.script`` (or ``module.generate_python_script(ctx)``) -- a
+           Python script string. Written to
+           ``<workspace>/modules/<module>_<ip>.py`` and dispatched as
+           ``python <path> <target_ip>``.
+
+        Returns ``(output_text, classification_dict)`` on dispatch, or ``None``
+        when there is nothing runnable (no command, no script) or the
+        tool_executor raises (best-effort: the exception is recorded as a
+        timeline event and we return ``None`` so the caller treats the module
+        as a non-verified run, NOT a hard failure -- the script itself may be
+        valid and just need a manual operator run).
+
+        The classification comes from ``classify_exploit_result`` (Phase 1.1),
+        imported lazily so a missing dep never breaks the executor. The
+        classifier is conservative: only strong shell / uid=0 / Meterpreter /
+        NT AUTHORITY\\SYSTEM markers yield ``compromise``.
+        """
+        executor = self._tool_executor
+        if executor is None:
+            return None
+
+        # 1. suggested_command wins -- it's already a complete shell invocation.
+        command = mresult.suggested_command or ""
+        if not command:
+            # 2. Fall back to the module's generated Python script.
+            script_text = mresult.script
+            if not script_text:
+                try:
+                    script_text = module.generate_python_script(ctx) or ""
+                except Exception:
+                    script_text = ""
+            if script_text:
+                try:
+                    modules_dir = ctx.workspace / "modules"
+                    modules_dir.mkdir(parents=True, exist_ok=True)
+                    safe_name = re.sub(
+                        r"[^A-Za-z0-9_.-]", "_", f"{module.name}_{ctx.target_ip}.py"
+                    )
+                    script_path = modules_dir / safe_name
+                    script_path.write_text(script_text, encoding="utf-8")
+                    command = f"python {script_path} {ctx.target_ip}"
+                except Exception as exc:  # noqa: BLE001 -- best-effort
+                    state.add_timeline_event(
+                        "dispatch_write_err",
+                        f"Failed to write script for {module.name}: {exc}",
+                    )
+                    return None
+
+        if not command:
+            return None
+
+        try:
+            output = executor(command, {"target": task.target})
+        except Exception as exc:  # noqa: BLE001 -- best-effort dispatch
+            state.add_timeline_event(
+                "dispatch_err",
+                f"{module.name} dispatch raised: {exc}",
+                {"command": command[:200]},
+            )
+            return None
+
+        output_text = str(output or "")
+        state.add_timeline_event(
+            "module_dispatch",
+            f"Dispatched {module.name} artifact ({len(output_text)} bytes output)",
+            {"command": command[:200], "output_len": len(output_text)},
+        )
+
+        # Conservative classification (Phase 1.1). Lazy import -- the dep lives
+        # in tools/exploit_agent which is always present in the runtime, but the
+        # import is deferred so a stale/missing module never breaks the
+        # executor's hot path.
+        try:
+            from tools.exploit_agent.outcome_classify import classify_exploit_result
+
+            classification = classify_exploit_result(output_text)
+        except Exception:
+            classification = {"outcome": "unknown", "shell_type": "", "privilege_level": "", "evidence": []}
+
+        return output_text, classification
 
     # ── Swarm integration helpers (Tier 0 item 0.6b) ───────────────────────
     #
@@ -720,6 +927,17 @@ class AutonomousOrchestrator:
         self._tool_executor = tool_executor
         self._recon_config = recon_config or ReconConfig()
         self._recon = ReconPipeline(self._recon_config)
+        # Phase 6.2: build an OpsecManager from the ``opsec`` config block
+        # (merged into mission_config by the campaign call sites). Tolerant of
+        # its absence -> disabled profile -> pacing no-op. Also published as the
+        # process-global UA source so HTTP egress rotates UAs when ua_rotation
+        # is on. Wrapped so an OPSEC build failure can never block orchestration.
+        try:
+            from tools.opsec import OpsecManager, configure as _opsec_configure
+            self._opsec = OpsecManager.from_config(mission_config or {})
+            _opsec_configure(self._opsec.profile)
+        except Exception:  # noqa: BLE001 -- OPSEC is best-effort
+            self._opsec = None
         # Pass the swarm context through so the autonomous path runs the
         # critic pre-check / reflection post-check / shared blackboard
         # (Tier 0 item 0.6b). Unwired -> AttackModuleExecutor behaves as before.
@@ -730,6 +948,8 @@ class AutonomousOrchestrator:
             model_client=model_client,
             critic_agent=critic_agent,
             reflection_agent=reflection_agent,
+            tool_executor=tool_executor,
+            opsec_manager=self._opsec,
         )
 
         self._states: dict[str, AttackState] = {}
@@ -751,6 +971,21 @@ class AutonomousOrchestrator:
         # the reachable hosts may opt in to bounded pivoting by setting
         # ``max_pivot_depth: N`` in mission.yaml/config.
         self._max_pivot_depth = int(mission_config.get("max_pivot_depth", 0))
+
+        # Phase 2 opt-in capabilities (default OFF — new attack-path capabilities
+        # must be opt-in per CLAUDE.md). These flow in from config.yaml's
+        # ``autonomous`` block via the mission_config dict the call sites build
+        # (see tools/mcp_tools/attack_modules.py start_autonomous_campaign /
+        # run_campaign_step, which merge config["autonomous"] into mission_config).
+        # ``persistence_phase`` enables the PERSISTENCE phase handler (2.2);
+        # ``checkpoint_every`` makes run_autonomous_campaign save
+        # attack_states.json every N completed targets (2.3, 0 = off);
+        # ``adaptive_replan`` enables per-target multi-round replan + vuln
+        # chaining (2.4). All default off so the default single-pass
+        # _attack_target behavior is unchanged.
+        self._persistence_enabled = bool(mission_config.get("persistence_phase", False))
+        self._checkpoint_every = max(0, int(mission_config.get("checkpoint_every", 0) or 0))
+        self._adaptive_replan = bool(mission_config.get("adaptive_replan", False))
 
     def _new_task_id(self) -> str:
         self._task_counter += 1
@@ -791,12 +1026,36 @@ class AutonomousOrchestrator:
                 logger.info("Resume requested but no usable state found — fresh start")
 
         results: dict[str, Any] = {}
+        completed = 0
 
         for target in targets:
             if not self._running:
                 break
-            result = await self._attack_target(target)
+            # Phase 2.3: crash-bounded per-target dispatch. A single target's
+            # unexpected exception must NOT abort the whole campaign -- record
+            # the failure and continue so the operator still gets results for
+            # the remaining targets (and a checkpoint preserves progress).
+            try:
+                result = await self._attack_target(target)
+            except Exception as exc:  # noqa: BLE001 -- crash-bounded: one target shouldn't kill the campaign
+                logger.exception(f"Crash-bounded: _attack_target({target}) raised {exc}")
+                state = self.get_state(target)
+                state.add_timeline_event(
+                    "target_crash", f"Target {target} aborted: {exc}", {"error": str(exc)}
+                )
+                result = {"status": "crashed", "error": str(exc), "state": state.to_dict()}
             results[target] = result
+            completed += 1
+            # Phase 2.3: periodic checkpoint. Every ``checkpoint_every`` completed
+            # targets (opt-in, 0 = off), persist attack_states.json so a crashed
+            # run resumes with real progress. The save itself is best-effort --
+            # a checkpoint failure never aborts the campaign.
+            if self._checkpoint_every > 0 and completed % self._checkpoint_every == 0:
+                try:
+                    self.save_state()
+                    logger.info(f"[CHECKPOINT] Saved attack state after {completed} target(s)")
+                except Exception as exc:  # noqa: BLE001 -- checkpoint failure is non-fatal
+                    logger.warning(f"[CHECKPOINT] Save failed (non-fatal): {exc}")
 
         campaign_duration = time.monotonic() - campaign_start
         logger.info(f"Campaign complete in {campaign_duration:.1f}s")
@@ -850,16 +1109,29 @@ class AutonomousOrchestrator:
         # Phase 2: Service enumeration (already done in recon pipeline)
         state.current_phase = AttackPhase.ENUMERATION
 
-        # Phase 3: Exploitation - automatically select and run attack modules
-        await self._phase_exploitation(state)
+        # Phases 3-6. The default path is a single pass (exploit -> privesc ->
+        # lateral -> persistence -> validation). When ``adaptive_replan`` is on
+        # (Phase 2.4, opt-in) the exploit/privesc/lateral sequence runs as a
+        # bounded multi-round loop with pre-round replan and post-success
+        # vuln-chaining; persistence still runs once after the rounds converge.
+        if self._adaptive_replan:
+            await self._run_adaptive_rounds(state, _depth)
+        else:
+            # Phase 3: Exploitation - automatically select and run attack modules
+            await self._phase_exploitation(state)
 
-        # Phase 4: Privilege escalation
-        if state.access_achieved and state.privilege_level not in ("system", "root", "admin"):
-            await self._phase_privilege_escalation(state)
+            # Phase 4: Privilege escalation
+            if state.access_achieved and state.privilege_level not in ("system", "root", "admin"):
+                await self._phase_privilege_escalation(state)
 
-        # Phase 5: Lateral movement
-        if state.pivot_targets:
-            await self._phase_lateral_movement(state, _depth)
+            # Phase 5: Lateral movement
+            if state.pivot_targets:
+                await self._phase_lateral_movement(state, _depth)
+
+        # Phase 5.5: Persistence (opt-in, Phase 2.2). Only after a foothold is
+        # established -- persisting on a host you do not yet control is a no-op.
+        if self._persistence_enabled and state.access_achieved:
+            await self._phase_persistence(state)
 
         # Phase 6: Validation
         await self._phase_validation(state)
@@ -968,8 +1240,14 @@ class AutonomousOrchestrator:
         else:
             state.add_timeline_event("recon_empty", "No open ports found")
 
-    async def _phase_exploitation(self, state: AttackState) -> None:
-        """Automatically select and execute attack modules based on recon."""
+    async def _phase_exploitation(self, state: AttackState, *, skip_failed: bool = False) -> None:
+        """Automatically select and execute attack modules based on recon.
+
+        ``skip_failed`` (Phase 2.4 adaptive replan) drops modules that already
+        failed this campaign from the ranked list, so an adaptive round attacks
+        a different surface instead of re-attacking the same dead module.
+        Default False preserves the single-pass behavior.
+        """
         logger.info(f"[EXPLOIT] Starting exploitation against {state.target}")
         state.current_phase = AttackPhase.EXPLOITATION
         state.add_timeline_event("phase_start", "Exploitation phase started")
@@ -993,6 +1271,15 @@ class AutonomousOrchestrator:
         )
 
         scored_modules = find_modules(ctx)
+        if skip_failed:
+            # Adaptive replan: exclude modules that already failed this campaign
+            # so the round tries a different attack surface. Preserves ranking.
+            failed = set(state.failed_attempts.keys())
+            scored_modules = [(s, m) for (s, m) in scored_modules if m.name not in failed]
+            logger.info(
+                f"[EXPLOIT] Adaptive replan: {len(scored_modules)} modules after "
+                f"dropping {len(failed)} previously-failed"
+            )
         logger.info(f"[EXPLOIT] {len(scored_modules)} applicable modules found")
 
         # Create attack tasks for top modules
@@ -1123,6 +1410,188 @@ class AutonomousOrchestrator:
             )
             self._tasks[task.task_id] = task
             await self._executor.execute(task, state)
+
+    # ── Phase 2.2: Persistence (opt-in) ──────────────────────────────────
+
+    _PERSISTENCE_MARKER_RE = re.compile(r"PERSISTENCE_INSTALLED:\s*(\S+)", re.IGNORECASE)
+
+    def _extract_persistence_marker(self, output_text: str) -> str | None:
+        """Return the lowercased persistence method a dispatch output confirms.
+
+        Persistence modules print ``PERSISTENCE_INSTALLED: <method>`` (cron /
+        schtask / webshell) when they install a foothold. Unlike shell
+        compromise, this is NOT a signal ``classify_exploit_result`` looks for
+        (persistence runs after access is achieved), so the handler scans the
+        raw dispatch output itself.
+        """
+        m = self._PERSISTENCE_MARKER_RE.search(str(output_text or ""))
+        return m.group(1).lower() if m else None
+
+    def _module_context(self, state: AttackState) -> ModuleContext:
+        """Build the ModuleContext the attack modules expect from current state."""
+        return ModuleContext(
+            target_ip=state.target,
+            target_os=state.recon_result.os_family if state.recon_result else "",
+            services=[
+                {"service": s.service, "port": f"{s.port}/{s.protocol}"}
+                for s in (state.recon_result.services if state.recon_result else [])
+            ],
+            cves=[
+                cve for s in (state.recon_result.services if state.recon_result else [])
+                for cve in s.scripts.get("openssh_cves", [])
+            ],
+        )
+
+    async def _phase_persistence(self, state: AttackState) -> None:
+        """Establish persistence on a compromised host (Phase 2.2, opt-in).
+
+        Runs only after ``access_achieved`` is True -- persisting on a host you
+        do not yet control is meaningless. Selects OS-appropriate persistence
+        modules (LinuxPersistence / WindowsPersistence) plus WebShellPersistence
+        when a web service is exposed, dispatches each module's generated
+        script through the wired ``tool_executor``, and records confirmed
+        methods in ``state.persistence_established`` by scanning the dispatch
+        output for the ``PERSISTENCE_INSTALLED:`` marker. Without a
+        tool_executor the phase is skipped (best-effort, like the local-takeover
+        reads). A failure in one module never aborts the phase.
+        """
+        if not state.access_achieved:
+            return
+        logger.info(f"[PERSIST] Starting persistence against {state.target}")
+        state.current_phase = AttackPhase.PERSISTENCE
+        state.add_timeline_event("phase_start", "Persistence phase started")
+
+        os_family = (state.recon_result.os_family if state.recon_result else "") or ""
+        mod_names: list[str] = []
+        if "windows" in os_family.lower():
+            mod_names.append("WindowsPersistence")
+        else:
+            mod_names.append("LinuxPersistence")
+        web_services = {"http", "https"}
+        if state.recon_result and any(
+            (s.service or "").lower() in web_services for s in state.recon_result.services
+        ):
+            mod_names.append("WebShellPersistence")
+
+        if not self._tool_executor:
+            state.add_timeline_event(
+                "persistence_skipped",
+                "No tool_executor wired -- persistence scripts not dispatched",
+            )
+            logger.info("[PERSIST] No tool_executor; persistence scripts not dispatched")
+            return
+
+        ctx = self._module_context(state)
+        for mod_name in mod_names:
+            module = get_module(mod_name)
+            if module is None:
+                state.add_timeline_event("persistence_skip", f"Module {mod_name} unavailable")
+                continue
+            try:
+                mresult_dict = module.run(ctx) or {}
+            except Exception as exc:  # noqa: BLE001 -- one bad module shouldn't abort the phase
+                state.add_timeline_event("persistence_err", f"{mod_name}.run: {exc}")
+                continue
+            script = mresult_dict.get("script") or mresult_dict.get("suggested_command") or ""
+            if not script:
+                state.add_timeline_event("persistence_skip", f"{mod_name}: no runnable artifact")
+                continue
+            task = AttackTask(
+                task_id=self._new_task_id(),
+                phase=AttackPhase.PERSISTENCE,
+                module_name=mod_name,
+                target=state.target,
+                aggression=state.aggression,
+                priority=60,
+            )
+            self._tasks[task.task_id] = task
+            try:
+                out = self._tool_executor(script, {"target": state.target, "module": mod_name})
+            except Exception as exc:  # noqa: BLE001 -- dispatch failure is not fatal
+                task.status = TaskStatus.FAILED
+                task.error = str(exc)
+                state.add_timeline_event("persistence_err", f"{mod_name} dispatch: {exc}")
+                continue
+            marker = self._extract_persistence_marker(str(out or ""))
+            if marker:
+                state.persistence_established.append(marker)
+                task.status = TaskStatus.COMPLETED
+                task.result = {"status": "success", "persistence": marker}
+                state.add_timeline_event(
+                    "persistence_established",
+                    f"{mod_name} installed persistence via {marker}",
+                    {"module": mod_name, "method": marker},
+                )
+            else:
+                task.status = TaskStatus.FAILED
+                task.error = "no PERSISTENCE_INSTALLED marker in dispatch output"
+                state.add_timeline_event(
+                    "persistence_failed",
+                    f"{mod_name} dispatch did not confirm persistence",
+                    {"module": mod_name},
+                )
+
+    # ── Phase 2.4: Adaptive replan + vuln-chaining (opt-in) ──────────────
+
+    async def _run_adaptive_rounds(self, state: AttackState, _depth: int) -> None:
+        """Run the exploit/privesc/lateral sequence as a bounded multi-round loop.
+
+        Each round re-runs exploitation with already-failed modules dropped
+        (adaptive replan), then privesc + lateral if their gates fire, then
+        schedules vuln-chain metadata from the round's successes. The loop
+        stops when ``state.should_continue()`` is False (access at max
+        privilege and no pivot targets remain) or the round cap
+        (``max_cycles``) is hit. Bounded by construction -- no unbounded
+        recursion, no re-attacking the same dead module forever.
+        """
+        max_rounds = max(1, int(self._max_cycles))
+        rounds = 0
+        while rounds < max_rounds and self._running:
+            rounds += 1
+            state.add_timeline_event(
+                "adaptive_round", f"Adaptive round {rounds}/{max_rounds}"
+            )
+            logger.info(f"[ADAPTIVE] {state.target} round {rounds}/{max_rounds}")
+
+            # Pre-round replan: skip_failed drops modules that already failed
+            # this campaign so the round attacks a different surface.
+            await self._phase_exploitation(state, skip_failed=True)
+
+            if state.access_achieved and state.privilege_level not in ("system", "root", "admin"):
+                await self._phase_privilege_escalation(state)
+            if state.pivot_targets:
+                await self._phase_lateral_movement(state, _depth)
+
+            self._schedule_vuln_chain(state)
+
+            if not state.should_continue():
+                break
+
+    def _schedule_vuln_chain(self, state: AttackState) -> None:
+        """Record vulnerability-chain metadata from the current foothold.
+
+        Chains the last successful exploit -> harvested credentials -> discovered
+        pivot targets into ``state.attack_paths`` (the report consumes these as
+        the chain graph) and emits a ``vuln_chain_scheduled`` timeline event so
+        the chain is observable. The actual lateral dispatch into pivot targets
+        is handled by ``_phase_lateral_movement`` on the next round; this
+        scheduler formalizes the chain links.
+        """
+        if not state.successful_exploits:
+            return
+        tail = f"exploit:{state.successful_exploits[-1]}"
+        chains: list[list[str]] = []
+        for cred in state.credentials_found[-3:]:
+            chains.append([tail, f"creds:{cred}"])
+        for pivot in state.pivot_targets[:5]:
+            chains.append([tail, f"pivot:{pivot}"])
+        if chains:
+            state.attack_paths.extend(chains)
+            state.add_timeline_event(
+                "vuln_chain_scheduled",
+                f"Scheduled {len(chains)} vuln-chain step(s) from {tail}",
+                {"chains": chains},
+            )
 
     # ── Task execution ───────────────────────────────────────────────────
 

@@ -1,5 +1,337 @@
 # Changelog
 
+## v0.49.12 (2026-07-28) — Plugin / extension ecosystem (Phase 5)
+
+Phase 5 introduces a real plugin layer that **composes with** the existing
+safety chokepoints rather than bypassing them. Plugins are trusted Python with
+full operator-box privileges (lab build, same as built-in `tools/mcp_tools/*`),
+**opt-in and disabled by default** per the CLAUDE.md opt-in rule. Plugin MCP
+tools MUST wrap handlers with `ctx.require_allowlist()` (target-touching) or
+`ctx.audit_tool` (free-text command tools) so the **target-IP allowlist lock +
+tamper-evident JSONL audit trail apply automatically** — the plugin manager does
+not sandbox code, it enforces opt-in and documents the safety-decorator
+requirement. No log-clearing, timestomping, EDR defeat, DoS, or malware.
+
+Four registration hooks, all fully wired into the core registries (additive,
+lazy-imported, try/except-guarded so a plugin import/load failure never breaks
+boot, `list_modules`, `get_module`, `find_modules`, `ConfigValidator.validate`,
+`load_skill_registry`, or `create_mcp_server`):
+
+- `register_attack_module(cls)` — contribute an `AttackModule` subclass; picked
+  up by `list_modules()` / `get_module()` / `find_modules()`.
+- `register_mcp_tools(factory)` — `factory(mcp, ctx)` registers `@mcp.tool()`
+  handlers; called from `create_mcp_server` after the built-in
+  `register_*_tools` calls.
+- `register_skill_dir(path)` — contribute a skills directory merged into
+  `load_skill_registry` roots (deduped).
+- `register_config_section(name, schema)` — contribute a config block treated
+  as known by `ConfigValidator` (no unknown-key warning).
+
+Discovery: filesystem (`config.plugins.search_paths`, default `["plugins"]`,
+scanning for `plugin.yaml` manifests + sibling `plugin.py` exposing
+`create_plugin()`) and Python entry points (`netattackai.plugins` group via
+`importlib.metadata`). Enablement via `config.plugins.enabled` /
+`config.plugins.disabled`; default OFF. A small stdlib YAML-subset parser
+parses manifests (no PyYAML dependency). 76 new regression tests across 3 new
+files; full suite green apart from the pre-existing Windows-only environmental
+bucket.
+
+### Added
+- `tools/plugins.py` — `PluginManifest`, `Plugin` ABC, `PluginRegistry`,
+  `PluginManager` (filesystem + entry-point discovery, opt-in gating,
+  per-plugin tolerance), module-level `PLUGIN_REGISTRY` singleton,
+  `load_plugins(config)`, `list_discovered_plugins()`. Pure stdlib.
+- `plugins/example_recon_report/` — reference plugin (`plugin.yaml` +
+  `plugin.py`) contributing a read-only `example_plugin_recon_report` attack
+  module (applicability 10, no shell/privilege claims, target-locked) and a
+  `plugin_info` MCP tool stacked with `@mcp.tool()` + `@ctx.require_allowlist()`.
+- `docs/plugin-development.md` — plugin author guide (manifest format, the four
+  registration hooks, the `@mcp.tool()`/`@require_allowlist()` stacking pattern,
+  discovery, enablement, the reference plugin, safety checklist).
+- `--list-plugins` CLI flag printing discovered plugins (name/version/
+  capabilities/loaded) and exiting.
+- `plugins` config block (`enabled`, `disabled`, `search_paths`,
+  `entry_points`) in `CONFIG_SCHEMA` — defaults OFF.
+- `main.py` boot calls `load_plugins(config)` once before the MCP exploit
+  server is created (best-effort, guarded).
+
+### Changed
+- `tools/attack_modules/registry.py` — `list_modules()` / `get_module()` consult
+  `PLUGIN_REGISTRY.extra_module_classes` (additive, guarded).
+- `mcp_exploit_server.py` — `create_mcp_server` iterates
+  `PLUGIN_REGISTRY.mcp_tool_factories` after built-in tool registration.
+- `tools/config_manager.py` — `ConfigValidator.validate` treats
+  `PLUGIN_REGISTRY.config_sections` keys as known.
+- `tools/skill_registry.py` — `load_skill_registry` merges
+  `PLUGIN_REGISTRY.skill_dirs` into roots (deduped).
+
+### Tests
+- `tests/test_plugins.py` (38) — manifest, registry, discovery (filesystem +
+  entry-point with injectable loader), opt-in gating, tolerance, import hygiene.
+- `tests/test_example_plugin.py` (18) — reference plugin load/register/run +
+  MCP factory with FakeMcp/FakeCtx.
+- `tests/test_plugin_wiring.py` (20) — each core-registry consult point.
+
+## v0.49.11 (2026-07-28) — OPSEC / detection-evasion (Phase 6.2)
+
+Phase 6.2 OPSEC workstream. Makes `AggressionLevel.STEALTH` load-bearing and
+adds agent self-hardening + detection-coverage testing. **This is OPSEC
+hardening of the agent (pacing/jitter/UA-rotation/DNS-over-HTTPS/quiet-command
+scoring) and detection-coverage testing (canary probes + read-only audit
+footprint summary) — NOT active evasion of the target's defenses.** No
+log-clearing, timestomping, or EDR/SIEM defeat; the append-only tamper-evident
+audit chain (`exploit_audit.jsonl`) is untouched. Defaults OFF per the opt-in
+rule. 94 new regression tests across 4 new files; full suite green apart from
+the pre-existing Windows-only environmental bucket.
+
+### Added
+- **`tools/opsec.py`** — `OpsecProfile` dataclass + `OpsecManager`: User-Agent
+  rotation across an 8-UA pool, DNS-over-HTTPS resolution (Cloudflare/Google)
+  with socket fallback, aggression-scaled jittered pacing
+  (`pacing_delay`/`acquire_pacing`: STEALTH=2.0x gap → MAXIMUM=0.0x), optional
+  token-bucket rate cap (reuses the `reliability.RateLimiter` contract),
+  `score_command_noise` (heuristic noisy-command detection), `is_quiet_blocked`,
+  and `suggest_low_noise_alternative` (rewrites `-T5`→`-T2`, `masscan`→`nmap -sS`,
+  `nuclei`/`ffuf`/`gobuster`→`nmap -sV`, etc.). Module-level `process_user_agent`
+  / `configure` publish a process-global UA source so egress sites rotate UAs
+  with zero behavior change when OPSEC is unconfigured. Pure stdlib, injectable
+  fakes, no import-time network/time/random.
+- **`tools/detection_coverage.py`** — read-only detection-coverage helpers:
+  `canary_command`, `detection_probe_plan` (4 target-locked canary actions:
+  auth/file/exec/network, each `read_only=True`), and `footprint_summary`
+  (reduces audit records into `total_actions`/`noisy_actions`/`distinct_tools`/
+  `egress_endpoints`/`noisy_examples`/`target_ips` — never mutates the
+  append-only audit trail).
+- **Detection/OPSEC attack modules** (`tools/attack_modules/modules/detection.py`,
+  read-only / planning): `DetectionCoverageProbe` (plans canary actions for
+  SIEM/IDS/FIM detection validation), `LogSourceEnum` (lists candidate Linux/
+  Windows log/audit sources — does not read them), `OPSECPostureReport` (active
+  OPSEC posture + audit footprint summary with heuristic recommendations). All
+  `status=info`, never set `shell_type`/`privilege_level`, target-locked. 3 new
+  modules → `list_modules()` returns 66 (was 63).
+- **`opsec` config block** (`config.yaml` + `tools/config_manager.py`
+  `CONFIG_SCHEMA`): `enabled`, `ua_rotation`, `doh`, `doh_provider`,
+  `min_gap_seconds`, `jitter_seconds`, `rate_per_minute`,
+  `quiet_command_patterns`, `noise_budget`. First-class validated config key.
+
+### Changed
+- **`AggressionLevel.STEALTH` is now load-bearing**: `AttackModuleExecutor.execute()`
+  awaits `opsec_manager.acquire_pacing(task.aggression.value)` before each module
+  run; `AutonomousOrchestrator` builds an `OpsecManager` from the `opsec` config
+  block (merged into `mission_config` by the campaign call sites) and forwards
+  it to the executor. Disabled profile → pacing no-op (legacy behavior unchanged).
+- **UA rotation wired into the agent's own stdlib HTTP egress**: `recon_osint.py`,
+  `recon_enrichers.py`, `cve_lookup.py`, `exploit_search.py` now route their
+  `User-Agent` through `process_user_agent(<default>)` — returns the static
+  default verbatim when OPSEC is unconfigured, a rotated browser UA when
+  `ua_rotation` is on. (Generated exploit-script UAs in ICS/supply-chain modules
+  are intentionally untouched — they run on the operator box, not the agent.)
+- `tools/swarm/agents/recon_agent.py`: fixed a latent `TypeError` — the swarm
+  recon agent passed a `stealth=` kwarg to `ReconConfig`, which has no `stealth`
+  field (it uses `aggression_level`). Now maps the legacy stealth flag onto
+  `aggression_level="stealth"`.
+
+### Tests
+- `tests/test_opsec_manager.py` (36), `tests/test_detection_coverage.py` (16),
+  `tests/test_detection_modules.py` (16), `tests/test_opsec_orchestrator_wiring.py`
+  (6) — all hermetic (injected fakes, no real network/sleep).
+
+## v0.49.10 (2026-07-28) — Recon coverage & depth (Phase 3)
+
+Phase 3 coverage workstream. Broadens reconnaissance beyond the TCP
+nmap-only scan: UDP top-ports scanning, TLS/SSL certificate parsing,
+SMTP/DB banner parsing, an off-site-bounded web spider, and passive
+OSINT (reverse DNS + crt.sh certificate transparency + optional
+Shodan + IPv6 AAAA lookup). Plus a recon diff tool for comparing two
+recon runs (added/removed ports, changed services, new/lost CVEs,
+OS changes). All additive, gated behind a first-class `recon` config
+block; the TCP `scan_host` path is byte-identical when the new
+enumerators are off. IPv6 stays **passive-only** (AAAA lookup) — the
+target-IP allowlist lock and `validate_ipv4` are untouched. 79 new
+regression tests across 6 new files; full suite green apart from the
+pre-existing Windows-only environmental bucket.
+
+### Added
+- **UDP recon** (`tools/recon_pipeline.py` `PrimaryReconScanner.recon_udp`
+  + `ReconPipeline.recon_udp`): nmap `-sU --top-ports N` parse into
+  `HostReconResult.udp_ports` + per-port `ServiceInfo(protocol="udp")`.
+  New MCP tool `run_udp_recon(target_ip, top_ports=100)`.
+- **TLS/SSL enumeration** (`SecondaryEnumerator._enumerate_tls`): parses
+  nmap `ssl-cert` script output (subject/issuer/SAN/not-before/not-after)
+  into `ServiceInfo.ssl_info`.
+- **SMTP/DB banner parsing** (`tools/recon_enrichers.py`
+  `parse_smtp_banner` / `parse_db_banner`; `SecondaryEnumerator`
+  `_enumerate_smtp` / `_enumerate_db`): STARTTLS / AUTH methods /
+  8BITMIME support and MySQL/PostgreSQL/MSSQL/Redis/MongoDB version
+  banners into `ServiceInfo.smtp_info` / `ServiceInfo.db_info`.
+- **Web spider** (`tools/recon_enrichers.http_spider` +
+  `SecondaryEnumerator._enumerate_web_spider`): breadth-bounded crawler
+  (default 20 pages), records links/forms/status codes/technologies;
+  off-site URLs are recorded but never fetched. `http`/`https` scheme
+  selected from the service/port.
+- **Passive OSINT** (`tools/recon_osint.py` + `SecondaryEnumerator._enumerate_osint`):
+  reverse DNS, crt.sh certificate-transparency lookup, optional
+  key-gated Shodan, and **passive IPv6 AAAA lookup** via
+  `socket.getaddrinfo(AF_INET6)`. Stored in `HostReconResult.osint` and
+  mirrored to `HostReconResult.ipv6_addresses`. New MCP tool
+  `run_osint_recon(target_ip)`.
+- **Recon diff** (`tools/recon_diff.py`): `diff_recon(old, new)` /
+  `diff_recon_files(old_path, new_path)` computing added/removed ports,
+  changed services, new/lost CVEs, OS changes + summary. New MCP tool
+  `diff_recon_runs(old_path, new_path)`.
+- **`recon` config block** (`config.yaml` + `tools/config_manager.py`
+  `CONFIG_SCHEMA`): `extended_enumerators: true` (gates the TLS/SMTP/DB/
+  spider/OSINT enumerators; defaults on in production via `from_config`)
+  and `udp_top_ports: 100`. First-class validated config key.
+
+### Changed
+- `tools/recon_pipeline.py`: `ServiceInfo` gains `smtp_info` / `db_info`
+  (default `{}`); `HostReconResult` gains `udp_ports` / `spider_results`
+  / `osint` / `ipv6_addresses` (default `[]` / `[]` / `{}` / `[]`);
+  `ReconConfig` gains `extended_enumerators` + `udp_top_ports`.
+  `from_dict` tolerant of old recon dumps missing the new keys.
+- `tools/mcp_tools/recon.py`: three new `@mcp.tool()` + `@require_allowlist()`
+  recon tools (`run_udp_recon`, `run_osint_recon`, `diff_recon_runs`).
+- `tools/enhanced_reporting.py`: tolerant rendering of the new recon
+  fields.
+
+## v0.49.9 (2026-07-28) — ICS/SCADA/IoT + supply-chain/CI-CD enumeration modules
+
+Phase 6.3/6.4 coverage workstream. Eleven new pre-packaged attack modules across
+two new category files, all **identify / enumerate / detect only** and
+target-locked to `ctx.target_ip`. None touches Flow B or weakens the target-IP
+allowlist lock. 34 new regression tests; full suite green apart from the
+pre-existing Windows-only environmental bucket.
+
+### Added
+- **ICS/SCADA/IoT enumeration** (`tools/attack_modules/modules/ics_iot.py`,
+  read-only / non-disruptive): `ModbusEnum` (Modbus/TCP unit-id enumeration via
+  read function codes 43/04 — never write codes 05/06/15/16), `DNP3Enum`
+  (function-code 1 READ of class-0 data — never operate/direct-out),
+  `S7Enum` (Siemens COTP/TPKT handshake + SZL identification reads — no PLC
+  stop/start, no block write), `BACnetEnum` (Who-Is + ReadProperty only — no
+  WriteProperty/reinitializeDevice), `HMIDefaultCred` and `IoTDefaultCred`
+  (default-credential *checks* against the owned target's HMI/IoT web UI,
+  consistent with the existing `BasicAuthBuster`/`CredentialSpray` modules).
+  Every generated script carries a READ-ONLY header and tests assert write
+  function codes are absent — no operation can alter a physical process.
+- **Supply-chain / CI-CD reconnaissance** (`tools/attack_modules/modules/supply_chain.py`,
+  detection-only): `ExposedVCS` (exposed `.git`/`.svn`/`.hg` metadata),
+  `CICDMisconfig` (exposed CI config + Jenkins/GitLab/Gitea/Artifactory/Drone/
+  GoCD/TeamCity fingerprinting), `DependencyConfusion` (detection-only —
+  classifies internal-vs-public package names and reports unclaimed-in-public
+  risk; explicitly forbids registering malicious packages in public registries,
+  which would attack third-party infrastructure), `ArtifactExposure` (exposed
+  `.env`/credentials/`.npmrc`/build artifacts — 64-byte peek, no exfiltration),
+  `SupplyChainRecon` (workflow orchestrating `search_cve_intel` /
+  `search_web_exploit` / `fetch_webpage` into a per-dependency CVE report).
+
+### Changed
+- `tools/attack_modules/registry.py:list_modules()` now returns 63 modules
+  (was 52); the eleven new classes are registered in `modules/__init__.py` and
+  `registry.py` under "Phase 6.3" and "Phase 6.4" section comments.
+- README capabilities row reflects the ICS and supply-chain categories.
+
+## v0.49.8 (2026-07-28) — Exploit coverage: AD/Kerberos, SSRF/XXE/LFI, weaponized-CVE, cloud/k8s privesc, version-aware ranking
+
+Phase 4 exploit-coverage workstream. Ten new pre-packaged attack modules, a
+version-aware applicability bonus, and an experience-store switch that persists
+Bayesian confidence across missions. All new modules target only `ctx.target_ip`
+(the single authorized target) and **none touches Flow B** (`cli.py` /
+`agent_loop.py` / `scope_gate.py` / `mission.py` / `db.py`) or weakens the
+target-IP allowlist lock. 48 new regression tests; full suite green apart from
+the pre-existing Windows-only `PermissionError`/environmental bucket.
+
+### Added
+- **Active-Directory / Kerberos modules** (`tools/attack_modules/modules/auth_creds.py`):
+  `ASREPRoast` (impacket-GetNPUsers + hashcat -m 18200), `Kerberoasting`
+  (wraps the existing `kerberoast` MCP tool, hashcat -m 13100), `DCSyncAttack`
+  (wraps `dump_credentials`, impacket-secretsdump), and `ADLDAPEnum` (stdlib
+  LDAP enumerator against the target DC). The first three are `info`-status
+  workflow modules that orchestrate the existing MCP tools rather than
+  re-implementing them.
+- **Web-side injection modules** (`tools/attack_modules/modules/web.py`):
+  `SSRFProbe` (URL-fetch parameter probing incl. cloud-metadata payloads
+  fetched *by the target* — not a third-party pivot), `XXEProbe` (in-band
+  `file://` + OOB parameter-entity payloads), and `LFITraversal`
+  (path-traversal + `php://filter` payloads). All emit stdlib-only probe
+  scripts.
+- **Weaponized CVE synthesis + cloud/k8s privesc.** `WeaponizedExploit`
+  (`synthesis.py`) is a weaponized variant of `CVEToExploit`: it returns an
+  LLM workflow that produces a verifying-and-gaining-execution exploit, and
+  expresses its *intent* via `expected_shell_type="reverse"` — it does NOT set
+  `shell_type`/`privilege_level`, so it cannot falsely flip
+  `AttackState.access_achieved`. `CloudPrivesc` and `K8sPrivesc`
+  (`privesc.py`) are stdlib scripts that enumerate cloud-IMDS / Docker-API /
+  k8s-service-account and kubelet/API-server privesc vectors on the target.
+- **Version-aware module ranking.** `AttackModule` gains a
+  `target_versions: dict[str, list[str]]` class attribute (default `{}`, so
+  every existing module is unchanged). `applicability()` now adds a single
+  flat `+25` bonus when a present service's version matches a declared
+  vulnerable-version pattern (case-insensitive substring; once per module;
+  cap unchanged at 100). `find_modules()` consumes this automatically.
+- **Cross-mission experience store.** The `craft_exploit` and `mutate_exploit`
+  MCP tools now build their `ExperienceStore` from `db.get_default_db()` (the
+  shared `research_workspace/research.db` singleton) instead of a per-workspace
+  `experience.db`, so the Bayesian confidence that ranks modules via
+  `find_modules()` accumulates across runs. `get_default_db` is re-exported
+  through `tools/mcp_tools/registry.py`.
+
+### Changed
+- `tools/attack_modules/registry.py:list_modules()` now returns 52 modules
+  (was 42); the nine new classes are registered in `modules/__init__.py` and
+  `registry.py` under their matching section comments.
+- README documents the new module categories and the version-aware ranking.
+
+## v0.49.7 (2026-07-28) — Eval/benchmark harness and autonomous persistence phase
+
+Two workstreams shipping together: the Phase 6.1 evaluation harness and the
+Phase 2 autonomous-persistence capabilities. Both are opt-in and **neither
+touches Flow B** (`cli.py` / `agent_loop.py` / `scope_gate.py` / `mission.py` /
+`db.py`) or weakens the target-IP allowlist lock. Default behavior is unchanged
+unless the relevant config keys are enabled.
+
+### Added
+- **Eval/benchmark harness** (Phase 6.1). `python main.py --eval --target <ip>`
+  runs a single attack-mode exploit session against the target, derives
+  outcome/compromise/privilege metrics from the run records, and writes
+  `reports/eval/<run_id>/eval_report.json` (plus optional `.md` / `.html`).
+  Implementation lives in `tools/eval_harness.py:run_eval`. A `make eval`
+  Makefile target mirrors the flag. The `eval` block in `config.yaml`
+  (`enabled`, `output_dir`, `max_rounds`, `write_markdown`, `write_html`) gates
+  the runner defaults; `--eval` still runs when `enabled` is false. A TUI
+  `EvalScreen` (binding `v`, sidebar "Eval") surfaces the harness from the
+  dashboard.
+- **Autonomous persistence phase** (Phase 2.2, opt-in). When
+  `autonomous.persistence_phase: true`, the autonomous orchestrator runs a
+  PERSISTENCE phase after access is achieved, before validation. Three new
+  attack modules back it (`tools/attack_modules/modules/persistence.py`):
+  `LinuxPersistence`, `WindowsPersistence`, and `WebShellPersistence`. The
+  orchestrator's `scope_gate.check_scope(asset=task.target)` Path-B target lock
+  is preserved on the persistence path.
+- **Periodic campaign checkpoint** (Phase 2.3, opt-in).
+  `autonomous.checkpoint_every: N` makes `run_autonomous_campaign` save
+  `attack_states.json` every N completed targets (`0` = off, the default), so a
+  long campaign survives a restart with real state instead of a condensed
+  snippet.
+- **Adaptive replan + vulnerability chaining** (Phase 2.4, opt-in).
+  `autonomous.adaptive_replan: true` enables per-target multi-round replanning
+  with vuln-chaining across phases (capped by `autonomous.max_cycles`, default
+  100). When off, the orchestrator keeps its single-pass phase order.
+- **`ModuleResult` execution adapter and independent privilege-level
+  detection.** The orchestrator's attack-module dispatch converts tool output
+  into a `ModuleResult` and the outcome classifier now reports
+  `privilege_level` (`none` / `user` / `admin` / `system` / `root`) independently
+  of the access-achieved flag, so "access but not max privilege" drives the
+  privilege-escalation phase without conflating it with a missed shell.
+
+### Changed
+- `config.yaml` documents the new `autonomous` (`persistence_phase`,
+  `checkpoint_every`, `adaptive_replan`, `max_cycles`) and `eval` top-level
+  blocks; all keys default OFF / 0 so first-run behavior is unchanged.
+- README gains a Workspace layout section, the `--eval` CLI flag, the `make eval`
+  target, and the `eval` config block.
+
 ## v0.49.5 (2026-07-26) — Tool-layer hardening: binary writes, local-target autonomous path, sudo-pivot, git_clone preflight, unified env registry, GITHUB_TOKEN bootstrap
 
 Six residual gaps that remained even at v0.49.4 after the `127.0.0.1` run. All are

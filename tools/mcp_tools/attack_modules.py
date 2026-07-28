@@ -1247,6 +1247,26 @@ if __name__ == "__main__":
                 lines.append(f"SUGGESTED_COMMAND: {result['suggested_command']}")
             if result.get("suggested_msf"):
                 lines.append(f"SUGGESTED_MSF: {result['suggested_msf']}")
+            # Phase 2.1: render the compromise / credential signals a typed
+            # ModuleResult (or an enriched dict from the autonomous executor)
+            # carries. These keys are what ``AttackState.record_success`` reads
+            # to flip ``access_achieved`` -- surfacing them here lets the MCP
+            # caller see whether a module verified a real foothold.
+            if result.get("shell_type"):
+                lines.append(f"SHELL_TYPE: {result['shell_type']}")
+            if result.get("privilege_level"):
+                lines.append(f"PRIVILEGE_LEVEL: {result['privilege_level']}")
+            creds = result.get("credentials_found") or result.get("credentials") or []
+            if creds:
+                creds_str = "; ".join(
+                    c if isinstance(c, str) else " ".join(f"{k}={v}" for k, v in c.items())
+                    for c in creds
+                )
+                lines.append(f"CREDENTIALS_FOUND: {creds_str}")
+            if result.get("evidence"):
+                lines.append(f"EVIDENCE: {'; '.join(str(e) for e in result['evidence'])}")
+            if result.get("references"):
+                lines.append(f"REFERENCES: {'; '.join(str(r) for r in result['references'])}")
             if script_path:
                 lines.append(f"SCRIPT_SAVED: {script_path}")
             if result.get("script"):
@@ -1300,9 +1320,7 @@ if __name__ == "__main__":
             # Build experience store (lightweight JSONL fallback if DB unavailable)
             experience_store: ExperienceStore | None = None
             try:
-                db_path = workspace / "experience.db"
-                db = DatabaseManager(db_path)
-                experience_store = ExperienceStore(db)
+                experience_store = ExperienceStore(get_default_db())
             except Exception:
                 experience_store = None
 
@@ -1438,9 +1456,7 @@ if __name__ == "__main__":
             # Build experience store
             experience_store: ExperienceStore | None = None
             try:
-                db_path = workspace / "experience.db"
-                db = DatabaseManager(db_path)
-                experience_store = ExperienceStore(db)
+                experience_store = ExperienceStore(get_default_db())
             except Exception:
                 experience_store = None
 
@@ -1550,8 +1566,18 @@ if __name__ == "__main__":
             campaign_dir = workspace / "campaigns" / campaign_id
             campaign_dir.mkdir(parents=True, exist_ok=True)
 
-            # Build mission config
+            # Build mission config. The ``autonomous`` block (config.yaml) is
+            # merged first so its opt-in Phase 2 flags (persistence_phase,
+            # checkpoint_every, adaptive_replan, max_pivot_depth) reach the
+            # orchestrator; the explicit keys below then override the shared
+            # ones (target/goal/aggression/max_cycles/workspace).
             mission_config = {
+                **(config or {}).get("autonomous", {}),
+                # Phase 6.2: pass the opsec block through so the orchestrator's
+                # AttackModuleExecutor can build an OpsecManager and make
+                # AggressionLevel.STEALTH pacing load-bearing. Absent -> {} ->
+                # disabled profile -> pacing no-op (legacy behavior).
+                "opsec": (config or {}).get("opsec", {}),
                 "target": target_ip,
                 "goal": goal,
                 "aggression": agg.value,
@@ -1752,8 +1778,17 @@ if __name__ == "__main__":
                     f"BLOCKED_REASON: {reason}"
                 )
 
-            # Build orchestrator and load state
+            # Build orchestrator and load state. Merge the ``autonomous``
+            # config block so the opt-in Phase 2 flags flow through; explicit
+            # keys below override (max_cycles=1 -- run_campaign_step is a
+            # single step).
             mission_config = {
+                **(config or {}).get("autonomous", {}),
+                # Phase 6.2: pass the opsec block through so the orchestrator's
+                # AttackModuleExecutor can build an OpsecManager and make
+                # AggressionLevel.STEALTH pacing load-bearing. Absent -> {} ->
+                # disabled profile -> pacing no-op (legacy behavior).
+                "opsec": (config or {}).get("opsec", {}),
                 "target": target_ip,
                 "goal": state_data.get("goal", "initial_access"),
                 "max_cycles": 1,

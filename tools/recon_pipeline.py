@@ -54,6 +54,8 @@ class ServiceInfo:
     cpe: list[str] = field(default_factory=list)
     scripts: dict[str, str] = field(default_factory=dict)
     ssl_info: dict[str, Any] = field(default_factory=dict)
+    smtp_info: dict[str, Any] = field(default_factory=dict)
+    db_info: dict[str, Any] = field(default_factory=dict)
     os_guess: str = ""
     confidence: int = 0
     technologies: list[str] = field(default_factory=list)
@@ -68,6 +70,8 @@ class ServiceInfo:
             "cpe": self.cpe,
             "scripts": self.scripts,
             "ssl_info": self.ssl_info,
+            "smtp_info": self.smtp_info,
+            "db_info": self.db_info,
             "os_guess": self.os_guess,
             "confidence": self.confidence,
             "technologies": self.technologies,
@@ -94,6 +98,8 @@ class ServiceInfo:
             cpe=list(data.get("cpe", []) or []),
             scripts=dict(data.get("scripts", {}) or {}),
             ssl_info=dict(data.get("ssl_info", {}) or {}),
+            smtp_info=dict(data.get("smtp_info", {}) or {}),
+            db_info=dict(data.get("db_info", {}) or {}),
             os_guess=str(data.get("os_guess", "") or ""),
             confidence=int(data.get("confidence", 0) or 0),
             technologies=list(data.get("technologies", []) or []),
@@ -119,6 +125,11 @@ class HostReconResult:
     evidence_refs: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # --- Phase 3 Round 2 additive recon fields (UDP / spider / OSINT) ---
+    udp_ports: list[int] = field(default_factory=list)
+    spider_results: list[dict[str, Any]] = field(default_factory=list)
+    osint: dict[str, Any] = field(default_factory=dict)
+    ipv6_addresses: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -138,6 +149,10 @@ class HostReconResult:
             "evidence_refs": self.evidence_refs,
             "errors": self.errors,
             "warnings": self.warnings,
+            "udp_ports": self.udp_ports,
+            "spider_results": self.spider_results,
+            "osint": self.osint,
+            "ipv6_addresses": self.ipv6_addresses,
         }
 
     def get_services_by_name(self, name: str) -> list[ServiceInfo]:
@@ -188,6 +203,10 @@ class HostReconResult:
             evidence_refs=list(data.get("evidence_refs", []) or []),
             errors=list(data.get("errors", []) or []),
             warnings=list(data.get("warnings", []) or []),
+            udp_ports=list(data.get("udp_ports", []) or []),
+            spider_results=list(data.get("spider_results", []) or []),
+            osint=dict(data.get("osint", {}) or {}),
+            ipv6_addresses=list(data.get("ipv6_addresses", []) or []),
         )
 
 
@@ -221,6 +240,19 @@ class ReconConfig:
     # ``-sT`` instead of failing. See ``tools.nmap_priv``.
     sudo: bool = False
     priv_fallback: bool = True
+    # UDP scan scope (Phase 3 Round 2). ``--top-ports <N>`` for the additive
+    # ``recon_udp`` path. Default 100 keeps the UDP scan fast; raise it for
+    # deeper coverage. TCP ``scan_host`` is unaffected.
+    udp_top_ports: int = 100
+    # Phase 3 Round 2 additive secondary enumerators (TLS / SMTP / DB / web
+    # spider / passive OSINT). The dataclass default is False so direct
+    # ``ReconConfig()`` construction (used by existing tests that mock only the
+    # original nine enumerators) preserves the legacy enumerate_host behavior
+    # — the new coroutines never run unmocked and cannot append evidence or
+    # touch the network in those tests. ``from_config`` flips this to True
+    # (reading ``recon.extended_enumerators``) so production / MCP paths opt in
+    # automatically. The TCP ``scan_host`` path is unchanged regardless.
+    extended_enumerators: bool = False
 
     @classmethod
     def from_config(cls, config: dict | None, **overrides: Any) -> "ReconConfig":
@@ -229,10 +261,14 @@ class ReconConfig:
         ``aggression_level``) are applied on top so callers don't lose fields
         they used to pass positionally."""
         nmap = ((config or {}).get("nmap") or {})
+        recon_cfg = ((config or {}).get("recon") or {})
         fields: dict[str, Any] = dict(
             nmap_path=nmap.get("path") or "nmap",
             sudo=bool(nmap.get("sudo", False)),
             priv_fallback=bool(nmap.get("priv_fallback", True)),
+            # Production opts into the Phase 3 additive enumerators by
+            # default; ``recon.extended_enumerators: false`` disables them.
+            extended_enumerators=bool(recon_cfg.get("extended_enumerators", True)),
         )
         fields.update(overrides)
         return cls(**fields)
@@ -542,6 +578,122 @@ class PrimaryReconScanner:
             result.os_family = self._ttl_to_os_family(result.ttl)
 
         return result
+
+    async def _run_nmap_udp(
+        self, target: str, top_ports: int = 100
+    ) -> HostReconResult | None:
+        """Run a targeted UDP scan against the single target.
+
+        Uses ``nmap -sU --top-ports <N> -sV --script=default,vuln -Pn``. UDP
+        scanning requires root/raw sockets, so this mirrors the TCP
+        ``_run_nmap`` privilege handling: ``apply_nmap_privilege`` is applied up
+        front (sudo prefix / ``priv_fallback``), and on a privilege-related
+        failure the scan is retried once with a smaller ``--top-ports`` set
+        (UDP scan time grows quickly with port count) before giving up.
+
+        Output is parsed by :func:`tools.recon_enrichers.parse_udp_nmap_output`
+        into ``ServiceInfo`` entries with ``protocol="udp"``; their ports are
+        also collected into ``result.udp_ports``. Routed through
+        :func:`run_command` so tests can mock it. Targets ONLY the single
+        authorized ``target``.
+        """
+        from tools.recon_enrichers import parse_udp_nmap_output
+
+        result = HostReconResult(target_ip=target, scan_tool="nmap-udp")
+        if top_ports is None or top_ports <= 0:
+            top_ports = 100
+
+        cmd = [
+            self._config.nmap_path,
+            "-sU", "-sV", "-Pn",
+            "--top-ports", str(top_ports),
+            "--script=default,vuln",
+            "-oX", "-",
+            target,
+        ]
+
+        cmd, note = apply_nmap_privilege(
+            cmd, sudo=self._config.sudo, priv_fallback=self._config.priv_fallback
+        )
+        if note:
+            result.warnings.append(note)
+
+        success, stdout, stderr, elapsed = await run_command(
+            cmd,
+            timeout=self._config.timeout_seconds,
+            max_retries=self._config.max_retries,
+            retry_delay=self._config.retry_delay,
+        )
+
+        # Privilege-related failure: retry once with a smaller port set so a
+        # non-root operator box still gets *some* UDP coverage rather than
+        # aborting. run_command returns immediately on privilege errors.
+        if not success and is_privilege_error(stderr) and not note:
+            reduced = max(min(top_ports // 2, 50), 10)
+            cmd2 = [
+                self._config.nmap_path,
+                "-sU", "-sV", "-Pn",
+                "--top-ports", str(reduced),
+                "--script=default",
+                "-oX", "-",
+                target,
+            ]
+            cmd2, note2 = apply_nmap_privilege(
+                cmd2, sudo=self._config.sudo, priv_fallback=True
+            )
+            if note2:
+                result.warnings.append(note2)
+            success, stdout, stderr, elapsed = await run_command(
+                cmd2,
+                timeout=self._config.timeout_seconds,
+                max_retries=0,
+            )
+            cmd = cmd2
+
+        result.scan_duration = elapsed
+        result.raw_output = stdout + "\n" + stderr
+
+        if not success:
+            result.errors.append(f"Nmap UDP failed: {stderr[:500]}")
+            return result
+
+        # Parse UDP output into ServiceInfo entries (protocol="udp").
+        udp_entries = parse_udp_nmap_output(stdout)
+        udp_ports: list[int] = []
+        for entry in udp_entries:
+            port = int(entry.get("port", 0) or 0)
+            if port <= 0:
+                continue
+            udp_ports.append(port)
+            result.services.append(
+                ServiceInfo(
+                    port=port,
+                    protocol="udp",
+                    service=str(entry.get("service", "") or "unknown"),
+                    banner=str(entry.get("banner", "") or ""),
+                )
+            )
+        # De-duplicate ports preserving order.
+        seen: set[int] = set()
+        result.udp_ports = [p for p in udp_ports if not (p in seen or seen.add(p))]
+
+        return result
+
+    async def recon_udp(self, target: str, top_ports: int = 100) -> HostReconResult:
+        """Public UDP recon entry point against the single target.
+
+        Runs ``_run_nmap_udp`` and returns a ``HostReconResult`` whose
+        ``udp_ports`` / ``services`` (protocol="udp") are populated. The TCP
+        :meth:`scan_host` path is unchanged — this is an additive, separate
+        entry point so existing callers/tests are unaffected. Targets ONLY the
+        single authorized ``target``.
+        """
+        if not ToolAvailability.check(self._config.nmap_path):
+            result = HostReconResult(target_ip=target, scan_tool="nmap-udp")
+            result.errors.append("nmap not available for UDP scan")
+            return result
+        result = await self._run_nmap_udp(target, top_ports=top_ports)
+        return result or HostReconResult(target_ip=target, scan_tool="nmap-udp")
 
     async def _run_rustscan(self, target: str) -> HostReconResult | None:
         """Run RustScan for fast port discovery, then Nmap for service detection."""
@@ -891,6 +1043,53 @@ class SecondaryEnumerator:
         rdp_services = [s for s in result.services if s.service.lower() in ("ms-wbt-server", "rdp", "terminal-server")]
         if rdp_services:
             coros.append(self._enumerate_rdp(result, rdp_services))
+
+        # --- Phase 3: additive enumerators (TLS / SMTP / DB / spider / OSINT) ---
+        # Gated behind ``extended_enumerators`` (dataclass default False;
+        # ``from_config`` defaults True). When off, enumerate_host behaves
+        # exactly as before — the new coroutines never run, so existing tests
+        # that mock only the original nine enumerators are unaffected.
+        if getattr(self._config, "extended_enumerators", False):
+            # TLS deep cert enumeration on TLS-likely ports.
+            _TLS_LIKELY_PORTS = {443, 8443, 993, 995, 465, 636}
+            tls_services = [
+                s for s in result.services
+                if s.port in _TLS_LIKELY_PORTS
+                or s.service.lower() in ("https", "imaps", "pop3s", "smtps", "ldaps", "ftps")
+            ]
+            if tls_services:
+                coros.append(self._enumerate_tls(result, tls_services))
+
+            # SMTP banner / capability enumeration.
+            smtp_services = [
+                s for s in result.services
+                if s.service.lower() in ("smtp", "smtps") or s.port in (25, 465, 587)
+            ]
+            if smtp_services:
+                coros.append(self._enumerate_smtp(result, smtp_services))
+
+            # Database banner enumeration.
+            _DB_PORTS = {3306, 5432, 1433, 27017, 6379, 1521}
+            _DB_SERVICE_NAMES = {
+                "mysql", "postgresql", "mssql", "mongod", "mongodb", "redis", "oracle",
+                "oracle-tns", "ms-sql-s",
+            }
+            db_services = [
+                s for s in result.services
+                if s.port in _DB_PORTS or s.service.lower() in _DB_SERVICE_NAMES
+            ]
+            if db_services:
+                coros.append(self._enumerate_db(result, db_services))
+
+            # Bounded web spider on http/https services.
+            web_spider_services = [
+                s for s in result.services if s.service.lower() in ("http", "https", "http-proxy")
+            ]
+            if web_spider_services:
+                coros.append(self._enumerate_web_spider(result, web_spider_services))
+
+            # Passive OSINT — target-level (run once per host, not per service).
+            coros.append(self._enumerate_osint(result, []))
 
         # Run secondary enumeration with concurrency limit
         if coros:
@@ -1413,6 +1612,195 @@ class SecondaryEnumerator:
         return result
 
     # -----------------------------------------------------------------------
+    # Phase 3 Round 2 additive enumerators
+    # (TLS / SMTP / DB / web spider / passive OSINT). Each targets ONLY the
+    # single authorized ``result.target_ip`` and is routed through
+    # ``run_command`` (so tests can mock it) or the bounded Round 1 helpers.
+    # -----------------------------------------------------------------------
+
+    async def _enumerate_tls(
+        self, result: HostReconResult, services: list[ServiceInfo]
+    ) -> HostReconResult:
+        """Deep TLS certificate enumeration on TLS-likely ports.
+
+        Runs ``nmap --script ssl-cert,ssl-enum`` on each TLS-likely port and
+        parses the output with :func:`tools.recon_enrichers.parse_tls_info`,
+        populating ``svc.ssl_info``. Mirrors how ``_enumerate_ssh`` runs a
+        targeted nmap script.
+        """
+        from tools.recon_enrichers import parse_tls_info
+
+        logger.info(f"Starting TLS enumeration on {result.target_ip}")
+        for svc in services:
+            port = svc.port
+            if not ToolAvailability.check(self._config.nmap_path):
+                continue
+            cmd = [
+                self._config.nmap_path,
+                "-p", str(port),
+                "--script", "ssl-cert,ssl-enum",
+                "-Pn",
+                result.target_ip,
+            ]
+            try:
+                success, stdout, stderr, _ = await run_command(
+                    cmd, timeout=60, max_retries=1,
+                )
+            except Exception as exc:
+                result.warnings.append(f"TLS enum failed on port {port}: {exc}")
+                continue
+            if success and stdout:
+                svc.ssl_info = parse_tls_info(stdout)
+                svc.scripts["ssl_cert"] = stdout[:3000]
+                result.evidence_refs.append(f"ssl_cert:{port}")
+        return result
+
+    async def _enumerate_smtp(
+        self, result: HostReconResult, services: list[ServiceInfo]
+    ) -> HostReconResult:
+        """SMTP banner / capability enumeration on smtp-service ports.
+
+        Runs ``nmap --script smtp-commands,smtp-open-relay`` and parses the
+        banner with :func:`tools.recon_enrichers.parse_smtp_banner`, populating
+        ``svc.smtp_info`` (server_software, supports_starttls, auth_methods).
+        """
+        from tools.recon_enrichers import parse_smtp_banner
+
+        logger.info(f"Starting SMTP enumeration on {result.target_ip}")
+        for svc in services:
+            port = svc.port
+            banner_text = ""
+            if ToolAvailability.check(self._config.nmap_path):
+                cmd = [
+                    self._config.nmap_path,
+                    "-p", str(port),
+                    "--script", "smtp-commands,smtp-open-relay",
+                    "-Pn",
+                    result.target_ip,
+                ]
+                try:
+                    success, stdout, stderr, _ = await run_command(
+                        cmd, timeout=60, max_retries=1,
+                    )
+                except Exception as exc:
+                    result.warnings.append(f"SMTP enum failed on port {port}: {exc}")
+                    continue
+                if success and stdout:
+                    banner_text = stdout
+                    svc.scripts["smtp_commands"] = stdout[:3000]
+                    result.evidence_refs.append(f"smtp_commands:{port}")
+            if banner_text:
+                svc.smtp_info = parse_smtp_banner(banner_text)
+        return result
+
+    async def _enumerate_db(
+        self, result: HostReconResult, services: list[ServiceInfo]
+    ) -> HostReconResult:
+        """Database banner enumeration on mysql/postgres/mssql/mongo/redis/oracle.
+
+        Runs a targeted ``nmap --script`` banner grab per port and parses with
+        :func:`tools.recon_enrichers.parse_db_banner`, populating
+        ``svc.db_info`` (db_type, version, auth_required).
+        """
+        from tools.recon_enrichers import parse_db_banner
+
+        logger.info(f"Starting DB enumeration on {result.target_ip}")
+        for svc in services:
+            port = svc.port
+            banner_text = ""
+            if ToolAvailability.check(self._config.nmap_path):
+                cmd = [
+                    self._config.nmap_path,
+                    "-p", str(port),
+                    "--script", "banner,default",
+                    "-Pn",
+                    result.target_ip,
+                ]
+                try:
+                    success, stdout, stderr, _ = await run_command(
+                        cmd, timeout=60, max_retries=1,
+                    )
+                except Exception as exc:
+                    result.warnings.append(f"DB enum failed on port {port}: {exc}")
+                    continue
+                if success and stdout:
+                    banner_text = stdout
+                    svc.scripts["db_banner"] = stdout[:3000]
+                    result.evidence_refs.append(f"db_banner:{port}")
+            if banner_text:
+                svc.db_info = parse_db_banner(banner_text, service=svc.service)
+        return result
+
+    async def _enumerate_web_spider(
+        self, result: HostReconResult, services: list[ServiceInfo]
+    ) -> HostReconResult:
+        """Bounded stdlib web spider on http/https services.
+
+        Calls :func:`tools.recon_enrichers.http_spider` (a bounded BFS spider
+        that connects ONLY to the single ``target_ip:port``) and appends each
+        result dict to ``result.spider_results``. This is the one place a
+        Round 1 function does network — it is bounded and targets only the
+        single authorized host.
+        """
+        from tools.recon_enrichers import http_spider
+
+        logger.info(f"Starting web spider on {result.target_ip}")
+        for svc in services:
+            port = svc.port
+            scheme = (
+                "https"
+                if svc.service.lower() == "https" or port in (443, 8443)
+                else "http"
+            )
+            try:
+                spider = http_spider(
+                    result.target_ip, port, scheme=scheme, max_pages=20
+                )
+            except Exception as exc:
+                result.warnings.append(f"Web spider failed on port {port}: {exc}")
+                continue
+            if isinstance(spider, dict):
+                result.spider_results.append(spider)
+                result.evidence_refs.append(f"spider:{port}")
+        return result
+
+    async def _enumerate_osint(
+        self, result: HostReconResult, services: list[ServiceInfo]
+    ) -> HostReconResult:
+        """Passive OSINT aggregation for the single target.
+
+        Calls :func:`tools.recon_osint.run_osint` (PASSIVE ONLY: reverse DNS,
+        DNS AAAA for IPv6, crt.sh certificate transparency, optional Shodan)
+        about the single target and stores the returned dict in
+        ``result.osint``; copies the ipv6 list into ``result.ipv6_addresses``.
+        Wrapped in try/except so an OSINT failure never breaks the pipeline.
+        Does NOT perform any active scan.
+        """
+        from tools.recon_osint import run_osint
+
+        logger.info(f"Starting passive OSINT for {result.target_ip}")
+        # Shodan is optional and gated on an API key. The ReconConfig schema
+        # does not currently carry one; pass "" so run_osint skips Shodan
+        # (returns {"enabled": False, ...}). A key can be injected later via
+        # the MCP ``run_osint_recon`` tool path without changing the pipeline.
+        shodan_key = ""
+        try:
+            osint = run_osint(
+                result.target_ip,
+                hostname=result.hostname or "",
+                shodan_api_key=shodan_key,
+            )
+            if isinstance(osint, dict):
+                result.osint = osint
+                ipv6 = osint.get("ipv6_addresses") or []
+                if isinstance(ipv6, list):
+                    result.ipv6_addresses = [str(a) for a in ipv6 if isinstance(a, str)]
+        except Exception as exc:
+            # OSINT failure must never break the recon pipeline.
+            result.warnings.append(f"OSINT failed for {result.target_ip}: {exc}")
+        return result
+
+    # -----------------------------------------------------------------------
     # Helpers
     # -----------------------------------------------------------------------
 
@@ -1542,6 +1930,18 @@ class ReconPipeline:
         logger.info(f"Starting parallel reconnaissance for {len(targets)} targets")
         tasks = [self.recon_host(t) for t in targets]
         return await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def recon_udp(self, target: str, top_ports: int | None = None) -> HostReconResult:
+        """Run the additive UDP recon path against the single target.
+
+        Does NOT run the TCP primary scan or the secondary enumerators — it is
+        a standalone UDP pass that populates ``udp_ports`` and udp
+        ``ServiceInfo`` entries. The TCP :meth:`recon_host` path is unchanged.
+        Targets ONLY the single authorized ``target``.
+        """
+        if top_ports is None:
+            top_ports = self._config.udp_top_ports
+        return await self._primary.recon_udp(target, top_ports=top_ports)
 
     def get_attack_surface_summary(self, result: HostReconResult) -> dict[str, Any]:
         """Generate a structured attack surface summary for downstream attack modules."""

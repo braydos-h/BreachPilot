@@ -5,7 +5,7 @@ for common vulnerabilities, so it doesn't have to write every exploit
 from scratch.
 """
 
-from tools.attack_modules.base import AttackModule, ModuleContext
+from tools.attack_modules.base import AttackModule, ModuleContext, ModuleResult
 from tools.attack_modules.registry import (
     find_modules,
     get_module,
@@ -23,6 +23,7 @@ from tools.attack_modules.modules import __all__ as _MODULE_EXPORTS
 __all__ = [
     "AttackModule",
     "ModuleContext",
+    "ModuleResult",
     "list_modules",
     "find_modules",
     "get_module",
