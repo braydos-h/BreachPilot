@@ -21,8 +21,8 @@ reports/
 exploit_workspace/
 research_workspace/
 test_workspace*/
-tui_workspace/
 swarm_workspace/
+*.egg-info/
 
 _analysis_output.json
 _cycles_output.json

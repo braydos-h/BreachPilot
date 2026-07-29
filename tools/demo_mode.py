@@ -162,7 +162,6 @@ def run_demo(args: Any) -> int:
             stealth=False,
             rotate_ua=False,
             doh=False,
-            tui=False,
             menu=False,
             web=False, web_host="127.0.0.1", web_port=8080,
             swarm=False, critic=False, reflection=False,

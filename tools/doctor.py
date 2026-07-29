@@ -42,7 +42,7 @@ def _check_python() -> dict[str, Any]:
 def _check_imports() -> dict[str, Any]:
     required = [
         "yaml", "ollama", "mcp", "uvicorn", "websockets",
-        "textual", "questionary", "pytest",
+        "questionary", "pytest",
     ]
     missing: list[str] = []
     for mod in required:

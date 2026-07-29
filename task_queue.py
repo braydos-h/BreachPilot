@@ -221,7 +221,7 @@ class TaskQueue:
         search: str = "",
     ) -> list[dict[str, Any]]:
         # When a status filter is supplied it *replaces* the default open-set
-        # predicate (pending/running) so the TUI status filter can show e.g. only
+        # predicate (pending/running) so callers can request, for example, only
         # 'blocked' or only 'complete'. Empty status keeps the open-set default.
         params: list[Any] = []
         if status:

@@ -423,7 +423,7 @@ class AgentLoop:
             pass
 
     def _persist_event(self, event_type: str, data: dict[str, Any]) -> None:
-        """Append swarm events to a JSONL trail for TUI replay."""
+        """Append swarm events to a JSONL observability trail."""
         try:
             record = {"ts": time.time(), "event_type": event_type, "data": data}
             with self._swarm_events_path.open("a", encoding="utf-8") as handle:

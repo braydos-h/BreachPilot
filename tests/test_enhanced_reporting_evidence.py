@@ -10,7 +10,6 @@ Covers:
   service-aware fallback and vulnerable-version bump.
 - ``generate_full_report`` writes a self-contained HTML report that contains
   finding titles, evidence refs, reproduction steps, and escaped content.
-- The TUI ReportsScreen preview helper surfaces the newest HTML report path.
 """
 
 from __future__ import annotations
@@ -393,42 +392,3 @@ def test_output_format_both_stays_json_and_markdown_only(generator):
 def test_output_format_html_only(generator):
     paths = generator.generate_full_report(_campaign(), output_format="html")
     assert set(paths.keys()) == {"html"}
-
-
-# ── TUI ReportsScreen preview helper ──────────────────────────────────────
-
-
-def test_tui_preview_surfaces_latest_html(tmp_path):
-    """The ReportsScreen._latest_html_report helper finds the newest HTML file."""
-    # Construct a minimal fake service registry with workspace_root.
-    class _FakeSvc:
-        workspace_root = tmp_path
-
-    enhanced = tmp_path / "enhanced"
-    enhanced.mkdir(parents=True, exist_ok=True)
-    (enhanced / "report_M-1_older.html").write_text("<html>old</html>", encoding="utf-8")
-    newest = enhanced / "report_M-1_newest.html"
-    newest.write_text("<html>new</html>", encoding="utf-8")
-    # Bump mtime so ordering is deterministic regardless of FS resolution.
-    import os
-    os.utime(newest, (newest.stat().st_mtime + 5,) * 2)
-
-    # Import the screen module lazily (Textual may be unavailable in CI).
-    from tui.screens import reports as reports_mod
-
-    screen = object.__new__(reports_mod.ReportsScreen)
-    screen._get_services = lambda: _FakeSvc()  # type: ignore[attr-defined]
-    latest = screen._latest_html_report()  # type: ignore[attr-defined]
-    assert latest is not None
-    assert latest.name == "report_M-1_newest.html"
-
-
-def test_tui_preview_returns_none_when_no_html(tmp_path):
-    class _FakeSvc:
-        workspace_root = tmp_path
-
-    from tui.screens import reports as reports_mod
-
-    screen = object.__new__(reports_mod.ReportsScreen)
-    screen._get_services = lambda: _FakeSvc()  # type: ignore[attr-defined]
-    assert screen._latest_html_report() is None  # type: ignore[attr-defined]

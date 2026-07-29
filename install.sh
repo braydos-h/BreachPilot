@@ -219,7 +219,6 @@ echo
 echo "Done. Next steps:"
 echo "  natai                      # interactive menu (after \`source ~/.bashrc\` / new terminal)"
 echo "  natai --target 10.0.0.50 --mode attack --goal backdoor"
-echo "  natai --tui                # dashboard"
 echo "  (or, inside the venv)  python main.py ..."
 echo
 echo "Reminder: only run against networks you own or are explicitly authorized to test."

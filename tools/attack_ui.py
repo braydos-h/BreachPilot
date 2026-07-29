@@ -311,7 +311,7 @@ class AttackUi:
 
     def skill_reselected(self, active_count: int, added: list[str]) -> None:
         """Emit the mid-run re-selection event (advisory). Mirrors the
-        ``[SKILL] reselected`` line the exploit loop prints so the CLI/TUI
+        ``[SKILL] reselected`` line the exploit loop prints so the CLI
         share one vocabulary for skill lifecycle events."""
         added_text = ", ".join(_sanitize(n) for n in added[:5]) or "none"
         print(

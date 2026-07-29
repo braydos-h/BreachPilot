@@ -3,7 +3,7 @@
 ## Mission Creation Flow
 
 ```text
-mission.yaml or UI form
+mission.yaml or CLI configuration
   -> mission.Mission.from_yaml_or_dict
   -> Mission.validate
   -> MissionController.create_from_config
@@ -12,7 +12,7 @@ mission.yaml or UI form
   -> workspace/evidence/report directories initialized
 ```
 
-Use this flow when changing mission schema, risk profiles, scope behavior, or the TUI mission setup wizard.
+Use this flow when changing mission schema, risk profiles, scope behavior, or CLI mission creation.
 
 ## Database-Backed Research Loop
 
@@ -125,18 +125,6 @@ MCP client
 
 Defensive tools include ping sweep, triage scan, basic scan, service scan, vuln scan, limited terminal, vulnerability intel, and CVE intel. This server is the safer integration surface for scan-only clients.
 
-## TUI Flow
-
-```text
-python -m tui
-  -> tui.app.ResearchTUI
-  -> tui.services.ServiceRegistry
-  -> backend services loaded lazily
-  -> screens query services and update widgets
-```
-
-Screen routing lives in `tui/app.py`. Backend integration lives in `tui/services.py`. Most screens should call the service registry rather than constructing backend classes directly.
-
 ## Swarm Flow
 
 ```text
@@ -148,7 +136,7 @@ task/context
   -> optional reflection pass
 ```
 
-Use the swarm path for multi-agent strategy, parallel routing, blackboard state, and battle-log UI changes.
+Use the swarm path for multi-agent strategy, parallel routing, blackboard state, and battle-log observability changes.
 
 ## Report Flow
 

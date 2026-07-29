@@ -4,7 +4,7 @@
 
 | Path | Responsibility |
 | --- | --- |
-| `main.py` | Primary launcher for interactive, TUI, recon, attack, doctor, self-test, resume, model, and MCP transport flows. |
+| `main.py` | Primary launcher for interactive, recon, attack, doctor, self-test, resume, model, and MCP transport flows. |
 | `app.py` | Tiny friendly launcher that imports and calls `main`. |
 | `cli.py` | Deterministic workflow CLI over missions, scope, tasks, findings, and reports. |
 | `agent_loop.py` | Full database-backed research loop orchestration. |
@@ -64,24 +64,7 @@ Add a new module by subclassing `AttackModule`, implementing applicability and r
 - `agents/critic_agent.py`: safety/policy critic.
 - `agents/reflection_agent.py`: strategy reflection specialist.
 
-Update `tests/test_swarm.py`, `tests/test_swarm_integration.py`, and `tests/test_swarm_ui.py` when changing this area.
-
-## `tui/`
-
-- `tui/app.py`: Textual app, sidebar routing, global actions.
-- `tui/services.py`: backend service facade and dashboard/swarm snapshots.
-- `tui/themes.py`: colors/icons/status styling.
-- `tui/widgets/__init__.py`: reusable widgets such as sidebar, status bar, modal, scope preview, empty state, and card.
-- `tui/screens/*.py`: one file per major screen.
-- `tui/app.tcss`: Textual CSS.
-
-When adding a screen:
-
-1. Create the screen module under `tui/screens/`.
-2. Export/import it through `tui/screens/__init__.py` if needed.
-3. Add routing in `tui/app.py`.
-4. Use `ServiceRegistry` for backend access.
-5. Add TUI/service tests where practical.
+Update `tests/test_swarm.py`, `tests/test_swarm_integration.py`, and `tests/test_swarm_observability.py` when changing this area.
 
 ## Tests
 
@@ -92,4 +75,4 @@ Tests are organized by module or feature. Examples:
 - Exploit tooling: `test_attack_modules.py`, `test_mcp_workspace.py`, `test_retry_logic.py`, `test_lateral_tools.py`
 - Safety/config: `test_safety_reviewer.py`, `test_config_manager.py`, `test_command_analyzer.py`, `test_audit_redaction.py`
 - AI/research: `test_goal_engine.py`, `test_cve_lookup.py`, `test_recon_pipeline.py`, `test_semantic_memory.py`, `test_ultrathink.py`
-- UI/swarm: `test_tui_services.py`, `test_swarm.py`, `test_swarm_integration.py`, `test_swarm_ui.py`
+- Menu/swarm: `test_interactive_menu.py`, `test_swarm.py`, `test_swarm_integration.py`, `test_swarm_observability.py`

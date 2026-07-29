@@ -11,7 +11,7 @@ The repo is NOT a generic nmap wrapper. It couples:
 - A defensive MCP tool server (`mcp_server.py`) that exposes scope-gated Nmap scanning, sanitized vulnerability search, and NVD CVE lookup.
 - A second permissive MCP tool server (`mcp_exploit_server.py`, port 8001 by default) that exposes terminal execution, Python file write/run, searchsploit, Metasploit, msfvenom, impacket lateral movement, and credential dumping — gated at the policy layer in `tools/exploit_agent/policy.py`, not in the MCP server itself.
 - A multi-agent swarm (`tools/swarm/`) that decomposes work across 6 specialist agents with a shared blackboard.
-- An interactive Textual TUI (`tui/`, `python -m tui`) and a questionary-driven interactive menu.
+- A questionary-driven interactive menu and direct CLI entry points.
 - An autonomous attack orchestrator (`tools/autonomous_orchestrator.py`) that drives persistent multi-phase campaigns with adaptive aggression levels.
 
 The operator must only ever run this against networks they own or are explicitly authorized to assess. Scope, command, and search safety are enforced in Python code, not just in prompts.
@@ -46,7 +46,6 @@ make self-test        # python main.py --self-test
 make test             # full pytest suite
 make test-one F=tests/test_scope_gate.py  # single file
 make run              # interactive menu
-make tui              # Textual TUI
 make mcp-defensive    # defensive MCP server
 make mcp-exploit      # exploit MCP server
 make clean            # remove venv + __pycache__ dirs
@@ -57,12 +56,10 @@ make clean            # remove venv + __pycache__ dirs
 ./scripts/setup-linux.sh   # venv + deps + doctor check
 ```
 
-### Run (all three UIs from the same entry point)
+### Run
 ```bash
 python main.py                               # interactive questionary menu (the DEFAULT no-args behavior)
 python main.py --menu                         # same interactive menu, explicit
-python main.py --tui                         # launch Textual TUI dashboard
-python -m tui                                # same TUI, alternate entry
 python main.py --target 10.0.0.50 --mode attack --goal backdoor
 python main.py --target 10.0.0.50 --mode recon --recon-first
 python main.py --target 10.0.0.50 --mode attack --swarm --critic --reflection --adaptive-exploits
@@ -86,7 +83,7 @@ python -m pytest tests/test_scope_gate.py -v          # single file
 python -m pytest tests/test_recon_pipeline.py::TestClass::test_method -v   # single test
 python -m pytest tests/ -v -k "scope"                  # by keyword
 ```
-~80 test files across `tests/`. Coverage of: scope gate, safety reviewer, semantic memory, recon pipeline, MCP workspace, report generator, CVE lookup, agent loop, reliability regressions, swarm, retry logic, TUI services, skills, reasoning loop, long-session, peer consultation, audit chain, credential store, metasploit bridge, and more.
+The test suite covers scope gates, safety review, semantic memory, recon, MCP workspaces, reporting, CVE lookup, the agent loop, reliability, swarm behavior, retry logic, skills, reasoning, long sessions, peer consultation, audit chains, credential storage, Metasploit integration, and more.
 
 ### MCP servers (standalone)
 ```bash
@@ -100,7 +97,7 @@ The HTTP transport refuses to bind to non-loopback interfaces unless `--allow-pu
 ```bash
 python -m pip install -e ".[dev]"   # includes ruff
 ruff check .                         # line-length 120, select E/F/W/I
-python -m pytest --cov=tools --cov=tui --cov=main.py --cov=cli.py
+python -m pytest --cov=tools --cov=main.py --cov=cli.py
 ```
 
 ## Configuration
@@ -133,7 +130,7 @@ operator ──► main.py (or app.py)
                 │     sets EXPLOIT_TARGET env on the server subprocess (the target-IP lock);
                 │     soft_fail lets the recon-first path degrade to None
                 │
-                ├─ interactive menu (AttackUi) / TUI / CLI args
+                ├─ interactive menu (AttackUi) / CLI args
                 │
                 ├─ GoalEngine (tools/goal_engine.py) → resolves preset or custom goal,
                 │     gates by risk profile (SAFE/GATED/HIGH tags)
@@ -212,9 +209,6 @@ The exploit MCP server's tool implementations live in a structured subpackage, r
 
 ### Shared infrastructure
 - **`db.py`** — SQLite schema (missions, scope_rules, tasks, observations, graph_nodes, graph_edges, evidence, findings, audit_logs, memories) with `_new_id()` and `_now_iso()` helpers. Versioned migrations table.
-- **`tui/services.py`** — TUI service layer that wires mission state, task queues, and findings into the dashboard screens.
-- **`tui/`** — Textual app with 18 screens (dashboard, mission setup wizard, tasks, task detail, findings, finding detail, evidence, scope, targets, execution, target graph, reports, logs, settings, swarm, skills, memory browser, help). Bindings: d, m, t, f, e, s, g, r, l, a, k, ?.
-
 ### `tools/` Directory — Key Modules
 
 | Module | Purpose |
@@ -226,7 +220,7 @@ The exploit MCP server's tool implementations live in a structured subpackage, r
 | `recon_pipeline.py` (63K) | Host discovery, service identification, enrichment, goal suggestion |
 | `attack_modules/` (pkg, ~2.2K lines) | Split from the old 87K monolith: `base.py` (AttackModule ABC + ModuleContext), `registry.py` (ranking), `modules/` per-category (`web`, `auth_creds`, `crypto_jwt`, `deserialize`, `network_smb`, `privesc`, `services`, `ssh`, `synthesis`) |
 | `command_analyzer.py` (30K) | Destructive command and egress analysis |
-| `config_manager.py` (30K) | Config schema, validation, defaults, TUI settings propagation |
+| `config_manager.py` (30K) | Config schema, validation, and defaults |
 | `payload_crafter.py` (31K) | Payload generation and mutation |
 | `metasploit_bridge.py` (30K) | Metasploit RPC integration |
 | `persistent_session_manager.py` (36K) | Session persistence, checkpoint, resume |
@@ -312,14 +306,13 @@ Kali arsenal including searchsploit/metasploit/hydra/crackmapexec/impacket).
 - `reports/<run_id>/` — per-run artifacts (activity.jsonl, raw_nmap/, xml_nmap/, host_<ip>.md, network_summary.{md,html}, findings.csv, mcp_server.log, exploit_workspace/)
 - `research_workspace/<mission_id>/` — Flow B mission data (research.db, evidence/, reports/)
 - `exploit_workspace/<target_ip>/<attempt_id>/` — per-attempt exploit artifacts (exploit_script.py, terminal.log, python_run.log, msf_output.log, run_active_check.ps1) + `exploit_audit.jsonl`
-- `tui_workspace/`, `swarm_workspace/` — created on demand by main.py
+- `swarm_workspace/` — created on demand by main.py
 
 ## Testing Notes
 
 - ~80 test files, all in `tests/`. No fixtures for live Nmap; everything mocks subprocess / network.
 - New safety-relevant code needs regression tests in `test_scope_gate.py`, `test_safety_reviewer.py`, `test_validation_utils.py` (or a new file if the surface is new).
-- The TUI tests in `test_tui_services.py` guard against the regressions listed in `CHANGELOG.md` v1.0.0 (ListItem disabled crash, circular import between dashboard/mission_setup, dashboard refresh timer, etc.).
-- `pyproject.toml` configures pytest with `asyncio_mode = "auto"` and `testpaths = ["tests"]`. Coverage is configured for `tools/`, `tui/`, `main.py`, `cli.py`.
+- `pyproject.toml` configures pytest with `asyncio_mode = "auto"` and `testpaths = ["tests"]`. Coverage is configured for `tools/`, `main.py`, and `cli.py`.
 - No linter / formatter / mypy / CI config is checked in. `pyproject.toml` has optional `ruff` (line-length 120, select E/F/W/I) and `mypy` configs. If adding `ruff` or `mypy`, keep config minimal so security-sensitive diffs stay readable.
 
 ## Things To Watch Out For

@@ -478,7 +478,7 @@ Before publishing a plugin, confirm every item:
 it tells you which existing files to change when adding a defensive MCP tool,
 an exploit MCP tool, an attack module, a runtime skill, recon behavior, a
 goal, model routing, config keys, persistent data, agent-loop behavior, swarm
-behavior, reporting, TUI backend, or external tool integration. Those edits
+behavior, reporting, or external tool integration. Those edits
 ship inside the core repository and run on the next boot.
 
 This guide is the **external** extension path. Use a plugin when:

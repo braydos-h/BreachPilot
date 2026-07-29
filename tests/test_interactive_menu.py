@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+
+import pytest
 
 
 def test_menu_module_imports():
@@ -42,7 +43,7 @@ def test_help_text():
         sys.stdout = old_stdout
     assert "QUICK REFERENCE" in output
     assert "INTERACTIVE MODE" in output
-    assert "TUI DASHBOARD" in output
+    assert "TUI" not in output
     assert "DIRECT ATTACK" in output
 
 
@@ -82,7 +83,7 @@ def test_menu_recon_first_args_override_only_recon_first():
 
 def test_fallback_main_menu_exit():
     """Fallback menu should handle 'exit' choice."""
-    with patch("builtins.input", return_value="8"):
+    with patch("builtins.input", return_value="7"):
         from tools.interactive_menu import _fallback_main_menu
         result = _fallback_main_menu()
         assert result == "exit"
@@ -102,6 +103,33 @@ def test_fallback_main_menu_eof():
         from tools.interactive_menu import _fallback_main_menu
         result = _fallback_main_menu()
         assert result == "exit"
+
+
+def test_questionary_main_menu_has_no_tui_action():
+    """The interactive menu should expose only supported actions."""
+    from tools import interactive_menu
+
+    with (
+        patch.object(interactive_menu, "_HAS_QUESTIONARY", True),
+        patch.object(interactive_menu.questionary, "select") as select,
+    ):
+        select.return_value.unsafe_ask.return_value = "exit"
+        assert interactive_menu._main_menu() == "exit"
+
+    choices = select.call_args.kwargs["choices"]
+    assert "tui" not in [choice.value for choice in choices]
+
+
+def test_parser_help_and_arguments_have_no_tui(capsys):
+    """The removed dashboard should not remain as a hidden CLI interface."""
+    from main import parse_args
+
+    with pytest.raises(SystemExit):
+        parse_args(["--help"])
+    assert "--tui" not in capsys.readouterr().out
+
+    with pytest.raises(SystemExit):
+        parse_args(["--tui"])
 
 
 def test_run_interactive_menu_exits_on_exit():

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Removed
+
+- Removed the unused Textual dashboard, its `--tui` / `python -m tui` launch
+  paths, tests, documentation, and mandatory `textual` dependency.
+- Removed automatic creation of duplicate dashboard mission records and
+  `tui_mission_id.txt` artifacts from normal exploit runs.
+
 ## v0.49.12 (2026-07-28) — Plugin / extension ecosystem (Phase 5)
 
 Phase 5 introduces a real plugin layer that **composes with** the existing

@@ -13,6 +13,45 @@ from tools.goal_suggester import ReconAssessment, build_assessment_from_mcp_resu
 
 ui = AttackUi(plain=False)
 
+
+_GENERIC_SERVICE_NAMES = frozenset({
+    "dns", "ftp", "http", "https", "imap", "pop3", "smtp", "ssh", "telnet",
+})
+
+
+def _cve_query_from_banner(banner: str) -> tuple[str, str] | None:
+    """Return a product/version pair suitable for a CVE search.
+
+    A port/service name is not proof of a particular implementation or version.
+    In particular, querying NVD for just ``ssh`` returns broad historical results
+    that are not attributable to the host.  Only search when the banner identifies
+    a concrete product and version.
+    """
+    if not banner:
+        return None
+
+    # SSH banners commonly start with a protocol identifier (``SSH-2.0-``).
+    # Match OpenSSH first so we do not mistake the protocol version for the
+    # server version.
+    openssh_match = re.search(
+        r"\b(?P<product>OpenSSH)[_\s/-]*v?(?P<version>\d+(?:\.\d+)+(?:p\d+)?)",
+        banner,
+        re.IGNORECASE,
+    )
+    if openssh_match:
+        return "OpenSSH", openssh_match.group("version")
+
+    for match in re.finditer(
+        r"\b(?P<product>[A-Za-z][A-Za-z0-9_.+-]*)[\s/_-]+v?"
+        r"(?P<version>\d+(?:\.\d+)+(?:[A-Za-z0-9._+-]*)?)",
+        banner,
+    ):
+        product = match.group("product")
+        if product.lower() not in _GENERIC_SERVICE_NAMES:
+            return product, match.group("version")
+    return None
+
+
 async def run_recon_assessment(
     *,
     session: Any,
@@ -61,7 +100,6 @@ async def run_recon_assessment(
 
     # ── Step 3: CVE lookup per discovered service ──
     cve_results: list[dict[str, Any]] = []
-    import re
     open_ports: list[tuple[str, str, str, str]] = []
     for line in scan_result.splitlines():
         port_match = re.match(
@@ -77,22 +115,28 @@ async def run_recon_assessment(
         banner = banner.strip()
         if banner == "(no banner)":
             banner = ""
-        version = ""
-        version_match = re.search(r"(\d+\.\d+(?:\.\d+)?)", banner)
-        if version_match:
-            version = version_match.group(1)
-        query = f"{service} {version}".strip()
-        with ui.spinner(f"Looking up CVEs for {service} on port {port}..."):
+        product_version = _cve_query_from_banner(banner)
+        if product_version is None:
+            ui.info(
+                f"Skipping CVE lookup for {service or 'unknown service'} on port {port}: "
+                "no product/version banner was identified."
+            )
+            continue
+
+        product, version = product_version
+        query = f"{product} {version}"
+        with ui.spinner(f"Looking up CVEs for {product} {version} on port {port}..."):
             try:
                 cve_raw = await session.call_tool("search_cve_intel", {"query": query})
                 cve_text = _extract_tool_text(cve_raw)
                 cve_results.append({
                     "service": service,
+                    "product": product,
                     "version": version,
                     "port": port,
                     "results": cve_text[:2000],
                 })
-                ui.result(f"CVEs for {service} {version}".strip(), cve_text[:600])
+                ui.result(f"CVEs for {product} {version}", cve_text[:600])
             except _EXC_GROUP_CATCH as exc:
                 ui.info(f"CVE lookup skipped for {service}: {exc}")
                 if _is_exception_group(exc):

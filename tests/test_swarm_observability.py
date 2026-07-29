@@ -1,4 +1,4 @@
-"""Tests for swarm sub-agent UI visibility."""
+"""Tests for persisted swarm state and event observability."""
 
 from __future__ import annotations
 
@@ -6,9 +6,6 @@ import json
 import tempfile
 from pathlib import Path
 from typing import Any
-
-import pytest
-
 
 def test_orchestrator_emits_agent_started_and_complete():
     """SwarmOrchestrator should emit agent_started and agent_complete events."""
@@ -109,67 +106,6 @@ def test_orchestrator_persists_state_file():
         data = json.loads(state_path.read_text(encoding="utf-8"))
         assert data["blackboard"]["access_achieved"] is True
         assert len(data["agents"]) == 1
-
-
-def test_service_registry_reads_swarm_state():
-    """ServiceRegistry.swarm should parse a valid swarm_state.json."""
-    from tui.services import ServiceRegistry, SwarmStateSnapshot
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        swarm_ws = Path(tmpdir) / "swarm_workspace"
-        swarm_ws.mkdir()
-        state_path = swarm_ws / "swarm_state.json"
-        state_path.write_text(
-            json.dumps(
-                {
-                    "agents": [
-                        {
-                            "agent_id": "recon-abc123",
-                            "agent_type": "recon",
-                            "status": "running",
-                            "task_id": "T-1",
-                        }
-                    ],
-                    "blackboard": {"access_achieved": True, "discovered_services": ["ssh"]},
-                    "battle_log_tail": [{"task_id": "T-1", "success": True}],
-                    "last_reflection": {"recommended_strategy_shift": "focus on ssh"},
-                    "strategy_shift": "focus on ssh",
-                    "updated_at": 1234567890.0,
-                }
-            ),
-            encoding="utf-8",
-        )
-
-        svc = ServiceRegistry(Path(tmpdir) / "research_workspace")
-        state = svc.swarm
-        assert isinstance(state, SwarmStateSnapshot)
-        assert state.active is True
-        assert len(state.agent_rows) == 1
-        assert state.blackboard.get("access_achieved") is True
-        assert state.strategy_shift == "focus on ssh"
-
-
-def test_service_registry_swarm_state_missing():
-    """ServiceRegistry.swarm should return an inactive snapshot when no state file exists."""
-    from tui.services import ServiceRegistry, SwarmStateSnapshot
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        svc = ServiceRegistry(Path(tmpdir) / "research_workspace")
-        state = svc.swarm
-        assert isinstance(state, SwarmStateSnapshot)
-        assert state.active is False
-        assert "No swarm state file found" in state.error
-
-
-def test_dashboard_stats_swarm_fields():
-    """DashboardStats should include swarm fields with sensible defaults."""
-    from tui.services import DashboardStats
-
-    stats = DashboardStats()
-    assert stats.swarm_active is False
-    assert stats.swarm_agent_count == 0
-    assert stats.swarm_running_count == 0
-    assert stats.swarm_access_achieved is False
 
 
 def test_agent_loop_persists_swarm_events():

@@ -2,11 +2,11 @@
 
 ## System Shape
 
-The codebase is organized around an authorized security research workflow. Most modules are plain Python services backed by SQLite and filesystem evidence, with multiple user interfaces on top.
+The codebase is organized around an authorized security research workflow. Most modules are plain Python services backed by SQLite and filesystem evidence, with CLI and MCP entry points on top.
 
 ```text
 User
-  -> main.py / cli.py / tui / MCP client
+  -> main.py / cli.py / MCP client
   -> MissionController
   -> ScopeGate + RiskController
   -> PlannerAgent + TaskQueue
@@ -35,7 +35,7 @@ main.py
 
 ### `main.py`
 
-The main launcher for interactive menu, TUI, recon, attack, doctor, demo, self-test, resume, swarm, and model selection flows. It loads `config.yaml`, starts or connects to MCP transport, routes model calls through Ollama, and runs recon/attack sessions.
+The main launcher for interactive menu, recon, attack, doctor, demo, self-test, resume, swarm, and model selection flows. It loads `config.yaml`, starts or connects to MCP transport, routes model calls through Ollama, and runs recon/attack sessions.
 
 Important functions:
 
@@ -65,10 +65,6 @@ Commands:
 - `validate-finding`
 - `generate-report`
 - `status`
-
-### `tui/`
-
-Textual application with screens for dashboard, mission setup, scope, targets, tasks, execution, findings, evidence, reports, logs, memory, graph, settings, and swarm state. The TUI uses `tui.services.ServiceRegistry` as a facade over backend services.
 
 ### MCP Servers
 

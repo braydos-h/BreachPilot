@@ -1,7 +1,7 @@
 """Centralized logging for the AI Bug Bounty Research Agent.
 
 Writes to research_workspace/logs/app.log with rotation support.
-Provides a consistent logging interface for both CLI and TUI modes.
+Provides a consistent logging interface for CLI modes.
 """
 
 from __future__ import annotations

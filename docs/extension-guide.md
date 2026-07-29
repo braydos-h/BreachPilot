@@ -181,7 +181,7 @@ Edit:
 - `config.yaml`: checked-in operator defaults.
 - `tools/config_manager.py::CONFIG_SCHEMA`: defaults used when config is missing or incomplete.
 - `tools/config_manager.py::ConfigValidator.validate`: type/range validation.
-- `tools/interactive_menu.py` or `tui/screens/settings.py`: only if operators should edit the setting interactively.
+- `tools/interactive_menu.py`: only if operators should edit the setting interactively.
 - `tests/test_config_manager.py`: defaulting and validation coverage.
 
 Conventions:
@@ -236,13 +236,12 @@ Edit:
 - `tools/swarm/base.py`: shared agent result/status contract.
 - `tools/swarm/orchestrator.py`: routing, parallel execution, critic/reflection flow, persisted state.
 - `tools/swarm/agents/*.py`: specialist behavior.
-- `tui/services.py`: swarm state snapshot consumed by TUI screens.
 
 Tests:
 
 - `tests/test_swarm.py`
 - `tests/test_swarm_integration.py`
-- `tests/test_swarm_ui.py`
+- `tests/test_swarm_observability.py`
 
 Conventions:
 
@@ -270,25 +269,6 @@ Conventions:
 - Keep report output evidence-linked and reproducible.
 - Avoid overstating severity when validation is incomplete.
 - Store raw data separately from summaries.
-
-## Add TUI Backend Integration
-
-The terminal UI should usually access backend code through `tui/services.py`.
-
-Edit:
-
-- `tui/services.py`: add service methods or snapshot fields.
-- `tui/screens/<screen>.py`: display or interaction logic.
-- `tui/app.py`: routing if adding a new screen.
-- `tui/themes.py`: shared status/icon styling.
-- `tui/app.tcss`: Textual styles.
-
-Tests:
-
-- `tests/test_tui_services.py`
-- `tests/test_swarm_ui.py` for swarm-related changes.
-
-Keep screens thin. Put filesystem/database reads in `ServiceRegistry` or backend services.
 
 ## Add External Tool Integration
 

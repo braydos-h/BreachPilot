@@ -347,7 +347,7 @@ class SwarmOrchestrator:
         execution paths within a run (never concurrent), so a shared mutable
         reference is safe here; callers must not mutate it from multiple
         threads. ``get_blackboard()`` remains the snapshot API for read-only
-        consumers (TUI, persistence).
+        persistence and diagnostics consumers.
         """
         return self._blackboard
 
@@ -368,7 +368,7 @@ class SwarmOrchestrator:
             pass
 
     def _persist_state(self) -> None:
-        """Persist a snapshot of swarm state to disk for the TUI to read."""
+        """Persist a snapshot of swarm state for resume and live CLI progress."""
         if self._state_path is None:
             return
         try:
@@ -390,7 +390,7 @@ class SwarmOrchestrator:
                 "strategy_shift": self._blackboard.get("strategy_shift", ""),
                 "updated_at": time.time(),
             }
-            # Atomic write: write to temp then rename so the TUI never reads a partial file.
+            # Atomic write so progress and resume readers never see a partial file.
             tmp = self._state_path.with_suffix(".tmp")
             tmp.write_text(json.dumps(snapshot, indent=2, default=str), encoding="utf-8")
             tmp.rename(self._state_path)
@@ -401,7 +401,7 @@ class SwarmOrchestrator:
         """Restore the shared blackboard from a persisted swarm_state.json.
 
         Tier 1.3: ``_persist_state`` already writes the blackboard snapshot on
-        every event for the TUI to read, but nothing ever read it back — so a
+        every event, but nothing originally read it back — so a
         resumed swarm started with a fresh blackboard, losing every discovered
         service / vulnerability hypothesis / credential / failed-module the
         prior run had accumulated. This restores those keys so the resumed

@@ -110,7 +110,6 @@ def _make_args(tmp_path: Path, *, recon_first: bool = True) -> Namespace:
         stealth=False,
         rotate_ua=False,
         doh=False,
-        tui=False,
         menu=False,
         web=False,
         web_port=8080,

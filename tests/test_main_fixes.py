@@ -61,7 +61,6 @@ def _make_args(
         stealth=False,
         rotate_ua=False,
         doh=False,
-        tui=False,
         menu=False,
         swarm=swarm,
         critic=False,

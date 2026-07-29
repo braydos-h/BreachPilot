@@ -33,7 +33,7 @@ For editable package metadata and dev extras (either shell):
 python -m pip install -e ".[dev]"
 ```
 
-`requirements.txt` and `pyproject.toml` are not perfectly identical. `requirements.txt` includes MCP, Starlette, websockets, numpy, and newer Textual/Pytest pins used by current code and tests. Prefer `requirements.txt` for local development unless packaging is the specific task.
+`requirements.txt` includes runtime dependencies plus Pytest for local development. `pyproject.toml` separates runtime and development dependencies for packaging. Prefer `requirements.txt` for a local checkout unless packaging is the specific task.
 
 ## First Commands
 
@@ -59,12 +59,6 @@ The `--menu` flag is equivalent to the no-argument default:
 
 ```bash
 python main.py --menu
-```
-
-Launch the full Textual TUI dashboard:
-
-```bash
-python -m tui
 ```
 
 Run recon against an explicitly allowed target:
@@ -110,7 +104,6 @@ control interpretation and replanning—they do not grant execution authority.
 
 - `python main.py`: launch the interactive questionary menu — the default with no arguments (same as `--menu`).
 - `python main.py --menu`: force the interactive terminal menu.
-- `python main.py --tui`: launch the Textual TUI dashboard through the main launcher.
 - `python main.py --target <ip> --mode recon`: reconnaissance mode.
 - `python main.py --target <ip> --mode attack`: exploitation mode, still subject to config and policy gates.
 - `python main.py --mcp-transport stdio|http`: select exploit MCP transport.

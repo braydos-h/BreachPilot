@@ -17,9 +17,8 @@ def register_runtime_skill_tools(mcp: Any, *, ctx: ToolContext) -> None:
     skills_cfg = _skills_config(config)
 
     def _skill_registry():
-        # Shared process-level cache so the MCP tools, main loop, swarm, and
-        # TUI all read the same loaded registry instead of re-rglobbing the
-        # 138-file catalog per consumer.
+        # Shared process-level cache so the MCP tools, main loop, and swarm all
+        # read the same registry instead of re-rglobbing the catalog per consumer.
         from tools.skill_registry_cache import get_registry
 
         return get_registry({"skills": skills_cfg}, base_dir=Path.cwd())

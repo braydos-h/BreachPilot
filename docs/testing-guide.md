@@ -42,8 +42,8 @@ python tests/test_new_modules.py
 | MCP workspace/tool behavior | `tests/test_mcp_workspace.py`, relevant safety tests |
 | Exploit modules | `tests/test_attack_modules.py`, `tests/test_lateral_tools.py` |
 | Exploit agent retry/context | `tests/test_retry_logic.py`, `tests/test_ultrathink.py` |
-| Swarm behavior | `tests/test_swarm.py`, `tests/test_swarm_integration.py`, `tests/test_swarm_ui.py` |
-| TUI services/screens | `tests/test_tui_services.py`, screen-specific tests if added |
+| Swarm behavior | `tests/test_swarm.py`, `tests/test_swarm_integration.py`, `tests/test_swarm_observability.py` |
+| Interactive menu | `tests/test_interactive_menu.py` |
 | Config/doctor/self-test | `tests/test_config_manager.py`, `tests/test_doctor.py`, `tests/test_self_test.py` |
 
 ## Test Workspace Pattern

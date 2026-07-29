@@ -24,7 +24,7 @@ NetAttackAI combines reconnaissance, model-guided investigation, evidence collec
 | Recon and research | Nmap-based discovery (TCP + UDP top-ports), TLS/SSL cert parsing, SMTP/DB banner parsing, off-site-bounded web spider, passive OSINT (reverse DNS, crt.sh certificate transparency, optional Shodan, IPv6 AAAA lookup), recon-run diffing, service enrichment, CVE intelligence, web research, goal suggestions, and runtime skill selection. |
 | AI-assisted operations | Ollama model routing, configurable model aliases, optional peer-model consultation, adaptive strategies, and resumable long sessions. |
 | OPSEC / detection-evasion | Opt-in agent self-hardening: aggression-scaled jittered pacing (STEALTH→MAXIMUM), User-Agent rotation across HTTP egress, DNS-over-HTTPS, noisy-command scoring + low-noise rewrite suggestions, and a quiet-command denylist — making `AggressionLevel.STEALTH` load-bearing. Plus detection-coverage testing: canary-action planning and a read-only audit-footprint summary. This is OPSEC hardening of the agent and detection-coverage validation, not active evasion of the target's defenses; the tamper-evident audit chain is untouched. |
-| Operator experiences | Guided terminal menu, direct CLI, a Textual dashboard, and MCP servers for client integrations. |
+| Operator experiences | Guided terminal menu, direct CLI, and MCP servers for client integrations. |
 | Assessment workflow | Missions, scope and risk controls, queued tasks, evidence-grounded hypothesis judgment, target graphs, memory, findings, and Markdown reports. |
 | Specialist swarm | Optional recon, vulnerability, exploit, post-exploit, critic, and reflection agents coordinated through shared state. |
 | Plugin ecosystem | Opt-in, no-recompile extensions discovered from a `plugins/` directory or Python entry points. A plugin contributes attack modules, MCP tools, skill directories, and config sections through a small registration API. Plugin MCP tools must stack the same `@require_allowlist()` / `@audit_tool` safety decorators as built-ins, so the target-IP allowlist lock and audit trail apply automatically. Disabled by default; list with `--list-plugins`. |
@@ -77,11 +77,10 @@ python main.py --self-test
 
 ## Run an assessment
 
-Start with the guided menu or the operations dashboard:
+Start with the guided menu:
 
 ```bash
 python main.py
-python -m tui
 ```
 
 For an authorized target, begin with recon and retain the confirmation gate:
@@ -98,7 +97,6 @@ Useful commands:
 | `python main.py --self-test` | Run the localhost-only, read-only smoke test. |
 | `python main.py --skills-list` | View the runtime-skill catalog. |
 | `python main.py --list-plugins` | List discovered plugins (name/version/capabilities/loaded) and exit. |
-| `python main.py --tui` | Launch the Textual dashboard from the main launcher. |
 | `python main.py --swarm --critic --reflection` | Enable specialist-agent coordination and review for a compatible run. |
 | `python main.py --long-session --resume <RUN_OR_SESSION_ID>` | Run or resume a checkpointed session. |
 | `python main.py --eval --target <AUTHORIZED_LAB_IP>` | Run the eval/benchmark harness against a target and write `reports/eval/<run_id>/`. |
@@ -123,7 +121,7 @@ NetAttackAI has separate configuration for its two primary workflows:
 
 | File | Used by | Purpose |
 | --- | --- | --- |
-| [`config.yaml`](config.yaml) | `main.py`, TUI, and exploit MCP flow | Ollama, models, Nmap, MCP transport, skills, swarm, memory, research, workspaces, and modern-runtime controls. |
+| [`config.yaml`](config.yaml) | `main.py` and exploit MCP flow | Ollama, models, Nmap, MCP transport, skills, swarm, memory, research, workspaces, and modern-runtime controls. |
 | [`mission.yaml`](mission.yaml) | `cli.py` workflow | Mission objective, allowed/disallowed assets, forbidden actions, risk profile, rate limits, testing modes, and accounts. |
 | [`.env.example`](.env.example) | Optional integrations | Reference for NVD, GitHub, Ollama, and SerpAPI credentials plus runtime overrides. |
 
@@ -161,7 +159,7 @@ Read the [Safety Model](docs/safety-model.md) for the full trust boundaries, per
 
 ```mermaid
 flowchart LR
-    O[Operator] --> I[CLI / Menu / TUI / MCP client]
+    O[Operator] --> I[CLI / Menu / MCP client]
     I --> C[Assessment controller]
     C --> M[Ollama model router]
     C --> W[Recon, skills, swarm, and MCP tools]
@@ -188,12 +186,11 @@ not by itself refute the hypothesis.
 
 | Path | Role |
 | --- | --- |
-| [`main.py`](main.py) | Main launcher for menu, TUI, recon, attack, diagnostics, and sessions. |
+| [`main.py`](main.py) | Main launcher for menu, recon, attack, diagnostics, and sessions. |
 | [`cli.py`](cli.py) | Deterministic mission, task, finding, and report workflow. |
 | [`mcp_server.py`](mcp_server.py) | Defensive, scope-aware MCP scanning server. |
 | [`mcp_exploit_server.py`](mcp_exploit_server.py) | MCP wiring for the modern exploit runtime. |
 | [`tools/`](tools) | Model routing, policy, recon, skills, sessions, reporting, swarm, and MCP tools. |
-| [`tui/`](tui) | Textual application, screens, services, widgets, and themes. |
 | [`tests/`](tests) | Unit and integration-style regression tests with mocked external behavior. |
 | [`docs/`](docs/README.md) | Engineering and operational documentation. |
 
@@ -210,7 +207,7 @@ The runtime writes to a few well-defined locations under the project root:
 | `reports/self_test_<run_id>/` | `--self-test` diagnostic artifacts. |
 | `research_workspace/<mission_id>/` | Database-backed mission data (`research.db`, evidence, reports). |
 | `exploit_workspace/<target_ip>/<attempt_id>/` | Per-attempt exploit scripts, terminal/python/msf logs, and `exploit_audit.jsonl`. |
-| `tui_workspace/`, `swarm_workspace/` | Created on demand by `main.py` for TUI and swarm runs. |
+| `swarm_workspace/` | Created on demand by `main.py` for swarm runs. |
 
 ## MCP servers
 
@@ -244,8 +241,8 @@ On Unix-like systems, the [`Makefile`](Makefile) provides equivalent shortcuts s
 
 - [Getting Started](docs/getting-started.md) — prerequisites, setup, and local development loop.
 - [Architecture](docs/architecture.md) — entry points, persistence, services, and MCP layout.
-- [Runtime Flows](docs/runtime-flows.md) — recon, assessment, swarm, TUI, and report lifecycles.
-- [Module Guide](docs/module-guide.md) — ownership across modules, tools, TUI, and tests.
+- [Runtime Flows](docs/runtime-flows.md) — recon, assessment, swarm, and report lifecycles.
+- [Module Guide](docs/module-guide.md) — ownership across modules, tools, and tests.
 - [Extension Guide](docs/extension-guide.md) — safe edit points for integrations and new capabilities.
 - [Plugin Development](docs/plugin-development.md) — authoring opt-in plugins (attack modules, MCP tools, skills, config sections) discovered from `plugins/` or entry points.
 - [Safety Model](docs/safety-model.md) — scope, permissions, audits, and lab boundaries.

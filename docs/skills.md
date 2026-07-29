@@ -21,8 +21,7 @@ tools/skill_selector.select_runtime_skills (deterministic tag scoring
 tools/skill_pipeline.build_skill_selection_for_context
         │
         ├─ main.py            (CLI: initial selection + mid-run re-selection)
-        ├─ tools/swarm/       (phase-relevant hints per specialist agent)
-        └─ tui/services.py    (read-only Skills screen)
+        └─ tools/swarm/       (phase-relevant hints per specialist agent)
 ```
 
 ### 1. Selection
@@ -159,11 +158,6 @@ gating applies to semantic hits too.
 `--skills-exclude NAME`, `--no-skills-reselect`. See the README Runtime Skills
 section. These mutate the in-memory `config["skills"]` dict only — advisory,
 never permission/scope/audit.
-
-## TUI
-
-Press `k` for the read-only Skills screen (catalog + active selection). No
-enable/disable toggle by design.
 
 ## Invariant
 

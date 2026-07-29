@@ -2,7 +2,7 @@
 
 Centralizes the build → select → render/hints flow used by the main exploit
 loop (``main.py``), the mid-run re-selection hook (``tools.exploit_agent``),
-the swarm (``tools/swarm/``), and the TUI so every consumer applies the same
+the swarm (``tools/swarm/``), and MCP tools so every consumer applies the same
 advisory-only invariant and the same char budgets.
 
 Skills are advisory prompt context only -- nothing here grants execution

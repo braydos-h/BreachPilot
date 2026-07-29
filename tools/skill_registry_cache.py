@@ -2,7 +2,7 @@
 
 Loading the registry rglobs every configured root for ``SKILL.md`` files
 (138+ files in the default catalog). Several consumers need the registry --
-the main exploit loop, the runtime-skill MCP tools, the swarm, and the TUI --
+the main exploit loop, the runtime-skill MCP tools, and the swarm --
 so we cache one registry per unique set of resolved roots instead of
 re-reading the disk for each consumer.
 

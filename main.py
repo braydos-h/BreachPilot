@@ -235,8 +235,7 @@ def _read_swarm_snapshot(swarm_workspace: Path) -> str:
 
     Counts agents by status (complete/running/blocked/failed) so the swarm
     wait loop can show live progress instead of a frozen "elapsed 0s" label.
-    Intentionally does NOT import ``tui.services`` (pulls the whole TUI stack);
-    this is a tiny inline json.loads mirroring the snapshot shape written by
+    This is a tiny inline json.loads reader for the snapshot shape written by
     ``tools/swarm/orchestrator.py:_persist_state``.
     """
     import json as _json
@@ -344,7 +343,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--api-key-file", type=Path, default=DEFAULT_API_KEY_FILE, help="Local JSON file for saved provider API keys")
     parser.add_argument("--no-api-key-prompt", action="store_true", help="Skip the interactive startup API-key prompt")
     parser.add_argument("--plain", action="store_true", help="Disable color output")
-    parser.add_argument("--tui", action="store_true", help="Launch the full TUI dashboard")
     parser.add_argument("--menu", action="store_true", help="Force interactive menu mode even with other args")
     # Swarm / reasoning / adaptive exploit flags
     parser.add_argument("--swarm", action="store_true", help="Enable multi-agent swarm mode")
@@ -940,49 +938,6 @@ async def async_main(args: argparse.Namespace) -> int:
     activity.log("info", f"Session started: {mode} against {target_ip} with goal {goal.name}")
 
     # -----------------------------------------------------------------------
-    # Optionally sync to TUI research database
-    # -----------------------------------------------------------------------
-    try:
-        from tui.services import ServiceRegistry
-        from mission import MissionController
-
-        tui_svc = ServiceRegistry(Path("research_workspace"))
-        tui_ctrl = MissionController(tui_svc.db, tui_svc.workspace_root)
-
-        # Build mission config from CLI args
-        mission_config = {
-            "program_name": f"Exploit: {target_ip}",
-            "objective": goal.description or f"{mode} against {target_ip}",
-            "risk_profile": "high_authorized_testing" if mode == "attack" else "standard_authorized",
-            "allowed_assets": [str(target_ip)],
-            "disallowed_assets": [],
-            "forbidden_actions": [
-                "denial_of_service", "social_engineering", "physical_attack"
-            ],
-            "testing_modes": ["recon", "test", "exploit", "report"] if mode == "attack" else ["recon", "analysis", "report"],
-            "rate_limits": {
-                "default_requests_per_second": 2,
-                "max_concurrent_requests": 3,
-            },
-            "accounts": [],
-            "notes": f"Created from main.py exploitation engine. Mode={mode}, Goal={goal.name}",
-        }
-        mission = tui_ctrl.create_from_config(mission_config)
-        ui.ok(f"TUI mission created: {mission.mission_id}")
-        try:
-            (reports_dir / "tui_mission_id.txt").write_text(
-                str(mission.mission_id), encoding="utf-8"
-            )
-        except OSError:
-            pass
-    except ImportError as exc:
-        ui.skip(f"TUI mission sync disabled (import error: {exc})")
-    except (OSError, ValueError, KeyError) as exc:
-        ui.skip(f"TUI mission sync skipped (config error: {exc})")
-    except _EXC_GROUP_CATCH as exc:
-        ui.skip(f"TUI mission sync failed unexpectedly: {exc}")
-
-    # -----------------------------------------------------------------------
     # Phase 1.2: optionally run the AgentLoop swarm alongside the exploit
     # session. The swarm brings in the 6 specialist agents (recon, vuln,
     # exploit, post_exploit, critic, reflection), the shared blackboard,
@@ -1371,7 +1326,6 @@ def main(argv: list[str] | None = None) -> int:
                 args.goal.strip(),
                 args.custom_goal.strip(),
                 args.menu,
-                args.tui,
                 args.doctor,
                 getattr(args, "self_test", False),
                 getattr(args, "eval", False),
@@ -1424,12 +1378,6 @@ def main(argv: list[str] | None = None) -> int:
                 state = "loaded" if p.get("loaded") else "discovered"
                 caps = ",".join(p.get("capabilities", []) or []) or "-"
                 print(f"  {p['name']} v{p.get('version', '?')} [{state}] caps={caps} - {p.get('description', '')}")
-            return 0
-
-        # --tui flag: launch the full TUI dashboard
-        if args.tui:
-            from tui.app import run
-            run()
             return 0
 
         # --menu flag or no arguments: launch interactive menu

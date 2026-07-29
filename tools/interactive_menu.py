@@ -5,7 +5,6 @@ with no arguments. Uses questionary for rich terminal interaction.
 
 Architecture:
     MainMenu ──> Start New Session ──> Interactive wizard (attack_ui.py)
-             ├──> Open TUI Dashboard ──> tui.app.run()
              ├──> Manage Missions ──> CLI backend
              ├──> View Reports ──> reports/ browser
              ├──> Settings ──> config.yaml editor
@@ -85,7 +84,6 @@ def _main_menu() -> str | None:
         choices=[
             Choice(title="🔍  Recon & Suggest Goals", value="recon_first"),
             Choice(title="🚀  Start New Session", value="new_session"),
-            Choice(title="📊  Open TUI Dashboard", value="tui"),
             Choice(title="📋  Manage Missions", value="missions"),
             Choice(title="📝  View Reports", value="reports"),
             Choice(title="⚙️   Settings", value="settings"),
@@ -102,22 +100,20 @@ def _fallback_main_menu() -> str | None:
     options = {
         "1": "recon_first",
         "2": "new_session",
-        "3": "tui",
-        "4": "missions",
-        "5": "reports",
-        "6": "settings",
-        "7": "help",
-        "8": "exit",
+        "3": "missions",
+        "4": "reports",
+        "5": "settings",
+        "6": "help",
+        "7": "exit",
     }
     print("\nMain Menu:")
     print("  1. Recon & Suggest Goals")
     print("  2. Start New Session")
-    print("  3. Open TUI Dashboard")
-    print("  4. Manage Missions")
-    print("  5. View Reports")
-    print("  6. Settings")
-    print("  7. Help")
-    print("  8. Exit")
+    print("  3. Manage Missions")
+    print("  4. View Reports")
+    print("  5. Settings")
+    print("  6. Help")
+    print("  7. Exit")
     try:
         choice = input("\n  > ").strip()
         return options.get(choice, "exit")
@@ -149,7 +145,6 @@ def _start_new_session() -> int:
         stealth=False,
         rotate_ua=False,
         doh=False,
-        tui=False,
         menu=False,
         observer_mode=None,
         adaptive_exploits=False,
@@ -190,7 +185,6 @@ def _recon_first_session() -> int:
         stealth=False,
         rotate_ua=False,
         doh=False,
-        tui=False,
         menu=False,
         observer_mode=None,
         adaptive_exploits=False,
@@ -206,21 +200,6 @@ def _recon_first_session() -> int:
     except KeyboardInterrupt:
         print("\nSession aborted.")
         return 130
-
-
-def _open_tui() -> int:
-    """Launch the full TUI dashboard."""
-    try:
-        from tui.app import run
-        run()
-        return 0
-    except ImportError as exc:
-        print(f"ERROR: TUI dependencies not available: {exc}")
-        print("Install with: pip install textual>=2.0.0")
-        return 1
-    except Exception as exc:
-        print(f"ERROR: Failed to launch TUI: {exc}")
-        return 1
 
 
 def _manage_missions() -> None:
@@ -665,10 +644,6 @@ def _show_help() -> None:
 ║  INTERACTIVE MODE (no arguments)                             ║
 ║    python main.py                                            ║
 ║                                                              ║
-║  TUI DASHBOARD                                               ║
-║    python main.py --tui                                      ║
-║    python -m tui                                             ║
-║                                                              ║
 ║  DIRECT ATTACK (power users)                                 ║
 ║    python main.py --target 10.0.0.50 --mode attack           ║
 ║    python main.py --target 10.0.0.50 --mode recon            ║
@@ -683,12 +658,6 @@ def _show_help() -> None:
 ║    python cli.py list-findings                               ║
 ║    python cli.py generate-report F-00001                     ║
 ║    python cli.py status                                      ║
-║                                                              ║
-║  KEYBOARD SHORTCUTS (TUI)                                    ║
-║    d = Dashboard    t = Tasks    f = Findings                 ║
-║    e = Evidence     s = Scope    g = Graph                    ║
-║    l = Logs         ? = Help     q = Quit                     ║
-║    / = Search       r = Refresh                              ║
 ║                                                              ║
 ║  CONFIGURATION                                               ║
 ║    Edit config.yaml to set:                                  ║
@@ -740,7 +709,6 @@ def _main_menu() -> str | None:
         choices=[
             Choice(title="Recon & Suggest Goals", value="recon_first"),
             Choice(title="Start New Session", value="new_session"),
-            Choice(title="Open TUI Dashboard", value="tui"),
             Choice(title="Manage Missions", value="missions"),
             Choice(title="View Reports", value="reports"),
             Choice(title="Settings", value="settings"),
@@ -794,10 +762,6 @@ def _show_help() -> None:
   INTERACTIVE MODE
     python main.py
 
-  TUI DASHBOARD
-    python main.py --tui
-    python -m tui
-
   DIRECT ATTACK
     python main.py --target 10.0.0.50 --mode recon
     python main.py --target 10.0.0.50 --mode attack
@@ -835,10 +799,6 @@ def run_interactive_menu() -> int:
                 return code
         elif action == "new_session":
             code = _start_new_session()
-            if code != 0:
-                return code
-        elif action == "tui":
-            code = _open_tui()
             if code != 0:
                 return code
         elif action == "missions":

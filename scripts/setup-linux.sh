@@ -57,4 +57,3 @@ echo
 echo "Done. Activate the venv with:  source $VENV/bin/activate"
 echo "Then run:                      python main.py           (interactive menu)"
 echo "                               python main.py --doctor  (re-check)"
-echo "                               python -m tui            (dashboard)"
