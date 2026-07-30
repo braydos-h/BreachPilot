@@ -13,6 +13,45 @@ from tools.command_analyzer import (
     _extract_destinations as _cmd_extract_destinations,
 )
 from tools.mcp_shared import _allowed_target_list, _is_inside_workspace
+from tools.opsec import OpsecManager
+
+
+def _opsec_advisory_block(sanitized_command: str, config: Any) -> str:
+    """Build an advisory OPSEC feedback block for a command the AI just ran.
+
+    Target-aware (resolves against the runtime ``EXPLOIT_TARGET``): returns ``""``
+    when OPSEC is OFF for this target (local/private, or OPSEC disabled). When ON,
+    surfaces a live noise score, a suggested quieter rewrite, and the pacing
+    posture. ADVISORY ONLY -- the command always executes regardless of this
+    block; ``is_quiet_blocked`` and ``noise_budget`` are NOT consulted and stay
+    dormant (no attack-path gate is re-added). Best-effort: any OPSEC build error
+    degrades to ``""`` and never blocks the result.
+    """
+    try:
+        _target_ip = os.environ.get("EXPLOIT_TARGET", "")
+        # ponytail: per-call config read; cache only if profiling shows it matters.
+        mgr = OpsecManager.from_config(config or {}).resolve_for_target(_target_ip)
+        if not mgr.profile.enabled:
+            return ""
+        noise = mgr.score_command_noise(sanitized_command)
+        alt = mgr.suggest_low_noise_alternative(sanitized_command)
+        reasons = ", ".join(noise["reasons"][:3]) or "none"
+        alt_line = alt if alt else "no rewrite available"
+        if mgr.profile.min_gap_seconds > 0 or mgr.profile.jitter_seconds > 0:
+            pacing = (
+                f"min_gap={mgr.profile.min_gap_seconds}s "
+                f"jitter={mgr.profile.jitter_seconds}s active"
+            )
+        else:
+            pacing = "off (no min_gap/jitter configured)"
+        return (
+            f"OPSEC_ADVISORY: (advisory -- does not block; you decide)\n"
+            f"- Noise score: {noise['score']} (matched: {reasons})\n"
+            f"- Suggested quieter rewrite: {alt_line}\n"
+            f"- Pacing posture: {pacing}\n"
+        )
+    except Exception:
+        return ""
 
 
 def _target_lock_block(command: str, config: Any) -> str | None:
@@ -279,12 +318,15 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
             text = log_path.read_text(encoding="utf-8", errors="replace")
             output_tail = text[-4000:]
 
+        _opsec_advisory = _opsec_advisory_block(sanitized_command, config)
+
         return (
             f"TERMINAL_RESULT: {status} (exit_code={exit_code}, duration={elapsed:.1f}s)\n"
             f"ATTEMPT_ID: {attempt_id}\n"
             f"COMMAND_ORIGINAL: {original_command}\n"
             f"COMMAND_SANITIZED: {sanitized_command}\n"
             f"{preflight_note}"
+            f"{_opsec_advisory}"
             f"WORKSPACE: {attempt_dir}\n"
             f"OUTPUT:\n{output_tail}"
         )

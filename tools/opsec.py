@@ -230,6 +230,22 @@ class OpsecManager:
     )
     """Substring patterns (case-insensitive) used by :meth:`score_command_noise`."""
 
+    _LOW_NOISE_REWRITES: tuple[tuple[str, str], ...] = (
+        ("-t5", "-T2"),
+        ("-t4", "-T2"),
+        ("--script=vuln", "(drop --script=vuln)"),
+        ("masscan", "nmap -sS -Pn"),
+        ("crackmapexec", "smbclient -N"),
+        ("nuclei", "nmap -sV"),
+        ("nucleus", "nmap -sV"),
+        ("ffuf", "nmap -sV"),
+        ("gobuster", "nmap -sV"),
+        ("dirb", "nmap -sV"),
+    )
+    """Single source of truth for low-noise rewrites, shared by
+    :meth:`suggest_low_noise_alternative` (per-command rewrite) and the system
+    prompt's OPSEC briefing (example list) so they cannot drift apart."""
+
     def __init__(
         self,
         profile: OpsecProfile,
@@ -360,19 +376,7 @@ class OpsecManager:
         # (needle_lower, replacement). Order matters: more specific rewrites
         # first. The replacement replaces the first case-insensitive occurrence
         # of needle in the original command, preserving the rest of the casing.
-        rewrites: tuple[tuple[str, str], ...] = (
-            ("-t5", "-T2"),
-            ("-t4", "-T2"),
-            ("--script=vuln", "(drop --script=vuln)"),
-            ("masscan", "nmap -sS -Pn"),
-            ("crackmapexec", "smbclient -N"),
-            ("nuclei", "nmap -sV"),
-            ("nucleus", "nmap -sV"),
-            ("ffuf", "nmap -sV"),
-            ("gobuster", "nmap -sV"),
-            ("dirb", "nmap -sV"),
-        )
-        for needle, replacement in rewrites:
+        for needle, replacement in self._LOW_NOISE_REWRITES:
             idx = lowered.find(needle)
             if idx >= 0:
                 return command[:idx] + replacement + command[idx + len(needle):]
