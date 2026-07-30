@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -508,9 +509,23 @@ class AttackModuleExecutor:
         # aggression-scaled) + optional rate bucket before the module runs. A
         # disabled profile or unwired manager makes this a no-op. Wrapped so an
         # OPSEC hiccup can never block an authorized attack step.
+        #
+        # Phase 6.2+ (target-aware OPSEC): resolve the effective manager against
+        # THIS task's target so the operator-intent toggle bites per action --
+        # local/private target -> disabled profile -> pacing no-op (the operator
+        # owns the box, let the AI move freely); public target -> configured
+        # posture (pacing/UA-rotation/quiet-commands ON). Resolving per-task
+        # (rather than once at campaign start) keeps pivot targets correct:
+        # ``OpsecManager.resolve_for_target`` returns ``self`` for a public
+        # target (zero overhead) and a disabled manager for a local one. The
+        # ``getattr`` guard keeps legacy/test fakes without the method working.
         if self._opsec is not None:
             try:
-                await self._opsec.acquire_pacing(task.aggression.value)
+                mgr = self._opsec
+                resolver = getattr(self._opsec, "resolve_for_target", None)
+                if resolver is not None and task.target:
+                    mgr = resolver(task.target)
+                await mgr.acquire_pacing(task.aggression.value)
             except Exception as exc:  # noqa: BLE001 -- pacing is best-effort
                 logger.debug(f"OPSEC pacing skipped for {task.module_name}: {exc}")
 
@@ -932,10 +947,23 @@ class AutonomousOrchestrator:
         # its absence -> disabled profile -> pacing no-op. Also published as the
         # process-global UA source so HTTP egress rotates UAs when ua_rotation
         # is on. Wrapped so an OPSEC build failure can never block orchestration.
+        #
+        # Phase 6.2+ (target-aware OPSEC): the manager passed to the executor is
+        # the BASE (unresolved) manager -- ``AttackModuleExecutor.execute``
+        # resolves it per task.target so each action gets the right posture
+        # (local/private -> OPSEC off, public -> OPSEC on). The process-global
+        # UA source is published resolved against the campaign's PRIMARY target
+        # so egress UA rotation follows the same local/public rule. The primary
+        # target is read from mission_config["target"] (set by the MCP campaign
+        # tools) or the EXPLOIT_TARGET env (set by mcp_session at boot).
         try:
             from tools.opsec import OpsecManager, configure as _opsec_configure
             self._opsec = OpsecManager.from_config(mission_config or {})
-            _opsec_configure(self._opsec.profile)
+            _primary_target = (mission_config or {}).get("target") or os.environ.get("EXPLOIT_TARGET", "")
+            _ua_profile = self._opsec.profile
+            if _primary_target:
+                _ua_profile = self._opsec.resolve_for_target(_primary_target).profile
+            _opsec_configure(_ua_profile)
         except Exception:  # noqa: BLE001 -- OPSEC is best-effort
             self._opsec = None
         # Pass the swarm context through so the autonomous path runs the

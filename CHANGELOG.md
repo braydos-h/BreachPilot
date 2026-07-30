@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Added
+
+- **Target-aware OPSEC** — OPSEC hardening is now automatically turned OFF for
+  private/local target IPs and ON for public-routable target IPs. When the
+  target is the operator's own box or an RFC1918/loopback/link-local/reserved/
+  ULA address (or anything in the new `opsec.local_cidrs` list), the effective
+  OPSEC profile is forced off so the AI moves freely with no pacing, UA
+  rotation, or quiet-command blocking. A public Internet target keeps the
+  configured OPSEC posture (pacing/UA/quiet-commands) and the AI retains full
+  attack autonomy (`opsec.public_autonomy`). New `opsec` config keys:
+  `local_targets_off` (default `true`), `local_cidrs` (default `[]`),
+  `public_autonomy` (default `true`). New helper
+  `tools/validation_utils.is_private_or_local_target` and
+  `OpsecProfile.resolve_for_target` / `OpsecManager.resolve_for_target`; wired
+  into `AutonomousOrchestrator` (process-global UA) and per-action in
+  `AttackModuleExecutor.execute`.
+
 ### Removed
 
 - Removed the unused Textual dashboard, its `--tui` / `python -m tui` launch

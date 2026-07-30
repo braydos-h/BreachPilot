@@ -10,7 +10,7 @@ import ipaddress
 import re
 import shutil
 import socket
-from typing import Any
+from typing import Any, Sequence
 
 # Strict IPv4 regex: four octets 0-255 separated by dots, anchored.
 _STRICT_IPV4_RE = re.compile(
@@ -270,6 +270,59 @@ def is_target_in_allowlist(target: str, allowed_assets: list[str]) -> bool:
         except ValueError:
             pass
 
+    return False
+
+
+def is_private_or_local_target(
+    target_ip: str, extra_local_cidrs: Sequence[str] | None = None
+) -> bool:
+    """True when ``target_ip`` is a private / local-network address (not public-routable).
+
+    This is the "local vs public" classifier used by the target-aware OPSEC
+    policy: when the operator points the agent at their own lab box or a
+    private RFC1918 network, OPSEC hardening (pacing, UA rotation, quiet
+    commands) is turned OFF -- the operator already owns the box and wants the
+    AI to move freely. For a public Internet-routable target, OPSEC stays ON.
+
+    Distinct from :func:`is_local_target`, which means specifically "the
+    operator's own host" (loopback / an IP bound on a local interface) and is
+    locked by ``tests/test_local_target.py`` (it returns False for
+    ``10.0.0.50``). This function returns True for all RFC1918 / loopback /
+    link-local / reserved / ULA space, not just the operator's own box.
+
+    Returns True when ``target_ip`` parses as an IP and any of
+    ``ipaddress``'s ``is_private`` / ``is_loopback`` / ``is_link_local`` /
+    ``is_reserved`` / ``is_multicast`` / ``is_unspecified`` flags hold, OR when
+    it falls inside any operator-configured ``extra_local_cidrs`` entry (CIDR
+    or exact IP, matched via :func:`is_target_in_allowlist`). Best-effort: any
+    parse error returns False (treat as public, so OPSEC stays on -- the safe
+    default for an unknown target).
+    """
+    if not target_ip or not isinstance(target_ip, str):
+        return False
+    s = target_ip.strip().lower()
+    if not s:
+        return False
+    if s in {"localhost", "localhost.localdomain", "0.0.0.0"}:
+        return True
+    try:
+        addr = ipaddress.ip_address(s)
+    except ValueError:
+        return False
+    if (
+        addr.is_private
+        or addr.is_loopback
+        or addr.is_link_local
+        or addr.is_reserved
+        or addr.is_multicast
+        or addr.is_unspecified
+    ):
+        return True
+    # Operator-configured local ranges (e.g. a lab CIDR that is technically
+    # public space but the operator treats as local). Reuse the allowlist
+    # matcher so CIDR containment + exact-IP normalization come for free.
+    if extra_local_cidrs and is_target_in_allowlist(s, list(extra_local_cidrs)):
+        return True
     return False
 
 

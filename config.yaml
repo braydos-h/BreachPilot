@@ -187,6 +187,14 @@ opsec:
   rate_per_minute: 0              # 0 = no token-bucket cap
   quiet_command_patterns: []      # substrings to refuse when enabled
   noise_budget: 0                 # max noisy commands allowed (0 = unlimited)
+  # Target-aware OPSEC: private/local target IPs (RFC1918/loopback/link-local/
+  # reserved/ULA, or anything in local_cidrs) -> OPSEC forced OFF; the operator
+  # owns the box so the AI moves freely with no pacing/UA-rotation/quiet-block.
+  # Public-routable targets keep OPSEC ON (pacing/UA/quiet-commands) and the AI
+  # retains full attack autonomy (public_autonomy). Default true.
+  local_targets_off: true         # local/private target -> OPSEC off; public -> on
+  local_cidrs: []                 # extra CIDRs/IPs treated as local (e.g. ["10.99.0.0/16"])
+  public_autonomy: true           # public target -> AI chooses its own attacks
 
 # Eval/benchmark harness config. The --eval CLI flag still works when
 # ``enabled`` is false, but this block gates the defaults used by the eval

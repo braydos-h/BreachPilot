@@ -220,6 +220,16 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "rate_per_minute": 0,           # 0 = no token-bucket cap
         "quiet_command_patterns": [],   # substrings to refuse when enabled (e.g. ["masscan", "nuclei"])
         "noise_budget": 0,              # max noisy commands allowed (0 = unlimited)
+        # Target-aware OPSEC: when the target IP is private/local (RFC1918,
+        # loopback, link-local, reserved, ULA, or any local_cidrs entry) the
+        # effective profile is forced OFF -- the operator owns the box and the
+        # AI moves freely with no pacing/UA-rotation/quiet-blocking. A public-
+        # routable target keeps the configured posture (OPSEC ON) and the AI
+        # retains full attack autonomy (public_autonomy). Default true so the
+        # local-off/public-on behavior is the out-of-the-box rule.
+        "local_targets_off": True,
+        "local_cidrs": [],              # extra CIDRs/IPs treated as local (e.g. ["10.99.0.0/16"])
+        "public_autonomy": True,        # for public targets the AI chooses its own attacks (documentary)
     },
     # Eval/benchmark harness config. The --eval CLI flag still works when
     # ``enabled`` is false, but this block gates the defaults used by the

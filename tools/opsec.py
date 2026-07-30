@@ -66,6 +66,18 @@ class OpsecProfile:
     rate_per_minute: int = 0  # 0 = no token-bucket cap
     quiet_command_patterns: tuple[str, ...] = ()  # substrings to refuse when enabled
     noise_budget: int = 0  # max noisy commands allowed (0 = unlimited)
+    # Target-aware OPSEC (Phase 6.2+). When ``local_targets_off`` is true (the
+    # default), resolving the profile against a private/local target IP yields a
+    # fully-disabled profile -- the operator owns the box and wants the AI to
+    # move freely without pacing/UA-rotation/quiet-blocking. A public-routable
+    # target keeps the configured posture. ``local_cidrs`` lets the operator
+    # mark extra ranges (e.g. a lab CIDR) as local. ``public_autonomy`` is an
+    # explicit assertion that for public targets the AI chooses its own attacks
+    # (already true in full_access mode); it is documentary + available to prompt
+    # builders, not a runtime gate.
+    local_targets_off: bool = True
+    local_cidrs: tuple[str, ...] = ()
+    public_autonomy: bool = True
 
     @classmethod
     def from_config(cls, cfg: dict) -> "OpsecProfile":
@@ -86,6 +98,9 @@ class OpsecProfile:
             rate_per_minute=int(block.get("rate_per_minute", 0)),
             quiet_command_patterns=tuple(block.get("quiet_command_patterns", []) or []),
             noise_budget=int(block.get("noise_budget", 0)),
+            local_targets_off=bool(block.get("local_targets_off", True)),
+            local_cidrs=tuple(block.get("local_cidrs", []) or []),
+            public_autonomy=bool(block.get("public_autonomy", True)),
         )
 
     def to_dict(self) -> dict:
@@ -101,7 +116,56 @@ class OpsecProfile:
             "rate_per_minute": self.rate_per_minute,
             "quiet_command_patterns": list(self.quiet_command_patterns),
             "noise_budget": self.noise_budget,
+            "local_targets_off": self.local_targets_off,
+            "local_cidrs": list(self.local_cidrs),
+            "public_autonomy": self.public_autonomy,
         }
+
+    def resolve_for_target(self, target_ip: str) -> "OpsecProfile":
+        """Return the effective profile for a given target IP.
+
+        Operator intent: OPSEC OFF for local/private targets (the operator's
+        own lab box / RFC1918 network -- they own it and want the AI to move
+        freely); OPSEC ON for public-routable targets (real external surface,
+        keep pacing / UA rotation / quiet-commands / noise budget).
+
+        When ``self.local_targets_off`` is true AND ``target_ip`` classifies as
+        private/local (via :func:`tools.validation_utils.is_private_or_local_target`,
+        which honors ``self.local_cidrs``), return a **disabled** profile
+        (``OpsecProfile`` with all hardening fields off) that **preserves**
+        ``local_targets_off`` / ``local_cidrs`` / ``public_autonomy`` so a
+        later re-resolution against a public pivot target re-enables correctly.
+
+        Otherwise (public target, or ``local_targets_off`` false) return
+        ``self`` unchanged so the configured posture applies. A missing/empty
+        ``target_ip`` returns ``self`` (no information -> keep configured
+        posture, the safe default).
+        """
+        if not self.local_targets_off or not target_ip:
+            return self
+        # Lazy import keeps this module hermetic at import time (no tools.*
+        # import side effects) per the opsec.py design constraints.
+        from tools.validation_utils import is_private_or_local_target
+
+        if not is_private_or_local_target(target_ip, list(self.local_cidrs)):
+            return self
+        # Local target -> fully disabled hardening, but keep the
+        # target-awareness knobs so per-task re-resolution of a different
+        # (public) target from this resolved profile still works.
+        return OpsecProfile(
+            enabled=False,
+            ua_rotation=False,
+            doh=False,
+            doh_provider=self.doh_provider,
+            min_gap_seconds=0.0,
+            jitter_seconds=0.0,
+            rate_per_minute=0,
+            quiet_command_patterns=(),
+            noise_budget=0,
+            local_targets_off=self.local_targets_off,
+            local_cidrs=self.local_cidrs,
+            public_autonomy=self.public_autonomy,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -406,6 +470,29 @@ class OpsecManager:
         """
         profile = OpsecProfile.from_config(cfg or {})
         return cls(profile, **kwargs)
+
+    # -- Target-aware resolution ------------------------------------------
+
+    def resolve_for_target(self, target_ip: str) -> "OpsecManager":
+        """Return the effective manager for a given target IP.
+
+        Delegates to :meth:`OpsecProfile.resolve_for_target`: a local/private
+        target with ``local_targets_off`` yields a manager wrapping a disabled
+        profile (OPSEC off -- pacing no-op, no UA rotation, no quiet-blocking);
+        a public target returns ``self`` unchanged (configured posture ON).
+        The resolved manager shares this manager's injected rng / fetch_fn /
+        rate_limiter / sleep_fn so deterministic tests stay deterministic.
+        """
+        resolved = self.profile.resolve_for_target(target_ip)
+        if resolved is self.profile:
+            return self
+        return OpsecManager(
+            resolved,
+            rng=self._rng,
+            fetch_fn=self._fetch_fn,
+            rate_limiter=self._rate_limiter,
+            sleep_fn=self._sleep_fn,
+        )
 
 
 # ---------------------------------------------------------------------------
