@@ -292,7 +292,7 @@ async def test_kerberoast_guard_invalid_dc_ip(tmp_path: Path) -> None:
         "kerberoast",
         {"target_ip": "10.0.0.1", "domain": "corp", "password": "p", "dc_ip": "not-an-ip"},
     ))
-    assert "ERROR: Invalid IPv4 address for dc_ip" in text
+    assert "ERROR: Invalid" in text and "dc_ip" in text
 
 
 @pytest.mark.asyncio

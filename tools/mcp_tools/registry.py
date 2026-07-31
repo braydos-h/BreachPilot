@@ -53,11 +53,13 @@ from tools.exploit_mutator import ExploitMutator
 from tools.exploit_search import ExploitSearch
 from tools.mcp_shared import (
     _attempt_dir,
+    _allowed_target_list,
     _extract_msf_rhosts,
     _find_file,
     _is_inside_workspace,
     _resolve_workspace_file,
     _run_with_pgrp_timeout as _shared_run_with_pgrp_timeout,
+    add_discovered_target,
     build_cve_search,
     build_researcher,
     build_search,
@@ -339,6 +341,7 @@ __all__ = [
     "TaskStatus",
     "ToolContext",
     "WebResearcher",
+    "add_discovered_target",
     "build_cve_search",
     "build_planning_prompt",
     "build_replanning_prompt",

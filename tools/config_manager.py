@@ -218,6 +218,18 @@ CONFIG_SCHEMA: dict[str, Any] = {
             "engine": "duckduckgo",
             "region": "us-en",
         },
+        "assistant": {
+            "enabled": True,
+            "model_alias": "",
+            "automatic": True,
+            "failure_trigger": 2,
+            "max_auto_consultations": 4,
+            "max_tool_calls_per_consultation": 5,
+            "max_model_rounds": 3,
+            "max_advisory_chars": 4000,
+            "timeout_seconds": 90,
+            "save_advisories": True,
+        },
     },
     "swarm": {
         "enabled": True,
@@ -601,6 +613,41 @@ class ConfigValidator:
                     block = research.get(nested)
                     if block is not None and not isinstance(block, dict):
                         result.warnings.append(f"research.{nested} must be a mapping.")
+                assistant = research.get("assistant")
+                if assistant is not None and not isinstance(assistant, dict):
+                    result.warnings.append("research.assistant must be a mapping.")
+                elif isinstance(assistant, dict):
+                    for key in ("enabled", "automatic", "save_advisories"):
+                        value = assistant.get(key)
+                        if value is not None and not isinstance(value, bool):
+                            result.warnings.append(
+                                f"research.assistant.{key} must be a boolean."
+                            )
+                    for key in (
+                        "failure_trigger",
+                        "max_auto_consultations",
+                        "max_tool_calls_per_consultation",
+                        "max_model_rounds",
+                        "max_advisory_chars",
+                    ):
+                        value = assistant.get(key)
+                        if value is not None and (not isinstance(value, int) or value < 1):
+                            result.warnings.append(
+                                f"research.assistant.{key} must be a positive integer."
+                            )
+                    timeout = assistant.get("timeout_seconds")
+                    if timeout is not None and (
+                        not isinstance(timeout, (int, float)) or timeout <= 0
+                    ):
+                        result.warnings.append(
+                            "research.assistant.timeout_seconds must be a positive number."
+                        )
+                    alias = str(assistant.get("model_alias") or "").strip()
+                    registry = (self._config.get("models", {}) or {}).get("registry", {})
+                    if alias and isinstance(registry, dict) and alias not in registry:
+                        result.warnings.append(
+                            f"research.assistant.model_alias {alias!r} is not in models.registry."
+                        )
 
         # Validate memory section (Tier 1.1: ExperienceStore soundness gates)
         if "memory" in self._config:
