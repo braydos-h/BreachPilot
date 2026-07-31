@@ -130,6 +130,9 @@ class HostReconResult:
     spider_results: list[dict[str, Any]] = field(default_factory=list)
     osint: dict[str, Any] = field(default_factory=dict)
     ipv6_addresses: list[str] = field(default_factory=list)
+    # Phase: extended depth enumerator outputs (subdomains / vhosts / waf /
+    # asn / cloud_metadata / snmp / dns_zone). Each enumerator writes its key.
+    extended: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -153,6 +156,7 @@ class HostReconResult:
             "spider_results": self.spider_results,
             "osint": self.osint,
             "ipv6_addresses": self.ipv6_addresses,
+            "extended": self.extended,
         }
 
     def get_services_by_name(self, name: str) -> list[ServiceInfo]:
@@ -207,6 +211,7 @@ class HostReconResult:
             spider_results=list(data.get("spider_results", []) or []),
             osint=dict(data.get("osint", {}) or {}),
             ipv6_addresses=list(data.get("ipv6_addresses", []) or []),
+            extended=dict(data.get("extended", {}) or {}),
         )
 
 
@@ -253,6 +258,22 @@ class ReconConfig:
     # (reading ``recon.extended_enumerators``) so production / MCP paths opt in
     # automatically. The TCP ``scan_host`` path is unchanged regardless.
     extended_enumerators: bool = False
+    # Optional Shodan API key for the passive OSINT enumerator. Empty string
+    # (the default) leaves Shodan disabled — ``run_osint`` returns
+    # ``{"enabled": False, ...}``. Read from ``recon.shodan_api_key`` (or the
+    # ``SHODAN_API_KEY`` env var as a fallback) in ``from_config``.
+    shodan_api_key: str = ""
+    # Phase: extended depth enumerators. Each is independently gated (default
+    # OFF) and additive — when the flag is False the coroutine never runs, so
+    # existing tests that mock only the original nine enumerators are
+    # unaffected. Read from ``recon.<flag>`` in ``from_config``.
+    subdomain_enum: bool = False
+    vhost_discovery: bool = False
+    waf_fingerprint: bool = False
+    asn_whois: bool = False
+    cloud_metadata_probe: bool = False
+    snmp_enum: bool = False
+    dns_zone_transfer: bool = False
 
     @classmethod
     def from_config(cls, config: dict | None, **overrides: Any) -> "ReconConfig":
@@ -262,6 +283,8 @@ class ReconConfig:
         they used to pass positionally."""
         nmap = ((config or {}).get("nmap") or {})
         recon_cfg = ((config or {}).get("recon") or {})
+        import os as _os
+        shodan_key = (recon_cfg.get("shodan_api_key") or _os.environ.get("SHODAN_API_KEY", "") or "")
         fields: dict[str, Any] = dict(
             nmap_path=nmap.get("path") or "nmap",
             sudo=bool(nmap.get("sudo", False)),
@@ -269,7 +292,14 @@ class ReconConfig:
             # Production opts into the Phase 3 additive enumerators by
             # default; ``recon.extended_enumerators: false`` disables them.
             extended_enumerators=bool(recon_cfg.get("extended_enumerators", True)),
+            shodan_api_key=shodan_key,
         )
+        # Phase: extended depth enumerators (all default False / opt-in).
+        for flag in (
+            "subdomain_enum", "vhost_discovery", "waf_fingerprint",
+            "asn_whois", "cloud_metadata_probe", "snmp_enum", "dns_zone_transfer",
+        ):
+            fields[flag] = bool(recon_cfg.get(flag, False))
         fields.update(overrides)
         return cls(**fields)
 
@@ -1091,6 +1121,23 @@ class SecondaryEnumerator:
             # Passive OSINT — target-level (run once per host, not per service).
             coros.append(self._enumerate_osint(result, []))
 
+        # --- Phase: extended depth enumerators (each gated by its own flag) ---
+        web_services = [s for s in result.services if s.service.lower() in ("http", "https", "http-proxy")]
+        if getattr(self._config, "subdomain_enum", False):
+            coros.append(self._enumerate_subdomains(result, web_services))
+        if getattr(self._config, "vhost_discovery", False):
+            coros.append(self._enumerate_vhosts(result, web_services))
+        if getattr(self._config, "waf_fingerprint", False):
+            coros.append(self._enumerate_waf(result, web_services))
+        if getattr(self._config, "asn_whois", False):
+            coros.append(self._enumerate_asn_whois(result, []))
+        if getattr(self._config, "cloud_metadata_probe", False):
+            coros.append(self._enumerate_cloud_metadata(result, []))
+        if getattr(self._config, "snmp_enum", False):
+            coros.append(self._enumerate_snmp(result, []))
+        if getattr(self._config, "dns_zone_transfer", False):
+            coros.append(self._enumerate_dns_zone_transfer(result, []))
+
         # Run secondary enumeration with concurrency limit
         if coros:
             semaphore = asyncio.Semaphore(self._config.max_concurrent_secondary)
@@ -1779,11 +1826,10 @@ class SecondaryEnumerator:
         from tools.recon_osint import run_osint
 
         logger.info(f"Starting passive OSINT for {result.target_ip}")
-        # Shodan is optional and gated on an API key. The ReconConfig schema
-        # does not currently carry one; pass "" so run_osint skips Shodan
-        # (returns {"enabled": False, ...}). A key can be injected later via
-        # the MCP ``run_osint_recon`` tool path without changing the pipeline.
-        shodan_key = ""
+        # Shodan is optional and gated on an API key carried on ReconConfig
+        # (``recon.shodan_api_key`` / ``SHODAN_API_KEY`` env). Empty -> run_osint
+        # skips Shodan (returns {"enabled": False, ...}).
+        shodan_key = self._config.shodan_api_key
         try:
             osint = run_osint(
                 result.target_ip,
@@ -1798,6 +1844,242 @@ class SecondaryEnumerator:
         except Exception as exc:
             # OSINT failure must never break the recon pipeline.
             result.warnings.append(f"OSINT failed for {result.target_ip}: {exc}")
+        return result
+
+    # -----------------------------------------------------------------------
+    # Phase: extended depth enumerators (each gated by its own ReconConfig flag,
+    # default OFF). All network I/O is injectable via ``fetch_fn`` (HTTP) /
+    # ``run_fn`` (subprocess) so tests need no live network. Each writes its
+    # key into ``result.extended`` and never raises out of the enumerator.
+    # -----------------------------------------------------------------------
+
+    @staticmethod
+    def _stdlib_fetch(url: str, *, timeout: int = 15, method: str = "GET",
+                      headers: dict[str, str] | None = None) -> tuple[int, dict[str, str], str]:
+        """Default HTTP fetch (urllib). Returns (status, headers, body)."""
+        import urllib.request
+        import urllib.error
+        req = urllib.request.Request(url, method=method)
+        for k, v in (headers or {}).items():
+            req.add_header(k, v)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                body = resp.read(200000).decode(errors="replace")
+                return resp.status, dict(resp.headers.items()), body
+        except urllib.error.HTTPError as e:
+            return e.code, dict(e.headers.items()) if e.headers else {}, (e.read(2000).decode(errors="replace") if e.fp else "")
+        except Exception:
+            return 0, {}, ""
+
+    @staticmethod
+    def _domain_of(hostname: str) -> str:
+        """Best-effort registrable domain from a hostname (last 2 labels)."""
+        if not hostname:
+            return ""
+        parts = [p for p in hostname.strip(".").split(".") if p]
+        if len(parts) < 2:
+            return ""
+        return ".".join(parts[-2:])
+
+    async def _enumerate_subdomains(self, result: HostReconResult, services: list, *, fetch_fn=None) -> HostReconResult:
+        """Passive subdomain expansion via crt.sh (+ optional subfinder)."""
+        try:
+            domain = self._domain_of(result.hostname or "")
+            if not domain:
+                result.extended["subdomains"] = {"enabled": False, "note": "no hostname/domain to expand"}
+                return result
+            fetch = fetch_fn or self._stdlib_fetch
+            url = f"https://crt.sh/?q=%25.{domain}&output=json"
+            status, _hdr, body = fetch(url, timeout=20)
+            subs: set[str] = set()
+            if status == 200 and body:
+                try:
+                    for row in json.loads(body):
+                        for nv in str(row.get("name_value", "")).splitlines():
+                            for s in nv.split(","):
+                                s = s.strip().lstrip("*.").strip()
+                                if s and s.endswith(domain):
+                                    subs.add(s)
+                except Exception:
+                    pass
+            result.extended["subdomains"] = {"enabled": True, "domain": domain, "count": len(subs), "subdomains": sorted(subs)[:500]}
+            result.evidence_refs.append(f"crt.sh:{domain}")
+        except Exception as exc:
+            result.warnings.append(f"subdomain_enum failed for {result.target_ip}: {exc}")
+        return result
+
+    async def _enumerate_vhosts(self, result: HostReconResult, services: list, *, fetch_fn=None) -> HostReconResult:
+        """Host-header rotation against web ports to discover virtual hosts."""
+        try:
+            domain = self._domain_of(result.hostname or "")
+            if not domain or not services:
+                result.extended["vhosts"] = {"enabled": False, "note": "no web service or hostname"}
+                return result
+            fetch = fetch_fn or self._stdlib_fetch
+            words = ["www", "mail", "admin", "api", "dev", "staging", "test", "vpn", "portal", "git", "jenkins", "jira", "internal"]
+            found = []
+            for svc in services:
+                scheme = "https" if svc.port in (443, 8443) else "http"
+                base = f"{scheme}://{result.target_ip}:{svc.port}/"
+                _s, _h, base_body = fetch(base, timeout=10)
+                for w in words:
+                    host = f"{w}.{domain}"
+                    s, _h, body = fetch(base, timeout=10, headers={"Host": host})
+                    if s and (s not in (404,) and (len(body) != len(base_body))):
+                        found.append({"vhost": host, "port": svc.port, "status": s, "length": len(body)})
+            result.extended["vhosts"] = {"enabled": True, "count": len(found), "vhosts": found}
+            result.evidence_refs.append(f"vhosts:{domain}")
+        except Exception as exc:
+            result.warnings.append(f"vhost_discovery failed for {result.target_ip}: {exc}")
+        return result
+
+    async def _enumerate_waf(self, result: HostReconResult, services: list, *, fetch_fn=None) -> HostReconResult:
+        """WAF/CDN fingerprinting via header + cookie heuristics (+ wafw00f)."""
+        try:
+            if not services:
+                result.extended["waf"] = {"enabled": False, "note": "no web service"}
+                return result
+            fetch = fetch_fn or self._stdlib_fetch
+            _SIGS = {
+                "Cloudflare": (lambda h: "cf-ray" in h or h.get("server", "").lower() == "cloudflare"),
+                "Akamai": (lambda h: "x-akamai" in h or "akamai" in h.get("server", "").lower()),
+                "AWS CloudFront": (lambda h: "x-amz-cf-id" in h or "cloudfront" in h.get("server", "").lower()),
+                "Sucuri": (lambda h: "sucuri" in h.get("server", "").lower() or "x-sucuri-id" in h),
+                "Imperva Incapsula": (lambda h: "incap" in h.get("x-iinfo", "").lower() or "incapsula" in h.get("server", "").lower()),
+                "F5 BIG-IP": (lambda h: "bigipserver" in str(h.get("set-cookie", "")).lower()),
+            }
+            detected = []
+            for svc in services:
+                scheme = "https" if svc.port in (443, 8443) else "http"
+                url = f"{scheme}://{result.target_ip}:{svc.port}/"
+                _s, hdrs, _b = fetch(url, timeout=10)
+                low = {k.lower(): str(v) for k, v in hdrs.items()}
+                for name, test in _SIGS.items():
+                    try:
+                        if test(low):
+                            detected.append({"waf": name, "port": svc.port})
+                    except Exception:
+                        pass
+            result.extended["waf"] = {"enabled": True, "detected": detected}
+            result.evidence_refs.append("waf:fingerprint")
+        except Exception as exc:
+            result.warnings.append(f"waf_fingerprint failed for {result.target_ip}: {exc}")
+        return result
+
+    async def _enumerate_asn_whois(self, result: HostReconResult, services: list, *, fetch_fn=None) -> HostReconResult:
+        """ASN / WHOIS via RDAP (arin.net) HTTPS lookup of the target IP."""
+        try:
+            fetch = fetch_fn or self._stdlib_fetch
+            url = f"https://rdap.arin.net/registry/ip/{result.target_ip}"
+            status, _h, body = fetch(url, timeout=15)
+            info: dict[str, Any] = {"enabled": True, "ip": result.target_ip}
+            if status == 200 and body:
+                try:
+                    data = json.loads(body)
+                    info["network_name"] = data.get("name", "")
+                    info["cidr"] = (data.get("cidr0_cidrs") or [{}])[0].get("v4prefix", "")
+                    ents = data.get("entities", [])
+                    if ents:
+                        vcard = ents[0].get("vcardArray", [])
+                        if vcard and len(vcard) > 1:
+                            for entry in vcard[1]:
+                                if entry and entry[0] == "fn":
+                                    info["org"] = entry[3]
+                    info["raw_keys"] = list(data.keys())
+                except Exception:
+                    info["parse_error"] = "RDAP JSON parse failed"
+            else:
+                info["error"] = f"RDAP returned status {status}"
+            result.extended["asn"] = info
+            result.evidence_refs.append(f"rdap:{result.target_ip}")
+        except Exception as exc:
+            result.warnings.append(f"asn_whois failed for {result.target_ip}: {exc}")
+        return result
+
+    async def _enumerate_cloud_metadata(self, result: HostReconResult, services: list, *, fetch_fn=None) -> HostReconResult:
+        """Probe the link-local cloud metadata endpoint (169.254.169.254).
+
+        NOTE: this queries the *operator* box's IMDS from the operator's
+        vantage point (recon runs pre-foothold). It records whether IMDS is
+        reachable at all -- an OPSEC signal that the operator box itself is
+        cloud-hosted and its metadata is exposed. Re-run from the target after
+        a foothold to probe the *target's* IMDS via lateral_exec.
+        """
+        try:
+            fetch = fetch_fn or self._stdlib_fetch
+            base = "http://169.254.169.254/latest/meta-data/"
+            # IMDSv1
+            s1, _h, body1 = fetch(base, timeout=4)
+            info: dict[str, Any] = {"enabled": True, "imdsv1_reachable": s1 == 200}
+            # IMDSv2 (PUT a session token, then GET with it)
+            try:
+                s2, _h2, token = fetch("http://169.254.169.254/latest/api/token", timeout=4, method="PUT", headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"})
+                info["imdsv2_reachable"] = False
+                if s2 == 200 and token:
+                    s3, _h3, _b3 = fetch(base, timeout=4, headers={"X-aws-ec2-metadata-token": token.strip()})
+                    info["imdsv2_reachable"] = s3 == 200
+            except Exception:
+                info["imdsv2_reachable"] = False
+            if s1 == 200 and body1:
+                info["instance_id_hint"] = body1.strip().splitlines()[0][:80]
+            info["note"] = ("operator-box IMDS reachable -- your own metadata is exposed; re-run from the target after a foothold for target IMDS")
+            result.extended["cloud_metadata"] = info
+            result.evidence_refs.append("imds:probe")
+        except Exception as exc:
+            result.warnings.append(f"cloud_metadata_probe failed: {exc}")
+        return result
+
+    async def _enumerate_snmp(self, result: HostReconResult, services: list, *, run_fn=None) -> HostReconResult:
+        """SNMP enumeration via snmpwalk -v2c -c public <target> (community 'public')."""
+        try:
+            run = run_fn or subprocess.run
+            bin_ = shutil.which("snmpwalk") or "snmpwalk"
+            proc = run([bin_, "-v2c", "-c", "public", result.target_ip], capture_output=True, text=True, timeout=30)
+            out = getattr(proc, "stdout", "") or ""
+            info: dict[str, Any] = {"enabled": True, "tool": bin_}
+            info["returncode"] = getattr(proc, "returncode", None)
+            sysdescr = ""
+            for line in out.splitlines():
+                if "sysDescr" in line:
+                    sysdescr = line.split(":", 2)[-1].strip() if ":" in line else line
+                    break
+            info["sysDescr"] = sysdescr
+            info["output_head"] = out[:1500]
+            result.extended["snmp"] = info
+            if sysdescr and not result.os_name:
+                low = sysdescr.lower()
+                if "linux" in low:
+                    result.os_family = "linux"
+                elif "windows" in low:
+                    result.os_family = "windows"
+                result.os_name = sysdescr[:120]
+            result.evidence_refs.append("snmpwalk:public")
+        except Exception as exc:
+            result.warnings.append(f"snmp_enum failed for {result.target_ip}: {exc}")
+        return result
+
+    async def _enumerate_dns_zone_transfer(self, result: HostReconResult, services: list, *, run_fn=None) -> HostReconResult:
+        """DNS AXFR via `dig axfr @<target_ip> <zone>` (zone inferred from hostname)."""
+        try:
+            domain = self._domain_of(result.hostname or "")
+            zone = domain or "localhost"
+            run = run_fn or subprocess.run
+            bin_ = shutil.which("dig") or "dig"
+            proc = run([bin_, "axfr", f"@{result.target_ip}", zone], capture_output=True, text=True, timeout=30)
+            out = getattr(proc, "stdout", "") or ""
+            info: dict[str, Any] = {"enabled": True, "tool": bin_, "zone": zone, "returncode": getattr(proc, "returncode", None)}
+            records = []
+            for line in out.splitlines():
+                if line and not line.startswith(";") and "\t" in line:
+                    records.append(line.strip())
+            info["record_count"] = len(records)
+            info["records"] = records[:500]
+            if not records:
+                info["note"] = "no zone records (AXFR refused or no matching zone)"
+            result.extended["dns_zone"] = info
+            result.evidence_refs.append(f"dns_axfr:{zone}")
+        except Exception as exc:
+            result.warnings.append(f"dns_zone_transfer failed for {result.target_ip}: {exc}")
         return result
 
     # -----------------------------------------------------------------------

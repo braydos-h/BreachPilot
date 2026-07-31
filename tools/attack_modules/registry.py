@@ -72,6 +72,15 @@ from tools.attack_modules.modules import (
     DetectionCoverageProbe,
     LogSourceEnum,
     OPSECPostureReport,
+    TokenImpersonation,
+    ServiceMisconfiguration,
+    LateralMovement,
+    ValidateFinding,
+    ADCSEnum,
+    BloodHoundCollect,
+    ResponderRelay,
+    GoldenTicket,
+    SMBSigningCheck,
 )
 
 _MODULE_CLASSES: list[type[AttackModule]] = [
@@ -152,6 +161,18 @@ _MODULE_CLASSES: list[type[AttackModule]] = [
     DetectionCoverageProbe,
     LogSourceEnum,
     OPSECPostureReport,
+    # --- Orchestrator phase modules (back the privesc/lateral/validation phases;
+    #     previously phantom names -> get_module None -> FAILED) ---
+    TokenImpersonation,
+    ServiceMisconfiguration,
+    LateralMovement,
+    ValidateFinding,
+    # --- Phase 1: AD/Kerberos post-exploit recipe modules (wrap ad.py MCP tools) ---
+    ADCSEnum,
+    BloodHoundCollect,
+    ResponderRelay,
+    GoldenTicket,
+    SMBSigningCheck,
 ]
 
 

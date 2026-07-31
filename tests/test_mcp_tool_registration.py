@@ -59,6 +59,8 @@ async def test_exploit_mcp_registers_expected_core_tools(tmp_path: Path) -> None
         "lateral_exec",
         "dump_credentials",
         "kerberoast",
+        "run_web_scan",
+        "run_hash_crack",
         "check_os",
         "quick_scan",
         "run_full_recon",

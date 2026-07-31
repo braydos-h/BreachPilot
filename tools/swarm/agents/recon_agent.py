@@ -10,12 +10,33 @@ Deep recon specialist with:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from typing import Any
 
 from tools.swarm.base import Agent, AgentResult, AgentStatus
 from tools.recon_pipeline import ReconPipeline, ReconConfig
+
+
+def _run_coro(coro: "Any") -> Any:
+    """Drive an async coroutine to completion from a sync ``Agent.run``.
+
+    The swarm dispatches agents two ways: ``route_parallel`` runs
+    ``agent.run`` in a ``run_in_executor`` worker thread (no running loop, so
+    ``asyncio.run`` suffices), while the sync ``route()`` path may execute
+    inside the campaign's already-running loop. Handle both: if no loop is
+    running in *this* thread, ``asyncio.run``; otherwise run the coroutine in
+    a fresh thread with its own loop (cannot ``run_until_complete`` on a
+    loop that is already running).
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        return ex.submit(asyncio.run, coro).result()
 
 
 # ── Technology fingerprint database ───────────────────────────────────────
@@ -128,7 +149,6 @@ class ReconAgent(Agent):
         mission = context.get("mission", {})
         target = task.get("target", "")
         task_id = task.get("task_id", task.get("id", ""))
-        tool_router = context.get("tool_router")
         blackboard = context.get("blackboard", {})
 
         output: dict[str, Any] = {
@@ -148,21 +168,34 @@ class ReconAgent(Agent):
         error = ""
 
         try:
-            # ── Stage 1: Quick scan ──
-            recon_cfg = ReconConfig(
-                target=target,
-                ports=task.get("ports", "top1000"),
-                # ReconConfig has no ``stealth`` field (it uses ``aggression_level``);
-                # map the legacy stealth flag onto the stealth aggression level.
+            # ── Stage 1: Full recon via the shared ReconPipeline ──
+            # Mirror the MCP run_full_recon path: ReconConfig.from_config +
+            # ReconPipeline(recon_cfg) + await pipeline.recon_host(target).
+            # The previous code raised TypeError/AttributeError: it passed
+            # non-existent ``target=``/``ports=`` kwargs to ReconConfig, a
+            # second positional (tool_router) to ReconPipeline.__init__(config),
+            # and called a non-existent pipeline.run() -- so the swarm recon
+            # path never actually ran.
+            recon_cfg = ReconConfig.from_config(
+                context.get("config"),
                 aggression_level="stealth" if context.get("stealth", False) else "normal",
             )
-            pipeline = ReconPipeline(recon_cfg, tool_router)
-            result = pipeline.run()
+            pipeline = ReconPipeline(recon_cfg)
+            host_result = _run_coro(pipeline.recon_host(target))
+            result = host_result.to_dict()
 
             raw_services = result.get("services", [])
-            output["technologies"] = result.get("technologies", [])
-            output["endpoints"] = result.get("endpoints", [])
-            output["os_guess"] = result.get("os_guess", {})
+            # HostReconResult has no top-level technologies/endpoints/os_guess:
+            # technologies are per-service (built up in Stage 2 from banners),
+            # endpoints come from spider_results, and the OS guess is assembled
+            # from os_name/os_family/os_accuracy.
+            output["technologies"] = []
+            output["endpoints"] = result.get("spider_results", [])
+            output["os_guess"] = {
+                "name": result.get("os_name", ""),
+                "family": result.get("os_family", ""),
+                "accuracy": result.get("os_accuracy", 0),
+            }
             evidence_refs = result.get("evidence_refs", [])
 
             # ── Stage 2: Enrich services with risk scores and tech fingerprinting ──

@@ -167,7 +167,7 @@ class ASREPRoast(AttackModule):
             "note": "AS-REP roasts accounts with UF_DONT_REQUIRE_PREAUTH set. Offline crackable via hashcat -m 18200.",
             "workflow": [
                 "1. Gather a username list (LDAP enum against ctx.target_ip, or use ADLDAPEnum) to feed candidates.",
-                "2. Call kerberoast(target_ip=ctx.target_ip, mode='asrep') -- or run_python_file with an impacket-GetNPUsers driver -- to request AS-REPs for preauth-disabled accounts.",
+                f"2. Call asrep_roast(target_ip='{ctx.target_ip}', domain=<d>, username=<u>, password=<p> or ntlm_hash=<nt>, users_file=<optional>) to request AS-REPs for preauth-disabled accounts (impacket-GetNPUsers).",
                 "3. Call write_python_file + run_python_file with 'hashcat -m 18200 asrep.txt rockyou.txt' to crack the recovered AS-REP hashes offline on the operator box.",
                 "4. Validate recovered plaintext against the target with lateral_exec / dump_credentials as needed.",
             ],

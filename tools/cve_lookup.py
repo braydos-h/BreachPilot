@@ -58,6 +58,12 @@ class CVESearchSettings:
     # failure and re-raises (existing RuntimeError contract preserved).
     circuit_failure_threshold: int = 5
     circuit_recovery_timeout: float = 60.0
+    # Phase 2: EPSS + KEV vuln-intel enrichment (opt-in, default OFF). When
+    # off, CVEEntry carries None/False and the NVD output is unchanged.
+    epss_enabled: bool = False
+    kev_enabled: bool = False
+    kev_cache_ttl_seconds: int = 86400  # 24h catalog refresh
+    kev_cache_path: str = ""  # "" = exploit_workspace/.kev_catalog.json
 
 
 @dataclass
@@ -69,11 +75,21 @@ class CVEEntry:
     cwe: str = ""  # e.g. CWE-79
     published: str = ""  # YYYY-MM-DD
     references: list[str] = field(default_factory=list)
+    # Phase 2: EPSS exploit-likelihood score (0-1) + percentile (0-1), and
+    # CISA KEV (Known Exploited Vulnerability) membership. Populated only
+    # when the corresponding CVESearchSettings flag is enabled.
+    epss: float | None = None
+    epss_percentile: float | None = None
+    kev: bool = False
 
     def summary(self) -> str:
         lines = [f"- {self.cve_id} ({self.severity or 'unknown severity'})"]
         if self.cvss_score is not None:
             lines.append(f"  CVSS: {self.cvss_score}")
+        if self.epss is not None:
+            lines.append(f"  EPSS: {self.epss:.4f} (percentile {self.epss_percentile:.4f})")
+        if self.kev:
+            lines.append("  KEV: yes (CISA Known Exploited Vulnerability)")
         if self.cwe:
             lines.append(f"  CWE: {self.cwe}")
         if self.published:
@@ -83,6 +99,109 @@ class CVEEntry:
         if self.references:
             lines.append(f"  References: {', '.join(self.references[:3])}")
         return "\n".join(lines)
+
+
+class EPSSClient:
+    """EPSS (Exploit Prediction Scoring System) enrichment.
+
+    One batched HTTP GET to ``https://api.first.org/data/v1/epss?cve=...`` per
+    NVD result set. Pure stdlib (urllib); injectable ``fetch_fn`` for tests.
+    Failures degrade to no enrichment (never raise -- vuln intel is advisory).
+    """
+
+    def __init__(self, settings: CVESearchSettings) -> None:
+        self.settings = settings
+        self._cache: dict[str, dict[str, float]] = {}
+
+    def get_batch(self, cve_ids: list[str], *, fetch_fn=None) -> dict[str, dict[str, float]]:
+        if not cve_ids:
+            return {}
+        ids = [c for c in cve_ids if c]
+        cached = {c: self._cache[c] for c in ids if c in self._cache}
+        missing = [c for c in ids if c not in self._cache]
+        if not missing:
+            return cached
+        url = "https://api.first.org/data/v1/epss?cve=" + ",".join(missing[:100])
+        try:
+            if fetch_fn is None:
+                req = urllib.request.Request(url, headers={"User-Agent": process_user_agent("netattackai-epss/1.0")})
+                with urllib.request.urlopen(req, timeout=self.settings.timeout_seconds) as resp:
+                    payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+            else:
+                payload = fetch_fn(url)
+            for item in (payload or {}).get("data", []) or []:
+                cve = item.get("cve", "")
+                if cve:
+                    try:
+                        rec = {"epss": float(item.get("epss", 0.0)), "percentile": float(item.get("percentile", 0.0))}
+                        self._cache[cve] = rec
+                        cached[cve] = rec
+                    except (TypeError, ValueError):
+                        continue
+        except Exception:
+            pass  # advisory only
+        return cached
+
+
+class KEVCatalog:
+    """CISA Known Exploited Vulnerabilities catalog with file-cache + TTL.
+
+    Downloads the canonical JSON feed once, caches it to disk (default
+    ``exploit_workspace/.kev_catalog.json``) with a 24h TTL, and exposes
+    ``is_known_exploited(cve)``. Injectable ``fetch_fn``/``cache_path`` for
+    tests. Failures degrade to ``False`` (never raise).
+    """
+
+    KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+
+    def __init__(self, settings: CVESearchSettings, *, cache_path: str = "", fetch_fn=None) -> None:
+        self.settings = settings
+        self._fetch_fn = fetch_fn
+        self._path = cache_path or settings.kev_cache_path or os.path.join(
+            os.environ.get("EXPLOIT_WORKSPACE", "exploit_workspace"), ".kev_catalog.json"
+        )
+        self._cves: set[str] | None = None
+
+    def _load(self) -> set[str]:
+        if self._cves is not None:
+            return self._cves
+        cves: set[str] = set()
+        data: dict[str, Any] | None = None
+        try:
+            fresh = True
+            if os.path.exists(self._path) and (time.time() - os.path.getmtime(self._path)) < self.settings.kev_cache_ttl_seconds:
+                with open(self._path, "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+                fresh = False
+            if data is None:
+                if self._fetch_fn is not None:
+                    data = self._fetch_fn(self.KEV_URL)
+                else:
+                    req = urllib.request.Request(self.KEV_URL, headers={"User-Agent": process_user_agent("netattackai-kev/1.0")})
+                    with urllib.request.urlopen(req, timeout=self.settings.timeout_seconds) as resp:
+                        raw = resp.read().decode("utf-8", errors="replace")
+                    data = json.loads(raw)
+                if fresh and data:
+                    try:
+                        os.makedirs(os.path.dirname(self._path) or ".", exist_ok=True)
+                        with open(self._path, "w", encoding="utf-8") as fh:
+                            json.dump(data, fh)
+                    except Exception:
+                        pass
+        except Exception:
+            data = None
+        for item in (data or {}).get("vulnerabilities", []) or []:
+            cve = (item.get("cveID") or "").strip()
+            if cve:
+                cves.add(cve)
+        self._cves = cves
+        return self._cves
+
+    def is_known_exploited(self, cve: str) -> bool:
+        try:
+            return cve in self._load()
+        except Exception:
+            return False
 
 
 class NVDClient:
@@ -112,6 +231,10 @@ class NVDClient:
         # per-instance throttle is used (back-compat -- vuln_agent and tests
         # construct NVDClient without a shared limiter).
         self._rate_limiter = rate_limiter
+        # Phase 2: EPSS + KEV enrichers. Constructed only when the
+        # corresponding flag is on; None otherwise (zero behavior change).
+        self._epss = EPSSClient(settings) if settings.epss_enabled else None
+        self._kev = KEVCatalog(settings) if settings.kev_enabled else None
 
     async def search(self, query: str) -> list[CVEEntry]:
         if not self.settings.enabled:
@@ -212,13 +335,17 @@ class NVDClient:
         return await loop.run_in_executor(None, self._fetch_sync, query)
 
     def _fetch_sync(self, query: str) -> list[CVEEntry]:
-        """Perform the actual HTTP GET to NVD API."""
-        params: dict[str, str] = {
+        """Perform the actual HTTP GET to NVD API (keyword search)."""
+        return self._fetch_by_params({
             "keywordSearch": query,
             "resultsPerPage": str(self.settings.max_results),
-        }
+        })
+
+    def _fetch_by_params(self, params: dict[str, str]) -> list[CVEEntry]:
+        """Shared NVD HTTP GET + parse for an arbitrary params dict."""
         api_key = os.environ.get(self.settings.api_key_env, "").strip()
         if api_key:
+            params = dict(params)
             params["apiKey"] = api_key
 
         url = NVD_API_BASE + "?" + urllib.parse.urlencode(params)
@@ -238,6 +365,20 @@ class NVDClient:
             raise RuntimeError(f"NVD request failed: {exc}") from exc
 
         return self._parse(payload)
+
+    # Phase 2: NVD CPE-name search (vuln-intel by product configuration).
+    def search_by_cpe_sync(self, cpe: str) -> list[CVEEntry]:
+        """Synchronous NVD search by CPE name (cpeName parameter)."""
+        if not self.settings.enabled or not cpe:
+            return []
+        return self._fetch_by_params({
+            "cpeName": cpe,
+            "resultsPerPage": str(self.settings.max_results),
+        })
+
+    async def search_by_cpe(self, cpe: str) -> list[CVEEntry]:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.search_by_cpe_sync, cpe)
 
     def _parse(self, payload: dict[str, Any]) -> list[CVEEntry]:
         entries: list[CVEEntry] = []
@@ -299,6 +440,25 @@ class NVDClient:
                     references=references,
                 )
             )
+        # Phase 2: EPSS + KEV enrichment (only when the enrichers are
+        # present, i.e. the corresponding settings flag is ON). Advisory;
+        # failures never raise out of _parse.
+        if self._epss is not None and entries:
+            try:
+                epss = self._epss.get_batch([e.cve_id for e in entries])
+                for e in entries:
+                    rec = epss.get(e.cve_id)
+                    if rec:
+                        e.epss = rec["epss"]
+                        e.epss_percentile = rec["percentile"]
+            except Exception:
+                pass
+        if self._kev is not None:
+            try:
+                for e in entries:
+                    e.kev = self._kev.is_known_exploited(e.cve_id)
+            except Exception:
+                pass
         return entries
 
 

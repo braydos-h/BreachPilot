@@ -14,6 +14,57 @@ from tools.mcp_tools.registry import *
 _running_campaign_tasks: set = set()
 
 
+def _identify_hash_modes(h: str) -> list[tuple[str, str, str]]:
+    """Return ``[(name, hashcat_mode, sample_cmd), ...]`` for a hash string.
+
+    Single source of truth for the hash-type -> hashcat-mode mapping, shared by
+    ``hash_crack_identify`` (advisory command suggestions) and the standalone
+    ``run_hash_crack`` MCP tool (execution). Order matters: the MD5 branch only
+    fires when no earlier branch matched (a 32-hex hash is reported as NTLM).
+    """
+    identifications: list[tuple[str, str, str]] = []
+
+    # NTLM: 32 hex chars
+    if re.fullmatch(r"[0-9a-fA-F]{32}", h):
+        identifications.append(("NTLM", "1000", f"hashcat -m 1000 -a 3 '{h}' ?l?l?l?l?l?l?l?l"))
+
+    # NetNTLMv2: user::domain:challenge:HMAC-MD5:blob
+    if "::" in h and ":" in h:
+        parts = h.split(":")
+        if len(parts) >= 5:
+            identifications.append(("NetNTLMv2", "5600", f"hashcat -m 5600 -a 0 '{h}' rockyou.txt"))
+
+    # Kerberos TGS: $krb5tgs$23$*...
+    if h.startswith("$krb5tgs$"):
+        identifications.append(("Kerberos 5 TGS-REP", "13100", f"hashcat -m 13100 -a 0 '{h}' rockyou.txt"))
+
+    # Kerberos AS-REP: $krb5asrep$23$...
+    if h.startswith("$krb5asrep$"):
+        identifications.append(("Kerberos 5 AS-REP", "18200", f"hashcat -m 18200 -a 0 '{h}' rockyou.txt"))
+
+    # MD5: 32 hex chars (already caught as NTLM, but check context)
+    if re.fullmatch(r"[0-9a-fA-F]{32}", h) and not identifications:
+        identifications.append(("MD5", "0", f"hashcat -m 0 -a 0 '{h}' rockyou.txt"))
+
+    # SHA1: 40 hex chars
+    if re.fullmatch(r"[0-9a-fA-F]{40}", h):
+        identifications.append(("SHA1", "100", f"hashcat -m 100 -a 0 '{h}' rockyou.txt"))
+
+    # SHA256: 64 hex chars
+    if re.fullmatch(r"[0-9a-fA-F]{64}", h):
+        identifications.append(("SHA2-256", "1400", f"hashcat -m 1400 -a 0 '{h}' rockyou.txt"))
+
+    # bcrypt: $2a$ or $2b$ or $2y$
+    if h.startswith("$2a$") or h.startswith("$2b$") or h.startswith("$2y$"):
+        identifications.append(("bcrypt", "3200", f"hashcat -m 3200 -a 0 '{h}' rockyou.txt"))
+
+    # LM: 16 bytes hex
+    if re.fullmatch(r"[0-9a-fA-F]{16}", h):
+        identifications.append(("LM", "3000", f"hashcat -m 3000 -a 3 '{h}' ?u?u?u?u?u?u?u"))
+
+    return identifications
+
+
 def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
     workspace = ctx.workspace
     config = ctx.config
@@ -846,46 +897,7 @@ if __name__ == "__main__":
         h = hash_value.strip()
         result_lines = ["HASH_CRACK_IDENTIFY:", ""]
 
-        # Identify hash type
-        identifications = []
-
-        # NTLM: 32 hex chars
-        if re.fullmatch(r"[0-9a-fA-F]{32}", h):
-            identifications.append(("NTLM", "1000", f"hashcat -m 1000 -a 3 '{h}' ?l?l?l?l?l?l?l?l"))
-
-        # NetNTLMv2: user::domain:challenge:HMAC-MD5:blob
-        if "::" in h and ":" in h:
-            parts = h.split(":")
-            if len(parts) >= 5:
-                identifications.append(("NetNTLMv2", "5600", f"hashcat -m 5600 -a 0 '{h}' rockyou.txt"))
-
-        # Kerberos TGS: $krb5tgs$23$*...
-        if h.startswith("$krb5tgs$"):
-            identifications.append(("Kerberos 5 TGS-REP", "13100", f"hashcat -m 13100 -a 0 '{h}' rockyou.txt"))
-
-        # Kerberos AS-REP: $krb5asrep$23$...
-        if h.startswith("$krb5asrep$"):
-            identifications.append(("Kerberos 5 AS-REP", "18200", f"hashcat -m 18200 -a 0 '{h}' rockyou.txt"))
-
-        # MD5: 32 hex chars (already caught as NTLM, but check context)
-        if re.fullmatch(r"[0-9a-fA-F]{32}", h) and not identifications:
-            identifications.append(("MD5", "0", f"hashcat -m 0 -a 0 '{h}' rockyou.txt"))
-
-        # SHA1: 40 hex chars
-        if re.fullmatch(r"[0-9a-fA-F]{40}", h):
-            identifications.append(("SHA1", "100", f"hashcat -m 100 -a 0 '{h}' rockyou.txt"))
-
-        # SHA256: 64 hex chars
-        if re.fullmatch(r"[0-9a-fA-F]{64}", h):
-            identifications.append(("SHA2-256", "1400", f"hashcat -m 1400 -a 0 '{h}' rockyou.txt"))
-
-        # bcrypt: $2a$ or $2b$ or $2y$
-        if h.startswith("$2a$") or h.startswith("$2b$") or h.startswith("$2y$"):
-            identifications.append(("bcrypt", "3200", f"hashcat -m 3200 -a 0 '{h}' rockyou.txt"))
-
-        # LM: 16 bytes hex
-        if re.fullmatch(r"[0-9a-fA-F]{16}", h):
-            identifications.append(("LM", "3000", f"hashcat -m 3000 -a 3 '{h}' ?u?u?u?u?u?u?u"))
+        identifications = _identify_hash_modes(h)
 
         if identifications:
             for name, mode, cmd in identifications:

@@ -124,6 +124,21 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "allowed_targets": [],
         "disallowed_assets": [],
         "forbidden_actions": [],
+        # Active Directory / Kerberos post-exploit suite (Phase 1). Opt-in:
+        # the master ``enabled`` plus a per-tool flag must BOTH be true, or the
+        # tool short-circuits with ``BLOCKED: ... disabled`` before the allowlist.
+        # ``smb_signing_check`` is detection-only and defaults ON. Every tool is
+        # target-IP-locked (@require_allowlist + check_targets_allowlist for DC).
+        "ad_kerberos": {
+            "enabled": False,
+            "asrep_roast": False,
+            "pass_the_hash": False,
+            "adcs_enum": False,
+            "bloodhound": False,
+            "responder_relay": False,
+            "golden_ticket": False,
+            "smb_signing_check": True,
+        },
     },
     "stealth": {
         "rotate_ua": False,
@@ -143,6 +158,13 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "circuit_recovery_timeout": 60.0,
         # Tier 1.8: process-wide shared NVD rate budget (per minute); 0 disables.
         "search_rate_limit_per_minute": 10,
+        # Phase 2: EPSS + KEV vuln-intel enrichment (opt-in, default OFF). When
+        # off, NVD output is unchanged (CVEEntry carries None/False). EPSS adds
+        # exploit-likelihood scoring; KEV flags CISA-known-exploited CVEs.
+        "epss_enabled": False,
+        "kev_enabled": False,
+        "kev_cache_ttl_seconds": 86400,
+        "kev_cache_path": "",
         # Gap 6: GitHub Search API token for cve_to_poc (CVE->verified-PoC URL
         # resolution). OPTIONAL -- absent = unauthenticated 60/hr rate limit;
         # cve_to_poc still works (falls through to searchsploit/NVD on rate-limit).
@@ -200,6 +222,21 @@ CONFIG_SCHEMA: dict[str, Any] = {
     "recon": {
         "extended_enumerators": True,   # enable TLS/SMTP/DB/spider/OSINT additive enumerators
         "udp_top_ports": 100,           # nmap -sU --top-ports N for run_udp_recon / recon_udp
+        # Optional Shodan API key for passive OSINT. Empty = Shodan disabled
+        # (run_osint returns {"enabled": False, ...}). Falls back to the
+        # SHODAN_API_KEY env var at ReconConfig.from_config time.
+        "shodan_api_key": "",
+        # Extended depth enumerators (Phase 2). Each is independently gated and
+        # default OFF; when False the coroutine never runs (no network, no
+        # regressions to the legacy nine enumerators). All network I/O is
+        # injectable for tests.
+        "subdomain_enum": False,
+        "vhost_discovery": False,
+        "waf_fingerprint": False,
+        "asn_whois": False,
+        "cloud_metadata_probe": False,
+        "snmp_enum": False,
+        "dns_zone_transfer": False,
     },
     # OPSEC / detection-evasion (Phase 6.2). This is the agent's OWN operational
     # hardening (pacing/jitter/UA-rotation/DNS-over-HTTPS/quiet-commands) so an

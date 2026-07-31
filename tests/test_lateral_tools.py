@@ -185,6 +185,89 @@ async def test_dump_credentials_sam_local_valid(monkeypatch, tmp_path: Path) -> 
     assert "METHOD: sam_local" in text
 
 
+# ── dump_credentials: dcsync (DCSync via DRSUAPI) ──────────────────────────
+
+@pytest.mark.asyncio
+async def test_dump_credentials_dcsync_missing_username(tmp_path: Path) -> None:
+    mcp = _make_server(tmp_path, require_allowlist=False)
+    text = _text(await mcp.call_tool(
+        "dump_credentials", {"target_ip": "10.0.0.1", "method": "dcsync", "password": "pass"}
+    ))
+    assert "BLOCKED" in text and "username is required for dcsync" in text
+
+
+@pytest.mark.asyncio
+async def test_dump_credentials_dcsync_missing_secret(tmp_path: Path) -> None:
+    mcp = _make_server(tmp_path, require_allowlist=False)
+    text = _text(await mcp.call_tool(
+        "dump_credentials", {"target_ip": "10.0.0.1", "method": "dcsync", "username": "admin"}
+    ))
+    assert "BLOCKED" in text and "either password or ntlm_hash must be provided for dcsync" in text
+
+
+@pytest.mark.asyncio
+async def test_dump_credentials_dcsync_valid_run(monkeypatch, tmp_path: Path) -> None:
+    """DCSync must build an impacket-secretsdump argv with -just-dc (no shell)."""
+    captured: dict[str, Any] = {}
+
+    def _run(*args, **kwargs):
+        argv = args[0] if args else kwargs.get("args")
+        captured["argv"] = list(argv)
+        return subprocess.CompletedProcess(args=argv, returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _run)
+    mcp = _make_server(tmp_path, require_allowlist=False)
+    text = _text(await mcp.call_tool(
+        "dump_credentials",
+        {
+            "target_ip": "10.0.0.1",
+            "method": "dcsync",
+            "username": "admin",
+            "password": "pass",
+            "domain": "corp",
+            "target_user": "krbtgt",
+        },
+    ))
+    assert "CRED_DUMP_RESULT: completed" in text
+    assert "METHOD: dcsync" in text
+    argv = captured["argv"]
+    assert argv[0] == "impacket-secretsdump"
+    assert "corp/admin:pass@10.0.0.1" in argv
+    assert "-just-dc" in argv
+    assert "-just-dc-user" in argv and "krbtgt" in argv
+    assert "-outputfile" in argv
+    # No shell metachar injection vector: argv list, not a bash -c string.
+    assert "bash" not in argv and "-c" not in argv
+
+
+@pytest.mark.asyncio
+async def test_dump_credentials_dcsync_with_ntlm_hash(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+
+    def _run(*args, **kwargs):
+        argv = args[0] if args else kwargs.get("args")
+        captured["argv"] = list(argv)
+        return subprocess.CompletedProcess(args=argv, returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _run)
+    mcp = _make_server(tmp_path, require_allowlist=False)
+    text = _text(await mcp.call_tool(
+        "dump_credentials",
+        {
+            "target_ip": "10.0.0.1",
+            "method": "dcsync",
+            "username": "admin",
+            "ntlm_hash": "aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0",
+        },
+    ))
+    assert "CRED_DUMP_RESULT: completed" in text
+    argv = captured["argv"]
+    assert "-hashes" in argv
+    # Only the NT half (after the colon) is passed to -hashes.
+    idx = argv.index("-hashes")
+    assert argv[idx + 1] == ":31d6cfe0d16ae931b73c59d7e0c089c0"
+
+
 # ── kerberoast ──────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio

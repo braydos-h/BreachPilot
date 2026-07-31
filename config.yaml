@@ -97,6 +97,20 @@ exploit:
   #   forbidden_actions: ["credential_dumping", "lateral_movement"]
   disallowed_assets: []
   forbidden_actions: []
+  # Active Directory / Kerberos post-exploit suite (Phase 1). Opt-in: the
+  # master `enabled` AND the per-tool flag must both be true, or the tool
+  # returns BLOCKED: ... disabled before the allowlist gate. smb_signing_check
+  # is detection-only and defaults ON. Every tool is target-IP-locked
+  # (@require_allowlist + check_targets_allowlist for any off-target DC).
+  ad_kerberos:
+    enabled: false
+    asrep_roast: false
+    pass_the_hash: false
+    adcs_enum: false
+    bloodhound: false
+    responder_relay: false
+    golden_ticket: false
+    smb_signing_check: true   # detection-only
 stealth:
   rotate_ua: false
   dns_over_https: false
@@ -169,6 +183,15 @@ autonomous:
 recon:
   extended_enumerators: true      # enable TLS/SMTP/DB/spider/OSINT additive enumerators
   udp_top_ports: 100              # nmap -sU --top-ports N for run_udp_recon / recon_udp
+  shodan_api_key: ""              # optional Shodan key for passive OSINT; "" = disabled (falls back to $SHODAN_API_KEY)
+  # Extended depth enumerators (Phase 2). Default OFF; each independently gated.
+  subdomain_enum: false
+  vhost_discovery: false
+  waf_fingerprint: false
+  asn_whois: false
+  cloud_metadata_probe: false
+  snmp_enum: false
+  dns_zone_transfer: false
 
 # OPSEC / detection-evasion (Phase 6.2). The agent's OWN operational hardening
 # (pacing/jitter/UA-rotation/DNS-over-HTTPS/quiet-commands) so an authorized

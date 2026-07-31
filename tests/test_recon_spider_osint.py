@@ -149,3 +149,39 @@ class TestOsintEnumerator:
             updated = await enumerator._enumerate_osint(result, [])
         assert updated.osint == canned
         assert updated.ipv6_addresses == []
+
+
+class TestShodanKeyWiring:
+    """0.4 — the hardcoded ``shodan_key = ""`` is replaced by ReconConfig's
+    ``shodan_api_key``, read from ``recon.shodan_api_key`` (or
+    ``SHODAN_API_KEY`` env) in ``from_config``. Previously Shodan OSINT never
+    ran because the key was always empty."""
+
+    def test_from_config_reads_recon_shodan_key(self) -> None:
+        cfg = ReconConfig.from_config({"recon": {"shodan_api_key": "abc123"}})
+        assert cfg.shodan_api_key == "abc123"
+
+    def test_from_config_falls_back_to_env(self, monkeypatch) -> None:
+        monkeypatch.setenv("SHODAN_API_KEY", "envkey")
+        cfg = ReconConfig.from_config({"recon": {}})
+        assert cfg.shodan_api_key == "envkey"
+
+    def test_from_config_recon_key_overrides_env(self, monkeypatch) -> None:
+        monkeypatch.setenv("SHODAN_API_KEY", "envkey")
+        cfg = ReconConfig.from_config({"recon": {"shodan_api_key": "explicit"}})
+        assert cfg.shodan_api_key == "explicit"
+
+    def test_default_key_is_empty(self) -> None:
+        assert ReconConfig().shodan_api_key == ""
+
+    @pytest.mark.asyncio
+    async def test_enumerate_osint_passes_configured_key_to_run_osint(self) -> None:
+        """The key on ReconConfig must reach run_osint(shodan_api_key=...)."""
+        canned = {"target_ip": "10.0.0.50", "shodan": {"enabled": True}}
+        cfg = ReconConfig(extended_enumerators=True, shodan_api_key="REALKEY")
+        with patch("tools.recon_osint.run_osint", return_value=canned) as mock_osint:
+            enumerator = SecondaryEnumerator(cfg)
+            result = HostReconResult(target_ip="10.0.0.50")
+            await enumerator._enumerate_osint(result, [])
+        assert mock_osint.called
+        assert mock_osint.call_args.kwargs.get("shodan_api_key") == "REALKEY"

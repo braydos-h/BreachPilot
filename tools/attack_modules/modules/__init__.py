@@ -88,6 +88,19 @@ from tools.attack_modules.modules.detection import (
     LogSourceEnum,
     OPSECPostureReport,
 )
+from tools.attack_modules.modules.orchestrator_phases import (
+    TokenImpersonation,
+    ServiceMisconfiguration,
+    LateralMovement,
+    ValidateFinding,
+)
+from tools.attack_modules.modules.ad import (
+    ADCSEnum,
+    BloodHoundCollect,
+    ResponderRelay,
+    GoldenTicket,
+    SMBSigningCheck,
+)
 
 __all__ = [
     "Log4jRCE",
@@ -156,4 +169,13 @@ __all__ = [
     "DetectionCoverageProbe",
     "LogSourceEnum",
     "OPSECPostureReport",
+    "TokenImpersonation",
+    "ServiceMisconfiguration",
+    "LateralMovement",
+    "ValidateFinding",
+    "ADCSEnum",
+    "BloodHoundCollect",
+    "ResponderRelay",
+    "GoldenTicket",
+    "SMBSigningCheck",
 ]
