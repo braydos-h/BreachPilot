@@ -435,7 +435,14 @@ async def async_main(args: argparse.Namespace) -> int:
         ui.info(f"Plugin load skipped: {type(exc).__name__}: {exc}")
         if getattr(args, "debug", False):
             ui.info(traceback.format_exc().strip())
-    bootstrap_startup_api_keys(args, prompt=False)
+    # T1.8: API-key bootstrap runs ONCE, in main() before this coroutine is
+    # dispatched (prompt=True for the interactive menu path, prompt=False for
+    # the async run path). The second prompt=False call that used to live here
+    # just reloaded the same store and double-printed "Loaded provider API
+    # key(s) ...". main() reaches async_main only after that call, so the env
+    # is already populated; tests that invoke async_main directly use an empty
+    # temp key store + no_api_key_prompt=True, so dropping this call is a
+    # no-op for them.
     multi_model_cfg = config.get("multi_model", {}) or {}
     if getattr(args, "multi_model_consult", None) is None:
         args.multi_model_consult = bool(multi_model_cfg.get("enabled", False))
@@ -1095,8 +1102,16 @@ async def async_main(args: argparse.Namespace) -> int:
                 pass
         ui.divider()
         ui.success(f"Session complete. {result.get('total_actions', 0)} actions executed.")
-        ui.info(f"Workspace: {result.get('workspace', 'unknown')}")
-        ui.info(f"Audit trail: {result.get('audit_path', 'unknown')}")
+        # T1.10: on-screen recap reusing keys already in the result dict. The
+        # workspace/audit paths used to be printed here too — they move to the
+        # consolidated "Artifacts written:" block at the end of the session.
+        ui.status(f"Goal:    {goal.name}")
+        ui.status(f"Target:  {target_ip}")
+        ui.status(f"Mode:    {mode}")
+        ui.status(f"Actions: {result.get('total_actions', 0)}")
+        _outcome = result.get("outcome_summary") if isinstance(result, dict) else None
+        if _outcome:
+            ui.status(f"Blocked/thrash: {_outcome}")
         _tel = _run_telemetry(_telemetry_start_lines)
         if _tel:
             _ctx_part = ""
@@ -1191,7 +1206,9 @@ async def async_main(args: argparse.Namespace) -> int:
             "",
         ])
         summary_path.write_text("\n".join(summary_lines), encoding="utf-8")
-        ui.info(f"Summary written to: {summary_path}")
+        # T1.11: the "Summary written to:" line used to print here; it now
+        # appears once in the consolidated "Artifacts written:" block at the
+        # end of the session (alongside the other artifact paths).
 
         # Structured JSON artifact: makes the session consumable by downstream
         # tooling. v1 just dumps the result dict; richer schema can come later.
@@ -1203,8 +1220,9 @@ async def async_main(args: argparse.Namespace) -> int:
                     json.dumps(result, indent=2, default=str),
                     encoding="utf-8",
                 )
-                if getattr(args, "json", False):
-                    ui.info(f"Run JSON written to: {run_json_path}")
+                # T1.11: the "Run JSON written to:" line used to print here
+                # (only under --json); it now appears once in the consolidated
+                # "Artifacts written:" block at the end of the session.
             except OSError as exc:
                 ui.warning(f"Could not write run.json: {exc}")
 
@@ -1281,6 +1299,25 @@ async def async_main(args: argparse.Namespace) -> int:
             except _EXC_GROUP_CATCH as exc:
                 ui.error(f"Swarm task error: {exc}")
                 result["swarm_result"] = {"error": str(exc)}
+
+        # T1.11: consolidated "Artifacts written:" block — one place listing
+        # every artifact the operator may want to inspect, replacing the
+        # scattered ui.info path lines that used to appear mid-run.
+        _audit_path = result.get("audit_path", "unknown") if isinstance(result, dict) else "unknown"
+        _workspace = result.get("workspace", "unknown") if isinstance(result, dict) else "unknown"
+        ui.status("Artifacts written:")
+        ui.info(f"  reports dir:        {reports_dir}")
+        ui.info(f"  session summary:    {summary_path}")
+        ui.info(f"  run json:           {reports_dir / 'run.json'}")
+        ui.info(f"  audit trail:        {_audit_path}")
+        ui.info(f"  exploit workspace:  {_workspace}")
+
+        # T1.12: attack-mode next-steps hint. Recon mode already gets its
+        # next-steps from the safety reviewer above; attack mode used to end
+        # with nothing. Advisory only.
+        if mode != "recon":
+            ui.status(f"Review findings in: {summary_path}")
+            ui.status(f"Continue with: python main.py --resume {run_id} --mode attack")
     except RuntimeError as exc:
         ui.error(f"Exploitation session failed: {exc}")
         return 1

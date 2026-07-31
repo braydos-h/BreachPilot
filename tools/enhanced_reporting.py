@@ -703,6 +703,12 @@ class EnhancedReportGenerator:
                     remediation=self._get_remediation(exploit),
                 ))
 
+        # T1.13: rank findings by CVSS base score (desc) so both render paths
+        # (_generate_findings_md / _generate_findings_html, which iterate this
+        # list in order) surface the highest-severity findings first. Guard
+        # against None base scores (treat as 0).
+        findings.sort(key=lambda f: f.cvss.base_score or 0, reverse=True)
+
         return {
             "report_metadata": {
                 "generated_at": datetime.now(timezone.utc).isoformat(),
