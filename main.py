@@ -108,6 +108,8 @@ async def open_exploit_mcp_session(
     multi_model_enabled: bool | None = None,
     active_model_alias: str = "",
     soft_fail: bool = False,
+    original_target: str | None = None,
+    resolved_ip: str | None = None,
 ) -> AsyncIterator[Any]:
     _mcp_session.MCP_BOOT_TIMEOUT_SECONDS = MCP_BOOT_TIMEOUT_SECONDS
     _mcp_session.ui = ui
@@ -120,6 +122,8 @@ async def open_exploit_mcp_session(
         multi_model_enabled=multi_model_enabled,
         active_model_alias=active_model_alias,
         soft_fail=soft_fail,
+        original_target=original_target,
+        resolved_ip=resolved_ip,
     ) as session:
         yield session
 
@@ -158,6 +162,8 @@ async def run_exploit_session(
     approval_prompt: Callable[[str], str] | None = None,
     swarm_attach: Callable[[Any, list[dict[str, Any]], Any], None] | None = None,
     heartbeat: "_mcp_session._RunHeartbeat | None" = None,
+    original_target: str | None = None,
+    resolved_ip: str | None = None,
 ) -> dict[str, Any]:
     _exploit_session.ui = ui
     _exploit_session.load_config = load_config
@@ -179,6 +185,8 @@ async def run_exploit_session(
         approval_prompt=approval_prompt,
         swarm_attach=swarm_attach,
         heartbeat=heartbeat,
+        original_target=original_target,
+        resolved_ip=resolved_ip,
     )
 
 
@@ -721,6 +729,8 @@ async def async_main(args: argparse.Namespace) -> int:
                 multi_model_enabled=bool(getattr(args, "multi_model_consult", False)),
                 active_model_alias=model_alias,
                 soft_fail=True,
+                original_target=original_target if resolved_domain else None,
+                resolved_ip=resolved_ip if resolved_domain else None,
             ) as recon_session:
                 if recon_session is None:
                     # ``open_exploit_mcp_session`` already emitted a single
