@@ -586,30 +586,48 @@ async def async_main(args: argparse.Namespace) -> int:
     if getattr(args, "json", False):
         ui.info(f"JSON output mode enabled. A structured run.json will be written to {reports_dir / 'run.json'}.")
 
-    # Determine target
-    target_ip = args.target.strip()
-    if not target_ip:
+    # Determine target. Accept an IPv4/IPv6 literal OR a domain name; a
+    # domain is resolved to a primary IP (carried as ``resolved_ip``) while
+    # the operator's original string is preserved as ``original_target`` so
+    # web tools can use it for Host headers / TLS SNI.
+    from tools.validation_utils import (
+        validate_target as _validate_target,
+        resolve_target as _resolve_target,
+    )
+
+    original_target = args.target.strip()
+    if not original_target:
         try:
-            target_ip = ui.ask_target()
+            original_target = ui.ask_target()
         except (EOFError, KeyboardInterrupt):
             ui.error("Aborted.")
             return 1
 
-    # Validate IP
-    try:
-        target_addr = ipaddress.ip_address(target_ip)
-    except ValueError:
-        ui.error(f"Invalid IP address: {target_ip}")
+    # Validate the target (IP or FQDN) and resolve a domain to an IP.
+    if not _validate_target(original_target):
+        ui.error(f"Invalid target (must be an IP or domain): {original_target}")
         return 1
+
+    resolved_ip, resolved_domain = _resolve_target(original_target)
+    if resolved_domain and resolved_ip is None:
+        ui.error(f"Could not resolve domain: {original_target}")
+        return 1
+
+    # When the operator gave a domain, ``target_ip`` becomes the resolved IP
+    # (so IP-based tools like nmap/metasploit/hydra keep working unchanged);
+    # ``original_target`` keeps the domain string for web tools / SNI.
+    # and the env-var union in ``_allowed_target_list`` authorizes both.
+    target_ip = resolved_ip if resolved_ip is not None else original_target
 
     # A target entered through Start New Session is an operator-approved asset.
     # Persist it before any assessment work begins so the current and future
-    # sessions both enforce the same explicit allowlist.
+    # sessions both enforce the same explicit allowlist. Persist the original
+    # target string (domain or IP as typed) so wildcard/CIDR entries survive.
     if interactive_session:
         try:
-            added_to_allowlist = _config_cli.add_target_to_allowlist(config_path, target_ip)
+            added_to_allowlist = _config_cli.add_target_to_allowlist(config_path, original_target)
         except (OSError, ValueError) as exc:
-            ui.error(f"Could not save {target_ip} to the config allowlist: {exc}")
+            ui.error(f"Could not save {original_target} to the config allowlist: {exc}")
             return 1
 
         # Keep the in-memory config synchronized with the persisted allowlist
@@ -620,12 +638,20 @@ async def async_main(args: argparse.Namespace) -> int:
         persisted_allowed_targets = persisted_exploit.get("allowed_targets", [])
         exploit_config = config.setdefault("exploit", {})
         exploit_config["allowed_targets"] = list(persisted_allowed_targets)
-        normalized_target = str(target_addr)
+        normalized_target = original_target
         if added_to_allowlist:
             ui.status(f"Saved {normalized_target} to {config_path} exploit.allowed_targets.")
 
-    if not target_addr.is_private:
-        ui.status("WARNING: Target is a PUBLIC IP. Ensure you OWN this infrastructure.")
+    # Warn on public targets. Use the resolved IP when available so the
+    # is_private check works for domain targets too.
+    _privacy_ip = resolved_ip if resolved_ip is not None else original_target
+    try:
+        if not ipaddress.ip_address(_privacy_ip).is_private:
+            ui.status("WARNING: Target is a PUBLIC IP. Ensure you OWN this infrastructure.")
+    except ValueError:
+        pass
+    if resolved_domain:
+        ui.status(f"Domain target {resolved_domain} resolved to {resolved_ip}.")
 
     # Determine mode
     mode = args.mode.strip().lower()

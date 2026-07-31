@@ -1,7 +1,9 @@
 """Validation utilities for security testing commands and targets.
 
 Provides strict IPv4 validation, command sanitization, target allowlist
-enforcement, tool preflight checks, and service banner parsing.
+enforcement, tool preflight checks, and service banner parsing. Also
+provides domain-aware target validation and resolution helpers so the
+agent can be pointed at a DNS name (``example.com``) as well as an IP.
 """
 
 from __future__ import annotations
@@ -16,6 +18,17 @@ from typing import Any, Sequence
 _STRICT_IPV4_RE = re.compile(
     r"^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}"
     r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"
+)
+
+# FQDN regex: a dot-separated sequence of labels, the last label being at
+# least two alphabetic characters (the TLD). A leading wildcard ``*.`` is
+# permitted because operators may add ``*.example.com`` to the allowlist
+# by hand and the matcher already supports it. Length bounds follow RFC1035.
+_FQDN_RE = re.compile(
+    r"^(?:\*\.)?"
+    r"(?=.{1,253}$)"
+    r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
+    r"[A-Za-z]{2,}$"
 )
 
 # Regex to find an IP-like substring that may have trailing garbage.
@@ -68,6 +81,133 @@ def sanitize_ipv4(ip: str) -> str | None:
         if validate_ipv4(candidate):
             return candidate
     return None
+
+
+def is_fqdn(s: str) -> bool:
+    """True when ``s`` looks like a fully-qualified domain name.
+
+    Accepts an optional leading ``*.`` wildcard (used by operators when
+    they add ``*.example.com`` to the allowlist). Does NOT resolve -- a
+    syntactic check only. An IPv4/IPv6 literal returns False.
+    """
+    if not s or not isinstance(s, str):
+        return False
+    s = s.strip().lower()
+    if not s:
+        return False
+    # An IP literal is not a domain.
+    try:
+        ipaddress.ip_address(s)
+        return False
+    except ValueError:
+        pass
+    return bool(_FQDN_RE.match(s))
+
+
+def validate_target(s: str) -> bool:
+    """True when ``s`` is a valid IPv4, IPv6, or FQDN target.
+
+    Pure syntax check -- does NOT resolve a domain. Use
+    :func:`resolve_target_to_ip` when you need an address.
+    """
+    if not s or not isinstance(s, str):
+        return False
+    s = s.strip()
+    if not s:
+        return False
+    if validate_ipv4(s):
+        return True
+    try:
+        ipaddress.ip_address(s)  # IPv6
+        return True
+    except ValueError:
+        pass
+    return is_fqdn(s)
+
+
+def validate_target_or_ip(s: str) -> bool:
+    """Alias for :func:`validate_target` -- the per-MCP-tool gate.
+
+    The per-tool ``validate_ipv4`` pre-gates were replaced with this so
+    the exploit MCP tools accept a resolvable domain alongside an IP.
+    Pure syntax check; the allowlist gate (``is_target_in_allowlist``)
+    is the actual authorization.
+    """
+    return validate_target(s)
+
+
+def resolve_target_to_ip(
+    host: str,
+    *,
+    resolver_fn: Any = None,
+    family: int = socket.AF_INET,
+) -> str | None:
+    """Resolve a hostname to a single primary IP string.
+
+    ``resolver_fn(host) -> list[str]`` may be injected for testing (the
+    same injectable-resolver pattern used by ``tools.recon_osint``). When
+    ``resolver_fn`` is ``None`` the system resolver is used via
+    ``socket.getaddrinfo``. ``family`` selects the address family
+    (``AF_INET`` for IPv4 by default, ``AF_INET6`` for IPv6). Returns
+    ``None`` on any error -- never raises -- so callers can fall back to
+    the hostname. If ``host`` is already an IP literal it is returned as-is.
+    """
+    if not host or not isinstance(host, str):
+        return None
+    host = host.strip()
+    if not host:
+        return None
+    # Already an IP literal -- return verbatim.
+    try:
+        ipaddress.ip_address(host)
+        return host
+    except ValueError:
+        pass
+    if not is_fqdn(host):
+        return None
+    try:
+        if resolver_fn is not None:
+            addrs = resolver_fn(host)
+            if addrs:
+                return str(addrs[0])
+            return None
+        infos = socket.getaddrinfo(host, None, family, socket.SOCK_STREAM)
+        for info in infos:
+            try:
+                return info[4][0].split("%")[0]
+            except (IndexError, TypeError):
+                continue
+        return None
+    except (OSError, socket.gaierror, ValueError):
+        return None
+
+
+def resolve_target(host: str, *, resolver_fn: Any = None) -> tuple[str | None, str | None]:
+    """Classify and (if needed) resolve a target string.
+
+    Returns ``(ip, domain)``:
+      - ``host`` is an IP literal  -> ``(host, None)``
+      - ``host`` is a domain       -> ``(resolved_ip_or_None, host)``
+      - ``host`` is invalid        -> ``(None, None)``
+
+    The domain is always returned verbatim when ``host`` is a domain, even
+    if resolution fails, so callers can still use the domain for HTTP Host
+    headers / TLS SNI while falling back to it when no IP is available.
+    """
+    if not host or not isinstance(host, str):
+        return None, None
+    host = host.strip()
+    if not host:
+        return None, None
+    try:
+        ipaddress.ip_address(host)
+        return host, None
+    except ValueError:
+        pass
+    if not is_fqdn(host):
+        return None, None
+    ip = resolve_target_to_ip(host, resolver_fn=resolver_fn)
+    return ip, host
 
 
 def extract_ips_from_command(command: str) -> list[str]:
@@ -146,6 +286,7 @@ def is_local_target(target_ip: str) -> bool:
       - any loopback IP (127.0.0.0/8, ::1) per ``ipaddress.is_loopback``
       - any IP bound on a local interface (``socket.getaddrinfo`` of the
         hostname) -- e.g. the box's own 192.168.x.x / 10.x.x.x address
+      - a domain that resolves to any of the above (best-effort DNS)
     Best-effort: any parse error returns False (treat as remote, the safe
     default for the network playbook).
     """
@@ -156,6 +297,12 @@ def is_local_target(target_ip: str) -> bool:
         return False
     if s.lower() == "localhost":
         return True
+    # If the target is a domain, resolve it and classify the resolved IP.
+    if is_fqdn(s):
+        resolved = resolve_target_to_ip(s)
+        if resolved is None:
+            return False
+        return is_local_target(resolved)
     # Loopback (127.0.0.0/8, ::1)
     try:
         if ipaddress.ip_address(s).is_loopback:
@@ -294,9 +441,10 @@ def is_private_or_local_target(
     ``ipaddress``'s ``is_private`` / ``is_loopback`` / ``is_link_local`` /
     ``is_reserved`` / ``is_multicast`` / ``is_unspecified`` flags hold, OR when
     it falls inside any operator-configured ``extra_local_cidrs`` entry (CIDR
-    or exact IP, matched via :func:`is_target_in_allowlist`). Best-effort: any
-    parse error returns False (treat as public, so OPSEC stays on -- the safe
-    default for an unknown target).
+    or exact IP, matched via :func:`is_target_in_allowlist`). A domain name is
+    resolved (best-effort DNS) and the resolved IP is classified; a domain that
+    fails to resolve returns False (treat as public, so OPSEC stays on -- the
+    safe default for an unknown target).
     """
     if not target_ip or not isinstance(target_ip, str):
         return False
@@ -305,6 +453,13 @@ def is_private_or_local_target(
         return False
     if s in {"localhost", "localhost.localdomain", "0.0.0.0"}:
         return True
+    # A domain: resolve and classify the resolved IP. DNS failure -> False
+    # (public), so OPSEC stays on -- the safe default.
+    if is_fqdn(s):
+        resolved = resolve_target_to_ip(s)
+        if resolved is None:
+            return False
+        return is_private_or_local_target(resolved, extra_local_cidrs)
     try:
         addr = ipaddress.ip_address(s)
     except ValueError:
