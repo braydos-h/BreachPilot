@@ -126,6 +126,11 @@ cve_lookup:
   circuit_failure_threshold: 5
   circuit_recovery_timeout: 60.0
   search_rate_limit_per_minute: 10
+  # Phase 2: EPSS + KEV vuln-intel enrichment (opt-in, default OFF).
+  epss_enabled: false
+  kev_enabled: false
+  kev_cache_ttl_seconds: 86400
+  kev_cache_path: ""               # "" = exploit_workspace/.kev_catalog.json
   # GitHub Search API token for cve_to_poc (optional). Absent = unauth 60/hr
   # rate limit; cve_to_poc still works (falls through to searchsploit/NVD).
   github:
