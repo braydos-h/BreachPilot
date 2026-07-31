@@ -77,10 +77,15 @@ exploit:
   cache_ttl_seconds: 3600
   cache_max_entries: 50
   require_explicit_allowlist: true
-  # IPs entered through Start New Session are saved here automatically. The
-  # runtime --target is also injected via EXPLOIT_TARGET and unioned at check
-  # time (tools/mcp_shared._check_allowlist). Add extra operator-authorized
-  # hosts here (e.g. a callback/C2 listener) to permit them as well.
+  # Targets entered through Start New Session are saved here automatically
+  # (IPs, domains, and *.wildcard domains are all accepted). The runtime
+  # --target is also injected via EXPLOIT_TARGET and unioned at check time
+  # (tools/mcp_shared._check_allowlist). For a domain --target, the resolved
+  # IP is added via EXPLOIT_TARGET_IP and the domain via EXPLOIT_TARGET_DOMAIN;
+  # discovered subdomains are added via EXPLOIT_DISCOVERED_TARGETS. Add extra
+  # operator-authorized hosts here (e.g. a callback/C2 listener) to permit
+  # them as well. Domains and *.example.com wildcards are matched by
+  # is_target_in_allowlist.
   allowed_targets:
     - 127.0.0.1
   # H10: Flow A (exploit engine) reads its scope rules HERE, not from
@@ -216,6 +221,18 @@ recon:
   extended_enumerators: true      # enable TLS/SMTP/DB/spider/OSINT additive enumerators
   udp_top_ports: 100              # nmap -sU --top-ports N for run_udp_recon / recon_udp
   shodan_api_key: ""              # optional Shodan key for passive OSINT; "" = disabled (falls back to $SHODAN_API_KEY)
+  # Domain targeting (Phase 4). When the operator gives a domain --target,
+  # the agent resolves it to an IP, carries both, and can expand the attack
+  # surface via subdomain enumeration. Each discovered subdomain is
+  # auto-authorized (added to EXPLOIT_DISCOVERED_TARGETS) so the agent can
+  # attack it without a per-host config edit -- the target-IP lock is
+  # preserved (each host is still gated through is_target_in_allowlist).
+  domain_resolution:
+    enabled: true                  # accept domain --target and resolve at boot
+    max_subdomains: 500            # cap on enumerate_subdomains results
+    subdomain_sources: [crt_sh, dns_bruteforce, subfinder, amass]
+    dns_zone_transfer: false       # AXFR attempt in dns_recon (opt-in)
+    whois_enabled: true            # domain_whois tool (graceful if whois absent)
   # Extended depth enumerators (Phase 2). Default OFF; each independently gated.
   subdomain_enum: false
   vhost_discovery: false
@@ -344,6 +361,7 @@ skills:
   - executing-red-team-engagement-planning
   - auditing-mcp-servers-for-tool-poisoning
   - securing-agentic-ai-tool-invocation
+  - attacking-domains-end-to-end
   include_tags: []
   exclude_names: []
   maybe_enabled: false

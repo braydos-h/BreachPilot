@@ -188,6 +188,69 @@ async def test_research_tool_output_is_untrusted_and_sources_are_preserved(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_oversized_tool_output_keeps_source_urls_when_compacted(
+    tmp_path: Path,
+) -> None:
+    source_url = "https://vendor.example/security/CVE-2024-12345"
+    oversized_result = ("A" * 20_000) + f"\nSource: {source_url}"
+    client = _SequenceClient(
+        [
+            _response(
+                tool_name="search_exploit_db",
+                arguments={"query": "CVE-2024-12345"},
+            ),
+            _response(content=_final_json(source_url)),
+        ]
+    )
+    assistant = _assistant(
+        tmp_path,
+        client=client,
+        session=_FakeSession(oversized_result),
+        schemas=[_schema("search_exploit_db")],
+    )
+
+    advisory = await assistant.consult("Find a matching local exploit.")
+
+    tool_message = next(
+        message
+        for message in client.calls[1]["messages"]
+        if message.get("role") == "tool"
+    )
+    assert len(tool_message["content"]) <= 12_000
+    assert "SOURCE URLS RETAINED" in tool_message["content"]
+    assert source_url in tool_message["content"]
+    assert source_url in advisory["source_urls"]
+
+
+@pytest.mark.asyncio
+async def test_model_round_budget_is_a_hard_cap(tmp_path: Path) -> None:
+    client = _SequenceClient(
+        [
+            _response(
+                tool_name="search_exploit_db",
+                arguments={"query": "Apache 2.4.49"},
+            )
+        ]
+    )
+    assistant = _assistant(
+        tmp_path,
+        client=client,
+        session=_FakeSession("Local Exploit-DB result"),
+        schemas=[_schema("search_exploit_db")],
+        settings=ResearchAssistantSettings(
+            max_model_rounds=1,
+            max_tool_calls_per_consultation=1,
+        ),
+    )
+
+    advisory = await assistant.consult("Research Apache 2.4.49.")
+
+    assert len(client.calls) == 1
+    assert advisory["model_rounds_used"] == 1
+    assert advisory["tool_calls_used"] == 1
+
+
+@pytest.mark.asyncio
 async def test_automatic_topic_deduplication_and_cap(tmp_path: Path) -> None:
     client = _SequenceClient([_response(content=_final_json())])
     assistant = _assistant(
