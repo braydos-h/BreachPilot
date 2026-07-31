@@ -270,6 +270,36 @@ def _stream_with_telemetry(
         )
 
 
+# Track which hosts have already been flagged as unreachable so a transient
+# hiccup during boot doesn't print one warning per registered alias.
+_OLLAMA_UNREACHABLE_WARNED: set[str] = set()
+
+
+def _check_ollama_reachable(client: Any, host: str) -> bool:
+    """Best-effort reachability probe with a single retry.
+
+    Ollama can briefly refuse connections while its API socket settles after a
+    restart (the operator often runs multiple ollama processes). A momentary
+    failure here is not a real outage, so retry once before reporting. The
+    probe is advisory only — it never blocks client construction.
+    """
+    for attempt in range(2):
+        try:
+            client.list()
+            return True
+        except Exception:
+            if attempt == 0:
+                time.sleep(0.5)
+    return False
+
+
+def _warn_ollama_unreachable(host: str) -> None:
+    if host in _OLLAMA_UNREACHABLE_WARNED:
+        return
+    _OLLAMA_UNREACHABLE_WARNED.add(host)
+    print(f"[WARNING] Ollama server at {host} appears unreachable. Ensure it is running.")
+
+
 def _build_model_client(
     model_name: str,
     host: str = "http://localhost:11434",
@@ -289,10 +319,8 @@ def _build_model_client(
         raw_client = OllamaClient(host=host, timeout=request_timeout_seconds)
     else:
         raw_client = OllamaClient(host=host)
-    try:
-        raw_client.list()
-    except Exception:
-        print(f"[WARNING] Ollama server at {host} appears unreachable. Ensure it is running.")
+    if not _check_ollama_reachable(raw_client, host):
+        _warn_ollama_unreachable(host)
 
     telemetry_alias = alias or model_name
     context_window_tokens = _context_window_for(telemetry_alias, model_name)

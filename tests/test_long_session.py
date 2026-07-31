@@ -191,6 +191,68 @@ class TestModelClientTimeout:
         assert "timeout" not in recorded["kwargs"]
 
 
+# ── 5b: unreachable warning de-duplicates per host ────────────────────────
+
+
+class TestUnreachableWarningDedup:
+    def test_warns_at_most_once_per_host(self, monkeypatch, capsys):
+        import tools.model_router as mr
+
+        # Fresh state: no host warned yet.
+        mr._OLLAMA_UNREACHABLE_WARNED.clear()
+
+        calls = {"list": 0}
+
+        class FlakyClient:
+            def __init__(self, host=None, **kwargs):
+                pass
+
+            def list(self):
+                calls["list"] += 1
+                raise RuntimeError("connection refused")
+
+            def chat(self, *a, **k):
+                return {"message": {"content": "x"}}
+
+        monkeypatch.setattr(mr, "OllamaClient", FlakyClient)
+        # Simulate build_router registering 5 aliases against the same host.
+        for alias in ("a", "b", "c", "d", "e"):
+            mr._build_model_client("m", host="http://h", alias=alias)
+
+        out = capsys.readouterr().out
+        # The probe retries once per client, so 5 clients x 2 attempts = 10 list() calls.
+        assert calls["list"] == 10
+        # But the warning prints exactly once (de-duped by host).
+        assert out.count("[WARNING] Ollama server at http://h appears unreachable") == 1
+
+    def test_retries_then_succeeds_no_warning(self, monkeypatch, capsys):
+        import tools.model_router as mr
+
+        mr._OLLAMA_UNREACHABLE_WARNED.clear()
+
+        attempts = {"n": 0}
+
+        class SlowStartClient:
+            def __init__(self, host=None, **kwargs):
+                pass
+
+            def list(self):
+                attempts["n"] += 1
+                if attempts["n"] == 1:
+                    raise RuntimeError("starting up")
+                return []
+
+            def chat(self, *a, **k):
+                return {"message": {"content": "x"}}
+
+        monkeypatch.setattr(mr, "OllamaClient", SlowStartClient)
+        monkeypatch.setattr(mr.time, "sleep", lambda *_: None)
+        mr._build_model_client("m", host="http://h", alias="a")
+        out = capsys.readouterr().out
+        assert "[WARNING]" not in out
+        assert attempts["n"] == 2  # first failed, retry succeeded
+
+
 # ── 6 & 7: SessionState persist_messages roundtrip + resume ───────────────
 
 
