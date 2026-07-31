@@ -439,6 +439,21 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "search_paths": ["plugins"],
         "entry_points": True,
     },
+    # Local WebUI API daemon (``--demon`` / ``--daemon``). V1 is loopback-only;
+    # there is no public-bind override. The bearer token is generated into
+    # ``token_file`` (gitignored) on first boot, or overridden via
+    # ``NETATTACKAI_API_TOKEN``. ``allowed_origins`` are extra loopback origins
+    # permitted for CORS/WS (in addition to localhost/127.0.0.1); ``null`` and
+    # non-loopback origins are always rejected.
+    "api": {
+        "enabled": True,
+        "host": "127.0.0.1",
+        "port": 8765,
+        "token_file": ".webui_secret_key",
+        "allowed_origins": [],
+        "event_buffer_size": 256,
+        "shutdown_timeout_seconds": 15,
+    },
 }
 
 # Known top-level keys
@@ -874,6 +889,39 @@ class ConfigValidator:
                     value = ev.get(key)
                     if value is not None and not isinstance(value, bool):
                         result.errors.append(f"eval.{key} must be a boolean.")
+
+        # Validate api (WebUI daemon) section
+        if "api" in self._config:
+            ap = self._config["api"]
+            if not isinstance(ap, dict):
+                result.errors.append("'api' must be a mapping.")
+            else:
+                host = ap.get("host", "127.0.0.1")
+                if not isinstance(host, str) or not host.strip():
+                    result.errors.append("api.host must be a non-empty string.")
+                elif host not in ("127.0.0.1", "localhost", "::1"):
+                    # v1 is loopback-only; no public-bind override.
+                    result.errors.append(
+                        f"api.host must be a loopback address (127.0.0.1/localhost/::1); "
+                        f"got {host!r}. Public binds are not supported in v1."
+                    )
+                port = ap.get("port", 8765)
+                if not isinstance(port, int) or isinstance(port, bool) or not (1 <= port <= 65535):
+                    result.errors.append("api.port must be an integer in 1-65535.")
+                token_file = ap.get("token_file")
+                if token_file is not None and (not isinstance(token_file, str) or not token_file.strip()):
+                    result.errors.append("api.token_file must be a non-empty string.")
+                allowed_origins = ap.get("allowed_origins", [])
+                if not isinstance(allowed_origins, list) or not all(
+                    isinstance(o, str) for o in allowed_origins
+                ):
+                    result.errors.append("api.allowed_origins must be a list of strings.")
+                for key in ("event_buffer_size", "shutdown_timeout_seconds"):
+                    value = ap.get(key)
+                    if value is not None and (
+                        not isinstance(value, int) or isinstance(value, bool) or value < 0
+                    ):
+                        result.errors.append(f"api.{key} must be a non-negative integer.")
 
         return result
 

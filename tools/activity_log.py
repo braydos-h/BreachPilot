@@ -71,7 +71,7 @@ class ActivityLog:
             "subnets_done": 0,
         }
         self._buf: list[str] = []
-        self._buf_lock = threading.Lock()
+        self._buf_lock = threading.RLock()
 
     # ------------------------------------------------------------------
     # helpers

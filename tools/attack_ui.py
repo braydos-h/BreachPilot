@@ -796,6 +796,21 @@ class AttackUi:
         helper. Reused by the ready-to-begin gate in main.py."""
         return await self._qconfirm(question, default=default)
 
+    async def ask_tool_approval(self, prompt_text: str, required_text: str) -> str:
+        """Read a typed tool-approval answer for the ``approve_only`` policy path.
+
+        Mirrors the legacy ``ExploitPolicy`` banner+input flow so the terminal
+        experience is identical whether the policy prompts directly or the
+        ``TerminalApprovalProvider`` routes through here. Returns the raw
+        answer string (the caller checks the ``ALLOW <target>`` exact match).
+        """
+        print(prompt_text)
+        host = required_text.replace("ALLOW ", "") if required_text else "target"
+        try:
+            return input(f"Type ALLOW {host} to approve, anything else to deny: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return ""
+
     def ask_target(self, default: str = "") -> str:
         print(f"\n{self._c('bold')}Enter target (IP address or domain):{self._c('reset')}")
         print("  Only scan systems you own or are explicitly authorized to test.")

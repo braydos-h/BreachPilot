@@ -12,11 +12,11 @@ import getpass
 import json
 import os
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
-
 
 DEFAULT_API_KEY_FILE = Path("secr.json")
 RESEARCH_MCP_TOOLS = frozenset({"search_web_exploit", "fetch_webpage", "deep_research"})
@@ -120,6 +120,15 @@ def save_api_keys(path: Path, keys: dict[str, str]) -> list[str]:
     cleaned = {str(k).strip(): str(v).strip() for k, v in keys.items() if str(k).strip() and str(v).strip()}
     if not cleaned:
         return []
+    if path.exists():
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError) as exc:
+            raise ValueError(f"Refusing to overwrite unreadable API key store: {path}") from exc
+        if not isinstance(raw, dict) or (
+            "api_keys" in raw and not isinstance(raw["api_keys"], dict)
+        ):
+            raise ValueError(f"Refusing to overwrite invalid API key store: {path}")
     existing = load_api_key_file(path)
     existing.update(cleaned)
     payload = {
@@ -128,11 +137,28 @@ def save_api_keys(path: Path, keys: dict[str, str]) -> list[str]:
         "api_keys": existing,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    temp_path: Path | None = None
     try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=path.parent,
+            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+        ) as temp:
+            json.dump(payload, temp, indent=2, sort_keys=True)
+            temp.write("\n")
+            temp.flush()
+            os.fsync(temp.fileno())
+            temp_path = Path(temp.name)
+        try:
+            os.chmod(temp_path, 0o600)
+        except OSError:
+            pass
+        os.replace(temp_path, path)
+    finally:
+        if temp_path is not None and temp_path.exists():
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
     return sorted(cleaned)
 
 

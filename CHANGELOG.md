@@ -4,6 +4,45 @@
 
 ### Added
 
+- **WebUI API daemon (`--demon` / `--daemon`)** — a versioned, loopback-only
+  REST + WebSocket API so third-party WebUIs can drive assessments, answer
+  decisions, stream live events, and invoke MCP tools through a policy-gated
+  gateway. Start with `python main.py --demon` (default `http://127.0.0.1:8765`).
+  Interactive Swagger docs at `/docs`, OpenAPI schema at `/openapi.json`. Bearer
+  token auto-generated into `.webui_secret_key` (gitignored) or overridden via
+  `NETATTACKAI_API_TOKEN`. v1 is loopback-only; one active run at a time
+  (HTTP 409); no bundled WebUI (third parties build against the OpenAPI).
+
+- **`AssessmentService` (`tools/run_service/`)** — transport-neutral run
+  preparation + execution extracted from `main.async_main`. Both the CLI and
+  the API daemon drive assessments through one code path. `RunRequest` /
+  `RunPreview` / `RunResult` typed contracts; `DecisionProvider` / `EventSink` /
+  `ApprovalProvider` protocols with terminal (`AttackUi`) and API (persisted
+  decision + WebSocket) adapters. `Callables` injection preserves existing CLI
+  test monkeypatching.
+
+- **`ExploitPolicy.approval_provider`** — the `approve_only` path now supports
+  an async `ApprovalProvider` protocol so the API daemon routes tool approvals
+  through the decision broker instead of the synchronous terminal prompt.
+
+- **`api:` config block** — new top-level `api:` section in `config.yaml`:
+  `host` (loopback only), `port` (default 8765), `token_file`,
+  `allowed_origins`, `event_buffer_size`, `shutdown_timeout_seconds`. Validated
+  by `ConfigValidator`.
+
+- **FastAPI dependency** — added `fastapi>=0.110.0` to `pyproject.toml` and
+  `requirements.txt`.
+
+### Changed
+
+- `main.async_main` is now a thin CLI adapter over `AssessmentService.prepare`
+  + `execute`. All existing `ui.*` output is preserved; existing tests that
+  monkeypatch `main_mod.open_exploit_mcp_session` / `run_exploit_session` /
+  `build_router` / `GoalEngine` continue to work via `Callables` injection.
+- `app.py` restored as the ASGI application factory (`create_app()`); keeps
+  orchestration in `tools/api/` services so it does not become a second copy
+  of `main.py`.
+
 - **Target-aware OPSEC** — OPSEC hardening is now automatically turned OFF for
   private/local target IPs and ON for public-routable target IPs. When the
   target is the operator's own box or an RFC1918/loopback/link-local/reserved/

@@ -66,6 +66,16 @@ python main.py --target 10.0.0.50 --mode attack --swarm --critic --reflection --
 python main.py --exploit --exploit-mode standalone --exploit-target 10.0.0.50 --exploit-cve CVE-2021-44228 --exploit-permission full_access
 ```
 
+### WebUI API daemon (--demon / --daemon)
+```bash
+python main.py --demon                        # start the local WebUI API on http://127.0.0.1:8765
+python main.py --daemon --api-port 9000       # alias, custom port
+# Interactive docs: http://127.0.0.1:8765/docs
+# OpenAPI schema:  http://127.0.0.1:8765/openapi.json
+# Bearer token: generated into .webui_secret_key (gitignored) or set NETATTACKAI_API_TOKEN
+# v1 is loopback-only; one active run at a time; no bundled WebUI (third parties build against OpenAPI).
+```
+
 ### Legacy research CLI (writes to research_workspace/research.db)
 ```bash
 python cli.py init-mission --config mission.yaml
@@ -121,6 +131,18 @@ Two parallel control flows exist in the same checkout and are partially redundan
 
 ### Flow A — Exploitation engine (modern, `main.py` / `app.py`)
 The "what the user actually runs" path. Async, MCP-based, multi-agent-capable.
+
+Both the CLI (`main.async_main`) and the WebUI API daemon (`--demon`/`--daemon`,
+`app.py` → `tools/api/`) drive assessments through `AssessmentService`
+(`tools/run_service/service.py`), a transport-neutral preparation + execution
+service. The CLI supplies `TerminalDecisionProvider` / `TerminalEventSink` /
+`TerminalApprovalProvider` adapters (backed by `AttackUi`); the API supplies
+`ApiDecisionProvider` / `ApiEventSink` / `ApiApprovalProvider` adapters (backed
+by persisted decisions + WebSocket events). The service never calls `AttackUi`
+directly — it emits events and requests decisions through the provider/sink
+interfaces. `Callables` injection lets the CLI pass its monkeypatchable
+module-level symbols (`open_exploit_mcp_session`, `run_exploit_session`,
+`build_router`, `GoalEngine`) so existing tests that patch `main_mod.*` work.
 
 ```
 operator ──► main.py (or app.py)
@@ -210,6 +232,8 @@ The exploit MCP server's tool implementations live in a structured subpackage, r
 - `safety_review_cli.py` — `run_safety_review` for recon mode.
 - `skills_cli.py` — runtime skill overrides + startup selection (`--skills*` flags).
 - `swarm_bridge.py` — `SwarmMcpBridge`: bridges the sync swarm `tool_executor`/`ExploitAgent.run` onto the live MCP `ClientSession` (preserves run_exploit_session's single-session invariant).
+- `run_service/` (pkg) — Transport-neutral `AssessmentService` (prep + execute), typed `RunRequest`/`RunPreview`/`RunResult`/`Decision`/`Event`, `DecisionProvider`/`EventSink`/`ApprovalProvider` protocols with terminal + API adapters, `CancellationToken`, `Callables` injection for CLI monkeypatching.
+- `api/` (pkg) — WebUI API daemon: `auth.py` (bearer token + loopback + WS auth), `errors.py` (stable error shape + redaction + request-id middleware), `persistence.py` (`api_runtime.db` SQLite), `event_broker.py` (per-run JSONL + ring buffer + WS pub/sub), `decision_broker.py` (decision futures), `run_manager.py` (single-active-run owner + tool-call serialization), `routes/` (system, runs, decisions, events).
 
 ### Shared infrastructure
 - **`db.py`** — SQLite schema (missions, scope_rules, tasks, observations, graph_nodes, graph_edges, evidence, findings, audit_logs, memories) with `_new_id()` and `_now_iso()` helpers. Versioned migrations table.

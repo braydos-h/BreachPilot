@@ -160,6 +160,7 @@ async def run_exploit_session(
     reports_dir: Path,
     assessment: ReconAssessment | None = None,
     approval_prompt: Callable[[str], str] | None = None,
+    approval_provider: Any = None,
     swarm_attach: Callable[[Any, list[dict[str, Any]], Any], None] | None = None,
     heartbeat: "_mcp_session._RunHeartbeat | None" = None,
     original_target: str | None = None,
@@ -183,6 +184,7 @@ async def run_exploit_session(
         reports_dir=reports_dir,
         assessment=assessment,
         approval_prompt=approval_prompt,
+        approval_provider=approval_provider,
         swarm_attach=swarm_attach,
         heartbeat=heartbeat,
         original_target=original_target,
@@ -413,6 +415,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     # ── Plugin ecosystem flags ──
     parser.add_argument("--list-plugins", dest="list_plugins", action="store_true",
                         help="Print discovered plugins (name/version/capabilities/loaded) and exit")
+    # ── WebUI API daemon flags ──
+    parser.add_argument("--demon", "--daemon", dest="daemon", action="store_true",
+                        help="Start the local WebUI API server instead of the terminal menu")
+    parser.add_argument("--api-host", default=None, help="API daemon bind host (loopback only; default 127.0.0.1)")
+    parser.add_argument("--api-port", type=int, default=None, help="API daemon port (default 8765)")
     parsed = parser.parse_args(argv)
     return parsed
 
@@ -420,29 +427,70 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 from tools.resume_state import _load_resume_state
 
 
+def _run_daemon(args: argparse.Namespace) -> int:
+    """Start the local WebUI API server (``--demon`` / ``--daemon``)."""
+    config = load_config(args.config)
+    api_cfg = config.get("api", {}) or {}
+    host = args.api_host or api_cfg.get("host", "127.0.0.1")
+    port = int(args.api_port or api_cfg.get("port", 8765))
+    # v1: loopback-only. Refuse any non-loopback bind (no public override).
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        ui.error(f"--api-host must be loopback (127.0.0.1/localhost/::1); got {host!r}. Public binds are not supported in v1.")
+        return 2
+    try:
+        import uvicorn  # noqa: F401 -- import gate
+    except ImportError:
+        ui.error("uvicorn is not installed. Run: python -m pip install -r requirements.txt")
+        return 1
+    try:
+        from app import create_app
+    except ImportError as exc:
+        ui.error(f"Could not import the ASGI app factory (app.py): {exc}")
+        return 1
+    ui.banner()
+    ui.status(f"Starting WebUI API daemon on http://{host}:{port}")
+    ui.status(f"  Interactive docs: http://{host}:{port}/docs")
+    ui.status(f"  OpenAPI schema:    http://{host}:{port}/openapi.json")
+    app = create_app(config_path=args.config)
+    uvicorn.run(app, host=host, port=port, log_level="info")
+    return 0
+
+
 
 
 async def async_main(args: argparse.Namespace) -> int:
-    # --debug: surface a visible signal and flip the env var that downstream
-    # modules already check. Belt-and-suspenders: the env var is what most code
-    # consumes; the info line is for the operator running the session.
+    """CLI adapter over ``AssessmentService``.
+
+    Builds a ``RunRequest`` from CLI args, calls ``AssessmentService.prepare``
+    to get a preview, renders it via ``AttackUi``, asks the ready-to-begin
+    confirmation via ``TerminalDecisionProvider``, then calls
+    ``AssessmentService.execute`` with terminal event/approval adapters.
+
+    The ``Callables`` bundle passes ``main``'s module-level symbols
+    (``open_exploit_mcp_session``, ``run_exploit_session``, ``build_router``,
+    ``GoalEngine``) into the service so existing tests that monkeypatch
+    ``main_mod.*`` continue to drive the service through the patched symbols.
+    """
+    from tools.run_service import (
+        AssessmentService,
+        Callables,
+        CancellationToken,
+        RunRequest,
+        TerminalDecisionProvider,
+        TerminalEventSink,
+    )
+
+    # --debug / --ultrathink signals.
     if getattr(args, "debug", False):
         os.environ["AI_NMAP_DEBUG"] = "1"
         ui.info("Debug mode enabled (verbose logging; tracebacks will be printed to stderr on error).")
-
     if getattr(args, "ultrathink", False):
         ui.info("ULTRATHINK mode enabled: verbose chain-of-thought and frequent reflection.")
 
     config_path = args.config
     config = load_config(config_path)
-    # Apply --skills* CLI overrides to the in-memory skills config before any
-    # skill selection is built. Advisory only (hints/selection, never
-    # permission/scope/audit).
     config = apply_skills_cli_overrides(config, args)
-    # Load plugins once during boot, BEFORE the MCP exploit server is created
-    # so plugin-contributed attack modules + MCP tool factories are registered
-    # before create_mcp_server runs. Best-effort: a plugin load failure never
-    # blocks boot.
+    # Load plugins before the MCP exploit server is created.
     try:
         from tools.plugins import load_plugins
         load_plugins(config)
@@ -450,14 +498,7 @@ async def async_main(args: argparse.Namespace) -> int:
         ui.info(f"Plugin load skipped: {type(exc).__name__}: {exc}")
         if getattr(args, "debug", False):
             ui.info(traceback.format_exc().strip())
-    # T1.8: API-key bootstrap runs ONCE, in main() before this coroutine is
-    # dispatched (prompt=True for the interactive menu path, prompt=False for
-    # the async run path). The second prompt=False call that used to live here
-    # just reloaded the same store and double-printed "Loaded provider API
-    # key(s) ...". main() reaches async_main only after that call, so the env
-    # is already populated; tests that invoke async_main directly use an empty
-    # temp key store + no_api_key_prompt=True, so dropping this call is a
-    # no-op for them.
+
     multi_model_cfg = config.get("multi_model", {}) or {}
     if getattr(args, "multi_model_consult", None) is None:
         args.multi_model_consult = bool(multi_model_cfg.get("enabled", False))
@@ -465,940 +506,173 @@ async def async_main(args: argparse.Namespace) -> int:
     ui.banner()
     ui.info(f"Config: {config_path} ({'found' if config_path.exists() else 'not found; using defaults'})")
 
-    # Build router and pick active client
-    ollama_host = config.get("ollama", {}).get("host", "http://localhost:11434")
-    _long_cfg = config.get("long_session", {}) or {}
-    _ls_active = bool(getattr(args, "long_session", False) or _long_cfg.get("enabled", False))
-    _req_timeout = float(_long_cfg.get("request_timeout_seconds")) if (_ls_active and _long_cfg.get("request_timeout_seconds")) else None
-    router = build_router(
-        config.get("models", {}).get("registry"),
-        host=ollama_host,
-        request_timeout_seconds=_req_timeout,
-    )
-
-    interactive_session = not args.target.strip()
+    # Interactive session: ask advanced settings.
+    interactive_session = not getattr(args, "target", "").strip()
     if interactive_session:
         try:
-            args = await ui.ask_advanced_settings(router, args)
+            args = await ui.ask_advanced_settings(None, args)
             ui.plain = bool(getattr(args, "plain", False) or getattr(args, "quiet", False) or getattr(args, "json", False))
         except (EOFError, KeyboardInterrupt):
             ui.error("Aborted.")
             return 1
 
-    # Determine model alias
-    model_alias = args.model or config.get("models", {}).get("default_alias", "glm")
-    if model_alias not in router._clients:
-        # If user passed a raw model name that is not an alias, treat it as a custom alias
-        # pointing to itself
-        try:
-            model_client = router.get_client(model_alias)
-        except KeyError:
-            ui.warning(
-                f"Unknown model alias {model_alias!r}; registering it as a custom "
-                f"alias pointing at itself."
-            )
-            from tools.model_router import _build_model_client
-            router.register(model_alias, _build_model_client(
-                model_alias, host=ollama_host, request_timeout_seconds=_req_timeout,
-            ))
-            model_client = router.get_client(model_alias)
-    else:
-        model_client = router.get_client(model_alias)
-
-    # Always use the local HTTP MCP server. This is fixed even for
-    # non-interactive invocations or callers that provide --mcp-transport.
-    if args.mcp_transport == "stdio":
-        ui.warning(
-            "--mcp-transport stdio requested; forcing http so the target-IP "
-            "lock reaches the server."
-        )
-    args.mcp_transport = "http"
-    mcp_transport = args.mcp_transport
-    http_port = int(args.http_port or config.get("mcp", {}).get("http_port", 8001))
-    exploit_port = http_port
-
-    reports_dir = args.reports_dir
-    reports_dir.mkdir(parents=True, exist_ok=True)
-    resume_key = (getattr(args, "resume", "") or "").strip()
-    # M21: restored assessment + chosen goal for the --resume path. Stays
-    # ``None`` for fresh runs and resume-misses; consumed later to override
-    # ``recon_first`` / ``assessment`` / ``goal`` so the resumed run reuses the
-    # saved state instead of re-running recon and re-asking for a goal.
-    _resume_state: tuple[ReconAssessment, str, str] | None = None
-    match: Path | None = None
-    if resume_key:
-        # --resume: find the existing run subdir and append to it instead of
-        # minting a new timestamped directory. Match either the subdir name
-        # (typical run_id) or the `session_id` field inside session_state.json.
-        # Tier 1.3: the historical matcher read `session.json`, but NOTHING in
-        # the codebase ever wrote that file, so the session_id branch was dead
-        # and only the subdir-name match ever worked. We now write
-        # `session_state.json` at run start (below), so the session_id match is
-        # real. Legacy `session.json` is still read for back-compat with any
-        # pre-1.3 run dir that happened to have one.
-        match: Path | None = None
-        for child in sorted(reports_dir.iterdir(), reverse=True):
-            if not child.is_dir():
-                continue
-            if child.name == resume_key:
-                match = child
-                break
-            for sj_name in ("session_state.json", "session.json"):
-                sj = child / sj_name
-                if sj.exists():
-                    try:
-                        if json.loads(sj.read_text(encoding="utf-8")).get("session_id") == resume_key:
-                            match = child
-                            break
-                    except (OSError, ValueError, KeyError):
-                        continue
-            if match is not None:
-                break
-        if match is not None:
-            run_id = match.name
-            reports_dir = match
-            ui.info(f"Resuming run_id={run_id} at {reports_dir}")
-            # M21: reload the saved recon assessment + chosen goal (if any) so
-            # the resumed run reuses them and skips recon-first.
-            _resume_state = _load_resume_state(reports_dir, args)
-            if _resume_state is not None:
-                ui.info(
-                    "Resuming with saved recon assessment and chosen goal "
-                    f"('{_resume_state[1] or 'unchanged'}')."
-                )
-        else:
-            ui.warning(f"--resume key '{resume_key}' not found under {reports_dir}; minting a fresh run_id.")
-            run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-            reports_dir = reports_dir / run_id
-            reports_dir.mkdir(parents=True, exist_ok=True)
-    else:
-        run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        reports_dir = reports_dir / run_id
-        reports_dir.mkdir(parents=True, exist_ok=True)
-
-    # Tier 1.3: write session_state.json at run start so a future
-    # `--resume <session_id>` can re-find THIS run by its session_id even after
-    # the timestamped dir name is forgotten. On a successful resume we DON'T
-    # overwrite the existing file (it already records the session we're
-    # reattaching to); we only mint one for fresh runs and for resume-misses
-    # that fell back to a fresh run_id.
-    if not (resume_key and match is not None):
-        try:
-            (reports_dir / "session_state.json").write_text(
-                json.dumps(
-                    {
-                        "session_id": run_id,
-                        "started_at": datetime.now(timezone.utc).isoformat(),
-                    },
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
-        except OSError:
-            pass
-
-    # --json: announce that a structured artifact will be written at session end.
-    if getattr(args, "json", False):
-        ui.info(f"JSON output mode enabled. A structured run.json will be written to {reports_dir / 'run.json'}.")
-
-    # Determine target. Accept an IPv4/IPv6 literal OR a domain name; a
-    # domain is resolved to a primary IP (carried as ``resolved_ip``) while
-    # the operator's original string is preserved as ``original_target`` so
-    # web tools can use it for Host headers / TLS SNI.
-    from tools.validation_utils import (
-        validate_target as _validate_target,
-        resolve_target as _resolve_target,
+    # Build the RunRequest from args.
+    request = RunRequest(
+        target=args.target.strip(),
+        mode=getattr(args, "mode", "").strip().lower() or "attack",
+        goal_name=getattr(args, "goal", "").strip().lower(),
+        custom_goal=getattr(args, "custom_goal", "").strip(),
+        recon_first=getattr(args, "recon_first", None),
+        model_alias=getattr(args, "model", None) or "",
+        config_path=config_path,
+        reports_dir=getattr(args, "reports_dir", Path("reports")),
+        swarm=bool(getattr(args, "swarm", False)),
+        parallel_swarm=bool(getattr(args, "parallel_swarm", False)),
+        critic=bool(getattr(args, "critic", False)),
+        reflection=bool(getattr(args, "reflection", False)),
+        adaptive_exploits=bool(getattr(args, "adaptive_exploits", False)),
+        long_session=bool(getattr(args, "long_session", False)),
+        multi_model_consult=getattr(args, "multi_model_consult", None),
+        observer_mode=getattr(args, "observer_mode", "hybrid"),
+        ultrathink=bool(getattr(args, "ultrathink", False)),
+        debug=bool(getattr(args, "debug", False)),
+        plain=bool(getattr(args, "plain", False)),
+        json_output=bool(getattr(args, "json", False)),
+        yes=bool(getattr(args, "yes", False)),
+        skills_mode=getattr(args, "skills", None),
+        skills_include=list(getattr(args, "skills_include", None) or []),
+        skills_exclude=list(getattr(args, "skills_exclude", None) or []),
+        skills_no_reselect=bool(getattr(args, "no_skills_reselect", False)),
+        resume_source=(getattr(args, "resume", "") or "").strip(),
+        interactive=interactive_session,
     )
 
-    original_target = args.target.strip()
-    if not original_target:
+    # If no target, ask interactively (preserves the existing menu flow).
+    if not request.target:
         try:
-            original_target = ui.ask_target()
+            request.target = ui.ask_target()
         except (EOFError, KeyboardInterrupt):
             ui.error("Aborted.")
             return 1
-
-    # Validate the target (IP or FQDN) and resolve a domain to an IP.
-    if not _validate_target(original_target):
-        ui.error(f"Invalid target (must be an IP or domain): {original_target}")
+    if not request.target:
+        ui.error("No target provided.")
         return 1
 
-    resolved_ip, resolved_domain = _resolve_target(original_target)
-    if resolved_domain and resolved_ip is None:
-        ui.error(f"Could not resolve domain: {original_target}")
+    # Construct the service with CLI-patchable callables.
+    callables = Callables(
+        build_router=build_router,
+        open_session=open_exploit_mcp_session,
+        run_session=run_exploit_session,
+        goal_engine_cls=GoalEngine,
+        run_recon_assessment=run_recon_assessment,
+        run_safety_review=run_safety_review,
+    )
+    service = AssessmentService(config=config, callables=callables)
+
+    # Prepare (resolve target/goal/settings without I/O side effects).
+    try:
+        preview = await service.prepare(request)
+    except ValueError as exc:
+        ui.error(str(exc))
         return 1
 
-    # When the operator gave a domain, ``target_ip`` becomes the resolved IP
-    # (so IP-based tools like nmap/metasploit/hydra keep working unchanged);
-    # ``original_target`` keeps the domain string for web tools / SNI.
-    # and the env-var union in ``_allowed_target_list`` authorizes both.
-    target_ip = resolved_ip if resolved_ip is not None else original_target
-
-    # A target entered through Start New Session is an operator-approved asset.
-    # Persist it before any assessment work begins so the current and future
-    # sessions both enforce the same explicit allowlist. Persist the original
-    # target string (domain or IP as typed) so wildcard/CIDR entries survive.
+    # Interactive target entered via menu: persist to allowlist.
     if interactive_session:
         try:
-            added_to_allowlist = _config_cli.add_target_to_allowlist(config_path, original_target)
+            from tools import config_cli as _config_cli
+            added = _config_cli.add_target_to_allowlist(config_path, preview.original_target)
+            if added:
+                ui.status(f"Saved {preview.original_target} to {config_path} exploit.allowed_targets.")
         except (OSError, ValueError) as exc:
-            ui.error(f"Could not save {original_target} to the config allowlist: {exc}")
+            ui.error(f"Could not save {preview.original_target} to the config allowlist: {exc}")
             return 1
 
-        # Keep the in-memory config synchronized with the persisted allowlist
-        # too. This matters for equivalent IPv6 spellings, where a string
-        # comparison alone would otherwise make this session see a duplicate.
-        persisted_config = _config_cli.load_config(config_path)
-        persisted_exploit = persisted_config.get("exploit", {})
-        persisted_allowed_targets = persisted_exploit.get("allowed_targets", [])
-        exploit_config = config.setdefault("exploit", {})
-        exploit_config["allowed_targets"] = list(persisted_allowed_targets)
-        normalized_target = original_target
-        if added_to_allowlist:
-            ui.status(f"Saved {normalized_target} to {config_path} exploit.allowed_targets.")
-
-    # Warn on public targets. Use the resolved IP when available so the
-    # is_private check works for domain targets too.
-    _privacy_ip = resolved_ip if resolved_ip is not None else original_target
+    # Warn on public targets.
+    _privacy_ip = preview.resolved_ip or preview.target_ip
     try:
         if not ipaddress.ip_address(_privacy_ip).is_private:
             ui.status("WARNING: Target is a PUBLIC IP. Ensure you OWN this infrastructure.")
     except ValueError:
         pass
-    if resolved_domain:
-        ui.status(f"Domain target {resolved_domain} resolved to {resolved_ip}.")
+    if preview.resolved_domain:
+        ui.status(f"Domain target {preview.resolved_domain} resolved to {preview.resolved_ip}.")
 
-    # Determine mode
-    mode = args.mode.strip().lower()
-    if mode not in ("recon", "attack"):
-        try:
-            mode = ui.ask_mode()
-        except (EOFError, KeyboardInterrupt):
-            ui.error("Aborted.")
-            return 1
-
-    # Determine goal
-    goal_engine = GoalEngine()
-    goal_name = args.goal.strip().lower()
-    custom_text = args.custom_goal.strip()
-
-    # Decide whether to run recon-first
-    # recon-first if: explicitly requested, OR no goal provided and not explicitly disabled
-    recon_first = args.recon_first
-    if recon_first is None:
-        recon_first = not goal_name and not custom_text
-
-    # M21: a resumed run with a saved assessment reuses it — skip recon-first
-    # so the recon-first block (which would re-scan and re-ask for a goal) is
-    # bypassed and the saved assessment is reused.
-    if _resume_state is not None:
-        recon_first = False
-
-    # ``assessment`` is referenced by the post-recon path (``run_exploit_session``)
-    # regardless of whether we entered the recon-first branch, so it must be
-    # bound unconditionally. The recon-first block rebinds it to a real value;
-    # all other branches leave it ``None`` and the post-recon code passes
-    # ``None`` through to ``run_exploit_session``. On a resumed run the saved
-    # assessment is pre-loaded here.
-    assessment: ReconAssessment | None = None
-    if _resume_state is not None:
-        assessment = _resume_state[0]
-
-    # Determine risk profile for goal compatibility filtering
-    risk_profile = "high_authorized_testing" if mode == "attack" else "standard_authorized"
-
-    if recon_first:
-        # ── Recon-First Mode: scan target, suggest rated goals, let user pick ──
-        ui.status("RECON-FIRST MODE: Scanning target before goal selection...")
-        ui.divider()
-
-        # Open a temporary MCP session for recon only
-        workspace = Path("exploit_workspace")
-        workspace.mkdir(parents=True, exist_ok=True)
-
-        # The recon-first block used to be unwrapped: any MCP stdio death or
-        # ``BaseExceptionGroup`` from a recon tool (e.g. ``check_os``) would
-        # propagate out of ``async_main`` and surface as a bare
-        # ``Session aborted.`` from the interactive menu. Now we open the
-        # session with ``soft_fail=True``: the context manager returns
-        # ``None`` instead of raising if the MCP server fails to boot or the
-        # session dies mid-recon, and the inner spinners print ``[WARN]``
-        # (yellow) instead of ``[ERROR]`` (red). The outer ``try/except``
-        # below is kept as defence-in-depth in case ``run_recon_assessment``
-        # itself raises something unexpected.
-        try:
-            async with open_exploit_mcp_session(
-                transport=mcp_transport,
-                config_path=args.config,
-                target_ip=target_ip,
-                exploit_port=exploit_port,
-                workspace=workspace,
-                multi_model_enabled=bool(getattr(args, "multi_model_consult", False)),
-                active_model_alias=model_alias,
-                soft_fail=True,
-                original_target=original_target if resolved_domain else None,
-                resolved_ip=resolved_ip if resolved_domain else None,
-            ) as recon_session:
-                if recon_session is None:
-                    # ``open_exploit_mcp_session`` already emitted a single
-                    # ``[WARN]`` line explaining the failure. Build a
-                    # minimal UNKNOWN assessment so the operator can still
-                    # select a goal. The goal engine degrades gracefully
-                    # when the recon payload is empty.
-                    ui.info(
-                        "MCP recon unavailable — falling back to UNKNOWN OS verdict; "
-                        "goal selection will be limited."
-                    )
-                    assessment = ReconAssessment(
-                        target_ip=target_ip,
-                        os_verdict="UNKNOWN",
-                        services=[],
-                        cve_findings=[],
-                    )
-                else:
-                    # NOTE: ``open_exploit_mcp_session`` already calls
-                    # ``session.initialize()`` inside the context manager. Calling
-                    # it again here used to send a duplicate ``InitializeRequest``
-                    # and was the seed of the cascade: a subsequent tool failure
-                    # would unwind both spinners (Booting + Probing OS), escape
-                    # this block, and abort the whole session.
-                    assessment = await run_recon_assessment(
-                        session=recon_session,
-                        target_ip=target_ip,
-                        reports_dir=reports_dir,
-                    )
-        except _EXC_GROUP_CATCH as exc:
-            # Defence-in-depth: ``run_recon_assessment`` catches per-tool
-            # failures itself, but a bug or unexpected exception class
-            # (e.g. ``asyncio.CancelledError``) could still escape. The
-            # soft-fail path above already handles the common case; this
-            # branch is only for surprises. Write a post-mortem and fall
-            # back so the operator can still pick a goal.
-            log_path = reports_dir / "recon_first_error.log"
-            try:
-                log_path.write_text(
-                    "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
-                    encoding="utf-8",
-                )
-            except OSError:
-                pass
-            ui.warning(f"Recon-first session hit an unexpected error: {exc}")
-            ui.info(f"  See {log_path} for the full traceback.")
-            if _is_exception_group(exc):
-                _log_nested_exceptions(exc)
-            assessment = ReconAssessment(
-                target_ip=target_ip,
-                os_verdict="UNKNOWN",
-                services=[],
-                cve_findings=[],
-            )
-        # Defensive: assessment is always set above, but be explicit.
-        if assessment is None:
-            assessment = ReconAssessment(
-                target_ip=target_ip,
-                os_verdict="UNKNOWN",
-                services=[],
-                cve_findings=[],
-            )
-
-        # ── Display recon summary ──
-        ui.display_recon_assessment(assessment)
-
-        # ── Generate goal suggestions ──
-        suggestions = goal_engine.suggest_goals(assessment, risk_profile)
-
-        # ── Persist suggestions ──
-        suggestions_path = reports_dir / "goal_suggestions.json"
-        suggestions_path.write_text(
-            json.dumps([s.to_dict() for s in suggestions], indent=2),
-            encoding="utf-8",
-        )
-        ui.info(f"Goal suggestions saved to: {suggestions_path}")
-
-        # ── Display and let user pick ──
-        ui.display_goal_suggestions(suggestions)
-
-        try:
-            selected_name, selected_custom = ui.ask_goal_from_suggestions(suggestions)
-        except (EOFError, KeyboardInterrupt):
-            ui.error("Aborted.")
-            return 1
-
-        if selected_custom:
-            goal = goal_engine.get("custom", selected_custom, risk_profile=risk_profile)
-        else:
-            # Check if selected goal is AI-generated (not in presets)
-            selected_sg = next((s for s in suggestions if s.name == selected_name), None)
-            if selected_sg and getattr(selected_sg, 'is_ai_generated', False):
-                goal = goal_engine.get("custom", selected_sg.description, risk_profile=risk_profile)
-                goal.name = selected_sg.name  # Override name for reporting
-            else:
-                goal = goal_engine.get(selected_name, risk_profile=risk_profile)
-
-        # Save chosen goal to assessment
-        assessment_path = reports_dir / "recon_assessment.json"
-        if assessment_path.exists():
-            data = json.loads(assessment_path.read_text(encoding="utf-8"))
-            data["chosen_goal"] = goal.name
-            data["chosen_goal_description"] = goal.description
-            assessment_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
-    elif custom_text:
-        goal = goal_engine.get("custom", custom_text, risk_profile=risk_profile)
-    elif goal_name and goal_engine.is_preset(goal_name):
-        goal = goal_engine.get(goal_name, risk_profile=risk_profile)
-    else:
-        # Interactive selection (no recon-first)
-        presets = goal_engine.list_presets()
-        try:
-            selected = ui.ask_preset_goal(presets)
-            if selected == "custom":
-                custom_text = ui.ask_custom_goal()
-                goal = goal_engine.get("custom", custom_text or "No custom goal provided.", risk_profile=risk_profile)
-            else:
-                goal = goal_engine.get(selected, risk_profile=risk_profile)
-        except (EOFError, KeyboardInterrupt):
-            ui.error("Aborted.")
-            return 1
-
-    # M21: on a resumed run, the operator's previously chosen goal (saved into
-    # recon_assessment.json by the recon-first block) takes precedence over a
-    # freshly resolved one — it's the commitment they made on the prior run.
-    # Falls back to args.goal/args.custom_goal when no chosen_goal was saved
-    # (e.g. a run that was started without recon-first).
-    if _resume_state is not None:
-        _rg_name, _rg_desc = _resume_state[1], _resume_state[2]
-        if _rg_name:
-            _rg_risk = "high_authorized_testing" if mode == "attack" else "standard_authorized"
-            goal = goal_engine.get(_rg_name, _rg_desc, risk_profile=_rg_risk)
-
-    # Surface the resolved reports paths so the user can find their session later.
-    # The parent is whatever they passed via --reports-dir; the subdir is the
-    # per-run timestamp (or the resumed run_id). Print before the gate so they
-    # can see exactly where output is going before confirming.
-    if not getattr(args, "resume", ""):
+    # Render run summary.
+    if not request.resume_source:
         ui.info(f"Reports root: {args.reports_dir}")
-        ui.info(f"This run will write to: {reports_dir}  (run_id={run_id})")
-
-    ui.status(f"Target: {target_ip}")
-    ui.status(f"Mode: {mode}")
-    ui.status(f"Goal: {goal.name}")
-    ui.divider()
-
-    # -----------------------------------------------------------------------
-    # Ready-to-begin gate: print a one-screen summary of every setting that
-    # will be used, then ask the operator to confirm. In this lab build the
-    # attack path is unrestricted-but-target-locked (config.yaml defaults
-    # exploit.permission: full_access + attack_mode: true; the target-IP lock
-    # is enforced at the MCP tool layer), so this gate is the last operator
-    # confirmation before the agent starts hammering the wire. `--yes` skips
-    # the gate for scripted/CI runs.
-    # -----------------------------------------------------------------------
-    # Peek at the config blocks we'll consume below so the summary reflects
-    # the *effective* settings (config + CLI overrides). Kept local so the
-    # original "Build exploit settings" block can still re-read them.
-    _gate_exploit_cfg = config.get("exploit", {}) or {}
-    _gate_swarm_cfg = config.get("swarm", {}) or {}
-    transport_summary = mcp_transport
-    if mcp_transport == "http":
-        transport_summary = f"http on port {http_port}"
-    skill_selection = _build_runtime_skill_selection(
-        config=config,
-        goal=goal,
-        mode=mode,
-        assessment=assessment if (recon_first or _resume_state is not None) else None,
-        # Domain targeting: surface domain-attack skills (subdomain enum, DNS
-        # recon, takeover, vhost) when the operator targeted a domain.
-        is_domain=bool(resolved_domain),
-    )
-
-    # Build exploit settings BEFORE the ready-to-begin gate so the action
-    # budget can be shown in the run summary — the operator should confirm
-    # with the upper bound (commands/rounds/duration) visible, not learn it
-    # only after committing. This is a pure data build (no I/O, no MCP), so
-    # constructing it pre-gate is free even if the operator aborts.
-    exploit_settings = build_cli_exploit_settings(
-        mode=mode,
-        target_ip=target_ip,
-        goal=goal,
-        config=config,
-        adaptive_exploits=bool(args.adaptive_exploits),
-        swarm=bool(args.swarm),
-        critic=bool(args.critic),
-        reflection=bool(args.reflection),
-        multi_model_enabled=bool(getattr(args, "multi_model_consult", False)),
-        observer_mode=args.observer_mode,
-        ultrathink=bool(getattr(args, "ultrathink", False)),
-        debug=bool(getattr(args, "debug", False)),
-        long_session=bool(getattr(args, "long_session", False)),
-    )
-    _apply_runtime_skill_selection(exploit_settings, skill_selection, config=config, goal=goal, mode=mode)
-
+        ui.info(f"This run will write to: {preview.reports_dir}  (run_id={preview.run_id})")
+    ui.status(f"Target: {preview.target_ip}")
+    ui.status(f"Mode: {preview.mode}")
+    ui.status(f"Goal: {preview.goal_name}")
     ui.divider()
     ui.status("Run summary:")
     ui.status(f"  Config:      {config_path}")
     ui.status(f"  Reports root:{args.reports_dir}")
-    ui.status(f"  Run ID:      {run_id}")
-    ui.status(f"  Target:      {target_ip}")
-    ui.status(f"  Mode:        {mode}")
-    ui.status(f"  Goal:        {goal.name}")
-    _models_cfg = config.get("models", {}) if isinstance(config, dict) else {}
-    ui.status(
-        f"  Model:       {format_model_choice(model_alias, registry=_models_cfg.get('registry', {}), registry_info=_models_cfg.get('info', {}))}"
-    )
-    ui.status(f"  Transport:   {transport_summary}")
-    ui.status(f"  Reports:     {reports_dir}")
-    permission_effective = str(_gate_exploit_cfg.get("permission", "read_only"))
-    attack_mode_effective = mode == "attack"
-    swarm_effective = bool(args.swarm or _gate_swarm_cfg.get("enabled", False))
-    # Phase 3/4: --parallel-swarm (or swarm.parallel_enabled in config) flips
-    # on the parallel sub-agent surface: route_parallel for batched same-phase
-    # dispatch AND the spawn_subagent MCP tool the main AI uses to delegate.
-    # Off by default (recon-first rollout). When enabled via the CLI flag, we
-    # also set it in the in-memory config so the MCP server subprocess (which
-    # reads config via env) and the swarm orchestrator both see it.
-    parallel_swarm_effective = bool(
-        getattr(args, "parallel_swarm", False) or _gate_swarm_cfg.get("parallel_enabled", False)
-    )
-    if parallel_swarm_effective:
-        # Mutate the in-memory config so downstream consumers (the MCP server
-        # subprocess env, the SwarmOrchestrator construction in agent_loop,
-        # and build_parallel_agents_briefing in the prompt) all see the flip.
-        _gate_swarm_cfg["parallel_enabled"] = True
-        config.setdefault("swarm", {}).setdefault("parallel_enabled", True)
-        _gate_swarm_cfg["parallel_enabled"] = True
-    multi_model_effective = bool(getattr(args, "multi_model_consult", False))
-    destructive_run = permission_effective == "full_access" and mode == "attack"
-    if destructive_run:
-        ui.status(
-            f"  {ui._c('red')}[!] DESTRUCTIVE: permission=full_access, attack_mode={attack_mode_effective}{ui._c('reset')}"
-        )
-    ui.status(f"  Permission:  {permission_effective}")
-    ui.status(f"  Attack mode: {attack_mode_effective}")
-    ui.status(f"  Swarm:       {swarm_effective}")
-    if swarm_effective or parallel_swarm_effective:
-        ui.status(f"  Parallel:    {parallel_swarm_effective}")
-    ui.status(f"  Peer models: {multi_model_effective}")
-    # Action budget: show the upper bound before the operator commits.
+    ui.status(f"  Run ID:      {preview.run_id}")
+    ui.status(f"  Target:      {preview.target_ip}")
+    ui.status(f"  Mode:        {preview.mode}")
+    ui.status(f"  Goal:        {preview.goal_name}")
+    ui.status(f"  Model:       {preview.model_label}")
+    ui.status(f"  Transport:   {preview.transport_summary}")
+    ui.status(f"  Reports:     {preview.reports_dir}")
+    if preview.destructive:
+        ui.status(f"  {ui._c('red')}[!] DESTRUCTIVE: permission=full_access, attack_mode={preview.attack_mode}{ui._c('reset')}")
+    ui.status(f"  Permission:  {preview.permission}")
+    ui.status(f"  Attack mode: {preview.attack_mode}")
+    ui.status(f"  Swarm:       {preview.swarm}")
+    if preview.swarm or preview.parallel_swarm:
+        ui.status(f"  Parallel:   {preview.parallel_swarm}")
+    ui.status(f"  Peer models: {preview.multi_model}")
     try:
         ui.status(
-            f"  Budget:      {getattr(exploit_settings, 'attack_max_commands', 'n/a')} commands, "
-            f"{getattr(exploit_settings, 'attack_max_rounds', 'n/a')} rounds, "
-            f"{getattr(exploit_settings, 'attack_max_duration_minutes', 'n/a')} min."
+            f"  Budget:      {preview.budgets.get('commands', 'n/a')} commands, "
+            f"{preview.budgets.get('rounds', 'n/a')} rounds, "
+            f"{preview.budgets.get('duration_minutes', 'n/a')} min."
         )
     except Exception:
         pass
-    ui.skills([
-        f"{activation.name} - {activation.reason}"
-        for activation in skill_selection.activations
-    ])
-    if skill_selection.errors:
-        ui.warning(f"Skill registry loaded with {len(skill_selection.errors)} warning(s):")
-        for err in skill_selection.errors:
+    ui.skills([f"{a['name']} - {a['reason']}" for a in preview.skill_activations])
+    if preview.skill_errors:
+        ui.warning(f"Skill registry loaded with {len(preview.skill_errors)} warning(s):")
+        for err in preview.skill_errors:
             ui.warning(f"  - {err}")
     ui.divider()
 
+    # Ready-to-begin gate.
     if not getattr(args, "yes", False):
-        try:
-            if destructive_run:
-                proceed = await ui.ask_destructive_confirm(str(target_ip))
-            else:
-                proceed = await ui.ask_confirm("Proceed? [Y/n]", default=True)
-        except (EOFError, KeyboardInterrupt):
-            ui.error("Aborted.")
-            return 1
-        if not proceed:
-            ui.info("Aborted by user.")
-            return 0
+        decision_provider = TerminalDecisionProvider(ui)
+        from tools.run_service.models import Decision, DecisionKind
+        confirm_decision = Decision(
+            id="", run_id=preview.run_id, kind=DecisionKind.START_CONFIRM,
+            prompt_text="Proceed? [Y/n]",
+            required_text=preview.required_confirmation_text,
+        )
+        answer = await decision_provider.request(confirm_decision)
+        if preview.destructive:
+            if answer != preview.required_confirmation_text:
+                ui.info("Aborted by user.")
+                return 0
+        else:
+            if not answer:
+                ui.info("Aborted by user.")
+                return 0
 
-    # exploit_settings was built before the gate so the budget could be shown
-    # in the run summary. Only exploit_cfg (used below for max_rounds) is
-    # re-read here; swarm_cfg was dead and removed.
-    exploit_cfg = config.get("exploit", {}) or {}
-
-    # Activity log
-    activity = ActivityLog(reports_dir, plain=args.plain)
-    activity.log("info", f"Session started: {mode} against {target_ip} with goal {goal.name}")
-
-    # -----------------------------------------------------------------------
-    # Phase 1.2: optionally run the AgentLoop swarm alongside the exploit
-    # session. The swarm brings in the 6 specialist agents (recon, vuln,
-    # exploit, post_exploit, critic, reflection), the shared blackboard,
-    # and structured reasoning. It runs in a background task so the
-    # main exploit session is unaffected if the swarm hits an error.
-    # -----------------------------------------------------------------------
-    swarm_task: asyncio.Task[Any] | None = None
-    # Tier 5: the swarm shares run_exploit_session's single MCP ClientSession
-    # via this bridge (constructed unconditionally; attach() is a no-op until
-    # run_exploit_session calls swarm_attach with the live session). When
-    # --swarm is off, the bridge stays unattached and is never used.
-    swarm_bridge = SwarmMcpBridge()
-    swarm_loop: Any = None
-    if args.swarm:
-        try:
-            from agent_loop import AgentLoop
-
-            swarm_mission_config = {
-                "program_name": f"Swarm: {target_ip}",
-                "objective": goal.description or f"Swarm against {target_ip}",
-                "risk_profile": "high_authorized_testing" if mode == "attack" else "standard_authorized",
-                "allowed_assets": [str(target_ip)],
-                "disallowed_assets": [],
-                "forbidden_actions": [
-                    "denial_of_service", "social_engineering", "physical_attack"
-                ],
-                "testing_modes": ["recon", "test", "exploit", "report"] if mode == "attack" else ["recon", "analysis", "report"],
-                "rate_limits": {"default_requests_per_second": 2, "max_concurrent_requests": 3},
-                "accounts": [],
-                "use_swarm": True,
-                "critic_enabled": bool(args.critic),
-                "reflection_enabled": bool(args.reflection),
-                "adaptive_exploits_enabled": bool(args.adaptive_exploits),
-                "reflection_every_n_actions": 10,
-                "attack_max_rounds": int(exploit_cfg.get("max_rounds", 30)),
-            }
-            swarm_workspace = reports_dir.parent / "swarm_workspace"
-            swarm_workspace.mkdir(parents=True, exist_ok=True)
-            swarm_loop = AgentLoop(
-                mission_config=swarm_mission_config,
-                workspace_root=swarm_workspace,
-                # Tier 5: real dispatch. tool_executor is SwarmMcpBridge.dispatch
-                # -- it gates through ExploitPolicy.approve_action and then calls
-                # session.call_tool on the live MCP ClientSession that
-                # run_exploit_session opens (the bridge is attached from there
-                # via the swarm_attach callback). Recon-mode tool_router calls
-                # now actually execute; until attach() runs, dispatch returns a
-                # "BLOCKED: bridge not attached" marker (the session is not yet
-                # open), which the agent loop treats as a denied tool call.
-                tool_executor=swarm_bridge.dispatch,
-                console_ui=ui,
-                state_dir=swarm_workspace,
-                # Domain targeting: thread the operator's original target and
-                # resolved IP into the AgentLoop so run_autonomous_campaign →
-                # AutonomousOrchestrator can run Path-B subdomain expansion.
-                original_target=original_target if resolved_domain else "",
-                resolved_ip=resolved_ip if resolved_domain else "",
-            )
-            # Tier 5: populate the swarm context's model_client (previously always
-            # None, which kept ExploitAgent Path A disabled). The bridge's
-            # mcp_session / exploit_tools_schemas / main_loop are set later by
-            # the swarm_attach callback (they are not available until
-            # run_exploit_session opens the MCP session).
-            try:
-                swarm_loop.set_model_client(model_client, model_alias)
-            except Exception as exc:  # noqa: BLE001
-                ui.warning(f"swarm set_model_client failed: {exc}")
-
-            async def _run_swarm() -> dict[str, Any]:
-                try:
-                    # M20: dispatch on mode. Attack mode runs the autonomous
-                    # campaign (async, deep recon → chained exploit paths) via
-                    # ``run_autonomous_campaign``; recon mode runs the
-                    # synchronous research loop in a worker thread as before.
-                    if mode == "attack":
-                        return await swarm_loop.run_autonomous_campaign([target_ip])
-                    max_cycles = int(exploit_cfg.get("max_rounds", 30))
-                    return await asyncio.to_thread(swarm_loop.run, max_cycles)
-                except _EXC_GROUP_CATCH as exc:
-                    ui.error(f"Swarm campaign error: {exc}")
-                    return {"error": str(exc)}
-
-            swarm_task = asyncio.create_task(_run_swarm())
-            ui.info(
-                f"Swarm mode ENABLED "
-                f"(critic={bool(args.critic)}, "
-                f"reflection={bool(args.reflection)}, "
-                f"adaptive_exploits={bool(args.adaptive_exploits)})."
-            )
-        except _EXC_GROUP_CATCH as exc:
-            ui.error(f"Failed to start swarm: {exc}")
-            swarm_task = None
-
-    # -----------------------------------------------------------------------
-    # Run session
-    # -----------------------------------------------------------------------
+    # Execute.
+    cancellation = CancellationToken()
+    event_sink = TerminalEventSink()
     try:
-        # The action budget was already shown in the ready-to-begin gate above
-        # (before the operator confirmed), so it is not re-printed here.
-        # Snapshot the LLM-usage log line count so the end-of-run telemetry line
-        # reports THIS run's model calls, not the cumulative all-history file
-        # (model_router appends every chat to one shared llm_usage.jsonl).
-        _telemetry_start_lines = _llm_usage_line_count()
-        # Tier 5: closure run_exploit_session calls right after it opens the MCP
-        # session, to attach the live session + tool schemas + exploit policy to
-        # the swarm bridge AND populate the swarm context (mcp_session /
-        # exploit_tools_schemas / main_loop) so ExploitAgent Path A can run its
-        # run_exploit_agent coroutine on the main loop instead of a fresh one.
-        def _swarm_attach(session: Any, schemas: list[dict[str, Any]], policy: Any) -> None:
-            main_loop = asyncio.get_running_loop()
-            swarm_bridge.attach(session, schemas, policy, loop=main_loop)
-            if swarm_loop is not None:
-                ctx = getattr(getattr(swarm_loop, "_swarm", None), "_context", None)
-                if isinstance(ctx, dict):
-                    ctx["mcp_session"] = session
-                    ctx["exploit_tools_schemas"] = schemas
-                    ctx["main_loop"] = main_loop
-
-        # Shared heartbeat so the sibling ticker reports round/action/phase,
-        # not just elapsed time. One holder, passed to both the ticker and the
-        # session; the loop updates it each round (single event loop, no lock).
-        _heartbeat = _mcp_session._RunHeartbeat()
-        ticker = asyncio.create_task(_elapsed_ticker("Exploit agent", heartbeat=_heartbeat))
-        try:
-            result = await run_exploit_session(
-                client=model_client,
-                model=model_alias,
-                target_ip=target_ip,
-                mode=mode,
-                goal=goal,
-                exploit_settings=exploit_settings,
-                config_path=args.config,
-                mcp_transport=mcp_transport,
-                exploit_port=exploit_port,
-                reports_dir=reports_dir,
-                # M21: pass the restored assessment on the resume path too, not
-                # just on recon-first, so run_exploit_session can reuse it.
-                assessment=assessment if (recon_first or _resume_state is not None) else None,
-                # Tier 5: hand the live MCP session to the --swarm bridge.
-                swarm_attach=_swarm_attach if args.swarm else None,
-                heartbeat=_heartbeat,
-                # Domain targeting: thread the operator's original target and
-                # the resolved IP down to the MCP session env vars.
-                original_target=original_target if resolved_domain else None,
-                resolved_ip=resolved_ip if resolved_domain else None,
-            )
-        finally:
-            ticker.cancel()
-            try:
-                await asyncio.wait_for(ticker, timeout=0.1)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
-                pass
-        ui.divider()
-        ui.success(f"Session complete. {result.get('total_actions', 0)} actions executed.")
-        # T1.10: on-screen recap reusing keys already in the result dict. The
-        # workspace/audit paths used to be printed here too — they move to the
-        # consolidated "Artifacts written:" block at the end of the session.
-        ui.status(f"Goal:    {goal.name}")
-        ui.status(f"Target:  {target_ip}")
-        ui.status(f"Mode:    {mode}")
-        ui.status(f"Actions: {result.get('total_actions', 0)}")
-        _outcome = result.get("outcome_summary") if isinstance(result, dict) else None
-        if _outcome:
-            ui.status(f"Blocked/thrash: {_outcome}")
-        _tel = _run_telemetry(_telemetry_start_lines)
-        if _tel:
-            _ctx_part = ""
-            if _tel["avg_ctx"] is not None:
-                _ctx_part = f" (avg ctx {_tel['avg_ctx']:.0f}%, max {_tel['max_ctx']:.0f}%)" if _tel["max_ctx"] is not None else f" (avg ctx {_tel['avg_ctx']:.0f}%)"
-            ui.info(f"Model usage: {_tel['total_tokens']:,} tokens across {_tel['calls']} calls{_ctx_part}")
-        final_skills = result.get("active_skills") or exploit_settings.target_context.get("active_skills", [])
-        if final_skills:
-            ui.skills([
-                f"{item.get('name', 'unknown')} - {item.get('reason', 'selected')}"
-                for item in final_skills
-                if isinstance(item, dict)
-            ])
-
-        # Safety review after recon
-        if mode == "recon":
-            try:
-                review = await run_safety_review(model_client, model_alias, result, target_ip, goal)
-                # Render the structured concerns / recommended-next-steps (the
-                # bare "passed/flagged" lines dropped that detail). The reviewer
-                # module itself is untouched — we only consume its return value
-                # via the already-built AttackUi.display_safety_review renderer.
-                ui.display_safety_review(review)
-                if review.safe_to_proceed:
-                    ui.status("You can run again with --mode attack to exploit this target.")
-                else:
-                    ui.status("Safety review flagged concerns. Review before attacking.")
-            except _EXC_GROUP_CATCH as exc:
-                log_path = reports_dir / "safety_review_error.log"
-                try:
-                    log_path.write_text(
-                        "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
-                        encoding="utf-8",
-                    )
-                except OSError:
-                    pass
-                ui.error(f"Safety review failed: {exc}")
-                ui.error(f"  See {log_path} for the full traceback.")
-                if getattr(args, "debug", False):
-                    traceback.print_exc()
-
-        # Write simple summary report
-        summary_path = reports_dir / "session_summary.md"
-        summary_lines = [
-            f"# Session Summary — {target_ip}",
-            "",
-            f"- **Date**: {datetime.now(timezone.utc).isoformat()}",
-            f"- **Target**: {target_ip}",
-            f"- **Mode**: {mode}",
-            f"- **Goal**: {goal.name}",
-            f"- **Goal Description**: {goal.description}",
-            f"- **Actions Executed**: {result.get('total_actions', 0)}",
-            f"- **Workspace**: {result.get('workspace', 'unknown')}",
-            f"- **Audit trail**: {result.get('audit_path', 'unknown')}",
-        ]
-        # Per-run model usage (tokens/calls/context%) — same delta math as the
-        # console telemetry line, persisted for the record.
-        _summary_tel = _run_telemetry(_telemetry_start_lines)
-        if _summary_tel:
-            _ctx = ""
-            if _summary_tel["avg_ctx"] is not None:
-                _ctx = f", avg ctx {_summary_tel['avg_ctx']:.0f}%"
-            summary_lines.append(
-                f"- **Model usage**: {_summary_tel['total_tokens']:,} tokens across {_summary_tel['calls']} calls{_ctx}"
-            )
-        _summary_skills = result.get("active_skills") or []
-        if _summary_skills:
-            _skill_names = ", ".join(
-                str(s.get("name", "unknown")) for s in _summary_skills if isinstance(s, dict)
-            )
-            summary_lines.append(f"- **Active skills**: {_skill_names}")
-        _summary_outcome = result.get("outcome_summary")
-        if _summary_outcome:
-            summary_lines.append(f"- **Blocked/thrash summary**: {_summary_outcome}")
-        # Swarm campaign tallies (only present for --swarm runs).
-        _sw = result.get("swarm_result")
-        if isinstance(_sw, dict) and _sw.get("tasks_completed") is not None:
-            summary_lines.extend([
-                "",
-                "## Swarm",
-                "",
-                f"- **Completed**: {_sw.get('tasks_completed', 0)}",
-                f"- **Blocked**: {_sw.get('tasks_blocked', 0)}",
-                f"- **Failed**: {_sw.get('tasks_failed', 0)}",
-                f"- **Report-ready findings**: {_sw.get('findings_report_ready', 0)}",
-            ])
-        summary_lines.extend([
-            "",
-            "## Results",
-            "",
-            "See the exploit workspace for full logs, scripts, and audit trails.",
-            "",
-        ])
-        summary_path.write_text("\n".join(summary_lines), encoding="utf-8")
-        # T1.11: the "Summary written to:" line used to print here; it now
-        # appears once in the consolidated "Artifacts written:" block at the
-        # end of the session (alongside the other artifact paths).
-
-        # Structured JSON artifact: makes the session consumable by downstream
-        # tooling. v1 just dumps the result dict; richer schema can come later.
-        # Skip silently if the session didn't produce a result dict.
-        if isinstance(result, dict):
-            run_json_path = reports_dir / "run.json"
-            try:
-                run_json_path.write_text(
-                    json.dumps(result, indent=2, default=str),
-                    encoding="utf-8",
-                )
-                # T1.11: the "Run JSON written to:" line used to print here
-                # (only under --json); it now appears once in the consolidated
-                # "Artifacts written:" block at the end of the session.
-            except OSError as exc:
-                ui.warning(f"Could not write run.json: {exc}")
-
-        # Phase 1.2: if a swarm task is running, wait for it to finish
-        # (with a hard timeout so a hung swarm can't block the main loop)
-        # and merge its result into the session output. We poll every 2s and
-        # show elapsed time so the user sees life even on a 5-minute campaign.
-        if swarm_task is not None:
-            swarm_start = time.monotonic()
-            swarm_timeout = _compute_swarm_timeout(config, args)
-            # Bug #7: ``swarm_result`` must be bound before the loop — if the
-            # swarm finished before polling starts, the while body never runs
-            # and the later ``result["swarm_result"] = swarm_result`` would
-            # raise UnboundLocalError and discard a completed campaign.
-            swarm_result = None
-            try:
-                # Live progress, not a frozen spinner. The spinner's label is
-                # fixed at construction so it can't show elapsed time (a 30-min
-                # swarm showed "elapsed 0s" forever — actively misleading).
-                # Instead poll every 2s (prompt completion) and print a
-                # progress line every 15s reading swarm_state.json for live
-                # agent-status counts. Bug #8 still holds: each wait_for is
-                # bounded by the remaining deadline so a hung swarm actually
-                # times out and cancels instead of looping forever.
-                _last_progress = 0.0
-                while not swarm_task.done():
-                    remaining = swarm_timeout - (time.monotonic() - swarm_start)
-                    if remaining <= 0:
-                        raise asyncio.TimeoutError()
-                    try:
-                        swarm_result = await asyncio.wait_for(
-                            asyncio.shield(swarm_task),
-                            timeout=min(2.0, remaining),
-                        )
-                        break
-                    except asyncio.TimeoutError:
-                        elapsed = int(time.monotonic() - swarm_start)
-                        if elapsed - _last_progress >= 15:
-                            _last_progress = elapsed
-                            snap = _read_swarm_snapshot(swarm_workspace)
-                            detail = f" — {snap}" if snap else ""
-                            ui.info(f"Swarm running {elapsed}s elapsed (timeout {int(swarm_timeout)}s){detail}")
-                        continue
-                # The while body is skipped entirely when the task finished
-                # before the first poll — retrieve the result explicitly here
-                # (this re-raises if the task errored, handled below).
-                if swarm_result is None and not swarm_task.cancelled():
-                    swarm_result = swarm_task.result()
-                result["swarm_result"] = swarm_result
-                elapsed = int(time.monotonic() - swarm_start)
-                # Tier 5: the swarm now dispatches through the live MCP session
-                # via SwarmMcpBridge (recon-mode tool calls go through
-                # ExploitPolicy.approve_action -> session.call_tool; attack-mode
-                # ExploitAgent Path A runs run_exploit_agent on the main loop).
-                # Report the real dispatched-tool-call count from the bridge so
-                # the summary reflects actions actually executed against the
-                # target, not simulated counts.
-                dispatched = getattr(swarm_bridge, "dispatched", 0)
-                ui.info(
-                    f"Swarm campaign complete in {elapsed}s "
-                    f"(dispatched {dispatched} tool call(s) through the MCP exploit session): "
-                    f"{swarm_result.get('tasks_completed', 0)} completed, "
-                    f"{swarm_result.get('tasks_blocked', 0)} blocked, "
-                    f"{swarm_result.get('tasks_failed', 0)} failed, "
-                    f"{swarm_result.get('findings_report_ready', 0)} report-ready findings."
-                )
-                if dispatched == 0:
-                    ui.info("Swarm dispatched 0 tool calls (recon-only or denied by policy).")
-                ui.info(f"Swarm live state: {swarm_workspace / 'swarm_state.json'}")
-            except asyncio.TimeoutError:
-                ui.error(f"Swarm task timed out ({int(swarm_timeout)}s). Cancelling.")
-                swarm_task.cancel()
-                result["swarm_result"] = {"error": "timeout"}
-            except _EXC_GROUP_CATCH as exc:
-                ui.error(f"Swarm task error: {exc}")
-                result["swarm_result"] = {"error": str(exc)}
-
-        # T1.11: consolidated "Artifacts written:" block — one place listing
-        # every artifact the operator may want to inspect, replacing the
-        # scattered ui.info path lines that used to appear mid-run.
-        _audit_path = result.get("audit_path", "unknown") if isinstance(result, dict) else "unknown"
-        _workspace = result.get("workspace", "unknown") if isinstance(result, dict) else "unknown"
-        ui.status("Artifacts written:")
-        ui.info(f"  reports dir:        {reports_dir}")
-        ui.info(f"  session summary:    {summary_path}")
-        ui.info(f"  run json:           {reports_dir / 'run.json'}")
-        ui.info(f"  audit trail:        {_audit_path}")
-        ui.info(f"  exploit workspace:  {_workspace}")
-
-        # T1.12: attack-mode next-steps hint. Recon mode already gets its
-        # next-steps from the safety reviewer above; attack mode used to end
-        # with nothing. Advisory only.
-        if mode != "recon":
-            ui.status(f"Review findings in: {summary_path}")
-            ui.status(f"Continue with: python main.py --resume {run_id} --mode attack")
+        result = await service.execute(
+            request, preview,
+            decision_provider=TerminalDecisionProvider(ui),
+            event_sink=event_sink,
+            cancellation=cancellation,
+            config=config,
+        )
     except RuntimeError as exc:
         ui.error(f"Exploitation session failed: {exc}")
         return 1
     except _EXC_GROUP_CATCH as exc:
-        # ``BaseExceptionGroup`` is *not* an ``Exception`` subclass — an MCP
-        # stdio crash during the session would otherwise bypass this handler
-        # and surface as a bare ``Session aborted.`` from the interactive menu.
-        log_path = reports_dir / "session_error.log"
+        log_path = preview.reports_dir / "session_error.log"
         try:
             log_path.write_text(
                 "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
@@ -1414,14 +688,10 @@ async def async_main(args: argparse.Namespace) -> int:
         if getattr(args, "debug", False):
             traceback.print_exc()
         return 1
-    finally:
-        if swarm_task is not None and not swarm_task.done():
-            swarm_task.cancel()
-            try:
-                await swarm_task
-            except asyncio.CancelledError:
-                pass
 
+    if result.error:
+        ui.error(f"Run failed: {result.error}")
+        return 1
     return 0
 
 
@@ -1456,6 +726,24 @@ def main(argv: list[str] | None = None) -> int:
         )
         if setup_only:
             return 0
+
+        # --demon / --daemon: start the local WebUI API server and exit.
+        # Checked BEFORE --doctor/--self-test/etc. so the mutual-exclusion
+        # gate fires even when one of those flags is also set.
+        if getattr(args, "daemon", False):
+            _conflicting = []
+            for flag in ("target", "mode", "goal", "custom_goal"):
+                if getattr(args, flag, "").strip():
+                    _conflicting.append(f"--{flag.replace('_', '-')}")
+            for flag in ("menu", "doctor", "demo", "eval", "self_test", "skills_list", "list_plugins", "setup_api_keys"):
+                if getattr(args, flag, False):
+                    _conflicting.append(f"--{flag.replace('_', '-')}")
+            if _conflicting:
+                ui.error(
+                    "--demon/--daemon cannot be combined with: " + ", ".join(_conflicting)
+                )
+                return 2
+            return _run_daemon(args)
 
         # --doctor: run a self-check and exit. No exploit session starts.
         if args.doctor:
