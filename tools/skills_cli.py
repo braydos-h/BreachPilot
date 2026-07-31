@@ -132,6 +132,7 @@ def _build_runtime_skill_selection(
     mode: str,
     assessment: ReconAssessment | None = None,
     service_context: str = "",
+    is_domain: bool = False,
 ) -> SkillSelection:
     from tools.skill_feedback import get_shared_skill_store
     from tools.skill_embeddings import get_shared_skill_embedder
@@ -146,6 +147,7 @@ def _build_runtime_skill_selection(
         context_text=service_context,
         experience_store=get_shared_skill_store(config),
         skill_embedder=get_shared_skill_embedder(config) if bool(_skills_config(config).get("semantic_matching", True)) else None,
+        is_domain=is_domain,
     )
 
 

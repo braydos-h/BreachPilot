@@ -235,6 +235,23 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "enabled": True,
         "agents": ["recon", "vuln", "exploit", "post_exploit", "critic", "reflection"],
         "max_parallel_agents": 3,
+        # Phase 3/4: parallel sub-agents. ``parallel_enabled`` gates BOTH
+        # route_parallel (the swarm's batched same-phase dispatch) AND the
+        # spawn_subagent MCP tool (the main AI's delegation surface). Off by
+        # default per the recon-first rollout — opt in via config or
+        # ``--parallel-swarm``. ``per_phase_concurrency`` is the semaphore
+        # size for route_parallel (3 = up to 3 concurrent same-phase agents).
+        # ``exploit_parallel`` defaults False (exploit/post_exploit stay
+        # sequential in route_parallel unless flipped); flip to True once
+        # you've validated parallel recon is stable on your targets.
+        "parallel_enabled": False,
+        "per_phase_concurrency": 3,
+        "exploit_parallel": False,
+        # Phase 4: the spawn_subagent/await_subagent/list_subagents MCP tools
+        # are gated on ``parallel_enabled`` (above) at registration time.
+        # ``subagent_timeout_seconds`` is the ceiling for await_subagent so
+        # a stuck sub-agent can't wedge the main AI's loop.
+        "subagent_timeout_seconds": 600,
     },
     # Autonomous orchestrator Phase 2 capabilities (opt-in). All keys default
     # OFF / 0 so default behavior is unchanged -- the new attack-path

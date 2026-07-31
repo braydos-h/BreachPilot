@@ -749,7 +749,12 @@ def make_require_allowlist(workspace: Path, config: dict[str, Any] | None):
 # starts with one of these (case-insensitive, leading whitespace stripped), the
 # completion audit record is written as ``approved=False, status="blocked"``
 # instead of ``approved=True, status="completed"``.
-_BLOCKED_RESULT_MARKERS = ("BLOCKED:", "TERMINAL_RESULT: BLOCKED", "ROOT_CMD_RESULT:")
+# ``ERROR:`` covers argument-validation rejections (invalid target, missing
+# field), exception failures, and not-found returns -- all semantically "the
+# tool did not complete its intended action". Verified against all 74
+# ``return "ERROR:`` / ``return f"ERROR:`` sites in tools/mcp_tools/ (none are
+# successful results that happen to start with ERROR:).
+_BLOCKED_RESULT_MARKERS = ("BLOCKED:", "TERMINAL_RESULT: BLOCKED", "ROOT_CMD_RESULT:", "ERROR:")
 
 
 def _result_is_blocked(result: Any) -> bool:

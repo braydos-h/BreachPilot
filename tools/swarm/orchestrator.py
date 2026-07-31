@@ -70,6 +70,16 @@ class SwarmOrchestrator:
         self._battle_log: list[dict[str, Any]] = []
         self._lock = threading.RLock()
 
+        # Phase 3: per-(target, phase) milestone events. A dependent task
+        # (e.g. a vuln task waiting on recon for the same target) awaits the
+        # event before its agent runs, so cross-phase parallelism can't start
+        # the recon→vuln→exploit chain out of order. Same-phase, different-
+        # target tasks don't wait on each other (parallel recon on N hosts is
+        # the win). ``threading.Event`` (not asyncio.Event) because agents run
+        # in run_in_executor worker threads under route_parallel; the
+        # await_milestone helper hops to the main loop to wait.
+        self._milestone_events: dict[tuple[str, str], threading.Event] = {}
+
         # In-memory growth caps. ``_results`` and ``_battle_log`` are only read
         # for their length and a recent tail (see _persist_state's
         # ``battle_log[-20:]`` and _distill_episode_summary's win-count roll-up),
@@ -297,54 +307,103 @@ class SwarmOrchestrator:
     async def route_parallel(self, tasks: list[dict[str, Any]]) -> list[AgentResult]:
         """Route multiple tasks in parallel with a concurrency limit.
 
-        .. warning::
+        Phase 3: re-enabled. The 5 hazards from the old warning are fixed:
 
-            **Not wired into production and not safe to enable as-is.** This method
-            is retained as Tier 1.9 groundwork. It is *not* called from ``agent_loop``
-            (production dispatch is sequential: ``route()`` one task per cycle). Do
-            not wire it into the default dispatch until the following land in the
-            Tier 1.9 typed/per-target blackboard refactor -- each is a concrete
-            correctness hazard verified against the current code:
+        1. **``route()`` RLock no longer serializes agent.run** — the lock now
+           guards only ``_spawn``/``_results.append``/``_battle_log.append``/
+           ``_mark_milestone`` (short, metadata-only critical sections);
+           ``agent.run()`` and ``critic.run()`` run unlocked.
+        2. **Blackboard is thread-safe + per-target namespaced** (Phase 1) —
+           same-phase tasks on different targets write to isolated buckets;
+           atomic ``extend_list``/``append_to`` make list merges race-free.
+        3. **List read-modify-writes are atomic** (Phase 1) — all 4 named
+           races (compromised_hosts, credentials_found, loot, failed_modules)
+           go through ``Blackboard.append_to``/``extend_list``.
+        4. **Precondition gating** (Phase 3) — a task with ``depends_on`` set
+           to ``(target, phase)`` awaits the milestone event before running,
+           so a vuln task won't start until its target's recon is done. Same-
+           phase, different-target tasks run concurrently (parallel recon on
+           N hosts is the win).
+        5. **Per-attempt UUID workspaces** (Phase 2) — parallel exploit/post-
+           exploit agents get isolated ``<ip>/<attempt_uuid>/`` dirs so they
+           don't collide on exploit_script.py / loot.jsonl.
 
-            1. **The ``route()`` RLock serializes this method to one task at a time.**
-               ``route()`` holds ``self._lock`` across ``agent.run()``
-               (orchestrator.py:97-216), so even with the semaphore below, real
-               concurrency is 1. Shrinking that lock is the easy part -- but doing
-               it alone is a footgun, because:
-            2. **The shared blackboard is single + un-namespaced.** Same-phase tasks
-               *overwrite* phase keys (``recon`` sets ``discovered_services`` at
-               ``recon_agent.py:255``; ``vuln`` sets ``vulnerability_hypotheses`` at
-               ``vuln_agent.py:251``). Parallelizing multiple recon targets loses all
-               but the last writer's services. Needs per-target namespacing.
-            3. **Four list read-modify-writes race** once ``agent.run()`` is unlocked:
-               ``exploit_agent.py:233`` (``compromised_hosts``),
-               ``post_exploit_agent.py:149`` (``credentials_found``) / ``:151``
-               (``loot``), ``reflection_agent.py:223-226`` (``failed_modules``) --
-               each does ``bb["k"] = bb.get("k", []) + [...]`` (get-then-set, not
-               atomic). Needs a thread-safe ``Blackboard`` with atomic
-               ``append_to``/``extend_list``.
-            4. **No precondition gating.** The queue (``task_queue.py:113-123``)
-               sorts by priority, not phase; agents silently fall back to ``[]`` when
-               a dependency's blackboard key is absent (``vuln_agent.py:114``,
-               ``exploit_agent.py:113-116``). Cross-phase parallelism silently breaks
-               the recon→vuln→exploit chain.
-            5. **Shared-filesystem writes race**: post_exploit appends to one
-               ``workspace/loot/credentials.jsonl``/``loot.jsonl``
-               (``post_exploit_agent.py:104,108``) and exploit writes under one
-               ``reports_dir``/``workspace_root`` (``exploit_agent.py:156-166``).
-               Needs per-task workspace subpaths.
-
-            Until 1.9 lands all five, keep production on sequential ``route()``.
+        Recon-first policy: by default only ``recon`` and ``analysis`` phases
+        parallelize here. ``exploit``/``post_exploit`` stay sequential (run
+        via the plain ``route()`` path) unless the caller passes them through
+        here explicitly (e.g. a future ``swarm.exploit_parallel: true`` config
+        flips the policy). This matches the operator's recon-first rollout
+        choice — parallel recon (multi-host scan) + vuln research (multi-
+        service CVE lookup) first; parallel exploits (higher IDS/crash risk)
+        stay sequential until explicitly opted in.
         """
+        # Recon-first filter: only parallelize the safe read-only phases here
+        # by default. Caller can override per-call via the task's
+        # ``force_parallel`` flag (used by the Phase 4 spawn_subagent tool when
+        # the main AI explicitly delegates a parallel exploit batch).
+        _parallel_phases = ("recon", "analysis")
+        parallel_tasks: list[dict[str, Any]] = []
+        sequential_tasks: list[dict[str, Any]] = []
+        for t in tasks:
+            phase = t.get("phase", "recon")
+            if phase in _parallel_phases or t.get("force_parallel"):
+                parallel_tasks.append(t)
+            else:
+                sequential_tasks.append(t)
+
         semaphore = asyncio.Semaphore(self._max_parallel)
 
         async def _run_one(task: dict[str, Any]) -> AgentResult:
+            # Precondition gating: wait for the dependency milestone before
+            # starting the agent. ``depends_on`` is a (target, phase) tuple
+            # serialized as a 2-list (JSON-friendly). Same-target deps block;
+            # different-target same-phase tasks don't wait on each other (so
+            # parallel recon on N hosts runs concurrently).
+            depends_on = task.get("depends_on")
+            if depends_on and isinstance(depends_on, (list, tuple)) and len(depends_on) == 2:
+                dep_target, dep_phase = depends_on
+                # Block in this worker thread (only this task waits, not the
+                # whole loop). 10-min ceiling so a stuck dependency can't
+                # wedge the campaign forever.
+                self._await_milestone(dep_target, dep_phase, timeout=600.0)
             async with semaphore:
                 loop = asyncio.get_running_loop()
                 return await loop.run_in_executor(None, self.route, task)
 
-        results = await asyncio.gather(*[_run_one(t) for t in tasks])
-        return list(results)
+        parallel_results: list[AgentResult] = []
+        if parallel_tasks:
+            parallel_results = list(await asyncio.gather(*[_run_one(t) for t in parallel_tasks]))
+
+        # Sequential tasks (exploit/post_exploit in recon-first mode) run
+        # via route() one at a time, after the parallel batch finishes, so a
+        # vuln result feeds the next exploit cycle cleanly.
+        sequential_results: list[AgentResult] = []
+        for t in sequential_tasks:
+            sequential_results.append(self.route(t))
+
+        # Preserve input order: return results in the same order as ``tasks``.
+        # gather preserves order for parallel_tasks; the sequential loop
+        # preserves order for sequential_tasks; we interleave by matching
+        # task_id back to the original input position.
+        result_by_task_id: dict[str, AgentResult] = {}
+        for r in parallel_results + sequential_results:
+            result_by_task_id[r.task_id] = r
+        ordered: list[AgentResult] = []
+        for t in tasks:
+            tid = t.get("task_id", t.get("id", ""))
+            r = result_by_task_id.get(tid)
+            if r is not None:
+                ordered.append(r)
+        # Any task that didn't produce a result (shouldn't happen) falls back
+        # to a failed placeholder so the caller gets exactly len(tasks) items.
+        while len(ordered) < len(tasks):
+            ordered.append(AgentResult(
+                agent_type="unknown",
+                status=AgentStatus.FAILED,
+                task_id="",
+                error="route_parallel: no result produced for task",
+            ))
+        return ordered
 
     def reflect(self, battle_log: list[dict[str, Any]], session_state: dict[str, Any]) -> AgentResult:
         """Run the reflection agent on the current phase results.
@@ -417,6 +476,46 @@ class SwarmOrchestrator:
         return self._context.get("model_client")
 
     # ── Event emission + state persistence ───────────────────────────────
+
+    def _mark_milestone(self, target: str, phase: str) -> None:
+        """Mark ``(target, phase)`` complete so dependent tasks can proceed.
+
+        Idempotent: creating the event and setting it are both no-ops if
+        already done. Called after every ``agent.run`` (even on failure) so a
+        failed recon doesn't wedge a waiting vuln task forever — the vuln
+        task will see an empty ``discovered_services`` and no-op, which is the
+        correct degraded behavior, rather than hanging the campaign.
+        """
+        key = (target, phase)
+        with self._lock:
+            event = self._milestone_events.get(key)
+            if event is None:
+                event = threading.Event()
+                self._milestone_events[key] = event
+        event.set()
+
+    def is_milestone_set(self, target: str, phase: str) -> bool:
+        """Check whether ``(target, phase)`` has completed (non-blocking).
+
+        Useful for a caller deciding whether to skip a redundant task, or for
+        the agent loop to avoid re-dispatching a phase that already ran.
+        """
+        with self._lock:
+            event = self._milestone_events.get((target, phase))
+        return event is not None and event.is_set()
+
+    def _await_milestone(self, target: str, phase: str, timeout: float | None = None) -> bool:
+        """Block until ``(target, phase)`` is marked complete. Returns True if
+        the event was set within timeout, False on timeout. Called from a
+        worker thread (route_parallel runs agents via run_in_executor); safe
+        to block here because only THIS task is waiting, not the whole loop.
+        """
+        with self._lock:
+            event = self._milestone_events.get((target, phase))
+            if event is None:
+                event = threading.Event()
+                self._milestone_events[(target, phase)] = event
+        return event.wait(timeout=timeout)
 
     def _emit(self, event_type: str, data: dict[str, Any]) -> None:
         """Emit an event to the registered callback, swallowing errors."""

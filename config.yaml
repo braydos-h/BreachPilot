@@ -200,6 +200,16 @@ swarm:
   - critic
   - reflection
   max_parallel_agents: 3
+  # Parallel sub-agents (Phase 3/4). parallel_enabled gates BOTH
+  # route_parallel (batched same-phase dispatch) AND the spawn_subagent MCP
+  # tool (the main AI's delegation surface). Off by default — opt in via
+  # --parallel-swarm or by flipping this. Recon-first: recon + vuln-research
+  # phases parallelize by default; exploit/post_exploit stay sequential
+  # unless exploit_parallel: true.
+  parallel_enabled: false
+  per_phase_concurrency: 3
+  exploit_parallel: false
+  subagent_timeout_seconds: 600
 
 # Autonomous orchestrator Phase 2 capabilities — opt-in. All keys default OFF / 0
 # so default behavior is unchanged; the new attack-path capabilities must be

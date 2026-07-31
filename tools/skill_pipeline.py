@@ -44,6 +44,7 @@ def build_skill_selection_for_context(
     sticky_defaults: bool = False,
     experience_store: Any | None = None,
     skill_embedder: Any | None = None,
+    is_domain: bool = False,
 ) -> SkillSelection:
     """Build a ``SkillSelection`` for the given run context.
 
@@ -53,6 +54,9 @@ def build_skill_selection_for_context(
     ``experience_store`` to apply the cross-mission feedback boost (advisory,
     boost-only; no-op without a store). Pass a ``skill_embedder`` to enable
     embedding-based semantic matching (default-on with graceful fallback).
+    Pass ``is_domain=True`` when the operator targeted a domain --target so
+    domain-attack skills (subdomain enum, DNS recon, takeover, vhost) get a
+    ``target:domain`` tag-signal boost.
     """
 
     skills_cfg = _skills_config(config)
@@ -83,6 +87,7 @@ def build_skill_selection_for_context(
         sticky_defaults=sticky_defaults,
         experience_store=experience_store,
         skill_embedder=skill_embedder,
+        is_domain=is_domain,
     )
 
 

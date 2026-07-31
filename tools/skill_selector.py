@@ -115,6 +115,7 @@ def select_runtime_skills(
     sticky_defaults: bool = False,
     experience_store: Any | None = None,
     skill_embedder: Any | None = None,
+    is_domain: bool = False,
 ) -> SkillSelection:
     cfg = (config or {}).get("skills", {}) if isinstance(config, dict) else {}
     if cfg.get("enabled", True) is False:
@@ -200,6 +201,7 @@ def select_runtime_skills(
         tool_text=tool_text,
         context_text=extra_text,
         mode=mode,
+        is_domain=is_domain,
     )
     for tag, signals in dynamic_tags.items():
         source = _source_from_signals(signals)
@@ -379,6 +381,7 @@ def _tag_signals(
     tool_text: str,
     context_text: str,
     mode: str,
+    is_domain: bool = False,
 ) -> dict[str, set[str]]:
     tags: dict[str, set[str]] = {}
 
@@ -407,6 +410,22 @@ def _tag_signals(
     if "searchsploit" in combined_tool_text or "exploit-db" in combined_tool_text:
         for tag in ("exploit-research", "cve"):
             mark(tag, "tool:exploit-search")
+    # Domain targeting: when the operator passed a domain --target, surface the
+    # domain-attack skills (subdomain enumeration, DNS recon, takeover, vhost,
+    # attack-surface) with a target:domain signal. This is the missing link
+    # that meant a domain run never preferentially selected domain skills --
+    # the domain string wasn't fed into the selector's tag-signal path.
+    if is_domain:
+        for tag in (
+            "domain-attack",
+            "subdomain-enumeration",
+            "dns-recon",
+            "subdomain-takeover",
+            "attack-surface",
+            "reconnaissance",
+            "web-application-security",
+        ):
+            mark(tag, "target:domain")
     return tags
 
 

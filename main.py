@@ -900,6 +900,9 @@ async def async_main(args: argparse.Namespace) -> int:
         goal=goal,
         mode=mode,
         assessment=assessment if (recon_first or _resume_state is not None) else None,
+        # Domain targeting: surface domain-attack skills (subdomain enum, DNS
+        # recon, takeover, vhost) when the operator targeted a domain.
+        is_domain=bool(resolved_domain),
     )
 
     # Build exploit settings BEFORE the ready-to-begin gate so the action

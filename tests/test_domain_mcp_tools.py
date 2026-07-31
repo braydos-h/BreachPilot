@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -508,3 +508,55 @@ async def test_dns_recon_dnssec_uses_ds_record(tmp_path: Path):
     # query DS records). The key assertion: the old "enabled (AD flag set)"
     # string must NOT appear (that was the old heuristic's output).
     assert "AD flag" not in text, f"old AD-flag heuristic still present:\n{text}"
+
+
+# ── Tier 3.2: domain_whois captures ALL name servers (not just the first) ──
+
+
+@pytest.mark.asyncio
+async def test_domain_whois_captures_all_nameservers(tmp_path: Path):
+    """The binary-fallback parser must collect ALL name server: lines, not
+    just the first (regression: the old `and not nameservers` guard stopped
+    after the first NS)."""
+    mcp = _make_server(tmp_path)
+    # Mock python-whois as unavailable; mock the whois binary to return 3 NS lines.
+    import builtins
+    real_import = builtins.__import__
+    def mock_import(name, *a, **k):
+        if name == "whois":
+            raise ImportError("no python-whois")
+        return real_import(name, *a, **k)
+    fake_whois_output = (
+        "Registrar: Example Registrar, LLC\n"
+        "Creation Date: 2020-01-01T00:00:00Z\n"
+        "Registry Expiry Date: 2025-01-01T00:00:00Z\n"
+        "Registrant Org: Example Inc\n"
+        "Name Server: ns1.example.com\n"
+        "Name Server: ns2.example.com\n"
+        "Name Server: ns3.example.com\n"
+    )
+    with patch("builtins.__import__", side_effect=mock_import), \
+         patch("shutil.which", return_value="/usr/bin/whois"), \
+         patch("tools.mcp_tools.domain._run_with_pgrp_timeout",
+               return_value=(0, fake_whois_output, "")):
+        text = _text(await mcp.call_tool("domain_whois", {"domain": "example.com"}))
+    assert "WHOIS_RESULT:" in text
+    # All 3 nameservers must appear (the old guard captured only ns1).
+    assert "ns1.example.com" in text
+    assert "ns2.example.com" in text
+    assert "ns3.example.com" in text
+
+
+# ── Tier 3.4: ERROR: returns are audited as blocked ──────────────────────
+
+
+def test_error_result_marker_is_blocked():
+    """The _result_is_blocked helper must recognize ERROR: returns as blocked
+    (Tier 3.4 added ERROR: to _BLOCKED_RESULT_MARKERS)."""
+    from tools.mcp_shared import _result_is_blocked
+    assert _result_is_blocked("ERROR: domain is required.") is True
+    assert _result_is_blocked("ERROR: Invalid target (IP or domain).") is True
+    assert _result_is_blocked("BLOCKED: target not in allowlist") is True
+    # A successful result must NOT be flagged as blocked.
+    assert _result_is_blocked("SUBDOMAIN_RESULT: completed\n...") is False
+    assert _result_is_blocked("DNS_RESULT: completed") is False

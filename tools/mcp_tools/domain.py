@@ -202,16 +202,6 @@ _TAKEOVER_FINGERPRINTS = {
 }
 
 
-def _domain_of(hostname: str) -> str:
-    """Best-effort registrable domain from a hostname (last 2 labels)."""
-    if not hostname:
-        return ""
-    parts = [p for p in hostname.strip(".").split(".") if p]
-    if len(parts) < 2:
-        return ""
-    return ".".join(parts[-2:])
-
-
 def _stdlib_fetch(
     url: str,
     *,
@@ -900,13 +890,21 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
         nameservers: list[str] = []
         dns_provider = "unknown"
 
-        # Try python-whois first
+        # Try python-whois first (structured fields — preferred over binary parsing)
         try:
             import whois  # type: ignore
             w = whois.whois(dom)
             registrar = str(getattr(w, "registrar", "") or "")
-            creation_date = str(getattr(w, "creation_date", "") or "")
-            expiry_date = str(getattr(w, "expiration_date", "") or "")
+            # python-whois returns dates as a list for some TLDs (e.g. .com) —
+            # take the first; format datetimes to ISO.
+            _cd = getattr(w, "creation_date", None)
+            if isinstance(_cd, list):
+                _cd = _cd[0] if _cd else None
+            creation_date = str(_cd or "")
+            _ed = getattr(w, "expiration_date", None)
+            if isinstance(_ed, list):
+                _ed = _ed[0] if _ed else None
+            expiry_date = str(_ed or "")
             registrant_org = str(getattr(w, "org", "") or getattr(w, "organization", "") or "")
             ns = getattr(w, "name_servers", []) or []
             if isinstance(ns, list):
@@ -926,7 +924,9 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     argv, 30, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                 )
                 if rc == 0 and out:
-                    # Parse common WHOIS fields heuristically
+                    # Parse common WHOIS fields heuristically. Different
+                    # registrars format differently (Verisign vs. .io vs.
+                    # ccTLDs), so match case-insensitively on the line prefix.
                     for line in out.splitlines():
                         ll = line.strip().lower()
                         if "registrar:" in ll and not registrar:
@@ -937,7 +937,10 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                             expiry_date = line.split(":", 1)[1].strip()
                         elif "registrant org" in ll and not registrant_org:
                             registrant_org = line.split(":", 1)[1].strip()
-                        elif ll.startswith("name server:") and not nameservers:
+                        elif ll.startswith("name server:"):
+                            # Bug fix: the old `and not nameservers` guard
+                            # stopped after the first NS line, so only one
+                            # nameserver was captured. Collect ALL of them.
                             ns_val = line.split(":", 1)[1].strip().rstrip(".").lower()
                             if ns_val and ns_val not in nameservers:
                                 nameservers.append(ns_val)

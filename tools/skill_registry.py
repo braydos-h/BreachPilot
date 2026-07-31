@@ -63,6 +63,12 @@ _TAG_ALIASES: dict[str, tuple[str, ...]] = {
     "active-directory": ("windows", "ldap", "kerberos", "smb"),
     "ssl": ("tls",),
     "certificate-transparency": ("certificate", "tls", "osint"),
+    # Domain targeting: map the domain-attack tag family so the selector's
+    # tag-signal boost matches these skills. "domain-attack" → the orchestration
+    # skill; "subdomain-enumeration" → the subfinder/dns skills.
+    "domain-attack": ("domain", "attack-surface", "subdomain-takeover"),
+    "subdomain-enumeration": ("subdomain", "dns", "osint"),
+    "dns-recon": ("dns", "zone-transfer", "reconnaissance"),
 }
 _SEARCH_STOPWORDS = {
     "a",
