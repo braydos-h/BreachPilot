@@ -57,6 +57,12 @@ class SwarmOrchestrator:
         reflection_enabled: bool = True,
         event_callback: Callable[[str, dict[str, Any]], None] | None = None,
         state_path: Path | str | None = None,
+        # Phase 3: ``exploit_parallel`` controls whether exploit/post_exploit
+        # tasks parallelize in ``route_parallel``. False (default) = recon-
+        # first policy (only recon + analysis parallelize). True = exploits
+        # also run in parallel (higher IDS/crash risk; opt in via
+        # ``swarm.exploit_parallel: true`` in config.yaml).
+        exploit_parallel: bool = False,
     ) -> None:
         self._context = context
         self._agent_registry = agent_registry or dict(_DEFAULT_AGENT_MAP)
@@ -64,6 +70,7 @@ class SwarmOrchestrator:
         self._critic_enabled = critic_enabled
         self._reflection_enabled = reflection_enabled
         self._event_callback = event_callback
+        self._exploit_parallel = exploit_parallel
         self._state_path: Path | None = Path(state_path) if state_path else None
         self._agents: dict[str, Agent] = {}
         self._results: list[AgentResult] = []
@@ -338,10 +345,15 @@ class SwarmOrchestrator:
         stay sequential until explicitly opted in.
         """
         # Recon-first filter: only parallelize the safe read-only phases here
-        # by default. Caller can override per-call via the task's
-        # ``force_parallel`` flag (used by the Phase 4 spawn_subagent tool when
-        # the main AI explicitly delegates a parallel exploit batch).
-        _parallel_phases = ("recon", "analysis")
+        # by default. ``self._exploit_parallel`` (from config.yaml
+        # ``swarm.exploit_parallel``) flips the policy so exploit/post_exploit
+        # also parallelize. A task can also opt in individually via
+        # ``force_parallel`` (used by the Phase 4 spawn_subagent tool when the
+        # main AI explicitly delegates a parallel exploit batch).
+        if self._exploit_parallel:
+            _parallel_phases = ("recon", "analysis", "exploit", "post_exploit")
+        else:
+            _parallel_phases = ("recon", "analysis")
         parallel_tasks: list[dict[str, Any]] = []
         sequential_tasks: list[dict[str, Any]] = []
         for t in tasks:
