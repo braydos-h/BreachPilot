@@ -45,7 +45,7 @@ Optional integrations—including Metasploit, Exploit-DB/searchsploit, tmux, Hyd
 ### Install
 
 ```bash
-git clone <your-fork-or-repository-url>
+git clone https://github.com/braydos-h/NetAttackAi
 cd NetAttackAi
 
 python3 -m venv .venv
