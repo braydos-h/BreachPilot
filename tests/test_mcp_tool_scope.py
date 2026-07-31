@@ -30,9 +30,10 @@ def test_extract_msf_rhosts_finds_rhosts_and_rhost():
     assert _extract_msf_rhosts("set RHOST 10.0.0.99") == ["10.0.0.99"]
     # setg (global set) too
     assert _extract_msf_rhosts("setg RHOSTS 10.0.0.99") == ["10.0.0.99"]
-    # multiple, with quotes
+    # multiple, with quotes -- quotes are stripped so the bare IP reaches the
+    # allowlist matcher (a quoted token would never match is_target_in_allowlist).
     out = _extract_msf_rhosts('set RHOSTS "10.0.0.99"; set RHOST 10.0.0.50')
-    assert out == ['"10.0.0.99"', "10.0.0.50"]
+    assert out == ["10.0.0.99", "10.0.0.50"]
 
 
 def test_extract_msf_rhosts_empty_when_no_rhosts():

@@ -34,6 +34,24 @@ import pytest
 
 from db import DatabaseManager, _new_id
 from risk_controller import RiskController
+
+
+# add_discovered_target (called by the orchestrator during subdomain expansion
+# in test_orchestrator_domain_campaign_runs_subdomain_expansion) writes
+# os.environ["EXPLOIT_DISCOVERED_TARGETS"] directly. monkeypatch does NOT
+# restore direct os.environ[k]=v writes, so they leak for the whole pytest
+# session and break later empty-allowlist tests. Snapshot+restore here.
+@pytest.fixture(autouse=True)
+def _restore_target_env():
+    import os as _os
+    _snap = {k: _os.environ.get(k) for k in
+             ("EXPLOIT_TARGET", "EXPLOIT_TARGET_IP", "EXPLOIT_TARGET_DOMAIN", "EXPLOIT_DISCOVERED_TARGETS")}
+    yield
+    for _k, _v in _snap.items():
+        if _v is None:
+            _os.environ.pop(_k, None)
+        else:
+            _os.environ[_k] = _v
 from scope_gate import ScopeGate
 from tools.command_analyzer import analysis_payload, analyze_command
 from tools.mcp_shared import _attempt_dir
@@ -242,7 +260,10 @@ async def test_orchestrator_domain_campaign_runs_subdomain_expansion(tmp_path: P
     )
     # is_fqdn must pass for "example.com".
     monkeypatch.setattr("tools.validation_utils.is_fqdn", lambda h: h == "example.com")
-    # add_discovered_target hits EXPLOIT_DISCOVERED_TARGETS env; safe to let it run.
+    # add_discovered_target writes os.environ["EXPLOIT_DISCOVERED_TARGETS"]
+    # directly (not via monkeypatch). The autouse _restore_target_env fixture
+    # at the top of this file snapshots+restores it around every test so the
+    # discovered hosts don't leak into later empty-allowlist tests.
 
     # Run the campaign with domain-targeting context threaded through.
     result = await orch.run_autonomous_campaign(

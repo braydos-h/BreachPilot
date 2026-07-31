@@ -177,3 +177,67 @@ def test_prepare_recon_mode_not_destructive(tmp_path):
     preview = asyncio.run(service.prepare(req))
     assert preview.destructive is False
     assert preview.required_confirmation_text == ""
+
+
+# ── TerminalDecisionProvider: dict options → AttackUi interop ──────────────────
+# Regression for the crash in reports/.../session_error.log:
+# service.py builds Decision.options as list[dict] (for API persistence), but
+# AttackUi.ask_goal_from_suggestions reads sg.compatible as an attribute.
+# The provider must rehydrate dicts to SuggestedGoal before delegating.
+
+def test_decision_provider_goal_select_accepts_dict_options(monkeypatch):
+    from tools.attack_ui import AttackUi
+    from tools.run_service.models import Decision, DecisionKind
+
+    ui = AttackUi()
+    # Disable color to keep test output clean.
+    monkeypatch.setattr(ui, "_c", lambda *_a, **_kw: "")
+    # Pick the first compatible suggestion.
+    inputs = iter(["1"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(inputs))
+
+    provider = TerminalDecisionProvider(ui)
+    decision = Decision(
+        id="", run_id="", kind=DecisionKind.GOAL_SELECT,
+        prompt_text="Select a goal:",
+        options=[
+            {"name": "backdoor", "description": "get a shell",
+             "exploit_likelihood": "Likely", "success_rating": 80,
+             "rationale": "ssh open", "compatible": True,
+             "blocked_reason": "", "risk_requirement": "high",
+             "is_ai_generated": False},
+            {"name": "blocked_goal", "description": "blocked",
+             "exploit_likelihood": "Blocked", "success_rating": 0,
+             "rationale": "", "compatible": False,
+             "blocked_reason": "risk", "risk_requirement": "high",
+             "is_ai_generated": False},
+        ],
+    )
+    answer = asyncio.run(provider.request(decision))
+    assert answer == "backdoor"
+
+
+def test_decision_provider_goal_select_custom(monkeypatch):
+    from tools.attack_ui import AttackUi
+    from tools.run_service.models import Decision, DecisionKind
+
+    ui = AttackUi()
+    monkeypatch.setattr(ui, "_c", lambda *_a, **_kw: "")
+    # 'c' for custom, then type a custom goal.
+    inputs = iter(["c", "dump creds and pivot"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(inputs))
+
+    provider = TerminalDecisionProvider(ui)
+    decision = Decision(
+        id="", run_id="", kind=DecisionKind.GOAL_SELECT,
+        prompt_text="Select a goal:",
+        options=[
+            {"name": "recon_only", "description": "recon",
+             "exploit_likelihood": "Likely", "success_rating": 50,
+             "rationale": "", "compatible": True,
+             "blocked_reason": "", "risk_requirement": "safe",
+             "is_ai_generated": False},
+        ],
+    )
+    answer = asyncio.run(provider.request(decision))
+    assert answer == "dump creds and pivot"

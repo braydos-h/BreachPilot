@@ -327,7 +327,9 @@ def test_check_linux_privilege_non_root_off_windows(monkeypatch):
     from tools import doctor
 
     monkeypatch.setattr(doctor.os, "name", "posix")
-    monkeypatch.setattr(doctor.os, "geteuid", lambda: 1000)
+    # os.geteuid is absent on Windows; raising=False lets us inject it so the
+    # POSIX branch runs (the doctor source already guards the call).
+    monkeypatch.setattr(doctor.os, "geteuid", lambda: 1000, raising=False)
     doctor._DOCTOR_NMAP_CFG.clear()
     doctor._DOCTOR_NMAP_CFG["sudo"] = False
     res = doctor._check_linux_privilege()

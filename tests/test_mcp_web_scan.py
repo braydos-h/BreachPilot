@@ -93,7 +93,7 @@ async def test_run_web_scan_rejects_invalid_target_ip(tmp_path: Path) -> None:
         "run_web_scan", {"scanner": "nikto", "target_ip": "not-an-ip"},
     ))
     assert text.startswith("BLOCKED:")
-    assert "valid IPv4" in text
+    assert "valid IP address or domain" in text
 
 
 @pytest.mark.asyncio

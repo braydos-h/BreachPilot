@@ -583,7 +583,7 @@ def _check_allowlist(target_ip: str, config: dict[str, Any] | None) -> tuple[boo
 # host through these ``@audit_tool``-only tools. These helpers extract the host
 # tokens and run them through the same allowlist as ``_check_allowlist``.
 _MSF_RHOSTS_RE = re.compile(
-    r"\bset(?:g)?\s+(?:RHOSTS|RHOST)\s+(\S+)", re.IGNORECASE,
+    r"\bset(?:g)?\s+(?:RHOSTS|RHOST)\s+(?:\"([^\"]+)\"|'([^']+)'|(\S+))", re.IGNORECASE,
 )
 # Meterpreter pivot verbs that name a remote host/subnet to pivot through,
 # not via RHOSTS: ``portfwd add -r <host>`` (and reverse ``-R``), ``route add
@@ -603,11 +603,17 @@ def _extract_msf_rhosts(text: str) -> list[str]:
     can scope-check each."""
     if not text:
         return []
-    out: list[str] = [m.strip().strip("\"'") for m in _MSF_RHOSTS_RE.findall(text)]
+    out: list[str] = []
+    for m in _MSF_RHOSTS_RE.findall(text):
+        # Each match is a 3-tuple (dq, sq, bare) from the alternation; only one
+        # group is non-empty. Quoted forms are captured WITHOUT the quotes.
+        tok = next((g for g in m if g), "").strip().strip("\"';")
+        if tok and tok not in out:
+            out.append(tok)
     for m in _MSF_PIVOT_RE.finditer(text):
         for g in m.groups():
             if g:
-                tok = g.strip().strip("\"'")
+                tok = g.strip().strip("\"';")
                 if tok and tok not in out:
                     out.append(tok)
     return out

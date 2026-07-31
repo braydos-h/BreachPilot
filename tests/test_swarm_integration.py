@@ -20,15 +20,16 @@ from db import DatabaseManager
 
 
 @pytest.fixture
-def temp_db():
-    db_path = Path("test_workspace_integration") / "research.db"
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+def temp_db(tmp_path):
+    # ponytail: previously a hardcoded test_workspace_integration/ path that
+    # persisted across runs and accumulated stale rows, polluting later
+    # tests (inflated confidence scores, UNIQUE-constraint collisions).
+    # tmp_path is pytest-provided: unique per test, auto-cleaned.
+    db_path = tmp_path / "research.db"
     db = DatabaseManager(db_path)
     with db.connection(write=True) as conn:
         db.ensure_schema(conn)
     yield db
-    import shutil
-    shutil.rmtree(db_path.parent, ignore_errors=True)
 
 
 @pytest.fixture
@@ -41,7 +42,7 @@ def mock_executor():
 # ── End-to-End Swarm + Memory Integration ────────────────────────────────
 
 
-def test_agent_loop_with_swarm_and_semantic_memory(temp_db, mock_executor):
+def test_agent_loop_with_swarm_and_semantic_memory(temp_db, mock_executor, tmp_path):
     """Run AgentLoop with swarm enabled and semantic memory active."""
     config = {
         "program_name": "Integration Test",
@@ -58,7 +59,7 @@ def test_agent_loop_with_swarm_and_semantic_memory(temp_db, mock_executor):
         "reflection_every_n_actions": 2,
         "memory": {"semantic_enabled": True, "embedding_model": "nomic-embed-text"},
     }
-    loop = AgentLoop(config, Path("test_workspace_integration"), mock_executor)
+    loop = AgentLoop(config, tmp_path, mock_executor)
     assert loop._use_swarm is True
     assert loop._swarm is not None
     assert loop._semantic_memory is not None
@@ -110,7 +111,7 @@ def test_payload_crafter_generates_valid_python(temp_db):
     import ast
 
     crafter = PayloadCrafter(
-        workspace=Path("test_workspace_integration") / "mutations",
+        workspace=temp_db._path.parent / "mutations",
         experience_store=None,
         client=None,
         model="",
@@ -135,7 +136,7 @@ def test_payload_crafter_generates_valid_python(temp_db):
 
 def test_exploit_mutator_lineage_tracking(temp_db):
     """Verify mutation lineage is tracked correctly."""
-    workspace = Path("test_workspace_integration") / "mutations"
+    workspace = temp_db._path.parent / "mutations"
     mutator = ExploitMutator(
         workspace=workspace,
         experience_store=None,

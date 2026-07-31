@@ -104,12 +104,15 @@ async def test_run_osint_recon_returns_summary(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_osint_recon_rejects_invalid_ip(tmp_path: Path) -> None:
+async def test_run_osint_recon_rejects_invalid_ip(tmp_path: Path):
     mcp = _make_server(tmp_path)
-    result = await mcp.call_tool("run_osint_recon", {"target_ip": "not.an.ip.addr"})
+    # "not-an-ip" is neither a valid IPv4 nor a valid FQDN (no dot/TLD), so the
+    # Phase 4 validate_target_or_ip gate rejects it. (A dotted string like
+    # "not.an.ip.addr" IS a valid FQDN under the relaxed gate and would pass.)
+    result = await mcp.call_tool("run_osint_recon", {"target_ip": "not-an-ip"})
     text = _to_text(result)
     assert "ERROR" in text
-    assert "Invalid IPv4" in text
+    assert "Invalid target (IP or domain)" in text
 
 
 @pytest.mark.asyncio

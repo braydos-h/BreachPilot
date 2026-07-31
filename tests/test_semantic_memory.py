@@ -12,16 +12,16 @@ from tools.experience_store import ExperienceStore
 
 
 @pytest.fixture
-def temp_db():
-    db_path = Path("test_workspace_semantic") / "research.db"
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+def temp_db(tmp_path):
+    # ponytail: previously a hardcoded test_workspace_semantic/ path that
+    # persisted across runs and accumulated stale rows, polluting later
+    # tests (UNIQUE-constraint collisions, inflated confidence scores).
+    # tmp_path is pytest-provided: unique per test, auto-cleaned.
+    db_path = tmp_path / "research.db"
     db = DatabaseManager(db_path)
     with db.connection(write=True) as conn:
         db.ensure_schema(conn)
     yield db
-    # Cleanup
-    import shutil
-    shutil.rmtree(db_path.parent, ignore_errors=True)
 
 
 # ── SemanticMemoryManager Tests ───────────────────────────────────────────

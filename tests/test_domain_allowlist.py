@@ -12,6 +12,25 @@ from __future__ import annotations
 import os
 from unittest.mock import patch
 
+import pytest
+
+
+# add_discovered_target writes os.environ["EXPLOIT_DISCOVERED_TARGETS"]
+# directly (NOT via monkeypatch), and monkeypatch does not restore direct
+# os.environ[k]=v writes -- they leak for the whole pytest session and break
+# unrelated empty-allowlist tests later. This autouse fixture snapshots and
+# restores the 4 target env vars around every test in this file.
+@pytest.fixture(autouse=True)
+def _restore_target_env():
+    _snap = {k: os.environ.get(k) for k in
+             ("EXPLOIT_TARGET", "EXPLOIT_TARGET_IP", "EXPLOIT_TARGET_DOMAIN", "EXPLOIT_DISCOVERED_TARGETS")}
+    yield
+    for _k, _v in _snap.items():
+        if _v is None:
+            os.environ.pop(_k, None)
+        else:
+            os.environ[_k] = _v
+
 
 def _clear_env(monkeypatch):
     """Clear all domain env vars so tests start from a clean slate."""

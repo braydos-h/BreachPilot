@@ -119,7 +119,12 @@ def test_agent_loop_persists_swarm_events():
     """AgentLoop._persist_event should append events to swarm_events.jsonl."""
     from agent_loop import AgentLoop
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        # ponytail: ignore_cleanup_errors=True because AgentLoop opens a SQLite
+        # research.db whose thread-local handle outlives the test on Windows,
+        # making the tempdir's __exit__ rmtree raise WinError 32 on the .db
+        # file. The assertions above already prove correctness; the leftover
+        # file is reaped by the OS temp cleaner.
         ws = Path(tmpdir) / "ws"
         ws.mkdir()
         loop = AgentLoop(

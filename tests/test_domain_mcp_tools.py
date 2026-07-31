@@ -8,10 +8,27 @@ Covers ``resolve_domain``, ``enumerate_subdomains``, ``dns_recon``,
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+# enumerate_subdomains internally calls add_discovered_target, which writes
+# os.environ["EXPLOIT_DISCOVERED_TARGETS"] directly. monkeypatch does NOT
+# restore direct os.environ[k]=v writes, so they leak for the whole pytest
+# session and break later empty-allowlist tests. Snapshot+restore here.
+@pytest.fixture(autouse=True)
+def _restore_target_env():
+    _snap = {k: os.environ.get(k) for k in
+             ("EXPLOIT_TARGET", "EXPLOIT_TARGET_IP", "EXPLOIT_TARGET_DOMAIN", "EXPLOIT_DISCOVERED_TARGETS")}
+    yield
+    for _k, _v in _snap.items():
+        if _v is None:
+            os.environ.pop(_k, None)
+        else:
+            os.environ[_k] = _v
 
 
 def _make_server(tmp_path: Path, *, require_allowlist: bool = False, allowed_targets: list[str] | None = None):

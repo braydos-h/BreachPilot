@@ -16,13 +16,18 @@ from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 
 
-def _make_client(tmp_path, monkeypatch, token="test-token"):
-    """Create a TestClient with a known token + minimal config (no Ollama needed)."""
+def _make_client(tmp_path, monkeypatch, token="test-token", ollama_host="http://localhost:11434"):
+    """Create a TestClient with a known token + minimal config (no Ollama needed).
+
+    ``ollama_host`` lets a test point the live-models route at an unreachable
+    host so the 503 fallback fires deterministically even when a real Ollama
+    is running on the dev box's :11434.
+    """
     monkeypatch.setenv("NETATTACKAI_API_TOKEN", token)
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "ollama:\n  host: http://localhost:11434\n"
+        f"ollama:\n  host: {ollama_host}\n"
         "models:\n  default_alias: glm\n  registry:\n    glm: glm-5.2:cloud\n"
         "exploit:\n  permission: read_only\n"
         "api:\n  host: 127.0.0.1\n  port: 8765\n",
@@ -111,7 +116,9 @@ def test_self_test_returns_output(tmp_path, monkeypatch):
 # ── Live Ollama models (C1) ──────────────────────────────────────────────────
 
 def test_models_live_falls_back_when_ollama_unreachable(tmp_path, monkeypatch):
-    client = _make_client(tmp_path, monkeypatch)
+    # Point the route at a closed port so the 503 fallback fires deterministically,
+    # regardless of whether a real Ollama is running on localhost:11434.
+    client = _make_client(tmp_path, monkeypatch, ollama_host="http://127.0.0.1:9")
     resp = client.get("/api/v1/models/live", headers=_auth())
     # Ollama not running in tests -> 503 fallback with registry
     assert resp.status_code == 503

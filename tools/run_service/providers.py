@@ -84,8 +84,27 @@ class TerminalDecisionProvider:
                 return ""
             return "yes" if proceed else ""
         if kind == "goal_select":
+            # ponytail: options are transport-neutral dicts ([{name, compatible, ...}]);
+            # AttackUi reads attrs. Rehydrate to SuggestedGoal at the terminal boundary.
+            from tools.goal_suggester import SuggestedGoal
+            options = []
+            for opt in decision.options:
+                if isinstance(opt, dict):
+                    options.append(SuggestedGoal(
+                        name=opt.get("name", ""),
+                        description=opt.get("description", ""),
+                        exploit_likelihood=opt.get("exploit_likelihood", "Possible"),
+                        success_rating=int(opt.get("success_rating", 0)),
+                        rationale=opt.get("rationale", ""),
+                        compatible=bool(opt.get("compatible", True)),
+                        blocked_reason=opt.get("blocked_reason", ""),
+                        risk_requirement=opt.get("risk_requirement", "safe"),
+                        is_ai_generated=bool(opt.get("is_ai_generated", False)),
+                    ))
+                else:
+                    options.append(opt)
             try:
-                name, custom = await _maybe_await(self._ui.ask_goal_from_suggestions(decision.options))
+                name, custom = await _maybe_await(self._ui.ask_goal_from_suggestions(options))
             except (EOFError, KeyboardInterrupt):
                 return ""
             return custom if custom else name

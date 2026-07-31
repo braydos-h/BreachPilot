@@ -145,7 +145,7 @@ async def test_run_msf_module_rejects_invalid_target_ip(tmp_path: Path) -> None:
         {"module": "exploit/multi/http/log4shell", "target_ip": "10.0.0.1; whoami"},
     ))
     assert text.startswith("BLOCKED:")
-    assert "valid IPv4" in text
+    assert "valid IP address or domain" in text
 
 
 @pytest.mark.asyncio
@@ -233,7 +233,7 @@ async def test_lateral_exec_rejects_invalid_target_ip(tmp_path: Path) -> None:
         {"target_ip": "10.0.0.1$(id)", "method": "psexec", "username": "a",
          "password": "p"},
     ))
-    assert text.startswith("BLOCKED:") or "Invalid IPv4" in text
+    assert text.startswith("BLOCKED:") or "Invalid target (IP or domain)" in text
 
 
 @pytest.mark.asyncio
@@ -567,7 +567,7 @@ async def test_run_python_file_rejects_invalid_target_ip(tmp_path: Path) -> None
         {"target_ip": "10.0.0.1; rm -rf /", "filename": "x.py"},
     ))
     assert text.startswith("BLOCKED:")
-    assert "valid IPv4" in text
+    assert "valid IP address or domain" in text
 
 
 @pytest.mark.asyncio
@@ -623,7 +623,7 @@ async def test_cve_to_exploit_synth_rejects_invalid_target_ip(tmp_path: Path) ->
         {"target_ip": "10.0.0.1`id`", "cve_id": "CVE-2021-44228"},
     ))
     assert text.startswith("BLOCKED:")
-    assert "valid IPv4" in text
+    assert "valid IP address or domain" in text
 
 
 @pytest.mark.asyncio

@@ -175,6 +175,14 @@ async def test_lateral_movement_proceeds_for_remote(tmp_path: Path) -> None:
     orch = _orch(tmp_path, mission_config={"max_cycles": 5, "max_pivot_depth": 2})
     state = AttackState(target="10.0.0.5", pivot_targets=["10.0.0.99"])
 
+    # Stub _attack_target so the LateralMovement info-stub module's success=True
+    # (which triggers recursion) does NOT run a real recon pass against the
+    # pivot over the network. Full recursion is covered by test_phase4_bugfixes.
+    async def _fake_attack(target: str, *, _depth: int = 0) -> dict[str, Any]:
+        return {"status": "complete", "state": {}}
+
+    orch._attack_target = _fake_attack  # type: ignore[assignment]
+
     await orch._phase_lateral_movement(state, _depth=0)  # type: ignore[arg-type]
     # The local guard must not have fired.
     assert "lateral_skip_local" not in _timeline_types(state)
