@@ -131,10 +131,24 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
     @mcp.tool()
     @audit_tool
-    def start_listener(name: str, port: int, listener_type: str = "netcat", protocol: str = "tcp", directory: str = "") -> str:
-        """Start a named network listener. Types: netcat (nc/ncat), socat, http (python http.server). Use for: catching reverse shells, serving payloads, port forwarding, etc."""
+    def start_listener(name: str, port: int, listener_type: str = "netcat", protocol: str = "tcp", directory: str = "", upstream_host: str = "", upstream_port: int = 0) -> str:
+        """Start a named network listener. Types: netcat (nc/ncat), socat, http (python http.server), tls (openssl/socat TLS), dns (dnscat2), https-beacon (socat TLS HTTP), socks_pivot (chisel/ligolo-ng/socat TCP forward). socks_pivot forwards to upstream_host:upstream_port which MUST be in allowed_targets (pivot lock)."""
+        # Phase 3 config-off guard for the new C2 listener types. The legacy
+        # netcat/socat/http types stay ungated (pre-existing behavior).
+        _NEW_LISTENER_TYPES = {"tls", "dns", "https-beacon", "socks_pivot"}
+        if listener_type in _NEW_LISTENER_TYPES:
+            listeners_cfg = ((config or {}).get("exploit", {}) or {}).get("listeners", {}) or {}
+            key = {"tls": "tls", "dns": "dns", "https-beacon": "https_beacon", "socks_pivot": "socks_pivot"}[listener_type]
+            if not listeners_cfg.get(key, False):
+                return f"BLOCKED: exploit.listeners.{key} is disabled. Listener: {listener_type}"
+            # socks_pivot upstream must be allowlist-gated (the allowlist is the
+            # pivot lock — no forwarding to off-list hosts).
+            if listener_type == "socks_pivot" and upstream_host:
+                allowed, reason = check_targets_allowlist([upstream_host], config)
+                if not allowed:
+                    return f"BLOCKED: {reason}\nTOOL: start_listener\nUPSTREAM: {upstream_host}"
         mgr = _get_session_mgr()
-        result = mgr.start_listener(name, port, listener_type, protocol, directory)
+        result = mgr.start_listener(name, port, listener_type, protocol, directory, upstream_host, upstream_port)
         if result["success"]:
             return (
                 f"LISTENER_STARTED: {name}\n"

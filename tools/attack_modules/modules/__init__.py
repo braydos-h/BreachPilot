@@ -93,6 +93,7 @@ from tools.attack_modules.modules.orchestrator_phases import (
     ServiceMisconfiguration,
     LateralMovement,
     ValidateFinding,
+    LocalExploitSuggester,
 )
 from tools.attack_modules.modules.ad import (
     ADCSEnum,
@@ -173,6 +174,7 @@ __all__ = [
     "ServiceMisconfiguration",
     "LateralMovement",
     "ValidateFinding",
+    "LocalExploitSuggester",
     "ADCSEnum",
     "BloodHoundCollect",
     "ResponderRelay",

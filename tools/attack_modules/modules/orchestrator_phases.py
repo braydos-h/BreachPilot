@@ -179,3 +179,43 @@ class ValidateFinding(AttackModule):
             ],
             "extra": {"phase_only": True},
         }
+
+
+class LocalExploitSuggester(AttackModule):
+    """Advisory privesc module (Phase 3). Suggests the MSF
+    ``local_exploit_suggester`` recipe against an obtained meterpreter session.
+
+    Path B (the orchestrator's AttackModuleExecutor) has no MSF session id, so
+    this module is ``status="info"`` -- it surfaces the suggestion and points
+    the operator/AI at ``msf_list_sessions`` to obtain the real session id,
+    rather than fabricating one. Path A (the MCP agent loop, which tracks
+    sessions in MetasploitBridge) can call ``msf_run_recipe('local_exploit_suggester',
+    session_id=<id>)`` directly.
+    """
+    name = "LocalExploitSuggester"
+    description = "Suggest MSF local_exploit_suggester against an obtained session to enumerate local privesc exploits (advisory -- does not fabricate a session id)"
+    target_services: list[str] = []
+    target_ports: list[int] = []
+    required_cves: list[str] = []
+
+    def run(self, ctx: ModuleContext) -> dict[str, Any]:
+        return {
+            "status": "info",
+            "module": self.name,
+            "note": (
+                "Advisory: enumerate local privilege-escalation exploits via the MSF "
+                "local_exploit_suggester post module. Requires an existing meterpreter "
+                "session -- run msf_list_sessions to obtain the real session id, then "
+                "msf_run_recipe('local_exploit_suggester', session_id=<id>). This module "
+                "does NOT fabricate a session id."
+            ),
+            "suggested_command": (
+                "msf_run_recipe(name='local_exploit_suggester', session_id=<id from msf_list_sessions>)"
+            ),
+            "workflow": [
+                "1. Confirm access_achieved and obtain the meterpreter session id (msf_list_sessions).",
+                "2. msf_run_recipe('local_exploit_suggester', session_id=<id>) to list candidate privesc modules.",
+                "3. Run a suggested module via msf_run_exploit / msf_run_post_module against the session.",
+            ],
+            "extra": {"phase_only": True, "requires_session": True},
+        }

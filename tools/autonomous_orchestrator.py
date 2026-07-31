@@ -1014,6 +1014,16 @@ class AutonomousOrchestrator:
         self._persistence_enabled = bool(mission_config.get("persistence_phase", False))
         self._checkpoint_every = max(0, int(mission_config.get("checkpoint_every", 0) or 0))
         self._adaptive_replan = bool(mission_config.get("adaptive_replan", False))
+        # Phase 3: advisory local_exploit_suggester follow-up after the privesc
+        # batch. Passed through as ``msf_auto_les`` (or nested ``msf`` dict) by
+        # the campaign call sites. Default off. When on AND access was
+        # achieved, a single LocalExploitSuggester info-task runs -- it only
+        # SUGGESTS the MSF recipe (Path B has no MSF session id, so it never
+        # fabricates one).
+        self._auto_local_exploit_suggester = bool(
+            mission_config.get("msf_auto_les", False)
+            or ((mission_config.get("msf") or {}).get("auto_local_exploit_suggester", False))
+        )
 
     def _new_task_id(self) -> str:
         self._task_counter += 1
@@ -1366,6 +1376,26 @@ class AutonomousOrchestrator:
             self._tasks[task.task_id] = task
 
         await self._execute_task_batch(tasks, state)
+
+        # Phase 3: advisory local_exploit_suggester follow-up. Only when the
+        # config flag is on AND access was achieved (so a meterpreter session
+        # plausibly exists). The module is info-only -- it suggests the MSF
+        # recipe and does NOT fabricate a session id (Path B has none).
+        if self._auto_local_exploit_suggester and state.access_achieved:
+            les_task = AttackTask(
+                task_id=self._new_task_id(),
+                phase=AttackPhase.PRIVILEGE_ESCALATION,
+                module_name="LocalExploitSuggester",
+                target=state.target,
+                aggression=state.aggression,
+                priority=60,
+            )
+            self._tasks[les_task.task_id] = les_task
+            await self._executor.execute(les_task, state)
+            state.add_timeline_event(
+                "local_exploit_suggester",
+                "Advisory local_exploit_suggester follow-up dispatched (info-only)",
+            )
 
     async def _phase_lateral_movement(self, state: AttackState, _depth: int = 0) -> None:
         """Attempt lateral movement to discovered pivot targets.

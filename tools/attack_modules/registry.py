@@ -76,6 +76,7 @@ from tools.attack_modules.modules import (
     ServiceMisconfiguration,
     LateralMovement,
     ValidateFinding,
+    LocalExploitSuggester,
     ADCSEnum,
     BloodHoundCollect,
     ResponderRelay,
@@ -167,6 +168,7 @@ _MODULE_CLASSES: list[type[AttackModule]] = [
     ServiceMisconfiguration,
     LateralMovement,
     ValidateFinding,
+    LocalExploitSuggester,
     # --- Phase 1: AD/Kerberos post-exploit recipe modules (wrap ad.py MCP tools) ---
     ADCSEnum,
     BloodHoundCollect,

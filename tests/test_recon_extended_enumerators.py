@@ -108,8 +108,9 @@ async def test_vhost_discovery_detects_diverging_response() -> None:
             return 200, {}, "y" * 200
         return 200, {}, base_body
 
+    base = _result()
     enum = SecondaryEnumerator(ReconConfig(vhost_discovery=True))
-    r = await enum._enumerate_vhosts(_result(), r.services, fetch_fn=fake_fetch)
+    r = await enum._enumerate_vhosts(base, base.services, fetch_fn=fake_fetch)
     vhosts = r.extended["vhosts"]["vhosts"]
     assert any(v["vhost"] == "admin.example.com" for v in vhosts)
 
@@ -120,8 +121,9 @@ async def test_vhost_discovery_detects_diverging_response() -> None:
 async def test_waf_fingerprint_detects_cloudflare() -> None:
     def fake_fetch(url, **kw):
         return 200, {"server": "cloudflare", "cf-ray": "abc123", "content-type": "text/html"}, "<html>"
+    base = _result()
     enum = SecondaryEnumerator(ReconConfig(waf_fingerprint=True))
-    r = await enum._enumerate_waf(_result(), r.services, fetch_fn=fake_fetch)
+    r = await enum._enumerate_waf(base, base.services, fetch_fn=fake_fetch)
     detected = r.extended["waf"]["detected"]
     assert any(d["waf"] == "Cloudflare" for d in detected)
 
@@ -247,7 +249,9 @@ async def test_dns_zone_transfer_refused_is_safe() -> None:
 @pytest.mark.asyncio
 async def test_enumerate_host_runs_extended_when_flagged(monkeypatch) -> None:
     """With subdomain_enum ON, enumerate_host dispatches the subdomain
-    coroutine (mocked crt.sh). With it OFF, no subdomain key appears."""
+    coroutine (mocked crt.sh). With it OFF, no subdomain key appears.
+    Sibling heavy coroutines (http/osint/spider) are stubbed to no-ops so the
+    test never touches live subprocess/DNS."""
     crt_body = json.dumps([{"name_value": "a.example.com"}])
 
     def fake_fetch(url, **kw):
@@ -255,12 +259,18 @@ async def test_enumerate_host_runs_extended_when_flagged(monkeypatch) -> None:
             return 200, {}, crt_body
         return 0, {}, ""
 
-    # Patch the stdlib fetch used when no fetch_fn is passed (dispatch path).
+    async def _noop(self, result, services=None, **kw):
+        return result
+
     monkeypatch.setattr(SecondaryEnumerator, "_stdlib_fetch", staticmethod(fake_fetch))
+    # Stub the heavy sibling enumerators so only the gated subdomain coroutine runs.
+    for sib in ("_enumerate_http", "_enumerate_osint", "_enumerate_web_spider"):
+        monkeypatch.setattr(SecondaryEnumerator, sib, _noop, raising=False)
 
     cfg_on = ReconConfig(extended_enumerators=True, subdomain_enum=True)
     r_on = await SecondaryEnumerator(cfg_on).enumerate_host(_result())
     assert "subdomains" in r_on.extended
+    assert "a.example.com" in r_on.extended["subdomains"]["subdomains"]
 
     cfg_off = ReconConfig(extended_enumerators=True, subdomain_enum=False)
     r_off = await SecondaryEnumerator(cfg_off).enumerate_host(_result())

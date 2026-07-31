@@ -396,6 +396,135 @@ class ListenerHelper:
         time.sleep(0.2)
         return proc.poll() is None, proc.pid
 
+    # ── Phase 3: TLS / DNS / HTTPS-beacon / SOCKS-pivot listeners ──
+    # Each is a new ``listener_type`` branch for ``start_listener``. They probe
+    # the optional Kali binary via ``shutil.which`` and fall back to a stdlib
+    # tool (socat/openssl) or a clean ``False`` when nothing is available —
+    # never raise. ``socks_pivot`` takes an upstream host the caller must have
+    # allowlist-gated at the MCP tool layer (the allowlist is the pivot lock).
+
+    def _tls_cert(self, port: int) -> tuple[Path, Path] | None:
+        """Generate (or reuse) a self-signed cert+key for a TLS listener."""
+        cert = self.workspace / f"tls_listener_{port}.crt"
+        key = self.workspace / f"tls_listener_{port}.key"
+        if cert.exists() and key.exists():
+            return cert, key
+        openssl = shutil.which("openssl")
+        if not openssl:
+            return None
+        try:
+            proc = subprocess.run(
+                [openssl, "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                 "-keyout", str(key), "-out", str(cert), "-days", "365",
+                 "-subj", "/CN=localhost"],
+                capture_output=True, text=True, timeout=15,
+            )
+            if proc.returncode != 0 or not cert.exists() or not key.exists():
+                return None
+        except Exception:
+            return None
+        return cert, key
+
+    def start_tls(self, name: str, port: int, protocol: str = "tcp") -> tuple[bool, int | None]:
+        """Start a TLS-wrapped listener (openssl s_server, socat fallback)."""
+        try:
+            _validate_name(name)
+        except ValueError:
+            return False, None
+        ck = self._tls_cert(port)
+        if ck is None:
+            return False, None
+        cert, _key = ck
+        log_path = self.workspace / f"listener_{name}.log"
+        with open(log_path, "w", encoding="utf-8") as log_f:
+            if shutil.which("openssl"):
+                argv = ["openssl", "s_server", "-accept", str(port), "-cert", str(cert), "-key", str(ck[1]), "-naccept", "1"]
+            elif shutil.which("socat"):
+                argv = ["socat", f"OPENSSL-LISTEN:{port},cert={cert},key={ck[1]},fork", "STDIO"]
+            else:
+                return False, None
+            proc = subprocess.Popen(
+                argv, stdout=log_f, stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL, start_new_session=True,
+            )
+        with self._lock:
+            self._listeners[name] = proc
+        time.sleep(0.2)
+        return proc.poll() is None, proc.pid
+
+    def start_dns(self, name: str, port: int = 53) -> tuple[bool, int | None]:
+        """Start a DNS C2 listener (dnscat2). Clean fail when not installed."""
+        try:
+            _validate_name(name)
+        except ValueError:
+            return False, None
+        if not shutil.which("dnscat2"):
+            return False, None
+        log_path = self.workspace / f"listener_{name}.log"
+        with open(log_path, "w", encoding="utf-8") as log_f:
+            proc = subprocess.Popen(
+                ["dnscat2", "--listen", str(port)],
+                stdout=log_f, stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL, start_new_session=True,
+            )
+        with self._lock:
+            self._listeners[name] = proc
+        time.sleep(0.2)
+        return proc.poll() is None, proc.pid
+
+    def start_https_beacon(self, name: str, port: int) -> tuple[bool, int | None]:
+        """Start a TLS HTTP beacon listener (socat OPENSSL-LISTEN -> cat)."""
+        try:
+            _validate_name(name)
+        except ValueError:
+            return False, None
+        if not shutil.which("socat"):
+            return False, None
+        ck = self._tls_cert(port)
+        if ck is None:
+            return False, None
+        cert, key = ck
+        log_path = self.workspace / f"listener_{name}.log"
+        with open(log_path, "w", encoding="utf-8") as log_f:
+            proc = subprocess.Popen(
+                ["socat", f"OPENSSL-LISTEN:{port},cert={cert},key={key},fork", "SYSTEM:cat"],
+                stdout=log_f, stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL, start_new_session=True,
+            )
+        with self._lock:
+            self._listeners[name] = proc
+        time.sleep(0.2)
+        return proc.poll() is None, proc.pid
+
+    def start_socks_pivot(self, name: str, port: int, upstream_host: str = "", upstream_port: int = 0) -> tuple[bool, int | None]:
+        """Start a SOCKS/pivot listener (chisel/ligolo-ng if present, else
+        socat TCP-LISTEN:<port>,fork TCP:<upstream>). The caller MUST allowlist-
+        gate ``upstream_host`` (the allowlist is the pivot lock)."""
+        try:
+            _validate_name(name)
+        except ValueError:
+            return False, None
+        log_path = self.workspace / f"listener_{name}.log"
+        argv: list[str] | None = None
+        if shutil.which("chisel"):
+            argv = ["chisel", "server", "--reverse", "--port", str(port)]
+        elif shutil.which("ligolo-ng") or shutil.which("ligolo"):
+            bin_ = shutil.which("ligolo-ng") or shutil.which("ligolo")
+            argv = [bin_, "selfserve", "--bind", f"0.0.0.0:{port}"]
+        elif shutil.which("socat") and upstream_host and upstream_port:
+            argv = ["socat", f"TCP-LISTEN:{port},fork", f"TCP:{upstream_host}:{upstream_port}"]
+        else:
+            return False, None
+        with open(log_path, "w", encoding="utf-8") as log_f:
+            proc = subprocess.Popen(
+                argv, stdout=log_f, stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL, start_new_session=True,
+            )
+        with self._lock:
+            self._listeners[name] = proc
+        time.sleep(0.2)
+        return proc.poll() is None, proc.pid
+
     def stop(self, name: str) -> bool:
         """Stop a listener."""
         with self._lock:
@@ -783,7 +912,7 @@ class PersistentSessionManager:
 
     # ── Listeners ──
 
-    def start_listener(self, name: str, port: int, listener_type: str = "netcat", protocol: str = "tcp", directory: str = "") -> dict[str, Any]:
+    def start_listener(self, name: str, port: int, listener_type: str = "netcat", protocol: str = "tcp", directory: str = "", upstream_host: str = "", upstream_port: int = 0) -> dict[str, Any]:
         """Start a network listener."""
         try:
             _validate_name(name)
@@ -806,8 +935,16 @@ class PersistentSessionManager:
                     ),
                 }
             success, pid = self._listeners.start_http_server(name, port, directory)
+        elif listener_type == "tls":
+            success, pid = self._listeners.start_tls(name, port, protocol)
+        elif listener_type == "dns":
+            success, pid = self._listeners.start_dns(name, port)
+        elif listener_type == "https-beacon":
+            success, pid = self._listeners.start_https_beacon(name, port)
+        elif listener_type == "socks_pivot":
+            success, pid = self._listeners.start_socks_pivot(name, port, upstream_host, upstream_port)
         else:
-            return {"success": False, "error": f"Unknown listener_type: {listener_type}. Use: netcat, socat, http"}
+            return {"success": False, "error": f"Unknown listener_type: {listener_type}. Use: netcat, socat, http, tls, dns, https-beacon, socks_pivot"}
 
         if not success:
             return {"success": False, "error": f"Failed to start {listener_type} listener on port {port}."}

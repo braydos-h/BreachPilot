@@ -19,6 +19,75 @@
   into `AutonomousOrchestrator` (process-global UA) and per-action in
   `AttackModuleExecutor.execute`.
 
+- **AD/Kerberos post-exploit suite** — new opt-in `exploit.ad_kerberos` config
+  block (every key default `false` except `smb_signing_check`, which is
+  detection-only and defaults `true`) gating a new `tools/mcp_tools/ad.py`
+  MCP tool suite: `asrep_roast`, `pass_the_hash`, `adcs_enum`,
+  `bloodhound_collect`, `responder_relay`, `smb_signing_check`,
+  `golden_ticket`. Each tool is `@require_allowlist()` + `validate_ipv4` +
+  `check_targets_allowlist` for secondary IPs (DC, relay targets, callback
+  hosts); the allowlist is the single lock. New `tools/attack_modules/
+  modules/ad.py` modules (`ADCSEnum`, `BloodHoundCollect`, `ResponderRelay`,
+  `GoldenTicket`, `SMBSigningCheck` — detection-only) and upgrades to the
+  existing `ASREPRoast` / `SMBRelay` / `PassTheHash` / `DumpHashes` /
+  `DCSyncAttack` modules to executable `script_generated` status. Wired via
+  `register_ad_tools` in `mcp_exploit_server.py`.
+
+- **Recon & vuln-intel depth** — seven new gated `SecondaryEnumerator`
+  coroutines in `tools/recon_pipeline.py` (subdomain crt.sh expansion, vhost
+  Host-header rotation, WAF fingerprint, ASN/RDAP whois, cloud IMDSv1/v2
+  metadata probe, SNMP enum, DNS zone transfer), each behind a new
+  `ReconConfig` flag (default `false`) read from `config.recon`. Shodan OSINT
+  is now wired to `config.recon.shodan_api_key` / `SHODAN_API_KEY` (previously
+  hardcoded to `""`). New EPSS + CISA KEV vuln-intel enrichment in
+  `tools/cve_lookup.py` (`EPSSClient`, `KEVCatalog` with 24h on-disk TTL,
+  `NVDClient.search_by_cpe`, `CVEEntry.epss`/`epss_percentile`/`kev`) gated by
+  `cve_lookup.epss.enabled` / `cve_lookup.kev.enabled` (default `false`); off
+  leaves NVD output unchanged. Recon stays read-only/propose-only.
+
+- **MSF & C2 maturity** — new `MSF_RECIPES` catalog + `MetasploitBridge.
+  run_recipe` / `start_handler` / `stop_handler` in `tools/metasploit_bridge.
+  py`; new MCP tools `msf_run_recipe`, `msf_start_handler`, `msf_stop_handler`,
+  `msf_post_hashdump`, `msf_post_getsystem`, `msf_post_portfwd`,
+  `msf_post_route` in `tools/mcp_tools/metasploit.py` (all `@audit_tool` with
+  in-body allowlist gating on `target_ip`, `lhost`, `portfwd remote`, `route
+  subnet`). New `LocalExploitSuggester` advisory attack module + conditional
+  auto-dispatch in `AutonomousOrchestrator._phase_privilege_escalation` when
+  `exploit.msf.auto_local_exploit_suggester` is on and access is achieved.
+  Extended C2 listener types in `tools/persistent_session_manager.py`
+  (`tls` / `dns` / `https-beacon` / `socks_pivot` with `openssl`/`socat`/
+  `chisel`/`ligolo-ng`/`dnscat2` probing and stdlib fallbacks, clean-fail when
+  absent) gated by `exploit.listeners.{tls,dns,https_beacon,socks_pivot}`
+  (default `false`); the `socks_pivot` upstream is allowlist-gated (the
+  allowlist is the pivot lock). Legacy netcat/socat/http listeners stay
+  ungated. New `exploit.msf` (`recipes_enabled`, `auto_local_exploit_
+  suggester`) and `exploit.listeners` config blocks.
+
+### Fixed
+
+- **DCSync now runs** — `tools/mcp_tools/credentials.py` `dump_credentials`
+  accepted a `dcsync` method name but had no dispatch branch, so DCSync
+  silently fell through. Added the `dcsync` branch (`impacket-secretsdump
+  -just-dc`), `target_user` parameter, and `dcsync` to `allowed_methods`.
+- **Four phantom orchestrator modules** — `tools/autonomous_orchestrator.py`
+  referenced `TokenImpersonation` / `ServiceMisconfiguration` /
+  `LateralMovement` / `ValidateFinding` that were not in
+  `registry._MODULE_CLASSES`, so every privesc/lateral/validation task hit
+  `get_module` → `None` → FAILED. Implemented all four as real `AttackModule`s
+  in `tools/attack_modules/modules/orchestrator_phases.py` and registered them.
+- **Broken swarm recon path** — `tools/swarm/agents/recon_agent.py` passed
+  non-existent `ReconConfig` fields, a 2nd positional to `ReconPipeline.
+  __init__`, and called a non-existent `pipeline.run()`. Fixed to call
+  `ReconPipeline(ReconConfig(...))` + `await pipeline.recon_host(target)`.
+- **Shodan OSINT never ran** — `tools/recon_pipeline.py` hardcoded
+  `shodan_key=""`. Wired to `ReconConfig.shodan_api_key` from
+  `config.recon.shodan_api_key` / `SHODAN_API_KEY`.
+- **SSH persistence planted a placeholder key** — `tools/attack_modules/
+  modules/persistence.py` wrote a non-functional `placeholder_key` into
+  `authorized_keys` but still printed `PERSISTENCE_INSTALLED:`. Replaced with
+  a real `ssh-keygen -t ed25519` key generated on the operator box and planted
+  as a real pubkey.
+
 ### Removed
 
 - Removed the unused Textual dashboard, its `--tui` / `python -m tui` launch

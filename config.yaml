@@ -111,6 +111,22 @@ exploit:
     responder_relay: false
     golden_ticket: false
     smb_signing_check: true   # detection-only
+  # Phase 3: MSF recipe dispatch + handler orchestration. Opt-in. When
+  # recipes_enabled is false, msf_run_recipe returns BLOCKED before dispatch.
+  # auto_local_exploit_suggester adds an advisory LocalExploitSuggester task to
+  # the orchestrator privesc phase (suggestion only -- Path B has no MSF
+  # session id, so it never fabricates one).
+  msf:
+    recipes_enabled: false
+    auto_local_exploit_suggester: false
+  # Phase 3: extended C2 listener types for start_listener. Opt-in (default
+  # OFF); legacy netcat/socat/http types stay ungated. socks_pivot upstream is
+  # allowlist-gated at the tool layer (pivot lock).
+  listeners:
+    tls: false
+    dns: false
+    https_beacon: false
+    socks_pivot: false
 stealth:
   rotate_ua: false
   dns_over_https: false

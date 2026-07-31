@@ -1590,6 +1590,9 @@ if __name__ == "__main__":
                 # AggressionLevel.STEALTH pacing load-bearing. Absent -> {} ->
                 # disabled profile -> pacing no-op (legacy behavior).
                 "opsec": (config or {}).get("opsec", {}),
+                # Phase 3: pass the MSF auto-local_exploit_suggester flag through
+                # so the privesc phase can dispatch the advisory follow-up.
+                "msf_auto_les": (config or {}).get("exploit", {}).get("msf", {}).get("auto_local_exploit_suggester", False),
                 "target": target_ip,
                 "goal": goal,
                 "aggression": agg.value,
@@ -1801,6 +1804,8 @@ if __name__ == "__main__":
                 # AggressionLevel.STEALTH pacing load-bearing. Absent -> {} ->
                 # disabled profile -> pacing no-op (legacy behavior).
                 "opsec": (config or {}).get("opsec", {}),
+                # Phase 3: pass the MSF auto-local_exploit_suggester flag through.
+                "msf_auto_les": (config or {}).get("exploit", {}).get("msf", {}).get("auto_local_exploit_suggester", False),
                 "target": target_ip,
                 "goal": state_data.get("goal", "initial_access"),
                 "max_cycles": 1,

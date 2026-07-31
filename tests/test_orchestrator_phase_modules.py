@@ -10,6 +10,8 @@ expected shape, and that ``get_module`` resolves them (the regression).
 """
 from __future__ import annotations
 
+import pytest
+
 from tools.attack_modules.base import ModuleContext
 from tools.attack_modules import registry
 from tools.attack_modules.modules.orchestrator_phases import (
@@ -92,3 +94,106 @@ def test_phase_only_modules_not_auto_selected() -> None:
     names = {m.name for _, m in scored}
     assert "LateralMovement" not in names
     assert "ValidateFinding" not in names
+
+# ── Phase 3: LocalExploitSuggester advisory module + orchestrator wiring ──────
+
+from tools.attack_modules.modules.orchestrator_phases import LocalExploitSuggester
+
+
+def test_local_exploit_suggester_registered() -> None:
+    assert registry.get_module("LocalExploitSuggester") is not None
+    assert "LocalExploitSuggester" in {cls.name for cls in registry._MODULE_CLASSES}
+
+
+def test_local_exploit_suggester_is_advisory_info() -> None:
+    mod = LocalExploitSuggester()
+    res = mod.run(_ctx())
+    assert res["status"] == "info"
+    assert res["extra"].get("phase_only") is True
+    assert res["extra"].get("requires_session") is True
+    # It SUGGESTS the MSF recipe but must NOT fabricate a session id.
+    assert "local_exploit_suggester" in res["suggested_command"]
+    assert "<id" in res["suggested_command"]  # placeholder, not a real session id
+    assert mod.target_services == []
+
+
+def test_local_exploit_suggester_not_auto_selected() -> None:
+    scored = registry.find_modules(_ctx())
+    assert "LocalExploitSuggester" not in {m.name for _, m in scored}
+
+
+def _orchestrator(mission_config, tmp_path):
+    from tools.autonomous_orchestrator import AutonomousOrchestrator
+    return AutonomousOrchestrator(mission_config, tmp_path)
+
+
+def test_orchestrator_auto_les_flag_default_off(tmp_path) -> None:
+    o = _orchestrator({"target": "10.0.0.1"}, tmp_path)
+    assert o._auto_local_exploit_suggester is False
+
+
+def test_orchestrator_auto_les_flag_from_msf_auto_les(tmp_path) -> None:
+    o = _orchestrator({"target": "10.0.0.1", "msf_auto_les": True}, tmp_path)
+    assert o._auto_local_exploit_suggester is True
+
+
+def test_orchestrator_auto_les_flag_from_nested_msf_dict(tmp_path) -> None:
+    o = _orchestrator({"target": "10.0.0.1", "msf": {"auto_local_exploit_suggester": True}}, tmp_path)
+    assert o._auto_local_exploit_suggester is True
+
+
+@pytest.mark.asyncio
+async def test_privesc_phase_appends_les_when_access_achieved(tmp_path, monkeypatch) -> None:
+    """When auto_les is on AND access_achieved, the privesc phase dispatches a
+    LocalExploitSuggester info-task after the privesc batch. When access is NOT
+    achieved, no LES task is dispatched."""
+    from tools.autonomous_orchestrator import AttackState, AggressionLevel
+
+    o = _orchestrator({"target": "10.0.0.1", "msf_auto_les": True}, tmp_path)
+    state = AttackState(target="10.0.0.1", aggression=AggressionLevel.NORMAL)
+    state.recon_result = None  # triggers the else-branch privesc module list
+
+    executed: list[str] = []
+
+    async def fake_execute(self, task, state):
+        executed.append(task.module_name)
+        task.status = __import__("tools.autonomous_orchestrator", fromlist=["TaskStatus"]).TaskStatus.COMPLETED
+        return {"success": True}
+
+    monkeypatch.setattr(
+        "tools.autonomous_orchestrator.AttackModuleExecutor.execute", fake_execute
+    )
+
+    # Access NOT achieved -> no LES task.
+    state.access_achieved = False
+    executed.clear()
+    await o._phase_privilege_escalation(state)
+    assert "LocalExploitSuggester" not in executed
+
+    # Access achieved -> LES task dispatched after the privesc batch.
+    state.access_achieved = True
+    executed.clear()
+    await o._phase_privilege_escalation(state)
+    assert "LocalExploitSuggester" in executed
+
+
+@pytest.mark.asyncio
+async def test_privesc_phase_no_les_when_flag_off(tmp_path, monkeypatch) -> None:
+    from tools.autonomous_orchestrator import AttackState, AggressionLevel
+    from tools.autonomous_orchestrator import TaskStatus
+
+    o = _orchestrator({"target": "10.0.0.1"}, tmp_path)  # auto_les off
+    assert o._auto_local_exploit_suggester is False
+    state = AttackState(target="10.0.0.1", aggression=AggressionLevel.NORMAL)
+    state.access_achieved = True
+    state.recon_result = None
+
+    executed: list[str] = []
+    async def fake_execute(self, task, state):
+        executed.append(task.module_name)
+        task.status = TaskStatus.COMPLETED
+        return {"success": True}
+    monkeypatch.setattr("tools.autonomous_orchestrator.AttackModuleExecutor.execute", fake_execute)
+
+    await o._phase_privilege_escalation(state)
+    assert "LocalExploitSuggester" not in executed

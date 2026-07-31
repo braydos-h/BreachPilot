@@ -139,6 +139,26 @@ CONFIG_SCHEMA: dict[str, Any] = {
             "golden_ticket": False,
             "smb_signing_check": True,
         },
+        # Phase 3: MSF recipe dispatch + handler orchestration. Opt-in: when
+        # ``recipes_enabled`` is false the ``msf_run_recipe`` MCP tool returns
+        # BLOCKED before any dispatch. ``auto_local_exploit_suggester`` adds an
+        # advisory LocalExploitSuggester task to the orchestrator privesc phase
+        # (only surfaces the suggestion; Path B has no MSF session id, so it
+        # never fabricates one).
+        "msf": {
+            "recipes_enabled": False,
+            "auto_local_exploit_suggester": False,
+        },
+        # Phase 3: extended C2 listener types for ``start_listener``. Each is
+        # opt-in (default OFF); the legacy netcat/socat/http types stay ungated.
+        # ``socks_pivot`` upstream is allowlist-gated at the tool layer (pivot
+        # lock).
+        "listeners": {
+            "tls": False,
+            "dns": False,
+            "https_beacon": False,
+            "socks_pivot": False,
+        },
     },
     "stealth": {
         "rotate_ua": False,
