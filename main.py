@@ -355,6 +355,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--menu", action="store_true", help="Force interactive menu mode even with other args")
     # Swarm / reasoning / adaptive exploit flags
     parser.add_argument("--swarm", action="store_true", help="Enable multi-agent swarm mode")
+    parser.add_argument(
+        "--parallel-swarm", action="store_true",
+        help="Enable parallel sub-agents (route_parallel + spawn_subagent MCP tool). "
+             "Off by default; flips swarm.parallel_enabled to true. Recon-first: "
+             "recon + vuln-research parallelize; exploit/post_exploit stay sequential "
+             "unless swarm.exploit_parallel is also true.",
+    )
     parser.add_argument("--critic", action="store_true", help="Enable critic agent pre-approval (requires --swarm)")
     parser.add_argument("--reflection", action="store_true", help="Enable reflection agent (requires --swarm)")
     parser.add_argument("--adaptive-exploits", action="store_true", help="Enable adaptive exploit generation with mutation")
@@ -944,6 +951,22 @@ async def async_main(args: argparse.Namespace) -> int:
     permission_effective = str(_gate_exploit_cfg.get("permission", "read_only"))
     attack_mode_effective = mode == "attack"
     swarm_effective = bool(args.swarm or _gate_swarm_cfg.get("enabled", False))
+    # Phase 3/4: --parallel-swarm (or swarm.parallel_enabled in config) flips
+    # on the parallel sub-agent surface: route_parallel for batched same-phase
+    # dispatch AND the spawn_subagent MCP tool the main AI uses to delegate.
+    # Off by default (recon-first rollout). When enabled via the CLI flag, we
+    # also set it in the in-memory config so the MCP server subprocess (which
+    # reads config via env) and the swarm orchestrator both see it.
+    parallel_swarm_effective = bool(
+        getattr(args, "parallel_swarm", False) or _gate_swarm_cfg.get("parallel_enabled", False)
+    )
+    if parallel_swarm_effective:
+        # Mutate the in-memory config so downstream consumers (the MCP server
+        # subprocess env, the SwarmOrchestrator construction in agent_loop,
+        # and build_parallel_agents_briefing in the prompt) all see the flip.
+        _gate_swarm_cfg["parallel_enabled"] = True
+        config.setdefault("swarm", {}).setdefault("parallel_enabled", True)
+        _gate_swarm_cfg["parallel_enabled"] = True
     multi_model_effective = bool(getattr(args, "multi_model_consult", False))
     destructive_run = permission_effective == "full_access" and mode == "attack"
     if destructive_run:
@@ -953,6 +976,8 @@ async def async_main(args: argparse.Namespace) -> int:
     ui.status(f"  Permission:  {permission_effective}")
     ui.status(f"  Attack mode: {attack_mode_effective}")
     ui.status(f"  Swarm:       {swarm_effective}")
+    if swarm_effective or parallel_swarm_effective:
+        ui.status(f"  Parallel:    {parallel_swarm_effective}")
     ui.status(f"  Peer models: {multi_model_effective}")
     # Action budget: show the upper bound before the operator commits.
     try:
