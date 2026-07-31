@@ -108,6 +108,7 @@ Useful commands:
 | `python main.py --skills-list` | View the runtime-skill catalog. |
 | `python main.py --list-plugins` | List discovered plugins (name/version/capabilities/loaded) and exit. |
 | `python main.py --swarm --critic --reflection` | Enable specialist-agent coordination and review for a compatible run. |
+| `python main.py --parallel-swarm` | Enable parallel sub-agents: `route_parallel` runs same-phase recon/vuln batches concurrently, and the main AI gains `spawn_subagent`/`await_subagent`/`list_subagents` MCP tools to delegate work. Off by default (recon-first); `swarm.exploit_parallel: true` in `config.yaml` also parallelizes exploit/post_exploit. |
 | `python main.py --long-session --resume <RUN_OR_SESSION_ID>` | Run or resume a checkpointed session. |
 | `python main.py --eval --target <AUTHORIZED_LAB_IP>` | Run the eval/benchmark harness against a target and write `reports/eval/<run_id>/`. |
 | `python main.py --help` | Show the complete CLI reference. |
