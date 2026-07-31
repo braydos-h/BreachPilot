@@ -252,8 +252,8 @@ async def test_mcp_cred_store_add_encrypts_and_audits_redacted(monkeypatch, tmp_
 @pytest.mark.asyncio
 async def test_mcp_cred_store_add_rejects_bad_inputs(tmp_path):
     mcp = _make_server(tmp_path)
-    # bad target_ip -> ERROR (invalid IPv4)
-    assert "Invalid IPv4" in _text(await mcp.call_tool("cred_store_add", {
+    # bad target_ip -> ERROR (invalid target)
+    assert "Invalid" in _text(await mcp.call_tool("cred_store_add", {
         "target_ip": "999.0.0.50", "username": "u", "password": "p"}))
     # missing username
     assert "BLOCKED" in _text(await mcp.call_tool("cred_store_add", {

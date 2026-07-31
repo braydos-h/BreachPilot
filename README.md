@@ -90,6 +90,15 @@ For an authorized target, begin with recon and retain the confirmation gate:
 python main.py --target <AUTHORIZED_LAB_IP> --mode recon --recon-first
 ```
 
+You may also target a **domain** instead of an IP — the agent resolves it, carries
+both the domain and the resolved IP, and expands the attack surface via subdomain
+enumeration (each discovered subdomain is auto-authorized):
+
+```bash
+python main.py --target example.com --mode attack --goal initial_access
+python main.py --target example.com --mode recon --recon-first
+```
+
 Useful commands:
 
 | Command | Purpose |

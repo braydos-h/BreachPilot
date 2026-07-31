@@ -196,6 +196,7 @@ The exploit MCP server's tool implementations live in a structured subpackage, r
 | `workspace.py` | `write_python_file`, `run_python_file`, `read_workspace_file`, `list_workspace` — workspace file I/O (lab build: arbitrary absolute paths allowed) |
 | `sessions.py` | tmux/background-job + listener management (`start_tmux_session`, `send_to_session`, `read_session_output`, `kill_session`, `start_background_job`, `read_job_output`, `stop_background_job`, `start_listener`, `read_listener_output`, `stop_listener`, `list_sessions`, `list_processes`, `kill_process`) |
 | `research.py` | `search_exploit_db`, `search_web_exploit`, `fetch_webpage`, `deep_research`, `search_cve_intel` |
+| `domain.py` | `resolve_domain` (forward DNS), `enumerate_subdomains` (crt.sh + DNS bruteforce + optional subfinder/amass; auto-authorizes discovered hosts + flags dangling-CNAME takeover), `dns_recon` (AXFR/DNSSEC/SPF/DMARC/NS-version), `vhost_enum` (Host-header rotation), `domain_whois` — Phase 4 domain targeting |
 | `runtime_skills.py` | `list_runtime_skills`, `search_runtime_skills`, `load_runtime_skill`, `list_skill_references` (conditionally registered) |
 | `peer_models.py` | `consult_peer_models` (conditionally registered) — multi-model advisory consultation |
 
