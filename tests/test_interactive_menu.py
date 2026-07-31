@@ -26,6 +26,7 @@ def test_menu_module_imports():
 def test_banner_contains_app_name():
     """Banner should contain the app name."""
     from tools.interactive_menu import BANNER
+    assert "NetAttackAI" in BANNER
     assert "AI Bug Bounty" in BANNER
     assert "Research Agent" in BANNER
 

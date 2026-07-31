@@ -191,7 +191,7 @@ class AttackUi:
     def banner(self) -> None:
         print()
         print("=" * 60)
-        print(f"  {self._c('header')}AI Target Exploitation Engine{self._c('reset')}")
+        print(f"  {self._c('header')}NetAttackAI — AI Target Exploitation Engine{self._c('reset')}")
         print("  Autonomous penetration testing AI")
         print("=" * 60)
         print()
@@ -1037,19 +1037,27 @@ class AttackUi:
 
         # Build numbered list of compatible suggestions (AI-generated first, then presets)
         compatible = [sg for sg in suggestions if sg.compatible]
-        for i, sg in enumerate(compatible, 1):
-            rating_color = "green" if sg.success_rating >= 80 else ("yellow" if sg.success_rating >= 55 else "red")
-            ai_marker = "AI: " if getattr(sg, 'is_ai_generated', False) else ""
-            print(
-                f"  {self._c('blue')}{i}.{self._c('reset')} "
-                f"{ai_marker}{sg.name} "
-                f"[{self._c(rating_color)}{sg.success_rating}/100{self._c('reset')}] "
-                f"{self._c('gray')}{sg.exploit_likelihood}{self._c('reset')}"
-            )
-        print(f"  {self._c('blue')}c.{self._c('reset')} Custom goal (type your own)")
 
-        try:
-            choice = input("  > ").strip().lower()
+        while True:
+            for i, sg in enumerate(compatible, 1):
+                rating_color = "green" if sg.success_rating >= 80 else ("yellow" if sg.success_rating >= 55 else "red")
+                ai_marker = "AI: " if getattr(sg, 'is_ai_generated', False) else ""
+                print(
+                    f"  {self._c('blue')}{i}.{self._c('reset')} "
+                    f"{ai_marker}{sg.name} "
+                    f"[{self._c(rating_color)}{sg.success_rating}/100{self._c('reset')}] "
+                    f"{self._c('gray')}{sg.exploit_likelihood}{self._c('reset')}"
+                )
+            print(f"  {self._c('blue')}c.{self._c('reset')} Custom goal (type your own)")
+
+            try:
+                choice = input("  > ").strip().lower()
+            except EOFError:
+                # Default to first compatible suggestion
+                if compatible:
+                    return (compatible[0].name, "")
+                return ("recon_only", "")
+
             if choice == "c":
                 custom = self.ask_custom_goal()
                 return ("custom", custom)
@@ -1062,12 +1070,6 @@ class AttackUi:
                 if choice == sg.name.lower():
                     return (sg.name, "")
             print(f"  {self._c('red')}Invalid choice. Please try again.{self._c('reset')}")
-            return self.ask_goal_from_suggestions(suggestions)
-        except EOFError:
-            # Default to first compatible suggestion
-            if compatible:
-                return (compatible[0].name, "")
-            return ("recon_only", "")
 
     async def ask_power_ups(self, args: Any) -> None:
         """One multi-select for the boolean "power-up" flags.

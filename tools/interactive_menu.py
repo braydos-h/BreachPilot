@@ -1,4 +1,4 @@
-"""Interactive menu system for the AI Bug Bounty Research Agent.
+"""Interactive menu system for NetAttackAI.
 
 Provides a polished arrow-key-driven menu when `python main.py` is run
 with no arguments. Uses questionary for rich terminal interaction.
@@ -29,25 +29,6 @@ except ImportError:
     Style = None  # type: ignore
 
 
-# ── Banner ─────────────────────────────────────────────────────────────────
-
-BANNER = r"""
-╔══════════════════════════════════════════════════════════════╗
-║                                                              ║
-║     █████╗ ██╗    ██████╗ ██╗   ██╗ ██████╗                 ║
-║    ██╔══██╗██║    ██╔══██╗██║   ██║██╔════╝                 ║
-║    ███████║██║    ██████╔╝██║   ██║██║  ███╗                ║
-║    ██╔══██║██║    ██╔══██╗██║   ██║██║   ██║                ║
-║    ██║  ██║██║    ██████╔╝╚██████╔╝╚██████╔╝                ║
-║    ╚═╝  ╚═╝╚═╝    ╚═════╝  ╚═════╝  ╚═════╝                 ║
-║                                                              ║
-║       AI Bug Bounty Research Agent v0.49.2                   ║
-║       Autonomous Penetration Testing & Research              ║
-║                                                              ║
-╚══════════════════════════════════════════════════════════════╝
-"""
-
-
 # ── Styling ────────────────────────────────────────────────────────────────
 
 def _get_style() -> Style | None:
@@ -68,32 +49,6 @@ def _get_style() -> Style | None:
 
 
 # ── Main Menu ──────────────────────────────────────────────────────────────
-
-def _show_banner() -> None:
-    """Display the ASCII art banner."""
-    print(BANNER)
-
-
-def _main_menu() -> str | None:
-    """Display the main menu and return the selected action."""
-    if not _HAS_QUESTIONARY:
-        return _fallback_main_menu()
-
-    return questionary.select(
-        "What would you like to do?",
-        choices=[
-            Choice(title="🔍  Recon & Suggest Goals", value="recon_first"),
-            Choice(title="🚀  Start New Session", value="new_session"),
-            Choice(title="📋  Manage Missions", value="missions"),
-            Choice(title="📝  View Reports", value="reports"),
-            Choice(title="⚙️   Settings", value="settings"),
-            Choice(title="❓  Help", value="help"),
-            Choice(title="👋  Exit", value="exit"),
-        ],
-        style=_get_style(),
-        use_indicator=True,
-    ).unsafe_ask()
-
 
 def _fallback_main_menu() -> str | None:
     """Simple numbered menu fallback when questionary is unavailable."""
@@ -122,85 +77,6 @@ def _fallback_main_menu() -> str | None:
 
 
 # ── Sub-menus ──────────────────────────────────────────────────────────────
-
-def _start_new_session() -> int:
-    """Launch the interactive attack wizard and run a session."""
-    import asyncio
-    import argparse
-    from pathlib import Path
-
-    # Build minimal args for the wizard
-    args = argparse.Namespace(
-        target="",
-        mode="",
-        goal="",
-        custom_goal="",
-        config=Path("config.yaml"),
-        model=None,
-        model_strategy="default",
-        mcp_transport="stdio",
-        http_port=None,
-        reports_dir=Path("reports"),
-        plain=False,
-        stealth=False,
-        rotate_ua=False,
-        doh=False,
-        menu=False,
-        observer_mode=None,
-        adaptive_exploits=False,
-        swarm=False,
-        critic=False,
-        reflection=False,
-        recon_first=None,
-    )
-
-    # Run the async main with interactive prompts
-    from main import async_main
-    try:
-        return asyncio.run(async_main(args))
-    except KeyboardInterrupt:
-        print("\nSession aborted.")
-        return 130
-
-
-def _recon_first_session() -> int:
-    """Launch recon-first mode: scan target, suggest rated goals, then attack."""
-    import asyncio
-    import argparse
-    from pathlib import Path
-
-    # Build args with recon_first=True
-    args = argparse.Namespace(
-        target="",
-        mode="",
-        goal="",
-        custom_goal="",
-        config=Path("config.yaml"),
-        model=None,
-        model_strategy="default",
-        mcp_transport="stdio",
-        http_port=None,
-        reports_dir=Path("reports"),
-        plain=False,
-        stealth=False,
-        rotate_ua=False,
-        doh=False,
-        menu=False,
-        observer_mode=None,
-        adaptive_exploits=False,
-        swarm=False,
-        critic=False,
-        reflection=False,
-        recon_first=True,
-    )
-
-    from main import async_main
-    try:
-        return asyncio.run(async_main(args))
-    except KeyboardInterrupt:
-        print("\nSession aborted.")
-        return 130
-
 
 def _manage_missions() -> None:
     """Mission management submenu — list, create, delete missions."""
@@ -634,55 +510,12 @@ def _create_default_config(path: Path) -> None:
     )
 
 
-def _show_help() -> None:
-    """Display quick reference help."""
-    help_text = r"""
-╔══════════════════════════════════════════════════════════════╗
-║                     QUICK REFERENCE                           ║
-╠══════════════════════════════════════════════════════════════╣
-║                                                              ║
-║  INTERACTIVE MODE (no arguments)                             ║
-║    python main.py                                            ║
-║                                                              ║
-║  DIRECT ATTACK (power users)                                 ║
-║    python main.py --target 10.0.0.50 --mode attack           ║
-║    python main.py --target 10.0.0.50 --mode recon            ║
-║                                                              ║
-║  STEALTH MODE                                                ║
-║    python main.py --target 10.0.0.50 --mode attack           ║
-║                    --stealth --rotate-ua --doh               ║
-║                                                              ║
-║  RESEARCH CLI                                                ║
-║    python cli.py init-mission --config mission.yaml          ║
-║    python cli.py next-task                                   ║
-║    python cli.py list-findings                               ║
-║    python cli.py generate-report F-00001                     ║
-║    python cli.py status                                      ║
-║                                                              ║
-║  CONFIGURATION                                               ║
-║    Edit config.yaml to set:                                  ║
-║    - Ollama host & model registry                            ║
-║    - MCP transport (stdio/http)                              ║
-║    - Exploit limits & workspace                              ║
-║    - Stealth defaults                                        ║
-║                                                              ║
-║  SAFETY                                                      ║
-║    - Only targets you OWN or are AUTHORIZED to test          ║
-║    - Recon mode does NOT exploit, only gathers intel         ║
-║    - Safety review runs automatically after recon            ║
-║    - Scope gate enforces allow/deny rules                    ║
-║                                                              ║
-╚══════════════════════════════════════════════════════════════╝
-"""
-    print(help_text)
-
-
 # ── Main entry point ───────────────────────────────────────────────────────
 
 BANNER = (
     "\n"
     "============================================================\n"
-    "  AI Bug Bounty Research Agent\n"
+    "  NetAttackAI — AI Bug Bounty Research Agent\n"
     "  Authorized reconnaissance, research, evidence, reporting\n"
     "============================================================\n"
 )
@@ -693,7 +526,7 @@ def _show_banner() -> None:
     print(
         "\n"
         "============================================================\n"
-        "  AI Bug Bounty Research Agent\n"
+        "  NetAttackAI — AI Bug Bounty Research Agent\n"
         "  Authorized reconnaissance, research, evidence, reporting\n"
         "============================================================\n"
     )
@@ -756,25 +589,43 @@ def _show_help() -> None:
     print(
         """
 ============================================================
-  QUICK REFERENCE
+  NetAttackAI — QUICK REFERENCE
 ============================================================
 
-  INTERACTIVE MODE
+  INTERACTIVE MODE (no arguments)
     python main.py
 
   DIRECT ATTACK
     python main.py --target 10.0.0.50 --mode recon
     python main.py --target 10.0.0.50 --mode attack
+    python main.py --target 10.0.0.50 --mode attack --goal backdoor
+    python main.py --target 10.0.0.50 --mode attack --swarm --critic --reflection
+
+  RECON-FIRST (scan, then suggest rated goals)
+    python main.py --target 10.0.0.50 --recon-first
+
+  COMMON FLAGS
+    --mode {recon,attack}        recon = intel only, attack = full path
+    --goal NAME                  preset goal (backdoor, initial_access, ...)
+    --custom-goal TEXT           custom goal description
+    --model ALIAS                glm / kimi / deepseek / deepseek_flash / minimax
+    --long-session               raise budgets for multi-hour runs
+    --ultrathink                 deep reasoning + frequent reflection
+    --adaptive-exploits          mutate exploits on failure
+    --resume RUN_ID              resume a prior run
+    --skills {on,off,hints,lookup}
+    --yes                        skip the ready-to-begin gate
+    --json / --quiet / --plain   output control
+
+  SUPPORT
+    python main.py --doctor      environment + config self-check
+    python main.py --self-test   safe localhost smoke test
 
   SAFETY
     - Only scan targets you own or are authorized to test.
     - Recon mode gathers intelligence only.
-    - Attack mode uses the exploit policy and confirmation gate.
+    - Attack mode uses the exploit policy and a confirmation gate.
     - Reports and run artifacts are written under reports/.
-
-  SUPPORT
-    python main.py --doctor
-    python main.py --self-test
 """
     )
 
