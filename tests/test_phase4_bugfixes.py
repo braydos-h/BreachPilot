@@ -27,6 +27,8 @@ import re
 import subprocess
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -179,6 +181,153 @@ async def test_execute_task_batch_no_deadlock_with_many_retryable(tmp_path: Path
 
     # max_retries=1 -> 1 initial + 1 retry = 2 executions per task.
     assert stub.calls == 10
+
+
+# ── Phase 3 policy: pivot-depth 0 = single-IP lock ─────────────────────────
+
+
+# ── Tier 1.2: orchestrator subdomain-expansion wiring ──────────────────────
+# Regression: get_state() never set original_target/resolved_ip on the
+# AttackState, so the expansion branch at _phase_reconnaissance:1338 was
+# unreachable. Now run_autonomous_campaign threads them through → get_state.
+# These tests confirm a domain campaign actually discovers subdomains on
+# Path B, and that to_dict/from_dict round-trips the 3 domain fields.
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_domain_campaign_runs_subdomain_expansion(tmp_path: Path, monkeypatch):
+    """A domain-target campaign populates state.discovered_subdomains."""
+    import json as _json
+    from tools.autonomous_orchestrator import AutonomousOrchestrator, AttackPhase
+
+    orch = AutonomousOrchestrator(
+        mission_config={"max_cycles": 1, "max_pivot_depth": 0},
+        workspace_root=tmp_path,
+    )
+
+    # Stub recon: return a minimal HostReconResult with one open port.
+    class _FakeRecon:
+        async def recon_host(self, target):
+            class _R:
+                open_ports = [80]
+                os_family = "linux"
+                services = []
+                def to_dict(self):
+                    return {"open_ports": [80], "os_family": "linux", "services": []}
+            return _R()
+    orch._recon = _FakeRecon()  # type: ignore[attr-defined]
+
+    # Stub the executor so no attack modules run (we only care about recon).
+    class _NoopExecutor:
+        async def execute(self, task, state):
+            return {"success": False, "blocked": False, "error": "noop"}
+    orch._executor = _NoopExecutor()  # type: ignore[attr-defined]
+
+    # Mock crt.sh urlopen to return two subdomains.
+    fake_crt = _json.dumps([
+        {"name_value": "www.example.com"},
+        {"name_value": "api.example.com"},
+    ]).encode()
+    fake_resp = MagicMock()
+    fake_resp.read.return_value = fake_crt
+    fake_resp.__enter__ = lambda self: self
+    fake_resp.__exit__ = lambda self, *a: None
+    import urllib.request as _urlreq
+    monkeypatch.setattr(_urlreq, "urlopen", lambda *a, **k: fake_resp)
+
+    # Mock resolve_target_to_ip for the discovered subdomains.
+    monkeypatch.setattr(
+        "tools.validation_utils.resolve_target_to_ip",
+        lambda h: {"www.example.com": "1.1.1.1", "api.example.com": "2.2.2.2"}.get(h),
+    )
+    # is_fqdn must pass for "example.com".
+    monkeypatch.setattr("tools.validation_utils.is_fqdn", lambda h: h == "example.com")
+    # add_discovered_target hits EXPLOIT_DISCOVERED_TARGETS env; safe to let it run.
+
+    # Run the campaign with domain-targeting context threaded through.
+    result = await orch.run_autonomous_campaign(
+        ["93.184.216.34"],
+        original_target="example.com",
+        resolved_ip="93.184.216.34",
+    )
+
+    state = orch.get_state("93.184.216.34")
+    assert state.original_target == "example.com"
+    assert state.resolved_ip == "93.184.216.34"
+    # The expansion branch should have found 2 subdomains.
+    assert len(state.discovered_subdomains) == 2, (
+        f"expected 2 discovered subdomains, got {state.discovered_subdomains}"
+    )
+    subs = {s["subdomain"] for s in state.discovered_subdomains}
+    assert "www.example.com" in subs
+    assert "api.example.com" in subs
+
+
+def test_attack_state_to_dict_serializes_domain_fields():
+    """to_dict must persist original_target, resolved_ip, discovered_subdomains."""
+    from tools.autonomous_orchestrator import AttackState, AttackPhase, AggressionLevel
+    state = AttackState(target="93.184.216.34")
+    state.original_target = "example.com"
+    state.resolved_ip = "93.184.216.34"
+    state.discovered_subdomains = [
+        {"subdomain": "www.example.com", "ip": "1.1.1.1"},
+        {"subdomain": "api.example.com", "ip": "2.2.2.2"},
+    ]
+    d = state.to_dict()
+    assert d["original_target"] == "example.com"
+    assert d["resolved_ip"] == "93.184.216.34"
+    assert len(d["discovered_subdomains"]) == 2
+    assert d["discovered_subdomains"][0]["subdomain"] == "www.example.com"
+
+
+def test_attack_state_from_dict_restores_domain_fields():
+    """from_dict must restore the 3 domain fields so resume keeps them."""
+    from tools.autonomous_orchestrator import AttackState
+    data = {
+        "target": "93.184.216.34",
+        "current_phase": "reconnaissance",
+        "aggression": "normal",
+        "original_target": "example.com",
+        "resolved_ip": "93.184.216.34",
+        "discovered_subdomains": [{"subdomain": "www.example.com", "ip": "1.1.1.1"}],
+    }
+    state = AttackState.from_dict(data)
+    assert state.original_target == "example.com"
+    assert state.resolved_ip == "93.184.216.34"
+    assert len(state.discovered_subdomains) == 1
+    assert state.discovered_subdomains[0]["subdomain"] == "www.example.com"
+
+
+def test_attack_state_to_dict_from_dict_roundtrip_domain_fields():
+    """Round-trip to_dict → from_dict preserves all 3 domain fields."""
+    from tools.autonomous_orchestrator import AttackState
+    state = AttackState(target="10.0.0.5")
+    state.original_target = "test.com"
+    state.resolved_ip = "10.0.0.5"
+    state.discovered_subdomains = [{"subdomain": "a.test.com", "ip": "10.0.0.6"}]
+    restored = AttackState.from_dict(state.to_dict())
+    assert restored.original_target == "test.com"
+    assert restored.resolved_ip == "10.0.0.5"
+    assert len(restored.discovered_subdomains) == 1
+    assert restored.discovered_subdomains[0] == {"subdomain": "a.test.com", "ip": "10.0.0.6"}
+
+
+def test_get_state_threads_domain_context_on_first_creation(tmp_path: Path):
+    """get_state must populate original_target/resolved_ip from the orchestrator."""
+    from tools.autonomous_orchestrator import AutonomousOrchestrator
+    orch = AutonomousOrchestrator(
+        mission_config={"max_cycles": 1},
+        workspace_root=tmp_path,
+    )
+    # Simulate what run_autonomous_campaign does: stash before get_state.
+    orch._original_target = "example.com"
+    orch._resolved_ip = "93.184.216.34"
+    state = orch.get_state("93.184.216.34")
+    assert state.original_target == "example.com"
+    assert state.resolved_ip == "93.184.216.34"
+    # A second get_state for an already-created state must not clobber.
+    state2 = orch.get_state("93.184.216.34")
+    assert state2 is state
 
 
 # ── Phase 3 policy: pivot-depth 0 = single-IP lock ─────────────────────────

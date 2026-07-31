@@ -23,11 +23,11 @@ operator-authorized set).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import socket
 import subprocess
-import time
 import urllib.request
 
 from tools.mcp_tools.registry import *
@@ -93,7 +93,11 @@ _SUBDOMAIN_WORDLIST = [
 _RESOLVE_TYPES = ("A", "AAAA", "MX", "NS", "TXT", "CNAME", "SOA", "CAA")
 
 # Known dangling-CNAME takeover fingerprints (service -> DNS suffix + HTTP body marker).
-# Used by subdomain-takeover detection inside enumerate_subdomains.
+# Used by subdomain-takeover detection inside enumerate_subdomains. The HTTP
+# body_markers are matched (case-insensitive, substring) against the response
+# body of the unresolvable subdomain to CONFIRM a takeover (the CNAME suffix
+# alone is only a "likely" signal -- a deprovisioned service may still resolve).
+# Sources: takeovers exposed HackerOne/HackerOne reports, can-i-takeover-xyz.
 _TAKEOVER_FINGERPRINTS = {
     "GitHub Pages": {
         "suffix": ".github.io",
@@ -135,6 +139,66 @@ _TAKEOVER_FINGERPRINTS = {
         "suffix": ".ghost.io",
         "body_markers": ["The thing you were looking for is no longer here", "ghost"],
     },
+    "Netlify": {
+        "suffix": ".netlify.app",
+        "body_markers": ["Not Found - Default Page", "netlify"],
+    },
+    "Vercel": {
+        "suffix": ".vercel.app",
+        "body_markers": ["The deployment could not be found", "vercel"],
+    },
+    "Fly.dev": {
+        "suffix": ".fly.dev",
+        "body_markers": ["404", "fly.io"],
+    },
+    "Render": {
+        "suffix": ".onrender.com",
+        "body_markers": ["There isn't a site here", "render"],
+    },
+    "Bitbucket Pages": {
+        "suffix": ".bitbucket.io",
+        "body_markers": ["404", "bitbucket"],
+    },
+    "Cloudfront": {
+        "suffix": ".cloudfront.net",
+        "body_markers": ["Bad request", "cloudfront"],
+    },
+    "Google Cloud Storage": {
+        "suffix": "storage.googleapis.com",
+        "body_markers": ["The specified bucket does not exist", "NoSuchBucket"],
+    },
+    "Webflow": {
+        "suffix": ".webflow.io",
+        "body_markers": ["The page you are looking for doesn't exist", "webflow"],
+    },
+    "Tilda": {
+        "suffix": ".tilda.ws",
+        "body_markers": ["Please enter a valid domain", "tilda"],
+    },
+    "Smartling": {
+        "suffix": ".smartling.com",
+        "body_markers": ["Domain not found", "smartling"],
+    },
+    "S3 Website": {
+        "suffix": ".s3-website",
+        "body_markers": ["The specified bucket does not exist", "NoSuchBucket"],
+    },
+    "Fastmail": {
+        "suffix": ".fastmail.net",
+        "body_markers": ["Domain not found", "fastmail"],
+    },
+    "Zendesk": {
+        "suffix": ".zendesk.com",
+        "body_markers": ["Help Center Closed", "zendesk"],
+    },
+    "Readme.io": {
+        "suffix": ".readme.io",
+        "body_markers": ["Project not found", "readme"],
+    },
+    "Unbounce": {
+        "suffix": ".unbouncepages.com",
+        "body_markers": ["The requested URL was not found", "unbounce"],
+    },
 }
 
 
@@ -154,19 +218,26 @@ def _stdlib_fetch(
     timeout: int = 15,
     headers: dict[str, str] | None = None,
     data: bytes | None = None,
+    max_bytes: int = 4000,
 ) -> tuple[int, dict[str, str], str]:
-    """HTTP GET/POST via urllib. Returns (status, headers, body). Never raises."""
+    """HTTP GET/POST via urllib. Returns (status, headers, body). Never raises.
+
+    ``max_bytes`` caps the response body read (default 4000 -- fine for most
+    probe responses). Callers fetching large JSON payloads (e.g. crt.sh CT
+    logs, which can exceed 100KB for popular domains) must pass a larger cap
+    or the body is truncated mid-stream and JSON parsing silently fails.
+    """
     try:
         hdrs = {"User-Agent": "NetAttackAi-DomainRecon/1.0"}
         if headers:
             hdrs.update(headers)
         req = urllib.request.Request(url, headers=hdrs, data=data)
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - passive recon
-            body = resp.read(4000).decode(errors="replace")
+            body = resp.read(max_bytes).decode(errors="replace")
             return resp.status, dict(resp.headers.items()), body
     except urllib.error.HTTPError as e:
         try:
-            body = e.read(2000).decode(errors="replace")
+            body = e.read(min(2000, max_bytes)).decode(errors="replace")
         except Exception:
             body = ""
         return e.code, dict(e.headers.items()) if e.headers else {}, body
@@ -228,7 +299,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
     # 1. resolve_domain -- the bridge primitive
     # ------------------------------------------------------------------
     @mcp.tool()
-    @require_allowlist()
+    @require_allowlist("domain")
     def resolve_domain(
         domain: str,
         record_types: str = "A,AAAA,MX,NS,TXT,CNAME,SOA,CAA",
@@ -293,7 +364,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
     # 2. enumerate_subdomains -- attack-surface expansion
     # ------------------------------------------------------------------
     @mcp.tool()
-    @require_allowlist()
+    @require_allowlist("domain")
     def enumerate_subdomains(
         domain: str,
         sources: str = "crt_sh,dns_bruteforce",
@@ -337,8 +408,13 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
         # crt.sh Certificate Transparency
         if "crt_sh" in srcs:
+            # CT log responses for popular domains can exceed 100KB; the default
+            # 4000-byte cap would truncate the JSON mid-stream and silently
+            # lose all subdomains (the json.loads fails and the except: pass
+            # swallows it). Pass a 5MB cap so the full response is parsed.
             status, _hdr, body = _stdlib_fetch(
-                f"https://crt.sh/?q=%25.{dom}&output=json", timeout=20
+                f"https://crt.sh/?q=%25.{dom}&output=json", timeout=20,
+                max_bytes=5_000_000,
             )
             if status == 200 and body:
                 try:
@@ -351,15 +427,21 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 except Exception:
                     pass
 
-        # DNS bruteforce with the built-in wordlist
+        # DNS bruteforce with the built-in wordlist. Run resolutions
+        # concurrently (32 workers) so ~200 candidates don't block for minutes
+        # on a slow resolver. The GIL doesn't matter here -- getaddrinfo
+        # releases it during the syscall.
         if "dns_bruteforce" in srcs:
-            for prefix in _SUBDOMAIN_WORDLIST:
-                cand = f"{prefix}.{dom}"
-                if cand in subs:
-                    continue
-                ip = resolve_target_to_ip(cand)
-                if ip:
-                    subs[cand] = ip
+            from concurrent.futures import ThreadPoolExecutor
+            candidates = [f"{prefix}.{dom}" for prefix in _SUBDOMAIN_WORDLIST if f"{prefix}.{dom}" not in subs]
+
+            def _resolve_one(cand: str) -> tuple[str, str | None]:
+                return cand, resolve_target_to_ip(cand)
+
+            with ThreadPoolExecutor(max_workers=32) as pool:
+                for cand, ip in pool.map(_resolve_one, candidates):
+                    if ip:
+                        subs[cand] = ip
 
         # subfinder (passive, if installed)
         if "subfinder" in srcs and shutil.which("subfinder"):
@@ -418,11 +500,32 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 if cname_target:
                     for svc, fp in _TAKEOVER_FINGERPRINTS.items():
                         if cname_target.endswith(fp["suffix"]):
+                            # CNAME-suffix match -- a "likely" signal. Try to
+                            # CONFIRM by fetching the subdomain's HTTP response
+                            # and matching the service's body_markers (e.g.
+                            # Heroku's "No such app"). A deprovisioned service
+                            # that still resolves would fail this check.
+                            status = "unresolvable -- likely dangling CNAME"
+                            markers = fp.get("body_markers") or []
+                            if markers:
+                                for probe_scheme in ("https", "http"):
+                                    _status, _hdr, body = _stdlib_fetch(
+                                        f"{probe_scheme}://{sub}/",
+                                        timeout=8,
+                                    )
+                                    if _status and body:
+                                        body_lower = body.lower()
+                                        if any(m.lower() in body_lower for m in markers):
+                                            status = (
+                                                f"CONFIRMED takeover -- body matches {svc} "
+                                                f"(HTTP {_status})"
+                                            )
+                                            break
                             takeover_candidates.append({
                                 "subdomain": sub,
                                 "cname": cname_target,
                                 "service": svc,
-                                "status": "unresolvable -- likely dangling CNAME",
+                                "status": status,
                             })
                             break
                     else:
@@ -462,7 +565,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
     # 3. dns_recon -- full DNS intelligence
     # ------------------------------------------------------------------
     @mcp.tool()
-    @require_allowlist()
+    @require_allowlist("domain")
     def dns_recon(domain: str, zone_transfer: bool = False) -> str:
         """Full DNS reconnaissance against a domain.
 
@@ -504,11 +607,17 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
         ns_version = ""
 
         try:
-            import dns.resolver  # type: ignore
-            import dns.query  # type: ignore
-            import dns.zone  # type: ignore
-            import dns.rdatatype  # type: ignore
             import dns.exception  # type: ignore
+            import dns.name  # type: ignore
+            import dns.query  # type: ignore
+            import dns.rdataclass  # type: ignore
+            import dns.rdatatype  # type: ignore
+            import dns.resolver  # type: ignore
+            import dns.zone  # type: ignore
+            try:
+                import dns.xfr  # type: ignore  # dnspython 2.x (TransferError lives here)
+            except ImportError:
+                pass
 
             resolver = dns.resolver.Resolver()
             for rt in ("A", "AAAA", "MX", "NS", "TXT", "SOA", "CAA"):
@@ -533,23 +642,33 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
             except Exception:
                 records["DMARC"] = []
 
-            # DNSSEC: check the AD flag on a query
+            # DNSSEC: presence of a DS record at the parent zone indicates a
+            # signed zone. The previous AD-flag heuristic measured the resolving
+            # resolver's validation config, not the target domain's DNSSEC.
             try:
-                resolver.set_flags(0x8000)  # AD flag
-                _ = resolver.resolve(dom, "A")
-                dnssec_status = "enabled (AD flag set)" if resolver.flags & 0x8000 else "disabled"
+                resolver.resolve(dom, "DS", lifetime=5)
+                dnssec_status = "signed (DS record present)"
+            except dns.resolver.NoAnswer:
+                dnssec_status = "unsigned (no DS record)"
+            except (dns.resolver.NXDOMAIN, dns.exception.DNSException):
+                dnssec_status = "unsigned"
             except Exception:
                 dnssec_status = "unknown"
 
-            # NS version fingerprinting
+            # NS version fingerprinting -- query version.bind in the CHAOS
+            # (CH) class, not a subdomain of the NS host. The old code queried
+            # ``version.bind.{ns_name}`` as a normal TXT record, which returned
+            # NXDOMAIN.
             ns_hosts = records.get("NS", [])
             if ns_hosts:
-                ns_name = ns_hosts[0].rstrip(".")
                 try:
                     version_answers = resolver.resolve(
-                        f"version.bind.{ns_name}", "TXT", tcp=True,
+                        dns.name.from_text("version.bind"),
+                        rdtype=dns.rdatatype.TXT,
+                        rdclass=dns.rdataclass.CH,
+                        lifetime=5,
                     )
-                    ns_version = str(version_answers[0].to_text())
+                    ns_version = " ".join(str(r.to_text()) for r in version_answers)
                 except Exception:
                     ns_version = "(version.bind query failed / refused)"
 
@@ -559,7 +678,10 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 try:
                     ns_a = resolver.resolve(ns_name, "A")
                     ns_ip = str(ns_a[0].to_text())
-                    zone = dns.zone.from_xfr(dns.query.xfr(ns_ip, dom, timeout=10))
+                    # dnspython 2.x moved xfr() to dns.xfr.xfr(); 1.x had it on
+                    # dns.query.xfr. Resolve the callable defensively.
+                    xfr_fn = getattr(dns.xfr, "xfr", None) or dns.query.xfr
+                    zone = dns.zone.from_xfr(xfr_fn(ns_ip, dom, timeout=10))
                     zone_records = []
                     for name, node in zone.nodes.items():
                         for rdataset in node.rdatasets:
@@ -570,10 +692,16 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     records["AXFR"] = zone_records[:200]  # cap for display
                 except dns.exception.FormError:
                     axfr_result = "AXFR_REFUSED: server refused zone transfer"
-                except dns.xfr.TransferError as e:
-                    axfr_result = f"AXFR_REFUSED: {e}"
                 except Exception as e:
-                    axfr_result = f"AXFR_FAILED: {e}"
+                    # dns.xfr.TransferError (when importable) is a subclass of
+                    # Exception, so this branch covers both transfer-refused
+                    # and generic AXFR failures without needing to name the
+                    # class at the except-clause (which would AttributeError
+                    # if dns.xfr failed to import above).
+                    if "TransferError" in type(e).__name__:
+                        axfr_result = f"AXFR_REFUSED: {e}"
+                    else:
+                        axfr_result = f"AXFR_FAILED: {e}"
             elif allow_axfr:
                 axfr_result = "AXFR_SKIPPED: no NS records found"
             else:
@@ -643,13 +771,21 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
             target_ip: The web server to probe (IP or domain).
             port: TCP port (default 80).
             domain: The parent domain to build vhost candidates from
-                     (e.g. ``example.com`` -> ``www.example.com``). Required.
+                      (e.g. ``example.com`` -> ``www.example.com``). Required.
             wordlist: Comma-separated extra vhost prefixes (appended to the
-                       built-in wordlist).
-            timeout: Per-request timeout in seconds.
+                        built-in wordlist).
+            timeout: Overall budget in seconds (default 300). Each probe
+                      gets 10s; the wordlist is capped at ``timeout // 10``
+                      probes so the total stays within budget.
 
         Returns:
             A ``VHOST_RESULT:`` block with discovered virtual hosts.
+
+        Note:
+            For HTTPS (443/8443), this tool rotates the ``Host:`` header but
+            does NOT rotate TLS SNI (urllib has no SNI override). TLS-based
+            vhost servers that key off SNI rather than Host may be missed;
+            the output flags this when it applies.
         """
         if not target_ip or not target_ip.strip():
             return "ERROR: target_ip is required."
@@ -673,44 +809,67 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if wordlist and wordlist.strip():
             words.extend([w.strip().lower() for w in wordlist.split(",") if w.strip()])
 
+        # Cap the wordlist so the total probe time stays within the budget
+        # (each probe gets a 10s per-request timeout). At least one probe.
+        max_probes = max(1, timeout // 10)
+        if len(words) > max_probes:
+            words = words[:max_probes]
+
+        per_probe = 10
+
         # Baseline request with the default Host (the target_ip itself).
-        _b_status, _b_hdr, base_body = _stdlib_fetch(base_url, timeout=10)
+        _b_status, _b_hdr, base_body = _stdlib_fetch(base_url, timeout=per_probe)
         base_len = len(base_body)
+        base_hash = hashlib.sha256(base_body.encode(errors="replace")).hexdigest()[:12]
 
         found: list[dict[str, Any]] = []
         for w in words:
             host = f"{w}.{dom}"
-            s, _h, body = _stdlib_fetch(base_url, timeout=10, headers={"Host": host})
-            if s and s not in (404,) and (len(body) != base_len or s != _b_status):
-                found.append({
-                    "vhost": host,
-                    "status": s,
-                    "length": len(body),
-                    "baseline_length": base_len,
-                })
+            s, _h, body = _stdlib_fetch(base_url, timeout=per_probe, headers={"Host": host})
+            if s and s not in (404,):
+                body_hash = hashlib.sha256(body.encode(errors="replace")).hexdigest()[:12]
+                # Flag a vhost if the body differs from baseline by length OR
+                # status OR content hash. The hash catches same-length
+                # different-content responses the old length-only check missed.
+                if len(body) != base_len or s != _b_status or body_hash != base_hash:
+                    found.append({
+                        "vhost": host,
+                        "status": s,
+                        "length": len(body),
+                        "baseline_length": base_len,
+                        "hash": body_hash,
+                        "baseline_hash": base_hash,
+                    })
 
         lines = [
-            f"VHOST_RESULT: completed",
+            "VHOST_RESULT: completed",
             f"TARGET: {target_ip}:{port}",
             f"DOMAIN: {dom}",
             f"BASELINE_LENGTH: {base_len}",
+            f"BASELINE_HASH: {base_hash}",
             f"VHOSTS_FOUND: {len(found)}",
             "",
             "VHOSTS:",
         ]
         for v in found:
             lines.append(
-                f"  {v['vhost']} (status={v['status']}, len={v['length']} vs baseline {v['baseline_length']})"
+                f"  {v['vhost']} (status={v['status']}, len={v['length']} vs baseline {v['baseline_length']}, hash={v['hash']} vs {v['baseline_hash']})"
             )
         if not found:
             lines.append("  (none -- the server returns the same response for all Host headers)")
+        if scheme == "https":
+            lines.append(
+                "NOTE: HTTPS vhost enum uses the Host header only; SNI is not "
+                "rotated (urllib has no SNI override). TLS-vhost servers that "
+                "key off SNI may be missed."
+            )
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # 5. domain_whois -- WHOIS + DNS provider profiling
     # ------------------------------------------------------------------
     @mcp.tool()
-    @require_allowlist()
+    @require_allowlist("domain")
     def domain_whois(domain: str) -> str:
         """WHOIS lookup + DNS-provider profiling for a domain.
 

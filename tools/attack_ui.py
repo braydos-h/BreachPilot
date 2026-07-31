@@ -332,6 +332,143 @@ class AttackUi:
     def divider(self) -> None:
         print("-" * 60)
 
+    # ------------------------------------------------------------------
+    # Attack-progress visibility (round / phase / budget / thinking)
+    # ------------------------------------------------------------------
+    #
+    # These give the operator a clear picture of WHAT the agent is doing
+    # during a long attack run: which round, which phase, how many actions
+    # have run, how much of the command/round budget is left, and a
+    # "thinking" line while the model is generating its next move.
+    def round_header(
+        self,
+        *,
+        round_num: int,
+        max_rounds: int,
+        action_count: int,
+        max_commands: int,
+        phase: str,
+    ) -> None:
+        """Print a one-line header at the start of each agent round.
+
+        Shows the round number, action count, current phase, and remaining
+        command budget so the operator can tell a long run is making
+        progress (and roughly how much runway is left).
+        """
+        cmds_left = max(0, max_commands - action_count)
+        print(
+            f"{self._c('header')}[ROUND {round_num}/{max_rounds}]"
+            f"{self._c('reset')} "
+            f"{self._c('gray')}phase={phase} actions={action_count} "
+            f"cmds_left={cmds_left}{self._c('reset')}"
+        )
+
+    def phase_change(self, new_phase: str) -> None:
+        """Print a banner when the agent transitions to a new phase."""
+        print(
+            f"{self._c('blue')}[PHASE]{self._c('reset')} "
+            f"entering {self._c('bold')}{new_phase}{self._c('reset')}"
+        )
+
+    def thinking_indicator(self, round_num: int) -> None:
+        """Print a 'thinking' line while the model is generating its response."""
+        print(
+            f"{self._c('gray')}[THINKING] round {round_num} — "
+            f"waiting for model…{self._c('reset')}"
+        )
+
+    def action_status(
+        self,
+        *,
+        action_num: int,
+        tool: str,
+        target: str,
+        phase: str,
+    ) -> None:
+        """Print a richer action line: action #, tool name, target, phase."""
+        print(
+            f"{self._c('blue')}[ACTION #{action_num}]{self._c('reset')} "
+            f"{self._c('bold')}{_sanitize(tool)}{self._c('reset')} "
+            f"{self._c('gray')}target={_sanitize(target)} phase={phase}"
+            f"{self._c('reset')}"
+        )
+
+    # ------------------------------------------------------------------
+    # Outcome milestone events (compromise / cred dump / partial / fail)
+    # ------------------------------------------------------------------
+    #
+    # These fire on the highest-signal moments of an attack run: a confirmed
+    # shell/session, a credential harvest, a partial result, or a run of
+    # consecutive exploit failures. They use distinct colors so the operator
+    # can spot the milestone lines at a glance in a long scroll.
+    def compromise(
+        self,
+        *,
+        action_num: int,
+        shell_type: str = "",
+        privilege_level: str = "",
+    ) -> None:
+        """Print a red [COMPROMISE] banner when a shell/session is confirmed."""
+        detail = []
+        if shell_type:
+            detail.append(f"shell={_sanitize(shell_type)}")
+        if privilege_level:
+            detail.append(f"priv={_sanitize(privilege_level)}")
+        suffix = (" " + " ".join(detail)) if detail else ""
+        print(
+            f"{self._c('red')}[COMPROMISE]#{action_num}{self._c('reset')}"
+            f"{self._c('bold')} foothold established{suffix}{self._c('reset')}"
+        )
+
+    def cred_dump(self, *, action_num: int) -> None:
+        """Print a yellow [CRED DUMP] line when credentials are harvested."""
+        print(
+            f"{self._c('yellow')}[CRED DUMP]#{action_num}{self._c('reset')}"
+            f" credentials harvested"
+        )
+
+    def partial_outcome(self, *, action_num: int, reason: str = "") -> None:
+        """Print a gray [PARTIAL] line for a limited / incomplete outcome."""
+        suffix = f" — {_sanitize(reason)}" if reason else ""
+        print(
+            f"{self._c('gray')}[PARTIAL]#{action_num}{self._c('reset')}{suffix}"
+        )
+
+    def exploit_failure_run(self, *, count: int) -> None:
+        """Print a yellow warning when consecutive exploit failures stack up."""
+        print(
+            f"{self._c('yellow')}[FAILURES]{self._c('reset')} "
+            f"{count} consecutive exploit failure(s)"
+        )
+
+    def result_outcome(
+        self,
+        *,
+        action_num: int,
+        exit_code: int | None,
+        success: bool,
+    ) -> None:
+        """Print a one-line pass/fail tag for a completed tool action.
+
+        Uses green for success (exit 0), red for failure (non-zero exit),
+        and gray when the exit code could not be determined. Lets the
+        operator see at a glance whether each action succeeded without
+        reading the full result block.
+        """
+        if exit_code is None:
+            tag = "DONE"
+            color = "gray"
+        elif success:
+            tag = "OK"
+            color = "green"
+        else:
+            tag = "FAIL"
+            color = "red"
+        ec = "" if exit_code is None else f" exit={exit_code}"
+        print(
+            f"{self._c(color)}[{tag}]#{action_num}{self._c('reset')}{ec}"
+        )
+
     @contextlib.contextmanager
     def spinner(
         self,

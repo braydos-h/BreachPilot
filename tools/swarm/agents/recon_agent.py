@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 from tools.swarm.base import Agent, AgentResult, AgentStatus
+from tools.swarm.bb_compat import bb_set
 from tools.recon_pipeline import ReconPipeline, ReconConfig
 
 
@@ -284,11 +285,18 @@ class ReconAgent(Agent):
             output["recommended_next_phases"] = phases
 
             # ── Stage 6: Update shared blackboard ──
-            blackboard["recon_complete"] = True
-            blackboard["discovered_services"] = enriched_services
-            blackboard["target_os"] = output["os_guess"]
-            blackboard["attack_surface_score"] = output["attack_surface_score"]
-            blackboard["technologies"] = output["technologies"]
+            # Atomic writes via the Blackboard API (tools/swarm/blackboard.py),
+            # bridged by bb_compat so a plain-dict blackboard (test/legacy path)
+            # keeps working. recon replaces these keys rather than appending,
+            # so bb_set is the right call (the legacy ``bb[k] = v`` did the
+            # same). The lock inside Blackboard.set_scalar makes the overwrite
+            # safe if a concurrent reader (e.g. a vuln agent that started early)
+            # is reading the same key.
+            bb_set(blackboard, "recon_complete", True)
+            bb_set(blackboard, "discovered_services", enriched_services)
+            bb_set(blackboard, "target_os", output["os_guess"])
+            bb_set(blackboard, "attack_surface_score", output["attack_surface_score"])
+            bb_set(blackboard, "technologies", output["technologies"])
 
             # Memory updates
             memory_updates.append({

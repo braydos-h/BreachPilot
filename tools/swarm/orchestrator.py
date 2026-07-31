@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
 
 from tools.swarm.base import Agent, AgentResult, AgentStatus
+from tools.swarm.blackboard import Blackboard
 from tools.swarm.agents.recon_agent import ReconAgent
 from tools.swarm.agents.vuln_agent import VulnAgent
 from tools.swarm.agents.exploit_agent import ExploitAgent
@@ -68,8 +70,24 @@ class SwarmOrchestrator:
         self._battle_log: list[dict[str, Any]] = []
         self._lock = threading.RLock()
 
+        # In-memory growth caps. ``_results`` and ``_battle_log`` are only read
+        # for their length and a recent tail (see _persist_state's
+        # ``battle_log[-20:]`` and _distill_episode_summary's win-count roll-up),
+        # so bounding them reclaims the memory a long multi-cycle campaign would
+        # otherwise leak without losing any consumed data. The full per-task
+        # outcome is already persisted to swarm_state.json on every event.
+        self._max_results = 500
+        self._max_battle_log = 500
+
         # ── Shared blackboard for inter-agent state ──
-        self._blackboard: dict[str, Any] = {
+        # ``Blackboard`` (tools/swarm/blackboard.py) is a dict subclass with
+        # atomic append_to/extend_list and per-target namespacing. Subclassing
+        # dict means every existing ``bb["k"]`` / ``bb.get("k")`` read site in
+        # the 6 agents keeps working unchanged (reads hit the __global__
+        # bucket, the legacy flat-dict view); only write sites are migrated to
+        # the atomic methods so parallel dispatch in route_parallel no longer
+        # races on the get-then-set list appends the old plain dict allowed.
+        self._blackboard: Blackboard = Blackboard({
             "recon_complete": False,
             "vuln_research_complete": False,
             "access_achieved": False,
@@ -82,9 +100,11 @@ class SwarmOrchestrator:
             "failed_modules": [],
             "attack_surface_score": 0,
             "strategy_shift": "",
-        }
+        })
 
-        # Inject blackboard into context so all agents can access it
+        # Inject blackboard into context so all agents can access it. Agents
+        # read it as a dict (bb["k"] / bb.get) and write via the atomic API
+        # (bb.set_scalar / bb.append_to / bb.extend_list).
         self._context["blackboard"] = self._blackboard
 
         # ── Runtime skill selection for advisory phase hints ──
@@ -160,6 +180,7 @@ class SwarmOrchestrator:
                         "success": False,
                         "error": f"Critic blocked: {reasoning}",
                     })
+                    self._trim_history()
                     self._emit(
                         "agent_blocked",
                         {
@@ -206,28 +227,29 @@ class SwarmOrchestrator:
                 "findings": result.findings,
                 "new_tasks": result.new_tasks,
             })
+            self._trim_history()
 
             # ── Blackboard milestone events ──
             if result.output:
                 for key in ("access_achieved", "compromised_hosts", "credentials_found", "loot"):
                     value = result.output.get(key) if isinstance(result.output, dict) else None
                     if value:
-                        # Bug #18: ``setdefault(key, value)`` on a list value is
-                        # a no-op once the key exists — the *first* task's list
-                        # stuck and every later task's list was silently
-                        # dropped, so compromised_hosts/credentials_found/loot
-                        # lost everything after the first contribution. Merge
-                        # list values (order-preserving dedupe); keep first-write
-                        # semantics for scalars.
+                        # Bug #18 (preserved): the old ``setdefault(key, value)``
+                        # on a list value was a no-op once the key existed — the
+                        # first task's list stuck and every later task's list was
+                        # silently dropped. We now merge list values
+                        # (order-preserving dedupe) and keep first-write
+                        # semantics for scalars. The Blackboard API makes this
+                        # atomic (lock-protected get-then-set) so the same merge
+                        # is safe under route_parallel's unlocked agent.run.
                         if isinstance(value, list):
-                            existing = self._blackboard.setdefault(key, [])
-                            for item in value:
-                                if item not in existing:
-                                    existing.append(item)
+                            self._blackboard.extend_list(key, value)
                         else:
-                            self._blackboard.setdefault(key, value)
+                            # First-write-wins for scalars: only set if absent.
+                            if key not in self._blackboard:
+                                self._blackboard.set_scalar(key, value)
                         if key == "access_achieved" and value:
-                            self._blackboard["access_achieved"] = True
+                            self._blackboard.set_scalar("access_achieved", True)
                         self._emit(
                             "blackboard_updated",
                             {"key": key, "value": value, "task_id": task_id, "agent_type": agent.agent_type},
@@ -315,11 +337,10 @@ class SwarmOrchestrator:
             }
             result = agent.run(task, self._context)
             self._results.append(result)
-
-            # Update blackboard with reflection output
+            self._trim_history()
             if result.output:
-                self._blackboard["last_reflection"] = result.output
-                self._blackboard["strategy_shift"] = result.output.get("recommended_strategy_shift", "")
+                self._blackboard.set_scalar("last_reflection", result.output)
+                self._blackboard.set_scalar("strategy_shift", result.output.get("recommended_strategy_shift", ""))
                 self._emit(
                     "reflection_output",
                     {
@@ -333,21 +354,29 @@ class SwarmOrchestrator:
             return result
 
     def get_blackboard(self) -> dict[str, Any]:
-        """Return the current shared blackboard state."""
-        return dict(self._blackboard)
+        """Return a snapshot of the global (legacy flat-dict) blackboard state.
 
-    def share_blackboard(self) -> dict[str, Any]:
+        Read-only consumers (diagnostics, the resume JSON's
+        ``last_reflection``/``strategy_shift`` echoes) get the flat view they
+        always had. Per-target namespaced state is NOT included here — use
+        ``self._blackboard.snapshot()`` for the full namespaced picture, or
+        ``self._blackboard.get_target(ip)`` for one host.
+        """
+        return self._blackboard.flat()
+
+    def share_blackboard(self) -> "Blackboard":
         """Return the LIVE shared blackboard (not a copy).
 
         Used by the autonomous orchestrator (Tier 0 item 0.6b) so the autonomous
         attack path and the swarm ``route()`` loop share one source of truth --
         ``AttackModuleExecutor`` records module failures / reflection output
-        into this dict and the swarm's ``CriticAgent`` reads them back. The
-        autonomous campaign and the swarm ``route()`` loop are alternative
+        into this Blackboard and the swarm's ``CriticAgent`` reads them back.
+        The autonomous campaign and the swarm ``route()`` loop are alternative
         execution paths within a run (never concurrent), so a shared mutable
-        reference is safe here; callers must not mutate it from multiple
-        threads. ``get_blackboard()`` remains the snapshot API for read-only
-        persistence and diagnostics consumers.
+        reference is safe here; callers must use the atomic ``set_scalar`` /
+        ``append_to`` / ``extend_list`` methods (not bare ``bb[k] = v``) so the
+        internal lock protects writes. ``get_blackboard()`` remains the snapshot
+        API for read-only persistence and diagnostics consumers.
         """
         return self._blackboard
 
@@ -367,6 +396,22 @@ class SwarmOrchestrator:
         except Exception:
             pass
 
+    def _trim_history(self) -> None:
+        """Bound ``_results`` and ``_battle_log`` in memory.
+
+        Both lists are read only for their length and a recent tail
+        (``_persist_state`` snapshots ``battle_log[-20:]``;
+        ``_distill_episode_summary`` rolls up win-counts over the log). The
+        full per-task outcome is persisted to ``swarm_state.json`` on every
+        event, so dropping old in-memory entries reclaims the memory a long
+        multi-cycle campaign would otherwise leak without losing any data a
+        consumer actually reads.
+        """
+        if len(self._results) > self._max_results:
+            del self._results[: len(self._results) - self._max_results]
+        if len(self._battle_log) > self._max_battle_log:
+            del self._battle_log[: len(self._battle_log) - self._max_battle_log]
+
     def _persist_state(self) -> None:
         """Persist a snapshot of swarm state for resume and live CLI progress."""
         if self._state_path is None:
@@ -383,7 +428,12 @@ class SwarmOrchestrator:
                     }
                     for agent in self._agents.values()
                 ],
-                "blackboard": self._blackboard,
+                # Persist the FULL namespaced snapshot (global + per-target
+                # buckets) so a resumed run restores per-host findings too,
+                # not just the legacy flat global view. ``Blackboard.snapshot``
+                # returns ``{__global__: {...}, "<target>": {...}, ...}``.
+                "blackboard": self._blackboard.snapshot(),
+                "blackboard_schema": "namespaced",
                 "battle_log_tail": self._battle_log[-20:],
                 "results_count": len(self._results),
                 "last_reflection": self._blackboard.get("last_reflection", {}),
@@ -391,9 +441,15 @@ class SwarmOrchestrator:
                 "updated_at": time.time(),
             }
             # Atomic write so progress and resume readers never see a partial file.
+            # ``os.replace`` atomically overwrites an existing target on both
+            # Windows and POSIX (``Path.rename`` raises ``FileExistsError`` on
+            # Windows when the target exists — the second+ persist would throw,
+            # be swallowed by the bare ``except``, and leave the stale first-
+            # write file on disk; that's why ``access_achieved`` never showed
+            # ``True`` on Windows even after the milestone block set it).
             tmp = self._state_path.with_suffix(".tmp")
             tmp.write_text(json.dumps(snapshot, indent=2, default=str), encoding="utf-8")
-            tmp.rename(self._state_path)
+            os.replace(tmp, self._state_path)
         except Exception:
             pass
 
@@ -413,6 +469,19 @@ class SwarmOrchestrator:
         keys in the file are ignored; missing keys keep their defaults. A
         missing/corrupt file returns False (fresh start), never raises — so a
         bad state file can't wedge the swarm.
+
+        Handles two on-disk shapes:
+
+        * **Namespaced** (current, ``blackboard_schema == "namespaced"`` or
+          detected by presence of a ``__global__`` key): the value is
+          ``{__global__: {...}, "<target>": {...}, ...}`` and is passed to
+          ``Blackboard.merge_snapshot`` which restores both the global bucket
+          and per-target buckets.
+        * **Flat** (legacy, pre-parallel-swarm): the value is a plain
+          ``{k: v}`` dict (the old ``dict(self._blackboard)`` global view).
+          Merged key-by-key into the global bucket to preserve the original
+          resume semantics — list values extended (order-preserving dedup),
+          scalars replaced.
         """
         state_path = Path(path) if path is not None else self._state_path
         if state_path is None or not state_path.exists():
@@ -426,25 +495,22 @@ class SwarmOrchestrator:
         bb = data.get("blackboard")
         if not isinstance(bb, dict):
             return False
-        # Merge rather than wholesale-replace: keep the in-memory defaults for
-        # any key the file doesn't carry (forward/back-compat), and overwrite
-        # with persisted values for keys the prior run actually set. List
-        # values are extended (so a resumed run's new findings append to the
-        # prior run's), scalars replaced.
+
+        # Namespaced shape (current): delegate to Blackboard.merge_snapshot.
+        if data.get("blackboard_schema") == "namespaced" or "__global__" in bb:
+            self._blackboard.merge_snapshot(bb)
+            return True
+
+        # Legacy flat shape: merge key-by-key into the global bucket. Keeps
+        # the original resume semantics (list extend w/ dedup, scalar replace)
+        # so a pre-parallel-swarm state file still resumes cleanly.
         for key, value in bb.items():
-            if key not in self._blackboard:
-                self._blackboard[key] = value
-                continue
-            current = self._blackboard[key]
+            current = self._blackboard.get(key)
             if isinstance(current, list) and isinstance(value, list):
                 # Preserve ordering + dedup so resumed findings don't double up.
-                merged = list(current)
-                for item in value:
-                    if item not in merged:
-                        merged.append(item)
-                self._blackboard[key] = merged
+                self._blackboard.extend_list(key, value)
             else:
-                self._blackboard[key] = value
+                self._blackboard.set_scalar(key, value)
         return True
 
     # ── Internal ────────────────────────────────────────────────────────

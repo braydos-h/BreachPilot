@@ -77,10 +77,20 @@ class AgentLoop:
         console_ui: Any | None = None,
         state_dir: Path | None = None,
         mission_id: str | None = None,
+        # Domain targeting: the operator's original --target (domain or IP)
+        # and the resolved IP for a domain target. Threaded through to the
+        # AutonomousOrchestrator so the Path-B subdomain-expansion branch
+        # in _phase_reconnaissance fires for domain targets.
+        original_target: str = "",
+        resolved_ip: str = "",
     ) -> None:
         self._workspace_root = workspace_root
         self._workspace_root.mkdir(parents=True, exist_ok=True)
         self._console_ui = console_ui
+        # Stash domain-targeting context for run_autonomous_campaign →
+        # AutonomousOrchestrator.run_autonomous_campaign.
+        self._original_target = original_target or ""
+        self._resolved_ip = resolved_ip or ""
 
         # ── DB ──
         db_path = workspace_root / "research.db"
@@ -288,6 +298,13 @@ class AgentLoop:
         self._running: bool = True
         self._battle_log: list[dict[str, Any]] = []
         self._reflection_interval: int = mission_config.get("reflection_every_n_actions", 10)
+        # In-memory cap for ``_battle_log``. It is read only for a recent tail
+        # (``self._battle_log[-self._reflection_interval:]`` fed to reflection)
+        # and a win-count roll-up in ``_distill_episode_summary`` — never the
+        # full history — so bounding it reclaims the memory a long campaign
+        # would otherwise leak. The reflection interval is the largest tail any
+        # consumer reads, so keep at least that many entries plus headroom.
+        self._max_battle_log = max(200, self._reflection_interval * 4)
         # Tier 1.1: stashed by set_model_client() for _distill_episode_summary().
         self._model_client: Any = None
         self._model_name: str = ""
@@ -892,6 +909,9 @@ class AgentLoop:
                 "evidential_outcome": assessment.evidential_outcome,
                 "evidence_refs": assessment.evidence_refs,
             })
+            # Bound the in-memory battle log (see _max_battle_log note above).
+            if len(self._battle_log) > self._max_battle_log:
+                del self._battle_log[: len(self._battle_log) - self._max_battle_log]
 
             # Trigger reflection every N actions when swarm is enabled
             if (
@@ -1117,7 +1137,12 @@ class AgentLoop:
         # continues the prior campaign (skip done recon, don't re-fire
         # succeeded/failed modules) instead of starting over from scratch.
         campaign_result = await orchestrator.run_autonomous_campaign(
-            targets, resume=self._resumed
+            targets,
+            resume=self._resumed,
+            # Thread the domain-targeting context so the orchestrator's
+            # Path-B subdomain expansion actually fires for domain targets.
+            original_target=self._original_target,
+            resolved_ip=self._resolved_ip,
         )
 
         # Save states

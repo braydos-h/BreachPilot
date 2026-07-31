@@ -34,6 +34,7 @@ from typing import Any, Callable
 from tools.logging_setup import get_logger
 from tools.recon_pipeline import ReconPipeline, ReconConfig, HostReconResult
 from tools.validation_utils import is_local_target
+from tools.attack_ui import get_ui
 from tools.attack_modules import (
     AttackModule,
     ModuleContext,
@@ -44,6 +45,14 @@ from tools.attack_modules import (
 )
 
 logger = get_logger()
+
+# Process-wide UI singleton for operator-visible phase/action lines. The
+# orchestrator's phase handlers previously emitted only ``logger.info`` lines
+# (log file only), so an operator running the autonomous campaign saw no
+# real-time phase transitions on the console. Routing phase transitions
+# through ``ui.phase_change`` gives them the same [PHASE] banner the
+# exploit-agent loop now emits.
+ui = get_ui()
 
 # ---------------------------------------------------------------------------
 # Enums and data structures
@@ -203,6 +212,11 @@ class AttackState:
             "timeline": self.timeline,
             "recon_result": self.recon_result.to_dict() if self.recon_result else None,
             "persistence_established": self.persistence_established,
+            # Domain targeting: persist so a resumed campaign still knows it
+            # was a domain run and doesn't lose the discovered-subdomain set.
+            "original_target": self.original_target,
+            "resolved_ip": self.resolved_ip,
+            "discovered_subdomains": list(self.discovered_subdomains),
         }
 
     @classmethod
@@ -243,6 +257,13 @@ class AttackState:
             timeline=list(data.get("timeline", []) or []),
             recon_result=recon,
             persistence_established=list(data.get("persistence_established", []) or []),
+            # Domain targeting: restore so a resumed domain campaign keeps its
+            # original_target/resolved_ip and discovered subdomains.
+            original_target=str(data.get("original_target", "") or ""),
+            resolved_ip=str(data.get("resolved_ip", "") or ""),
+            discovered_subdomains=[
+                dict(s) for s in (data.get("discovered_subdomains", []) or []) if isinstance(s, dict)
+            ],
         )
 
     def add_timeline_event(self, event_type: str, description: str, metadata: dict[str, Any] | None = None) -> None:
@@ -263,10 +284,18 @@ class AttackState:
         if result.get("shell_type"):
             self.shell_type = result["shell_type"]
             self.access_achieved = True
+            # Surface the foothold to the operator so a long autonomous campaign
+            # shows the breakthrough on the console, not just in the log file.
+            ui.compromise(
+                action_num=len(self.successful_exploits),
+                shell_type=result.get("shell_type", ""),
+                privilege_level=result.get("privilege_level", ""),
+            )
         if result.get("privilege_level"):
             self.privilege_level = result["privilege_level"]
         if result.get("credentials"):
             self.credentials_found.extend(result["credentials"])
+            ui.cred_dump(action_num=len(self.successful_exploits))
         if result.get("loot"):
             self.loot.extend(result["loot"])
         if result.get("pivot_targets"):
@@ -279,6 +308,10 @@ class AttackState:
         if idx < len(levels) - 1:
             self.aggression = levels[idx + 1]
             logger.info(f"Aggression escalated to {self.aggression.value} for {self.target}")
+            # Surface aggression escalation to the operator — it drives which
+            # modules the next round runs, so the user should see the campaign
+            # getting more aggressive in real time.
+            ui.warning(f"Aggression escalated to {self.aggression.value} — retrying failed modules")
 
     def should_continue(self) -> bool:
         """Determine if attack should continue based on state."""
@@ -440,6 +473,14 @@ class AttackModuleExecutor:
         task.started_at = time.monotonic()
 
         logger.info(f"Executing {task.module_name} against {task.target} (attempt {task.retry_count + 1})")
+        # Surface each module dispatch to the operator so a long campaign shows
+        # which attack module is running against which target in which phase.
+        ui.action_status(
+            action_num=task.retry_count + 1,
+            tool=task.module_name,
+            target=task.target,
+            phase=task.phase.value,
+        )
         state.add_timeline_event(
             "module_execution",
             f"Executing {task.module_name} against {task.target}",
@@ -849,29 +890,48 @@ class AttackModuleExecutor:
         Feeds the CriticAgent's repeat-failure detection (Layer 4) so a
         re-attempt of the same failing module on the autonomous path is flagged
         for modification. No-op when no blackboard is wired (empty dict).
+
+        Uses ``Blackboard.append_to`` (atomic, dedupe via extend_list) so the
+        write is safe even if the swarm ``route()`` loop is concurrently
+        touching ``failed_modules`` via the reflection agent — the legacy
+        ``bb.setdefault(...)`` + in-place ``.append`` mutated the list outside
+        any lock and raced under the shared-blackboard model.
         """
         bb = self._blackboard
         if not bb:
             return
-        failed = bb.setdefault("failed_modules", [])
-        if module_name not in failed:
-            failed.append(module_name)
+        # extend_list with dedupe=True gives the "append if absent" semantics
+        # the old setdefault+append had, atomically.
+        if hasattr(bb, "extend_list"):
+            bb.extend_list("failed_modules", [module_name])
+        else:  # legacy plain-dict fallback (defensive)
+            failed = bb.setdefault("failed_modules", [])
+            if module_name not in failed:
+                failed.append(module_name)
 
     def _record_success_on_blackboard(self, module_name: str) -> None:
         """Record a module success on the shared blackboard.
 
         Clears the module from the repeat-failure list (so the critic stops
         flagging it) and notes it as successful. No-op when no blackboard wired.
+
+        Atomic via ``Blackboard.remove_from_list`` / ``append_to`` so the
+        failed→successful transition is safe against a concurrent reflection
+        agent merge.
         """
         bb = self._blackboard
         if not bb:
             return
-        failed = bb.get("failed_modules")
-        if failed and module_name in failed:
-            failed.remove(module_name)
-        worked = bb.setdefault("successful_modules", [])
-        if module_name not in worked:
-            worked.append(module_name)
+        if hasattr(bb, "remove_from_list"):
+            bb.remove_from_list("failed_modules", module_name)
+            bb.append_to("successful_modules", module_name)
+        else:  # legacy plain-dict fallback (defensive)
+            failed = bb.get("failed_modules")
+            if failed and module_name in failed:
+                failed.remove(module_name)
+            worked = bb.setdefault("successful_modules", [])
+            if module_name not in worked:
+                worked.append(module_name)
 
     def _run_reflection(self, task: AttackTask, state: AttackState, result: dict[str, Any]) -> None:
         """Run the ReflectionAgent post-check.
@@ -1032,13 +1092,30 @@ class AutonomousOrchestrator:
             or ((mission_config.get("msf") or {}).get("auto_local_exploit_suggester", False))
         )
 
+        # Domain targeting: the operator's original --target (domain or IP) and
+        # the resolved IP for a domain target. Threaded in from
+        # run_autonomous_campaign(original_target=..., resolved_ip=...) so the
+        # Path-B subdomain expansion in _phase_reconnaissance actually fires
+        # (it's gated on state.original_target). Defaults to "" so IP-only
+        # campaigns are unaffected.
+        self._original_target = ""
+        self._resolved_ip = ""
+
     def _new_task_id(self) -> str:
         self._task_counter += 1
         return f"ATK-{self._task_counter:05d}"
 
     def get_state(self, target: str) -> AttackState:
         if target not in self._states:
-            self._states[target] = AttackState(target=target)
+            state = AttackState(target=target)
+            # Thread the domain-targeting context into the freshly-created
+            # AttackState so _phase_reconnaissance's subdomain-expansion branch
+            # (gated on state.original_target) is reachable on Path B.
+            if self._original_target and not state.original_target:
+                state.original_target = self._original_target
+            if self._resolved_ip and not state.resolved_ip:
+                state.resolved_ip = self._resolved_ip
+            self._states[target] = state
         return self._states[target]
 
     # ── Main campaign runner ─────────────────────────────────────────────
@@ -1048,6 +1125,8 @@ class AutonomousOrchestrator:
         targets: list[str],
         *,
         resume: bool = False,
+        original_target: str = "",
+        resolved_ip: str = "",
     ) -> dict[str, Any]:
         """Run a full autonomous attack campaign against multiple targets.
 
@@ -1058,7 +1137,18 @@ class AutonomousOrchestrator:
         skips recon it already finished and doesn't re-fire modules that
         already succeeded/failed. A missing/empty state file degrades
         gracefully to a fresh start (see ``load_state``).
+
+        Domain targeting: pass ``original_target`` (the operator's domain
+        --target) and ``resolved_ip`` so the Path-B subdomain-expansion branch
+        in _phase_reconnaissance fires. When both are "" (the default), an
+        IP-only campaign runs unchanged.
         """
+        # Stash on the instance so get_state() can thread them into freshly-
+        # created AttackState objects (get_state has no kwargs of its own).
+        if original_target:
+            self._original_target = original_target
+        if resolved_ip:
+            self._resolved_ip = resolved_ip
         logger.info(f"Starting autonomous campaign against {len(targets)} targets")
         campaign_start = time.monotonic()
 
@@ -1205,6 +1295,7 @@ class AutonomousOrchestrator:
         logger.info(
             f"[LOCAL] Target {state.target} is this host -- local-takeover phase"
         )
+        ui.phase_change("local_takeover")
         state.current_phase = AttackPhase.PRIVILEGE_ESCALATION
         state.add_timeline_event(
             "local_takeover",
@@ -1257,6 +1348,7 @@ class AutonomousOrchestrator:
         scan as before.
         """
         logger.info(f"[RECON] Starting reconnaissance against {state.target}")
+        ui.phase_change("reconnaissance")
         state.current_phase = AttackPhase.RECONNAISSANCE
         state.add_timeline_event("phase_start", "Reconnaissance phase started")
 
@@ -1354,6 +1446,7 @@ class AutonomousOrchestrator:
         Default False preserves the single-pass behavior.
         """
         logger.info(f"[EXPLOIT] Starting exploitation against {state.target}")
+        ui.phase_change("exploitation")
         state.current_phase = AttackPhase.EXPLOITATION
         state.add_timeline_event("phase_start", "Exploitation phase started")
 
@@ -1418,6 +1511,7 @@ class AutonomousOrchestrator:
     async def _phase_privilege_escalation(self, state: AttackState) -> None:
         """Attempt privilege escalation after successful exploitation."""
         logger.info(f"[PRIVESC] Starting privilege escalation against {state.target}")
+        ui.phase_change("privilege_escalation")
         state.current_phase = AttackPhase.PRIVILEGE_ESCALATION
         state.add_timeline_event("phase_start", "Privilege escalation phase started")
 
@@ -1473,6 +1567,7 @@ class AutonomousOrchestrator:
         can't loop the campaign.
         """
         logger.info(f"[LATERAL] Starting lateral movement from {state.target} (pivot depth {_depth})")
+        ui.phase_change("lateral_movement")
         state.current_phase = AttackPhase.LATERAL_MOVEMENT
         state.add_timeline_event("phase_start", "Lateral movement phase started")
 
@@ -1520,6 +1615,7 @@ class AutonomousOrchestrator:
     async def _phase_validation(self, state: AttackState) -> None:
         """Validate all findings and generate evidence."""
         logger.info(f"[VALIDATE] Starting validation for {state.target}")
+        ui.phase_change("validation")
         state.current_phase = AttackPhase.VALIDATION
         state.add_timeline_event("phase_start", "Validation phase started")
 
@@ -1583,6 +1679,7 @@ class AutonomousOrchestrator:
         if not state.access_achieved:
             return
         logger.info(f"[PERSIST] Starting persistence against {state.target}")
+        ui.phase_change("persistence")
         state.current_phase = AttackPhase.PERSISTENCE
         state.add_timeline_event("phase_start", "Persistence phase started")
 

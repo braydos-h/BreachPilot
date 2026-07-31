@@ -1606,8 +1606,23 @@ if __name__ == "__main__":
                 workspace_root=campaign_dir,
             )
 
+            # Domain targeting: when the operator passed a domain (not an IP)
+            # to start_autonomous_campaign, resolve it and thread both the
+            # original domain and the resolved IP into the orchestrator so
+            # the Path-B subdomain-expansion branch in _phase_reconnaissance
+            # fires. IP-only campaigns pass "" (unchanged behavior).
+            _orig_target = ""
+            _resolved_ip = ""
+            if is_fqdn(target_ip):
+                _orig_target = target_ip
+                _resolved_ip = resolve_target_to_ip(target_ip) or ""
+
             # Write initial state
             state = orchestrator.get_state(target_ip)
+            if _orig_target:
+                state.original_target = _orig_target
+            if _resolved_ip:
+                state.resolved_ip = _resolved_ip
             state.aggression = agg
             state.add_timeline_event("campaign_start", f"Autonomous campaign started with goal: {goal}")
 
@@ -1630,7 +1645,11 @@ if __name__ == "__main__":
             # Launch in background asyncio task
             async def _run_campaign() -> None:
                 try:
-                    await orchestrator.run_autonomous_campaign([target_ip])
+                    await orchestrator.run_autonomous_campaign(
+                        [target_ip],
+                        original_target=_orig_target,
+                        resolved_ip=_resolved_ip,
+                    )
                     # Save final state
                     final_state = {
                         "campaign_id": campaign_id,
@@ -1819,6 +1838,17 @@ if __name__ == "__main__":
             )
 
             state = orchestrator.get_state(target_ip)
+            # Domain targeting: restore the domain context on a step-resumed
+            # campaign so state.original_target is populated (the subdomain-
+            # expansion branch in _phase_reconnaissance reads it). The
+            # state.json written by start_autonomous_campaign carries the
+            # original target string; if it's a domain, thread it through.
+            _step_orig = state_data.get("original_target", "") or ""
+            _step_resolved = state_data.get("resolved_ip", "") or ""
+            if _step_orig and not state.original_target:
+                state.original_target = _step_orig
+            if _step_resolved and not state.resolved_ip:
+                state.resolved_ip = _step_resolved
 
             # Run just the recon phase if no recon yet, otherwise try exploitation
             if state.recon_result is None:

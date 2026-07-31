@@ -1045,6 +1045,11 @@ async def async_main(args: argparse.Namespace) -> int:
                 tool_executor=swarm_bridge.dispatch,
                 console_ui=ui,
                 state_dir=swarm_workspace,
+                # Domain targeting: thread the operator's original target and
+                # resolved IP into the AgentLoop so run_autonomous_campaign →
+                # AutonomousOrchestrator can run Path-B subdomain expansion.
+                original_target=original_target if resolved_domain else "",
+                resolved_ip=resolved_ip if resolved_domain else "",
             )
             # Tier 5: populate the swarm context's model_client (previously always
             # None, which kept ExploitAgent Path A disabled). The bridge's

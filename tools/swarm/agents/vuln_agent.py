@@ -15,6 +15,7 @@ import time
 from typing import Any
 
 from tools.swarm.base import Agent, AgentResult, AgentStatus
+from tools.swarm.bb_compat import bb_set
 from tools.cve_lookup import NVDClient, CVESearchSettings, format_cve_results
 from tools.exploit_search import ExploitSearch, ExploitSearchSettings
 from tools.attack_modules import ModuleContext, find_modules
@@ -274,13 +275,18 @@ class VulnAgent(Agent):
                         output["recommended_exploit_path"] = llm_analysis["recommended_exploit_path"]
 
             # ── Update blackboard ──
-            blackboard["vuln_research_complete"] = True
-            blackboard["vulnerability_hypotheses"] = output["hypotheses"]
-            blackboard["recommended_exploit_path"] = output["recommended_exploit_path"]
-            blackboard["matched_attack_modules"] = [
+            # Atomic overwrites via the Blackboard API (bb_compat bridges the
+            # plain-dict test/legacy path). Vuln research replaces these keys
+            # (not append) so bb_set preserves the prior semantics; the lock
+            # makes the writes safe under parallel per-service dispatch in
+            # Phase 3.
+            bb_set(blackboard, "vuln_research_complete", True)
+            bb_set(blackboard, "vulnerability_hypotheses", output["hypotheses"])
+            bb_set(blackboard, "recommended_exploit_path", output["recommended_exploit_path"])
+            bb_set(blackboard, "matched_attack_modules", [
                 {"service": h["service"], "modules": h["matched_modules"]}
                 for h in output["hypotheses"] if h.get("matched_modules")
-            ]
+            ])
 
             # Memory updates
             memory_updates.append({

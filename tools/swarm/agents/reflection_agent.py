@@ -15,6 +15,7 @@ import time
 from typing import Any
 
 from tools.swarm.base import Agent, AgentResult, AgentStatus
+from tools.swarm.bb_compat import bb_set, bb_extend, bb_remove
 from tools.exceptions import _EXC_GROUP_CATCH
 
 
@@ -224,13 +225,19 @@ class ReflectionAgent(Agent):
                         output["confidence"] = llm_reflection["confidence"]
 
             # ── Update blackboard ──
-            blackboard["last_reflection"] = output
-            blackboard["strategy_shift"] = output["recommended_strategy_shift"]
+            # Atomic writes via the Blackboard API (bb_compat bridges the
+            # plain-dict test/legacy path). The ``failed_modules`` merge below
+            # was a named list read-modify-write race in the route_parallel
+            # warning (``bb[k] = list(set(bb.get(k,[]) + [...]))`` — get-then-set,
+            # not atomic). ``bb_extend`` (dedupe=True) makes it atomic;
+            # ``bb_remove`` makes the "clear succeeded modules" filter-then-set
+            # atomic too.
+            bb_set(blackboard, "last_reflection", output)
+            bb_set(blackboard, "strategy_shift", output["recommended_strategy_shift"])
             if failures:
-                blackboard["failed_modules"] = list(set(
-                    blackboard.get("failed_modules", []) +
-                    [e.get("tool", "unknown") for e in failures]
-                ))
+                # Dedupe-failures: the old code did list(set(bb + new)) which
+                # lost ordering; bb_extend keeps insertion order while deduping.
+                bb_extend(blackboard, "failed_modules", [e.get("tool", "unknown") for e in failures])
             # Clear modules that just succeeded. Without this the swarm path,
             # unlike the autonomous path's _record_success_on_blackboard, leaves
             # a recovered module in failed_modules forever -- so CriticAgent's
@@ -239,14 +246,9 @@ class ReflectionAgent(Agent):
             # autonomous semantics: remove from failed, note as successful.
             if successes:
                 success_tools = {e.get("tool", "unknown") for e in successes}
-                if blackboard.get("failed_modules"):
-                    blackboard["failed_modules"] = [
-                        m for m in blackboard["failed_modules"] if m not in success_tools
-                    ]
-                worked = blackboard.setdefault("successful_modules", [])
                 for tool in success_tools:
-                    if tool not in worked:
-                        worked.append(tool)
+                    bb_remove(blackboard, "failed_modules", tool)
+                bb_extend(blackboard, "successful_modules", list(success_tools))
 
             # ── Store in semantic memory ──
             memory_updates.append({

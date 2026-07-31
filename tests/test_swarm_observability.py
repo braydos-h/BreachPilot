@@ -104,7 +104,14 @@ def test_orchestrator_persists_state_file():
 
         assert state_path.exists()
         data = json.loads(state_path.read_text(encoding="utf-8"))
-        assert data["blackboard"]["access_achieved"] is True
+        # Phase 1: the persisted blackboard is now namespaced
+        # (``{__global__: {...}, "<target>": {...}, ...}``) so per-target
+        # findings survive resume. The ``access_achieved`` milestone is a
+        # global scalar, so it lives under ``__global__``. The
+        # ``blackboard_schema: "namespaced"`` flag distinguishes this from the
+        # legacy flat shape (which ``load_state`` still reads for back-compat).
+        assert data["blackboard_schema"] == "namespaced"
+        assert data["blackboard"]["__global__"]["access_achieved"] is True
         assert len(data["agents"]) == 1
 
 
