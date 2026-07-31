@@ -660,19 +660,22 @@ class AttackUi:
         return await self._qconfirm(question, default=default)
 
     def ask_target(self, default: str = "") -> str:
-        print(f"\n{self._c('bold')}Enter target IP address:{self._c('reset')}")
+        print(f"\n{self._c('bold')}Enter target (IP address or domain):{self._c('reset')}")
         print("  Only scan systems you own or are explicitly authorized to test.")
         if default:
             print(f"  (press Enter for {default})")
+        # Domain targeting: accept an IPv4/IPv6 literal OR a domain name. A
+        # domain is NOT resolved here -- the caller (main.py) resolves it so
+        # it can carry both the domain and the resolved IP. Syntax-only gate.
+        from tools.validation_utils import validate_target
         while True:
             try:
                 val = input("  > ").strip()
                 if not val and default:
                     val = default
-                ipaddress.ip_address(val)
-                return val
-            except ValueError:
-                print(f"  {self._c('red')}Invalid IP address. Enter an IPv4 or IPv6 address.{self._c('reset')}")
+                if validate_target(val):
+                    return val
+                print(f"  {self._c('red')}Invalid target. Enter an IPv4/IPv6 address or a domain name.{self._c('reset')}")
             except EOFError:
                 return default
 

@@ -1129,6 +1129,10 @@ async def async_main(args: argparse.Namespace) -> int:
                 # Tier 5: hand the live MCP session to the --swarm bridge.
                 swarm_attach=_swarm_attach if args.swarm else None,
                 heartbeat=_heartbeat,
+                # Domain targeting: thread the operator's original target and
+                # the resolved IP down to the MCP session env vars.
+                original_target=original_target if resolved_domain else None,
+                resolved_ip=resolved_ip if resolved_domain else None,
             )
         finally:
             ticker.cancel()

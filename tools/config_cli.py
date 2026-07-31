@@ -28,13 +28,23 @@ def load_config(path: Path) -> dict[str, Any]:
 
 
 def add_target_to_allowlist(path: Path, target_ip: str) -> bool:
-    """Persist an IP address in ``exploit.allowed_targets``.
+    """Persist a target (IP, domain, or wildcard domain) in ``exploit.allowed_targets``.
 
     Returns ``True`` when the config file was changed and ``False`` when the
     normalized address was already present.  The replacement is atomic so an
     interrupted new-session flow cannot leave a partial YAML file behind.
+
+    Bare IP addresses are normalized via ``ipaddress.ip_address`` for
+    deduplication; domains and ``*.wildcard`` entries are persisted verbatim
+    (the allowlist matcher ``is_target_in_allowlist`` handles all forms).
     """
-    normalized_target = str(ipaddress.ip_address(target_ip.strip()))
+    target = target_ip.strip()
+    # Normalize IPs; preserve domains/wildcards verbatim.
+    try:
+        normalized_target = str(ipaddress.ip_address(target))
+    except ValueError:
+        # Not an IP -- keep the domain/wildcard string as-is.
+        normalized_target = target
     source = path.read_text(encoding="utf-8") if path.exists() else ""
     config = load_config(path)
 
@@ -55,7 +65,7 @@ def add_target_to_allowlist(path: Path, target_ip: str) -> bool:
         except ValueError:
             # Existing host, wildcard, and CIDR entries remain valid allowlist
             # entries; only bare IP addresses are normalized for deduplication.
-            normalized_existing.add(entry.strip())
+            normalized_existing.add(entry.strip().lower())
 
     if normalized_target in normalized_existing:
         return False

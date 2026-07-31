@@ -62,7 +62,7 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return f"BLOCKED: unsupported scanner '{sc}'. Allowed: {', '.join(sorted(_SCANNERS))}."
         if not target_ip or not target_ip.strip():
             return "BLOCKED: target_ip is required."
-        if not validate_ipv4(target_ip):
+        if not validate_target_or_ip(target_ip):
             return "BLOCKED: target_ip must be a valid IPv4 address."
         if not isinstance(port, int) or port < 1 or port > 65535:
             return "BLOCKED: port must be an integer between 1 and 65535."

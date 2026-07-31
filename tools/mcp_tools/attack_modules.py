@@ -797,7 +797,7 @@ if __name__ == "__main__":
             return "BLOCKED: cve_id is required."
         # M8: validate the target IP before it is interpolated into the
         # generated exploit script.
-        if not validate_ipv4(target_ip):
+        if not validate_target_or_ip(target_ip):
             return "BLOCKED: target_ip must be a valid IPv4 address."
         # M8: service_name/version are interpolated into generated Python
         # source comments -- reject obvious injection carriers (newlines,
@@ -944,7 +944,7 @@ if __name__ == "__main__":
         Example:
             create_attack_plan("192.168.1.100", "linux", "CVE-2024-6387,CVE-2021-44228")
         """
-        if not validate_ipv4(target_ip):
+        if not validate_target_or_ip(target_ip):
             return "ERROR: Invalid IPv4 address."
 
         try:
@@ -1016,7 +1016,7 @@ if __name__ == "__main__":
         Example:
             get_current_plan("192.168.1.100")
         """
-        if not validate_ipv4(target_ip):
+        if not validate_target_or_ip(target_ip):
             return "ERROR: Invalid IPv4 address."
 
         try:
@@ -1061,7 +1061,7 @@ if __name__ == "__main__":
         Example:
             replan("192.168.1.100", "Log4j probe returned no response Ã¢â‚¬â€ service may be patched")
         """
-        if not validate_ipv4(target_ip):
+        if not validate_target_or_ip(target_ip):
             return "ERROR: Invalid IPv4 address."
 
         try:
@@ -1166,7 +1166,7 @@ if __name__ == "__main__":
         Example:
             run_attack_module("SSHBruteForce", "192.168.1.100", "timeout=30 threads=4")
         """
-        if not validate_ipv4(target_ip):
+        if not validate_target_or_ip(target_ip):
             return "ERROR: Invalid IPv4 address."
 
         try:
@@ -1315,7 +1315,7 @@ if __name__ == "__main__":
         Example:
             craft_exploit("192.168.1.100", "ssh", "OpenSSH 8.9p1", "linux", "RegreSSHion")
         """
-        if not validate_ipv4(target_ip):
+        if not validate_target_or_ip(target_ip):
             return "ERROR: Invalid IPv4 address."
         if not service_name or not service_name.strip():
             return "ERROR: service_name is required."
@@ -1557,7 +1557,7 @@ if __name__ == "__main__":
         Example:
             start_autonomous_campaign("192.168.1.100", "full_compromise", "aggressive")
         """
-        if not validate_ipv4(target_ip):
+        if not validate_target_or_ip(target_ip):
             return "ERROR: Invalid IPv4 address."
 
         # Check config gate

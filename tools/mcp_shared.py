@@ -493,21 +493,66 @@ def _audit_log(
 
 def _allowed_target_list(config: dict[str, Any] | None) -> list[str]:
     """The effective allowlist = config ``exploit.allowed_targets`` UNION the
-    runtime target injected via the ``EXPLOIT_TARGET`` env var (set in
-    ``tools/mcp_session.open_exploit_mcp_session`` to the ``--target`` IP).
+    runtime targets injected via env vars (set in
+    ``tools/mcp_session.open_exploit_mcp_session``).
 
-    LAB BUILD: this union is the target-IP lock. An empty config list is the
-    lab default -- the runtime ``--target`` is auto-authorized, so the AI is
-    locked to the single target it was launched against without per-run config
-    edits. Extra operator-authorized hosts (e.g. a callback/C2 listener) may be
-    added to ``exploit.allowed_targets`` on top of the runtime target.
+    Domain targeting unions four env vars so the lock accepts both the
+    operator's original target and every form it can take during a run:
+
+      - ``EXPLOIT_TARGET``            -- the operator's literal ``--target``
+                                         (IP or domain) -- always set
+      - ``EXPLOIT_TARGET_IP``          -- resolved IP for a domain target
+                                         (set only when the operator gave a domain)
+      - ``EXPLOIT_TARGET_DOMAIN``      -- the domain string itself
+                                         (set only when the operator gave a domain)
+      - ``EXPLOIT_DISCOVERED_TARGETS`` -- comma-separated hosts/IPs discovered
+                                         mid-run by subdomain expansion
+                                         (each auto-authorized by the orchestrator)
+
+    LAB BUILD: this union is the target-IP lock. The lock now locks to a
+    *set* of operator-authorized hosts (the primary target + its resolved IP
+    + discovered subdomains) instead of a single IP, but every member of the
+    set is still operator-authorized (the env vars are set from the
+    operator's ``--target`` and the orchestrator's ``add_discovered_target``).
+    Extra operator-authorized hosts (e.g. a callback/C2 listener) may be added
+    to ``exploit.allowed_targets`` on top of the runtime targets.
     """
     exploit_cfg = (config or {}).get("exploit", {})
     allowed = list(exploit_cfg.get("allowed_targets", []))
-    env_target = os.environ.get("EXPLOIT_TARGET", "").strip()
-    if env_target:
-        allowed.append(env_target)
+    # Single-target env vars.
+    for env_key in ("EXPLOIT_TARGET", "EXPLOIT_TARGET_IP", "EXPLOIT_TARGET_DOMAIN"):
+        val = os.environ.get(env_key, "").strip()
+        if val and val not in allowed:
+            allowed.append(val)
+    # Discovered-targets env var (comma-separated, set by subdomain expansion).
+    discovered = os.environ.get("EXPLOIT_DISCOVERED_TARGETS", "").strip()
+    if discovered:
+        for tok in discovered.split(","):
+            tok = tok.strip()
+            if tok and tok not in allowed:
+                allowed.append(tok)
     return allowed
+
+
+def add_discovered_target(host: str, ip: str | None = None) -> None:
+    """Runtime-extend the allowlist with a subdomain discovered during this session.
+
+    Writes to the ``EXPLOIT_DISCOVERED_TARGETS`` env var (comma-separated) so
+    ``_allowed_target_list`` picks it up on the next allowlist check. Both the
+    hostname and (when available) its resolved IP are added, so HTTP tools
+    (which use the hostname for Host/SNI) and IP-based tools (nmap/metasploit)
+    can both target the discovered host. The lock model is preserved: the
+    host is still gated through ``is_target_in_allowlist`` -- this helper only
+    adds it to the operator-authorized set, it does not bypass the check.
+    """
+    if not host:
+        return
+    vals = [t.strip() for t in os.environ.get("EXPLOIT_DISCOVERED_TARGETS", "").split(",") if t.strip()]
+    if host not in vals:
+        vals.append(host)
+    if ip and ip not in vals and ip != host:
+        vals.append(ip)
+    os.environ["EXPLOIT_DISCOVERED_TARGETS"] = ",".join(vals)
 
 
 def _check_allowlist(target_ip: str, config: dict[str, Any] | None) -> tuple[bool, str]:

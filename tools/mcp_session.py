@@ -126,6 +126,8 @@ async def open_exploit_mcp_session(
     active_model_alias: str = "",
     soft_fail: bool = False,
     fallback_to_stdio: bool = True,
+    original_target: str | None = None,
+    resolved_ip: str | None = None,
 ) -> AsyncIterator[Any]:
     """Open the requested transport, falling back during HTTP startup only.
 
@@ -143,6 +145,8 @@ async def open_exploit_mcp_session(
         "multi_model_enabled": multi_model_enabled,
         "active_model_alias": active_model_alias,
         "soft_fail": soft_fail,
+        "original_target": original_target,
+        "resolved_ip": resolved_ip,
     }
     if transport != "http" or not fallback_to_stdio:
         async with _open_exploit_mcp_session_once(
@@ -204,6 +208,8 @@ async def _open_exploit_mcp_session_once(
     soft_fail: bool = False,
     startup_soft_fail: bool | None = None,
     startup_errors: list[BaseException] | None = None,
+    original_target: str | None = None,
+    resolved_ip: str | None = None,
 ) -> AsyncIterator[Any]:
     """Open one MCP client session without transport fallback.
 
@@ -248,6 +254,16 @@ async def _open_exploit_mcp_session_once(
     env = os.environ.copy()
     env["EXPLOIT_TARGET"] = target_ip
     env["EXPLOIT_WORKSPACE"] = str(workspace.resolve())
+    # Domain targeting: when the operator gave a domain, set the resolved IP
+    # and the domain string as extra env vars so the allowlist union
+    # (``_allowed_target_list``) authorizes both forms. ``EXPLOIT_TARGET``
+    # stays the operator's literal ``--target`` (domain or IP) so it is the
+    # primary lock identity; ``EXPLOIT_TARGET_IP`` lets IP-based tools
+    # (nmap/metasploit) target the resolved host; ``EXPLOIT_TARGET_DOMAIN``
+    # lets web tools use the domain for Host headers / TLS SNI.
+    if original_target and resolved_ip:
+        env["EXPLOIT_TARGET_IP"] = resolved_ip
+        env["EXPLOIT_TARGET_DOMAIN"] = original_target
     if multi_model_enabled is not None:
         env["AI_NMAP_MULTI_MODEL_ENABLED"] = "1" if multi_model_enabled else "0"
     if active_model_alias:

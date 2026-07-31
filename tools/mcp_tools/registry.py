@@ -76,6 +76,11 @@ from tools.validation_utils import (
     is_target_in_allowlist,
     preflight_command_check,
     validate_ipv4,
+    validate_target,
+    validate_target_or_ip,
+    is_fqdn,
+    resolve_target_to_ip,
+    resolve_target,
 )
 from tools.web_researcher import WebResearcher
 from db import DatabaseManager, get_default_db
@@ -362,6 +367,11 @@ __all__ = [
     "render_skill_context",
     "research_api_keys_available",
     "validate_ipv4",
+    "validate_target",
+    "validate_target_or_ip",
+    "is_fqdn",
+    "resolve_target_to_ip",
+    "resolve_target",
     # ponytail: underscore-prefixed helpers used by runtime_skills.py via import *
     "_get_model_client",
     "_positive_int",

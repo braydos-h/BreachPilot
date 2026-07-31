@@ -223,7 +223,7 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
         Example:
             run_full_recon("192.168.1.100", "aggressive")
         """
-        if not validate_ipv4(target_ip):
+        if not validate_target_or_ip(target_ip):
             return "ERROR: Invalid IPv4 address."
         aggression_map = {
             "stealth": "stealth",
@@ -291,7 +291,7 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
         Example:
             get_service_fingerprint("192.168.1.100", 443)
         """
-        if not validate_ipv4(target_ip):
+        if not validate_target_or_ip(target_ip):
             return "ERROR: Invalid IPv4 address."
         if not isinstance(port, int) or port < 1 or port > 65535:
             return "ERROR: Port must be an integer between 1 and 65535."
@@ -427,7 +427,7 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
         Returns:
             UDP_PORTS summary listing the discovered UDP ports and services.
         """
-        if not validate_ipv4(target_ip):
+        if not validate_target_or_ip(target_ip):
             return "ERROR: Invalid IPv4 address."
         if not isinstance(top_ports, int) or top_ports <= 0:
             top_ports = 100
@@ -476,7 +476,7 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
             OSINT summary: ipv6 addresses, reverse dns, cert-transparency count,
             shodan enabled/disabled.
         """
-        if not validate_ipv4(target_ip):
+        if not validate_target_or_ip(target_ip):
             return "ERROR: Invalid IPv4 address."
         from tools.recon_osint import run_osint
 

@@ -90,8 +90,8 @@ def register_workspace_tools(mcp: Any, *, ctx: ToolContext) -> None:
         # M4: validate the target IP before it is interpolated into the
         # PowerShell WindowTitle / env / argv -- a crafted target_ip could
         # inject into the .ps1 wrapper otherwise.
-        if not validate_ipv4(target_ip):
-            return "BLOCKED: target_ip must be a valid IPv4 address."
+        if not validate_target_or_ip(target_ip):
+            return "BLOCKED: target_ip must be a valid IP address or domain."
         cleaned = str(filename).strip().replace("\\", "/").split("/")[-1]
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}\.py", cleaned):
             return "BLOCKED: invalid filename."
