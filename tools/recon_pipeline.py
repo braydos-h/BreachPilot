@@ -36,7 +36,7 @@ from typing import Any, Coroutine
 
 from tools.logging_setup import get_logger
 from tools.nmap_priv import apply_nmap_privilege, is_privilege_error
-from tools.validation_utils import validate_ipv4
+from tools.validation_utils import validate_ipv4, is_fqdn
 
 logger = get_logger()
 
@@ -1479,11 +1479,12 @@ class SecondaryEnumerator:
         """
         logger.info(f"Starting Redis enumeration on {result.target_ip}")
 
-        # Defense-in-depth: refuse non-IPv4 targets so a malformed target_ip
-        # can never reach a subprocess argument list.
-        if not validate_ipv4(result.target_ip):
+        # Defense-in-depth: refuse non-IP/non-domain targets so a malformed
+        # target_ip can never reach a subprocess argument list. A domain is
+        # accepted (nc/redis-cli resolve it); a bare garbage string is refused.
+        if not (validate_ipv4(result.target_ip) or is_fqdn(result.target_ip)):
             logger.warning(
-                f"Skipping Redis enumeration: invalid target IP {result.target_ip!r}"
+                f"Skipping Redis enumeration: invalid target {result.target_ip!r}"
             )
             return result
 

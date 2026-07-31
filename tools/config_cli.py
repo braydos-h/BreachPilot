@@ -37,13 +37,18 @@ def add_target_to_allowlist(path: Path, target_ip: str) -> bool:
     Bare IP addresses are normalized via ``ipaddress.ip_address`` for
     deduplication; domains and ``*.wildcard`` entries are persisted verbatim
     (the allowlist matcher ``is_target_in_allowlist`` handles all forms).
+    Raises ``ValueError`` for a target that is neither a valid IP nor a
+    valid domain (so genuinely malformed input is still rejected).
     """
     target = target_ip.strip()
-    # Normalize IPs; preserve domains/wildcards verbatim.
+    # Normalize IPs; preserve domains/wildcards verbatim. Reject anything that
+    # is neither a valid IP nor a valid FQDN.
     try:
         normalized_target = str(ipaddress.ip_address(target))
     except ValueError:
-        # Not an IP -- keep the domain/wildcard string as-is.
+        from tools.validation_utils import is_fqdn
+        if not is_fqdn(target):
+            raise ValueError(f"Invalid target (not an IP or domain): {target!r}")
         normalized_target = target
     source = path.read_text(encoding="utf-8") if path.exists() else ""
     config = load_config(path)

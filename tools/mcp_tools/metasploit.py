@@ -31,7 +31,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if not re.fullmatch(r"[A-Za-z0-9_./-]{1,120}", module):
             return "BLOCKED: module path must match [A-Za-z0-9_./-]{1,120}."
         if not validate_target_or_ip(target_ip):
-            return "BLOCKED: target_ip must be a valid IPv4 address."
+            return "BLOCKED: target_ip must be a valid IP address or domain."
 
         attempt_dir, attempt_id = _attempt_dir(workspace)
         log_path = attempt_dir / "msf_output.log"
@@ -200,7 +200,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
     def msf_run_exploit(module: str, target_ip: str, options: str = "", payload: str = "", wait_seconds: float = 30.0) -> str:
         """Run a Metasploit exploit module against a target using the persistent msfconsole. Provide module path (e.g., 'exploit/multi/http/log4shell_header_injection'), target IP, and optional key=value options separated by spaces. Returns the full exploit output including any session that was created."""
         if not validate_target_or_ip(target_ip):
-            return "ERROR: Invalid IPv4 address."
+            return "ERROR: Invalid target (IP or domain)."
         bridge = _get_msf_bridge()
         opts: dict[str, str] = {}
         if options.strip():
@@ -228,7 +228,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
     def msf_run_auxiliary(module: str, target_ip: str, options: str = "", wait_seconds: float = 15.0) -> str:
         """Run a Metasploit auxiliary module (scanner, fuzzer, dos, etc.) against a target. Use for: port scanning, service enumeration, vulnerability checking."""
         if not validate_target_or_ip(target_ip):
-            return "ERROR: Invalid IPv4 address."
+            return "ERROR: Invalid target (IP or domain)."
         bridge = _get_msf_bridge()
         opts: dict[str, str] = {}
         if options.strip():

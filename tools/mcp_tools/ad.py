@@ -42,8 +42,8 @@ def _gate_dc(dc_ip: str, target_ip: str, config: dict[str, Any]) -> str | None:
     """Validate + allowlist-gate a secondary DC IP. Returns an error string
     (to return to the caller) or None when the DC is allowed / equals target."""
     dc = (dc_ip or "").strip() or target_ip
-    if not validate_ipv4(dc):
-        return f"ERROR: Invalid IPv4 address for dc_ip ({dc})."
+    if not validate_target_or_ip(dc):
+        return f"ERROR: Invalid dc_ip (must be an IP or domain): {dc}."
     if dc != target_ip:
         allowed, reason = check_targets_allowlist([dc], config)
         if not allowed:
@@ -102,8 +102,8 @@ def register_ad_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """AS-REP Roast: request AS-REPs for accounts with 'Do not require Kerberos preauthentication' (impacket-GetNPUsers) and emit hashcat-mode-18200 hashes for offline cracking. Provide a domain and either credentials or a users_file. dc_ip defaults to target_ip (the DC); an off-target DC is allowlist-gated."""
         if not _ad_enabled(config, "asrep_roast"):
             return "BLOCKED: asrep_roast disabled (exploit.ad_kerberos.enabled / asrep_roast)."
-        if not target_ip or not validate_ipv4(target_ip):
-            return "ERROR: Invalid target_ip."
+        if not target_ip or not validate_target_or_ip(target_ip):
+            return "ERROR: Invalid target_ip (must be an IP or domain)."
         if not (domain or "").strip():
             return "BLOCKED: domain is required."
         dc_err = _gate_dc(dc_ip, target_ip, config)
@@ -150,8 +150,8 @@ def register_ad_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Pass-the-Hash: execute a command on a Windows target via NTLM hash (no plaintext). Uses NetExec (nxc/crackmapexec) when available, else impacket-wmiexec. service: smb | winrm. target_ip only (no secondary host)."""
         if not _ad_enabled(config, "pass_the_hash"):
             return "BLOCKED: pass_the_hash disabled (exploit.ad_kerberos.enabled / pass_the_hash)."
-        if not target_ip or not validate_ipv4(target_ip):
-            return "ERROR: Invalid target_ip."
+        if not target_ip or not validate_target_or_ip(target_ip):
+            return "ERROR: Invalid target_ip (must be an IP or domain)."
         if not (username or "").strip():
             return "BLOCKED: username is required."
         h = (ntlm_hash or "").strip()
@@ -188,8 +188,8 @@ def register_ad_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Enumerate Active Directory Certificate Services (AD CS) templates via certipy (ESC1-8). Provide username + domain + (password or ntlm_hash). dc_ip defaults to target_ip; an off-target DC is allowlist-gated. Returns vulnerable-template summary for privesc/credential-theft planning."""
         if not _ad_enabled(config, "adcs_enum"):
             return "BLOCKED: adcs_enum disabled (exploit.ad_kerberos.enabled / adcs_enum)."
-        if not target_ip or not validate_ipv4(target_ip):
-            return "ERROR: Invalid target_ip."
+        if not target_ip or not validate_target_or_ip(target_ip):
+            return "ERROR: Invalid target_ip (must be an IP or domain)."
         if not (username or "").strip() or not (domain or "").strip():
             return "BLOCKED: username and domain are required."
         if not ((password or "").strip() or (ntlm_hash or "").strip()):
@@ -225,8 +225,8 @@ def register_ad_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Collect BloodHound data (users/groups/sessions/acls) via bloodhound-python -c All --zip for graph-based attack-path analysis. Provide domain + credentials. dc_ip defaults to target_ip (the DC); off-target DC is allowlist-gated. Zipped JSON lands in the per-target workspace."""
         if not _ad_enabled(config, "bloodhound"):
             return "BLOCKED: bloodhound disabled (exploit.ad_kerberos.enabled / bloodhound)."
-        if not target_ip or not validate_ipv4(target_ip):
-            return "ERROR: Invalid target_ip."
+        if not target_ip or not validate_target_or_ip(target_ip):
+            return "ERROR: Invalid target_ip (must be an IP or domain)."
         if not (domain or "").strip() or not (username or "").strip():
             return "BLOCKED: domain and username are required."
         if not ((password or "").strip() or (ntlm_hash or "").strip()):
@@ -262,8 +262,8 @@ def register_ad_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """SMB/NTLM relay via impacket ntlmrelayx. The relay target list is built ONLY from the operator allowlist (exploit.allowed_targets + runtime target) plus target_ip; any off-list host is refused. ntlmrelayx binds the operator's iface (no target IP). Use after coercing an auth to your listener. Optional command runs on a successful relay."""
         if not _ad_enabled(config, "responder_relay"):
             return "BLOCKED: responder_relay disabled (exploit.ad_kerberos.enabled / responder_relay)."
-        if not target_ip or not validate_ipv4(target_ip):
-            return "ERROR: Invalid target_ip."
+        if not target_ip or not validate_target_or_ip(target_ip):
+            return "ERROR: Invalid target_ip (must be an IP or domain)."
 
         # Build the relay target list from the allowlist ONLY (+ the runtime target).
         # An off-list host would pivot ntlmrelayx to an unauthorized box.
@@ -303,8 +303,8 @@ def register_ad_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """DETECTION ONLY: check whether the target requires SMB signing (determines relay feasibility). Uses NetExec --signing when available, else nmap smb2-security-mode. No credentials sent, no exploitation."""
         if not _ad_enabled(config, "smb_signing_check", default=True):
             return "BLOCKED: smb_signing_check disabled (exploit.ad_kerberos.enabled / smb_signing_check)."
-        if not target_ip or not validate_ipv4(target_ip):
-            return "ERROR: Invalid target_ip."
+        if not target_ip or not validate_target_or_ip(target_ip):
+            return "ERROR: Invalid target_ip (must be an IP or domain)."
         attempt_dir, attempt_id = _attempt_dir(workspace)
 
         nxc = shutil.which("nxc") or shutil.which("crackmapexec")
@@ -328,8 +328,8 @@ def register_ad_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Mint a Kerberos golden ticket (TGT) from a stolen krbtgt NTLM hash via impacket-ticketer. Provide the domain, target user, krbtgt hash (32-hex NT), domain SID, and ticket duration. The ticket is written to the workspace; export KRB5CCNAME to use it with impacket tools against the owned target only."""
         if not _ad_enabled(config, "golden_ticket"):
             return "BLOCKED: golden_ticket disabled (exploit.ad_kerberos.enabled / golden_ticket)."
-        if not target_ip or not validate_ipv4(target_ip):
-            return "ERROR: Invalid target_ip."
+        if not target_ip or not validate_target_or_ip(target_ip):
+            return "ERROR: Invalid target_ip (must be an IP or domain)."
         if not (domain or "").strip() or not (username or "").strip():
             return "BLOCKED: domain and username are required."
         h = (krbtgt_hash or "").strip()

@@ -32,8 +32,8 @@ def register_payload_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return "BLOCKED: payload_type is required."
         if not lhost or not lhost.strip():
             return "BLOCKED: lhost is required."
-        if not validate_ipv4(lhost):
-            return "ERROR: Invalid IPv4 address for lhost."
+        if not validate_target_or_ip(lhost):
+            return "ERROR: Invalid lhost (must be an IP or domain)."
         # Tool-layer scope gate: lhost is the payload's callback host. A payload
         # that calls back to an out-of-scope host is an egress path the allowlist
         # must gate (mirrors the command-analyzer egress check on the agent path).

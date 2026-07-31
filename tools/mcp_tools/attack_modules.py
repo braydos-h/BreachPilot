@@ -798,7 +798,7 @@ if __name__ == "__main__":
         # M8: validate the target IP before it is interpolated into the
         # generated exploit script.
         if not validate_target_or_ip(target_ip):
-            return "BLOCKED: target_ip must be a valid IPv4 address."
+            return "BLOCKED: target_ip must be a valid IP address or domain."
         # M8: service_name/version are interpolated into generated Python
         # source comments -- reject obvious injection carriers (newlines,
         # quotes, backslashes) outright so a crafted value can't break out of
@@ -945,7 +945,7 @@ if __name__ == "__main__":
             create_attack_plan("192.168.1.100", "linux", "CVE-2024-6387,CVE-2021-44228")
         """
         if not validate_target_or_ip(target_ip):
-            return "ERROR: Invalid IPv4 address."
+            return "ERROR: Invalid target (IP or domain)."
 
         try:
             cve_list = [c.strip() for c in known_cves.split(",") if c.strip()] if known_cves else []
@@ -1017,7 +1017,7 @@ if __name__ == "__main__":
             get_current_plan("192.168.1.100")
         """
         if not validate_target_or_ip(target_ip):
-            return "ERROR: Invalid IPv4 address."
+            return "ERROR: Invalid target (IP or domain)."
 
         try:
             planner = AttackPlanner(workspace)
@@ -1062,7 +1062,7 @@ if __name__ == "__main__":
             replan("192.168.1.100", "Log4j probe returned no response Ã¢â‚¬â€ service may be patched")
         """
         if not validate_target_or_ip(target_ip):
-            return "ERROR: Invalid IPv4 address."
+            return "ERROR: Invalid target (IP or domain)."
 
         try:
             planner = AttackPlanner(workspace)
@@ -1167,7 +1167,7 @@ if __name__ == "__main__":
             run_attack_module("SSHBruteForce", "192.168.1.100", "timeout=30 threads=4")
         """
         if not validate_target_or_ip(target_ip):
-            return "ERROR: Invalid IPv4 address."
+            return "ERROR: Invalid target (IP or domain)."
 
         try:
             module = get_module(module_name)
@@ -1316,7 +1316,7 @@ if __name__ == "__main__":
             craft_exploit("192.168.1.100", "ssh", "OpenSSH 8.9p1", "linux", "RegreSSHion")
         """
         if not validate_target_or_ip(target_ip):
-            return "ERROR: Invalid IPv4 address."
+            return "ERROR: Invalid target (IP or domain)."
         if not service_name or not service_name.strip():
             return "ERROR: service_name is required."
 
@@ -1558,7 +1558,7 @@ if __name__ == "__main__":
             start_autonomous_campaign("192.168.1.100", "full_compromise", "aggressive")
         """
         if not validate_target_or_ip(target_ip):
-            return "ERROR: Invalid IPv4 address."
+            return "ERROR: Invalid target (IP or domain)."
 
         # Check config gate
         swarm_cfg = (config or {}).get("swarm", {})

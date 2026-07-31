@@ -34,8 +34,8 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Store a harvested or known credential for a target in the encrypted credential vault. The secret (password/hash/token/key) is Fernet-encrypted at rest under exploit_workspace/credentials/<target_ip>/credentials.jsonl and is never written to the audit log in cleartext. Records are added UNCONFIRMED (confirmed=False); use cred_store_confirm only after validating the credential by successfully reusing it against the target. credential_type: password | hash | token | key."""
         if not target_ip or not target_ip.strip():
             return "BLOCKED: target_ip is required."
-        if not validate_ipv4(target_ip):
-            return "ERROR: Invalid IPv4 address."
+        if not validate_target_or_ip(target_ip):
+            return "ERROR: Invalid target (IP or domain)."
         if not username or not username.strip():
             return "BLOCKED: username is required."
         ctype = (credential_type or "password").strip().lower() or "password"
@@ -77,8 +77,8 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Retrieve stored credentials for a target from the encrypted vault. By default returns a SAFE summary (secrets masked). Set include_secret=True WITH a specific username to reveal the decrypted secret for reuse in lateral_exec/dump_credentials -- only do this in full_access mode against an authorized target. With username empty, lists all credentials for the target with secrets masked."""
         if not target_ip or not target_ip.strip():
             return "BLOCKED: target_ip is required."
-        if not validate_ipv4(target_ip):
-            return "ERROR: Invalid IPv4 address."
+        if not validate_target_or_ip(target_ip):
+            return "ERROR: Invalid target (IP or domain)."
 
         store = CredentialStore(_cred_store_dir(target_ip))
         recs = store.all_credentials()
@@ -114,8 +114,8 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """List all stored credentials for a target as a safe summary (no cleartext secrets). Shows username, type, target/source host, and confirmed status for each record in the encrypted vault, plus whether at-rest encryption is active."""
         if not target_ip or not target_ip.strip():
             return "BLOCKED: target_ip is required."
-        if not validate_ipv4(target_ip):
-            return "ERROR: Invalid IPv4 address."
+        if not validate_target_or_ip(target_ip):
+            return "ERROR: Invalid target (IP or domain)."
 
         store = CredentialStore(_cred_store_dir(target_ip))
         recs = store.all_credentials()
@@ -136,8 +136,8 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Mark a stored credential confirmed=True. Use ONLY after validating the credential by successfully reusing it against the target (e.g. it authenticated via lateral_exec/dump_credentials). Pass validated=True to assert that reuse succeeded -- a bare confirm is refused and flips nothing, so an unvalidated credential is never promoted. The confirmed flag is then HMAC-signed at rest so it cannot be forged on disk. Harvested credentials are never auto-confirmed; this is the deliberate post-reuse signal that the credential is known-good."""
         if not target_ip or not target_ip.strip():
             return "BLOCKED: target_ip is required."
-        if not validate_ipv4(target_ip):
-            return "ERROR: Invalid IPv4 address."
+        if not validate_target_or_ip(target_ip):
+            return "ERROR: Invalid target (IP or domain)."
         if not username or not username.strip():
             return "BLOCKED: username is required (name which credential you confirmed)."
 
@@ -171,8 +171,8 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Execute a command on a remote Windows host via impacket lateral-movement tools. Methods: wmiexec, smbexec, psexec, atexec. Provide either a plaintext password or an NTLM hash (format LM:NT or just NT). Use after obtaining credentials to move laterally across a Windows network."""
         if not target_ip or not target_ip.strip():
             return "BLOCKED: target_ip is required."
-        if not validate_ipv4(target_ip):
-            return "ERROR: Invalid IPv4 address."
+        if not validate_target_or_ip(target_ip):
+            return "ERROR: Invalid target (IP or domain)."
         if not method or not method.strip():
             return "BLOCKED: method is required."
         if not username or not username.strip():
@@ -244,8 +244,8 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Dump credentials from a target using secretsdump, mimikatz, or local SAM/LSASS extraction. Methods: secretsdump (remote via impacket), sam_local (local registry hives), mimikatz (if binary available), lsass (procdump + mimikatz), dcsync (impacket-secretsdump over DRSUAPI against a domain controller -- requires an account with DS-Replication-Get-Changes privileges; target_ip must be the DC; optional target_user dumps a single account). Use after gaining admin access to harvest hashes for offline cracking or pass-the-hash."""
         if not target_ip or not target_ip.strip():
             return "BLOCKED: target_ip is required."
-        if not validate_ipv4(target_ip):
-            return "ERROR: Invalid IPv4 address."
+        if not validate_target_or_ip(target_ip):
+            return "ERROR: Invalid target (IP or domain)."
         if not method or not method.strip():
             return "BLOCKED: method is required."
 
@@ -443,8 +443,8 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Perform Kerberoasting against a Windows domain to extract TGS service tickets for offline hash cracking. Uses impacket GetUserSPNs.py. Provide domain, credentials (password or NTLM hash), and optionally the DC IP. Returns the path to the captured tickets file and the recommended hashcat command."""
         if not target_ip or not target_ip.strip():
             return "BLOCKED: target_ip is required."
-        if not validate_ipv4(target_ip):
-            return "ERROR: Invalid IPv4 address."
+        if not validate_target_or_ip(target_ip):
+            return "ERROR: Invalid target (IP or domain)."
         if not domain or not domain.strip():
             return "BLOCKED: domain is required."
 
@@ -454,8 +454,8 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
         d = domain.strip()
         dc = dc_ip.strip() or target_ip
-        if dc and not validate_ipv4(dc):
-            return "ERROR: Invalid IPv4 address for dc_ip."
+        if dc and not validate_target_or_ip(dc):
+            return "ERROR: Invalid target for dc_ip (IP or domain)."
         # Tool-layer target lock: dc_ip is an impacket -dc-ip egress target. If
         # the operator supplies a DC other than the runtime target, gate it
         # through the allowlist so kerberoast cannot pivot to an off-target DC.
