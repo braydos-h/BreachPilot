@@ -1,0 +1,450 @@
+import { useMemo, useState } from "react";
+import { Link, useParams } from "react-router-dom";
+import {
+  AlertTriangle,
+  Loader2,
+  Play,
+  Square,
+  Terminal,
+  Wrench,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { StatusBadge } from "@/components/StatusBadge";
+import { CopyButton } from "@/components/CopyButton";
+import { EventList } from "@/components/EventList";
+import { DecisionCard } from "@/components/DecisionCard";
+import { useRunEvents } from "@/api/ws";
+import {
+  useAudit,
+  useCallTool,
+  useCancelRun,
+  useDecisions,
+  useResumeRun,
+  useRun,
+  useRunTools,
+  useSwarmState,
+  useCampaignState,
+} from "@/api/hooks";
+import { ApiError } from "@/api/client";
+import { isActiveState, isTerminalState, type RunState } from "@/api/types";
+
+export function RunPage() {
+  const { runId } = useParams<{ runId: string }>();
+  const run = useRun(runId ?? null);
+  const decisions = useDecisions(runId ?? null);
+  const events = useRunEvents(runId ?? null);
+  const cancel = useCancelRun();
+  const resume = useResumeRun();
+  const audit = useAudit(runId ?? null);
+  const swarm = useSwarmState(runId ?? null, run.data?.request?.swarm === true);
+  const campaign = useCampaignState(runId ?? null, run.data?.request?.long_session === true);
+  const tools = useRunTools(runId ?? null, isActiveState(run.data?.state as RunState));
+  const callTool = useCallTool(runId ?? "");
+
+  const [showCancel, setShowCancel] = useState(false);
+  const [selectedTool, setSelectedTool] = useState<string>("");
+  const [toolArgs, setToolArgs] = useState<string>("{}");
+  const [toolResult, setToolResult] = useState<string>("");
+
+  const mergedDecisions = useMemo(() => {
+    const rows = decisions.data?.decisions ?? [];
+    const seen = new Set(rows.map((r) => r.id));
+    for (const ev of events.events) {
+      if (ev.type !== "approval") continue;
+      const id = ev.payload.decision_id;
+      if (typeof id !== "string" || seen.has(id)) continue;
+      seen.add(id);
+      rows.unshift({
+        id,
+        kind: String(ev.payload.kind ?? "tool_approval"),
+        status: "pending",
+        answer: "",
+        prompt_text: String(ev.payload.prompt_text ?? ""),
+        required_text: String(ev.payload.required_text ?? ""),
+        options: Array.isArray(ev.payload.options) ? ev.payload.options : [],
+      });
+    }
+    return rows;
+  }, [decisions.data, events.events]);
+
+  const pendingDecisions = mergedDecisions.filter((d) => d.status === "pending");
+  const currentState =
+    (events.events.findLast((e) => e.type === "state")?.payload?.state as RunState | undefined) ??
+    run.data?.state;
+  const active = isActiveState(currentState as RunState);
+  const terminal = isTerminalState(currentState as RunState);
+
+  if (run.isLoading) {
+    return <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading run...</div>;
+  }
+  if (run.error || !run.data) {
+    return <div className="p-6 text-sm text-destructive">Run not found.</div>;
+  }
+
+  const preview = run.data.preview ?? {};
+  const request = run.data.request ?? {};
+  const transportLabel = events.transport === "sse" ? "SSE" : events.transport === "websocket" ? "WS" : "\u2014";
+
+  return (
+    <div className="flex flex-col gap-4 p-4 md:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <h1 className="font-mono text-sm">{run.data.id}</h1>
+            <CopyButton value={run.data.id} size="icon" label="Copy ID" />
+            {currentState && <StatusBadge state={currentState as RunState} />}
+            <Badge variant="outline" className="text-xs">{transportLabel}</Badge>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span><span className="text-muted-foreground/70">target:</span> <span className="font-mono text-foreground">{String(preview.target_ip ?? request.target ?? "\u2014")}</span></span>
+            <span><span className="text-muted-foreground/70">mode:</span> <span className="text-foreground">{String(request.mode ?? preview.mode ?? "\u2014")}</span></span>
+            <span><span className="text-muted-foreground/70">goal:</span> <span className="text-foreground">{String(preview.goal_name ?? request.goal_name ?? "\u2014")}</span></span>
+            <span><span className="text-muted-foreground/70">model:</span> <span className="font-mono text-foreground">{String(preview.model_alias ?? request.model_alias ?? "\u2014")}</span></span>
+            <span><span className="text-muted-foreground/70">permission:</span> <span className="text-foreground">{String(preview.permission ?? "\u2014")}</span></span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {active && (
+            <Button variant="destructive" size="sm" onClick={() => setShowCancel(true)} disabled={cancel.isPending}>
+              {cancel.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-4 w-4" />}
+              Cancel
+            </Button>
+          )}
+          {terminal && (
+            <Button size="sm" onClick={() => resume.mutate(run.data.id, { onSuccess: (data) => (window.location.href = `/runs/${data.run_id}`) })} disabled={resume.isPending}>
+              {resume.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              Resume
+            </Button>
+          )}
+          <Button asChild size="sm" variant="outline">
+            <Link to={`/runs/${run.data.id}/artifacts`}>Artifacts</Link>
+          </Button>
+          <Button asChild size="sm" variant="outline">
+            <Link to={`/runs/${run.data.id}/loot`}>Loot</Link>
+          </Button>
+        </div>
+      </div>
+
+      {events.authError && (
+        <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-red-200">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          {events.authError}
+        </div>
+      )}
+
+      <div className="grid flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="min-h-[40vh] flex-1">
+          <EventList events={events.events} decisions={mergedDecisions} runId={run.data.id} className="h-full min-h-[40vh]" />
+        </div>
+        <div className="space-y-3">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Pending decisions</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {pendingDecisions.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No pending input.</p>
+              ) : (
+                pendingDecisions.map((d) => (
+                  <DecisionCard key={d.id} decision={d} runId={run.data.id} />
+                ))
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Decisions</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1 text-xs">
+              {mergedDecisions.length === 0 ? (
+                <p className="text-muted-foreground">None.</p>
+              ) : (
+                mergedDecisions.map((d) => (
+                  <div key={d.id} className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-[10px]">{d.kind}</Badge>
+                    <span className={cn("font-mono", d.status === "pending" && "text-yellow-300")}>{d.status}</span>
+                    {d.answer && <span className="ml-auto truncate text-muted-foreground">{d.answer}</span>}
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      <Tabs defaultValue="tools" className="mt-2">
+        <TabsList>
+          <TabsTrigger value="tools"><Wrench className="mr-1.5 h-3.5 w-3.5" />Tools</TabsTrigger>
+          <TabsTrigger value="audit">Audit</TabsTrigger>
+          {request.swarm && <TabsTrigger value="swarm">Swarm</TabsTrigger>}
+          {request.long_session && <TabsTrigger value="campaign">Campaign</TabsTrigger>}
+        </TabsList>
+        <TabsContent value="tools" className="space-y-3">
+          <ManualToolPanel
+            runId={run.data.id}
+            tools={tools.data?.tools ?? []}
+            isLoading={tools.isLoading}
+            selectedTool={selectedTool}
+            onSelect={setSelectedTool}
+            args={toolArgs}
+            onArgs={setToolArgs}
+            result={toolResult}
+            onResult={setToolResult}
+            onCall={(name, parsedArgs) =>
+              callTool.mutate(
+                { tool: name, arguments: parsedArgs },
+                {
+                  onSuccess: (data) => setToolResult(data.result || "(no output)"),
+                  onError: (err) => setToolResult(err instanceof ApiError ? err.message : "Tool call failed."),
+                },
+              )
+            }
+            calling={callTool.isPending}
+          />
+        </TabsContent>
+        <TabsContent value="audit" className="space-y-3">
+          <AuditView
+            loading={audit.isLoading}
+            error={audit.error}
+            records={audit.data?.records ?? []}
+            chainValid={audit.data?.chain_valid ?? false}
+            chainReason={audit.data?.chain_reason ?? ""}
+          />
+        </TabsContent>
+        {request.swarm && (
+          <TabsContent value="swarm">
+            <StateView label="swarm_state.json" loading={swarm.isLoading} error={swarm.error} data={swarm.data?.state} />
+          </TabsContent>
+        )}
+        {request.long_session && (
+          <TabsContent value="campaign">
+            <StateView label="attack_states.json" loading={campaign.isLoading} error={campaign.error} data={campaign.data?.state} />
+          </TabsContent>
+        )}
+      </Tabs>
+
+      <Dialog open={showCancel} onOpenChange={setShowCancel}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancel this run?</DialogTitle>
+            <DialogDescription>
+              Cancellation is cooperative. The agent stops at the next boundary and tears down MCP/swarm children.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCancel(false)}>Keep running</Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                cancel.mutate(run.data.id, { onSettled: () => setShowCancel(false) });
+              }}
+              disabled={cancel.isPending}
+            >
+              {cancel.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-4 w-4" />}
+              Cancel run
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+interface ManualToolPanelProps {
+  runId: string;
+  tools: Array<{ function?: { name: string; description?: string; parameters?: Record<string, unknown> } }>;
+  isLoading: boolean;
+  selectedTool: string;
+  onSelect: (name: string) => void;
+  args: string;
+  onArgs: (args: string) => void;
+  result: string;
+  onResult: (result: string) => void;
+  onCall: (name: string, args: Record<string, unknown>) => void;
+  calling: boolean;
+}
+
+function ManualToolPanel({
+  tools,
+  isLoading,
+  selectedTool,
+  onSelect,
+  args,
+  onArgs,
+  result,
+  onResult,
+  onCall,
+  calling,
+}: ManualToolPanelProps) {
+  const tool = tools.find((t) => t.function?.name === selectedTool);
+
+  const call = () => {
+    if (!selectedTool) return;
+    let parsed: Record<string, unknown> = {};
+    try {
+      parsed = args.trim() ? JSON.parse(args) : {};
+    } catch {
+      onResult("Invalid JSON arguments.");
+      return;
+    }
+    onCall(selectedTool, parsed);
+  };
+
+  if (isLoading) {
+    return <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading tools...</div>;
+  }
+  if (tools.length === 0) {
+    return (
+      <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+        No live MCP tools. Tools are available only while a run is active and the MCP session is attached.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2">
+        <Label className="text-xs">Tool</Label>
+        <div className="flex flex-wrap gap-2">
+          {tools.map((t) => (
+            <Button
+              key={t.function?.name}
+              type="button"
+              variant={selectedTool === t.function?.name ? "default" : "outline"}
+              size="sm"
+              className="font-mono text-xs"
+              onClick={() => {
+                onSelect(t.function?.name ?? "");
+                onArgs("{}");
+                onResult("");
+              }}
+            >
+              {t.function?.name}
+            </Button>
+          ))}
+        </div>
+        {tool?.function?.description && (
+          <p className="text-xs text-muted-foreground">{tool.function.description}</p>
+        )}
+      </div>
+      <div className="space-y-2">
+        <Label className="text-xs" htmlFor="tool-args">Arguments (JSON)</Label>
+        <Textarea
+          id="tool-args"
+          value={args}
+          onChange={(e) => onArgs(e.target.value)}
+          className="min-h-[6rem] font-mono text-xs"
+          spellCheck={false}
+        />
+      </div>
+      <Button type="button" size="sm" onClick={call} disabled={!selectedTool || calling}>
+        {calling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Terminal className="h-4 w-4" />}
+        Run tool
+      </Button>
+      {result && (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs">Result</Label>
+            <CopyButton value={result} size="sm" />
+          </div>
+          <pre className="max-h-72 overflow-auto rounded-md border bg-muted/40 p-2 font-mono text-xs whitespace-pre-wrap break-words scrollbar-thin">
+            {result}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface AuditViewProps {
+  loading: boolean;
+  error: unknown;
+  records: Array<Record<string, unknown>>;
+  chainValid: boolean;
+  chainReason: string;
+}
+
+function AuditView({ loading, error, records, chainValid, chainReason }: AuditViewProps) {
+  if (loading) return <div className="text-sm text-muted-foreground">Loading audit...</div>;
+  if (error) return <div className="text-sm text-destructive">Failed to load audit.</div>;
+  return (
+    <div className="space-y-3">
+      <div className={cn("rounded-md border p-3 text-sm", chainValid ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-destructive/40 bg-destructive/10 text-red-200")}>
+        <div className="text-xs uppercase tracking-wide">{chainValid ? "Chain valid" : "Chain invalid"}</div>
+        <div className="text-xs">{chainReason}</div>
+      </div>
+      {records.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No audit records.</p>
+      ) : (
+        <div className="overflow-x-auto rounded-md border">
+          <table className="w-full border-collapse text-xs">
+            <thead className="bg-muted/50 text-muted-foreground">
+              <tr>
+                {Object.keys(records[0]).slice(0, 6).map((k) => (
+                  <th key={k} className="p-2 text-left">{k}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {records.map((rec, i) => (
+                <tr key={i} className="border-t">
+                  {Object.keys(records[0]).slice(0, 6).map((k) => (
+                    <td key={k} className="max-w-xs truncate p-2 font-mono" title={String(rec[k] ?? "")}>
+                      {String(rec[k] ?? "")}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface StateViewProps {
+  label: string;
+  loading: boolean;
+  error: unknown;
+  data: unknown;
+}
+
+function StateView({ label, loading, error, data }: StateViewProps) {
+  if (loading) return <div className="text-sm text-muted-foreground">Loading {label}...</div>;
+  if (error) {
+    const msg = error instanceof ApiError ? (error.isNotFound ? "State unavailable for this run." : error.message) : "Failed to load state.";
+    return <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">{msg}</div>;
+  }
+  return (
+    <div className="space-y-2">
+      <Label className="text-xs">{label}</Label>
+      <pre className="max-h-[40vh] overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs scrollbar-thin">
+        {safeStringify(data)}
+      </pre>
+    </div>
+  );
+}
+
+function safeStringify(value: unknown): string {
+  try {
+    return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}

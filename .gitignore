@@ -6,6 +6,8 @@ __pycache__/
 venv/
 env/
 node_modules/
+webui/node_modules/
+webui/dist/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/

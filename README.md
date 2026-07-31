@@ -163,8 +163,10 @@ python main.py --eval --target <AUTHORIZED_LAB_IP>   # writes reports/eval/<run_
 ```bash
 python main.py --demon                         # start API on http://127.0.0.1:8765
 python main.py --daemon --api-port 9000        # alias, custom port
+python main.py --web                           # build + serve + open the WebUI in a browser
 ```
 
+- **WebUI:** `python main.py --web` builds `webui/dist/` if needed (first run only), serves it at `http://127.0.0.1:8765/`, and opens a browser. The SPA talks to the `/api/v1` REST + WebSocket surface. Requires Node.js/npm on PATH for the first build.
 - **Interactive docs (Swagger):** `http://127.0.0.1:8765/docs`
 - **OpenAPI schema:** `http://127.0.0.1:8765/openapi.json`
 - **Bearer token:** auto-generated into `.webui_secret_key` (gitignored), or set `NETATTACKAI_API_TOKEN`
@@ -246,6 +248,7 @@ python mcp_exploit_server.py    # defaults: stdio, port 8001
 | `--no-skills-reselect` | Disable mid-run skill re-selection for this run |
 | `--list-plugins` | Print discovered plugins (name/version/capabilities/loaded) and exit |
 | `--demon` / `--daemon` | Start the local WebUI API server instead of the terminal menu |
+| `--web` | Build the WebUI if needed, serve it from the daemon at /, and open a browser |
 | `--api-host <host>` | API daemon bind host (loopback only; default 127.0.0.1) |
 | `--api-port <port>` | API daemon port (default 8765) |
 | `--help` | Show the complete CLI reference |
@@ -502,7 +505,7 @@ Top-level keys:
 | `adaptive_exploits` | enabled, max_mutations, mutation_strategies |
 | `multi_model` | enabled, consult_aliases, max_consultations, max_question/answer_chars |
 | `skills` | enabled, roots, default_enabled, include_tags, semantic_matching, reselect_*, feedback_*, swarm_inject |
-| `api` | enabled, host, port, token_file, allowed_origins, event_buffer_size, shutdown_timeout_seconds |
+| `api` | enabled, host, port, token_file, allowed_origins, event_buffer_size, shutdown_timeout_seconds, serve_webui |
 
 ### `mission.yaml` (mission scope, for `cli.py`)
 

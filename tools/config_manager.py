@@ -453,6 +453,7 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "allowed_origins": [],
         "event_buffer_size": 256,
         "shutdown_timeout_seconds": 15,
+        "serve_webui": False,
     },
 }
 
@@ -922,6 +923,9 @@ class ConfigValidator:
                         not isinstance(value, int) or isinstance(value, bool) or value < 0
                     ):
                         result.errors.append(f"api.{key} must be a non-negative integer.")
+                serve_webui = ap.get("serve_webui")
+                if serve_webui is not None and not isinstance(serve_webui, bool):
+                    result.errors.append("api.serve_webui must be a boolean.")
 
         return result
 

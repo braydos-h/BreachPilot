@@ -1,0 +1,49 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { Layout } from "@/components/Layout";
+import { TokenGate } from "@/components/TokenGate";
+import { RunListPage } from "@/routes/RunListPage";
+import { NewRunPage } from "@/routes/NewRunPage";
+import { RunPage } from "@/routes/RunPage";
+import { ArtifactsPage } from "@/routes/ArtifactsPage";
+import { LootPage } from "@/routes/LootPage";
+import { SystemPage } from "@/routes/SystemPage";
+import { Toaster } from "@/components/Toaster";
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: (failureCount, error) => {
+        if (error && typeof error === "object" && "status" in error) {
+          const status = (error as { status: number }).status;
+          if (status >= 400 && status < 500 && status !== 408 && status !== 429) return false;
+        }
+        return failureCount < 2;
+      },
+      refetchOnWindowFocus: false,
+    },
+  },
+});
+
+export default function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <TokenGate>
+          <Routes>
+            <Route element={<Layout />}>
+              <Route path="/" element={<RunListPage />} />
+              <Route path="/runs/new" element={<NewRunPage />} />
+              <Route path="/runs/:runId" element={<RunPage />} />
+              <Route path="/runs/:runId/artifacts" element={<ArtifactsPage />} />
+              <Route path="/runs/:runId/loot" element={<LootPage />} />
+              <Route path="/system" element={<SystemPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Route>
+          </Routes>
+        </TokenGate>
+      </BrowserRouter>
+      <Toaster />
+    </QueryClientProvider>
+  );
+}

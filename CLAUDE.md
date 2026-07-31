@@ -66,15 +66,17 @@ python main.py --target 10.0.0.50 --mode attack --swarm --critic --reflection --
 python main.py --exploit --exploit-mode standalone --exploit-target 10.0.0.50 --exploit-cve CVE-2021-44228 --exploit-permission full_access
 ```
 
-### WebUI API daemon (--demon / --daemon)
+### WebUI API daemon (--demon / --daemon / --web)
 ```bash
 python main.py --demon                        # start the local WebUI API on http://127.0.0.1:8765
 python main.py --daemon --api-port 9000       # alias, custom port
+python main.py --web                          # build webui/ if needed, serve it at /, open a browser
 # Interactive docs: http://127.0.0.1:8765/docs
 # OpenAPI schema:  http://127.0.0.1:8765/openapi.json
 # Bearer token: generated into .webui_secret_key (gitignored) or set NETATTACKAI_API_TOKEN
-# v1 is loopback-only; one active run at a time; no bundled WebUI (third parties build against OpenAPI).
+# v1 is loopback-only; one active run at a time; bundled WebUI served when api.serve_webui is true.
 ```
+`--web` is shorthand for: build `webui/dist/` if missing (runs `npm install && npm run build` in `webui/`), set `api.serve_webui: true` in memory (not written to `config.yaml`), start the daemon, and open `http://127.0.0.1:8765/` in a browser. The built UI is a Vite + React + TypeScript SPA under `webui/` that talks to the `/api/v1` REST + WebSocket surface. `--web` has the same mutual-exclusion constraints as `--demon`.
 
 ### Legacy research CLI (writes to research_workspace/research.db)
 ```bash

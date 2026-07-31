@@ -414,3 +414,4 @@ api:
   allowed_origins: []      # extra loopback origins; [] = localhost/127.0.0.1 only
   event_buffer_size: 256   # in-memory ring buffer per run for live WS subscribers
   shutdown_timeout_seconds: 15   # graceful shutdown wait before forcing child cleanup
+  serve_webui: false      # mount the built webui/dist/ at / when true (--web sets this in memory)

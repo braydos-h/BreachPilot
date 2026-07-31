@@ -16,9 +16,13 @@ import contextlib
 import ipaddress
 import json
 import os
+import shutil
+import subprocess
 import sys
+import threading
 import time
 import traceback
+import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable
@@ -418,6 +422,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     # ── WebUI API daemon flags ──
     parser.add_argument("--demon", "--daemon", dest="daemon", action="store_true",
                         help="Start the local WebUI API server instead of the terminal menu")
+    parser.add_argument("--web", dest="web", action="store_true",
+                        help="Build the WebUI if needed, serve it from the daemon at /, and open a browser")
     parser.add_argument("--api-host", default=None, help="API daemon bind host (loopback only; default 127.0.0.1)")
     parser.add_argument("--api-port", type=int, default=None, help="API daemon port (default 8765)")
     parsed = parser.parse_args(argv)
@@ -427,10 +433,70 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 from tools.resume_state import _load_resume_state
 
 
+def _ensure_webui_build(ui: Any) -> int:
+    """Build webui/dist/ if missing. Returns 0 on success, non-zero on failure."""
+    webui_dir = Path(__file__).resolve().parent / "webui"
+    dist_index = webui_dir / "dist" / "index.html"
+    if dist_index.exists():
+        return 0
+    npm_cmd = shutil.which("npm.cmd") or shutil.which("npm")
+    node_cmd = shutil.which("node") or shutil.which("node")
+    if not npm_cmd or not node_cmd:
+        ui.error("Node/npm not found on PATH. Install Node.js, or build the WebUI manually:")
+        ui.error(f"  cd {webui_dir} && npm install && npm run build")
+        return 1
+    ui.status("Building the WebUI (first run only)...")
+    for step in (("install", [npm_cmd, "install", "--no-audit", "--no-fund"]),
+                 ("build", [npm_cmd, "run", "build"])):
+        label, argv = step
+        ui.status(f"  npm {label}...")
+        try:
+            result = subprocess.run(argv, cwd=str(webui_dir), capture_output=True, text=True, timeout=600)
+        except subprocess.TimeoutExpired:
+            ui.error(f"npm {label} timed out.")
+            return 1
+        except OSError as exc:
+            ui.error(f"npm {label} failed: {exc}")
+            return 1
+        if result.returncode != 0:
+            ui.error(f"npm {label} exited {result.returncode}.")
+            stderr_tail = (result.stderr or "")[-1500:]
+            if stderr_tail:
+                ui.error(stderr_tail)
+            return 1
+    if not dist_index.exists():
+        ui.error(f"Build finished but {dist_index} was not produced.")
+        return 1
+    ui.status("WebUI build complete.")
+    return 0
+
+
+def _open_browser_when_ready(host: str, port: int, ui: Any) -> None:
+    """Poll the health endpoint, then open the browser. Daemon thread."""
+    import urllib.request
+    base = f"http://{host}:{port}/" if host != "::1" else "http://[::1]:{port}/"
+    deadline = time.monotonic() + 30.0
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(base, timeout=2) as resp:  # noqa: S310 -- loopback only
+                if resp.status == 200:
+                    break
+        except OSError:
+            time.sleep(0.5)
+    else:
+        ui.warning("Could not confirm the API was ready; open the browser manually.")
+        return
+    try:
+        webbrowser.open(base)
+    except Exception as exc:  # noqa: BLE001 -- headless/text browsers
+        ui.warning(f"Could not open the browser automatically: {exc}")
+        ui.status(f"  Open {base} manually.")
+
+
 def _run_daemon(args: argparse.Namespace) -> int:
-    """Start the local WebUI API server (``--demon`` / ``--daemon``)."""
+    """Start the local WebUI API server (``--demon`` / ``--daemon`` / ``--web``)."""
     config = load_config(args.config)
-    api_cfg = config.get("api", {}) or {}
+    api_cfg = config.setdefault("api", {})
     host = args.api_host or api_cfg.get("host", "127.0.0.1")
     port = int(args.api_port or api_cfg.get("port", 8765))
     # v1: loopback-only. Refuse any non-loopback bind (no public override).
@@ -447,11 +513,32 @@ def _run_daemon(args: argparse.Namespace) -> int:
     except ImportError as exc:
         ui.error(f"Could not import the ASGI app factory (app.py): {exc}")
         return 1
+
+    web_mode = getattr(args, "web", False)
+    if web_mode:
+        build_rc = _ensure_webui_build(ui)
+        if build_rc != 0:
+            return build_rc
+        # In-memory override only; never persisted to config.yaml.
+        api_cfg["serve_webui"] = True
+
     ui.banner()
-    ui.status(f"Starting WebUI API daemon on http://{host}:{port}")
-    ui.status(f"  Interactive docs: http://{host}:{port}/docs")
-    ui.status(f"  OpenAPI schema:    http://{host}:{port}/openapi.json")
-    app = create_app(config_path=args.config)
+    status_host = f"[{host}]" if host == "::1" else host
+    ui.status(f"Starting WebUI API daemon on http://{status_host}:{port}")
+    ui.status(f"  Interactive docs: http://{status_host}:{port}/docs")
+    ui.status(f"  OpenAPI schema:    http://{status_host}:{port}/openapi.json")
+    if web_mode:
+        ui.status(f"  WebUI:             http://{status_host}:{port}/")
+    app = create_app(config_path=args.config, config=config)
+
+    if web_mode:
+        browser_thread = threading.Thread(
+            target=_open_browser_when_ready,
+            args=(host, port, ui),
+            daemon=True,
+        )
+        browser_thread.start()
+
     uvicorn.run(app, host=host, port=port, log_level="info")
     return 0
 
@@ -722,15 +809,18 @@ def main(argv: list[str] | None = None) -> int:
                 getattr(args, "self_test", False),
                 getattr(args, "eval", False),
                 args.demo,
+                getattr(args, "daemon", False),
+                getattr(args, "web", False),
             ]
         )
         if setup_only:
             return 0
 
-        # --demon / --daemon: start the local WebUI API server and exit.
+        # --demon / --daemon / --web: start the local WebUI API server and exit.
         # Checked BEFORE --doctor/--self-test/etc. so the mutual-exclusion
-        # gate fires even when one of those flags is also set.
-        if getattr(args, "daemon", False):
+        # gate fires even when one of those flags is also set. --web implies
+        # daemon mode and additionally builds/serves/opens the WebUI.
+        if getattr(args, "daemon", False) or getattr(args, "web", False):
             _conflicting = []
             for flag in ("target", "mode", "goal", "custom_goal"):
                 if getattr(args, flag, "").strip():
@@ -740,7 +830,8 @@ def main(argv: list[str] | None = None) -> int:
                     _conflicting.append(f"--{flag.replace('_', '-')}")
             if _conflicting:
                 ui.error(
-                    "--demon/--daemon cannot be combined with: " + ", ".join(_conflicting)
+                    ("--demon/--daemon/--web cannot be combined with: " if getattr(args, "web", False)
+                     else "--demon/--daemon cannot be combined with: ") + ", ".join(_conflicting)
                 )
                 return 2
             return _run_daemon(args)

@@ -1,8 +1,8 @@
 # NetAttackAI WebUI API — v1 Reference
 
-The local WebUI API daemon (`--demon` / `--daemon`) exposes a versioned,
-loopback-only REST + WebSocket API so third-party WebUIs can drive
-assessments, answer decisions, stream live events, and invoke MCP tools
+The local WebUI API daemon (`--demon` / `--daemon` / `--web`) exposes a versioned,
+loopback-only REST + WebSocket API so the bundled WebUI (or third-party clients)
+can drive assessments, answer decisions, stream live events, and invoke MCP tools
 through a policy-gated gateway — all through the same `AssessmentService`
 the CLI uses.
 
@@ -13,6 +13,9 @@ the CLI uses.
 - **Transport:** HTTP/1.1 + WebSocket; loopback-only bind (no public override in v1)
 - **Concurrency:** one active run at a time (HTTP 409 on a second)
 - **Persistence:** `reports/api_runtime.db` (SQLite; Flow B's `research.db` untouched)
+- **Bundled WebUI:** `python main.py --web` builds `webui/dist/` (if needed), sets
+  `api.serve_webui: true` in memory, and serves the SPA at `/` with a deep-link
+  fallback. The SPA is a Vite + React + TypeScript app under `webui/`.
 
 > Source: `app.py` (ASGI factory), `tools/api/` (services + routes), `tools/run_service/` (transport-neutral contracts).
 
@@ -887,6 +890,7 @@ api:
   allowed_origins: []          # extra loopback origins for CORS/WS
   event_buffer_size: 256       # in-memory ring buffer per run
   shutdown_timeout_seconds: 15 # graceful shutdown wait
+  serve_webui: false           # mount built webui/dist/ at / when true (--web sets this in memory)
 ```
 
 | Key | Type | Default | Notes |
@@ -898,6 +902,7 @@ api:
 | `allowed_origins` | str[] | `[]` | Extra loopback HTTP(S) origins for CORS/WS |
 | `event_buffer_size` | int | 256 | In-memory ring per run; ≥ 1 |
 | `shutdown_timeout_seconds` | int | 15 | Graceful cancel wait before forcing cleanup |
+| `serve_webui` | bool | false | Mount `webui/dist/` at `/` when true. `--web` sets this in memory only (never written to `config.yaml`). Requires `webui/dist/index.html` to exist. |
 
 **Env overrides:**
 - `NETATTACKAI_API_TOKEN` — bearer token (precedes `token_file`).
