@@ -336,7 +336,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--model", default=None, help="Override default model alias (glm/kimi/deepseek/deepseek_flash/minimax)")
     parser.add_argument("--model-strategy", choices=("default", "round-robin", "random", "specific"), default="default",
                         help="How to pick model across targets")
-    parser.add_argument("--mcp-transport", choices=("stdio", "http"), default="stdio")
+    parser.add_argument("--mcp-transport", choices=("stdio", "http"), default=None,
+                        help="MCP transport (ignored on the run path: always forced to http so the target-IP lock reaches the server)")
     parser.add_argument("--http-port", type=int, default=None)
     parser.add_argument("--reports-dir", type=Path, default=Path("reports"))
     parser.add_argument("--setup-api-keys", action="store_true", help="Prompt for provider API keys and save them to secr.json")
@@ -430,8 +431,10 @@ async def async_main(args: argparse.Namespace) -> int:
     try:
         from tools.plugins import load_plugins
         load_plugins(config)
-    except Exception:  # noqa: BLE001 -- plugin load must not block boot
-        ui.info("Plugin load skipped (plugins module unavailable or failed).")
+    except Exception as exc:  # noqa: BLE001 -- plugin load must not block boot
+        ui.info(f"Plugin load skipped: {type(exc).__name__}: {exc}")
+        if getattr(args, "debug", False):
+            ui.info(traceback.format_exc().strip())
     bootstrap_startup_api_keys(args, prompt=False)
     multi_model_cfg = config.get("multi_model", {}) or {}
     if getattr(args, "multi_model_consult", None) is None:
@@ -468,6 +471,10 @@ async def async_main(args: argparse.Namespace) -> int:
         try:
             model_client = router.get_client(model_alias)
         except KeyError:
+            ui.warning(
+                f"Unknown model alias {model_alias!r}; registering it as a custom "
+                f"alias pointing at itself."
+            )
             from tools.model_router import _build_model_client
             router.register(model_alias, _build_model_client(
                 model_alias, host=ollama_host, request_timeout_seconds=_req_timeout,
@@ -478,6 +485,11 @@ async def async_main(args: argparse.Namespace) -> int:
 
     # Always use the local HTTP MCP server. This is fixed even for
     # non-interactive invocations or callers that provide --mcp-transport.
+    if args.mcp_transport == "stdio":
+        ui.warning(
+            "--mcp-transport stdio requested; forcing http so the target-IP "
+            "lock reaches the server."
+        )
     args.mcp_transport = "http"
     mcp_transport = args.mcp_transport
     http_port = int(args.http_port or config.get("mcp", {}).get("http_port", 8001))

@@ -75,6 +75,7 @@ async def run_recon_assessment(
             # ``BaseExceptionGroup`` is *not* an ``Exception`` subclass — must be
             # listed explicitly or the spinner exits with a confusing [ERROR] line
             # and the user sees no underlying cause.
+            ui.warning(f"OS detection failed: {exc}")
             os_result = (
                 f"OS_CHECK_RESULTS:\nTARGET: {target_ip}\nOS_VERDICT: UNKNOWN\nHINTS: Error: {exc}"
             )
@@ -92,6 +93,7 @@ async def run_recon_assessment(
             })
             scan_result = _extract_tool_text(scan_raw)
         except _EXC_GROUP_CATCH as exc:
+            ui.warning(f"Port scan failed: {exc}")
             scan_result = f"QUICK_SCAN_RESULTS: {target_ip}\nSUMMARY: 0/0 ports open\nNOTE: Scan error: {exc}"
             if _is_exception_group(exc):
                 _log_nested_exceptions(exc)
@@ -138,7 +140,7 @@ async def run_recon_assessment(
                 })
                 ui.result(f"CVEs for {product} {version}", cve_text[:600])
             except _EXC_GROUP_CATCH as exc:
-                ui.info(f"CVE lookup skipped for {service}: {exc}")
+                ui.warning(f"CVE lookup skipped for {service}: {exc}")
                 if _is_exception_group(exc):
                     _log_nested_exceptions(exc)
 

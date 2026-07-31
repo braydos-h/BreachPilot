@@ -31,12 +31,15 @@ from typing import Any
 def _check_python() -> dict[str, Any]:
     v = sys.version_info
     ok = (v.major, v.minor) >= (3, 11)
-    return {
+    result: dict[str, Any] = {
         "name": "python_version",
         "ok": ok,
         "value": f"{v.major}.{v.minor}.{v.micro}",
         "expected": ">= 3.11",
     }
+    if not ok:
+        result["hint"] = "Install Python >= 3.11 from https://www.python.org/downloads/"
+    return result
 
 
 def _check_imports() -> dict[str, Any]:
@@ -50,11 +53,14 @@ def _check_imports() -> dict[str, Any]:
             importlib.import_module(mod)
         except Exception:
             missing.append(mod)
-    return {
+    result: dict[str, Any] = {
         "name": "python_imports",
         "ok": not missing,
         "missing": missing,
     }
+    if missing:
+        result["hint"] = "Install missing deps: python -m pip install -r requirements.txt"
+    return result
 
 
 def _check_nmap(config: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -226,7 +232,13 @@ def _check_port(host: str, port: int) -> dict[str, Any]:
         sock.settimeout(0.5)
         try:
             sock.connect((host, port))
-            return {"name": f"port_{port}_free", "ok": False, "host": host, "port": port, "in_use": True}
+            hint = (
+                f"Find the holder: `netstat -ano | findstr :{port}` (Windows) / "
+                f"`lsof -i :{port}` (Linux/macOS); stop it or set mcp.http_port "
+                f"in config.yaml to a free port."
+            )
+            return {"name": f"port_{port}_free", "ok": False, "host": host, "port": port,
+                    "in_use": True, "hint": hint}
         except OSError:
             return {"name": f"port_{port}_free", "ok": True, "host": host, "port": port}
 
