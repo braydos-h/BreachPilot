@@ -126,45 +126,60 @@ class SwarmOrchestrator:
         """Route a single task to the appropriate agent (sequential).
 
         Includes critic pre-check with blackboard awareness.
-        """
-        with self._lock:
-            phase = task.get("phase", "recon")
-            agent_cls = self._agent_registry.get(phase)
-            if agent_cls is None:
-                return AgentResult(
-                    agent_type="unknown",
-                    status=AgentStatus.FAILED,
-                    task_id=task.get("task_id", task.get("id", "")),
-                    error=f"No agent registered for phase '{phase}'.",
-                )
 
-            task_id = task.get("task_id", task.get("id", ""))
-            target = task.get("target", "")
+        Phase 3: the ``self._lock`` (an ``RLock``) now guards ONLY the
+        orchestrator's own mutable state (``_agents``, ``_results``,
+        ``_battle_log``, ``_milestone_events``) — NOT ``agent.run()`` /
+        ``critic.run()``. Those run outside the lock so ``route_parallel`` can
+        dispatch multiple agents concurrently (the lock is reentrant for the
+        ``_spawn`` / ``_results.append`` / ``_battle_log.append`` /
+        ``_mark_milestone`` calls that happen before/after the unlocked
+        ``agent.run``). This is hazard #1 from the route_parallel warning,
+        fixed. Hazards #2-#5 are fixed by Phase 1 (Blackboard), Phase 2
+        (per-attempt workspaces), and the milestone gating below.
+        """
+        phase = task.get("phase", "recon")
+        agent_cls = self._agent_registry.get(phase)
+        if agent_cls is None:
+            return AgentResult(
+                agent_type="unknown",
+                status=AgentStatus.FAILED,
+                task_id=task.get("task_id", task.get("id", "")),
+                error=f"No agent registered for phase '{phase}'.",
+            )
+
+        task_id = task.get("task_id", task.get("id", ""))
+        target = task.get("target", "")
+        with self._lock:
             agent = self._spawn(agent_cls, task_id=task_id)
 
-            # ── Critic pre-check (with blackboard awareness) ──
-            if self._critic_enabled and phase not in ("recon", "report"):
-                critic_cls = self._agent_registry.get("critic", CriticAgent)
-                critic = critic_cls()
-                critic_task = {
-                    "task_id": f"critic-{task_id}",
-                    "proposed_action": task,
-                }
-                critic_result = critic.run(critic_task, self._context)
-                decision = critic_result.output.get("decision", "approve") if critic_result.output else "approve"
-                reasoning = critic_result.output.get("reasoning", "") if critic_result.output else ""
+        # ── Critic pre-check (with blackboard awareness) ──
+        # Runs UNLOCKED — critic.run() reads the blackboard (atomic via
+        # Blackboard.get) and may call an LLM; holding the orchestrator lock
+        # across that would serialize all parallel agents.
+        if self._critic_enabled and phase not in ("recon", "report"):
+            critic_cls = self._agent_registry.get("critic", CriticAgent)
+            critic = critic_cls()
+            critic_task = {
+                "task_id": f"critic-{task_id}",
+                "proposed_action": task,
+            }
+            critic_result = critic.run(critic_task, self._context)
+            decision = critic_result.output.get("decision", "approve") if critic_result.output else "approve"
+            reasoning = critic_result.output.get("reasoning", "") if critic_result.output else ""
 
-                self._emit(
-                    "critic_decision",
-                    {
-                        "task_id": task_id,
-                        "target": target,
-                        "decision": decision,
-                        "reasoning": reasoning,
-                    },
-                )
+            self._emit(
+                "critic_decision",
+                {
+                    "task_id": task_id,
+                    "target": target,
+                    "decision": decision,
+                    "reasoning": reasoning,
+                },
+            )
 
-                if decision == "deny":
+            if decision == "deny":
+                with self._lock:
                     blocked_result = AgentResult(
                         agent_type=agent.agent_type,
                         status=AgentStatus.BLOCKED,
@@ -181,42 +196,50 @@ class SwarmOrchestrator:
                         "error": f"Critic blocked: {reasoning}",
                     })
                     self._trim_history()
-                    self._emit(
-                        "agent_blocked",
-                        {
-                            "agent_id": agent.agent_id,
-                            "agent_type": agent.agent_type,
-                            "task_id": task_id,
-                            "reason": f"Critic blocked: {reasoning}",
-                        },
-                    )
-                    self._persist_state()
-                    return blocked_result
+                self._emit(
+                    "agent_blocked",
+                    {
+                        "agent_id": agent.agent_id,
+                        "agent_type": agent.agent_type,
+                        "task_id": task_id,
+                        "reason": f"Critic blocked: {reasoning}",
+                    },
+                )
+                self._persist_state()
+                return blocked_result
 
-                if decision == "modify":
-                    modifications = critic_result.output.get("modifications", {})
-                    task.update(modifications)
+            if decision == "modify":
+                modifications = critic_result.output.get("modifications", {})
+                task.update(modifications)
 
-            # ── Execute agent ──
-            result = agent.run(task, self._context)
-            agent._set_status(result.status)
+        # ── Execute agent ──
+        # Runs UNLOCKED so parallel agents (route_parallel) actually run
+        # concurrently. All blackboard writes inside agent.run go through the
+        # atomic Blackboard API (Phase 1); per-attempt workspaces (Phase 2)
+        # isolate filesystem writes. The orchestrator's own state
+        # (_results, _battle_log, _agents) is touched only in the locked
+        # blocks below.
+        result = agent.run(task, self._context)
+        agent._set_status(result.status)
+
+        with self._lock:
             self._results.append(result)
+        self._emit(
+            f"agent_{result.status.value}",
+            {
+                "agent_id": agent.agent_id,
+                "agent_type": agent.agent_type,
+                "task_id": task_id,
+                "status": result.status.value,
+                "execution_time": result.execution_time,
+                "summary": str(result.output)[:200] if result.output else result.error,
+                "findings_count": len(result.findings),
+                "new_tasks_count": len(result.new_tasks),
+            },
+        )
 
-            self._emit(
-                f"agent_{result.status.value}",
-                {
-                    "agent_id": agent.agent_id,
-                    "agent_type": agent.agent_type,
-                    "task_id": task_id,
-                    "status": result.status.value,
-                    "execution_time": result.execution_time,
-                    "summary": str(result.output)[:200] if result.output else result.error,
-                    "findings_count": len(result.findings),
-                    "new_tasks_count": len(result.new_tasks),
-                },
-            )
-
-            # ── Update battle log with richer context ──
+        # ── Update battle log with richer context ──
+        with self._lock:
             self._battle_log.append({
                 "task_id": task_id,
                 "tool": task.get("tool", task.get("phase", "")),
@@ -229,39 +252,47 @@ class SwarmOrchestrator:
             })
             self._trim_history()
 
-            # ── Blackboard milestone events ──
-            if result.output:
-                for key in ("access_achieved", "compromised_hosts", "credentials_found", "loot"):
-                    value = result.output.get(key) if isinstance(result.output, dict) else None
-                    if value:
-                        # Bug #18 (preserved): the old ``setdefault(key, value)``
-                        # on a list value was a no-op once the key existed — the
-                        # first task's list stuck and every later task's list was
-                        # silently dropped. We now merge list values
-                        # (order-preserving dedupe) and keep first-write
-                        # semantics for scalars. The Blackboard API makes this
-                        # atomic (lock-protected get-then-set) so the same merge
-                        # is safe under route_parallel's unlocked agent.run.
-                        if isinstance(value, list):
-                            self._blackboard.extend_list(key, value)
-                        else:
-                            # First-write-wins for scalars: only set if absent.
-                            if key not in self._blackboard:
-                                self._blackboard.set_scalar(key, value)
-                        if key == "access_achieved" and value:
-                            self._blackboard.set_scalar("access_achieved", True)
-                        self._emit(
-                            "blackboard_updated",
-                            {"key": key, "value": value, "task_id": task_id, "agent_type": agent.agent_type},
-                        )
+        # ── Blackboard milestone events ──
+        if result.output:
+            for key in ("access_achieved", "compromised_hosts", "credentials_found", "loot"):
+                value = result.output.get(key) if isinstance(result.output, dict) else None
+                if value:
+                    # Bug #18 (preserved): the old ``setdefault(key, value)``
+                    # on a list value was a no-op once the key existed — the
+                    # first task's list stuck and every later task's list was
+                    # silently dropped. We now merge list values
+                    # (order-preserving dedupe) and keep first-write
+                    # semantics for scalars. The Blackboard API makes this
+                    # atomic (lock-protected get-then-set) so the same merge
+                    # is safe under route_parallel's unlocked agent.run.
+                    if isinstance(value, list):
+                        self._blackboard.extend_list(key, value)
+                    else:
+                        # First-write-wins for scalars: only set if absent.
+                        if key not in self._blackboard:
+                            self._blackboard.set_scalar(key, value)
+                    if key == "access_achieved" and value:
+                        self._blackboard.set_scalar("access_achieved", True)
+                    self._emit(
+                        "blackboard_updated",
+                        {"key": key, "value": value, "task_id": task_id, "agent_type": agent.agent_type},
+                    )
 
-            self._persist_state()
+        # ── Phase milestone ──
+        # Mark this (target, phase) complete so any dependent task waiting in
+        # route_parallel can proceed. ``recon``→``analysis``/``exploit`` chain
+        # depends on this; ``post_exploit`` depends on ``exploit``. Done in a
+        # finally-style block so a failed agent still unblocks dependents (a
+        # failed recon shouldn't wedge the whole campaign forever).
+        self._mark_milestone(target, phase)
 
-            # ── Auto-reflect after exploitation phases ──
-            if self._reflection_enabled and phase in ("exploit", "post_exploit"):
-                self.reflect(self._battle_log, {"target_ip": target})
+        self._persist_state()
 
-            return result
+        # ── Auto-reflect after exploitation phases ──
+        if self._reflection_enabled and phase in ("exploit", "post_exploit"):
+            self.reflect(self._battle_log, {"target_ip": target})
+
+        return result
 
     async def route_parallel(self, tasks: list[dict[str, Any]]) -> list[AgentResult]:
         """Route multiple tasks in parallel with a concurrency limit.
