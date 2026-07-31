@@ -81,9 +81,9 @@ class RunEventBroker:
                     evt = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                    sequence = evt.get("sequence")
-                    if isinstance(sequence, int) and not isinstance(sequence, bool) and sequence > after:
-                        events.append(evt)
+                sequence = evt.get("sequence")
+                if isinstance(sequence, int) and not isinstance(sequence, bool) and sequence > after:
+                    events.append(evt)
         return events
 
     async def subscribe(self, after: int = 0) -> "EventSubscription":

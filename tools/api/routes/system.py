@@ -1,7 +1,8 @@
-"""System and administration routes: /health, /capabilities, /config, /secrets, /models, /plugins, /skills, /diagnostics."""
+"""System and administration routes: /health, /capabilities, /config, /secrets, /models, /plugins, /skills, /diagnostics, /goals, /config/schema, /models/live, /skills/{name}."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -53,7 +54,10 @@ async def capabilities(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     """API features, supported run options, constraints, and tool groups."""
     return {
         "api_version": "v1",
-        "features": ["runs", "decisions", "events", "websocket", "tool_gateway", "config", "secrets"],
+        "features": ["runs", "decisions", "events", "websocket", "tool_gateway", "config", "secrets",
+                     "goals", "config_schema", "artifacts", "audit", "swarm_state", "campaign_state",
+                     "logs", "credentials", "loot", "live_models", "skill_detail", "run_delete",
+                     "sse", "single_decision", "diagnostics_output"],
         "constraints": {
             "max_concurrent_runs": 1,
             "loopback_only": True,
@@ -227,15 +231,109 @@ async def search_skills(q: str = "", auth: str = Depends(_require_auth)) -> dict
 
 @router.post("/diagnostics/doctor")
 async def run_doctor(auth: str = Depends(_require_auth)) -> dict[str, Any]:
-    """Run the environment self-check."""
-    from tools.doctor import run_doctor
-    code = run_doctor(_CONFIG_PATH)
-    return {"exit_code": code}
+    """Run the environment self-check and capture its stdout output."""
+    import contextlib
+    import io
+    from tools.doctor import run_doctor as _run
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        code = _run(_CONFIG_PATH)
+    return {"exit_code": code, "output": buf.getvalue()}
 
 
 @router.post("/diagnostics/self-test")
 async def run_self_test(auth: str = Depends(_require_auth)) -> dict[str, Any]:
-    """Run the safe localhost smoke test."""
+    """Run the safe localhost smoke test and capture its stdout output."""
+    import contextlib
+    import io
     from tools.self_test import run_self_test as _run
-    code = await _run(None)
-    return {"exit_code": code}
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        code = await _run(None)
+    return {"exit_code": code, "output": buf.getvalue()}
+
+
+# ── Goals (B4) ──────────────────────────────────────────────────────────────
+
+@router.get("/goals")
+async def list_goals(auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """List all preset goals with full descriptions and risk requirement tags."""
+    from tools.goal_engine import GoalEngine
+    engine = GoalEngine()
+    out: list[dict[str, Any]] = []
+    for name, goal in engine.presets.items():
+        out.append({
+            "name": name,
+            "description": goal.description,
+            "risk": goal.risk_requirement,
+            "compatible": True,
+        })
+    return {"goals": out}
+
+
+# ── Config schema (B5) ──────────────────────────────────────────────────────
+
+@router.get("/config/schema")
+async def get_config_schema(auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Return the full default config schema (CONFIG_SCHEMA) for typed form rendering."""
+    from tools.config_manager import CONFIG_SCHEMA
+    return {"schema": CONFIG_SCHEMA}
+
+
+# ── Live Ollama models (C1) ─────────────────────────────────────────────────
+
+@router.get("/models/live")
+async def list_live_models(auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """List models actually installed in the local Ollama instance.
+
+    Hits ``ollama.host`` ``/api/tags`` live each call. Falls back to the
+    configured registry with a 503 when Ollama is unreachable.
+    """
+    ollama_host = _CONFIG.get("ollama", {}).get("host", "http://localhost:11434")
+    registry = _CONFIG.get("models", {}).get("registry", {})
+    try:
+        import httpx
+        from fastapi import Response
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{ollama_host}/api/tags")
+            resp.raise_for_status()
+            data = resp.json()
+            models = [m.get("name", "") for m in data.get("models", []) if m.get("name")]
+            return {"models": models, "source": "ollama"}
+    except Exception as exc:
+        return Response(
+            content=json.dumps({"models": list(registry.values()), "source": "registry", "error": f"Ollama unreachable: {exc}"}),
+            status_code=503,
+            media_type="application/json",
+        )
+
+
+# ── Skill detail (C2) ──────────────────────────────────────────────────────
+
+@router.get("/skills/{name}")
+async def get_skill(name: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Return a single runtime skill's sanitized body + sections + references."""
+    from fastapi import HTTPException
+    try:
+        from tools.skill_registry_cache import get_registry
+        reg = get_registry(_CONFIG)
+        skill = reg.get(name)
+        if skill is None:
+            raise HTTPException(status_code=404, detail="Skill not found")
+        return {
+            "name": skill.name,
+            "description": skill.description,
+            "body": skill.body,
+            "sections": skill.sections,
+            "tags": list(skill.metadata.tags or []),
+            "references": [str(r) for r in skill.metadata.references],
+            "nist_csf": list(skill.metadata.nist_csf or []),
+            "mitre_attack": list(skill.metadata.mitre_attack or []),
+            "domain": skill.metadata.domain,
+            "subdomain": skill.metadata.subdomain,
+            "version": skill.metadata.version,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not load skill: {exc}")

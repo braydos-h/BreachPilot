@@ -294,3 +294,14 @@ class ApiPersistence:
                 conn.commit()
             finally:
                 conn.close()
+
+    def delete_run(self, run_id: str) -> bool:
+        """Delete a run and its decisions (cascade). Returns True if a row was removed."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute("DELETE FROM runs WHERE id=?", (run_id,))
+                conn.commit()
+                return cur.rowcount > 0
+            finally:
+                conn.close()

@@ -1,13 +1,16 @@
-"""Assessment run routes: POST /runs, GET /runs, GET /runs/{id}, cancel, resume, tools."""
+"""Assessment run routes: POST /runs, GET /runs, GET /runs/{id}, cancel, resume, tools, artifacts, logs, audit, swarm, campaign, credentials, loot."""
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from tools.api.auth import BearerAuth
+from tools.api.errors import APIError
 from tools.api.persistence import ApiPersistence
 from tools.api.run_manager import RunManager
 from tools.run_service.models import RunKind, RunRequest
@@ -43,6 +46,59 @@ def _ps() -> ApiPersistence:
     if _PERSISTENCE is None:
         raise RuntimeError("Persistence not configured.")
     return _PERSISTENCE
+
+
+def _run_dir(run_id: str) -> Path:
+    """Resolve the reports/<run_id>/ directory, refusing path escapes."""
+    base = _ps().reports_dir.resolve()
+    candidate = (base / run_id).resolve()
+    if base not in candidate.parents and candidate != base:
+        raise HTTPException(status_code=400, detail="Invalid run id")
+    return candidate
+
+
+_ARTIFACT_WHITELIST = frozenset({
+    "session_summary.md", "run.json", "recon_assessment.json",
+    "goal_suggestions.json", "activity.jsonl", "exploit_audit.jsonl",
+    "events.jsonl", "session_error.log", "recon_first_error.log",
+})
+
+_LOG_WHITELIST = frozenset({
+    "mcp_exploit_server.log", "session_error.log", "recon_first_error.log",
+})
+
+_CONTENT_TYPES = {
+    ".md": "text/markdown; charset=utf-8",
+    ".json": "application/json",
+    ".jsonl": "application/x-ndjson",
+    ".html": "text/html; charset=utf-8",
+    ".log": "text/plain; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+    ".csv": "text/csv; charset=utf-8",
+}
+
+
+def _safe_child(parent: Path, name: str, *, allow_subdirs: bool = False) -> Path:
+    """Resolve ``name`` under ``parent`` and refuse path traversal.
+
+    ``allow_subdirs`` permits a single subdirectory level (e.g. ``enhanced/foo.json``)
+    but still rejects ``..``, absolute paths, and deeper nesting.
+    """
+    if not name or name in {".", ".."}:
+        raise HTTPException(status_code=400, detail="Invalid name")
+    parts = [p for p in name.replace("\\", "/").split("/") if p and p != "."]
+    if not parts:
+        raise HTTPException(status_code=400, detail="Invalid name")
+    if ".." in parts:
+        raise HTTPException(status_code=400, detail="Invalid name")
+    if not allow_subdirs and len(parts) != 1:
+        raise HTTPException(status_code=400, detail="Invalid name")
+    candidate = (parent / Path(*parts)).resolve()
+    if parent.resolve() not in candidate.parents and candidate != parent.resolve():
+        raise HTTPException(status_code=400, detail="Invalid name")
+    if not str(candidate).startswith(str(parent.resolve())):
+        raise HTTPException(status_code=400, detail="Invalid name")
+    return candidate
 
 
 # ── Request models ──────────────────────────────────────────────────────────
@@ -129,9 +185,23 @@ async def list_runs(
     offset: int = Query(0, ge=0),
     auth: str = Depends(_require_auth),
 ) -> dict[str, Any]:
-    """List run history."""
+    """List run history with target/mode/goal/model summary (no N+1 queries)."""
     runs = _ps().list_runs(limit=limit, offset=offset)
-    return {"runs": [{"id": r["id"], "state": r["state"], "created_at": r["created_at"]} for r in runs]}
+    out: list[dict[str, Any]] = []
+    for r in runs:
+        req = r.get("request_json", {}) or {}
+        prev = r.get("preview_json", {}) or {}
+        out.append({
+            "id": r["id"],
+            "state": r["state"],
+            "created_at": r["created_at"],
+            "target": req.get("target", ""),
+            "mode": req.get("mode", ""),
+            "goal_name": req.get("goal_name", ""),
+            "target_ip": prev.get("target_ip", ""),
+            "model_alias": prev.get("model_alias", ""),
+        })
+    return {"runs": out}
 
 
 @router.get("/runs/{run_id}")
@@ -196,3 +266,271 @@ async def get_tools(run_id: str, auth: str = Depends(_require_auth)) -> dict[str
 async def call_tool(run_id: str, tool_name: str, body: ToolCallRequest, auth: str = Depends(_require_auth)) -> dict[str, Any]:
     """Policy-gated REST bridge for manual WebUI tool calls."""
     return await _rm().call_tool(run_id, tool_name, body.arguments)
+
+
+# ── Artifacts (B2-B3) ───────────────────────────────────────────────────────
+
+@router.get("/runs/{run_id}/artifacts")
+async def list_artifacts(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """List known run-level artifacts present on disk."""
+    if _ps().get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    run_dir = _run_dir(run_id)
+    artifacts: list[dict[str, Any]] = []
+    for name in sorted(_ARTIFACT_WHITELIST):
+        p = run_dir / name
+        if p.exists() and p.is_file():
+            artifacts.append({"name": name, "bytes": p.stat().st_size, "exists": True})
+    enhanced = run_dir / "enhanced"
+    if enhanced.exists() and enhanced.is_dir():
+        for child in sorted(enhanced.iterdir()):
+            if child.is_file():
+                artifacts.append({
+                    "name": f"enhanced/{child.name}",
+                    "bytes": child.stat().st_size,
+                    "exists": True,
+                })
+    return {"artifacts": artifacts}
+
+
+@router.get("/runs/{run_id}/artifacts/{name:path}")
+async def get_artifact(run_id: str, name: str, auth: str = Depends(_require_auth)) -> Any:
+    """Serve one artifact's content. Whitelist-bound; path-traversal-safe."""
+    if _ps().get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    run_dir = _run_dir(run_id)
+    is_enhanced = name.startswith("enhanced/")
+    bare = name.split("/", 1)[-1] if is_enhanced else name
+    if is_enhanced:
+        if bare not in {child.name for child in (run_dir / "enhanced").iterdir() if (run_dir / "enhanced").is_dir()}:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        path = _safe_child(run_dir, name, allow_subdirs=True)
+    elif name in _ARTIFACT_WHITELIST:
+        path = _safe_child(run_dir, name)
+    else:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    content_type = _CONTENT_TYPES.get(path.suffix.lower(), "application/octet-stream")
+    from fastapi import Response
+    return Response(content=path.read_bytes(), media_type=content_type)
+
+
+# ── Audit trail (C6) ────────────────────────────────────────────────────────
+
+@router.get("/runs/{run_id}/audit")
+async def get_audit(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Read the tamper-evident exploit audit log + verify the hash chain."""
+    if _ps().get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    run_dir = _run_dir(run_id)
+    audit_path = run_dir / "exploit_audit.jsonl"
+    if not audit_path.exists():
+        # Fall back to the workspace copy.
+        audit_path = run_dir / "exploit_workspace" / "exploit_audit.jsonl"
+    records: list[dict[str, Any]] = []
+    if audit_path.exists():
+        for line in audit_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    chain_valid, chain_reason = (True, "no audit log")
+    if audit_path.exists():
+        try:
+            from tools.exploit_agent.policy import verify_audit_chain
+            chain_valid, chain_reason = verify_audit_chain(audit_path)
+        except Exception as exc:
+            chain_valid, chain_reason = False, f"verification error: {exc}"
+    return {"records": records, "chain_valid": chain_valid, "chain_reason": chain_reason}
+
+
+# ── Swarm + campaign state (C7-C8) ──────────────────────────────────────────
+
+def _read_state_json(run_id: str, filename: str) -> dict[str, Any]:
+    """Read a JSON state file under reports/<run_id>/swarm_workspace/."""
+    if _ps().get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    state_path = _run_dir(run_id) / "swarm_workspace" / filename
+    if not state_path.exists() or not state_path.is_file():
+        raise HTTPException(status_code=404, detail=f"{filename} not found")
+    try:
+        return json.loads(state_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not parse {filename}: {exc}")
+
+
+@router.get("/runs/{run_id}/swarm")
+async def get_swarm_state(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Read the swarm orchestrator state (swarm_state.json)."""
+    return {"state": _read_state_json(run_id, "swarm_state.json")}
+
+
+@router.get("/runs/{run_id}/campaign")
+async def get_campaign_state(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Read the autonomous orchestrator campaign state (attack_states.json)."""
+    return {"state": _read_state_json(run_id, "attack_states.json")}
+
+
+# ── Log tailing (C9) ────────────────────────────────────────────────────────
+
+@router.get("/runs/{run_id}/logs/{name}")
+async def get_log(
+    run_id: str,
+    name: str,
+    tail: int = Query(200, ge=1, le=2000),
+    attempt_id: str = "",
+    target_ip: str = "",
+    auth: str = Depends(_require_auth),
+) -> dict[str, Any]:
+    """Tail a run log. ``name`` must be in the whitelist; per-attempt logs need
+    ``attempt_id`` + ``target_ip`` to resolve under exploit_workspace/<ip>/<id>/.
+    """
+    if _ps().get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    run_dir = _run_dir(run_id)
+    per_attempt = {"terminal.log", "python_run.log", "msf_output.log", "run_active_check.ps1"}
+    recognized = _LOG_WHITELIST | per_attempt
+    if name not in recognized:
+        raise HTTPException(status_code=404, detail="Log not found")
+    if name in per_attempt:
+        if not attempt_id or not target_ip:
+            raise HTTPException(
+                status_code=400,
+                detail="This log requires attempt_id and target_ip query params",
+            )
+        ip_dir = _safe_child(run_dir / "exploit_workspace", target_ip, allow_subdirs=True)
+        attempt_dir = _safe_child(ip_dir, attempt_id, allow_subdirs=True)
+        log_path = _safe_child(attempt_dir, name)
+        candidates = [log_path]
+    else:
+        candidates = [run_dir / name]
+        if name == "mcp_exploit_server.log":
+            candidates.append(run_dir / "exploit_workspace" / "mcp_exploit_server.log")
+    log_path = next((p for p in candidates if p.exists() and p.is_file()), None)
+    if log_path is None:
+        raise HTTPException(status_code=404, detail="Log not found")
+    all_lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    returned = all_lines[-tail:]
+    return {
+        "name": name,
+        "lines": returned,
+        "total_lines_returned": len(returned),
+        "total_lines_in_file": len(all_lines),
+    }
+
+
+# ── Credentials + loot (C3-C5) ──────────────────────────────────────────────
+
+def _exploit_workspace(run_id: str) -> Path:
+    return _run_dir(run_id) / "exploit_workspace"
+
+
+def _credential_access_log(run_id: str) -> Path:
+    return _run_dir(run_id) / "credential_access.jsonl"
+
+
+@router.get("/runs/{run_id}/credentials")
+async def list_credentials(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """List credentials harvested during the run. Passwords are NEVER returned."""
+    if _ps().get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    ws = _exploit_workspace(run_id)
+    store_path = ws / "credentials.jsonl"
+    if not store_path.exists():
+        return {"credentials": []}
+    try:
+        from tools.credential_store import CredentialStore
+        store = CredentialStore(ws)
+        out = []
+        for idx, rec in enumerate(store.all_credentials()):
+            data = rec.to_json()
+            data["password"] = "[REDACTED]"
+            data["index"] = idx
+            out.append(data)
+        return {"credentials": out}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not read credentials: {exc}")
+
+
+@router.post("/runs/{run_id}/credentials/{index}/reveal")
+async def reveal_credential(
+    run_id: str, index: int, auth: str = Depends(_require_auth),
+) -> dict[str, Any]:
+    """Reveal one credential's plaintext password. Audited."""
+    if _ps().get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    ws = _exploit_workspace(run_id)
+    store_path = ws / "credentials.jsonl"
+    if not store_path.exists():
+        raise HTTPException(status_code=404, detail="No credentials for this run")
+    try:
+        from tools.credential_store import CredentialStore
+        store = CredentialStore(ws)
+        records = store.all_credentials()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not read credentials: {exc}")
+    if index < 0 or index >= len(records):
+        raise HTTPException(status_code=404, detail="Credential index out of range")
+    rec = records[index]
+    access_entry = {
+        "run_id": run_id,
+        "index": index,
+        "username": rec.username,
+        "target_host": rec.target_host,
+        "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+    }
+    with _credential_access_log(run_id).open("a", encoding="utf-8") as f:
+        f.write(json.dumps(access_entry, default=str) + "\n")
+    return {
+        "index": index,
+        "username": rec.username,
+        "target_host": rec.target_host,
+        "password": rec.password,
+    }
+
+
+@router.get("/runs/{run_id}/loot")
+async def list_loot(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """List loot captured during the run."""
+    if _ps().get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    ws = _exploit_workspace(run_id)
+    loot_path = ws / "loot.jsonl"
+    if not loot_path.exists():
+        return {"loot": []}
+    try:
+        from tools.credential_store import LootStore
+        store = LootStore(ws)
+        return {"loot": [item.to_json() for item in store._items]}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not read loot: {exc}")
+
+
+# ── DELETE run history (D1) ─────────────────────────────────────────────────
+
+@router.delete("/runs/{run_id}")
+async def delete_run(
+    run_id: str,
+    purge: bool = Query(False),
+    auth: str = Depends(_require_auth),
+) -> dict[str, Any]:
+    """Delete a run from the DB. Refuses active runs. ``?purge=true`` also
+    removes the reports/<run_id>/ directory.
+    """
+    if _ps().get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if _rm().has_active and _rm().active and _rm().active.run_id == run_id:
+        raise APIError("conflict", "Cannot delete an active run.", status_code=409)
+    purged = False
+    if purge:
+        run_dir = _run_dir(run_id)
+        if run_dir.exists():
+            import shutil
+            shutil.rmtree(run_dir, ignore_errors=True)
+            purged = True
+    _ps().delete_run(run_id)
+    return {"run_id": run_id, "deleted": True, "purged": purged}

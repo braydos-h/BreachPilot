@@ -1,6 +1,10 @@
-"""Event routes: replay via GET + live WebSocket delivery."""
+"""Event routes: replay via GET + live WebSocket delivery + SSE stream."""
 
 from __future__ import annotations
+
+import asyncio
+import json
+from typing import Any
 
 from fastapi import (
     APIRouter,
@@ -11,6 +15,8 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from pydantic import BaseModel, Field
+from starlette.responses import StreamingResponse
 
 from tools.api.auth import BearerAuth, authenticate_websocket
 from tools.api.event_broker import EventBrokerRegistry
@@ -47,6 +53,15 @@ async def _require_auth(request: Request) -> str:
     return await _AUTH(request)
 
 
+class EventOut(BaseModel):
+    """Typed event shape for OpenAPI codegen."""
+    sequence: int
+    timestamp: str
+    run_id: str
+    type: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
 @router.get("/runs/{run_id}/events", response_model=None)
 async def get_events(run_id: str, after: int = Query(0, ge=0), auth: str = Depends(_require_auth)) -> dict:
     """Replay events for a run with sequence > ``after``."""
@@ -56,6 +71,50 @@ async def get_events(run_id: str, after: int = Query(0, ge=0), auth: str = Depen
         raise HTTPException(status_code=503, detail="Event service unavailable")
     events = await _EVENTS.get_or_create(run_id).replay(after)
     return {"run_id": run_id, "events": events}
+
+
+@router.get("/runs/{run_id}/events/stream")
+async def stream_events(
+    run_id: str,
+    request: Request,
+    after: int = Query(0, ge=0),
+    token: str = Query("", description="Bearer token (EventSource cannot set headers)"),
+) -> Response:
+    """Server-Sent Events stream: replays from ``after`` then streams live.
+
+    Auth via ``?token=<bearer>`` query param (browser EventSource cannot set
+    Authorization headers). Each event is sent as ``data: {json}\\n\\n``; a
+    ``: heartbeat`` comment keeps the connection alive every 30s.
+    """
+    import hmac
+    if _PERSISTENCE is None or _PERSISTENCE.get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if _EVENTS is None:
+        raise HTTPException(status_code=503, detail="Event service unavailable")
+    if not token or not hmac.compare_digest(token, _TOKEN):
+        raise HTTPException(status_code=401, detail="Invalid or missing token")
+
+    broker = _EVENTS.get_or_create(run_id)
+    subscription = await broker.subscribe(after=after)
+
+    async def event_generator():
+        try:
+            async for event in subscription:
+                yield f"data: {json.dumps(event, default=str)}\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            subscription.close()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.websocket("/ws/v1/runs/{run_id}")
