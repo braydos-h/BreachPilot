@@ -178,6 +178,13 @@ class AttackState:
     # (e.g. ["cron", "schtask", "webshell"]). Populated only by the opt-in
     # _phase_persistence handler; empty when the persistence phase is off.
     persistence_established: list[str] = field(default_factory=list)
+    # Domain targeting: the operator's original --target (domain or IP) and
+    # the resolved IP for a domain target. When original_target is a domain,
+    # the orchestrator runs subdomain expansion after recon to discover the
+    # full attack surface and auto-authorizes each discovered host.
+    original_target: str = ""
+    resolved_ip: str = ""
+    discovered_subdomains: list[dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1277,6 +1284,66 @@ class AutonomousOrchestrator:
             logger.info(f"[RECON] Found {len(recon_result.open_ports)} ports on {state.target}")
         else:
             state.add_timeline_event("recon_empty", "No open ports found")
+
+        # Domain targeting: when the operator gave a domain, run subdomain
+        # expansion after the primary recon to discover the full attack
+        # surface. Each discovered (subdomain, ip) pair is auto-authorized
+        # via add_discovered_target so the agent can attack them. This is
+        # best-effort: a failure degrades to no expansion (the primary
+        # target is still attacked). The actual subdomain discovery uses
+        # the same crt.sh + DNS bruteforce as the enumerate_subdomains MCP
+        # tool, but runs inline here (Path B has no MCP session).
+        if state.original_target and state.original_target != state.target:
+            try:
+                from tools.validation_utils import is_fqdn, resolve_target_to_ip
+                from tools.mcp_shared import add_discovered_target
+                if is_fqdn(state.original_target):
+                    logger.info(
+                        f"[RECON] Domain target {state.original_target} -- "
+                        f"expanding attack surface via subdomain enumeration"
+                    )
+                    # Reuse the crt.sh passive source (no external dep).
+                    import json as _json
+                    import urllib.request as _urlreq
+                    dom = state.original_target.strip().lower()
+                    try:
+                        req = _urlreq.Request(
+                            f"https://crt.sh/?q=%25.{dom}&output=json",
+                            headers={"User-Agent": "NetAttackAi-Orchestrator/1.0"},
+                        )
+                        with _urlreq.urlopen(req, timeout=20) as resp:  # noqa: S310
+                            body = resp.read().decode(errors="replace")
+                        subs: set[str] = set()
+                        if body:
+                            for row in _json.loads(body):
+                                for nv in str(row.get("name_value", "")).splitlines():
+                                    for s in nv.split(","):
+                                        s = s.strip().lstrip("*.").strip().lower()
+                                        if s and s.endswith(dom) and s != dom:
+                                            subs.add(s)
+                        for sub in sorted(subs)[:200]:
+                            ip = resolve_target_to_ip(sub)
+                            if ip:
+                                state.discovered_subdomains.append(
+                                    {"subdomain": sub, "ip": ip}
+                                )
+                                add_discovered_target(sub, ip)
+                    except Exception as exc:
+                        logger.warning(
+                            f"[RECON] Subdomain expansion failed for {dom}: {exc}"
+                        )
+                    if state.discovered_subdomains:
+                        state.add_timeline_event(
+                            "subdomain_expansion",
+                            f"Discovered {len(state.discovered_subdomains)} subdomains",
+                            {"subdomains": state.discovered_subdomains[:20]},
+                        )
+                        logger.info(
+                            f"[RECON] Discovered {len(state.discovered_subdomains)} "
+                            f"subdomains of {state.original_target}"
+                        )
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning(f"[RECON] Domain expansion hook failed: {exc}")
 
     async def _phase_exploitation(self, state: AttackState, *, skip_failed: bool = False) -> None:
         """Automatically select and execute attack modules based on recon.
