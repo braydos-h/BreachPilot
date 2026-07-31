@@ -58,8 +58,11 @@ Current exploit MCP categories:
 - `peer_models.py`: advisory peer-model consultation.
 - `metasploit.py`: Metasploit module execution and bridge/console helpers.
 - `credentials.py`: encrypted credential store plus credential-use helpers.
+- `ad.py`: Active Directory enumeration and attack helpers.
 - `payloads.py`: payload generation helpers.
+- `cracking.py`: local hash cracking with hashcat/john and auto hash-type identification.
 - `recon.py`: OS/service detection and recon pipeline tools.
+- `domain.py`: domain targeting — resolve_domain, enumerate_subdomains, dns_recon, vhost_enum, domain_whois.
 - `attack_modules.py`: attack planning, exploit crafting/mutation, web probes, campaign, and module execution tools.
 - `sessions.py`: persistent sessions, background jobs, listeners, and process helpers.
 
@@ -95,6 +98,8 @@ Conventions:
 - Return data, commands, workflow instructions, or generated script text as structured dictionaries.
 - Keep module names stable because tests and orchestrators can reference them.
 - Do not embed credentials in plain output.
+
+For out-of-tree attack modules, register the class through `registry.register_attack_module(cls)` instead of adding to `_MODULE_CLASSES`; see [plugin-development.md](plugin-development.md).
 
 ## Add Runtime Skill Guidance
 
@@ -133,6 +138,7 @@ Important classes:
 Also check:
 
 - `main.py::run_recon_assessment`
+- `tools/recon_assessment_cli.py`: wraps `run_recon_assessment` (referenced from `main.py`).
 - `tools/goal_suggester.py`
 - `tests/test_recon_pipeline.py`
 - `tests/test_recon_first_session.py`
@@ -181,6 +187,7 @@ Edit:
 - `config.yaml`: checked-in operator defaults.
 - `tools/config_manager.py::CONFIG_SCHEMA`: defaults used when config is missing or incomplete.
 - `tools/config_manager.py::ConfigValidator.validate`: type/range validation.
+- `tools/config_cli.py`: handles `load_config` and the startup API-key bootstrap (referenced from `main.py`).
 - `tools/interactive_menu.py`: only if operators should edit the setting interactively.
 - `tests/test_config_manager.py`: defaulting and validation coverage.
 
@@ -284,6 +291,27 @@ Use these modules:
 - `tools/logging_setup.py`: shared logging behavior.
 
 Add tests for missing-tool behavior and timeout behavior. Do not assume the external binary exists on every developer machine.
+
+## Add OPSEC / Detection-Coverage Behavior
+
+Edit:
+
+- `tools/opsec.py`: `OpsecProfile` and `OpsecManager` (target-aware via `resolve_for_target(ip)`, OFF for private/local targets, ON for public-routable targets).
+- `tools/detection_coverage.py`: detection-coverage analysis and posture helpers.
+- `tools/mcp_tools/terminal.py::_opsec_advisory_block`: appends a live `OPSEC_ADVISORY:` block (noise score, quieter rewrite, pacing) to every `run_exploit_terminal` result.
+- `tools/exploit_agent/prompt.py::build_opsec_briefing`: target-aware posture section injected into the agent system prompt.
+
+OPSEC is advisory-only on the attack path: it never gates tool calls, and `is_quiet_blocked` / `noise_budget` stay dormant. The command always executes.
+
+## Add a Plugin (out-of-tree)
+
+Plugins are out-of-tree extensions that ship as self-contained directories and are discovered without modifying the core tree. See [plugin-development.md](plugin-development.md) for the full guide.
+
+Key facts:
+
+- Plugins live under `plugins/<name>/` with a `plugin.yaml` manifest and a `plugin.py` entry point; `plugins/example_recon_report/` is a reference plugin.
+- Plugins are OFF by default; enable them via `config.plugins.enabled` (per-plugin or as a list).
+- Any MCP tool a plugin exposes must stack `@ctx.require_allowlist()` (for target-touching tools) or `@ctx.audit_tool()` (for local-only tools), reusing the same gates as in-tree tools.
 
 ## Debugging Checklist
 

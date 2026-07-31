@@ -11,6 +11,8 @@ These docs are the fastest path into this codebase for new contributors. The roo
 - [Extension Guide](extension-guide.md): exact edit points for adding tools, integrations, config, persistent data, and tests.
 - [Safety Model](safety-model.md): scope checks, risk checks, permission modes, audit records, and secure development rules.
 - [Testing Guide](testing-guide.md): test layout, focused test commands, and what to update with each kind of change.
+- [Plugin Development](plugin-development.md): how to write, package, enable, and distribute out-of-tree plugins.
+- [Runtime Skills](skills.md): advisory skill pipeline, selection, re-selection, feedback, and semantic matching.
 
 ## Mental Model
 
@@ -24,6 +26,11 @@ This project is a locally run, AI-assisted security research agent. It has sever
 The shared domain model is:
 
 `Mission -> Scope/Risk gates -> Planner -> TaskQueue -> Executor/Tools -> Observer -> OutcomeJudge/Hypothesis state -> Memory/Graph/Evidence -> FindingVerifier -> ReportGenerator`
+
+## Extension Paths
+
+- In-tree edits: see `extension-guide.md` for exact edit points for adding tools, integrations, config, persistent data, and tests.
+- Out-of-tree plugins: see `plugin-development.md` for writing, packaging, enabling, and distributing plugins.
 
 ## Generated Directories
 

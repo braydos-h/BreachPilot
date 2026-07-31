@@ -10,7 +10,8 @@ This project can run powerful security tooling. The codebase relies on layered c
 4. Tool routing controls in `tool_router.py`
 5. Exploit permission controls in `tools/exploit_agent/`
 6. Runtime configuration in `config.yaml`
-7. Audit logs, evidence records, and workspace artifacts
+7. OPSEC advisory layer in `tools/opsec.py` (target-aware, advisory-only — never a gate)
+8. Audit logs, evidence records, and workspace artifacts
 
 ## Mission Rules
 
@@ -175,3 +176,11 @@ Evidence and auditability are part of the safety model:
   existing scope, risk, approval, permission, target-lock, rate-limit, audit,
   and workspace controls.
 - For tests, prefer localhost, mocks, and temporary workspaces.
+
+## OPSEC (Advisory Layer)
+
+`tools/opsec.py` provides `OpsecProfile` / `OpsecManager` with `resolve_for_target(ip)` that forces the profile OFF for private/local target IPs (RFC1918/loopback/link-local) and ON for public routable targets, matching the `opsec` config block in CLAUDE.md. It is advisory-only on the attack path: `is_quiet_blocked` / `noise_budget` stay **dormant** and must NOT become attack-path gates — the command always executes. The AI-facing surfaces (`build_opsec_briefing` in `tools/exploit_agent/prompt.py`, `_opsec_advisory_block` in `tools/mcp_tools/terminal.py`) render advisory context (noise score, suggested quieter rewrite, pacing posture) only; they never gate execution.
+
+## Plugin Safety
+
+Plugins (`tools/plugins.py`) are trusted Python with full operator-box privileges, OFF by default, enabled via `config plugins.enabled`. Any MCP tool a plugin registers MUST wrap its handler with `ctx.require_allowlist()` (target-touching tools) or `ctx.audit_tool` (free-text command tools) so it inherits the same target-IP lock and audit trail as built-in tools. See `docs/plugin-development.md` section 9 for the full checklist.

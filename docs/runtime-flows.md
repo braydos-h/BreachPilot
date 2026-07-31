@@ -103,6 +103,8 @@ main.py
   -> result is sanitized, summarized, audited, and returned to model
 ```
 
+The session boot is wrapped by `tools/mcp_session.py:open_exploit_mcp_session` (async context manager emitting `[BOOT]`/`[OK]` markers); single-target orchestration is `tools/exploit_session.py:run_exploit_session`; `tools/swarm_bridge.py:SwarmMcpBridge` bridges the sync swarm `tool_executor` onto the live MCP `ClientSession`.
+
 Important controls:
 
 - `config.yaml` controls `exploit.permission`, `attack_mode`, command limits, round limits, target allowlist, and workspace paths.
@@ -111,6 +113,10 @@ Important controls:
 - `ExploitPermission` supports `read_only`, `approve_only`, and `full_access`.
 - `ExploitPolicy` is the place to update approval rules for exploit tools.
 - `mcp_exploit_server.py` exposes powerful primitives and should not be treated as a safety boundary by itself.
+
+## Domain Targeting Flow
+
+When the operator passes `--target example.com`, `main.py` resolves it via `tools/validation_utils.resolve_target_to_ip`, then threads `original_target` (the domain) and `resolved_ip` through `run_exploit_session` → `open_exploit_mcp_session`. The MCP server subprocess receives `EXPLOIT_TARGET`, `EXPLOIT_TARGET_IP`, and `EXPLOIT_TARGET_DOMAIN` env vars, so the allowlist locks to the resolved IP plus the domain. Subdomain expansion (mid-run) auto-authorizes each discovered `(subdomain, ip)` pair via `tools/mcp_shared.add_discovered_target`, which appends to `EXPLOIT_DISCOVERED_TARGETS`. Five domain MCP tools live in `tools/mcp_tools/domain.py`: `resolve_domain`, `enumerate_subdomains`, `dns_recon`, `vhost_enum`, `domain_whois`. A `DOMAIN TARGET BRIEFING` is injected into the agent system prompt telling it to use the domain for Host/SNI and the IP for nmap/metasploit.
 
 ## Defensive MCP Flow
 
@@ -138,6 +144,10 @@ task/context
 
 Use the swarm path for multi-agent strategy, parallel routing, blackboard state, and battle-log observability changes.
 
+## Autonomous Orchestrator Flow
+
+`tools/autonomous_orchestrator.py` drives persistent multi-phase campaigns (recon -> vuln -> exploit -> post-exploit) with adaptive aggression levels, auto-retry on failure with modified parameters, vulnerability chaining, and privilege-escalation tracking. It is a SEPARATE campaign engine from the swarm (which is parallel specialist decomposition) and can be used independently. It is target-locked by `scope_gate.check_scope(asset=task.target)`, and its `max_pivot_depth` defaults to 0 (no host-pivoting recursion).
+
 ## Report Flow
 
 ```text
@@ -149,3 +159,7 @@ validated finding
 ```
 
 Report generation should stay evidence-linked, reproducible, and conservative in severity wording.
+
+## Plugin Load Flow
+
+`tools/plugins.load_plugins(config)` runs once during boot before the MCP exploit server is created. It discovers filesystem plugins under `plugins/` (configurable via `plugins.search_paths`) plus entry-point plugins in the `netattackai.plugins` group. Only enabled plugins are registered; each `Plugin.register(registry)` contributes attack modules, MCP tool factories, skill dirs, and config sections to the shared `PLUGIN_REGISTRY`.

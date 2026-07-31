@@ -5,7 +5,6 @@
 | Path | Responsibility |
 | --- | --- |
 | `main.py` | Primary launcher for interactive, recon, attack, doctor, self-test, resume, model, and MCP transport flows. |
-| `app.py` | Tiny friendly launcher that imports and calls `main`. |
 | `cli.py` | Deterministic workflow CLI over missions, scope, tasks, findings, and reports. |
 | `agent_loop.py` | Full database-backed research loop orchestration. |
 | `db.py` | SQLite schema, migrations, IDs, shared default database manager. |
@@ -31,13 +30,16 @@
 
 | Area | Files |
 | --- | --- |
-| Model and reasoning | `model_router.py`, `goal_engine.py`, `goal_suggester.py`, `semantic_memory.py` |
-| Safety and validation | `config_manager.py`, `doctor.py`, `safety_reviewer.py`, `validation_utils.py`, `command_analyzer.py`, `exceptions.py` |
-| Recon and research | `recon_pipeline.py`, `cve_lookup.py`, `exploit_search.py`, `web_researcher.py`, `stealth.py` |
-| Exploit orchestration | `exploit_agent/` (pkg: `loop.py`, `policy.py`, `context.py`, `prompt.py`, `reflection.py`, `skills.py`, `tool_calls.py`, `ollama_client.py`), `autonomous_orchestrator.py`, `attack_planner.py`, `attack_modules/` (pkg: `base.py`, `registry.py`, `modules/`), `payload_crafter.py`, `exploit_mutator.py`, `post_exploit.py` |
+| Model and reasoning | `model_router.py`, `model_telemetry.py`, `goal_engine.py`, `goal_suggester.py`, `semantic_memory.py` |
+| Safety and validation | `config_manager.py`, `doctor.py`, `safety_reviewer.py`, `validation_utils.py`, `command_analyzer.py`, `exceptions.py`, `env_probe.py` |
+| Recon and research | `recon_pipeline.py`, `cve_lookup.py`, `exploit_search.py`, `web_researcher.py`, `recon_enrichers.py`, `recon_diff.py`, `recon_osint.py`, `nmap_priv.py`, `socket_scan.py` |
+| Exploit orchestration | `exploit_agent/` (pkg: `loop.py`, `policy.py`, `context.py`, `prompt.py`, `reflection.py`, `skills.py`, `tool_calls.py`, `ollama_client.py`, `research_assistant.py`, `outcome_classify.py`, `outcome_adapter.py`), `autonomous_orchestrator.py`, `attack_planner.py`, `attack_modules/` (pkg: `base.py`, `registry.py`, `modules/`), `payload_crafter.py`, `exploit_mutator.py`, `post_exploit.py` |
+| OPSEC and detection | `opsec.py`, `detection_coverage.py` |
 | External tooling | `metasploit_bridge.py`, `mcp_shared.py` |
-| Persistence and learning | `session_manager.py`, `persistent_session_manager.py`, `experience_store.py`, `credential_store.py`, `activity_log.py` |
-| Reporting and UX | `enhanced_reporting.py`, `interactive_menu.py`, `attack_ui.py`, `demo_mode.py`, `logging_setup.py`, `self_test.py`, `reliability.py` |
+| Persistence and learning | `session_manager.py`, `persistent_session_manager.py`, `experience_store.py`, `credential_store.py`, `activity_log.py`, `attack_memory.py`, `api_key_store.py` |
+| Skills | `skill_registry.py`, `skill_selector.py`, `skill_embeddings.py`, `skill_pipeline.py`, `skill_feedback.py`, `skill_registry_cache.py` |
+| Flow A CLI orchestration | `config_cli.py`, `cli_exploit_settings.py`, `exploit_session.py`, `mcp_session.py`, `recon_assessment_cli.py`, `resume_state.py`, `safety_review_cli.py`, `skills_cli.py`, `swarm_bridge.py` |
+| Reporting and UX | `enhanced_reporting.py`, `interactive_menu.py`, `attack_ui.py`, `demo_mode.py`, `logging_setup.py`, `self_test.py`, `reliability.py`, `eval_harness.py` |
 
 ### Attack Modules
 
@@ -50,6 +52,12 @@
 - Post-exploit modules: Linux/Windows privilege checks, SUID, kernel checks, container breakout.
 - Network service modules: FTP, Redis, Elasticsearch, LDAP, RDP.
 - AI-assisted modules: CVE-to-exploit, diff/patch analysis, fuzz-to-exploit.
+- Active Directory (`ad.py`): AD enumeration and attack modules.
+- ICS/IoT (`ics_iot.py`): industrial control and IoT device modules.
+- Detection/AV evasion (`detection.py`): detection-aware and AV-evasion modules.
+- Persistence (`persistence.py`): persistence establishment modules.
+- Supply chain (`supply_chain.py`): supply-chain attack modules.
+- Orchestrator phases (`orchestrator_phases.py`): orchestrator phase modules.
 
 Add a new module by subclassing `AttackModule`, implementing applicability and run behavior, and registering the class in `_MODULE_CLASSES`. Update `tests/test_attack_modules.py`.
 
@@ -63,16 +71,31 @@ Add a new module by subclassing `AttackModule`, implementing applicability and r
 - `agents/post_exploit_agent.py`: post-exploit specialist.
 - `agents/critic_agent.py`: safety/policy critic.
 - `agents/reflection_agent.py`: strategy reflection specialist.
+- `skill_phase.py`: skill phase routing.
 
 Update `tests/test_swarm.py`, `tests/test_swarm_integration.py`, and `tests/test_swarm_observability.py` when changing this area.
 
 ## Tests
 
-Tests are organized by module or feature. Examples:
+Tests are organized by module or feature; the suite has grown to 100+ files. The list below highlights major areas, not every file — run `python -m pytest tests/ -v` for the full set.
 
 - Core workflow: `test_mission.py`, `test_scope_gate.py`, `test_risk_controller.py`, `test_task_queue.py`, `test_outcome_judge.py`, `test_agent_loop.py`
 - Persistence/reporting: `test_evidence.py`, `test_finding_verifier.py`, `test_report_generator.py`
 - Exploit tooling: `test_attack_modules.py`, `test_mcp_workspace.py`, `test_retry_logic.py`, `test_lateral_tools.py`
-- Safety/config: `test_safety_reviewer.py`, `test_config_manager.py`, `test_command_analyzer.py`, `test_audit_redaction.py`
+- Safety/config: `test_safety_reviewer.py`, `test_config_manager.py`, `test_command_analyzer.py`, `test_audit_redaction.py`, `test_validate_target.py`
 - AI/research: `test_goal_engine.py`, `test_cve_lookup.py`, `test_recon_pipeline.py`, `test_semantic_memory.py`, `test_ultrathink.py`
 - Menu/swarm: `test_interactive_menu.py`, `test_swarm.py`, `test_swarm_integration.py`, `test_swarm_observability.py`
+- OPSEC: `test_opsec_*` (target-aware posture, noise scoring, pacing, UA/DoH).
+- Plugins: `test_plugins.py`, `test_plugin_wiring.py`.
+- Domain targeting: `test_domain_*.py` (DNS recon, subdomain enumeration, vhost, WHOIS).
+- Active Directory: `test_ad_*.py`.
+- Detection/AV evasion: `test_detection_*.py`.
+- Supply chain: `test_supply_chain_modules.py`.
+- Persistence: `test_persistence_modules.py`.
+- Autonomous orchestrator: `test_autonomous_*.py` (campaign phases, aggression, retry, chaining).
+- Recon enrichers/OSINT/diff: service enrichment, OSINT recon, recon diffing tests.
+- Resume flow: `test_resume_*.py`.
+- Peer consultation: multi-model advisory consultation tests.
+- Reasoning loop: reasoning/reflection loop tests.
+- Model telemetry: LLM usage telemetry tests.
+- Tool call parsing: tool-call argument parse tests.

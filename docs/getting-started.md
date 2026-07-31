@@ -80,6 +80,7 @@ python cli.py next-task
 
 - `config.yaml`: runtime configuration for Ollama, model aliases, MCP transport, exploit behavior, stealth options, CVE lookup, research, swarm, reasoning, memory, outcome judgment, adaptive exploit settings, and optional peer-model consultation.
 - `mission.yaml`: sample mission definition. This is where allowed assets, disallowed assets, forbidden actions, testing modes, rate limits, accounts, and notes are defined.
+- `plugins` block in `config.yaml`: controls plugin enablement (`enabled`/`disabled` name lists), `search_paths` (default `["plugins"]`), and `entry_points` (default `true`).
 
 Important defaults in `config.yaml`:
 
@@ -108,8 +109,14 @@ control interpretation and replanning—they do not grant execution authority.
 - `python main.py --target <ip> --mode attack`: exploitation mode, still subject to config and policy gates.
 - `python main.py --mcp-transport stdio|http`: select exploit MCP transport.
 - `python main.py --swarm --critic --reflection`: enable swarm orchestration helpers.
+- `python main.py --list-plugins`: list discovered plugins.
+- `python main.py --skills {on,off,hints,lookup}`: set runtime skill mode.
+- `python main.py --skills-list`: list available skills.
+- `python main.py --long-session`: opt-in multi-hour attack mode.
 - `python mcp_server.py`: start the defensive MCP server.
 - `python mcp_exploit_server.py`: start the exploit MCP server.
+
+For plugin authoring see `docs/plugin-development.md`; for the runtime skills system see `docs/skills.md`.
 
 ## Developer Loop
 
