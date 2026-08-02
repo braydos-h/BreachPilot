@@ -48,6 +48,7 @@ from tools.run_service.models import (
     EVENT_COMPLETION,
     EVENT_ERROR,
     EVENT_PROGRESS,
+    EVENT_RECON,
     EVENT_STATE,
     EVENT_SWARM,
     Decision,
@@ -824,6 +825,8 @@ class AssessmentService:
             assessment = ReconAssessment(target_ip=target_ip, os_verdict="UNKNOWN", services=[], cve_findings=[])
 
         ui.display_recon_assessment(assessment)
+
+        await event_sink.emit(EVENT_RECON, {"assessment": assessment.to_dict()})
 
         suggestions = goal_engine.suggest_goals(assessment, risk_profile)
         suggestions_path = reports_dir / "goal_suggestions.json"

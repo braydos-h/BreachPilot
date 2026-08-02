@@ -211,6 +211,7 @@ EVENT_STATE = "state"                   # run state transition
 EVENT_BOOT = "boot"                       # MCP boot step ([BOOT]/[OK])
 EVENT_PROGRESS = "progress"               # heartbeat: round/action/phase
 EVENT_GOAL_SUGGESTIONS = "goal_suggestions"
+EVENT_RECON = "recon_assessment"          # recon-first assessment (OS/ports/CVEs/score)
 EVENT_ASSISTANT = "assistant"             # LLM output text
 EVENT_TOOL_REQUEST = "tool_request"      # agent decided to call a tool
 EVENT_TOOL_START = "tool_start"

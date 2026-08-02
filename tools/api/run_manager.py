@@ -110,6 +110,19 @@ class RunManager:
         service = AssessmentService(config=self._config, callables=self._callables)
         preview = await service.prepare(request)
 
+        # Mirror the CLI's interactive-target allowlist persistence
+        # (main.py:667-675): a target entered via the WebUI form is saved to
+        # config.yaml exploit.allowed_targets so it survives across runs.
+        # Best-effort: a config write failure is logged but never kills a run.
+        try:
+            from tools import config_cli as _config_cli
+            _config_cli.add_target_to_allowlist(self._config_path, preview.original_target)
+        except (OSError, ValueError) as exc:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "Could not save %s to config allowlist: %s", preview.original_target, exc,
+            )
+
         # Persist the run row.
         self._persistence.create_run(
             run_id=preview.run_id,
