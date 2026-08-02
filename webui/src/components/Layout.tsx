@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { Activity, Cpu, Eye, Github, List, Plus, Settings, Terminal } from "lucide-react";
+import { Activity, Cpu, Eye, Github, Home, List, Settings, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useRuns } from "@/api/hooks";
@@ -8,8 +8,8 @@ import { clearStoredToken } from "@/api/client";
 import { useNavigate } from "react-router-dom";
 
 const NAV_ITEMS = [
-  { to: "/", label: "Runs", icon: List, end: true },
-  { to: "/runs/new", label: "New run", icon: Plus, end: false },
+  { to: "/", label: "Home", icon: Home, end: true },
+  { to: "/sessions", label: "Sessions", icon: List, end: false },
   { to: "/system", label: "System", icon: Settings, end: false },
 ];
 

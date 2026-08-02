@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "@/components/Layout";
 import { TokenGate } from "@/components/TokenGate";
+import { HomePage } from "@/routes/HomePage";
 import { RunListPage } from "@/routes/RunListPage";
 import { NewRunPage } from "@/routes/NewRunPage";
 import { RunPage } from "@/routes/RunPage";
@@ -32,7 +33,8 @@ export default function App() {
         <TokenGate>
           <Routes>
             <Route element={<Layout />}>
-              <Route path="/" element={<RunListPage />} />
+              <Route path="/" element={<HomePage />} />
+              <Route path="/sessions" element={<RunListPage />} />
               <Route path="/runs/new" element={<NewRunPage />} />
               <Route path="/runs/:runId" element={<RunPage />} />
               <Route path="/runs/:runId/artifacts" element={<ArtifactsPage />} />
