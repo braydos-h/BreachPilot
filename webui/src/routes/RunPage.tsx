@@ -7,6 +7,8 @@ import {
   Square,
   Terminal,
   Wrench,
+  ScanSearch,
+  ClipboardList,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -27,12 +29,15 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { CopyButton } from "@/components/CopyButton";
 import { EventList } from "@/components/EventList";
 import { DecisionCard } from "@/components/DecisionCard";
+import { ReconAssessmentCard } from "@/components/ReconAssessmentCard";
+import { SessionSummaryCard } from "@/components/SessionSummaryCard";
 import { useRunEvents } from "@/api/ws";
 import {
   useAudit,
   useCallTool,
   useCancelRun,
   useDecisions,
+  useFetchArtifactBlob,
   useResumeRun,
   useRun,
   useRunTools,
@@ -40,7 +45,7 @@ import {
   useCampaignState,
 } from "@/api/hooks";
 import { ApiError } from "@/api/client";
-import { isActiveState, isTerminalState, type RunState } from "@/api/types";
+import { isActiveState, isTerminalState, type RunState, type ReconAssessment, type RunResult } from "@/api/types";
 
 export function RunPage() {
   const { runId } = useParams<{ runId: string }>();
@@ -54,6 +59,7 @@ export function RunPage() {
   const campaign = useCampaignState(runId ?? null, run.data?.request?.long_session === true);
   const tools = useRunTools(runId ?? null, isActiveState(run.data?.state as RunState));
   const callTool = useCallTool(runId ?? "");
+  const fetchArtifact = useFetchArtifactBlob(runId ?? "");
 
   const [showCancel, setShowCancel] = useState(false);
   const [selectedTool, setSelectedTool] = useState<string>("");
@@ -187,13 +193,24 @@ export function RunPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="tools" className="mt-2">
+      <Tabs defaultValue="recon" className="mt-2">
         <TabsList>
+          <TabsTrigger value="recon"><ScanSearch className="mr-1.5 h-3.5 w-3.5" />Recon</TabsTrigger>
+          <TabsTrigger value="summary"><ClipboardList className="mr-1.5 h-3.5 w-3.5" />Summary</TabsTrigger>
           <TabsTrigger value="tools"><Wrench className="mr-1.5 h-3.5 w-3.5" />Tools</TabsTrigger>
           <TabsTrigger value="audit">Audit</TabsTrigger>
           {request.swarm && <TabsTrigger value="swarm">Swarm</TabsTrigger>}
           {request.long_session && <TabsTrigger value="campaign">Campaign</TabsTrigger>}
         </TabsList>
+        <TabsContent value="recon" className="space-y-3">
+          <ReconTab
+            runId={run.data.id}
+            fetchArtifact={fetchArtifact}
+          />
+        </TabsContent>
+        <TabsContent value="summary" className="space-y-3">
+          <SessionSummaryCard result={(run.data.result ?? {}) as RunResult} />
+        </TabsContent>
         <TabsContent value="tools" className="space-y-3">
           <ManualToolPanel
             runId={run.data.id}
@@ -437,6 +454,58 @@ function StateView({ label, loading, error, data }: StateViewProps) {
       <pre className="max-h-[40vh] overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs scrollbar-thin">
         {safeStringify(data)}
       </pre>
+    </div>
+  );
+}
+
+interface ReconTabProps {
+  runId: string;
+  fetchArtifact: ReturnType<typeof useFetchArtifactBlob>;
+}
+
+function ReconTab({ fetchArtifact }: ReconTabProps) {
+  const [assessment, setAssessment] = useState<ReconAssessment | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string>("");
+
+  const load = () => {
+    setLoading(true);
+    setError("");
+    fetchArtifact.mutate("recon_assessment.json", {
+      onSuccess: async (blob) => {
+        try {
+          const text = await blob.text();
+          const data = JSON.parse(text) as ReconAssessment;
+          setAssessment(data);
+        } catch {
+          setError("recon_assessment.json is not valid JSON.");
+        }
+        setLoading(false);
+      },
+      onError: (err) => {
+        setError(err instanceof ApiError && err.isNotFound
+          ? "No recon was run for this session."
+          : "Failed to load recon assessment.");
+        setAssessment(null);
+        setLoading(false);
+      },
+    });
+  };
+
+  if (loading) {
+    return <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading recon...</div>;
+  }
+  if (assessment) {
+    return <ReconAssessmentCard assessment={assessment} />;
+  }
+  return (
+    <div className="space-y-2 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+      {error || "Recon assessment not loaded yet."}
+      <div>
+        <Button type="button" size="sm" variant="outline" onClick={load}>
+          <ScanSearch className="mr-1.5 h-3.5 w-3.5" />Load recon assessment
+        </Button>
+      </div>
     </div>
   );
 }

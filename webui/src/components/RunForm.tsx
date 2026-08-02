@@ -367,7 +367,7 @@ interface SegmentedControlProps {
   options: Array<{ value: string; label: string }>;
 }
 
-function SegmentedControl({ value, onChange, options }: SegmentedControlProps) {
+export function SegmentedControl({ value, onChange, options }: SegmentedControlProps) {
   return (
     <div className="inline-flex h-9 items-center rounded-md border bg-muted/40 p-0.5" role="radiogroup">
       {options.map((opt) => (
@@ -397,7 +397,7 @@ interface TriStateToggleProps {
   labels: { true: string; false: string; null: string };
 }
 
-function TriStateToggle({ value, onChange, labels }: TriStateToggleProps) {
+export function TriStateToggle({ value, onChange, labels }: TriStateToggleProps) {
   return (
     <SegmentedControl
       value={String(value)}
@@ -418,7 +418,7 @@ interface ToggleRowProps {
   disabled?: boolean;
 }
 
-function ToggleRow({ label, checked, onChange, disabled }: ToggleRowProps) {
+export function ToggleRow({ label, checked, onChange, disabled }: ToggleRowProps) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-md border bg-card/30 px-3 py-2">
       <Label className="text-sm">{label}</Label>
@@ -434,7 +434,7 @@ interface SkillMultiSelectProps {
   onChange: (next: string[]) => void;
 }
 
-function SkillMultiSelect({ label, skills, selected, onChange }: SkillMultiSelectProps) {
+export function SkillMultiSelect({ label, skills, selected, onChange }: SkillMultiSelectProps) {
   const toggle = (name: string) => {
     onChange(selected.includes(name) ? selected.filter((n) => n !== name) : [...selected, name]);
   };

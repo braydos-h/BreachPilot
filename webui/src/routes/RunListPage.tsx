@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Loader2, Plus, RotateCw, Trash2 } from "lucide-react";
+import { Loader2, Plus, RotateCw, ScanSearch, Trash2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -76,9 +76,25 @@ export function RunListPage() {
         </div>
       )}
 
-      {!runs.isLoading && rows.length === 0 && (
-        <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
-          No runs yet. Start one from the New run page.
+      {!runs.isLoading && rows.length === 0 && !activeRun && (
+        <div className="space-y-3">
+          <p className="text-center text-sm text-muted-foreground">No runs yet. Choose how to start:</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Link to="/runs/new?path=recon" className="flex flex-col items-start gap-3 rounded-lg border bg-card/40 p-5 text-left transition-colors hover:border-primary hover:bg-accent">
+              <div className="rounded-md border bg-secondary/40 p-2"><ScanSearch className="h-6 w-6" /></div>
+              <div className="space-y-1">
+                <div className="font-medium">Recon & Suggest Goals</div>
+                <p className="text-xs text-muted-foreground">Scan the target first, then pick a goal from AI-ranked suggestions.</p>
+              </div>
+            </Link>
+            <Link to="/runs/new?path=attack" className="flex flex-col items-start gap-3 rounded-lg border bg-card/40 p-5 text-left transition-colors hover:border-primary hover:bg-accent">
+              <div className="rounded-md border bg-secondary/40 p-2"><Zap className="h-6 w-6" /></div>
+              <div className="space-y-1">
+                <div className="font-medium">Start New Session</div>
+                <p className="text-xs text-muted-foreground">Go straight to attack mode with a preset or custom goal.</p>
+              </div>
+            </Link>
+          </div>
         </div>
       )}
 

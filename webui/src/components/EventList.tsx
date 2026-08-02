@@ -1,12 +1,14 @@
 import { useMemo, useRef, useEffect, useState } from "react";
-import { AlertTriangle, ArrowDownToLine, Cpu, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowDownToLine, Cpu, Sparkles, ListChecks } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { BootChecklist } from "@/components/BootChecklist";
 import { ToolCallCard } from "@/components/ToolCallCard";
 import { DecisionCard } from "@/components/DecisionCard";
-import type { RunEvent } from "@/api/types";
+import { ReconAssessmentCard } from "@/components/ReconAssessmentCard";
+import { GoalSuggestionCard } from "@/components/GoalSuggestionCard";
+import type { RunEvent, SuggestedGoal, ReconAssessment } from "@/api/types";
 import type { DecisionListRow } from "@/api/types";
 
 interface EventListProps {
@@ -216,22 +218,28 @@ function renderSimpleEvent(event: RunEvent, key: string): React.ReactNode {
           </div>
         </div>
       );
+    case "recon_assessment": {
+      const assessment = event.payload.assessment as ReconAssessment | undefined;
+      if (!assessment) return null;
+      return <ReconAssessmentCard key={key} assessment={assessment} className="mb-2" />;
+    }
     case "goal_suggestions": {
-      const suggestions = Array.isArray(event.payload.suggestions) ? event.payload.suggestions : [];
+      const raw = Array.isArray(event.payload.suggestions) ? event.payload.suggestions : [];
+      const suggestions = raw as SuggestedGoal[];
+      const aiGoals = suggestions.filter((s) => s.is_ai_generated === true);
+      const presetGoals = suggestions.filter((s) => s.is_ai_generated !== true);
+      const sorted = [...aiGoals, ...presetGoals];
       return (
         <div key={key} className="rounded-md border bg-card/40 p-3 text-sm">
-          <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Goal suggestions</div>
-          <ul className="space-y-1.5">
-            {suggestions.map((s, i) => {
-              const item = s as Record<string, unknown>;
-              return (
-                <li key={i} className="flex flex-col gap-0.5">
-                  <span className="font-medium">{String(item.name ?? "\u2014")}</span>
-                  <span className="text-xs text-muted-foreground">{String(item.description ?? "")}</span>
-                </li>
-              );
-            })}
-          </ul>
+          <div className="mb-2 flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
+            <ListChecks className="h-3.5 w-3.5" />
+            Suggested goals (ranked by exploit success rating)
+          </div>
+          <div className="space-y-2">
+            {sorted.map((s, i) => (
+              <GoalSuggestionCard key={i} goal={s} compact />
+            ))}
+          </div>
         </div>
       );
     }

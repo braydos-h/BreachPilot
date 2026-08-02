@@ -40,6 +40,46 @@ export interface GoalPreset {
   compatible: boolean;
 }
 
+export interface SuggestedGoal {
+  name?: string;
+  description?: string;
+  exploit_likelihood: string;
+  success_rating: number;
+  rationale?: string;
+  compatible?: boolean;
+  blocked_reason?: string;
+  risk_requirement?: RiskTag | string;
+  is_ai_generated?: boolean;
+}
+
+export interface ReconService {
+  name?: string;
+  port?: number;
+  banner?: string;
+  risk?: number;
+  [key: string]: unknown;
+}
+
+export interface ReconCveFinding {
+  service?: string;
+  product?: string;
+  version?: string;
+  count?: number;
+  cves?: unknown[];
+  [key: string]: unknown;
+}
+
+export interface ReconAssessment {
+  target_ip: string;
+  os_verdict: string;
+  os_hints?: string[];
+  open_ports?: number[];
+  services?: ReconService[];
+  cve_findings?: ReconCveFinding[];
+  overall_risk_score?: number;
+  [key: string]: unknown;
+}
+
 export interface ModelRegistryInfo {
   default_alias: string;
   registry: Record<string, string>;
@@ -125,14 +165,27 @@ export interface RunCreateRequest {
 export interface RunPreview {
   run_id: string;
   target_ip: string;
+  original_target?: string;
+  resolved_ip?: string | null;
+  resolved_domain?: string | null;
   mode: RunMode;
   goal_name: string;
+  goal_description?: string;
   model_alias: string;
+  model_label?: string;
+  transport_summary?: string;
   permission: string;
+  attack_mode?: boolean;
   destructive: boolean;
   required_confirmation_text: string;
   budgets: Record<string, unknown>;
   swarm: boolean;
+  parallel_swarm?: boolean;
+  multi_model?: boolean;
+  skill_activations?: Array<{ name: string; reason: string }>;
+  skill_errors?: string[];
+  resumed_from?: string;
+  [key: string]: unknown;
 }
 
 export interface CreateRunDecisionSummary {
@@ -202,11 +255,53 @@ export interface RunDetail {
   updated_at?: string;
   request: RunDetailRequest;
   preview: Partial<RunPreview> & Record<string, unknown>;
-  result: Record<string, unknown>;
+  result: RunResult;
   error: string;
   cancelled_at?: string;
   resumed_from?: string;
   decisions: DecisionListRow[];
+}
+
+export interface RunResultTelemetry {
+  total_tokens?: number;
+  total_calls?: number;
+  avg_ctx_pct?: number;
+  max_ctx_pct?: number;
+  [key: string]: unknown;
+}
+
+export interface RunResultActiveSkill {
+  name: string;
+  reason: string;
+}
+
+export interface RunResultSafetyReview {
+  safe?: boolean;
+  reasoning?: string;
+  concerns?: string[];
+  recommended?: string[];
+  [key: string]: unknown;
+}
+
+export interface RunResult {
+  run_id?: string;
+  target_ip?: string;
+  mode?: RunMode;
+  goal_name?: string;
+  goal_description?: string;
+  total_actions?: number;
+  workspace?: string;
+  audit_path?: string;
+  error?: string;
+  outcome_summary?: string;
+  telemetry?: RunResultTelemetry;
+  active_skills?: RunResultActiveSkill[];
+  safety_review?: RunResultSafetyReview;
+  swarm_result?: Record<string, unknown>;
+  reports_dir?: string;
+  summary_path?: string;
+  run_json_path?: string;
+  [key: string]: unknown;
 }
 
 export interface DecisionListRow {
@@ -345,6 +440,7 @@ export type EventType =
   | "boot"
   | "ok"
   | "progress"
+  | "recon_assessment"
   | "goal_suggestions"
   | "assistant"
   | "tool_request"
