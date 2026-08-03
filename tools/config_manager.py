@@ -93,11 +93,12 @@ CONFIG_SCHEMA: dict[str, Any] = {
     "exploit": {
         "enabled": True,
         "mode": "standalone",
-        # LAB BUILD: defaults grant live exploitation. Attack mode auto-
+        # LAB BUILD: defaults grant live exploitation. Full access auto-
         # approves every action; the only remaining gate is the target-IP lock
         # (require_explicit_allowlist unions the runtime --target via
-        # EXPLOIT_TARGET env). Recon mode keeps its own safety. See CLAUDE.md
-        # "Permission Model". Only run against lab systems you own.
+        # EXPLOIT_TARGET env). Set permission to read_only for propose-only
+        # recon. See CLAUDE.md "Permission Model". Only run against lab systems
+        # you own.
         "permission": "full_access",
         "attack_mode": True,
         "terminal": "visible",

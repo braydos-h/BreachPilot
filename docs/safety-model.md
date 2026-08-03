@@ -63,12 +63,12 @@ Use `RiskController.assess_action` before adding new task or exploit execution b
 ## Exploit Permission Modes
 
 This is a **lab-only build**: run only against systems the operator owns or is
-explicitly authorized to test, on a throwaway operator box. The attack path is
-**unrestricted but target-locked**; recon keeps its full safety.
+explicitly authorized to test, on a throwaway operator box. An explicit
+`full_access` setting is **unrestricted but target-locked** in either run mode.
 
 `tools/exploit_agent/policy.py` defines exploit permissions:
 
-- `full_access` (config + schema default): the lab attack posture.
+- `full_access` (config + schema default): the lab posture.
   `ExploitPolicy.approve_action` auto-approves every action with no command-content
   or scope inspection — destructive commands, egress, reverse shells, credential
   dumping, Metasploit, and Python write/run are all allowed. The `is_full_access`
@@ -76,13 +76,12 @@ explicitly authorized to test, on a throwaway operator box. The attack path is
   `_check_command_safety` / `_check_scope_gate` / `_gate_pivot_and_count` gates
   were removed from this branch (they remain referenced by the `read_only` /
   `approve_only` recon paths' comments only).
-- `approve_only`: require operator approval for sensitive actions (interactive /
-  recon paths; unreachable from attack mode).
-- `read_only`: gather information and avoid active exploitation. Recon uses this;
-  `_resolve_exploit_permission` hard-codes `read_only` as the missing-key fallback
-  so a partial config never silently becomes live.
+- `approve_only`: require operator approval for sensitive actions.
+- `read_only`: gather information and avoid active exploitation. Set it for
+  propose-only recon; `_resolve_exploit_permission` uses it as the missing-key
+  fallback so a partial config never silently becomes live.
 
-**The one attack-mode safety kept is the target-IP lock (no pivoting to other
+**The one full-access safety kept is the target-IP lock (no pivoting to other
 hosts).** It is enforced at the MCP tool layer: `tools/mcp_shared._allowed_target_list`
 unions `os.environ["EXPLOIT_TARGET"]` (the runtime `--target`, set in
 `tools/mcp_session.py`) with `exploit.allowed_targets`; `@require_allowlist` on
@@ -130,9 +129,9 @@ multi_model:
   enabled: false
 ```
 
-Recon safety is retained: the post-session `SafetyReviewer`, the READ_ONLY
-propose-only path, the goal-menu SAFE/GATED narrowing, and the defensive
-scope-gated `mcp_server.py` are unchanged.
+Recon safety is retained when `permission: read_only` is configured: the
+post-session `SafetyReviewer`, the READ_ONLY propose-only path, the goal-menu
+SAFE/GATED narrowing, and the defensive scope-gated `mcp_server.py` are unchanged.
 
 ## MCP Safety Boundary
 

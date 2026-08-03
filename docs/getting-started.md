@@ -84,7 +84,7 @@ python cli.py next-task
 
 Important defaults in `config.yaml`:
 
-- `exploit.permission: full_access` (lab build; recon still resolves to `read_only`)
+- `exploit.permission: full_access` (lab build; set `read_only` for propose-only recon)
 - `exploit.attack_mode: true`
 - `exploit.require_explicit_allowlist: true`
 - `exploit.allowed_targets: []` initially (a target entered in Start New Session is saved here; the runtime `--target` is also unioned in via `EXPLOIT_TARGET`)

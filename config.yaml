@@ -55,12 +55,11 @@ nmap:
 exploit:
   enabled: true
   mode: standalone
-  # LAB BUILD: attack mode is unrestricted. Default full_access + attack_mode
-  # auto-approves every action; the only remaining gate is the target-IP lock
+  # LAB BUILD: explicit full_access auto-approves every action in either run
+  # mode; the only remaining gate is the target-IP lock
   # (require_explicit_allowlist unions the runtime --target via EXPLOIT_TARGET
-  # env, see tools/mcp_shared._check_allowlist). Recon mode keeps its own
-  # safety (read_only propose-only, post-session SafetyReviewer) — recon never
-  # enters the full_access auto-approve branch. Operator-box filesystem is
+  # env, see tools/mcp_shared._check_allowlist). Set permission: read_only for
+  # propose-only recon. Operator-box filesystem is
   # unrestricted (no workspace path-traversal protection) — only run this on a
   # throwaway lab VM.
   permission: full_access

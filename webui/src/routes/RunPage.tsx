@@ -71,22 +71,32 @@ export function RunPage() {
   const [toolResult, setToolResult] = useState<string>("");
 
   const mergedDecisions = useMemo(() => {
-    const rows = decisions.data?.decisions ?? [];
-    const seen = new Set(rows.map((r) => r.id));
+    const rows = (decisions.data?.decisions ?? []).map((row) => ({ ...row }));
+    const byId = new Map(rows.map((row) => [row.id, row]));
     for (const ev of events.events) {
       if (ev.type !== "approval") continue;
       const id = ev.payload.decision_id;
-      if (typeof id !== "string" || seen.has(id)) continue;
-      seen.add(id);
-      rows.unshift({
+      if (typeof id !== "string") continue;
+      const existing = byId.get(id);
+      if (ev.payload.status === "answered") {
+        if (existing) {
+          existing.status = "answered";
+          if (typeof ev.payload.answer === "string") existing.answer = ev.payload.answer;
+        }
+        continue;
+      }
+      if (existing) continue;
+      const row = {
         id,
         kind: String(ev.payload.kind ?? "tool_approval"),
-        status: "pending",
+        status: "pending" as const,
         answer: "",
         prompt_text: String(ev.payload.prompt_text ?? ""),
         required_text: String(ev.payload.required_text ?? ""),
         options: Array.isArray(ev.payload.options) ? ev.payload.options : [],
-      });
+      };
+      byId.set(id, row);
+      rows.unshift(row);
     }
     return rows;
   }, [decisions.data, events.events]);
@@ -245,8 +255,8 @@ export function RunPage() {
       )}
 
       <div className="grid flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="min-h-[40vh] flex-1">
-          <EventList events={events.events} decisions={mergedDecisions} runId={run.data.id} className="h-full min-h-[40vh]" />
+        <div className="flex-1">
+          <EventList events={events.events} decisions={mergedDecisions} runId={run.data.id} className="h-[70vh]" />
         </div>
         <div className="space-y-3">
           <Card className={cn(pendingDecisions.length > 0 && "border-primary/40 glow-primary")}>
