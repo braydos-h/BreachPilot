@@ -230,6 +230,116 @@ def test_check_models_unreachable_ollama():
     assert "error" in result
 
 
+# ── Cloud-model self-heal ────────────────────────────────────────────────────
+
+
+def test_is_cloud_spec_detection():
+    """Cloud specs end in a tag whose last segment ends with 'cloud'."""
+    from tools.doctor import _is_cloud_spec
+
+    assert _is_cloud_spec("glm-5.2:cloud") is True
+    assert _is_cloud_spec("gpt-oss:20b-cloud") is True
+    assert _is_cloud_spec("deepseek-v4-pro:cloud") is True
+    assert _is_cloud_spec("nomic-embed-text:latest") is False
+    assert _is_cloud_spec("llama3:8b") is False
+    assert _is_cloud_spec("") is False
+
+
+def test_ping_cloud_model_returns_false_on_error():
+    """An unreachable/unknown cloud model must not be reported as recovered."""
+    from tools.doctor import _ping_cloud_model
+
+    with patch("tools.doctor.urllib.request.urlopen",
+               MagicMock(side_effect=urllib.error.URLError("conn refused"))):
+        assert _ping_cloud_model("http://localhost:11434", "zzz-not-real:cloud") is False
+
+
+def test_run_doctor_self_heals_missing_cloud_model(tmp_path: Path):
+    """A missing cloud model that pings OK is recovered (ok=True), not pulled.
+
+    Cloud models are verified by running them, not by ``ollama pull``. The
+    doctor must self-heal a missing-but-reachable cloud model instead of
+    failing with a pull hint.
+    """
+    from tools import doctor
+
+    config_path = _write_config(tmp_path / "config.yaml", """
+ollama:
+  host: http://localhost:11434
+models:
+  registry:
+    glm: glm-5.2:cloud
+    ghost: ghost-cloud:cloud
+  default_alias: glm
+mcp:
+  http_port: 8001
+exploit:
+  permission: read_only
+research:
+  workspace_dir: research_workspace
+""")
+
+    # /api/tags lists only glm-5.2:cloud -> ghost-cloud:cloud is "missing".
+    payload = {"models": [{"name": "glm-5.2:cloud"}]}
+
+    def _ping(host, spec, timeout=45.0):
+        # The doctor pings the missing cloud model; it answers.
+        assert spec == "ghost-cloud:cloud"
+        return True
+
+    with patch("tools.doctor._check_python", return_value={"name": "python_version", "ok": True}), \
+         patch("tools.doctor._check_imports", return_value={"name": "python_imports", "ok": True}), \
+         patch("tools.doctor._check_nmap", return_value={"name": "nmap_binary", "ok": True}), \
+         patch("tools.doctor._check_workspace", return_value={"name": "workspace_writable", "ok": True}), \
+         patch("tools.doctor._check_ollama", return_value={"name": "ollama_reachable", "ok": True}), \
+         patch("tools.doctor.urllib.request.urlopen", _fake_urlopen(payload)), \
+         patch("tools.doctor._ping_cloud_model", side_effect=_ping), \
+         patch("tools.doctor._check_port", return_value={"name": "port_free", "ok": True}):
+        rc = doctor.run_doctor(config_path)
+
+    assert rc == 0
+
+
+def test_run_doctor_keeps_local_pull_hint_for_missing_local_model(tmp_path: Path):
+    """A missing *local* model must still get the ``ollama pull`` hint
+    (the self-heal ping is cloud-only — never auto-pull a multi-GB local model)."""
+    from tools import doctor
+
+    config_path = _write_config(tmp_path / "config.yaml", """
+ollama:
+  host: http://localhost:11434
+models:
+  registry:
+    glm: glm-5.2:cloud
+    local: ghost-local:latest
+  default_alias: glm
+mcp:
+  http_port: 8001
+exploit:
+  permission: read_only
+research:
+  workspace_dir: research_workspace
+""")
+
+    payload = {"models": [{"name": "glm-5.2:cloud"}]}
+
+    with patch("tools.doctor._check_python", return_value={"name": "python_version", "ok": True}), \
+         patch("tools.doctor._check_imports", return_value={"name": "python_imports", "ok": True}), \
+         patch("tools.doctor._check_nmap", return_value={"name": "nmap_binary", "ok": True}), \
+         patch("tools.doctor._check_workspace", return_value={"name": "workspace_writable", "ok": True}), \
+         patch("tools.doctor._check_ollama", return_value={"name": "ollama_reachable", "ok": True}), \
+         patch("tools.doctor.urllib.request.urlopen", _fake_urlopen(payload)), \
+         patch("tools.doctor._ping_cloud_model", return_value=False), \
+         patch("tools.doctor._check_port", return_value={"name": "port_free", "ok": True}), \
+         patch("builtins.print") as _print:
+        rc = doctor.run_doctor(config_path)
+
+    assert rc == 1  # missing local model is a real failure
+    printed = " ".join(str(call.args[0]) for call in _print.call_args_list if call.args)
+    assert "ollama pull ghost-local:latest" in printed
+    assert "ollama run ghost-local:latest" not in printed
+
+
 # ── Call-site wiring ─────────────────────────────────────────────────────────
 
 

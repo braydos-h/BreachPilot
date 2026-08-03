@@ -189,6 +189,48 @@ def _check_models(host: str, configured: list[str], timeout: float = 3.0) -> dic
     }
 
 
+def _is_cloud_spec(spec: str) -> bool:
+    """True for Ollama Cloud models (e.g. ``glm-5.2:cloud``, ``gpt-oss:20b-cloud``).
+
+    Cloud models aren't local weights — ``ollama pull`` only registers a
+    pointer and on some installs hangs or reports failure, so the doctor must
+    not advise pulling them. They're verified by *running* them (a real
+    generation through the cloud backend), which is what ``_ping_cloud_model``
+    does and what the operator-facing hint tells the user to do.
+    """
+    tag = (spec or "").split(":")[-1].lower()
+    return tag.endswith("cloud")
+
+
+def _ping_cloud_model(host: str, spec: str, timeout: float = 45.0) -> bool:
+    """Run a 1-token generation against a cloud model to register + verify it.
+
+    This is the programmatic equivalent of ``ollama run <spec>`` — the only
+    real test that a cloud model is reachable from the operator's Ollama
+    daemon. Unlike ``ollama run``/``pull``, a raw generate call does not cache
+    the model in ``/api/tags``, so this verifies reachability without leaving
+    a pointer behind. Any error (unknown model, cloud auth missing, timeout)
+    → False.
+    """
+    url = f"{host.rstrip('/')}/api/generate"
+    body = json.dumps({
+        "model": spec,
+        "prompt": "ok",
+        "stream": False,
+        "options": {"num_predict": 1},
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=body, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8") or "{}")
+        # Ollama returns an ``error`` field on unknown/unreachable cloud models.
+        return "error" not in data
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+
+
 def _check_workspace(workspace: Path) -> dict[str, Any]:
     try:
         workspace.mkdir(parents=True, exist_ok=True)
@@ -289,6 +331,30 @@ def run_doctor(config_path: Path) -> int:
         checks.append(_check_optional_tools(config))
 
     failed = 0
+
+    # Self-heal missing *cloud* models: ping each via /api/generate (the
+    # programmatic ``ollama run`` — the only real test that a cloud model is
+    # reachable). A successful ping verifies the cloud backend serves the
+    # model, so the operator doesn't have to manually run every newly-
+    # configured cloud model. The model isn't cached in /api/tags by a
+    # generate call, so a future doctor run re-pings it (a cheap, real
+    # verification — strictly stronger than the old /api/tags pointer check).
+    # Local models are never auto-pulled (a real multi-GB download) — they
+    # keep the pull hint below.
+    for c in checks:
+        if c.get("name") != "model_registry":
+            continue
+        missing = list(c.get("missing") or [])
+        recovered: list[str] = []
+        for spec in missing:
+            if _is_cloud_spec(spec) and _ping_cloud_model(ollama_host, spec):
+                recovered.append(spec)
+        if recovered:
+            still_missing = [s for s in missing if s not in set(recovered)]
+            c["missing"] = still_missing
+            c["ok"] = not still_missing
+            c["registered_cloud"] = recovered
+
     for c in checks:
         status = "OK" if c.get("ok") else "FAIL"
         name = c.get("name", "unknown")
@@ -303,8 +369,20 @@ def run_doctor(config_path: Path) -> int:
             if hint:
                 print(f"        -> {hint}")
         # Drill down on model registry
-        if name == "model_registry" and c.get("missing"):
-            print("        -> pull missing models with: ollama pull <name>")
+        if name == "model_registry":
+            registered = c.get("registered_cloud") or []
+            if registered:
+                print(f"        -> verified cloud models by running a test generation: {', '.join(registered)}")
+            missing = c.get("missing") or []
+            if missing:
+                cloud_missing = [s for s in missing if _is_cloud_spec(s)]
+                local_missing = [s for s in missing if not _is_cloud_spec(s)]
+                for spec in cloud_missing:
+                    print(f"        -> cloud model not reachable: run it to register & verify: ollama run {spec}"
+                          f" (cloud models aren't local weights — `ollama pull` only registers a pointer"
+                          f" and isn't a real test; `ollama run` hits the cloud backend)")
+                for spec in local_missing:
+                    print(f"        -> pull missing local model: ollama pull {spec}")
         if name == "ollama_reachable" and not c.get("ok"):
             print("        -> start Ollama or update ollama.host in config.yaml")
         # Informational drill-downs (these checks never fail)
