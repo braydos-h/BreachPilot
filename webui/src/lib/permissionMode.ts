@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { DecisionListRow } from "@/api/types";
 
-export type PermissionMode = "read_only" | "approve";
+export type PermissionMode = "read_only" | "approve" | "full_access";
 
 const STORAGE_KEY = "netattackai.permissionMode.v1";
 const DEFAULT_MODE: PermissionMode = "read_only";
@@ -9,7 +9,7 @@ const DEFAULT_MODE: PermissionMode = "read_only";
 function readStored(): PermissionMode {
   try {
     const v = sessionStorage.getItem(STORAGE_KEY);
-    if (v === "approve") return "approve";
+    if (v === "approve" || v === "full_access") return v;
   } catch {
     // ignore
   }
@@ -43,6 +43,10 @@ export function usePermissionMode() {
  * - approve: non-destructive start_confirm / tool_approval only (sends "yes").
  *   Destructive decisions (those carrying required_text) are always left to
  *   the operator regardless of mode.
+ * - full_access: auto-answers every start_confirm / tool_approval. Non-
+ *   destructive decisions send "yes"; destructive decisions send the exact
+ *   `required_text` string the server validates against
+ *   (run_manager.confirm_and_start). goal_select is still left to the operator.
  *
  * goal_select is never auto-answered — the operator must pick a
  * goal from the AI-ranked suggestions themselves.
@@ -56,8 +60,15 @@ export function autoAnswerFor(decision: DecisionListRow, mode: PermissionMode): 
   const kind = decision.kind;
 
   if (kind === "goal_select") return null;
-  if (destructive) return null;
 
-  // start_confirm / tool_approval, non-destructive
-  return "yes";
+  if (mode === "approve") {
+    if (destructive) return null;
+    // start_confirm / tool_approval, non-destructive
+    return "yes";
+  }
+
+  // full_access: auto-answer everything the operator could answer.
+  // Destructive confirmations require the exact required_text string; the
+  // server's confirm_and_start gate rejects anything else.
+  return destructive ? requiredText : "yes";
 }

@@ -21,16 +21,19 @@ const NAV_ITEMS = [
 const PERMISSION_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "read_only", label: "Read" },
   { value: "approve", label: "Approve" },
+  { value: "full_access", label: "Full" },
 ];
 
 const MODE_TITLES: Record<PermissionMode, string> = {
   read_only: "Read-only",
   approve: "Approve",
+  full_access: "Full access",
 };
 
 const MODE_BLURB: Record<PermissionMode, string> = {
   read_only: "Every decision waits for the operator. Nothing is auto-answered. Safest — you drive.",
   approve: "Non-destructive decisions (start, safe tool calls) are auto-answered with \u201cyes\u201d. Goal selection and destructive confirmations still wait for you.",
+  full_access: "Every start_confirm and tool_approval is auto-answered, including destructive confirmations (the exact required_text is submitted). Goal selection still waits for you. The target-IP allowlist lock still applies.",
 };
 
 const DEMO_DECISIONS: Array<{ kind: string; status: "pending"; required_text?: string; options?: Array<{ name: string; compatible: boolean }> }> = [
@@ -130,7 +133,9 @@ export function Layout() {
             <p className="text-[10px] leading-tight text-muted-foreground">
               {mode === "read_only"
                 ? "Decisions wait for you."
-                : "Auto-approves non-destructive decisions."}
+                : mode === "approve"
+                  ? "Auto-approves non-destructive decisions."
+                  : "Auto-answers ALL decisions incl. destructive."}
             </p>
           </div>
           <div className="flex items-center gap-2 rounded-md px-3 py-1.5 text-xs text-muted-foreground">
@@ -194,16 +199,19 @@ export function Layout() {
               "flex h-9 items-center justify-center rounded-md px-2 text-[10px] font-medium uppercase tracking-wide transition-colors",
               mode === "read_only"
                 ? "bg-muted/40 text-muted-foreground"
-                : "bg-yellow-500/15 text-yellow-300",
+                : mode === "approve"
+                  ? "bg-yellow-500/15 text-yellow-300"
+                  : "bg-destructive/15 text-red-200",
             )}
             onClick={() => {
-              const next: PermissionMode = mode === "read_only" ? "approve" : "read_only";
+              const next: PermissionMode =
+                mode === "read_only" ? "approve" : mode === "approve" ? "full_access" : "read_only";
               setMode(next);
             }}
             aria-label={`Permission mode: ${mode}`}
-            title={`Permission mode: ${mode} (tap to toggle)`}
+            title={`Permission mode: ${mode} (tap to cycle)`}
           >
-            {mode === "read_only" ? "R" : "A"}
+            {mode === "read_only" ? "R" : mode === "approve" ? "A" : "F"}
           </button>
           <button
             type="button"
@@ -217,13 +225,30 @@ export function Layout() {
       </header>
 
       <main className="flex min-w-0 flex-1 flex-col">
-        {mode !== "read_only" && (
+        {mode === "approve" && (
           <div
             className="flex items-center gap-2 border-b border-yellow-500/30 bg-yellow-500/10 px-4 py-1.5 text-xs text-yellow-300"
             role="status"
           >
             <ShieldAlert className="h-3.5 w-3.5" />
             <span>Approve mode: non-destructive decisions auto-answered.</span>
+            <button
+              type="button"
+              onClick={() => setMode("read_only")}
+              aria-label="Dismiss banner"
+              className="ml-auto inline-flex h-4 w-4 items-center justify-center rounded transition-colors hover:bg-foreground/10"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+        {mode === "full_access" && (
+          <div
+            className="flex items-center gap-2 border-b border-destructive/40 bg-destructive/10 px-4 py-1.5 text-xs text-red-200"
+            role="status"
+          >
+            <ShieldAlert className="h-3.5 w-3.5" />
+            <span>Full access mode: ALL decisions auto-answered, including destructive confirmations.</span>
             <button
               type="button"
               onClick={() => setMode("read_only")}
@@ -272,7 +297,7 @@ export function Layout() {
               Permission mode
             </DialogTitle>
             <DialogDescription className="text-sm">
-              Controls how the agent answers operator decisions when you're not watching. Two levels, one lock.
+              Controls how the agent answers operator decisions when you're not watching. Three levels, one lock.
             </DialogDescription>
           </DialogHeader>
 
@@ -310,6 +335,7 @@ export function Layout() {
                       <th className="px-3 py-2.5 font-medium">Decision</th>
                       <th className="px-3 py-2.5 font-medium">Read-only</th>
                       <th className="px-3 py-2.5 font-medium">Approve</th>
+                      <th className="px-3 py-2.5 font-medium">Full access</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -318,6 +344,7 @@ export function Layout() {
                         <td className="px-3 py-2.5 font-mono text-foreground">{d.kind}</td>
                         <td className="px-3 py-2.5 text-muted-foreground">{demoAnswer(d, "read_only")}</td>
                         <td className="px-3 py-2.5 text-yellow-300">{demoAnswer(d, "approve")}</td>
+                        <td className="px-3 py-2.5 text-red-300">{demoAnswer(d, "full_access")}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -326,6 +353,8 @@ export function Layout() {
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
                 <span className="text-yellow-300">Approve</span> leaves the destructive
                 <span className="font-mono"> tool_approval</span> to you.
+                <span className="text-red-300"> Full access</span> auto-submits the exact
+                <span className="font-mono"> required_text</span> for destructive confirmations.
               </p>
             </div>
 

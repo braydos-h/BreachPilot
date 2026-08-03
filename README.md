@@ -59,6 +59,16 @@ Metasploit (`msfconsole`), `searchsploit`, `tmux`, `hashcat`/`john`, Impacket, N
 
 ### Install
 
+**One-shot bootstrap** (creates the venv, installs requirements, pulls the
+default model, runs `--doctor`, and installs a `natai` launcher on PATH):
+
+```bash
+./install.sh         # Linux / macOS
+install.bat          # Windows (cmd)
+```
+
+Or step-by-step manually:
+
 **Linux / macOS:**
 
 ```bash
