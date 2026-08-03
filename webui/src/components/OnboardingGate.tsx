@@ -33,7 +33,8 @@ export function OnboardingGate({ children }: OnboardingGateProps) {
   const missing = useMemo(() => entries.filter(([, status]) => status === "missing"), [entries]);
 
   // ponytail: gate only triggers when secrets endpoint resolves with >=1 missing key
-  // AND the user hasn't dismissed/completed onboarding this session.
+  // AND the user hasn't dismissed/completed onboarding this session. Configured keys
+  // can still be replaced from System → Secrets, but onboarding is for first-run gaps.
   const showGate = !done && !secrets.isLoading && !secrets.error && missing.length > 0;
 
   useEffect(() => {
@@ -54,15 +55,17 @@ export function OnboardingGate({ children }: OnboardingGateProps) {
     return <>{children}</>;
   }
 
-  return <OnboardingCard missing={missing} onDone={() => setDone(true)} />;
+  return <OnboardingCard entries={entries} onDone={() => setDone(true)} />;
 }
 
+type SecretStatus = "missing" | "configured";
+
 interface OnboardingCardProps {
-  missing: Array<[string, "missing" | "configured"]>;
+  entries: Array<[string, SecretStatus]>;
   onDone: () => void;
 }
 
-function OnboardingCard({ missing, onDone }: OnboardingCardProps) {
+function OnboardingCard({ entries, onDone }: OnboardingCardProps) {
   const put = usePutSecrets();
   const { toast } = useToast();
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -111,6 +114,12 @@ function OnboardingCard({ missing, onDone }: OnboardingCardProps) {
     }
   };
 
+  // Show missing first, then configured (replaceable). Both are editable.
+  const sorted = [...entries].sort((a, b) => {
+    const order = (s: SecretStatus) => (s === "missing" ? 0 : 1);
+    return order(a[1]) - order(b[1]);
+  });
+
   return (
     <div className="flex min-h-dvh items-center justify-center bg-background px-4 py-10">
       <Card className="w-full max-w-lg">
@@ -121,8 +130,8 @@ function OnboardingCard({ missing, onDone }: OnboardingCardProps) {
           </div>
           <CardTitle className="text-xl">Configure provider API keys</CardTitle>
           <CardDescription>
-            Some research and CVE integrations need provider API keys to run.
-            Enter them now or skip — you can add them later under{" "}
+            Some integrations need provider API keys to run. Missing keys are required;
+            configured ones can be replaced. You can also edit these later under{" "}
             <code className="rounded bg-muted px-1 py-0.5 text-xs">System → Secrets</code>.
             Values are stored locally in <code className="rounded bg-muted px-1 py-0.5 text-xs">secr.json</code> and
             never sent anywhere except <code className="rounded bg-muted px-1 py-0.5 text-xs">127.0.0.1</code>.
@@ -131,18 +140,28 @@ function OnboardingCard({ missing, onDone }: OnboardingCardProps) {
         <CardContent>
           <form className="space-y-4" onSubmit={onSubmit}>
             <ul className="space-y-3">
-              {missing.map(([name]) => (
+              {sorted.map(([name, status]) => (
                 <li key={name} className="space-y-1.5">
                   <div className="flex items-center gap-2">
                     <Label htmlFor={name} className="font-mono text-xs">{name}</Label>
-                    <Badge variant="outline" className="text-muted-foreground">missing</Badge>
+                    {status === "configured" ? (
+                      <Badge variant="outline" className="border-emerald-500/40 text-emerald-300">
+                        <ShieldCheck className="mr-1 h-3 w-3" />configured
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-muted-foreground">missing</Badge>
+                    )}
                   </div>
                   <Input
                     id={name}
                     type="password"
                     autoComplete="off"
                     spellCheck={false}
-                    placeholder={`Paste ${name} value (or leave blank)`}
+                    placeholder={
+                      status === "configured"
+                        ? `Enter a new value to replace the saved ${name}`
+                        : `Paste ${name} value (or leave blank)`
+                    }
                     value={draft[name] ?? ""}
                     onChange={(e) => setDraft((p) => ({ ...p, [name]: e.target.value }))}
                   />
