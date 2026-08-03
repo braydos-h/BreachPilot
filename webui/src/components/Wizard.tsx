@@ -282,7 +282,7 @@ export function Wizard({ onCreated }: WizardProps) {
   );
 }
 
-function InfoTip({ label, children }: { label: string; children: React.ReactNode }) {
+function InfoTip({ label, title, children }: { label: string; title: string; children: React.ReactNode }) {
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -290,7 +290,15 @@ function InfoTip({ label, children }: { label: string; children: React.ReactNode
           <Info className="h-3.5 w-3.5" />
         </button>
       </PopoverTrigger>
-      <PopoverContent side="top" className="max-w-[16rem] leading-snug text-xs">{children}</PopoverContent>
+      <PopoverContent side="top" align="start" className="w-80 max-w-[20rem] p-0 text-xs leading-relaxed">
+        <div className="space-y-2 p-3">
+          <div className="flex items-center gap-1.5 border-b pb-2">
+            <Info className="h-3.5 w-3.5 text-primary" />
+            <h4 className="text-sm font-semibold text-foreground">{title}</h4>
+          </div>
+          <div className="space-y-2 text-muted-foreground">{children}</div>
+        </div>
+      </PopoverContent>
     </Popover>
   );
 }
@@ -434,7 +442,19 @@ function SettingsPanel(props: SettingsPanelProps) {
       {/* Core behavior section — two-column grid */}
       <div className="mt-5 grid gap-x-5 gap-y-3 sm:grid-cols-2">
         {/* Recon first */}
-        <FieldLabel hint="Run recon before the goal phase. Auto defers when no goal is selected.">
+        <FieldLabel
+          title="Recon first"
+          body={
+            <>
+              <p>Controls whether a reconnaissance phase runs before the goal phase.</p>
+              <div className="space-y-1">
+                <div><span className="font-medium text-foreground">On</span> — Always run recon first, then hand findings to the goal phase.</div>
+                <div><span className="font-medium text-foreground">Off</span> — Skip the recon phase, go straight to the goal.</div>
+                <div><span className="font-medium text-foreground">Auto</span> — Run recon first only when no goal is selected (the default for this wizard).</div>
+              </div>
+            </>
+          }
+        >
           Recon first
         </FieldLabel>
         <TriStateToggle
@@ -444,7 +464,19 @@ function SettingsPanel(props: SettingsPanelProps) {
         />
 
         {/* Observer mode */}
-        <FieldLabel hint="Heuristic classifies tool results without an LLM call. LLM uses the model. Hybrid blends both.">
+        <FieldLabel
+          title="Observer mode"
+          body={
+            <>
+              <p>How the agent classifies and interprets tool results after each step.</p>
+              <div className="space-y-1">
+                <div><span className="font-medium text-foreground">Heuristic</span> — Fast, no LLM call. Rule-based classifier reads tool output. Cheapest, good for simple scans.</div>
+                <div><span className="font-medium text-foreground">LLM</span> — The model interprets every tool result. Most accurate, costs a chat call per step.</div>
+                <div><span className="font-medium text-foreground">Hybrid</span> — Heuristic first, LLM only when the heuristic is uncertain. Balanced default.</div>
+              </div>
+            </>
+          }
+        >
           Observer mode
         </FieldLabel>
         <SegmentedControl
@@ -454,7 +486,21 @@ function SettingsPanel(props: SettingsPanelProps) {
         />
 
         {/* Skills */}
-        <FieldLabel hint="Off disables skill lookups. On injects them. Hints shows suggestions. Lookup searches on demand.">
+        <FieldLabel
+          title="Skills"
+          body={
+            <>
+              <p>Controls how the agent looks up and uses installed skills (playbooks, cheat sheets, tool guides).</p>
+              <div className="space-y-1">
+                <div><span className="font-medium text-foreground">Off</span> — No skill lookups. Pure agent reasoning.</div>
+                <div><span className="font-medium text-foreground">On</span> — Inject matching skills into the system prompt automatically.</div>
+                <div><span className="font-medium text-foreground">Hints</span> — Show skill suggestions to the agent without forcing injection.</div>
+                <div><span className="font-medium text-foreground">Lookup</span> — Agent searches skills on demand when it decides it needs them.</div>
+              </div>
+              <p>Use Include/Exclude to filter which skills are eligible once a non-off mode is picked.</p>
+            </>
+          }
+        >
           Skills
         </FieldLabel>
         <div>
@@ -472,7 +518,18 @@ function SettingsPanel(props: SettingsPanelProps) {
         </div>
 
         {/* Run kind */}
-        <FieldLabel hint="Agent runs the full agent loop. Manual is advertised by the API but currently executes the normal agent path.">
+        <FieldLabel
+          title="Run kind"
+          body={
+            <>
+              <p>Selects the execution path for the run.</p>
+              <div className="space-y-1">
+                <div><span className="font-medium text-foreground">Agent</span> — Full autonomous agent loop: the model plans, calls tools, observes, and iterates until the goal is met or the budget is exhausted.</div>
+                <div><span className="font-medium text-foreground">Manual</span> — Advertised by the API, but currently executes the normal agent path. Treat as Agent for now.</div>
+              </div>
+            </>
+          }
+        >
           Run kind
         </FieldLabel>
         <SegmentedControl
@@ -499,11 +556,11 @@ function SettingsPanel(props: SettingsPanelProps) {
   );
 }
 
-function FieldLabel({ children, hint }: { children: React.ReactNode; hint: string }) {
+function FieldLabel({ children, title, body }: { children: React.ReactNode; title: string; body: React.ReactNode }) {
   return (
     <div className="flex items-center gap-1.5">
       <Label className="text-xs text-muted-foreground">{children}</Label>
-      <InfoTip label={String(children)}>{hint}</InfoTip>
+      <InfoTip label={String(children)} title={title}>{body}</InfoTip>
     </div>
   );
 }

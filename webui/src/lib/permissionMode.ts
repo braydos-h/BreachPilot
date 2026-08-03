@@ -6,19 +6,9 @@ export type PermissionMode = "read_only" | "approve" | "full_access";
 const STORAGE_KEY = "netattackai.permissionMode.v1";
 const DEFAULT_MODE: PermissionMode = "full_access";
 
-const MODE_VALUES: PermissionMode[] = ["read_only", "approve", "full_access"];
-
-function isMode(v: unknown): v is PermissionMode {
-  return typeof v === "string" && (MODE_VALUES as string[]).includes(v);
-}
-
 function readStored(): PermissionMode {
-  try {
-    const v = sessionStorage.getItem(STORAGE_KEY);
-    if (isMode(v)) return v;
-  } catch {
-    // ignore
-  }
+  // ponytail: always Full on load. The sidebar toggle still writes to storage,
+  // but we ignore it on next mount so the menu always lands on Full.
   return DEFAULT_MODE;
 }
 

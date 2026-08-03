@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
   Activity,
@@ -6,11 +6,14 @@ import {
   History,
   ListFilter,
   ScanSearch,
+  ShieldAlert,
   Target,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { SegmentedControl } from "@/components/RunForm";
 import { StatusBadge } from "@/components/StatusBadge";
 import { SkeletonRows } from "@/components/Loading";
 import { useRuns } from "@/api/hooks";
@@ -19,7 +22,100 @@ import {
   isTerminalState,
   type RunListRow,
 } from "@/api/types";
+import { usePermissionMode, type PermissionMode } from "@/lib/permissionMode";
+import { cn } from "@/lib/utils";
 import { formatRelative, truncateId } from "@/lib/utils";
+
+const PERMISSION_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "read_only", label: "Read" },
+  { value: "approve", label: "Approve" },
+  { value: "full_access", label: "Full" },
+];
+
+const FULL_EXAMPLES: Array<{ kind: string; action: string }> = [
+  { kind: "goal_select", action: "Auto-picks the first compatible goal from AI-ranked suggestions." },
+  { kind: "start_confirm", action: "Auto-answers \u201cyes\u201d to start the run without waiting." },
+  { kind: "tool_approval", action: "Auto-sends the exact required confirmation text (e.g. \u201cI UNDERSTAND THE RISK\u201d) for destructive tool calls." },
+];
+
+const NOTICE_KEY = "netattackai.fullNotice.shown.v1";
+
+function FullAccessNotice() {
+  const { mode, setMode } = usePermissionMode();
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      if (mode !== "full_access") return;
+      if (sessionStorage.getItem(NOTICE_KEY) === "1") return;
+      sessionStorage.setItem(NOTICE_KEY, "1");
+      setOpen(true);
+    } catch {
+      // ignore
+    }
+  }, [mode]);
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-lg">
+            <ShieldAlert className="h-5 w-5 text-red-400" />
+            Permission mode: Full access
+          </DialogTitle>
+          <DialogDescription className="text-sm">
+            The console defaults to <span className="text-red-300 font-medium">Full access</span>. The agent will auto-answer every operator decision, including destructive ones, without waiting for you. Use only on assets you own or are authorized to test.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div>
+            <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Change mode
+            </div>
+            <SegmentedControl
+              value={mode}
+              onChange={(v) => setMode(v as PermissionMode)}
+              options={PERMISSION_OPTIONS}
+            />
+            <p className="mt-1.5 text-[11px] leading-tight text-muted-foreground">
+              {mode === "read_only"
+                ? "Every decision waits for you. Nothing is auto-answered."
+                : mode === "approve"
+                  ? "Non-destructive decisions auto-answered; destructive ones still wait."
+                  : "Everything auto-answered, including destructive actions."}
+            </p>
+          </div>
+
+          <div>
+            <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              What Full access does
+            </div>
+            <ul className="space-y-1.5">
+              {FULL_EXAMPLES.map((ex) => (
+                <li key={ex.kind} className="flex flex-col gap-0.5 rounded-md border border-red-500/20 bg-red-500/5 px-3 py-2">
+                  <span className="font-mono text-xs text-red-300">{ex.kind}</span>
+                  <span className="text-xs leading-relaxed text-muted-foreground">{ex.action}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className={cn("rounded-md border px-3 py-2 text-[11px] leading-relaxed text-muted-foreground",
+            mode === "full_access" ? "border-red-500/30 bg-red-500/5" : "border-border bg-card/40")}>
+            The target-IP allowlist lock still applies in every mode \u2014 nothing here escapes the allowlist configured for a run.
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" size="sm" onClick={() => setOpen(false)}>
+            {mode === "full_access" ? "Got it, keep Full" : "Done"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export function HomePage() {
   const runs = useRuns(50, 0);
@@ -34,6 +130,7 @@ export function HomePage() {
 
   return (
     <div className="relative mx-auto max-w-5xl space-y-8 p-4 md:p-8">
+      <FullAccessNotice />
       {/* Hero */}
       <section className="relative overflow-hidden rounded-xl border bg-card/30">
         <div className="absolute inset-0 bg-grid bg-radial-fade" aria-hidden />
@@ -123,14 +220,14 @@ export function HomePage() {
       <section className="grid gap-3 sm:grid-cols-2">
         <ActionCard
           to="/runs/new?path=recon"
-          icon={<ScanSearch className="h-7 w-7" />}
+          icon={<ScanSearch className="h-6 w-6" />}
           title="Recon & Suggest Goals"
           desc="Scan the target first, see what's open, then pick a goal from AI-ranked suggestions."
           accent="cyan"
         />
         <ActionCard
           to="/runs/new?path=recon"
-          icon={<ScanSearch className="h-7 w-7" />}
+          icon={<ScanSearch className="h-6 w-6" />}
           title="Recon"
           desc="Run a fresh recon scan against a target."
           accent="violet"
@@ -139,7 +236,7 @@ export function HomePage() {
 
       {/* Recent sessions */}
       <section className="rounded-xl border bg-card/30">
-        <header className="flex items-center justify-between gap-2 border-b px-4 py-3">
+        <header className="flex items-center justify-between gap-2 border-b px-4 py-2.5">
           <div className="flex items-center gap-2">
             <History className="h-4 w-4 text-muted-foreground" />
             <div>
@@ -158,8 +255,8 @@ export function HomePage() {
         </header>
 
         {recent.length === 0 && !runs.isLoading && (
-          <div className="flex flex-col items-center gap-2 p-10 text-center text-sm text-muted-foreground">
-            <Target className="h-8 w-8 opacity-40" />
+          <div className="flex flex-col items-center gap-2 p-6 text-center text-sm text-muted-foreground">
+            <Target className="h-7 w-7 opacity-40" />
             <span>No past sessions yet. Start one above.</span>
           </div>
         )}
@@ -241,16 +338,16 @@ function ActionCard({
   return (
     <Link
       to={to}
-      className={`group relative flex flex-col items-start gap-3 rounded-lg border bg-card/40 p-6 text-left transition-all hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${a.ring}`}
+      className={`group relative flex flex-col items-start gap-2 rounded-lg border bg-card/40 p-4 text-left transition-all hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${a.ring}`}
     >
-      <div className={`rounded-md border bg-secondary/40 p-2.5 ${a.icon}`}>
+      <div className={`rounded-md border bg-secondary/40 p-2 ${a.icon}`}>
         {icon}
       </div>
-      <div className="space-y-1">
-        <div className="text-base font-medium">{title}</div>
+      <div className="space-y-0.5">
+        <div className="text-sm font-medium">{title}</div>
         <p className="text-xs text-muted-foreground">{desc}</p>
       </div>
-      <span className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground transition-transform group-hover:translate-x-0.5">
+      <span className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground transition-transform group-hover:translate-x-0.5">
         Start <ArrowRight className="h-3 w-3" />
       </span>
     </Link>
@@ -264,7 +361,7 @@ function RecentRow({ row }: { row: RunListRow }) {
     <li>
       <Link
         to={`/runs/${row.id}`}
-        className="flex items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-accent/40"
+        className="flex items-center gap-3 px-4 py-2 text-sm transition-colors hover:bg-accent/40"
       >
         <span className="font-mono text-xs text-muted-foreground" title={row.id}>
           {truncateId(row.id)}
