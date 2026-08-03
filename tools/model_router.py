@@ -177,12 +177,19 @@ class ModelRouter:
         self._clients[alias] = client
 
     def get_client(self, alias: str) -> ModelClient:
-        if alias not in self._clients:
-            raise KeyError(
-                f"Model alias '{alias}' not registered. "
-                f"Available: {list(self._clients)!r}"
-            )
-        return self._clients[alias]
+        # Tolerate callers that pass a concrete model id (e.g. "glm-5.2:cloud")
+        # instead of its alias. Reverse-lookup by model_id, then by name, so a
+        # stray --model glm-5.2:cloud resolves to the registered "glm" client
+        # instead of hard-failing the whole boot.
+        if alias in self._clients:
+            return self._clients[alias]
+        for client in self._clients.values():
+            if client.model_id == alias or client.name == alias:
+                return client
+        raise KeyError(
+            f"Model alias '{alias}' not registered. "
+            f"Available: {list(self._clients)!r}"
+        )
 
     def clients(self) -> list[ModelClient]:
         return list(self._clients.values())
@@ -274,6 +281,11 @@ def _stream_with_telemetry(
 # Track which hosts have already been flagged as unreachable so a transient
 # hiccup during boot doesn't print one warning per registered alias.
 _OLLAMA_UNREACHABLE_WARNED: set[str] = set()
+# ponytail: same dedupe for the cloud-fallback INFO line — build_router
+# constructs one client per registry alias (5 by default), each probing the
+# same local host; without this the operator sees the fallback announced
+# once per alias instead of once per boot.
+_OLLAMA_CLOUD_FALLBACK_ANNOUNCED: set[str] = set()
 
 # ponytail: Ollama Cloud fallback host. The Ollama Python client reads
 # OLLAMA_API_KEY from the env on init and adds ``Authorization: Bearer <key>``
@@ -352,7 +364,9 @@ def _build_model_client(
             if _check_ollama_reachable(cloud_client, OLLAMA_CLOUD_HOST):
                 raw_client = cloud_client
                 effective_host = OLLAMA_CLOUD_HOST
-                print(f"[INFO] Local Ollama unreachable — falling back to Ollama Cloud at {OLLAMA_CLOUD_HOST}.")
+                if host not in _OLLAMA_CLOUD_FALLBACK_ANNOUNCED:
+                    _OLLAMA_CLOUD_FALLBACK_ANNOUNCED.add(host)
+                    print(f"[INFO] Local Ollama unreachable — falling back to Ollama Cloud at {OLLAMA_CLOUD_HOST}.")
             else:
                 _warn_ollama_unreachable(host)
         else:
