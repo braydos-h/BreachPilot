@@ -6,7 +6,7 @@ ollama:
   # the client to OLLAMA_CLOUD_HOST (https://api.ollama.com) iff this key is
   # present in env. Without it the cloud fallback never fires on the main
   # model path (only on the research subsystem, via research.ollama).
-  api_key_env: 7c90ceaf4f554298935a477d2256d10a.S2xs-NisI3yYlt-7_xkg1gfw
+  # Set OLLAMA_API_KEY in your environment (e.g. .env, gitignored).
   api_key_env: OLLAMA_API_KEY
 models:
   registry:
