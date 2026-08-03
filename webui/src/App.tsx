@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "@/components/Layout";
+import { OnboardingGate } from "@/components/OnboardingGate";
 import { TokenGate } from "@/components/TokenGate";
 import { HomePage } from "@/routes/HomePage";
 import { RunListPage } from "@/routes/RunListPage";
@@ -31,18 +32,20 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <TokenGate>
-          <Routes>
-            <Route element={<Layout />}>
-              <Route path="/" element={<HomePage />} />
-              <Route path="/sessions" element={<RunListPage />} />
-              <Route path="/runs/new" element={<NewRunPage />} />
-              <Route path="/runs/:runId" element={<RunPage />} />
-              <Route path="/runs/:runId/artifacts" element={<ArtifactsPage />} />
-              <Route path="/runs/:runId/loot" element={<LootPage />} />
-              <Route path="/system" element={<SystemPage />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Route>
-          </Routes>
+          <OnboardingGate>
+            <Routes>
+              <Route element={<Layout />}>
+                <Route path="/" element={<HomePage />} />
+                <Route path="/sessions" element={<RunListPage />} />
+                <Route path="/runs/new" element={<NewRunPage />} />
+                <Route path="/runs/:runId" element={<RunPage />} />
+                <Route path="/runs/:runId/artifacts" element={<ArtifactsPage />} />
+                <Route path="/runs/:runId/loot" element={<LootPage />} />
+                <Route path="/system" element={<SystemPage />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Route>
+            </Routes>
+          </OnboardingGate>
         </TokenGate>
       </BrowserRouter>
       <Toaster />

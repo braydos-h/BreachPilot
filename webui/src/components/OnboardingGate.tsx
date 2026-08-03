@@ -1,0 +1,171 @@
+import { useEffect, useMemo, useState } from "react";
+import { KeyRound, Loader2, ShieldCheck } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useSecrets, usePutSecrets } from "@/api/hooks";
+import { ApiError } from "@/api/client";
+import { useToast } from "@/hooks/use-toast";
+
+const ONBOARDING_KEY = "netattackai.onboarding.v1";
+
+interface OnboardingGateProps {
+  children: React.ReactNode;
+}
+
+export function OnboardingGate({ children }: OnboardingGateProps) {
+  const secrets = useSecrets();
+  const [done, setDone] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem(ONBOARDING_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  const entries = useMemo(() => {
+    const keys = secrets.data?.keys ?? {};
+    return Object.entries(keys);
+  }, [secrets.data?.keys]);
+
+  const missing = useMemo(() => entries.filter(([, status]) => status === "missing"), [entries]);
+
+  // ponytail: gate only triggers when secrets endpoint resolves with >=1 missing key
+  // AND the user hasn't dismissed/completed onboarding this session.
+  const showGate = !done && !secrets.isLoading && !secrets.error && missing.length > 0;
+
+  useEffect(() => {
+    if (!showGate) return;
+    try {
+      sessionStorage.removeItem(ONBOARDING_KEY);
+    } catch {
+      // ignore
+    }
+  }, [showGate]);
+
+  if (secrets.isLoading || secrets.isError || !secrets.data) {
+    // Don't block on secrets failure; let the app render.
+    return <>{children}</>;
+  }
+
+  if (!showGate) {
+    return <>{children}</>;
+  }
+
+  return <OnboardingCard missing={missing} onDone={() => setDone(true)} />;
+}
+
+interface OnboardingCardProps {
+  missing: Array<[string, "missing" | "configured"]>;
+  onDone: () => void;
+}
+
+function OnboardingCard({ missing, onDone }: OnboardingCardProps) {
+  const put = usePutSecrets();
+  const { toast } = useToast();
+  const [draft, setDraft] = useState<Record<string, string>>({});
+
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const payload = Object.fromEntries(
+      Object.entries(draft).filter(([, v]) => v.trim()),
+    );
+    if (Object.keys(payload).length === 0) {
+      onDone();
+      try {
+        sessionStorage.setItem(ONBOARDING_KEY, "1");
+      } catch {
+        // ignore
+      }
+      return;
+    }
+    put.mutate(payload, {
+      onSuccess: () => {
+        toast({ title: "API keys saved", description: "Values stored in secr.json (write-only)." });
+        setDraft({});
+        onDone();
+        try {
+          sessionStorage.setItem(ONBOARDING_KEY, "1");
+        } catch {
+          // ignore
+        }
+      },
+      onError: (err) => {
+        toast({
+          title: "Save failed",
+          description: err instanceof ApiError ? err.message : "Could not save keys.",
+          variant: "destructive",
+        });
+      },
+    });
+  };
+
+  const onSkip = () => {
+    onDone();
+    try {
+      sessionStorage.setItem(ONBOARDING_KEY, "1");
+    } catch {
+      // ignore
+    }
+  };
+
+  return (
+    <div className="flex min-h-dvh items-center justify-center bg-background px-4 py-10">
+      <Card className="w-full max-w-lg">
+        <CardHeader className="space-y-2">
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <KeyRound className="h-4 w-4" />
+            <span className="text-xs uppercase tracking-wide">First-run setup</span>
+          </div>
+          <CardTitle className="text-xl">Configure provider API keys</CardTitle>
+          <CardDescription>
+            Some research and CVE integrations need provider API keys to run.
+            Enter them now or skip — you can add them later under{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">System → Secrets</code>.
+            Values are stored locally in <code className="rounded bg-muted px-1 py-0.5 text-xs">secr.json</code> and
+            never sent anywhere except <code className="rounded bg-muted px-1 py-0.5 text-xs">127.0.0.1</code>.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form className="space-y-4" onSubmit={onSubmit}>
+            <ul className="space-y-3">
+              {missing.map(([name]) => (
+                <li key={name} className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor={name} className="font-mono text-xs">{name}</Label>
+                    <Badge variant="outline" className="text-muted-foreground">missing</Badge>
+                  </div>
+                  <Input
+                    id={name}
+                    type="password"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder={`Paste ${name} value (or leave blank)`}
+                    value={draft[name] ?? ""}
+                    onChange={(e) => setDraft((p) => ({ ...p, [name]: e.target.value }))}
+                  />
+                </li>
+              ))}
+            </ul>
+            {put.error && (
+              <p className="text-xs text-destructive">
+                {put.error instanceof ApiError ? put.error.message : "Save failed."}
+              </p>
+            )}
+            <div className="flex items-center gap-2">
+              <Button type="submit" className="flex-1" disabled={put.isPending}>
+                {put.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                {put.isPending ? "Saving" : "Save & continue"}
+              </Button>
+              <Button type="button" variant="outline" onClick={onSkip} disabled={put.isPending}>
+                Skip for now
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
