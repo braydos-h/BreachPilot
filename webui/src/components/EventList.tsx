@@ -280,6 +280,16 @@ function renderSimpleEvent(event: RunEvent, key: string): React.ReactNode {
           </div>
         </div>
       );
+    case "phase":
+      return (
+        <div key={key} className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-sm">
+          <Badge variant="info" className="text-xs uppercase">phase</Badge>
+          <span className="font-mono text-xs text-foreground">
+            {String(event.payload.previous ?? "")} → {String(event.payload.phase ?? "")}
+          </span>
+          {event.timestamp && <span className="ml-auto text-xs text-muted-foreground">{event.timestamp}</span>}
+        </div>
+      );
     case "recon_assessment": {
       const assessment = event.payload.assessment as ReconAssessment | undefined;
       if (!assessment) return null;

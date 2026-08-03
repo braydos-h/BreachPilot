@@ -18,7 +18,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
 
-
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
@@ -210,6 +209,7 @@ class Event:
 EVENT_STATE = "state"                   # run state transition
 EVENT_BOOT = "boot"                       # MCP boot step ([BOOT]/[OK])
 EVENT_PROGRESS = "progress"               # heartbeat: round/action/phase
+EVENT_PHASE = "phase"                      # agent phase transition (recon/enum/...)
 EVENT_GOAL_SUGGESTIONS = "goal_suggestions"
 EVENT_RECON = "recon_assessment"          # recon-first assessment (OS/ports/CVEs/score)
 EVENT_ASSISTANT = "assistant"             # LLM output text

@@ -9,10 +9,6 @@ adapters (backed by persisted decision rows + WebSocket event pushes).
 """
 
 from tools.run_service.models import (
-    Decision,
-    DecisionKind,
-    DecisionStatus,
-    Event,
     EVENT_APPROVAL,
     EVENT_ARTIFACT,
     EVENT_ASSISTANT,
@@ -20,6 +16,7 @@ from tools.run_service.models import (
     EVENT_COMPLETION,
     EVENT_ERROR,
     EVENT_GOAL_SUGGESTIONS,
+    EVENT_PHASE,
     EVENT_PROGRESS,
     EVENT_RECON,
     EVENT_STATE,
@@ -27,6 +24,10 @@ from tools.run_service.models import (
     EVENT_TOOL_REQUEST,
     EVENT_TOOL_RESULT,
     EVENT_TOOL_START,
+    Decision,
+    DecisionKind,
+    DecisionStatus,
+    Event,
     RunKind,
     RunMode,
     RunPreview,
@@ -69,6 +70,7 @@ __all__ = [
     "EVENT_COMPLETION",
     "EVENT_ERROR",
     "EVENT_GOAL_SUGGESTIONS",
+    "EVENT_PHASE",
     "EVENT_PROGRESS",
     "EVENT_RECON",
     "EVENT_STATE",

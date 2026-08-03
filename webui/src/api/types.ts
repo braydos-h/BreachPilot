@@ -486,6 +486,7 @@ export type EventType =
   | "boot"
   | "ok"
   | "progress"
+  | "phase"
   | "recon_assessment"
   | "goal_suggestions"
   | "assistant"

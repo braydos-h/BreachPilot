@@ -32,6 +32,7 @@ import { EventList } from "@/components/EventList";
 import { DecisionCard } from "@/components/DecisionCard";
 import { ReconAssessmentCard } from "@/components/ReconAssessmentCard";
 import { LiveRunSummary } from "@/components/LiveRunSummary";
+import { PhaseTracker } from "@/components/PhaseTracker";
 import { SessionSummaryCard } from "@/components/SessionSummaryCard";
 import { Skeleton, SkeletonCards, SkeletonRows, Spinner } from "@/components/Loading";
 import { useRunEvents } from "@/api/ws";
@@ -226,25 +227,28 @@ export function RunPage() {
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          {active && (
-            <Button variant="destructive" size="sm" onClick={() => setShowCancel(true)} disabled={cancel.isPending}>
-              {cancel.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-4 w-4" />}
-              Cancel
+        <div className="flex flex-col items-end gap-2">
+          <PhaseTracker events={events.events} runState={currentState as RunState} className="w-full max-w-sm" />
+          <div className="flex items-center gap-2">
+            {active && (
+              <Button variant="destructive" size="sm" onClick={() => setShowCancel(true)} disabled={cancel.isPending}>
+                {cancel.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-4 w-4" />}
+                Cancel
+              </Button>
+            )}
+            {terminal && (
+              <Button size="sm" onClick={() => resume.mutate(run.data.id, { onSuccess: (data) => (window.location.href = `/runs/${data.run_id}`) })} disabled={resume.isPending}>
+                {resume.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                Resume
+              </Button>
+            )}
+            <Button asChild size="sm" variant="outline">
+              <Link to={`/runs/${run.data.id}/artifacts`}>Artifacts</Link>
             </Button>
-          )}
-          {terminal && (
-            <Button size="sm" onClick={() => resume.mutate(run.data.id, { onSuccess: (data) => (window.location.href = `/runs/${data.run_id}`) })} disabled={resume.isPending}>
-              {resume.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              Resume
+            <Button asChild size="sm" variant="outline">
+              <Link to={`/runs/${run.data.id}/loot`}>Loot</Link>
             </Button>
-          )}
-          <Button asChild size="sm" variant="outline">
-            <Link to={`/runs/${run.data.id}/artifacts`}>Artifacts</Link>
-          </Button>
-          <Button asChild size="sm" variant="outline">
-            <Link to={`/runs/${run.data.id}/loot`}>Loot</Link>
-          </Button>
+          </div>
         </div>
       </div>
 

@@ -38,8 +38,7 @@ function derive(events: RunEvent[]): Derived {
   let toolCount = 0;
   let toolErrors = 0;
   let assistantCount = 0;
-  let bootDone = 0;
-  let bootTotal = 0;
+  const bootSteps = new Map<string, boolean>();
   let artifacts = 0;
   let tokens: number | null = null;
 
@@ -83,12 +82,14 @@ function derive(events: RunEvent[]): Derived {
         break;
       }
       case "boot":
-        bootTotal++;
+      case "ok": {
+        const step = typeof ev.payload.step === "string" ? ev.payload.step : "";
+        if (step) {
+          const ok = ev.payload.ok === true || ev.type === "ok";
+          bootSteps.set(step, ok || (bootSteps.get(step) ?? false));
+        }
         break;
-      case "ok":
-        bootDone++;
-        if (bootTotal === 0) bootTotal = bootDone;
-        break;
+      }
       case "artifact":
         artifacts++;
         break;
@@ -96,6 +97,9 @@ function derive(events: RunEvent[]): Derived {
         break;
     }
   }
+
+  const bootDone = Array.from(bootSteps.values()).filter(Boolean).length;
+  const bootTotal = bootSteps.size;
 
   // ponytail: wall-clock events/min from first→last timestamp; cheap and good enough.
   let eventsPerMin: number | null = null;
@@ -129,7 +133,8 @@ function truncate(s: string, n: number): string {
 
 export function LiveRunSummary({ events, className }: LiveRunSummaryProps) {
   const d = derive(events);
-  const hasAny = d.phase || d.round != null || d.actions != null || d.lastTool || d.lastAssistant;
+  const hasAny =
+    d.phase || d.round != null || d.actions != null || d.lastTool || d.lastAssistant || d.bootTotal > 0;
 
   if (!hasAny) {
     return (
@@ -145,6 +150,9 @@ export function LiveRunSummary({ events, className }: LiveRunSummaryProps) {
       </Card>
     );
   }
+
+  const errorRate = d.toolCount > 0 ? (d.toolErrors / d.toolCount) * 100 : 0;
+  const bootComplete = d.bootTotal > 0 && d.bootDone >= d.bootTotal;
 
   return (
     <Card className={cn(className)}>
@@ -166,9 +174,36 @@ export function LiveRunSummary({ events, className }: LiveRunSummaryProps) {
         </div>
 
         <div className="grid grid-cols-2 gap-2 font-mono">
-          <Stat icon={<Cpu className="h-3 w-3" />} label="tool calls" value={String(toolCountLabel(d))} />
+          <Stat icon={<Cpu className="h-3 w-3" />} label="tool calls" value={toolCountLabel(d)} />
           <Stat icon={<MessageSquare className="h-3 w-3" />} label="msgs" value={String(d.assistantCount)} />
         </div>
+
+        <div className="grid grid-cols-3 gap-2 font-mono">
+          <Stat
+            icon={<AlertTriangle className="h-3 w-3" />}
+            label="tool errors"
+            value={d.toolErrors > 0 ? `${d.toolErrors} (${errorRate.toFixed(0)}%)` : "0"}
+            tone={d.toolErrors > 0 ? "danger" : undefined}
+          />
+          <Stat icon={<FileCheck className="h-3 w-3" />} label="artifacts" value={String(d.artifacts)} />
+          <Stat
+            icon={<Layers className="h-3 w-3" />}
+            label="boot"
+            value={d.bootTotal > 0 ? `${d.bootDone}/${d.bootTotal}` : "\u2014"}
+            tone={bootComplete ? "success" : undefined}
+          />
+        </div>
+
+        {(d.tokens != null || d.eventsPerMin != null) && (
+          <div className="grid grid-cols-2 gap-2 font-mono">
+            {d.tokens != null && (
+              <Stat icon={<Cpu className="h-3 w-3" />} label="tokens" value={Number(d.tokens).toLocaleString()} />
+            )}
+            {d.eventsPerMin != null && (
+              <Stat icon={<Activity className="h-3 w-3" />} label="events/min" value={String(d.eventsPerMin)} />
+            )}
+          </div>
+        )}
 
         {d.lastTool && (
           <div className="space-y-1 rounded-md border bg-muted/30 p-2">
@@ -215,9 +250,25 @@ function toolCountLabel(d: Derived): string {
   return String(d.toolCount);
 }
 
-function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function Stat({
+  icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  tone?: "success" | "danger";
+}) {
   return (
-    <div className="space-y-0.5 rounded-md border bg-card/40 p-1.5">
+    <div
+      className={cn(
+        "space-y-0.5 rounded-md border bg-card/40 p-1.5",
+        tone === "success" && "border-emerald-500/40 bg-emerald-500/5",
+        tone === "danger" && "border-destructive/40 bg-destructive/5",
+      )}
+    >
       <div className="flex items-center gap-1 text-muted-foreground">
         {icon}
         <span className="text-[10px] uppercase tracking-wide">{label}</span>

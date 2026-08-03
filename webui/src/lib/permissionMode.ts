@@ -31,32 +31,18 @@ export function usePermissionMode() {
   return { mode, setMode: change };
 }
 
-interface GoalOption {
-  name?: string;
-  compatible?: boolean;
-}
-
-function normalizeGoalOptions(raw: unknown): GoalOption[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter((o): o is Record<string, unknown> => !!o && typeof o === "object")
-    .map((o) => ({
-      name: o.name as string | undefined,
-      compatible: o.compatible !== false,
-    }))
-    .filter((o) => !!o.name);
-}
-
 /**
  * Return the answer string to auto-submit for `decision` under `mode`,
  * or `null` when the mode does not cover this decision (operator must answer).
  *
  * - read_only: never auto-answers.
- * - approve: goal_select (first compatible option) + non-destructive
- *   start_confirm / tool_approval (sends "yes"). Destructive decisions
- *   (those carrying required_text) are left to the operator.
+ * - approve: non-destructive start_confirm / tool_approval (sends "yes").
+ *   Destructive decisions (those carrying required_text) are left to the operator.
  * - full_access: everything approve covers, plus destructive decisions
  *   (sends the exact required_text so the server accepts it).
+ *
+ * goal_select is never auto-answered in any mode — the operator must pick a
+ * goal from the AI-ranked suggestions themselves.
  */
 export function autoAnswerFor(decision: DecisionListRow, mode: PermissionMode): string | null {
   if (mode === "read_only") return null;
@@ -66,13 +52,9 @@ export function autoAnswerFor(decision: DecisionListRow, mode: PermissionMode): 
   const destructive = !!requiredText;
   const kind = decision.kind;
 
-  if (mode === "approve" && destructive) return null;
+  if (kind === "goal_select") return null;
 
-  if (kind === "goal_select") {
-    const opts = normalizeGoalOptions(decision.options_json ?? decision.options);
-    const pick = opts.find((o) => o.compatible) ?? opts[0];
-    return pick?.name ?? null;
-  }
+  if (mode === "approve" && destructive) return null;
 
   // start_confirm / tool_approval
   return destructive ? requiredText : "yes";

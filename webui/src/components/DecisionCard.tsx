@@ -40,16 +40,27 @@ export function DecisionCard({ decision, runId, className, autoAnswering = false
     return "Failed to submit answer.";
   }, [answer.error]);
 
-  const onSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (submitted || isAnswered || autoAnswering) return;
+  const submitAnswer = (value: string) => {
+    if (submitted || isAnswered || autoAnswering || !value) return;
     setSubmitted(true);
     answer.mutate(
-      { decisionId: decision.id, answer: text },
+      { decisionId: decision.id, answer: value },
       {
         onError: () => setSubmitted(false),
       },
     );
+  };
+
+  const onSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    submitAnswer(text);
+  };
+
+  const pickGoal = (name: string) => {
+    setText(name);
+    setCustomMode(false);
+    setCustomText("");
+    submitAnswer(name);
   };
 
   return (
@@ -105,32 +116,38 @@ export function DecisionCard({ decision, runId, className, autoAnswering = false
             {aiGoals.length > 0 && (
               <>
                 <div className="text-xs uppercase tracking-wide text-muted-foreground">AI-generated goals</div>
-                {aiGoals.map((opt, i) => (
+                {aiGoals.map((opt, i) => {
+                  const name = opt.name;
+                  return (
                   <GoalSuggestionCard
                     key={`ai-${i}`}
                     goal={opt}
-                    selected={text === opt.name}
-                    onClick={() => { setText(opt.name ?? ""); setCustomMode(false); setCustomText(""); }}
+                    selected={text === name}
+                    onClick={name ? () => pickGoal(name) : undefined}
                   />
-                ))}
+                  );
+                })}
               </>
             )}
             {presetGoals.length > 0 && (
               <>
                 <div className="pt-1 text-xs uppercase tracking-wide text-muted-foreground">Preset goals</div>
-                {presetGoals.map((opt, i) => (
+                {presetGoals.map((opt, i) => {
+                  const name = opt.name;
+                  return (
                   <GoalSuggestionCard
                     key={`pre-${i}`}
                     goal={opt}
-                    selected={text === opt.name}
-                    onClick={() => { setText(opt.name ?? ""); setCustomMode(false); setCustomText(""); }}
+                    selected={text === name}
+                    onClick={name ? () => pickGoal(name) : undefined}
                   />
-                ))}
+                  );
+                })}
               </>
             )}
             <button
               type="button"
-              onClick={() => { setCustomMode(true); setText(""); }}
+              onClick={() => { setCustomMode(true); setText(""); setCustomText(""); }}
               className={cn(
                 "flex w-full items-center gap-2 rounded-md border p-2.5 text-left text-sm transition-colors hover:bg-accent",
                 customMode && "border-primary bg-accent ring-1 ring-primary",
@@ -150,10 +167,16 @@ export function DecisionCard({ decision, runId, className, autoAnswering = false
             )}
           </div>
           {effectiveError && <p className="text-xs text-destructive">{effectiveError}</p>}
-          <Button type="submit" disabled={!text || submitted} className="w-full">
-            {submitted ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-            Submit selection
-          </Button>
+          {customMode ? (
+            <Button type="submit" disabled={!customText.trim() || submitted} className="w-full">
+              {submitted ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+              Submit custom goal
+            </Button>
+          ) : (
+            <p className="text-center text-[11px] text-muted-foreground">
+              Click a goal to start it. Or pick custom to type your own.
+            </p>
+          )}
         </form>
       )}
 

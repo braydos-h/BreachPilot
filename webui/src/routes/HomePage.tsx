@@ -33,7 +33,6 @@ const PERMISSION_OPTIONS: Array<{ value: string; label: string }> = [
 ];
 
 const FULL_EXAMPLES: Array<{ kind: string; action: string }> = [
-  { kind: "goal_select", action: "Auto-picks the first compatible goal from AI-ranked suggestions." },
   { kind: "start_confirm", action: "Auto-answers \u201cyes\u201d to start the run without waiting." },
   { kind: "tool_approval", action: "Auto-sends the exact required confirmation text (e.g. \u201cI UNDERSTAND THE RISK\u201d) for destructive tool calls." },
 ];
@@ -82,8 +81,8 @@ function FullAccessNotice() {
               {mode === "read_only"
                 ? "Every decision waits for you. Nothing is auto-answered."
                 : mode === "approve"
-                  ? "Non-destructive decisions auto-answered; destructive ones still wait."
-                  : "Everything auto-answered, including destructive actions."}
+                  ? "Non-destructive decisions auto-answered; goal selection and destructive ones still wait."
+                  : "Everything auto-answered except goal selection, including destructive actions."}
             </p>
           </div>
 

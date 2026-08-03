@@ -961,6 +961,7 @@ class AssessmentService:
             approval_provider=approval_provider,
             swarm_attach=swarm_attach, heartbeat=heartbeat,
             original_target=original_target, resolved_ip=resolved_ip,
+            event_sink=event_sink,
         )
         ui.divider()
         ui.success(f"Session complete. {result.get('total_actions', 0)} actions executed.")

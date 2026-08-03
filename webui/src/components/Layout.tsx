@@ -32,8 +32,8 @@ const MODE_TITLES: Record<PermissionMode, string> = {
 
 const MODE_BLURB: Record<PermissionMode, string> = {
   read_only: "Every decision waits for the operator. Nothing is auto-answered. Safest — you drive.",
-  approve: "Non-destructive decisions (start, safe tool calls, goal picks) are auto-answered with \u201cyes\u201d. Destructive confirmations still wait for you.",
-  full_access: "Everything is auto-answered, including destructive actions. The exact required confirmation text is sent automatically. Use only on owned targets.",
+  approve: "Non-destructive decisions (start, safe tool calls) are auto-answered with \u201cyes\u201d. Goal selection and destructive confirmations still wait for you.",
+  full_access: "Everything is auto-answered except goal selection, including destructive actions. The exact required confirmation text is sent automatically. Use only on owned targets.",
 };
 
 const DEMO_DECISIONS: Array<{ kind: string; status: "pending"; required_text?: string; options?: Array<{ name: string; compatible: boolean }> }> = [
