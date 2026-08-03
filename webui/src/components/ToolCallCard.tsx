@@ -36,6 +36,7 @@ export function ToolCallCard({
       className={cn(
         "rounded-md border bg-card/50 p-3 text-sm",
         completed && errorText && "border-destructive/40",
+        !completed && started && "border-primary/30",
         className,
       )}
     >
@@ -49,14 +50,14 @@ export function ToolCallCard({
         <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="font-mono text-xs">{toolName}</span>
         <Badge
-          variant="outline"
-          className={cn(
-            "ml-auto",
-            completed && !errorText && "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
-            completed && !!errorText && "border-destructive/40 bg-destructive/10 text-red-300",
-            !completed && started && "border-yellow-500/40 bg-yellow-500/10 text-yellow-300",
-            !completed && !started && "text-muted-foreground",
-          )}
+          variant={
+            completed
+              ? (errorText ? "danger" : "success")
+              : started
+                ? "warn"
+                : "muted"
+          }
+          className={cn("ml-auto", !completed && started && "animate-pulse-ring")}
         >
           {completed ? (errorText ? "error" : "done") : started ? "running" : "queued"}
         </Badge>

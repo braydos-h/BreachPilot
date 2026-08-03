@@ -4,25 +4,26 @@
 
 @layer base {
   :root {
-    --background: 240 10% 3.9%;
+    /* Brand: neutral monochrome. No cyber tint. */
+    --background: 0 0% 3.9%;
     --foreground: 0 0% 98%;
-    --card: 240 10% 5.5%;
+    --card: 0 0% 5.5%;
     --card-foreground: 0 0% 98%;
-    --popover: 240 10% 6%;
+    --popover: 0 0% 6%;
     --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 240 10% 3.9%;
-    --secondary: 240 4% 16%;
+    --primary: 0 0% 92%;
+    --primary-foreground: 0 0% 3.9%;
+    --secondary: 0 0% 16%;
     --secondary-foreground: 0 0% 98%;
-    --muted: 240 4% 16%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 240 4% 16%;
+    --muted: 0 0% 16%;
+    --muted-foreground: 0 0% 64.9%;
+    --accent: 0 0% 16%;
     --accent-foreground: 0 0% 98%;
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 98%;
-    --border: 240 4% 16%;
-    --input: 240 4% 16%;
-    --ring: 240 5% 64.9%;
+    --border: 0 0% 16%;
+    --input: 0 0% 16%;
+    --ring: 0 0% 92%;
     --radius: 0.5rem;
   }
 }
@@ -46,6 +47,25 @@
     outline-offset: 2px;
     border-radius: inherit;
   }
+  /* Unified table treatment — applied wherever a <table> uses .border */
+  table {
+    @apply text-sm;
+  }
+  thead {
+    @apply bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground;
+  }
+  th {
+    @apply p-2 text-left font-medium;
+  }
+  tbody tr {
+    @apply border-t transition-colors hover:bg-primary/5;
+  }
+  tbody tr:nth-child(even) {
+    @apply bg-muted/10;
+  }
+  td {
+    @apply p-2;
+  }
 }
 
 @layer utilities {
@@ -58,15 +78,30 @@
       linear-gradient(to bottom, hsl(var(--border) / 0.35) 1px, transparent 1px);
     background-size: 32px 32px;
   }
+  .bg-grid-sm {
+    background-image:
+      linear-gradient(to right, hsl(var(--border) / 0.25) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--border) / 0.25) 1px, transparent 1px);
+    background-size: 16px 16px;
+  }
   .bg-radial-fade {
     -webkit-mask-image: radial-gradient(ellipse 60% 50% at 50% 0%, #000 40%, transparent 100%);
     mask-image: radial-gradient(ellipse 60% 50% at 50% 0%, #000 40%, transparent 100%);
   }
   .glow-primary {
-    box-shadow: 0 0 0 1px hsl(var(--border)), 0 0 24px -4px hsl(var(--primary) / 0.25);
+    box-shadow: 0 0 0 1px hsl(var(--primary) / 0.5), 0 1px 0 0 hsl(var(--primary) / 0.1);
+  }
+  .glow-primary-strong {
+    box-shadow: 0 0 0 1px hsl(var(--primary) / 0.7), 0 1px 0 0 hsl(var(--primary) / 0.2);
   }
   .text-gradient {
     background: linear-gradient(180deg, hsl(var(--foreground)) 0%, hsl(var(--muted-foreground)) 140%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .text-gradient-primary {
+    background: linear-gradient(180deg, hsl(var(--foreground)) 0%, hsl(var(--muted-foreground)) 120%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
@@ -86,6 +121,20 @@
   }
   .animate-pulse-ring {
     animation: pulse-ring 2.4s ease-in-out infinite;
+  }
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--muted)) 0%,
+      hsl(var(--muted) / 0.5) 50%,
+      hsl(var(--muted)) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.6s ease-in-out infinite;
   }
   .scrollbar-thin {
     scrollbar-width: thin;

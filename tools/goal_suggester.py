@@ -228,12 +228,12 @@ class GoalSuggester:
 
         # ── Generate AI custom goals from discovered services ──
         ai_goals = self._generate_ai_custom_goals(assessment, risk_profile)
-        # Insert AI goals after the top 3 preset suggestions (or at top if no presets)
-        insert_at = min(3, len([s for s in suggestions if s.compatible]))
-        for ag in ai_goals:
-            suggestions.insert(insert_at, ag)
-            insert_at += 1
+        suggestions.extend(ai_goals)
 
+        # Global rank by rating desc so the best goal is always #1, regardless
+        # of whether it is preset or AI-generated. Compatible goals above
+        # blocked ones; within each group, higher rating first.
+        suggestions.sort(key=lambda g: (g.compatible, g.success_rating), reverse=True)
         return suggestions
 
     def _generate_ai_custom_goals(

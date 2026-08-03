@@ -1,8 +1,9 @@
 import { useMemo, useRef, useEffect, useState } from "react";
-import { AlertTriangle, ArrowDownToLine, Cpu, Sparkles, ListChecks } from "lucide-react";
+import { AlertTriangle, ArrowUpToLine, Cpu, Sparkles, ListChecks } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { BootChecklist } from "@/components/BootChecklist";
 import { ToolCallCard } from "@/components/ToolCallCard";
 import { DecisionCard } from "@/components/DecisionCard";
@@ -45,14 +46,13 @@ export function EventList({ events, decisions, runId, className }: EventListProp
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    if (stick) el.scrollTop = el.scrollHeight;
+    if (stick) el.scrollTop = 0;
   }, [events, stick]);
 
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setStick(distance < 40);
+    setStick(el.scrollTop < 40);
   };
 
   const rendered = useMemo(() => {
@@ -60,6 +60,9 @@ export function EventList({ events, decisions, runId, className }: EventListProp
     const decisionIds = new Set<string>();
     const nodes: React.ReactNode[] = [];
     let lastBootIndex = -1;
+    const goalSelectAnswered = decisions.some(
+      (d) => d.kind === "goal_select" && d.status !== "pending",
+    );
 
     events.forEach((event) => {
       if (event.type === "boot" || event.type === "ok") {
@@ -139,6 +142,7 @@ export function EventList({ events, decisions, runId, className }: EventListProp
         );
         return;
       }
+      if (event.type === "goal_suggestions" && goalSelectAnswered) return;
       nodes.push(renderSimpleEvent(event, `evt-${event.sequence}`));
     });
 
@@ -146,13 +150,22 @@ export function EventList({ events, decisions, runId, className }: EventListProp
       nodes.unshift(<BootChecklist key="boot-checklist" events={events} className="mb-3 rounded-md border bg-card/40 p-3" />);
     }
 
+    nodes.reverse();
     return nodes;
   }, [events, decisions, runId]);
 
   if (events.length === 0) {
     return (
-      <div className={cn("flex items-center justify-center rounded-md border border-dashed p-8 text-sm text-muted-foreground", className)}>
-        Waiting for events...
+      <div className={cn("space-y-2", className)}>
+        <div className="relative flex-1 overflow-hidden rounded-md border border-dashed bg-grid-sm/30 p-3">
+          <div className="space-y-2" aria-hidden>
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-6 w-2/3" />
+            <Skeleton className="h-6 w-4/5" />
+            <Skeleton className="h-8 w-1/2" />
+          </div>
+        </div>
+        <p className="text-center text-xs text-muted-foreground">Waiting for events…</p>
       </div>
     );
   }
@@ -162,10 +175,10 @@ export function EventList({ events, decisions, runId, className }: EventListProp
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="flex-1 overflow-y-auto rounded-md border bg-background/40 p-3 scrollbar-thin"
+        className="relative flex-1 overflow-y-auto rounded-md border bg-background/40 bg-grid-sm/20 p-3 scrollbar-thin"
         aria-live="polite"
       >
-        <div className="space-y-2">{rendered}</div>
+        <div className="relative space-y-2">{rendered}</div>
       </div>
       {!stick && (
         <Button
@@ -175,12 +188,12 @@ export function EventList({ events, decisions, runId, className }: EventListProp
           className="absolute bottom-3 right-3 h-8 w-8 rounded-full"
           onClick={() => {
             const el = scrollRef.current;
-            if (el) el.scrollTop = el.scrollHeight;
+            if (el) el.scrollTop = 0;
             setStick(true);
           }}
           aria-label="Jump to latest"
         >
-          <ArrowDownToLine className="h-4 w-4" />
+          <ArrowUpToLine className="h-4 w-4" />
         </Button>
       )}
     </div>
@@ -211,8 +224,8 @@ function renderSimpleEvent(event: RunEvent, key: string): React.ReactNode {
       );
     case "assistant":
       return (
-        <div key={key} className="flex gap-2 rounded-md border bg-card/40 px-3 py-2 text-sm">
-          <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <div key={key} className="flex gap-2 rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm">
+          <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
           <div className="whitespace-pre-wrap break-words text-sm">
             {String(event.payload.text ?? "")}
           </div>

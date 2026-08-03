@@ -1132,54 +1132,39 @@ class AttackUi:
         print(f"{'='*60}")
 
     def display_goal_suggestions(self, suggestions: list[Any]) -> None:
-        """Display ranked goal suggestions with exploit ratings."""
+        """Display ranked goal suggestions with exploit ratings.
+
+        One unified list ranked by success_rating descending — best goal at
+        the top, AI-generated goals mixed in and marked with ``AI:``. Blocked
+        goals sink to the bottom of their group.
+        """
         print(f"\n{self._c('bold')}SUGGESTED GOALS (ranked by exploit success rating):{self._c('reset')}")
         print()
 
         # Header
-        print(f"  {'Goal':<28} {'Likelihood':<16} {'Rating':<8} {'Risk':<8}")
-        print(f"  {'-'*28} {'-'*16} {'-'*8} {'-'*8}")
+        print(f"  {'Goal':<30} {'Likelihood':<16} {'Rating':<8} {'Risk':<8}")
+        print(f"  {'-'*30} {'-'*16} {'-'*8} {'-'*8}")
 
-        # Separate AI-generated and preset goals
-        ai_goals = [sg for sg in suggestions if getattr(sg, 'is_ai_generated', False)]
-        preset_goals = [sg for sg in suggestions if not getattr(sg, 'is_ai_generated', False)]
+        compatible = [sg for sg in suggestions if sg.compatible]
+        blocked = [sg for sg in suggestions if not sg.compatible]
 
-        # Show AI-generated goals first with special marker
-        if ai_goals:
-            print(f"\n  {self._c('header')}AI-GENERATED GOALS (based on discovered services):{self._c('reset')}")
-            for sg in ai_goals:
-                if not sg.compatible:
-                    print(f"  {self._c('gray')}{sg.name:<28} {'BLOCKED':<16} {'-':<8} {sg.risk_requirement:<8}{self._c('reset')}")
-                    continue
+        for sg in compatible:
+            rating_color = "green" if sg.success_rating >= 80 else ("yellow" if sg.success_rating >= 55 else "red")
+            ai_marker = "AI:" if getattr(sg, 'is_ai_generated', False) else ""
+            name = f"{ai_marker}{sg.name}" if ai_marker else sg.name
+            print(
+                f"  * {name:<28} "
+                f"{sg.exploit_likelihood:<16} "
+                f"{self._c(rating_color)}{sg.success_rating:>3}/100{self._c('reset')}  "
+                f"{sg.risk_requirement:<8}"
+            )
+            if sg.rationale:
+                print(f"    {self._c('gray')}-> {sg.rationale[:120]}{self._c('reset')}")
 
-                rating_color = "green" if sg.success_rating >= 80 else ("yellow" if sg.success_rating >= 55 else "red")
-                print(
-                    f"  * {sg.name:<26} "
-                    f"{sg.exploit_likelihood:<16} "
-                    f"{self._c(rating_color)}{sg.success_rating:>3}/100{self._c('reset')}  "
-                    f"{sg.risk_requirement:<8}"
-                )
-                if sg.rationale:
-                    print(f"    {self._c('gray')}-> {sg.rationale[:120]}{self._c('reset')}")
-            print()
-
-        # Show preset goals
-        if preset_goals:
-            print(f"  {self._c('bold')}PRESET GOALS:{self._c('reset')}")
-            for sg in preset_goals:
-                if not sg.compatible:
-                    print(f"  {self._c('gray')}{sg.name:<28} {'BLOCKED':<16} {'-':<8} {sg.risk_requirement:<8}{self._c('reset')}")
-                    continue
-
-                rating_color = "green" if sg.success_rating >= 80 else ("yellow" if sg.success_rating >= 55 else "red")
-                print(
-                    f"  {sg.name:<28} "
-                    f"{sg.exploit_likelihood:<16} "
-                    f"{self._c(rating_color)}{sg.success_rating:>3}/100{self._c('reset')}  "
-                    f"{sg.risk_requirement:<8}"
-                )
-                if sg.rationale:
-                    print(f"    {self._c('gray')}-> {sg.rationale[:120]}{self._c('reset')}")
+        if blocked:
+            print(f"\n  {self._c('gray')}BLOCKED (raise risk profile to unlock):{self._c('reset')}")
+            for sg in blocked:
+                print(f"  {self._c('gray')}{sg.name:<30} {'BLOCKED':<16} {'-':<8} {sg.risk_requirement:<8}{self._c('reset')}")
 
         print()
 
@@ -1190,7 +1175,7 @@ class AttackUi:
         """
         print(f"\n{self._c('bold')}Select a goal to pursue:{self._c('reset')}")
 
-        # Build numbered list of compatible suggestions (AI-generated first, then presets)
+        # Build numbered list of compatible suggestions, ranked by rating desc.
         compatible = [sg for sg in suggestions if sg.compatible]
 
         while True:

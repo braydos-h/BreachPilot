@@ -394,15 +394,23 @@ class TestReconPipeline:
 
     @pytest.mark.asyncio
     async def test_recon_host_no_ports(self, recon_config: ReconConfig) -> None:
-        with patch("tools.recon_pipeline.ToolAvailability.check", return_value=True):
-            with patch("tools.recon_pipeline.run_command") as mock_run:
-                mock_run.return_value = (True, "", "", 1.0)
+        # Patch the native socket-scan fallback too, otherwise a test run on a
+        # machine that can actually reach 10.0.0.50 would find real open ports
+        # and break the "no ports" assertion. The fallback is real network I/O
+        # the test never intended to exercise.
+        async def _no_open_ports(_target: str, _ports):
+            return []
 
-                pipeline = ReconPipeline(recon_config)
-                result = await pipeline.recon_host("10.0.0.50")
+        with patch("tools.recon_pipeline.ToolAvailability.check", return_value=True), \
+             patch("tools.recon_pipeline.run_command") as mock_run, \
+             patch("tools.socket_scan.socket_scan", side_effect=_no_open_ports):
+            mock_run.return_value = (True, "", "", 1.0)
 
-                assert len(result.open_ports) == 0
-                assert len(result.errors) > 0
+            pipeline = ReconPipeline(recon_config)
+            result = await pipeline.recon_host("10.0.0.50")
+
+            assert len(result.open_ports) == 0
+            assert len(result.errors) > 0
 
     @pytest.mark.asyncio
     async def test_recon_hosts_parallel(self, recon_config: ReconConfig, sample_nmap_xml: str) -> None:

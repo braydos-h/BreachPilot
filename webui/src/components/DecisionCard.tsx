@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, Check, Loader2, Pencil } from "lucide-react";
+import { AlertTriangle, Check, Loader2, Pencil, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,9 +16,10 @@ interface DecisionCardProps {
   decision: DecisionListRow;
   runId: string;
   className?: string;
+  autoAnswering?: boolean;
 }
 
-export function DecisionCard({ decision, runId, className }: DecisionCardProps) {
+export function DecisionCard({ decision, runId, className, autoAnswering = false }: DecisionCardProps) {
   const answer = useAnswerDecision(runId);
   const [text, setText] = useState("");
   const [customMode, setCustomMode] = useState(false);
@@ -41,7 +42,7 @@ export function DecisionCard({ decision, runId, className }: DecisionCardProps) 
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (submitted || isAnswered) return;
+    if (submitted || isAnswered || autoAnswering) return;
     setSubmitted(true);
     answer.mutate(
       { decisionId: decision.id, answer: text },
@@ -90,7 +91,15 @@ export function DecisionCard({ decision, runId, className }: DecisionCardProps) 
         </div>
       )}
 
-      {kind === "goal_select" && options.length > 0 && !isAnswered && (
+      {autoAnswering && !isAnswered && (
+        <div className="mt-2 flex items-center gap-2 rounded border border-primary/40 bg-primary/10 p-2 text-xs text-primary">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <span>Auto-answering via permission mode…</span>
+          {isDestructive && <ShieldAlert className="ml-auto h-3.5 w-3.5" />}
+        </div>
+      )}
+
+      {kind === "goal_select" && options.length > 0 && !isAnswered && !autoAnswering && (
         <form className="mt-3 space-y-2" onSubmit={onSubmit}>
           <div className="space-y-1.5">
             {aiGoals.length > 0 && (
@@ -148,7 +157,7 @@ export function DecisionCard({ decision, runId, className }: DecisionCardProps) 
         </form>
       )}
 
-      {kind !== "goal_select" && !isAnswered && (
+      {kind !== "goal_select" && !isAnswered && !autoAnswering && (
         <form className="mt-3 space-y-2" onSubmit={onSubmit}>
           <Label htmlFor={`answer-${decision.id}`}>
             {isDestructive ? "Confirmation text" : "Answer"}

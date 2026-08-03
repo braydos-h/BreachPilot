@@ -49,16 +49,9 @@ def test_log_tail_is_bounded_and_redacts_secrets(tmp_path: Path) -> None:
     assert len(tail) < 500
 
 
-def test_mcp_readiness_retries_real_probe_until_success(monkeypatch, tmp_path: Path) -> None:
-    attempts = 0
-
-    async def _probe(*_args, **_kwargs):
-        nonlocal attempts
-        attempts += 1
-        if attempts < 3:
-            raise ConnectionError("server still importing")
-
-    monkeypatch.setattr(ms, "_probe_mcp_http", _probe)
+def test_mcp_readiness_retries_until_listener_opens(monkeypatch, tmp_path: Path) -> None:
+    attempts = iter((False, False, True))
+    monkeypatch.setattr(ms, "port_is_open", lambda *_args: next(attempts))
 
     asyncio.run(
         ms.wait_for_mcp_http_ready(
@@ -70,48 +63,27 @@ def test_mcp_readiness_retries_real_probe_until_success(monkeypatch, tmp_path: P
         )
     )
 
-    assert attempts == 3
 
+def test_open_listener_does_not_wait_for_disposable_mcp_probe(monkeypatch) -> None:
+    monkeypatch.setattr(ms, "port_is_open", lambda *_args: True)
 
-def test_tcp_listener_that_is_not_mcp_never_becomes_ready(monkeypatch, tmp_path: Path) -> None:
-    log_path = tmp_path / "server.log"
-    log_path.write_text("plain HTTP listener accepted TCP\n", encoding="utf-8")
-
-    async def _not_mcp(*_args, **_kwargs):
-        raise RuntimeError("404 Not Found")
-
-    monkeypatch.setattr(ms, "_probe_mcp_http", _not_mcp)
-
-    with pytest.raises(RuntimeError) as exc_info:
-        asyncio.run(
-            ms.wait_for_mcp_http_ready(
-                "http://127.0.0.1:8001/mcp",
-                timeout_seconds=0.01,
-                process=_RunningProcess(),
-                log_path=log_path,
-                retry_initial_seconds=0,
-            )
+    asyncio.run(
+        ms.wait_for_mcp_http_ready(
+            "http://127.0.0.1:8001/mcp",
+            timeout_seconds=0.01,
+            process=_RunningProcess(),
         )
-
-    message = str(exc_info.value)
-    assert "MCP initialize/list-tools readiness" in message
-    assert "404 Not Found" in message
-    assert "plain HTTP listener accepted TCP" in message
+    )
 
 
 def test_mcp_readiness_reports_early_child_exit_with_redacted_log(
-    monkeypatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     log_path = tmp_path / "server.log"
     log_path.write_text(
         "MCP_HTTP_TOKEN=must-not-leak\nRuntimeError: import failed\n",
         encoding="utf-8",
     )
-
-    async def _must_not_probe(*_args, **_kwargs):
-        raise AssertionError("dead child should be detected before probing")
-
-    monkeypatch.setattr(ms, "_probe_mcp_http", _must_not_probe)
 
     with pytest.raises(RuntimeError) as exc_info:
         asyncio.run(

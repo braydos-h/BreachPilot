@@ -21,12 +21,16 @@ logger = logging.getLogger(__name__)
 
 CONFIG_SCHEMA: dict[str, Any] = {
     "ollama": {
-        "host": "http://localhost:11434",
+        # ponytail: cloud-only by default. Chat/generate go to Ollama Cloud
+        # (https://api.ollama.com); the ollama Python client auto-attaches
+        # ``Authorization: Bearer $OLLAMA_API_KEY``. Override ``host`` to use
+        # a local daemon. ``embed_host`` keeps embeddings on local Ollama
+        # (nomic-embed-text is small + cheap to self-host) and falls back to
+        # ``host`` when absent — see config.yaml for the full rationale.
+        "host": "https://api.ollama.com",
         "model": "glm-5.2:cloud",
-        # ponytail: makes the Ollama Cloud fallback (model_router._build_model_client
-        # swaps to https://api.ollama.com when local is unreachable) reachable on the
-        # main model path. Loaded into env at boot by api_key_store.bootstrap_api_keys.
         "api_key_env": "OLLAMA_API_KEY",
+        "embed_host": "http://localhost:11434",
     },
     "models": {
         "registry": {
@@ -560,7 +564,7 @@ class ConfigValidator:
             if not isinstance(ollama, dict):
                 result.errors.append("'ollama' must be a mapping.")
             elif "host" not in ollama:
-                result.warnings.append("ollama.host is missing. Default: http://localhost:11434")
+                result.warnings.append("ollama.host is missing. Default: https://api.ollama.com")
 
         # Validate models section
         if "models" in self._config:
@@ -979,7 +983,17 @@ class ConfigValidator:
     # ── Convenience accessors ──────────────────────────────────────────
 
     def get_ollama_host(self) -> str:
-        return str(self._config.get("ollama", {}).get("host", "http://localhost:11434"))
+        return str(self._config.get("ollama", {}).get("host", "https://api.ollama.com"))
+
+    def get_ollama_embed_host(self) -> str:
+        """Embedding host — local Ollama for nomic-embed-text by default.
+
+        Falls back to the main ``ollama.host`` when ``embed_host`` is absent
+        (so a cloud-only install with no local daemon still serves embeddings
+        through the cloud).
+        """
+        ollama = self._config.get("ollama", {})
+        return str(ollama.get("embed_host") or ollama.get("host", "https://api.ollama.com"))
 
     def get_default_model(self) -> str:
         return str(self._config.get("models", {}).get("default_alias", "glm"))

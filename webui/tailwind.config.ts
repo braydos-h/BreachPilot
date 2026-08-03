@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import typography from "@tailwindcss/typography";
 
 const config: Config = {
   darkMode: ["class"],
@@ -9,6 +10,21 @@ const config: Config = {
       padding: "1rem",
     },
     extend: {
+      typography: {
+        invert: {
+          css: {
+            "--tw-prose-body": "hsl(var(--muted-foreground))",
+            "--tw-prose-headings": "hsl(var(--foreground))",
+            "--tw-prose-links": "hsl(var(--primary))",
+            "--tw-prose-code": "hsl(var(--foreground))",
+            "--tw-prose-pre-bg": "hsl(var(--muted))",
+            "--tw-prose-pre-code": "hsl(var(--foreground))",
+            "--tw-prose-bullets": "hsl(var(--border))",
+            "--tw-prose-quotes": "hsl(var(--muted-foreground))",
+            "--tw-prose-quote-borders": "hsl(var(--primary) / 0.4)",
+          },
+        },
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
@@ -54,7 +70,7 @@ const config: Config = {
       },
     },
   },
-  plugins: [],
+  plugins: [typography],
 };
 
 export default config;

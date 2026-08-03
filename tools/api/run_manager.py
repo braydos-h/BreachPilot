@@ -24,6 +24,7 @@ from tools.api.decision_broker import DecisionBroker
 from tools.api.errors import APIError
 from tools.api.event_broker import EventBrokerRegistry, RunEventBroker
 from tools.api.persistence import ApiPersistence
+from tools.api.session_titler import generate_session_title
 from tools.run_service.models import (
     Decision,
     DecisionKind,
@@ -83,6 +84,14 @@ class RunManager:
     @property
     def has_active(self) -> bool:
         return self._active is not None
+
+    @property
+    def config(self) -> dict[str, Any]:
+        return self._config
+
+    @property
+    def config_path(self) -> Path:
+        return self._config_path
 
     @property
     def active(self) -> RunHandle | None:
@@ -222,11 +231,13 @@ class RunManager:
                 ),
             )
             state = RunState.COMPLETED.value if not result.error else RunState.FAILED.value
+            result_dict = _result_to_dict(result)
             self._persistence.update_run_state(
                 handle.run_id, state, error=result.error,
-                result=_result_to_dict(result),
+                result=result_dict,
             )
-            await handle.event_broker.emit("state", {"state": state, "result": _result_to_dict(result)})
+            await handle.event_broker.emit("state", {"state": state, "result": result_dict})
+            await self._maybe_title_run(handle, result_dict)
         except asyncio.CancelledError:
             self._persistence.update_run_state(handle.run_id, RunState.CANCELLED.value)
             await handle.event_broker.emit("state", {"state": RunState.CANCELLED.value})
@@ -234,6 +245,7 @@ class RunManager:
         except Exception as exc:
             self._persistence.update_run_state(handle.run_id, RunState.FAILED.value, error=str(exc))
             await handle.event_broker.emit("error", {"message": str(exc)})
+            await self._maybe_title_run(handle, {"error": str(exc)})
         finally:
             if handle.decision_broker:
                 handle.decision_broker.cancel_all()
@@ -241,6 +253,38 @@ class RunManager:
             async with self._lifecycle_lock:
                 if self._active is handle:
                     self._active = None
+
+    async def _maybe_title_run(
+        self, handle: "RunHandle", result_dict: dict[str, Any],
+    ) -> None:
+        """Ask gemma4:31b-cloud for a session title; persist on success.
+
+        Best-effort: any failure (ollama unreachable, missing pkg, parse
+        error, empty response) is logged at DEBUG and swallowed. Skips
+        runs that already have a title (e.g. resumed runs keep the parent's
+        title). Fires after the run state is persisted + emitted so a slow
+        or failing titler never delays the state transition.
+        """
+        try:
+            existing = self._persistence.get_run(handle.run_id) or {}
+            if existing.get("title"):
+                return
+            host = str(
+                (self._config.get("ollama") or {}).get("host")
+                or "https://api.ollama.com"
+            )
+            request_dict = _request_to_dict(handle.request) if handle.request else {}
+            title = await generate_session_title(
+                result_dict, request_dict, host=host,
+            )
+            if title:
+                self._persistence.update_run_title(handle.run_id, title)
+                await handle.event_broker.emit("title", {"title": title})
+        except Exception as exc:  # best-effort — never propagate
+            import logging as _logging
+            _logging.getLogger(__name__).debug(
+                "session title persistence failed for %s: %s", handle.run_id, exc,
+            )
 
     async def cancel_run(self, run_id: str) -> None:
         """Cooperative cancellation: set the flag + cancel the task."""

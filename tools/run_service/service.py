@@ -255,7 +255,7 @@ class AssessmentService:
             pass
 
         # Build router + resolve model alias.
-        ollama_host = config.get("ollama", {}).get("host", "http://localhost:11434")
+        ollama_host = config.get("ollama", {}).get("host", "https://api.ollama.com")
         _long_cfg = config.get("long_session", {}) or {}
         _ls_active = bool(request.long_session or _long_cfg.get("enabled", False))
         _req_timeout = (
@@ -465,7 +465,7 @@ class AssessmentService:
 
         # Build/refresh model client if not supplied.
         if model_client is None:
-            ollama_host = config.get("ollama", {}).get("host", "http://localhost:11434")
+            ollama_host = config.get("ollama", {}).get("host", "https://api.ollama.com")
             _long_cfg = config.get("long_session", {}) or {}
             _ls_active = bool(request.long_session or _long_cfg.get("enabled", False))
             _req_timeout = (

@@ -171,9 +171,13 @@ class AgentLoop:
         semantic_cfg = mission_config.get("memory", {})
         self._semantic_memory: SemanticMemoryManager | None = None
         if semantic_cfg.get("semantic_enabled", False):
+            # ponytail: embeddings stay on local Ollama (embed_host) when set;
+            # falls back to ollama.host for cloud-only installs.
+            _ollama_cfg = mission_config.get("ollama", {}) or {}
+            _embed_host = _ollama_cfg.get("embed_host") or _ollama_cfg.get("host", "https://api.ollama.com")
             self._semantic_memory = SemanticMemoryManager(
                 db=self._db,
-                ollama_host=mission_config.get("ollama", {}).get("host", "http://localhost:11434"),
+                ollama_host=_embed_host,
                 embedding_model=semantic_cfg.get("embedding_model", "nomic-embed-text"),
             )
         self._memory = MemoryManager(self._db, self._mission_id, semantic_memory=self._semantic_memory)

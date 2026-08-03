@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _API_DB_NAME = "api_runtime.db"
 
 _DDL = """
@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS runs (
     result_json TEXT NOT NULL DEFAULT '{}',
     resumed_from TEXT NOT NULL DEFAULT '',
     error TEXT NOT NULL DEFAULT '',
-    cancelled_at TEXT NOT NULL DEFAULT ''
+    cancelled_at TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS decisions (
@@ -54,6 +55,25 @@ CREATE TABLE IF NOT EXISTS decisions (
 CREATE INDEX IF NOT EXISTS idx_decisions_run_id ON decisions(run_id);
 CREATE INDEX IF NOT EXISTS idx_runs_state ON runs(state);
 """
+
+# v2: add ``title`` column to runs for AI-generated session titles.
+# Existing v1 DBs lack the column; ALTER it in idempotently. New DBs get it
+# via _DDL above so this migration is a no-op there (PRAGMA table_info check).
+_MIGRATION_V2 = [
+    "ALTER TABLE runs ADD COLUMN title TEXT NOT NULL DEFAULT ''",
+]
+
+# Sort clauses for list_runs. Keys map to the public ``sort`` query param.
+# All use index-backed columns or the small runs table's natural size; no
+# extra indexes needed at this scale.
+_SORT_CLAUSES = {
+    "created_desc": "created_at DESC",
+    "created_asc": "created_at ASC",
+    "title_asc": "title COLLATE NOCASE ASC, created_at DESC",
+    "title_desc": "title COLLATE NOCASE DESC, created_at DESC",
+    "state_asc": "state ASC, created_at DESC",
+    "state_desc": "state DESC, created_at DESC",
+}
 
 
 def _now_iso() -> str:
@@ -89,6 +109,22 @@ class ApiPersistence:
             conn = self._connect()
             try:
                 conn.executescript(_DDL)
+                # Apply incremental migrations for DBs created at an older
+                # schema version. Each migration is gated on its column/idx
+                # not already existing so re-runs are safe.
+                applied = {
+                    row["version"]
+                    for row in conn.execute("SELECT version FROM _migrations").fetchall()
+                }
+                if 2 not in applied and "title" not in {
+                    r["name"] for r in conn.execute("PRAGMA table_info(runs)").fetchall()
+                }:
+                    for stmt in _MIGRATION_V2:
+                        conn.execute(stmt)
+                    conn.execute(
+                        "INSERT OR IGNORE INTO _migrations (version, applied_at) VALUES (?, ?)",
+                        (2, _now_iso()),
+                    )
                 conn.execute(
                     "INSERT OR IGNORE INTO _migrations (version, applied_at) VALUES (?, ?)",
                     (_SCHEMA_VERSION, _now_iso()),
@@ -141,6 +177,23 @@ class ApiPersistence:
             finally:
                 conn.close()
 
+    def update_run_title(self, run_id: str, title: str) -> bool:
+        """Persist an AI-generated (or manual) title for a run. Returns True if updated."""
+        title = (title or "").strip()
+        if not title:
+            return False
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute(
+                    "UPDATE runs SET title=?, updated_at=? WHERE id=?",
+                    (title[:200], _now_iso(), run_id),
+                )
+                conn.commit()
+                return cur.rowcount > 0
+            finally:
+                conn.close()
+
     def get_run(self, run_id: str) -> dict[str, Any] | None:
         with self._lock:
             conn = self._connect()
@@ -155,12 +208,26 @@ class ApiPersistence:
             finally:
                 conn.close()
 
-    def list_runs(self, *, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+    def list_runs(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        sort: str = "created_desc",
+    ) -> list[dict[str, Any]]:
+        """List runs with target/mode/goal/model summary (no N+1 queries).
+
+        ``sort`` is one of: created_desc (default, newest first), created_asc
+        (oldest first), title_asc, title_desc, state_asc, state_desc. Unknown
+        values fall back to the default. Sorting on title treats empty titles
+        as the empty string (so they cluster together, not at either extreme).
+        """
+        order_by = _SORT_CLAUSES.get(sort, _SORT_CLAUSES["created_desc"])
         with self._lock:
             conn = self._connect()
             try:
                 rows = conn.execute(
-                    "SELECT * FROM runs ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                    f"SELECT * FROM runs ORDER BY {order_by} LIMIT ? OFFSET ?",
                     (limit, offset),
                 ).fetchall()
                 result = []

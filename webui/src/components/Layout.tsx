@@ -1,24 +1,59 @@
+import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { Activity, Cpu, Eye, Github, Home, List, Settings, Terminal } from "lucide-react";
+import { Activity, Cpu, Eye, Github, HelpCircle, Home, List, Settings, ShieldAlert, Sparkles, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { useRuns } from "@/api/hooks";
-import { isActiveState } from "@/api/types";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { SegmentedControl } from "@/components/RunForm";
+import { useRuns, useLiveModels } from "@/api/hooks";
+import { isActiveState, type DecisionListRow } from "@/api/types";
 import { clearStoredToken } from "@/api/client";
 import { useNavigate } from "react-router-dom";
-import { LiveStatus } from "@/components/LiveStatus";
+import { autoAnswerFor, usePermissionMode, type PermissionMode } from "@/lib/permissionMode";
 
 const NAV_ITEMS = [
   { to: "/", label: "Home", icon: Home, end: true },
   { to: "/sessions", label: "Sessions", icon: List, end: false },
+  { to: "/skills", label: "Skills", icon: Sparkles, end: false },
   { to: "/system", label: "System", icon: Settings, end: false },
 ];
+
+const PERMISSION_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "read_only", label: "Read" },
+  { value: "approve", label: "Approve" },
+  { value: "full_access", label: "Full" },
+];
+
+const MODE_TITLES: Record<PermissionMode, string> = {
+  read_only: "Read-only",
+  approve: "Approve",
+  full_access: "Full access",
+};
+
+const MODE_BLURB: Record<PermissionMode, string> = {
+  read_only: "Every decision waits for the operator. Nothing is auto-answered. Safest — you drive.",
+  approve: "Non-destructive decisions (start, safe tool calls, goal picks) are auto-answered with \u201cyes\u201d. Destructive confirmations still wait for you.",
+  full_access: "Everything is auto-answered, including destructive actions. The exact required confirmation text is sent automatically. Use only on owned targets.",
+};
+
+const DEMO_DECISIONS: Array<{ kind: string; status: "pending"; required_text?: string; options?: Array<{ name: string; compatible: boolean }> }> = [
+  { kind: "goal_select", status: "pending", options: [{ name: "enumerate-then-report", compatible: true }] },
+  { kind: "start_confirm", status: "pending" },
+  { kind: "tool_approval", status: "pending", required_text: "I UNDERSTAND THE RISK" },
+];
+
+function demoAnswer(d: typeof DEMO_DECISIONS[number], mode: PermissionMode): string {
+  return autoAnswerFor(d as DecisionListRow, mode) ?? "\u2014 waits for operator";
+}
 
 export function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
   const runs = useRuns(50, 0);
+  const liveModels = useLiveModels();
+  const { mode, setMode } = usePermissionMode();
   const activeRun = runs.data?.runs.find((r) => isActiveState(r.state));
+  const [showHelp, setShowHelp] = useState(false);
 
   const onSignOut = () => {
     clearStoredToken();
@@ -26,19 +61,24 @@ export function Layout() {
     window.location.reload();
   };
 
+  const ollamaOnline = (liveModels.data?.models.length ?? 0) > 0 && !liveModels.data?.error;
+
   return (
     <div className="flex min-h-dvh flex-col bg-background text-foreground md:flex-row">
       <aside className="hidden w-56 shrink-0 border-r bg-card/30 md:flex md:flex-col">
-        <div className="flex items-center gap-2 border-b px-4 py-4">
-          <Terminal className="h-4 w-4 text-muted-foreground" />
-          <div className="flex flex-col">
-            <span className="text-sm font-semibold leading-tight">NetAttackAI</span>
+        <div className="relative flex items-center gap-2 overflow-hidden border-b px-4 py-4">
+          <div className="absolute inset-0 bg-grid-sm bg-radial-fade opacity-40" aria-hidden />
+          <Terminal className="relative h-5 w-5 text-primary" />
+          <div className="relative flex flex-col">
+            <span className="text-sm font-semibold leading-tight">
+              <span className="text-gradient-primary">NetAttack</span>
+              <span className="text-foreground">AI</span>
+            </span>
             <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
               v{__APP_VERSION__} beta · Local console
             </span>
           </div>
         </div>
-        <LiveStatus />
         <nav className="flex flex-1 flex-col gap-1 p-2" aria-label="Primary">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
@@ -51,7 +91,7 @@ export function Layout() {
                   cn(
                     "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
                     isActive
-                      ? "bg-secondary text-secondary-foreground"
+                      ? "bg-primary/10 text-primary"
                       : "text-muted-foreground hover:bg-accent hover:text-foreground",
                   )
                 }
@@ -71,7 +111,46 @@ export function Layout() {
             </NavLink>
           )}
         </nav>
-        <div className="border-t p-2">
+        <div className="space-y-2 border-t p-2">
+          <div className="space-y-1.5 px-1">
+            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+              <ShieldAlert className="h-3 w-3" />
+              <span>Permission mode</span>
+              <button
+                type="button"
+                onClick={() => setShowHelp(true)}
+                aria-label="What does Permission mode do?"
+                className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-muted-foreground/50 text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
+              >
+                <HelpCircle className="h-3 w-3" />
+              </button>
+            </div>
+            <SegmentedControl
+              value={mode}
+              onChange={(v) => setMode(v as PermissionMode)}
+              options={PERMISSION_OPTIONS}
+            />
+            <p className="text-[10px] leading-tight text-muted-foreground">
+              {mode === "read_only"
+                ? "Decisions wait for you."
+                : mode === "approve"
+                  ? "Auto-approves non-destructive decisions."
+                  : "Auto-approves everything, including destructive."}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 rounded-md px-3 py-1.5 text-xs text-muted-foreground">
+            <span className="relative flex h-2 w-2">
+              {ollamaOnline ? (
+                <>
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/70" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+                </>
+              ) : (
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-muted-foreground/50" />
+              )}
+            </span>
+            <span>Ollama {ollamaOnline ? "online" : "offline"}</span>
+          </div>
           <Button
             variant="ghost"
             size="sm"
@@ -86,10 +165,10 @@ export function Layout() {
 
       <header className="flex items-center justify-between gap-3 border-b bg-card/30 px-4 py-2 md:hidden">
         <div className="flex items-center gap-2">
-          <Terminal className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm font-semibold">NetAttackAI</span>
-          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-            v{__APP_VERSION__} beta
+          <Terminal className="h-4 w-4 text-primary" />
+          <span className="text-sm font-semibold">
+            <span className="text-gradient-primary">NetAttack</span>
+            <span className="text-foreground">AI</span>
           </span>
         </div>
         <nav className="flex items-center gap-1" aria-label="Primary mobile">
@@ -104,7 +183,7 @@ export function Layout() {
                   cn(
                     "flex h-9 w-9 items-center justify-center rounded-md transition-colors",
                     isActive
-                      ? "bg-secondary text-secondary-foreground"
+                      ? "bg-primary/10 text-primary"
                       : "text-muted-foreground hover:bg-accent hover:text-foreground",
                   )
                 }
@@ -116,20 +195,57 @@ export function Layout() {
           })}
           <button
             type="button"
-            className="flex h-9 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className={cn(
+              "flex h-9 items-center justify-center rounded-md px-2 text-[10px] font-medium uppercase tracking-wide transition-colors",
+              mode === "read_only"
+                ? "bg-muted/40 text-muted-foreground"
+                : mode === "approve"
+                  ? "bg-yellow-500/15 text-yellow-300"
+                  : "bg-destructive/15 text-red-300",
+            )}
+            onClick={() => {
+              const next: PermissionMode =
+                mode === "read_only" ? "approve" : mode === "approve" ? "full_access" : "read_only";
+              setMode(next);
+            }}
+            aria-label={`Permission mode: ${mode}`}
+            title={`Permission mode: ${mode} (tap to cycle)`}
+          >
+            {mode === "read_only" ? "R" : mode === "approve" ? "A" : "F"}
+          </button>
+          <button
+            type="button"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             onClick={onSignOut}
-            aria-label="Clear token (sign out)"
+            aria-label="Clear token"
           >
             <Cpu className="h-4 w-4" />
-            <span>Clear</span>
           </button>
         </nav>
       </header>
 
-      <LiveStatus compact />
       <main className="flex min-w-0 flex-1 flex-col">
+        {mode !== "read_only" && (
+          <div
+            className={cn(
+              "flex items-center gap-2 px-4 py-1.5 text-xs",
+              mode === "approve"
+                ? "border-b border-yellow-500/30 bg-yellow-500/10 text-yellow-300"
+                : "border-b border-destructive/40 bg-destructive/10 text-red-200",
+            )}
+            role="status"
+          >
+            <ShieldAlert className="h-3.5 w-3.5" />
+            <span>
+              {mode === "approve"
+                ? "Approve mode: non-destructive decisions auto-answered."
+                : "Full-access mode: destructive decisions will be auto-confirmed."}
+            </span>
+          </div>
+        )}
         {activeRun && (
-          <div className="flex items-center gap-2 border-b border-yellow-500/30 bg-yellow-500/10 px-4 py-2 text-sm text-yellow-300">
+          <div className="relative flex items-center gap-2 overflow-hidden border-b border-yellow-500/30 bg-yellow-500/10 px-4 py-2 text-sm text-yellow-300">
+            <span className="absolute inset-y-0 left-0 w-px animate-scan bg-gradient-to-b from-transparent via-yellow-400/60 to-transparent" aria-hidden />
             <Activity className="h-4 w-4 animate-pulse" />
             <span className="truncate">An active run is in progress.</span>
             <NavLink to={`/runs/${activeRun.id}`} className="ml-auto underline-offset-4 hover:underline">
@@ -145,20 +261,95 @@ export function Layout() {
             <Eye className="h-3 w-3" />
             Loopback only. Run only against assets you own or are authorized to test.
           </span>
-          <span className="inline-flex items-center gap-2">
-            <span className="opacity-70">v{__APP_VERSION__} beta</span>
           <a
-            href="https://github.com/braydos-h/NetAttackAi/issues"
+            href="https://github.com/braydos-h/NetAttackAi"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 hover:text-foreground"
           >
             <Github className="h-3 w-3" />
-            Feedback
+            GitHub
           </a>
-          </span>
         </footer>
       </main>
+
+      <Dialog open={showHelp} onOpenChange={setShowHelp}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <ShieldAlert className="h-5 w-5 text-primary" />
+              Permission mode
+            </DialogTitle>
+            <DialogDescription className="text-sm">
+              Controls how the agent answers operator decisions when you're not watching. Three levels, one lock.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-5">
+            <div className="grid gap-2.5 sm:grid-cols-3">
+              {(Object.keys(MODE_TITLES) as PermissionMode[]).map((m) => (
+                <div
+                  key={m}
+                  className={cn(
+                    "rounded-lg border p-3.5",
+                    mode === m ? "border-primary/60 bg-primary/5 ring-1 ring-primary/30" : "border-border bg-card/40",
+                  )}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold">{MODE_TITLES[m]}</span>
+                    {mode === m && (
+                      <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary">
+                        active
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{MODE_BLURB[m]}</p>
+                </div>
+              ))}
+            </div>
+
+            <div>
+              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Demo — what the agent sends for each decision kind
+              </div>
+              <div className="overflow-hidden rounded-lg border">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2.5 font-medium">Decision</th>
+                      <th className="px-3 py-2.5 font-medium">Read-only</th>
+                      <th className="px-3 py-2.5 font-medium">Approve</th>
+                      <th className="px-3 py-2.5 font-medium">Full access</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {DEMO_DECISIONS.map((d) => (
+                      <tr key={d.kind} className="border-t">
+                        <td className="px-3 py-2.5 font-mono text-foreground">{d.kind}</td>
+                        <td className="px-3 py-2.5 text-muted-foreground">{demoAnswer(d, "read_only")}</td>
+                        <td className="px-3 py-2.5 text-yellow-300">{demoAnswer(d, "approve")}</td>
+                        <td className="px-3 py-2.5 text-red-300">{demoAnswer(d, "full_access")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                <span className="text-yellow-300">Approve</span> leaves the destructive
+                <span className="font-mono"> tool_approval</span> to you; <span className="text-red-300">Full access</span>{" "}
+                sends the exact <span className="font-mono">required_text</span> for it.
+              </p>
+            </div>
+
+            <DialogDescription asChild>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                The target-IP allowlist lock still applies in every mode — nothing here escapes the allowlist configured for
+                this run.
+              </p>
+            </DialogDescription>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

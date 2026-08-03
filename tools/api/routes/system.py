@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
+import re
+import shutil
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from tools.api.auth import BearerAuth
 from tools.api.errors import sanitize
@@ -285,17 +288,22 @@ async def get_config_schema(auth: str = Depends(_require_auth)) -> dict[str, Any
 
 @router.get("/models/live")
 async def list_live_models(auth: str = Depends(_require_auth)) -> dict[str, Any]:
-    """List models actually installed in the local Ollama instance.
+    """List models actually installed in the configured Ollama backend.
 
-    Hits ``ollama.host`` ``/api/tags`` live each call. Falls back to the
-    configured registry with a 503 when Ollama is unreachable.
+    Hits ``ollama.host`` ``/api/tags`` live each call (cloud host requires
+    ``Authorization: Bearer $OLLAMA_API_KEY``). Falls back to the configured
+    registry with a 503 when the backend is unreachable.
     """
-    ollama_host = _CONFIG.get("ollama", {}).get("host", "http://localhost:11434")
+    ollama_host = _CONFIG.get("ollama", {}).get("host", "https://api.ollama.com")
     registry = _CONFIG.get("models", {}).get("registry", {})
     try:
         import httpx
         from fastapi import Response
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        headers = {}
+        api_key = (os.environ.get("OLLAMA_API_KEY", "") or "").strip()
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        async with httpx.AsyncClient(timeout=5.0, headers=headers) as client:
             resp = await client.get(f"{ollama_host}/api/tags")
             resp.raise_for_status()
             data = resp.json()
@@ -314,7 +322,6 @@ async def list_live_models(auth: str = Depends(_require_auth)) -> dict[str, Any]
 @router.get("/skills/{name}")
 async def get_skill(name: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
     """Return a single runtime skill's sanitized body + sections + references."""
-    from fastapi import HTTPException
     try:
         from tools.skill_registry_cache import get_registry
         reg = get_registry(_CONFIG)
@@ -338,3 +345,185 @@ async def get_skill(name: str, auth: str = Depends(_require_auth)) -> dict[str, 
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Could not load skill: {exc}")
+
+
+# ── Skill install / remove (write path) ──────────────────────────────────────
+# Skills are advisory-only markdown guidance imported into the LLM system prompt.
+# Install writes a new SKILL.md under the first configured skills.roots dir;
+# remove deletes the skill's directory. Both paths guard against path traversal
+# (regex on the name + resolve()-based containment under the chosen root) and
+# refuse to touch plugin-contributed skill dirs (only configured roots are
+# writable). parse_skill_file validates on write so malformed skills never land
+# on disk; the registry cache is cleared so the next read reloads from disk.
+
+_SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,63}$")
+
+
+def _skill_writable_root() -> Path:
+    """Return the first configured skills.roots entry, resolved against the repo base.
+
+    The repo base is the config file's parent dir (matches how load_config and
+    skill_registry_cache resolve relative roots). Raises 400 if no root is
+    configured or it is not a writable directory.
+    """
+    from tools.api.errors import APIError
+
+    skills_cfg = _CONFIG.get("skills", {}) or {}
+    roots = skills_cfg.get("roots") or ["skills-to-add"]
+    if not isinstance(roots, list) or not roots:
+        raise APIError("invalid_config", "skills.roots is empty.", status_code=400)
+    first = Path(str(roots[0]))
+    if not first.is_absolute():
+        first = _CONFIG_PATH.parent / first
+    try:
+        first = first.resolve()
+    except OSError as exc:
+        raise APIError("invalid_config", f"Cannot resolve skills root: {exc}", status_code=400)
+    if not first.is_dir():
+        raise APIError("invalid_config", f"Skills root is not a directory: {first}", status_code=400)
+    return first
+
+
+def _validate_skill_name(name: str) -> str:
+    from tools.api.errors import APIError
+
+    cleaned = str(name or "").strip()
+    if not _SKILL_NAME_RE.match(cleaned):
+        raise APIError(
+            "invalid_skill_name",
+            "Skill name must be 2-64 chars, lowercase alphanumeric and hyphens, starting with a letter or digit.",
+            status_code=400,
+        )
+    return cleaned
+
+
+def _resolve_skill_dir(name: str, root: Path) -> Path:
+    """Resolve the skill directory for a name and confirm it stays under root."""
+    from tools.api.errors import APIError
+
+    target = (root / name).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        raise APIError("invalid_skill_name", "Skill name escapes the skills root.", status_code=400)
+    return target
+
+
+def _plugin_skill_dirs() -> set[str]:
+    """Return the set of plugin-contributed skill dir paths (read-only, never writable)."""
+    try:
+        from tools.plugins import PLUGIN_REGISTRY
+        return {str(p) for p in PLUGIN_REGISTRY.skill_dirs}
+    except Exception:
+        return set()
+
+
+@router.post("/skills")
+async def install_skill(request: Request, auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Install a new skill by writing SKILL.md under the writable skills root.
+
+    Body: {name: str, markdown: str}. The name is validated and the markdown is
+    parsed on write -- a malformed skill (bad front matter, empty name, etc.)
+    is rejected and the created directory is cleaned up so nothing broken
+    lands on disk. The registry cache is cleared so the next /skills read
+    reflects the new file.
+    """
+    from tools.api.errors import APIError
+    from tools.skill_registry import parse_skill_file
+    from tools.skill_registry_cache import clear_cache
+
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise APIError("invalid_body", "Expected a JSON object.", status_code=400)
+    name = _validate_skill_name(str(body.get("name") or ""))
+    markdown = body.get("markdown")
+    if not isinstance(markdown, str) or not markdown.strip():
+        raise APIError("invalid_body", "markdown must be a non-empty string.", status_code=400)
+
+    root = _skill_writable_root()
+    target_dir = _resolve_skill_dir(name, root)
+    if target_dir.exists():
+        raise APIError("skill_exists", f"Skill '{name}' already exists.", status_code=409)
+
+    skill_file = target_dir / "SKILL.md"
+    tmp_file = target_dir.with_name(f".{target_dir.name}.tmp")
+    created_dir = False
+    try:
+        target_dir.mkdir(parents=True)
+        created_dir = True
+        # Write via temp file then atomic replace, mirroring config write style.
+        tmp_file.write_text(markdown, encoding="utf-8")
+        os.replace(tmp_file, skill_file)
+        # Validate on write: parse the file we just wrote. On failure, clean up.
+        try:
+            parsed = parse_skill_file(skill_file, root=root)
+        except Exception as exc:
+            raise APIError("invalid_skill", f"Skill markdown is invalid: {exc}", status_code=400)
+        # Enforce dir name == front-matter name so the registry (which keys on
+        # the front-matter name) indexes the skill under the same name the
+        # client used -- otherwise DELETE /skills/{name} and config toggles
+        # would target the wrong identifier.
+        if parsed.name != name:
+            raise APIError(
+                "invalid_skill",
+                f"Front-matter name '{parsed.name}' does not match the requested name '{name}'.",
+                status_code=400,
+            )
+        clear_cache()
+        return {
+            "name": parsed.name,
+            "description": parsed.metadata.description,
+            "tags": list(parsed.metadata.tags or []),
+        }
+    except APIError:
+        # Clean up any partial state on validation/config errors.
+        if created_dir and target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
+        if tmp_file.exists():
+            try:
+                tmp_file.unlink()
+            except OSError:
+                pass
+        raise
+    except Exception as exc:
+        if created_dir and target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
+        if tmp_file.exists():
+            try:
+                tmp_file.unlink()
+            except OSError:
+                pass
+        raise APIError("install_failed", f"Could not install skill: {exc}", status_code=500)
+
+
+@router.delete("/skills/{name}")
+async def remove_skill(name: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Delete a skill's directory from the writable skills root.
+
+    Refuses to delete skills that resolve to plugin-contributed roots (those
+    are read-only). Path traversal is blocked by _resolve_skill_dir's
+    containment check. Clears the registry cache so the next /skills read
+    reflects the deletion.
+    """
+    from tools.api.errors import APIError
+    from tools.skill_registry_cache import clear_cache
+
+    cleaned = _validate_skill_name(name)
+    root = _skill_writable_root()
+    target_dir = _resolve_skill_dir(cleaned, root)
+    if not target_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Skill '{cleaned}' not found")
+    # Reject deletion of plugin-contributed skill dirs (defence in depth).
+    plugin_dirs = _plugin_skill_dirs()
+    if any(str(target_dir).startswith(pd) for pd in plugin_dirs):
+        raise APIError(
+            "skill_not_writable",
+            "Cannot delete skills from plugin-contributed directories.",
+            status_code=400,
+        )
+    try:
+        shutil.rmtree(target_dir)
+    except OSError as exc:
+        raise APIError("remove_failed", f"Could not delete skill: {exc}", status_code=500)
+    clear_cache()
+    return {"name": cleaned, "deleted": True}

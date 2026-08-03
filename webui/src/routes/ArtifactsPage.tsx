@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ChevronLeft, FileText, Loader2, RefreshCw } from "lucide-react";
+import { ChevronLeft, FileText, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { ArtifactViewer } from "@/components/ArtifactViewer";
+import { SkeletonRows, Spinner } from "@/components/Loading";
 import { useArtifacts, useAudit, useRunLog } from "@/api/hooks";
 import { ApiError } from "@/api/client";
 import { formatBytes } from "@/lib/utils";
@@ -64,7 +65,7 @@ export function ArtifactsPage() {
 
         <TabsContent value="artifacts" className="grid gap-4 md:grid-cols-[260px_minmax(0,1fr)]">
           <div className="space-y-1">
-            {artifacts.isLoading && <div className="text-sm text-muted-foreground">Loading...</div>}
+            {artifacts.isLoading && <SkeletonRows count={4} />}
             {artifacts.error && <div className="text-sm text-destructive">Failed to load artifacts.</div>}
             {!artifacts.isLoading && artifactNames.length === 0 && (
               <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
@@ -107,23 +108,27 @@ export function ArtifactsPage() {
 
         <TabsContent value="audit" className="space-y-3">
           <div className={cn("rounded-md border p-3 text-sm", audit.data?.chain_valid ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-destructive/40 bg-destructive/10 text-red-200")}>
-            <div className="text-xs uppercase tracking-wide">{audit.data?.chain_valid ? "Chain valid" : "Chain invalid"}</div>
-            <div className="text-xs">{audit.data?.chain_reason ?? ""}</div>
+            <div className="flex items-center gap-2 text-xs uppercase tracking-wide">
+              <Badge variant={audit.data?.chain_valid ? "success" : "danger"}>
+                {audit.data?.chain_valid ? "Chain valid" : "Chain invalid"}
+              </Badge>
+            </div>
+            <div className="mt-1 text-xs">{audit.data?.chain_reason ?? ""}</div>
           </div>
           <div className="overflow-x-auto rounded-md border">
             <table className="w-full border-collapse text-xs">
-              <thead className="bg-muted/50 text-muted-foreground">
+              <thead>
                 <tr>
                   {(audit.data?.records[0] ? Object.keys(audit.data.records[0]).slice(0, 6) : ["record"]).map((k) => (
-                    <th key={k} className="p-2 text-left">{k}</th>
+                    <th key={k}>{k}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {(audit.data?.records ?? []).map((rec, i) => (
-                  <tr key={i} className="border-t">
+                  <tr key={i}>
                     {(audit.data?.records[0] ? Object.keys(audit.data.records[0]).slice(0, 6) : ["record"]).map((k) => (
-                      <td key={k} className="max-w-xs truncate p-2 font-mono" title={String(rec[k] ?? "")}>
+                      <td key={k} className="max-w-xs truncate font-mono" title={String(rec[k] ?? "")}>
                         {String(rec[k] ?? "")}
                       </td>
                     ))}
@@ -225,7 +230,7 @@ function LogsPanel({ runId, attemptCandidates }: LogsPanelProps) {
             <RefreshCw className={cn("h-3.5 w-3.5", log.isFetching && "animate-spin")} />
           </Button>
         </div>
-        {log.isLoading && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading log...</div>}
+        {log.isLoading && <Spinner label="Loading log..." />}
         {log.error && (
           <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-red-200">
             {log.error instanceof ApiError ? log.error.message : "Failed to load log."}

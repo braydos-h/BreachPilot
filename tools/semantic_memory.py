@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 from typing import Any
 
 import numpy as np
@@ -24,7 +25,7 @@ class SemanticMemoryManager:
     def __init__(
         self,
         db: DatabaseManager,
-        ollama_host: str = "http://localhost:11434",
+        ollama_host: str = "https://api.ollama.com",
         embedding_model: str = "nomic-embed-text",
     ) -> None:
         self._db = db
@@ -69,6 +70,11 @@ class SemanticMemoryManager:
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
+            # ponytail: cloud embed host needs the bearer token; local daemon
+            # ignores it. Send unconditionally — one code path for both.
+            _api_key = (os.environ.get("OLLAMA_API_KEY", "") or "").strip()
+            if _api_key:
+                req.add_header("Authorization", f"Bearer {_api_key}")
 
             with urllib.request.urlopen(req, timeout=30) as resp:
                 data = json.loads(resp.read().decode("utf-8"))

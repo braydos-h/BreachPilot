@@ -145,11 +145,11 @@ function OnboardingCard({ entries, onDone }: OnboardingCardProps) {
                   <div className="flex items-center gap-2">
                     <Label htmlFor={name} className="font-mono text-xs">{name}</Label>
                     {status === "configured" ? (
-                      <Badge variant="outline" className="border-emerald-500/40 text-emerald-300">
-                        <ShieldCheck className="mr-1 h-3 w-3" />configured
+                      <Badge variant="success">
+                        <ShieldCheck className="h-3 w-3" />configured
                       </Badge>
                     ) : (
-                      <Badge variant="outline" className="text-muted-foreground">missing</Badge>
+                      <Badge variant="muted">missing</Badge>
                     )}
                   </div>
                   <Input

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   AlertTriangle,
@@ -32,8 +32,10 @@ import { EventList } from "@/components/EventList";
 import { DecisionCard } from "@/components/DecisionCard";
 import { ReconAssessmentCard } from "@/components/ReconAssessmentCard";
 import { SessionSummaryCard } from "@/components/SessionSummaryCard";
+import { Skeleton, SkeletonCards, SkeletonRows, Spinner } from "@/components/Loading";
 import { useRunEvents } from "@/api/ws";
 import {
+  useAnswerDecision,
   useAudit,
   useCallTool,
   useCancelRun,
@@ -47,6 +49,7 @@ import {
 } from "@/api/hooks";
 import { ApiError } from "@/api/client";
 import { isActiveState, isTerminalState, type RunState, type ReconAssessment, type RunResult, type RunResultTelemetry } from "@/api/types";
+import { autoAnswerFor, usePermissionMode } from "@/lib/permissionMode";
 
 export function RunPage() {
   const { runId } = useParams<{ runId: string }>();
@@ -95,6 +98,30 @@ export function RunPage() {
   const active = isActiveState(currentState as RunState);
   const terminal = isTerminalState(currentState as RunState);
 
+  // Permission-mode auto-answer loop. For each pending decision the armed
+  // mode covers, submit the resolved answer via useAnswerDecision. Tracked in
+  // a ref set so a slow mutate + re-render doesn't double-submit.
+  const { mode } = usePermissionMode();
+  const answerDecision = useAnswerDecision(runId ?? "");
+  const inFlight = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (mode === "read_only") return;
+    for (const d of pendingDecisions) {
+      if (inFlight.current.has(d.id)) continue;
+      const ans = autoAnswerFor(d, mode);
+      if (ans === null) continue;
+      inFlight.current.add(d.id);
+      answerDecision.mutate(
+        { decisionId: d.id, answer: ans },
+        {
+          onError: () => {
+            inFlight.current.delete(d.id);
+          },
+        },
+      );
+    }
+  }, [mode, pendingDecisions, answerDecision]);
+
   const liveTelemetry = useMemo<RunResultTelemetry | null>(() => {
     for (let i = events.events.length - 1; i >= 0; i--) {
       const ev = events.events[i];
@@ -107,7 +134,23 @@ export function RunPage() {
   }, [events.events, run.data?.result]);
 
   if (run.isLoading) {
-    return <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading run...</div>;
+    return (
+      <div className="space-y-4 p-4 md:p-6" role="status" aria-live="polite">
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-4 w-40" />
+          <Skeleton className="h-5 w-16 rounded-full" />
+        </div>
+        <div className="flex flex-wrap gap-x-3 gap-y-1">
+          <Skeleton className="h-3 w-32" />
+          <Skeleton className="h-3 w-24" />
+          <Skeleton className="h-3 w-28" />
+        </div>
+        <div className="grid flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <Skeleton className="h-[40vh] rounded-md" />
+          <SkeletonCards count={2} />
+        </div>
+      </div>
+    );
   }
   if (run.error || !run.data) {
     return <div className="p-6 text-sm text-destructive">Run not found.</div>;
@@ -122,7 +165,9 @@ export function RunPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <h1 className="font-mono text-sm">{run.data.id}</h1>
+            <h1 className="font-mono text-sm">
+            <span className="text-gradient-primary">{run.data.id}</span>
+          </h1>
             <CopyButton value={run.data.id} size="icon" label="Copy ID" />
             {currentState && <StatusBadge state={currentState as RunState} />}
             <Badge variant="outline" className="text-xs">{transportLabel}</Badge>
@@ -204,16 +249,21 @@ export function RunPage() {
           <EventList events={events.events} decisions={mergedDecisions} runId={run.data.id} className="h-full min-h-[40vh]" />
         </div>
         <div className="space-y-3">
-          <Card>
+          <Card className={cn(pendingDecisions.length > 0 && "border-primary/40 glow-primary")}>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Pending decisions</CardTitle>
+              <CardTitle className="flex items-center gap-2 text-sm">
+                Pending decisions
+                {pendingDecisions.length > 0 && (
+                  <Badge variant="info" className="tabular-nums">{pendingDecisions.length}</Badge>
+                )}
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
               {pendingDecisions.length === 0 ? (
                 <p className="text-xs text-muted-foreground">No pending input.</p>
               ) : (
                 pendingDecisions.map((d) => (
-                  <DecisionCard key={d.id} decision={d} runId={run.data.id} />
+                  <DecisionCard key={d.id} decision={d} runId={run.data.id} autoAnswering={inFlight.current.has(d.id) && mode !== "read_only"} />
                 ))
               )}
             </CardContent>
@@ -256,7 +306,7 @@ export function RunPage() {
           />
         </TabsContent>
         <TabsContent value="summary" className="space-y-3">
-          <SessionSummaryCard result={(run.data.result ?? {}) as RunResult} />
+          <SessionSummaryCard result={(run.data.result ?? {}) as RunResult} title={run.data.title} />
         </TabsContent>
         <TabsContent value="tools" className="space-y-3">
           <ManualToolPanel
@@ -370,7 +420,7 @@ function ManualToolPanel({
   };
 
   if (isLoading) {
-    return <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading tools...</div>;
+    return <Spinner label="Loading tools..." />;
   }
   if (tools.length === 0) {
     return (
@@ -444,31 +494,35 @@ interface AuditViewProps {
 }
 
 function AuditView({ loading, error, records, chainValid, chainReason }: AuditViewProps) {
-  if (loading) return <div className="text-sm text-muted-foreground">Loading audit...</div>;
+  if (loading) return <SkeletonRows count={3} />;
   if (error) return <div className="text-sm text-destructive">Failed to load audit.</div>;
   return (
     <div className="space-y-3">
       <div className={cn("rounded-md border p-3 text-sm", chainValid ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-destructive/40 bg-destructive/10 text-red-200")}>
-        <div className="text-xs uppercase tracking-wide">{chainValid ? "Chain valid" : "Chain invalid"}</div>
-        <div className="text-xs">{chainReason}</div>
+        <div className="flex items-center gap-2">
+          <Badge variant={chainValid ? "success" : "danger"}>
+            {chainValid ? "Chain valid" : "Chain invalid"}
+          </Badge>
+        </div>
+        <div className="mt-1 text-xs">{chainReason}</div>
       </div>
       {records.length === 0 ? (
         <p className="text-sm text-muted-foreground">No audit records.</p>
       ) : (
         <div className="overflow-x-auto rounded-md border">
           <table className="w-full border-collapse text-xs">
-            <thead className="bg-muted/50 text-muted-foreground">
+            <thead>
               <tr>
                 {Object.keys(records[0]).slice(0, 6).map((k) => (
-                  <th key={k} className="p-2 text-left">{k}</th>
+                  <th key={k}>{k}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {records.map((rec, i) => (
-                <tr key={i} className="border-t">
+                <tr key={i}>
                   {Object.keys(records[0]).slice(0, 6).map((k) => (
-                    <td key={k} className="max-w-xs truncate p-2 font-mono" title={String(rec[k] ?? "")}>
+                    <td key={k} className="max-w-xs truncate font-mono" title={String(rec[k] ?? "")}>
                       {String(rec[k] ?? "")}
                     </td>
                   ))}
@@ -490,7 +544,7 @@ interface StateViewProps {
 }
 
 function StateView({ label, loading, error, data }: StateViewProps) {
-  if (loading) return <div className="text-sm text-muted-foreground">Loading {label}...</div>;
+  if (loading) return <Skeleton className="h-40 rounded-md" />;
   if (error) {
     const msg = error instanceof ApiError ? (error.isNotFound ? "State unavailable for this run." : error.message) : "Failed to load state.";
     return <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">{msg}</div>;
@@ -540,7 +594,7 @@ function ReconTab({ fetchArtifact }: ReconTabProps) {
   };
 
   if (loading) {
-    return <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading recon...</div>;
+    return <Spinner label="Loading recon..." />;
   }
   if (assessment) {
     return <ReconAssessmentCard assessment={assessment} />;

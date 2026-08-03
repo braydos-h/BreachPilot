@@ -485,7 +485,8 @@ When `yes=true`, no `decision` is returned and `state` is `"queued"` (execution 
 
 **Auth:** bearer.
 
-List run history (newest first).
+List run history. Each row includes an AI-generated `title` (empty string when
+the titler hasn't run yet — e.g. an active or cancelled run).
 
 **Query params:**
 
@@ -493,15 +494,41 @@ List run history (newest first).
 |-------|------|---------|-------|
 | `limit` | int | 50 | 1–200 |
 | `offset` | int | 0 | ≥ 0 |
+| `sort` | string | `created_desc` | one of `created_desc`, `created_asc`, `title_asc`, `title_desc`, `state_asc`, `state_desc` |
 
 **Response:** `200`
 ```json
 {
   "runs": [
-    {"id": "run-...", "state": "completed", "created_at": "2026-07-31T..."}
-  ]
+    {"id": "run-...", "state": "completed", "created_at": "2026-07-31T...", "title": "Recon scan of 10.0.0.50"}
+  ],
+  "sort": "created_desc"
 }
 ```
+
+---
+
+### `POST /runs/{run_id}/title`
+
+**Auth:** bearer.
+
+Set or AI-regenerate a run's title. The titler model is `gemma4:31b-cloud`
+(routed through the same Ollama host/API key as the main model).
+
+**Body:**
+
+| Field | Type | Default | Meaning |
+|-------|------|---------|---------|
+| `title` | string \| null | null | Explicit title (max 200 chars). Takes precedence over `regen`. |
+| `regen` | bool | false | If true and `title` is null/empty, ask the titler model for a fresh title from the run's result/request. |
+
+**Response:** `200`
+```json
+{"run_id": "run-...", "title": "Recon scan of 10.0.0.50", "regenerated": true}
+```
+
+**Errors:** `404` (run not found). A titler failure (ollama unreachable, empty
+response) returns `200` with the current title unchanged — never `5xx`.
 
 ---
 

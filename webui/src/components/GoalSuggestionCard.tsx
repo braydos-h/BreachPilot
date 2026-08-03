@@ -23,11 +23,11 @@ function ratingBar(rating: number): string {
   return "bg-red-500";
 }
 
-function riskBadgeClass(risk?: string): string {
-  if (risk === "safe") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
-  if (risk === "gated") return "border-yellow-500/40 bg-yellow-500/10 text-yellow-300";
-  if (risk === "high") return "border-red-500/40 bg-red-500/10 text-red-300";
-  return "border-muted-foreground/30 text-muted-foreground";
+function riskVariant(risk?: string): "success" | "warn" | "danger" | "muted" {
+  if (risk === "safe") return "success";
+  if (risk === "gated") return "warn";
+  if (risk === "high") return "danger";
+  return "muted";
 }
 
 export function GoalSuggestionCard({
@@ -57,18 +57,18 @@ export function GoalSuggestionCard({
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex flex-wrap items-center gap-1.5">
           {isAi && (
-            <Badge variant="outline" className="gap-1 border-violet-500/40 bg-violet-500/10 text-violet-300">
+            <Badge variant="violet">
               <Sparkles className="h-3 w-3" /> AI
             </Badge>
           )}
           <span className="text-sm font-medium">{goal.name}</span>
           {goal.risk_requirement && (
-            <Badge variant="outline" className={cn("text-[10px]", riskBadgeClass(goal.risk_requirement))}>
+            <Badge variant={riskVariant(goal.risk_requirement)} className="text-[10px]">
               {goal.risk_requirement}
             </Badge>
           )}
           {!compatible && (
-            <Badge variant="outline" className="gap-1 border-red-500/40 bg-red-500/10 text-red-300">
+            <Badge variant="danger">
               <Lock className="h-3 w-3" /> BLOCKED
             </Badge>
           )}

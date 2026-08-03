@@ -9,6 +9,7 @@ import { NewRunPage } from "@/routes/NewRunPage";
 import { RunPage } from "@/routes/RunPage";
 import { ArtifactsPage } from "@/routes/ArtifactsPage";
 import { LootPage } from "@/routes/LootPage";
+import { SkillsPage } from "@/routes/SkillsPage";
 import { SystemPage } from "@/routes/SystemPage";
 import { Toaster } from "@/components/Toaster";
 
@@ -41,6 +42,7 @@ export default function App() {
                 <Route path="/runs/:runId" element={<RunPage />} />
                 <Route path="/runs/:runId/artifacts" element={<ArtifactsPage />} />
                 <Route path="/runs/:runId/loot" element={<LootPage />} />
+                <Route path="/skills" element={<SkillsPage />} />
                 <Route path="/system" element={<SystemPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>

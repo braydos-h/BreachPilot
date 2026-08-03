@@ -143,9 +143,19 @@ def _check_optional_tools(config: dict[str, Any] | None = None) -> dict[str, Any
 
 
 def _check_ollama(host: str, timeout: float = 3.0) -> dict[str, Any]:
+    """Ping ``/api/tags`` to confirm the Ollama backend (local or cloud) is up.
+
+    Cloud hosts (``https://api.ollama.com``) require ``Authorization: Bearer
+    $OLLAMA_API_KEY`` — without it the request 401s and is reported unreachable.
+    Local daemons ignore the header, so sending it unconditionally is safe.
+    """
     url = f"{host.rstrip('/')}/api/tags"
+    req = urllib.request.Request(url)
+    api_key = (os.environ.get("OLLAMA_API_KEY", "") or "").strip()
+    if api_key:
+        req.add_header("Authorization", f"Bearer {api_key}")
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         models = [m.get("name") for m in data.get("models", [])]
         return {"name": "ollama_reachable", "ok": True, "host": host, "models": models}
@@ -167,8 +177,12 @@ def _check_models(host: str, configured: list[str], timeout: float = 3.0) -> dic
     ``name:tag`` form or the untagged base ``name``.
     """
     url = f"{host.rstrip('/')}/api/tags"
+    req = urllib.request.Request(url)
+    api_key = (os.environ.get("OLLAMA_API_KEY", "") or "").strip()
+    if api_key:
+        req.add_header("Authorization", f"Bearer {api_key}")
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except Exception as exc:
         return {"name": "model_registry", "ok": False, "error": str(exc)}
@@ -222,6 +236,9 @@ def _ping_cloud_model(host: str, spec: str, timeout: float = 45.0) -> bool:
     req = urllib.request.Request(
         url, data=body, headers={"Content-Type": "application/json"}, method="POST"
     )
+    api_key = (os.environ.get("OLLAMA_API_KEY", "") or "").strip()
+    if api_key:
+        req.add_header("Authorization", f"Bearer {api_key}")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8") or "{}")
@@ -300,7 +317,7 @@ def run_doctor(config_path: Path) -> int:
                 config = yaml.safe_load(handle) or {}
         except Exception as exc:
             print(f"  [!] Could not load {config_path}: {exc}")
-    ollama_host = (config.get("ollama") or {}).get("host", "http://localhost:11434")
+    ollama_host = (config.get("ollama") or {}).get("host", "https://api.ollama.com")
     models_cfg = config.get("models", {}).get("registry", {}) or {}
     # Pass the registry *values* (actual model specs like "kimi-k2.6:cloud"),
     # not the alias keys ("kimi") -- see _check_models docstring.
@@ -384,7 +401,7 @@ def run_doctor(config_path: Path) -> int:
                 for spec in local_missing:
                     print(f"        -> pull missing local model: ollama pull {spec}")
         if name == "ollama_reachable" and not c.get("ok"):
-            print("        -> start Ollama or update ollama.host in config.yaml")
+            print("        -> start Ollama, set OLLAMA_API_KEY, or update ollama.host in config.yaml")
         # Informational drill-downs (these checks never fail)
         if name == "linux_privilege" and c.get("note"):
             print(f"        -> {c['note']}")

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Loader2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { CopyButton } from "@/components/CopyButton";
+import { Spinner } from "@/components/Loading";
 import { useFetchArtifactBlob } from "@/api/hooks";
 import { ApiError } from "@/api/client";
 
@@ -65,12 +65,7 @@ export function ArtifactViewer({ runId, name, className }: ArtifactViewerProps) 
         <span className="truncate font-mono text-xs text-muted-foreground">{name}</span>
         {text && <CopyButton value={text} label="Copy" size="sm" />}
       </div>
-      {loading && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Loading...
-        </div>
-      )}
+      {loading && <Spinner label="Loading artifact..." />}
       {error && <div className="rounded border border-destructive/40 bg-destructive/10 p-2 text-sm text-red-200">{error}</div>}
       {blob && !loading && !error && (
         <div className="overflow-auto rounded-md border bg-background/40 scrollbar-thin">

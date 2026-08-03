@@ -80,10 +80,17 @@ export interface ReconAssessment {
   [key: string]: unknown;
 }
 
+export interface ModelInfo {
+  label?: string;
+  context_window?: number;
+  description?: string;
+  [key: string]: unknown;
+}
+
 export interface ModelRegistryInfo {
   default_alias: string;
   registry: Record<string, string>;
-  info?: Record<string, unknown>;
+  info?: Record<string, ModelInfo>;
 }
 
 export interface LiveModelsResponse {
@@ -101,6 +108,22 @@ export interface SkillSummary {
 export interface SkillSearchResult {
   name: string;
   description: string;
+}
+
+export interface SkillInstallRequest {
+  name: string;
+  markdown: string;
+}
+
+export interface SkillInstallResponse {
+  name: string;
+  description: string;
+  tags: string[];
+}
+
+export interface SkillRemoveResponse {
+  name: string;
+  deleted: boolean;
 }
 
 export interface SkillDetail {
@@ -217,11 +240,30 @@ export interface RunListRow {
   goal_name: string;
   target_ip: string;
   model_alias: string;
+  title?: string;
 }
 
 export interface RunListResponse {
   runs: RunListRow[];
+  sort?: string;
 }
+
+export type RunSortKey =
+  | "created_desc"
+  | "created_asc"
+  | "title_asc"
+  | "title_desc"
+  | "state_asc"
+  | "state_desc";
+
+export const RUN_SORT_OPTIONS: { value: RunSortKey; label: string }[] = [
+  { value: "created_desc", label: "Newest first" },
+  { value: "created_asc", label: "Oldest first" },
+  { value: "title_asc", label: "Title A→Z" },
+  { value: "title_desc", label: "Title Z→A" },
+  { value: "state_asc", label: "State A→Z" },
+  { value: "state_desc", label: "State Z→A" },
+];
 
 export interface RunDetailRequest {
   target?: string;
@@ -257,6 +299,7 @@ export interface RunDetail {
   preview: Partial<RunPreview> & Record<string, unknown>;
   result: RunResult;
   error: string;
+  title?: string;
   cancelled_at?: string;
   resumed_from?: string;
   decisions: DecisionListRow[];

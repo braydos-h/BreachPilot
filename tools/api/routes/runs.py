@@ -1,4 +1,6 @@
-"""Assessment run routes: POST /runs, GET /runs, GET /runs/{id}, cancel, resume, tools, artifacts, logs, audit, swarm, campaign, credentials, loot."""
+"""Assessment run routes: POST /runs, GET /runs (sort+title), GET /runs/{id},
+cancel, resume, POST /runs/{id}/title (AI retitle), tools, artifacts, logs,
+audit, swarm, campaign, credentials, loot."""
 
 from __future__ import annotations
 
@@ -131,6 +133,12 @@ class DecisionAnswerRequest(BaseModel):
     answer: str
 
 
+class TitleRequest(BaseModel):
+    """Body for POST /runs/{id}/title — manual retitle or regen trigger."""
+    title: str | None = None  # explicit title; if None + regen=true, AI-generate
+    regen: bool = False        # force AI regeneration even if a title exists
+
+
 class ToolCallRequest(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
 
@@ -183,10 +191,14 @@ async def create_run(body: RunCreateRequest, auth: str = Depends(_require_auth))
 async def list_runs(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    sort: str = Query(
+        "created_desc",
+        pattern="^(created_desc|created_asc|title_asc|title_desc|state_asc|state_desc)$",
+    ),
     auth: str = Depends(_require_auth),
 ) -> dict[str, Any]:
-    """List run history with target/mode/goal/model summary (no N+1 queries)."""
-    runs = _ps().list_runs(limit=limit, offset=offset)
+    """List run history with target/mode/goal/model/title summary (no N+1)."""
+    runs = _ps().list_runs(limit=limit, offset=offset, sort=sort)
     out: list[dict[str, Any]] = []
     for r in runs:
         req = r.get("request_json", {}) or {}
@@ -200,8 +212,9 @@ async def list_runs(
             "goal_name": req.get("goal_name", ""),
             "target_ip": prev.get("target_ip", ""),
             "model_alias": prev.get("model_alias", ""),
+            "title": r.get("title", "") or "",
         })
-    return {"runs": out}
+    return {"runs": out, "sort": sort}
 
 
 @router.get("/runs/{run_id}")
@@ -220,6 +233,7 @@ async def get_run(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, 
         "preview": run.get("preview_json", {}),
         "result": run.get("result_json", {}),
         "error": run.get("error", ""),
+        "title": run.get("title", "") or "",
         "cancelled_at": run.get("cancelled_at", ""),
         "resumed_from": run.get("resumed_from", ""),
         "decisions": [{"id": d["id"], "kind": d["kind"], "status": d["status"], "answer": d["answer"]} for d in decisions],
@@ -253,6 +267,40 @@ async def resume_run(run_id: str, auth: str = Depends(_require_auth)) -> dict[st
     request = RunRequest(**request_fields)
     new_id, preview, decision = await _rm().create_run(request)
     return {"run_id": new_id, "resumed_from": run_id, "preview": {"run_id": preview.run_id, "target_ip": preview.target_ip}}
+
+
+@router.post("/runs/{run_id}/title")
+async def set_run_title(
+    run_id: str, body: TitleRequest, auth: str = Depends(_require_auth),
+) -> dict[str, Any]:
+    """Set or AI-regenerate a run's title.
+
+    - ``{"title": "..."}`` — persist the explicit title (max 200 chars).
+    - ``{"regen": true}`` — ask ``gemma4:31b-cloud`` for a fresh title from
+      the run's result/request; ignored if ``title`` is also set.
+    - ``{}`` — no-op; returns the current title.
+
+    Best-effort: a titler failure (ollama unreachable, empty response) returns
+    the current title unchanged with a 200, never 5xx.
+    """
+    run = _ps().get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    current = run.get("title", "") or ""
+    new_title = (body.title or "").strip()[:200]
+    if not new_title and body.regen:
+        from tools.api.session_titler import generate_session_title_sync
+        cfg = _rm().config
+        host = str((cfg.get("ollama") or {}).get("host") or "https://api.ollama.com")
+        new_title = generate_session_title_sync(
+            run.get("result_json", {}) or {},
+            run.get("request_json", {}) or {},
+            host=host,
+        )
+    if new_title and new_title != current:
+        _ps().update_run_title(run_id, new_title)
+        return {"run_id": run_id, "title": new_title, "regenerated": body.regen and not body.title}
+    return {"run_id": run_id, "title": current, "regenerated": False}
 
 
 @router.get("/runs/{run_id}/tools")

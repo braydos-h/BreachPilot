@@ -393,7 +393,7 @@ async def run_eval(args: Any) -> int:
     print("=" * 60)
 
     # Build the model client exactly as main.py does.
-    ollama_host = config.get("ollama", {}).get("host", "http://localhost:11434")
+    ollama_host = config.get("ollama", {}).get("host", "https://api.ollama.com")
     registry = config.get("models", {}).get("registry")
     router = build_router(registry, host=ollama_host)
     model_alias = config.get("models", {}).get("default_alias", "glm")

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { SkeletonRows } from "@/components/Loading";
 import { useCredentials, useRevealCredential } from "@/api/hooks";
 import { ApiError } from "@/api/client";
 import type { CredentialRecord } from "@/api/types";
@@ -59,7 +60,7 @@ export function CredentialTable({ runId, className }: CredentialTableProps) {
   };
 
   if (credentials.isLoading) {
-    return <div className="text-sm text-muted-foreground">Loading credentials...</div>;
+    return <SkeletonRows count={3} className="p-2" />;
   }
   if (credentials.error) {
     return (
@@ -81,15 +82,15 @@ export function CredentialTable({ runId, className }: CredentialTableProps) {
     <div className={cn("space-y-3", className)}>
       <div className="overflow-x-auto rounded-md border">
         <table className="w-full border-collapse text-sm">
-          <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
+          <thead>
             <tr>
-              <th className="p-2 text-left">#</th>
-              <th className="p-2 text-left">Username</th>
-              <th className="p-2 text-left">Target</th>
-              <th className="p-2 text-left">Type</th>
-              <th className="p-2 text-left">Source</th>
-              <th className="p-2 text-left">Password</th>
-              <th className="p-2 text-right">Action</th>
+              <th>#</th>
+              <th>Username</th>
+              <th>Target</th>
+              <th>Type</th>
+              <th>Source</th>
+              <th>Password</th>
+              <th className="text-right">Action</th>
             </tr>
           </thead>
           <tbody>
@@ -142,20 +143,20 @@ interface CredentialRowProps {
 
 function CredentialRow({ row, revealed, pending, error, onReveal, onBlur }: CredentialRowProps) {
   return (
-    <tr className="border-t">
-      <td className="p-2 tabular-nums">{row.index}</td>
-      <td className="p-2 font-mono">{row.username || "\u2014"}</td>
-      <td className="p-2 font-mono">{row.target_host || "\u2014"}</td>
-      <td className="p-2">{row.credential_type || "\u2014"}</td>
-      <td className="p-2 font-mono text-xs">{row.source_action || "\u2014"}</td>
-      <td className="p-2 font-mono" onBlur={onBlur}>
+    <tr>
+      <td className="tabular-nums">{row.index}</td>
+      <td className="font-mono">{row.username || "\u2014"}</td>
+      <td className="font-mono">{row.target_host || "\u2014"}</td>
+      <td>{row.credential_type || "\u2014"}</td>
+      <td className="font-mono text-xs">{row.source_action || "\u2014"}</td>
+      <td className="font-mono" onBlur={onBlur}>
         {revealed !== undefined ? (
           <span className="select-all text-foreground">{revealed}</span>
         ) : (
           <span className="text-muted-foreground">[REDACTED]</span>
         )}
       </td>
-      <td className="p-2 text-right">
+      <td className="text-right">
         <Button
           type="button"
           variant="outline"

@@ -14,6 +14,7 @@ import time
 from collections import deque
 from pathlib import Path
 from typing import Any, AsyncIterator
+from urllib.parse import urlsplit
 
 from tools.attack_ui import get_ui
 from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
@@ -29,9 +30,7 @@ ui = get_ui()
 # 30 seconds is generous: any healthy boot completes in < 15 s on developer
 # hardware, and a hung subprocess is exactly what we want to detect here.
 MCP_BOOT_TIMEOUT_SECONDS: float = 30.0
-MCP_HTTP_PROBE_TIMEOUT_SECONDS: float = 5.0
 MCP_HTTP_RETRY_INITIAL_SECONDS: float = 0.2
-MCP_HTTP_RETRY_MAX_SECONDS: float = 1.0
 
 
 class _RunHeartbeat:
@@ -439,19 +438,15 @@ async def _open_exploit_mcp_session_once(
                 soft_fail=startup_soft_fail,
                 soft_fail_flag=boot_failed,
             ):
-                # Use the same cold-start budget as stdio. Both transports
-                # construct the identical (and import-heavy) exploit server;
-                # limiting HTTP to 15 seconds made healthy cold boots fail
-                # while stdio was allowed the full 30 seconds. Pass the child
-                # and its log so an early subprocess crash is reported
-                # immediately with the real cause instead of masquerading as
-                # a generic port timeout.
+                # The live session below performs the authoritative MCP
+                # handshake. Readiness only needs the owned child to listen;
+                # a disposable preflight session can hang independently and
+                # incorrectly reject an otherwise healthy server.
                 await wait_for_mcp_http_ready(
                     f"http://127.0.0.1:{exploit_port}/mcp",
                     timeout_seconds=MCP_BOOT_TIMEOUT_SECONDS,
                     process=process,
                     log_path=http_log_path,
-                    token=env.get("MCP_HTTP_TOKEN", "").strip(),
                     secret_values=http_log_secrets,
                 )
             ui.boot_step(_http_port_label, ok=True)
@@ -729,31 +724,6 @@ async def _streamable_http_transport(
             yield streams
 
 
-async def _probe_mcp_http(url: str, *, token: str, timeout_seconds: float) -> None:
-    """Complete an MCP initialize + tool-discovery handshake and close it."""
-    from mcp import ClientSession
-
-    async def _handshake() -> None:
-        async with _streamable_http_transport(url, token=token) as (
-            read_stream,
-            write_stream,
-            _,
-        ):
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-                await session.list_tools()
-
-    await asyncio.wait_for(_handshake(), timeout=timeout_seconds)
-
-
-def _contains_fatal_base_exception(exc: BaseException) -> bool:
-    if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
-        return True
-    if _is_exception_group(exc):
-        return any(_contains_fatal_base_exception(item) for item in exc.exceptions)
-    return False
-
-
 def _child_exit_error(
     process: subprocess.Popen[str] | None,
     *,
@@ -786,15 +756,15 @@ async def wait_for_mcp_http_ready(
     *,
     process: subprocess.Popen[str] | None = None,
     log_path: Path | None = None,
-    token: str = "",
     secret_values: tuple[str, ...] = (),
     retry_initial_seconds: float = MCP_HTTP_RETRY_INITIAL_SECONDS,
 ) -> None:
-    """Retry a real MCP handshake within one bounded cold-start budget."""
+    """Wait for the owned HTTP child to listen within one cold-start budget."""
+    endpoint = urlsplit(url)
+    host, port = endpoint.hostname or "", endpoint.port
     deadline = time.monotonic() + timeout_seconds
     delay = max(0.0, retry_initial_seconds)
     attempts = 0
-    last_error: BaseException | None = None
 
     while True:
         child_error = _child_exit_error(
@@ -805,49 +775,17 @@ async def wait_for_mcp_http_ready(
         )
         if child_error is not None:
             raise child_error
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
-
         attempts += 1
-        attempt_timeout = min(MCP_HTTP_PROBE_TIMEOUT_SECONDS, remaining)
-        try:
-            await _probe_mcp_http(
-                url,
-                token=token,
-                timeout_seconds=attempt_timeout,
-            )
+        if port is not None and port_is_open(host, port):
             return
-        except _EXC_GROUP_CATCH as exc:
-            if _contains_fatal_base_exception(exc):
-                raise
-            last_error = exc
-
-        child_error = _child_exit_error(
-            process,
-            endpoint=url,
-            log_path=log_path,
-            secret_values=secret_values,
-        )
-        if child_error is not None:
-            raise child_error
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
         await asyncio.sleep(min(delay, remaining))
-        delay = min(
-            MCP_HTTP_RETRY_MAX_SECONDS,
-            max(MCP_HTTP_RETRY_INITIAL_SECONDS, delay * 2),
-        )
 
-    detail = (
-        f" Last probe error: {_concise_startup_error(last_error)}."
-        if last_error is not None
-        else ""
-    )
     raise RuntimeError(
-        f"Timed out after {timeout_seconds:g}s waiting for MCP initialize/list-tools "
-        f"readiness at {url} ({attempts} attempts).{detail}"
+        f"Timed out after {timeout_seconds:g}s waiting for MCP HTTP listener "
+        f"at {url} ({attempts} attempts)."
         f"{_server_log_tail(log_path, secret_values=secret_values)}"
     )
 

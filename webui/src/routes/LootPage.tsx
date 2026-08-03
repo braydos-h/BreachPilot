@@ -1,9 +1,10 @@
 import { Link, useParams } from "react-router-dom";
-import { ChevronLeft, Expand, Loader2 } from "lucide-react";
+import { ChevronLeft, Expand } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CredentialTable } from "@/components/CredentialTable";
+import { SkeletonCards } from "@/components/Loading";
 import { useLoot } from "@/api/hooks";
 import { ApiError } from "@/api/client";
 import { useState } from "react";
@@ -29,7 +30,7 @@ export function LootPage() {
 
       <section className="space-y-2">
         <h2 className="text-sm font-semibold">Loot</h2>
-        {loot.isLoading && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading loot...</div>}
+        {loot.isLoading && <SkeletonCards count={2} />}
         {loot.error && <div className="text-sm text-destructive">{loot.error instanceof ApiError ? loot.error.message : "Failed to load loot."}</div>}
         {!loot.isLoading && (loot.data?.loot.length ?? 0) === 0 && (
           <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">No loot captured.</div>

@@ -83,9 +83,16 @@ On Linux/macOS `make install|test|test-one F=…|run|doctor|mcp-exploit` work.
    env vars into the MCP server. The allowlist matcher supports
    domains + `*.wildcard` + CIDR by design.
 
-7. **Ollama is required at runtime.** The model client is built at the top of
-   `main.py`; unreachable Ollama surfaces as `[WARN]` on recon or hard-fail on
-   attack. `OLLAMA_API_KEY` env enables cloud fallback on the main model path.
+7. **Ollama Cloud is the default model path.** `ollama.host` defaults to
+   `https://api.ollama.com`; the ollama Python client auto-attaches
+   `Authorization: Bearer $OLLAMA_API_KEY` to every chat/generate request, so
+   a host swap is the whole wiring (no probe, no local→cloud fallback).
+   Override `ollama.host` in config.yaml to point at a local daemon and the
+   same code path runs against it. Embeddings stay local by default via
+   `ollama.embed_host` (falls back to `ollama.host` when absent) —
+   `nomic-embed-text` is small enough to self-host. `OLLAMA_API_KEY` env is
+   required for the cloud path; missing key surfaces as auth failure on the
+   first chat.
 
 8. **No CI is configured.** Before a PR: run `python -m pytest tests/ -v`,
    `ruff check .`, and verify README flags/config still match reality.

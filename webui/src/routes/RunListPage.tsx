@@ -1,35 +1,68 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Loader2, Plus, RotateCw, Trash2 } from "lucide-react";
+import { Loader2, Plus, RotateCw, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { StatusBadge } from "@/components/StatusBadge";
 import { CopyButton } from "@/components/CopyButton";
-import { useDeleteRun, useResumeRun, useRuns } from "@/api/hooks";
+import { useDeleteRun, useResumeRun, useRetitleRun, useRuns } from "@/api/hooks";
 import { ApiError } from "@/api/client";
-import { isActiveState, isTerminalState, type RunState } from "@/api/types";
+import { SkeletonRows } from "@/components/Loading";
+import {
+  RUN_SORT_OPTIONS,
+  isActiveState,
+  isTerminalState,
+  type RunSortKey,
+  type RunState,
+} from "@/api/types";
 import { formatRelative, truncateId } from "@/lib/utils";
 
+const SORT_KEY_STORAGE = "netattack.runSort";
+
+function loadSortKey(): RunSortKey {
+  try {
+    const v = localStorage.getItem(SORT_KEY_STORAGE) ?? "";
+    if (RUN_SORT_OPTIONS.some((o) => o.value === v)) return v as RunSortKey;
+  } catch {
+    /* SSR / storage disabled — fall through to default */
+  }
+  return "created_desc";
+}
+
 export function RunListPage() {
-  const runs = useRuns(50, 0);
+  const [sortKey, setSortKey] = useState<RunSortKey>(loadSortKey);
+  const runs = useRuns(50, 0, sortKey);
   const deleteRun = useDeleteRun();
   const resumeRun = useResumeRun();
+  const retitleRun = useRetitleRun();
   const navigate = useNavigate();
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [resumeTarget, setResumeTarget] = useState<string | null>(null);
+  const [retitling, setRetitling] = useState<string | null>(null);
 
   const rows = runs.data?.runs ?? [];
   const activeRun = rows.find((r) => isActiveState(r.state));
+
+  const onSortChange = (v: string) => {
+    const next = v as RunSortKey;
+    setSortKey(next);
+    try { localStorage.setItem(SORT_KEY_STORAGE, next); } catch { /* ignore */ }
+  };
 
   const onDelete = (runId: string) => {
     if (!window.confirm(`Permanently delete run ${runId} and all of its artifacts?`)) return;
     setPendingDelete(runId);
     deleteRun.mutate(
       { runId, purge: true },
-      {
-        onSettled: () => setPendingDelete(null),
-      },
+      { onSettled: () => setPendingDelete(null) },
     );
   };
 
@@ -41,11 +74,31 @@ export function RunListPage() {
     });
   };
 
+  const onRegenTitle = (runId: string) => {
+    setRetitling(runId);
+    retitleRun.mutate(
+      { runId, regen: true },
+      { onSettled: () => setRetitling(null) },
+    );
+  };
+
   return (
     <div className="space-y-4 p-4 md:p-6">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-lg font-semibold">Sessions</h1>
         <div className="flex items-center gap-2">
+          <Select value={sortKey} onValueChange={onSortChange}>
+            <SelectTrigger className="h-8 w-[10rem] text-xs" aria-label="Sort sessions">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {RUN_SORT_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value} className="text-xs">
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           {runs.isFetching && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
           <Button asChild size="sm" disabled={!!activeRun}>
             <Link to="/runs/new">
@@ -59,7 +112,7 @@ export function RunListPage() {
       {activeRun && (
         <Card className="border-yellow-500/40 bg-yellow-500/5">
           <CardContent className="flex flex-wrap items-center gap-2 p-3 text-sm">
-            <Badge variant="outline" className="border-yellow-500/40 text-yellow-300">Active</Badge>
+            <Badge variant="warn">Active</Badge>
             <span className="truncate font-mono text-xs">{activeRun.target}</span>
             <StatusBadge state={activeRun.state} />
             <Button asChild size="sm" variant="outline" className="ml-auto">
@@ -69,7 +122,7 @@ export function RunListPage() {
         </Card>
       )}
 
-      {runs.isLoading && <div className="text-sm text-muted-foreground">Loading runs...</div>}
+      {runs.isLoading && <SkeletonRows count={4} className="p-2" />}
       {runs.error && (
         <div className="text-sm text-destructive">
           {runs.error instanceof ApiError ? runs.error.message : "Failed to load runs."}
@@ -86,25 +139,27 @@ export function RunListPage() {
       {rows.length > 0 && (
         <div className="overflow-x-auto rounded-md border">
           <table className="w-full border-collapse text-sm">
-            <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
+            <thead>
               <tr>
-                <th className="p-2 text-left">ID</th>
-                <th className="p-2 text-left">State</th>
-                <th className="p-2 text-left">Target</th>
-                <th className="p-2 text-left">Mode</th>
-                <th className="p-2 text-left">Goal</th>
-                <th className="p-2 text-left">Model</th>
-                <th className="p-2 text-left">Created</th>
-                <th className="p-2 text-right">Actions</th>
+                <th>ID</th>
+                <th>Title</th>
+                <th>State</th>
+                <th>Target</th>
+                <th>Mode</th>
+                <th>Goal</th>
+                <th>Model</th>
+                <th>Created</th>
+                <th className="text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => {
                 const active = isActiveState(row.state);
                 const terminal = isTerminalState(row.state as RunState);
+                const title = row.title || "";
                 return (
-                  <tr key={row.id} className="border-t hover:bg-muted/20">
-                    <td className="p-2">
+                  <tr key={row.id}>
+                    <td>
                       <div className="flex items-center gap-1.5">
                         <Link to={`/runs/${row.id}`} className="font-mono text-xs hover:underline" title={row.id}>
                           {truncateId(row.id)}
@@ -112,16 +167,36 @@ export function RunListPage() {
                         <CopyButton value={row.id} size="icon" label="Copy ID" />
                       </div>
                     </td>
-                    <td className="p-2"><StatusBadge state={row.state} /></td>
-                    <td className="p-2 font-mono text-xs">{row.target || row.target_ip || "\u2014"}</td>
-                    <td className="p-2 text-xs">{row.mode}</td>
-                    <td className="p-2 text-xs">{row.goal_name || "\u2014"}</td>
-                    <td className="p-2 font-mono text-xs">{row.model_alias || "\u2014"}</td>
-                    <td className="p-2 text-xs text-muted-foreground" title={row.created_at}>{formatRelative(row.created_at)}</td>
-                    <td className="p-2 text-right">
+                    <td className="max-w-[18rem]">
+                      {title ? (
+                        <Link to={`/runs/${row.id}`} className="block truncate text-xs hover:underline" title={title}>
+                          {title}
+                        </Link>
+                      ) : (
+                        <span className="text-xs text-muted-foreground italic">untitled</span>
+                      )}
+                    </td>
+                    <td><StatusBadge state={row.state} /></td>
+                    <td className="font-mono text-xs">{row.target || row.target_ip || "\u2014"}</td>
+                    <td className="text-xs">{row.mode}</td>
+                    <td className="text-xs">{row.goal_name || "\u2014"}</td>
+                    <td className="font-mono text-xs">{row.model_alias || "\u2014"}</td>
+                    <td className="text-xs text-muted-foreground" title={row.created_at}>{formatRelative(row.created_at)}</td>
+                    <td className="text-right">
                       <div className="inline-flex items-center gap-1">
                         <Button asChild size="sm" variant="ghost">
                           <Link to={`/runs/${row.id}`}>Open</Link>
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => onRegenTitle(row.id)}
+                          disabled={retitling === row.id}
+                          aria-label="Regenerate title with AI"
+                          title="Regenerate title with AI"
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          {retitling === row.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
                         </Button>
                         {terminal && (
                           <Button

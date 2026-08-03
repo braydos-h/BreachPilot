@@ -6,6 +6,7 @@ import type { RunResult } from "@/api/types";
 
 interface SessionSummaryCardProps {
   result: RunResult;
+  title?: string;
   className?: string;
 }
 
@@ -14,7 +15,7 @@ function safeNum(v: unknown, dft = 0): number {
   return Number.isFinite(n) ? n : dft;
 }
 
-export function SessionSummaryCard({ result, className }: SessionSummaryCardProps) {
+export function SessionSummaryCard({ result, title, className }: SessionSummaryCardProps) {
   const actions = safeNum(result.total_actions);
   const telemetry = result.telemetry;
   const skills = result.active_skills ?? [];
@@ -22,6 +23,7 @@ export function SessionSummaryCard({ result, className }: SessionSummaryCardProp
   const swarm = result.swarm_result;
   const hasError = !!result.error;
   const outcome = result.outcome_summary;
+  const displayTitle = (title || "").trim();
 
   return (
     <Card className={cn("border-border/60", className)}>
@@ -30,9 +32,14 @@ export function SessionSummaryCard({ result, className }: SessionSummaryCardProp
           <Activity className="h-4 w-4" />
           Session summary
           {hasError ? (
-            <Badge variant="outline" className="border-red-500/40 bg-red-500/10 text-red-300">failed</Badge>
+            <Badge variant="danger">failed</Badge>
           ) : (
-            <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-300">complete</Badge>
+            <Badge variant="success">complete</Badge>
+          )}
+          {displayTitle && (
+            <span className="ml-auto truncate text-xs font-normal text-muted-foreground" title={displayTitle}>
+              {displayTitle}
+            </span>
           )}
         </CardTitle>
       </CardHeader>

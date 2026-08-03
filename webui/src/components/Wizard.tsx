@@ -1,59 +1,53 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
   Check,
+  Info,
   Loader2,
   Play,
   RefreshCw,
-  ScanSearch,
   Target,
   Settings as SettingsIcon,
   ClipboardCheck,
-  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isValidTarget } from "@/lib/targetValidation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
-  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   SegmentedControl,
-  TriStateToggle,
   SkillMultiSelect,
+  TriStateToggle,
 } from "@/components/RunForm";
 import {
   useAnswerDecision,
   useCapabilities,
   useCreateRun,
-  useGoals,
   useLiveModels,
   useModels,
   useSkills,
 } from "@/api/hooks";
+import { Spinner } from "@/components/Loading";
 import { ApiError } from "@/api/client";
 import type {
   CreateRunResponse,
-  GoalPreset,
   RunCreateRequest,
   RunKind,
-  RunMode,
   SkillsMode,
 } from "@/api/types";
 
@@ -61,11 +55,10 @@ interface WizardProps {
   onCreated?: (runId: string, state: string) => void;
 }
 
-const STEPS = ["path", "settings", "target", "review"] as const;
+const STEPS = ["settings", "target", "review"] as const;
 type Step = (typeof STEPS)[number];
 
-const STEP_META: Array<{ key: Step; label: string; icon: typeof ScanSearch }> = [
-  { key: "path", label: "Choose path", icon: ScanSearch },
+const STEP_META: Array<{ key: Step; label: string; icon: typeof Target }> = [
   { key: "settings", label: "Settings", icon: SettingsIcon },
   { key: "target", label: "Target", icon: Target },
   { key: "review", label: "Review & confirm", icon: ClipboardCheck },
@@ -75,37 +68,35 @@ const OBSERVER_OPTIONS = ["heuristic", "llm", "hybrid"] as const;
 const SKILLS_OPTIONS: SkillsMode[] = ["off", "on", "hints", "lookup"];
 
 const POWER_UPS = [
-  { key: "swarm", label: "Swarm" },
-  { key: "parallel_swarm", label: "Parallel swarm" },
-  { key: "critic", label: "Critic" },
-  { key: "reflection", label: "Reflection" },
-  { key: "adaptive_exploits", label: "Adaptive exploits" },
-  { key: "long_session", label: "Long session" },
-  { key: "multi_model_consult", label: "Multi-model consult" },
-  { key: "ultrathink", label: "Ultrathink" },
+  { key: "swarm", label: "Swarm", hint: "Multi-agent swarm execution." },
+  { key: "parallel_swarm", label: "Parallel swarm", hint: "Swarm agents run in parallel. Requires swarm." },
+  { key: "critic", label: "Critic", hint: "Critic agent critiques swarm steps. Requires swarm." },
+  { key: "reflection", label: "Reflection", hint: "Swarm self-reflects on each step. Requires swarm." },
+  { key: "adaptive_exploits", label: "Adaptive exploits", hint: "Adapt exploit attempts to recon findings." },
+  { key: "long_session", label: "Long session", hint: "Extend the agent session past the default cap." },
+  { key: "multi_model_consult", label: "Multi-model consult", hint: "Consult peer models during the run." },
+  { key: "ultrathink", label: "Ultrathink", hint: "Allocate extra thinking budget per step." },
 ] as const;
 
+const POWER_UP_HINT: Record<string, string> = Object.fromEntries(
+  POWER_UPS.map((p) => [p.key, p.hint]),
+);
+
 export function Wizard({ onCreated }: WizardProps) {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [step, setStep] = useState<Step>("path");
-  const [path, setPath] = useState<"recon" | "attack">("recon");
+  const [step, setStep] = useState<Step>("settings");
 
   // Settings state
-  const [mode, setMode] = useState<RunMode>("recon");
-  const [reconFirst, setReconFirst] = useState<boolean | null>(true);
   const [modelAlias, setModelAlias] = useState<string>("");
   const [powerUps, setPowerUps] = useState<Record<string, boolean>>({});
+  const [reconFirst, setReconFirst] = useState<boolean | null>(true);
   const [observerMode, setObserverMode] = useState<(typeof OBSERVER_OPTIONS)[number]>("hybrid");
   const [skillsMode, setSkillsMode] = useState<SkillsMode>("off");
   const [skillsInclude, setSkillsInclude] = useState<string[]>([]);
   const [skillsExclude, setSkillsExclude] = useState<string[]>([]);
   const [kind, setKind] = useState<RunKind>("agent");
   const [yes, setYes] = useState(false);
-
-  // Goal state (lifted from GoalSelector so buildRequest can include it).
-  const [goalMode, setGoalMode] = useState<"preset" | "custom">("preset");
-  const [goal, setGoal] = useState<string>("");
-  const [customGoal, setCustomGoal] = useState("");
 
   // Target state
   const [target, setTarget] = useState("");
@@ -116,7 +107,6 @@ export function Wizard({ onCreated }: WizardProps) {
 
   // Hooks
   const capabilities = useCapabilities();
-  const goals = useGoals();
   const models = useModels();
   const liveModels = useLiveModels();
   const skills = useSkills();
@@ -126,19 +116,9 @@ export function Wizard({ onCreated }: WizardProps) {
     if (!modelAlias && models.data?.default_alias) setModelAlias(models.data.default_alias);
   }, [models.data, modelAlias]);
 
-  // Preselect path from ?path= query
-  useEffect(() => {
-    const p = searchParams.get("path");
-    if (p === "attack") {
-      setPath("attack");
-      setMode("attack");
-      setReconFirst(null);
-    } else if (p === "recon") {
-      setPath("recon");
-      setMode("recon");
-      setReconFirst(true);
-    }
-  }, [searchParams]);
+  // ponytail: ?path= query param kept for backward compat with HomePage links;
+  // Wizard is recon-only now, so the value is ignored.
+  void searchParams;
 
   const flags = capabilities.data?.run_options.flags ?? [];
   const skillsList = skills.data?.skills ?? [];
@@ -151,33 +131,15 @@ export function Wizard({ onCreated }: WizardProps) {
     return Array.from(set);
   }, [liveModels.data, models.data]);
 
-  const goalGroups = useMemo(() => {
-    const groups: Record<string, GoalPreset[]> = { safe: [], gated: [], high: [] };
-    for (const g of goals.data?.goals ?? []) groups[g.risk]?.push(g);
-    return groups;
-  }, [goals.data]);
-
-  const selectPath = (p: "recon" | "attack") => {
-    setPath(p);
-    if (p === "recon") {
-      setMode("recon");
-      setReconFirst(true);
-    } else {
-      setMode("attack");
-      setReconFirst(null);
-    }
-    setStep("settings");
-  };
-
   const togglePowerUp = (key: string) => {
     setPowerUps((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   const buildRequest = (): RunCreateRequest => ({
     target: target.trim(),
-    mode,
-    goal: goalMode === "preset" ? goal : "",
-    custom_goal: goalMode === "custom" ? customGoal.trim() : "",
+    mode: "recon",
+    goal: "",
+    custom_goal: "",
     recon_first: reconFirst,
     model: modelAlias || undefined,
     swarm: !!powerUps.swarm,
@@ -217,7 +179,7 @@ export function Wizard({ onCreated }: WizardProps) {
   };
 
   const stepIndex = STEPS.indexOf(step);
-  const canGoNext = step === "path" || (step === "settings") || (step === "target" && isValidTarget(target));
+  const canGoNext = step === "settings" || (step === "target" && isValidTarget(target));
 
   const goNext = () => {
     if (step === "target" && !createdRun) {
@@ -230,158 +192,43 @@ export function Wizard({ onCreated }: WizardProps) {
   const goBack = () => {
     const prev = STEPS[stepIndex - 1];
     if (prev) setStep(prev);
+    else navigate(-1);
   };
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
+    <div className="mx-auto flex w-full max-w-[1060px] flex-col gap-3 px-4 py-4 md:px-6 md:py-5">
       <div>
-        <h1 className="text-lg font-semibold">New assessment</h1>
-        <p className="text-sm text-muted-foreground">Guided setup — mirrors the CLI questionnaire flow.</p>
+        <h1 className="text-lg font-semibold">New recon</h1>
+        <p className="text-sm text-muted-foreground">Guided setup — mirrors the CLI recon-first flow.</p>
       </div>
 
       <Stepper current={step} />
 
-      {step === "path" && (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <PathCard
-            icon={<ScanSearch className="h-6 w-6" />}
-            title="Recon & Suggest Goals"
-            description="Scan the target first, see what's open, then pick a goal from AI-ranked suggestions. Mirrors the CLI 'Recon-first' path."
-            onClick={() => selectPath("recon")}
-          />
-          <PathCard
-            icon={<Zap className="h-6 w-6" />}
-            title="Start New Session"
-            description="Go straight to attack mode. Pick a preset goal or type a custom one. Mirrors the CLI 'Start New Session' path."
-            onClick={() => selectPath("attack")}
-          />
-        </div>
-      )}
-
       {step === "settings" && (
-        <Card>
-          <CardContent className="space-y-5 pt-6">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Model</Label>
-                <Button type="button" size="sm" variant="ghost" className="gap-1.5 text-xs" onClick={() => liveModels.refetch()} disabled={liveModels.isFetching}>
-                  <RefreshCw className={cn("h-3 w-3", liveModels.isFetching && "animate-spin")} /> Refresh
-                </Button>
-              </div>
-              <Select value={modelAlias} onValueChange={setModelAlias}>
-                <SelectTrigger><SelectValue placeholder="Default model" /></SelectTrigger>
-                <SelectContent>
-                  {modelOptions.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              {liveModels.data && (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Badge variant="outline" className="text-xs">{liveModels.data.source}</Badge>
-                  {liveModels.data.source === "registry" && liveModels.data.error && (
-                    <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-amber-200">
-                      Ollama unreachable — using configured registry models.
-                    </span>
-                  )}
-                  {liveModels.data.source === "ollama" && liveModels.data.error && (
-                    <span className="truncate">{liveModels.data.error}</span>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <Label>Power-ups</Label>
-              <p className="text-xs text-muted-foreground">Toggle the execution flags (space to toggle in the CLI).</p>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {POWER_UPS.filter((p) => flags.includes(p.key)).map((p) => {
-                  const disabled = (p.key === "critic" || p.key === "reflection" || p.key === "parallel_swarm") && !powerUps.swarm;
-                  return (
-                    <button
-                      key={p.key}
-                      type="button"
-                      onClick={() => !disabled && togglePowerUp(p.key)}
-                      disabled={disabled}
-                      className={cn(
-                        "flex items-center gap-2 rounded-md border p-2 text-sm transition-colors",
-                        "hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                        disabled && "cursor-not-allowed opacity-50 hover:bg-transparent",
-                        powerUps[p.key] && "border-primary bg-accent",
-                      )}
-                    >
-                      <Checkbox checked={!!powerUps[p.key]} />
-                      <span>{p.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Recon first</Label>
-              <TriStateToggle value={reconFirst} onChange={setReconFirst} labels={{ true: "On", false: "Off", null: "Auto" }} />
-              <p className="text-xs text-muted-foreground">Auto enables recon-first when no goal is selected.</p>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Observer mode</Label>
-              <SegmentedControl value={observerMode} onChange={(v) => setObserverMode(v as (typeof OBSERVER_OPTIONS)[number])}
-                options={OBSERVER_OPTIONS.map((o) => ({ value: o, label: o.charAt(0).toUpperCase() + o.slice(1) }))} />
-            </div>
-
-            <div className="space-y-2">
-              <Label>Skills</Label>
-              <SegmentedControl value={skillsMode} onChange={(v) => setSkillsMode(v as SkillsMode)}
-                options={SKILLS_OPTIONS.map((o) => ({ value: o, label: o.charAt(0).toUpperCase() + o.slice(1) }))} />
-              {skillsMode !== "off" && (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <SkillMultiSelect label="Include" skills={skillsList.map((s) => s.name)} selected={skillsInclude} onChange={setSkillsInclude} />
-                  <SkillMultiSelect label="Exclude" skills={skillsList.map((s) => s.name)} selected={skillsExclude} onChange={setSkillsExclude} />
-                </div>
-              )}
-            </div>
-
-            {path === "attack" && (
-              <div className="space-y-2">
-                <Label>Goal (optional — leave blank to choose after recon)</Label>
-                <p className="text-xs text-muted-foreground">If you set a goal here, recon-first is skipped.</p>
-                <GoalSelector
-                  goalGroups={goalGroups}
-                  goalMode={goalMode}
-                  setGoalMode={setGoalMode}
-                  goal={goal}
-                  setGoal={setGoal}
-                  customGoal={customGoal}
-                  setCustomGoal={setCustomGoal}
-                />
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <Label>Run kind</Label>
-              <SegmentedControl value={kind} onChange={(v) => setKind(v as RunKind)}
-                options={[{ value: "agent", label: "Agent" }, { value: "manual", label: "Manual" }]} />
-              {kind === "manual" && (
-                <p className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-200">
-                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  Manual kind is advertised by the API but currently executes the normal agent path.
-                </p>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2">
-                <Checkbox checked={yes} onCheckedChange={(v) => setYes(v === true)} />
-                Skip start confirmation (yes)
-              </Label>
-              {yes && mode === "attack" && (
-                <p className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-red-200">
-                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  Skipping confirmation on attack mode bypasses the destructive-action gate.
-                </p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+        <SettingsPanel
+          modelAlias={modelAlias}
+          setModelAlias={setModelAlias}
+          modelOptions={modelOptions}
+          liveModels={liveModels}
+          powerUps={powerUps}
+          togglePowerUp={togglePowerUp}
+          flags={flags}
+          reconFirst={reconFirst}
+          setReconFirst={setReconFirst}
+          observerMode={observerMode}
+          setObserverMode={setObserverMode}
+          skillsMode={skillsMode}
+          setSkillsMode={setSkillsMode}
+          skillsList={skillsList}
+          skillsInclude={skillsInclude}
+          setSkillsInclude={setSkillsInclude}
+          skillsExclude={skillsExclude}
+          setSkillsExclude={setSkillsExclude}
+          kind={kind}
+          setKind={setKind}
+          yes={yes}
+          setYes={setYes}
+        />
       )}
 
       {step === "target" && (
@@ -421,8 +268,8 @@ export function Wizard({ onCreated }: WizardProps) {
       )}
 
       {step !== "review" && (
-        <div className="flex items-center justify-between">
-          <Button type="button" variant="ghost" size="sm" onClick={goBack} disabled={stepIndex === 0 || createRun.isPending}>
+        <div className="flex items-center justify-between border-t pt-3">
+          <Button type="button" variant="ghost" size="sm" onClick={goBack} disabled={createRun.isPending}>
             <ArrowLeft className="mr-1.5 h-4 w-4" /> Back
           </Button>
           <Button type="button" size="sm" onClick={goNext} disabled={!canGoNext || createRun.isPending}>
@@ -431,6 +278,232 @@ export function Wizard({ onCreated }: WizardProps) {
           </Button>
         </div>
       )}
+    </div>
+  );
+}
+
+function InfoTip({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button type="button" aria-label={`${label} info`} className="text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">
+          <Info className="h-3.5 w-3.5" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent side="top" className="max-w-[16rem] leading-snug text-xs">{children}</PopoverContent>
+    </Popover>
+  );
+}
+
+interface SettingsPanelProps {
+  modelAlias: string;
+  setModelAlias: (v: string) => void;
+  modelOptions: string[];
+  liveModels: ReturnType<typeof useLiveModels>;
+  powerUps: Record<string, boolean>;
+  togglePowerUp: (key: string) => void;
+  flags: string[];
+  reconFirst: boolean | null;
+  setReconFirst: (v: boolean | null) => void;
+  observerMode: (typeof OBSERVER_OPTIONS)[number];
+  setObserverMode: (v: (typeof OBSERVER_OPTIONS)[number]) => void;
+  skillsMode: SkillsMode;
+  setSkillsMode: (v: SkillsMode) => void;
+  skillsList: { name: string }[];
+  skillsInclude: string[];
+  setSkillsInclude: (v: string[]) => void;
+  skillsExclude: string[];
+  setSkillsExclude: (v: string[]) => void;
+  kind: RunKind;
+  setKind: (v: RunKind) => void;
+  yes: boolean;
+  setYes: (v: boolean) => void;
+}
+
+function SettingsPanel(props: SettingsPanelProps) {
+  const {
+    modelAlias, setModelAlias, modelOptions, liveModels,
+    powerUps, togglePowerUp, flags,
+    reconFirst, setReconFirst,
+    observerMode, setObserverMode,
+    skillsMode, setSkillsMode, skillsList, skillsInclude, setSkillsInclude, skillsExclude, setSkillsExclude,
+    kind, setKind, yes, setYes,
+  } = props;
+
+  const ollamaOnline = !!liveModels.data && liveModels.data.source === "ollama" && !liveModels.data.error;
+  const visiblePowerUps = POWER_UPS.filter((p) => flags.includes(p.key));
+  const skillsOpen = skillsMode !== "off";
+
+  return (
+    <div className="rounded-lg border bg-card/60 p-5 md:p-6">
+      {/* Top configuration row: model selector + provider badge + refresh */}
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="min-w-0 flex-1">
+          <Label className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+            Model
+          </Label>
+          <Select value={modelAlias} onValueChange={setModelAlias}>
+            <SelectTrigger className="h-9">
+              <SelectValue placeholder="Default model" />
+            </SelectTrigger>
+            <SelectContent>
+              {modelOptions.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex items-center gap-2 self-end pb-px">
+          <Badge
+            variant="outline"
+            className={cn(
+              "gap-1.5 px-2 py-1 text-xs",
+              ollamaOnline
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                : "border-muted-foreground/30 text-muted-foreground",
+            )}
+          >
+            <span className="relative flex h-1.5 w-1.5">
+              {ollamaOnline && (
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/70" />
+              )}
+              <span className={cn("relative inline-flex h-1.5 w-1.5 rounded-full", ollamaOnline ? "bg-emerald-400" : "bg-muted-foreground/50")} />
+            </span>
+            Ollama {ollamaOnline ? "connected" : "offline"}
+          </Badge>
+
+          <Button
+            type="button"
+            size="icon"
+            variant="outline"
+            className="h-9 w-9 shrink-0"
+            onClick={() => liveModels.refetch()}
+            disabled={liveModels.isFetching}
+            aria-label="Refresh models"
+            title="Refresh models"
+          >
+            <RefreshCw className={cn("h-4 w-4", liveModels.isFetching && "animate-spin")} />
+          </Button>
+        </div>
+      </div>
+
+      {liveModels.data?.source === "registry" && liveModels.data.error && (
+        <p className="mt-1.5 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-200">
+          Ollama unreachable — using configured registry models.
+        </p>
+      )}
+      {liveModels.data?.source === "ollama" && liveModels.data.error && (
+        <p className="mt-1.5 truncate text-[11px] text-destructive/80">{liveModels.data.error}</p>
+      )}
+
+      {/* Power-ups section */}
+      <div className="mt-5">
+        <div className="mb-2 flex items-baseline gap-2">
+          <h2 className="text-sm font-semibold">Power-ups</h2>
+          <span className="text-xs text-muted-foreground">Toggle execution flags. Multi-agent options require swarm.</span>
+        </div>
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+          {visiblePowerUps.map((p) => {
+            const disabled = (p.key === "critic" || p.key === "reflection" || p.key === "parallel_swarm") && !powerUps.swarm;
+            const checked = !!powerUps[p.key];
+            return (
+              <button
+                key={p.key}
+                type="button"
+                onClick={() => !disabled && togglePowerUp(p.key)}
+                disabled={disabled}
+                aria-pressed={checked}
+                title={POWER_UP_HINT[p.key]}
+                className={cn(
+                  "group flex h-11 items-center gap-2 rounded-md border px-2.5 text-[13px] transition-colors",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  disabled && "cursor-not-allowed opacity-45 hover:bg-transparent",
+                  !disabled && !checked && "hover:bg-accent",
+                  checked
+                    ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-200"
+                    : "border-border bg-background/40 text-foreground",
+                )}
+              >
+                <Checkbox checked={checked} disabled={disabled} className={cn(checked && "border-emerald-500/60 bg-emerald-500 text-emerald-950")} />
+                <span className="truncate">{p.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Core behavior section — two-column grid */}
+      <div className="mt-5 grid gap-x-5 gap-y-3 sm:grid-cols-2">
+        {/* Recon first */}
+        <FieldLabel hint="Run recon before the goal phase. Auto defers when no goal is selected.">
+          Recon first
+        </FieldLabel>
+        <TriStateToggle
+          value={reconFirst}
+          onChange={setReconFirst}
+          labels={{ true: "On", false: "Off", null: "Auto" }}
+        />
+
+        {/* Observer mode */}
+        <FieldLabel hint="Heuristic classifies tool results without an LLM call. LLM uses the model. Hybrid blends both.">
+          Observer mode
+        </FieldLabel>
+        <SegmentedControl
+          value={observerMode}
+          onChange={(v) => setObserverMode(v as (typeof OBSERVER_OPTIONS)[number])}
+          options={OBSERVER_OPTIONS.map((o) => ({ value: o, label: o.charAt(0).toUpperCase() + o.slice(1) }))}
+        />
+
+        {/* Skills */}
+        <FieldLabel hint="Off disables skill lookups. On injects them. Hints shows suggestions. Lookup searches on demand.">
+          Skills
+        </FieldLabel>
+        <div>
+          <SegmentedControl
+            value={skillsMode}
+            onChange={(v) => setSkillsMode(v as SkillsMode)}
+            options={SKILLS_OPTIONS.map((o) => ({ value: o, label: o.charAt(0).toUpperCase() + o.slice(1) }))}
+          />
+          {skillsOpen && (
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <SkillMultiSelect label="Include" skills={skillsList.map((s) => s.name)} selected={skillsInclude} onChange={setSkillsInclude} />
+              <SkillMultiSelect label="Exclude" skills={skillsList.map((s) => s.name)} selected={skillsExclude} onChange={setSkillsExclude} />
+            </div>
+          )}
+        </div>
+
+        {/* Run kind */}
+        <FieldLabel hint="Agent runs the full agent loop. Manual is advertised by the API but currently executes the normal agent path.">
+          Run kind
+        </FieldLabel>
+        <SegmentedControl
+          value={kind}
+          onChange={(v) => setKind(v as RunKind)}
+          options={[{ value: "agent", label: "Agent" }, { value: "manual", label: "Manual" }]}
+        />
+      </div>
+
+      {/* Skip start confirmation */}
+      <div className="mt-4 flex items-start gap-2 rounded-md border bg-background/30 px-3 py-2">
+        <Checkbox
+          id="skip-confirm"
+          checked={yes}
+          onCheckedChange={(v) => setYes(v === true)}
+          className="mt-0.5"
+        />
+        <Label htmlFor="skip-confirm" className="cursor-pointer text-[13px] font-normal leading-snug">
+          Skip start confirmation
+          <span className="ml-1.5 text-xs text-muted-foreground">Starts the assessment immediately after review.</span>
+        </Label>
+      </div>
+    </div>
+  );
+}
+
+function FieldLabel({ children, hint }: { children: React.ReactNode; hint: string }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <Label className="text-xs text-muted-foreground">{children}</Label>
+      <InfoTip label={String(children)}>{hint}</InfoTip>
     </div>
   );
 }
@@ -447,7 +520,7 @@ function Stepper({ current }: { current: Step }) {
           <div key={s.key} className="flex items-center gap-1">
             <div className={cn(
               "flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors",
-              active ? "bg-secondary text-secondary-foreground" : done ? "text-emerald-400" : "text-muted-foreground",
+              active ? "bg-primary/10 text-primary" : done ? "text-emerald-400" : "text-muted-foreground",
             )}>
               <Icon className="h-3.5 w-3.5" />
               <span>{s.label}</span>
@@ -457,73 +530,6 @@ function Stepper({ current }: { current: Step }) {
           </div>
         );
       })}
-    </div>
-  );
-}
-
-interface PathCardProps {
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-  onClick: () => void;
-}
-
-function PathCard({ icon, title, description, onClick }: PathCardProps) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex flex-col items-start gap-3 rounded-lg border bg-card/40 p-5 text-left transition-colors hover:border-primary hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      <div className="rounded-md border bg-secondary/40 p-2 text-foreground">{icon}</div>
-      <div className="space-y-1">
-        <div className="font-medium">{title}</div>
-        <p className="text-xs text-muted-foreground">{description}</p>
-      </div>
-    </button>
-  );
-}
-
-interface GoalSelectorProps {
-  goalGroups: Record<string, GoalPreset[]>;
-  goalMode: "preset" | "custom";
-  setGoalMode: (v: "preset" | "custom") => void;
-  goal: string;
-  setGoal: (v: string) => void;
-  customGoal: string;
-  setCustomGoal: (v: string) => void;
-}
-
-function GoalSelector({
-  goalGroups, goalMode, setGoalMode, goal, setGoal, customGoal, setCustomGoal,
-}: GoalSelectorProps) {
-  return (
-    <div className="space-y-2">
-      <SegmentedControl value={goalMode} onChange={(v) => setGoalMode(v as "preset" | "custom")}
-        options={[{ value: "preset", label: "Preset" }, { value: "custom", label: "Custom" }]} />
-      {goalMode === "preset" ? (
-        <Select value={goal} onValueChange={setGoal}>
-          <SelectTrigger className="min-w-[14rem]"><SelectValue placeholder="Select a goal" /></SelectTrigger>
-          <SelectContent>
-            {(["safe", "gated", "high"] as const).map((risk) => (
-              <SelectGroup key={risk}>
-                <SelectLabel className="uppercase">{risk}</SelectLabel>
-                {goalGroups[risk].map((g) => (
-                  <SelectItem key={g.name} value={g.name}>
-                    <div className="flex flex-col">
-                      <span>{g.name}</span>
-                      <span className="text-xs text-muted-foreground">{g.description}</span>
-                    </div>
-                  </SelectItem>
-                ))}
-                {risk !== "high" && <SelectSeparator />}
-              </SelectGroup>
-            ))}
-          </SelectContent>
-        </Select>
-      ) : (
-        <Textarea value={customGoal} onChange={(e) => setCustomGoal(e.target.value)} placeholder="Describe the goal of this assessment" className="min-h-[5rem]" />
-      )}
     </div>
   );
 }
@@ -542,7 +548,7 @@ function ReviewStep({ createdRun, createError, isCreating, onRetry, onCreated }:
   const [submitting, setSubmitting] = useState(false);
 
   if (isCreating && !createdRun) {
-    return <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Creating run...</div>;
+    return <Spinner label="Creating run..." className="p-6" />;
   }
 
   if (createError && !createdRun) {
@@ -595,14 +601,13 @@ function ReviewStep({ createdRun, createError, isCreating, onRetry, onCreated }:
             <SummaryRow label="Model" value={preview.model_label ?? preview.model_alias} />
             <SummaryRow label="Transport" value={preview.transport_summary} />
             <SummaryRow label="Permission" value={preview.permission} />
-            <SummaryRow label="Attack mode" value={String(preview.attack_mode ?? false)} />
             <SummaryRow label="Swarm" value={String(preview.swarm)} />
             <SummaryRow label="Peer models" value={String(preview.multi_model ?? false)} />
           </div>
 
           {destructive && (
             <div className="mt-2 flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-red-200">
-              <AlertTriangle className="h-3.5 w-3.5" /> DESTRUCTIVE: permission={preview.permission}, attack_mode={String(preview.attack_mode)}
+              <AlertTriangle className="h-3.5 w-3.5" /> DESTRUCTIVE: permission={preview.permission}
             </div>
           )}
 

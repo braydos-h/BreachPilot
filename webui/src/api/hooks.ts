@@ -37,6 +37,9 @@ import type {
   RunListResponse,
   SecretsStatus,
   SkillDetail,
+  SkillInstallRequest,
+  SkillInstallResponse,
+  SkillRemoveResponse,
   SkillSearchResult,
   SkillSummary,
   SwarmStateResponse,
@@ -57,7 +60,8 @@ export const queryKeys = {
   skills: ["skills"] as const,
   skillsSearch: (q: string) => ["skills", "search", q] as const,
   skill: (name: string) => ["skills", name] as const,
-  runs: (limit: number, offset: number) => ["runs", { limit, offset }] as const,
+  runs: (limit: number, offset: number, sort: string = "created_desc") =>
+    ["runs", { limit, offset, sort }] as const,
   run: (runId: string) => ["runs", runId] as const,
   runDecisions: (runId: string) => ["runs", runId, "decisions"] as const,
   decision: (runId: string, decisionId: string) => ["runs", runId, "decisions", decisionId] as const,
@@ -197,9 +201,9 @@ export function useGoals() {
 }
 
 export function useSkills() {
-  return useQuery<{ skills: SkillSummary[] }>({
+  return useQuery<{ skills: SkillSummary[]; error?: string }>({
     queryKey: queryKeys.skills,
-    queryFn: () => apiFetch<{ skills: SkillSummary[] }>("/skills"),
+    queryFn: () => apiFetch<{ skills: SkillSummary[]; error?: string }>("/skills"),
     ...defaultQueryOptions,
     staleTime: 60_000,
   });
@@ -224,6 +228,28 @@ export function useSkillDetail(name: string | null) {
   });
 }
 
+export function useInstallSkill() {
+  const qc = useQueryClient();
+  return useMutation<SkillInstallResponse, ApiError, SkillInstallRequest>({
+    mutationFn: (body) => apiFetch<SkillInstallResponse>("/skills", { method: "POST", body }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.skills });
+    },
+  });
+}
+
+export function useRemoveSkill() {
+  const qc = useQueryClient();
+  return useMutation<SkillRemoveResponse, ApiError, string>({
+    mutationFn: (name) =>
+      apiFetch<SkillRemoveResponse>(`/skills/${encodeURIComponent(name)}`, { method: "DELETE" }),
+    onSuccess: (_data, name) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.skills });
+      void qc.removeQueries({ queryKey: queryKeys.skill(name) });
+    },
+  });
+}
+
 export function useDiagnostics() {
   const useMut = useMutation<DiagnosticsResponse, ApiError, "doctor" | "self-test">;
   return useMut({
@@ -232,10 +258,11 @@ export function useDiagnostics() {
   });
 }
 
-export function useRuns(limit = 50, offset = 0) {
+export function useRuns(limit = 50, offset = 0, sort: string = "created_desc") {
   return useQuery<RunListResponse>({
-    queryKey: queryKeys.runs(limit, offset),
-    queryFn: () => apiFetch<RunListResponse>(`/runs?limit=${limit}&offset=${offset}`),
+    queryKey: queryKeys.runs(limit, offset, sort),
+    queryFn: () =>
+      apiFetch<RunListResponse>(`/runs?limit=${limit}&offset=${offset}&sort=${encodeURIComponent(sort)}`),
     ...defaultQueryOptions,
     refetchInterval: 5_000,
     placeholderData: keepPreviousData,
@@ -304,6 +331,25 @@ export function useDeleteRun() {
         { method: "DELETE" },
       ),
     onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["runs"] });
+    },
+  });
+}
+
+export function useRetitleRun() {
+  const qc = useQueryClient();
+  return useMutation<
+    { run_id: string; title: string; regenerated: boolean },
+    ApiError,
+    { runId: string; title?: string; regen?: boolean }
+  >({
+    mutationFn: ({ runId, title, regen }) =>
+      apiFetch<{ run_id: string; title: string; regenerated: boolean }>(
+        `/runs/${encodeURIComponent(runId)}/title`,
+        { method: "POST", body: { title: title ?? null, regen: !!regen } },
+      ),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.run(vars.runId) });
       void qc.invalidateQueries({ queryKey: ["runs"] });
     },
   });

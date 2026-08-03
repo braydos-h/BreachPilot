@@ -1,4 +1,4 @@
-"""Regression tests for the ``--long-session`` / ``long_session:`` config block.
+﻿"""Regression tests for the ``--long-session`` / ``long_session:`` config block.
 
 Covers the five longevity fixes:
 * ``build_cli_exploit_settings`` raises the attack budgets when long-session is
@@ -14,7 +14,7 @@ Covers the five longevity fixes:
 * ``_compute_swarm_timeout`` raises the deadline from
   ``long_session.swarm_session_timeout_minutes`` and keeps the 300s default.
 
-All tests stub the Ollama client / MCP — no live network. Per the project
+All tests stub the Ollama client / MCP â€” no live network. Per the project
 memory note pytest can't run on the Linux dev box; run on the Windows env:
 ``python -m pytest tests/test_long_session.py -q``.
 """
@@ -28,7 +28,7 @@ from typing import Any
 import pytest
 
 
-# ── 1 & 2: build_cli_exploit_settings budget bumps + off-by-default ────────
+# â”€â”€ 1 & 2: build_cli_exploit_settings budget bumps + off-by-default â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def _goal():
@@ -94,7 +94,7 @@ class TestBuildSettingsLongSession:
         assert settings.attack_max_commands == 9
 
 
-# ── 3 & 4: num_ctx passthrough to Ollama chat ─────────────────────────────
+# â”€â”€ 3 & 4: num_ctx passthrough to Ollama chat â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class _RecordingClient:
@@ -149,7 +149,7 @@ class TestNumCtxPassthrough:
         assert "options" not in client.calls[0]
 
 
-# ── 5: _build_model_client forwards timeout ───────────────────────────────
+# â”€â”€ 5: _build_model_client forwards timeout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class TestModelClientTimeout:
@@ -162,7 +162,7 @@ class TestModelClientTimeout:
                 recorded["host"] = host
                 recorded["timeout"] = timeout
 
-            def list(self):  # noqa: A003 — mirror real client
+            def list(self):  # noqa: A003 â€” mirror real client
                 return []
 
             def chat(self, *a, **k):
@@ -191,166 +191,17 @@ class TestModelClientTimeout:
         assert "timeout" not in recorded["kwargs"]
 
 
-# ── 5b: unreachable warning de-duplicates per host ────────────────────────
+# â”€â”€ 5b: cloud-only build â€” no probe, no fallback â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
-class TestUnreachableWarningDedup:
-    def test_warns_at_most_once_per_host(self, monkeypatch, capsys):
+class TestBuildModelClientCloudOnly:
+    """Cloud-only: ``_build_model_client`` points the Ollama client at the
+    given host (default https://api.ollama.com) with no reachability probe
+    and no localâ†’cloud fallback. Auth is the ollama client's job
+    (``OLLAMA_API_KEY`` env), not ours."""
+
+    def test_uses_given_host_directly(self, monkeypatch):
         import tools.model_router as mr
-
-        # Fresh state: no host warned yet.
-        mr._OLLAMA_UNREACHABLE_WARNED.clear()
-
-        calls = {"list": 0}
-
-        class FlakyClient:
-            def __init__(self, host=None, **kwargs):
-                pass
-
-            def list(self):
-                calls["list"] += 1
-                raise RuntimeError("connection refused")
-
-            def chat(self, *a, **k):
-                return {"message": {"content": "x"}}
-
-        monkeypatch.setattr(mr, "OllamaClient", FlakyClient)
-        # Simulate build_router registering 5 aliases against the same host.
-        for alias in ("a", "b", "c", "d", "e"):
-            mr._build_model_client("m", host="http://h", alias=alias)
-
-        out = capsys.readouterr().out
-        # The probe retries once per client, so 5 clients x 2 attempts = 10 list() calls.
-        assert calls["list"] == 10
-        # But the warning prints exactly once (de-duped by host).
-        assert out.count("[WARNING] Ollama server at http://h appears unreachable") == 1
-
-    def test_retries_then_succeeds_no_warning(self, monkeypatch, capsys):
-        import tools.model_router as mr
-
-        mr._OLLAMA_UNREACHABLE_WARNED.clear()
-
-        attempts = {"n": 0}
-
-        class SlowStartClient:
-            def __init__(self, host=None, **kwargs):
-                pass
-
-            def list(self):
-                attempts["n"] += 1
-                if attempts["n"] == 1:
-                    raise RuntimeError("starting up")
-                return []
-
-            def chat(self, *a, **k):
-                return {"message": {"content": "x"}}
-
-        monkeypatch.setattr(mr, "OllamaClient", SlowStartClient)
-        monkeypatch.setattr(mr.time, "sleep", lambda *_: None)
-        mr._build_model_client("m", host="http://h", alias="a")
-        out = capsys.readouterr().out
-        assert "[WARNING]" not in out
-        assert attempts["n"] == 2  # first failed, retry succeeded
-
-
-# ── 5c: Ollama Cloud fallback when local is unreachable ───────────────────
-
-
-class TestOllamaCloudFallback:
-    """When the local Ollama is down AND OLLAMA_API_KEY is set, the factory
-    swaps the client over to https://api.ollama.com instead of warning."""
-
-    def test_falls_back_to_cloud_when_local_unreachable_and_key_set(self, monkeypatch, capsys):
-        import tools.model_router as mr
-
-        mr._OLLAMA_UNREACHABLE_WARNED.clear()
-        monkeypatch.setattr(mr.os, "environ", {"OLLAMA_API_KEY": "sk-test"})
-        monkeypatch.setattr(mr.time, "sleep", lambda *_: None)
-
-        constructed: list[dict[str, Any]] = []
-
-        class _Client:
-            def __init__(self, host=None, **kwargs):
-                constructed.append({"host": host, "kwargs": kwargs})
-                self.host = host
-
-            def list(self):  # noqa: A003
-                if self.host == "http://h":
-                    raise RuntimeError("connection refused")
-                return []  # cloud reachable
-
-            def chat(self, *a, **k):
-                return {"message": {"content": "x"}}
-
-        monkeypatch.setattr(mr, "OllamaClient", _Client)
-        client = mr._build_model_client("m", host="http://h", alias="a")
-
-        out = capsys.readouterr().out
-        # Two clients constructed: local (failed) then cloud (succeeded).
-        assert [c["host"] for c in constructed] == ["http://h", mr.OLLAMA_CLOUD_HOST]
-        assert "[WARNING]" not in out
-        assert "Ollama Cloud" in out
-        # The returned ModelClient's chat delegates to the cloud client, so a
-        # chat call hits the cloud host.
-        constructed.clear()
-        client.chat([{"role": "user", "content": "hi"}])
-        # No new local construction during chat — the cloud client is captured.
-        assert constructed == []
-
-    def test_no_fallback_without_api_key(self, monkeypatch, capsys):
-        import tools.model_router as mr
-
-        mr._OLLAMA_UNREACHABLE_WARNED.clear()
-        monkeypatch.setattr(mr.os, "environ", {})
-        monkeypatch.setattr(mr.time, "sleep", lambda *_: None)
-
-        class _Client:
-            def __init__(self, host=None, **kwargs):
-                self.host = host
-
-            def list(self):  # noqa: A003
-                raise RuntimeError("connection refused")
-
-            def chat(self, *a, **k):
-                return {"message": {"content": "x"}}
-
-        monkeypatch.setattr(mr, "OllamaClient", _Client)
-        mr._build_model_client("m", host="http://h", alias="a")
-        out = capsys.readouterr().out
-        assert "[WARNING] Ollama server at http://h appears unreachable" in out
-
-    def test_no_fallback_when_cloud_also_unreachable(self, monkeypatch, capsys):
-        import tools.model_router as mr
-
-        mr._OLLAMA_UNREACHABLE_WARNED.clear()
-        monkeypatch.setattr(mr.os, "environ", {"OLLAMA_API_KEY": "sk-test"})
-        monkeypatch.setattr(mr.time, "sleep", lambda *_: None)
-
-        class _Client:
-            def __init__(self, host=None, **kwargs):
-                self.host = host
-
-            def list(self):  # noqa: A003
-                raise RuntimeError("down")
-
-            def chat(self, *a, **k):
-                return {"message": {"content": "x"}}
-
-        monkeypatch.setattr(mr, "OllamaClient", _Client)
-        mr._build_model_client("m", host="http://h", alias="a")
-        out = capsys.readouterr().out
-        # Both local and cloud down → falls back to the original warning.
-        assert "[WARNING] Ollama server at http://h appears unreachable" in out
-        assert "Ollama Cloud" not in out
-
-    def test_no_fallback_when_local_is_already_cloud_host(self, monkeypatch, capsys):
-        """Avoid an infinite/conflated re-probe when the configured host IS the
-        cloud host (operator pointed ollama.host at the cloud upfront)."""
-        import tools.model_router as mr
-
-        mr._OLLAMA_UNREACHABLE_WARNED.clear()
-        monkeypatch.setattr(mr.os, "environ", {"OLLAMA_API_KEY": "sk-test"})
-        monkeypatch.setattr(mr.time, "sleep", lambda *_: None)
 
         constructed: list[str] = []
 
@@ -359,21 +210,90 @@ class TestOllamaCloudFallback:
                 constructed.append(host)
                 self.host = host
 
-            def list(self):  # noqa: A003
-                raise RuntimeError("down")
+            def chat(self, *a, **k):
+                return {"message": {"content": "x"}}
+
+        monkeypatch.setattr(mr, "OllamaClient", _Client)
+        mr._build_model_client("m", host="http://my-host", alias="a")
+        # Exactly one client built, against the given host â€” no probe, no retry.
+        assert constructed == ["http://my-host"]
+
+    def test_defaults_to_cloud_host(self, monkeypatch):
+        import tools.model_router as mr
+
+        constructed: list[str] = []
+
+        class _Client:
+            def __init__(self, host=None, **kwargs):
+                constructed.append(host)
 
             def chat(self, *a, **k):
                 return {"message": {"content": "x"}}
 
         monkeypatch.setattr(mr, "OllamaClient", _Client)
-        mr._build_model_client("m", host=mr.OLLAMA_CLOUD_HOST, alias="a")
-        # Only the cloud host is constructed — no second probe.
+        mr._build_model_client("m", alias="a")
         assert constructed == [mr.OLLAMA_CLOUD_HOST]
+
+    def test_no_list_probe_called(self, monkeypatch):
+        """Building a client must not call ``list()`` â€” cloud-only builds skip
+        the reachability probe entirely (auth failures surface on the first
+        real chat, not a boot-time probe)."""
+        import tools.model_router as mr
+
+        class _Client:
+            def __init__(self, host=None, **kwargs):
+                self.host = host
+
+            def list(self):  # pragma: no cover - should not be called
+                raise AssertionError("list() probe must not run in cloud-only mode")
+
+            def chat(self, *a, **k):
+                return {"message": {"content": "x"}}
+
+        monkeypatch.setattr(mr, "OllamaClient", _Client)
+        mr._build_model_client("m", host="http://h", alias="a")
+
+    def test_no_warning_or_info_printed(self, monkeypatch, capsys):
+        import tools.model_router as mr
+
+        class _Client:
+            def __init__(self, host=None, **kwargs):
+                pass
+
+            def chat(self, *a, **k):
+                return {"message": {"content": "x"}}
+
+        monkeypatch.setattr(mr, "OllamaClient", _Client)
+        for alias in ("a", "b", "c"):
+            mr._build_model_client("m", host="http://h", alias=alias)
         out = capsys.readouterr().out
-        assert "[WARNING] Ollama server at https://api.ollama.com appears unreachable" in out
+        assert "[WARNING]" not in out
+        assert "Ollama Cloud" not in out
+        assert "falling back" not in out
+
+    def test_chat_delegates_to_built_client(self, monkeypatch):
+        """The returned ModelClient's chat hits whatever host was passed in
+        (no second client is constructed during chat)."""
+        import tools.model_router as mr
+
+        constructed: list[str] = []
+
+        class _Client:
+            def __init__(self, host=None, **kwargs):
+                constructed.append(host)
+                self.host = host
+
+            def chat(self, *a, **k):
+                return {"message": {"content": "x"}}
+
+        monkeypatch.setattr(mr, "OllamaClient", _Client)
+        client = mr._build_model_client("m", host="http://h", alias="a")
+        constructed.clear()
+        client.chat([{"role": "user", "content": "hi"}])
+        assert constructed == []  # no new client built during chat
 
 
-# ── 6 & 7: SessionState persist_messages roundtrip + resume ───────────────
+# â”€â”€ 6 & 7: SessionState persist_messages roundtrip + resume â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class TestSessionStatePersist:
@@ -442,7 +362,7 @@ class TestSessionStatePersist:
         assert any(m["role"] == "tool" for m in out)
 
 
-# ── 8: _compute_swarm_timeout ──────────────────────────────────────────────
+# â”€â”€ 8: _compute_swarm_timeout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def _args(**kw) -> Namespace:

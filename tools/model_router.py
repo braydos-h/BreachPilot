@@ -16,7 +16,6 @@ Usage:
 
 from __future__ import annotations
 
-import os
 import random
 import time
 from dataclasses import dataclass
@@ -278,67 +277,31 @@ def _stream_with_telemetry(
         )
 
 
-# Track which hosts have already been flagged as unreachable so a transient
-# hiccup during boot doesn't print one warning per registered alias.
-_OLLAMA_UNREACHABLE_WARNED: set[str] = set()
-# ponytail: same dedupe for the cloud-fallback INFO line — build_router
-# constructs one client per registry alias (5 by default), each probing the
-# same local host; without this the operator sees the fallback announced
-# once per alias instead of once per boot.
-_OLLAMA_CLOUD_FALLBACK_ANNOUNCED: set[str] = set()
-
-# ponytail: Ollama Cloud fallback host. The Ollama Python client reads
-# OLLAMA_API_KEY from the env on init and adds ``Authorization: Bearer <key>``
-# to every request, so pointing the same Client at the cloud host is enough —
-# no custom transport or header plumbing. See:
-# https://docs.ollama.com/api (POST /api/chat / /api/generate).
+# ponytail: cloud-only. The host (default https://api.ollama.com) is set
+# from config.yaml's ``ollama.host`` at every call site; the ollama Python
+# client auto-attaches ``Authorization: Bearer $OLLAMA_API_KEY`` to every
+# request, so pointing the same Client at the cloud host is the whole
+# wiring. No reachability probe, no local→cloud fallback — the cloud IS
+# the default. A local-only install overrides ``ollama.host`` to point at
+# a local daemon and the same code path runs against that.
 OLLAMA_CLOUD_HOST = "https://api.ollama.com"
-
-
-def _cloud_available() -> bool:
-    """True iff an Ollama Cloud API key is present in the environment."""
-    return bool(os.environ.get("OLLAMA_API_KEY", "").strip())
-
-
-def _check_ollama_reachable(client: Any, host: str) -> bool:
-    """Best-effort reachability probe with a single retry.
-
-    Ollama can briefly refuse connections while its API socket settles after a
-    restart (the operator often runs multiple ollama processes). A momentary
-    failure here is not a real outage, so retry once before reporting. The
-    probe is advisory only — it never blocks client construction.
-    """
-    for attempt in range(2):
-        try:
-            client.list()
-            return True
-        except Exception:
-            if attempt == 0:
-                time.sleep(0.5)
-    return False
-
-
-def _warn_ollama_unreachable(host: str) -> None:
-    if host in _OLLAMA_UNREACHABLE_WARNED:
-        return
-    _OLLAMA_UNREACHABLE_WARNED.add(host)
-    print(f"[WARNING] Ollama server at {host} appears unreachable. Ensure it is running.")
 
 
 def _build_model_client(
     model_name: str,
-    host: str = "http://localhost:11434",
+    host: str = OLLAMA_CLOUD_HOST,
     *,
     alias: str = "",
     request_timeout_seconds: float | None = None,
 ) -> ModelClient:
     """Factory to build a ModelClient for an Ollama model.
 
-    Falls back to Ollama Cloud (``https://api.ollama.com``) when the local
-    server is unreachable AND ``OLLAMA_API_KEY`` is set in the environment.
-    The Ollama Python client auto-attaches the bearer token from that env var,
-    so a host swap is sufficient — no extra auth plumbing. Without a key the
-    behavior is unchanged (warning printed, local client returned).
+    Cloud-only by default: ``host`` is ``https://api.ollama.com`` unless
+    overridden by config or a caller. The ollama Python client reads
+    ``OLLAMA_API_KEY`` from the env on init and adds ``Authorization: Bearer
+    <key>`` to every request, so a host swap is sufficient — no extra auth
+    plumbing. Override ``ollama.host`` in config.yaml to point at a local
+    daemon if you have one; the same code path runs against it.
     """
     if OllamaClient is None:
         raise RuntimeError("ollama package not installed")
@@ -351,26 +314,6 @@ def _build_model_client(
         raw_client = OllamaClient(host=host, timeout=request_timeout_seconds)
     else:
         raw_client = OllamaClient(host=host)
-
-    effective_host = host
-    if not _check_ollama_reachable(raw_client, host):
-        if _cloud_available() and host != OLLAMA_CLOUD_HOST:
-            # Try the cloud once. If reachable, switch the client over and drop
-            # the local warning (the run will use the cloud from here on).
-            if request_timeout_seconds is not None:
-                cloud_client = OllamaClient(host=OLLAMA_CLOUD_HOST, timeout=request_timeout_seconds)
-            else:
-                cloud_client = OllamaClient(host=OLLAMA_CLOUD_HOST)
-            if _check_ollama_reachable(cloud_client, OLLAMA_CLOUD_HOST):
-                raw_client = cloud_client
-                effective_host = OLLAMA_CLOUD_HOST
-                if host not in _OLLAMA_CLOUD_FALLBACK_ANNOUNCED:
-                    _OLLAMA_CLOUD_FALLBACK_ANNOUNCED.add(host)
-                    print(f"[INFO] Local Ollama unreachable — falling back to Ollama Cloud at {OLLAMA_CLOUD_HOST}.")
-            else:
-                _warn_ollama_unreachable(host)
-        else:
-            _warn_ollama_unreachable(host)
 
     telemetry_alias = alias or model_name
     context_window_tokens = _context_window_for(telemetry_alias, model_name)
@@ -436,7 +379,7 @@ def _build_model_client(
 
 def build_router(
     registry: Mapping[str, str] | None = None,
-    host: str = "http://localhost:11434",
+    host: str = OLLAMA_CLOUD_HOST,
     *,
     request_timeout_seconds: float | None = None,
 ) -> ModelRouter:

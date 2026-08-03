@@ -98,7 +98,7 @@ async def run_self_test(args: Any) -> int:
         stages.append({"name": "config_load", "ok": False, "error": str(exc)})
         print(f"  [!] Could not load/validate config: {exc}")
 
-    ollama_host = config.get("ollama", {}).get("host", "http://localhost:11434")
+    ollama_host = config.get("ollama", {}).get("host", "https://api.ollama.com")
     models_cfg = config.get("models", {}).get("registry", {}) or {}
     # Pass registry *values* (model specs), not alias keys -- see
     # tools.doctor._check_models docstring.

@@ -3,17 +3,16 @@ import { Link } from "react-router-dom";
 import {
   Activity,
   ArrowRight,
-  Crosshair,
   History,
   ListFilter,
   ScanSearch,
   Target,
-  Zap,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/StatusBadge";
+import { SkeletonRows } from "@/components/Loading";
 import { useRuns } from "@/api/hooks";
 import {
   isActiveState,
@@ -29,50 +28,51 @@ export function HomePage() {
   const recent = rows.slice(0, 5);
   const doneCount = rows.filter((r) => isTerminalState(r.state)).length;
   const failedCount = rows.filter((r) => r.state === "failed").length;
+  const returning = rows.length > 0 && !runs.isLoading;
+  const lastRow = rows[0];
+  const lastTarget = lastRow?.target || lastRow?.target_ip || "—";
 
   return (
     <div className="relative mx-auto max-w-5xl space-y-8 p-4 md:p-8">
       {/* Hero */}
       <section className="relative overflow-hidden rounded-xl border bg-card/30">
         <div className="absolute inset-0 bg-grid bg-radial-fade" aria-hidden />
+        <div className="absolute inset-0 overflow-hidden" aria-hidden>
+          <div className="absolute inset-x-0 top-0 h-px animate-scan bg-gradient-to-r from-transparent via-primary/60 to-transparent" />
+        </div>
         <div
-          className="absolute -top-24 left-1/2 h-48 w-[60%] -translate-x-1/2 rounded-full bg-primary/5 blur-3xl"
+          className="absolute -top-24 left-1/2 h-48 w-[60%] -translate-x-1/2 rounded-full bg-primary/10 blur-3xl"
           aria-hidden
         />
         <div className="relative flex flex-col gap-5 p-6 md:p-10">
-          <div className="flex items-center gap-2 text-xs">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/70" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
-            </span>
-            <span className="font-mono uppercase tracking-[0.2em] text-muted-foreground">
-              local console &middot; loopback only
-            </span>
-          </div>
-
           <div className="space-y-2">
             <h1 className="text-3xl font-semibold leading-tight tracking-tight md:text-4xl">
-              <span className="text-gradient">NetAttack</span>
-              <span className="text-foreground">AI</span>
+              {returning ? (
+                <>
+                  <span className="text-gradient-primary">Welcome back</span>
+                  <span className="text-foreground">.</span>
+                </>
+              ) : (
+                <>
+                  <span className="text-gradient-primary">NetAttack</span>
+                  <span className="text-foreground">AI</span>
+                </>
+              )}
             </h1>
             <p className="max-w-2xl text-sm text-muted-foreground md:text-base">
-              AI-driven penetration testing console. Plan, execute, and review
-              authorized assessments against assets you own or are
-              explicitly authorized to test.
+              {returning
+                ? `You have ${rows.length} run${rows.length === 1 ? "" : "s"} on record${
+                    lastRow ? `, last targeting ${lastTarget} ${formatRelative(lastRow.created_at)}` : ""
+                  }. Pick up where you left off or start a new assessment.`
+                : "AI-driven penetration testing console. Plan, execute, and review authorized assessments against assets you own or are explicitly authorized to test."}
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Button asChild size="sm" className="gap-1.5">
-              <Link to="/runs/new?path=attack">
-                <Crosshair className="h-4 w-4" />
-                New attack
-              </Link>
-            </Button>
-            <Button asChild size="sm" variant="outline" className="gap-1.5">
+            <Button asChild size="sm" className="gap-1.5 glow-primary">
               <Link to="/runs/new?path=recon">
                 <ScanSearch className="h-4 w-4" />
-                Recon first
+                New recon
               </Link>
             </Button>
             {activeRun && (
@@ -109,9 +109,7 @@ export function HomePage() {
         <Card className="border-yellow-500/40 bg-yellow-500/5">
           <CardContent className="flex flex-wrap items-center gap-2 p-3 text-sm">
             <Activity className="h-4 w-4 animate-pulse text-yellow-300" />
-            <Badge variant="outline" className="border-yellow-500/40 text-yellow-300">
-              Active
-            </Badge>
+            <Badge variant="warn">Active</Badge>
             <span className="truncate font-mono text-xs">{activeRun.target}</span>
             <StatusBadge state={activeRun.state} />
             <Button asChild size="sm" variant="outline" className="ml-auto">
@@ -131,10 +129,10 @@ export function HomePage() {
           accent="cyan"
         />
         <ActionCard
-          to="/runs/new?path=attack"
-          icon={<Zap className="h-7 w-7" />}
-          title="Start New Session"
-          desc="Go straight to attack mode with a preset or custom goal."
+          to="/runs/new?path=recon"
+          icon={<ScanSearch className="h-7 w-7" />}
+          title="Recon"
+          desc="Run a fresh recon scan against a target."
           accent="violet"
         />
       </section>
@@ -167,7 +165,7 @@ export function HomePage() {
         )}
 
         {runs.isLoading && recent.length === 0 && (
-          <div className="p-6 text-center text-sm text-muted-foreground">Loading runs…</div>
+          <SkeletonRows count={3} className="p-2" />
         )}
 
         {recent.length > 0 && (
@@ -217,12 +215,12 @@ function Stat({
 
 const ACCENTS = {
   cyan: {
-    ring: "hover:border-cyan-500/50 hover:shadow-[0_0_28px_-8px_rgba(34,211,238,0.45)]",
-    icon: "text-cyan-300",
+    ring: "hover:border-primary/50 hover:glow-primary",
+    icon: "text-primary",
   },
   violet: {
-    ring: "hover:border-violet-500/50 hover:shadow-[0_0_28px_-8px_rgba(139,92,246,0.45)]",
-    icon: "text-violet-300",
+    ring: "hover:border-primary/50 hover:glow-primary",
+    icon: "text-primary",
   },
 } as const;
 
@@ -261,6 +259,7 @@ function ActionCard({
 
 function RecentRow({ row }: { row: RunListRow }) {
   const target = row.target || row.target_ip || "—";
+  const title = row.title || "";
   return (
     <li>
       <Link
@@ -271,12 +270,13 @@ function RecentRow({ row }: { row: RunListRow }) {
           {truncateId(row.id)}
         </span>
         <StatusBadge state={row.state} />
-        <span className="truncate font-mono text-xs">{target}</span>
+        {title ? (
+          <span className="max-w-[16rem] truncate text-xs" title={title}>{title}</span>
+        ) : (
+          <span className="max-w-[16rem] truncate font-mono text-xs" title={target}>{target}</span>
+        )}
         <span className="ml-auto hidden text-xs text-muted-foreground sm:inline">
           {row.mode}
-        </span>
-        <span className="hidden w-28 truncate text-xs text-muted-foreground md:inline">
-          {row.goal_name || "—"}
         </span>
         <span
           className="text-xs text-muted-foreground"
