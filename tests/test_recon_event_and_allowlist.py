@@ -109,9 +109,15 @@ def test_recon_first_emits_recon_assessment_event(tmp_path):
 # ── 2. RunManager allowlist auto-save ──────────────────────────────────────
 
 
-def test_run_manager_persists_target_to_allowlist(tmp_path, monkeypatch):
-    """``RunManager._create_run_locked`` calls ``add_target_to_allowlist``
-    with ``(config_path, preview.original_target)`` after ``prepare``.
+def test_run_manager_does_not_persist_target_to_allowlist(tmp_path, monkeypatch):
+    """``RunManager._create_run_locked`` must NOT call ``add_target_to_allowlist``.
+
+    The WebUI used to auto-save every entered target to config.yaml's
+    exploit.allowed_targets, which accumulated stale targets and weakened
+    the one-target lock. Target authorization now happens at runtime via
+    EXPLOIT_TARGET env (set in tools/mcp_session.py), so the config write is
+    both unnecessary and a safety regression. This test guards against
+    re-adding it.
     """
     from tools.api.event_broker import EventBrokerRegistry
     from tools.api.persistence import ApiPersistence
@@ -158,7 +164,6 @@ def test_run_manager_persists_target_to_allowlist(tmp_path, monkeypatch):
     monkeypatch.setattr("tools.run_service.AssessmentService", FakeService)
 
     spy_calls: list[tuple] = []
-    real_add = None
 
     def _spy_add(path: Path, target_ip: str) -> bool:
         spy_calls.append((path, target_ip))
@@ -180,14 +185,12 @@ def test_run_manager_persists_target_to_allowlist(tmp_path, monkeypatch):
 
     asyncio.run(_run())
 
-    assert len(spy_calls) == 1, f"expected one allowlist call, got {spy_calls}"
-    called_path, called_target = spy_calls[0]
-    assert called_path == config_path
-    assert called_target == "10.0.0.50"
+    assert len(spy_calls) == 0, f"RunManager must not auto-persist targets to the allowlist (got {spy_calls})"
 
 
 def test_run_manager_allowlist_failure_does_not_kill_run(tmp_path, monkeypatch):
-    """If ``add_target_to_allowlist`` raises, the run still proceeds."""
+    """The run proceeds normally; ``add_target_to_allowlist`` is never called
+    (auto-persist was removed), so a raising stub has no effect on the run."""
     from tools.api.event_broker import EventBrokerRegistry
     from tools.api.persistence import ApiPersistence
     from tools.api.run_manager import RunManager
@@ -247,7 +250,7 @@ def test_run_manager_allowlist_failure_does_not_kill_run(tmp_path, monkeypatch):
 
     async def _run():
         await manager.create_run(RunRequest(target="10.0.0.50"))
-        assert manager.has_active is True, "run must survive an allowlist write failure"
+        assert manager.has_active is True, "run must survive (allowlist is never called)"
         await manager.cancel_run(manager.active.run_id)
 
     asyncio.run(_run())  # must not raise

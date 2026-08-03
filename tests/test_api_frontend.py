@@ -250,9 +250,11 @@ def test_swarm_state_returns_json(tmp_path, monkeypatch):
 def test_campaign_state_returns_json(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
     created = _create_run(client)
-    swarm_dir = Path("reports") / created["run_id"] / "swarm_workspace"
-    swarm_dir.mkdir(parents=True, exist_ok=True)
-    (swarm_dir / "attack_states.json").write_text('{"phase": "exploitation"}', encoding="utf-8")
+    # The autonomous orchestrator runs under swarm_workspace/autonomous/, so
+    # attack_states.json lives there (not at the swarm_workspace root).
+    autonomous_dir = Path("reports") / created["run_id"] / "swarm_workspace" / "autonomous"
+    autonomous_dir.mkdir(parents=True, exist_ok=True)
+    (autonomous_dir / "attack_states.json").write_text('{"phase": "exploitation"}', encoding="utf-8")
     resp = client.get(f"/api/v1/runs/{created['run_id']}/campaign", headers=_auth())
     assert resp.status_code == 200
     assert resp.json()["state"] == {"phase": "exploitation"}

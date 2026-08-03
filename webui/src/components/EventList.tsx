@@ -32,6 +32,12 @@ interface ToolGroup {
 
 function corrIdOf(event: RunEvent): string {
   const payload = event.payload ?? {};
+  // The backend emits a stable `action` counter per tool call across
+  // tool_request/tool_start/tool_result (tools/exploit_agent/loop.py).
+  // Prefer it over name-sequence which differs per event stage.
+  if (typeof payload.action === "number" && payload.action > 0) {
+    return `action-${payload.action}`;
+  }
   const candidate =
     payload.correlation_id ?? payload.call_id ?? payload.tool_call_id ?? payload.request_id;
   if (typeof candidate === "string" && candidate) return candidate;
@@ -91,8 +97,10 @@ export function EventList({ events, decisions, runId, className }: EventListProp
           if (event.type === "tool_result") {
             existing.completed = true;
             existing.result = typeof event.payload.result === "string" ? event.payload.result : undefined;
-            existing.error =
-              typeof event.payload.error === "string" ? event.payload.error : undefined;
+            // Backend signals failure via `success: false` OR a string `error`.
+            const success = event.payload.success;
+            const errStr = typeof event.payload.error === "string" ? event.payload.error : undefined;
+            existing.error = (success === false) ? (errStr ?? "tool failed") : errStr;
           }
         }
         return;

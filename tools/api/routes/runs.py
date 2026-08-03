@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from tools.api.auth import BearerAuth
 from tools.api.errors import APIError
 from tools.api.persistence import ApiPersistence
-from tools.api.run_manager import RunManager
+from tools.api.run_manager import RunManager, _preview_to_dict
 from tools.run_service.models import RunKind, RunRequest
 
 router = APIRouter(prefix="/api/v1", tags=["runs"])
@@ -125,7 +125,7 @@ class RunCreateRequest(BaseModel):
     skills_include: list[str] = Field(default_factory=list)
     skills_exclude: list[str] = Field(default_factory=list)
     resume: str = ""
-    kind: str = Field("agent", pattern="^(agent|manual)$")
+    kind: str = Field("agent", pattern="^agent$")
     yes: bool = False
 
 
@@ -163,18 +163,7 @@ async def create_run(body: RunCreateRequest, auth: str = Depends(_require_auth))
     run_id, preview, decision = await _rm().create_run(request)
     result: dict[str, Any] = {
         "run_id": run_id,
-        "preview": {
-            "run_id": preview.run_id,
-            "target_ip": preview.target_ip,
-            "mode": preview.mode,
-            "goal_name": preview.goal_name,
-            "model_alias": preview.model_alias,
-            "permission": preview.permission,
-            "destructive": preview.destructive,
-            "required_confirmation_text": preview.required_confirmation_text,
-            "budgets": preview.budgets,
-            "swarm": preview.swarm,
-        },
+        "preview": _preview_to_dict(preview),
         "state": "awaiting_confirmation" if decision else "queued",
     }
     if decision:
@@ -398,11 +387,12 @@ async def get_audit(run_id: str, auth: str = Depends(_require_auth)) -> dict[str
 
 # ── Swarm + campaign state (C7-C8) ──────────────────────────────────────────
 
-def _read_state_json(run_id: str, filename: str) -> dict[str, Any]:
-    """Read a JSON state file under reports/<run_id>/swarm_workspace/."""
+def _read_state_json(run_id: str, filename: str, *, subdir: str = "") -> dict[str, Any]:
+    """Read a JSON state file under reports/<run_id>/swarm_workspace/[subdir/]."""
     if _ps().get_run(run_id) is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    state_path = _run_dir(run_id) / "swarm_workspace" / filename
+    base = _run_dir(run_id) / "swarm_workspace"
+    state_path = base / subdir / filename if subdir else base / filename
     if not state_path.exists() or not state_path.is_file():
         raise HTTPException(status_code=404, detail=f"{filename} not found")
     try:
@@ -419,8 +409,12 @@ async def get_swarm_state(run_id: str, auth: str = Depends(_require_auth)) -> di
 
 @router.get("/runs/{run_id}/campaign")
 async def get_campaign_state(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
-    """Read the autonomous orchestrator campaign state (attack_states.json)."""
-    return {"state": _read_state_json(run_id, "attack_states.json")}
+    """Read the autonomous orchestrator campaign state (attack_states.json).
+
+    The autonomous orchestrator runs under ``swarm_workspace/autonomous/`` so
+    the state file lives there, not at the swarm_workspace root.
+    """
+    return {"state": _read_state_json(run_id, "attack_states.json", subdir="autonomous")}
 
 
 # ── Log tailing (C9) ────────────────────────────────────────────────────────
@@ -481,24 +475,47 @@ def _credential_access_log(run_id: str) -> Path:
     return _run_dir(run_id) / "credential_access.jsonl"
 
 
+def _find_credential_stores(ws: Path) -> list[Path]:
+    """Find credential.jsonl files under exploit_workspace/credentials/<target>/.
+
+    The MCP credential tools (tools/mcp_tools/credentials.py) store per-target
+    records at ``workspace/credentials/<target_ip>/credentials.jsonl``. The
+    older path ``exploit_workspace/credentials.jsonl`` is checked as a fallback.
+    """
+    stores: list[Path] = []
+    cred_root = ws / "credentials"
+    if cred_root.is_dir():
+        for child in sorted(cred_root.iterdir()):
+            p = child / "credentials.jsonl"
+            if p.is_file():
+                stores.append(p)
+    legacy = ws / "credentials.jsonl"
+    if legacy.is_file():
+        stores.append(legacy)
+    return stores
+
+
 @router.get("/runs/{run_id}/credentials")
 async def list_credentials(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
     """List credentials harvested during the run. Passwords are NEVER returned."""
     if _ps().get_run(run_id) is None:
         raise HTTPException(status_code=404, detail="Run not found")
     ws = _exploit_workspace(run_id)
-    store_path = ws / "credentials.jsonl"
-    if not store_path.exists():
+    stores = _find_credential_stores(ws)
+    if not stores:
         return {"credentials": []}
     try:
         from tools.credential_store import CredentialStore
-        store = CredentialStore(ws)
-        out = []
-        for idx, rec in enumerate(store.all_credentials()):
-            data = rec.to_json()
-            data["password"] = "[REDACTED]"
-            data["index"] = idx
-            out.append(data)
+        out: list[dict[str, Any]] = []
+        idx = 0
+        for store_path in stores:
+            store = CredentialStore(store_path.parent)
+            for rec in store.all_credentials():
+                data = rec.to_json()
+                data["password"] = "[REDACTED]"
+                data["index"] = idx
+                out.append(data)
+                idx += 1
         return {"credentials": out}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Could not read credentials: {exc}")
@@ -512,13 +529,18 @@ async def reveal_credential(
     if _ps().get_run(run_id) is None:
         raise HTTPException(status_code=404, detail="Run not found")
     ws = _exploit_workspace(run_id)
-    store_path = ws / "credentials.jsonl"
-    if not store_path.exists():
+    stores = _find_credential_stores(ws)
+    if not stores:
         raise HTTPException(status_code=404, detail="No credentials for this run")
     try:
         from tools.credential_store import CredentialStore
-        store = CredentialStore(ws)
-        records = store.all_credentials()
+        records: list[Any] = []
+        store_paths: list[Path] = []
+        for store_path in stores:
+            store = CredentialStore(store_path.parent)
+            for rec in store.all_credentials():
+                records.append(rec)
+                store_paths.append(store_path)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Could not read credentials: {exc}")
     if index < 0 or index >= len(records):
@@ -547,15 +569,20 @@ async def list_loot(run_id: str, auth: str = Depends(_require_auth)) -> dict[str
     if _ps().get_run(run_id) is None:
         raise HTTPException(status_code=404, detail="Run not found")
     ws = _exploit_workspace(run_id)
-    loot_path = ws / "loot.jsonl"
-    if not loot_path.exists():
-        return {"loot": []}
-    try:
-        from tools.credential_store import LootStore
-        store = LootStore(ws)
-        return {"loot": [item.to_json() for item in store._items]}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Could not read loot: {exc}")
+    # LootStore is constructed with a workspace dir and reads <dir>/loot.jsonl.
+    # post_exploit uses LootStore(workspace / "loot") -> exploit_workspace/loot/loot.jsonl.
+    # Fall back to the root-level exploit_workspace/loot.jsonl for older runs.
+    candidates = [ws / "loot", ws]
+    for cand in candidates:
+        loot_path = cand / "loot.jsonl"
+        if loot_path.exists():
+            try:
+                from tools.credential_store import LootStore
+                store = LootStore(cand)
+                return {"loot": [item.to_json() for item in store._items]}
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail=f"Could not read loot: {exc}")
+    return {"loot": []}
 
 
 # ── DELETE run history (D1) ─────────────────────────────────────────────────

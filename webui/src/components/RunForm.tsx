@@ -30,7 +30,6 @@ import { ApiError } from "@/api/client";
 import type {
   GoalPreset,
   RunCreateRequest,
-  RunKind,
   RunMode,
   SkillsMode,
 } from "@/api/types";
@@ -70,7 +69,6 @@ export function RunForm({ className, onCreated }: RunFormProps) {
   const [skillsMode, setSkillsMode] = useState<SkillsMode>("off");
   const [skillsInclude, setSkillsInclude] = useState<string[]>([]);
   const [skillsExclude, setSkillsExclude] = useState<string[]>([]);
-  const [kind, setKind] = useState<RunKind>("agent");
   const [yes, setYes] = useState(false);
   const [submitError, setSubmitError] = useState("");
 
@@ -120,7 +118,7 @@ export function RunForm({ className, onCreated }: RunFormProps) {
       skills: skillsMode === "off" ? null : skillsMode,
       skills_include: skillsInclude,
       skills_exclude: skillsExclude,
-      kind,
+      kind: "agent",
       yes,
     };
     createRun.mutate(body, {
@@ -133,7 +131,6 @@ export function RunForm({ className, onCreated }: RunFormProps) {
 
   const showSkillsSelectors = skillsMode !== "off";
   const criticDisabled = !swarm;
-  const kindManualWarn = kind === "manual";
 
   return (
     <form className={cn("space-y-6", className)} onSubmit={submit}>
@@ -319,21 +316,6 @@ export function RunForm({ className, onCreated }: RunFormProps) {
               onChange={setSkillsExclude}
             />
           </div>
-        )}
-      </section>
-
-      <section className="space-y-3">
-        <h3 className="text-sm font-semibold">Run kind</h3>
-        <SegmentedControl
-          value={kind}
-          onChange={(v) => setKind(v as RunKind)}
-          options={[{ value: "agent", label: "Agent" }, { value: "manual", label: "Manual" }]}
-        />
-        {kindManualWarn && (
-          <p className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-200">
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            Manual kind is advertised by the API but currently executes the normal agent path.
-          </p>
         )}
       </section>
 

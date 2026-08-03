@@ -21,10 +21,14 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -38,6 +42,7 @@ import {
   useAnswerDecision,
   useCapabilities,
   useCreateRun,
+  useGoals,
   useLiveModels,
   useModels,
   useSkills,
@@ -46,8 +51,9 @@ import { Spinner } from "@/components/Loading";
 import { ApiError } from "@/api/client";
 import type {
   CreateRunResponse,
+  GoalPreset,
   RunCreateRequest,
-  RunKind,
+  RunMode,
   SkillsMode,
 } from "@/api/types";
 
@@ -87,6 +93,10 @@ export function Wizard({ onCreated }: WizardProps) {
   const [searchParams] = useSearchParams();
   const [step, setStep] = useState<Step>("settings");
 
+  // ponytail: ?path= query param preselects recon vs attack mode.
+  const pathParam = searchParams.get("path");
+  const modeParam: RunMode = pathParam === "attack" ? "attack" : "recon";
+
   // Settings state
   const [modelAlias, setModelAlias] = useState<string>("");
   const [powerUps, setPowerUps] = useState<Record<string, boolean>>({});
@@ -95,8 +105,13 @@ export function Wizard({ onCreated }: WizardProps) {
   const [skillsMode, setSkillsMode] = useState<SkillsMode>("off");
   const [skillsInclude, setSkillsInclude] = useState<string[]>([]);
   const [skillsExclude, setSkillsExclude] = useState<string[]>([]);
-  const [kind, setKind] = useState<RunKind>("agent");
   const [yes, setYes] = useState(false);
+
+  // Mode + goal state. Honors the ?path= query param (recon|attack).
+  const [mode, setMode] = useState<RunMode>(modeParam);
+  const [goalMode, setGoalMode] = useState<"preset" | "custom">("preset");
+  const [goal, setGoal] = useState<string>("");
+  const [customGoal, setCustomGoal] = useState<string>("");
 
   // Target state
   const [target, setTarget] = useState("");
@@ -116,9 +131,12 @@ export function Wizard({ onCreated }: WizardProps) {
     if (!modelAlias && models.data?.default_alias) setModelAlias(models.data.default_alias);
   }, [models.data, modelAlias]);
 
-  // ponytail: ?path= query param kept for backward compat with HomePage links;
-  // Wizard is recon-only now, so the value is ignored.
-  void searchParams;
+  const goals = useGoals();
+  const goalGroups = useMemo(() => {
+    const groups: Record<string, GoalPreset[]> = { safe: [], gated: [], high: [] };
+    for (const g of goals.data?.goals ?? []) groups[g.risk]?.push(g);
+    return groups;
+  }, [goals.data]);
 
   const flags = capabilities.data?.run_options.flags ?? [];
   const skillsList = skills.data?.skills ?? [];
@@ -137,9 +155,9 @@ export function Wizard({ onCreated }: WizardProps) {
 
   const buildRequest = (): RunCreateRequest => ({
     target: target.trim(),
-    mode: "recon",
-    goal: "",
-    custom_goal: "",
+    mode,
+    goal: goalMode === "preset" ? goal : "",
+    custom_goal: goalMode === "custom" ? customGoal.trim() : "",
     recon_first: reconFirst,
     model: modelAlias || undefined,
     swarm: !!powerUps.swarm,
@@ -154,7 +172,7 @@ export function Wizard({ onCreated }: WizardProps) {
     skills: skillsMode === "off" ? null : skillsMode,
     skills_include: skillsInclude,
     skills_exclude: skillsExclude,
-    kind,
+    kind: "agent",
     yes,
   });
 
@@ -198,8 +216,8 @@ export function Wizard({ onCreated }: WizardProps) {
   return (
     <div className="mx-auto flex w-full max-w-[1060px] flex-col gap-3 px-4 py-4 md:px-6 md:py-5">
       <div>
-        <h1 className="text-lg font-semibold">New recon</h1>
-        <p className="text-sm text-muted-foreground">Guided setup — mirrors the CLI recon-first flow.</p>
+        <h1 className="text-lg font-semibold">New {mode === "attack" ? "attack" : "recon"}</h1>
+        <p className="text-sm text-muted-foreground">Guided setup — mirrors the CLI flow.</p>
       </div>
 
       <Stepper current={step} />
@@ -224,10 +242,17 @@ export function Wizard({ onCreated }: WizardProps) {
           setSkillsInclude={setSkillsInclude}
           skillsExclude={skillsExclude}
           setSkillsExclude={setSkillsExclude}
-          kind={kind}
-          setKind={setKind}
           yes={yes}
           setYes={setYes}
+          mode={mode}
+          setMode={setMode}
+          goalMode={goalMode}
+          setGoalMode={setGoalMode}
+          goal={goal}
+          setGoal={setGoal}
+          customGoal={customGoal}
+          setCustomGoal={setCustomGoal}
+          goalGroups={goalGroups}
         />
       )}
 
@@ -322,10 +347,17 @@ interface SettingsPanelProps {
   setSkillsInclude: (v: string[]) => void;
   skillsExclude: string[];
   setSkillsExclude: (v: string[]) => void;
-  kind: RunKind;
-  setKind: (v: RunKind) => void;
   yes: boolean;
   setYes: (v: boolean) => void;
+  mode: RunMode;
+  setMode: (v: RunMode) => void;
+  goalMode: "preset" | "custom";
+  setGoalMode: (v: "preset" | "custom") => void;
+  goal: string;
+  setGoal: (v: string) => void;
+  customGoal: string;
+  setCustomGoal: (v: string) => void;
+  goalGroups: Record<string, GoalPreset[]>;
 }
 
 function SettingsPanel(props: SettingsPanelProps) {
@@ -335,7 +367,8 @@ function SettingsPanel(props: SettingsPanelProps) {
     reconFirst, setReconFirst,
     observerMode, setObserverMode,
     skillsMode, setSkillsMode, skillsList, skillsInclude, setSkillsInclude, skillsExclude, setSkillsExclude,
-    kind, setKind, yes, setYes,
+    yes, setYes,
+    mode, setMode, goalMode, setGoalMode, goal, setGoal, customGoal, setCustomGoal, goalGroups,
   } = props;
 
   const ollamaOnline = !!liveModels.data && liveModels.data.source === "ollama" && !liveModels.data.error;
@@ -402,6 +435,68 @@ function SettingsPanel(props: SettingsPanelProps) {
       {liveModels.data?.source === "ollama" && liveModels.data.error && (
         <p className="mt-1.5 truncate text-[11px] text-destructive/80">{liveModels.data.error}</p>
       )}
+
+      {/* Mode + goal section */}
+      <div className="mt-5 grid gap-x-5 gap-y-3 sm:grid-cols-2">
+        <div className="space-y-2">
+          <Label>Mode</Label>
+          <SegmentedControl
+            value={mode}
+            onChange={(v) => setMode(v as RunMode)}
+            options={[{ value: "recon", label: "Recon" }, { value: "attack", label: "Attack" }]}
+          />
+          <p className="text-xs text-muted-foreground">
+            {mode === "attack"
+              ? "Full exploitation. Requires full_access permission in config to execute offensive tools."
+              : "Gather intel only. Always read-only — offensive tools are disabled."}
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Goal</Label>
+          <div className="flex flex-wrap items-center gap-2">
+            <SegmentedControl
+              value={goalMode}
+              onChange={(v) => setGoalMode(v as "preset" | "custom")}
+              options={[{ value: "preset", label: "Preset" }, { value: "custom", label: "Custom" }]}
+            />
+            {goalMode === "preset" && (
+              <Select value={goal} onValueChange={setGoal}>
+                <SelectTrigger className="min-w-[14rem]">
+                  <SelectValue placeholder="Select a goal" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(["safe", "gated", "high"] as const).map((risk) => (
+                    <SelectGroup key={risk}>
+                      <SelectLabel className="uppercase">{risk}</SelectLabel>
+                      {goalGroups[risk].map((g) => (
+                        <SelectItem key={g.name} value={g.name}>
+                          <div className="flex flex-col">
+                            <span>{g.name}</span>
+                            <span className="text-xs text-muted-foreground">{g.description}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                      {risk !== "high" && <SelectSeparator />}
+                    </SelectGroup>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+          {goalMode === "custom" && (
+            <Textarea
+              value={customGoal}
+              onChange={(e) => setCustomGoal(e.target.value)}
+              placeholder="Describe the goal of this assessment"
+              className="min-h-[5rem]"
+            />
+          )}
+          {mode === "recon" && (
+            <p className="text-xs text-muted-foreground">Recon mode ignores the goal and runs recon-first.</p>
+          )}
+        </div>
+      </div>
 
       {/* Power-ups section */}
       <div className="mt-5">
@@ -516,27 +611,6 @@ function SettingsPanel(props: SettingsPanelProps) {
             </div>
           )}
         </div>
-
-        {/* Run kind */}
-        <FieldLabel
-          title="Run kind"
-          body={
-            <>
-              <p>Selects the execution path for the run.</p>
-              <div className="space-y-1">
-                <div><span className="font-medium text-foreground">Agent</span> — Full autonomous agent loop: the model plans, calls tools, observes, and iterates until the goal is met or the budget is exhausted.</div>
-                <div><span className="font-medium text-foreground">Manual</span> — Advertised by the API, but currently executes the normal agent path. Treat as Agent for now.</div>
-              </div>
-            </>
-          }
-        >
-          Run kind
-        </FieldLabel>
-        <SegmentedControl
-          value={kind}
-          onChange={(v) => setKind(v as RunKind)}
-          options={[{ value: "agent", label: "Agent" }, { value: "manual", label: "Manual" }]}
-        />
       </div>
 
       {/* Skip start confirmation */}
@@ -630,12 +704,12 @@ function ReviewStep({ createdRun, createError, isCreating, onRetry, onCreated }:
   const skillActivations = (preview.skill_activations ?? []) as Array<{ name: string; reason: string }>;
   const skillErrors = preview.skill_errors ?? [];
 
-  const submitConfirm = (e: React.FormEvent) => {
+  const submitConfirm = (e: React.FormEvent, overrideAnswer?: string) => {
     e.preventDefault();
     if (!decision || submitting) return;
     setSubmitting(true);
     answerDecision.mutate(
-      { decisionId: decision.id, answer: confirmText },
+      { decisionId: decision.id, answer: overrideAnswer ?? confirmText },
       {
         onSuccess: () => onCreated?.(createdRun.run_id, "running"),
         onError: () => setSubmitting(false),
@@ -712,7 +786,7 @@ function ReviewStep({ createdRun, createError, isCreating, onRetry, onCreated }:
             ) : (
               <div className="space-y-2">
                 <p className="text-sm text-muted-foreground">Proceed with this run?</p>
-                <Button type="button" className="w-full" disabled={submitting} onClick={submitConfirm}>
+                <Button type="button" className="w-full" disabled={submitting} onClick={(e) => submitConfirm(e as unknown as React.FormEvent, "yes")}>
                   {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />} Proceed
                 </Button>
               </div>

@@ -39,7 +39,11 @@ class RunState(str, Enum):
 class RunKind(str, Enum):
     """What kind of run this is."""
     AGENT = "agent"     # full autonomous/semi-autonomous assessment
-    MANUAL = "manual"   # MCP tool gateway only, no agent loop
+    # MANUAL was removed: it advertised "MCP tool gateway only, no agent loop"
+    # but AssessmentService.execute never branched on it and ran the normal
+    # agent path. Re-add a distinct branch if genuine manual-only mode is
+    # needed (manual MCP tool calls are already available via the Tools tab
+    # on an active run).
 
 
 class DecisionKind(str, Enum):

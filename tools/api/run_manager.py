@@ -16,6 +16,7 @@ shared UI state. The manager:
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -25,6 +26,7 @@ from tools.api.errors import APIError
 from tools.api.event_broker import EventBrokerRegistry, RunEventBroker
 from tools.api.persistence import ApiPersistence
 from tools.api.session_titler import generate_session_title
+from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
 from tools.run_service.models import (
     Decision,
     DecisionKind,
@@ -59,6 +61,10 @@ class RunHandle:
         self.tool_lock = asyncio.Lock()
         self.preview: RunPreview | None = None
         self.request: RunRequest | None = None
+        # Frozen config snapshot captured at prepare() time so the preview's
+        # permission/budgets/destructive verdicts stay valid even if the
+        # operator PATCHes /config between confirmation and execution.
+        self.config_snapshot: dict[str, Any] | None = None
 
 
 class RunManager:
@@ -119,19 +125,6 @@ class RunManager:
         service = AssessmentService(config=self._config, callables=self._callables)
         preview = await service.prepare(request)
 
-        # Mirror the CLI's interactive-target allowlist persistence
-        # (main.py:667-675): a target entered via the WebUI form is saved to
-        # config.yaml exploit.allowed_targets so it survives across runs.
-        # Best-effort: a config write failure is logged but never kills a run.
-        try:
-            from tools import config_cli as _config_cli
-            _config_cli.add_target_to_allowlist(self._config_path, preview.original_target)
-        except (OSError, ValueError) as exc:
-            import logging as _logging
-            _logging.getLogger(__name__).warning(
-                "Could not save %s to config allowlist: %s", preview.original_target, exc,
-            )
-
         # Persist the run row.
         self._persistence.create_run(
             run_id=preview.run_id,
@@ -144,6 +137,9 @@ class RunManager:
         handle = RunHandle(preview.run_id)
         handle.preview = preview
         handle.request = request
+        # Freeze the config that produced this preview so execution sees the
+        # same permission/budgets/destructive verdict the operator confirmed.
+        handle.config_snapshot = copy.deepcopy(self._config)
         handle.event_broker = event_broker
         handle.decision_broker = DecisionBroker(preview.run_id, self._persistence)
         self._active = handle
@@ -206,7 +202,9 @@ class RunManager:
     async def _execute_run(self, handle: RunHandle) -> None:
         """Run ``AssessmentService.execute`` in the background."""
         from tools.run_service import AssessmentService
-        service = AssessmentService(config=self._config, callables=self._callables)
+        # Use the frozen config snapshot captured at prepare() time so the
+        # confirmed preview (permission/destructive/budgets) stays accurate.
+        service = AssessmentService(config=handle.config_snapshot, callables=self._callables)
 
         decision_provider = ApiDecisionProvider(
             handle.run_id, handle.decision_broker, handle.event_broker.emit,
@@ -224,7 +222,7 @@ class RunManager:
                 decision_provider=decision_provider,
                 event_sink=event_sink,
                 cancellation=handle.cancellation,
-                config=self._config,
+                config=handle.config_snapshot,
                 approval_provider=approval_provider,
                 session_attach=lambda session, schemas, policy: self.set_mcp_session(
                     handle.run_id, session, schemas, policy,
@@ -242,9 +240,14 @@ class RunManager:
             self._persistence.update_run_state(handle.run_id, RunState.CANCELLED.value)
             await handle.event_broker.emit("state", {"state": RunState.CANCELLED.value})
             raise
-        except Exception as exc:
+        except _EXC_GROUP_CATCH as exc:
+            # Catch BaseExceptionGroup too (MCP subprocess death raises it,
+            # and it is NOT a subclass of Exception). Without this the run
+            # would stay "running" forever. See tools/exceptions.py.
             self._persistence.update_run_state(handle.run_id, RunState.FAILED.value, error=str(exc))
             await handle.event_broker.emit("error", {"message": str(exc)})
+            if _is_exception_group(exc):
+                _log_nested_exceptions(exc)
             await self._maybe_title_run(handle, {"error": str(exc)})
         finally:
             if handle.decision_broker:
@@ -374,7 +377,10 @@ class RunManager:
                 raise APIError("tool_denied", "Exploit policy denied the tool call.", status_code=403)
             try:
                 result = await handle.mcp_session.call_tool(tool_name, arguments=arguments)
-            except Exception as exc:
+            except _EXC_GROUP_CATCH as exc:
+                # BaseExceptionGroup from MCP subprocess death is not an Exception.
+                if _is_exception_group(exc):
+                    _log_nested_exceptions(exc)
                 raise APIError("tool_error", "MCP tool call failed.", status_code=500) from exc
         # Extract text content.
         text = _extract_text(result)
@@ -451,17 +457,27 @@ def _request_to_dict(req: RunRequest) -> dict[str, Any]:
 def _preview_to_dict(p: RunPreview) -> dict[str, Any]:
     return {
         "run_id": p.run_id, "target_ip": p.target_ip, "original_target": p.original_target,
-        "mode": p.mode, "goal_name": p.goal_name, "model_alias": p.model_alias,
-        "permission": p.permission, "destructive": p.destructive,
+        "resolved_ip": p.resolved_ip, "resolved_domain": p.resolved_domain,
+        "mode": p.mode, "goal_name": p.goal_name, "goal_description": p.goal_description,
+        "model_alias": p.model_alias, "model_label": p.model_label,
+        "transport_summary": p.transport_summary, "permission": p.permission,
+        "attack_mode": p.attack_mode, "swarm": p.swarm, "parallel_swarm": p.parallel_swarm,
+        "multi_model": p.multi_model, "destructive": p.destructive,
         "required_confirmation_text": p.required_confirmation_text,
-        "budgets": p.budgets, "swarm": p.swarm,
+        "budgets": p.budgets, "skill_activations": p.skill_activations,
+        "skill_errors": p.skill_errors, "resumed_from": p.resumed_from,
     }
 
 
 def _result_to_dict(r: RunResult) -> dict[str, Any]:
     return {
         "run_id": r.run_id, "target_ip": r.target_ip, "mode": r.mode,
-        "goal_name": r.goal_name, "total_actions": r.total_actions,
-        "workspace": r.workspace, "error": r.error,
-        "outcome_summary": r.outcome_summary, "reports_dir": r.reports_dir,
+        "goal_name": r.goal_name, "goal_description": r.goal_description,
+        "total_actions": r.total_actions, "workspace": r.workspace,
+        "audit_path": r.audit_path, "records": r.records, "messages": r.messages,
+        "error": r.error, "swarm_result": r.swarm_result,
+        "active_skills": r.active_skills, "outcome_summary": r.outcome_summary,
+        "telemetry": r.telemetry, "safety_review": r.safety_review,
+        "reports_dir": r.reports_dir, "summary_path": r.summary_path,
+        "run_json_path": r.run_json_path,
     }

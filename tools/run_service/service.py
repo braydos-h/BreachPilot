@@ -581,6 +581,7 @@ class AssessmentService:
                 model_alias=model_alias, swarm_bridge=swarm_bridge,
                 original_target=original_target, resolved_ip=resolved_ip,
                 resolved_domain=resolved_domain, event_sink=event_sink,
+                reports_dir=reports_dir,
             )
 
         # Activity log.
@@ -889,7 +890,7 @@ class AssessmentService:
         goal: AttackGoal, mode: str, exploit_settings: ExploitSettings,
         model_client: Any, model_alias: str, swarm_bridge: SwarmMcpBridge,
         original_target: str, resolved_ip: str | None, resolved_domain: str | None,
-        event_sink: EventSink,
+        event_sink: EventSink, reports_dir: Path,
     ) -> tuple[Any, asyncio.Task[Any] | None, Path]:
         from agent_loop import AgentLoop
 
@@ -911,7 +912,7 @@ class AssessmentService:
             "reflection_every_n_actions": 10,
             "attack_max_rounds": int(exploit_cfg.get("max_rounds", 30)),
         }
-        swarm_workspace = Path("swarm_workspace")
+        swarm_workspace = reports_dir / "swarm_workspace"
         swarm_workspace.mkdir(parents=True, exist_ok=True)
         swarm_loop = AgentLoop(
             mission_config=swarm_mission_config, workspace_root=swarm_workspace,

@@ -13,7 +13,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { SegmentedControl } from "@/components/RunForm";
 import { StatusBadge } from "@/components/StatusBadge";
 import { SkeletonRows } from "@/components/Loading";
 import { useRuns } from "@/api/hooks";
@@ -22,37 +21,22 @@ import {
   isTerminalState,
   type RunListRow,
 } from "@/api/types";
-import { usePermissionMode, type PermissionMode } from "@/lib/permissionMode";
-import { cn } from "@/lib/utils";
 import { formatRelative, truncateId } from "@/lib/utils";
-
-const PERMISSION_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: "read_only", label: "Read" },
-  { value: "approve", label: "Approve" },
-  { value: "full_access", label: "Full" },
-];
-
-const FULL_EXAMPLES: Array<{ kind: string; action: string }> = [
-  { kind: "start_confirm", action: "Auto-answers \u201cyes\u201d to start the run without waiting." },
-  { kind: "tool_approval", action: "Auto-sends the exact required confirmation text (e.g. \u201cI UNDERSTAND THE RISK\u201d) for destructive tool calls." },
-];
 
 const NOTICE_KEY = "netattackai.fullNotice.shown.v1";
 
 function FullAccessNotice() {
-  const { mode, setMode } = usePermissionMode();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     try {
-      if (mode !== "full_access") return;
       if (sessionStorage.getItem(NOTICE_KEY) === "1") return;
       sessionStorage.setItem(NOTICE_KEY, "1");
       setOpen(true);
     } catch {
       // ignore
     }
-  }, [mode]);
+  }, []);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -60,56 +44,14 @@ function FullAccessNotice() {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-lg">
             <ShieldAlert className="h-5 w-5 text-red-400" />
-            Permission mode: Full access
+            Read-only by default
           </DialogTitle>
           <DialogDescription className="text-sm">
-            The console defaults to <span className="text-red-300 font-medium">Full access</span>. The agent will auto-answer every operator decision, including destructive ones, without waiting for you. Use only on assets you own or are authorized to test.
+            The console defaults to <span className="text-yellow-300 font-medium">Read-only</span>. Every operator decision waits for you to answer it. Use the sidebar toggle to switch to Approve (auto-answers non-destructive decisions only).
           </DialogDescription>
         </DialogHeader>
-
-        <div className="space-y-4">
-          <div>
-            <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Change mode
-            </div>
-            <SegmentedControl
-              value={mode}
-              onChange={(v) => setMode(v as PermissionMode)}
-              options={PERMISSION_OPTIONS}
-            />
-            <p className="mt-1.5 text-[11px] leading-tight text-muted-foreground">
-              {mode === "read_only"
-                ? "Every decision waits for you. Nothing is auto-answered."
-                : mode === "approve"
-                  ? "Non-destructive decisions auto-answered; goal selection and destructive ones still wait."
-                  : "Everything auto-answered except goal selection, including destructive actions."}
-            </p>
-          </div>
-
-          <div>
-            <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              What Full access does
-            </div>
-            <ul className="space-y-1.5">
-              {FULL_EXAMPLES.map((ex) => (
-                <li key={ex.kind} className="flex flex-col gap-0.5 rounded-md border border-red-500/20 bg-red-500/5 px-3 py-2">
-                  <span className="font-mono text-xs text-red-300">{ex.kind}</span>
-                  <span className="text-xs leading-relaxed text-muted-foreground">{ex.action}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div className={cn("rounded-md border px-3 py-2 text-[11px] leading-relaxed text-muted-foreground",
-            mode === "full_access" ? "border-red-500/30 bg-red-500/5" : "border-border bg-card/40")}>
-            The target-IP allowlist lock still applies in every mode \u2014 nothing here escapes the allowlist configured for a run.
-          </div>
-        </div>
-
         <div className="flex justify-end gap-2 pt-1">
-          <Button type="button" size="sm" onClick={() => setOpen(false)}>
-            {mode === "full_access" ? "Got it, keep Full" : "Done"}
-          </Button>
+          <Button type="button" size="sm" onClick={() => setOpen(false)}>Got it</Button>
         </div>
       </DialogContent>
     </Dialog>
@@ -225,10 +167,10 @@ export function HomePage() {
           accent="cyan"
         />
         <ActionCard
-          to="/runs/new?path=recon"
-          icon={<ScanSearch className="h-6 w-6" />}
-          title="Recon"
-          desc="Run a fresh recon scan against a target."
+          to="/runs/new?path=attack"
+          icon={<Target className="h-6 w-6" />}
+          title="Attack"
+          desc="Run a full exploitation session against a target with a preset or custom goal."
           accent="violet"
         />
       </section>

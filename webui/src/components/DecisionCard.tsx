@@ -204,10 +204,28 @@ export function DecisionCard({ decision, runId, className, autoAnswering = false
             />
           )}
           {effectiveError && <p className="text-xs text-destructive">{effectiveError}</p>}
-          <Button type="submit" disabled={submitted || (isDestructive ? text !== requiredText : !text)} className="w-full">
-            {submitted ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-            Submit answer
-          </Button>
+          <div className="flex gap-2">
+            <Button type="submit" disabled={submitted || (isDestructive ? text !== requiredText : !text)} className="flex-1">
+              {submitted ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+              Submit answer
+            </Button>
+            {kind === "tool_approval" && (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={submitted}
+                onClick={() => {
+                  answer.mutate(
+                    { decisionId: decision.id, answer: "deny" },
+                    { onError: () => { /* leave form armed */ } },
+                  );
+                }}
+                className="text-destructive hover:text-destructive"
+              >
+                Deny
+              </Button>
+            )}
+          </div>
         </form>
       )}
 

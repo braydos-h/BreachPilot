@@ -14,7 +14,7 @@ export type DecisionKind = "start_confirm" | "goal_select" | "tool_approval";
 export type DecisionStatus = "pending" | "answered" | "denied" | "expired";
 export type RiskTag = "safe" | "gated" | "high";
 export type RunMode = "recon" | "attack";
-export type RunKind = "agent" | "manual";
+export type RunKind = "agent";
 export type SkillsMode = "on" | "off" | "hints" | "lookup";
 export type ObserverMode = "heuristic" | "llm" | "hybrid";
 
