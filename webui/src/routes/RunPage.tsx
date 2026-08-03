@@ -9,6 +9,7 @@ import {
   Wrench,
   ScanSearch,
   ClipboardList,
+  Gauge,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -45,7 +46,7 @@ import {
   useCampaignState,
 } from "@/api/hooks";
 import { ApiError } from "@/api/client";
-import { isActiveState, isTerminalState, type RunState, type ReconAssessment, type RunResult } from "@/api/types";
+import { isActiveState, isTerminalState, type RunState, type ReconAssessment, type RunResult, type RunResultTelemetry } from "@/api/types";
 
 export function RunPage() {
   const { runId } = useParams<{ runId: string }>();
@@ -94,6 +95,17 @@ export function RunPage() {
   const active = isActiveState(currentState as RunState);
   const terminal = isTerminalState(currentState as RunState);
 
+  const liveTelemetry = useMemo<RunResultTelemetry | null>(() => {
+    for (let i = events.events.length - 1; i >= 0; i--) {
+      const ev = events.events[i];
+      if (ev.type !== "progress") continue;
+      const tel = ev.payload.telemetry as RunResultTelemetry | undefined;
+      if (tel && typeof tel === "object") return tel;
+    }
+    const finalTel = (run.data?.result ?? {}).telemetry as RunResultTelemetry | undefined;
+    return finalTel && typeof finalTel === "object" ? finalTel : null;
+  }, [events.events, run.data?.result]);
+
   if (run.isLoading) {
     return <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading run...</div>;
   }
@@ -122,6 +134,41 @@ export function RunPage() {
             <span><span className="text-muted-foreground/70">model:</span> <span className="font-mono text-foreground">{String(preview.model_alias ?? request.model_alias ?? "\u2014")}</span></span>
             <span><span className="text-muted-foreground/70">permission:</span> <span className="text-foreground">{String(preview.permission ?? "\u2014")}</span></span>
           </div>
+          {liveTelemetry && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1">
+                <Gauge className="h-3 w-3" />
+                <span className="text-muted-foreground/70">tokens:</span>{" "}
+                <span className="font-mono tabular-nums text-foreground">{Number(liveTelemetry.total_tokens ?? 0).toLocaleString()}</span>
+              </span>
+              {liveTelemetry.calls != null && (
+                <span>
+                  <span className="text-muted-foreground/70">calls:</span>{" "}
+                  <span className="font-mono tabular-nums text-foreground">{Number(liveTelemetry.calls)}</span>
+                </span>
+              )}
+              {liveTelemetry.context_window_tokens != null && (
+                <span>
+                  <span className="text-muted-foreground/70">ctx window:</span>{" "}
+                  <span className="font-mono tabular-nums text-foreground">{Number(liveTelemetry.context_window_tokens).toLocaleString()}</span>
+                </span>
+              )}
+              {liveTelemetry.last_ctx_pct != null && (
+                <span>
+                  <span className="text-muted-foreground/70">ctx used:</span>{" "}
+                  <span className="font-mono tabular-nums text-foreground">{Number(liveTelemetry.last_ctx_pct).toFixed(1)}%</span>
+                </span>
+              )}
+              {liveTelemetry.last_estimated_context_tokens != null && liveTelemetry.context_window_tokens != null && (
+                <span className="hidden sm:inline">
+                  <span className="text-muted-foreground/70">remaining:</span>{" "}
+                  <span className="font-mono tabular-nums text-foreground">
+                    {Math.max(0, Number(liveTelemetry.context_window_tokens) - Number(liveTelemetry.last_estimated_context_tokens)).toLocaleString()}
+                  </span>
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {active && (

@@ -73,18 +73,23 @@ async def get_events(run_id: str, after: int = Query(0, ge=0), auth: str = Depen
     return {"run_id": run_id, "events": events}
 
 
-@router.get("/runs/{run_id}/events/stream")
+@router.get("/runs/{run_id}/events/stream", response_model=None)
 async def stream_events(
     run_id: str,
     request: Request,
     after: int = Query(0, ge=0),
     token: str = Query("", description="Bearer token (EventSource cannot set headers)"),
-) -> Response:
+) -> StreamingResponse:
     """Server-Sent Events stream: replays from ``after`` then streams live.
 
     Auth via ``?token=<bearer>`` query param (browser EventSource cannot set
     Authorization headers). Each event is sent as ``data: {json}\\n\\n``; a
     ``: heartbeat`` comment keeps the connection alive every 30s.
+
+    Returns a concrete ``StreamingResponse`` (not the bare ``Response`` base
+    class) so FastAPI's OpenAPI schema generator can resolve the return
+    annotation without raising ``PydanticUserError`` (ForwardRef 'Response'
+    not fully defined), which previously made ``/openapi.json`` return 500.
     """
     import hmac
     if _PERSISTENCE is None or _PERSISTENCE.get_run(run_id) is None:

@@ -106,7 +106,7 @@ export function ConfigEditor({ className }: ConfigEditorProps) {
 
       <div className="space-y-4">
         {sections.map((section) => (
-          <details key={section.key} className="rounded-md border bg-card/40" open>
+          <details key={section.key} className="rounded-md border bg-card/40">
             <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium">{section.key}</summary>
             <div className="space-y-3 border-t p-3">
               {Object.entries(section.value)

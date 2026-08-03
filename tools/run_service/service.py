@@ -98,6 +98,9 @@ def _run_telemetry(start_lines: int) -> dict[str, Any] | None:
     calls = 0
     total_tokens = 0
     ctx_values: list[float] = []
+    last_ctx_pct: float | None = None
+    last_ctx_window: int | None = None
+    last_est_ctx: int | None = None
     for line in new_lines:
         try:
             item = _json.loads(line)
@@ -112,11 +115,26 @@ def _run_telemetry(start_lines: int) -> dict[str, Any] | None:
         ctx = item.get("context_usage_pct")
         if isinstance(ctx, (int, float)):
             ctx_values.append(float(ctx))
+            last_ctx_pct = float(ctx)
+        win = item.get("context_window_tokens")
+        if isinstance(win, int):
+            last_ctx_window = win
+        est = item.get("estimated_context_tokens")
+        if isinstance(est, int):
+            last_est_ctx = est
     if not calls:
         return None
     avg_ctx = (sum(ctx_values) / len(ctx_values)) if ctx_values else None
     max_ctx = max(ctx_values) if ctx_values else None
-    return {"calls": calls, "total_tokens": total_tokens, "avg_ctx": avg_ctx, "max_ctx": max_ctx}
+    return {
+        "calls": calls,
+        "total_tokens": total_tokens,
+        "avg_ctx": avg_ctx,
+        "max_ctx": max_ctx,
+        "context_window_tokens": last_ctx_window,
+        "last_ctx_pct": last_ctx_pct,
+        "last_estimated_context_tokens": last_est_ctx,
+    }
 
 
 def _read_swarm_snapshot(swarm_workspace: Path) -> str:
@@ -582,11 +600,13 @@ class AssessmentService:
                 if cancellation.cancelled:
                     return
                 m, s = divmod(int(time.monotonic() - start), 60)
+                _live_tel = _run_telemetry(_telemetry_start) or {}
                 await event_sink.emit(EVENT_PROGRESS, {
                     "elapsed_seconds": int(time.monotonic() - start),
                     "round": _heartbeat.round,
                     "actions": _heartbeat.action,
                     "phase": _heartbeat.phase,
+                    "telemetry": _live_tel,
                 })
                 ui.info(f"Exploit agent still running... {m}:{s:02d} elapsed (round {_heartbeat.round}, {_heartbeat.action} actions, {_heartbeat.phase})")
 

@@ -15,6 +15,7 @@ import {
   Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { isValidTarget } from "@/lib/targetValidation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -84,15 +85,6 @@ const POWER_UPS = [
   { key: "ultrathink", label: "Ultrathink" },
 ] as const;
 
-function isValidTarget(v: string): boolean {
-  const s = v.trim();
-  if (!s) return false;
-  const ipv4 = /^(\d{1,3}\.){3}\d{1,3}$/;
-  const ipv6 = /^[0-9a-fA-F:]+$/;
-  const fqdn = /^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
-  return ipv4.test(s) || (ipv6.test(s) && s.includes(":")) || fqdn.test(s);
-}
-
 export function Wizard({ onCreated }: WizardProps) {
   const [searchParams] = useSearchParams();
   const [step, setStep] = useState<Step>("path");
@@ -109,6 +101,11 @@ export function Wizard({ onCreated }: WizardProps) {
   const [skillsExclude, setSkillsExclude] = useState<string[]>([]);
   const [kind, setKind] = useState<RunKind>("agent");
   const [yes, setYes] = useState(false);
+
+  // Goal state (lifted from GoalSelector so buildRequest can include it).
+  const [goalMode, setGoalMode] = useState<"preset" | "custom">("preset");
+  const [goal, setGoal] = useState<string>("");
+  const [customGoal, setCustomGoal] = useState("");
 
   // Target state
   const [target, setTarget] = useState("");
@@ -179,6 +176,8 @@ export function Wizard({ onCreated }: WizardProps) {
   const buildRequest = (): RunCreateRequest => ({
     target: target.trim(),
     mode,
+    goal: goalMode === "preset" ? goal : "",
+    custom_goal: goalMode === "custom" ? customGoal.trim() : "",
     recon_first: reconFirst,
     model: modelAlias || undefined,
     swarm: !!powerUps.swarm,
@@ -202,8 +201,13 @@ export function Wizard({ onCreated }: WizardProps) {
     createRun.mutate(buildRequest(), {
       onSuccess: (data) => {
         setCreatedRun(data);
+        // Advance to the confirmation gate so the required start_confirm
+        // decision is reachable. Only auto-launch (no confirmation) when the
+        // server says the run is already queued/running (e.g. `yes:true`).
         if (data.state === "queued" || data.state === "running") {
           onCreated?.(data.run_id, data.state);
+        } else {
+          setStep("review");
         }
       },
       onError: (err) => {
@@ -229,10 +233,10 @@ export function Wizard({ onCreated }: WizardProps) {
   };
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 p-4 md:p-6">
+    <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
       <div>
         <h1 className="text-lg font-semibold">New assessment</h1>
-        <p className="text-sm text-muted-foreground">Guided setup — mirrors the CLI questionary flow.</p>
+        <p className="text-sm text-muted-foreground">Guided setup — mirrors the CLI questionnaire flow.</p>
       </div>
 
       <Stepper current={step} />
@@ -273,7 +277,14 @@ export function Wizard({ onCreated }: WizardProps) {
               {liveModels.data && (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Badge variant="outline" className="text-xs">{liveModels.data.source}</Badge>
-                  {liveModels.data.error && <span className="truncate">{liveModels.data.error}</span>}
+                  {liveModels.data.source === "registry" && liveModels.data.error && (
+                    <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-amber-200">
+                      Ollama unreachable — using configured registry models.
+                    </span>
+                  )}
+                  {liveModels.data.source === "ollama" && liveModels.data.error && (
+                    <span className="truncate">{liveModels.data.error}</span>
+                  )}
                 </div>
               )}
             </div>
@@ -333,7 +344,15 @@ export function Wizard({ onCreated }: WizardProps) {
               <div className="space-y-2">
                 <Label>Goal (optional — leave blank to choose after recon)</Label>
                 <p className="text-xs text-muted-foreground">If you set a goal here, recon-first is skipped.</p>
-                <GoalSelector goalGroups={goalGroups} />
+                <GoalSelector
+                  goalGroups={goalGroups}
+                  goalMode={goalMode}
+                  setGoalMode={setGoalMode}
+                  goal={goal}
+                  setGoal={setGoal}
+                  customGoal={customGoal}
+                  setCustomGoal={setCustomGoal}
+                />
               </div>
             )}
 
@@ -465,10 +484,19 @@ function PathCard({ icon, title, description, onClick }: PathCardProps) {
   );
 }
 
-function GoalSelector({ goalGroups }: { goalGroups: Record<string, GoalPreset[]> }) {
-  const [goalMode, setGoalMode] = useState<"preset" | "custom">("preset");
-  const [goal, setGoal] = useState("");
-  const [customGoal, setCustomGoal] = useState("");
+interface GoalSelectorProps {
+  goalGroups: Record<string, GoalPreset[]>;
+  goalMode: "preset" | "custom";
+  setGoalMode: (v: "preset" | "custom") => void;
+  goal: string;
+  setGoal: (v: string) => void;
+  customGoal: string;
+  setCustomGoal: (v: string) => void;
+}
+
+function GoalSelector({
+  goalGroups, goalMode, setGoalMode, goal, setGoal, customGoal, setCustomGoal,
+}: GoalSelectorProps) {
   return (
     <div className="space-y-2">
       <SegmentedControl value={goalMode} onChange={(v) => setGoalMode(v as "preset" | "custom")}

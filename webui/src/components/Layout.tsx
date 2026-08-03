@@ -6,6 +6,7 @@ import { useRuns } from "@/api/hooks";
 import { isActiveState } from "@/api/types";
 import { clearStoredToken } from "@/api/client";
 import { useNavigate } from "react-router-dom";
+import { LiveStatus } from "@/components/LiveStatus";
 
 const NAV_ITEMS = [
   { to: "/", label: "Home", icon: Home, end: true },
@@ -32,9 +33,12 @@ export function Layout() {
           <Terminal className="h-4 w-4 text-muted-foreground" />
           <div className="flex flex-col">
             <span className="text-sm font-semibold leading-tight">NetAttackAI</span>
-            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Local console</span>
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              v{__APP_VERSION__} beta · Local console
+            </span>
           </div>
         </div>
+        <LiveStatus />
         <nav className="flex flex-1 flex-col gap-1 p-2" aria-label="Primary">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
@@ -84,6 +88,9 @@ export function Layout() {
         <div className="flex items-center gap-2">
           <Terminal className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm font-semibold">NetAttackAI</span>
+          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+            v{__APP_VERSION__} beta
+          </span>
         </div>
         <nav className="flex items-center gap-1" aria-label="Primary mobile">
           {NAV_ITEMS.map((item) => {
@@ -109,15 +116,17 @@ export function Layout() {
           })}
           <button
             type="button"
-            className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="flex h-9 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             onClick={onSignOut}
-            aria-label="Clear token"
+            aria-label="Clear token (sign out)"
           >
             <Cpu className="h-4 w-4" />
+            <span>Clear</span>
           </button>
         </nav>
       </header>
 
+      <LiveStatus compact />
       <main className="flex min-w-0 flex-1 flex-col">
         {activeRun && (
           <div className="flex items-center gap-2 border-b border-yellow-500/30 bg-yellow-500/10 px-4 py-2 text-sm text-yellow-300">
@@ -136,8 +145,10 @@ export function Layout() {
             <Eye className="h-3 w-3" />
             Loopback only. Run only against assets you own or are authorized to test.
           </span>
+          <span className="inline-flex items-center gap-2">
+            <span className="opacity-70">v{__APP_VERSION__} beta</span>
           <a
-            href="https://github.com/anomalyco/opencode/issues"
+            href="https://github.com/braydos-h/NetAttackAi/issues"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 hover:text-foreground"
@@ -145,6 +156,7 @@ export function Layout() {
             <Github className="h-3 w-3" />
             Feedback
           </a>
+          </span>
         </footer>
       </main>
     </div>

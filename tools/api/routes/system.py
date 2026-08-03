@@ -209,12 +209,13 @@ async def list_skills(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     try:
         from tools.skill_registry_cache import get_registry
         reg = get_registry(_CONFIG)
-        skills = []
-        for s in reg.all_skills():
-            skills.append({"name": s.name, "description": s.description, "tags": list(s.tags or [])})
+        skills = [
+            {"name": s.name, "description": s.metadata.description, "tags": list(s.metadata.tags or [])}
+            for s in reg.list_skills()
+        ]
         return {"skills": skills}
-    except Exception:
-        return {"skills": []}
+    except Exception as exc:
+        return {"skills": [], "error": f"{type(exc).__name__}: {exc}"}
 
 
 @router.get("/skills/search")
@@ -223,10 +224,10 @@ async def search_skills(q: str = "", auth: str = Depends(_require_auth)) -> dict
     try:
         from tools.skill_registry_cache import get_registry
         reg = get_registry(_CONFIG)
-        results = reg.search(q) if q else reg.all_skills()
-        return {"results": [{"name": s.name, "description": s.description} for s in results[:20]]}
-    except Exception:
-        return {"results": []}
+        results = reg.search(q) if q else reg.list_skills()
+        return {"results": [{"name": s.name, "description": s.metadata.description} for s in results[:20]]}
+    except Exception as exc:
+        return {"results": [], "error": f"{type(exc).__name__}: {exc}"}
 
 
 @router.post("/diagnostics/doctor")

@@ -241,7 +241,14 @@ export function RunForm({ className, onCreated }: RunFormProps) {
           {liveModels.data && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Badge variant="outline" className="text-xs">{liveModels.data.source}</Badge>
-              {liveModels.data.error && <span className="truncate">{liveModels.data.error}</span>}
+              {liveModels.data.source === "registry" && liveModels.data.error && (
+                <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-amber-200">
+                  Ollama unreachable — using configured registry models.
+                </span>
+              )}
+              {liveModels.data.source === "ollama" && liveModels.data.error && (
+                <span className="truncate">{liveModels.data.error}</span>
+              )}
             </div>
           )}
         </div>

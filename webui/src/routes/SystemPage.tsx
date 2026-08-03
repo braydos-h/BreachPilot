@@ -115,7 +115,14 @@ function ModelsTab() {
           {live.data && (
             <div className="flex items-center gap-2">
               <Badge variant="outline">{live.data.source}</Badge>
-              {live.data.error && <span className="text-xs text-muted-foreground">{live.data.error}</span>}
+              {live.data.source === "registry" && live.data.error && (
+                <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-xs text-amber-200">
+                  Ollama unreachable — showing configured registry models below.
+                </span>
+              )}
+              {live.data.source === "ollama" && live.data.error && (
+                <span className="text-xs text-muted-foreground">{live.data.error}</span>
+              )}
             </div>
           )}
           <ul className="space-y-1 font-mono text-xs">

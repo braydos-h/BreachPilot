@@ -74,8 +74,6 @@ def test_serve_webui_deep_link_returns_spa(tmp_path, monkeypatch):
 
 @skip_if_no_build
 def test_serve_webui_does_not_shadow_api(tmp_path, monkeypatch):
-    # raise_server_exceptions=False so the pre-existing openapi/pydantic
-    # compatibility issue returns 500 instead of raising in the test.
     client = _make_client(tmp_path, monkeypatch, serve_webui=True)
     client2 = TestClient(client.app, raise_server_exceptions=False)
     # Health (no auth).
@@ -88,12 +86,12 @@ def test_serve_webui_does_not_shadow_api(tmp_path, monkeypatch):
     # A protected API route still requires auth (not shadowed by SPA).
     resp = client2.get("/api/v1/capabilities")
     assert resp.status_code == 401
-    # OpenAPI schema endpoint is reachable (not shadowed by SPA). The schema
-    # generation itself may hit a pre-existing pydantic compatibility issue
-    # unrelated to the WebUI mount — the key assertion is that the SPA
-    # fallback does not intercept /openapi.json.
+    # OpenAPI schema endpoint must return 200 (not 500, not shadowed by the
+    # SPA fallback). Previously the bare ``Response`` return annotation on the
+    # SSE stream route made schema generation raise PydanticUserError -> 500.
     resp = client2.get("/openapi.json")
-    assert resp.status_code in (200, 500), f"openapi.json was shadowed by SPA (got {resp.status_code})"
+    assert resp.status_code == 200, f"openapi.json returned {resp.status_code} (expected 200)"
+    assert "/api/v1/runs" in resp.json().get("paths", {})
 
 
 @skip_if_no_build

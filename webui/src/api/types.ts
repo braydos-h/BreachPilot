@@ -267,6 +267,9 @@ export interface RunResultTelemetry {
   total_calls?: number;
   avg_ctx_pct?: number;
   max_ctx_pct?: number;
+  context_window_tokens?: number;
+  last_ctx_pct?: number;
+  last_estimated_context_tokens?: number;
   [key: string]: unknown;
 }
 

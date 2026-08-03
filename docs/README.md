@@ -14,6 +14,7 @@ These docs are the fastest path into this codebase for new contributors. The roo
 - [Plugin Development](plugin-development.md): how to write, package, enable, and distribute out-of-tree plugins.
 - [Runtime Skills](skills.md): advisory skill pipeline, selection, re-selection, feedback, and semantic matching.
 - [WebUI API](api.md): v1 REST + WebSocket reference for the `--demon`/`--daemon` API (runs, decisions, events, tools, config, secrets).
+- [WebUI](webui.md): the bundled React/Vite SPA — stack, pages, auth, real-time transport, and extension points.
 
 ## Mental Model
 
