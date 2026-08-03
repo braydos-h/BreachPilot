@@ -210,18 +210,67 @@ function renderSimpleEvent(event: RunEvent, key: string): React.ReactNode {
           {event.timestamp && <span className="ml-auto text-xs text-muted-foreground">{event.timestamp}</span>}
         </div>
       );
-    case "progress":
+    case "progress": {
+      const tel = event.payload.telemetry as
+        | {
+            calls?: number;
+            total_tokens?: number;
+            last_ctx_pct?: number | null;
+            context_window_tokens?: number | null;
+            last_estimated_context_tokens?: number | null;
+            avg_ctx?: number | null;
+            max_ctx?: number | null;
+          }
+        | undefined;
+      const ctxPct = tel?.last_ctx_pct ?? null;
+      const ctxWindow = tel?.context_window_tokens ?? null;
+      const ctxUsed = tel?.last_estimated_context_tokens ?? null;
+      const ctxBar = ctxPct != null ? Math.max(0, Math.min(100, Math.round(ctxPct))) : null;
       return (
-        <div key={key} className="flex items-center gap-2 px-3 py-1 text-xs text-muted-foreground">
-          <Cpu className="h-3 w-3" />
-          <span>
-            round {String(event.payload.round ?? "\u2014")} · {String(event.payload.action ?? "\u2014")} · {String(event.payload.phase ?? "\u2014")}
-          </span>
-          {event.payload.elapsed_seconds != null && (
-            <span className="ml-auto tabular-nums">{String(event.payload.elapsed_seconds)}s</span>
+        <div key={key} className="rounded-md bg-secondary/40 px-3 py-1.5 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <Cpu className="h-3 w-3" />
+            <span>
+              round {String(event.payload.round ?? "\u2014")} · {String(event.payload.actions ?? event.payload.action ?? "\u2014")} · {String(event.payload.phase ?? "\u2014")}
+            </span>
+            {event.payload.elapsed_seconds != null && (
+              <span className="ml-auto tabular-nums">{formatElapsed(Number(event.payload.elapsed_seconds))}</span>
+            )}
+          </div>
+          {tel && (tel.calls || tel.total_tokens || ctxPct != null) && (
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 pl-5 text-[11px]">
+              {tel.calls != null && (
+                <span>
+                  LLM <span className="tabular-nums text-foreground">{tel.calls}</span> calls
+                </span>
+              )}
+              {tel.total_tokens != null && (
+                <span>
+                  <span className="tabular-nums text-foreground">{formatTokens(tel.total_tokens)}</span> tokens
+                </span>
+              )}
+              {ctxPct != null && (
+                <span className="inline-flex items-center gap-1">
+                  <span>ctx</span>
+                  <span className="relative inline-block h-1.5 w-16 overflow-hidden rounded-full bg-muted">
+                    <span
+                      className="absolute left-0 top-0 h-full rounded-full bg-primary/70"
+                      style={{ width: `${ctxBar ?? 0}%` }}
+                    />
+                  </span>
+                  <span className="tabular-nums text-foreground">{ctxBar}%</span>
+                </span>
+              )}
+              {ctxUsed != null && ctxWindow != null && (
+                <span className="tabular-nums">
+                  {formatTokens(ctxUsed)}/{formatTokens(ctxWindow)}
+                </span>
+              )}
+            </div>
           )}
         </div>
       );
+    }
     case "assistant":
       return (
         <div key={key} className="flex gap-2 rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm">
@@ -300,4 +349,23 @@ function safeStringify(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function formatElapsed(totalSeconds: number): string {
+  const s = Math.max(0, Math.round(totalSeconds));
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  if (m >= 60) {
+    const h = Math.floor(m / 60);
+    const mm = m % 60;
+    return `${h}h${String(mm).padStart(2, "0")}m`;
+  }
+  if (m > 0) return `${m}m${String(rem).padStart(2, "0")}s`;
+  return `${rem}s`;
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
 }

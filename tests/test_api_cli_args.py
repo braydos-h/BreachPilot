@@ -23,6 +23,26 @@ def test_demon_default_host_port():
     assert args.api_port is None
 
 
+def test_demon_reuses_running_api_daemon(monkeypatch):
+    """A second daemon invocation must not attempt another bind."""
+    import main
+
+    class _Ui:
+        def __init__(self):
+            self.messages = []
+
+        def status(self, message):
+            self.messages.append(message)
+
+    monkeypatch.setattr(main, "ui", _Ui())
+    monkeypatch.setattr(main, "load_config", lambda _: {"api": {"host": "127.0.0.1", "port": 8765}})
+    monkeypatch.setattr(main, "_api_daemon_ready", lambda host, port: True)
+    monkeypatch.setattr(main, "create_app", lambda *args, **kwargs: pytest.fail("must not create a second daemon"), raising=False)
+
+    assert main._run_daemon(main.parse_args(["--daemon"])) == 0
+    assert main.ui.messages == ["WebUI API daemon is already running on http://127.0.0.1:8765"]
+
+
 def test_demon_mutually_exclusive_with_target():
     """--demon + --target should return exit code 2 (conflict)."""
     from main import main

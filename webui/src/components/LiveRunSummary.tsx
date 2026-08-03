@@ -1,0 +1,228 @@
+import { Activity, AlertTriangle, Clock, Cpu, FileCheck, Layers, MessageSquare, Terminal, Timer } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import type { RunEvent } from "@/api/types";
+
+interface LiveRunSummaryProps {
+  events: RunEvent[];
+  className?: string;
+}
+
+interface Derived {
+  phase: string;
+  round: number | null;
+  actions: number | null;
+  elapsedSeconds: number | null;
+  lastAssistant: string;
+  lastTool: string;
+  lastToolStatus: string;
+  toolCount: number;
+  toolErrors: number;
+  assistantCount: number;
+  bootDone: number;
+  bootTotal: number;
+  artifacts: number;
+  tokens: number | null;
+  eventsPerMin: number | null;
+}
+
+function derive(events: RunEvent[]): Derived {
+  let phase = "";
+  let round: number | null = null;
+  let actions: number | null = null;
+  let elapsedSeconds: number | null = null;
+  let lastAssistant = "";
+  let lastTool = "";
+  let lastToolStatus = "";
+  let toolCount = 0;
+  let toolErrors = 0;
+  let assistantCount = 0;
+  let bootDone = 0;
+  let bootTotal = 0;
+  let artifacts = 0;
+  let tokens: number | null = null;
+
+  for (let i = 0; i < events.length; i++) {
+    const ev = events[i];
+    switch (ev.type) {
+      case "progress": {
+        const p = ev.payload ?? {};
+        if (typeof p.phase === "string" && p.phase) phase = p.phase;
+        if (typeof p.round === "number") round = p.round;
+        if (typeof p.actions === "number") actions = p.actions;
+        if (typeof p.elapsed_seconds === "number") elapsedSeconds = p.elapsed_seconds;
+        const tel = p.telemetry as Record<string, unknown> | undefined;
+        if (tel && typeof tel.total_tokens === "number") tokens = tel.total_tokens as number;
+        break;
+      }
+      case "assistant": {
+        const txt = typeof ev.payload.text === "string" ? ev.payload.text : "";
+        if (txt.trim()) {
+          lastAssistant = txt;
+          assistantCount++;
+        }
+        break;
+      }
+      case "tool_request":
+      case "tool_start":
+      case "tool_result": {
+        if (ev.type === "tool_request") toolCount++;
+        const name = typeof ev.payload.name === "string" ? ev.payload.name : "";
+        if (name) lastTool = name;
+        if (ev.type === "tool_result") {
+          if (ev.payload.error) {
+            lastToolStatus = "error";
+            toolErrors++;
+          } else {
+            lastToolStatus = "done";
+          }
+        } else if (ev.type === "tool_start") {
+          if (lastToolStatus !== "error" && lastToolStatus !== "done") lastToolStatus = "running";
+        }
+        break;
+      }
+      case "boot":
+        bootTotal++;
+        break;
+      case "ok":
+        bootDone++;
+        if (bootTotal === 0) bootTotal = bootDone;
+        break;
+      case "artifact":
+        artifacts++;
+        break;
+      default:
+        break;
+    }
+  }
+
+  // ponytail: wall-clock events/min from first→last timestamp; cheap and good enough.
+  let eventsPerMin: number | null = null;
+  if (events.length >= 2) {
+    const first = events[0].timestamp ? Date.parse(events[0].timestamp) : NaN;
+    const last = events[events.length - 1].timestamp ? Date.parse(events[events.length - 1].timestamp) : NaN;
+    if (Number.isFinite(first) && Number.isFinite(last) && last > first) {
+      const mins = (last - first) / 60000;
+      eventsPerMin = mins > 0 ? Math.round(events.length / mins) : null;
+    }
+  }
+
+  return {
+    phase, round, actions, elapsedSeconds,
+    lastAssistant, lastTool, lastToolStatus,
+    toolCount, toolErrors, assistantCount,
+    bootDone, bootTotal, artifacts, tokens, eventsPerMin,
+  };
+}
+
+function fmtElapsed(s: number): string {
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${m}:${sec.toString().padStart(2, "0")}`;
+}
+
+function truncate(s: string, n: number): string {
+  const one = s.replace(/\s+/g, " ").trim();
+  return one.length <= n ? one : one.slice(0, n - 1) + "\u2026";
+}
+
+export function LiveRunSummary({ events, className }: LiveRunSummaryProps) {
+  const d = derive(events);
+  const hasAny = d.phase || d.round != null || d.actions != null || d.lastTool || d.lastAssistant;
+
+  if (!hasAny) {
+    return (
+      <Card className={cn(className)}>
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <Activity className="h-4 w-4" /> Live activity
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="text-xs text-muted-foreground">
+          Waiting for the agent to start…
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className={cn(className)}>
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <Activity className="h-4 w-4" /> Live activity
+          {d.phase && (
+            <Badge variant="info" className="ml-auto font-mono text-[10px] uppercase">
+              {d.phase}
+            </Badge>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2.5 text-xs">
+        <div className="grid grid-cols-3 gap-2 font-mono">
+          <Stat icon={<Layers className="h-3 w-3" />} label="round" value={d.round != null ? String(d.round) : "\u2014"} />
+          <Stat icon={<Terminal className="h-3 w-3" />} label="actions" value={d.actions != null ? String(d.actions) : "\u2014"} />
+          <Stat icon={<Clock className="h-3 w-3" />} label="elapsed" value={d.elapsedSeconds != null ? fmtElapsed(d.elapsedSeconds) : "\u2014"} />
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 font-mono">
+          <Stat icon={<Cpu className="h-3 w-3" />} label="tool calls" value={String(toolCountLabel(d))} />
+          <Stat icon={<MessageSquare className="h-3 w-3" />} label="msgs" value={String(d.assistantCount)} />
+        </div>
+
+        {d.lastTool && (
+          <div className="space-y-1 rounded-md border bg-muted/30 p-2">
+            <div className="flex items-center gap-1.5 text-muted-foreground">
+              <Terminal className="h-3 w-3" /> Last tool
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-foreground">{d.lastTool}</span>
+              {d.lastToolStatus && (
+                <Badge
+                  variant={d.lastToolStatus === "error" ? "danger" : d.lastToolStatus === "done" ? "success" : "warn"}
+                  className="ml-auto text-[10px]"
+                >
+                  {d.lastToolStatus}
+                </Badge>
+              )}
+            </div>
+          </div>
+        )}
+
+        {d.lastAssistant && (
+          <div className="space-y-1 rounded-md border border-primary/20 bg-primary/5 p-2">
+            <div className="flex items-center gap-1.5 text-muted-foreground">
+              <MessageSquare className="h-3 w-3" /> Agent said
+            </div>
+            <div className="whitespace-pre-wrap break-words text-foreground">
+              {truncate(d.lastAssistant, 240)}
+            </div>
+          </div>
+        )}
+
+        {d.elapsedSeconds != null && (
+          <div className="flex items-center gap-1.5 pt-0.5 text-muted-foreground">
+            <Timer className="h-3 w-3" /> updated {fmtElapsed(d.elapsedSeconds)} ago
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function toolCountLabel(d: Derived): string {
+  if (d.actions != null) return `${d.toolCount}/${d.actions}`;
+  return String(d.toolCount);
+}
+
+function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="space-y-0.5 rounded-md border bg-card/40 p-1.5">
+      <div className="flex items-center gap-1 text-muted-foreground">
+        {icon}
+        <span className="text-[10px] uppercase tracking-wide">{label}</span>
+      </div>
+      <div className="tabular-nums text-foreground">{value}</div>
+    </div>
+  );
+}

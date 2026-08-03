@@ -31,6 +31,7 @@ import { CopyButton } from "@/components/CopyButton";
 import { EventList } from "@/components/EventList";
 import { DecisionCard } from "@/components/DecisionCard";
 import { ReconAssessmentCard } from "@/components/ReconAssessmentCard";
+import { LiveRunSummary } from "@/components/LiveRunSummary";
 import { SessionSummaryCard } from "@/components/SessionSummaryCard";
 import { Skeleton, SkeletonCards, SkeletonRows, Spinner } from "@/components/Loading";
 import { useRunEvents } from "@/api/ws";
@@ -259,6 +260,8 @@ export function RunPage() {
           <EventList events={events.events} decisions={mergedDecisions} runId={run.data.id} className="h-[70vh]" />
         </div>
         <div className="space-y-3">
+          <LiveRunSummary events={events.events} />
+
           <Card className={cn(pendingDecisions.length > 0 && "border-primary/40 glow-primary")}>
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-sm">

@@ -474,11 +474,12 @@ def _ensure_webui_build(ui: Any) -> int:
 def _open_browser_when_ready(host: str, port: int, ui: Any) -> None:
     """Poll the health endpoint, then open the browser. Daemon thread."""
     import urllib.request
-    base = f"http://{host}:{port}/" if host != "::1" else "http://[::1]:{port}/"
+    base = f"http://{host}:{port}/" if host != "::1" else f"http://[::1]:{port}/"
+    health_url = f"{base}api/v1/health"
     deadline = time.monotonic() + 30.0
     while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen(base, timeout=2) as resp:  # noqa: S310 -- loopback only
+            with urllib.request.urlopen(health_url, timeout=2) as resp:  # noqa: S310 -- loopback only
                 if resp.status == 200:
                     break
         except OSError:
@@ -493,6 +494,18 @@ def _open_browser_when_ready(host: str, port: int, ui: Any) -> None:
         ui.status(f"  Open {base} manually.")
 
 
+def _api_daemon_ready(host: str, port: int) -> bool:
+    """Return whether a NetAttackAI API daemon already owns this endpoint."""
+    import urllib.request
+
+    base = f"http://{host}:{port}/" if host != "::1" else f"http://[{host}]:{port}/"
+    try:
+        with urllib.request.urlopen(f"{base}api/v1/health", timeout=1) as response:  # noqa: S310 -- loopback only
+            return response.status == 200
+    except OSError:
+        return False
+
+
 def _run_daemon(args: argparse.Namespace) -> int:
     """Start the local WebUI API server (``--demon`` / ``--daemon`` / ``--web``)."""
     config = load_config(args.config)
@@ -503,6 +516,13 @@ def _run_daemon(args: argparse.Namespace) -> int:
     if host not in ("127.0.0.1", "localhost", "::1"):
         ui.error(f"--api-host must be loopback (127.0.0.1/localhost/::1); got {host!r}. Public binds are not supported in v1.")
         return 2
+    status_host = f"[{host}]" if host == "::1" else host
+    web_mode = getattr(args, "web", False)
+    if _api_daemon_ready(host, port):
+        ui.status(f"WebUI API daemon is already running on http://{status_host}:{port}")
+        if web_mode:
+            threading.Thread(target=_open_browser_when_ready, args=(host, port, ui), daemon=True).start()
+        return 0
     try:
         import uvicorn  # noqa: F401 -- import gate
     except ImportError:
@@ -514,7 +534,6 @@ def _run_daemon(args: argparse.Namespace) -> int:
         ui.error(f"Could not import the ASGI app factory (app.py): {exc}")
         return 1
 
-    web_mode = getattr(args, "web", False)
     if web_mode:
         build_rc = _ensure_webui_build(ui)
         if build_rc != 0:
@@ -523,7 +542,6 @@ def _run_daemon(args: argparse.Namespace) -> int:
         api_cfg["serve_webui"] = True
 
     ui.banner()
-    status_host = f"[{host}]" if host == "::1" else host
     ui.status(f"Starting WebUI API daemon on http://{status_host}:{port}")
     ui.status(f"  Interactive docs: http://{status_host}:{port}/docs")
     ui.status(f"  OpenAPI schema:    http://{status_host}:{port}/openapi.json")
