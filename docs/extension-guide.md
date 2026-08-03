@@ -108,7 +108,7 @@ new execution capability.
 
 Edit:
 
-- `skills-to-add/<skill-name>/SKILL.md`: add YAML front matter and Markdown guidance.
+- `skills/<skill-name>/SKILL.md`: add YAML front matter and Markdown guidance.
 - `config.yaml`: add the skill to `skills.default_enabled` or rely on tags for contextual selection.
 - `tests/test_skill_registry.py` or `tests/test_skill_selector.py`: cover parsing and selection behavior when the skill changes core routing.
 
@@ -116,7 +116,7 @@ Conventions:
 
 - Skills are prompt context only. They must not bypass scope, permission, approval, command safety, workspace containment, or audit logging.
 - Prefer accurate tags such as `nmap`, `api`, `active-directory`, `tls`, `reconnaissance`, or `vulnerability-scanning`.
-- Put higher-risk or niche skills under `skills-to-add/maybe/`; they are ignored unless `skills.maybe_enabled` is true.
+- Put higher-risk or niche skills under `skills/maybe/`; they are ignored unless `skills.maybe_enabled` is true.
 - Keep guidance compact. By default selected skills are exposed as short hints
   and full text is loaded later through `load_runtime_skill`; only
   `skills.inject_startup_context: true` uses `skills.max_total_chars` to inject

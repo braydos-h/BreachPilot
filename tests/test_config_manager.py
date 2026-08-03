@@ -308,7 +308,7 @@ def test_validate_skills_warnings(tmp_path: Path):
         "skills": {
             "enabled": "yes",
             "inject_startup_context": "yes",
-            "roots": "skills-to-add",
+            "roots": "skills",
             "max_active_skills": 0,
             "min_contextual_skills": 0,
             "default_skill_weight": "high",

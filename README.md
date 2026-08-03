@@ -410,7 +410,7 @@ See [docs/plugin-development.md](docs/plugin-development.md) for the full guide.
 
 ### 10. Runtime skills
 
-130+ advisory methodology skills in `skills-to-add/`, spanning:
+130+ advisory methodology skills in `skills/`, spanning:
 
 - Core methodology, scope, recon, and workflow
 - Recon, enumeration, and evidence analysis

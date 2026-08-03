@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 
 
 def _make_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str = "test-token") -> TestClient:
-    """Create a TestClient whose skills.roots points at tmp_path/skills-to-add."""
+    """Create a TestClient whose skills.roots points at tmp_path/skills."""
     monkeypatch.setenv("NETATTACKAI_API_TOKEN", token)
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
@@ -33,11 +33,11 @@ def _make_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str = "
         "models:\n  default_alias: glm\n  registry:\n    glm: glm-5.2:cloud\n"
         "exploit:\n  permission: read_only\n"
         "api:\n  host: 127.0.0.1\n  port: 8765\n"
-        "skills:\n  enabled: true\n  roots:\n  - skills-to-add\n  default_enabled: []\n  exclude_names: []\n",
+        "skills:\n  enabled: true\n  roots:\n  - skills\n  default_enabled: []\n  exclude_names: []\n",
         encoding="utf-8",
     )
     # Pre-create the skills root so install_skill's root check passes.
-    (tmp_path / "skills-to-add").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "skills").mkdir(parents=True, exist_ok=True)
     from app import create_app
 
     app = create_app(config_path=config_path)
@@ -87,7 +87,7 @@ def test_install_skill_creates_file_and_lists(tmp_path, monkeypatch):
     assert body["name"] == "my-test-skill"
     assert "test" in body["tags"]
     # The SKILL.md file is on disk under the configured root.
-    skill_file = tmp_path / "skills-to-add" / "my-test-skill" / "SKILL.md"
+    skill_file = tmp_path / "skills" / "my-test-skill" / "SKILL.md"
     assert skill_file.is_file()
     assert "my-test-skill" in skill_file.read_text(encoding="utf-8")
     # The new skill appears in the catalog list.
@@ -102,7 +102,7 @@ def test_install_skill_rejects_invalid_name(tmp_path, monkeypatch):
         resp = client.post("/api/v1/skills", json={"name": bad, "markdown": _VALID_SKILL_MD}, headers=_auth())
         assert resp.status_code == 400, f"name {bad!r} should be rejected, got {resp.status_code}"
     # No directory should have been created for the bad names.
-    root = tmp_path / "skills-to-add"
+    root = tmp_path / "skills"
     created = [p.name for p in root.iterdir() if p.is_dir()]
     assert created == [], f"unexpected dirs created: {created}"
 
@@ -125,7 +125,7 @@ def test_install_skill_rejects_malformed_markdown(tmp_path, monkeypatch):
     resp = client.post("/api/v1/skills", json={"name": "bad-skill", "markdown": bad_md}, headers=_auth())
     assert resp.status_code == 400, resp.text
     # The created directory must have been cleaned up on parse failure.
-    assert not (tmp_path / "skills-to-add" / "bad-skill").exists()
+    assert not (tmp_path / "skills" / "bad-skill").exists()
 
 
 def test_install_skill_rejects_empty_markdown(tmp_path, monkeypatch):
@@ -137,7 +137,7 @@ def test_install_skill_rejects_empty_markdown(tmp_path, monkeypatch):
 def test_install_skill_conflict_on_existing_name(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
     # Seed an existing skill dir with a SKILL.md.
-    existing = tmp_path / "skills-to-add" / "already-here"
+    existing = tmp_path / "skills" / "already-here"
     existing.mkdir(parents=True)
     (existing / "SKILL.md").write_text(_skill_md("already-here"), encoding="utf-8")
     from tools.skill_registry_cache import clear_cache
@@ -169,7 +169,7 @@ def test_install_rejects_front_matter_name_mismatch(tmp_path, monkeypatch):
         headers=_auth(),
     )
     assert resp.status_code == 400, resp.text
-    assert not (tmp_path / "skills-to-add" / "dir-name").exists()
+    assert not (tmp_path / "skills" / "dir-name").exists()
 
 
 # ── Remove ────────────────────────────────────────────────────────────────────
@@ -179,7 +179,7 @@ def test_remove_skill_deletes_dir(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
     # Install first.
     client.post("/api/v1/skills", json={"name": "removable-skill", "markdown": _skill_md("removable-skill")}, headers=_auth())
-    target = tmp_path / "skills-to-add" / "removable-skill"
+    target = tmp_path / "skills" / "removable-skill"
     assert target.is_dir()
     resp = client.delete("/api/v1/skills/removable-skill", headers=_auth())
     assert resp.status_code == 200, resp.text
@@ -214,7 +214,7 @@ def test_remove_requires_auth(tmp_path, monkeypatch):
 def test_toggle_default_enabled_persists_and_lists(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
     # Seed a skill on disk so GET /skills has something to report.
-    skill_dir = tmp_path / "skills-to-add" / "toggle-skill"
+    skill_dir = tmp_path / "skills" / "toggle-skill"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(_skill_md("toggle-skill"), encoding="utf-8")
     from tools.skill_registry_cache import clear_cache

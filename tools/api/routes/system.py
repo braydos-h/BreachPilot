@@ -369,7 +369,7 @@ def _skill_writable_root() -> Path:
     from tools.api.errors import APIError
 
     skills_cfg = _CONFIG.get("skills", {}) or {}
-    roots = skills_cfg.get("roots") or ["skills-to-add"]
+    roots = skills_cfg.get("roots") or ["skills"]
     if not isinstance(roots, list) or not roots:
         raise APIError("invalid_config", "skills.roots is empty.", status_code=400)
     first = Path(str(roots[0]))

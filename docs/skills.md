@@ -1,7 +1,7 @@
 # Runtime Skills
 
 Runtime skills are an **advisory prompt-context layer**. Each skill is a
-`SKILL.md` file (YAML frontmatter + markdown body) under `skills-to-add/`.
+`SKILL.md` file (YAML frontmatter + markdown body) under `skills/`.
 The engine indexes them, deterministically selects a small set for the current
 assessment context, and exposes them to the LLM as compact hints plus
 read-only MCP tools. **Skills never grant execution authority.**
@@ -9,7 +9,7 @@ read-only MCP tools. **Skills never grant execution authority.**
 ## Pipeline
 
 ```
-skills-to-add/**/SKILL.md
+skills/**/SKILL.md
         │
         ▼
 tools/skill_registry.load_skill_registry   (parse + sanitize + cache)
@@ -94,8 +94,8 @@ gating applies to semantic hits too.
 
 ## Adding a skill
 
-1. Create `skills-to-add/<skill-name>/SKILL.md` (or
-   `skills-to-add/maybe/<skill-name>/SKILL.md` for a gated experimental
+1. Create `skills/<skill-name>/SKILL.md` (or
+   `skills/maybe/<skill-name>/SKILL.md` for a gated experimental
    skill — ignored unless `skills.maybe_enabled: true`).
 2. Frontmatter:
 
@@ -134,7 +134,7 @@ gating applies to semantic hits too.
 | --- | --- | --- |
 | `enabled` | `true` | Master toggle. |
 | `inject_startup_context` | `false` | Inject selected bodies into the initial prompt (eager). |
-| `maybe_enabled` | `false` | Include `skills-to-add/maybe/` skills. |
+| `maybe_enabled` | `false` | Include `skills/maybe/` skills. |
 | `reselect_mid_run` | `true` | Re-select skills as new services/CVEs appear. |
 | `reselect_max_per_run` | `3` | Max re-selections per run. |
 | `reselect_min_interval_actions` | `5` | Min actions between re-selections. |

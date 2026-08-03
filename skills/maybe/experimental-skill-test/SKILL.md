@@ -13,7 +13,7 @@ mitre_attack: []
 
 ## When to Use
 
-This is a **placeholder** skill under `skills-to-add/maybe/`. Skills in this
+This is a **placeholder** skill under `skills/maybe/`. Skills in this
 directory are gated by `skills.maybe_enabled` (default `false`) — they are
 excluded from selection, the catalog list, and the `load_runtime_skill` MCP
 tool until an operator explicitly opts in.

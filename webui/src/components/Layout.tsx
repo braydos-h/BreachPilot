@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { Activity, Cpu, Eye, Github, HelpCircle, Home, List, Settings, ShieldAlert, Sparkles, Terminal } from "lucide-react";
+import { Activity, Cpu, Eye, Github, HelpCircle, Home, List, Settings, ShieldAlert, Sparkles, Terminal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -241,6 +241,14 @@ export function Layout() {
                 ? "Approve mode: non-destructive decisions auto-answered."
                 : "Full-access mode: destructive decisions will be auto-confirmed."}
             </span>
+            <button
+              type="button"
+              onClick={() => setMode("read_only")}
+              aria-label="Dismiss banner"
+              className="ml-auto inline-flex h-4 w-4 items-center justify-center rounded transition-colors hover:bg-foreground/10"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
           </div>
         )}
         {activeRun && (

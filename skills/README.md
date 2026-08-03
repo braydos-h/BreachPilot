@@ -226,11 +226,11 @@ tools (still subject to `require_allowlist`) to pull a reference.
 
 ### `maybe/` tier
 
-`skills-to-add/maybe/<name>/SKILL.md` is a gated tier for experimental or
+`skills/maybe/<name>/SKILL.md` is a gated tier for experimental or
 higher-risk methodology. It is ignored — excluded from selection, the
 catalog, and the `load_runtime_skill` tool — unless an operator sets
 `skills.maybe_enabled: true` (default `false`). A placeholder lives at
-`skills-to-add/maybe/experimental-skill-test/`.
+`skills/maybe/experimental-skill-test/`.
 
 ### Selection at runtime
 

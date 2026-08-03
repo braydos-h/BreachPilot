@@ -240,7 +240,7 @@ it -- there is nothing else to do.
 
 Append a skill directory to the skill-registry roots. Each contribution is a
 directory of `SKILL.md` files (YAML front matter + Markdown guidance), the
-same format used by the built-in `skills-to-add/` tree.
+same format used by the built-in `skills/` tree.
 
 ```python
 from pathlib import Path

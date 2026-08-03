@@ -24,7 +24,7 @@ _cache: dict[tuple[Path, ...], SkillRegistry] = {}
 
 def _skills_roots(config: dict[str, Any] | None) -> list[str]:
     skills = (config or {}).get("skills", {}) or {}
-    roots = skills.get("roots") or ["skills-to-add"]
+    roots = skills.get("roots") or ["skills"]
     if isinstance(roots, str):
         roots = [roots]
     return [str(root) for root in roots if str(root).strip()]

@@ -55,7 +55,7 @@ def test_clear_cache_drops_cached_registries(tmp_path: Path):
 
 def test_get_registry_defaults_roots_when_unset(tmp_path: Path):
     clear_cache()
-    # No skills.roots in config -> defaults to ["skills-to-add"]; must not
+    # No skills.roots in config -> defaults to ["skills"]; must not
     # raise and must return a registry object.
     registry = get_registry({}, base_dir=tmp_path)
     assert registry is not None

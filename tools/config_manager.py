@@ -400,7 +400,7 @@ CONFIG_SCHEMA: dict[str, Any] = {
     },
     "skills": {
         "enabled": True,
-        "roots": ["skills-to-add"],
+        "roots": ["skills"],
         "default_enabled": [
             "scanning-network-with-nmap-advanced",
             "conducting-network-penetration-test",

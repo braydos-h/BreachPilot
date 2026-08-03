@@ -374,7 +374,7 @@ multi_model:
 skills:
   enabled: true
   roots:
-  - skills-to-add
+  - skills
   default_enabled:
   - scanning-network-with-nmap-advanced
   - conducting-network-penetration-test

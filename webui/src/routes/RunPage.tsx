@@ -61,8 +61,8 @@ export function RunPage() {
   const cancel = useCancelRun();
   const resume = useResumeRun();
   const audit = useAudit(runId ?? null);
-  const swarm = useSwarmState(runId ?? null, run.data?.request?.swarm === true);
-  const campaign = useCampaignState(runId ?? null, run.data?.request?.long_session === true);
+  const swarm = useSwarmState(runId ?? null);
+  const campaign = useCampaignState(runId ?? null);
   const tools = useRunTools(runId ?? null, isActiveState(run.data?.state as RunState));
   const callTool = useCallTool(runId ?? "");
   const fetchArtifact = useFetchArtifactBlob(runId ?? "");
@@ -313,8 +313,8 @@ export function RunPage() {
           <TabsTrigger value="summary"><ClipboardList className="mr-1.5 h-3.5 w-3.5" />Summary</TabsTrigger>
           <TabsTrigger value="tools"><Wrench className="mr-1.5 h-3.5 w-3.5" />Tools</TabsTrigger>
           <TabsTrigger value="audit">Audit</TabsTrigger>
-          {request.swarm && <TabsTrigger value="swarm">Swarm</TabsTrigger>}
-          {request.long_session && <TabsTrigger value="campaign">Campaign</TabsTrigger>}
+          <TabsTrigger value="swarm">Swarm</TabsTrigger>
+          <TabsTrigger value="campaign">Campaign</TabsTrigger>
         </TabsList>
         <TabsContent value="recon" className="space-y-3">
           <ReconTab
@@ -357,16 +357,12 @@ export function RunPage() {
             chainReason={audit.data?.chain_reason ?? ""}
           />
         </TabsContent>
-        {request.swarm && (
-          <TabsContent value="swarm">
-            <StateView label="swarm_state.json" loading={swarm.isLoading} error={swarm.error} data={swarm.data?.state} />
-          </TabsContent>
-        )}
-        {request.long_session && (
-          <TabsContent value="campaign">
-            <StateView label="attack_states.json" loading={campaign.isLoading} error={campaign.error} data={campaign.data?.state} />
-          </TabsContent>
-        )}
+        <TabsContent value="swarm">
+          <StateView label="swarm_state.json" loading={swarm.isLoading} error={swarm.error} data={swarm.data?.state} />
+        </TabsContent>
+        <TabsContent value="campaign">
+          <StateView label="attack_states.json" loading={campaign.isLoading} error={campaign.error} data={campaign.data?.state} />
+        </TabsContent>
       </Tabs>
 
       <Dialog open={showCancel} onOpenChange={setShowCancel}>
@@ -586,7 +582,7 @@ function ReconTab({ fetchArtifact }: ReconTabProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
 
-  const load = () => {
+  useEffect(() => {
     setLoading(true);
     setError("");
     fetchArtifact.mutate("recon_assessment.json", {
@@ -608,7 +604,7 @@ function ReconTab({ fetchArtifact }: ReconTabProps) {
         setLoading(false);
       },
     });
-  };
+  }, [fetchArtifact]);
 
   if (loading) {
     return <Spinner label="Loading recon..." />;
@@ -619,11 +615,6 @@ function ReconTab({ fetchArtifact }: ReconTabProps) {
   return (
     <div className="space-y-2 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
       {error || "Recon assessment not loaded yet."}
-      <div>
-        <Button type="button" size="sm" variant="outline" onClick={load}>
-          <ScanSearch className="mr-1.5 h-3.5 w-3.5" />Load recon assessment
-        </Button>
-      </div>
     </div>
   );
 }
