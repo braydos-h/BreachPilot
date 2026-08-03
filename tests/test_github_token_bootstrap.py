@@ -51,6 +51,105 @@ def test_configured_api_key_env_names_custom_github_env():
     assert "GITHUB_TOKEN" not in names  # custom overrides the default
 
 
+# ── top-level ollama.api_key_env (cloud fallback wiring) ───────────────────
+
+
+def test_configured_api_key_env_names_includes_top_level_ollama():
+    """The top-level ollama.api_key_env is picked up even when research is absent.
+
+    This is the key that gates the model_router cloud fallback on the MAIN
+    model path. Without this discovery, the fallback never fires unless the
+    operator manually exports OLLAMA_API_KEY in their shell.
+    """
+    from tools.api_key_store import configured_api_key_env_names
+
+    config = {"ollama": {"api_key_env": "OLLAMA_API_KEY"}}
+    names = configured_api_key_env_names(config)
+    assert "OLLAMA_API_KEY" in names
+
+
+def test_configured_api_key_env_names_top_level_ollama_without_research():
+    """A config with only a top-level ollama block (no research) still loads the key."""
+    from tools.api_key_store import configured_api_key_env_names
+
+    config = {"ollama": {"host": "http://localhost:11434", "api_key_env": "OLLAMA_API_KEY"}}
+    names = configured_api_key_env_names(config)
+    assert "OLLAMA_API_KEY" in names
+    # Defaults still present (NVD, GITHUB) — those are independent subsystems.
+    assert "NVD_API_KEY" in names
+    assert "GITHUB_TOKEN" in names
+
+
+def test_configured_api_key_env_names_top_level_custom_env():
+    """A custom top-level ollama.api_key_env is honored (dedup vs research.ollama)."""
+    from tools.api_key_store import configured_api_key_env_names
+
+    config = {
+        "ollama": {"api_key_env": "OLLAMA_CLOUD_KEY"},
+        "research": {"ollama": {"api_key_env": "OLLAMA_CLOUD_KEY"}},
+    }
+    names = configured_api_key_env_names(config)
+    # Appears exactly once (dedup), not twice.
+    assert names.count("OLLAMA_CLOUD_KEY") == 1
+
+
+def test_load_api_keys_into_env_loads_top_level_ollama(tmp_path: Path, monkeypatch):
+    """bootstrap path: a saved OLLAMA_API_KEY is loaded into env from the top-
+    level ollama block, so model_router's cloud fallback can fire."""
+    from tools.api_key_store import configured_api_key_env_names, load_api_keys_into_env
+
+    store = tmp_path / "secr.json"
+    store.write_text(json.dumps({
+        "version": 1,
+        "api_keys": {"OLLAMA_API_KEY": "sk-ollama-cloud"},
+    }), encoding="utf-8")
+
+    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+
+    config = {"ollama": {"api_key_env": "OLLAMA_API_KEY"}}
+    loaded = load_api_keys_into_env(store, allowed_names=configured_api_key_env_names(config))
+    assert "OLLAMA_API_KEY" in loaded
+    assert os.environ["OLLAMA_API_KEY"] == "sk-ollama-cloud"
+
+
+def test_load_api_keys_into_env_top_level_only(tmp_path: Path, monkeypatch):
+    """A config with only a top-level ollama block (no research) still loads the key."""
+    from tools.api_key_store import configured_api_key_env_names, load_api_keys_into_env
+
+    store = tmp_path / "secr.json"
+    store.write_text(json.dumps({
+        "version": 1,
+        "api_keys": {"OLLAMA_API_KEY": "sk-cloud-only"},
+    }), encoding="utf-8")
+
+    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+
+    config = {"ollama": {"host": "http://localhost:11434", "api_key_env": "OLLAMA_API_KEY"}}
+    loaded = load_api_keys_into_env(store, allowed_names=configured_api_key_env_names(config))
+    assert "OLLAMA_API_KEY" in loaded
+    assert os.environ["OLLAMA_API_KEY"] == "sk-cloud-only"
+
+
+# ── config_manager schema ───────────────────────────────────────────────────
+
+
+def test_config_defaults_include_github_block():
+    from tools.config_manager import CONFIG_SCHEMA
+
+    cve = CONFIG_SCHEMA.get("cve_lookup", {})
+    assert "github" in cve
+    assert cve["github"]["token_env"] == "GITHUB_TOKEN"
+
+
+def test_config_defaults_include_ollama_api_key_env():
+    """The top-level ollama schema default includes api_key_env so a missing
+    config.yaml still yields the cloud-fallback wiring."""
+    from tools.config_manager import CONFIG_SCHEMA
+
+    ollama = CONFIG_SCHEMA.get("ollama", {})
+    assert ollama.get("api_key_env") == "OLLAMA_API_KEY"
+
+
 def test_load_api_keys_into_env_loads_github(tmp_path: Path, monkeypatch):
     from tools.api_key_store import configured_api_key_env_names, load_api_keys_into_env
 
@@ -69,17 +168,6 @@ def test_load_api_keys_into_env_loads_github(tmp_path: Path, monkeypatch):
     assert "GITHUB_TOKEN" in loaded
     assert os.environ["GITHUB_TOKEN"] == "ghp_secret123"
     assert os.environ["NVD_API_KEY"] == "nvd-key"
-
-
-# ── config_manager schema ───────────────────────────────────────────────────
-
-
-def test_config_defaults_include_github_block():
-    from tools.config_manager import CONFIG_SCHEMA
-
-    cve = CONFIG_SCHEMA.get("cve_lookup", {})
-    assert "github" in cve
-    assert cve["github"]["token_env"] == "GITHUB_TOKEN"
 
 
 # ── cve_to_poc uses the token ───────────────────────────────────────────────

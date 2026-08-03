@@ -253,6 +253,126 @@ class TestUnreachableWarningDedup:
         assert attempts["n"] == 2  # first failed, retry succeeded
 
 
+# ── 5c: Ollama Cloud fallback when local is unreachable ───────────────────
+
+
+class TestOllamaCloudFallback:
+    """When the local Ollama is down AND OLLAMA_API_KEY is set, the factory
+    swaps the client over to https://api.ollama.com instead of warning."""
+
+    def test_falls_back_to_cloud_when_local_unreachable_and_key_set(self, monkeypatch, capsys):
+        import tools.model_router as mr
+
+        mr._OLLAMA_UNREACHABLE_WARNED.clear()
+        monkeypatch.setattr(mr.os, "environ", {"OLLAMA_API_KEY": "sk-test"})
+        monkeypatch.setattr(mr.time, "sleep", lambda *_: None)
+
+        constructed: list[dict[str, Any]] = []
+
+        class _Client:
+            def __init__(self, host=None, **kwargs):
+                constructed.append({"host": host, "kwargs": kwargs})
+                self.host = host
+
+            def list(self):  # noqa: A003
+                if self.host == "http://h":
+                    raise RuntimeError("connection refused")
+                return []  # cloud reachable
+
+            def chat(self, *a, **k):
+                return {"message": {"content": "x"}}
+
+        monkeypatch.setattr(mr, "OllamaClient", _Client)
+        client = mr._build_model_client("m", host="http://h", alias="a")
+
+        out = capsys.readouterr().out
+        # Two clients constructed: local (failed) then cloud (succeeded).
+        assert [c["host"] for c in constructed] == ["http://h", mr.OLLAMA_CLOUD_HOST]
+        assert "[WARNING]" not in out
+        assert "Ollama Cloud" in out
+        # The returned ModelClient's chat delegates to the cloud client, so a
+        # chat call hits the cloud host.
+        constructed.clear()
+        client.chat([{"role": "user", "content": "hi"}])
+        # No new local construction during chat — the cloud client is captured.
+        assert constructed == []
+
+    def test_no_fallback_without_api_key(self, monkeypatch, capsys):
+        import tools.model_router as mr
+
+        mr._OLLAMA_UNREACHABLE_WARNED.clear()
+        monkeypatch.setattr(mr.os, "environ", {})
+        monkeypatch.setattr(mr.time, "sleep", lambda *_: None)
+
+        class _Client:
+            def __init__(self, host=None, **kwargs):
+                self.host = host
+
+            def list(self):  # noqa: A003
+                raise RuntimeError("connection refused")
+
+            def chat(self, *a, **k):
+                return {"message": {"content": "x"}}
+
+        monkeypatch.setattr(mr, "OllamaClient", _Client)
+        mr._build_model_client("m", host="http://h", alias="a")
+        out = capsys.readouterr().out
+        assert "[WARNING] Ollama server at http://h appears unreachable" in out
+
+    def test_no_fallback_when_cloud_also_unreachable(self, monkeypatch, capsys):
+        import tools.model_router as mr
+
+        mr._OLLAMA_UNREACHABLE_WARNED.clear()
+        monkeypatch.setattr(mr.os, "environ", {"OLLAMA_API_KEY": "sk-test"})
+        monkeypatch.setattr(mr.time, "sleep", lambda *_: None)
+
+        class _Client:
+            def __init__(self, host=None, **kwargs):
+                self.host = host
+
+            def list(self):  # noqa: A003
+                raise RuntimeError("down")
+
+            def chat(self, *a, **k):
+                return {"message": {"content": "x"}}
+
+        monkeypatch.setattr(mr, "OllamaClient", _Client)
+        mr._build_model_client("m", host="http://h", alias="a")
+        out = capsys.readouterr().out
+        # Both local and cloud down → falls back to the original warning.
+        assert "[WARNING] Ollama server at http://h appears unreachable" in out
+        assert "Ollama Cloud" not in out
+
+    def test_no_fallback_when_local_is_already_cloud_host(self, monkeypatch, capsys):
+        """Avoid an infinite/conflated re-probe when the configured host IS the
+        cloud host (operator pointed ollama.host at the cloud upfront)."""
+        import tools.model_router as mr
+
+        mr._OLLAMA_UNREACHABLE_WARNED.clear()
+        monkeypatch.setattr(mr.os, "environ", {"OLLAMA_API_KEY": "sk-test"})
+        monkeypatch.setattr(mr.time, "sleep", lambda *_: None)
+
+        constructed: list[str] = []
+
+        class _Client:
+            def __init__(self, host=None, **kwargs):
+                constructed.append(host)
+                self.host = host
+
+            def list(self):  # noqa: A003
+                raise RuntimeError("down")
+
+            def chat(self, *a, **k):
+                return {"message": {"content": "x"}}
+
+        monkeypatch.setattr(mr, "OllamaClient", _Client)
+        mr._build_model_client("m", host=mr.OLLAMA_CLOUD_HOST, alias="a")
+        # Only the cloud host is constructed — no second probe.
+        assert constructed == [mr.OLLAMA_CLOUD_HOST]
+        out = capsys.readouterr().out
+        assert "[WARNING] Ollama server at https://api.ollama.com appears unreachable" in out
+
+
 # ── 6 & 7: SessionState persist_messages roundtrip + resume ───────────────
 
 

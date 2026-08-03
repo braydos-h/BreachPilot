@@ -23,6 +23,10 @@ CONFIG_SCHEMA: dict[str, Any] = {
     "ollama": {
         "host": "http://localhost:11434",
         "model": "glm-5.2:cloud",
+        # ponytail: makes the Ollama Cloud fallback (model_router._build_model_client
+        # swaps to https://api.ollama.com when local is unreachable) reachable on the
+        # main model path. Loaded into env at boot by api_key_store.bootstrap_api_keys.
+        "api_key_env": "OLLAMA_API_KEY",
     },
     "models": {
         "registry": {

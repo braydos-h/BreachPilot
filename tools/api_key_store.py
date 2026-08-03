@@ -34,6 +34,11 @@ def configured_api_key_env_names(config: dict[str, Any]) -> list[str]:
     """Return provider API-key environment variable names from config."""
 
     names: list[str] = []
+    # ponytail: top-level ollama.api_key_env drives the cloud fallback on the
+    # MAIN model path (model_router._build_model_client swaps the client to
+    # https://api.ollama.com when local is unreachable). Without this the key
+    # is loaded only for the research subsystem (research.ollama.api_key_env).
+    top_ollama = config.get("ollama", {}) or {}
     research = config.get("research", {}) or {}
     ollama = research.get("ollama", {}) or {}
     serpapi = research.get("serpapi", {}) or {}
@@ -41,6 +46,7 @@ def configured_api_key_env_names(config: dict[str, Any]) -> list[str]:
     github = cve_lookup.get("github", {}) or {}
 
     for value in (
+        top_ollama.get("api_key_env", "OLLAMA_API_KEY"),
         ollama.get("api_key_env", "OLLAMA_API_KEY"),
         serpapi.get("api_key_env", "SERPAPI_API_KEY"),
         cve_lookup.get("api_key_env", "NVD_API_KEY"),
