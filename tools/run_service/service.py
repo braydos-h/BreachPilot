@@ -69,6 +69,72 @@ from tools.run_service.providers import (
 from tools.safety_reviewer import SafetyReview
 from tools.swarm_bridge import SwarmMcpBridge
 
+
+# Exploit-action tool names that count toward ``successful_exploits`` in the
+# derived campaign_result. Recon/research tools with exit_code==0 are NOT
+# exploits. Mirrors the _EXPLOIT_ACTIONS set used by the loop's outcome tracker.
+_EXPLOIT_TOOL_ACTIONS = frozenset({
+    "run_exploit_terminal", "run_python_file", "run_msf_module",
+    "msf_run_exploit", "run_attack_module", "lateral_exec",
+    "generate_payload", "msf_generate_payload", "craft_exploit",
+})
+
+
+def _build_campaign_result_from_records(
+    result: dict[str, Any], target_ip: str,
+) -> dict[str, Any] | None:
+    """Build a minimal ``campaign_result`` for EnhancedReportGenerator.
+
+    Flow A's run_exploit_agent does not run an AutonomousOrchestrator campaign,
+    so it never produced the ``{states: {target: AttackState.to_dict()}}`` shape
+    EnhancedReportGenerator consumes. This folds the per-target audit records
+    into that shape so the WebUI attack-graph has data to render.
+
+    Returns None when there are no records (e.g. a recon-only run).
+    """
+    records = result.get("records") or []
+    if not records:
+        return None
+    successful: list[str] = []
+    failed: dict[str, list[str]] = {}
+    timeline: list[dict[str, Any]] = []
+    privilege_level = "none"
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        action = str(rec.get("action", "") or "")
+        status = str(rec.get("status", "") or "")
+        exit_code = rec.get("exit_code")
+        ts = str(rec.get("timestamp", "") or "")
+        detail = str(rec.get("detail", "") or rec.get("command", "") or "")
+        is_exploit = action in _EXPLOIT_TOOL_ACTIONS
+        if status in {"blocked", "analyzer_error", "SCOPE_DENIED"} or (exit_code is not None and int(exit_code) != 0):
+            failed.setdefault(action, []).append(detail[:200] or status)
+            timeline.append({"timestamp": ts, "event_type": "failure", "description": detail[:200] or status, "metadata": {"module": action}})
+        elif status == "completed" and is_exploit:
+            successful.append(action)
+            timeline.append({"timestamp": ts, "event_type": "success", "description": detail[:200] or action, "metadata": {"module": action}})
+        else:
+            timeline.append({"timestamp": ts, "event_type": status or "observation", "description": detail[:200] or action, "metadata": {"module": action}})
+    # Heuristic privilege level from the outcome summary string if present.
+    summary = str(result.get("outcome_summary", "") or "")
+    for label in ("root", "SYSTEM", "system", "admin", "NT AUTHORITY"):
+        if label.lower() in summary.lower():
+            privilege_level = label.lower() if label != "NT AUTHORITY" else "system"
+            break
+    return {
+        "states": {
+            target_ip: {
+                "successful_exploits": successful,
+                "failed_attempts": failed,
+                "privilege_level": privilege_level,
+                "timeline": timeline,
+                "recon_result": {"services": []},
+                "credentials_found": [],
+            },
+        },
+    }
+
 ui = get_ui()
 
 
@@ -742,6 +808,29 @@ class AssessmentService:
                 run_json_path.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
             except OSError as exc:
                 ui.warning(f"Could not write run.json: {exc}")
+
+        # Flow A enhanced report (Phase B1). Flow A's run_exploit_agent does
+        # not run an AutonomousOrchestrator campaign, so EnhancedReportGenerator
+        # was Flow B-only. Build a minimal campaign_result["states"] from the
+        # audit records: each completed exit_code==0 record is a successful
+        # action; failed/blocked records populate failed_attempts. This feeds
+        # ExploitationChain + TechnicalFinding so the WebUI can render the
+        # attack graph. Best-effort — never fatal to the run.
+        try:
+            campaign_result = _build_campaign_result_from_records(result, target_ip)
+            if campaign_result is not None:
+                from tools.enhanced_reporting import EnhancedReportGenerator
+                generator = EnhancedReportGenerator(
+                    db=None, mission_id=run_id, workspace=reports_dir,
+                )
+                paths = generator.generate_full_report(campaign_result, output_format="json")
+                json_src = paths.get("json")
+                if json_src is not None and json_src.exists():
+                    # Stable name so the WebUI can fetch /artifacts/enhanced/enhanced_report.json
+                    stable = reports_dir / "enhanced" / "enhanced_report.json"
+                    stable.write_bytes(json_src.read_bytes())
+        except Exception as exc:  # noqa: BLE001 -- reporting is best-effort
+            ui.warning(f"Could not write enhanced report: {exc}")
 
         await event_sink.emit(EVENT_ARTIFACT, {
             "reports_dir": str(reports_dir),

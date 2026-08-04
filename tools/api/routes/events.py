@@ -148,6 +148,9 @@ async def ws_run_events(ws: WebSocket, run_id: str) -> None:
     except WebSocketDisconnect:
         pass
     except Exception:
-        await ws.close(code=1011, reason="Event stream failed")
+        try:
+            await ws.close(code=1011, reason="Event stream failed")
+        except (RuntimeError, WebSocketDisconnect):
+            pass  # socket already closed by the client
     finally:
         subscription.close()

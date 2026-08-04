@@ -155,9 +155,11 @@ python main.py --target 10.0.0.50 --mode attack --long-session --resume <RUN_OR_
 
 ### Standalone exploit with a specific CVE
 
+Use the attack mode with a CVE-scoped goal (CVE lookup is wired into the
+exploit agent's planning step):
+
 ```bash
-python main.py --exploit --exploit-mode standalone --exploit-target 10.0.0.50 \
-  --exploit-cve CVE-2021-44228 --exploit-permission full_access
+python main.py --target 10.0.0.50 --mode attack --goal "exploit CVE-2021-44228"
 ```
 
 ### Eval/benchmark harness
@@ -202,10 +204,18 @@ Key API endpoints (all under `/api/v1`):
 ### Standalone MCP servers
 
 ```bash
-python mcp_server.py --transport stdio --approved-subnets 192.168.1.0/24
-python mcp_server.py --transport http --host 127.0.0.1 --port 8000 --approved-subnets 192.168.1.0/24
+python mcp_server.py --transport stdio                  # allowlist via config.yaml exploit.allowed_targets
+python mcp_server.py --transport http --host 127.0.0.1 --port 8000
 python mcp_exploit_server.py    # defaults: stdio, port 8001
+python mcp_engine_server.py     # defaults: stdio, port 8002 (advisory: skills/CVE/run history)
 ```
+
+`mcp_engine_server.py` exposes the engine's advisory surface (skill search,
+NVD CVE lookup, run history) to other AI assistants (Claude Desktop, Cursor)
+as read-only MCP tools. No target touching, no terminal, no exploit surface.
+
+Target allowlist is configured in `config.yaml` under `exploit.allowed_targets`
+(not a CLI flag); see §Configuration.
 
 ---
 
@@ -296,6 +306,7 @@ make test-one F=tests/test_scope_gate.py   # single test file
 make run              # interactive menu
 make mcp-defensive    # defensive MCP server
 make mcp-exploit      # exploit MCP server
+make mcp-engine       # engine advisory MCP server (skills/CVE/run history)
 make clean            # remove venv + __pycache__ dirs
 ```
 
@@ -448,7 +459,7 @@ See [docs/skills.md](docs/skills.md) for the full pipeline.
 
 ## MCP tools
 
-The app ships two MCP servers.
+The app ships three MCP servers.
 
 ### Defensive MCP server (`mcp_server.py`)
 
@@ -459,6 +470,19 @@ Scope-aware, safer integration surface for client-side recon workflows:
 - NVD CVE lookup
 
 The tools enforce scope (approved subnets, allowed assets, forbidden actions, rate limits).
+
+### Engine MCP server (`mcp_engine_server.py`)
+
+Advisory surface for foreign AI assistants (Claude Desktop, Cursor, etc.) to
+query the engine without touching targets. Read-only:
+
+- `search_skills` — lexical search over the runtime skill catalog
+- `get_skill` — one SKILL.md body + metadata
+- `cve_lookup` — NVD CVE lookup (rate-limited, cached)
+- `list_runs` / `get_run` — read-only run history
+
+No terminal, no exploit execution, no target touching. The target-IP
+allowlist lock is not in scope because no tool reaches the network.
 
 ### Exploit MCP server (`mcp_exploit_server.py`)
 
@@ -590,7 +614,7 @@ python -m pytest --cov=tools --cov=main.py --cov=cli.py       # with coverage
 ruff check .                                                   # lint (line-length 120, select E/F/W/I)
 ```
 
-The test suite (~80 files in `tests/`) covers scope gates, safety review, semantic memory, recon, MCP workspaces, reporting, CVE lookup, the agent loop, reliability, swarm behavior, retry logic, skills, reasoning, long sessions, peer consultation, audit chains, credential storage, Metasploit integration, and more.
+The test suite (168 files in `tests/`) covers scope gates, safety review, semantic memory, recon, MCP workspaces, reporting, CVE lookup, the agent loop, reliability, swarm behavior, retry logic, skills, reasoning, long sessions, peer consultation, audit chains, credential storage, Metasploit integration, and more.
 
 ---
 

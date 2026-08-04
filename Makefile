@@ -6,7 +6,7 @@ PYTHON ?= python3
 VENV   ?= .venv
 BIN    := $(VENV)/bin
 
-.PHONY: venv install install-dev doctor self-test eval test test-focused run mcp-defensive mcp-exploit clean
+.PHONY: venv install install-dev doctor self-test eval test test-focused run mcp-defensive mcp-exploit mcp-engine clean
 
 venv:
 	$(PYTHON) -m venv $(VENV)
@@ -43,6 +43,9 @@ mcp-defensive:
 
 mcp-exploit:
 	$(BIN)/python mcp_exploit_server.py
+
+mcp-engine:
+	$(BIN)/python mcp_engine_server.py
 
 clean:
 	rm -rf $(VENV)

@@ -392,6 +392,63 @@ export interface ArtifactListResponse {
   artifacts: ArtifactSummary[];
 }
 
+// B2: Enhanced report shapes (mirrors tools/enhanced_reporting.py dataclasses).
+// The WebUI fetches /artifacts/enhanced/enhanced_report.json and renders the
+// attack graph from exploitation_chains[] + technical_findings[].
+export interface ChainEntry {
+  module: string;
+  timestamp?: string;
+  result?: string;
+  [key: string]: unknown;
+}
+
+export interface ExploitationChain {
+  chain_id: string;
+  target: string;
+  entries: ChainEntry[];
+  successful: boolean;
+  final_privilege: string;
+  total_duration?: number;
+  [key: string]: unknown;
+}
+
+export interface CVSSScore {
+  base_score: number;
+  severity: string;
+  vector_string?: string;
+  [key: string]: unknown;
+}
+
+export interface TechnicalFinding {
+  finding_id: string;
+  title: string;
+  affected_asset: string;
+  vuln_class: string;
+  severity: string;
+  cvss: CVSSScore;
+  confidence: number;
+  summary: string;
+  reproduction_steps?: string[];
+  evidence_refs?: string[];
+  exploitation_result?: string;
+  persistence_achieved?: boolean;
+  privilege_level_gained?: string;
+  attack_chain?: ExploitationChain | null;
+  remediation?: string;
+  references?: string[];
+  [key: string]: unknown;
+}
+
+export interface EnhancedReport {
+  report_metadata?: Record<string, unknown>;
+  executive_summary?: string;
+  attack_timeline?: Array<Record<string, unknown>>;
+  exploitation_chains?: ExploitationChain[];
+  technical_findings?: TechnicalFinding[];
+  failure_analysis?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+}
+
 export interface AuditRecord {
   [key: string]: unknown;
 }

@@ -44,6 +44,17 @@ models:
       description: "Minimax M3 (cloud) \u2014 512K context, balanced coding + reasoning."
 mcp:
   default_transport: stdio
+# Engine advisory MCP server (``mcp_engine_server.py``). Exposes the engine's
+# read-only surface (skill search, NVD CVE lookup, run history) to foreign AI
+# assistants (Claude Desktop, Cursor) as MCP tools. No target touching, no
+# terminal, no exploit surface — the target-IP allowlist lock is not in scope.
+# The server is runnable via CLI regardless of this block; this only provides
+# defaults for the CLI entrypoint. HTTP transport reuses the shared loopback
+# gate + optional ``MCP_HTTP_TOKEN`` bearer auth from tools.mcp_shared.
+engine_mcp:
+  enabled: true
+  host: 127.0.0.1          # loopback-only in v1; no public-bind override
+  port: 8002
 # Linux-friendly nmap invocation. `path` overrides the binary when nmap is not
 # on PATH; `sudo` runs nmap via `sudo -n` so root-only scans (-O, -sS) work
 # from a non-root shell; `priv_fallback` auto-downgrades those flags instead of

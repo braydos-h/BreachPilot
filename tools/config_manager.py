@@ -80,6 +80,15 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "http_host": "127.0.0.1",
         "http_port": 8001,
     },
+    # Engine advisory MCP server (``mcp_engine_server.py``): read-only skill
+    # search / CVE lookup / run history for foreign AI assistants. Defaults
+    # for the CLI entrypoint; HTTP transport is loopback-only via
+    # ``tools.mcp_shared``.
+    "engine_mcp": {
+        "enabled": True,
+        "host": "127.0.0.1",
+        "port": 8002,
+    },
     # Linux-friendly nmap invocation. ``path`` overrides the binary when nmap
     # is not on PATH; ``sudo`` runs nmap via `sudo -n` so root-only scans
     # (-O OS detection, -sS SYN) work from a non-root shell; ``priv_fallback``

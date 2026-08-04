@@ -22,6 +22,7 @@ from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request, WebSocket, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from starlette.websockets import WebSocketDisconnect
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
@@ -132,6 +133,8 @@ async def authenticate_websocket(
     await ws.accept()
     try:
         first = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
+    except WebSocketDisconnect:
+        return None  # client already gone; socket is closed, no close() allowed
     except Exception:
         await ws.close(code=4401, reason="Auth message required")
         return None

@@ -47,7 +47,6 @@ from tools.autonomous_orchestrator import (
 from tools.config_manager import CONFIG_SCHEMA
 from tools.credential_store import CredentialRecord, CredentialStore
 from tools.cve_lookup import NVDClient, format_cve_results
-from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group
 from tools.experience_store import ExperienceStore
 from tools.exploit_mutator import ExploitMutator
 from tools.exploit_search import ExploitSearch

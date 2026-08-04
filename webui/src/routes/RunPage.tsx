@@ -10,6 +10,7 @@ import {
   ScanSearch,
   ClipboardList,
   Gauge,
+  Network,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,7 @@ import { CopyButton } from "@/components/CopyButton";
 import { EventList } from "@/components/EventList";
 import { DecisionCard } from "@/components/DecisionCard";
 import { ReconAssessmentCard } from "@/components/ReconAssessmentCard";
+import { AttackGraph } from "@/components/AttackGraph";
 import { LiveRunSummary } from "@/components/LiveRunSummary";
 import { PhaseTracker } from "@/components/PhaseTracker";
 import { SessionSummaryCard } from "@/components/SessionSummaryCard";
@@ -310,6 +312,7 @@ export function RunPage() {
       <Tabs defaultValue="recon" className="mt-2">
         <TabsList>
           <TabsTrigger value="recon"><ScanSearch className="mr-1.5 h-3.5 w-3.5" />Recon</TabsTrigger>
+          <TabsTrigger value="graph"><Network className="mr-1.5 h-3.5 w-3.5" />Attack Path</TabsTrigger>
           <TabsTrigger value="summary"><ClipboardList className="mr-1.5 h-3.5 w-3.5" />Summary</TabsTrigger>
           <TabsTrigger value="tools"><Wrench className="mr-1.5 h-3.5 w-3.5" />Tools</TabsTrigger>
           <TabsTrigger value="audit">Audit</TabsTrigger>
@@ -321,6 +324,9 @@ export function RunPage() {
             runId={run.data.id}
             fetchArtifact={fetchArtifact}
           />
+        </TabsContent>
+        <TabsContent value="graph" className="space-y-3">
+          <AttackGraph runId={run.data.id} />
         </TabsContent>
         <TabsContent value="summary" className="space-y-3">
           <SessionSummaryCard result={(run.data.result ?? {}) as RunResult} title={run.data.title} />

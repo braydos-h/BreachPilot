@@ -25,7 +25,7 @@ python main.py --doctor          # env check (Python/nmap/Ollama/config)
 python main.py --self-test       # safe localhost smoke test
 python main.py                   # interactive menu (default no-args)
 
-# Tests (166 files in tests/, all mock subprocess/network — no live Nmap)
+# Tests (168 files in tests/, all mock subprocess/network — no live Nmap)
 python -m pytest tests/ -v                                            # full suite
 python -m pytest tests/test_scope_gate.py -v                          # one file
 python -m pytest tests/test_recon_pipeline.py::TestClass::test_method # one test

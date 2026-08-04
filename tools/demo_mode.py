@@ -183,8 +183,7 @@ def run_demo(args: Any) -> int:
             f"- **Target**: 127.0.0.1:{_DVWA_HOST_PORT}\n"
             f"- **Mode**: recon\n"
             f"- **Date**: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            "- **Source**: Docker DVWA\n" if used_docker else
-            "- **Source**: Synthetic in-process server\n"
+            f"- **Source**: {'Docker DVWA' if used_docker else 'Synthetic in-process server'}\n"
         )
         print(f"  [✓] Demo report written to: {report}")
         print()

@@ -5,6 +5,7 @@ audit, swarm, campaign, credentials, loot."""
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -551,7 +552,7 @@ async def reveal_credential(
         "index": index,
         "username": rec.username,
         "target_host": rec.target_host,
-        "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     with _credential_access_log(run_id).open("a", encoding="utf-8") as f:
         f.write(json.dumps(access_entry, default=str) + "\n")

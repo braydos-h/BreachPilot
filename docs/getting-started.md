@@ -115,6 +115,7 @@ control interpretation and replanning—they do not grant execution authority.
 - `python main.py --long-session`: opt-in multi-hour attack mode.
 - `python mcp_server.py`: start the defensive MCP server.
 - `python mcp_exploit_server.py`: start the exploit MCP server.
+- `python mcp_engine_server.py`: start the engine advisory MCP server (skills/CVE/run history, read-only, for foreign AI assistants).
 
 For plugin authoring see `docs/plugin-development.md`; for the runtime skills system see `docs/skills.md`.
 

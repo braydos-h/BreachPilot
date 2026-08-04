@@ -47,6 +47,22 @@ def heuristic_flags(description: str):
     return flags
 
 
+def _log_exception(exc, prefix=""):
+    """Print an exception, unpacking anyio BaseExceptionGroup nests.
+
+    Anyio task groups raise BaseExceptionGroup on subprocess death, which is
+    NOT a subclass of Exception — bare `except Exception` misses it and the
+    real cause is lost. This unpacks the nest so the operator sees every leaf.
+    Uses the hasattr heuristic (works on 3.10 without the builtin).
+    """
+    if hasattr(exc, "exceptions") and isinstance(exc.exceptions, tuple):
+        for i, nested in enumerate(exc.exceptions):
+            _log_exception(nested, prefix=f"{prefix}  [{i}] ")
+    else:
+        print(f"{prefix}[!] MCP enumeration failed: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+
+
 def run_static(args):
     findings = {"ts": datetime.now(timezone.utc).isoformat(),
                 "config": args.config, "atlas": "AML.T0010", "scanner": None,
@@ -128,8 +144,10 @@ def run_enum(args):
 
     try:
         asyncio.run(_enum())
-    except Exception as exc:  # connection/protocol errors
-        print(f"[!] MCP enumeration failed: {exc}", file=sys.stderr)
+    except BaseException as exc:  # connection/protocol errors + anyio BaseExceptionGroup
+        # anyio task groups raise BaseExceptionGroup on subprocess death, which is
+        # NOT a subclass of Exception — bare `except Exception` would miss it.
+        _log_exception(exc)
         sys.exit(2)
 
 
