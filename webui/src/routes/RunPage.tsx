@@ -581,11 +581,12 @@ function ReconTab({ fetchArtifact }: ReconTabProps) {
   const [assessment, setAssessment] = useState<ReconAssessment | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
+  const mutate = fetchArtifact.mutate;
 
   useEffect(() => {
     setLoading(true);
     setError("");
-    fetchArtifact.mutate("recon_assessment.json", {
+    mutate("recon_assessment.json", {
       onSuccess: async (blob) => {
         try {
           const text = await blob.text();
@@ -604,7 +605,7 @@ function ReconTab({ fetchArtifact }: ReconTabProps) {
         setLoading(false);
       },
     });
-  }, [fetchArtifact]);
+  }, [mutate]);
 
   if (loading) {
     return <Spinner label="Loading recon..." />;
