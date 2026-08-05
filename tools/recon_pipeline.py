@@ -36,7 +36,7 @@ from typing import Any, Coroutine
 
 from tools.logging_setup import get_logger
 from tools.nmap_priv import apply_nmap_privilege, is_privilege_error
-from tools.validation_utils import validate_ipv4, is_fqdn
+from tools.validation_utils import is_fqdn, is_subdomain_of, validate_ipv4
 
 logger = get_logger()
 
@@ -1919,7 +1919,7 @@ class SecondaryEnumerator:
                         for nv in str(row.get("name_value", "")).splitlines():
                             for s in nv.split(","):
                                 s = s.strip().lstrip("*.").strip()
-                                if s and s.endswith(domain):
+                                if s and is_subdomain_of(s, domain):
                                     subs.add(s)
                 except Exception:
                     pass

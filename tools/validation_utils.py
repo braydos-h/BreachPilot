@@ -420,6 +420,28 @@ def is_target_in_allowlist(target: str, allowed_assets: list[str]) -> bool:
     return False
 
 
+def is_subdomain_of(candidate: str, parent: str) -> bool:
+    """True when ``candidate`` is ``parent`` itself or a child of ``parent``.
+
+    Boundary-aware: ``badexample.com`` is NOT a subdomain of ``example.com``,
+    but ``a.example.com`` is. Both names are lowercased and stripped of a
+    leading ``*.`` wildcard before the check. An empty/missing parent or
+    candidate returns False. Reused everywhere subdomain enumeration
+    auto-authorizes a discovered host so the allowlist lock cannot be widened
+    to an out-of-parent asset via a suffix-collision (the bug ``endswith(dom)``
+    had -- it accepted ``badexample.com`` as a child of ``example.com``).
+    """
+    if not candidate or not parent:
+        return False
+    c = candidate.strip().lower().lstrip("*.").rstrip(".")
+    p = parent.strip().lower().lstrip("*.").rstrip(".")
+    if not c or not p:
+        return False
+    if c == p:
+        return True
+    return c.endswith("." + p)
+
+
 def is_private_or_local_target(
     target_ip: str, extra_local_cidrs: Sequence[str] | None = None
 ) -> bool:
@@ -519,6 +541,15 @@ def parse_service_banners(text: str) -> list[dict[str, Any]]:
         re.IGNORECASE | re.MULTILINE,
     )
 
+    # Pattern: "Port 22/tcp OPEN (ssh) - banner text"  (quick_scan / socket_scan
+    # format -- the loop's service-ingestion block missed this and only saw
+    # check_os/nmap output). Reused from goal_suggester.build_assessment_from_mcp_results.
+    # Service name allows dashes (e.g. ``microsoft-ds``).
+    quick_re = re.compile(
+        r"\s*Port\s+(\d+)/(tcp|udp)\s+OPEN\s*\(([\w-]*)\)\s*-\s*(.*)",
+    )
+
+    seen_ports: set[tuple[int, str]] = set()
     for m in port_re.finditer(text):
         port = int(m.group(1))
         protocol = m.group(2).lower()
@@ -555,6 +586,7 @@ def parse_service_banners(text: str) -> list[dict[str, Any]]:
         elif "rdp" in product.lower() or "ms-wbt-server" in banner.lower():
             service = "rdp"
 
+        seen_ports.add((port, protocol))
         records.append({
             "host": host,
             "port": port,
@@ -562,6 +594,32 @@ def parse_service_banners(text: str) -> list[dict[str, Any]]:
             "service": service,
             "product": product,
             "version": version,
+            "os_guess": os_guess,
+            "raw_banner": banner,
+        })
+
+    # quick_scan / socket_scan format -- merge into the same records list,
+    # skipping ports the check_os/nmap regex already captured.
+    for line in text.splitlines():
+        m = quick_re.match(line)
+        if not m:
+            continue
+        port = int(m.group(1))
+        protocol = m.group(2).lower()
+        if (port, protocol) in seen_ports:
+            continue
+        service = m.group(3) or "unknown"
+        banner = m.group(4).strip()
+        if banner == "(no banner)":
+            banner = ""
+        seen_ports.add((port, protocol))
+        records.append({
+            "host": host,
+            "port": port,
+            "protocol": protocol,
+            "service": service,
+            "product": "",
+            "version": "",
             "os_guess": os_guess,
             "raw_banner": banner,
         })

@@ -56,8 +56,8 @@ class SemanticMemoryManager:
         ``find_similar_lessons``) already handles ``None`` gracefully.
         """
         try:
-            import urllib.request
             import urllib.error
+            import urllib.request
 
             payload = json.dumps({
                 "model": self._embedding_model,
@@ -137,7 +137,14 @@ class SemanticMemoryManager:
         metadata: dict[str, Any] | None = None,
         confidence: float = 0.5,
     ) -> str | None:
-        """Store a learned lesson with its embedding for cross-mission retrieval."""
+        """Store a learned lesson with its embedding for cross-mission retrieval.
+
+        The audit flagged that the lesson ``text`` (the ``why it failed`` /
+        ``why it worked`` explanation) was embedded for similarity search but
+        never persisted -- retrieval returned labels + metadata but NOT the
+        text, so the model never saw the lesson. The ``text`` column is now
+        populated (migration v5 adds it to existing DBs).
+        """
         embedding = self._generate_embedding(text)
         if embedding is None:
             return None
@@ -146,8 +153,8 @@ class SemanticMemoryManager:
         pattern_hash = f"{target_signature}:{action_type}:{outcome}"
         with self._db.connection(write=True) as conn:
             conn.execute(
-                """INSERT INTO lessons(id, pattern_hash, target_signature, action_type, outcome, confidence, embedding_json, metadata_json, created_at)
-                   VALUES(?,?,?,?,?,?,?,?,?)""",
+                """INSERT INTO lessons(id, pattern_hash, target_signature, action_type, outcome, confidence, embedding_json, metadata_json, text, created_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
                 (
                     lid,
                     pattern_hash,
@@ -157,6 +164,7 @@ class SemanticMemoryManager:
                     confidence,
                     json.dumps(embedding),
                     json.dumps(metadata or {}),
+                    str(text or "")[:8000],
                     _now_iso(),
                 ),
             )
@@ -252,7 +260,7 @@ class SemanticMemoryManager:
         # of every recall — defeating the whole point of wiring find_similar_lessons.
         sql = (
             "SELECT id, pattern_hash, target_signature, action_type, outcome, "
-            "confidence, embedding_json, metadata_json "
+            "confidence, embedding_json, metadata_json, text "
             "FROM lessons WHERE embedding_json != '[]'"
         )
         params: list[Any] = []
@@ -305,6 +313,11 @@ class SemanticMemoryManager:
                     "confidence": row["confidence"],
                     "similarity": float(sim),
                     "metadata": metadata,
+                    # The lesson text (the "why" explanation). The audit flagged
+                    # this was embedded for similarity but never returned, so the
+                    # model never saw the lesson. Now persisted in the text column
+                    # (migration v5) and selected here.
+                    "text": str(row["text"] or "") if "text" in row.keys() else "",
                 })
 
         candidates.sort(key=lambda x: x["similarity"], reverse=True)

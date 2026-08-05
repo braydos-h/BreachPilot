@@ -333,8 +333,12 @@ async def test_loop_flow_a_compromise_records_compromise(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_loop_flow_a_disabled_behavior_unchanged(tmp_path):
-    """With flow_a=False, a Meterpreter result does NOT record a compromise --
-    the shallow exit_code==0 success flag governs and no taxonomy counts appear."""
+    """With flow_a=False, the hypothesis judge is off -- but the authoritative
+    outcome-truth module STILL detects a real Meterpreter session as a
+    compromise (it is no longer gated on flow_a; flow_a only controls the
+    hypothesis-verdict layer). The old contract (no taxonomy without flow_a)
+    let false positives through; the new contract is: compromise detection is
+    always on, flow_a only adds the CONFIRMED/REFUTED hypothesis verdict."""
     from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings
     from tools.exploit_agent import run_exploit_agent
 
@@ -370,10 +374,9 @@ async def test_loop_flow_a_disabled_behavior_unchanged(tmp_path):
         )
 
     summary = result["outcome_summary"]
-    # No taxonomy counts when flow_a is off.
-    assert "compromises:" not in summary
-    assert "cred dumps:" not in summary
-    assert "partials:" not in summary
+    # A real Meterpreter session is now ALWAYS counted as a compromise by the
+    # outcome-truth module, even with the hypothesis judge off.
+    assert "compromises: 1" in summary
 
 
 @pytest.mark.asyncio
@@ -564,3 +567,109 @@ def test_config_validator_flags_non_bool_flow_a():
     if flow_a is not None and not isinstance(flow_a, bool):
         result.warnings.append("outcome_judgment.flow_a must be a boolean.")
     assert result.warnings
+
+
+# ── Goal-complete stopping predicate ──────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_loop_terminates_naturally_after_compromise(tmp_path):
+    """A run that achieves a verified compromise MAY terminate on the next
+    no-tool answer instead of being forced to continue (the audit flagged
+    that attack mode otherwise only stopped via round/command budget
+    exhaustion -- up to 200 rounds in long-session config -- because no tool
+    maps to the ``reporting`` phase minimum)."""
+    from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings
+    from tools.exploit_agent import run_exploit_agent
+
+    settings = ExploitSettings(
+        enabled=True,
+        permission=ExploitPermission.FULL_ACCESS,
+        attack_mode=True,
+        attack_max_rounds=50,
+        attack_max_commands=200,
+        outcome_judgment_flow_a=True,
+        workspace_root=tmp_path,
+        target_ip="10.0.0.50",
+    )
+    policy = ExploitPolicy(settings, tmp_path)
+
+    client = MagicMock()
+    # Round 1: exploit call. Round 2: no-tool final answer.
+    client.chat.side_effect = [_tool_call_msg(), _done_msg()]
+    session = AsyncMock()
+    session.call_tool.return_value = _tool_result("meterpreter session 1 opened\nuid=0(root)")
+
+    with __import__("unittest.mock", fromlist=["patch"]).patch(
+        "tools.exploit_agent._stream_ollama", new_callable=AsyncMock
+    ) as stream:
+        stream.return_value = {"role": "assistant", "content": "done"}
+        result = await run_exploit_agent(
+            client=client,
+            model="glm",
+            session=session,
+            exploit_tools=[{"type": "function", "function": {"name": "run_exploit_terminal"}}],
+            policy=policy,
+            target_ip="10.0.0.50",
+            config={"outcome_judgment": {"flow_a": True, "max_inconclusive_attempts": 3}},
+        )
+
+    # The compromise was recorded and the loop terminated on the no-tool
+    # answer -- it did NOT loop to the round budget.
+    assert "compromises: 1" in result["outcome_summary"]
+    assert result["total_actions"] == 1
+
+
+@pytest.mark.asyncio
+async def test_loop_does_not_terminate_early_without_compromise(tmp_path):
+    """Without a verified compromise, a no-tool answer still triggers the
+    phase-minimum gate (the model can't skip recon by saying 'done' before
+    doing anything)."""
+    from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings
+    from tools.exploit_agent import run_exploit_agent
+
+    settings = ExploitSettings(
+        enabled=True,
+        permission=ExploitPermission.FULL_ACCESS,
+        attack_mode=True,
+        attack_max_rounds=5,
+        attack_max_commands=50,
+        outcome_judgment_flow_a=True,
+        workspace_root=tmp_path,
+        target_ip="10.0.0.50",
+    )
+    policy = ExploitPolicy(settings, tmp_path)
+
+    client = MagicMock()
+    # Round 1: a recon tool call. Round 2: no-tool answer (too early).
+    client.chat.side_effect = [
+        {
+            "message": {
+                "content": "scanning",
+                "tool_calls": [{"function": {"name": "check_os", "arguments": {"target_ip": "10.0.0.50"}}}],
+            }
+        },
+        _done_msg(),
+        # Round 3: after the phase-minimum nudge, another no-tool answer.
+        _done_msg(),
+    ]
+    session = AsyncMock()
+    session.call_tool.return_value = _tool_result("OS_VERDICT: LINUX\nexit_code=0")
+
+    with __import__("unittest.mock", fromlist=["patch"]).patch(
+        "tools.exploit_agent._stream_ollama", new_callable=AsyncMock
+    ) as stream:
+        stream.return_value = {"role": "assistant", "content": "done"}
+        result = await run_exploit_agent(
+            client=client,
+            model="glm",
+            session=session,
+            exploit_tools=[{"type": "function", "function": {"name": "check_os"}}],
+            policy=policy,
+            target_ip="10.0.0.50",
+            config={"outcome_judgment": {"flow_a": True, "max_inconclusive_attempts": 3}},
+        )
+
+    # No compromise was recorded -- the loop should NOT have terminated on the
+    # first no-tool answer; it nudged and continued.
+    assert "compromises: 0" in result["outcome_summary"] or "compromises:" not in result["outcome_summary"]

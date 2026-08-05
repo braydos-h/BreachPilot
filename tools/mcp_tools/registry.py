@@ -76,14 +76,15 @@ from tools.recon_pipeline import ReconPipeline, ReconConfig, HostReconResult
 from tools.skill_registry import load_skill_registry, render_skill_context
 from tools.validation_utils import (
     extract_ips_from_command,
+    is_fqdn,
+    is_subdomain_of,
     is_target_in_allowlist,
     preflight_command_check,
+    resolve_target,
+    resolve_target_to_ip,
     validate_ipv4,
     validate_target,
     validate_target_or_ip,
-    is_fqdn,
-    resolve_target_to_ip,
-    resolve_target,
 )
 from tools.web_researcher import WebResearcher
 from db import DatabaseManager, get_default_db
@@ -448,6 +449,7 @@ __all__ = [
     "get_module",
     "get_session_manager",
     "is_target_in_allowlist",
+    "is_subdomain_of",
     "list_modules",
     "load_api_keys_into_env",
     "load_config",

@@ -543,12 +543,21 @@ class AttackModuleExecutor:
             self._record_failure_on_blackboard(task.module_name)
             return {"success": False, "error": task.error}
 
-        # Build context
+        # Build context -- carry version + CPE so the module's
+        # generate_dynamic_script records the correct service:version:os
+        # signature for the ExperienceStore (audit: version was dropped here
+        # too, so historical confidence never applied).
         ctx = ModuleContext(
             target_ip=task.target,
             target_os=state.recon_result.os_family if state.recon_result else None,
             services=[
-                {"service": s.service, "port": f"{s.port}/{s.protocol}"}
+                {
+                    "service": s.service,
+                    "port": f"{s.port}/{s.protocol}",
+                    "version": s.version,
+                    "cpe": list(s.cpe),
+                    "banner": s.banner,
+                }
                 for s in (state.recon_result.services if state.recon_result else [])
             ],
         )
@@ -1002,6 +1011,7 @@ class AutonomousOrchestrator:
         model_client: Any = None,
         critic_agent: Any = None,
         reflection_agent: Any = None,
+        experience_store: Any | None = None,
     ) -> None:
         self._workspace = workspace_root
         self._workspace.mkdir(parents=True, exist_ok=True)
@@ -1009,6 +1019,19 @@ class AutonomousOrchestrator:
         self._tool_executor = tool_executor
         self._recon_config = recon_config or ReconConfig()
         self._recon = ReconPipeline(self._recon_config)
+        # Evidence-aware module ranking: the dormant ExperienceStore at
+        # tools/attack_modules/registry.py:205-328 already supports Bayesian
+        # confidence boosting/demotion, but the autonomous path never passed
+        # it (the audit flagged this -- ranked modules always got neutral 0.5).
+        # Build a shared default-backed store when the caller doesn't supply one.
+        self._experience_store = experience_store
+        if self._experience_store is None:
+            try:
+                from db import get_default_db
+                from tools.experience_store import ExperienceStore
+                self._experience_store = ExperienceStore(get_default_db())
+            except Exception:  # noqa: BLE001 -- ranking degrades to static-only
+                self._experience_store = None
         # Phase 6.2: build an OpsecManager from the ``opsec`` config block
         # (merged into mission_config by the campaign call sites). Tolerant of
         # its absence -> disabled profile -> pacing no-op. Also published as the
@@ -1387,7 +1410,7 @@ class AutonomousOrchestrator:
         # tool, but runs inline here (Path B has no MCP session).
         if state.original_target and state.original_target != state.target:
             try:
-                from tools.validation_utils import is_fqdn, resolve_target_to_ip
+                from tools.validation_utils import is_fqdn, is_subdomain_of, resolve_target_to_ip
                 from tools.mcp_shared import add_discovered_target
                 if is_fqdn(state.original_target):
                     logger.info(
@@ -1411,7 +1434,7 @@ class AutonomousOrchestrator:
                                 for nv in str(row.get("name_value", "")).splitlines():
                                     for s in nv.split(","):
                                         s = s.strip().lstrip("*.").strip().lower()
-                                        if s and s.endswith(dom) and s != dom:
+                                        if s and is_subdomain_of(s, dom) and s != dom:
                                             subs.add(s)
                         for sub in sorted(subs)[:200]:
                             ip = resolve_target_to_ip(sub)
@@ -1455,20 +1478,14 @@ class AutonomousOrchestrator:
             return
 
         # Get applicable modules sorted by score
-        ctx = ModuleContext(
-            target_ip=state.target,
-            target_os=state.recon_result.os_family,
-            services=[
-                {"service": s.service, "port": f"{s.port}/{s.protocol}"}
-                for s in state.recon_result.services
-            ],
-            cves=[
-                cve for s in state.recon_result.services
-                for cve in s.scripts.get("openssh_cves", [])
-            ],
-        )
+        # Evidence-aware ranking: carry version + CPE + the full per-service CVE
+        # list (the audit flagged these were dropped -- the ranking's
+        # service:version:os signature at registry.py:249-298 needs version to
+        # query the ExperienceStore, and the dormant Bayesian boost never fired
+        # because experience_store was never passed).
+        ctx = self._module_context(state)
 
-        scored_modules = find_modules(ctx)
+        scored_modules = find_modules(ctx, experience_store=self._experience_store)
         if skip_failed:
             # Adaptive replan: exclude modules that already failed this campaign
             # so the round tries a different attack surface. Preserves ranking.
@@ -1482,7 +1499,16 @@ class AutonomousOrchestrator:
 
         # Create attack tasks for top modules
         tasks: list[AttackTask] = []
+        ranked_names: set[tuple[str, str]] = set()  # (module_name, port) for dedupe
         for score, module in scored_modules[:15]:  # Top 15 modules
+            # Derive the effective port from the module's primary service if
+            # available, so service-specific tasks (below) can dedupe against it.
+            _port = ""
+            for s in state.recon_result.services:
+                if s.service.lower() in {t.lower() for t in module.target_services}:
+                    _port = f"{s.port}/{s.protocol}"
+                    break
+            ranked_names.add((module.name, _port))
             task = AttackTask(
                 task_id=self._new_task_id(),
                 phase=AttackPhase.EXPLOITATION,
@@ -1495,9 +1521,17 @@ class AutonomousOrchestrator:
             tasks.append(task)
             self._tasks[task.task_id] = task
 
-        # Also add service-specific tasks
+        # Also add service-specific tasks, skipping any that duplicate a ranked
+        # module (same name + port). The audit flagged the ranked and
+        # service-specific lists were merged without dedupe, so the same module
+        # could execute twice against the same port.
         service_tasks = self._create_service_specific_tasks(state)
-        tasks.extend(service_tasks)
+        for st in service_tasks:
+            _key = (st.module_name, str(st.parameters.get("port", "")))
+            if _key in ranked_names:
+                logger.info(f"[EXPLOIT] Dropping duplicate service task {st.module_name} on {_key[1]}")
+                continue
+            tasks.append(st)
 
         # Execute tasks with concurrency limit
         await self._execute_task_batch(tasks, state)
@@ -1649,18 +1683,46 @@ class AutonomousOrchestrator:
         return m.group(1).lower() if m else None
 
     def _module_context(self, state: AttackState) -> ModuleContext:
-        """Build the ModuleContext the attack modules expect from current state."""
+        """Build the ModuleContext the attack modules expect from current state.
+
+        Carries version + CPE + the full per-service CVE list (the audit flagged
+        these were dropped, so the ranking's service:version:os signature at
+        registry.py:249-298 always read an empty version and the Bayesian boost
+        never fired). The CVE list now pulls from openssh_cves plus any CVE the
+        recon pipeline attached to the service's scripts (broader than the
+        OpenSSH-only gate).
+        """
+        services_full = []
+        cves: list[str] = []
+        import re as _re
+        for s in (state.recon_result.services if state.recon_result else []):
+            services_full.append({
+                "service": s.service,
+                "port": f"{s.port}/{s.protocol}",
+                "version": s.version,
+                "cpe": list(s.cpe),
+                "banner": s.banner,
+            })
+            # openssh_cves may be a list of CVE IDs OR a single string. Handle
+            # both (the audit flagged a character-iteration bug where a string
+            # value was iterated char-by-char into the CVE list).
+            openssh = s.scripts.get("openssh_cves", [])
+            if isinstance(openssh, str):
+                cves.extend(_re.findall(r"CVE-\d{4}-\d{4,}", openssh, _re.IGNORECASE))
+            else:
+                for cve in openssh:
+                    cves.append(str(cve))
+            # Also carry CVEs the recon pipeline attached under other script keys.
+            for key, val in s.scripts.items():
+                if key == "openssh_cves":
+                    continue
+                if isinstance(val, str):
+                    cves.extend(_re.findall(r"CVE-\d{4}-\d{4,}", val, _re.IGNORECASE))
         return ModuleContext(
             target_ip=state.target,
             target_os=state.recon_result.os_family if state.recon_result else "",
-            services=[
-                {"service": s.service, "port": f"{s.port}/{s.protocol}"}
-                for s in (state.recon_result.services if state.recon_result else [])
-            ],
-            cves=[
-                cve for s in (state.recon_result.services if state.recon_result else [])
-                for cve in s.scripts.get("openssh_cves", [])
-            ],
+            services=services_full,
+            cves=sorted(set(cves)),
         )
 
     async def _phase_persistence(self, state: AttackState) -> None:
@@ -1762,9 +1824,13 @@ class AutonomousOrchestrator:
         (adaptive replan), then privesc + lateral if their gates fire, then
         schedules vuln-chain metadata from the round's successes. The loop
         stops when ``state.should_continue()`` is False (access at max
-        privilege and no pivot targets remain) or the round cap
-        (``max_cycles``) is hit. Bounded by construction -- no unbounded
-        recursion, no re-attacking the same dead module forever.
+        privilege and no pivot targets remain), the round cap
+        (``max_cycles``) is hit, OR a round produces no novel candidate tasks
+        (audit: the loop used to spin empty rounds after all modules were
+        dropped, because ``should_continue()`` stayed true on
+        ``not access_achieved`` even with nothing left to try). Bounded by
+        construction -- no unbounded recursion, no re-attacking the same dead
+        module forever.
         """
         max_rounds = max(1, int(self._max_cycles))
         rounds = 0
@@ -1777,7 +1843,24 @@ class AutonomousOrchestrator:
 
             # Pre-round replan: skip_failed drops modules that already failed
             # this campaign so the round attacks a different surface.
+            _tasks_before = len(self._tasks)
             await self._phase_exploitation(state, skip_failed=True)
+            _tasks_after = len(self._tasks)
+
+            # No-novel-candidate stop: if the exploitation phase created no new
+            # tasks (all applicable modules already failed), continuing would
+            # spin an empty round -- the audit flagged this could burn the full
+            # ``max_cycles`` budget doing nothing. Stop instead.
+            if _tasks_after == _tasks_before and not state.access_achieved:
+                logger.info(
+                    f"[ADAPTIVE] {state.target} round {rounds}: no novel "
+                    f"candidate modules remain and no access achieved; stopping."
+                )
+                state.add_timeline_event(
+                    "adaptive_stop",
+                    "No novel candidate modules remain; stopping adaptive rounds.",
+                )
+                break
 
             if state.access_achieved and state.privilege_level not in ("system", "root", "admin"):
                 await self._phase_privilege_escalation(state)

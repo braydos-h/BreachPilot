@@ -412,7 +412,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         for nv in str(row.get("name_value", "")).splitlines():
                             for s in nv.split(","):
                                 s = s.strip().lstrip("*.").strip().lower()
-                                if s and s.endswith(dom) and s not in subs:
+                                if s and is_subdomain_of(s, dom) and s != dom and s not in subs:
                                     subs[s] = None
                 except Exception:
                     pass
@@ -443,7 +443,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 if rc == 0 and out:
                     for line in out.splitlines():
                         s = line.strip().lower()
-                        if s and s.endswith(dom) and s not in subs:
+                        if s and is_subdomain_of(s, dom) and s != dom and s not in subs:
                             subs[s] = None
             except Exception:
                 pass
@@ -458,7 +458,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 if rc == 0 and out:
                     for line in out.splitlines():
                         s = line.strip().lower()
-                        if s and s.endswith(dom) and s not in subs:
+                        if s and is_subdomain_of(s, dom) and s != dom and s not in subs:
                             subs[s] = None
             except Exception:
                 pass

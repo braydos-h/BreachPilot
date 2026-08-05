@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Generator
 
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 5
 _MIGRATIONS_TABLE = "_migrations"
 
 
@@ -284,6 +284,7 @@ CREATE TABLE IF NOT EXISTS lessons (
     confidence REAL NOT NULL DEFAULT 0.0,
     embedding_json TEXT NOT NULL DEFAULT '[]',
     metadata_json TEXT NOT NULL DEFAULT '{{}}',
+    text TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
 
@@ -394,6 +395,8 @@ class DatabaseManager:
             self._migrate_v3_indexes(conn)
         if version == 4:
             self._migrate_v4_outcome_judgment(conn)
+        if version == 5:
+            self._migrate_v5_lessons_text(conn)
         conn.execute(
             f"INSERT INTO {_MIGRATIONS_TABLE}(version, applied_at) VALUES(?,?)",
             (version, _now_iso()),
@@ -689,6 +692,25 @@ class DatabaseManager:
         )
 
     # ------------------------------------------------------------------
+    def _migrate_v5_lessons_text(self, conn: sqlite3.Connection) -> None:
+        """Add the ``text`` column to the ``lessons`` table.
+
+        The audit flagged that ``SemanticMemoryManager.store_lesson`` embedded
+        the lesson text for similarity search but never persisted the text
+        itself -- retrieval returned labels/metadata but NOT the explanatory
+        ``why it failed`` text, so the model never saw the lesson. This
+        migration adds the column to existing DBs (the DDL already includes it
+        for fresh creates). Tolerant of the column already existing.
+        """
+        lessons_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(lessons)").fetchall()
+        }
+        if "text" not in lessons_columns:
+            conn.execute(
+                "ALTER TABLE lessons ADD COLUMN text TEXT NOT NULL DEFAULT ''"
+            )
+
+    # ------------------------------------------------------------------
     # High-level helpers used across modules
     # ------------------------------------------------------------------
 
@@ -783,6 +805,15 @@ def get_default_db() -> DatabaseManager:
     if _default_db is None:
         workspace = Path(os.environ.get("RESEARCH_WORKSPACE", "research_workspace"))
         _default_db = DatabaseManager(workspace / "research.db")
+        # Ensure the schema (incl. the lessons table the ExperienceStore /
+        # SemanticMemoryManager write to) exists on a fresh Flow A install.
+        # The audit flagged that a fresh install hit "no such table: lessons"
+        # because nothing in the Flow A path called ensure_schema().
+        try:
+            with _default_db.connection(write=True) as conn:
+                _default_db.ensure_schema(conn)
+        except Exception:
+            pass
     return _default_db
 
 
