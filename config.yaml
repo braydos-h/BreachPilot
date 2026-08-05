@@ -317,7 +317,7 @@ eval:
 # context instead of a 300-char-condensed snippet. Absent/false = current
 # behavior; first-run defaults are unchanged.
 long_session:
-  enabled: false
+  enabled: true
   request_timeout_seconds: 600        # per-LLM-call httpx timeout (bounds hung generations)
   swarm_session_timeout_minutes: 30   # overrides the 300s swarm cap when long-session active
   attack_max_rounds: 200
@@ -329,13 +329,13 @@ reasoning:
   reflection_every_n_actions: 10
   critic_enabled: true
   observer_mode: hybrid
-  ultrathink: false
+  ultrathink: true
   ultrathink_reflection_interval: 3
   # LLM-driven reflection inside run_exploit_agent (Phase 1b). Default off so
   # the hot loop makes no extra LLM calls unless explicitly opted in. When off,
   # the heuristic _generate_reflection is used. Advisory-only; never feeds the
   # Bayesian ExperienceStore.
-  llm_reflection: false
+  llm_reflection: true
   # Phase 1c: auto-trigger consult_peer_models after N consecutive exploit
   # failures (in-process, advisory-only — peers have no tool schemas). 0
   # disables the auto-consult (manual consult_peer_models still works). The
@@ -362,7 +362,7 @@ outcome_judgment:
   # first-run behavior is unchanged (shallow exit_code==0 success). When true,
   # the exploit loop runs classify_exploit_result + OutcomeJudge.judge and uses
   # the evidence-grounded HypothesisStatus to override the success flag.
-  flow_a: false
+  flow_a: true
 adaptive_exploits:
   enabled: true
   max_mutations: 5
