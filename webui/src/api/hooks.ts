@@ -35,6 +35,7 @@ import type {
   RunCreateRequest,
   RunDetail,
   RunListResponse,
+  RunListRow,
   SecretsStatus,
   SkillDetail,
   SkillInstallRequest,
@@ -47,6 +48,7 @@ import type {
   ToolCallResponse,
   ToolsResponse,
 } from "@/api/types";
+import { isActiveState } from "@/api/types";
 
 export const queryKeys = {
   capabilities: ["capabilities"] as const,
@@ -264,7 +266,14 @@ export function useRuns(limit = 50, offset = 0, sort: string = "created_desc") {
     queryFn: () =>
       apiFetch<RunListResponse>(`/runs?limit=${limit}&offset=${offset}&sort=${encodeURIComponent(sort)}`),
     ...defaultQueryOptions,
-    refetchInterval: 5_000,
+    // Poll fast only while at least one run is in an active state; when every
+    // run is terminal, back off to a slow cadence so an idle dashboard is not
+    // hammering the API every 5s forever.
+    refetchInterval: (query) => {
+      const rows: RunListRow[] | undefined = query.state.data?.runs;
+      const hasActive = !!rows?.some((r) => isActiveState(r.state));
+      return hasActive ? 5_000 : 60_000;
+    },
     placeholderData: keepPreviousData,
   });
 }
@@ -419,15 +428,21 @@ export function useCallTool(runId: string) {
 }
 
 export function useArtifacts(runId: string | null | undefined) {
+  const qc = useQueryClient();
   return useQuery<ArtifactListResponse>({
     queryKey: queryKeys.runArtifacts(runId ?? ""),
     queryFn: () => apiFetch<ArtifactListResponse>(`/runs/${encodeURIComponent(runId as string)}/artifacts`),
     ...defaultQueryOptions,
     enabled: !!runId,
-    refetchInterval: (query) => {
-      const run = query.state.data;
-      if (!run) return 30_000;
-      return 30_000;
+    // Poll artifacts only while the run is active (artifacts appear as the run
+    // progresses). Once the run reaches a terminal state the artifact set is
+    // frozen, so stop polling. The run state is read from the run-detail query
+    // cache so this hook needs no extra prop.
+    refetchInterval: () => {
+      if (!runId) return false;
+      const run = qc.getQueryData<RunDetail>(queryKeys.run(runId));
+      if (!run || isActiveState(run.state)) return 30_000;
+      return false;
     },
   });
 }

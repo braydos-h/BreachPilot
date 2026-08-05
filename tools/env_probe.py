@@ -29,8 +29,8 @@ from typing import Any
 ENV_TOOLS: list[str] = [
     "nmap", "searchsploit", "hydra", "sqlmap", "msfconsole", "gobuster",
     "nikto", "enum4linux", "smbclient", "impacket-secretsdump",
-    "crackmapexec", "hashcat", "john", "gcc", "pip", "python3", "curl",
-    "git", "nc", "netcat",
+    "crackmapexec", "hashcat", "john", "gcc", "pip", "python3", "python", "py",
+    "curl", "git", "nc", "netcat",
 ]
 # Backward-compat alias so existing patch sites that reference ``_ENV_TOOLS``
 # keep working (it is the same list object).

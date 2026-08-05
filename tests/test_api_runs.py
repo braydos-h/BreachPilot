@@ -97,6 +97,25 @@ def test_get_run_after_create(tmp_path, monkeypatch):
     assert data["state"] == "awaiting_confirmation"
 
 
+def test_get_artifact_enhanced_missing_returns_404_not_500(tmp_path, monkeypatch):
+    """A run that never produced an enhanced report has no ``enhanced/`` dir.
+    GET /artifacts/enhanced/<file> must return a clean 404, not a 500 from
+    FileNotFoundError on ``(run_dir / "enhanced").iterdir()`` (regression guard
+    for the WinError 3 trace seen in the --web log)."""
+    client = _make_client(tmp_path, monkeypatch)
+    create_resp = client.post("/api/v1/runs", json={
+        "target": "10.0.0.50", "mode": "attack", "goal": "recon_only",
+    }, headers=_auth_headers())
+    assert create_resp.status_code == 201
+    run_id = create_resp.json()["run_id"]
+    resp = client.get(
+        f"/api/v1/runs/{run_id}/artifacts/enhanced/enhanced_report.json",
+        headers=_auth_headers(),
+    )
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["error"]["message"] == "Artifact not found"
+
+
 def test_second_run_returns_409(tmp_path, monkeypatch):
     """One active run at a time — a second returns 409."""
     client = _make_client(tmp_path, monkeypatch)

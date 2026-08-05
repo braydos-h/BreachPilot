@@ -44,6 +44,7 @@ import {
   useCallTool,
   useCancelRun,
   useDecisions,
+  useArtifacts,
   useFetchArtifactBlob,
   useResumeRun,
   useRun,
@@ -68,6 +69,17 @@ export function RunPage() {
   const tools = useRunTools(runId ?? null, isActiveState(run.data?.state as RunState));
   const callTool = useCallTool(runId ?? "");
   const fetchArtifact = useFetchArtifactBlob(runId ?? "");
+  const artifacts = useArtifacts(runId ?? null);
+
+  // Gate per-artifact fetches on run state so we don't 404-loop while recon is
+  // still in progress. An artifact is "ready to fetch" once the run is terminal
+  // OR the artifact list already contains it (recon/attack finished writing it).
+  const artifactNames = useMemo(
+    () => new Set((artifacts.data?.artifacts ?? []).map((a) => a.name)),
+    [artifacts.data],
+  );
+  const runIsActive = isActiveState(run.data?.state as RunState);
+  const artifactReady = (name: string) => !runIsActive || artifactNames.has(name);
 
   const [showCancel, setShowCancel] = useState(false);
   const [selectedTool, setSelectedTool] = useState<string>("");
@@ -323,10 +335,11 @@ export function RunPage() {
           <ReconTab
             runId={run.data.id}
             fetchArtifact={fetchArtifact}
+            ready={artifactReady("recon_assessment.json")}
           />
         </TabsContent>
         <TabsContent value="graph" className="space-y-3">
-          <AttackGraph runId={run.data.id} />
+          <AttackGraph runId={run.data.id} ready={artifactReady("enhanced/enhanced_report.json")} />
         </TabsContent>
         <TabsContent value="summary" className="space-y-3">
           <SessionSummaryCard result={(run.data.result ?? {}) as RunResult} title={run.data.title} />
@@ -581,15 +594,25 @@ function StateView({ label, loading, error, data }: StateViewProps) {
 interface ReconTabProps {
   runId: string;
   fetchArtifact: ReturnType<typeof useFetchArtifactBlob>;
+  ready: boolean;
 }
 
-function ReconTab({ fetchArtifact }: ReconTabProps) {
+function ReconTab({ fetchArtifact, ready }: ReconTabProps) {
   const [assessment, setAssessment] = useState<ReconAssessment | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
   const mutate = fetchArtifact.mutate;
 
   useEffect(() => {
+    // Don't fetch recon_assessment.json until the run is terminal or the
+    // artifact list confirms it exists -- otherwise an in-progress recon
+    // 404s on every mount (StrictMode double-mount + tab remounts).
+    if (!ready) {
+      setLoading(false);
+      setAssessment(null);
+      setError("");
+      return;
+    }
     setLoading(true);
     setError("");
     mutate("recon_assessment.json", {
@@ -611,7 +634,7 @@ function ReconTab({ fetchArtifact }: ReconTabProps) {
         setLoading(false);
       },
     });
-  }, [mutate]);
+  }, [mutate, ready]);
 
   if (loading) {
     return <Spinner label="Loading recon..." />;
@@ -621,7 +644,7 @@ function ReconTab({ fetchArtifact }: ReconTabProps) {
   }
   return (
     <div className="space-y-2 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-      {error || "Recon assessment not loaded yet."}
+      {error || "Recon in progress — assessment will appear here once recon completes."}
     </div>
   );
 }

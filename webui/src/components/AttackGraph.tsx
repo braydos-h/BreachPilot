@@ -15,9 +15,10 @@ import type { EnhancedReport, ExploitationChain, TechnicalFinding } from "@/api/
 interface AttackGraphProps {
   runId: string;
   className?: string;
+  ready?: boolean;
 }
 
-export function AttackGraph({ runId, className }: AttackGraphProps) {
+export function AttackGraph({ runId, className, ready = true }: AttackGraphProps) {
   const fetchArtifact = useFetchArtifactBlob(runId);
   const [report, setReport] = useState<EnhancedReport | null>(null);
   const [loading, setLoading] = useState(false);
@@ -25,6 +26,15 @@ export function AttackGraph({ runId, className }: AttackGraphProps) {
   const mutate = fetchArtifact.mutate;
 
   useEffect(() => {
+    // Don't fetch the enhanced report until the run is terminal or the artifact
+    // list confirms it exists -- otherwise an in-progress run 404s on every
+    // mount (StrictMode double-mount + tab remounts).
+    if (!ready) {
+      setLoading(false);
+      setReport(null);
+      setError("");
+      return;
+    }
     setLoading(true);
     setError("");
     setReport(null);
@@ -48,13 +58,20 @@ export function AttackGraph({ runId, className }: AttackGraphProps) {
         setLoading(false);
       },
     });
-  }, [mutate, runId]);
+  }, [mutate, runId, ready]);
 
   if (loading) {
     return (
       <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" />
         Loading attack graph...
+      </div>
+    );
+  }
+  if (!ready && !report && !error) {
+    return (
+      <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+        Attack path report is generated when the run completes.
       </div>
     );
   }

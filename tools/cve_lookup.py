@@ -30,6 +30,16 @@ from tools.reliability import CircuitBreaker, RateLimiter
 NVD_API_BASE = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 
 
+class NVDHTTPError(RuntimeError):
+    """Raised on an NVD HTTP error response. Carries the status code so callers
+    can treat 4xx (intermittent 404 / not-found) as a soft miss that must NOT
+    open the circuit breaker, while 5xx/timeout still count as hard failures."""
+
+    def __init__(self, code: int, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 def _sanitize_query(query: str) -> str:
     text = " ".join(str(query or "").strip().split())
     if not text:
@@ -276,6 +286,15 @@ class NVDClient:
 
         try:
             entries = await self._fetch_async(clean_query)
+        except NVDHTTPError as exc:
+            if 400 <= exc.code < 500:
+                # 4xx (e.g. intermittent NVD 404) is a soft miss -- the API
+                # responded, the query just had no match. Do NOT open the
+                # circuit breaker over it; a later lookup may still succeed.
+                self._breaker.record_success()
+            else:
+                self._breaker.record_failure()
+            raise
         except Exception:
             self._breaker.record_failure()
             raise
@@ -320,6 +339,12 @@ class NVDClient:
 
         try:
             entries = self._fetch_sync(clean_query)
+        except NVDHTTPError as exc:
+            if 400 <= exc.code < 500:
+                self._breaker.record_success()
+            else:
+                self._breaker.record_failure()
+            raise
         except Exception:
             self._breaker.record_failure()
             raise
@@ -360,7 +385,7 @@ class NVDClient:
             payload = json.loads(response.read().decode("utf-8", errors="replace"))
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")[:800]
-            raise RuntimeError(f"NVD HTTP {exc.code}: {body}") from exc
+            raise NVDHTTPError(exc.code, f"NVD HTTP {exc.code}: {body}") from exc
         except Exception as exc:
             raise RuntimeError(f"NVD request failed: {exc}") from exc
 

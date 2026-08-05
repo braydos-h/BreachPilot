@@ -30,7 +30,7 @@ def register_workspace_tools(mcp: Any, *, ctx: ToolContext) -> None:
     @mcp.tool()
     @audit_tool
     def write_python_file(filename: str, code: str, binary: bool = False) -> str:
-        """Write an AI-generated Python exploit script. The script will receive --target <ip> and ACTIVE_CHECK_TARGET env var. Use only standard library imports (socket, ssl, http, json, etc.) or common pip packages. Pass a bare .py name to save into the workspace, or an absolute path to write anywhere on the operator box (LAB BUILD: unrestricted).
+        """Write an AI-generated Python exploit script. The script receives the target IP as sys.argv[1] (bare positional), as --target <ip>, and via the ACTIVE_CHECK_TARGET env var. Read sys.argv[1] (simplest), or use argparse with parse_known_args() so the bare positional is not flagged as an unrecognized argument. Use only standard library imports (socket, ssl, http, json, etc.) or common pip packages. Pass a bare .py name to save into the workspace, or an absolute path to write anywhere on the operator box (LAB BUILD: unrestricted).
 
         With binary=True, ``code`` is a base64 payload and the file is written as raw bytes (no shell interpolation, no UTF-8 re-encoding). Use this to materialize a private key / PEM / binary blob that must be byte-exact -- then `chmod 600` it via run_exploit_terminal. Never paste keys through a shell heredoc."""
         if not filename or not filename.strip():
@@ -84,7 +84,7 @@ def register_workspace_tools(mcp: Any, *, ctx: ToolContext) -> None:
     @mcp.tool()
     @require_allowlist()
     def run_python_file(target_ip: str, filename: str) -> str:
-        """Execute a previously written Python exploit script against the target IP. The script is searched across the entire workspace (all subdirectories) by filename, so you do not need to know the exact path. The script runs in a visible terminal window. Pass the target IP to attack."""
+        """Execute a previously written Python exploit script against the target IP. The script is searched across the entire workspace (all subdirectories) by filename, so you do not need to know the exact path. The script runs in a visible terminal window. Pass the target IP to attack. The IP is passed as sys.argv[1] (bare positional) AND as --target <ip> AND via the ACTIVE_CHECK_TARGET env var; scripts should read sys.argv[1] or use argparse parse_known_args()."""
         if not target_ip or not target_ip.strip():
             return "BLOCKED: target_ip is required."
         # M4: validate the target IP before it is interpolated into the
@@ -126,7 +126,14 @@ def register_workspace_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return f"BLOCKED: {_block}\nTOOL: run_python_file\nSCRIPT: {cleaned}"
 
         log_path = attempt_dir / "python_run.log"
-        argv = [sys.executable, str(script_path), "--target", str(target_ip)]
+        # Pass the target IP as BOTH a bare positional (argv[1]) AND --target <ip>.
+        # The attack-module templates the AI copies (network_smb/web/auth_creds)
+        # and the orchestrator's `python <path> <ip>` dispatch read sys.argv[1]
+        # as the bare IP; synthesis-style scripts use argparse --target. Reading
+        # sys.argv[1] always works; an argparse script should use
+        # parse_known_args() (or an optional positional) so the bare IP is not
+        # flagged as an unrecognized argument.
+        argv = [sys.executable, str(script_path), str(target_ip), "--target", str(target_ip)]
         env = os.environ.copy()
         env["ACTIVE_CHECK_TARGET"] = str(target_ip)
         env["EXPLOIT_WORKSPACE"] = str(attempt_dir)

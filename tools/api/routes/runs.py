@@ -340,7 +340,11 @@ async def get_artifact(run_id: str, name: str, auth: str = Depends(_require_auth
     is_enhanced = name.startswith("enhanced/")
     bare = name.split("/", 1)[-1] if is_enhanced else name
     if is_enhanced:
-        if bare not in {child.name for child in (run_dir / "enhanced").iterdir() if (run_dir / "enhanced").is_dir()}:
+        enhanced = run_dir / "enhanced"
+        # Guard the directory before iterdir(): is_dir() returns False (no raise)
+        # for a missing path, so a run that never produced an enhanced report
+        # resolves to a clean 404 instead of FileNotFoundError -> 500.
+        if not enhanced.is_dir() or bare not in {child.name for child in enhanced.iterdir()}:
             raise HTTPException(status_code=404, detail="Artifact not found")
         path = _safe_child(run_dir, name, allow_subdirs=True)
     elif name in _ARTIFACT_WHITELIST:

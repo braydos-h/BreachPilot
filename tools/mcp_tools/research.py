@@ -43,7 +43,18 @@ def register_research_tools(mcp: Any, *, ctx: ToolContext) -> None:
     @mcp.tool()
     def search_cve_intel(query: str) -> str:
         """Look up CVEs in the NVD database for a known CVE ID or product/version string. Returns CVSS score, description, and reference links."""
-        entries = nvd.search_sync(query)
+        try:
+            entries = nvd.search_sync(query)
+        except Exception as exc:
+            # NVD can 404 intermittently or be rate-limited. Degrade to an
+            # empty result instead of surfacing a tool error that stalls the
+            # agent loop -- the AI treats "no CVEs found" as a signal to move
+            # on or use other research tools.
+            return (
+                f"NO_CVE_RESULTS: NVD lookup for {query!r} failed ({exc}). "
+                f"Treat as no CVEs found; try search_web_exploit or "
+                f"search_exploit_db for alternate intel."
+            )
         return format_cve_results(entries, query)
 
     @mcp.tool()

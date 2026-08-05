@@ -190,6 +190,52 @@ class TestRunCommand:
             assert success is True
             assert stdout == "success"
 
+    @pytest.mark.asyncio
+    async def test_windows_access_violation_not_retried(self) -> None:
+        """0xC0000005 (nmap crash on Windows) is deterministic, not transient.
+        run_command must return immediately without sleeping/retrying -- the
+        log showed it retried 2x with 5s/7.5s sleeps before falling through."""
+        with patch("asyncio.create_subprocess_exec") as mock_exec, \
+                patch("asyncio.sleep", new=AsyncMock()) as mock_sleep:
+            mock_proc = AsyncMock()
+            mock_proc.returncode = 3221225477  # 0xC0000005
+            mock_proc.communicate.return_value = (b"", b"access violation")
+            mock_exec.return_value = mock_proc
+
+            success, stdout, stderr, elapsed = await run_command(
+                ["nmap", "-sS", "10.0.0.50"],
+                timeout=10,
+                max_retries=2,
+                retry_delay=5.0,
+            )
+            assert success is False
+            assert elapsed > 0
+            # Only one subprocess attempt -- no retry.
+            assert mock_exec.call_count == 1
+            # No retry sleep happened.
+            mock_sleep.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_command_not_found_exit_not_retried(self) -> None:
+        """Exit 127 / 9009 (command not found) is deterministic -- no retry."""
+        for code in (127, 9009):
+            with patch("asyncio.create_subprocess_exec") as mock_exec, \
+                    patch("asyncio.sleep", new=AsyncMock()) as mock_sleep:
+                mock_proc = AsyncMock()
+                mock_proc.returncode = code
+                mock_proc.communicate.return_value = (b"", b"not found")
+                mock_exec.return_value = mock_proc
+
+                success, _stdout, _stderr, _elapsed = await run_command(
+                    ["nonexistent-tool"],
+                    timeout=10,
+                    max_retries=2,
+                    retry_delay=0.1,
+                )
+                assert success is False
+                assert mock_exec.call_count == 1
+                mock_sleep.assert_not_called()
+
 
 # ── Nmap XML Parsing Tests ─────────────────────────────────────────────────
 

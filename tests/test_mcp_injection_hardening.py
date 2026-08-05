@@ -454,6 +454,60 @@ async def test_run_python_file_blocks_off_target_script_body(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
+async def test_run_python_file_passes_target_both_positional_and_flag(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """run_python_file passes the target IP as BOTH a bare positional (sys.argv[1])
+    AND --target <ip>, so a script reading sys.argv[1] (the attack-module template
+    / orchestrator convention) and a script using argparse --target both receive
+    the IP. Regression guard for the log bug where sys.argv[1] was the literal
+    string "--target" and the script connected to "--target:445"."""
+    from tools.mcp_tools import workspace as wsmod
+
+    captured: list[Any] = []
+
+    class _CapturingPopen(_Popen):
+        def __init__(self, argv, **kwargs):
+            super().__init__(argv)
+            captured.append(list(argv))
+
+    monkeypatch.setattr(subprocess, "Popen", _CapturingPopen)
+    mcp = _make_server(tmp_path)
+
+    written = _text(await mcp.call_tool(
+        "write_python_file",
+        {"filename": "argcheck.py", "code": "import sys\nprint(sys.argv[1:])\n"},
+    ))
+    assert "PYTHON_FILE_WRITTEN" in written
+    text = _text(await mcp.call_tool(
+        "run_python_file", {"target_ip": "10.0.0.5", "filename": "argcheck.py"}
+    ))
+    assert "PYTHON_RUN_RESULT" in text
+
+    if wsmod._platform_system() == "Windows":
+        # Windows: the python argv is materialized inside the .ps1 wrapper as
+        # $args = @('10.0.0.5', '--target', '10.0.0.5') (ps_quote single-quotes
+        # each arg). Recover it from the run dir.
+        script_line = [ln for ln in text.splitlines() if ln.startswith("SCRIPT:")]
+        assert script_line, "SCRIPT: line missing from result"
+        script_path = Path(script_line[0].split(":", 1)[1].strip())
+        wrapper = script_path.parent / "run_python.ps1"
+        assert wrapper.exists(), "powershell wrapper was not written"
+        ps1 = wrapper.read_text(encoding="utf-8")
+        assert "'10.0.0.5'" in ps1
+        assert "'--target'" in ps1
+        # Bare positional must precede --target so sys.argv[1] is the IP, not the flag.
+        assert ps1.index("'10.0.0.5'") < ps1.index("'--target'")
+    else:
+        # Linux: subprocess.Popen is called with the python argv directly.
+        assert captured, "subprocess.Popen was not invoked"
+        argv = captured[0]
+        assert "10.0.0.5" in argv
+        assert "--target" in argv
+        assert argv.index("10.0.0.5") < argv.index("--target")
+
+
+@pytest.mark.asyncio
 async def test_msfconsole_command_blocks_portfwd_to_non_target(tmp_path: Path) -> None:
     """LAB BUILD target lock: a meterpreter ``portfwd add -r <other_ip>`` pivot
     names a remote host via -r, not RHOSTS/RHOST. The msf free-text command gate

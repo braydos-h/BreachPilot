@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
 import re
 import signal
@@ -750,6 +751,46 @@ def _concise_startup_error(exc: BaseException, *, max_chars: int = 1000) -> str:
     return rendered
 
 
+async def _mcp_http_ready_probe(url: str, *, per_attempt_timeout: float = 3.0) -> bool:
+    """Return True once the MCP HTTP endpoint at ``url`` answers with a real
+    HTTP status that is NOT 503.
+
+    A bare ``port_is_open`` (TCP connect) only proves uvicorn bound the socket,
+    not that ``/mcp`` is actually serving -- during app startup the port can be
+    open while ``/mcp`` still 503s, so the live ``streamable_http_client`` would
+    hit a 503 on its real ``initialize`` and fall back to stdio. This probe
+    POSTs a minimal JSON-RPC ``initialize`` and treats any non-503 HTTP
+    response (200/400/404/406 all mean "the app is up and routing /mcp") as
+    ready. 503, connection-refused, and timeout all mean "not ready yet".
+
+    Reads the status code only (streaming response, body never consumed) so a
+    server that accepts the connection but streams an SSE body cannot hang the
+    probe -- the per-attempt timeout caps the wait for response headers.
+    """
+    import httpx
+
+    body = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "netattackai-readyprobe", "version": "0"},
+        },
+    })
+    headers = {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=per_attempt_timeout) as client:
+            async with client.stream("POST", url, content=body, headers=headers) as resp:
+                return resp.status_code != 503
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.TransportError, OSError):
+        return False
+
+
 async def wait_for_mcp_http_ready(
     url: str,
     timeout_seconds: float,
@@ -759,7 +800,13 @@ async def wait_for_mcp_http_ready(
     secret_values: tuple[str, ...] = (),
     retry_initial_seconds: float = MCP_HTTP_RETRY_INITIAL_SECONDS,
 ) -> None:
-    """Wait for the owned HTTP child to listen within one cold-start budget."""
+    """Wait for the owned HTTP child to listen AND serve ``/mcp`` within one
+    cold-start budget.
+
+    Cheap ``port_is_open`` first (avoids spending an HTTP probe before the
+    socket is bound), then an actual ``/mcp`` POST probe so readiness measures
+    "the MCP app is serving", not just "uvicorn bound a socket".
+    """
     endpoint = urlsplit(url)
     host, port = endpoint.hostname or "", endpoint.port
     deadline = time.monotonic() + timeout_seconds
@@ -777,7 +824,8 @@ async def wait_for_mcp_http_ready(
             raise child_error
         attempts += 1
         if port is not None and port_is_open(host, port):
-            return
+            if await _mcp_http_ready_probe(url):
+                return
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break

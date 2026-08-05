@@ -10,6 +10,7 @@ from tools.cve_lookup import (
     CVESearchSettings,
     CVEEntry,
     NVDClient,
+    NVDHTTPError,
     format_cve_results,
 )
 
@@ -189,6 +190,84 @@ def test_search_sync_circuit_opens_sync_path():
             with pytest.raises(RuntimeError):
                 client.search_sync(f"s{i}")
     assert client.search_sync("s2") == []  # OPEN -> graceful []
+
+
+@pytest.mark.asyncio
+async def test_4xx_is_soft_miss_does_not_open_breaker():
+    """An intermittent NVD 404 must NOT open the circuit breaker -- a later
+    lookup on a still-healthy NVD would otherwise be blocked. 5xx still opens
+    it. (Plan P3: the log showed NVD 404s raising to the AI and counting toward
+    breaker trips.)"""
+    client = NVDClient(CVESearchSettings(
+        circuit_failure_threshold=2, rate_limit_seconds=0.0,
+    ))
+    calls = []
+
+    def fetch(query):
+        calls.append(query)
+        if query.startswith("miss"):
+            raise NVDHTTPError(404, "NVD HTTP 404: not found")
+        return []
+
+    with patch.object(client, "_fetch_sync", side_effect=fetch):
+        # Two 404 "soft misses" -- the search() call re-raises (the tool layer
+        # degrades gracefully), but the breaker records SUCCESS for 4xx, so it
+        # stays CLOSED and a later real query is not blocked.
+        for i in range(2):
+            with pytest.raises(NVDHTTPError):
+                await client.search(f"miss{i}")
+        assert client._breaker.get_state() == "closed"
+        # A subsequent real query still hits NVD (breaker never opened).
+        await client.search("ok")
+        assert "ok" in calls
+
+
+@pytest.mark.asyncio
+async def test_5xx_still_opens_breaker():
+    """A 5xx NVDHTTPError is a hard failure and still opens the breaker."""
+    client = NVDClient(CVESearchSettings(
+        circuit_failure_threshold=2, rate_limit_seconds=0.0,
+    ))
+
+    def fetch(query):
+        raise NVDHTTPError(503, "NVD HTTP 503: down")
+
+    with patch.object(client, "_fetch_sync", side_effect=fetch):
+        for i in range(2):
+            with pytest.raises(NVDHTTPError):
+                await client.search(f"q{i}")
+        assert client._breaker.get_state() == "open"
+        assert await client.search("q3") == []  # OPEN -> graceful []
+
+
+def _tool_text(result) -> str:
+    content = result[0] if isinstance(result, (list, tuple)) else result
+    if hasattr(content, "content"):
+        content = content.content
+    return "".join(getattr(c, "text", str(c)) for c in content)
+
+
+@pytest.mark.asyncio
+async def test_search_cve_intel_degrades_gracefully_on_nvd_error(tmp_path):
+    """The MCP tool search_cve_intel must NOT raise to the agent when NVD
+    fails -- it returns a graceful NO_CVE_RESULTS string so the agent continues
+    instead of stalling on a tool error (Plan P3: the log showed NVD 404 raising
+    to the AI)."""
+    from mcp_exploit_server import create_mcp_server
+    from tools.exploit_search import ExploitSearch, ExploitSearchSettings
+    from tools.web_researcher import WebResearcher, WebResearcherSettings
+
+    nvd = NVDClient(CVESearchSettings(rate_limit_seconds=0.0))
+    mcp = create_mcp_server(
+        ExploitSearch(ExploitSearchSettings()), nvd,
+        WebResearcher(WebResearcherSettings()), tmp_path,
+        {"exploit": {"require_explicit_allowlist": False}},
+    )
+    with patch.object(nvd, "search_sync", side_effect=NVDHTTPError(404, "NVD HTTP 404: nf")):
+        result = await mcp.call_tool("search_cve_intel", {"query": "CVE-2021-44228"})
+    text = _tool_text(result)
+    assert text.startswith("NO_CVE_RESULTS")
+    assert "404" in text
 
 
 def test_build_cve_search_threads_breaker_config_through():

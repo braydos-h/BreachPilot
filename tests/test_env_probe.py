@@ -89,6 +89,27 @@ def test_prompt_without_env_context_unchanged():
     assert "PRE-FLIGHT ENVIRONMENT" not in prompt
 
 
+def test_windows_guidance_names_specific_failure_modes():
+    """The Windows attacker guidance must name the specifics the runtime log
+    showed failing: use `python` not `python3`, no pip installs, no netcat, and
+    that nmap 0xC0000005 crashes are deterministic (not retried). Generic
+    guidance let the AI burn rounds on pip/python3/nc."""
+    from tools.exploit_agent import build_exploit_system_prompt
+    from tools.env_probe import ENV_TOOLS
+
+    prompt = build_exploit_system_prompt(attacker_os="Windows", target_ip="10.0.0.5")
+    assert "WINDOWS ATTACKER GUIDANCE" in prompt
+    assert "`python3`" in prompt and "use `python`" in prompt
+    assert "pip install" in prompt  # told NOT to use it
+    assert "netcat" in prompt
+    assert "0xC0000005" in prompt
+    assert "not retried" in prompt or "do NOT retry" in prompt
+    # The probe registry must include the Windows interpreter names so the
+    # startup env report can confirm a working `python` (not just `python3`).
+    assert "python" in ENV_TOOLS
+    assert "py" in ENV_TOOLS
+
+
 # ── Gap 5: single source of truth for the required-tool registry ────────────
 
 

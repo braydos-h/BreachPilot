@@ -52,6 +52,10 @@ def test_log_tail_is_bounded_and_redacts_secrets(tmp_path: Path) -> None:
 def test_mcp_readiness_retries_until_listener_opens(monkeypatch, tmp_path: Path) -> None:
     attempts = iter((False, False, True))
     monkeypatch.setattr(ms, "port_is_open", lambda *_args: next(attempts))
+    # Once the port opens, the /mcp probe must agree -- stub it to "serving".
+    async def _probe(*_a, **_k):
+        return True
+    monkeypatch.setattr(ms, "_mcp_http_ready_probe", _probe)
 
     asyncio.run(
         ms.wait_for_mcp_http_ready(
@@ -64,16 +68,131 @@ def test_mcp_readiness_retries_until_listener_opens(monkeypatch, tmp_path: Path)
     )
 
 
-def test_open_listener_does_not_wait_for_disposable_mcp_probe(monkeypatch) -> None:
+def test_open_listener_returns_once_mcp_endpoint_serves(monkeypatch) -> None:
+    """An open TCP port alone is not readiness -- ``/mcp`` must actually serve.
+    Here the port is open from the first attempt and the probe says "serving",
+    so readiness returns without waiting."""
     monkeypatch.setattr(ms, "port_is_open", lambda *_args: True)
+    async def _probe(*_a, **_k):
+        return True
+    monkeypatch.setattr(ms, "_mcp_http_ready_probe", _probe)
 
     asyncio.run(
         ms.wait_for_mcp_http_ready(
             "http://127.0.0.1:8001/mcp",
-            timeout_seconds=0.01,
+            timeout_seconds=0.5,
             process=_RunningProcess(),
         )
     )
+
+
+def test_open_port_with_503_mcp_retries_until_serving(monkeypatch) -> None:
+    """Port open but ``/mcp`` 503ing during app startup must retry the probe
+    until it serves (the structural defect from the --web log: a bare TCP
+    probe declared readiness, then the live client 503'd and fell back to
+    stdio)."""
+    monkeypatch.setattr(ms, "port_is_open", lambda *_args: True)
+    probe_results = iter((False, False, True))
+    calls = {"n": 0}
+
+    async def _probe(*_a, **_k):
+        calls["n"] += 1
+        return next(probe_results)
+
+    monkeypatch.setattr(ms, "_mcp_http_ready_probe", _probe)
+
+    asyncio.run(
+        ms.wait_for_mcp_http_ready(
+            "http://127.0.0.1:8001/mcp",
+            timeout_seconds=1,
+            process=_RunningProcess(),
+            retry_initial_seconds=0,
+        )
+    )
+    assert calls["n"] == 3, "probe must be retried through 503s until serving"
+
+
+def _install_fake_httpx(monkeypatch, *, status=None, exc=None):
+    """Inject a minimal fake ``httpx`` module so ``_mcp_http_ready_probe`` (which
+    imports httpx at call time) can be exercised without a real server."""
+    import sys
+    import types
+
+    class _Resp:
+        def __init__(self, status_code):
+            self.status_code = status_code
+
+    class _StreamCtx:
+        def __init__(self, status_code):
+            self._resp = _Resp(status_code)
+
+        async def __aenter__(self):
+            return self._resp
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class _StreamMethod:
+        def __init__(self, status_code, exc):
+            self._status = status_code
+            self._exc = exc
+
+        def __call__(self, *a, **k):
+            return _StreamCtx(self._status)
+
+    class _ClientCtx:
+        def __init__(self, status_code, exc):
+            self._status = status_code
+            self._exc = exc
+
+        async def __aenter__(self):
+            client = types.SimpleNamespace()
+            client.stream = _StreamMethod(self._status, self._exc)
+            return client
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class _AsyncClient:
+        def __init__(self, *a, **k):
+            self._status = status
+            self._exc = exc
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        def stream(self, *a, **k):
+            return _StreamCtx(self._status)
+
+    class _ConnectError(Exception):
+        pass
+
+    class _TimeoutException(Exception):
+        pass
+
+    class _TransportError(Exception):
+        pass
+
+    fake = types.ModuleType("httpx")
+    fake.AsyncClient = _AsyncClient
+    fake.ConnectError = _ConnectError
+    fake.TimeoutException = _TimeoutException
+    fake.TransportError = _TransportError
+    monkeypatch.setitem(sys.modules, "httpx", fake)
+
+
+def test_mcp_ready_probe_treats_non_503_as_ready(monkeypatch) -> None:
+    for status in (200, 400, 404, 406):
+        _install_fake_httpx(monkeypatch, status=status)
+        assert asyncio.run(ms._mcp_http_ready_probe("http://127.0.0.1:8001/mcp")) is True
+
+
+def test_mcp_ready_probe_treats_503_as_not_ready(monkeypatch) -> None:
+    _install_fake_httpx(monkeypatch, status=503)
+    assert asyncio.run(ms._mcp_http_ready_probe("http://127.0.0.1:8001/mcp")) is False
 
 
 def test_mcp_readiness_reports_early_child_exit_with_redacted_log(

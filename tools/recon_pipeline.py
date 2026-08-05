@@ -328,6 +328,21 @@ class ToolAvailability:
 # Async command runner with retries
 # ---------------------------------------------------------------------------
 
+# Exit codes that are deterministic, not transient -- retrying a command that
+# died this way just burns the retry budget (the log showed nmap on Windows
+# retried 2x with 5s/7.5s sleeps after a 0xC0000005 access violation). Like
+# ``is_privilege_error``, these short-circuit before the retry sleep so the
+# caller can fall through to the next argv in the fallback chain.
+_NON_RETRYABLE_EXIT_CODES = frozenset({
+    127,            # POSIX: command not found
+    126,            # POSIX: found but not executable
+    9009,           # Windows CMD: command not recognized
+    3221225477,     # 0xC0000005 NTSTATUS_ACCESS_VIOLATION (nmap crash)
+    3221225786,     # 0xC0000135 DLL not found
+    3221225776,     # 0xC0000142 DLL initialization failed
+})
+
+
 async def _kill_process(proc: Any) -> None:
     """Kill a subprocess and wait for it.
 
@@ -403,6 +418,11 @@ async def run_command(
                 # ``-sT``) and retry once with the corrected command.
                 if is_privilege_error(stderr):
                     logger.warning(f"Privilege-related failure, not retrying: {last_error}")
+                    return False, stdout, stderr, elapsed
+                if proc.returncode in _NON_RETRYABLE_EXIT_CODES:
+                    logger.warning(
+                        f"Non-retryable exit code {proc.returncode}, not retrying: {last_error}"
+                    )
                     return False, stdout, stderr, elapsed
 
         except asyncio.TimeoutError:

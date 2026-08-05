@@ -79,8 +79,7 @@ def _target_lock_block(command: str, config: Any) -> str | None:
     for _ip in extract_ips_from_command(command):
         if _ip not in _dest_tokens:
             _dest_tokens.append(_ip)
-    for _m in _SCANNER_TARGET_RE.finditer(command):
-        _tok = _m.group(1)
+    for _tok in _extract_scanner_targets(command):
         if _tok not in _dest_tokens:
             _dest_tokens.append(_tok)
     for _tok in _dest_tokens:

@@ -4,7 +4,7 @@ Structured first-class wrapper around the Kali web scanners the agent
 otherwise shells out to via ``run_exploit_terminal`` (nikto/nuclei/sqlmap/
 gobuster/feroxbuster/whatweb/wpscan/dirb/dirbuster). Gives parsed output,
 consistent audit records, and the same target-IP allowlist lock the shell-out
-path already has (``_SCANNER_TARGET_RE`` already recognizes these verbs).
+path already has (``_extract_scanner_targets`` already recognizes these verbs).
 """
 
 from __future__ import annotations
