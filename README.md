@@ -8,6 +8,13 @@
 ![Models](https://img.shields.io/badge/LLM-Ollama%20Cloud-22c55e?style=flat-square)
 ![MCP](https://img.shields.io/badge/MCP-1.27%2B-f97316?style=flat-square)
 ![WebUI](https://img.shields.io/badge/WebUI-React%20%2B%20Vite-06b6d4?style=flat-square)
+![Skills](https://img.shields.io/badge/skills-140-a855f7?style=flat-square)
+![Swarm](https://img.shields.io/badge/swarm-6%20agents-f59e0b?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-179%20mocked-10b981?style=flat-square)
+![Models](https://img.shields.io/badge/peers-Kimi%20%7C%20DeepSeek%20%7C%20GLM%20%7C%20Minimax-3b82f6?style=flat-square)
+![Transport](https://img.shields.io/badge/transport-stdio%20%7C%20http-8b5cf6?style=flat-square)
+![Context](https://img.shields.io/badge/context-976K-ec4899?style=flat-square)
+![Audit](https://img.shields.io/badge/audit-SHA256%20chain-ef4444?style=flat-square)
 
 **An AI-driven, local-first penetration testing & bug bounty research agent.**
 
