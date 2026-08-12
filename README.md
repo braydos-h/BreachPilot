@@ -106,13 +106,13 @@ python main.py --web
 
 For deeper technical details, see:
 
-- `/home/runner/work/NetAttackAi/NetAttackAi/CLAUDE.md`
-- `/home/runner/work/NetAttackAi/NetAttackAi/AGENTS.md`
-- `/home/runner/work/NetAttackAi/NetAttackAi/docs/README.md`
+- [`CLAUDE.md`](CLAUDE.md)
+- [`AGENTS.md`](AGENTS.md)
+- [`docs/README.md`](docs/README.md)
 
 ## Configuration
 
-Runtime behavior is driven by `/home/runner/work/NetAttackAi/NetAttackAi/config.yaml`.
+Runtime behavior is driven by [`config.yaml`](config.yaml).
 
 Important sections:
 
@@ -152,6 +152,6 @@ Generated runtime state (gitignored) is written under:
 
 ## Documentation
 
-- Project docs index: `/home/runner/work/NetAttackAi/NetAttackAi/docs/README.md`
-- WebUI/API details: `/home/runner/work/NetAttackAi/NetAttackAi/docs/webui.md` and `/home/runner/work/NetAttackAi/NetAttackAi/docs/api.md`
-- Plugin guide: `/home/runner/work/NetAttackAi/NetAttackAi/docs/plugin-development.md`
+- Project docs index: [`docs/README.md`](docs/README.md)
+- WebUI/API details: [`docs/webui.md`](docs/webui.md) and [`docs/api.md`](docs/api.md)
+- Plugin guide: [`docs/plugin-development.md`](docs/plugin-development.md)
