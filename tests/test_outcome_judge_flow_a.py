@@ -261,6 +261,93 @@ async def test_judge_flow_a_partial_returns_non_terminal(tmp_path):
     assert status in {HypothesisStatus.INCONCLUSIVE, HypothesisStatus.OPEN}
 
 
+@pytest.mark.asyncio
+async def test_judge_flow_a_action_result_overrides_loose_classifier(tmp_path):
+    """When the loop threads the authoritative ``ActionResult`` (tightened
+    classifier), the judge must use THAT verdict -- not the legacy loose
+    ``classify_exploit_result`` that could confirm on bare ``meterpreter``.
+
+    Bare ``"Sending stage to meterpreter"`` (no ``session N``) is NOT a
+    compromise under the tightened classifier. The legacy loose classifier
+    matched ``\\bmeterpreter\\b`` and would have returned ``compromise``. With
+    ``action_result`` threaded, the judge must NOT confirm.
+    """
+    from outcome_judge import HypothesisStatus
+    from tools.exploit_agent.outcome_adapter import judge_flow_a
+    from tools.exploit_agent.outcome_truth import (
+        ActionResult,
+        ExploitOutcome,
+        OperationalStatus,
+    )
+
+    # The authoritative normalized result: bare "meterpreter" is UNKNOWN, not
+    # compromise (tightened classifier requires "session N").
+    ar = ActionResult(
+        tool_name="run_exploit_terminal",
+        operational_status=OperationalStatus.COMPLETED,
+        exploit_outcome=ExploitOutcome.UNKNOWN,
+        exit_code=0,
+        text="Sending stage to meterpreter",
+    )
+    policy = _fake_policy(tmp_path)
+    verdict = await judge_flow_a(
+        config={"outcome_judgment": {"flow_a": True}},
+        policy=policy,
+        result_text="Sending stage to meterpreter",
+        tool_name="run_exploit_terminal",
+        detail="ran exploit",
+        exit_code=0,
+        target_ip="10.0.0.50",
+        plan=_fake_plan(),
+        action_result=ar,
+    )
+    assert verdict is not None
+    status, _, cls = verdict
+    # Tightened classification -> unknown -> NOT confirmed.
+    assert status is not HypothesisStatus.CONFIRMED
+    assert cls["outcome"] != "compromise"
+
+
+@pytest.mark.asyncio
+async def test_judge_flow_a_action_result_threads_real_compromise(tmp_path):
+    """A real ``meterpreter session 1`` ActionResult (tightened COMPROMISE)
+    drives CONFIRMED through the threaded classification, matching the
+    legacy path's behavior for genuine compromises.
+    """
+    from outcome_judge import HypothesisStatus
+    from tools.exploit_agent.outcome_adapter import judge_flow_a
+    from tools.exploit_agent.outcome_truth import (
+        ActionResult,
+        ExploitOutcome,
+        OperationalStatus,
+    )
+
+    ar = ActionResult(
+        tool_name="run_exploit_terminal",
+        operational_status=OperationalStatus.COMPLETED,
+        exploit_outcome=ExploitOutcome.COMPROMISE,
+        exit_code=0,
+        text="meterpreter session 1 opened",
+        shell_type="meterpreter",
+    )
+    policy = _fake_policy(tmp_path)
+    verdict = await judge_flow_a(
+        config={"outcome_judgment": {"flow_a": True}},
+        policy=policy,
+        result_text="meterpreter session 1 opened",
+        tool_name="run_exploit_terminal",
+        detail="ran exploit",
+        exit_code=0,
+        target_ip="10.0.0.50",
+        plan=_fake_plan(),
+        action_result=ar,
+    )
+    assert verdict is not None
+    status, _, cls = verdict
+    assert status is HypothesisStatus.CONFIRMED
+    assert cls["outcome"] == "compromise"
+
+
 # ── 3. loop integration ─────────────────────────────────────────────────────
 
 
