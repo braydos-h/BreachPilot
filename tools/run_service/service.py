@@ -99,6 +99,19 @@ def _build_campaign_result_from_records(
     failed: dict[str, list[str]] = {}
     timeline: list[dict[str, Any]] = []
     privilege_level = "none"
+    # ponytail: the verified-compromise signal lives in outcome_summary, not
+    # in per-record ``status == "completed"``. A completed exploit-tool call
+    # only means the tool ran -- the tightened outcome-truth classifier must
+    # confirm a shell/root/SYSTEM/cred-dump marker for it to count as a
+    # successful exploit. The old code counted any completed exploit action
+    # as successful, inflating ``successful_exploits`` and the WebUI attack
+    # graph with runs that never got a shell.
+    summary = str(result.get("outcome_summary", "") or "")
+    _run_verified_compromise = (
+        "compromises: " in summary and "compromises: 0" not in summary
+    ) or (
+        "cred dumps: " in summary and "cred dumps: 0" not in summary
+    )
     for rec in records:
         if not isinstance(rec, dict):
             continue
@@ -111,13 +124,12 @@ def _build_campaign_result_from_records(
         if status in {"blocked", "analyzer_error", "SCOPE_DENIED"} or (exit_code is not None and int(exit_code) != 0):
             failed.setdefault(action, []).append(detail[:200] or status)
             timeline.append({"timestamp": ts, "event_type": "failure", "description": detail[:200] or status, "metadata": {"module": action}})
-        elif status == "completed" and is_exploit:
+        elif status == "completed" and is_exploit and _run_verified_compromise:
             successful.append(action)
             timeline.append({"timestamp": ts, "event_type": "success", "description": detail[:200] or action, "metadata": {"module": action}})
         else:
             timeline.append({"timestamp": ts, "event_type": status or "observation", "description": detail[:200] or action, "metadata": {"module": action}})
     # Heuristic privilege level from the outcome summary string if present.
-    summary = str(result.get("outcome_summary", "") or "")
     for label in ("root", "SYSTEM", "system", "admin", "NT AUTHORITY"):
         if label.lower() in summary.lower():
             privilege_level = label.lower() if label != "NT AUTHORITY" else "system"

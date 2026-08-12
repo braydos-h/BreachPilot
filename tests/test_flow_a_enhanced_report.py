@@ -34,6 +34,14 @@ def test_build_campaign_result_returns_none_when_no_records():
 
 
 def test_build_campaign_result_separates_successful_from_failed():
+    """A completed exploit-tool action counts as ``successful_exploits`` ONLY
+    when the run's ``outcome_summary`` carries a verified compromise/cred-dump
+    count. The old contract counted any ``status=completed`` exploit action as
+    successful; the tightened outcome-truth classifier must confirm a real
+    shell/root/SYSTEM/cred marker, and that confirmation surfaces in
+    ``outcome_summary`` as ``compromises: N`` / ``cred dumps: N``.
+    """
+    # WITHOUT a verified outcome_summary -> completed exploits are NOT successful.
     result = {
         "records": [
             _rec("run_exploit_terminal", "completed", detail="whoami; id"),
@@ -45,15 +53,36 @@ def test_build_campaign_result_separates_successful_from_failed():
     campaign = _build_campaign_result_from_records(result, "10.0.0.50")
     assert campaign is not None
     state = campaign["states"]["10.0.0.50"]
-    # Only exploit-action tools with status=completed count as successful_exploits.
-    assert "run_exploit_terminal" in state["successful_exploits"]
-    assert "run_msf_module" in state["successful_exploits"]
+    # No verified compromise in outcome_summary -> no successful_exploits, even
+    # though two exploit actions completed.
+    assert state["successful_exploits"] == []
     # Recon tools never count as exploits even on success.
     assert "quick_scan" not in state["successful_exploits"]
     # Non-zero exit goes to failed_attempts.
     assert "run_python_file" in state["failed_attempts"]
     # Timeline carries every record.
     assert len(state["timeline"]) == 4
+
+    # WITH a verified outcome_summary -> completed exploits ARE successful.
+    result_verified = {
+        "records": [
+            _rec("run_exploit_terminal", "completed", detail="whoami; id"),
+            _rec("run_msf_module", "completed", detail="meterpreter session 1 opened"),
+            _rec("run_python_file", "executed", exit_code=1, detail="Traceback"),
+            _rec("quick_scan", "completed", detail="open ports: 22,80"),
+        ],
+        "outcome_summary": "compromises: 1; last outcome: compromise",
+    }
+    campaign_v = _build_campaign_result_from_records(result_verified, "10.0.0.50")
+    assert campaign_v is not None
+    state_v = campaign_v["states"]["10.0.0.50"]
+    # Now the completed exploit actions count as successful.
+    assert "run_exploit_terminal" in state_v["successful_exploits"]
+    assert "run_msf_module" in state_v["successful_exploits"]
+    # Recon tools still never count as exploits.
+    assert "quick_scan" not in state_v["successful_exploits"]
+    # Non-zero exit still goes to failed_attempts.
+    assert "run_python_file" in state_v["failed_attempts"]
 
 
 def test_build_campaign_result_blocked_records_go_to_failed():
