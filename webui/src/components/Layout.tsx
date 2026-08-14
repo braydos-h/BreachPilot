@@ -5,7 +5,8 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { SegmentedControl } from "@/components/RunForm";
-import { useRuns, useLiveModels } from "@/api/hooks";
+import { useProviderStatus } from "@/components/ProviderSetup";
+import { useRuns } from "@/api/hooks";
 import { isActiveState, type DecisionListRow } from "@/api/types";
 import { clearStoredToken } from "@/api/client";
 import { useNavigate } from "react-router-dom";
@@ -50,7 +51,7 @@ export function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
   const runs = useRuns(50, 0);
-  const liveModels = useLiveModels();
+  const status = useProviderStatus();
   const { mode, setMode } = usePermissionMode();
   const activeRun = runs.data?.runs.find((r) => isActiveState(r.state));
   const [showHelp, setShowHelp] = useState(false);
@@ -60,8 +61,6 @@ export function Layout() {
     navigate("/");
     window.location.reload();
   };
-
-  const ollamaOnline = (liveModels.data?.models.length ?? 0) > 0 && !liveModels.data?.error;
 
   return (
     <div className="flex min-h-dvh flex-col bg-background text-foreground md:flex-row">
@@ -140,7 +139,7 @@ export function Layout() {
           </div>
           <div className="flex items-center gap-2 rounded-md px-3 py-1.5 text-xs text-muted-foreground">
             <span className="relative flex h-2 w-2">
-              {ollamaOnline ? (
+              {status.online ? (
                 <>
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/70" />
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
@@ -149,7 +148,7 @@ export function Layout() {
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-muted-foreground/50" />
               )}
             </span>
-            <span>Ollama {ollamaOnline ? "online" : "offline"}</span>
+            <span>{status.label} {status.online ? "online" : "offline"}</span>
           </div>
           <Button
             variant="ghost"

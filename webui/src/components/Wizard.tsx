@@ -392,18 +392,18 @@ function SettingsPanel(props: SettingsPanelProps) {
             variant="outline"
             className={cn(
               "gap-1.5 px-2 py-1 text-xs",
-              ollamaOnline
+              status.online
                 ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
                 : "border-muted-foreground/30 text-muted-foreground",
             )}
           >
             <span className="relative flex h-1.5 w-1.5">
-              {ollamaOnline && (
+              {status.online && (
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/70" />
               )}
-              <span className={cn("relative inline-flex h-1.5 w-1.5 rounded-full", ollamaOnline ? "bg-emerald-400" : "bg-muted-foreground/50")} />
+              <span className={cn("relative inline-flex h-1.5 w-1.5 rounded-full", status.online ? "bg-emerald-400" : "bg-muted-foreground/50")} />
             </span>
-            Ollama {ollamaOnline ? "connected" : "offline"}
+            {status.label} {status.online ? "connected" : "offline"}
           </Badge>
 
           <Button
@@ -421,13 +421,18 @@ function SettingsPanel(props: SettingsPanelProps) {
         </div>
       </div>
 
-      {liveModels.data?.source === "registry" && liveModels.data.error && (
+      {status.provider === "chatgpt" && !status.online && status.error && (
+        <p className="mt-1.5 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-200">
+          {status.error} — sign in / start the proxy via System → Models.
+        </p>
+      )}
+      {status.provider === "ollama" && status.source === "registry" && status.error && (
         <p className="mt-1.5 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-200">
           Ollama unreachable — using configured registry models.
         </p>
       )}
-      {liveModels.data?.source === "ollama" && liveModels.data.error && (
-        <p className="mt-1.5 truncate text-[11px] text-destructive/80">{liveModels.data.error}</p>
+      {status.provider === "ollama" && status.source === "ollama" && status.error && (
+        <p className="mt-1.5 truncate text-[11px] text-destructive/80">{status.error}</p>
       )}
 
       {/* Mode + goal section */}

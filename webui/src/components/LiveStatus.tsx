@@ -1,7 +1,8 @@
 import { Radio } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StatusBadge } from "@/components/StatusBadge";
-import { useLiveModels, useModels, useRuns, useSecrets } from "@/api/hooks";
+import { useLiveModels, useRuns, useSecrets } from "@/api/hooks";
+import { useDefaultModel } from "@/components/ProviderSetup";
 import { isActiveState, isTerminalState, type RunState } from "@/api/types";
 
 // ponytail: API health is derived from useRuns (polls every 5s) — no extra
@@ -9,7 +10,7 @@ import { isActiveState, isTerminalState, type RunState } from "@/api/types";
 
 export function LiveStatus({ compact = false }: { compact?: boolean }) {
   const runs = useRuns(50, 0);
-  const models = useModels();
+  const defaultModel = useDefaultModel();
   const live = useLiveModels();
   const secrets = useSecrets();
 
@@ -29,7 +30,7 @@ export function LiveStatus({ compact = false }: { compact?: boolean }) {
 
   const liveModels = live.data?.models ?? [];
   const liveSource = live.data?.source ?? "—";
-  const defaultAlias = models.data?.default_alias ?? "—";
+  const defaultAlias = defaultModel || "—";
 
   if (compact) {
     return (
