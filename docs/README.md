@@ -1,4 +1,4 @@
-# Team Onboarding Docs
+# Docs
 
 These docs are the fastest path into this codebase for new contributors. The root `README.md` is the product and usage guide; this folder is the engineering guide.
 
