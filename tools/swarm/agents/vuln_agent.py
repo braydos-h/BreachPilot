@@ -267,6 +267,7 @@ class VulnAgent(Agent):
                 llm_analysis = self._llm_analyze(
                     model_client, target, output["hypotheses"], all_cves, all_exploits,
                     skill_selection=context.get("skill_selection"),
+                    os_hint=os_hint,
                 )
                 if llm_analysis:
                     if llm_analysis.get("refined_hypotheses"):
@@ -326,35 +327,51 @@ class VulnAgent(Agent):
         cves: list[dict[str, Any]],
         exploits: list[dict[str, Any]],
         skill_selection: Any = None,
+        os_hint: str = "",
     ) -> dict[str, Any] | None:
-        """Use LLM to refine vulnerability hypotheses and recommend exploit paths."""
+        """Use LLM to refine vulnerability hypotheses and recommend exploit paths.
+
+        Sends the rich ``_VULN_SYSTEM_PROMPT`` as the system message so the
+        specialist framing is live. Returns ``None`` on failure so the
+        deterministic hypotheses are kept (NOT a silent error -- the failure
+        is logged so a persistent LLM problem is debuggable).
+        """
         try:
+            # Match truncation across all three inputs so the model isn't
+            # ranking 5 hypotheses against only 3 CVE/exploit blocks.
             prompt = f"""You are a senior vulnerability researcher analyzing scan results for target {target}.
+
+TARGET OS (detected): {os_hint or 'unknown'}
 
 SERVICE HYPOTHESES (from automated scanning):
 {json.dumps(hypotheses[:5], indent=2)}
 
-CVE FINDINGS:
-{json.dumps(cves[:3], indent=2)}
+CVE FINDINGS (each entry has a 'results' list with the real CVE records):
+{json.dumps(cves[:5], indent=2)}
 
-EXPLOIT FINDINGS:
-{json.dumps(exploits[:3], indent=2)}
+EXPLOIT FINDINGS (each entry has a 'results' list with the real exploit records):
+{json.dumps(exploits[:5], indent=2)}
 
 Your task:
-1. Rank hypotheses by real-world exploitability (not just CVSS score)
-2. Consider: is there a public exploit? Is the service version confirmed vulnerable? Is the OS match correct?
-3. Recommend the SINGLE best exploit path to try first
-4. For each hypothesis, suggest which attack module would work best
+1. Rank hypotheses by real-world exploitability (not just CVSS score).
+2. Consider: is there a public exploit? Is the service version confirmed vulnerable? Is the OS match correct? (use the TARGET OS above)
+3. Recommend the SINGLE best exploit path to try first, with a fallback.
+4. For each hypothesis, suggest which attack module would work best.
 
-Return JSON:
+Return JSON only (no markdown fences):
 {{
   "refined_hypotheses": [
-    {{"service": "...", "confidence": 0.0-1.0, "rationale": "...", "recommended_module": "..."}}
+    {{"service": "...", "version": "...", "port": 0, "confidence": 0.0, "rationale": "...", "recommended_module": "...", "matched_modules": [], "reason": "..."}}
   ],
   "recommended_exploit_path": [
-    {{"step": 1, "action": "...", "tool": "...", "rationale": "..."}}
+    {{"step": 1, "action": "...", "tool": "...", "rationale": "...", "expected_outcome": "...", "fallback": "..."}}
   ]
-}}"""
+}}
+Notes:
+- "confidence" MUST be a number between 0.0 and 1.0 (not the string "0.0-1.0").
+- Keep the fields "version", "port", "matched_modules" from the deterministic
+  hypotheses so downstream consumers (ExploitAgent) get a consistent shape.
+- If you have no refinement for a hypothesis, echo it unchanged rather than dropping it."""
 
             # Advisory skill hints for this phase (no-op when no selection).
             from tools.skill_pipeline import append_phase_skill_hints
@@ -363,7 +380,7 @@ Return JSON:
 
             resp = client.chat(
                 messages=[
-                    {"role": "system", "content": "You are an expert vulnerability researcher. Return only valid JSON."},
+                    {"role": "system", "content": _VULN_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
                 tools=None,
@@ -376,5 +393,8 @@ Return JSON:
             elif "```" in text:
                 text = text.split("```")[1].split("```")[0]
             return json.loads(text)
-        except Exception:
+        except Exception as exc:
+            # Log so a persistent LLM failure is debuggable instead of silently
+            # degrading to deterministic-only hypotheses on every call.
+            print(f"[VulnAgent] LLM analysis failed: {exc}")
             return None

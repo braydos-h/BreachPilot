@@ -51,12 +51,24 @@ The ULTRATHINK `[REASONING]` blocks from prior rounds are re-injected as a
 - **Tests pin prompt behavior.** `tests/test_ultrathink.py`,
   `tests/test_opsec_ai_awareness.py`, `tests/test_local_target.py`,
   `tests/test_key_handling_prompt.py`, `tests/test_multi_model_consultation.py`,
-  `tests/test_cve_to_poc.py`, `tests/test_env_probe.py` assert specific blocks
+  `tests/test_cve_to_poc.py`, `tests/test_env_probe.py`,
+  `tests/test_outcome_truth.py` (COMPROMISE marker), `tests/test_safety_reviewer.py`
+  (bool coercion), `tests/test_semantic_memory.py` assert specific blocks
   appear/disappear. Run `python -m pytest tests/ -v` after any prompt edit.
-- **Safety text is load-bearing.** The RULES block in `prompt.py:237` and the
-  FILE & KEY HANDLING block (`prompt.py:253`) encode real failure modes
-  (fabricated URLs, heredoc key corruption, nmap crashes). Do not trim them
-  for brevity.
+- **Safety text is load-bearing.** The RULES block in `prompt.py` and the
+  FILE & KEY HANDLING block encode real failure modes (fabricated URLs,
+  heredoc key corruption, nmap crashes). Do not trim them for brevity.
+- **Canonical outcome markers.** Exploit-generation prompts
+  (`payload_crafter.py`, `synthesis.py`, the main RULES block) require the
+  generated script to print `COMPROMISE: <desc> target=<ip>` on success or
+  `VULN_NOT_CONFIRMED: <reason>` on failure. `outcome_truth.py` recognizes
+  `^COMPROMISE:` as a strong-shell pattern. Do not revert to `[+] EXPLOIT SUCCESS`.
+- **Swarm SYSTEM_PROMPT constants are now live.** The six
+  `tools/swarm/agents/*.SYSTEM_PROMPT` constants are sent as the system
+  message in the `_llm_analyze` / `_llm_review` / `_llm_reflect` calls
+  (vuln/critic/reflection). recon/exploit/post_exploit are deterministic but
+  the constants document the intended specialist framing -- keep them
+  consistent with the code's actual output schema.
 - **Advisory blocks must stay advisory.** OPSEC/domain/parallel/skill blocks
   are explicitly "not a hard gate" — keep that framing; hard gates live in
   code (allowlist, policy), not prompts.
@@ -65,7 +77,8 @@ The ULTRATHINK `[REASONING]` blocks from prior rounds are re-injected as a
   When editing skills, keep the fence contract intact.
 - **Flow B prompts** (`attack_planner.py`, `safety_reviewer.py`) serve the
   legacy `cli.py` path. Edit them only if you also run Flow B; Flow A never
-  sees them.
+  sees them. The `safety_reviewer.py` bool-coercion fix (`_coerce_bool`) is
+  load-bearing -- do not revert to bare `bool()`.
 
 ## Where to look first when behavior is wrong
 

@@ -196,11 +196,16 @@ This is your single overriding goal. Evaluate every tool result against whether 
 When you achieve a milestone toward this goal, report it immediately.
 If you are stuck after multiple attempts, try a completely different angle rather than repeating the same failed approach.
 """
-        # Add service-aware adaptive strategy for attack-oriented goals
+        # Add service-aware adaptive strategy for attack-oriented goals.
+        # NOTE: verify_cves is intentionally NOT in this set -- its description
+        # says "do NOT cause damage or establish persistence. This is
+        # verification, not full exploitation," so attaching the post-exploit
+        # block (dump_credentials / lateral_exec / persistence) would directly
+        # contradict the goal's own scope. verify_cves gets the base block only.
         attack_goals = {
             "initial_access", "backdoor", "privilege_escalation", "full_compromise",
             "credential_dumping", "pivot_and_discovery", "lateral_movement",
-            "data_exfiltration", "whatever_it_takes", "verify_cves",
+            "data_exfiltration", "whatever_it_takes",
         }
         if self.name in attack_goals:
             base += """

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import {
   Activity,
   ArrowRight,
+  Compass,
   History,
   ListFilter,
   ScanSearch,
@@ -126,6 +127,15 @@ export function HomePage() {
                 </Link>
               </Button>
             )}
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              onClick={() => window.dispatchEvent(new Event("netattackai:open-welcome"))}
+            >
+              <Compass className="h-4 w-4" />
+              Take the tour
+            </Button>
           </div>
 
           {/* Stats strip */}

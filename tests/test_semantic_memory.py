@@ -76,7 +76,9 @@ def test_cosine_similarity():
 def test_summarize_episodes_no_memories(temp_db):
     mgr = SemanticMemoryManager(temp_db)
     result = mgr.summarize_episodes("episodic", "M-001")
-    assert "No memories" in result
+    # No memories -> empty string (not an error message) so the caller's
+    # ``if not summary`` falls to the factual fallback cleanly.
+    assert result == ""
 
 
 # ── ExperienceStore Tests ─────────────────────────────────────────────────

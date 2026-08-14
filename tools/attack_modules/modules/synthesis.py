@@ -26,11 +26,19 @@ class CVEToExploit(AttackModule):
             ],
             "prompt_template": (
                 "You are an exploit developer. Based on the CVE details below, write a complete "
-                "Python exploit script that tests whether the target is vulnerable. Use only "
-                "standard library imports (socket, ssl, http, urllib, struct, json, base64, hashlib). "
-                "The script must accept the target as sys.argv[1] (bare positional) AND --target <ip> "
-                "(use argparse.parse_known_args() so the bare positional is tolerated), plus --port <port>. "
-                "Include clear success/failure output. Do NOT cause damage — only verify vulnerability."
+                "Python exploit script that tests whether the target is vulnerable.\n\n"
+                "CVE DETAILS (append the fetched NVD description + references here):\n"
+                "<CVE_DETAILS/>\n\n"
+                "Use only standard library imports (socket, ssl, http, urllib, struct, json, "
+                "base64, hashlib, argparse, sys). The script must accept the target as "
+                "sys.argv[1] (bare positional) AND --target <ip> (use argparse.parse_known_args() "
+                "so the bare positional is tolerated), plus --port <port>. It MUST only connect "
+                "to --target; do NOT connect to any other host.\n"
+                "Print EXACTLY one canonical marker on its own line:\n"
+                "  - On success: COMPROMISE: vulnerability_confirmed target=<target_ip>\n"
+                "  - On failure: VULN_NOT_CONFIRMED: <one-line reason>\n"
+                "These markers are parsed by the agent loop to classify the outcome -- do not omit or reword them.\n"
+                "Return ONLY raw Python code -- NO markdown fences, NO explanations."
             ),
         }
 
@@ -54,9 +62,22 @@ class DiffPatchAnalysis(AttackModule):
                 "5. Test against target with write_python_file + run_python_file",
             ],
             "analysis_prompt": (
-                "Analyze this security patch diff. Identify: (1) what vulnerability is being fixed, "
-                "(2) the vulnerable code path, (3) the root cause, (4) how an attacker could trigger it, "
-                "(5) what the exploit payload would look like. Then generate a Python PoC."
+                "You are an exploit developer analyzing a security patch diff.\n\n"
+                "PATCH DIFF (append the diff here):\n"
+                "<DIFF/>\n\n"
+                "Produce your analysis as a single JSON object (no prose, no markdown fences):\n"
+                "{\n"
+                "  \"vulnerability_fixed\": \"short name of the vuln being fixed\",\n"
+                "  \"vulnerable_code_path\": \"where the bug lives (file:func, approx)\",\n"
+                "  \"root_cause\": \"one-paragraph root cause\",\n"
+                "  \"trigger\": \"how an attacker could trigger it\",\n"
+                "  \"exploit_payload_shape\": \"what the exploit payload would look like\",\n"
+                "  \"poc_code\": \"complete Python PoC script that accepts --target <ip> and --port <port> "
+                "via argparse.parse_known_args(), connects ONLY to --target, and prints one marker on its "
+                "own line: 'COMPROMISE: vulnerability_confirmed target=<target_ip>' on success, or "
+                "'VULN_NOT_CONFIRMED: <reason>' on failure. Use only stdlib imports.\"\n"
+                "}\n"
+                "Return ONLY the JSON object."
             ),
         }
 
@@ -79,10 +100,23 @@ class FuzzToExploit(AttackModule):
                 "4. Generate exploit with write_python_file and test with run_python_file",
             ],
             "crash_prompt": (
-                "You are an exploit developer. Given the crash information below, determine: "
-                "(1) what type of vulnerability caused the crash (buffer overflow, use-after-free, etc.), "
-                "(2) which register/IP is controlled, (3) the exploitation strategy (ROP, ret2libc, etc.), "
-                "(4) write a Python exploit script using socket/struct to trigger code execution."
+                "You are an exploit developer. Given the crash information below, determine the "
+                "exploitation strategy and write a Python exploit.\n\n"
+                "CRASH INFORMATION (append the crash output / registers / stack trace here):\n"
+                "<CRASH_INFO/>\n\n"
+                "Analyze: (1) what type of vulnerability caused the crash (buffer overflow, "
+                "use-after-free, etc.), (2) which register/IP is controlled (if the crash output "
+                "contains register state; if not, say \"unknown\" and proceed with a trigger/delivery "
+                "script anyway), (3) the exploitation strategy. For a remote service, a pure "
+                "socket/struct Python script can deliver the trigger and confirm crash control; if a "
+                "full ROP chain is required, document the chain in comments and implement the "
+                "trigger/delivery portion in Python.\n"
+                "The script must accept --target <ip> and --port <port> via argparse.parse_known_args(), "
+                "connect ONLY to --target, use only stdlib imports, and print one canonical marker on "
+                "its own line:\n"
+                "  - On success: COMPROMISE: crash_controlled target=<target_ip>\n"
+                "  - On failure: VULN_NOT_CONFIRMED: <one-line reason>\n"
+                "Return ONLY raw Python code -- NO markdown fences, NO explanations."
             ),
         }
 
@@ -118,16 +152,18 @@ class WeaponizedExploit(AttackModule):
                 "exploit that (1) verifies the target is vulnerable, AND (2) gains code execution by "
                 "establishing a reverse shell to an operator-controlled callback host. Constraints: "
                 "use only standard library imports (socket, ssl, http, urllib, struct, json, base64, "
-                "hashlib, subprocess, os, sys, threading). The script MUST accept the target as "
+                "hashlib, subprocess, os, sys, threading, argparse). The script MUST accept the target as "
                 "sys.argv[1] (bare positional) AND --target <ip> (use argparse.parse_known_args() so "
                 "the bare positional is tolerated), plus --port <port> --callback-host <operator_cb_ip> "
                 "--callback-port <operator_cb_port>. "
                 "It MUST only ever connect to --target (the single authorized target IP) "
                 "and to --callback-host (the operator's own listener). It MUST NOT connect to any "
-                "other host. On successful reverse-shell establishment, print EXACTLY: "
+                "other host. On successful reverse-shell establishment, print EXACTLY on its own line: "
                 "'COMPROMISE: reverse_shell_established target=<target> callback=<cb_host>:<cb_port>'. "
-                "On failure, print a clear 'VULN_NOT_CONFIRMED' line with the reason. Do NOT cause "
-                "denial of service; the exploit must be non-destructive to target availability."
+                "On failure, print EXACTLY on its own line: 'VULN_NOT_CONFIRMED: <one-line reason>'. "
+                "These markers are parsed by the agent loop to classify the outcome -- do not omit or "
+                "reword them. Do NOT cause denial of service; the exploit must be non-destructive to "
+                "target availability."
             ),
             "expected_shell_type": "reverse",
         }

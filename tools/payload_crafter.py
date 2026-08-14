@@ -410,19 +410,30 @@ if __name__ == "__main__":
 # ── Vulnerability class to import mapping ─────────────────────────────────
 
 _VULN_CLASS_IMPORTS: dict[str, str] = {
-    "command_injection": "import sys, socket, urllib.parse",
-    "sql_injection": "import sys, socket, urllib.parse",
-    "buffer_overflow": "import sys, socket, struct",
-    "auth_bypass": "import sys, socket, urllib.parse, json",
-    "deserialize": "import sys, socket, base64, struct",
-    "xss": "import sys, socket, urllib.parse",
-    "ssrf": "import sys, socket, urllib.parse, urllib.request",
-    "path_traversal": "import sys, socket, urllib.parse",
-    "file_upload": "import sys, socket, json",
-    "jwt": "import sys, socket, base64, json, hmac, hashlib",
-    "ssti": "import sys, socket, urllib.parse",
-    "race_condition": "import sys, socket, concurrent.futures, threading, time",
-    "default": "import sys, socket, struct, json",
+    "command_injection": "import sys, socket, urllib.parse, argparse",
+    "sql_injection": "import sys, socket, urllib.parse, argparse",
+    "buffer_overflow": "import sys, socket, struct, argparse",
+    "auth_bypass": "import sys, socket, urllib.parse, json, argparse",
+    "deserialize": "import sys, socket, base64, struct, argparse",
+    "xss": "import sys, socket, urllib.parse, argparse",
+    "ssrf": "import sys, socket, urllib.parse, urllib.request, argparse",
+    "path_traversal": "import sys, socket, urllib.parse, argparse",
+    "file_upload": "import sys, socket, json, argparse",
+    "jwt": "import sys, socket, base64, json, hmac, hashlib, argparse",
+    "ssti": "import sys, socket, urllib.parse, argparse",
+    "race_condition": "import sys, socket, concurrent.futures, threading, time, argparse",
+    "default": "import sys, socket, struct, json, argparse",
+}
+
+# Service -> default port, so the generator prompt doesn't hardcode port 80 for
+# every service (Redis on 80 is nonsense). Used only as a fallback default in
+# the prompt; the actual script must still accept --port.
+_SERVICE_DEFAULT_PORTS: dict[str, int] = {
+    "http": 80, "https": 443, "ssh": 22, "smb": 445, "rdp": 3389,
+    "redis": 6379, "mysql": 3306, "postgresql": 5432, "mssql": 1433,
+    "mongodb": 27017, "ftp": 21, "telnet": 23, "smtp": 25, "dns": 53,
+    "ldap": 389, "winrm": 5985, "docker": 2375, "elasticsearch": 9200,
+    "vnc": 5900, "snmp": 161, "ntp": 123,
 }
 
 
@@ -632,6 +643,7 @@ class PayloadCrafter:
 
         # Select appropriate imports
         imports = _VULN_CLASS_IMPORTS.get(vuln_class, _VULN_CLASS_IMPORTS["default"])
+        default_port = _SERVICE_DEFAULT_PORTS.get(service_name.lower(), 80)
 
         cve_context = ""
         if cve_ids:
@@ -641,8 +653,13 @@ class PayloadCrafter:
         if failure_output:
             retry_context = (
                 f"\nPREVIOUS ATTEMPT FAILED WITH:\n{failure_output[:600]}\n"
-                f"Analyze the failure and fix the exploit. Common issues: wrong port, "
-                f"wrong protocol, firewall blocking, service not vulnerable, payload syntax error."
+                "[truncated] - only the first 600 chars of the failure were shown."
+                if len(failure_output) > 600
+                else f"\nPREVIOUS ATTEMPT FAILED WITH:\n{failure_output}\n"
+            )
+            retry_context += (
+                "Analyze the failure and fix the exploit. Common issues: wrong port, "
+                "wrong protocol, firewall blocking, service not vulnerable, payload syntax error."
             )
 
         prompt = f"""You are an expert exploit developer. Write a COMPLETE, RUNNABLE Python 3 exploit script.
@@ -660,14 +677,20 @@ TARGET CONTEXT:
 {few_shot}
 
 REQUIREMENTS:
-1. The script MUST be self-contained and runnable: python script.py [target] [port]
+1. The script MUST be self-contained and runnable.
 2. Use ONLY standard library: {imports}
-3. Accept --target and --port via sys.argv (fallback to {target_ip}:80)
-4. Print CLEAR success/failure: "[+] EXPLOIT SUCCESS" or "[-] EXPLOIT FAILED"
-5. Include a main() function and `if __name__ == '__main__': sys.exit(main())`
-6. Do NOT cause damage — only verify vulnerability exists
-7. Handle errors gracefully (timeouts, connection refused, etc.)
-8. Return ONLY raw Python code — NO markdown fences, NO explanations
+3. Argument contract: accept the target as ``sys.argv[1]`` (bare positional) AND ``--target <ip>``
+   via ``argparse.parse_known_args()`` (so the bare positional is tolerated). Accept ``--port <port>``
+   with default {default_port} (the standard port for {service_name or 'this service'}). Do NOT hardcode
+   port 80 for non-HTTP services.
+4. Success/failure markers (print EXACTLY one of these, on its own line):
+   - On success: ``COMPROMISE: <short description> target=<target_ip>`` (e.g. ``COMPROMISE: command_injection_confirmed target=10.0.0.5``)
+   - On failure: ``VULN_NOT_CONFIRMED: <one-line reason>``
+   These markers are parsed by the agent loop to classify the outcome -- do not omit or reword them.
+5. Include a main() function and ``if __name__ == '__main__': sys.exit(main())``
+6. The script must only ever connect to the target IP ({target_ip}). Do NOT connect to any other host.
+7. Handle errors gracefully (timeouts, connection refused, etc.) -- print the VULN_NOT_CONFIRMED marker on any failure.
+8. Return ONLY raw Python code -- NO markdown fences, NO explanations, NO prose before or after the code.
 """
         messages = [
             {
@@ -675,7 +698,9 @@ REQUIREMENTS:
                 "content": (
                     "You are an expert exploit developer. You write clean, working Python 3 "
                     "exploit scripts. You return ONLY raw Python code with no markdown fences. "
-                    "Every script has clear success/failure output. You handle errors gracefully."
+                    "Every script prints a canonical COMPROMISE: or VULN_NOT_CONFIRMED: marker "
+                    "on its own line so the agent loop can classify the outcome. "
+                    "You handle errors gracefully."
                 ),
             },
             {"role": "user", "content": prompt},
@@ -747,10 +772,14 @@ REQUIREMENTS:
     ) -> str | None:
         """Use LLM to intelligently mutate a failing exploit script."""
         meta = metadata or {}
+        fail_trunc = failure_output[:800]
+        fail_marker = "\n[truncated] - only the first 800 chars of the failure were shown." if len(failure_output) > 800 else ""
+        script_trunc = script[:3000]
+        script_marker = "\n[truncated] - only the first 3000 chars of the script were shown." if len(script) > 3000 else ""
         prompt = f"""You are an exploit developer. The following Python exploit script FAILED.
 
 FAILURE OUTPUT:
-{failure_output[:800]}
+{fail_trunc}{fail_marker}
 
 MUTATION STRATEGY: {strategy}
 TARGET: {meta.get('target_ip', 'unknown')}
@@ -758,7 +787,7 @@ SERVICE: {meta.get('service_name', 'unknown')}
 
 CURRENT SCRIPT:
 ```python
-{script[:3000]}
+{script_trunc}{script_marker}
 ```
 
 Analyze WHY it failed based on the output, then produce a FIXED version.
@@ -768,27 +797,34 @@ Common fixes:
 - delivery_swap: change HTTP method, add/remove headers, change Content-Type
 - context_aware: adapt to OS/service version specifics from failure output
 
-Return ONLY the complete fixed Python script. NO markdown fences, NO explanations.
+CONSTRAINTS on the fixed script:
+1. It MUST only ever connect to the target IP ({meta.get('target_ip', 'the assigned target')}). Do NOT connect to any other host.
+2. It MUST print one canonical marker on its own line:
+   - On success: ``COMPROMISE: <short description> target={meta.get('target_ip', '<target>')}``
+   - On failure: ``VULN_NOT_CONFIRMED: <one-line reason>``
+   Do NOT use [+] EXPLOIT SUCCESS or [-] EXPLOIT FAILED -- use the canonical markers only.
+3. Keep the argument contract: ``sys.argv[1]`` bare positional AND ``--target <ip>`` via ``argparse.parse_known_args()``, plus ``--port <port>``.
+
+Return ONLY the complete fixed Python script. NO markdown fences, NO explanations, NO prose before or after the code.
 """
         try:
             messages = [
-                {"role": "system", "content": "You fix broken exploit scripts. Return ONLY raw Python code."},
+                {"role": "system", "content": "You fix broken exploit scripts. Return ONLY raw Python code. The fixed script must print a COMPROMISE: or VULN_NOT_CONFIRMED: marker on its own line."},
                 {"role": "user", "content": prompt},
             ]
             response = self._client.chat(self._model, messages=messages, stream=False)
             content = response.get("message", {}).get("content", "")
             content = content.strip()
-            if content.startswith("```python"):
-                content = content[9:]
-            elif content.startswith("```"):
-                content = content[3:]
-            if content.endswith("```"):
-                content = content[:-3]
+            # Strip markdown fences (handles ```python, ```py, ```python3, ``` etc.)
+            content = re.sub(r"^```\w*\s*", "", content)
+            content = re.sub(r"\s*```$", "", content)
             result = content.strip()
             if result and len(result) > 100:
                 return result
-        except Exception:
-            pass
+        except Exception as exc:
+            # Log so a persistent LLM failure is debuggable instead of silently
+            # degrading to mechanical mutation on every call.
+            print(f"[PayloadCrafter] LLM mutation failed: {exc}")
         return None
 
     def _save_script(self, generation_id: str, script: str, parent_id: str | None, strategy: str) -> None:

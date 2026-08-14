@@ -180,6 +180,26 @@ Tests:
 
 Keep `config.yaml` model aliases and `models.info` synchronized because context-window metadata is used by adaptive context handling in `tools/exploit_agent/`. Peer consultation should stay opt-in via `multi_model.enabled` or a per-run CLI override because each consultation spends extra tokens.
 
+## Add a Model Provider (chat, embeddings, or research)
+
+The engine has three provider surfaces, each coupled to Ollama differently.
+For the full architecture, current wiring, and concrete edit-point recipes,
+see [providers.md](providers.md). Summary:
+
+- **Chat/generate**: the single factory is `_build_model_client()` in
+  `tools/model_router.py:290-377`. Every consumer already receives a
+  `ModelClient` and calls `.chat()`, so adding a provider is a branch in the
+  factory plus a config key — no consumer edits. Watch tool-schema
+  conversion (`mcp_tools_to_ollama` in `mcp_session.py:911-935`) and
+  `tools/api/session_titler.py` (constructs its own client).
+- **Embeddings**: `SemanticMemoryManager._generate_embedding` in
+  `tools/semantic_memory.py:48-106` is a raw `urllib` POST to
+  `/api/embeddings`. Abstract it behind an `EmbeddingProvider` base (model on
+  `ResearchProvider`); consumers already call `.embed(text)`. Update both
+  Flow A and Flow B construction sites.
+- **Research**: already multi-provider. Subclass `ResearchProvider` in
+  `tools/web_researcher.py:235-307` and add a config block under `research:`.
+
 ## Add Config Keys
 
 Edit:

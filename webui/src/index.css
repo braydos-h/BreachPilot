@@ -151,4 +151,60 @@
   .scrollbar-thin::-webkit-scrollbar-track {
     background: transparent;
   }
+  /* Welcome screen animations */
+  @keyframes fade-in-up {
+    0% { opacity: 0; transform: translateY(12px); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+  .animate-fade-in-up {
+    animation: fade-in-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  @keyframes fade-in {
+    0% { opacity: 0; }
+    100% { opacity: 1; }
+  }
+  .animate-fade-in {
+    animation: fade-in 0.5s ease-out both;
+  }
+  @keyframes dash-flow {
+    to { stroke-dashoffset: -24; }
+  }
+  .animate-dash-flow {
+    animation: dash-flow 1.2s linear infinite;
+  }
+  @keyframes node-pulse {
+    0%, 100% { opacity: 0.4; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.35); }
+  }
+  .animate-node-pulse {
+    animation: node-pulse 2s ease-in-out infinite;
+    transform-origin: center;
+    transform-box: fill-box;
+  }
+  @keyframes typing-caret {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+  .animate-typing-caret {
+    animation: typing-caret 0.8s step-end infinite;
+  }
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+  }
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .animate-scan,
+    .animate-pulse-ring,
+    .animate-fade-in-up,
+    .animate-fade-in,
+    .animate-dash-flow,
+    .animate-node-pulse,
+    .animate-typing-caret,
+    .animate-float {
+      animation: none !important;
+    }
+  }
 }

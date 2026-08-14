@@ -25,6 +25,7 @@ These docs are the fastest path into this codebase for new contributors. The roo
 - [Swarm](swarm.md): multi-agent missions — orchestrator, blackboard, the six agent roles, phase flow, MCP bridge, observability.
 - [Attack Modules](attack-modules.md): the module registry, all 15 module families (~90 modules), applicability scoring, and the add-a-module checklist.
 - [Run Service](run-service.md): run lifecycle, providers, event/decision brokers, persistence, auth, and WebSocket transport.
+- [Model Providers](providers.md): Ollama wiring for chat/generate, embeddings, and research — and how to add a new provider.
 - [Config Reference](config-reference.md): every `config.yaml` key — type, default, consumer `file:line`, env overrides.
 - [CLI Reference](cli-reference.md): every entry point and flag across `main.py` / `app.py` / `cli.py`, interactive menu, exit codes, example workflows.
 - [Database & Mission](database-mission.md): SQLite schema (both DBs), mission lifecycle, task queue, memory, target graph, evidence-to-report pipeline.

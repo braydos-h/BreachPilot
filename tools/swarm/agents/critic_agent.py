@@ -192,14 +192,33 @@ class CriticAgent(Agent):
         self, client: Any, action: dict[str, Any], mission: dict[str, Any], blackboard: dict[str, Any],
         skill_selection: Any = None,
     ) -> dict[str, Any] | None:
-        """Use LLM for deeper reasoning about the proposed action."""
+        """Use LLM for deeper strategic reasoning about the proposed action.
+
+        Note: the LLM is only consulted AFTER all deterministic layers (scope,
+        risk budget, forbidden actions, risk-profile gating, repeat-failure
+        detection) have passed. So the LLM's job is strategic proportionality,
+        not hard scope/policy enforcement -- those are already done in code.
+        The LLM cannot upgrade a deny/modify to approve; it can only downgrade
+        approve -> deny/modify. On JSON parse failure, return a fail-SAFE
+        ``modify`` verdict so a broken critic never silently approves.
+        """
         try:
-            prompt = f"""You are a security operations critic reviewing a proposed penetration testing action.
+            # Scope data so the model is not reasoning blind.
+            allowed_assets = mission.get("allowed_assets") or mission.get("allowed_targets") or []
+            forbidden_tools = mission.get("forbidden_tools", [])
+            max_commands = mission.get("max_commands", "N/A")
+            executed = blackboard.get("commands_executed", "N/A")
+            prompt = f"""You are a security operations critic reviewing a proposed penetration testing action that already passed deterministic scope, risk-budget, forbidden-action, risk-profile, and repeat-failure gates. Your job is the STRATEGIC layer: proportionality and soundness.
 
 MISSION:
 - Program: {mission.get('program_name', 'Unknown')}
 - Risk Profile: {mission.get('risk_profile', 'unknown')}
 - Objective: {mission.get('objective', 'Find vulnerabilities')}
+
+SCOPE (already enforced -- for context only):
+- Allowed assets: {json.dumps(allowed_assets)}
+- Forbidden tools: {json.dumps(forbidden_tools)}
+- Command budget: {max_commands} (executed so far: {executed})
 
 BLACKBOARD STATE:
 - Access achieved: {blackboard.get('access_achieved', False)}
@@ -209,12 +228,23 @@ BLACKBOARD STATE:
 PROPOSED ACTION:
 - Phase: {action.get('phase', 'unknown')}
 - Tool: {action.get('tool', 'unknown')}
-- Target: {action.get('target', 'unknown')}
+- Target: {action.get('target', 'target not specified')}
 - Risk Level: {action.get('risk_level', 'low')}
 - Hypothesis: {action.get('hypothesis', 'none')}
 
 Evaluate: Is this action safe, proportional, and strategically sound given the current state?
-Return JSON: {{"decision": "approve"|"deny"|"modify", "reasoning": "...", "modifications": {{}}}}"""
+Return JSON only (no markdown fences):
+{{
+  "decision": "approve" | "deny" | "modify",
+  "reasoning": "one-paragraph rationale",
+  "modifications": {{
+    "require_mutation": false,
+    "risk_level": "low" | "medium" | "high",
+    "alternative_tool": ""
+  }}
+}}
+- If target is "target not specified", return decision "deny".
+- When in doubt, err on the side of caution (deny or modify over approve)."""
 
             # Advisory skill hints (critic reviews the full active set).
             from tools.skill_pipeline import append_phase_skill_hints
@@ -223,7 +253,7 @@ Return JSON: {{"decision": "approve"|"deny"|"modify", "reasoning": "...", "modif
 
             resp = client.chat(
                 messages=[
-                    {"role": "system", "content": "You are a security critic. Return only valid JSON."},
+                    {"role": "system", "content": _CRITIC_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
                 tools=None,
@@ -235,6 +265,16 @@ Return JSON: {{"decision": "approve"|"deny"|"modify", "reasoning": "...", "modif
                 text = text.split("```json")[1].split("```")[0]
             elif "```" in text:
                 text = text.split("```")[1].split("```")[0]
-            return json.loads(text)
+            parsed = json.loads(text)
+            if not isinstance(parsed, dict):
+                return {"decision": "modify", "reasoning": "LLM review returned non-object; requiring manual confirmation.", "modifications": {}}
+            # Validate the decision enum so unknown values fail safe.
+            decision = str(parsed.get("decision", "")).lower().strip()
+            if decision not in ("approve", "deny", "modify"):
+                return {"decision": "modify", "reasoning": f"LLM returned unknown decision '{decision}'; requiring manual confirmation.", "modifications": {}}
+            parsed["decision"] = decision
+            return parsed
         except Exception:
-            return None
+            # Fail safe: a broken critic must NOT silently approve. Return a
+            # modify verdict so the caller knows human confirmation is needed.
+            return {"decision": "modify", "reasoning": "LLM review failed to parse; requiring manual confirmation before proceeding.", "modifications": {}}

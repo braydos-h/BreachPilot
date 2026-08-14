@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "@/components/Layout";
 import { OnboardingGate } from "@/components/OnboardingGate";
 import { TokenGate } from "@/components/TokenGate";
+import { WelcomeGate } from "@/components/WelcomeScreen";
 import { HomePage } from "@/routes/HomePage";
 import { RunListPage } from "@/routes/RunListPage";
 import { NewRunPage } from "@/routes/NewRunPage";
@@ -34,19 +35,21 @@ export default function App() {
       <BrowserRouter>
         <TokenGate>
           <OnboardingGate>
-            <Routes>
-              <Route element={<Layout />}>
-                <Route path="/" element={<HomePage />} />
-                <Route path="/sessions" element={<RunListPage />} />
-                <Route path="/runs/new" element={<NewRunPage />} />
-                <Route path="/runs/:runId" element={<RunPage />} />
-                <Route path="/runs/:runId/artifacts" element={<ArtifactsPage />} />
-                <Route path="/runs/:runId/loot" element={<LootPage />} />
-                <Route path="/skills" element={<SkillsPage />} />
-                <Route path="/system" element={<SystemPage />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Route>
-            </Routes>
+            <WelcomeGate>
+              <Routes>
+                <Route element={<Layout />}>
+                  <Route path="/" element={<HomePage />} />
+                  <Route path="/sessions" element={<RunListPage />} />
+                  <Route path="/runs/new" element={<NewRunPage />} />
+                  <Route path="/runs/:runId" element={<RunPage />} />
+                  <Route path="/runs/:runId/artifacts" element={<ArtifactsPage />} />
+                  <Route path="/runs/:runId/loot" element={<LootPage />} />
+                  <Route path="/skills" element={<SkillsPage />} />
+                  <Route path="/system" element={<SystemPage />} />
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Route>
+              </Routes>
+            </WelcomeGate>
           </OnboardingGate>
         </TokenGate>
       </BrowserRouter>

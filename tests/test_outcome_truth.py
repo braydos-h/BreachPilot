@@ -183,6 +183,35 @@ def test_command_shell_session_n_is_compromise():
     assert r.is_compromise is True
 
 
+# ── Canonical COMPROMISE: marker (from exploit-generation prompts) ───────────
+
+
+def test_canonical_compromise_marker_is_compromise():
+    r = normalize_action_result(
+        tool_name="run_python_file",
+        result_text="COMPROMISE: reverse_shell_established target=10.0.0.5 callback=10.0.0.10:4444",
+    )
+    assert r.is_compromise is True
+    assert r.shell_type == "marker"
+
+
+def test_compromise_marker_must_be_at_line_start():
+    """Prose like 'the compromise of the system was...' must NOT trigger."""
+    r = classify_exploit_outcome(
+        "Analysis: the compromise of the system was due to a misconfiguration."
+    )
+    assert r["outcome"] != ExploitOutcome.COMPROMISE
+
+
+def test_compromise_marker_with_vuln_not_confirmed_is_not_compromise():
+    """The failure marker is not the success marker."""
+    r = normalize_action_result(
+        tool_name="run_python_file",
+        result_text="VULN_NOT_CONFIRMED: connection refused",
+    )
+    assert r.is_compromise is False
+
+
 # ── to_dict round-trip ──────────────────────────────────────────────────────
 
 

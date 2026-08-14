@@ -335,10 +335,21 @@ class ReflectionAgent(Agent):
         blackboard: dict[str, Any],
         skill_selection: Any = None,
     ) -> dict[str, Any] | None:
-        """Use LLM for deeper strategic reflection."""
+        """Use LLM for deeper strategic reflection.
+
+        Sends the rich ``_REFLECTION_SYSTEM_PROMPT`` as the system message so
+        the specialist framing (root-cause categories, strategy thresholds,
+        cross-mission learning) is live. Returns ``None`` on failure so the
+        deterministic reflection is kept; the failure is logged.
+        """
         try:
             log_summary = json.dumps(battle_log[-15:], indent=2)
+            current_phase = session_state.get("current_phase", "unknown")
+            remaining_budget = session_state.get("commands_remaining", "unknown")
             prompt = f"""You are a senior penetration testing strategist analyzing recent actions.
+
+CURRENT PHASE: {current_phase}
+REMAINING COMMAND BUDGET: {remaining_budget}
 
 BATTLE LOG (last 15 actions):
 {log_summary}
@@ -351,18 +362,21 @@ CURRENT STATE:
 
 Analyze:
 1. What patterns do you see in successes and failures?
-2. What is the ROOT CAUSE of failures (not just symptoms)?
-3. What should we do DIFFERENTLY?
-4. What is the single highest-impact next action?
+2. What is the ROOT CAUSE of failures (not just symptoms)? Categorize: TOOL_MISMATCH, PROTOCOL_ERROR, FIREWALL_BLOCK, PATCHED, WRONG_VERSION, AUTH_REQUIRED, NETWORK_ISSUE, TOOL_MISSING, RATE_LIMITED.
+3. What should we do DIFFERENTLY? (reference the strategy thresholds: ACCELERATE >70% success, CONTINUE 30-70%, PIVOT_SERVICE <30%, EXPAND_RECON <10%)
+4. What is the single highest-impact next action? Keep the remaining budget in mind.
 
-Return JSON:
+Return JSON only (no markdown fences):
 {{
   "patterns_identified": ["pattern 1", "pattern 2"],
   "why": "root cause analysis",
   "new_hypothesis": "revised hypothesis",
   "recommended_strategy_shift": "concrete next action",
-  "confidence": 0.0-1.0
-}}"""
+  "confidence": 0.0
+}}
+Notes:
+- "confidence" MUST be a number between 0.0 and 1.0 (not the string "0.0-1.0").
+- Keep the shift concrete and actionable; vague advice is not useful."""
 
             # Advisory skill hints (reflection reviews the full active set).
             from tools.skill_pipeline import append_phase_skill_hints
@@ -371,7 +385,7 @@ Return JSON:
 
             resp = client.chat(
                 messages=[
-                    {"role": "system", "content": "You are a penetration testing strategist. Return only valid JSON."},
+                    {"role": "system", "content": _REFLECTION_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
                 tools=None,
@@ -384,5 +398,8 @@ Return JSON:
             elif "```" in text:
                 text = text.split("```")[1].split("```")[0]
             return json.loads(text)
-        except Exception:
+        except Exception as exc:
+            # Log so a persistent LLM failure is debuggable instead of silently
+            # degrading to heuristic-only reflection on every call.
+            print(f"[ReflectionAgent] LLM reflection failed: {exc}")
             return None

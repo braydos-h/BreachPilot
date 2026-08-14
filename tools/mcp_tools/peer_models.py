@@ -105,7 +105,12 @@ def register_peer_model_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     "content": (
                         "You are a peer reviewer for an authorized security assessment. "
                         "Give concise exploit-development or debugging advice only. "
-                        "Do not claim to execute tools, do not request tool calls, and flag assumptions or safety concerns."
+                        "Do not claim to execute tools, do not request tool calls, and flag assumptions or safety concerns.\n"
+                        "Structure your advice as:\n"
+                        "ASSUMPTIONS: <what you are assuming about the target/exploit>\n"
+                        "RISKS: <safety or feasibility risks>\n"
+                        "RECOMMENDATION: <your concrete advice>\n"
+                        "Keep each section to a few sentences."
                     ),
                 },
                 {

@@ -332,7 +332,14 @@ class SemanticMemoryManager:
         client: Any | None = None,
         model: str = "",
     ) -> str:
-        """Use an LLM to distill episodic memories into semantic lessons."""
+        """Use an LLM to distill episodic memories into semantic lessons.
+
+        Returns ``""`` on failure (no memories, no client, or LLM error) so the
+        caller's ``if not summary`` check falls through to the factual fallback.
+        The previous error return ``"Summarization failed: {exc}"`` was
+        indistinguishable from a real summary and got embedded as a "lesson"
+        and retrieved later -- a real error-as-lesson bug.
+        """
         memories: list[str] = []
         with self._db.connection() as conn:
             cur = conn.execute(
@@ -343,22 +350,33 @@ class SemanticMemoryManager:
                 memories.append(row["fact"])
 
         if not memories or not client:
-            return "No memories or no LLM client available for summarization."
+            return ""
 
+        trunc_marker = " [truncated] - only the 30 most recent observations were shown." if len(memories) > 30 else ""
         prompt = (
             "Summarize the following research observations into concise, reusable security patterns. "
             "Focus on what worked, what failed, and why.\n\n"
             + "\n".join(f"- {m}" for m in memories[:30])
+            + trunc_marker
+            + "\n\nReturn a JSON object only (no markdown fences):\n"
+            "{\n"
+            "  \"lessons\": [{\"pattern\": \"...\", \"worked_or_failed\": \"worked|failed\", \"why\": \"...\"}],\n"
+            "  \"contradictions\": [\"observation pairs that conflict\"]\n"
+            "}\n"
+            "If no reusable pattern emerges, return {\"lessons\": [], \"contradictions\": []}."
         )
         messages = [
-            {"role": "system", "content": "You are a security research summarizer."},
+            {"role": "system", "content": "You are a security research summarizer. Return only valid JSON."},
             {"role": "user", "content": prompt},
         ]
         try:
             response = client.chat(model, messages=messages, stream=False)
             return response.get("message", {}).get("content", "")
-        except Exception as exc:
-            return f"Summarization failed: {exc}"
+        except Exception:
+            # Return empty string (not an error message) so the caller's
+            # ``if not summary`` falls to the factual fallback instead of
+            # embedding the error text as a retrieved "lesson".
+            return ""
 
     # ── Helpers ─────────────────────────────────────────────────────────
 

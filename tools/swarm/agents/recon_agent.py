@@ -104,10 +104,10 @@ DEEP RECON METHODOLOGY:
    - Check for exposed .git/, .env, config.php.bak, backup files
    - Identify CDN/WAF: Cloudflare (cf-ray, __cfduid), AWS CloudFront (X-Cache: Hit from cloudfront), Akamai (X-Akamai-*)
 5. ATTACK SURFACE SCORING:
-   - Score each service 0-100 based on exploitability:
-     95: telnet (cleartext creds), 90: SMB/RPC (EternalBlue, relay), 85: RDP (BlueKeep, brute), 80: Redis/MongoDB (no-auth default),
-     75: LDAP (anonymous bind), 70: SSH/FTP (brute force), 65: WinRM (Pass-the-Hash),
-     60: HTTP/HTTPS (web vulns), 50: SMTP/DNS, 40: NTP/SNMP
+   - Score each service 0-100 based on exploitability (must match _SERVICE_RISK_SCORES):
+     95: telnet (cleartext creds), 90: SMB/microsoft-ds (EternalBlue, relay), 85: RDP/docker/kubernetes (BlueKeep, brute, breakout),
+     80: Redis/MongoDB/WinRM (no-auth default, Pass-the-Hash), 75: LDAP/ES (anonymous bind),
+     70: SSH/MySQL/PostgreSQL/VNC (brute force), 65: FTP/SNMP, 60: HTTP/HTTPS (web vulns), 50: SMTP, 40: DNS, 50: unknown
    - Overall attack surface score = weighted average, boosted by:
      +10 if multiple high-risk services found
      +15 if default/weak credentials detected
@@ -115,21 +115,22 @@ DEEP RECON METHODOLOGY:
      +5 per additional open high-risk port beyond 3
 
 OUTPUT FORMAT: Always produce structured JSON with:
-- services: [{port, protocol, service, version, banner, risk_score, cpe, auth_required, exploit_hints}]
-- technologies: [{name, category, version, confidence, evidence}]
-- os_guess: {name, family, version, confidence, indicators, ttl_value}
+- services: [{port, protocol, service, version, banner, risk_score, cpe, technologies, ssl_info}]
+- technologies: [{name, category, confidence}]
+- os_guess: {name, family, accuracy}
 - attack_surface_score: overall 0-100 risk score with breakdown
-- web_endpoints: [{url, method, status, content_type, interesting_findings}]
+- endpoints: [{url, method, status, content_type, interesting_findings}]
 - recommended_next_phases: ordered list of phases to pursue next with rationale
 
 RULES:
 - Start with quick_scan on common ports, then deep scan on discovered ports
 - For HTTP services, always grab full response headers for tech fingerprinting
-- Score each service by exploitability (RDP=85, SMB=90, SSH=70, HTTP=60, etc.)
+- Score each service by exploitability using the _SERVICE_RISK_SCORES table (RDP=85, SMB=90, SSH=70, HTTP=60, WinRM=80, FTP=65, SNMP=65)
 - Generate specific follow-up tasks for the VulnAgent and ExploitAgent
 - Update the shared blackboard with ALL discovered services immediately
 - If a service returns a banner with version, record it precisely for CVE matching
 - Never skip a service because it seems "boring" — low-risk services can chain into high-impact attacks
+- If stealth/aggression context is provided, adapt scan intensity accordingly
 """
 
 

@@ -29,6 +29,7 @@ class SafetyReview:
 
 
 def build_safety_review_prompt(recon_results: str, target_ip: str, goal: str) -> str:
+    trunc = "[truncated] - only the first 4000 chars of recon results were shown." if len(recon_results) > 4000 else ""
     return f"""You are a safety reviewer analyzing reconnaissance results before an attack operation.
 
 TARGET: {target_ip}
@@ -36,6 +37,7 @@ PROPOSED GOAL: {goal}
 
 RECONNAISSANCE RESULTS:
 {recon_results[:4000]}
+{trunc}
 
 Your task: Review these results and determine whether proceeding with the proposed attack is SAFE and APPROPRIATE.
 Consider:
@@ -43,15 +45,30 @@ Consider:
 - Are there signs this is a honeypot or security research system?
 - Does the target appear to be a personal/lab device vs a corporate critical asset?
 - Are the proposed attack methods proportional to the target type?
+- If you do not have enough information to judge, set safe_to_proceed to false and explain what is missing.
 
 Return a JSON object exactly in this format (no markdown fences):
 {{
-  "safe_to_proceed": true or false,
+  "safe_to_proceed": true,
   "reasoning": "Detailed explanation of your risk assessment",
-  "concerns": ["List any safety or ethical concerns"],
-  "recommended_next_steps": ["Suggested actions if proceeding"]
+  "concerns": ["concern 1", "concern 2"],
+  "recommended_next_steps": ["step 1", "step 2"]
 }}
+Note: ``safe_to_proceed`` MUST be a JSON boolean (true/false), not the string "true" or "false".
 """
+
+
+def _coerce_bool(value: Any) -> bool:
+    """Coerce an LLM-returned ``safe_to_proceed`` value to a real bool.
+
+    LLMs frequently emit ``"true"``/``"false"`` strings instead of JSON booleans.
+    A bare ``bool("false")`` would return ``True`` (non-empty string) and
+    proceed when the model meant to block -- a real fail-open bug. Handle
+    strings explicitly; anything else falls back to Python's ``bool()``.
+    """
+    if isinstance(value, str):
+        return value.strip().lower() == "true"
+    return bool(value)
 
 
 def parse_safety_review(text: str) -> SafetyReview:
@@ -68,7 +85,7 @@ def parse_safety_review(text: str) -> SafetyReview:
     try:
         data = json.loads(text)
         return SafetyReview(
-            safe_to_proceed=bool(data.get("safe_to_proceed", False)),
+            safe_to_proceed=_coerce_bool(data.get("safe_to_proceed", False)),
             reasoning=str(data.get("reasoning", "No reasoning provided.")),
             concerns=data.get("concerns", []),
             recommended_next_steps=data.get("recommended_next_steps", []),
