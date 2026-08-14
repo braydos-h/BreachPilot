@@ -45,7 +45,6 @@ import {
   useCreateRun,
   useGoals,
   useLiveModels,
-  useModels,
   useSkills,
 } from "@/api/hooks";
 import { Spinner } from "@/components/Loading";
@@ -123,7 +122,6 @@ export function Wizard({ onCreated }: WizardProps) {
 
   // Hooks
   const capabilities = useCapabilities();
-  const models = useModels();
   const liveModels = useLiveModels();
   const skills = useSkills();
   const createRun = useCreateRun();
@@ -367,7 +365,7 @@ function SettingsPanel(props: SettingsPanelProps) {
     mode, setMode, goalMode, setGoalMode, goal, setGoal, customGoal, setCustomGoal, goalGroups,
   } = props;
 
-  const ollamaOnline = !!liveModels.data && liveModels.data.source === "ollama" && !liveModels.data.error;
+  const status = useProviderStatus();
   const visiblePowerUps = POWER_UPS.filter((p) => flags.includes(p.key));
   const skillsOpen = skillsMode !== "off";
 
