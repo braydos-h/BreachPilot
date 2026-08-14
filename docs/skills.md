@@ -1,5 +1,9 @@
 # Runtime Skills
 
+> For the practical authoring guide — layout, frontmatter, tags, body
+> structure, and how to tune selection/feedback — see
+> [Building & Improving Skills](skill-authoring.md).
+
 Runtime skills are an **advisory prompt-context layer**. Each skill is a
 `SKILL.md` file (YAML frontmatter + markdown body) under `skills/`.
 The engine indexes them, deterministically selects a small set for the current
