@@ -306,13 +306,13 @@ export interface RunDetail {
 }
 
 export interface RunResultTelemetry {
+  calls?: number;
   total_tokens?: number;
-  total_calls?: number;
-  avg_ctx_pct?: number;
-  max_ctx_pct?: number;
-  context_window_tokens?: number;
-  last_ctx_pct?: number;
-  last_estimated_context_tokens?: number;
+  avg_ctx?: number | null;
+  max_ctx?: number | null;
+  context_window_tokens?: number | null;
+  last_ctx_pct?: number | null;
+  last_estimated_context_tokens?: number | null;
   [key: string]: unknown;
 }
 

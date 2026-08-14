@@ -48,10 +48,11 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
       if (event.sequence <= lastSeqRef.current) return;
       lastSeqRef.current = event.sequence;
     }
-    setEvents((prev) => {
-      if (prev.some((e) => e.sequence === event.sequence)) return prev;
-      return [...prev, event].sort((a, b) => a.sequence - b.sequence);
-    });
+    // Backend delivers monotonic sequences (replay in order, then live in
+    // order), and the `sequence <= lastSeqRef.current` guard above already
+    // drops duplicates/out-of-order events — so a plain append keeps the
+    // array sorted without an O(n) dedup + O(n log n) sort per event.
+    setEvents((prev) => [...prev, event]);
   }, []);
 
   const closeSse = useCallback(() => {
@@ -159,6 +160,7 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
         }
         if (event.code === WS_CLOSE_CURSOR) {
           lastSeqRef.current = 0;
+          setEvents([]);
         }
         if (event.code === WS_CLOSE_NOT_FOUND) {
           setAuthError("Run not found.");

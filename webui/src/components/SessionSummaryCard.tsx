@@ -84,9 +84,9 @@ export function SessionSummaryCard({ result, title, className }: SessionSummaryC
             </div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 font-mono sm:grid-cols-4">
               <div><span className="text-muted-foreground">tokens: </span>{safeNum(telemetry.total_tokens).toLocaleString()}</div>
-              <div><span className="text-muted-foreground">calls: </span>{safeNum(telemetry.total_calls)}</div>
-              <div><span className="text-muted-foreground">avg ctx: </span>{safeNum(telemetry.avg_ctx_pct)}%</div>
-              <div><span className="text-muted-foreground">max ctx: </span>{safeNum(telemetry.max_ctx_pct)}%</div>
+              <div><span className="text-muted-foreground">calls: </span>{safeNum(telemetry.calls)}</div>
+              <div><span className="text-muted-foreground">avg ctx: </span>{safeNum(telemetry.avg_ctx)}%</div>
+              <div><span className="text-muted-foreground">max ctx: </span>{safeNum(telemetry.max_ctx)}%</div>
               {telemetry.context_window_tokens != null && (
                 <div><span className="text-muted-foreground">ctx window: </span>{safeNum(telemetry.context_window_tokens).toLocaleString()}</div>
               )}

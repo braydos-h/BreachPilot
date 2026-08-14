@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   AlertTriangle,
   Loader2,
@@ -58,6 +58,7 @@ import { autoAnswerFor, usePermissionMode } from "@/lib/permissionMode";
 
 export function RunPage() {
   const { runId } = useParams<{ runId: string }>();
+  const navigate = useNavigate();
   const run = useRun(runId ?? null);
   const decisions = useDecisions(runId ?? null);
   const events = useRunEvents(runId ?? null);
@@ -179,7 +180,18 @@ export function RunPage() {
     );
   }
   if (run.error || !run.data) {
-    return <div className="p-6 text-sm text-destructive">Run not found.</div>;
+    const notFound = run.error instanceof ApiError && run.error.isNotFound;
+    return (
+      <div className="flex flex-col items-start gap-3 p-6 text-sm">
+        <div className="text-destructive">{notFound ? "Run not found." : "Failed to load run."}</div>
+        <div className="flex gap-2">
+          <Button asChild variant="outline" size="sm">
+            <Link to="/runs">Back to runs</Link>
+          </Button>
+          <Button size="sm" onClick={() => run.refetch()}>Retry</Button>
+        </div>
+      </div>
+    );
   }
 
   const preview = run.data.preview ?? {};
@@ -196,7 +208,14 @@ export function RunPage() {
           </h1>
             <CopyButton value={run.data.id} size="icon" label="Copy ID" />
             {currentState && <StatusBadge state={currentState as RunState} />}
-            <Badge variant="outline" className="text-xs">{transportLabel}</Badge>
+            <Badge variant="outline" className="text-xs">
+              {transportLabel}
+              {active && (events.status === "connecting" || events.status === "closed") && (
+                <span className="ml-1 inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                  <Loader2 className="h-2.5 w-2.5 animate-spin" /> reconnecting
+                </span>
+              )}
+            </Badge>
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <span><span className="text-muted-foreground/70">target:</span> <span className="font-mono text-foreground">{String(preview.target_ip ?? request.target ?? "\u2014")}</span></span>
@@ -251,7 +270,7 @@ export function RunPage() {
               </Button>
             )}
             {terminal && (
-              <Button size="sm" onClick={() => resume.mutate(run.data.id, { onSuccess: (data) => (window.location.href = `/runs/${data.run_id}`) })} disabled={resume.isPending}>
+              <Button size="sm" onClick={() => resume.mutate(run.data.id, { onSuccess: (data) => navigate(`/runs/${data.run_id}`) })} disabled={resume.isPending}>
                 {resume.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
                 Resume
               </Button>
@@ -275,7 +294,7 @@ export function RunPage() {
 
       <div className="grid flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="flex-1">
-          <EventList events={events.events} decisions={mergedDecisions} runId={run.data.id} className="h-[70vh]" />
+          <EventList events={events.events} decisions={mergedDecisions} runId={run.data.id} terminal={terminal} className="h-[70vh]" />
         </div>
         <div className="space-y-3">
           <LiveRunSummary events={events.events} />

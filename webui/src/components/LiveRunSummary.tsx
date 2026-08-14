@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Activity, AlertTriangle, Clock, Cpu, FileCheck, Layers, MessageSquare, Terminal, Timer } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,6 +26,7 @@ interface Derived {
   artifacts: number;
   tokens: number | null;
   eventsPerMin: number | null;
+  telemetrySeries: Array<{ tokens: number; ctxPct: number | null }>;
 }
 
 function derive(events: RunEvent[]): Derived {
@@ -41,6 +43,7 @@ function derive(events: RunEvent[]): Derived {
   const bootSteps = new Map<string, boolean>();
   let artifacts = 0;
   let tokens: number | null = null;
+  const telemetrySeries: Array<{ tokens: number; ctxPct: number | null }> = [];
 
   for (let i = 0; i < events.length; i++) {
     const ev = events[i];
@@ -52,7 +55,13 @@ function derive(events: RunEvent[]): Derived {
         if (typeof p.actions === "number") actions = p.actions;
         if (typeof p.elapsed_seconds === "number") elapsedSeconds = p.elapsed_seconds;
         const tel = p.telemetry as Record<string, unknown> | undefined;
-        if (tel && typeof tel.total_tokens === "number") tokens = tel.total_tokens as number;
+        if (tel && typeof tel.total_tokens === "number") {
+          tokens = tel.total_tokens as number;
+          telemetrySeries.push({
+            tokens: tel.total_tokens as number,
+            ctxPct: typeof tel.last_ctx_pct === "number" ? (tel.last_ctx_pct as number) : null,
+          });
+        }
         break;
       }
       case "assistant": {
@@ -116,7 +125,7 @@ function derive(events: RunEvent[]): Derived {
     phase, round, actions, elapsedSeconds,
     lastAssistant, lastTool, lastToolStatus,
     toolCount, toolErrors, assistantCount,
-    bootDone, bootTotal, artifacts, tokens, eventsPerMin,
+    bootDone, bootTotal, artifacts, tokens, eventsPerMin, telemetrySeries,
   };
 }
 
@@ -131,8 +140,9 @@ function truncate(s: string, n: number): string {
   return one.length <= n ? one : one.slice(0, n - 1) + "\u2026";
 }
 
-export function LiveRunSummary({ events, className }: LiveRunSummaryProps) {
+export const LiveRunSummary = memo(function LiveRunSummary({ events, className }: LiveRunSummaryProps) {
   const d = derive(events);
+  const ctxValues = d.telemetrySeries.map((s) => s.ctxPct).filter((v): v is number => v != null);
   const hasAny =
     d.phase || d.round != null || d.actions != null || d.lastTool || d.lastAssistant || d.bootTotal > 0;
 
@@ -205,6 +215,16 @@ export function LiveRunSummary({ events, className }: LiveRunSummaryProps) {
           </div>
         )}
 
+        {d.telemetrySeries.length >= 2 &&
+          (ctxValues.length >= 2 ? (
+            <div className="grid grid-cols-2 gap-2">
+              <Sparkline label="tokens" values={d.telemetrySeries.map((s) => s.tokens)} />
+              <Sparkline label="ctx %" values={ctxValues} format={(v) => `${v.toFixed(1)}%`} />
+            </div>
+          ) : (
+            <Sparkline label="tokens" values={d.telemetrySeries.map((s) => s.tokens)} />
+          ))}
+
         {d.lastTool && (
           <div className="space-y-1 rounded-md border bg-muted/30 p-2">
             <div className="flex items-center gap-1.5 text-muted-foreground">
@@ -242,6 +262,51 @@ export function LiveRunSummary({ events, className }: LiveRunSummaryProps) {
         )}
       </CardContent>
     </Card>
+  );
+});
+
+function Sparkline({
+  label,
+  values,
+  format,
+}: {
+  label: string;
+  values: number[];
+  format?: (v: number) => string;
+}) {
+  if (values.length < 2) return null;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const W = 120;
+  const H = 28;
+  const points = values
+    .map((v, i) => {
+      const x = (i / (values.length - 1)) * (W - 2) + 1;
+      const y = H - 2 - ((v - min) / span) * (H - 4);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  return (
+    <div className="space-y-1 rounded-md border bg-card/40 p-1.5">
+      <div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-muted-foreground">
+        <span>{label}</span>
+        <span className="tabular-nums text-foreground">
+          {format ? format(values[values.length - 1]) : values[values.length - 1].toLocaleString()}
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-7 w-full" role="img" aria-label={`${label} over time`}>
+        <polyline
+          points={points}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.5}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          className="text-primary/80"
+        />
+      </svg>
+    </div>
   );
 }
 

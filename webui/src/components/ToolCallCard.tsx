@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { ChevronDown, ChevronRight, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +15,7 @@ interface ToolCallCardProps {
   className?: string;
 }
 
-export function ToolCallCard({
+export const ToolCallCard = memo(function ToolCallCard({
   toolName,
   arguments: args,
   result,
@@ -98,7 +98,7 @@ export function ToolCallCard({
       )}
     </div>
   );
-}
+});
 
 function safeStringify(value: unknown): string {
   try {

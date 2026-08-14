@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Loader2, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { RunEvent, RunState } from "@/api/types";
@@ -38,7 +39,7 @@ function infoFor(phase: string): PhaseInfo {
   return PHASES[phase] ?? { key: phase, label: phase, summary: "Working" };
 }
 
-export function PhaseTracker({ events, runState, className }: PhaseTrackerProps) {
+export const PhaseTracker = memo(function PhaseTracker({ events, runState, className }: PhaseTrackerProps) {
   const currentPhase = deriveCurrentPhase(events);
   const terminal = isTerminalState(runState as RunState);
   const info = infoFor(currentPhase);
@@ -84,7 +85,7 @@ export function PhaseTracker({ events, runState, className }: PhaseTrackerProps)
       </div>
     </div>
   );
-}
+});
 
 function deriveCurrentPhase(events: RunEvent[]): string {
   let phase = "starting";

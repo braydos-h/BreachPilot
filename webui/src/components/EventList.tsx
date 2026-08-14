@@ -17,6 +17,32 @@ interface EventListProps {
   decisions: DecisionListRow[];
   runId: string;
   className?: string;
+  terminal?: boolean;
+}
+
+const FILTERS = [
+  { key: "all", label: "All" },
+  { key: "tools", label: "Tools" },
+  { key: "assistant", label: "Assistant" },
+  { key: "errors", label: "Errors" },
+  { key: "progress", label: "Progress" },
+] as const;
+
+type FilterKey = (typeof FILTERS)[number]["key"];
+
+function matchesFilter(type: string, filter: FilterKey): boolean {
+  switch (filter) {
+    case "all":
+      return true;
+    case "tools":
+      return type === "tool_request" || type === "tool_start" || type === "tool_result";
+    case "assistant":
+      return type === "assistant";
+    case "errors":
+      return type === "error";
+    case "progress":
+      return type === "progress";
+  }
 }
 
 interface ToolGroup {
@@ -45,15 +71,23 @@ function corrIdOf(event: RunEvent): string {
   return `tool-${event.sequence}`;
 }
 
-export function EventList({ events, decisions, runId, className }: EventListProps) {
+export function EventList({ events, decisions, runId, className, terminal = false }: EventListProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [stick, setStick] = useState(true);
+  const [visibleCount, setVisibleCount] = useState(500);
+  const [filter, setFilter] = useState<FilterKey>("all");
 
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     if (stick) el.scrollTop = 0;
   }, [events, stick]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = 0;
+    setStick(true);
+  }, [filter]);
 
   const onScroll = () => {
     const el = scrollRef.current;
@@ -64,7 +98,7 @@ export function EventList({ events, decisions, runId, className }: EventListProp
   const rendered = useMemo(() => {
     const toolGroups = new Map<string, ToolGroup>();
     const decisionIds = new Set<string>();
-    const nodes: React.ReactNode[] = [];
+    let nodes: React.ReactNode[] = [];
     let lastBootIndex = -1;
     const goalSelectAnswered = decisions.some(
       (d) => d.kind === "goal_select" && d.status !== "pending",
@@ -114,6 +148,7 @@ export function EventList({ events, decisions, runId, className }: EventListProp
     events.forEach((event) => {
       if (event.type === "boot" || event.type === "ok") return;
       if (event.type === "tool_request" || event.type === "tool_start" || event.type === "tool_result") {
+        if (filter !== "all" && filter !== "tools") return;
         if (event.type === "tool_request") {
           const id = corrIdOf(event);
           const group = toolGroups.get(id);
@@ -136,6 +171,7 @@ export function EventList({ events, decisions, runId, className }: EventListProp
         return;
       }
       if (event.type === "approval") {
+        if (filter !== "all") return;
         const decisionId = event.payload.decision_id;
         if (typeof decisionId !== "string") return;
         const decision = decisions.find((d) => d.id === decisionId);
@@ -151,18 +187,28 @@ export function EventList({ events, decisions, runId, className }: EventListProp
         return;
       }
       if (event.type === "goal_suggestions" && goalSelectAnswered) return;
+      if (!matchesFilter(event.type, filter)) return;
       nodes.push(renderSimpleEvent(event, `evt-${event.sequence}`));
     });
 
-    if (lastBootIndex >= 0) {
+    const total = nodes.length;
+    if (nodes.length > visibleCount) nodes = nodes.slice(-visibleCount);
+    if (lastBootIndex >= 0 && filter === "all") {
       nodes.unshift(<BootChecklist key="boot-checklist" events={events} className="mb-3 rounded-md border bg-card/40 p-3" />);
     }
 
     nodes.reverse();
-    return nodes;
-  }, [events, decisions, runId]);
+    return { nodes, total };
+  }, [events, decisions, runId, visibleCount, filter]);
 
   if (events.length === 0) {
+    if (terminal) {
+      return (
+        <div className={cn("flex items-center justify-center rounded-md border border-dashed p-6 text-sm text-muted-foreground", className)}>
+          No events recorded for this run.
+        </div>
+      );
+    }
     return (
       <div className={cn("space-y-2", className)}>
         <div className="relative flex-1 overflow-hidden rounded-md border border-dashed bg-grid-sm/30 p-3">
@@ -178,15 +224,47 @@ export function EventList({ events, decisions, runId, className }: EventListProp
     );
   }
 
+  const { nodes, total } = rendered;
+
   return (
     <div className={cn("relative flex flex-col", className)}>
+      <div className="mb-2 flex flex-wrap gap-1.5">
+        {FILTERS.map((f) => (
+          <button
+            key={f.key}
+            type="button"
+            onClick={() => setFilter(f.key)}
+            className={cn(
+              "rounded-full border px-2.5 py-1 text-xs transition-colors",
+              filter === f.key
+                ? "border-primary bg-primary/10 text-foreground"
+                : "border-border text-muted-foreground hover:bg-accent",
+            )}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
       <div
         ref={scrollRef}
         onScroll={onScroll}
         className="relative flex-1 overflow-y-auto rounded-md border bg-background/40 bg-grid-sm/20 p-3 scrollbar-thin"
         aria-live="polite"
       >
-        <div className="relative space-y-2">{rendered}</div>
+        {nodes.length === 0 ? (
+          <div className="flex items-center justify-center p-6 text-sm text-muted-foreground">No matching events.</div>
+        ) : (
+          <div className="relative space-y-2">{nodes}</div>
+        )}
+        {total > visibleCount && (
+          <button
+            type="button"
+            onClick={() => setVisibleCount((v) => v + 500)}
+            className="mt-2 w-full rounded-md border border-dashed py-1.5 text-xs text-muted-foreground hover:bg-accent"
+          >
+            Show {total - visibleCount} earlier events
+          </button>
+        )}
       </div>
       {!stick && (
         <Button
