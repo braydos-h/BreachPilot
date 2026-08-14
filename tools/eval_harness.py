@@ -392,18 +392,32 @@ async def run_eval(args: Any) -> int:
     print(f"  Output: {eval_reports_dir}")
     print("=" * 60)
 
-    # Build the model client exactly as main.py does.
+    # Build the model client exactly as main.py does (provider-aware).
+    from tools.config_manager import get_ai_provider, get_chatgpt_config
     ollama_host = config.get("ollama", {}).get("host", "https://api.ollama.com")
     registry = config.get("models", {}).get("registry")
-    router = build_router(registry, host=ollama_host)
+    provider = get_ai_provider(config)
+    if provider == "chatgpt":
+        router = build_router(
+            registry, host=ollama_host, provider="chatgpt",
+            chatgpt_config=get_chatgpt_config(config), config=config,
+        )
+    else:
+        router = build_router(registry, host=ollama_host)
     model_alias = config.get("models", {}).get("default_alias", "glm")
     try:
         model_client = router.get_client(model_alias)
     except KeyError:
-        from tools.model_router import _build_model_client
-        router.register(model_alias, _build_model_client(
-            model_alias, host=ollama_host, request_timeout_seconds=None,
-        ))
+        if provider == "chatgpt":
+            from tools.model_router import build_model_client_for_provider
+            router.register(model_alias, build_model_client_for_provider(
+                config, model_alias, request_timeout_seconds=None,
+            ))
+        else:
+            from tools.model_router import _build_model_client
+            router.register(model_alias, _build_model_client(
+                model_alias, host=ollama_host, request_timeout_seconds=None,
+            ))
         model_client = router.get_client(model_alias)
 
     exploit_port = int(config.get("mcp", {}).get("http_port", 8001))

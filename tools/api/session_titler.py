@@ -89,22 +89,71 @@ def _clean_title(raw: str) -> str:
     return title
 
 
+def _chatgpt_title(config: Mapping[str, Any], prompt: str) -> str:
+    """Best-effort title via the ChatGPT provider. Returns "" on any failure.
+
+    Uses ``chatgpt.default_model`` (GPT models have no dedicated cheap title
+    model in openai-oauth's /v1/models). Ollama-only kwargs (options/num_predict)
+    are dropped by the adapter; temperature + max_tokens are forwarded.
+    """
+    try:
+        from tools.config_manager import get_chatgpt_config
+        from tools.model_router import build_model_client_for_provider
+
+        chatgpt_cfg = get_chatgpt_config(config)
+        model_id = str(chatgpt_cfg.get("default_model") or "gpt-5.2")
+        client = build_model_client_for_provider(
+            config, model_id, request_timeout_seconds=_REQUEST_TIMEOUT_S
+        )
+        response = client.chat(
+            model=model_id,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=30,
+        )
+        content = ""
+        try:
+            content = response["message"]["content"]
+        except (KeyError, TypeError, IndexError):
+            content = ""
+        return _clean_title(content)
+    except Exception as exc:  # best-effort — never raise to the caller
+        log.debug("chatgpt session title generation failed: %s", exc)
+        return ""
+
+
+def _provider_is_chatgpt(config: Mapping[str, Any] | None) -> bool:
+    if not config:
+        return False
+    try:
+        from tools.config_manager import get_ai_provider
+
+        return get_ai_provider(config) == "chatgpt"
+    except Exception:
+        return False
+
+
 async def generate_session_title(
     result: Mapping[str, Any],
     request: Mapping[str, Any],
     *,
     host: str = "https://api.ollama.com",
     model: str = TITLE_MODEL,
+    config: Mapping[str, Any] | None = None,
 ) -> str:
-    """Ask ``gemma4:31b-cloud`` for a short title summarizing the session.
+    """Ask the configured provider for a short title summarizing the session.
 
-    Returns "" on any failure (ollama unreachable, missing pkg, bad response,
-    timeout). Callers must treat the return as best-effort and persist only
-    when non-empty.
+    Returns "" on any failure (provider unreachable, missing pkg, bad
+    response, timeout). Callers must treat the return as best-effort and
+    persist only when non-empty. When ``config`` indicates the ChatGPT
+    provider, titles go through the local openai-oauth proxy; otherwise the
+    Ollama ``gemma4:31b-cloud`` path runs unchanged.
     """
+    prompt = _build_prompt(result, request)
+    if _provider_is_chatgpt(config):
+        return _chatgpt_title(config, prompt)
     if OllamaClient is None:
         return ""
-    prompt = _build_prompt(result, request)
     try:
         client = OllamaClient(host=host, timeout=_REQUEST_TIMEOUT_S)
         response = client.chat(
@@ -130,14 +179,17 @@ def generate_session_title_sync(
     *,
     host: str = "https://api.ollama.com",
     model: str = TITLE_MODEL,
+    config: Mapping[str, Any] | None = None,
 ) -> str:
     """Synchronous variant for non-async callers (e.g. the retitle route).
 
     Same best-effort contract: returns "" on any failure.
     """
+    prompt = _build_prompt(result, request)
+    if _provider_is_chatgpt(config):
+        return _chatgpt_title(config, prompt)
     if OllamaClient is None:
         return ""
-    prompt = _build_prompt(result, request)
     try:
         client = OllamaClient(host=host, timeout=_REQUEST_TIMEOUT_S)
         response = client.chat(

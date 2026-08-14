@@ -118,7 +118,7 @@ npm run preview    # vite preview --port 5173 --strictPort
 main.tsx
   └─ <App/>  (QueryClientProvider + BrowserRouter)
        └─ <TokenGate>            bearer token gate
-            └─ <OnboardingGate>  first-run provider-key setup
+            └─ <OnboardingGate>  first-run setup: provider + keys + ChatGPT OAuth
                  └─ <Routes>
                       └─ <Layout>  (sidebar + active-run pill + footer)
                            ├─ "/"                       → HomePage
@@ -202,10 +202,21 @@ Close `4401` clears the token and surfaces "Authentication failed". See
 
 After TokenGate, before routes. Calls `useSecrets`; if any key is `missing`
 and the user hasn't dismissed onboarding this session (`netattackai.onboarding.v1`
-not `"1"`), renders a card listing configured + missing provider keys with
-write-only inputs. Submit → `PUT /secrets` → toast "API keys saved" → dismiss.
-"Skip for now" also dismisses. Configured keys are still editable here and
-later under System → Secrets.
+not `"1"`), renders the first-run setup card. The card asks for three things
+up front so a fresh operator can configure everything before launching a run:
+
+1. **AI provider** — `<ProviderPicker />` (Ollama / ChatGPT segmented control;
+   persists `models.provider` via `PATCH /config`, flips `chatgpt.enabled` on for
+   ChatGPT). Switching invalidates the `models` / `modelsLive` / `providers`
+   caches immediately.
+2. **Provider API keys** — configured + missing keys with write-only inputs.
+   Submit → `PUT /secrets` → toast "API keys saved" → dismiss.
+3. **ChatGPT (optional)** — `<ChatGptControls />` (always shown, labelled
+   optional): Sign in with ChatGPT / Start proxy / Stop proxy, status badges,
+   and the OAuth URL link. OAuth tokens never reach the UI.
+
+"Skip for now" also dismisses without saving keys. Everything is re-editable
+later under System → Models (provider + ChatGPT) and System → Secrets (keys).
 
 > Provider secrets are stored in `secr.json` (default; override with
 > `NETATTACKAI_API_KEY_FILE`). This is **distinct** from `.webui_secret_key`,
@@ -309,7 +320,7 @@ path ──▶ settings ──▶ target ──▶ review
 | Step | Collects |
 |------|----------|
 | `path` | Recon-first vs straight attack (sets `mode` + `recon_first`). Preselectable via `?path=recon\|attack`. |
-| `settings` | Model alias (live Ollama list + registry, refresh button); power-ups grid (filtered by `capabilities.run_options.flags`); recon-first tri-state; observer mode; skills mode + include/exclude multi-select; goal (preset by risk group or custom text, attack path only); run kind; `yes` skip-confirm toggle. |
+| `settings` | Model alias (provider-aware: Ollama live list + registry, or ChatGPT discovered models + `chatgpt.default_model`; refresh button); power-ups grid (filtered by `capabilities.run_options.flags`); recon-first tri-state; observer mode; skills mode + include/exclude multi-select; goal (preset by risk group or custom text, attack path only); run kind; `yes` skip-confirm toggle. |
 | `target` | IPv4/IPv6/FQDN. Client-side `isValidTarget` mirrors `tools.validation_utils` (strict IPv4 octets, IPv6 must contain `:`, FQDN TLD ≥2 alpha). |
 | `review` | Summary card (target/mode/goal/model/transport/permission/destructive/budgets/skill activations) + the start-confirm gate. |
 
@@ -434,7 +445,7 @@ run always goes through the confirmation gate (`yes=false`).
 |-----|---------|
 | Config | `ConfigEditor` — redacted `GET /config` view + `PATCH /config` form. Atomic write, `400 config_invalid` on validation failure. |
 | Secrets | Per-provider-key status (`configured`/`missing`) + write-only inputs. `PUT /secrets` also loads values into the running daemon's env. Values are never returned. |
-| Models | Live Ollama model list (`GET /models/live`, refresh button, source badge, error line) + configured registry + default alias (`GET /models`). |
+| Models | **AI provider card** — `SegmentedControl` picker (Ollama / ChatGPT) bound to `models.provider`; switching PATCHes `/config` (deep-merge: → chatgpt also sets `chatgpt.enabled: true`, mirroring the CLI menu; `/models` + `/providers` + `/models/live` are invalidated immediately so there's no stale window). When ChatGPT is active the card shows `GET /providers` status (signed-in / proxy-running / started-by-NetAttackAi badges, host:port + default_model), a "Sign in with ChatGPT" prompt when not authenticated, "Sign in with ChatGPT" (`POST /providers/chatgpt/login` — backend-driven OAuth, URL shown as a link, tokens never reach the SPA), and Start/Stop proxy (`POST /providers/chatgpt/proxy/{start,stop}` — Stop only enabled when `we_started`). When Ollama is active the card notes embeddings also use Ollama. Below: live model list (`GET /models/live`, source badge `ollama`/`registry`/`chatgpt`, error line — for ChatGPT the proxy auto-starts on fetch so available GPT models populate once signed in) + configured models (registry for Ollama, `chatgpt.configured_models` for ChatGPT) + default. |
 | Skills | Searchable list (`GET /skills/search?q=`) + detail pane (`GET /skills/<name>`) showing body, sections, tags, NIST CSF, MITRE ATT&CK, references. |
 | Plugins | `GET /plugins` list with name/version/loaded/capabilities. Defensive `[]` on error. |
 | Diagnostics | Buttons to run `POST /diagnostics/doctor` and `POST /diagnostics/self-test`; renders exit code badge + output `<pre>`. |
@@ -533,7 +544,16 @@ patterns:
 - `useSwarmState` / `useCampaignState` — skip retry on 404 (state file
   optional).
 - `useLiveModels` — swallows 503 and returns the error payload as data (so
-  the UI can show the daemon's error message instead of throwing).
+  the UI can show the daemon's error message instead of throwing). Source is
+  `ollama` / `registry` / `chatgpt`.
+- `useProviders` / `useChatgptLogin` / `useChatgptProxyStart` /
+  `useChatgptProxyStop` — ChatGPT provider status + login/proxy lifecycle.
+  The three mutations invalidate `providers` / `modelsLive` / `models` on
+  settle. Login surfaces the OAuth URL; proxy stop is gated on `we_started`.
+- `usePatchConfig` — `PATCH /config` (deep-merge). `onSuccess` sets the `/config`
+  cache and also invalidates `models` / `modelsLive` / `providers`, since any
+  config change can affect the model list or provider status (e.g. switching
+  `models.provider` from the System → Models AI-provider card).
 
 ### `types.ts`
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -187,13 +188,25 @@ async def put_secrets(
 
 @router.get("/models")
 async def list_models(auth: str = Depends(_require_auth)) -> dict[str, Any]:
-    """List configured model aliases + metadata."""
+    """List configured model aliases + metadata (provider-aware)."""
+    from tools.config_manager import get_ai_provider, get_chatgpt_config
+
     models = _CONFIG.get("models", {})
-    return {
+    provider = get_ai_provider(_CONFIG)
+    response: dict[str, Any] = {
+        "provider": provider,
         "default_alias": models.get("default_alias", "glm"),
         "registry": models.get("registry", {}),
         "info": models.get("info", {}),
     }
+    if provider == "chatgpt":
+        chatgpt_cfg = get_chatgpt_config(_CONFIG)
+        response["chatgpt"] = {
+            "default_model": chatgpt_cfg.get("default_model", "gpt-5.2"),
+            "context_window": chatgpt_cfg.get("context_window", 128000),
+            "configured_models": list(chatgpt_cfg.get("models") or []),
+        }
+    return response
 
 
 @router.get("/plugins")
@@ -288,12 +301,66 @@ async def get_config_schema(auth: str = Depends(_require_auth)) -> dict[str, Any
 
 @router.get("/models/live")
 async def list_live_models(auth: str = Depends(_require_auth)) -> dict[str, Any]:
-    """List models actually installed in the configured Ollama backend.
+    """List models actually installed in the configured backend (provider-aware).
 
-    Hits ``ollama.host`` ``/api/tags`` live each call (cloud host requires
-    ``Authorization: Bearer $OLLAMA_API_KEY``). Falls back to the configured
-    registry with a 503 when the backend is unreachable.
+    Ollama: hits ``ollama.host`` ``/api/tags`` live each call (cloud host
+    requires ``Authorization: Bearer $OLLAMA_API_KEY``); falls back to the
+    configured registry with a 503 when the backend is unreachable.
+    ChatGPT: auto-starts the local openai-oauth proxy (``ensure_running`` —
+    only when signed in + ``auto_start``), then probes ``/v1/models``; falls
+    back to the configured ``chatgpt.models`` / ``default_model`` with a 503
+    (e.g. not signed in, or proxy failed to start).
     """
+    from tools.config_manager import get_ai_provider, get_chatgpt_config
+
+    provider = get_ai_provider(_CONFIG)
+    if provider == "chatgpt":
+        from tools.providers.chatgpt_provider import ChatGptProxyManager
+
+        chatgpt_cfg = get_chatgpt_config(_CONFIG)
+        manager = ChatGptProxyManager.get()
+        # Auto-start the openai-oauth proxy (when authenticated + auto_start) so the
+        # available-model list populates even before a run is launched. Idempotent:
+        # a pre-existing proxy is health-checked and reused (_we_started stays False,
+        # so we never stop a proxy we didn't start). Run off-thread so a cold start
+        # (up to start_timeout_seconds) does not block the event loop.
+        try:
+            result = await asyncio.to_thread(manager.ensure_running, chatgpt_cfg)
+        except Exception as exc:  # pragma: no cover - defensive
+            result = {"ok": False, "reason": f"ensure_running error: {exc}"}
+        if not result.get("ok"):
+            fallback = list(chatgpt_cfg.get("models") or []) or [chatgpt_cfg.get("default_model", "gpt-5.2")]
+            reason = result.get("reason", "proxy_unavailable")
+            msg = (
+                "Not signed in to ChatGPT — sign in via System → Models."
+                if reason == "not_authenticated"
+                else f"ChatGPT proxy unavailable: {reason}"
+            )
+            from fastapi import Response
+            return Response(
+                content=json.dumps({"models": fallback, "source": "registry", "error": msg}),
+                status_code=503,
+                media_type="application/json",
+            )
+        base_url = result.get("base_url") or chatgpt_cfg.get("base_url") or "http://127.0.0.1:10531/v1"
+        try:
+            import httpx
+            from fastapi import Response
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{str(base_url).rstrip('/')}/models")
+                resp.raise_for_status()
+                data = resp.json()
+                models = [str(m.get("id", "")) for m in data.get("data", []) if m.get("id")]
+                return {"models": models, "source": "chatgpt"}
+        except Exception as exc:
+            fallback = list(chatgpt_cfg.get("models") or []) or [chatgpt_cfg.get("default_model", "gpt-5.2")]
+            from fastapi import Response
+            return Response(
+                content=json.dumps({"models": fallback, "source": "registry", "error": f"ChatGPT proxy unreachable: {exc}"}),
+                status_code=503,
+                media_type="application/json",
+            )
+
     ollama_host = _CONFIG.get("ollama", {}).get("host", "https://api.ollama.com")
     registry = _CONFIG.get("models", {}).get("registry", {})
     try:
@@ -315,6 +382,70 @@ async def list_live_models(auth: str = Depends(_require_auth)) -> dict[str, Any]
             status_code=503,
             media_type="application/json",
         )
+
+
+# ── AI providers (ChatGPT / openai-oauth) ────────────────────────────────────
+
+@router.get("/providers")
+async def get_providers(auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Return the active provider + ChatGPT auth/proxy status (no secrets)."""
+    from tools.config_manager import get_ai_provider, get_chatgpt_config
+    from tools.providers.chatgpt_provider import ChatGptProxyManager
+
+    provider = get_ai_provider(_CONFIG)
+    chatgpt_cfg = get_chatgpt_config(_CONFIG)
+    manager = ChatGptProxyManager.get()
+    authenticated = manager.is_authenticated(chatgpt_cfg)
+    proxy_running = manager._health_ok(chatgpt_cfg)
+    return {
+        "provider": provider,
+        "chatgpt": {
+            "enabled": bool(chatgpt_cfg.get("enabled", False)),
+            "authenticated": authenticated,
+            "proxy_running": proxy_running,
+            "host": chatgpt_cfg.get("host", "127.0.0.1"),
+            "port": chatgpt_cfg.get("port", 10531),
+            "default_model": chatgpt_cfg.get("default_model", "gpt-5.2"),
+            "we_started": manager._we_started,
+        },
+    }
+
+
+@router.post("/providers/chatgpt/login")
+async def chatgpt_login(auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Start a ChatGPT OAuth login (browser flow) and return the login URL.
+
+    Tokens stay in openai-oauth's ~/.codex/auth.json — they never enter the
+    request/response/config. Returns ``{ok, url?, reason?}``.
+    """
+    from tools.config_manager import get_chatgpt_config
+    from tools.providers.chatgpt_provider import ChatGptProxyManager
+
+    chatgpt_cfg = get_chatgpt_config(_CONFIG)
+    result = ChatGptProxyManager.get().run_login(chatgpt_cfg)
+    return result
+
+
+@router.post("/providers/chatgpt/proxy/start")
+async def chatgpt_proxy_start(auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Ensure the local openai-oauth proxy is running."""
+    from tools.config_manager import get_chatgpt_config
+    from tools.providers.chatgpt_provider import ChatGptProxyManager
+
+    chatgpt_cfg = get_chatgpt_config(_CONFIG)
+    return ChatGptProxyManager.get().ensure_running(chatgpt_cfg)
+
+
+@router.post("/providers/chatgpt/proxy/stop")
+async def chatgpt_proxy_stop(auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Stop the proxy only if NetAttackAi started it."""
+    from tools.config_manager import get_chatgpt_config
+    from tools.providers.chatgpt_provider import ChatGptProxyManager
+
+    chatgpt_cfg = get_chatgpt_config(_CONFIG)
+    we_started = ChatGptProxyManager.get()._we_started
+    ChatGptProxyManager.get().shutdown(chatgpt_cfg)
+    return {"ok": True, "stopped": we_started}
 
 
 # ── Skill detail (C2) ──────────────────────────────────────────────────────

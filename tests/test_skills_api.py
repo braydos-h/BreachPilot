@@ -248,3 +248,42 @@ def test_install_clears_cache_so_list_reflects_disk(tmp_path, monkeypatch):
     client.post("/api/v1/skills", json={"name": "cache-test", "markdown": _skill_md("cache-test")}, headers=_auth())
     after = client.get("/api/v1/skills", headers=_auth()).json()
     assert "cache-test" in [s["name"] for s in after["skills"]]
+
+
+# ── Provider switch via PATCH /config (deep-merge guarantee) ─────────────────
+
+
+def test_switch_provider_persists(tmp_path, monkeypatch):
+    """Switching models.provider to chatgpt (with chatgpt.enabled=true) persists and
+    deep-merges: the existing models.registry/default_alias and any prior chatgpt
+    block keys survive. This is the backend guarantee the WebUI ProviderCard relies on."""
+    client = _make_client(tmp_path, monkeypatch)
+    before = client.get("/api/v1/config", headers=_auth()).json()
+    assert before["models"].get("provider", "ollama") == "ollama"  # _make_client seeds no provider -> default
+    registry_before = before["models"]["registry"]
+
+    resp = client.patch(
+        "/api/v1/config",
+        json={"models": {"provider": "chatgpt"}, "chatgpt": {"enabled": True}},
+        headers=_auth(),
+    )
+    assert resp.status_code == 200, resp.text
+
+    cfg = client.get("/api/v1/config", headers=_auth()).json()
+    assert cfg["models"]["provider"] == "chatgpt"
+    assert cfg["chatgpt"]["enabled"] is True
+    # Deep-merge must not clobber sibling models keys.
+    assert cfg["models"]["registry"] == registry_before
+    assert cfg["models"]["default_alias"] == "glm"
+
+    # /models now reports the chatgpt provider + chatgpt block.
+    models = client.get("/api/v1/models", headers=_auth()).json()
+    assert models["provider"] == "chatgpt"
+    assert "chatgpt" in models
+
+    # Switching back to ollama leaves chatgpt.enabled as-is (we don't disable it).
+    resp = client.patch("/api/v1/config", json={"models": {"provider": "ollama"}}, headers=_auth())
+    assert resp.status_code == 200, resp.text
+    cfg = client.get("/api/v1/config", headers=_auth()).json()
+    assert cfg["models"]["provider"] == "ollama"
+    assert cfg["chatgpt"]["enabled"] is True

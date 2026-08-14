@@ -94,6 +94,21 @@ On Linux/macOS `make install|test|test-one F=…|run|doctor|mcp-exploit` work.
    required for the cloud path; missing key surfaces as auth failure on the
    first chat.
 
+   **ChatGPT is an opt-in alternative provider** (`models.provider: chatgpt`,
+   vendored `openai-oauth/` loopback proxy at `127.0.0.1:10531/v1`). The single
+   seam is `tools/model_router.py::_build_model_client` — it takes an injectable
+   `raw_client`; `ollama` (default) builds `ollama.Client`, `chatgpt` injects a
+   `ChatGptProxyClient` (`tools/providers/chatgpt_provider.py`). Consumers stay
+   untouched (they already receive a `ModelClient`). Auth is browser OAuth
+   ("Sign in with ChatGPT") whose tokens live in `~/.codex/auth.json` — **never
+   copy OAuth tokens into `config.yaml` or logs; check `is_authenticated()` by
+   file existence only, never read it.** The proxy is loopback-only; lifecycle
+   uses openai-oauth's own `--detach`/`stop` CLI (never Popen+kill `serve`, and
+   never stop a proxy we didn't start — `_we_started`). Embeddings stay on
+   Ollama under either provider. `--doctor` runs `_check_chatgpt` only when
+   `provider: chatgpt` (default Ollama doctor output unchanged). See
+   [docs/providers.md](docs/providers.md).
+
 8. **No CI is configured.** Before a PR: run `python -m pytest tests/ -v`,
    `ruff check .`, and verify README flags/config still match reality.
 

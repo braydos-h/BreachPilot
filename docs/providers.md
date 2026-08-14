@@ -15,8 +15,8 @@ Three distinct provider surfaces, each coupled to Ollama differently:
 
 | Surface | Coupling point | Multi-provider today? |
 |---|---|---|
-| Chat/generate | `tools/model_router.py` — `_build_model_client()` instantiates `ollama.Client`; `ModelClient` is the de-facto interface every consumer receives | No — Ollama-only, but consumers are provider-agnostic by accident |
-| Embeddings | `tools/semantic_memory.py` — raw `urllib` POST to `/api/embeddings` | No — raw HTTP, no abstraction |
+| Chat/generate | `tools/model_router.py` — `_build_model_client()` builds a `ModelClient` over either `ollama.Client` (provider `ollama`, default) or `ChatGptProxyClient` (provider `chatgpt`); `ModelClient` is the de-facto interface every consumer receives | **Yes** — `models.provider: ollama\|chatgpt`; consumers are provider-agnostic |
+| Embeddings | `tools/semantic_memory.py` — raw `urllib` POST to `/api/embeddings` | No — raw HTTP, no abstraction (stays Ollama even under `provider: chatgpt`) |
 | Research (web search/fetch) | `tools/web_researcher.py` — `ResearchProvider` base + `OllamaResearchProvider` / `SerpAPIResearchProvider` | Yes — clean base class to model the others after |
 
 Flow of a chat call:
@@ -70,22 +70,28 @@ property that makes adding a chat provider a small change.
 
 ### The factory — `tools/model_router.py:290-377`
 
-`_build_model_client()` is the **single place** an `ollama.Client` is
-constructed for the chat/generate path:
+`_build_model_client()` is the **single place** a chat client is constructed
+for the chat/generate path. It takes an injectable `raw_client` so the Ollama
+and ChatGPT paths share one closure (telemetry, `_normalize_chat_args`,
+`_stream_with_telemetry`):
 
 ```python
 # tools/model_router.py:31
 from ollama import Client as OllamaClient
 
-# tools/model_router.py:290-316
-def _build_model_client(model_name, host=OLLAMA_CLOUD_HOST, *, alias="", request_timeout_seconds=None):
+# tools/model_router.py (provider-aware seam)
+def _build_model_client(model_name, host=OLLAMA_CLOUD_HOST, *, alias="",
+                        request_timeout_seconds=None, raw_client=None,
+                        provider="ollama"):
     ...
-    raw_client = OllamaClient(host=host, timeout=request_timeout_seconds)
+    if raw_client is None:                       # the Ollama path (default)
+        raw_client = OllamaClient(host=host, timeout=request_timeout_seconds)
+    # else: ChatGPT path uses the injected ChatGptProxyClient directly
     ...
     def chat(*args, **kwargs):
         raw_kwargs = _normalize_chat_args(args, kwargs, model_name)
-        response = raw_client.chat(**raw_kwargs)   # ← the actual Ollama call
-        record_model_usage(...)                      # telemetry
+        response = raw_client.chat(**raw_kwargs)   # ← Ollama or ChatGPT adapter
+        record_model_usage(..., provider=provider) # telemetry (provider-attributed)
         return response
     def stream_chat(*args, **kwargs):
         kwargs["stream"] = True
@@ -93,14 +99,33 @@ def _build_model_client(model_name, host=OLLAMA_CLOUD_HOST, *, alias="", request
     return ModelClient(name=model_name, chat=chat, stream=stream_chat, model_id=model_name)
 ```
 
+When `raw_client is None` the Ollama construction is byte-identical to the
+pre-provider code, so every test that `monkeypatch.setattr(model_router,
+"OllamaClient", FakeClient)` keeps working. The ChatGPT path passes a shared
+`ChatGptProxyClient` (see [ChatGPT provider](#chatgpt-provider-openai-oauth)).
+
 `_normalize_chat_args` (`model_router.py:224-241`) coerces both
 `client.chat(model, messages=...)` and `client.chat(messages=...)` call styles
-into the kwargs the underlying SDK expects, and forces the configured model id
-so consumers can pass an alias. The `chat` closure also records telemetry via
-`record_model_usage` (source field, alias, model id, wall duration, error).
+into the kwargs the underlying client expects, and forces the configured model
+id so consumers can pass an alias. The `chat` closure also records telemetry
+via `record_model_usage` (source field, alias, model id, wall duration, error,
+**provider**). The ChatGPT adapter drops Ollama-only kwargs (`options`,
+`keep_alive`, `format`, `suffix`, `think`, `raw`) before the HTTP call.
 
-`build_router()` (`model_router.py:380-394`) iterates `models.registry` and
-registers one `ModelClient` per alias, all pointing at the same `host`.
+`build_router()` (`model_router.py`) dispatches on `provider`:
+- `ollama` (default): iterates `models.registry` and registers one
+  `ModelClient` per alias, all pointing at the same `host` — unchanged.
+- `chatgpt`: ensures the loopback proxy is running, discovers models from
+  `/v1/models` (falling back to `chatgpt.default_model`), builds one shared
+  `ChatGptProxyClient`, and registers one `ModelClient` per GPT model id
+  (alias = model id) with `provider="chatgpt"`.
+
+A second entry point, `build_model_client_for_provider(config, alias, ...)`,
+is the root-cause shared helper for the call sites that previously built a
+bare `_build_model_client(alias, host=...)` fallback (`run_service/service.py`,
+`research_assistant.py`, `session_titler.py`, `eval_harness.py`,
+`eval_benchmark.py`): it reads `models.provider` + the `ollama`/`chatgpt`
+blocks and constructs the right client for one alias.
 
 ### Authentication — automatic
 
@@ -134,13 +159,128 @@ All of these receive a `ModelClient` and call `.chat()` — provider-agnostic:
 | Peer-model consultation | `tools/mcp_tools/peer_models.py:125`, `tools/exploit_agent/reflection.py:376` | advisory only, no tool schemas |
 | Attack planning | `tools/mcp_tools/attack_modules.py:975, 1081` | create/replan attack plan |
 
-### Tool-schema conversion — Ollama-format-specific
+### Tool-schema conversion — already OpenAI-shaped
 
 `mcp_tools_to_ollama()` (`tools/mcp_session.py:911-935`) converts MCP tool
-schemas into the Ollama function-call format
-`{"type":"function","function":{...}}`. This is the one chat-adjacent piece
-that is Ollama-shaped; a non-Ollama chat provider needs its own converter or
-a normalize-inside-`ModelClient` path (see the recipe below).
+schemas into `{"type":"function","function":{name,description,parameters}}` —
+which is **byte-identical to the OpenAI tool schema** openai-oauth's
+`/v1/chat/completions` accepts. No converter is needed for the ChatGPT
+provider: the same tool list is forwarded unchanged. Tool-call *responses* come
+back with `function.arguments` as a JSON **string**; `_normalize_tool_call`
+(`tools/exploit_agent/tool_calls.py:29-38`) already JSON-parses it (malformed →
+`{}`), so the exploit loop's parsing is provider-agnostic.
+
+## ChatGPT provider (openai-oauth)
+
+The opt-in `chatgpt` provider routes chat/generate through the operator's
+ChatGPT account via a vendored copy of [`openai-oauth`](https://github.com/EvanZhouDev/openai-oauth)
+(cloned at `openai-oauth/` in the repo root). openai-oauth runs a **loopback
+OpenAI-compatible HTTP proxy** (`127.0.0.1:10531/v1`) backed by browser OAuth
+that reuses the Codex CLI credential file at `~/.codex/auth.json` (or
+`$CODEX_HOME/auth.json`). The adapter lives in `tools/providers/chatgpt_provider.py`.
+
+### Config
+
+```yaml
+models:
+  provider: chatgpt          # ollama (default) | chatgpt
+chatgpt:
+  enabled: false
+  base_url: http://127.0.0.1:10531/v1
+  host: 127.0.0.1            # loopback-only unless you explicitly change it
+  port: 10531
+  auto_start: true
+  local_repo: ./openai-oauth
+  runtime: auto              # auto = prefer bun (run from source), fall back to node+dist/cli.js
+  request_timeout_seconds: 300
+  default_model: gpt-5.2
+  models: []                 # [] = discover from /v1/models
+  context_window: 128000     # conservative; /v1/models returns no context metadata
+  login_timeout_seconds: 300
+  start_timeout_seconds: 30
+  discover_cache_seconds: 300
+  oauth_file: ""             # "" = auto-resolve ~/.codex/auth.json | $CODEX_HOME/auth.json
+```
+
+Absent `models.provider` = `ollama` (today's behavior). The `chatgpt` block is
+warn-only validated (`config_manager.py`); a missing block is harmless.
+
+### Authentication — browser OAuth, tokens never enter Python/config
+
+`ChatGptProxyManager.is_authenticated()` checks **only the existence** of
+`~/.codex/auth.json` / `$CODEX_HOME/auth.json` — it never opens, reads, or
+prints the file. Login is "Sign in with ChatGPT": the manager shells out to
+openai-oauth's own `login` CLI (run from source via `bun ./packages/openai-oauth/src/cli.ts`),
+which prints an `OpenAI OAuth login URL:` and runs an OAuth callback server on
+`localhost:1455`. The browser handles the consent; the resulting tokens are
+written by openai-oauth directly to `~/.codex/auth.json`. **No OAuth access
+token, refresh token, cookie, or `Authorization` header is ever copied into
+`config.yaml`, stored in Python memory as a configured secret, or written to
+logs.** The CLI menu launches the browser (`--open`); the WebUI backend uses
+`--no-open` to capture the URL and surface a clickable link (backend-driven —
+the browser SPA never handles raw tokens).
+
+### Proxy lifecycle — check, reuse, else start; never kill what we didn't start
+
+`ChatGptProxyManager.ensure_running()` (a singleton via `get()`, thread-locked):
+
+1. If `not is_authenticated()` → return `{ok:False, reason:"not_authenticated"}`.
+   **It never spawns when unauthenticated** (the CLI throws without a TTY).
+2. `GET {base_url}/health` (2s). If ok → `_we_started=False`, reuse the
+   pre-existing proxy. We will **not** stop a proxy we did not start.
+3. If down and `auto_start`: run openai-oauth's own `serve --host --port
+   --detach` (the `--detach` path spawns the detached worker and the CLI
+   parent exits cleanly), then poll `/health` until `start_timeout_seconds`.
+   On success `_we_started=True`. Idempotent (lock + cached `_base_url`).
+
+`shutdown()` runs openai-oauth's `stop` CLI **only when `_we_started`** — it
+POSTs to the worker's auth-token-gated control server and cleanly tears down
+(no `taskkill`, no `psutil`, no Popen-tree kill). If we reused a pre-existing
+proxy, `shutdown()` is a no-op. `atexit` registers a best-effort shutdown.
+All subprocess calls use list args (no `shell=True`), `cwd=local_repo` (handles
+paths with spaces), and `CREATE_NO_WINDOW` on Windows.
+
+> **Why not Popen+kill `serve` directly?** `serve` forks a detached grandchild
+> worker that a controller-`Popen` kill can't reach on Windows. Using
+> openai-oauth's own `--detach`/`stop` CLI machinery is the only reliable
+> cross-platform lifecycle.
+
+### Model discovery
+
+`discover_models(base_url)` does `GET /v1/models`, cached for
+`discover_cache_seconds`. On failure it returns `[]` and `build_router` falls
+back to `chatgpt.models` (if non-empty) then `chatgpt.default_model`. Each
+discovered model id becomes a `ModelClient` (alias = model id). `/v1/models`
+returns no context metadata, so `chatgpt.context_window` (default 128000) is
+the conservative source of truth for the context compactor. The Ollama
+`models.registry` is untouched and still used when `provider: ollama`.
+
+### Runtime resolution
+
+`runtime: auto` prefers `bun` on PATH (run from source: `bun ./packages/openai-oauth/src/cli.ts`);
+else `node` if on PATH **and** `dist/cli.js` exists (a prior `bun run build`);
+else a helpful `RuntimeError` pointing at `bun install` in `openai-oauth/`.
+`bun install` is the one-time setup step (best-effort in the setup scripts).
+No global Codex CLI install is required.
+
+### What stays Ollama
+
+- **Embeddings** — `tools/semantic_memory.py` still POSTs to the Ollama
+  `/api/embeddings` endpoint. Under `provider: chatgpt` the operator still
+  needs a local Ollama for `nomic-embed-text` (or it degrades to a no-op
+  gracefully, as today). ChatGPT handles chat/generate only.
+- **`session_titler`** — uses `chatgpt.default_model` under the ChatGPT
+  provider (GPT models expose no dedicated cheap title model in `/v1/models`).
+
+### Security (preserved)
+
+This is a provider integration, not an auth-scope change. No edits to
+`scope_gate.py`, `safety_reviewer.py`, Flow B safety files,
+`tools/mcp_shared._allowed_target_list`, `tools/mcp_tools/terminal._target_lock_block`,
+or `tools/exploit_agent/policy.py`. The target-IP allowlist lock, permission
+model, MCP target locks, and recon restrictions are untouched. The proxy is
+loopback-only (`127.0.0.1`) unless the operator explicitly changes
+`chatgpt.host`. See the doctor section below for the ChatGPT health checks.
 
 ## Embeddings path (current)
 
@@ -262,10 +402,18 @@ tables are in [config-reference.md](config-reference.md); the summary:
 
 | Key | Default | Consumed at |
 |---|---|---|
+| `provider` | `ollama` | `config_manager.py:get_ai_provider`, `model_router.build_router`, `run_service/service.py`, `doctor.py` |
 | `registry` | kimi/deepseek/deepseek_flash/glm/minimax | `config_manager.py:1011`, `model_router.py:70-76` |
 | `default_alias` | `glm` | `config_manager.py:1008` |
 | `info.<alias>.context_window` | per-model | `model_router.py:202-221`, `exploit_agent/context.py:63-104` |
 | `info.<alias>.label/description` | per-model | `model_router.py:130`, `api/routes/system.py:193-194` |
+
+**`chatgpt:` (top-level, opt-in)** — ChatGPT provider (see
+[ChatGPT provider](#chatgpt-provider-openai-oauth) above). Consumed at
+`config_manager.py:get_chatgpt_config`, `tools/providers/chatgpt_provider.py`,
+`model_router._build_chatgpt_router`, `doctor._check_chatgpt`,
+`api/routes/system.py` (`/providers`, `/providers/chatgpt/*`). Full key table
+in [config-reference.md §`chatgpt:`](config-reference.md).
 
 **Env vars** — `OLLAMA_API_KEY` is the one load-bearing secret; everything else
 is target-lock plumbing. Full env table in
@@ -278,71 +426,77 @@ The minimal change. Consumers stay untouched — they already receive a
 
 ### 1. Config
 
-Add a provider selector to `config.yaml`:
+The implemented shape is a `provider` selector in the `models:` block plus a
+sibling block for the new provider (mirroring how `chatgpt:` is wired):
 
 ```yaml
-ollama:
-  host: https://api.ollama.com
-  model: glm-5.2:cloud
-  api_key_env: OLLAMA_API_KEY
-  provider: ollama          # ← new: "ollama" (default) | "openai" | "anthropic" | ...
+models:
+  provider: ollama          # "ollama" (default) | "chatgpt" | <your new provider>
+  registry: { ... }         # Ollama aliases — unchanged
+  default_alias: glm
+<yourprovider>:             # new top-level block
+  enabled: false
+  host: 127.0.0.1
+  # ...provider-specific keys...
 ```
 
-Add the default + validation in `tools/config_manager.py:CONFIG_SCHEMA`
-(`config_manager.py:22-34`) and `ConfigValidator.validate()` (`config_manager.py:571-577`).
-Add an accessor (`get_ollama_provider()`), mirroring `get_ollama_host()`
-(`config_manager.py:995-996`).
+Add `"provider": "ollama"` to `CONFIG_SCHEMA["models"]` and the new top-level
+block to `CONFIG_SCHEMA` in `tools/config_manager.py` (so `KNOWN_TOP_KEYS`
+auto-includes it — no unknown-key warning). Add a warn-only validation branch
+in `ConfigValidator.validate()` (mirror the `models.provider` ∈ {ollama,chatgpt}
+check). Add accessors `get_ai_provider(config)` and `get_<provider>_config(config)`,
+mirroring `get_ollama_host()` / `get_chatgpt_config()`
+(`config_manager.py`).
 
-### 2. Factory — branch in `_build_model_client`
+### 2. Factory — inject a `raw_client` into `_build_model_client`
 
-The single edit point is `tools/model_router.py:290-377`. Either branch
-inside it or split into `_build_ollama_client` / `_build_openai_client` and
-dispatch:
+The implemented seam is an injectable `raw_client` (anything with a
+`.chat(**kwargs)` returning an Ollama-shaped response), so the whole chat
+closure (telemetry, `_normalize_chat_args`, `_stream_with_telemetry`) is reused
+unchanged. Add a `provider` param to thread into `record_model_usage`:
 
 ```python
 def _build_model_client(model_name, host=OLLAMA_CLOUD_HOST, *, alias="",
-                        request_timeout_seconds=None, provider="ollama"):
-    if provider == "ollama":
+                        request_timeout_seconds=None, raw_client=None,
+                        provider="ollama"):
+    if raw_client is None:                       # Ollama path (default, byte-identical)
         raw_client = OllamaClient(host=host, timeout=request_timeout_seconds)
-    elif provider == "openai":
-        from openai import OpenAI
-        raw_client = OpenAI(api_key=os.environ[...], base_url=host)
-    else:
-        raise ValueError(f"unknown provider: {provider}")
+    # else: your provider path — pass a client whose .chat(**raw_kwargs)
+    #       returns an Ollama-shaped dict/iterable (normalize inside it).
 
     def chat(*args, **kwargs):
         raw_kwargs = _normalize_chat_args(args, kwargs, model_name)
-        if provider == "ollama":
-            response = raw_client.chat(**raw_kwargs)           # ollama signature
-        else:
-            response = raw_client.chat.completions.create(    # openai signature
-                model=model_name, messages=raw_kwargs["messages"],
-                tools=_convert_tools_to_openai(raw_kwargs.get("tools")),
-            )
-        record_model_usage(...); return response
+        response = raw_client.chat(**raw_kwargs)   # ← your client
+        record_model_usage(..., provider=provider)
+        return response
     ...
     return ModelClient(name=model_name, chat=chat, stream=stream_chat, model_id=model_name)
 ```
 
-Thread the `provider` value from config through `build_router()`
-(`model_router.py:380-394`).
+Thread `provider` + your provider's config through `build_router()` (which
+dispatches on `provider`), and add a branch in the shared
+`build_model_client_for_provider(config, alias, ...)` helper so the fallback
+call sites pick up the new provider automatically. The ChatGPT adapter
+(`tools/providers/chatgpt_provider.py:ChatGptProxyClient`) is the reference:
+it normalizes OpenAI responses back to the Ollama shape inside `.chat()`.
 
-### 3. Tool-schema conversion
+### 3. Tool-schema conversion — usually none needed
 
-`mcp_tools_to_ollama()` (`tools/mcp_session.py:911-935`) builds
-`{"type":"function","function":{...}}` — Ollama's format. A non-Ollama
-provider either:
-- needs its own `mcp_tools_to_<provider>()` converter and a branch where the
-  tool list is assembled, **or**
-- normalize the tool schema inside the `ModelClient.chat` closure so
-  consumers keep passing the Ollama-shape and the closure adapts. The second
-  option keeps every consumer untouched.
+`mcp_tools_to_ollama()` (`tools/mcp_session.py:911-935`) already emits
+`{"type":"function","function":{name,description,parameters}}` — the OpenAI
+tool schema. Most OpenAI-compatible providers (including the ChatGPT proxy)
+accept this verbatim, so no converter is needed: forward the same tool list.
+If your provider uses a different schema, normalize it inside the
+`ModelClient.chat` closure (or your `raw_client.chat`) so consumers keep
+passing the Ollama-shape and the closure adapts — that keeps every consumer
+untouched.
 
-The response shape (tool calls, content blocks) also differs between
-providers — the `chat` closure is the natural place to normalize the
-response back into the shape `tools/exploit_agent/ollama_client.py` expects,
-so the exploit loop's parsing (`_call_ollama_with_tools`,
-`ollama_client.py:125+`) doesn't need changes.
+The response shape (tool calls, content blocks) differs between providers —
+your `raw_client.chat` is the natural place to normalize the response back
+into the shape `tools/exploit_agent/ollama_client.py` expects, so the exploit
+loop's parsing (`_call_ollama_with_tools`, `ollama_client.py:125+`) and
+`_normalize_tool_call` (JSON-string `arguments` → dict) don't need changes.
+The ChatGPT adapter does exactly this.
 
 ### 4. Authentication
 
@@ -358,8 +512,10 @@ boot.
 - Every consumer in the table above — they call `.chat()` on a `ModelClient`.
 - `ModelRouter` — it just holds `ModelClient`s; it doesn't know the provider.
 - `build_router()` — only needs the new `provider=` kwarg threaded through.
-- Telemetry — `record_model_usage` already takes a `source` field
-  (`model_router.py:322`) so provider attribution works out of the box.
+- Telemetry — `record_model_usage` takes a `provider` field
+  (`model_telemetry.py`, added to `PUBLIC_USAGE_FIELDS`) so usage is
+  provider-attributed; `read_usage_records` still filters by alias, so adding
+  the field is invisible to existing readers.
 
 ### Tests
 
@@ -434,28 +590,37 @@ See [research.md](research.md) for the full research-subsystem walkthrough.
 
 ## Gotchas
 
-- **`session_titler.py` constructs its own client.** `tools/api/session_titler.py:109, 142`
-  builds a standalone `ollama.Client(host=host, timeout=...)` with a
-  hardcoded model `TITLE_MODEL = "gemma4:31b-cloud"` (`session_titler.py:26`),
-  **not** via the router. A new chat provider needs a parallel update here,
-  or route the titler through `ModelRouter` so it inherits the provider
-  automatically.
-- **`doctor.py` does raw HTTP.** `tools/doctor.py:154, 181, 239` POSTs directly
-  to `/api/tags` and `/api/generate` via `urllib` with a manually-attached
-  `Authorization: Bearer` header to verify cloud model reachability. This
-  path is Ollama-API-specific and won't work against a non-Ollama provider's
-  health endpoint — it needs its own probe or a provider-keyed branch.
-- **`tools/api/routes/system.py:303` live-models route** also does raw HTTP
-  to `/api/tags` with a manual bearer — same caveat as doctor.
+- **`session_titler.py` constructs its own client — now provider-aware.**
+  `tools/api/session_titler.py` builds a standalone client (not via the
+  router). Under `provider: ollama` it still uses a module-level `OllamaClient`
+  (so `test_session_titler`'s `monkeypatch` stays green); under
+  `provider: chatgpt` it builds a `ModelClient` for `chatgpt.default_model`
+  via `build_model_client_for_provider` and drops Ollama-only `options`. A new
+  chat provider needs a parallel branch here, or route the titler through
+  `ModelRouter` so it inherits the provider automatically.
+- **`doctor.py` does raw HTTP — Ollama path only.** `tools/doctor.py` POSTs
+  directly to `/api/tags` and `/api/generate` via `urllib` with a
+  manually-attached `Authorization: Bearer` header to verify cloud model
+  reachability. This is Ollama-API-specific. Under `provider: chatgpt` the
+  doctor instead runs `_check_chatgpt` (source/runtime/oauth/proxy/`/v1/models`
+  sub-checks — **never reading token contents**) and the Ollama probes are
+  skipped. A new chat provider needs its own `_check_<provider>` branch.
+- **`tools/api/routes/system.py` live-models route** is now provider-aware:
+  `provider: chatgpt` probes the proxy's `/v1/models`; `provider: ollama`
+  stays on the raw-HTTP `/api/tags` path (unchanged, so `test_api_frontend`
+  stays green). New `/providers` + `/providers/chatgpt/*` routes surface
+  auth/proxy status and backend-driven login.
 - **Manual auth is only for raw-HTTP paths.** The ollama Python client
   auto-attaches `Authorization: Bearer $OLLAMA_API_KEY` for the chat path, so
   app code only attaches it manually in `semantic_memory.py:75-77`,
   `doctor.py`, and `api/routes/system.py:305`. A new chat provider using its
   own SDK handles auth at construction (see the recipe).
-- **`mcp_tools_to_ollama()` is Ollama-format-specific.** The tool-schema
+- **`mcp_tools_to_ollama()` is already OpenAI-shaped.** The tool-schema
   converter at `tools/mcp_session.py:911-935` emits
-  `{"type":"function","function":{...}}`. A non-Ollama chat provider needs its
-  own converter or an in-`ModelClient` normalization (see the chat recipe).
+  `{"type":"function","function":{...}}` — byte-identical to the OpenAI tool
+  schema, so the ChatGPT provider forwards it unchanged. A provider with a
+  different schema needs its own converter or an in-`ModelClient`/`raw_client`
+  normalization (see the chat recipe).
 - **Two flows share `db.py`/`mission.py` schemas only.** Flow A
   (`main.py`/`app.py` → `tools/exploit_agent/`) and Flow B (`cli.py` +
   root-level `agent_loop.py`/`db.py`/`mission.py`) both construct

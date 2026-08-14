@@ -329,16 +329,103 @@ Invalid → `400 invalid_secrets`.
 
 **Auth:** bearer.
 
-List configured model aliases + metadata.
+List configured model aliases + metadata (provider-aware). The `provider`
+field is the active chat/generate provider (`ollama` default or `chatgpt`);
+when `chatgpt`, a `chatgpt` block with `default_model` / `context_window` /
+`configured_models` is included.
 
 **Response:** `200`
 ```json
 {
+  "provider": "ollama",
   "default_alias": "glm",
   "registry": { /* models.registry from config */ },
-  "info": { /* models.info from config */ }
+  "info": { /* models.info from config */ },
+  "chatgpt": { "default_model": "gpt-5.2", "context_window": 128000, "configured_models": [] }
 }
 ```
+
+---
+
+### `GET /models/live`
+
+**Auth:** bearer.
+
+Probe live, reachable models. Branches on `models.provider`:
+- `ollama` — queries the Ollama daemon `/api/tags`; on failure (503) returns
+  the configured `registry` models with `source: "registry"` and an `error`.
+- `chatgpt` — **auto-starts** the local openai-oauth proxy via
+  `ChatGptProxyManager.ensure_running` (only when signed in + `auto_start`;
+  idempotent — a pre-existing proxy is reused and never stopped), then queries
+  its `/v1/models`. On failure (not signed in, proxy wouldn't start, or
+  `/v1/models` unreachable) returns a 503 with `source: "registry"` falling back
+  to `chatgpt.models` / `chatgpt.default_model` and a human `error` (e.g.
+  "Not signed in to ChatGPT — sign in via System → Models"). The WebUI model
+  picker + System → Models use this list as the available models for both
+  providers; switching provider invalidates the cache so it refetches
+  immediately.
+
+**Response:** `200` / `503` (fallback body still returned)
+```json
+{ "models": ["glm-5.2:cloud"], "source": "ollama", "error": null }
+```
+
+---
+
+### `GET /providers`
+
+**Auth:** bearer.
+
+Return the active provider plus ChatGPT auth/proxy status. **Never includes
+secrets** — `authenticated` is derived from the existence of
+`~/.codex/auth.json` (file existence only, never read).
+
+**Response:** `200`
+```json
+{
+  "provider": "chatgpt",
+  "chatgpt": {
+    "enabled": true,
+    "authenticated": true,
+    "proxy_running": true,
+    "host": "127.0.0.1",
+    "port": 10531,
+    "default_model": "gpt-5.2",
+    "we_started": true
+  }
+}
+```
+
+---
+
+### `POST /providers/chatgpt/login`
+
+**Auth:** bearer.
+
+Start a ChatGPT OAuth login (browser flow) on the server host and return the
+login URL. Tokens stay in openai-oauth's `~/.codex/auth.json` — they never
+enter the request, response, or config. The WebUI surfaces the URL as a link
+(backend-driven OAuth; the browser SPA never handles raw tokens).
+
+**Response:** `200`
+```json
+{ "ok": true, "url": "https://auth.openai.com/..." }
+```
+
+---
+
+### `POST /providers/chatgpt/proxy/start`
+
+**Auth:** bearer. Ensure the local openai-oauth proxy is running. Returns
+`{ok, base_url?, reason?}`. Never spawns when not authenticated.
+
+---
+
+### `POST /providers/chatgpt/proxy/stop`
+
+**Auth:** bearer. Stop the proxy **only if NetAttackAi started it**
+(`we_started`); otherwise a no-op that leaves an operator-started proxy alone.
+Returns `{ok, stopped}`.
 
 ---
 

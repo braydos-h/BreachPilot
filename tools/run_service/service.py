@@ -302,6 +302,81 @@ class AssessmentService:
         self._config = config
         self._c = callables or _DEFAULT_CALLABLES
 
+    # ponytail: one provider-aware router builder for both prepare/execute.
+    # The ollama path calls ``self._c.build_router`` with ONLY the original
+    # kwargs so test fakes that don't accept the new provider kwargs stay
+    # byte-compatible; the chatgpt path forwards the extra kwargs (no test
+    # exercises chatgpt with a fake router).
+    def _build_router_for_config(
+        self, config: dict[str, Any], req_timeout: float | None
+    ) -> Any:
+        from tools.config_manager import get_ai_provider, get_chatgpt_config
+
+        ollama_host = config.get("ollama", {}).get("host", "https://api.ollama.com")
+        registry = config.get("models", {}).get("registry")
+        provider = get_ai_provider(config)
+        if provider == "chatgpt":
+            return self._c.build_router(
+                registry,
+                host=ollama_host,
+                request_timeout_seconds=req_timeout,
+                provider="chatgpt",
+                chatgpt_config=get_chatgpt_config(config),
+                config=config,
+            )
+        return self._c.build_router(
+            registry, host=ollama_host, request_timeout_seconds=req_timeout
+        )
+
+    def _ensure_client_registered(
+        self,
+        router: Any,
+        config: dict[str, Any],
+        model_alias: str,
+        req_timeout: float | None,
+    ) -> None:
+        """Register a fallback ModelClient for ``model_alias`` if missing."""
+        from tools.config_manager import get_ai_provider
+
+        if model_alias in getattr(router, "_clients", {}):
+            return
+        try:
+            router.get_client(model_alias)
+            return
+        except KeyError:
+            pass
+        if get_ai_provider(config) == "chatgpt":
+            from tools.model_router import build_model_client_for_provider
+
+            router.register(model_alias, build_model_client_for_provider(
+                config, model_alias, request_timeout_seconds=req_timeout
+            ))
+        else:
+            from tools.model_router import _build_model_client
+
+            ollama_host = config.get("ollama", {}).get("host", "https://api.ollama.com")
+            router.register(
+                model_alias,
+                _build_model_client(model_alias, host=ollama_host, request_timeout_seconds=req_timeout),
+            )
+
+    def _resolve_model_alias(self, config: dict[str, Any], request: "RunRequest") -> str:
+        """Resolve the model alias/id for the active provider.
+
+        For ``chatgpt`` the alias namespace IS the GPT model id space, so an
+        absent explicit ``request.model_alias`` falls back to
+        ``chatgpt.default_model`` (NOT the ollama ``models.default_alias``,
+        which would be an ollama id like ``glm``). For ``ollama`` this is the
+        unchanged ``models.default_alias`` resolution.
+        """
+        if request.model_alias:
+            return request.model_alias
+        from tools.config_manager import get_ai_provider, get_chatgpt_config
+
+        if get_ai_provider(config) == "chatgpt":
+            return str(get_chatgpt_config(config).get("default_model") or "gpt-5.2")
+        return config.get("models", {}).get("default_alias", "glm")
+
     # ------------------------------------------------------------------
     # Prepare: resolve target/goal/settings without I/O side effects
     # ------------------------------------------------------------------
@@ -341,21 +416,9 @@ class AssessmentService:
             if (_ls_active and _long_cfg.get("request_timeout_seconds"))
             else None
         )
-        router = self._c.build_router(
-            config.get("models", {}).get("registry"),
-            host=ollama_host,
-            request_timeout_seconds=_req_timeout,
-        )
-        model_alias = request.model_alias or config.get("models", {}).get("default_alias", "glm")
-        if model_alias not in router._clients:
-            try:
-                router.get_client(model_alias)
-            except KeyError:
-                from tools.model_router import _build_model_client
-                router.register(
-                    model_alias,
-                    _build_model_client(model_alias, host=ollama_host, request_timeout_seconds=_req_timeout),
-                )
+        router = self._build_router_for_config(config, _req_timeout)
+        model_alias = self._resolve_model_alias(config, request)
+        self._ensure_client_registered(router, config, model_alias, _req_timeout)
         model_client = router.get_client(model_alias)
 
         # Resolve target (IP or domain).
@@ -543,7 +606,6 @@ class AssessmentService:
 
         # Build/refresh model client if not supplied.
         if model_client is None:
-            ollama_host = config.get("ollama", {}).get("host", "https://api.ollama.com")
             _long_cfg = config.get("long_session", {}) or {}
             _ls_active = bool(request.long_session or _long_cfg.get("enabled", False))
             _req_timeout = (
@@ -551,13 +613,12 @@ class AssessmentService:
                 if (_ls_active and _long_cfg.get("request_timeout_seconds"))
                 else None
             )
-            router = self._c.build_router(
-                config.get("models", {}).get("registry"), host=ollama_host, request_timeout_seconds=_req_timeout
-            )
-            model_alias = request.model_alias or config.get("models", {}).get("default_alias", "glm")
+            router = self._build_router_for_config(config, _req_timeout)
+            model_alias = self._resolve_model_alias(config, request)
+            self._ensure_client_registered(router, config, model_alias, _req_timeout)
             model_client = router.get_client(model_alias)
         else:
-            model_alias = request.model_alias or config.get("models", {}).get("default_alias", "glm")
+            model_alias = self._resolve_model_alias(config, request)
 
         # Resolve goal (recon-first / interactive / preset / custom).
         goal_engine = self._c.goal_engine_cls()

@@ -278,7 +278,7 @@ class RunManager:
             )
             request_dict = _request_to_dict(handle.request) if handle.request else {}
             title = await generate_session_title(
-                result_dict, request_dict, host=host,
+                result_dict, request_dict, host=host, config=self._config,
             )
             if title:
                 self._persistence.update_run_title(handle.run_id, title)

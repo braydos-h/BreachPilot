@@ -248,6 +248,80 @@ def _ping_cloud_model(host: str, spec: str, timeout: float = 45.0) -> bool:
         return False
 
 
+def _check_chatgpt(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Check the ChatGPT (openai-oauth) provider readiness.
+
+    Never reads or prints OAuth token contents — only checks file existence.
+    Sub-checks: provider configured, openai-oauth source present, runtime (bun
+    or node) on PATH, OAuth login present, proxy /health up, /v1/models
+    reachable. Aggregated ``ok`` is True only when the proxy is reachable AND
+    models list non-empty (the operator can still run with auth missing — the
+    hint tells them to sign in).
+    """
+    import shutil as _shutil
+
+    from tools.config_manager import get_chatgpt_config
+    cfg = get_chatgpt_config(config)
+    host = str(cfg.get("host") or "127.0.0.1")
+    port = int(cfg.get("port") or 10531)
+    root = f"http://{host}:{port}"
+    repo = Path(str(cfg.get("local_repo") or "./openai-oauth"))
+    if not repo.is_absolute():
+        repo = Path.cwd() / repo
+    entry = repo / "packages" / "openai-oauth" / "src" / "cli.ts"
+
+    sub: list[dict[str, Any]] = []
+    sub.append({"name": "provider_configured", "ok": bool(cfg.get("enabled")) or True})
+    sub.append({"name": "openai_oauth_source", "ok": entry.exists(), "path": str(entry)})
+    bun = _shutil.which("bun")
+    node = _shutil.which("node")
+    runtime = "bun" if bun else ("node" if node else "")
+    sub.append({"name": "runtime", "ok": bool(runtime), "runtime": runtime or "none"})
+    # Auth file existence only — NEVER read contents.
+    auth_exists = False
+    codex_home = os.environ.get("CODEX_HOME")
+    candidates = []
+    if codex_home:
+        candidates.append(os.path.join(codex_home, "auth.json"))
+    candidates.append(os.path.join(os.path.expanduser("~"), ".codex", "auth.json"))
+    auth_exists = any(os.path.exists(p) for p in candidates)
+    sub.append({"name": "oauth_login", "ok": auth_exists})
+
+    # Proxy /health + /v1/models via urllib (consistent with the rest of doctor).
+    proxy_ok = False
+    try:
+        with urllib.request.urlopen(f"{root}/health", timeout=2.0) as resp:
+            proxy_ok = resp.status < 500
+    except Exception:
+        proxy_ok = False
+    sub.append({"name": "proxy_running", "ok": proxy_ok, "url": f"{root}/health"})
+
+    models_ok = False
+    models: list[str] = []
+    if proxy_ok:
+        try:
+            req = urllib.request.Request(f"{root}/v1/models")
+            with urllib.request.urlopen(req, timeout=3.0) as resp:
+                data = json.loads(resp.read().decode("utf-8") or "{}")
+            models = [str(m.get("id", "")) for m in data.get("data", []) if m.get("id")]
+            models_ok = bool(models)
+        except Exception:
+            models_ok = False
+    sub.append({"name": "models_reachable", "ok": models_ok, "models": models})
+
+    ok = proxy_ok and models_ok
+    hint = ""
+    if not auth_exists:
+        hint = "Sign in via the interactive menu ('Sign in with ChatGPT') or `python main.py --doctor` after login."
+    elif not proxy_ok:
+        hint = f"Proxy down at {root}/health — start it via the menu or POST /api/v1/providers/chatgpt/proxy/start."
+    elif not models_ok:
+        hint = f"Proxy up but /v1/models returned no models at {root}/v1/models."
+    if not entry.exists():
+        hint = (hint + " " if hint else "") + "openai-oauth source not found — clone EvanZhouDev/openai-oauth into openai-oauth/ and run `bun install`."
+    return {"name": "chatgpt_provider", "ok": ok, "subchecks": sub, "hint": hint, "runtime": runtime, "models": models}
+
+
 def _check_workspace(workspace: Path) -> dict[str, Any]:
     try:
         workspace.mkdir(parents=True, exist_ok=True)
@@ -346,6 +420,11 @@ def run_doctor(config_path: Path) -> int:
     if os.name != "nt":
         checks.append(_check_linux_privilege())
         checks.append(_check_optional_tools(config))
+    # ChatGPT provider check — only when selected, so the default (ollama)
+    # doctor output is unchanged. Counts toward failures when provider=chatgpt.
+    from tools.config_manager import get_ai_provider
+    if get_ai_provider(config) == "chatgpt":
+        checks.append(_check_chatgpt(config))
 
     failed = 0
 
@@ -410,6 +489,14 @@ def run_doctor(config_path: Path) -> int:
                 print(f"        -> present: {', '.join(c['present'])}")
             if c.get("missing"):
                 print(f"        -> missing: {', '.join(c['missing'])} (apt/pip install as needed)")
+        if name == "chatgpt_provider":
+            for s in c.get("subchecks") or []:
+                sstatus = "OK" if s.get("ok") else "FAIL"
+                print(f"        -> [{sstatus}] {s['name']}")
+            if c.get("models"):
+                print(f"        -> discovered models: {', '.join(c['models'])[:200]}")
+            if c.get("hint"):
+                print(f"        -> {c['hint']}")
 
     print("=" * 60)
     if failed == 0:

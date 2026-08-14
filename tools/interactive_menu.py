@@ -351,37 +351,88 @@ def _edit_settings() -> None:
         style=_get_style(),
     ).unsafe_ask()
 
+    # AI provider selection (ollama | chatgpt). Defaults to ollama so an
+    # absent key (the common case) is unchanged.
+    from tools.config_manager import get_ai_provider, get_chatgpt_config
+    current_provider = get_ai_provider(config)
+    provider = questionary.select(
+        "AI provider (chat/generate):",
+        choices=[
+            Choice(title="Ollama (local or Ollama Cloud)", value="ollama"),
+            Choice(title="ChatGPT (local openai-oauth proxy)", value="chatgpt"),
+        ],
+        default=current_provider if current_provider in ("ollama", "chatgpt") else "ollama",
+        style=_get_style(),
+    ).unsafe_ask()
+
+    chatgpt_cfg = get_chatgpt_config(config)
+    if provider == "chatgpt":
+        # Auth status (bool only — never read token contents) + sign-in flow.
+        from tools.providers.chatgpt_provider import ChatGptProxyManager
+        manager = ChatGptProxyManager.get()
+        if not manager.is_authenticated(chatgpt_cfg):
+            print("\n  ChatGPT: not signed in yet.")
+            do_login = questionary.confirm(
+                "Sign in with ChatGPT now? (opens a browser OAuth flow)",
+                default=True,
+                style=_get_style(),
+            ).unsafe_ask()
+            if do_login:
+                result = manager.run_login_open(chatgpt_cfg)
+                if not result.get("ok") and result.get("reason") != "already_authenticated":
+                    print(f"\n  Login could not start: {result.get('reason')}")
+        # Ensure the proxy is running so discovery works.
+        running = manager.ensure_running(chatgpt_cfg)
+        proxy_models = []
+        if running.get("ok"):
+            proxy_models = manager.discover_models(running["base_url"], chatgpt_cfg)
+        if not proxy_models:
+            configured = list(chatgpt_cfg.get("models") or [])
+            proxy_models = configured or [str(chatgpt_cfg.get("default_model") or "gpt-5.2")]
+        default_model = str(chatgpt_cfg.get("default_model") or proxy_models[0])
+        new_model = questionary.select(
+            "ChatGPT model (discovered from /v1/models):",
+            choices=[Choice(title=m, value=m) for m in proxy_models],
+            default=default_model if default_model in proxy_models else proxy_models[0],
+            style=_get_style(),
+        ).unsafe_ask()
+        # Skip the Ollama alias picker below.
+        _skip_ollama_picker = True
+    else:
+        _skip_ollama_picker = False
+
     # Default model — surface context window + description for each alias
     # so the operator can see what they're picking instead of staring at
     # bare keys. Falls back to MODEL_INFO in tools.model_router if the
     # config doesn't have an ``info`` block yet.
-    current_model = config.get("models", {}).get("default_alias", "glm")
-    aliases = list(config.get("models", {}).get("registry", {}).keys())
-    if not aliases:
-        aliases = ["glm", "kimi", "deepseek", "deepseek_flash", "minimax"]
+    if not _skip_ollama_picker:
+        current_model = config.get("models", {}).get("default_alias", "glm")
+        aliases = list(config.get("models", {}).get("registry", {}).keys())
+        if not aliases:
+            aliases = ["glm", "kimi", "deepseek", "deepseek_flash", "minimax"]
 
-    try:
-        from tools.model_router import format_model_choice
-        _info_lookup = config.get("models", {}).get("info", {}) or {}
-    except Exception:
-        format_model_choice = None
-        _info_lookup = {}
+        try:
+            from tools.model_router import format_model_choice
+            _info_lookup = config.get("models", {}).get("info", {}) or {}
+        except Exception:
+            format_model_choice = None
+            _info_lookup = {}
 
-    def _format_choice(alias: str) -> str:
-        if format_model_choice:
-            return format_model_choice(
-                alias,
-                registry=config.get("models", {}).get("registry", {}) or {},
-                registry_info=_info_lookup,
-            )
-        return alias
+        def _format_choice(alias: str) -> str:
+            if format_model_choice:
+                return format_model_choice(
+                    alias,
+                    registry=config.get("models", {}).get("registry", {}) or {},
+                    registry_info=_info_lookup,
+                )
+            return alias
 
-    new_model = questionary.select(
-        "Default model alias (format: alias  label  (context window)  — description):",
-        choices=[Choice(title=_format_choice(a), value=a) for a in aliases],
-        default=current_model if current_model in aliases else aliases[0],
-        style=_get_style(),
-    ).unsafe_ask()
+        new_model = questionary.select(
+            "Default model alias (format: alias  label  (context window)  — description):",
+            choices=[Choice(title=_format_choice(a), value=a) for a in aliases],
+            default=current_model if current_model in aliases else aliases[0],
+            style=_get_style(),
+        ).unsafe_ask()
 
     # Stealth defaults
     stealth_cfg = config.get("stealth", {})
@@ -430,7 +481,14 @@ def _edit_settings() -> None:
 
     if save:
         config.setdefault("ollama", {})["host"] = new_host
+        config.setdefault("models", {})["provider"] = provider
         config.setdefault("models", {})["default_alias"] = new_model
+        if provider == "chatgpt":
+            # Enable the chatgpt block and remember the chosen model. Tokens
+            # are never written here — they stay in ~/.codex/auth.json.
+            cg = config.setdefault("chatgpt", {})
+            cg["enabled"] = True
+            cg["default_model"] = new_model
         config.setdefault("stealth", {})["rotate_ua"] = rotate_ua
         config.setdefault("stealth", {})["dns_over_https"] = doh
         config.setdefault("exploit", {})["workspace_dir"] = new_ws

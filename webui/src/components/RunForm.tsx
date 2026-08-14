@@ -72,9 +72,18 @@ export function RunForm({ className, onCreated }: RunFormProps) {
   const [yes, setYes] = useState(false);
   const [submitError, setSubmitError] = useState("");
 
+  const provider = models.data?.provider ?? "ollama";
+  const isChatgpt = provider === "chatgpt";
+
   useEffect(() => {
-    if (!modelAlias && models.data?.default_alias) setModelAlias(models.data.default_alias);
-  }, [models.data, modelAlias]);
+    if (!modelAlias) {
+      if (isChatgpt && models.data?.chatgpt?.default_model) {
+        setModelAlias(models.data.chatgpt.default_model);
+      } else if (!isChatgpt && models.data?.default_alias) {
+        setModelAlias(models.data.default_alias);
+      }
+    }
+  }, [models.data, modelAlias, isChatgpt]);
 
   const goalGroups = useMemo(() => {
     const groups: Record<string, GoalPreset[]> = { safe: [], gated: [], high: [] };
@@ -86,11 +95,17 @@ export function RunForm({ className, onCreated }: RunFormProps) {
 
   const modelOptions = useMemo(() => {
     const set = new Set<string>();
-    if (liveModels.data?.source === "ollama") liveModels.data.models.forEach((m) => set.add(m));
-    Object.values(models.data?.registry ?? {}).forEach((m) => set.add(String(m)));
-    if (models.data?.default_alias) set.add(models.data.default_alias);
+    if (isChatgpt) {
+      if (liveModels.data?.source === "chatgpt") liveModels.data.models.forEach((m) => set.add(m));
+      (models.data?.chatgpt?.configured_models ?? []).forEach((m) => set.add(m));
+      if (models.data?.chatgpt?.default_model) set.add(models.data.chatgpt.default_model);
+    } else {
+      if (liveModels.data?.source === "ollama") liveModels.data.models.forEach((m) => set.add(m));
+      Object.values(models.data?.registry ?? {}).forEach((m) => set.add(String(m)));
+      if (models.data?.default_alias) set.add(models.data.default_alias);
+    }
     return Array.from(set);
-  }, [liveModels.data, models.data]);
+  }, [liveModels.data, models.data, isChatgpt]);
 
   const skillsList = skills.data?.skills ?? [];
 
@@ -242,6 +257,12 @@ export function RunForm({ className, onCreated }: RunFormProps) {
                 <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-amber-200">
                   Ollama unreachable — using configured registry models.
                 </span>
+              )}
+              {liveModels.data.source === "chatgpt" && liveModels.data.error && (
+                <span className="truncate">{liveModels.data.error}</span>
+              )}
+              {liveModels.data.source === "chatgpt" && (liveModels.data.models ?? []).length === 0 && (
+                <span className="text-amber-200">ChatGPT proxy unreachable or not signed in — sign in via System → Models.</span>
               )}
               {liveModels.data.source === "ollama" && liveModels.data.error && (
                 <span className="truncate">{liveModels.data.error}</span>

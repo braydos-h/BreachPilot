@@ -87,16 +87,57 @@ export interface ModelInfo {
   [key: string]: unknown;
 }
 
+export interface ChatgptModelsBlock {
+  default_model?: string;
+  context_window?: number;
+  configured_models?: string[];
+}
+
 export interface ModelRegistryInfo {
+  /** Active chat/generate provider: "ollama" (default) or "chatgpt". */
+  provider?: string;
   default_alias: string;
   registry: Record<string, string>;
   info?: Record<string, ModelInfo>;
+  /** Present only when provider === "chatgpt". */
+  chatgpt?: ChatgptModelsBlock;
 }
 
 export interface LiveModelsResponse {
   models: string[];
-  source: "ollama" | "registry";
+  /** "ollama" | "registry" (ollama path) | "chatgpt" (chatgpt path). */
+  source: "ollama" | "registry" | "chatgpt";
   error?: string;
+}
+
+export interface ChatgptProviderStatus {
+  enabled?: boolean;
+  authenticated?: boolean;
+  proxy_running?: boolean;
+  host?: string;
+  port?: number;
+  default_model?: string;
+  we_started?: boolean;
+}
+
+export interface ProvidersResponse {
+  provider: string;
+  chatgpt?: ChatgptProviderStatus;
+}
+
+/** POST /providers/chatgpt/login → {ok, url?, reason?}. Tokens never appear here. */
+export interface ChatgptLoginResponse {
+  ok: boolean;
+  url?: string;
+  reason?: string;
+}
+
+/** POST /providers/chatgpt/proxy/{start,stop}. */
+export interface ChatgptProxyResponse {
+  ok?: boolean;
+  base_url?: string;
+  reason?: string;
+  stopped?: boolean;
 }
 
 export interface SkillSummary {

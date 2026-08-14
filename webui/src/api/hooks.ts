@@ -14,6 +14,8 @@ import type {
   ArtifactListResponse,
   AuditResponse,
   Capabilities,
+  ChatgptLoginResponse,
+  ChatgptProxyResponse,
   ConfigPatchResponse,
   ConfigSchema,
   CampaignStateResponse,
@@ -31,6 +33,7 @@ import type {
   LootResponse,
   ModelRegistryInfo,
   PluginSummary,
+  ProvidersResponse,
   ResumeRunResponse,
   RunCreateRequest,
   RunDetail,
@@ -57,6 +60,7 @@ export const queryKeys = {
   secrets: ["secrets"] as const,
   models: ["models"] as const,
   modelsLive: ["models", "live"] as const,
+  providers: ["providers"] as const,
   plugins: ["plugins"] as const,
   goals: ["goals"] as const,
   skills: ["skills"] as const,
@@ -130,6 +134,11 @@ export function usePatchConfig() {
       apiFetch<ConfigPatchResponse>("/config", { method: "PATCH", body: patch }),
     onSuccess: (data) => {
       qc.setQueryData<Record<string, unknown>>(queryKeys.config, data.config);
+      // Any config change can affect models (ollama.host, models.registry, chatgpt.*) or
+      // provider status, so refetch those immediately instead of waiting on staleTime.
+      void qc.invalidateQueries({ queryKey: queryKeys.models });
+      void qc.invalidateQueries({ queryKey: queryKeys.modelsLive });
+      void qc.invalidateQueries({ queryKey: queryKeys.providers });
     },
     onError: (error) => {
       if (error.isAuth) clearStoredToken();
@@ -181,6 +190,49 @@ export function useLiveModels() {
     },
     ...defaultQueryOptions,
     staleTime: 30_000,
+  });
+}
+
+export function useProviders() {
+  return useQuery<ProvidersResponse>({
+    queryKey: queryKeys.providers,
+    queryFn: () => apiFetch<ProvidersResponse>("/providers"),
+    ...defaultQueryOptions,
+    staleTime: 15_000,
+  });
+}
+
+/** Invalidate providers + models caches (after login/proxy changes). */
+export function useInvalidateProviders() {
+  const qc = useQueryClient();
+  return useCallback(() => {
+    qc.invalidateQueries({ queryKey: queryKeys.providers });
+    qc.invalidateQueries({ queryKey: queryKeys.modelsLive });
+    qc.invalidateQueries({ queryKey: queryKeys.models });
+  }, [qc]);
+}
+
+export function useChatgptLogin() {
+  const invalidate = useInvalidateProviders();
+  return useMutation<ChatgptLoginResponse, ApiError, void>({
+    mutationFn: () => apiFetch<ChatgptLoginResponse>("/providers/chatgpt/login", { method: "POST", body: {} }),
+    onSettled: invalidate,
+  });
+}
+
+export function useChatgptProxyStart() {
+  const invalidate = useInvalidateProviders();
+  return useMutation<ChatgptProxyResponse, ApiError, void>({
+    mutationFn: () => apiFetch<ChatgptProxyResponse>("/providers/chatgpt/proxy/start", { method: "POST", body: {} }),
+    onSettled: invalidate,
+  });
+}
+
+export function useChatgptProxyStop() {
+  const invalidate = useInvalidateProviders();
+  return useMutation<ChatgptProxyResponse, ApiError, void>({
+    mutationFn: () => apiFetch<ChatgptProxyResponse>("/providers/chatgpt/proxy/stop", { method: "POST", body: {} }),
+    onSettled: invalidate,
   });
 }
 

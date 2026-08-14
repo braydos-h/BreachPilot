@@ -155,9 +155,18 @@ def _get_model_router_impl(config: dict[str, Any] | None) -> Any | None:
         _model_router_init_attempted = True
         try:
             from tools.model_router import build_router
+            from tools.config_manager import get_ai_provider, get_chatgpt_config
             registry = (config or {}).get("models", {}).get("registry", {})
             host = (config or {}).get("ollama", {}).get("host", "http://localhost:11434")
-            _model_router_cache = build_router(registry=registry if registry else None, host=str(host))
+            provider = get_ai_provider(config)
+            kwargs: dict[str, Any] = {"host": str(host)}
+            if registry:
+                kwargs["registry"] = registry
+            if provider == "chatgpt":
+                kwargs["provider"] = "chatgpt"
+                kwargs["chatgpt_config"] = get_chatgpt_config(config)
+                kwargs["config"] = config
+            _model_router_cache = build_router(**kwargs)
             return _model_router_cache
         except ImportError:
             return None

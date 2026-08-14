@@ -251,6 +251,7 @@ def _stream_with_telemetry(
     started_monotonic: float,
     context_window_tokens: int | None,
     source: str,
+    provider: str = "ollama",
 ):
     last_chunk: Any | None = None
     error = ""
@@ -274,6 +275,7 @@ def _stream_with_telemetry(
             context_window_tokens=context_window_tokens,
             source=source,
             error=error,
+            provider=provider,
         )
 
 
@@ -293,8 +295,10 @@ def _build_model_client(
     *,
     alias: str = "",
     request_timeout_seconds: float | None = None,
+    raw_client: Any = None,
+    provider: str = "ollama",
 ) -> ModelClient:
-    """Factory to build a ModelClient for an Ollama model.
+    """Factory to build a ModelClient for a chat/generate backend.
 
     Cloud-only by default: ``host`` is ``https://api.ollama.com`` unless
     overridden by config or a caller. The ollama Python client reads
@@ -302,18 +306,27 @@ def _build_model_client(
     <key>`` to every request, so a host swap is sufficient — no extra auth
     plumbing. Override ``ollama.host`` in config.yaml to point at a local
     daemon if you have one; the same code path runs against it.
-    """
-    if OllamaClient is None:
-        raise RuntimeError("ollama package not installed")
 
-    # ponytail: pass timeout straight to the httpx-backed Ollama client. A hung
-    # generation raises httpx.ReadTimeout, already matched by
-    # exploit_agent._is_retryable_error → 3x retry → synthetic error dict, so
-    # the attack loop survives without a new error path. None = httpx default.
-    if request_timeout_seconds is not None:
-        raw_client = OllamaClient(host=host, timeout=request_timeout_seconds)
-    else:
-        raw_client = OllamaClient(host=host)
+    Provider seam: pass ``raw_client`` (any object with a ``chat(**kwargs)``
+    method returning an Ollama-shaped dict / stream iterable) to route through
+    a non-Ollama backend. When ``raw_client is None`` the Ollama client is
+    constructed exactly as before — byte-identical, so every test that
+    monkeypatches ``model_router.OllamaClient`` keeps working. ``provider`` is
+    threaded into telemetry so records attribute by provider (additive; default
+    ``"ollama"`` keeps old records valid).
+    """
+    if raw_client is None:
+        if OllamaClient is None:
+            raise RuntimeError("ollama package not installed")
+
+        # ponytail: pass timeout straight to the httpx-backed Ollama client. A hung
+        # generation raises httpx.ReadTimeout, already matched by
+        # exploit_agent._is_retryable_error → 3x retry → synthetic error dict, so
+        # the attack loop survives without a new error path. None = httpx default.
+        if request_timeout_seconds is not None:
+            raw_client = OllamaClient(host=host, timeout=request_timeout_seconds)
+        else:
+            raw_client = OllamaClient(host=host)
 
     telemetry_alias = alias or model_name
     context_window_tokens = _context_window_for(telemetry_alias, model_name)
@@ -338,6 +351,7 @@ def _build_model_client(
                     started_monotonic=started_monotonic,
                     context_window_tokens=context_window_tokens,
                     source=source,
+                    provider=provider,
                 )
             record_model_usage(
                 alias=telemetry_alias,
@@ -350,6 +364,7 @@ def _build_model_client(
                 wall_duration_seconds=time.monotonic() - started_monotonic,
                 context_window_tokens=context_window_tokens,
                 source=source,
+                provider=provider,
             )
             return response
         except Exception as exc:
@@ -366,6 +381,7 @@ def _build_model_client(
                 context_window_tokens=context_window_tokens,
                 source=source,
                 error=error,
+                provider=provider,
             )
             raise
 
@@ -382,8 +398,27 @@ def build_router(
     host: str = OLLAMA_CLOUD_HOST,
     *,
     request_timeout_seconds: float | None = None,
+    provider: str = "ollama",
+    chatgpt_config: Mapping[str, Any] | None = None,
+    config: Mapping[str, Any] | None = None,
 ) -> ModelRouter:
-    """Build and return a router from alias -> Ollama model name."""
+    """Build and return a router from alias -> model name.
+
+    ``provider`` selects the backend. ``"ollama"`` (default) is the unchanged
+    per-registry-alias path. ``"chatgpt"`` routes through the local
+    openai-oauth proxy (``127.0.0.1:10531/v1``): it ensures the proxy is
+    running, discovers models from ``/v1/models`` (falling back to the
+    ``chatgpt.default_model`` / configured ``chatgpt.models`` list), and
+    registers one ``ModelClient`` per discovered GPT model — each backed by a
+    single shared ``ChatGptProxyClient``. ``alias`` == ``model_id`` for the
+    ChatGPT path (there is no separate alias namespace).
+    """
+    if provider == "chatgpt":
+        return _build_chatgpt_router(
+            chatgpt_config or {},
+            request_timeout_seconds=request_timeout_seconds,
+        )
+
     registry = registry or DEFAULT_MODEL_REGISTRY
     router = ModelRouter()
     for alias, model_name in registry.items():
@@ -392,3 +427,108 @@ def build_router(
             request_timeout_seconds=request_timeout_seconds,
         ))
     return router
+
+
+def _build_chatgpt_router(
+    chatgpt_config: Mapping[str, Any],
+    *,
+    request_timeout_seconds: float | None = None,
+) -> ModelRouter:
+    """Build a router backed by the local openai-oauth ChatGPT proxy."""
+    from tools.providers.chatgpt_provider import ChatGptProxyClient, ChatGptProxyManager
+
+    cfg = dict(chatgpt_config)
+    manager = ChatGptProxyManager.get()
+    running = manager.ensure_running(cfg)
+    if not running.get("ok"):
+        reason = running.get("reason") or "unavailable"
+        raise RuntimeError(
+            f"ChatGPT provider unavailable: {reason}. "
+            f"Run 'python main.py --doctor' or sign in via the interactive menu."
+        )
+    base_url = running["base_url"]
+
+    # Resolve the model list: explicit config override → discover → fallback.
+    configured = cfg.get("models") or []
+    if configured:
+        model_ids = [str(m) for m in configured if str(m).strip()]
+    else:
+        model_ids = manager.discover_models(base_url, cfg)
+    if not model_ids:
+        default_model = str(cfg.get("default_model") or "gpt-5.2")
+        model_ids = [default_model]
+
+    timeout = cfg.get("request_timeout_seconds")
+    client_timeout = request_timeout_seconds
+    if client_timeout is None and timeout is not None:
+        try:
+            client_timeout = float(timeout)
+        except (TypeError, ValueError):
+            client_timeout = None
+    shared = ChatGptProxyClient(base_url, timeout=client_timeout)
+
+    router = ModelRouter()
+    for model_id in model_ids:
+        router.register(
+            model_id,
+            _build_model_client(
+                model_id,
+                alias=model_id,
+                request_timeout_seconds=client_timeout,
+                raw_client=shared,
+                provider="chatgpt",
+            ),
+        )
+    return router
+
+
+def build_model_client_for_provider(
+    config: Mapping[str, Any] | None,
+    alias: str,
+    *,
+    request_timeout_seconds: float | None = None,
+) -> ModelClient:
+    """Build a single ``ModelClient`` for ``alias`` under the configured provider.
+
+    Root-cause replacement for the duplicated ``_build_model_client(alias,
+    host=...)`` fallback call sites: reads ``models.provider`` +
+    ``ollama.host`` / the ``chatgpt`` block from config and builds the right
+    client. For ``ollama`` this is byte-identical to the old direct call. For
+    ``chatgpt`` it ensures the proxy and wraps a ``ChatGptProxyClient``.
+    """
+    cfg = config or {}
+    from tools.config_manager import get_ai_provider, get_chatgpt_config, get_ollama_host
+
+    provider = get_ai_provider(cfg)
+    if provider == "chatgpt":
+        chatgpt_config = get_chatgpt_config(cfg)
+        from tools.providers.chatgpt_provider import ChatGptProxyClient, ChatGptProxyManager
+
+        manager = ChatGptProxyManager.get()
+        running = manager.ensure_running(chatgpt_config)
+        if not running.get("ok"):
+            raise RuntimeError(
+                f"ChatGPT provider unavailable: {running.get('reason') or 'unavailable'}."
+            )
+        timeout = request_timeout_seconds
+        if timeout is None and chatgpt_config.get("request_timeout_seconds") is not None:
+            try:
+                timeout = float(chatgpt_config["request_timeout_seconds"])
+            except (TypeError, ValueError):
+                timeout = None
+        shared = ChatGptProxyClient(running["base_url"], timeout=timeout)
+        return _build_model_client(
+            alias,
+            alias=alias,
+            request_timeout_seconds=timeout,
+            raw_client=shared,
+            provider="chatgpt",
+        )
+
+    host = get_ollama_host(cfg)
+    return _build_model_client(
+        alias,
+        host=host,
+        alias=alias,
+        request_timeout_seconds=request_timeout_seconds,
+    )

@@ -1,18 +1,10 @@
 ollama:
-  # ponytail: cloud-only by default. Chat/generate go to Ollama Cloud; the
-  # ollama Python client auto-attaches ``Authorization: Bearer $OLLAMA_API_KEY``
-  # to every request, so a host swap is the whole wiring. Set OLLAMA_API_KEY
-  # in your environment (e.g. .env, gitignored) or the cloud host will 401.
-  # Override ``host`` to point at a local daemon if you have one.
   host: https://api.ollama.com
   model: glm-5.2:cloud
   api_key_env: OLLAMA_API_KEY
-  # ponytail: embeddings stay local — nomic-embed-text is a small model that
-  # runs fine on CPU/local GPU and avoids paying per-call cloud pricing for
-  # 138-skill catalog embeds + every memory/lesson write. Falls back to
-  # ``host`` above when absent (so a cloud-only install still works).
   embed_host: http://localhost:11434
 models:
+  provider: chatgpt
   registry:
     kimi: kimi-k2.6:cloud
     deepseek: deepseek-v4-pro:cloud
@@ -24,41 +16,31 @@ models:
     kimi:
       label: Kimi K2.6
       context_window: 256000
-      description: "Moonshot Kimi K2.6 \u2014 strong long-form reasoning, 256K context."
+      description: Moonshot Kimi K2.6 — strong long-form reasoning, 256K context.
     deepseek:
       label: DeepSeek V4 Pro
       context_window: 1000000
-      description: "DeepSeek V4 Pro \u2014 1M token context, deep code reasoning."
+      description: DeepSeek V4 Pro — 1M token context, deep code reasoning.
     deepseek_flash:
       label: DeepSeek V4 Flash
       context_window: 1000000
-      description: "DeepSeek V4 Flash - 1M token context, fast DeepSeek option for lower-latency work."
+      description: DeepSeek V4 Flash - 1M token context, fast DeepSeek option for
+        lower-latency work.
     glm:
       label: GLM-5.2
       context_window: 976000
-      description: "Zhipu GLM-5.2 \u2014 976K context, the smartest/newest GLM for\
-        \ deep reasoning + coding."
+      description: Zhipu GLM-5.2 — 976K context, the smartest/newest GLM for deep
+        reasoning + coding.
     minimax:
       label: Minimax M3
       context_window: 512000
-      description: "Minimax M3 (cloud) \u2014 512K context, balanced coding + reasoning."
+      description: Minimax M3 (cloud) — 512K context, balanced coding + reasoning.
 mcp:
   default_transport: stdio
-# Engine advisory MCP server (``mcp_engine_server.py``). Exposes the engine's
-# read-only surface (skill search, NVD CVE lookup, run history) to foreign AI
-# assistants (Claude Desktop, Cursor) as MCP tools. No target touching, no
-# terminal, no exploit surface — the target-IP allowlist lock is not in scope.
-# The server is runnable via CLI regardless of this block; this only provides
-# defaults for the CLI entrypoint. HTTP transport reuses the shared loopback
-# gate + optional ``MCP_HTTP_TOKEN`` bearer auth from tools.mcp_shared.
 engine_mcp:
   enabled: true
-  host: 127.0.0.1          # loopback-only in v1; no public-bind override
+  host: 127.0.0.1
   port: 8002
-# Linux-friendly nmap invocation. `path` overrides the binary when nmap is not
-# on PATH; `sudo` runs nmap via `sudo -n` so root-only scans (-O, -sS) work
-# from a non-root shell; `priv_fallback` auto-downgrades those flags instead of
-# failing when unprivileged and sudo is off. No-op on Windows.
 nmap:
   path: nmap
   sudo: false
@@ -66,13 +48,6 @@ nmap:
 exploit:
   enabled: true
   mode: standalone
-  # LAB BUILD: explicit full_access auto-approves every action in either run
-  # mode; the only remaining gate is the target-IP lock
-  # (require_explicit_allowlist unions the runtime --target via EXPLOIT_TARGET
-  # env, see tools/mcp_shared._check_allowlist). Set permission: read_only for
-  # propose-only recon. Operator-box filesystem is
-  # unrestricted (no workspace path-traversal protection) — only run this on a
-  # throwaway lab VM.
   permission: full_access
   attack_mode: true
   terminal: visible
@@ -89,8 +64,6 @@ exploit:
   loot_workspace: exploit_workspace/loot
   attacker_os: auto
   searchsploit_path: searchsploit
-  # Linux: shell used by run_exploit_terminal (default bash; cmd.exe on Windows).
-  # msfconsole_path overrides the Metasploit console binary when not on PATH.
   shell: bash
   msfconsole_path: msfconsole
   web_search: true
@@ -98,36 +71,10 @@ exploit:
   cache_ttl_seconds: 3600
   cache_max_entries: 50
   require_explicit_allowlist: true
-  # Targets entered through Start New Session are saved here automatically
-  # (IPs, domains, and *.wildcard domains are all accepted). The runtime
-  # --target is also injected via EXPLOIT_TARGET and unioned at check time
-  # (tools/mcp_shared._check_allowlist). For a domain --target, the resolved
-  # IP is added via EXPLOIT_TARGET_IP and the domain via EXPLOIT_TARGET_DOMAIN;
-  # discovered subdomains are added via EXPLOIT_DISCOVERED_TARGETS. Add extra
-  # operator-authorized hosts here (e.g. a callback/C2 listener) to permit
-  # them as well. Domains and *.example.com wildcards are matched by
-  # is_target_in_allowlist.
   allowed_targets:
-    - 127.0.0.1
-  # H10: Flow A (exploit engine) reads its scope rules HERE, not from
-  # mission.yaml (which is Flow B's config). Previously these keys were absent,
-  # so _build_exploit_scope_gate in main.py always passed empty lists and the
-  # mission deny/forbidden rules never applied on the full_access auto-approve
-  # path. Listed categories are matched against the tool->action-category map in
-  # tools/exploit_agent.py::_TOOL_ACTION_CATEGORY. Defaults are intentionally
-  # empty: the hard-forbidden actions (denial_of_service, destructive_exploit,
-  # social_engineering, physical_attack, malware) are already always blocked by
-  # scope_gate._HARD_FORBIDDEN_ACTIONS, and the exploit engine's offensive tools
-  # (dump_credentials, lateral_exec, ...) are available in full_access by
-  # design. Add a category here to opt OUT of it, e.g.:
-  #   forbidden_actions: ["credential_dumping", "lateral_movement"]
+  - 127.0.0.1
   disallowed_assets: []
   forbidden_actions: []
-  # Active Directory / Kerberos post-exploit suite (Phase 1). Opt-in: the
-  # master `enabled` AND the per-tool flag must both be true, or the tool
-  # returns BLOCKED: ... disabled before the allowlist gate. smb_signing_check
-  # is detection-only and defaults ON. Every tool is target-IP-locked
-  # (@require_allowlist + check_targets_allowlist for any off-target DC).
   ad_kerberos:
     enabled: false
     asrep_roast: false
@@ -136,18 +83,10 @@ exploit:
     bloodhound: false
     responder_relay: false
     golden_ticket: false
-    smb_signing_check: true   # detection-only
-  # Phase 3: MSF recipe dispatch + handler orchestration. Opt-in. When
-  # recipes_enabled is false, msf_run_recipe returns BLOCKED before dispatch.
-  # auto_local_exploit_suggester adds an advisory LocalExploitSuggester task to
-  # the orchestrator privesc phase (suggestion only -- Path B has no MSF
-  # session id, so it never fabricates one).
+    smb_signing_check: true
   msf:
     recipes_enabled: false
     auto_local_exploit_suggester: false
-  # Phase 3: extended C2 listener types for start_listener. Opt-in (default
-  # OFF); legacy netcat/socat/http types stay ungated. socks_pivot upstream is
-  # allowlist-gated at the tool layer (pivot lock).
   listeners:
     tls: false
     dns: false
@@ -168,13 +107,10 @@ cve_lookup:
   circuit_failure_threshold: 5
   circuit_recovery_timeout: 60.0
   search_rate_limit_per_minute: 10
-  # Phase 2: EPSS + KEV vuln-intel enrichment (opt-in, default OFF).
   epss_enabled: false
   kev_enabled: false
   kev_cache_ttl_seconds: 86400
-  kev_cache_path: ""               # "" = exploit_workspace/.kev_catalog.json
-  # GitHub Search API token for cve_to_poc (optional). Absent = unauth 60/hr
-  # rate limit; cve_to_poc still works (falls through to searchsploit/NVD).
+  kev_cache_path: ''
   github:
     token_env: GITHUB_TOKEN
 research:
@@ -202,7 +138,7 @@ research:
     region: us-en
   assistant:
     enabled: true
-    model_alias: ""             # Empty = use the active main model
+    model_alias: ''
     automatic: true
     failure_trigger: 2
     max_auto_consultations: 4
@@ -221,50 +157,30 @@ swarm:
   - critic
   - reflection
   max_parallel_agents: 3
-  # Parallel sub-agents (Phase 3/4). parallel_enabled gates BOTH
-  # route_parallel (batched same-phase dispatch) AND the spawn_subagent MCP
-  # tool (the main AI's delegation surface). Off by default — opt in via
-  # --parallel-swarm or by flipping this. Recon-first: recon + vuln-research
-  # phases parallelize by default; exploit/post_exploit stay sequential
-  # unless exploit_parallel: true.
   parallel_enabled: false
   per_phase_concurrency: 3
   exploit_parallel: false
   subagent_timeout_seconds: 600
-
-# Autonomous orchestrator Phase 2 capabilities — opt-in. All keys default OFF / 0
-# so default behavior is unchanged; the new attack-path capabilities must be
-# explicitly enabled per the CLAUDE.md opt-in rule. The orchestrator reads these
-# from mission_config, not ExploitSettings.
 autonomous:
-  persistence_phase: false        # Phase 2.2: run PERSISTENCE phase after access achieved
-  checkpoint_every: 0             # Phase 2.3: save attack_states.json every N completed targets (0 = off)
-  adaptive_replan: false          # Phase 2.4: per-target multi-round replan + vuln-chaining
-  max_cycles: 100                 # round cap when adaptive_replan is on
-  max_pivot_depth: 0              # already consumed by the orchestrator (single-IP lock default)
-
-# Recon coverage & depth (Phase 3). Gates the additive enumerators (TLS/SSL
-# cert parse, SMTP/DB banner parse, web spider, passive OSINT + IPv6 AAAA
-# lookup) and the UDP top-ports scan. The TCP scan_host path is unchanged
-# regardless. IPv6 stays PASSIVE-ONLY (AAAA lookup) -- the target-IP allowlist
-# lock is untouched.
+  persistence_phase: false
+  checkpoint_every: 0
+  adaptive_replan: false
+  max_cycles: 100
+  max_pivot_depth: 0
 recon:
-  extended_enumerators: true      # enable TLS/SMTP/DB/spider/OSINT additive enumerators
-  udp_top_ports: 100              # nmap -sU --top-ports N for run_udp_recon / recon_udp
-  shodan_api_key: ""              # optional Shodan key for passive OSINT; "" = disabled (falls back to $SHODAN_API_KEY)
-  # Domain targeting (Phase 4). When the operator gives a domain --target,
-  # the agent resolves it to an IP, carries both, and can expand the attack
-  # surface via subdomain enumeration. Each discovered subdomain is
-  # auto-authorized (added to EXPLOIT_DISCOVERED_TARGETS) so the agent can
-  # attack it without a per-host config edit -- the target-IP lock is
-  # preserved (each host is still gated through is_target_in_allowlist).
+  extended_enumerators: true
+  udp_top_ports: 100
+  shodan_api_key: ''
   domain_resolution:
-    enabled: true                  # accept domain --target and resolve at boot
-    max_subdomains: 500            # cap on enumerate_subdomains results
-    subdomain_sources: [crt_sh, dns_bruteforce, subfinder, amass]
-    dns_zone_transfer: false       # AXFR attempt in dns_recon (opt-in)
-    whois_enabled: true            # domain_whois tool (graceful if whois absent)
-  # Extended depth enumerators (Phase 2). Default OFF; each independently gated.
+    enabled: true
+    max_subdomains: 500
+    subdomain_sources:
+    - crt_sh
+    - dns_bruteforce
+    - subfinder
+    - amass
+    dns_zone_transfer: false
+    whois_enabled: true
   subdomain_enum: false
   vhost_discovery: false
   waf_fingerprint: false
@@ -272,58 +188,33 @@ recon:
   cloud_metadata_probe: false
   snmp_enum: false
   dns_zone_transfer: false
-
-# OPSEC / detection-evasion (Phase 6.2). The agent's OWN operational hardening
-# (pacing/jitter/UA-rotation/DNS-over-HTTPS/quiet-commands) so an authorized
-# assessment can simulate a low-noise adversary, plus detection-coverage testing
-# (canary probes + read-only footprint summary). NOT active evasion of the
-# target's defenses -- no log-clearing/timestomping/EDR defeat; the append-only
-# tamper-evident audit chain is untouched. Defaults OFF (opt-in); when enabled,
-# AggressionLevel.STEALTH becomes load-bearing.
 opsec:
-  enabled: false                  # master switch (opt-in)
-  ua_rotation: false              # rotate User-Agent across HTTP egress
-  doh: false                      # resolve via DNS-over-HTTPS
-  doh_provider: cloudflare        # cloudflare | google
-  min_gap_seconds: 0.0            # base pacing gap between actions
-  jitter_seconds: 0.0             # +/- random jitter on the gap
-  rate_per_minute: 0              # 0 = no token-bucket cap
-  quiet_command_patterns: []      # substrings to refuse when enabled
-  noise_budget: 0                 # max noisy commands allowed (0 = unlimited)
-  # Target-aware OPSEC: private/local target IPs (RFC1918/loopback/link-local/
-  # reserved/ULA, or anything in local_cidrs) -> OPSEC forced OFF; the operator
-  # owns the box so the AI moves freely with no pacing/UA-rotation/quiet-block.
-  # Public-routable targets keep OPSEC ON (pacing/UA/quiet-commands) and the AI
-  # retains full attack autonomy (public_autonomy). Default true.
-  local_targets_off: true         # local/private target -> OPSEC off; public -> on
-  local_cidrs: []                 # extra CIDRs/IPs treated as local (e.g. ["10.99.0.0/16"])
-  public_autonomy: true           # public target -> AI chooses its own attacks
-
-# Eval/benchmark harness config. The --eval CLI flag still works when
-# ``enabled`` is false, but this block gates the defaults used by the eval
-# runner (output location, round budget, report formats).
+  enabled: false
+  ua_rotation: false
+  doh: false
+  doh_provider: cloudflare
+  min_gap_seconds: 0.0
+  jitter_seconds: 0.0
+  rate_per_minute: 0
+  quiet_command_patterns: []
+  noise_budget: 0
+  local_targets_off: true
+  local_cidrs: []
+  public_autonomy: true
 eval:
-  enabled: true                   # eval/benchmark harness enable (the --eval flag still works when false, but the config gates defaults)
-  output_dir: reports/eval        # where reports/eval/<run_id>/ trees are written
-  max_rounds: 30                  # attack_max_rounds for an eval run
-  write_markdown: true            # emit eval_report.md alongside the JSON
-  write_html: true                # emit eval_report.html alongside the JSON
-
-# Long-session mode — opt-in via ``--long-session`` flag or ``enabled: true``.
-# Lets a multi-hour attack run actually sustain itself: sends the model's real
-# context window (num_ctx) to Ollama, bounds each LLM call with an httpx
-# timeout, raises the round/command/duration budgets, lifts the 300s swarm cap,
-# and checkpoints the compacted conversation so a crashed run resumes with real
-# context instead of a 300-char-condensed snippet. Absent/false = current
-# behavior; first-run defaults are unchanged.
+  enabled: true
+  output_dir: reports/eval
+  max_rounds: 30
+  write_markdown: true
+  write_html: true
 long_session:
   enabled: true
-  request_timeout_seconds: 600        # per-LLM-call httpx timeout (bounds hung generations)
-  swarm_session_timeout_minutes: 30   # overrides the 300s swarm cap when long-session active
+  request_timeout_seconds: 600
+  swarm_session_timeout_minutes: 30
   attack_max_rounds: 200
   attack_max_commands: 1000
-  attack_max_duration_minutes: 720    # 12h wall clock
-  persist_messages: true             # checkpoint compacted messages to session_state.json
+  attack_max_duration_minutes: 720
+  persist_messages: true
 reasoning:
   chain_of_thought: true
   reflection_every_n_actions: 10
@@ -331,17 +222,7 @@ reasoning:
   observer_mode: hybrid
   ultrathink: true
   ultrathink_reflection_interval: 3
-  # LLM-driven reflection inside run_exploit_agent (Phase 1b). Default off so
-  # the hot loop makes no extra LLM calls unless explicitly opted in. When off,
-  # the heuristic _generate_reflection is used. Advisory-only; never feeds the
-  # Bayesian ExperienceStore.
   llm_reflection: true
-  # Phase 1c: auto-trigger consult_peer_models after N consecutive exploit
-  # failures (in-process, advisory-only — peers have no tool schemas). 0
-  # disables the auto-consult (manual consult_peer_models still works). The
-  # shared per-run max_consultations budget (multi_model.max_consultations) is
-  # honored via the single _consultation_count counter. No effect when
-  # multi_model.enabled is false or permission is read_only (nothing executes).
   peer_consult_on_failure_threshold: 3
 memory:
   semantic_enabled: true
@@ -352,16 +233,10 @@ memory:
   experience_min_samples: 3
   experience_time_decay_days: 90
 outcome_judgment:
-  # Only materially different checks count. At least 2 prevents one failed
-  # command from exhausting a hypothesis.
   max_inconclusive_attempts: 3
   confirmation_threshold: 0.75
   refutation_threshold: 0.75
   min_evidence_references: 1
-  # Phase 1.2: wire OutcomeJudge into Flow A (exploit engine). Default OFF --
-  # first-run behavior is unchanged (shallow exit_code==0 success). When true,
-  # the exploit loop runs classify_exploit_result + OutcomeJudge.judge and uses
-  # the evidence-grounded HypothesisStatus to override the success flag.
   flow_a: true
 adaptive_exploits:
   enabled: true
@@ -420,19 +295,14 @@ skills:
   diversity_penalty: 12
   include_metadata: false
   allow_reference_listing: true
-
-# Local WebUI API daemon (``--demon`` / ``--daemon``). V1 is loopback-only;
-# there is no public-bind override. The bearer token is generated into
-# ``token_file`` (gitignored) on first boot, or overridden via the
-# NETATTACKAI_API_TOKEN environment variable. ``allowed_origins`` permits extra
-# loopback origins for CORS/WS (in addition to localhost/127.0.0.1); ``null`` and
-# non-loopback origins are always rejected.
 api:
   enabled: true
-  host: 127.0.0.1          # loopback-only in v1; no public-bind override
+  host: 127.0.0.1
   port: 8765
-  token_file: .webui_secret_key   # already gitignored
-  allowed_origins: []      # extra loopback origins; [] = localhost/127.0.0.1 only
-  event_buffer_size: 256   # in-memory ring buffer per run for live WS subscribers
-  shutdown_timeout_seconds: 15   # graceful shutdown wait before forcing child cleanup
-  serve_webui: false      # mount the built webui/dist/ at / when true (--web sets this in memory)
+  token_file: .webui_secret_key
+  allowed_origins: []
+  event_buffer_size: 256
+  shutdown_timeout_seconds: 15
+  serve_webui: true
+chatgpt:
+  enabled: true

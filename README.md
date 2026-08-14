@@ -117,6 +117,10 @@ For the full architecture, Flow A/B split, and module map, see
   http://localhost:11434`)
 - Optional, Linux full arsenal: Metasploit, searchsploit, impacket, tmux
 - For the WebUI: Node.js + npm (only on first `--web` run)
+- **Optional — ChatGPT provider:** [bun](https://bun.sh) ≥ 1.3.11 to run the
+  vendored `openai-oauth/` proxy from source (only when `models.provider:
+  chatgpt`). A local Ollama is still required for embeddings even under the
+  ChatGPT provider. See [docs/providers.md](docs/providers.md).
 
 ### 2. Install
 
@@ -137,6 +141,17 @@ python -m pip install -r requirements.txt
 
 Linux nmap `-O`/`-sS` need root: set `nmap.sudo: true` (uses `sudo -n`) or run
 as root — otherwise `nmap.priv_fallback` (default true) auto-downgrades.
+
+**Optional — ChatGPT provider one-time setup** (only if you'll set
+`models.provider: chatgpt`):
+
+```bash
+cd openai-oauth && bun install && cd ..   # bun@1.3.11; makes ./src/cli.ts runnable
+```
+
+`install.bat` / `install.sh` / `scripts/setup-linux.sh` run this best-effort
+when `bun` is on PATH — it never aborts the install if bun is missing, since
+ChatGPT is opt-in. No global Codex CLI install is required.
 
 ### 3. Configure API keys (before `--doctor`)
 
@@ -159,10 +174,17 @@ python main.py --setup-api-keys      # prompts + writes secr.json (gitignored)
 `.env.example` documents the same vars; copy it to `.env` for your own
 shell-load workflow, but the app itself does not read `.env`.
 
+> **ChatGPT provider** (opt-in, `models.provider: chatgpt`) does **not** use an
+> env API key. It authenticates via a browser "Sign in with ChatGPT" OAuth flow
+> whose tokens live in `~/.codex/auth.json` (managed by the vendored
+> `openai-oauth/` proxy) — they are never copied into `config.yaml` or logged.
+> Run `python main.py` → choose **ChatGPT** → **Sign in with ChatGPT**, or see
+> [docs/providers.md](docs/providers.md).
+
 ### 4. Verify
 
 ```bash
-python main.py --doctor          # env check (Python/nmap/Ollama/models/config)
+python main.py --doctor          # env check (Python/nmap/Ollama/models/config; +ChatGPT when provider=chatgpt)
 python main.py --self-test       # safe localhost smoke test
 python main.py                   # WebUI daemon (default no-args; opens browser)
 python main.py --menu            # terminal interactive menu (legacy)
@@ -170,7 +192,10 @@ python main.py --menu            # terminal interactive menu (legacy)
 
 `--doctor` exits 0 when all checks pass. Cloud models are verified by running
 a 1-token generation (the programmatic `ollama run`); local models report a
-`ollama pull <spec>` hint if missing.
+`ollama pull <spec>` hint if missing. When `models.provider: chatgpt`, the
+doctor adds a ChatGPT block: openai-oauth source found, runtime (bun/node) on
+PATH, OAuth login present, proxy running, and `/v1/models` reachable — **never
+displaying token contents**.
 
 ## Choose an interface
 
@@ -185,6 +210,16 @@ WebUI: bearer token auto-generated into `.webui_secret_key` (gitignored) or
 set `NETATTACKAI_API_TOKEN`. Loopback-only, one active run at a time (HTTP
 409 on conflict). Docs at `http://127.0.0.1:8765/docs`. Full SPA reference in
 [`docs/webui.md`](docs/webui.md) and [`docs/api.md`](docs/api.md).
+
+### Choose an AI provider
+
+The default is **Ollama** (cloud or local daemon). To use **ChatGPT** instead,
+pick it in the interactive menu (`python main.py --menu` → *Select AI
+provider* → *ChatGPT* → *Sign in with ChatGPT*) or the WebUI's System page, or
+set `models.provider: chatgpt` in `config.yaml`. Both providers share the same
+`ModelClient`/`ModelRouter` surface, so every run path (CLI, WebUI, swarm,
+autonomous) works unchanged; embeddings always stay on Ollama. Full setup,
+proxy lifecycle, and security notes in [`docs/providers.md`](docs/providers.md).
 
 ### CLI showcase
 
@@ -276,7 +311,8 @@ All runtime behavior lives in **`config.yaml`**. Key sections:
 | Key | Purpose |
 |-----|---------|
 | `ollama` | host, model (`glm-5.2:cloud`), `embed_host` (local embeddings) |
-| `models` | registry (kimi/deepseek/deepseek_flash/glm/minimax), `default_alias` |
+| `models` | `provider` (`ollama` default \| `chatgpt`), registry (kimi/deepseek/deepseek_flash/glm/minimax), `default_alias` |
+| `chatgpt` | opt-in ChatGPT provider: `base_url` (loopback `127.0.0.1:10531`), `auto_start`, `local_repo`, `runtime`, `default_model`, `context_window`, discovery/login/proxy timeouts |
 | `exploit` | permission, attack_mode, timeouts, `allowed_targets`, `require_explicit_allowlist`, AD/Kerberos suite, MSF recipes, listeners |
 | `opsec` | target-aware OPSEC (pacing, UA rotation, DoH, `local_targets_off`) |
 | `swarm` | agents, `parallel_enabled`, `per_phase_concurrency` |
@@ -331,6 +367,7 @@ Engineering docs in [`docs/`](docs/):
 
 **Operators**
 - [Getting Started](docs/getting-started.md) — setup, common commands, dev loop
+- [Model Providers](docs/providers.md) — Ollama (default) + ChatGPT (openai-oauth), proxy/login lifecycle
 - [Safety Model](docs/safety-model.md) — scope, risk, permission, audit
 - [WebUI](docs/webui.md) — the bundled React/Vite SPA
 - [WebUI API](docs/api.md) — `/api/v1` REST + WebSocket reference

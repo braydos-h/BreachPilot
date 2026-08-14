@@ -92,16 +92,25 @@ Use this path when working on target fingerprinting, goal suggestions, or first-
 ```text
 main.py
   -> load config
-  -> select model with tools.model_router
+  -> select model with tools.model_router (provider = models.provider: ollama|chatgpt)
   -> start/connect mcp_exploit_server.py
-  -> build tool list for Ollama
+  -> build tool list (OpenAI-shaped; forwarded unchanged to either provider)
   -> tools.exploit_agent.run_exploit_agent
   -> optional consult_peer_models advisory calls when multi_model is enabled
-  -> tools.model_router records metadata-only LLM usage telemetry
+  -> tools.model_router records metadata-only LLM usage telemetry (provider-attributed)
   -> ExploitPolicy evaluates requested tool calls
   -> MCP tool executes if permitted
   -> result is sanitized, summarized, audited, and returned to model
 ```
+
+The model client is built by `tools/model_router.py::_build_model_client`, the
+single provider seam: `provider: ollama` (default) constructs an
+`ollama.Client`; `provider: chatgpt` injects a `ChatGptProxyClient`
+(`tools/providers/chatgpt_provider.py`) that POSTs to the vendored
+openai-oauth loopback proxy at `127.0.0.1:10531/v1`. Both wrap into the same
+`ModelClient`/`ModelRouter` surface, so the rest of the flow is provider-agnostic.
+Embeddings stay on Ollama under either provider. See
+[docs/providers.md](providers.md).
 
 The session boot is wrapped by `tools/mcp_session.py:open_exploit_mcp_session` (async context manager emitting `[BOOT]`/`[OK]` markers); single-target orchestration is `tools/exploit_session.py:run_exploit_session`; `tools/swarm_bridge.py:SwarmMcpBridge` bridges the sync swarm `tool_executor` onto the live MCP `ClientSession`.
 

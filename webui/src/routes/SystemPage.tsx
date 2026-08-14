@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfigEditor } from "@/components/ConfigEditor";
 import { SkeletonRows } from "@/components/Loading";
+import { ProviderSetup } from "@/components/ProviderSetup";
 import {
   useDiagnostics,
   useLiveModels,
@@ -94,14 +95,21 @@ function SecretsTab() {
 function ModelsTab() {
   const models = useModels();
   const live = useLiveModels();
+  const provider = models.data?.provider ?? "ollama";
+  const isChatgpt = provider === "chatgpt";
   const registry = Object.entries(models.data?.registry ?? {});
 
   return (
     <div className="space-y-3">
       <Card>
+        <CardHeader><CardTitle className="text-sm">AI provider</CardTitle></CardHeader>
+        <CardContent><ProviderSetup /></CardContent>
+      </Card>
+
+      <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-sm">Live Ollama models</CardTitle>
+            <CardTitle className="text-sm">{isChatgpt ? "Live ChatGPT models" : "Live Ollama models"}</CardTitle>
             <Button size="sm" variant="ghost" onClick={() => live.refetch()} disabled={live.isFetching}>
               <RefreshCw className={cn("h-3.5 w-3.5", live.isFetching && "animate-spin")} />
             </Button>
@@ -116,42 +124,58 @@ function ModelsTab() {
                   Ollama unreachable — showing configured registry models below.
                 </span>
               )}
-              {live.data.source === "ollama" && live.data.error && (
+              {(live.data.source === "ollama" || live.data.source === "chatgpt") && live.data.error && (
                 <span className="text-xs text-muted-foreground">{live.data.error}</span>
               )}
             </div>
           )}
           <ul className="space-y-1 font-mono text-xs">
             {(live.data?.models ?? []).map((m) => <li key={m} className="rounded bg-muted/40 px-2 py-1">{m}</li>)}
+            {(live.data?.models ?? []).length === 0 && (
+              <li className="text-muted-foreground">No models reported. {isChatgpt ? "Sign in and start the proxy, then refresh." : "Is the daemon running?"}</li>
+            )}
           </ul>
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle className="text-sm">Registry</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-sm">{isChatgpt ? "Configured ChatGPT models" : "Registry"}</CardTitle></CardHeader>
         <CardContent>
-          <div className="text-xs text-muted-foreground">Default alias: <span className="font-mono text-foreground">{models.data?.default_alias ?? "\u2014"}</span></div>
-          <ul className="mt-2 space-y-2 text-xs">
-            {registry.map(([alias, model]) => {
-              const info = models.data?.info?.[alias];
-              const isDefault = alias === models.data?.default_alias;
-              return (
-                <li key={alias} className="rounded-md border p-2">
-                  <div className="flex flex-wrap items-center gap-2 font-mono">
-                    <span className="text-muted-foreground">{alias}</span>
-                    <span>{String(model)}</span>
-                    {isDefault && <Badge variant="success" className="text-[10px]">default</Badge>}
-                    {info?.label && <span className="font-sans text-muted-foreground">{info.label}</span>}
-                    {typeof info?.context_window === "number" && (
-                      <span className="font-sans text-muted-foreground">{(info.context_window / 1000).toFixed(0)}K ctx</span>
-                    )}
-                  </div>
-                  {info?.description && (
-                    <p className="mt-1 font-sans text-muted-foreground">{info.description}</p>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+          {isChatgpt ? (
+            <ul className="space-y-1 font-mono text-xs">
+              {(models.data?.chatgpt?.configured_models ?? []).map((m) => (
+                <li key={m} className="rounded bg-muted/40 px-2 py-1">{m}</li>
+              ))}
+              {(models.data?.chatgpt?.configured_models ?? []).length === 0 && (
+                <li className="text-muted-foreground">Empty — models are discovered from <span className="font-mono">/v1/models</span> at run time.</li>
+              )}
+            </ul>
+          ) : (
+            <>
+              <div className="text-xs text-muted-foreground">Default alias: <span className="font-mono text-foreground">{models.data?.default_alias ?? "—"}</span></div>
+              <ul className="mt-2 space-y-2 text-xs">
+                {registry.map(([alias, model]) => {
+                  const info = models.data?.info?.[alias];
+                  const isDefault = alias === models.data?.default_alias;
+                  return (
+                    <li key={alias} className="rounded-md border p-2">
+                      <div className="flex flex-wrap items-center gap-2 font-mono">
+                        <span className="text-muted-foreground">{alias}</span>
+                        <span>{String(model)}</span>
+                        {isDefault && <Badge variant="success" className="text-[10px]">default</Badge>}
+                        {info?.label && <span className="font-sans text-muted-foreground">{info.label}</span>}
+                        {typeof info?.context_window === "number" && (
+                          <span className="font-sans text-muted-foreground">{(info.context_window / 1000).toFixed(0)}K ctx</span>
+                        )}
+                      </div>
+                      {info?.description && (
+                        <p className="mt-1 font-sans text-muted-foreground">{info.description}</p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
         </CardContent>
       </Card>
     </div>

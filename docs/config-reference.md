@@ -83,10 +83,36 @@ reachability, model registry, port conflicts) and `python main.py --self-test`
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `registry` | map[alias→model id] | kimi/deepseek/deepseek_flash/glm/minimax | Alias → concrete cloud model mapping | config_manager.py:1011, doctor.py:321, run_service/service.py:345, mcp_tools/registry.py:158-200 |
-| `default_alias` | str | `glm` | Active model alias | config_manager.py:1008, run_service/service.py:349, eval_harness.py:399, agent_loop.py:253 |
+| `provider` | enum | `ollama` | Active chat/generate provider (`ollama`\|`chatgpt`); absent = `ollama` (today's behavior). Warn-only validated. | config_manager.py `get_ai_provider`, model_router.py `build_router`/`build_model_client_for_provider`, run_service/service.py, doctor.py, api/routes/system.py |
+| `registry` | map[alias→model id] | kimi/deepseek/deepseek_flash/glm/minimax | Alias → concrete cloud model mapping (Ollama path) | config_manager.py:1011, doctor.py:321, run_service/service.py:345, mcp_tools/registry.py:158-200 |
+| `default_alias` | str | `glm` | Active model alias (Ollama path; ChatGPT path uses `chatgpt.default_model`) | config_manager.py:1008, run_service/service.py:349, eval_harness.py:399, agent_loop.py:253 |
 | `info.<alias>.context_window` | int | per-model | Source of truth for the adaptive context compactor | model_router.py:202-221, exploit_agent/context.py:63-104 |
 | `info.<alias>.label/description` | str | per-model | Display metadata | model_router.py:130, api routes/system.py:193-194 |
+
+### `chatgpt:` (top-level; absent from config.yaml by default) — ChatGPT provider (opt-in)
+
+Opt-in alternative chat/generate provider backed by the vendored
+`openai-oauth/` loopback proxy. Active only when `models.provider: chatgpt`.
+Embeddings stay on Ollama regardless. See
+[docs/providers.md § ChatGPT provider](providers.md#chatgpt-provider-openai-oauth).
+
+| Key | Type | Default | Controls | Consumed at |
+|-----|------|---------|----------|-------------|
+| `enabled` | bool | `false` | Master switch (advisory; `models.provider` is the real selector) | config_manager.py `get_chatgpt_config` |
+| `host` | str | `127.0.0.1` | Proxy bind — **loopback-only; do not point at a non-loopback interface** | chatgpt_provider.py `ensure_running` |
+| `port` | int | `10531` | Proxy port | chatgpt_provider.py `ensure_running` |
+| `base_url` | str | `http://127.0.0.1:10531/v1` | OpenAI-compatible endpoint the adapter POSTs to | chatgpt_provider.py `ChatGptProxyClient`, `discover_models` |
+| `auto_start` | bool | `true` | Start the vendored proxy if `/health` is down | chatgpt_provider.py `ensure_running` |
+| `local_repo` | str | `./openai-oauth` | Path to the vendored checkout (cwd for CLI subprocess) | chatgpt_provider.py `_resolve_runtime`/`ensure_running`/`run_login`/`shutdown` |
+| `runtime` | str | `auto` | `auto`\|`bun`\|`node` — how to run the openai-oauth CLI | chatgpt_provider.py `_resolve_runtime` |
+| `request_timeout_seconds` | int | `300` | httpx timeout for `/v1/chat/completions` | chatgpt_provider.py `ChatGptProxyClient`, model_router.py |
+| `default_model` | str | `gpt-5.2` | Fallback model id when `/v1/models` discovery fails; also the session-titler model | model_router.py `_build_chatgpt_router`, session_titler.py |
+| `models` | list[str] | `[]` | Override model list; `[]` = discover from `/v1/models` | model_router.py `_build_chatgpt_router` |
+| `context_window` | int | `128000` | Conservative context window (`/v1/models` returns no metadata) | model_router.py, exploit_agent/context.py |
+| `login_timeout_seconds` | int | `300` | `login` CLI subprocess timeout | chatgpt_provider.py `run_login` |
+| `start_timeout_seconds` | int | `30` | `/health` poll budget when auto-starting | chatgpt_provider.py `ensure_running` |
+| `discover_cache_seconds` | int | `300` | `/v1/models` discovery cache TTL | chatgpt_provider.py `discover_models` |
+| `oauth_file` | str | `""` | `""` = auto-resolve `~/.codex/auth.json` \| `$CODEX_HOME/auth.json` (existence only — never read) | chatgpt_provider.py `is_authenticated` |
 
 ### `mcp:` (config.yaml:45-46) — exploit MCP transport
 

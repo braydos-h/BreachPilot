@@ -46,6 +46,14 @@ check searchsploit "sudo apt install -y exploitdb   (Kali-only; optional unless 
 check msfconsole "sudo apt install -y metasploit-framework  (optional; Kali-only)"
 check hydra     "sudo apt install -y hydra  (optional)"
 check impacket-secretsdump "pip install impacket  (or: apt install impacket-scripts)"
+check bun       "curl -fsSL https://bun.sh/install | bash  (only needed for the ChatGPT provider; see docs/providers.md)"
+
+# Best-effort: prepare the vendored openai-oauth checkout if bun is available.
+# ChatGPT provider is opt-in (models.provider: chatgpt); never aborts setup.
+if [[ -d "$PWD/openai-oauth" ]] && command -v bun >/dev/null 2>&1; then
+    echo "==> Preparing vendored openai-oauth (ChatGPT provider) via bun install"
+    (cd "$PWD/openai-oauth" && bun install) || echo "  [!] bun install failed in openai-oauth/ — see docs/providers.md"
+fi
 
 echo "==> Pulling default model (best-effort)"
 ollama pull glm-5.2:cloud 2>/dev/null || echo "  [--] ollama pull skipped (is the ollama daemon running?)"

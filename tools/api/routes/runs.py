@@ -286,6 +286,7 @@ async def set_run_title(
             run.get("result_json", {}) or {},
             run.get("request_json", {}) or {},
             host=host,
+            config=cfg,
         )
     if new_title and new_title != current:
         _ps().update_run_title(run_id, new_title)

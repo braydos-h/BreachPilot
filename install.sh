@@ -118,6 +118,18 @@ else
     echo "  [!] ollama still not on PATH — AI-backed flows will fail until you install it."
 fi
 
+# --- 2b. openai-oauth (ChatGPT provider, best-effort / opt-in) ------------
+# Only needed if you set models.provider: chatgpt. Requires bun (bun.sh).
+# Never aborts the install if bun or the checkout is missing.
+if [[ -d "$REPO_ROOT/openai-oauth" ]] && have bun; then
+    echo "==> Preparing vendored openai-oauth (ChatGPT provider) via bun install"
+    (cd "$REPO_ROOT/openai-oauth" && bun install) \
+        || echo "  [!] bun install failed in openai-oauth/ — ChatGPT provider won't be runnable until it succeeds. See docs/providers.md."
+else
+    echo "==> Skipping openai-oauth setup (no openai-oauth/ checkout or bun not on PATH)."
+    echo "    ChatGPT provider is opt-in: install bun (https://bun.sh), then run 'bun install' in openai-oauth/. See docs/providers.md."
+fi
+
 # --- 3. Python venv + requirements (resilient) ----------------------------
 # python3 itself is the one true hard requirement: without it nothing works.
 if ! have "$PYTHON"; then

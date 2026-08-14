@@ -33,6 +33,11 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "embed_host": "http://localhost:11434",
     },
     "models": {
+        # ponytail: chat/generate provider selector. ``ollama`` (default) is
+        # the unchanged per-alias registry path. ``chatgpt`` routes through
+        # the local openai-oauth proxy (see the ``chatgpt`` block below).
+        # Absent key = ``ollama`` so first-run behavior is unchanged.
+        "provider": "ollama",
         "registry": {
             "kimi": "kimi-k2.6:cloud",
             "deepseek": "deepseek-v4-pro:cloud",
@@ -74,6 +79,30 @@ CONFIG_SCHEMA: dict[str, Any] = {
                 "description": "Minimax M3 (cloud) — 512K context, balanced coding + reasoning.",
             },
         },
+    },
+    # ChatGPT provider (openai-oauth). Opt-in: ``enabled: false`` by default so
+    # first-run behavior is unchanged. When ``models.provider: chatgpt`` the
+    # chat/generate path routes through the local openai-oauth proxy at
+    # ``base_url`` (loopback-only by default). OAuth credentials stay in
+    # openai-oauth's ``~/.codex/auth.json`` — they are NEVER copied into this
+    # config or read by NetAttackAi (only their existence is checked). See
+    # tools/providers/chatgpt_provider.py and docs/providers.md.
+    "chatgpt": {
+        "enabled": False,
+        "host": "127.0.0.1",
+        "port": 10531,
+        "base_url": "http://127.0.0.1:10531/v1",
+        "auto_start": True,
+        "local_repo": "./openai-oauth",
+        "runtime": "auto",
+        "request_timeout_seconds": 300,
+        "default_model": "gpt-5.2",
+        "models": [],
+        "context_window": 128000,
+        "login_timeout_seconds": 300,
+        "start_timeout_seconds": 30,
+        "discover_cache_seconds": 300,
+        "oauth_file": "",
     },
     "mcp": {
         "default_transport": "stdio",
@@ -586,6 +615,39 @@ class ConfigValidator:
                     result.warnings.append("models.registry is missing.")
                 if "default_alias" not in models:
                     result.warnings.append("models.default_alias is missing. Default: glm")
+                provider = models.get("provider")
+                if provider is not None and str(provider).lower() not in {"ollama", "chatgpt"}:
+                    result.warnings.append(
+                        "models.provider should be one of: ollama, chatgpt."
+                    )
+
+        # Validate chatgpt provider block (opt-in; warn-only on absence).
+        if "chatgpt" in self._config:
+            chatgpt = self._config["chatgpt"]
+            if not isinstance(chatgpt, dict):
+                result.errors.append("'chatgpt' must be a mapping.")
+            else:
+                port = chatgpt.get("port")
+                if port is not None and (not isinstance(port, int) or port < 1 or port > 65535):
+                    result.warnings.append(f"chatgpt.port {port} is invalid. Use 1-65535.")
+                for bkey in ("enabled", "auto_start"):
+                    val = chatgpt.get(bkey)
+                    if val is not None and not isinstance(val, bool):
+                        result.warnings.append(f"chatgpt.{bkey} must be a boolean.")
+                for nkey in ("request_timeout_seconds", "context_window",
+                             "login_timeout_seconds", "start_timeout_seconds",
+                             "discover_cache_seconds"):
+                    val = chatgpt.get(nkey)
+                    if val is not None and (not isinstance(val, (int, float)) or val < 0):
+                        result.warnings.append(f"chatgpt.{nkey} must be a non-negative number.")
+                runtime = chatgpt.get("runtime")
+                if runtime is not None and str(runtime).lower() not in {"auto", "bun", "node"}:
+                    result.warnings.append(
+                        "chatgpt.runtime should be one of: auto, bun, node."
+                    )
+                models_list = chatgpt.get("models")
+                if models_list is not None and not isinstance(models_list, list):
+                    result.warnings.append("chatgpt.models must be a list.")
 
         # Validate MCP section
         if "mcp" in self._config:
@@ -1056,3 +1118,44 @@ def load_validated_config(path: Path | str = "config.yaml") -> dict[str, Any]:
             logger.warning("Unknown config key: %s", uk)
 
     return validator.apply_defaults()
+
+
+def get_ai_provider(config: dict[str, Any] | None = None) -> str:
+    """Return the active chat/generate provider (``ollama`` | ``chatgpt``).
+
+    Reads ``models.provider``; defaults to ``ollama`` so an absent key (the
+    common case) is unchanged. Tolerates a None config.
+    """
+    cfg = config or {}
+    models = cfg.get("models") if isinstance(cfg, dict) else None
+    if isinstance(models, dict):
+        provider = models.get("provider")
+        if provider:
+            return str(provider).lower()
+    return "ollama"
+
+
+def get_chatgpt_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return the ``chatgpt`` block with schema defaults applied.
+
+    The merge is shallow-over-defaults; used by the model-router and proxy
+    manager. Never returns None.
+    """
+    import copy
+    base = copy.deepcopy(CONFIG_SCHEMA.get("chatgpt", {}))
+    cfg = config or {}
+    overlay = cfg.get("chatgpt") if isinstance(cfg, dict) else None
+    if isinstance(overlay, dict):
+        for key, value in overlay.items():
+            if value is not None:
+                base[key] = value
+    return base
+
+
+def get_ollama_host(config: dict[str, Any] | None = None) -> str:
+    """Return ``ollama.host`` from a config dict (module-level convenience)."""
+    cfg = config or {}
+    ollama = cfg.get("ollama") if isinstance(cfg, dict) else None
+    if isinstance(ollama, dict):
+        return str(ollama.get("host", "https://api.ollama.com"))
+    return "https://api.ollama.com"

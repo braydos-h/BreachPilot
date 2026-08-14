@@ -127,6 +127,77 @@ def test_models_live_falls_back_when_ollama_unreachable(tmp_path, monkeypatch):
     assert "glm-5.2:cloud" in data["models"]
 
 
+def _make_chatgpt_client(tmp_path, monkeypatch, token="test-token"):
+    """Like _make_client but with provider=chatgpt + a chatgpt block pointing at a
+    closed port so the /v1/models probe fails deterministically."""
+    monkeypatch.setenv("NETATTACKAI_API_TOKEN", token)
+    monkeypatch.chdir(tmp_path)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "ollama:\n  host: http://localhost:11434\n"
+        "models:\n  provider: chatgpt\n  default_alias: glm\n  registry:\n    glm: glm-5.2:cloud\n"
+        "chatgpt:\n  enabled: true\n  base_url: http://127.0.0.1:9/v1\n"
+        "  default_model: gpt-5.2\n  auto_start: true\n"
+        "exploit:\n  permission: read_only\n"
+        "api:\n  host: 127.0.0.1\n  port: 8765\n",
+        encoding="utf-8",
+    )
+    from tools.run_service.service import Callables
+
+    class _FakeRouter:
+        _clients = {"glm": MagicMock()}
+        def get_client(self, name):
+            return self._clients[name]
+
+    def _fake_build_router(*a, **kw):
+        return _FakeRouter()
+
+    async def _fake_run_session(**kwargs):
+        return {"total_actions": 0, "workspace": str(tmp_path), "audit_path": ""}
+
+    callables = Callables(build_router=_fake_build_router, run_session=_fake_run_session)
+    from app import create_app
+    app = create_app(config_path=config_path, callables=callables)
+    return TestClient(app)
+
+
+def _patch_chatgpt_manager(monkeypatch, ensure_return):
+    """Patch ChatGptProxyManager.get() to return a fake whose ensure_running returns
+    the given dict. Returns the fake so the test can assert call counts."""
+    from tools.providers import chatgpt_provider
+    fake = MagicMock()
+    fake.ensure_running.return_value = ensure_return
+    monkeypatch.setattr(chatgpt_provider.ChatGptProxyManager, "get", lambda *a, **k: fake)
+    return fake
+
+
+def test_models_live_chatgpt_auto_starts_proxy_then_probes(tmp_path, monkeypatch):
+    # ensure_running succeeds (proxy "started"); the /v1/models probe then hits a
+    # closed port and falls back. Asserts the route auto-started before probing.
+    fake = _patch_chatgpt_manager(monkeypatch, {"ok": True, "base_url": "http://127.0.0.1:9/v1"})
+    client = _make_chatgpt_client(tmp_path, monkeypatch)
+    resp = client.get("/api/v1/models/live", headers=_auth())
+    assert resp.status_code == 503
+    data = resp.json()
+    assert data["source"] == "registry"
+    assert "gpt-5.2" in data["models"]
+    fake.ensure_running.assert_called_once()
+
+
+def test_models_live_chatgpt_not_authenticated_no_spawn(tmp_path, monkeypatch):
+    # Not signed in -> ensure_running returns not_authenticated; the route must NOT
+    # probe and must return a clear "sign in" fallback.
+    fake = _patch_chatgpt_manager(monkeypatch, {"ok": False, "reason": "not_authenticated"})
+    client = _make_chatgpt_client(tmp_path, monkeypatch)
+    resp = client.get("/api/v1/models/live", headers=_auth())
+    assert resp.status_code == 503
+    data = resp.json()
+    assert data["source"] == "registry"
+    assert "signed in" in data["error"].lower()
+    assert "gpt-5.2" in data["models"]
+    fake.ensure_running.assert_called_once()
+
+
 # ── Skill detail (C2) ────────────────────────────────────────────────────────
 
 def test_skill_detail_not_found(tmp_path, monkeypatch):

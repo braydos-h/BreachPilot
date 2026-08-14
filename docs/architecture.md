@@ -35,7 +35,7 @@ main.py
 
 ### `main.py`
 
-The main launcher for interactive menu, recon, attack, doctor, demo, self-test, resume, swarm, and model selection flows. It loads `config.yaml`, starts or connects to MCP transport, routes model calls through Ollama, and runs recon/attack sessions.
+The main launcher for interactive menu, recon, attack, doctor, demo, self-test, resume, swarm, and model selection flows. It loads `config.yaml`, starts or connects to MCP transport, routes model calls through the configured provider (`models.provider: ollama` default, or `chatgpt` via the vendored `openai-oauth/` loopback proxy — see [providers.md](providers.md)), and runs recon/attack sessions.
 
 Important functions:
 

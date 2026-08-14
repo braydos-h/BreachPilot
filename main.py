@@ -547,6 +547,27 @@ def _run_daemon(args: argparse.Namespace) -> int:
     ui.status(f"  OpenAPI schema:    http://{status_host}:{port}/openapi.json")
     if web_mode:
         ui.status(f"  WebUI:             http://{status_host}:{port}/")
+    # ponytail: print the bearer token here (create_app re-reads the same file;
+    # one extra read beats threading the token back through the factory).
+    from tools.api.auth import load_or_create_token
+    token = load_or_create_token(
+        api_cfg.get("token_file", ".webui_secret_key"),
+        env_override=os.environ.get("NETATTACKAI_API_TOKEN", ""),
+    )
+    # Gate the token reveal + browser launch on Enter presses so the
+    # user can copy the key before it scrolls away under request logs.
+    print()
+    print(f"{ui._c('yellow')}The WebUI requires an API key to use it.{ui._c('reset')}")
+    try:
+        input(f"{ui._c('gray')}Press Enter to show it...{ui._c('reset')}")
+    except (EOFError, KeyboardInterrupt):
+        return 130
+    ui.status(f"  API token:         {token}")
+    if web_mode:
+        try:
+            input(f"{ui._c('gray')}Press Enter to launch the WebUI in your default browser...{ui._c('reset')}")
+        except (EOFError, KeyboardInterrupt):
+            return 130
     app = create_app(config_path=args.config, config=config)
 
     if web_mode:
@@ -557,7 +578,7 @@ def _run_daemon(args: argparse.Namespace) -> int:
         )
         browser_thread.start()
 
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    uvicorn.run(app, host=host, port=port, log_level="info", access_log=True)
     return 0
 
 
@@ -810,7 +831,11 @@ def main(argv: list[str] | None = None) -> int:
         # (ui.status, ui.error, ui.spinner, etc.) honors them.
         ui.plain = bool(args.plain or args.quiet or args.json)
         raw_argv = argv or sys.argv[1:]
-        interactive_startup = args.menu or (len(raw_argv) == 0 and not args.target.strip())
+        # ponytail: prompt only in the terminal menu (--menu). The no-args
+        # default now launches the WebUI daemon, not the terminal menu, so the
+        # interactive key prompt should not fire there. --setup-api-keys still
+        # forces the prompt via force_prompt below.
+        interactive_startup = bool(args.menu)
         bootstrap_startup_api_keys(
             args,
             prompt=interactive_startup and not args.doctor and not getattr(args, "self_test", False)

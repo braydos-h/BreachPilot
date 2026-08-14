@@ -251,15 +251,29 @@ async def _run_one_trial(
             merged = _merge_config(base_config, config)
             ollama_host = merged.get("ollama", {}).get("host", "https://api.ollama.com")
             registry = merged.get("models", {}).get("registry")
-            router = build_router(registry, host=ollama_host)
+            from tools.config_manager import get_ai_provider, get_chatgpt_config
+            provider = get_ai_provider(merged)
+            if provider == "chatgpt":
+                router = build_router(
+                    registry, host=ollama_host, provider="chatgpt",
+                    chatgpt_config=get_chatgpt_config(merged), config=merged,
+                )
+            else:
+                router = build_router(registry, host=ollama_host)
             model_alias = merged.get("models", {}).get("default_alias", "glm")
             try:
                 model_client = router.get_client(model_alias)
             except KeyError:
-                from tools.model_router import _build_model_client
-                router.register(model_alias, _build_model_client(
-                    model_alias, host=ollama_host, request_timeout_seconds=None,
-                ))
+                if provider == "chatgpt":
+                    from tools.model_router import build_model_client_for_provider
+                    router.register(model_alias, build_model_client_for_provider(
+                        merged, model_alias, request_timeout_seconds=None,
+                    ))
+                else:
+                    from tools.model_router import _build_model_client
+                    router.register(model_alias, _build_model_client(
+                        model_alias, host=ollama_host, request_timeout_seconds=None,
+                    ))
                 model_client = router.get_client(model_alias)
 
             agent_result = await run_exploit_session(

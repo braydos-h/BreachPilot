@@ -44,6 +44,7 @@ PUBLIC_USAGE_FIELDS = (
     "estimated_context_tokens",
     "context_usage_pct",
     "context_remaining_tokens",
+    "provider",
     "error",
 )
 
@@ -196,6 +197,7 @@ def build_usage_record(
     context_window_tokens: int | None = None,
     source: str = "",
     error: str = "",
+    provider: str = "ollama",
 ) -> dict[str, Any]:
     usage = _field(response, "usage", {}) or {}
     prompt_tokens = _as_int(_field(response, "prompt_eval_count"))
@@ -244,6 +246,7 @@ def build_usage_record(
         "estimated_context_tokens": estimated_context,
         "context_usage_pct": context_usage_pct,
         "context_remaining_tokens": context_remaining_tokens,
+        "provider": str(provider or "ollama"),
         "error": str(error or "")[:500],
     }
 
@@ -275,6 +278,7 @@ def record_model_usage(
     source: str = "",
     error: str = "",
     workspace_root: Path | None = None,
+    provider: str = "ollama",
 ) -> dict[str, Any]:
     record = build_usage_record(
         alias=alias,
@@ -288,6 +292,7 @@ def record_model_usage(
         context_window_tokens=context_window_tokens,
         source=source,
         error=error,
+        provider=provider,
     )
     record_usage(record, workspace_root)
     return record

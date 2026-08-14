@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { KeyRound, Loader2, ShieldCheck } from "lucide-react";
+import { KeyRound, Loader2, LogIn, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ChatGptControls, ProviderPicker } from "@/components/ProviderSetup";
 import { useSecrets, usePutSecrets } from "@/api/hooks";
 import { ApiError } from "@/api/client";
 import { useToast } from "@/hooks/use-toast";
@@ -128,18 +129,31 @@ function OnboardingCard({ entries, onDone }: OnboardingCardProps) {
             <KeyRound className="h-4 w-4" />
             <span className="text-xs uppercase tracking-wide">First-run setup</span>
           </div>
-          <CardTitle className="text-xl">Configure provider API keys</CardTitle>
+          <CardTitle className="text-xl">Set up NetAttackAI</CardTitle>
           <CardDescription>
-            Some integrations need provider API keys to run. Missing keys are required;
-            configured ones can be replaced. You can also edit these later under{" "}
-            <code className="rounded bg-muted px-1 py-0.5 text-xs">System → Secrets</code>.
-            Values are stored locally in <code className="rounded bg-muted px-1 py-0.5 text-xs">secr.json</code> and
+            Pick your AI provider, add provider API keys, and (optionally) sign in to ChatGPT.
+            Missing keys are required; configured ones can be replaced. You can change any of this
+            later under{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">System → Models</code> /{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">System → Secrets</code>. Keys are
+            stored locally in <code className="rounded bg-muted px-1 py-0.5 text-xs">secr.json</code> and
             never sent anywhere except <code className="rounded bg-muted px-1 py-0.5 text-xs">127.0.0.1</code>.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form className="space-y-4" onSubmit={onSubmit}>
-            <ul className="space-y-3">
+          <form className="space-y-5" onSubmit={onSubmit}>
+            <div className="space-y-2">
+              <Label className="text-sm">AI provider</Label>
+              <ProviderPicker />
+              <p className="text-xs text-muted-foreground">
+                Ollama runs locally; ChatGPT goes through the openai-oauth proxy. Switch any time.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <KeyRound className="h-4 w-4 text-muted-foreground" /> Provider API keys
+              </div>
+              <ul className="space-y-3">
               {sorted.map(([name, status]) => (
                 <li key={name} className="space-y-1.5">
                   <div className="flex items-center gap-2">
@@ -168,6 +182,19 @@ function OnboardingCard({ entries, onDone }: OnboardingCardProps) {
                 </li>
               ))}
             </ul>
+            </div>
+
+            <div className="space-y-2 rounded-md border p-3">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <LogIn className="h-4 w-4 text-muted-foreground" /> ChatGPT (optional)
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Only needed if you picked ChatGPT. Sign in opens a browser on the server host;
+                OAuth tokens stay on the server in <code className="rounded bg-muted px-1 text-xs">~/.codex/auth.json</code>.
+              </p>
+              <ChatGptControls />
+            </div>
+
             {put.error && (
               <p className="text-xs text-destructive">
                 {put.error instanceof ApiError ? put.error.message : "Save failed."}
