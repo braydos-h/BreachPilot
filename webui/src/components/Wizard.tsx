@@ -38,6 +38,7 @@ import {
   SkillMultiSelect,
   TriStateToggle,
 } from "@/components/RunForm";
+import { useDefaultModel, useModelOptions, useProviderStatus } from "@/components/ProviderSetup";
 import {
   useAnswerDecision,
   useCapabilities,
@@ -127,9 +128,10 @@ export function Wizard({ onCreated }: WizardProps) {
   const skills = useSkills();
   const createRun = useCreateRun();
 
+  const defaultModel = useDefaultModel();
   useEffect(() => {
-    if (!modelAlias && models.data?.default_alias) setModelAlias(models.data.default_alias);
-  }, [models.data, modelAlias]);
+    if (!modelAlias && defaultModel) setModelAlias(defaultModel);
+  }, [defaultModel, modelAlias]);
 
   const goals = useGoals();
   const goalGroups = useMemo(() => {
@@ -141,13 +143,7 @@ export function Wizard({ onCreated }: WizardProps) {
   const flags = capabilities.data?.run_options.flags ?? [];
   const skillsList = skills.data?.skills ?? [];
 
-  const modelOptions = useMemo(() => {
-    const set = new Set<string>();
-    if (liveModels.data?.source === "ollama") liveModels.data.models.forEach((m) => set.add(m));
-    Object.values(models.data?.registry ?? {}).forEach((m) => set.add(String(m)));
-    if (models.data?.default_alias) set.add(models.data.default_alias);
-    return Array.from(set);
-  }, [liveModels.data, models.data]);
+  const modelOptions = useModelOptions();
 
   const togglePowerUp = (key: string) => {
     setPowerUps((prev) => ({ ...prev, [key]: !prev[key] }));
