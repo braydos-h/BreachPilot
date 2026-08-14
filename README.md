@@ -164,7 +164,8 @@ shell-load workflow, but the app itself does not read `.env`.
 ```bash
 python main.py --doctor          # env check (Python/nmap/Ollama/models/config)
 python main.py --self-test       # safe localhost smoke test
-python main.py                   # interactive menu (default no-args)
+python main.py                   # WebUI daemon (default no-args; opens browser)
+python main.py --menu            # terminal interactive menu (legacy)
 ```
 
 `--doctor` exits 0 when all checks pass. Cloud models are verified by running
@@ -175,9 +176,9 @@ a 1-token generation (the programmatic `ollama run`); local models report a
 
 | Interface | Start | Notes |
 |---|---|---|
-| **CLI menu** | `python main.py` | Guided questionary flow; no extra deps |
+| **WebUI** | `python main.py` | Default. Builds `webui/dist/` on first run (needs Node/npm), opens `http://127.0.0.1:8765` |
+| **CLI menu** | `python main.py --menu` | Guided questionary flow; no extra deps |
 | **CLI direct** | `python main.py --target <ip> --mode recon\|attack` | Flags below |
-| **WebUI** | `python main.py --web` | Builds `webui/dist/` on first run (needs Node/npm), opens `http://127.0.0.1:8765` |
 | **API only** | `python main.py --demon` | Daemon without the SPA |
 
 WebUI: bearer token auto-generated into `.webui_secret_key` (gitignored) or

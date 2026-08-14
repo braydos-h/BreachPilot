@@ -899,10 +899,16 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  {p['name']} v{p.get('version', '?')} [{state}] caps={caps} - {p.get('description', '')}")
             return 0
 
-        # --menu flag or no arguments: launch interactive menu
-        if args.menu or (len(sys.argv) == 1 and not args.target.strip()):
+        # --menu flag: explicitly force the terminal interactive menu.
+        if args.menu:
             from tools.interactive_menu import run_interactive_menu
             return run_interactive_menu()
+
+        # No arguments: launch the WebUI daemon (default interface). --menu
+        # still forces the terminal menu; --demon/--daemon give the API alone.
+        if len(sys.argv) == 1 and not args.target.strip():
+            args.web = True
+            return _run_daemon(args)
 
         return asyncio.run(async_main(args))
     except KeyboardInterrupt:
