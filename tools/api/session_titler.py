@@ -13,6 +13,7 @@ wiring (``ollama.host`` + ``OLLAMA_API_KEY``) — no extra config.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Mapping
 
@@ -149,28 +150,9 @@ async def generate_session_title(
     provider, titles go through the local openai-oauth proxy; otherwise the
     Ollama ``gemma4:31b-cloud`` path runs unchanged.
     """
-    prompt = _build_prompt(result, request)
-    if _provider_is_chatgpt(config):
-        return _chatgpt_title(config, prompt)
-    if OllamaClient is None:
-        return ""
-    try:
-        client = OllamaClient(host=host, timeout=_REQUEST_TIMEOUT_S)
-        response = client.chat(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            options={"temperature": 0.3, "num_predict": 30},
-        )
-        content = ""
-        try:
-            content = response["message"]["content"]
-        except (KeyError, TypeError, IndexError):
-            content = getattr(response, "message", None)
-            content = getattr(content, "content", "") if content else ""
-        return _clean_title(content)
-    except Exception as exc:  # best-effort — never raise to the caller
-        log.debug("session title generation failed: %s", exc)
-        return ""
+    return await asyncio.to_thread(
+        generate_session_title_sync, result, request, host=host, model=model, config=config
+    )
 
 
 def generate_session_title_sync(

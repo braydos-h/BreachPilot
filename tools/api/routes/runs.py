@@ -4,6 +4,7 @@ audit, swarm, campaign, credentials, loot."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -282,7 +283,8 @@ async def set_run_title(
         from tools.api.session_titler import generate_session_title_sync
         cfg = _rm().config
         host = str((cfg.get("ollama") or {}).get("host") or "https://api.ollama.com")
-        new_title = generate_session_title_sync(
+        new_title = await asyncio.to_thread(
+            generate_session_title_sync,
             run.get("result_json", {}) or {},
             run.get("request_json", {}) or {},
             host=host,

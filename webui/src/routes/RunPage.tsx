@@ -59,15 +59,16 @@ import { autoAnswerFor, usePermissionMode } from "@/lib/permissionMode";
 export function RunPage() {
   const { runId } = useParams<{ runId: string }>();
   const navigate = useNavigate();
+  const [tab, setTab] = useState("recon");
   const run = useRun(runId ?? null);
   const decisions = useDecisions(runId ?? null);
   const events = useRunEvents(runId ?? null);
   const cancel = useCancelRun();
   const resume = useResumeRun();
-  const audit = useAudit(runId ?? null);
-  const swarm = useSwarmState(runId ?? null);
-  const campaign = useCampaignState(runId ?? null);
-  const tools = useRunTools(runId ?? null, isActiveState(run.data?.state as RunState));
+  const audit = useAudit(runId ?? null, tab === "audit");
+  const swarm = useSwarmState(runId ?? null, tab === "swarm");
+  const campaign = useCampaignState(runId ?? null, tab === "campaign");
+  const tools = useRunTools(runId ?? null, tab === "tools" && isActiveState(run.data?.state as RunState));
   const callTool = useCallTool(runId ?? "");
   const fetchArtifact = useFetchArtifactBlob(runId ?? "");
   const artifacts = useArtifacts(runId ?? null);
@@ -340,7 +341,7 @@ export function RunPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="recon" className="mt-2">
+      <Tabs value={tab} onValueChange={setTab} className="mt-2">
         <TabsList>
           <TabsTrigger value="recon"><ScanSearch className="mr-1.5 h-3.5 w-3.5" />Recon</TabsTrigger>
           <TabsTrigger value="graph"><Network className="mr-1.5 h-3.5 w-3.5" />Attack Path</TabsTrigger>

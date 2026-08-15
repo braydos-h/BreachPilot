@@ -63,14 +63,36 @@ class EventOut(BaseModel):
 
 
 @router.get("/runs/{run_id}/events", response_model=None)
-async def get_events(run_id: str, after: int = Query(0, ge=0), auth: str = Depends(_require_auth)) -> dict:
-    """Replay events for a run with sequence > ``after``."""
+async def get_events(
+    run_id: str,
+    after: int = Query(0, ge=0),
+    tail: int = Query(None, ge=1, le=1000),
+    before: int = Query(None, ge=0),
+    limit: int = Query(None, ge=1, le=1000),
+    auth: str = Depends(_require_auth),
+) -> dict:
+    """Replay events for a run.
+
+    ``after`` replays events with sequence > ``after`` (ascending). ``tail``
+    returns the newest N events; ``before`` + ``limit`` pages older events
+    (newest-first). Paged responses include cursor metadata.
+    """
     if _PERSISTENCE is None or _PERSISTENCE.get_run(run_id) is None:
         raise HTTPException(status_code=404, detail="Run not found")
     if _EVENTS is None:
         raise HTTPException(status_code=503, detail="Event service unavailable")
-    events = await _EVENTS.get_or_create(run_id).replay(after)
-    return {"run_id": run_id, "events": events}
+    broker = _EVENTS.get_or_create(run_id)
+    if tail is not None or before is not None or limit is not None:
+        page = await broker.replay_page(after=after, tail=tail, before=before, limit=limit)
+        return {"run_id": run_id, **page}
+    events = await broker.replay(after)
+    return {
+        "run_id": run_id,
+        "events": events,
+        "oldest_sequence": None,
+        "latest_sequence": None,
+        "has_more_before": False,
+    }
 
 
 @router.get("/runs/{run_id}/events/stream", response_model=None)

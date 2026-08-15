@@ -21,6 +21,7 @@ import contextlib
 import ipaddress
 import json
 import os
+import threading
 import time
 import traceback
 from dataclasses import dataclass, field
@@ -149,6 +150,10 @@ def _build_campaign_result_from_records(
 
 ui = get_ui()
 
+# Serializes cold plugin/skill-registry init across concurrent ``prepare``
+# calls (which now run on worker threads) so they don't race first-time setup.
+_COLD_INIT_LOCK = threading.Lock()
+
 
 def _llm_usage_line_count() -> int:
     """Line count of the shared llm_usage.jsonl, or 0 if absent."""
@@ -213,6 +218,92 @@ def _run_telemetry(start_lines: int) -> dict[str, Any] | None:
         "last_ctx_pct": last_ctx_pct,
         "last_estimated_context_tokens": last_est_ctx,
     }
+
+
+class _TelemetryAccumulator:
+    """Incremental reader for llm_usage.jsonl.
+
+    Tracks a byte offset into the shared usage log and only parses lines
+    appended since the last snapshot, instead of re-reading the whole file on
+    every tick. Handles truncation (log rotated/reset) by resetting to zero.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._offset = path.stat().st_size if path.exists() else 0
+        self._calls = 0
+        self._total_tokens = 0
+        self._ctx_values: list[float] = []
+        self._last_ctx_pct: float | None = None
+        self._last_ctx_window: int | None = None
+        self._last_est_ctx: int | None = None
+
+    def snapshot(self) -> dict[str, Any] | None:
+        import json as _json
+        try:
+            size = self._path.stat().st_size
+        except OSError:
+            return self._aggregate()
+        if size < self._offset:
+            # Truncated (rotated/reset) — start over.
+            self._offset = 0
+            self._calls = 0
+            self._total_tokens = 0
+            self._ctx_values = []
+            self._last_ctx_pct = None
+            self._last_ctx_window = None
+            self._last_est_ctx = None
+        if size > self._offset:
+            try:
+                with self._path.open("rb") as handle:
+                    handle.seek(self._offset)
+                    data = handle.read()
+            except OSError:
+                return self._aggregate()
+            last_nl = data.rfind(b"\n")
+            if last_nl != -1:
+                complete = data[:last_nl + 1]
+                self._offset += len(complete)
+                for raw in complete.splitlines():
+                    line = raw.decode("utf-8", errors="replace").strip()
+                    if not line:
+                        continue
+                    try:
+                        item = _json.loads(line)
+                    except _json.JSONDecodeError:
+                        continue
+                    if not isinstance(item, dict):
+                        continue
+                    self._calls += 1
+                    tok = item.get("total_tokens")
+                    if isinstance(tok, (int, float)):
+                        self._total_tokens += int(tok)
+                    ctx = item.get("context_usage_pct")
+                    if isinstance(ctx, (int, float)):
+                        self._ctx_values.append(float(ctx))
+                        self._last_ctx_pct = float(ctx)
+                    win = item.get("context_window_tokens")
+                    if isinstance(win, int):
+                        self._last_ctx_window = win
+                    est = item.get("estimated_context_tokens")
+                    if isinstance(est, int):
+                        self._last_est_ctx = est
+        return self._aggregate()
+
+    def _aggregate(self) -> dict[str, Any] | None:
+        if not self._calls:
+            return None
+        avg_ctx = (sum(self._ctx_values) / len(self._ctx_values)) if self._ctx_values else None
+        max_ctx = max(self._ctx_values) if self._ctx_values else None
+        return {
+            "calls": self._calls,
+            "total_tokens": self._total_tokens,
+            "avg_ctx": avg_ctx,
+            "max_ctx": max_ctx,
+            "context_window_tokens": self._last_ctx_window,
+            "last_ctx_pct": self._last_ctx_pct,
+            "last_estimated_context_tokens": self._last_est_ctx,
+        }
 
 
 def _read_swarm_snapshot(swarm_workspace: Path) -> str:
@@ -387,7 +478,15 @@ class AssessmentService:
         Does NOT open the MCP session, does NOT write session_state.json, does
         NOT start any subprocess. The caller (CLI or API) shows the preview to
         the operator and asks for confirmation before calling ``execute``.
+
+        The body is synchronous (config load, plugin load, router build, target
+        resolve, skill selection, mkdir), so it runs on a worker thread to keep
+        the event loop responsive.
         """
+        return await asyncio.to_thread(self._prepare_sync, request)
+
+    def _prepare_sync(self, request: RunRequest) -> RunPreview:
+        """Synchronous body of ``prepare`` (see above)."""
         from tools import config_cli as _config_cli
         from tools.cli_exploit_settings import build_cli_exploit_settings
         from tools.skills_cli import _build_runtime_skill_selection, apply_skills_cli_overrides
@@ -403,7 +502,8 @@ class AssessmentService:
         # Load plugins (best-effort; failure never blocks boot).
         try:
             from tools.plugins import load_plugins
-            load_plugins(config)
+            with _COLD_INIT_LOCK:
+                load_plugins(config)
         except Exception:  # noqa: BLE001
             pass
 
@@ -480,13 +580,14 @@ class AssessmentService:
         )
 
         # Skill selection (pure data; no I/O).
-        skill_selection = _build_runtime_skill_selection(
-            config=config,
-            goal=goal,
-            mode=mode,
-            assessment=None,
-            is_domain=bool(resolved_domain),
-        )
+        with _COLD_INIT_LOCK:
+            skill_selection = _build_runtime_skill_selection(
+                config=config,
+                goal=goal,
+                mode=mode,
+                assessment=None,
+                is_domain=bool(resolved_domain),
+            )
 
         # Run ID + reports dir.
         run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
@@ -727,8 +828,8 @@ class AssessmentService:
         activity = ActivityLog(reports_dir, plain=request.plain)
         activity.log("info", f"Session started: {mode} against {target_ip} with goal {goal.name}")
 
-        # Telemetry snapshot.
-        _telemetry_start = _llm_usage_line_count()
+        # Telemetry snapshot (incremental — only new bytes are re-read).
+        _telemetry_acc = _TelemetryAccumulator(usage_log_path(workspace_root_from_sources()))
 
         # Heartbeat + ticker.
         _heartbeat = _RunHeartbeat()
@@ -740,7 +841,7 @@ class AssessmentService:
                 if cancellation.cancelled:
                     return
                 m, s = divmod(int(time.monotonic() - start), 60)
-                _live_tel = _run_telemetry(_telemetry_start) or {}
+                _live_tel = _telemetry_acc.snapshot() or {}
                 await event_sink.emit(EVENT_PROGRESS, {
                     "elapsed_seconds": int(time.monotonic() - start),
                     "round": _heartbeat.round,
@@ -821,7 +922,7 @@ class AssessmentService:
             )
 
         # Telemetry.
-        _tel = _run_telemetry(_telemetry_start)
+        _tel = _telemetry_acc.snapshot()
         if _tel:
             result.setdefault("_telemetry", _tel)
 
@@ -906,6 +1007,7 @@ class AssessmentService:
             ui.warning(f"Could not write enhanced report: {exc}")
 
         await event_sink.emit(EVENT_ARTIFACT, {
+            "name": "session_summary.md",
             "reports_dir": str(reports_dir),
             "session_summary": str(summary_path),
             "run_json": str(run_json_path),
@@ -1014,6 +1116,7 @@ class AssessmentService:
         suggestions = goal_engine.suggest_goals(assessment, risk_profile)
         suggestions_path = reports_dir / "goal_suggestions.json"
         suggestions_path.write_text(json.dumps([s.to_dict() for s in suggestions], indent=2), encoding="utf-8")
+        await event_sink.emit(EVENT_ARTIFACT, {"name": "goal_suggestions.json"})
         ui.info(f"Goal suggestions saved to: {suggestions_path}")
         ui.display_goal_suggestions(suggestions)
 
@@ -1044,6 +1147,7 @@ class AssessmentService:
             data["chosen_goal"] = goal.name
             data["chosen_goal_description"] = goal.description
             assessment_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            await event_sink.emit(EVENT_ARTIFACT, {"name": "recon_assessment.json"})
 
         return assessment, goal
 

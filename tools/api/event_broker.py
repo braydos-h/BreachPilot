@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections import deque
+from collections import OrderedDict, deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -26,7 +26,7 @@ class RunEventBroker:
     are notified via an ``asyncio.Condition``.
     """
 
-    def __init__(self, run_id: str, reports_dir: Path, *, buffer_size: int = 256) -> None:
+    def __init__(self, run_id: str, reports_dir: Path, *, buffer_size: int = 1000) -> None:
         self._run_id = run_id
         self._reports_dir = reports_dir
         self._events_path = reports_dir / "events.jsonl"
@@ -85,6 +85,71 @@ class RunEventBroker:
                 if isinstance(sequence, int) and not isinstance(sequence, bool) and sequence > after:
                     events.append(evt)
         return events
+
+    @staticmethod
+    def _read_jsonl_events(path: Path) -> list[dict[str, Any]]:
+        """Read the full ordered list of parsed events from ``events.jsonl``."""
+        events: list[dict[str, Any]] = []
+        if not path.exists():
+            return events
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    evt = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                events.append(evt)
+        return events
+
+    async def replay_page(
+        self,
+        after: int = 0,
+        *,
+        tail: int | None = None,
+        before: int | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """Paged replay with cursor metadata.
+
+        Returns ``{"events": [...], "oldest_sequence": int|None,
+        "latest_sequence": int|None, "has_more_before": bool}``.
+
+        - ``tail=N``: newest N events, ascending by sequence.
+        - ``before=X`` + ``limit=N``: up to N events with sequence < X,
+          newest-first (descending) so the client can page older.
+        - ``after=X``: events with sequence > X, ascending (unchanged).
+        """
+        async with self._lock:
+            if self._ring and self._ring[0]["sequence"] == 1:
+                full = list(self._ring)
+            else:
+                full = await asyncio.to_thread(self._read_jsonl_events, self._events_path)
+
+            oldest = full[0]["sequence"] if full else None
+            latest = full[-1]["sequence"] if full else None
+
+            if tail is not None:
+                events = full[-tail:]
+                has_more_before = oldest is not None and oldest > 1
+            elif before is not None:
+                older = [e for e in full if e["sequence"] < before]
+                if limit is not None:
+                    older = older[-limit:]
+                events = list(reversed(older))
+                has_more_before = bool(older) and older[0]["sequence"] > 1
+            else:
+                events = [e for e in full if e["sequence"] > after]
+                has_more_before = False
+
+            return {
+                "events": events,
+                "oldest_sequence": oldest,
+                "latest_sequence": latest,
+                "has_more_before": has_more_before,
+            }
 
     async def subscribe(self, after: int = 0) -> "EventSubscription":
         """Subscribe to live events. ``after`` replays from that cursor first."""
@@ -149,16 +214,24 @@ class EventSubscription:
 class EventBrokerRegistry:
     """Registry of per-run event brokers. One active broker at a time."""
 
-    def __init__(self, reports_dir: Path, *, buffer_size: int = 256) -> None:
+    def __init__(self, reports_dir: Path, *, buffer_size: int = 1000, max_brokers: int = 10) -> None:
         self._reports_dir = reports_dir
         self._buffer_size = buffer_size
-        self._brokers: dict[str, RunEventBroker] = {}
+        self._max_brokers = max_brokers
+        self._brokers: OrderedDict[str, RunEventBroker] = OrderedDict()
 
     def get_or_create(self, run_id: str, *, reports_dir: Path | None = None) -> RunEventBroker:
-        if run_id not in self._brokers:
-            rd = reports_dir or self._reports_dir / run_id
-            self._brokers[run_id] = RunEventBroker(run_id, rd, buffer_size=self._buffer_size)
-        return self._brokers[run_id]
+        broker = self._brokers.get(run_id)
+        if broker is not None:
+            self._brokers.move_to_end(run_id)
+            return broker
+        rd = reports_dir or self._reports_dir / run_id
+        broker = RunEventBroker(run_id, rd, buffer_size=self._buffer_size)
+        self._brokers[run_id] = broker
+        while len(self._brokers) > self._max_brokers:
+            _, evicted = self._brokers.popitem(last=False)
+            evicted.close()
+        return broker
 
     def get(self, run_id: str) -> RunEventBroker | None:
         return self._brokers.get(run_id)

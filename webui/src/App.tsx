@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "@/components/Layout";
@@ -5,14 +6,16 @@ import { OnboardingGate } from "@/components/OnboardingGate";
 import { TokenGate } from "@/components/TokenGate";
 import { WelcomeGate } from "@/components/WelcomeScreen";
 import { HomePage } from "@/routes/HomePage";
-import { RunListPage } from "@/routes/RunListPage";
-import { NewRunPage } from "@/routes/NewRunPage";
-import { RunPage } from "@/routes/RunPage";
-import { ArtifactsPage } from "@/routes/ArtifactsPage";
-import { LootPage } from "@/routes/LootPage";
-import { SkillsPage } from "@/routes/SkillsPage";
-import { SystemPage } from "@/routes/SystemPage";
+import { Spinner } from "@/components/Loading";
 import { Toaster } from "@/components/Toaster";
+
+const RunListPage = lazy(() => import("@/routes/RunListPage").then((m) => ({ default: m.RunListPage })));
+const NewRunPage = lazy(() => import("@/routes/NewRunPage").then((m) => ({ default: m.NewRunPage })));
+const RunPage = lazy(() => import("@/routes/RunPage").then((m) => ({ default: m.RunPage })));
+const ArtifactsPage = lazy(() => import("@/routes/ArtifactsPage").then((m) => ({ default: m.ArtifactsPage })));
+const LootPage = lazy(() => import("@/routes/LootPage").then((m) => ({ default: m.LootPage })));
+const SkillsPage = lazy(() => import("@/routes/SkillsPage").then((m) => ({ default: m.SkillsPage })));
+const SystemPage = lazy(() => import("@/routes/SystemPage").then((m) => ({ default: m.SystemPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,19 +39,27 @@ export default function App() {
         <TokenGate>
           <OnboardingGate>
             <WelcomeGate>
-              <Routes>
-                <Route element={<Layout />}>
-                  <Route path="/" element={<HomePage />} />
-                  <Route path="/sessions" element={<RunListPage />} />
-                  <Route path="/runs/new" element={<NewRunPage />} />
-                  <Route path="/runs/:runId" element={<RunPage />} />
-                  <Route path="/runs/:runId/artifacts" element={<ArtifactsPage />} />
-                  <Route path="/runs/:runId/loot" element={<LootPage />} />
-                  <Route path="/skills" element={<SkillsPage />} />
-                  <Route path="/system" element={<SystemPage />} />
-                  <Route path="*" element={<Navigate to="/" replace />} />
-                </Route>
-              </Routes>
+              <Suspense
+                fallback={
+                  <div className="flex min-h-[50vh] items-center justify-center">
+                    <Spinner label="Loading..." />
+                  </div>
+                }
+              >
+                <Routes>
+                  <Route element={<Layout />}>
+                    <Route path="/" element={<HomePage />} />
+                    <Route path="/sessions" element={<RunListPage />} />
+                    <Route path="/runs/new" element={<NewRunPage />} />
+                    <Route path="/runs/:runId" element={<RunPage />} />
+                    <Route path="/runs/:runId/artifacts" element={<ArtifactsPage />} />
+                    <Route path="/runs/:runId/loot" element={<LootPage />} />
+                    <Route path="/skills" element={<SkillsPage />} />
+                    <Route path="/system" element={<SystemPage />} />
+                    <Route path="*" element={<Navigate to="/" replace />} />
+                  </Route>
+                </Routes>
+              </Suspense>
             </WelcomeGate>
           </OnboardingGate>
         </TokenGate>

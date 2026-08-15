@@ -227,7 +227,8 @@ class ApiPersistence:
             conn = self._connect()
             try:
                 rows = conn.execute(
-                    f"SELECT * FROM runs ORDER BY {order_by} LIMIT ? OFFSET ?",
+                    f"SELECT id, created_at, state, request_json, preview_json, title "
+                    f"FROM runs ORDER BY {order_by} LIMIT ? OFFSET ?",
                     (limit, offset),
                 ).fetchall()
                 result = []
@@ -235,7 +236,6 @@ class ApiPersistence:
                     d = dict(row)
                     d["request_json"] = json.loads(d.get("request_json", "{}"))
                     d["preview_json"] = json.loads(d.get("preview_json", "{}"))
-                    d["result_json"] = json.loads(d.get("result_json", "{}"))
                     result.append(d)
                 return result
             finally:

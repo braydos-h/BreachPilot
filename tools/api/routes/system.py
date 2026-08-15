@@ -246,16 +246,22 @@ async def search_skills(q: str = "", auth: str = Depends(_require_auth)) -> dict
         return {"results": [], "error": f"{type(exc).__name__}: {exc}"}
 
 
-@router.post("/diagnostics/doctor")
-async def run_doctor(auth: str = Depends(_require_auth)) -> dict[str, Any]:
-    """Run the environment self-check and capture its stdout output."""
+def _run_doctor_sync(config_path: Path) -> tuple[int, str]:
+    """Run the environment self-check off-thread and capture its stdout."""
     import contextlib
     import io
     from tools.doctor import run_doctor as _run
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        code = _run(_CONFIG_PATH)
-    return {"exit_code": code, "output": buf.getvalue()}
+        code = _run(config_path)
+    return code, buf.getvalue()
+
+
+@router.post("/diagnostics/doctor")
+async def run_doctor(auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Run the environment self-check and capture its stdout output."""
+    code, output = await asyncio.to_thread(_run_doctor_sync, _CONFIG_PATH)
+    return {"exit_code": code, "output": output}
 
 
 @router.post("/diagnostics/self-test")
@@ -386,6 +392,14 @@ async def list_live_models(auth: str = Depends(_require_auth)) -> dict[str, Any]
 
 # ── AI providers (ChatGPT / openai-oauth) ────────────────────────────────────
 
+def _chatgpt_status_sync(chatgpt_cfg: dict[str, Any]) -> tuple[bool, bool]:
+    """Read ChatGPT auth + proxy health off-thread (health check does HTTP)."""
+    from tools.providers.chatgpt_provider import ChatGptProxyManager
+
+    manager = ChatGptProxyManager.get()
+    return manager.is_authenticated(chatgpt_cfg), manager._health_ok(chatgpt_cfg)
+
+
 @router.get("/providers")
 async def get_providers(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     """Return the active provider + ChatGPT auth/proxy status (no secrets)."""
@@ -395,8 +409,7 @@ async def get_providers(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     provider = get_ai_provider(_CONFIG)
     chatgpt_cfg = get_chatgpt_config(_CONFIG)
     manager = ChatGptProxyManager.get()
-    authenticated = manager.is_authenticated(chatgpt_cfg)
-    proxy_running = manager._health_ok(chatgpt_cfg)
+    authenticated, proxy_running = await asyncio.to_thread(_chatgpt_status_sync, chatgpt_cfg)
     return {
         "provider": provider,
         "chatgpt": {
@@ -422,7 +435,7 @@ async def chatgpt_login(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     from tools.providers.chatgpt_provider import ChatGptProxyManager
 
     chatgpt_cfg = get_chatgpt_config(_CONFIG)
-    result = ChatGptProxyManager.get().run_login(chatgpt_cfg)
+    result = await asyncio.to_thread(ChatGptProxyManager.get().run_login, chatgpt_cfg)
     return result
 
 
@@ -433,7 +446,7 @@ async def chatgpt_proxy_start(auth: str = Depends(_require_auth)) -> dict[str, A
     from tools.providers.chatgpt_provider import ChatGptProxyManager
 
     chatgpt_cfg = get_chatgpt_config(_CONFIG)
-    return ChatGptProxyManager.get().ensure_running(chatgpt_cfg)
+    return await asyncio.to_thread(ChatGptProxyManager.get().ensure_running, chatgpt_cfg)
 
 
 @router.post("/providers/chatgpt/proxy/stop")
@@ -443,8 +456,9 @@ async def chatgpt_proxy_stop(auth: str = Depends(_require_auth)) -> dict[str, An
     from tools.providers.chatgpt_provider import ChatGptProxyManager
 
     chatgpt_cfg = get_chatgpt_config(_CONFIG)
-    we_started = ChatGptProxyManager.get()._we_started
-    ChatGptProxyManager.get().shutdown(chatgpt_cfg)
+    manager = ChatGptProxyManager.get()
+    we_started = manager._we_started
+    await asyncio.to_thread(manager.shutdown, chatgpt_cfg)
     return {"ok": True, "stopped": we_started}
 
 

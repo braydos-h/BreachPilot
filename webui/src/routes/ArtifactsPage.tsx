@@ -19,8 +19,9 @@ const ATTEMPT_LOGS = ["terminal.log", "python_run.log", "msf_output.log", "run_a
 
 export function ArtifactsPage() {
   const { runId } = useParams<{ runId: string }>();
+  const [tab, setTab] = useState("artifacts");
   const artifacts = useArtifacts(runId ?? null);
-  const audit = useAudit(runId ?? null);
+  const audit = useAudit(runId ?? null, tab === "audit");
   const [selected, setSelected] = useState<string>("");
 
   const artifactNames = artifacts.data?.artifacts.map((a) => a.name) ?? [];
@@ -56,7 +57,7 @@ export function ArtifactsPage() {
         </Button>
       </div>
 
-      <Tabs defaultValue="artifacts">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
           <TabsTrigger value="audit">Audit</TabsTrigger>

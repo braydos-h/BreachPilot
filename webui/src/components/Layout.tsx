@@ -5,8 +5,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { SegmentedControl } from "@/components/RunForm";
-import { useProviderStatus } from "@/components/ProviderSetup";
-import { useRuns } from "@/api/hooks";
+import { useModels, useRuns } from "@/api/hooks";
 import { isActiveState, type DecisionListRow } from "@/api/types";
 import { clearStoredToken } from "@/api/client";
 import { useNavigate } from "react-router-dom";
@@ -51,7 +50,9 @@ export function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
   const runs = useRuns(50, 0);
-  const status = useProviderStatus();
+  const models = useModels();
+  const provider = models.data?.provider ?? "ollama";
+  const label = provider === "chatgpt" ? "ChatGPT" : "Ollama";
   const { mode, setMode } = usePermissionMode();
   const activeRun = runs.data?.runs.find((r) => isActiveState(r.state));
   const [showHelp, setShowHelp] = useState(false);
@@ -139,16 +140,9 @@ export function Layout() {
           </div>
           <div className="flex items-center gap-2 rounded-md px-3 py-1.5 text-xs text-muted-foreground">
             <span className="relative flex h-2 w-2">
-              {status.online ? (
-                <>
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/70" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-                </>
-              ) : (
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-muted-foreground/50" />
-              )}
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-muted-foreground/50" />
             </span>
-            <span>{status.label} {status.online ? "online" : "offline"}</span>
+            <span>{label} configured</span>
           </div>
           <Button
             variant="ghost"

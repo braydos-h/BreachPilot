@@ -596,6 +596,7 @@ export type EventType =
   | "artifact"
   | "completion"
   | "error"
+  | "title"
   | "heartbeat";
 
 export interface RunEvent {
@@ -609,6 +610,9 @@ export interface RunEvent {
 export interface EventReplayResponse {
   run_id: string;
   events: RunEvent[];
+  oldest_sequence?: number | null;
+  latest_sequence?: number | null;
+  has_more_before?: boolean;
 }
 
 export interface DiagnosticsResponse {

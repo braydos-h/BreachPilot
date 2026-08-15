@@ -4,7 +4,7 @@ import {
   useQueryClient,
   keepPreviousData,
 } from "@tanstack/react-query";
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   apiFetch,
   ApiError,
@@ -132,13 +132,21 @@ export function usePatchConfig() {
   return useMutation<ConfigPatchResponse, ApiError, Record<string, unknown>>({
     mutationFn: (patch) =>
       apiFetch<ConfigPatchResponse>("/config", { method: "PATCH", body: patch }),
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       qc.setQueryData<Record<string, unknown>>(queryKeys.config, data.config);
-      // Any config change can affect models (ollama.host, models.registry, chatgpt.*) or
-      // provider status, so refetch those immediately instead of waiting on staleTime.
-      void qc.invalidateQueries({ queryKey: queryKeys.models });
-      void qc.invalidateQueries({ queryKey: queryKeys.modelsLive });
-      void qc.invalidateQueries({ queryKey: queryKeys.providers });
+      // Only refetch models/live/providers when the patch actually touches
+      // provider/model config; skills-only edits must not trigger provider probing.
+      const keys = Object.keys(variables);
+      const touchesModels =
+        keys.some((k) => ["models", "ollama", "chatgpt", "provider"].includes(k)) ||
+        (variables.models != null &&
+          typeof variables.models === "object" &&
+          "provider" in (variables.models as Record<string, unknown>));
+      if (touchesModels) {
+        void qc.invalidateQueries({ queryKey: queryKeys.models });
+        void qc.invalidateQueries({ queryKey: queryKeys.modelsLive });
+        void qc.invalidateQueries({ queryKey: queryKeys.providers });
+      }
     },
     onError: (error) => {
       if (error.isAuth) clearStoredToken();
@@ -264,11 +272,17 @@ export function useSkills() {
 }
 
 export function useSkillSearch(q: string, enabled = true) {
+  const [debouncedQ, setDebouncedQ] = useState(q);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQ(q), 250);
+    return () => clearTimeout(timer);
+  }, [q]);
+
   return useQuery<{ results: SkillSearchResult[] }>({
-    queryKey: queryKeys.skillsSearch(q),
-    queryFn: () => apiFetch<{ results: SkillSearchResult[] }>(`/skills/search?q=${encodeURIComponent(q)}`),
+    queryKey: queryKeys.skillsSearch(debouncedQ),
+    queryFn: () => apiFetch<{ results: SkillSearchResult[] }>(`/skills/search?q=${encodeURIComponent(debouncedQ)}`),
     ...defaultQueryOptions,
-    enabled: enabled && q.trim().length > 0,
+    enabled: enabled && debouncedQ.trim().length > 0,
     staleTime: 60_000,
   });
 }

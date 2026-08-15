@@ -601,7 +601,8 @@ def _ensure_chatgpt_runtime(args: argparse.Namespace) -> int:
         ui.status("Running `bun install` in openai-oauth/ (one-time setup)...")
         try:
             result = subprocess.run([bun_cmd, "install"], cwd=str(repo),
-                                    capture_output=True, text=True, timeout=300)
+                                    capture_output=True, text=True, encoding="utf-8",
+                                    errors="replace", timeout=300)
         except (subprocess.TimeoutExpired, OSError) as exc:
             ui.error(f"bun install failed: {exc}")
             return 1
@@ -626,10 +627,11 @@ def _ensure_chatgpt_runtime(args: argparse.Namespace) -> int:
                 "docs/providers.md."
             )
             return 1
-        ui.status("Running `bun run build` in openai-oauth/ (one-time setup, builds workspace dist/)...")
+        ui.status("Running `bun run build --force` in openai-oauth/ (one-time setup, builds workspace dist/)...")
         try:
-            result = subprocess.run([bun_cmd, "run", "build"], cwd=str(repo),
-                                    capture_output=True, text=True, timeout=600)
+            result = subprocess.run([bun_cmd, "run", "build", "--force"], cwd=str(repo),
+                                    capture_output=True, text=True, encoding="utf-8",
+                                    errors="replace", timeout=600)
         except (subprocess.TimeoutExpired, OSError) as exc:
             ui.error(f"bun run build failed: {exc}")
             return 1

@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { clearStoredToken } from "@/api/client";
-import type { RunEvent } from "@/api/types";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { apiFetch, clearStoredToken } from "@/api/client";
+import { queryKeys } from "@/api/hooks";
+import { eventStore } from "@/api/eventStore";
+import type { EventReplayResponse, RunDetail, RunEvent, RunState } from "@/api/types";
 
 export type WsStatus = "idle" | "connecting" | "open" | "closed" | "error";
 
@@ -15,6 +18,10 @@ const WS_CLOSE_CURSOR = 4400;
 const WS_CLOSE_NOT_FOUND = 4404;
 const MAX_BACKOFF = 10_000;
 const SSE_FALLBACK_THRESHOLD = 3;
+
+// Event types that must reach the UI immediately (terminal state, decisions,
+// errors, and title updates) rather than waiting for the next animation frame.
+const IMMEDIATE_EVENT_TYPES = new Set(["state", "approval", "error", "title"]);
 
 function backoffMs(attempt: number): number {
   return Math.min(MAX_BACKOFF, 1000 * 2 ** attempt);
@@ -36,24 +43,92 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
   const wsFailureCountRef = useRef(0);
   const sseActiveRef = useRef(false);
   const runIdRef = useRef<string | null>(null);
+  const pendingRef = useRef<RunEvent[]>([]);
+  const rafRef = useRef<number | null>(null);
 
-  const appendEvent = useCallback((event: RunEvent) => {
-    if (event.type === "heartbeat") {
-      if (typeof event.sequence === "number" && event.sequence > lastSeqRef.current) {
+  // The hook may be mounted outside a QueryClientProvider (tests), where
+  // useQueryClient() throws. Fall back to a no-op cache patcher in that case.
+  let queryClient: QueryClient | null = null;
+  try {
+    queryClient = useQueryClient();
+  } catch {
+    queryClient = null;
+  }
+
+  const patchCaches = useCallback(
+    (event: RunEvent) => {
+      if (!queryClient) return;
+      const id = runIdRef.current;
+      if (!id) return;
+      try {
+        if (event.type === "state") {
+          const state = event.payload?.state;
+          if (typeof state === "string") {
+            queryClient.setQueryData<RunDetail>(queryKeys.run(id), (prev) => {
+              if (!prev) return prev;
+              const next: RunDetail = { ...prev, state: state as RunState };
+              if (event.payload?.result !== undefined) {
+                next.result = event.payload.result as RunDetail["result"];
+              }
+              return next;
+            });
+          }
+          void queryClient.invalidateQueries({ queryKey: ["runs"] });
+        } else if (event.type === "approval") {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.runDecisions(id) });
+        } else if (event.type === "artifact") {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.runArtifacts(id) });
+        }
+      } catch {
+        // Cache patching is best-effort; never let it break the event stream.
+      }
+    },
+    [queryClient],
+  );
+
+  const flushPending = useCallback(() => {
+    rafRef.current = null;
+    const batch = pendingRef.current;
+    if (batch.length === 0) return;
+    pendingRef.current = [];
+    setEvents((prev) => [...prev, ...batch]);
+  }, []);
+
+  const scheduleFlush = useCallback(() => {
+    if (rafRef.current !== null) return;
+    rafRef.current = requestAnimationFrame(flushPending);
+  }, [flushPending]);
+
+  const handleEvent = useCallback(
+    (event: RunEvent) => {
+      if (event.type === "heartbeat") {
+        if (typeof event.sequence === "number" && event.sequence > lastSeqRef.current) {
+          lastSeqRef.current = event.sequence;
+        }
+        return;
+      }
+      if (typeof event.sequence === "number") {
+        if (event.sequence <= lastSeqRef.current) return;
         lastSeqRef.current = event.sequence;
       }
-      return;
-    }
-    if (typeof event.sequence === "number") {
-      if (event.sequence <= lastSeqRef.current) return;
-      lastSeqRef.current = event.sequence;
-    }
-    // Backend delivers monotonic sequences (replay in order, then live in
-    // order), and the `sequence <= lastSeqRef.current` guard above already
-    // drops duplicates/out-of-order events — so a plain append keeps the
-    // array sorted without an O(n) dedup + O(n log n) sort per event.
-    setEvents((prev) => [...prev, event]);
-  }, []);
+      const id = runIdRef.current ?? event.run_id;
+      if (id) eventStore.append(id, event);
+      patchCaches(event);
+      if (IMMEDIATE_EVENT_TYPES.has(event.type)) {
+        if (rafRef.current !== null) {
+          cancelAnimationFrame(rafRef.current);
+          rafRef.current = null;
+        }
+        const pending = pendingRef.current;
+        pendingRef.current = [];
+        setEvents((prev) => [...prev, ...pending, event]);
+      } else {
+        pendingRef.current.push(event);
+        scheduleFlush();
+      }
+    },
+    [patchCaches, scheduleFlush],
+  );
 
   const closeSse = useCallback(() => {
     if (esRef.current) {
@@ -80,7 +155,7 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
       es.onmessage = (msg) => {
         try {
           const event = JSON.parse(msg.data) as RunEvent;
-          appendEvent(event);
+          handleEvent(event);
         } catch {
           // Ignore malformed frames.
         }
@@ -96,7 +171,7 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
         }, backoffMs(attemptRef.current));
       };
     },
-    [appendEvent, closeSse],
+    [handleEvent, closeSse],
   );
 
   const connectWs = useCallback(
@@ -133,7 +208,7 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
       socket.onmessage = (message) => {
         try {
           const event = JSON.parse(message.data) as RunEvent;
-          appendEvent(event);
+          handleEvent(event);
         } catch {
           // Ignore malformed frames.
         }
@@ -161,6 +236,7 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
         if (event.code === WS_CLOSE_CURSOR) {
           lastSeqRef.current = 0;
           setEvents([]);
+          eventStore.clear(id);
         }
         if (event.code === WS_CLOSE_NOT_FOUND) {
           setAuthError("Run not found.");
@@ -179,7 +255,7 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
         }, backoffMs(attemptRef.current));
       };
     },
-    [appendEvent, connectSse],
+    [handleEvent, connectSse],
   );
 
   const reconnect = useCallback(() => {
@@ -201,18 +277,51 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
       return;
     }
     closedByUnmountRef.current = false;
-    lastSeqRef.current = initialAfter;
-    setEvents([]);
     setAuthError("");
     attemptRef.current = 0;
     wsFailureCountRef.current = 0;
-    connectWs(runId);
+
+    let cancelled = false;
+
+    const cached = eventStore.get(runId);
+    if (cached) {
+      // Reuse the in-memory cursor + events instead of replaying from zero.
+      lastSeqRef.current = cached.cursor;
+      setEvents(cached.events);
+      connectWs(runId);
+    } else {
+      lastSeqRef.current = initialAfter;
+      setEvents([]);
+      void (async () => {
+        try {
+          const res = await apiFetch<EventReplayResponse>(
+            `/runs/${encodeURIComponent(runId)}/events?tail=1000`,
+          );
+          if (cancelled) return;
+          const seeded = res.events ?? [];
+          const latest = typeof res.latest_sequence === "number" ? res.latest_sequence : 0;
+          lastSeqRef.current = latest;
+          eventStore.set(runId, seeded, latest);
+          setEvents(seeded);
+        } catch {
+          // Seed failed (run not found / network). Connect from the current
+          // cursor anyway; the WS/SSE path surfaces auth/404 errors.
+        } finally {
+          if (!cancelled) connectWs(runId);
+        }
+      })();
+    }
 
     return () => {
+      cancelled = true;
       closedByUnmountRef.current = true;
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
+      }
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
       }
       closeSse();
       if (wsRef.current) {
