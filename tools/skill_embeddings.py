@@ -19,6 +19,8 @@ import math
 import threading
 from typing import Any
 
+import numpy as np
+
 from tools.skill_registry import LoadedSkill, normalized_skill_tags
 
 _WARNED_NO_EMBEDDER = False
@@ -45,16 +47,13 @@ def _embed_search_text(skill: LoadedSkill) -> str:
 def _cosine(a: list[float] | tuple[float, ...], b: list[float] | tuple[float, ...]) -> float:
     if not a or not b or len(a) != len(b):
         return 0.0
-    dot = 0.0
-    na = 0.0
-    nb = 0.0
-    for x, y in zip(a, b):
-        dot += float(x) * float(y)
-        na += float(x) * float(x)
-        nb += float(y) * float(y)
+    av = np.asarray(a, dtype=np.float64)
+    bv = np.asarray(b, dtype=np.float64)
+    na = float(np.dot(av, av))
+    nb = float(np.dot(bv, bv))
     if na <= 0.0 or nb <= 0.0:
         return 0.0
-    sim = dot / (math.sqrt(na) * math.sqrt(nb))
+    sim = float(np.dot(av, bv)) / (math.sqrt(na) * math.sqrt(nb))
     # Clamp into [0, 1]; negative cosine is not meaningful for ranking here.
     return max(0.0, min(1.0, sim))
 

@@ -4,7 +4,7 @@ ollama:
   api_key_env: OLLAMA_API_KEY
   embed_host: http://localhost:11434
 models:
-  provider: chatgpt
+  provider: ollama
   registry:
     kimi: kimi-k2.6:cloud
     deepseek: deepseek-v4-pro:cloud

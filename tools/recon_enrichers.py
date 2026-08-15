@@ -390,30 +390,35 @@ def _parse_grepable_ports(ports_str: str) -> list[dict]:
 
 
 def _parse_xml_udp(raw: str) -> list[dict]:
+    import xml.etree.ElementTree as ET
+
     results: list[dict] = []
-    for m in re.finditer(
-        r'<port\s+[^>]*protocol="udp"[^>]*>(.*?)</port>',
-        raw,
-        re.IGNORECASE | re.DOTALL,
-    ):
-        port_attr = re.search(r'portid="(\d+)"', m.group(0))
-        if not port_attr:
+    try:
+        root = ET.fromstring(raw.encode("utf-8", errors="replace"))
+    except ET.ParseError:
+        return results
+    for port in root.iter("port"):
+        if (port.get("protocol") or "").lower() != "udp":
             continue
         try:
-            port = int(port_attr.group(1))
+            port_id = int(port.get("portid", "0"))
         except ValueError:
             continue
-        state_m = re.search(r'<state\s+state="([^"]+)"', m.group(1), re.IGNORECASE)
-        state = state_m.group(1).strip().lower() if state_m else "unknown"
-        service_m = re.search(r'<service\s+name="([^"]*)"', m.group(1), re.IGNORECASE)
-        service = service_m.group(1).strip() if service_m else ""
-        banner_m = re.search(r'<service\s+[^>]*product="([^"]*)"', m.group(1), re.IGNORECASE)
-        banner = banner_m.group(1).strip() if banner_m else ""
+        state_elem = port.find("state")
+        state = "unknown"
+        if state_elem is not None and state_elem.get("state"):
+            state = state_elem.get("state").strip().lower()
+        service_elem = port.find("service")
+        service = ""
+        banner = ""
+        if service_elem is not None:
+            service = (service_elem.get("name") or "").strip()
+            banner = (service_elem.get("product") or "").strip()
         # Skip closed / filtered-uninteresting.
         if state in ("closed", "filtered"):
             continue
         results.append({
-            "port": port,
+            "port": port_id,
             "protocol": "udp",
             "service": service,
             "state": state,

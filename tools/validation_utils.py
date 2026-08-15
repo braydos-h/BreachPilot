@@ -386,6 +386,11 @@ def is_target_in_allowlist(target: str, allowed_assets: list[str]) -> bool:
         return False
 
     target_clean = target.strip().lower()
+    # Parse the target once; a hostname (not an IP) skips the CIDR/IP checks.
+    try:
+        target_addr = ipaddress.ip_address(target_clean)
+    except ValueError:
+        target_addr = None
     for asset in allowed_assets:
         asset_clean = asset.strip().lower()
         if not asset_clean:
@@ -401,18 +406,20 @@ def is_target_in_allowlist(target: str, allowed_assets: list[str]) -> bool:
             if target_clean.endswith(suffix):
                 return True
 
+        if target_addr is None:
+            continue
+
         # CIDR match
         try:
             network = ipaddress.ip_network(asset_clean, strict=False)
-            addr = ipaddress.ip_address(target_clean)
-            if addr in network:
+            if target_addr in network:
                 return True
         except ValueError:
             pass
 
         # IP exact match via ipaddress
         try:
-            if str(ipaddress.ip_address(target_clean)) == str(ipaddress.ip_address(asset_clean)):
+            if target_addr == ipaddress.ip_address(asset_clean):
                 return True
         except ValueError:
             pass
