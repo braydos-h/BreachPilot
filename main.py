@@ -471,6 +471,175 @@ def _ensure_webui_build(ui: Any) -> int:
     return 0
 
 
+def _install_bun(ui: Any) -> bool:
+    """Best-effort install of the bun runtime. Returns True on success.
+
+    Installs via the npm package (`bun` publishes a binary wrapper) when npm is
+    on PATH; falls back to the official shell installer via PowerShell on
+    Windows or curl|bash on POSIX. Never raises — a failed install just leaves
+    bun absent and the caller surfaces the ChatGPT provider's own error.
+    """
+    if shutil.which("bun"):
+        return True
+    ui.status("bun not found — attempting install (needed for the ChatGPT provider)...")
+    npm_cmd = shutil.which("npm.cmd") or shutil.which("npm")
+    if npm_cmd:
+        try:
+            result = subprocess.run([npm_cmd, "install", "-g", "bun"],
+                                     capture_output=True, text=True, timeout=180)
+            if result.returncode == 0 and shutil.which("bun"):
+                ui.status("bun installed via npm.")
+                return True
+            ui.error(f"npm install -g bun exited {result.returncode}.")
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            ui.error(f"npm install -g bun failed: {exc}")
+    if os.name == "nt":
+        ps_cmd = (
+            "powershell -NoProfile -ExecutionPolicy Bypass -Command "
+            "\"irm bun.sh/install.ps1 | iex\""
+        )
+        try:
+            result = subprocess.run(ps_cmd, shell=True, capture_output=True,
+                                     text=True, timeout=180)
+            if result.returncode == 0 and shutil.which("bun"):
+                ui.status("bun installed via bun.sh/install.ps1.")
+                return True
+            ui.error(f"bun.sh/install.ps1 exited {result.returncode}.")
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            ui.error(f"bun.sh/install.ps1 failed: {exc}")
+    else:
+        try:
+            result = subprocess.run(["bash", "-c", "curl -fsSL https://bun.sh/install | bash"],
+                                     capture_output=True, text=True, timeout=180)
+            if result.returncode == 0 and shutil.which("bun"):
+                ui.status("bun installed via bun.sh.")
+                return True
+            ui.error(f"bun.sh install exited {result.returncode}.")
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            ui.error(f"bun.sh install failed: {exc}")
+    return False
+
+
+def _ensure_chatgpt_runtime(args: argparse.Namespace) -> int:
+    """Ensure the ChatGPT (openai-oauth) provider is runnable.
+
+    Only acts when ``models.provider`` is ``chatgpt``. Checks, in order:
+      1. bun on PATH (installs it if missing, best-effort)
+      2. the vendored ``openai-oauth/`` checkout (clones it if absent)
+      3. ``bun install`` in ``openai-oauth/`` (runs it if node_modules/ is absent)
+      4. ``bun run build`` in ``openai-oauth/`` (runs it if workspace dist/ is
+         absent — the package ``exports`` maps point at ``./dist/*.js``, which
+         ``bun install`` does NOT produce; running ``bun ./src/cli.ts`` from
+         source still resolves ``@openai-oauth/local/auth-file`` through the
+         exports map to a non-existent ``dist/auth-file-entry.js`` without this)
+
+    Returns 0 on success or when the ChatGPT provider is not active. Returns
+    non-zero only when a required step fails AND the operator is about to use
+    the ChatGPT provider (so the error is surfaced early instead of mid-run).
+    """
+    from tools.config_manager import get_ai_provider, get_chatgpt_config
+
+    try:
+        config = load_config(args.config)
+    except Exception:
+        config = {}
+    if get_ai_provider(config) != "chatgpt":
+        return 0
+
+    chatgpt_cfg = get_chatgpt_config(config)
+    repo = Path(str(chatgpt_cfg.get("local_repo") or "./openai-oauth"))
+    if not repo.is_absolute():
+        repo = Path.cwd() / repo
+    entry = repo / "packages" / "openai-oauth" / "src" / "cli.ts"
+
+    if not shutil.which("bun"):
+        if not _install_bun(ui):
+            ui.error(
+                "bun could not be installed automatically. Install it manually "
+                "from https://bun.sh, then re-run. The ChatGPT provider needs bun "
+                "to run the openai-oauth proxy. See docs/providers.md."
+            )
+            return 1
+        # npm/powershell installs may put bun on PATH for future shells but not
+        # this one; re-look and, if still missing, point at the user profile.
+        if not shutil.which("bun"):
+            user_bun = Path.home() / ".bun" / "bin" / ("bun.exe" if os.name == "nt" else "bun")
+            if user_bun.exists():
+                os.environ["PATH"] = f"{user_bun.parent}{os.pathsep}{os.environ.get('PATH', '')}"
+
+    if not entry.exists():
+        ui.status(f"openai-oauth checkout missing at {repo} — cloning EvanZhouDev/openai-oauth...")
+        git_cmd = shutil.which("git")
+        if not git_cmd:
+            ui.error(
+                "git not found on PATH. Clone EvanZhouDev/openai-oauth into "
+                f"{repo} manually, then re-run. See docs/providers.md."
+            )
+            return 1
+        try:
+            result = subprocess.run([git_cmd, "clone", "--depth", "1",
+                                     "https://github.com/EvanZhouDev/openai-oauth.git",
+                                     str(repo)], capture_output=True, text=True, timeout=180)
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            ui.error(f"git clone openai-oauth failed: {exc}")
+            return 1
+        if result.returncode != 0:
+            ui.error(f"git clone openai-oauth exited {result.returncode}: {(result.stderr or '')[:300]}")
+            return 1
+        ui.status("openai-oauth cloned.")
+
+    node_modules = repo / "node_modules"
+    if not node_modules.exists():
+        bun_cmd = shutil.which("bun") or (str(Path.home() / ".bun" / "bin" / ("bun.exe" if os.name == "nt" else "bun")))
+        if not Path(bun_cmd).exists():
+            ui.error(
+                "bun is not on PATH after install. Open a new terminal so PATH "
+                "updates apply, or add bun to PATH manually, then re-run. See "
+                "docs/providers.md."
+            )
+            return 1
+        ui.status("Running `bun install` in openai-oauth/ (one-time setup)...")
+        try:
+            result = subprocess.run([bun_cmd, "install"], cwd=str(repo),
+                                    capture_output=True, text=True, timeout=300)
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            ui.error(f"bun install failed: {exc}")
+            return 1
+        if result.returncode != 0:
+            ui.error(f"bun install exited {result.returncode}: {(result.stderr or '')[:300]}")
+            return 1
+        ui.status("bun install complete.")
+
+    # Workspace packages export from ./dist/*.js (e.g. @openai-oauth/local/auth-file
+    # -> dist/auth-file-entry.js). bun install only installs deps; it does NOT
+    # build the workspace packages. Without dist/, `bun ./src/cli.ts` fails at
+    # import time with "Cannot find module '@openai-oauth/local/auth-file'".
+    # Marker for "build needed": packages/local/dist/auth-file-entry.js — the
+    # exact module the CLI imports first, and the one the runtime error names.
+    local_dist = repo / "packages" / "local" / "dist" / "auth-file-entry.js"
+    if not local_dist.exists():
+        bun_cmd = shutil.which("bun") or (str(Path.home() / ".bun" / "bin" / ("bun.exe" if os.name == "nt" else "bun")))
+        if not Path(bun_cmd).exists():
+            ui.error(
+                "bun is not on PATH after install. Open a new terminal so PATH "
+                "updates apply, or add bun to PATH manually, then re-run. See "
+                "docs/providers.md."
+            )
+            return 1
+        ui.status("Running `bun run build` in openai-oauth/ (one-time setup, builds workspace dist/)...")
+        try:
+            result = subprocess.run([bun_cmd, "run", "build"], cwd=str(repo),
+                                    capture_output=True, text=True, timeout=600)
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            ui.error(f"bun run build failed: {exc}")
+            return 1
+        if result.returncode != 0:
+            ui.error(f"bun run build exited {result.returncode}: {(result.stderr or '')[:300]}")
+            return 1
+        ui.status("bun run build complete.")
+    return 0
+
+
 def _open_browser_when_ready(host: str, port: int, ui: Any) -> None:
     """Poll the health endpoint, then open the browser. Daemon thread."""
     import urllib.request
@@ -858,6 +1027,17 @@ def main(argv: list[str] | None = None) -> int:
         )
         if setup_only:
             return 0
+
+        # ChatGPT provider: ensure bun + the vendored openai-oauth checkout +
+        # `bun install` are all in place before any runtime path can hit the
+        # proxy. Surfaces the fix (install/clone/install-deps) up front instead
+        # of letting the proxy's own RuntimeError fire mid-run. Skipped for
+        # --doctor/--self-test/--eval, which intentionally probe a partial state.
+        if not any(getattr(args, flag, False) for flag in
+                    ("doctor", "self_test", "eval", "skills_list", "list_plugins")):
+            rc = _ensure_chatgpt_runtime(args)
+            if rc != 0:
+                return rc
 
         # --demon / --daemon / --web: start the local WebUI API server and exit.
         # Checked BEFORE --doctor/--self-test/etc. so the mutual-exclusion
