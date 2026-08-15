@@ -525,9 +525,9 @@ def _ensure_chatgpt_runtime(args: argparse.Namespace) -> int:
 
     Only acts when ``models.provider`` is ``chatgpt``. Checks, in order:
       1. bun on PATH (installs it if missing, best-effort)
-      2. the vendored ``openai-oauth/`` checkout (clones it if absent)
-      3. ``bun install`` in ``openai-oauth/`` (runs it if node_modules/ is absent)
-      4. ``bun run build`` in ``openai-oauth/`` (runs it if workspace dist/ is
+      2. the vendored ``oauth/`` checkout (clones it if absent)
+      3. ``bun install`` in ``oauth/`` (runs it if node_modules/ is absent)
+      4. ``bun run build`` in ``oauth/`` (runs it if workspace dist/ is
          absent — the package ``exports`` maps point at ``./dist/*.js``, which
          ``bun install`` does NOT produce; running ``bun ./src/cli.ts`` from
          source still resolves ``@openai-oauth/local/auth-file`` through the
@@ -547,7 +547,7 @@ def _ensure_chatgpt_runtime(args: argparse.Namespace) -> int:
         return 0
 
     chatgpt_cfg = get_chatgpt_config(config)
-    repo = Path(str(chatgpt_cfg.get("local_repo") or "./openai-oauth"))
+    repo = Path(str(chatgpt_cfg.get("local_repo") or "./oauth"))
     if not repo.is_absolute():
         repo = Path.cwd() / repo
     entry = repo / "packages" / "openai-oauth" / "src" / "cli.ts"
@@ -568,7 +568,7 @@ def _ensure_chatgpt_runtime(args: argparse.Namespace) -> int:
                 os.environ["PATH"] = f"{user_bun.parent}{os.pathsep}{os.environ.get('PATH', '')}"
 
     if not entry.exists():
-        ui.status(f"openai-oauth checkout missing at {repo} — cloning EvanZhouDev/openai-oauth...")
+        ui.status(f"oauth checkout missing at {repo} — cloning EvanZhouDev/openai-oauth...")
         git_cmd = shutil.which("git")
         if not git_cmd:
             ui.error(
@@ -598,7 +598,7 @@ def _ensure_chatgpt_runtime(args: argparse.Namespace) -> int:
                 "docs/providers.md."
             )
             return 1
-        ui.status("Running `bun install` in openai-oauth/ (one-time setup)...")
+        ui.status("Running `bun install` in oauth/ (one-time setup)...")
         try:
             result = subprocess.run([bun_cmd, "install"], cwd=str(repo),
                                     capture_output=True, text=True, encoding="utf-8",
@@ -627,7 +627,7 @@ def _ensure_chatgpt_runtime(args: argparse.Namespace) -> int:
                 "docs/providers.md."
             )
             return 1
-        ui.status("Running `bun run build --force` in openai-oauth/ (one-time setup, builds workspace dist/)...")
+        ui.status("Running `bun run build --force` in oauth/ (one-time setup, builds workspace dist/)...")
         try:
             result = subprocess.run([bun_cmd, "run", "build", "--force"], cwd=str(repo),
                                     capture_output=True, text=True, encoding="utf-8",

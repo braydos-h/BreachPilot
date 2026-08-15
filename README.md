@@ -118,7 +118,7 @@ For the full architecture, Flow A/B split, and module map, see
 - Optional, Linux full arsenal: Metasploit, searchsploit, impacket, tmux
 - For the WebUI: Node.js + npm (only on first `--web` run)
 - **Optional — ChatGPT provider:** [bun](https://bun.sh) ≥ 1.3.11 to run the
-  vendored `openai-oauth/` proxy from source (only when `models.provider:
+  vendored `oauth/` proxy from source (only when `models.provider:
   chatgpt`). A local Ollama is still required for embeddings even under the
   ChatGPT provider. See [docs/providers.md](docs/providers.md).
 
@@ -177,7 +177,7 @@ shell-load workflow, but the app itself does not read `.env`.
 > **ChatGPT provider** (opt-in, `models.provider: chatgpt`) does **not** use an
 > env API key. It authenticates via a browser "Sign in with ChatGPT" OAuth flow
 > whose tokens live in `~/.codex/auth.json` (managed by the vendored
-> `openai-oauth/` proxy) — they are never copied into `config.yaml` or logged.
+> `oauth/` proxy) — they are never copied into `config.yaml` or logged.
 > Run `python main.py` → choose **ChatGPT** → **Sign in with ChatGPT**, or see
 > [docs/providers.md](docs/providers.md).
 

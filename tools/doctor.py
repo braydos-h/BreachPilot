@@ -265,7 +265,7 @@ def _check_chatgpt(config: dict[str, Any] | None = None) -> dict[str, Any]:
     host = str(cfg.get("host") or "127.0.0.1")
     port = int(cfg.get("port") or 10531)
     root = f"http://{host}:{port}"
-    repo = Path(str(cfg.get("local_repo") or "./openai-oauth"))
+    repo = Path(str(cfg.get("local_repo") or "./oauth"))
     if not repo.is_absolute():
         repo = Path.cwd() / repo
     entry = repo / "packages" / "openai-oauth" / "src" / "cli.ts"
@@ -318,7 +318,7 @@ def _check_chatgpt(config: dict[str, Any] | None = None) -> dict[str, Any]:
     elif not models_ok:
         hint = f"Proxy up but /v1/models returned no models at {root}/v1/models."
     if not entry.exists():
-        hint = (hint + " " if hint else "") + "openai-oauth source not found — clone EvanZhouDev/openai-oauth into openai-oauth/ and run `bun install`."
+        hint = (hint + " " if hint else "") + "openai-oauth source not found — clone EvanZhouDev/openai-oauth into oauth/ and run `bun install`."
     return {"name": "chatgpt_provider", "ok": ok, "subchecks": sub, "hint": hint, "runtime": runtime, "models": models}
 
 

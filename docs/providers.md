@@ -174,7 +174,7 @@ back with `function.arguments` as a JSON **string**; `_normalize_tool_call`
 
 The opt-in `chatgpt` provider routes chat/generate through the operator's
 ChatGPT account via a vendored copy of [`openai-oauth`](https://github.com/EvanZhouDev/openai-oauth)
-(cloned at `openai-oauth/` in the repo root). openai-oauth runs a **loopback
+(cloned at `oauth/` in the repo root). openai-oauth runs a **loopback
 OpenAI-compatible HTTP proxy** (`127.0.0.1:10531/v1`) backed by browser OAuth
 that reuses the Codex CLI credential file at `~/.codex/auth.json` (or
 `$CODEX_HOME/auth.json`). The adapter lives in `tools/providers/chatgpt_provider.py`.
@@ -190,7 +190,7 @@ chatgpt:
   host: 127.0.0.1            # loopback-only unless you explicitly change it
   port: 10531
   auto_start: true
-  local_repo: ./openai-oauth
+  local_repo: ./oauth
   runtime: auto              # auto = prefer bun (run from source), fall back to node+dist/cli.js
   request_timeout_seconds: 300
   default_model: gpt-5.2
@@ -259,7 +259,7 @@ the conservative source of truth for the context compactor. The Ollama
 
 `runtime: auto` prefers `bun` on PATH (run from source: `bun ./packages/openai-oauth/src/cli.ts`);
 else `node` if on PATH **and** `dist/cli.js` exists (a prior `bun run build`);
-else a helpful `RuntimeError` pointing at `bun install` in `openai-oauth/`.
+else a helpful `RuntimeError` pointing at `bun install` in `oauth/`.
 `bun install` is the one-time setup step (best-effort in the setup scripts).
 No global Codex CLI install is required.
 

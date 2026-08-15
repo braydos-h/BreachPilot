@@ -103,7 +103,7 @@ Embeddings stay on Ollama regardless. See
 | `port` | int | `10531` | Proxy port | chatgpt_provider.py `ensure_running` |
 | `base_url` | str | `http://127.0.0.1:10531/v1` | OpenAI-compatible endpoint the adapter POSTs to | chatgpt_provider.py `ChatGptProxyClient`, `discover_models` |
 | `auto_start` | bool | `true` | Start the vendored proxy if `/health` is down | chatgpt_provider.py `ensure_running` |
-| `local_repo` | str | `./openai-oauth` | Path to the vendored checkout (cwd for CLI subprocess) | chatgpt_provider.py `_resolve_runtime`/`ensure_running`/`run_login`/`shutdown` |
+| `local_repo` | str | `./oauth` | Path to the vendored checkout (cwd for CLI subprocess) | chatgpt_provider.py `_resolve_runtime`/`ensure_running`/`run_login`/`shutdown` |
 | `runtime` | str | `auto` | `auto`\|`bun`\|`node` — how to run the openai-oauth CLI | chatgpt_provider.py `_resolve_runtime` |
 | `request_timeout_seconds` | int | `300` | httpx timeout for `/v1/chat/completions` | chatgpt_provider.py `ChatGptProxyClient`, model_router.py |
 | `default_model` | str | `gpt-5.2` | Fallback model id when `/v1/models` discovery fails; also the session-titler model | model_router.py `_build_chatgpt_router`, session_titler.py |

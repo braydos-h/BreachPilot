@@ -79,17 +79,17 @@ where ollama >nul 2>&1 && (
 REM --- 2b. openai-oauth (ChatGPT provider, best-effort / opt-in) -----------
 REM Only needed if you set models.provider: chatgpt. Requires bun (https://bun.sh).
 REM Never aborts the install if bun or the checkout is missing.
-if exist "%REPO_ROOT%\openai-oauth\packages\openai-oauth\src\cli.ts" (
+if exist "%REPO_ROOT%\oauth\packages\openai-oauth\src\cli.ts" (
     where bun >nul 2>&1 && (
         echo ==^> Preparing vendored openai-oauth ^(ChatGPT provider^) via bun install
-        pushd "%REPO_ROOT%\openai-oauth" 2>nul
-        bun install || echo   [!] bun install failed in openai-oauth\ -- ChatGPT provider not runnable until it succeeds. See docs/providers.md.
+        pushd "%REPO_ROOT%\oauth" 2>nul
+        bun install || echo   [!] bun install failed in oauth\ -- ChatGPT provider not runnable until it succeeds. See docs/providers.md.
         popd 2>nul
     ) || (
-        echo ==^> Skipping openai-oauth setup ^(bun not on PATH^). ChatGPT is opt-in: install bun from https://bun.sh then run "bun install" in openai-oauth\. See docs/providers.md.
+        echo ==^> Skipping openai-oauth setup ^(bun not on PATH^). ChatGPT is opt-in: install bun from https://bun.sh then run "bun install" in oauth\. See docs/providers.md.
     )
 ) else (
-    echo ==^> Skipping openai-oauth setup ^(no openai-oauth checkout^). ChatGPT provider is opt-in. See docs/providers.md.
+    echo ==^> Skipping openai-oauth setup ^(no oauth checkout^). ChatGPT provider is opt-in. See docs/providers.md.
 )
 
 REM --- 3. Python venv + requirements (resilient) -----------------------------

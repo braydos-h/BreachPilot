@@ -50,9 +50,9 @@ check bun       "curl -fsSL https://bun.sh/install | bash  (only needed for the 
 
 # Best-effort: prepare the vendored openai-oauth checkout if bun is available.
 # ChatGPT provider is opt-in (models.provider: chatgpt); never aborts setup.
-if [[ -d "$PWD/openai-oauth" ]] && command -v bun >/dev/null 2>&1; then
+if [[ -d "$PWD/oauth" ]] && command -v bun >/dev/null 2>&1; then
     echo "==> Preparing vendored openai-oauth (ChatGPT provider) via bun install"
-    (cd "$PWD/openai-oauth" && bun install) || echo "  [!] bun install failed in openai-oauth/ — see docs/providers.md"
+    (cd "$PWD/oauth" && bun install) || echo "  [!] bun install failed in oauth/ — see docs/providers.md"
 fi
 
 echo "==> Pulling default model (best-effort)"

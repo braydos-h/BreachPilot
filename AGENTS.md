@@ -95,7 +95,7 @@ On Linux/macOS `make install|test|test-one F=…|run|doctor|mcp-exploit` work.
    first chat.
 
    **ChatGPT is an opt-in alternative provider** (`models.provider: chatgpt`,
-   vendored `openai-oauth/` loopback proxy at `127.0.0.1:10531/v1`). The single
+   vendored `oauth/` loopback proxy at `127.0.0.1:10531/v1`). The single
    seam is `tools/model_router.py::_build_model_client` — it takes an injectable
    `raw_client`; `ollama` (default) builds `ollama.Client`, `chatgpt` injects a
    `ChatGptProxyClient` (`tools/providers/chatgpt_provider.py`). Consumers stay

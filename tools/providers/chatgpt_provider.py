@@ -1,6 +1,6 @@
 """ChatGPT provider adapter — local openai-oauth proxy.
 
-Wraps the vendored ``openai-oauth`` project (cloned at ``openai-oauth/`` at the
+Wraps the vendored ``openai-oauth`` project (cloned at ``oauth/`` at the
 repo root). openai-oauth exposes a loopback OpenAI-compatible HTTP proxy
 (``127.0.0.1:10531/v1``) backed by the operator's ChatGPT account via browser
 OAuth. Credentials are reused from the Codex CLI at ``~/.codex/auth.json``
@@ -68,7 +68,7 @@ def _chatgpt_defaults() -> dict[str, Any]:
         "port": _DEFAULT_PORT,
         "base_url": f"http://{_DEFAULT_HOST}:{_DEFAULT_PORT}/v1",
         "auto_start": True,
-        "local_repo": "./openai-oauth",
+        "local_repo": "./oauth",
         "runtime": "auto",
         "request_timeout_seconds": 300,
         "default_model": "gpt-5.2",
@@ -308,7 +308,7 @@ class ChatGptProxyManager:
     # --- runtime resolution -------------------------------------------------
 
     def _resolve_local_repo(self, cfg: Mapping[str, Any]) -> Path:
-        repo = Path(str(cfg.get("local_repo") or "./openai-oauth"))
+        repo = Path(str(cfg.get("local_repo") or "./oauth"))
         if not repo.is_absolute():
             repo = Path.cwd() / repo
         return repo
@@ -329,7 +329,7 @@ class ChatGptProxyManager:
         if not entry.exists():
             raise RuntimeError(
                 f"openai-oauth CLI not found at {entry}. "
-                f"Clone EvanZhouDev/openai-oauth into openai-oauth/ and run "
+                f"Clone EvanZhouDev/openai-oauth into oauth/ and run "
                 f"`bun install` there (see docs/providers.md)."
             )
 
@@ -353,7 +353,7 @@ class ChatGptProxyManager:
         if chosen is None:
             raise RuntimeError(
                 "No openai-oauth runtime available. Install bun (bun.sh) and run "
-                "`bun install` in openai-oauth/, or `bun run build` and set "
+                "`bun install` in oauth/, or `bun run build` and set "
                 "chatgpt.runtime: node. See docs/providers.md."
             )
         self._runtime = chosen

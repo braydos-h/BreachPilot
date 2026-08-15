@@ -8,6 +8,8 @@ env/
 node_modules/
 webui/node_modules/
 webui/dist/
+# Vendored openai-oauth ChatGPT-provider proxy (built locally via bun install).
+oauth/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/

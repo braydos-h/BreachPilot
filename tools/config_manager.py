@@ -93,7 +93,7 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "port": 10531,
         "base_url": "http://127.0.0.1:10531/v1",
         "auto_start": True,
-        "local_repo": "./openai-oauth",
+        "local_repo": "./oauth",
         "runtime": "auto",
         "request_timeout_seconds": 300,
         "default_model": "gpt-5.2",
