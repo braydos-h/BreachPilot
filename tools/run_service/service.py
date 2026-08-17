@@ -852,14 +852,16 @@ class AssessmentService:
                 )
                 live = _swarm_heartbeat if swarm_active else _heartbeat
                 source = "swarm" if swarm_active else "agent"
-                await event_sink.emit(EVENT_PROGRESS, {
+                progress = {
                     "elapsed_seconds": int(time.monotonic() - start),
-                    "round": _heartbeat.round if swarm_active else live.round,
                     "actions": live.action,
                     "phase": live.phase,
                     "source": source,
                     "telemetry": _live_tel,
-                })
+                }
+                if not swarm_active:
+                    progress["round"] = live.round
+                await event_sink.emit(EVENT_PROGRESS, progress)
                 if swarm_active:
                     ui.info(
                         f"Swarm still running... {m}:{s:02d} elapsed "
