@@ -63,6 +63,18 @@ class SwarmMcpBridge:
         loop = self._loop
         if loop is None:
             raise RuntimeError("SwarmMcpBridge has no event loop (attach not called)")
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+        if running_loop is loop:
+            close = getattr(coro, "close", None)
+            if close is not None:
+                close()
+            raise RuntimeError(
+                "SwarmMcpBridge.dispatch cannot run on its MCP event loop; "
+                "call it from a worker thread"
+            )
         future = asyncio.run_coroutine_threadsafe(coro, loop)
         return future.result(timeout=timeout)
 
