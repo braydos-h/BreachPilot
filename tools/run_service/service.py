@@ -809,6 +809,12 @@ class AssessmentService:
         )
         _apply_runtime_skill_selection(exploit_settings, skill_selection, config=config, goal=goal, mode=mode)
 
+        # The primary agent and the autonomous swarm advance independently.
+        # Keep separate holders so the ticker can report the live worker rather
+        # than overwriting one source's phase/action state with the other's.
+        _heartbeat = _RunHeartbeat()
+        _swarm_heartbeat = _RunHeartbeat()
+
         # Swarm bridge + loop setup.
         swarm_bridge = SwarmMcpBridge()
         swarm_loop: Any = None
@@ -821,7 +827,7 @@ class AssessmentService:
                 model_alias=model_alias, swarm_bridge=swarm_bridge,
                 original_target=original_target, resolved_ip=resolved_ip,
                 resolved_domain=resolved_domain, event_sink=event_sink,
-                reports_dir=reports_dir,
+                reports_dir=reports_dir, progress_heartbeat=_swarm_heartbeat,
             )
 
         # Activity log.
@@ -831,9 +837,6 @@ class AssessmentService:
         # Telemetry snapshot (incremental — only new bytes are re-read).
         _telemetry_acc = _TelemetryAccumulator(usage_log_path(workspace_root_from_sources()))
 
-        # Heartbeat + ticker.
-        _heartbeat = _RunHeartbeat()
-
         async def _ticker() -> None:
             start = time.monotonic()
             while True:
@@ -842,14 +845,31 @@ class AssessmentService:
                     return
                 m, s = divmod(int(time.monotonic() - start), 60)
                 _live_tel = _telemetry_acc.snapshot() or {}
+                swarm_active = (
+                    swarm_task is not None
+                    and not swarm_task.done()
+                    and _swarm_heartbeat.phase != "starting"
+                )
+                live = _swarm_heartbeat if swarm_active else _heartbeat
+                source = "swarm" if swarm_active else "agent"
                 await event_sink.emit(EVENT_PROGRESS, {
                     "elapsed_seconds": int(time.monotonic() - start),
-                    "round": _heartbeat.round,
-                    "actions": _heartbeat.action,
-                    "phase": _heartbeat.phase,
+                    "round": _heartbeat.round if swarm_active else live.round,
+                    "actions": live.action,
+                    "phase": live.phase,
+                    "source": source,
                     "telemetry": _live_tel,
                 })
-                ui.info(f"Exploit agent still running... {m}:{s:02d} elapsed (round {_heartbeat.round}, {_heartbeat.action} actions, {_heartbeat.phase})")
+                if swarm_active:
+                    ui.info(
+                        f"Swarm still running... {m}:{s:02d} elapsed "
+                        f"({live.action} actions, {live.phase})"
+                    )
+                else:
+                    ui.info(
+                        f"Exploit agent still running... {m}:{s:02d} elapsed "
+                        f"(round {live.round}, {live.action} actions, {live.phase})"
+                    )
 
         ticker_task = asyncio.create_task(_ticker())
 
@@ -998,6 +1018,15 @@ class AssessmentService:
             finally:
                 if session_attach is not None:
                     session_attach(None, [], None)
+
+            # Keep the progress ticker alive while the parallel swarm finishes;
+            # cancelling it before this wait left the API with frozen status.
+            if swarm_task is not None and swarm_workspace is not None:
+                result = await self._wait_swarm(
+                    swarm_task=swarm_task, swarm_bridge=swarm_bridge,
+                    swarm_workspace=swarm_workspace, config=config,
+                    request=request, result=result, event_sink=event_sink,
+                )
         except _EXC_GROUP_CATCH as exc:
             log_path = reports_dir / "session_error.log"
             try:
@@ -1022,14 +1051,6 @@ class AssessmentService:
                 await asyncio.wait_for(ticker_task, timeout=0.1)
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 pass
-
-        # Swarm wait.
-        if swarm_task is not None and swarm_workspace is not None:
-            result = await self._wait_swarm(
-                swarm_task=swarm_task, swarm_bridge=swarm_bridge,
-                swarm_workspace=swarm_workspace, config=config,
-                request=request, result=result, event_sink=event_sink,
-            )
 
         # Telemetry.
         _tel = _telemetry_acc.snapshot()
@@ -1289,7 +1310,7 @@ class AssessmentService:
         goal: AttackGoal, mode: str, exploit_settings: ExploitSettings,
         model_client: Any, model_alias: str, swarm_bridge: SwarmMcpBridge,
         original_target: str, resolved_ip: str | None, resolved_domain: str | None,
-        event_sink: EventSink, reports_dir: Path,
+        event_sink: EventSink, reports_dir: Path, progress_heartbeat: Any,
     ) -> tuple[Any, asyncio.Task[Any] | None, Path]:
         from agent_loop import AgentLoop
 
@@ -1324,10 +1345,20 @@ class AssessmentService:
         except Exception as exc:  # noqa: BLE001
             ui.warning(f"swarm set_model_client failed: {exc}")
 
+        def _track_progress(payload: dict[str, Any]) -> None:
+            action = payload.get("action")
+            progress_heartbeat.update(
+                round=progress_heartbeat.round,
+                action=int(action) if action is not None else progress_heartbeat.action,
+                phase=str(payload.get("phase") or progress_heartbeat.phase),
+            )
+
         async def _run_swarm() -> dict[str, Any]:
             try:
                 if mode == "attack":
-                    return await swarm_loop.run_autonomous_campaign([target_ip])
+                    from tools.autonomous_orchestrator import observe_autonomous_progress
+                    with observe_autonomous_progress(_track_progress):
+                        return await swarm_loop.run_autonomous_campaign([target_ip])
                 max_cycles = int(exploit_cfg.get("max_rounds", 30))
                 return await asyncio.to_thread(swarm_loop.run, max_cycles)
             except _EXC_GROUP_CATCH as exc:
