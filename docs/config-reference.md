@@ -264,6 +264,9 @@ Semantic-memory consumer for the autonomous orchestrator. When true, the orchest
 | `extended_enumerators` | bool | `true` | TLS/SMTP/DB/spider/OSINT additive enumerators | recon_pipeline.py:294,1102 |
 | `udp_top_ports` | int | `100` | `nmap -sU --top-ports N` | recon_pipeline.py:251,2246 |
 | `shodan_api_key` | str | `""` | Passive OSINT key; `""` = disabled (falls back to `$SHODAN_API_KEY`) | recon_pipeline.py:287,1853 |
+| `max_retries` | int | `2` | Nmap retry count on timeout/crash; set `0` to skip straight to native socket fallback (faster on Windows Npcap hangs) | recon_pipeline.py:234,589 |
+| `retry_delay` | float | `5.0` | Initial retry delay (s); multiplied by 1.5 each retry | recon_pipeline.py:235,590 |
+| `timeout_seconds` | int | `300` | Per-attempt nmap command timeout (s) | recon_pipeline.py:233,588 |
 | `domain_resolution.enabled` | bool | `true` | Accept domain `--target`, resolve at boot | tools/validation_utils.resolve_target_to_ip, main.py target threading |
 | `domain_resolution.max_subdomains` | int | `500` | Cap on `enumerate_subdomains` results | mcp_tools/domain.py:361 (tool default) |
 | `domain_resolution.subdomain_sources` | list | crt_sh/dns_bruteforce/subfinder/amass | Discovery sources | mcp_tools/domain.py:360,393-448 |

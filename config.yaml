@@ -201,6 +201,12 @@ recon:
   extended_enumerators: true
   udp_top_ports: 100
   shodan_api_key: ''
+  # Nmap retry budget. On Windows, nmap -sS/-O can hang on Npcap driver
+  # issues; set max_retries: 0 to skip straight to the native Python socket
+  # fallback instead of burning ~45s on 3 retries with 5-7.5s backoff.
+  max_retries: 2
+  retry_delay: 5.0
+  timeout_seconds: 300
   domain_resolution:
     enabled: true
     max_subdomains: 500

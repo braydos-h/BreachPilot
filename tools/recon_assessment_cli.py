@@ -112,37 +112,40 @@ async def run_recon_assessment(
             open_ports.append(port_match.groups())
 
     if open_ports:
-        ui.info(f"Looking up CVEs for {len(open_ports)} discovered service(s)...")
-    for port, proto, service, banner in open_ports:
-        banner = banner.strip()
-        if banner == "(no banner)":
-            banner = ""
-        product_version = _cve_query_from_banner(banner)
-        if product_version is None:
-            ui.info(
-                f"Skipping CVE lookup for {service or 'unknown service'} on port {port}: "
-                "no product/version banner was identified."
-            )
-            continue
-
-        product, version = product_version
-        query = f"{product} {version}"
-        with ui.spinner(f"Looking up CVEs for {product} {version} on port {port}..."):
-            try:
-                cve_raw = await session.call_tool("search_cve_intel", {"query": query})
-                cve_text = _extract_tool_text(cve_raw)
-                cve_results.append({
-                    "service": service,
-                    "product": product,
-                    "version": version,
-                    "port": port,
-                    "results": cve_text[:2000],
-                })
-                ui.result(f"CVEs for {product} {version}", cve_text[:600])
-            except _EXC_GROUP_CATCH as exc:
-                ui.warning(f"CVE lookup skipped for {service}: {exc}")
-                if _is_exception_group(exc):
-                    _log_nested_exceptions(exc)
+        # ponytail: pre-filter to the queryable subset (banner identifies a
+        # concrete product+version). The skip predicate is a pure function of
+        # the banner already in hand, so we compute it once instead of
+        # iterating all 23 ports and logging "Skipping..." 22 times. Also
+        # makes the announcement count honest ("N of M") instead of
+        # implying all M will be queried.
+        queryable: list[tuple[str, str, str, tuple[str, str]]] = []
+        for port, proto, service, banner in open_ports:
+            b = "" if banner.strip() == "(no banner)" else banner.strip()
+            qv = _cve_query_from_banner(b)
+            if qv is not None:
+                queryable.append((port, proto, service, qv))
+        ui.info(
+            f"Looking up CVEs for {len(queryable)} of {len(open_ports)} "
+            f"discovered service(s)..."
+        )
+        for port, proto, service, (product, version) in queryable:
+            query = f"{product} {version}"
+            with ui.spinner(f"Looking up CVEs for {product} {version} on port {port}..."):
+                try:
+                    cve_raw = await session.call_tool("search_cve_intel", {"query": query})
+                    cve_text = _extract_tool_text(cve_raw)
+                    cve_results.append({
+                        "service": service,
+                        "product": product,
+                        "version": version,
+                        "port": port,
+                        "results": cve_text[:2000],
+                    })
+                    ui.result(f"CVEs for {product} {version}", cve_text[:600])
+                except _EXC_GROUP_CATCH as exc:
+                    ui.warning(f"CVE lookup skipped for {service}: {exc}")
+                    if _is_exception_group(exc):
+                        _log_nested_exceptions(exc)
 
     # ── Build assessment ──
     assessment = build_assessment_from_mcp_results(

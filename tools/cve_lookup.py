@@ -360,11 +360,38 @@ class NVDClient:
         return await loop.run_in_executor(None, self._fetch_sync, query)
 
     def _fetch_sync(self, query: str) -> list[CVEEntry]:
-        """Perform the actual HTTP GET to NVD API (keyword search)."""
-        return self._fetch_by_params({
-            "keywordSearch": query,
-            "resultsPerPage": str(self.settings.max_results),
-        })
+        """Perform the actual HTTP GET to NVD API (keyword search).
+
+        ponytail: NVD's ``keywordSearch`` matches CVE *descriptions* only,
+        not CPE/version data — so ``"OpenSSH 9.6p1"`` misses CVE-2024-6387
+        (regreSSHion) because the description never contains ``9.6p1``.
+        When a product+version query returns nothing, retry with just the
+        product name (``"OpenSSH"``) which matches the description. This
+        finds regreSSHion without needing CPE construction.
+        """
+        try:
+            entries = self._fetch_by_params({
+                "keywordSearch": query,
+                "resultsPerPage": str(self.settings.max_results),
+            })
+        except NVDHTTPError as exc:
+            # 404 on a product+version query is NVD's intermittent no-match
+            # edge — fall back to product-only if the query had a version.
+            if 400 <= exc.code < 500 and " " in query.strip():
+                product_only = query.split(" ", 1)[0]
+                return self._fetch_by_params({
+                    "keywordSearch": product_only,
+                    "resultsPerPage": str(self.settings.max_results),
+                })
+            raise
+        if not entries and " " in query.strip():
+            # Zero results for product+version — try product-only.
+            product_only = query.split(" ", 1)[0]
+            return self._fetch_by_params({
+                "keywordSearch": product_only,
+                "resultsPerPage": str(self.settings.max_results),
+            })
+        return entries
 
     def _fetch_by_params(self, params: dict[str, str]) -> list[CVEEntry]:
         """Shared NVD HTTP GET + parse for an arbitrary params dict."""
@@ -373,7 +400,13 @@ class NVDClient:
             params = dict(params)
             params["apiKey"] = api_key
 
-        url = NVD_API_BASE + "?" + urllib.parse.urlencode(params)
+        # ponytail: NVD doc requires spaces encoded as %20, not '+'. The
+        # stdlib urlencode defaults to '+' (via quote_via=quote_plus); pass
+        # quote_via=urllib.parse.quote to emit %20. '+' is a contributing
+        # cause of intermittent 404s on keywordSearch queries.
+        url = NVD_API_BASE + "?" + urllib.parse.urlencode(
+            params, quote_via=urllib.parse.quote
+        )
         # M23b: NVD rejects requests without a User-Agent. Send an identifying
         # UA so the request is not filtered/blocked at the edge.
         request = urllib.request.Request(
