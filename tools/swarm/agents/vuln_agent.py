@@ -390,13 +390,20 @@ Notes:
                 tools=None,
                 stream=False,
             )
-            text = resp.get("message", {}).get("content", "") if isinstance(resp, dict) else str(resp)
-            text = text.strip()
+            message = resp.get("message", {}) if isinstance(resp, dict) else getattr(resp, "message", None)
+            if isinstance(message, dict):
+                text = message.get("content", "")
+            else:
+                text = getattr(message, "content", resp if isinstance(resp, str) else "")
+            text = str(text or "").strip()
+            if not text:
+                return None
             if "```json" in text:
                 text = text.split("```json")[1].split("```")[0]
             elif "```" in text:
                 text = text.split("```")[1].split("```")[0]
-            return json.loads(text)
+            parsed = json.loads(text)
+            return parsed if isinstance(parsed, dict) else None
         except Exception as exc:
             # Log so a persistent LLM failure is debuggable instead of silently
             # degrading to deterministic-only hypotheses on every call.

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from tools.swarm.base import Agent, AgentResult, AgentStatus
 from tools.swarm.orchestrator import SwarmOrchestrator, _DEFAULT_AGENT_MAP
@@ -295,6 +297,15 @@ def test_vuln_agent_llm_prompt_carries_vuln_hints_only():
     assert "<untrusted_skill_guidance" not in client.last_prompt
 
 
+def test_vuln_agent_parses_ollama_response_object():
+    expected = {"recommended_exploit_path": [{"step": 1, "tool": "nuclei"}]}
+    client = SimpleNamespace(chat=lambda **_: SimpleNamespace(
+        message=SimpleNamespace(content='{"recommended_exploit_path": [{"step": 1, "tool": "nuclei"}]}')
+    ))
+
+    assert VulnAgent()._llm_analyze(client, "10.0.0.5", [], [], []) == expected
+
+
 def test_critic_agent_llm_prompt_carries_full_set():
     agent = CriticAgent()
     client = _CapturingClient()
@@ -309,6 +320,17 @@ def test_critic_agent_llm_prompt_carries_full_set():
     assert "exploit-skill" in client.last_prompt
 
 
+def test_critic_agent_parses_ollama_response_object():
+    expected = {"decision": "deny", "reasoning": "duplicate action", "modifications": {}}
+    client = SimpleNamespace(chat=lambda **_: SimpleNamespace(
+        message=SimpleNamespace(
+            content='{"decision": "deny", "reasoning": "duplicate action", "modifications": {}}'
+        )
+    ))
+
+    assert CriticAgent()._llm_review(client, {}, {}, {}) == expected
+
+
 def test_reflection_agent_llm_prompt_carries_full_set():
     agent = ReflectionAgent()
     client = _CapturingClient()
@@ -319,6 +341,24 @@ def test_reflection_agent_llm_prompt_carries_full_set():
     assert "recon-skill" in client.last_prompt
     assert "vuln-skill" in client.last_prompt
     assert "exploit-skill" in client.last_prompt
+
+
+def test_reflection_agent_parses_ollama_response_object():
+    expected = {"why": "tool mismatch", "confidence": 0.8}
+    client = SimpleNamespace(chat=lambda **_: SimpleNamespace(
+        message=SimpleNamespace(content='{"why": "tool mismatch", "confidence": 0.8}')
+    ))
+
+    assert ReflectionAgent()._llm_reflect(client, [], {}, {}) == expected
+
+
+def test_reflection_agent_ignores_empty_response_without_parse_warning(capsys):
+    client = SimpleNamespace(chat=lambda **_: SimpleNamespace(
+        message=SimpleNamespace(content="")
+    ))
+
+    assert ReflectionAgent()._llm_reflect(client, [], {}, {}) is None
+    assert "LLM reflection failed" not in capsys.readouterr().out
 
 
 def test_agent_llm_prompt_no_hints_when_selection_empty():

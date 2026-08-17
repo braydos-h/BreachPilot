@@ -25,11 +25,13 @@ import json
 import os
 import re
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from tools.logging_setup import get_logger
 from tools.recon_pipeline import ReconPipeline, ReconConfig, HostReconResult
@@ -53,6 +55,31 @@ logger = get_logger()
 # through ``ui.phase_change`` gives them the same [PHASE] banner the
 # exploit-agent loop now emits.
 ui = get_ui()
+
+_AUTONOMOUS_PROGRESS: ContextVar[Callable[[dict[str, Any]], None] | None] = ContextVar(
+    "autonomous_progress", default=None,
+)
+
+
+@contextmanager
+def observe_autonomous_progress(
+    callback: Callable[[dict[str, Any]], None],
+) -> Iterator[None]:
+    """Route this task's autonomous phase/action updates to ``callback``."""
+    token = _AUTONOMOUS_PROGRESS.set(callback)
+    try:
+        yield
+    finally:
+        _AUTONOMOUS_PROGRESS.reset(token)
+
+
+def _report_autonomous_progress(**payload: Any) -> None:
+    callback = _AUTONOMOUS_PROGRESS.get()
+    if callback is not None:
+        try:
+            callback(payload)
+        except Exception:  # noqa: BLE001 -- observability must never stop a campaign
+            pass
 
 # ---------------------------------------------------------------------------
 # Enums and data structures
@@ -468,6 +495,7 @@ class AttackModuleExecutor:
         self._model_client = model_client
         self._critic = critic_agent
         self._reflection = reflection_agent
+        self._action_count = 0
 
     async def execute(
         self,
@@ -477,15 +505,24 @@ class AttackModuleExecutor:
         """Execute an attack module with full lifecycle management."""
         task.status = TaskStatus.RUNNING
         task.started_at = time.monotonic()
+        self._action_count += 1
+        action_num = self._action_count
 
         logger.info(f"Executing {task.module_name} against {task.target} (attempt {task.retry_count + 1})")
         # Surface each module dispatch to the operator so a long campaign shows
         # which attack module is running against which target in which phase.
         ui.action_status(
-            action_num=task.retry_count + 1,
+            action_num=action_num,
             tool=task.module_name,
             target=task.target,
             phase=task.phase.value,
+        )
+        _report_autonomous_progress(
+            action=action_num,
+            attempt=task.retry_count + 1,
+            phase=task.phase.value,
+            target=task.target,
+            tool=task.module_name,
         )
         state.add_timeline_event(
             "module_execution",
@@ -521,7 +558,7 @@ class AttackModuleExecutor:
         # "modify" mutates the task (aggression/risk downgrade, require_mutation
         # flag) and the run proceeds with the mutated task. Returns None when no
         # critic is wired (legacy path: only the inline checks above apply).
-        critic_decision = self._run_critic(task)
+        critic_decision = await asyncio.to_thread(self._run_critic, task)
         if critic_decision is not None:
             decision = critic_decision.get("decision", "approve")
             if decision == "deny":
@@ -620,7 +657,7 @@ class AttackModuleExecutor:
             mresult = ModuleResult.to_result(result)
             dispatch_failure = False
             if self._tool_executor is not None and mresult.status not in ("info",):
-                dispatch_out = self._dispatch_module_artifact(module, mresult, ctx, task, state)
+                dispatch_out = await self._dispatch_module_artifact(module, mresult, ctx, task, state)
                 if dispatch_out is not None:
                     output, classification = dispatch_out
                     # Merge real-output evidence onto the typed result.
@@ -701,7 +738,7 @@ class AttackModuleExecutor:
                 # down, and a None manager makes this a no-op. Distinct
                 # action_type keeps this from polluting the operational
                 # exploit-action confidence rows in the ExperienceStore.
-                self._record_lesson_on_success(task, state, result)
+                await asyncio.to_thread(self._record_lesson_on_success, task, state, result)
             else:
                 task.error = result.get("note", "Module did not achieve exploitation")
                 state.record_failure(task.module_name, task.error)
@@ -714,7 +751,9 @@ class AttackModuleExecutor:
             # heuristic-only when no model_client is wired, so per-module cost is
             # low. Advisory -- exceptions are swallowed so reflection can't stall
             # the campaign. No-op when no reflection agent is wired.
-            self._run_reflection(task, state, {"success": _succeeded, "result": result})
+            await asyncio.to_thread(
+                self._run_reflection, task, state, {"success": _succeeded, "result": result},
+            )
 
             return {"success": _succeeded, "result": result}
 
@@ -738,7 +777,7 @@ class AttackModuleExecutor:
 
     # ── Phase 2.1 dispatch helper ───────────────────────────────────────────
 
-    def _dispatch_module_artifact(
+    async def _dispatch_module_artifact(
         self,
         module: AttackModule,
         mresult: ModuleResult,
@@ -804,7 +843,7 @@ class AttackModuleExecutor:
             return None
 
         try:
-            output = executor(command, {"target": task.target})
+            output = await asyncio.to_thread(executor, command, {"target": task.target})
         except Exception as exc:  # noqa: BLE001 -- best-effort dispatch
             state.add_timeline_event(
                 "dispatch_err",
@@ -1359,6 +1398,7 @@ class AutonomousOrchestrator:
 
         # Phase 2: Service enumeration (already done in recon pipeline)
         state.current_phase = AttackPhase.ENUMERATION
+        _report_autonomous_progress(phase=state.current_phase.value, target=state.target)
 
         # Phases 3-6. The default path is a single pass (exploit -> privesc ->
         # lateral -> persistence -> validation). When ``adaptive_replan`` is on
@@ -1413,6 +1453,7 @@ class AutonomousOrchestrator:
         )
         ui.phase_change("local_takeover")
         state.current_phase = AttackPhase.PRIVILEGE_ESCALATION
+        _report_autonomous_progress(phase=state.current_phase.value, target=state.target)
         state.add_timeline_event(
             "local_takeover",
             "Local-target playbook: filesystem enumeration + privilege escalation",
@@ -1436,7 +1477,9 @@ class AutonomousOrchestrator:
         if self._tool_executor:
             for cmd in local_cmds:
                 try:
-                    out = self._tool_executor(cmd, {"target": state.target})
+                    out = await asyncio.to_thread(
+                        self._tool_executor, cmd, {"target": state.target},
+                    )
                     state.add_timeline_event(
                         "local_read", cmd, {"output_len": len(str(out or ""))}
                     )
@@ -1466,6 +1509,7 @@ class AutonomousOrchestrator:
         logger.info(f"[RECON] Starting reconnaissance against {state.target}")
         ui.phase_change("reconnaissance")
         state.current_phase = AttackPhase.RECONNAISSANCE
+        _report_autonomous_progress(phase=state.current_phase.value, target=state.target)
         state.add_timeline_event("phase_start", "Reconnaissance phase started")
 
         if state.recon_result and state.recon_result.open_ports:
@@ -1564,6 +1608,7 @@ class AutonomousOrchestrator:
         logger.info(f"[EXPLOIT] Starting exploitation against {state.target}")
         ui.phase_change("exploitation")
         state.current_phase = AttackPhase.EXPLOITATION
+        _report_autonomous_progress(phase=state.current_phase.value, target=state.target)
         state.add_timeline_event("phase_start", "Exploitation phase started")
 
         if not state.recon_result:
@@ -1640,6 +1685,7 @@ class AutonomousOrchestrator:
         logger.info(f"[PRIVESC] Starting privilege escalation against {state.target}")
         ui.phase_change("privilege_escalation")
         state.current_phase = AttackPhase.PRIVILEGE_ESCALATION
+        _report_autonomous_progress(phase=state.current_phase.value, target=state.target)
         state.add_timeline_event("phase_start", "Privilege escalation phase started")
 
         privesc_modules = []
@@ -1696,6 +1742,7 @@ class AutonomousOrchestrator:
         logger.info(f"[LATERAL] Starting lateral movement from {state.target} (pivot depth {_depth})")
         ui.phase_change("lateral_movement")
         state.current_phase = AttackPhase.LATERAL_MOVEMENT
+        _report_autonomous_progress(phase=state.current_phase.value, target=state.target)
         state.add_timeline_event("phase_start", "Lateral movement phase started")
 
         # Gap 2: defense-in-depth. A local target has no internal network to
@@ -1744,6 +1791,7 @@ class AutonomousOrchestrator:
         logger.info(f"[VALIDATE] Starting validation for {state.target}")
         ui.phase_change("validation")
         state.current_phase = AttackPhase.VALIDATION
+        _report_autonomous_progress(phase=state.current_phase.value, target=state.target)
         state.add_timeline_event("phase_start", "Validation phase started")
 
         # Validate each successful exploit
@@ -1836,6 +1884,7 @@ class AutonomousOrchestrator:
         logger.info(f"[PERSIST] Starting persistence against {state.target}")
         ui.phase_change("persistence")
         state.current_phase = AttackPhase.PERSISTENCE
+        _report_autonomous_progress(phase=state.current_phase.value, target=state.target)
         state.add_timeline_event("phase_start", "Persistence phase started")
 
         os_family = (state.recon_result.os_family if state.recon_result else "") or ""
@@ -1865,7 +1914,7 @@ class AutonomousOrchestrator:
                 state.add_timeline_event("persistence_skip", f"Module {mod_name} unavailable")
                 continue
             try:
-                mresult_dict = module.run(ctx) or {}
+                mresult_dict = await asyncio.to_thread(module.run, ctx) or {}
             except Exception as exc:  # noqa: BLE001 -- one bad module shouldn't abort the phase
                 state.add_timeline_event("persistence_err", f"{mod_name}.run: {exc}")
                 continue
@@ -1883,7 +1932,11 @@ class AutonomousOrchestrator:
             )
             self._tasks[task.task_id] = task
             try:
-                out = self._tool_executor(script, {"target": state.target, "module": mod_name})
+                out = await asyncio.to_thread(
+                    self._tool_executor,
+                    script,
+                    {"target": state.target, "module": mod_name},
+                )
             except Exception as exc:  # noqa: BLE001 -- dispatch failure is not fatal
                 task.status = TaskStatus.FAILED
                 task.error = str(exc)

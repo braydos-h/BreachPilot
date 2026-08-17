@@ -259,8 +259,12 @@ Return JSON only (no markdown fences):
                 tools=None,
                 stream=False,
             )
-            text = resp.get("message", {}).get("content", "") if isinstance(resp, dict) else str(resp)
-            text = text.strip()
+            message = resp.get("message", {}) if isinstance(resp, dict) else getattr(resp, "message", None)
+            if isinstance(message, dict):
+                text = message.get("content", "")
+            else:
+                text = getattr(message, "content", resp if isinstance(resp, str) else "")
+            text = str(text or "").strip()
             if "```json" in text:
                 text = text.split("```json")[1].split("```")[0]
             elif "```" in text:
