@@ -9,8 +9,9 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { ArtifactViewer } from "@/components/ArtifactViewer";
+import { WorkspaceViewer } from "@/components/WorkspaceViewer";
 import { SkeletonRows, Spinner } from "@/components/Loading";
-import { useArtifacts, useAudit, useRunLog } from "@/api/hooks";
+import { useArtifacts, useAudit, useRunLog, useWorkspace } from "@/api/hooks";
 import { ApiError } from "@/api/client";
 import { formatBytes } from "@/lib/utils";
 
@@ -60,6 +61,7 @@ export function ArtifactsPage() {
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
+          <TabsTrigger value="workspace">Workspace</TabsTrigger>
           <TabsTrigger value="audit">Audit</TabsTrigger>
           <TabsTrigger value="logs">Logs</TabsTrigger>
         </TabsList>
@@ -107,6 +109,10 @@ export function ArtifactsPage() {
           </div>
         </TabsContent>
 
+        <TabsContent value="workspace">
+          <WorkspacePanel runId={runId ?? ""} />
+        </TabsContent>
+
         <TabsContent value="audit" className="space-y-3">
           <div className={cn("rounded-md border p-3 text-sm", audit.data?.chain_valid ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-destructive/40 bg-destructive/10 text-red-200")}>
             <div className="flex items-center gap-2 text-xs uppercase tracking-wide">
@@ -144,6 +150,69 @@ export function ArtifactsPage() {
           <LogsPanel runId={runId ?? ""} attemptCandidates={attemptCandidates} />
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+function WorkspacePanel({ runId }: { runId: string }) {
+  const workspace = useWorkspace(runId);
+  const [selected, setSelected] = useState<string>("");
+  const [filter, setFilter] = useState<string>("");
+
+  const files = workspace.data?.files ?? [];
+  const filtered = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return files;
+    return files.filter((f) => f.path.toLowerCase().includes(q));
+  }, [files, filter]);
+
+  const effectiveSelected = selected || filtered[0]?.path || "";
+
+  return (
+    <div className="grid gap-4 md:grid-cols-[260px_minmax(0,1fr)]">
+      <div className="space-y-2">
+        <Input placeholder="Filter files..." value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <div className="max-h-[70vh] space-y-1 overflow-auto">
+          {workspace.isLoading && <SkeletonRows count={4} />}
+          {workspace.error && <div className="text-sm text-destructive">Failed to load workspace.</div>}
+          {!workspace.isLoading && filtered.length === 0 && (
+            <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+              No workspace files yet.
+            </div>
+          )}
+          {filtered.map((f) => (
+            <button
+              key={f.path}
+              type="button"
+              onClick={() => setSelected(f.path)}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors",
+                effectiveSelected === f.path ? "border-primary bg-accent" : "hover:bg-accent/50",
+              )}
+            >
+              <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span className="truncate font-mono">{f.path}</span>
+              <span className="ml-auto text-muted-foreground">{formatBytes(f.bytes)}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        {effectiveSelected ? (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-mono text-muted-foreground">{effectiveSelected}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <WorkspaceViewer runId={runId} path={effectiveSelected} />
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
+            Select a file to view it.
+          </div>
+        )}
+      </div>
     </div>
   );
 }

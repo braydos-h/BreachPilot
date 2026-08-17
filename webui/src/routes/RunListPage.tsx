@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Loader2, Plus, RotateCw, Sparkles, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, Plus, RotateCw, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -26,6 +27,21 @@ import {
 import { formatRelative, truncateId } from "@/lib/utils";
 
 const SORT_KEY_STORAGE = "netattack.runSort";
+const PAGE_SIZE = 50;
+
+const STATE_FILTER_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "All states" },
+  { value: "draft", label: "Draft" },
+  { value: "awaiting_confirmation", label: "Awaiting confirmation" },
+  { value: "queued", label: "Queued" },
+  { value: "running", label: "Running" },
+  { value: "awaiting_input", label: "Awaiting input" },
+  { value: "cancelling", label: "Cancelling" },
+  { value: "completed", label: "Completed" },
+  { value: "failed", label: "Failed" },
+  { value: "cancelled", label: "Cancelled" },
+  { value: "interrupted", label: "Interrupted" },
+];
 
 function loadSortKey(): RunSortKey {
   try {
@@ -39,7 +55,11 @@ function loadSortKey(): RunSortKey {
 
 export function RunListPage() {
   const [sortKey, setSortKey] = useState<RunSortKey>(loadSortKey);
-  const runs = useRuns(50, 0, sortKey);
+  const [q, setQ] = useState("");
+  const [debouncedQ, setDebouncedQ] = useState("");
+  const [stateFilter, setStateFilter] = useState("");
+  const [page, setPage] = useState(0);
+  const runs = useRuns(PAGE_SIZE, page * PAGE_SIZE, sortKey, debouncedQ, stateFilter);
   const deleteRun = useDeleteRun();
   const resumeRun = useResumeRun();
   const retitleRun = useRetitleRun();
@@ -48,13 +68,26 @@ export function RunListPage() {
   const [resumeTarget, setResumeTarget] = useState<string | null>(null);
   const [retitling, setRetitling] = useState<string | null>(null);
 
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(q), 300);
+    return () => clearTimeout(t);
+  }, [q]);
+
   const rows = runs.data?.runs ?? [];
+  const total = runs.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const activeRun = rows.find((r) => isActiveState(r.state));
 
   const onSortChange = (v: string) => {
     const next = v as RunSortKey;
     setSortKey(next);
     try { localStorage.setItem(SORT_KEY_STORAGE, next); } catch { /* ignore */ }
+  };
+
+  const onFilterChange = (nextQ: string, nextState: string) => {
+    setQ(nextQ);
+    setStateFilter(nextState);
+    setPage(0);
   };
 
   const onDelete = (runId: string) => {
@@ -87,19 +120,6 @@ export function RunListPage() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-lg font-semibold">Sessions</h1>
         <div className="flex items-center gap-2">
-          <Select value={sortKey} onValueChange={onSortChange}>
-            <SelectTrigger className="h-8 w-[10rem] text-xs" aria-label="Sort sessions">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {RUN_SORT_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value} className="text-xs">
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {runs.isFetching && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
           <Button asChild size="sm" disabled={!!activeRun}>
             <Link to="/runs/new">
               <Plus className="h-4 w-4" />
@@ -107,6 +127,38 @@ export function RunListPage() {
             </Link>
           </Button>
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          placeholder="Search title, target, mode, goal..."
+          value={q}
+          onChange={(e) => onFilterChange(e.target.value, stateFilter)}
+          className="h-8 max-w-xs text-xs"
+        />
+        <select
+          value={stateFilter}
+          onChange={(e) => onFilterChange(q, e.target.value)}
+          className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+          aria-label="Filter by state"
+        >
+          {STATE_FILTER_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+        <Select value={sortKey} onValueChange={onSortChange}>
+          <SelectTrigger className="h-8 w-[10rem] text-xs" aria-label="Sort sessions">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {RUN_SORT_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value} className="text-xs">
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {runs.isFetching && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
       </div>
 
       {activeRun && (
@@ -226,6 +278,24 @@ export function RunListPage() {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {total > PAGE_SIZE && (
+        <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>
+            {total} session{total === 1 ? "" : "s"} · page {page + 1} of {totalPages}
+          </span>
+          <div className="flex items-center gap-1">
+            <Button size="sm" variant="outline" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0}>
+              <ChevronLeft className="h-3.5 w-3.5" />
+              Prev
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}>
+              Next
+              <ChevronRight className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </div>
       )}
     </div>

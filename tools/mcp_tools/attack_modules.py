@@ -13,6 +13,11 @@ from tools.mcp_tools.registry import *
 # once the task finishes so completed campaigns don't leak.
 _running_campaign_tasks: set = set()
 
+# campaign_id -> live AutonomousOrchestrator, so stop_campaign can signal a
+# graceful stop. Popped when the background task finishes (see the done
+# callback in start_autonomous_campaign).
+_campaign_orchestrators: dict[str, Any] = {}
+
 
 def _identify_hash_modes(h: str) -> list[tuple[str, str, str]]:
     """Return ``[(name, hashcat_mode, sample_cmd), ...]`` for a hash string.
@@ -1691,7 +1696,13 @@ if __name__ == "__main__":
 
             _bg_task = asyncio.create_task(_run_campaign())
             _running_campaign_tasks.add(_bg_task)
-            _bg_task.add_done_callback(_running_campaign_tasks.discard)
+            _campaign_orchestrators[campaign_id] = orchestrator
+
+            def _on_done(task: asyncio.Task) -> None:
+                _running_campaign_tasks.discard(task)
+                _campaign_orchestrators.pop(campaign_id, None)
+
+            _bg_task.add_done_callback(_on_done)
 
             lines = [
                 f"CAMPAIGN_STARTED: {campaign_id}",
@@ -1932,6 +1943,37 @@ if __name__ == "__main__":
             return f"ERROR: Campaign step failed Ã¢â‚¬â€ {exc}"
 
     # Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+    @mcp.tool()
+    def stop_campaign(campaign_id: str) -> str:
+        """Gracefully stop a running autonomous campaign.
+
+        Signals the live AutonomousOrchestrator (if still running) to stop at its
+        next cycle boundary. The campaign's state.json is left intact so its final
+        status can still be read via get_campaign_status.
+
+        Args:
+            campaign_id: The campaign ID returned by start_autonomous_campaign.
+
+        Returns:
+            Status string indicating whether the campaign was signalled to stop,
+            had already finished, or was not found.
+
+        Example:
+            stop_campaign("campaign-20260504_120000-abc12345")
+        """
+        if not campaign_id or not campaign_id.strip():
+            return "ERROR: campaign_id is required."
+
+        orchestrator = _campaign_orchestrators.get(campaign_id)
+        if orchestrator is None:
+            state_path = workspace / "campaigns" / campaign_id / "state.json"
+            if state_path.exists():
+                return f"STOPPED: Campaign '{campaign_id}' is not running (already finished)."
+            return f"ERROR: Campaign '{campaign_id}' not found."
+
+        orchestrator.stop()
+        return f"STOPPED: Campaign '{campaign_id}' stop signal sent."
+
     # 6. Persistent Interactive Sessions (tools.persistent_session_manager)
     # Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 

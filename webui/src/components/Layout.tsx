@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { Activity, Cpu, Eye, Github, HelpCircle, Home, List, Settings, ShieldAlert, Sparkles, Terminal, X } from "lucide-react";
+import { Activity, Cpu, Eye, Github, HelpCircle, Home, List, Moon, Settings, ShieldAlert, Sparkles, Sun, Terminal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -10,6 +10,7 @@ import { isActiveState, type DecisionListRow } from "@/api/types";
 import { clearStoredToken } from "@/api/client";
 import { useNavigate } from "react-router-dom";
 import { autoAnswerFor, usePermissionMode, type PermissionMode } from "@/lib/permissionMode";
+import { useTheme } from "@/lib/useTheme";
 
 const NAV_ITEMS = [
   { to: "/", label: "Home", icon: Home, end: true },
@@ -54,6 +55,7 @@ export function Layout() {
   const provider = models.data?.provider ?? "ollama";
   const label = provider === "chatgpt" ? "ChatGPT" : "Ollama";
   const { mode, setMode } = usePermissionMode();
+  const { theme, toggle: toggleTheme } = useTheme();
   const activeRun = runs.data?.runs.find((r) => isActiveState(r.state));
   const [showHelp, setShowHelp] = useState(false);
 
@@ -153,6 +155,16 @@ export function Layout() {
             <Cpu className="h-4 w-4" />
             <span>Clear token</span>
           </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start gap-2 text-muted-foreground"
+            onClick={toggleTheme}
+            aria-label="Toggle theme"
+          >
+            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            <span>{theme === "dark" ? "Light mode" : "Dark mode"}</span>
+          </Button>
         </div>
       </aside>
 
@@ -205,6 +217,14 @@ export function Layout() {
             title={`Permission mode: ${mode} (tap to cycle)`}
           >
             {mode === "read_only" ? "R" : mode === "approve" ? "A" : "F"}
+          </button>
+          <button
+            type="button"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            onClick={toggleTheme}
+            aria-label="Toggle theme"
+          >
+            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </button>
           <button
             type="button"

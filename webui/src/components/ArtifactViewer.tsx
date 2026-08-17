@@ -76,7 +76,7 @@ export function ArtifactViewer({ runId, name, className }: ArtifactViewerProps) 
   );
 }
 
-function renderByExtension(ext: string, blob: Blob, text: string, objectUrl: string): React.ReactNode {
+export function renderByExtension(ext: string, blob: Blob, text: string, objectUrl: string): React.ReactNode {
   if (ext === "md" && text) {
     return (
       <div className="prose prose-invert max-w-none p-4 text-sm prose-pre:rounded prose-pre:bg-muted prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5">
@@ -114,7 +114,7 @@ function renderByExtension(ext: string, blob: Blob, text: string, objectUrl: str
   );
 }
 
-function isTextExt(ext: string): boolean {
+export function isTextExt(ext: string): boolean {
   return ["md", "txt", "log", "json", "jsonl", "csv", "html", "py", "sh", "ps1", "yaml", "yml", "toml"].includes(ext);
 }
 

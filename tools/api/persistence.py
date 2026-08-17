@@ -214,6 +214,8 @@ class ApiPersistence:
         limit: int = 50,
         offset: int = 0,
         sort: str = "created_desc",
+        q: str = "",
+        state: str = "",
     ) -> list[dict[str, Any]]:
         """List runs with target/mode/goal/model summary (no N+1 queries).
 
@@ -221,15 +223,28 @@ class ApiPersistence:
         (oldest first), title_asc, title_desc, state_asc, state_desc. Unknown
         values fall back to the default. Sorting on title treats empty titles
         as the empty string (so they cluster together, not at either extreme).
+
+        ``q`` filters on title + request_json (target/mode/goal) via a
+        case-insensitive substring match; ``state`` filters on the exact state.
         """
         order_by = _SORT_CLAUSES.get(sort, _SORT_CLAUSES["created_desc"])
+        where: list[str] = []
+        params: list[Any] = []
+        if state:
+            where.append("state = ?")
+            params.append(state)
+        if q:
+            where.append("(title LIKE ? OR request_json LIKE ?)")
+            like = f"%{q}%"
+            params.extend([like, like])
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
         with self._lock:
             conn = self._connect()
             try:
                 rows = conn.execute(
                     f"SELECT id, created_at, state, request_json, preview_json, title "
-                    f"FROM runs ORDER BY {order_by} LIMIT ? OFFSET ?",
-                    (limit, offset),
+                    f"FROM runs {where_sql} ORDER BY {order_by} LIMIT ? OFFSET ?",
+                    (*params, limit, offset),
                 ).fetchall()
                 result = []
                 for row in rows:
@@ -238,6 +253,28 @@ class ApiPersistence:
                     d["preview_json"] = json.loads(d.get("preview_json", "{}"))
                     result.append(d)
                 return result
+            finally:
+                conn.close()
+
+    def count_runs(self, *, q: str = "", state: str = "") -> int:
+        """Count runs matching the same filters as ``list_runs`` (for pagination)."""
+        where: list[str] = []
+        params: list[Any] = []
+        if state:
+            where.append("state = ?")
+            params.append(state)
+        if q:
+            where.append("(title LIKE ? OR request_json LIKE ?)")
+            like = f"%{q}%"
+            params.extend([like, like])
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    f"SELECT COUNT(*) AS n FROM runs {where_sql}", params,
+                ).fetchone()
+                return int(row["n"]) if row else 0
             finally:
                 conn.close()
 

@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { CheckCircle2, Eye, EyeOff, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { SkeletonRows } from "@/components/Loading";
-import { useCredentials, useRevealCredential } from "@/api/hooks";
+import { useConfirmCredential, useCredentials, useRevealCredential } from "@/api/hooks";
 import { ApiError } from "@/api/client";
 import type { CredentialRecord } from "@/api/types";
 
@@ -15,8 +15,10 @@ interface CredentialTableProps {
 export function CredentialTable({ runId, className }: CredentialTableProps) {
   const credentials = useCredentials(runId);
   const reveal = useRevealCredential(runId);
+  const confirm = useConfirmCredential(runId);
   const [revealed, setRevealed] = useState<Record<number, string>>({});
   const [pending, setPending] = useState<Record<number, boolean>>({});
+  const [confirming, setConfirming] = useState<Record<number, boolean>>({});
   const [error, setError] = useState<Record<number, string>>({});
   const [recent, setRecent] = useState<Array<{ index: number; username: string; at: string }>>([]);
 
@@ -51,6 +53,28 @@ export function CredentialTable({ runId, className }: CredentialTableProps) {
       },
       onSettled: () => {
         setPending((p) => {
+          const next = { ...p };
+          delete next[index];
+          return next;
+        });
+      },
+    });
+  };
+
+  const onConfirm = (index: number) => {
+    setConfirming((p) => ({ ...p, [index]: true }));
+    setError((p) => {
+      const next = { ...p };
+      delete next[index];
+      return next;
+    });
+    confirm.mutate(index, {
+      onError: (err) => {
+        const msg = err instanceof ApiError ? err.message : "Confirm failed.";
+        setError((p) => ({ ...p, [index]: msg }));
+      },
+      onSettled: () => {
+        setConfirming((p) => {
           const next = { ...p };
           delete next[index];
           return next;
@@ -100,8 +124,10 @@ export function CredentialTable({ runId, className }: CredentialTableProps) {
                 row={row}
                 revealed={revealed[row.index]}
                 pending={!!pending[row.index]}
+                confirming={!!confirming[row.index]}
                 error={error[row.index]}
                 onReveal={() => onReveal(row.index)}
+                onConfirm={() => onConfirm(row.index)}
                 onBlur={() => {
                   if (revealed[row.index] !== undefined) {
                     setRevealed((prev) => {
@@ -136,12 +162,14 @@ interface CredentialRowProps {
   row: CredentialRecord;
   revealed?: string;
   pending: boolean;
+  confirming: boolean;
   error?: string;
   onReveal: () => void;
+  onConfirm: () => void;
   onBlur: () => void;
 }
 
-function CredentialRow({ row, revealed, pending, error, onReveal, onBlur }: CredentialRowProps) {
+function CredentialRow({ row, revealed, pending, confirming, error, onReveal, onConfirm, onBlur }: CredentialRowProps) {
   return (
     <tr>
       <td className="tabular-nums">{row.index}</td>
@@ -157,17 +185,37 @@ function CredentialRow({ row, revealed, pending, error, onReveal, onBlur }: Cred
         )}
       </td>
       <td className="text-right">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="gap-1.5"
-          onClick={onReveal}
-          disabled={pending}
-        >
-          {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : revealed !== undefined ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-          {revealed !== undefined ? "Hide" : "Reveal"}
-        </Button>
+        <div className="inline-flex items-center gap-1">
+          {row.confirmed ? (
+            <span className="inline-flex items-center gap-1 text-xs text-emerald-400" title="Confirmed after validated reuse">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+            </span>
+          ) : (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-1 text-muted-foreground hover:text-foreground"
+              onClick={onConfirm}
+              disabled={confirming}
+              aria-label="Confirm credential"
+              title="Mark as confirmed after validated reuse"
+            >
+              {confirming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={onReveal}
+            disabled={pending}
+          >
+            {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : revealed !== undefined ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            {revealed !== undefined ? "Hide" : "Reveal"}
+          </Button>
+        </div>
         {error && <div className="mt-1 text-xs text-destructive">{error}</div>}
       </td>
     </tr>

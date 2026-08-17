@@ -14,7 +14,7 @@ import sys
 import time
 from collections import deque
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 from urllib.parse import urlsplit
 
 from tools.attack_ui import get_ui
@@ -128,6 +128,7 @@ async def open_exploit_mcp_session(
     fallback_to_stdio: bool = True,
     original_target: str | None = None,
     resolved_ip: str | None = None,
+    boot_cb: Callable[[str, bool, bool], None] | None = None,
 ) -> AsyncIterator[Any]:
     """Open the requested transport, falling back during HTTP startup only.
 
@@ -147,6 +148,7 @@ async def open_exploit_mcp_session(
         "soft_fail": soft_fail,
         "original_target": original_target,
         "resolved_ip": resolved_ip,
+        "boot_cb": boot_cb,
     }
     if transport != "http" or not fallback_to_stdio:
         async with _open_exploit_mcp_session_once(
@@ -210,6 +212,7 @@ async def _open_exploit_mcp_session_once(
     startup_errors: list[BaseException] | None = None,
     original_target: str | None = None,
     resolved_ip: str | None = None,
+    boot_cb: Callable[[str, bool, bool], None] | None = None,
 ) -> AsyncIterator[Any]:
     """Open one MCP client session without transport fallback.
 
@@ -283,6 +286,14 @@ async def _open_exploit_mcp_session_once(
     # what a log scraper greps. See AttackUi.boot_step / boot_section.
     ui.boot_section("MCP exploit session boot sequence")
 
+    def _boot_step(label: str, *, ok: bool = True, failed: bool = False) -> None:
+        """Emit a boot checklist step to the terminal UI and, when a ``boot_cb``
+        is supplied (the API path), forward it so the WebUI can render a live
+        boot checklist. ``boot_cb`` receives ``(label, ok, failed)``."""
+        ui.boot_step(label, ok=ok, failed=failed)  # terminal UI only — do not recurse
+        if boot_cb is not None:
+            boot_cb(label, ok, failed)
+
     if transport == "stdio":
         stdio_yielded = False
         server_params = StdioServerParameters(
@@ -297,7 +308,7 @@ async def _open_exploit_mcp_session_once(
         )
 
         _stdio_label = "Booting MCP server (stdio)"
-        ui.boot_step(_stdio_label, ok=False)
+        _boot_step(_stdio_label, ok=False)
         with ui.spinner(
             "Booting MCP server (stdio)...",
             soft_fail=startup_soft_fail,
@@ -328,7 +339,7 @@ async def _open_exploit_mcp_session_once(
                                 session.initialize(),
                                 timeout=MCP_BOOT_TIMEOUT_SECONDS,
                             )
-                            ui.boot_step(_stdio_label, ok=True)
+                            _boot_step(_stdio_label, ok=True)
                         except asyncio.TimeoutError as exc:
                             startup_errors.append(exc)
                             if startup_soft_fail:
@@ -338,7 +349,7 @@ async def _open_exploit_mcp_session_once(
                                     f"subprocess did not finish initializing."
                                 )
                                 boot_failed[0] = True
-                                ui.boot_step(_stdio_label, failed=True)
+                                _boot_step(_stdio_label, failed=True)
                                 stdio_yielded = True
                                 yield None
                                 return
@@ -379,7 +390,7 @@ async def _open_exploit_mcp_session_once(
                     # Fall out of the ``with ui.spinner(...)`` and the function
                     # to give the caller a ``None`` session.
                     boot_failed[0] = True
-                    ui.boot_step(_stdio_label, failed=True)
+                    _boot_step(_stdio_label, failed=True)
                     if not stdio_yielded:
                         stdio_yielded = True
                         yield None
@@ -392,7 +403,7 @@ async def _open_exploit_mcp_session_once(
         return
 
     _http_start_label = f"Starting MCP HTTP server on port {exploit_port}"
-    ui.boot_step(_http_start_label, ok=False)
+    _boot_step(_http_start_label, ok=False)
     with ui.spinner(
         f"Starting MCP HTTP server on port {exploit_port}...",
         soft_fail=startup_soft_fail,
@@ -421,18 +432,18 @@ async def _open_exploit_mcp_session_once(
             if startup_soft_fail:
                 ui.warning(f"MCP HTTP server failed to start on port {exploit_port}: {exc}")
                 boot_failed[0] = True
-                ui.boot_step(_http_start_label, failed=True)
+                _boot_step(_http_start_label, failed=True)
                 yield None
                 return
             ui.error(f"MCP HTTP server failed to start on port {exploit_port}: {exc}")
             raise
-    ui.boot_step(_http_start_label, ok=not boot_failed[0], failed=boot_failed[0])
+    _boot_step(_http_start_label, ok=not boot_failed[0], failed=boot_failed[0])
     http_log_path = Path(log_handle.name)
     http_log_secrets = _sensitive_env_values(env)
     http_initialized = False
     try:
         _http_port_label = f"Waiting for MCP HTTP readiness on port {exploit_port}"
-        ui.boot_step(_http_port_label, ok=False)
+        _boot_step(_http_port_label, ok=False)
         try:
             with ui.spinner(
                 f"Waiting for MCP HTTP readiness on port {exploit_port}...",
@@ -450,7 +461,7 @@ async def _open_exploit_mcp_session_once(
                     log_path=http_log_path,
                     secret_values=http_log_secrets,
                 )
-            ui.boot_step(_http_port_label, ok=True)
+            _boot_step(_http_port_label, ok=True)
         except (OSError, asyncio.TimeoutError, RuntimeError) as exc:
             startup_errors.append(exc)
             if startup_soft_fail:
@@ -462,7 +473,7 @@ async def _open_exploit_mcp_session_once(
                 # instead of degrading to a None session for the recon-first
                 # path. Mirror the stdio behaviour.
                 boot_failed[0] = True
-                ui.boot_step(_http_port_label, failed=True)
+                _boot_step(_http_port_label, failed=True)
                 yield None
                 return
             raise
@@ -475,7 +486,7 @@ async def _open_exploit_mcp_session_once(
             _,
         ):
             _http_init_label = "Initializing MCP session"
-            ui.boot_step(_http_init_label, ok=False)
+            _boot_step(_http_init_label, ok=False)
             with ui.spinner(
                 "Initializing MCP session...",
                 soft_fail=startup_soft_fail,
@@ -495,7 +506,7 @@ async def _open_exploit_mcp_session_once(
                             session.initialize(),
                             timeout=MCP_BOOT_TIMEOUT_SECONDS,
                         )
-                        ui.boot_step(_http_init_label, ok=True)
+                        _boot_step(_http_init_label, ok=True)
                     except asyncio.TimeoutError as exc:
                         startup_errors.append(exc)
                         if startup_soft_fail:
@@ -507,7 +518,7 @@ async def _open_exploit_mcp_session_once(
                             # M19: yield before returning (see the matching
                             # comment on the HTTP-start soft-fail branch above).
                             boot_failed[0] = True
-                            ui.boot_step(_http_init_label, failed=True)
+                            _boot_step(_http_init_label, failed=True)
                             yield None
                             return
                         raise RuntimeError(
@@ -535,7 +546,7 @@ async def _open_exploit_mcp_session_once(
                             if _is_exception_group(exc):
                                 _log_nested_exceptions(exc)
                             boot_failed[0] = True
-                            ui.boot_step(_http_init_label, failed=True)
+                            _boot_step(_http_init_label, failed=True)
                             yield None
                             return
                         ui.error(

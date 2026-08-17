@@ -82,26 +82,21 @@ async def get_config(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     return sanitize(_CONFIG)
 
 
-@router.patch("/config")
-async def patch_config(
-    request: Request,
-    auth: str = Depends(_require_auth),
-) -> dict[str, Any]:
-    """Apply config changes atomically through ConfigValidator."""
-    body = await request.json()
-    if not isinstance(body, dict):
-        from tools.api.errors import APIError
-        raise APIError("invalid_body", "Expected a JSON object.", status_code=400)
-    # Merge + validate.
+def _write_config(merged: dict[str, Any]) -> dict[str, Any]:
+    """Validate + atomically write ``merged`` as the new live config.
+
+    Shared by PATCH /config and the model-registry write endpoints so the
+    loopback-origin guard, ConfigValidator, and atomic write stay in one place.
+    """
     from tools.api.auth import is_loopback_origin
+    from tools.api.errors import APIError
     from tools.config_manager import ConfigValidator
-    merged = _merge_config(_CONFIG, body)
+
     origins = (merged.get("api", {}) or {}).get("allowed_origins", [])
     if isinstance(origins, list) and any(
         isinstance(origin, str) and not is_loopback_origin(origin, origins)
         for origin in origins
     ):
-        from tools.api.errors import APIError
         raise APIError(
             "config_invalid",
             "api.allowed_origins may contain only loopback HTTP(S) origins.",
@@ -111,10 +106,8 @@ async def patch_config(
     validator._config = merged
     result = validator.validate()
     if not result.is_valid:
-        from tools.api.errors import APIError
         raise APIError("config_invalid", "Config validation failed", status_code=400,
                        details={"errors": result.errors})
-    # Atomic write.
     import os
     from uuid import uuid4
 
@@ -128,6 +121,25 @@ async def patch_config(
             tmp.unlink()
     _CONFIG.clear()
     _CONFIG.update(merged)
+    return merged
+
+
+def _apply_config_patch(patch: dict[str, Any]) -> dict[str, Any]:
+    """Deep-merge ``patch`` into the live config and write it."""
+    return _write_config(_merge_config(_CONFIG, patch))
+
+
+@router.patch("/config")
+async def patch_config(
+    request: Request,
+    auth: str = Depends(_require_auth),
+) -> dict[str, Any]:
+    """Apply config changes atomically through ConfigValidator."""
+    body = await request.json()
+    if not isinstance(body, dict):
+        from tools.api.errors import APIError
+        raise APIError("invalid_body", "Expected a JSON object.", status_code=400)
+    merged = _apply_config_patch(body)
     return {"status": "ok", "config": sanitize(merged)}
 
 
@@ -207,6 +219,198 @@ async def list_models(auth: str = Depends(_require_auth)) -> dict[str, Any]:
             "configured_models": list(chatgpt_cfg.get("models") or []),
         }
     return response
+
+
+@router.post("/models")
+async def add_model(request: Request, auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Add a model alias to ``models.registry`` (writes through config validation)."""
+    from tools.api.errors import APIError
+
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise APIError("invalid_body", "Expected a JSON object.", status_code=400)
+    alias = str(body.get("alias") or "").strip()
+    model = str(body.get("model") or "").strip()
+    if not alias or not model:
+        raise APIError("invalid_body", "alias and model must be non-empty strings.", status_code=400)
+    if len(alias) > 64 or len(model) > 256:
+        raise APIError("invalid_body", "alias or model too long.", status_code=400)
+    merged = _apply_config_patch({"models": {"registry": {alias: model}}})
+    return {"status": "ok", "alias": alias, "model": model,
+            "registry": merged.get("models", {}).get("registry", {})}
+
+
+@router.delete("/models/{alias}")
+async def remove_model(alias: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Remove a model alias from ``models.registry`` (and its ``info`` entry)."""
+    import copy
+
+    from tools.api.errors import APIError
+
+    alias = alias.strip()
+    merged = copy.deepcopy(_CONFIG)
+    models = merged.setdefault("models", {})
+    registry = models.setdefault("registry", {})
+    if alias not in registry:
+        raise HTTPException(status_code=404, detail=f"Model alias '{alias}' not found")
+    if models.get("default_alias") == alias:
+        raise APIError("invalid_model", f"Cannot remove the default alias '{alias}'.", status_code=400)
+    del registry[alias]
+    models.setdefault("info", {}).pop(alias, None)
+    _write_config(merged)
+    return {"status": "ok", "alias": alias, "deleted": True}
+
+
+@router.post("/models/provider")
+async def set_model_provider(request: Request, auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Switch the active chat/generate provider (``ollama`` | ``chatgpt``)."""
+    from tools.api.errors import APIError
+
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise APIError("invalid_body", "Expected a JSON object.", status_code=400)
+    provider = str(body.get("provider") or "").strip().lower()
+    if provider not in ("ollama", "chatgpt"):
+        raise APIError("invalid_provider", "provider must be 'ollama' or 'chatgpt'.", status_code=400)
+    merged = _apply_config_patch({"models": {"provider": provider}})
+    return {"status": "ok", "provider": provider}
+
+
+@router.get("/system/telemetry")
+async def get_telemetry(auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """LLM usage telemetry summary + recent records (numeric/categorical only).
+
+    Reads ``research_workspace/logs/llm_usage.jsonl`` via tools/model_telemetry.
+    No prompts, responses, or raw provider payloads are ever persisted or returned.
+    """
+    from tools.model_telemetry import read_usage_records, usage_summary, workspace_root_from_sources
+
+    def _load() -> dict[str, Any]:
+        workspace_root = workspace_root_from_sources(_CONFIG_PATH)
+        return {
+            "summary": usage_summary(workspace_root),
+            "recent": read_usage_records(workspace_root, limit=50),
+        }
+
+    return await asyncio.to_thread(_load)
+
+
+def _safe_json(raw: Any) -> dict[str, Any]:
+    try:
+        data = json.loads(raw or "{}")
+        return data if isinstance(data, dict) else {}
+    except (TypeError, json.JSONDecodeError):
+        return {}
+
+
+def _read_attack_memory_db(db_path: Path) -> list[dict[str, Any]]:
+    """Read items from one ``attack_memory.db`` (best-effort, never raises)."""
+    import sqlite3
+
+    items: list[dict[str, Any]] = []
+    try:
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                "SELECT id, session_id, target_ip, category, item_key, item_value, "
+                "source_tool, success, metadata_json, first_seen_at, last_seen_at, seen_count "
+                "FROM attack_memory_items ORDER BY last_seen_at DESC LIMIT 200"
+            ).fetchall()
+        finally:
+            conn.close()
+    except Exception:
+        return items
+    for row in rows:
+        items.append({
+            "id": row["id"],
+            "session_id": row["session_id"],
+            "target_ip": row["target_ip"],
+            "category": row["category"],
+            "item_key": row["item_key"],
+            "item_value": row["item_value"],
+            "source_tool": row["source_tool"],
+            "success": bool(row["success"]),
+            "metadata": _safe_json(row["metadata_json"]),
+            "first_seen_at": row["first_seen_at"],
+            "last_seen_at": row["last_seen_at"],
+            "seen_count": int(row["seen_count"]),
+        })
+    return items
+
+
+def _load_memory_sync(config_path: Path, config: dict[str, Any]) -> dict[str, Any]:
+    """Read experience-store lessons + attack-memory items (best-effort).
+
+    Lessons come from the default research DB (``lessons`` table); attack
+    memory comes from any ``attack_memory.db`` under the reports dir. Both are
+    read-only and tolerate a fresh install (empty tables / no files).
+    """
+    lessons: list[dict[str, Any]] = []
+    confidence: list[dict[str, Any]] = []
+    try:
+        from db import get_default_db
+
+        db = get_default_db()
+        with db.connection() as conn:
+            cur = conn.execute(
+                "SELECT id, target_signature, action_type, outcome, confidence, created_at, metadata_json "
+                "FROM lessons WHERE embedding_json = '[]' ORDER BY created_at DESC LIMIT 100"
+            )
+            for row in cur.fetchall():
+                lessons.append({
+                    "id": row["id"],
+                    "target_signature": row["target_signature"],
+                    "action_type": row["action_type"],
+                    "outcome": row["outcome"],
+                    "confidence": row["confidence"],
+                    "created_at": row["created_at"],
+                    "metadata": _safe_json(row["metadata_json"]),
+                })
+            cur = conn.execute(
+                "SELECT action_type, COUNT(*) AS n, "
+                "SUM(CASE WHEN outcome='success' THEN 1 ELSE 0 END) AS successes, "
+                "SUM(CASE WHEN outcome='failure' THEN 1 ELSE 0 END) AS failures, "
+                "SUM(CASE WHEN outcome='partial' THEN 1 ELSE 0 END) AS partials, "
+                "MAX(created_at) AS last_seen "
+                "FROM lessons WHERE embedding_json = '[]' "
+                "GROUP BY action_type ORDER BY last_seen DESC"
+            )
+            for row in cur.fetchall():
+                n = int(row["n"]); s = int(row["successes"]); f = int(row["failures"]); p = int(row["partials"])
+                # Beta(1,1) posterior mean. ponytail: no time decay here — the
+                # viewer shows raw counts; add decay if it ever misleads.
+                alpha = 1.0 + s + p
+                beta = 1.0 + f + p
+                confidence.append({
+                    "action_type": row["action_type"],
+                    "observations": n,
+                    "successes": s,
+                    "failures": f,
+                    "partials": p,
+                    "confidence": round(alpha / (alpha + beta), 4),
+                    "last_seen": row["last_seen"],
+                })
+    except Exception:
+        lessons, confidence = [], []
+
+    attack_memory: list[dict[str, Any]] = []
+    try:
+        reports_dir = Path(str(config.get("reports_dir", "reports") or "reports"))
+        if not reports_dir.is_absolute():
+            reports_dir = config_path.parent / reports_dir
+        for db_path in sorted(reports_dir.rglob("attack_memory.db")):
+            attack_memory.extend(_read_attack_memory_db(db_path))
+    except Exception:
+        attack_memory = []
+
+    return {"lessons": lessons, "confidence": confidence, "attack_memory": attack_memory}
+
+
+@router.get("/system/memory")
+async def get_memory(auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Attack memory + experience-store learnings (cross-mission, no secrets)."""
+    return await asyncio.to_thread(_load_memory_sync, _CONFIG_PATH, _CONFIG)
 
 
 @router.get("/plugins")

@@ -287,6 +287,7 @@ export interface RunListRow {
 export interface RunListResponse {
   runs: RunListRow[];
   sort?: string;
+  total?: number;
 }
 
 export type RunSortKey =
@@ -522,6 +523,7 @@ export interface CredentialRecord {
   credential_type?: string;
   source_action?: string;
   password: string;
+  confirmed?: boolean;
   [key: string]: unknown;
 }
 
@@ -618,6 +620,97 @@ export interface EventReplayResponse {
 export interface DiagnosticsResponse {
   exit_code: number;
   output: string;
+}
+
+export interface TelemetrySummary {
+  alias: string;
+  aliases: string[];
+  calls: number;
+  successful_calls: number;
+  failed_calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  average_tokens_per_second: number | null;
+  average_completion_tokens_per_second: number | null;
+  average_context_usage_pct: number | null;
+  max_context_usage_pct: number | null;
+  last_call_at: string;
+}
+
+export interface TelemetryRecord {
+  alias?: string;
+  model_id?: string;
+  source?: string;
+  started_at?: string;
+  ended_at?: string;
+  wall_duration_seconds?: number;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  tokens_per_second?: number;
+  context_window_tokens?: number;
+  estimated_context_tokens?: number;
+  context_usage_pct?: number;
+  context_remaining_tokens?: number;
+  provider?: string;
+  error?: string;
+  [key: string]: unknown;
+}
+
+export interface TelemetryResponse {
+  summary: TelemetrySummary;
+  recent: TelemetryRecord[];
+}
+
+export interface MemoryLesson {
+  id: string;
+  target_signature: string;
+  action_type: string;
+  outcome: string;
+  confidence: number;
+  created_at: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface MemoryConfidence {
+  action_type: string;
+  observations: number;
+  successes: number;
+  failures: number;
+  partials: number;
+  confidence: number;
+  last_seen: string;
+}
+
+export interface AttackMemoryItem {
+  id: string;
+  session_id: string;
+  target_ip: string;
+  category: string;
+  item_key: string;
+  item_value: string;
+  source_tool: string;
+  success: boolean;
+  metadata: Record<string, unknown>;
+  first_seen_at: string;
+  last_seen_at: string;
+  seen_count: number;
+}
+
+export interface MemoryResponse {
+  lessons: MemoryLesson[];
+  confidence: MemoryConfidence[];
+  attack_memory: AttackMemoryItem[];
+}
+
+export interface WorkspaceFile {
+  path: string;
+  bytes: number;
+}
+
+export interface WorkspaceListResponse {
+  files: WorkspaceFile[];
 }
 
 export interface ConfigPatchResponse {

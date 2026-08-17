@@ -105,6 +105,24 @@ def _safe_child(parent: Path, name: str, *, allow_subdirs: bool = False) -> Path
     return candidate
 
 
+def _safe_workspace_path(ws_root: Path, rel_path: str) -> Path:
+    """Resolve a workspace-relative path and refuse traversal outside ``ws_root``.
+
+    Unlike ``_safe_child`` this permits arbitrary nesting depth (workspace files
+    live under ``exploit_workspace/<ip>/<attempt>/...``) while still rejecting
+    ``..``, absolute paths, and empty segments.
+    """
+    if not rel_path or rel_path in {".", ".."}:
+        raise HTTPException(status_code=400, detail="Invalid path")
+    parts = [p for p in rel_path.replace("\\", "/").split("/") if p and p != "."]
+    if not parts or ".." in parts:
+        raise HTTPException(status_code=400, detail="Invalid path")
+    candidate = (ws_root / Path(*parts)).resolve()
+    if ws_root.resolve() not in candidate.parents and candidate != ws_root.resolve():
+        raise HTTPException(status_code=400, detail="Invalid path")
+    return candidate
+
+
 # ── Request models ──────────────────────────────────────────────────────────
 
 class RunCreateRequest(BaseModel):
@@ -186,10 +204,17 @@ async def list_runs(
         "created_desc",
         pattern="^(created_desc|created_asc|title_asc|title_desc|state_asc|state_desc)$",
     ),
+    q: str = Query("", max_length=200),
+    state: str = Query("", max_length=32),
     auth: str = Depends(_require_auth),
 ) -> dict[str, Any]:
-    """List run history with target/mode/goal/model/title summary (no N+1)."""
-    runs = _ps().list_runs(limit=limit, offset=offset, sort=sort)
+    """List run history with target/mode/goal/model/title summary (no N+1).
+
+    ``q`` filters on title/target/mode/goal; ``state`` filters on the exact
+    run state. ``total`` is the filtered count (for pagination).
+    """
+    runs = _ps().list_runs(limit=limit, offset=offset, sort=sort, q=q, state=state)
+    total = _ps().count_runs(q=q, state=state)
     out: list[dict[str, Any]] = []
     for r in runs:
         req = r.get("request_json", {}) or {}
@@ -205,7 +230,7 @@ async def list_runs(
             "model_alias": prev.get("model_alias", ""),
             "title": r.get("title", "") or "",
         })
-    return {"runs": out, "sort": sort}
+    return {"runs": out, "sort": sort, "total": total}
 
 
 @router.get("/runs/{run_id}")
@@ -359,6 +384,37 @@ async def get_artifact(run_id: str, name: str, auth: str = Depends(_require_auth
     content_type = _CONTENT_TYPES.get(path.suffix.lower(), "application/octet-stream")
     from fastapi import Response
     return Response(content=path.read_bytes(), media_type=content_type)
+
+
+# ── Workspace file browser (C10) ─────────────────────────────────────────────
+
+@router.get("/runs/{run_id}/workspace")
+async def list_workspace(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """List files under the run's exploit_workspace/ (recursive, relative paths)."""
+    if _ps().get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    ws = _exploit_workspace(run_id)
+    if not ws.is_dir():
+        return {"files": []}
+    files: list[dict[str, Any]] = []
+    for p in sorted(ws.rglob("*")):
+        if p.is_file():
+            files.append({"path": p.relative_to(ws).as_posix(), "bytes": p.stat().st_size})
+    return {"files": files}
+
+
+@router.get("/runs/{run_id}/workspace/{path:path}")
+async def get_workspace_file(run_id: str, path: str, auth: str = Depends(_require_auth)) -> Any:
+    """Read one file under the run's exploit_workspace/ (path-traversal-safe)."""
+    if _ps().get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    ws = _exploit_workspace(run_id)
+    target = _safe_workspace_path(ws, path)
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    content_type = _CONTENT_TYPES.get(target.suffix.lower(), "application/octet-stream")
+    from fastapi import Response
+    return Response(content=target.read_bytes(), media_type=content_type)
 
 
 # ── Audit trail (C6) ────────────────────────────────────────────────────────
@@ -568,6 +624,59 @@ async def reveal_credential(
         "username": rec.username,
         "target_host": rec.target_host,
         "password": rec.password,
+    }
+
+
+@router.post("/runs/{run_id}/credentials/{index}/confirm")
+async def confirm_credential(
+    run_id: str, index: int, auth: str = Depends(_require_auth),
+) -> dict[str, Any]:
+    """Mark a harvested credential ``confirmed`` after validated reuse. Audited.
+
+    The operator asserts (via the UI) that the credential was reused successfully;
+    this is the only path to ``confirmed=True`` (``validated=True`` is required by
+    ``CredentialStore.confirm_credential``). Passwords are never returned.
+    """
+    if _ps().get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    ws = _exploit_workspace(run_id)
+    stores = _find_credential_stores(ws)
+    if not stores:
+        raise HTTPException(status_code=404, detail="No credentials for this run")
+    try:
+        from tools.credential_store import CredentialStore
+        records: list[Any] = []
+        store_paths: list[Path] = []
+        for store_path in stores:
+            store = CredentialStore(store_path.parent)
+            for rec in store.all_credentials():
+                records.append(rec)
+                store_paths.append(store_path)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not read credentials: {exc}")
+    if index < 0 or index >= len(records):
+        raise HTTPException(status_code=404, detail="Credential index out of range")
+    rec = records[index]
+    store = CredentialStore(store_paths[index].parent)
+    changed = store.confirm_credential(
+        username=rec.username, target_host=rec.target_host,
+        credential_type=rec.credential_type, validated=True,
+    )
+    access_entry = {
+        "run_id": run_id,
+        "index": index,
+        "username": rec.username,
+        "target_host": rec.target_host,
+        "action": "confirm",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    with _credential_access_log(run_id).open("a", encoding="utf-8") as f:
+        f.write(json.dumps(access_entry, default=str) + "\n")
+    return {
+        "index": index,
+        "username": rec.username,
+        "target_host": rec.target_host,
+        "confirmed": changed,
     }
 
 

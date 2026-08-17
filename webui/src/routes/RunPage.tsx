@@ -36,6 +36,7 @@ import { AttackGraph } from "@/components/AttackGraph";
 import { LiveRunSummary } from "@/components/LiveRunSummary";
 import { PhaseTracker } from "@/components/PhaseTracker";
 import { SessionSummaryCard } from "@/components/SessionSummaryCard";
+import { SwarmView, CampaignView } from "@/components/OrchestrationViews";
 import { Skeleton, SkeletonCards, SkeletonRows, Spinner } from "@/components/Loading";
 import { useRunEvents } from "@/api/ws";
 import {
@@ -66,8 +67,8 @@ export function RunPage() {
   const cancel = useCancelRun();
   const resume = useResumeRun();
   const audit = useAudit(runId ?? null, tab === "audit");
-  const swarm = useSwarmState(runId ?? null, tab === "swarm");
-  const campaign = useCampaignState(runId ?? null, tab === "campaign");
+  const swarm = useSwarmState(runId ?? null, tab === "swarm", isActiveState(run.data?.state as RunState) ? 3000 : false);
+  const campaign = useCampaignState(runId ?? null, tab === "campaign", isActiveState(run.data?.state as RunState) ? 3000 : false);
   const tools = useRunTools(runId ?? null, tab === "tools" && isActiveState(run.data?.state as RunState));
   const callTool = useCallTool(runId ?? "");
   const fetchArtifact = useFetchArtifactBlob(runId ?? "");
@@ -397,10 +398,10 @@ export function RunPage() {
           />
         </TabsContent>
         <TabsContent value="swarm">
-          <StateView label="swarm_state.json" loading={swarm.isLoading} error={swarm.error} data={swarm.data?.state} />
+          <SwarmView loading={swarm.isLoading} error={swarm.error} state={swarm.data?.state} />
         </TabsContent>
         <TabsContent value="campaign">
-          <StateView label="attack_states.json" loading={campaign.isLoading} error={campaign.error} data={campaign.data?.state} />
+          <CampaignView loading={campaign.isLoading} error={campaign.error} state={campaign.data?.state} />
         </TabsContent>
       </Tabs>
 
@@ -588,29 +589,6 @@ function AuditView({ loading, error, records, chainValid, chainReason }: AuditVi
   );
 }
 
-interface StateViewProps {
-  label: string;
-  loading: boolean;
-  error: unknown;
-  data: unknown;
-}
-
-function StateView({ label, loading, error, data }: StateViewProps) {
-  if (loading) return <Skeleton className="h-40 rounded-md" />;
-  if (error) {
-    const msg = error instanceof ApiError ? (error.isNotFound ? "State unavailable for this run." : error.message) : "Failed to load state.";
-    return <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">{msg}</div>;
-  }
-  return (
-    <div className="space-y-2">
-      <Label className="text-xs">{label}</Label>
-      <pre className="max-h-[40vh] overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs scrollbar-thin">
-        {safeStringify(data)}
-      </pre>
-    </div>
-  );
-}
-
 interface ReconTabProps {
   runId: string;
   fetchArtifact: ReturnType<typeof useFetchArtifactBlob>;
@@ -667,12 +645,4 @@ function ReconTab({ fetchArtifact, ready }: ReconTabProps) {
       {error || "Recon in progress — assessment will appear here once recon completes."}
     </div>
   );
-}
-
-function safeStringify(value: unknown): string {
-  try {
-    return typeof value === "string" ? value : JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
 }

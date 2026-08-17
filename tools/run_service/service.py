@@ -997,12 +997,17 @@ class AssessmentService:
                 generator = EnhancedReportGenerator(
                     db=None, mission_id=run_id, workspace=reports_dir,
                 )
-                paths = generator.generate_full_report(campaign_result, output_format="json")
-                json_src = paths.get("json")
-                if json_src is not None and json_src.exists():
-                    # Stable name so the WebUI can fetch /artifacts/enhanced/enhanced_report.json
-                    stable = reports_dir / "enhanced" / "enhanced_report.json"
-                    stable.write_bytes(json_src.read_bytes())
+                paths = generator.generate_full_report(campaign_result, output_format="all")
+                # Stable names so the WebUI can fetch /artifacts/enhanced/enhanced_report.{json,md,html}
+                for key, stable_name in (
+                    ("json", "enhanced_report.json"),
+                    ("markdown", "enhanced_report.md"),
+                    ("html", "enhanced_report.html"),
+                ):
+                    src = paths.get(key)
+                    if src is not None and src.exists():
+                        stable = reports_dir / "enhanced" / stable_name
+                        stable.write_bytes(src.read_bytes())
         except Exception as exc:  # noqa: BLE001 -- reporting is best-effort
             ui.warning(f"Could not write enhanced report: {exc}")
 

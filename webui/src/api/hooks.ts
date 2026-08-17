@@ -31,6 +31,7 @@ import type {
   LiveModelsResponse,
   LogResponse,
   LootResponse,
+  MemoryResponse,
   ModelRegistryInfo,
   PluginSummary,
   ProvidersResponse,
@@ -47,9 +48,11 @@ import type {
   SkillSearchResult,
   SkillSummary,
   SwarmStateResponse,
+  TelemetryResponse,
   ToolCallRequest,
   ToolCallResponse,
   ToolsResponse,
+  WorkspaceListResponse,
 } from "@/api/types";
 import { isActiveState } from "@/api/types";
 
@@ -61,13 +64,15 @@ export const queryKeys = {
   models: ["models"] as const,
   modelsLive: ["models", "live"] as const,
   providers: ["providers"] as const,
+  telemetry: ["telemetry"] as const,
+  memory: ["memory"] as const,
   plugins: ["plugins"] as const,
   goals: ["goals"] as const,
   skills: ["skills"] as const,
   skillsSearch: (q: string) => ["skills", "search", q] as const,
   skill: (name: string) => ["skills", name] as const,
-  runs: (limit: number, offset: number, sort: string = "created_desc") =>
-    ["runs", { limit, offset, sort }] as const,
+  runs: (limit: number, offset: number, sort: string = "created_desc", q: string = "", state: string = "") =>
+    ["runs", { limit, offset, sort, q, state }] as const,
   run: (runId: string) => ["runs", runId] as const,
   runDecisions: (runId: string) => ["runs", runId, "decisions"] as const,
   decision: (runId: string, decisionId: string) => ["runs", runId, "decisions", decisionId] as const,
@@ -80,6 +85,7 @@ export const queryKeys = {
     ["runs", runId, "logs", name, tail, attempt ?? "", target ?? ""] as const,
   runCredentials: (runId: string) => ["runs", runId, "credentials"] as const,
   runLoot: (runId: string) => ["runs", runId, "loot"] as const,
+  runWorkspace: (runId: string) => ["runs", runId, "workspace"] as const,
 };
 
 const DEFAULT_RETRY = (failureCount: number, error: unknown) => {
@@ -201,10 +207,60 @@ export function useLiveModels() {
   });
 }
 
+export function useAddModel() {
+  const qc = useQueryClient();
+  return useMutation<unknown, ApiError, { alias: string; model: string }>({
+    mutationFn: (body) => apiFetch<unknown>("/models", { method: "POST", body }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.models });
+    },
+  });
+}
+
+export function useRemoveModel() {
+  const qc = useQueryClient();
+  return useMutation<unknown, ApiError, string>({
+    mutationFn: (alias) => apiFetch<unknown>(`/models/${encodeURIComponent(alias)}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.models });
+    },
+  });
+}
+
+export function useSetModelProvider() {
+  const qc = useQueryClient();
+  return useMutation<unknown, ApiError, string>({
+    mutationFn: (provider) => apiFetch<unknown>("/models/provider", { method: "POST", body: { provider } }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.models });
+      void qc.invalidateQueries({ queryKey: queryKeys.modelsLive });
+      void qc.invalidateQueries({ queryKey: queryKeys.providers });
+    },
+  });
+}
+
 export function useProviders() {
   return useQuery<ProvidersResponse>({
     queryKey: queryKeys.providers,
     queryFn: () => apiFetch<ProvidersResponse>("/providers"),
+    ...defaultQueryOptions,
+    staleTime: 15_000,
+  });
+}
+
+export function useTelemetry() {
+  return useQuery<TelemetryResponse>({
+    queryKey: queryKeys.telemetry,
+    queryFn: () => apiFetch<TelemetryResponse>("/system/telemetry"),
+    ...defaultQueryOptions,
+    staleTime: 15_000,
+  });
+}
+
+export function useMemory() {
+  return useQuery<MemoryResponse>({
+    queryKey: queryKeys.memory,
+    queryFn: () => apiFetch<MemoryResponse>("/system/memory"),
     ...defaultQueryOptions,
     staleTime: 15_000,
   });
@@ -326,11 +382,15 @@ export function useDiagnostics() {
   });
 }
 
-export function useRuns(limit = 50, offset = 0, sort: string = "created_desc") {
+export function useRuns(limit = 50, offset = 0, sort: string = "created_desc", q = "", state = "") {
   return useQuery<RunListResponse>({
-    queryKey: queryKeys.runs(limit, offset, sort),
-    queryFn: () =>
-      apiFetch<RunListResponse>(`/runs?limit=${limit}&offset=${offset}&sort=${encodeURIComponent(sort)}`),
+    queryKey: queryKeys.runs(limit, offset, sort, q, state),
+    queryFn: () => {
+      const params = new URLSearchParams({ limit: String(limit), offset: String(offset), sort });
+      if (q) params.set("q", q);
+      if (state) params.set("state", state);
+      return apiFetch<RunListResponse>(`/runs?${params.toString()}`);
+    },
     ...defaultQueryOptions,
     // Poll fast only while at least one run is in an active state; when every
     // run is terminal, back off to a slow cadence so an idle dashboard is not
@@ -522,12 +582,13 @@ export function useAudit(runId: string | null | undefined, enabled = true) {
   });
 }
 
-export function useSwarmState(runId: string | null | undefined, enabled = true) {
+export function useSwarmState(runId: string | null | undefined, enabled = true, refetchInterval: number | false = false) {
   return useQuery<SwarmStateResponse>({
     queryKey: queryKeys.runSwarm(runId ?? ""),
     queryFn: () => apiFetch<SwarmStateResponse>(`/runs/${encodeURIComponent(runId as string)}/swarm`),
     ...defaultQueryOptions,
     enabled: !!runId && enabled,
+    refetchInterval,
     retry: (count, error) => {
       if (error instanceof ApiError && error.isNotFound) return false;
       return DEFAULT_RETRY(count, error);
@@ -535,12 +596,13 @@ export function useSwarmState(runId: string | null | undefined, enabled = true) 
   });
 }
 
-export function useCampaignState(runId: string | null | undefined, enabled = true) {
+export function useCampaignState(runId: string | null | undefined, enabled = true, refetchInterval: number | false = false) {
   return useQuery<CampaignStateResponse>({
     queryKey: queryKeys.runCampaign(runId ?? ""),
     queryFn: () => apiFetch<CampaignStateResponse>(`/runs/${encodeURIComponent(runId as string)}/campaign`),
     ...defaultQueryOptions,
     enabled: !!runId && enabled,
+    refetchInterval,
     retry: (count, error) => {
       if (error instanceof ApiError && error.isNotFound) return false;
       return DEFAULT_RETRY(count, error);
@@ -594,12 +656,53 @@ export function useRevealCredential(runId: string) {
   });
 }
 
+export function useConfirmCredential(runId: string) {
+  const qc = useQueryClient();
+  return useMutation<unknown, ApiError, number>({
+    mutationFn: (index) =>
+      apiFetch<unknown>(
+        `/runs/${encodeURIComponent(runId)}/credentials/${index}/confirm`,
+        { method: "POST", body: {} },
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.runCredentials(runId) });
+    },
+  });
+}
+
 export function useLoot(runId: string | null | undefined) {
   return useQuery<LootResponse>({
     queryKey: queryKeys.runLoot(runId ?? ""),
     queryFn: () => apiFetch<LootResponse>(`/runs/${encodeURIComponent(runId as string)}/loot`),
     ...defaultQueryOptions,
     enabled: !!runId,
+  });
+}
+
+export function useWorkspace(runId: string | null | undefined) {
+  return useQuery<WorkspaceListResponse>({
+    queryKey: queryKeys.runWorkspace(runId ?? ""),
+    queryFn: () => apiFetch<WorkspaceListResponse>(`/runs/${encodeURIComponent(runId as string)}/workspace`),
+    ...defaultQueryOptions,
+    enabled: !!runId,
+  });
+}
+
+export function useWorkspaceFileUrl(runId: string): (path: string) => string {
+  return useCallback(
+    (path: string) =>
+      `/api/v1/runs/${encodeURIComponent(runId)}/workspace/${path.split("/").map(encodeURIComponent).join("/")}`,
+    [runId],
+  );
+}
+
+export function useFetchWorkspaceFile(runId: string) {
+  return useMutation<Blob, ApiError, string>({
+    mutationFn: (path) =>
+      apiFetch<Blob>(
+        `/runs/${encodeURIComponent(runId)}/workspace/${path.split("/").map(encodeURIComponent).join("/")}`,
+        { raw: true },
+      ),
   });
 }
 
