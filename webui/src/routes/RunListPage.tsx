@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/select";
 import { StatusBadge } from "@/components/StatusBadge";
 import { CopyButton } from "@/components/CopyButton";
-import { useDeleteRun, useResumeRun, useRetitleRun, useRuns } from "@/api/hooks";
+import { useCapabilities, useDeleteRun, useResumeRun, useRetitleRun, useRuns } from "@/api/hooks";
 import { ApiError } from "@/api/client";
 import { SkeletonRows } from "@/components/Loading";
 import {
@@ -60,6 +60,8 @@ export function RunListPage() {
   const [stateFilter, setStateFilter] = useState("");
   const [page, setPage] = useState(0);
   const runs = useRuns(PAGE_SIZE, page * PAGE_SIZE, sortKey, debouncedQ, stateFilter);
+  const capabilities = useCapabilities();
+  const maxConcurrent = capabilities.data?.constraints.max_concurrent_runs ?? 1;
   const deleteRun = useDeleteRun();
   const resumeRun = useResumeRun();
   const retitleRun = useRetitleRun();
@@ -76,7 +78,8 @@ export function RunListPage() {
   const rows = runs.data?.runs ?? [];
   const total = runs.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const activeRun = rows.find((r) => isActiveState(r.state));
+  const activeRuns = rows.filter((r) => isActiveState(r.state));
+  const atCapacity = activeRuns.length >= maxConcurrent;
 
   const onSortChange = (v: string) => {
     const next = v as RunSortKey;
@@ -117,17 +120,17 @@ export function RunListPage() {
 
   return (
     <div className="space-y-4 p-4 md:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-lg font-semibold">Sessions</h1>
-        <div className="flex items-center gap-2">
-          <Button asChild size="sm" disabled={!!activeRun}>
-            <Link to="/runs/new">
-              <Plus className="h-4 w-4" />
-              New run
-            </Link>
-          </Button>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h1 className="text-lg font-semibold">Sessions</h1>
+          <div className="flex items-center gap-2">
+            <Button asChild size="sm" disabled={atCapacity} title={atCapacity ? `${maxConcurrent} run(s) already active (api.max_concurrent_runs)` : undefined}>
+              <Link to="/runs/new">
+                <Plus className="h-4 w-4" />
+                New run
+              </Link>
+            </Button>
+          </div>
         </div>
-      </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <Input
@@ -161,15 +164,26 @@ export function RunListPage() {
         {runs.isFetching && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
       </div>
 
-      {activeRun && (
+      {activeRuns.length > 0 && (
         <Card className="border-yellow-500/40 bg-yellow-500/5">
-          <CardContent className="flex flex-wrap items-center gap-2 p-3 text-sm">
-            <Badge variant="warn">Active</Badge>
-            <span className="truncate font-mono text-xs">{activeRun.target}</span>
-            <StatusBadge state={activeRun.state} />
-            <Button asChild size="sm" variant="outline" className="ml-auto">
-              <Link to={`/runs/${activeRun.id}`}>Open</Link>
-            </Button>
+          <CardContent className="space-y-2 p-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="warn">Active ({activeRuns.length})</Badge>
+              {maxConcurrent > 1 && (
+                <span className="text-xs text-muted-foreground">cap {maxConcurrent}</span>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              {activeRuns.map((r) => (
+                <div key={r.id} className="flex flex-wrap items-center gap-2">
+                  <span className="truncate font-mono text-xs">{r.target}</span>
+                  <StatusBadge state={r.state} />
+                  <Button asChild size="sm" variant="outline" className="ml-auto">
+                    <Link to={`/runs/${r.id}`}>Open</Link>
+                  </Button>
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
       )}
@@ -181,7 +195,7 @@ export function RunListPage() {
         </div>
       )}
 
-      {!runs.isLoading && rows.length === 0 && !activeRun && (
+      {!runs.isLoading && rows.length === 0 && activeRuns.length === 0 && (
         <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
           No past sessions yet.{" "}
           <Link to="/" className="text-foreground underline-offset-4 hover:underline">Start one from home.</Link>

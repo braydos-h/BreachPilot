@@ -465,6 +465,37 @@ def _read_state_json(run_id: str, filename: str, *, subdir: str = "") -> dict[st
         raise HTTPException(status_code=500, detail=f"Could not parse {filename}: {exc}")
 
 
+@router.get("/runs/{run_id}/witness")
+async def get_witness_flags(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Read the advisory witness log (reports/witness.jsonl by default).
+
+    The witness agent (``tools/swarm/agents/witness_agent.py``) is an advisory
+    audit-stream watcher that flags anomalies (allowlist breach, PoC escape,
+    permission escalation, prompt-injection, DoS drift) to a JSONL log. The
+    log path is configured via ``witness.log_path`` (default
+    ``reports/witness.jsonl``) and is process-global, not per-run. Returns the
+    parsed flag records; 404 when the log is absent so the WebUI no-retries.
+    """
+    if _ps().get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    cfg = _rm().config or {}
+    witness_cfg = cfg.get("witness", {}) or {}
+    log_path = str(witness_cfg.get("log_path", "reports/witness.jsonl") or "reports/witness.jsonl")
+    path = Path(log_path)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="witness log not found")
+    flags: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            flags.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return {"flags": flags}
+
+
 @router.get("/runs/{run_id}/swarm")
 async def get_swarm_state(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
     """Read the swarm orchestrator state (swarm_state.json)."""

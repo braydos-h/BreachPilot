@@ -184,8 +184,15 @@ export interface SkillDetail {
 export interface PluginSummary {
   name?: string;
   version?: string;
+  description?: string;
+  author?: string;
   capabilities?: string[];
   loaded?: boolean;
+  /** Manifest enablement default (config plugins.enabled/disabled may override). */
+  enabled?: boolean;
+  /** Manifest config block schema — gating fields (api_key_env/url/enabled) the
+   *  WebUI derives a "BLOCKED: no <key>" hint from. */
+  config_section?: Record<string, Record<string, unknown>> | null;
   [key: string]: unknown;
 }
 
@@ -797,4 +804,22 @@ export interface RunGraphResponse {
   run_id: string;
   nodes: GraphNode[];
   edges: GraphEdge[];
+}
+
+// ── Witness advisory flags (witness feature) ─────────────────────────────────
+// Returned by GET /api/v1/runs/{id}/witness (reads reports/witness.jsonl).
+// Advisory only — never a gate. The witness agent is advisory-only by design.
+
+export type WitnessSeverity = "critical" | "high" | "medium" | "low";
+
+export interface WitnessFlag {
+  signal: string;
+  severity: WitnessSeverity | string;
+  message: string;
+  record?: Record<string, unknown>;
+  timestamp?: string;
+}
+
+export interface WitnessResponse {
+  flags: WitnessFlag[];
 }

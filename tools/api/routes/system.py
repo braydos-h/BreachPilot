@@ -55,21 +55,37 @@ async def health() -> dict[str, Any]:
 
 @router.get("/capabilities")
 async def capabilities(auth: str = Depends(_require_auth)) -> dict[str, Any]:
-    """API features, supported run options, constraints, and tool groups."""
+    """API features, supported run options, constraints, and tool groups.
+
+    ``max_concurrent_runs`` is read from the live ``api.max_concurrent_runs``
+    config key (default 1 = legacy single-run behavior). The ``features`` list
+    advertises both REST surfaces and advisory MCP tool families so the WebUI
+    can gate each panel on its feature flag (an absent feature renders an empty
+    state, never a 404 loop).
+    """
+    api_cfg = _CONFIG.get("api", {}) or {}
     return {
         "api_version": "v1",
-        "features": ["runs", "decisions", "events", "websocket", "tool_gateway", "config", "secrets",
-                     "goals", "config_schema", "artifacts", "audit", "swarm_state", "campaign_state",
-                     "logs", "credentials", "loot", "live_models", "skill_detail", "run_delete",
-                     "sse", "single_decision", "diagnostics_output"],
+        "features": [
+            "runs", "decisions", "events", "websocket", "tool_gateway", "config", "secrets",
+            "goals", "config_schema", "artifacts", "audit", "swarm_state", "campaign_state",
+            "logs", "credentials", "loot", "live_models", "skill_detail", "run_delete",
+            "sse", "single_decision", "diagnostics_output",
+            # ── commit fc0af19 ── advisory/local MCP tool families + new surfaces.
+            # Each name keys a WebUI panel off capabilities.features so a disabled
+            # backend feature renders an empty state, not a 404 loop.
+            "graph_route", "poc_verification", "replay_simulator", "peer_review",
+            "mitre", "threat_intel", "ticketing", "witness", "negotiation_rounds",
+            "ics_write", "ctf",
+        ],
         "constraints": {
-            "max_concurrent_runs": 1,
+            "max_concurrent_runs": int(api_cfg.get("max_concurrent_runs", 1) or 1),
             "loopback_only": True,
             "manual_tool_calls": True,
         },
         "run_options": {
             "modes": ["recon", "attack"],
-            "kinds": ["agent", "manual"],
+            "kinds": ["agent"],
             "flags": ["swarm", "parallel_swarm", "critic", "reflection", "adaptive_exploits",
                        "long_session", "multi_model_consult", "ultrathink", "recon_first"],
         },

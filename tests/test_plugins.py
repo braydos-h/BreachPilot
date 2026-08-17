@@ -544,7 +544,8 @@ def test_list_discovered_plugins_shape(tmp_path: Path):
     by_name = {d["name"]: d for d in listed}
     assert set(by_name) == {"foo", "bar"}
     foo = by_name["foo"]
-    assert set(foo.keys()) == {"name", "version", "description", "capabilities", "loaded"}
+    assert set(foo.keys()) == {"name", "version", "description", "author",
+                               "capabilities", "loaded", "enabled", "config_section"}
     assert foo["loaded"] is True
     assert by_name["bar"]["loaded"] is False
 

@@ -1,4 +1,4 @@
-import { Activity, CheckCircle2, XCircle, Users, ListTree, ShieldCheck } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, XCircle, Users, ListTree, ShieldCheck } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
@@ -22,13 +22,25 @@ function NotFound({ error }: { error: unknown }) {
 
 // ── Swarm ────────────────────────────────────────────────────────────────────
 
+interface WitnessFlagView {
+  signal: string;
+  severity: string;
+  message: string;
+  timestamp?: string;
+}
+
 interface SwarmViewProps {
   loading: boolean;
   error: unknown;
   state: unknown;
+  /** Advisory witness flags from reports/witness.jsonl (witness feature). */
+  witnessFlags?: WitnessFlagView[];
+  witnessLoading?: boolean;
+  /** swarm.negotiation_rounds config value (negotiation_rounds feature). */
+  negotiationRounds?: number;
 }
 
-export function SwarmView({ loading, error, state }: SwarmViewProps) {
+export function SwarmView({ loading, error, state, witnessFlags, witnessLoading, negotiationRounds }: SwarmViewProps) {
   if (loading) return <Skeleton className="h-40 rounded-md" />;
   if (error) return <NotFound error={error} />;
 
@@ -43,6 +55,9 @@ export function SwarmView({ loading, error, state }: SwarmViewProps) {
   const namespaces = Object.entries(blackboard).filter(([k]) => k !== "__global__");
   const global = asRecord(blackboard.__global__);
 
+  const flags = witnessFlags ?? [];
+  const criticalFlags = flags.filter((f) => f.severity === "critical" || f.severity === "high");
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -50,7 +65,43 @@ export function SwarmView({ loading, error, state }: SwarmViewProps) {
           <Activity className="h-3 w-3" /> {resultsCount} results
         </Badge>
         {strategyShift && <Badge variant="warn">{strategyShift}</Badge>}
+        {negotiationRounds != null && negotiationRounds > 0 && (
+          <Badge variant="outline" className="tabular-nums" title="swarm.negotiation_rounds">
+            negotiation ×{negotiationRounds}
+          </Badge>
+        )}
+        {criticalFlags.length > 0 && (
+          <Badge variant="danger" className="tabular-nums">
+            <AlertTriangle className="h-3 w-3" /> {criticalFlags.length} witness flag{criticalFlags.length === 1 ? "" : "s"}
+          </Badge>
+        )}
       </div>
+
+      {flags.length > 0 && (
+        <Card className="border-red-500/30">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <AlertTriangle className="h-4 w-4 text-red-400" /> Witness flags ({flags.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1.5">
+            {flags.map((f, i) => {
+              const sev = f.severity || "low";
+              const variant = sev === "critical" ? "danger" : sev === "high" ? "danger" : sev === "medium" ? "warn" : "muted";
+              return (
+                <div key={i} className="flex items-start gap-2 text-xs">
+                  <Badge variant={variant as "danger" | "warn" | "muted"} className="shrink-0 text-[10px]">{sev}</Badge>
+                  <span className="font-mono text-muted-foreground">{f.signal}</span>
+                  <span className="break-words text-foreground">{f.message}</span>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
+      {witnessLoading && flags.length === 0 && (
+        <p className="text-xs text-muted-foreground">Loading witness flags…</p>
+      )}
 
       <Card>
         <CardHeader className="pb-2">

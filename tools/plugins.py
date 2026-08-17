@@ -677,10 +677,16 @@ def load_plugins(
 
 
 def list_discovered_plugins() -> list[dict[str, Any]]:
-    """Return ``{name, version, description, capabilities, loaded}`` dicts.
+    """Return ``{name, version, description, capabilities, loaded, enabled,
+    config_section}`` dicts.
 
     ``loaded`` is True iff the plugin name is in
-    ``PLUGIN_REGISTRY.loaded_plugins``. Intended for ``--list-plugins`` CLI.
+    ``PLUGIN_REGISTRY.loaded_plugins``. ``enabled`` is the manifest default
+    (config plugins.enabled/disabled may still override it at load time).
+    ``config_section`` is the manifest's declared config block schema (the
+    gating fields like ``api_key_env`` / ``url`` / ``enabled`` the WebUI uses
+    to derive a "BLOCKED: no <key>" hint without calling the tool). Intended
+    for ``--list-plugins`` CLI and the ``GET /plugins`` WebUI route.
     """
     loaded_names = set(PLUGIN_REGISTRY.loaded_plugins.keys())
     out: list[dict[str, Any]] = []
@@ -694,8 +700,11 @@ def list_discovered_plugins() -> list[dict[str, Any]]:
                 "name": manifest.name,
                 "version": manifest.version,
                 "description": manifest.description,
+                "author": manifest.author,
                 "capabilities": list(manifest.capabilities),
                 "loaded": manifest.name in loaded_names,
+                "enabled": manifest.enabled,
+                "config_section": manifest.config_section,
             }
         )
     return out

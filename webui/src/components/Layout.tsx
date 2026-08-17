@@ -56,7 +56,7 @@ export function Layout() {
   const label = provider === "chatgpt" ? "ChatGPT" : "Ollama";
   const { mode, setMode } = usePermissionMode();
   const { theme, toggle: toggleTheme } = useTheme();
-  const activeRun = runs.data?.runs.find((r) => isActiveState(r.state));
+  const activeRuns = runs.data?.runs.filter((r) => isActiveState(r.state)) ?? [];
   const [showHelp, setShowHelp] = useState(false);
 
   const onSignOut = () => {
@@ -103,15 +103,16 @@ export function Layout() {
               </NavLink>
             );
           })}
-          {activeRun && (
+          {activeRuns.length > 0 && activeRuns.map((r) => (
             <NavLink
-              to={`/runs/${activeRun.id}`}
+              key={r.id}
+              to={`/runs/${r.id}`}
               className="flex items-center gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-300 transition-colors hover:bg-yellow-500/20"
             >
               <Activity className="h-4 w-4 animate-pulse" />
-              <span className="truncate">Active run</span>
+              <span className="truncate">{r.target || r.id.slice(0, 8)}</span>
             </NavLink>
-          )}
+          ))}
         </nav>
         <div className="space-y-2 border-t p-2">
           <div className="space-y-1.5 px-1">
@@ -272,14 +273,19 @@ export function Layout() {
             </button>
           </div>
         )}
-        {activeRun && (
-          <div className="relative flex items-center gap-2 overflow-hidden border-b border-yellow-500/30 bg-yellow-500/10 px-4 py-2 text-sm text-yellow-300">
+        {activeRuns.length > 0 && (
+          <div className="relative flex flex-wrap items-center gap-2 overflow-hidden border-b border-yellow-500/30 bg-yellow-500/10 px-4 py-2 text-sm text-yellow-300">
             <span className="absolute inset-y-0 left-0 w-px animate-scan bg-gradient-to-b from-transparent via-yellow-400/60 to-transparent" aria-hidden />
             <Activity className="h-4 w-4 animate-pulse" />
-            <span className="truncate">An active run is in progress.</span>
-            <NavLink to={`/runs/${activeRun.id}`} className="ml-auto underline-offset-4 hover:underline">
-              Open
-            </NavLink>
+            <span className="truncate">{activeRuns.length === 1 ? "An active run is in progress." : `${activeRuns.length} active runs in progress.`}</span>
+            {activeRuns.slice(0, 3).map((r) => (
+              <NavLink key={r.id} to={`/runs/${r.id}`} className="underline-offset-4 hover:underline">
+                {r.target || r.id.slice(0, 8)}
+              </NavLink>
+            ))}
+            {activeRuns.length > 3 && (
+              <NavLink to="/sessions" className="underline-offset-4 hover:underline">+{activeRuns.length - 3} more</NavLink>
+            )}
           </div>
         )}
         <div className="flex-1" key={location.pathname}>

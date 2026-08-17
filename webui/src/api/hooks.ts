@@ -40,6 +40,7 @@ import type {
   RunDetail,
   RunListResponse,
   RunListRow,
+  RunGraphResponse,
   SecretsStatus,
   SkillDetail,
   SkillInstallRequest,
@@ -52,6 +53,7 @@ import type {
   ToolCallRequest,
   ToolCallResponse,
   ToolsResponse,
+  WitnessResponse,
   WorkspaceListResponse,
 } from "@/api/types";
 import { isActiveState } from "@/api/types";
@@ -87,6 +89,7 @@ export const queryKeys = {
   runLoot: (runId: string) => ["runs", runId, "loot"] as const,
   runWorkspace: (runId: string) => ["runs", runId, "workspace"] as const,
   runGraph: (runId: string) => ["runs", runId, "graph"] as const,
+  runWitness: (runId: string) => ["runs", runId, "witness"] as const,
 };
 
 const DEFAULT_RETRY = (failureCount: number, error: unknown) => {
@@ -733,6 +736,20 @@ export function useRunGraph(runId: string | null | undefined, enabled = true) {
     retry: (count, error) => {
       // 404 = route disabled (api.graph_route=false) or run has no graph yet;
       // don't retry — just render the empty state.
+      if (error instanceof ApiError && error.isNotFound) return false;
+      return DEFAULT_RETRY(count, error);
+    },
+  });
+}
+
+export function useWitness(runId: string | null | undefined, enabled = true) {
+  return useQuery<WitnessResponse>({
+    queryKey: queryKeys.runWitness(runId ?? ""),
+    queryFn: () => apiFetch<WitnessResponse>(`/runs/${encodeURIComponent(runId as string)}/witness`),
+    ...defaultQueryOptions,
+    enabled: !!runId && enabled,
+    retry: (count, error) => {
+      // 404 = witness feature off / no witness.jsonl yet; don't retry.
       if (error instanceof ApiError && error.isNotFound) return false;
       return DEFAULT_RETRY(count, error);
     },

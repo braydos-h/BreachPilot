@@ -50,6 +50,7 @@ class DecisionKind(str, Enum):
     START_CONFIRM = "start_confirm"       # ready-to-begin gate (destructive or normal)
     GOAL_SELECT = "goal_select"           # recon-first goal selection from suggestions
     TOOL_APPROVAL = "tool_approval"        # approve_only policy: allow/deny a tool call
+    CAMPAIGN_NEXT_STEP = "campaign_next_step"  # mid-run operator checkpoint at a verified-access or no-path milestone
 
 
 class DecisionStatus(str, Enum):
@@ -168,6 +169,16 @@ class RunResult:
     reports_dir: str = ""
     summary_path: str = ""
     run_json_path: str = ""
+    # Operator cancelled the run at a mid-run checkpoint (CAMPAIGN_NEXT_STEP).
+    # Set by AssessmentService when the loop surfaces ``cancelled_by_operator``
+    # in its result dict; consumed by RunManager._execute_run to map the run
+    # to the ``cancelled`` state instead of ``completed``/``failed``.
+    cancelled: bool = False
+    # Operator-selected objective transitions recorded at mid-run checkpoints
+    # (e.g. "recon_only" → "privesc", "backdoor" → "data_exfil"). Each entry is
+    # ``{"from": str, "to": str, "at_checkpoint": "access"|"no_path"}``. Empty
+    # when no checkpoint transitioned the objective.
+    objective_transitions: list[dict[str, Any]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

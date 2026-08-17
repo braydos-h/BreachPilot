@@ -439,18 +439,69 @@ function PluginsTab() {
         {list.length === 0 && <p className="text-sm text-muted-foreground">No discovered plugins.</p>}
         {list.map((p, i) => (
           <div key={i} className="rounded-md border p-2 text-xs">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono">{String(p.name ?? `plugin-${i}`)}</span>
               {p.version && <Badge variant="outline" className="text-[10px]">{String(p.version)}</Badge>}
-              {p.loaded && <Badge variant="success" className="text-[10px]">loaded</Badge>}
+              {p.loaded ? <Badge variant="success" className="text-[10px]">loaded</Badge>
+                : (p.enabled ? <Badge variant="warn" className="text-[10px]">enabled·not loaded</Badge>
+                  : <Badge variant="muted" className="text-[10px]">disabled</Badge>)}
             </div>
-            {Array.isArray(p.capabilities) && p.capabilities.length > 0 && (
-              <div className="mt-1 text-muted-foreground">{p.capabilities.join(", ")}</div>
-            )}
+            {p.description && <div className="mt-1 text-muted-foreground">{String(p.description)}</div>}
+            <div className="mt-1 flex flex-wrap items-center gap-1">
+              {Array.isArray(p.capabilities) && p.capabilities.map((cap) => (
+                <Badge key={cap} variant={cap === "event_subscriber" ? "info" : "outline"} className="text-[10px]">{String(cap)}</Badge>
+              ))}
+            </div>
+            <PluginGatingHints plugin={p} />
           </div>
         ))}
       </CardContent>
     </Card>
+  );
+}
+
+/** Derive gating hints from a plugin's config_section (the manifest schema).
+ *  Shows "requires allowlist" for mcp_tool plugins touching targets, "no-op
+ *  without url" when a url field is empty in the schema, and surfaces
+ *  api_key_env fields (the actual env-var presence is runtime — we show the
+ *  key name as a hint, not a live BLOCKED check, since the API doesn't expose
+ *  env var state per-plugin). */
+function PluginGatingHints({ plugin }: { plugin: { config_section?: Record<string, Record<string, unknown>> | null; capabilities?: string[] } }) {
+  const section = plugin.config_section;
+  if (!section || typeof section !== "object") {
+    // No config_section — derive from capabilities only.
+    const caps = plugin.capabilities ?? [];
+    if (caps.includes("mcp_tool")) {
+      return <div className="mt-1 text-muted-foreground"><Badge variant="outline" className="text-[10px]">requires allowlist</Badge></div>;
+    }
+    return null;
+  }
+  const hints: Array<{ label: string; variant: "warn" | "outline" | "info" }> = [];
+  for (const block of Object.values(section)) {
+    if (!block || typeof block !== "object") continue;
+    const envKey = block.api_key_env;
+    const url = block.url;
+    if (typeof envKey === "string" && envKey) {
+      hints.push({ label: `needs ${envKey}`, variant: "warn" });
+    }
+    if (typeof url === "string" && url === "") {
+      hints.push({ label: "no-op without url", variant: "warn" });
+    }
+    if (block.enabled === false) {
+      hints.push({ label: "plugin block disabled", variant: "outline" });
+    }
+  }
+  const caps = plugin.capabilities ?? [];
+  if (caps.includes("mcp_tool")) {
+    hints.push({ label: "requires allowlist", variant: "info" });
+  }
+  if (hints.length === 0) return null;
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-1">
+      {hints.map((h, idx) => (
+        <Badge key={idx} variant={h.variant} className="text-[10px]">{h.label}</Badge>
+      ))}
+    </div>
   );
 }
 

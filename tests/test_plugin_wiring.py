@@ -265,7 +265,8 @@ def test_list_discovered_plugins_shape_and_loaded_flag(tmp_path):
     by_name = {d["name"]: d for d in listed}
     assert set(by_name) == {"alpha", "beta"}
     alpha = by_name["alpha"]
-    assert set(alpha.keys()) == {"name", "version", "description", "capabilities", "loaded"}
+    assert set(alpha.keys()) == {"name", "version", "description", "author",
+                                 "capabilities", "loaded", "enabled", "config_section"}
     assert alpha["loaded"] is True
     assert by_name["beta"]["loaded"] is False
     assert alpha["capabilities"] == ["attack_module"]
