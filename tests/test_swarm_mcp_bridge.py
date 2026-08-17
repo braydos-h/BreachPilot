@@ -118,6 +118,15 @@ async def test_ready_requires_session_policy_and_loop():
 
 
 @pytest.mark.asyncio
+async def test_run_async_rejects_its_bound_loop_without_waiting():
+    bridge = SwarmMcpBridge()
+    bridge._loop = asyncio.get_running_loop()
+
+    with pytest.raises(RuntimeError, match="cannot run on its MCP event loop"):
+        bridge._run_async(asyncio.sleep(0), timeout=0.01)
+
+
+@pytest.mark.asyncio
 async def test_extract_text_handles_empty_content():
     # A result with no content blocks -> falls back to JSON dump of the result.
     out = SwarmMcpBridge._extract_text(SimpleNamespace(content=[]))

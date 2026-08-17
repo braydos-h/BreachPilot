@@ -29,6 +29,9 @@ a module's runnable artifact is dispatched, the real output is classified via
 """
 from __future__ import annotations
 
+import asyncio
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -45,6 +48,7 @@ from tools.autonomous_orchestrator import (
     AttackTask,
     AutonomousOrchestrator,
     AggressionLevel,
+    observe_autonomous_progress,
 )
 from tools.recon_pipeline import HostReconResult, ServiceInfo
 
@@ -243,6 +247,34 @@ async def test_shell_compromise_sets_access_achieved(tmp_path: Path) -> None:
     assert "_ShellCompromise" in state.successful_exploits
     assert captured, "the module's script must have been dispatched"
     assert "compromise_verified" in _timeline_types(state)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_keeps_loop_responsive_and_reports_monotonic_actions(tmp_path: Path) -> None:
+    started = threading.Event()
+    release = threading.Event()
+    progress: list[dict[str, Any]] = []
+    dispatch_started_at = 0.0
+
+    def _exec(cmd: str, ctx: dict[str, Any]) -> str:
+        nonlocal dispatch_started_at
+        dispatch_started_at = time.monotonic()
+        started.set()
+        release.wait(1.0)
+        return "exploit failed: no session created"
+
+    ex = _executor(tmp_path, tool_executor=_exec)
+    state = AttackState(target="10.0.0.5", recon_result=_recon_with_http())
+
+    with observe_autonomous_progress(progress.append):
+        first = asyncio.create_task(ex.execute(_task("_NoCompromise"), state))
+        assert await asyncio.to_thread(started.wait, 2.0)
+        assert time.monotonic() - dispatch_started_at < 0.5, "tool dispatch blocked the API event loop"
+        release.set()
+        await first
+        await ex.execute(_task("_InfoStub"), state)
+
+    assert [item["action"] for item in progress if "action" in item] == [1, 2]
 
 
 # ── 2. Info-stub does NOT set access_achieved ───────────────────────────────
