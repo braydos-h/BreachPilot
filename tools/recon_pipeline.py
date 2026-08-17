@@ -289,6 +289,14 @@ class ReconConfig:
             nmap_path=nmap.get("path") or "nmap",
             sudo=bool(nmap.get("sudo", False)),
             priv_fallback=bool(nmap.get("priv_fallback", True)),
+            # ponytail: make retry budget configurable so operators can set
+            # ``recon.max_retries: 0`` to skip straight to the native socket
+            # fallback on Windows where nmap -sS/-O hangs on Npcap issues
+            # (3 retries × 5-7.5s backoff = ~45s wasted before fallback).
+            # Defaults preserve existing behavior.
+            max_retries=int(recon_cfg.get("max_retries", 2)),
+            retry_delay=float(recon_cfg.get("retry_delay", 5.0)),
+            timeout_seconds=int(recon_cfg.get("timeout_seconds", 300)),
             # Production opts into the Phase 3 additive enumerators by
             # default; ``recon.extended_enumerators: false`` disables them.
             extended_enumerators=bool(recon_cfg.get("extended_enumerators", True)),

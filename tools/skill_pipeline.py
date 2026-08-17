@@ -144,6 +144,13 @@ def apply_skill_selection(
 
 
 def _phase_activations(selection: SkillSelection, phase: str) -> tuple:
+    # ponytail: SwarmOrchestrator.orchestrator.py:149 stores None in
+    # context["skill_selection"] when build_skill_selection_for_swarm raises
+    # (bare except Exception). Without this guard the review-phase branch
+    # below dereferences selection.activations and crashes with
+    # 'NoneType' object has no attribute 'activations' every reflection cycle.
+    if selection is None:
+        return ()
     from tools.swarm.skill_phase import phase_tags
 
     wanted = phase_tags(phase)

@@ -1051,6 +1051,16 @@ class AutonomousOrchestrator:
         results = await orchestrator.run_autonomous_campaign(targets=["10.0.0.50"])
     """
 
+    # ponytail: campaign-level cap on per-module retries. The per-task
+    # max_retries bound (default 3) only governs a single AttackTask; the
+    # aggression-escalation loop (_phase_exploitation:1622-1626) re-queues
+    # failed modules with a fresh retry_count=0 each time, so without a
+    # campaign-level budget a structural-failure module (e.g. Log4jRCE
+    # against a non-vulnerable target) gets retried indefinitely until the
+    # aggression ceiling is hit. Drop a module from the retry set once it
+    # has failed this many times total in state.failed_attempts[mod].
+    _max_module_failures: int = 3
+
     def __init__(
         self,
         mission_config: dict[str, Any],
@@ -2023,7 +2033,20 @@ class AutonomousOrchestrator:
 
     async def _retry_failed_modules(self, state: AttackState) -> None:
         """Retry failed modules with escalated aggression."""
-        failed_modules = set(state.failed_attempts.keys()) - set(state.successful_exploits)
+        all_failed = set(state.failed_attempts.keys()) - set(state.successful_exploits)
+        # ponytail: drop modules over the campaign-level failure cap so a
+        # structurally-failing exploit (e.g. Log4jRCE vs a non-vulnerable
+        # target) doesn't get re-queued forever on every aggression step.
+        failed_modules = {
+            m for m in all_failed
+            if len(state.failed_attempts.get(m, [])) < self._max_module_failures
+        }
+        dropped = all_failed - failed_modules
+        if dropped:
+            logger.info(
+                f"Not retrying {len(dropped)} module(s) at failure cap "
+                f"({self._max_module_failures}): {sorted(dropped)}"
+            )
 
         tasks: list[AttackTask] = []
         for mod_name in failed_modules:
