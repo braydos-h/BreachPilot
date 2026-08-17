@@ -620,87 +620,6 @@ async def _open_exploit_mcp_session_once(
             log_handle.close()
 
 
-def _try_kill_port_orphan(port: int) -> None:
-    """Best-effort kill of any process holding ``port`` on 127.0.0.1.
-
-    Used by ``start_exploit_http_server`` when the port is unexpectedly bound
-    at boot time — typically an orphaned uvicorn child from a prior recon
-    phase whose ``stop_process`` taskkill /T missed a descendant. Looks up
-    the PID via ``netstat -ano`` (Windows) or ``lsof``/``ss`` (POSIX) and
-    kills the whole tree. Safe because the only legitimate holder of the
-    exploit MCP port is a previous boot of this same server, which is gone.
-    """
-    import time
-
-    pids: list[int] = []
-    if os.name == "nt":
-        try:
-            out = subprocess.run(
-                ["netstat", "-ano", "-p", "TCP"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
-                timeout=5,
-                check=False,
-            )
-            if out.returncode == 0:
-                needle = f"127.0.0.1:{port}"
-                for line in out.stdout.splitlines():
-                    if "LISTENING" in line.upper() and needle in line:
-                        parts = line.split()
-                        if parts:
-                            try:
-                                pids.append(int(parts[-1]))
-                            except ValueError:
-                                pass
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-        for pid in pids:
-            try:
-                subprocess.run(
-                    ["taskkill", "/PID", str(pid), "/T", "/F"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                    timeout=5,
-                )
-            except (OSError, subprocess.TimeoutExpired):
-                pass
-    else:
-        for tool, args in (("lsof", ["-ti", f"tcp:{port}"]), ("ss", ["-lptn", f"sport = :{port}"])):
-            try:
-                out = subprocess.run(
-                    [tool, *args],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL,
-                    text=True,
-                    timeout=5,
-                    check=False,
-                )
-                if out.returncode == 0 and out.stdout.strip():
-                    for tok in out.stdout.split():
-                        try:
-                            pids.append(int(tok))
-                        except ValueError:
-                            continue
-                    if pids:
-                        break
-            except (OSError, subprocess.TimeoutExpired):
-                continue
-        for pid in pids:
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except (OSError, ProcessLookupError):
-                pass
-    # Give the OS a moment to release the socket after the kill.
-    if pids:
-        deadline = time.monotonic() + 2.0
-        while time.monotonic() < deadline:
-            if not port_is_open("127.0.0.1", port):
-                break
-            time.sleep(0.2)
-
-
 def start_exploit_http_server(
     *,
     server_path: Path,
@@ -710,15 +629,8 @@ def start_exploit_http_server(
     env: dict[str, str],
 ) -> tuple[subprocess.Popen[str], Any]:
     if port_is_open("127.0.0.1", port):
-        # ponytail: the recon→attack phase transition can leave an orphaned
-        # uvicorn child holding port 8001 when stop_process's taskkill /T
-        # missed a descendant. Try to kill whatever holds the port before
-        # raising — the recon phase is gone, so this is safe. Best-effort:
-        # if we can't identify/kill it, fall through to the original error.
-        _try_kill_port_orphan(port)
-        if port_is_open("127.0.0.1", port):
-            raise RuntimeError(
-                f"Exploit MCP HTTP port {port} is already in use. Stop the process using it."
+        raise RuntimeError(
+            f"Exploit MCP HTTP port {port} is already in use. Stop the process using it."
         )
 
     workspace.mkdir(parents=True, exist_ok=True)

@@ -694,6 +694,7 @@ def _run_daemon(args: argparse.Namespace) -> int:
     api_cfg = config.setdefault("api", {})
     host = args.api_host or api_cfg.get("host", "127.0.0.1")
     port = int(args.api_port or api_cfg.get("port", 8765))
+    shutdown_timeout = int(api_cfg.get("shutdown_timeout_seconds", 15))
     # v1: loopback-only. Refuse any non-loopback bind (no public override).
     if host not in ("127.0.0.1", "localhost", "::1"):
         ui.error(f"--api-host must be loopback (127.0.0.1/localhost/::1); got {host!r}. Public binds are not supported in v1.")
@@ -760,7 +761,14 @@ def _run_daemon(args: argparse.Namespace) -> int:
         )
         browser_thread.start()
 
-    uvicorn.run(app, host=host, port=port, log_level="info", access_log=True)
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        log_level="info",
+        access_log=True,
+        timeout_graceful_shutdown=shutdown_timeout,
+    )
     return 0
 
 

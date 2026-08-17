@@ -43,6 +43,36 @@ def test_demon_reuses_running_api_daemon(monkeypatch):
     assert main.ui.messages == ["WebUI API daemon is already running on http://127.0.0.1:8765"]
 
 
+def test_daemon_bounds_graceful_shutdown(monkeypatch):
+    """A streaming client cannot leave Uvicorn stuck after its listener closes."""
+    import builtins
+    from unittest.mock import MagicMock
+
+    import uvicorn
+
+    import app
+    import main
+    import tools.api.auth as auth
+
+    seen = {}
+    fake_ui = MagicMock()
+    fake_ui._c.return_value = ""
+    monkeypatch.setattr(main, "ui", fake_ui)
+    monkeypatch.setattr(
+        main,
+        "load_config",
+        lambda _: {"api": {"host": "127.0.0.1", "port": 8765, "shutdown_timeout_seconds": 7}},
+    )
+    monkeypatch.setattr(main, "_api_daemon_ready", lambda *_: False)
+    monkeypatch.setattr(app, "create_app", lambda **_: object())
+    monkeypatch.setattr(auth, "load_or_create_token", lambda *_args, **_kwargs: "token")
+    monkeypatch.setattr(builtins, "input", lambda *_args: "")
+    monkeypatch.setattr(uvicorn, "run", lambda _app, **kwargs: seen.update(kwargs))
+
+    assert main._run_daemon(main.parse_args(["--daemon"])) == 0
+    assert seen["timeout_graceful_shutdown"] == 7
+
+
 def test_demon_mutually_exclusive_with_target():
     """--demon + --target should return exit code 2 (conflict)."""
     from main import main
