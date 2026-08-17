@@ -1,0 +1,7 @@
+name: firmware_analysis
+version: 0.1.0
+description: Firmware analysis plugin - binwalk/firmadyne/fact-extractor/EMUX for IoT firmware unpack + emulation. Local file analysis (@audit_tool); emulation is local (no target touch unless the emulated firmware is treated as a target).
+author: NetAttackAi
+capabilities: [mcp_tool]
+# Lab build: enabled true. Local file analysis (@audit_tool); no target touch.
+enabled: true

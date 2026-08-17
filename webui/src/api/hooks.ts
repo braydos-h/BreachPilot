@@ -86,6 +86,7 @@ export const queryKeys = {
   runCredentials: (runId: string) => ["runs", runId, "credentials"] as const,
   runLoot: (runId: string) => ["runs", runId, "loot"] as const,
   runWorkspace: (runId: string) => ["runs", runId, "workspace"] as const,
+  runGraph: (runId: string) => ["runs", runId, "graph"] as const,
 };
 
 const DEFAULT_RETRY = (failureCount: number, error: unknown) => {
@@ -720,5 +721,20 @@ export function useFetchArtifactBlob(runId: string) {
         `/runs/${encodeURIComponent(runId)}/artifacts/${name.split("/").map(encodeURIComponent).join("/")}`,
         { raw: true },
       ),
+  });
+}
+
+export function useRunGraph(runId: string | null | undefined, enabled = true) {
+  return useQuery<RunGraphResponse>({
+    queryKey: queryKeys.runGraph(runId ?? ""),
+    queryFn: () => apiFetch<RunGraphResponse>(`/runs/${encodeURIComponent(runId as string)}/graph`),
+    ...defaultQueryOptions,
+    enabled: !!runId && enabled,
+    retry: (count, error) => {
+      // 404 = route disabled (api.graph_route=false) or run has no graph yet;
+      // don't retry — just render the empty state.
+      if (error instanceof ApiError && error.isNotFound) return false;
+      return DEFAULT_RETRY(count, error);
+    },
   });
 }

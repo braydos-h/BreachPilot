@@ -42,7 +42,7 @@ from typing import Any, Callable
 log = logging.getLogger("tools.plugins")
 
 # ─── Capability vocabulary ────────────────────────────────────────────────────
-_VALID_CAPABILITIES = ("attack_module", "mcp_tool", "skill_dir", "config")
+_VALID_CAPABILITIES = ("attack_module", "mcp_tool", "skill_dir", "config", "event_subscriber")
 
 # ─── Minimal YAML parser (stdlib only) ────────────────────────────────────────
 # plugin.yaml manifests use a tiny YAML subset: scalar key/value pairs, block
@@ -293,6 +293,7 @@ class PluginRegistry:
         self._skill_dirs: list[Path] = []
         self._config_sections: dict[str, dict[str, Any]] = {}
         self._loaded_plugins: dict[str, PluginManifest] = {}
+        self._event_subscribers: list[Callable[[dict[str, Any]], None]] = []
 
     def register_attack_module(self, cls: type) -> None:
         """Append an AttackModule subclass to the extra-modules list."""
@@ -323,6 +324,19 @@ class PluginRegistry:
             raise TypeError("config section schema must be a dict")
         self._config_sections[name] = schema
 
+    def register_event_subscriber(self, fn: Callable[[dict[str, Any]], None]) -> None:
+        """Register a synchronous callable that receives every emitted run event.
+
+        The subscriber receives the full event dict (``{sequence, timestamp,
+        run_id, type, payload}``) AFTER it has been persisted to JSONL. It MUST
+        be non-blocking and MUST NOT raise -- a failure in one subscriber is
+        swallowed so it never blocks the run or kills sibling subscribers.
+        Outbound-only (webhook/ticketing) subscribers belong here.
+        """
+        if not callable(fn):
+            raise TypeError("register_event_subscriber requires a callable")
+        self._event_subscribers.append(fn)
+
     def mark_plugin_loaded(self, manifest: PluginManifest) -> None:
         """Record a loaded plugin manifest by name."""
         self._loaded_plugins[manifest.name] = manifest
@@ -347,6 +361,10 @@ class PluginRegistry:
     def loaded_plugins(self) -> dict[str, PluginManifest]:
         return self._loaded_plugins
 
+    @property
+    def event_subscribers(self) -> list[Callable[[dict[str, Any]], None]]:
+        return self._event_subscribers
+
     def reset(self) -> None:
         """Clear all registrations (for tests)."""
         self._extra_module_classes.clear()
@@ -354,6 +372,7 @@ class PluginRegistry:
         self._skill_dirs.clear()
         self._config_sections.clear()
         self._loaded_plugins.clear()
+        self._event_subscribers.clear()
 
 
 # ─── Manager ──────────────────────────────────────────────────────────────────

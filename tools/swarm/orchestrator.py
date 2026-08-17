@@ -7,6 +7,7 @@ critic pre-check with blackboard awareness, and reflection-driven strategy adapt
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import threading
@@ -14,15 +15,14 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from tools.swarm.base import Agent, AgentResult, AgentStatus
-from tools.swarm.blackboard import Blackboard
-from tools.swarm.agents.recon_agent import ReconAgent
-from tools.swarm.agents.vuln_agent import VulnAgent
+from tools.swarm.agents.critic_agent import CriticAgent
 from tools.swarm.agents.exploit_agent import ExploitAgent
 from tools.swarm.agents.post_exploit_agent import PostExploitAgent
-from tools.swarm.agents.critic_agent import CriticAgent
+from tools.swarm.agents.recon_agent import ReconAgent
 from tools.swarm.agents.reflection_agent import ReflectionAgent
-
+from tools.swarm.agents.vuln_agent import VulnAgent
+from tools.swarm.base import Agent, AgentResult, AgentStatus
+from tools.swarm.blackboard import Blackboard
 
 # Mapping from task phase/type to default agent class
 _DEFAULT_AGENT_MAP: dict[str, type[Agent]] = {
@@ -63,6 +63,16 @@ class SwarmOrchestrator:
         # also run in parallel (higher IDS/crash risk; opt in via
         # ``swarm.exploit_parallel: true`` in config.yaml).
         exploit_parallel: bool = False,
+        # Bounded critic↔exploit negotiation rounds. 0 = legacy one-shot
+        # behavior (critic's ``modify`` is applied once, then the task runs).
+        # N>0 = after applying a ``modify``, the modified task is re-reviewed
+        # by the critic up to N times until it returns ``approve``/``deny``,
+        # a scope-expanding modification is proposed (rejected + logged), or
+        # the same modification repeats twice in a row (deadlock break). The
+        # negotiation is about *how* to execute a planned action (risk level,
+        # tool swap, mutation flag, rate limiting), never *what* target/scope
+        # to hit — the allowlist lock is untouched. See ``_negotiate``.
+        negotiation_rounds: int = 0,
     ) -> None:
         self._context = context
         self._agent_registry = agent_registry or dict(_DEFAULT_AGENT_MAP)
@@ -71,6 +81,7 @@ class SwarmOrchestrator:
         self._reflection_enabled = reflection_enabled
         self._event_callback = event_callback
         self._exploit_parallel = exploit_parallel
+        self._negotiation_rounds = max(0, int(negotiation_rounds))
         self._state_path: Path | None = Path(state_path) if state_path else None
         self._agents: dict[str, Agent] = {}
         self._results: list[AgentResult] = []
@@ -177,57 +188,11 @@ class SwarmOrchestrator:
         if self._critic_enabled and phase not in ("recon", "report"):
             critic_cls = self._agent_registry.get("critic", CriticAgent)
             critic = critic_cls()
-            critic_task = {
-                "task_id": f"critic-{task_id}",
-                "proposed_action": task,
-            }
-            critic_result = critic.run(critic_task, self._context)
-            decision = critic_result.output.get("decision", "approve") if critic_result.output else "approve"
-            reasoning = critic_result.output.get("reasoning", "") if critic_result.output else ""
-
-            self._emit(
-                "critic_decision",
-                {
-                    "task_id": task_id,
-                    "target": target,
-                    "decision": decision,
-                    "reasoning": reasoning,
-                },
-            )
-
-            if decision == "deny":
-                with self._lock:
-                    blocked_result = AgentResult(
-                        agent_type=agent.agent_type,
-                        status=AgentStatus.BLOCKED,
-                        task_id=task_id,
-                        error=f"Critic blocked: {reasoning}",
-                    )
-                    agent._set_status(AgentStatus.BLOCKED)
-                    self._results.append(blocked_result)
-                    self._battle_log.append({
-                        "task_id": task_id,
-                        "tool": task.get("tool", task.get("phase", "")),
-                        "target": target,
-                        "success": False,
-                        "error": f"Critic blocked: {reasoning}",
-                    })
-                    self._trim_history()
-                self._emit(
-                    "agent_blocked",
-                    {
-                        "agent_id": agent.agent_id,
-                        "agent_type": agent.agent_type,
-                        "task_id": task_id,
-                        "reason": f"Critic blocked: {reasoning}",
-                    },
-                )
-                self._persist_state()
-                return blocked_result
-
-            if decision == "modify":
-                modifications = critic_result.output.get("modifications", {})
-                task.update(modifications)
+            outcome = self._negotiate(critic, task, task_id, target, agent)
+            if outcome is not None:
+                # ``deny`` short-circuits the route — the blocked result is
+                # already recorded and persisted by ``_negotiate``.
+                return outcome
 
         # ── Execute agent ──
         # Runs UNLOCKED so parallel agents (route_parallel) actually run
@@ -654,6 +619,227 @@ class SwarmOrchestrator:
             else:
                 self._blackboard.set_scalar(key, value)
         return True
+
+    # ── Critic negotiation ─────────────────────────────────────────────
+
+    # Keys the critic is allowed to modify during a negotiation. A ``modify``
+    # proposing a change to any key NOT in this set is treated as a scope
+    # expansion attempt and rejected (the modification is dropped, the
+    # negotiation stops, and the original task runs). The negotiation is about
+    # *how* to execute a planned action — never *what* target/scope to hit.
+    # ``target``/``phase``/``scope``/``allowed_tools``/``asset_type`` define
+    # WHAT the action touches, so they are off the table. The allowlist lock is
+    # untouched by this allowlist: it is enforced separately at the MCP tool
+    # layer regardless of what the critic proposes.
+    _NEGOTIABLE_KEYS: frozenset[str] = frozenset({
+        "risk_level", "require_mutation", "alternative_tool",
+        "rate_limit_seconds", "delay_seconds", "timeout_seconds",
+        "max_retries", "mutation_strategy",
+    })
+
+    def _negotiate(
+        self,
+        critic: Agent,
+        task: dict[str, Any],
+        task_id: str,
+        target: str,
+        agent: Agent,
+    ) -> AgentResult | None:
+        """Run the bounded critic↔exploit negotiation and return a blocked
+        result on ``deny``, or ``None`` to let the route proceed.
+
+        Behavior by ``self._negotiation_rounds``:
+
+        - ``0`` (default, legacy one-shot): critic reviews once. ``deny``
+          blocks; ``modify`` is applied once and the task runs (no re-review).
+          Byte-for-byte the pre-negotiation behavior.
+        - ``N>0``: critic reviews; on ``modify`` the modifications are applied
+          and the critic re-reviews the modified task, up to ``N`` rounds. The
+          loop stops early on: ``approve`` (task runs), ``deny`` (blocked), a
+          scope-expanding modification (rejected + logged, original task runs),
+          or a repeated modification (deadlock — original task runs).
+
+        The negotiation never changes the target/scope: any modification
+        touching a key outside ``_NEGOTIABLE_KEYS`` is dropped and the loop
+        terminates with the pre-modification task. The allowlist lock is not
+        consulted here (it lives at the MCP tool layer); this guard only
+        prevents the critic from expanding WHAT the action touches.
+
+        Runs UNLOCKED — ``critic.run`` may call an LLM. All orchestrator state
+        mutations (``_results``/``_battle_log``) on the deny path happen under
+        ``self._lock``.
+        """
+        critic_task = {
+            "task_id": f"critic-{task_id}",
+            "proposed_action": task,
+        }
+        critic_result = critic.run(critic_task, self._context)
+        decision = critic_result.output.get("decision", "approve") if critic_result.output else "approve"
+        reasoning = critic_result.output.get("reasoning", "") if critic_result.output else ""
+
+        self._emit(
+            "critic_decision",
+            {"task_id": task_id, "target": target, "decision": decision, "reasoning": reasoning, "round": 0},
+        )
+
+        if decision == "deny":
+            return self._record_block(critic, task, task_id, target, agent, reasoning)
+
+        if decision == "modify":
+            modifications = critic_result.output.get("modifications", {}) or {}
+            # Legacy one-shot path: apply once, no re-review.
+            if self._negotiation_rounds <= 0:
+                safe = self._filter_modifications(modifications, task_id, target, round_idx=0)
+                task.update(safe)
+                return None
+            # Bounded loop: re-review the modified task up to N rounds.
+            return self._negotiation_loop(critic, task, task_id, target, agent, modifications)
+
+        return None
+
+    def _negotiation_loop(
+        self,
+        critic: Agent,
+        task: dict[str, Any],
+        task_id: str,
+        target: str,
+        agent: Agent,
+        first_modifications: dict[str, Any],
+    ) -> AgentResult | None:
+        """Bounded re-review loop. ``first_modifications`` is the round-0
+        ``modify`` output already extracted by ``_negotiate``."""
+        # Track a hash of each round's proposed modifications so a repeated
+        # proposal (same bytes twice in a row) breaks the loop as a deadlock.
+        # ponytail: SHA256 of the JSON-sorted modifications dict — O(1) per
+        # round, detects the exact-repeat case. A smarter detector would diff
+        # semantic content; upgrade if a critic oscillates between two
+        # different but equivalent modifications.
+        last_hash = self._modifications_hash(first_modifications)
+        # Apply the round-0 modifications (filtered for scope safety).
+        safe = self._filter_modifications(first_modifications, task_id, target, round_idx=0)
+        task.update(safe)
+
+        for round_idx in range(1, self._negotiation_rounds + 1):
+            critic_task = {"task_id": f"critic-{task_id}", "proposed_action": task}
+            critic_result = critic.run(critic_task, self._context)
+            decision = critic_result.output.get("decision", "approve") if critic_result.output else "approve"
+            reasoning = critic_result.output.get("reasoning", "") if critic_result.output else ""
+
+            self._emit(
+                "critic_decision",
+                {"task_id": task_id, "target": target, "decision": decision, "reasoning": reasoning, "round": round_idx},
+            )
+
+            if decision == "deny":
+                return self._record_block(critic, task, task_id, target, agent, reasoning)
+            if decision == "approve":
+                return None
+            # decision == "modify": check for scope expansion + deadlock.
+            modifications = critic_result.output.get("modifications", {}) or {}
+            cur_hash = self._modifications_hash(modifications)
+            # If every proposed key is out-of-scope, the critic tried to expand
+            # scope — reject, stop negotiating, run the pre-modification task.
+            if not self._filter_modifications(modifications, task_id, target, round_idx=round_idx):
+                self._emit(
+                    "negotiation_scope_rejected",
+                    {"task_id": task_id, "target": target, "round": round_idx, "modifications": modifications},
+                )
+                return None
+            # Deadlock: same modification repeated twice in a row.
+            if cur_hash == last_hash:
+                self._emit(
+                    "negotiation_deadlock",
+                    {"task_id": task_id, "target": target, "round": round_idx},
+                )
+                return None
+            last_hash = cur_hash
+            safe = self._filter_modifications(modifications, task_id, target, round_idx=round_idx)
+            task.update(safe)
+
+        # Rounds exhausted without consensus: fall back to the current task
+        # state (the last accepted modifications) + log. The task runs with
+        # whatever modifications were applied in the final accepted round.
+        self._emit(
+            "negotiation_exhausted",
+            {"task_id": task_id, "target": target, "rounds": self._negotiation_rounds},
+        )
+        return None
+
+    def _filter_modifications(
+        self,
+        modifications: dict[str, Any],
+        task_id: str,
+        target: str,
+        *,
+        round_idx: int,
+    ) -> dict[str, Any]:
+        """Return only the keys in ``_NEGOTIABLE_KEYS``. Out-of-scope keys are
+        dropped silently (the caller emits a ``negotiation_scope_rejected``
+        event when the WHOLE modification is empty after filtering)."""
+        if not isinstance(modifications, dict):
+            return {}
+        safe: dict[str, Any] = {}
+        rejected: list[str] = []
+        for key, value in modifications.items():
+            if key in self._NEGOTIABLE_KEYS:
+                safe[key] = value
+            else:
+                rejected.append(key)
+        if rejected:
+            self._emit(
+                "negotiation_keys_rejected",
+                {"task_id": task_id, "target": target, "round": round_idx, "keys": rejected},
+            )
+        return safe
+
+    @staticmethod
+    def _modifications_hash(modifications: dict[str, Any]) -> str:
+        """Stable hash of a modifications dict for deadlock detection."""
+        try:
+            return hashlib.sha256(
+                json.dumps(modifications, sort_keys=True, default=str).encode("utf-8")
+            ).hexdigest()
+        except (TypeError, ValueError):
+            return ""
+
+    def _record_block(
+        self,
+        critic: Agent,
+        task: dict[str, Any],
+        task_id: str,
+        target: str,
+        agent: Agent,
+        reasoning: str,
+    ) -> AgentResult:
+        """Record a critic ``deny`` as a blocked result + battle-log entry."""
+        with self._lock:
+            blocked_result = AgentResult(
+                agent_type=agent.agent_type,
+                status=AgentStatus.BLOCKED,
+                task_id=task_id,
+                error=f"Critic blocked: {reasoning}",
+            )
+            agent._set_status(AgentStatus.BLOCKED)
+            self._results.append(blocked_result)
+            self._battle_log.append({
+                "task_id": task_id,
+                "tool": task.get("tool", task.get("phase", "")),
+                "target": target,
+                "success": False,
+                "error": f"Critic blocked: {reasoning}",
+            })
+            self._trim_history()
+        self._emit(
+            "agent_blocked",
+            {
+                "agent_id": agent.agent_id,
+                "agent_type": agent.agent_type,
+                "task_id": task_id,
+                "reason": f"Critic blocked: {reasoning}",
+            },
+        )
+        self._persist_state()
+        return blocked_result
 
     # ── Internal ────────────────────────────────────────────────────────
 

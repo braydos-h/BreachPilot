@@ -1,0 +1,9 @@
+name: shodan_recon
+version: 0.1.0
+description: Passive Shodan OSINT plugin - port/banner/CVE enrichment from the Shodan REST API without touching the target. Advisory-only.
+author: NetAttackAi
+capabilities: [mcp_tool, config]
+# Lab build: enabled by default. Two-gate still holds -- the MCP tool refuses
+# with BLOCKED: when recon.shodan_api_key is unset, so the surface vanishes
+# without the key. Disable via config plugins.disabled list.
+enabled: true

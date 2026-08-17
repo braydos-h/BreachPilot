@@ -423,6 +423,7 @@ class AttackModuleExecutor:
         reflection_agent: Any = None,
         tool_executor: Callable[[str, dict[str, Any]], str] | None = None,
         opsec_manager: Any | None = None,
+        semantic_memory: Any | None = None,
     ) -> None:
         self._scope_gate = scope_gate
         self._risk_controller = risk_controller
@@ -434,6 +435,11 @@ class AttackModuleExecutor:
         # rate bucket). Unwired / disabled profile -> pacing_delay is 0.0 and
         # acquire_pacing is a no-op, so legacy callers and tests are unchanged.
         self._opsec = opsec_manager
+        # D1: optional SemanticMemoryManager. When wired (AutonomousOrchestrator
+        # builds one from the ``orchestrator.semantic_memory`` config flag),
+        # execute() calls store_lesson on a confirmed win so the campaign
+        # learns across missions. No-op when None (the default opt-in state).
+        self._semantic_memory = semantic_memory
         # Phase 2.1: the optional tool_executor lets execute() actually DISPATCH
         # a module's suggested_command / generated script and capture the real
         # output, instead of treating the module's dict as dead data. When wired
@@ -689,6 +695,13 @@ class AttackModuleExecutor:
                 )
                 logger.info(f"Module {task.module_name} succeeded against {task.target}")
                 self._record_success_on_blackboard(task.module_name)
+                # D1: persist a cross-mission lesson on a confirmed win so the
+                # campaign learns across missions, not just within the exploit
+                # loop. Best-effort — store_lesson skips + logs when Ollama is
+                # down, and a None manager makes this a no-op. Distinct
+                # action_type keeps this from polluting the operational
+                # exploit-action confidence rows in the ExperienceStore.
+                self._record_lesson_on_success(task, state, result)
             else:
                 task.error = result.get("note", "Module did not achieve exploitation")
                 state.record_failure(task.module_name, task.error)
@@ -984,6 +997,47 @@ class AttackModuleExecutor:
                 task.module_name, exc,
             )
 
+    def _record_lesson_on_success(
+        self,
+        task: AttackTask,
+        state: AttackState,
+        result: dict[str, Any],
+    ) -> None:
+        """Persist a cross-mission lesson on a confirmed win.
+
+        Advisory/best-effort — never raises, never blocks the campaign. No-op
+        when no SemanticMemoryManager is wired (the default). Uses a DISTINCT
+        ``action_type='orchestrator:module_success'`` so these rows are
+        isolated from the exploit-loop lessons ('reflection:exploit_loop') and
+        the swarm reflection lessons ('reflection:strategy_shift') —
+        downstream recall sees all three families, but the Bayesian
+        ExperienceStore (operational exploit-action confidence) is untouched.
+        """
+        if self._semantic_memory is None:
+            return
+        # ponytail: cap text length to keep the embedding + DB row bounded;
+        # store_lesson already truncates to 8000 chars, this is a tighter cap.
+        note = str(result.get("note") or result.get("status") or "succeeded")[:300]
+        text = f"{task.target} {task.module_name} ({task.phase.value}) succeeded: {note}"
+        try:
+            self._semantic_memory.store_lesson(
+                target_signature=task.target,
+                action_type="orchestrator:module_success",
+                outcome="success",
+                text=text,
+                confidence=0.75,
+                metadata={
+                    "module": task.module_name,
+                    "phase": task.phase.value,
+                    "aggression": task.aggression.value,
+                    "shell_type": result.get("shell_type", ""),
+                    "privilege_level": result.get("privilege_level", ""),
+                    "source": "autonomous_orchestrator",
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 -- never break the campaign on a lesson write
+            logger.debug("store_lesson skipped for %s: %r", task.module_name, exc)
+
 
 # ---------------------------------------------------------------------------
 # Autonomous orchestrator
@@ -1012,6 +1066,7 @@ class AutonomousOrchestrator:
         critic_agent: Any = None,
         reflection_agent: Any = None,
         experience_store: Any | None = None,
+        semantic_memory: Any | None = None,
     ) -> None:
         self._workspace = workspace_root
         self._workspace.mkdir(parents=True, exist_ok=True)
@@ -1032,6 +1087,33 @@ class AutonomousOrchestrator:
                 self._experience_store = ExperienceStore(get_default_db())
             except Exception:  # noqa: BLE001 -- ranking degrades to static-only
                 self._experience_store = None
+        # D1: semantic memory consumer. The exploit-agent loop and swarm
+        # reflection already write cross-mission lessons via
+        # SemanticMemoryManager.store_lesson; the orchestrator is the missing
+        # campaign-level consumer so a multi-phase campaign learns across
+        # missions, not just within the exploit loop. Read-only consumer —
+        # store_lesson writes to the lessons table; no execution authority.
+        # Built from config when not supplied (mirrors agent_loop.py:172-182
+        # and tools/exploit_agent/loop.py:470-489). Gated by
+        # ``orchestrator.semantic_memory`` (default false) so the wiring is
+        # opt-in per the "new attack-path capabilities must be opt-in" rule.
+        self._semantic_memory = semantic_memory
+        if self._semantic_memory is None and bool(mission_config.get("semantic_memory", False)):
+            try:
+                from db import get_default_db
+                from tools.semantic_memory import SemanticMemoryManager
+                _ollama_cfg = (mission_config.get("ollama", {}) or {})
+                # ponytail: embeddings stay on local Ollama (embed_host) when
+                # set; falls back to ollama.host for cloud-only installs.
+                _embed_host = _ollama_cfg.get("embed_host") or _ollama_cfg.get("host", "https://api.ollama.com")
+                self._semantic_memory = SemanticMemoryManager(
+                    db=get_default_db(),
+                    ollama_host=_embed_host,
+                    embedding_model=str(mission_config.get("embedding_model", "nomic-embed-text")),
+                )
+            except Exception as exc:  # noqa: BLE001 -- cross-mission learning degrades to no-op
+                logger.debug("SemanticMemoryManager wiring skipped: %r", exc)
+                self._semantic_memory = None
         # Phase 6.2: build an OpsecManager from the ``opsec`` config block
         # (merged into mission_config by the campaign call sites). Tolerant of
         # its absence -> disabled profile -> pacing no-op. Also published as the
@@ -1068,6 +1150,7 @@ class AutonomousOrchestrator:
             reflection_agent=reflection_agent,
             tool_executor=tool_executor,
             opsec_manager=self._opsec,
+            semantic_memory=self._semantic_memory,
         )
 
         self._states: dict[str, AttackState] = {}

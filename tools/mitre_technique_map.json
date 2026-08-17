@@ -1,0 +1,19 @@
+{
+  "_version": "1.0",
+  "_comment": "Override/extend the built-in tool->MITRE technique map in tools/mitre_export.py::_DEFAULT_MAP. Keys are MCP tool names as they appear in exploit_audit.jsonl tool_name fields. This file is merged over the built-in map (so you can add or override without re-listing the whole map).",
+  "run_exploit_terminal": "T1059",
+  "write_python_file": "T1059.006",
+  "run_python_file": "T1059.006",
+  "run_msf_module": "T1210",
+  "msf_generate_payload": "T1027",
+  "generate_payload": "T1027",
+  "lateral_exec": "T1021",
+  "dump_credentials": "T1003",
+  "kerberoast": "T1558.003",
+  "run_hash_crack": "T1110.002",
+  "run_web_scan": "T1595",
+  "password_spray": "T1110.003",
+  "asrep_roast": "T1558.004",
+  "golden_ticket": "T1558.001",
+  "pass_the_hash": "T1550.002"
+}

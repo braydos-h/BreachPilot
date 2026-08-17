@@ -1,0 +1,14 @@
+name: bloodhound_ce
+version: 0.1.0
+description: BloodHound CE data exchange - neo4j/CE API client for AD attack-path ingest and query. Pairs with the existing bloodhound_collect tool (which emits a zip); this plugin ingests the zip into BloodHound CE and queries attack paths. Target-touching tools are allowlist-locked.
+author: NetAttackAi
+capabilities: [mcp_tool]
+enabled: false
+config_section:
+  bloodhound_ce:
+    enabled: false
+    neo4j_uri: bolt://127.0.0.1:7687
+    neo4j_user: neo4j
+    neo4j_password_env: NEO4J_PASSWORD
+    ce_api_url: http://127.0.0.1:8080
+    ce_api_key_env: BLOODHOUND_CE_API_KEY

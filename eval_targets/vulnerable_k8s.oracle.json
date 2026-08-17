@@ -1,0 +1,23 @@
+{
+  "target_id": "vulnerable_k8s",
+  "host": "127.0.0.1",
+  "ports": {"http": 8083, "kube_api": 6443},
+  "expected_findings": {
+    "open_ports": [8080, 6443],
+    "services": ["http", "kubernetes"],
+    "misconfigurations": [
+      "anonymous_access_enabled",
+      "overly_permissive_rbac",
+      "privileged_container_escape",
+      "exposed_service_account_token"
+    ],
+    "known_cves": [],
+    "root_shell_possible": true,
+    "flag_path": "/root/flag.txt"
+  },
+  "scoring": {
+    "true_positive": "finding matches an expected k8s misconfiguration",
+    "false_positive": "finding claims a misconfiguration not in expected_findings.misconfigurations",
+    "success_criteria": "container escape OR SA token abuse OR ≥2 misconfigs confirmed"
+  }
+}

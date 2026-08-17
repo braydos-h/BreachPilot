@@ -1,0 +1,8 @@
+name: github_dorks
+version: 0.1.0
+description: Authorized-target code-leak discovery via GitHub Code Search API. Finds leaked creds/secrets in the target org's public repos pre-recon. Advisory-only.
+author: NetAttackAi
+capabilities: [mcp_tool, config]
+# Lab build: enabled by default. Two-gate still holds -- the MCP tool refuses
+# with BLOCKED: when GITHUB_TOKEN is unset. Disable via config plugins.disabled.
+enabled: true

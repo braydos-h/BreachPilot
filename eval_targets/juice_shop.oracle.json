@@ -1,0 +1,21 @@
+{
+  "target_id": "juice_shop",
+  "host": "127.0.0.1",
+  "ports": {"http": 3000},
+  "expected_findings": {
+    "open_ports": [3000],
+    "services": ["http"],
+    "weak_credentials": [
+      {"service": "http", "user": "admin@juice-sh.op", "password": "admin123"}
+    ],
+    "vulnerabilities": ["sqli", "xss", "broken_access_control", "sensitive_data_exposure", "api_abuse"],
+    "known_cves": [],
+    "root_shell_possible": false,
+    "flag_path": ""
+  },
+  "scoring": {
+    "true_positive": "finding matches an expected OWASP vuln or the admin cred",
+    "false_positive": "finding claims a vuln not in expected_findings.vulnerabilities",
+    "success_criteria": "admin login OR ≥2 OWASP vulns confirmed"
+  }
+}

@@ -109,6 +109,10 @@ def build_cve_search(config: dict[str, Any]) -> NVDClient:
         api_key_env=str(cve_cfg.get("api_key_env", "NVD_API_KEY")),
         circuit_failure_threshold=int(cve_cfg.get("circuit_failure_threshold", 5)),
         circuit_recovery_timeout=float(cve_cfg.get("circuit_recovery_timeout", 60.0)),
+        epss_enabled=bool(cve_cfg.get("epss_enabled", False)),
+        kev_enabled=bool(cve_cfg.get("kev_enabled", False)),
+        kev_cache_ttl_seconds=int(cve_cfg.get("kev_cache_ttl_seconds", 86400)),
+        kev_cache_path=str(cve_cfg.get("kev_cache_path", "")),
     )
     search_per_minute = float(cve_cfg.get("search_rate_limit_per_minute", 10))
     limiter = _shared_nvd_limiter(search_per_minute) if search_per_minute > 0 else None

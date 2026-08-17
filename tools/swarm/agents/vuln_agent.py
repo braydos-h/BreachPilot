@@ -138,6 +138,10 @@ class VulnAgent(Agent):
                 rate_limit_seconds=float(cve_cfg.get("rate_limit_seconds", 6.0)),
                 circuit_failure_threshold=int(cve_cfg.get("circuit_failure_threshold", 5)),
                 circuit_recovery_timeout=float(cve_cfg.get("circuit_recovery_timeout", 60.0)),
+                epss_enabled=bool(cve_cfg.get("epss_enabled", False)),
+                kev_enabled=bool(cve_cfg.get("kev_enabled", False)),
+                kev_cache_ttl_seconds=int(cve_cfg.get("kev_cache_ttl_seconds", 86400)),
+                kev_cache_path=str(cve_cfg.get("kev_cache_path", "")),
             ))
 
             exploit_cfg = config.get("exploit", {})

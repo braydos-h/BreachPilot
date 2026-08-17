@@ -1,106 +1,113 @@
 """Category modules re-exports."""
 
-from tools.attack_modules.modules.web import (
-    Log4jRCE,
-    BasicAuthBuster,
-    APIFuzzer,
-    WebShellUpload,
-    SQLInjection,
-    XSSScanner,
-    SSTIProbe,
-    GraphQLIntrospect,
-    RaceRequest,
-    TimingOracle,
-    RequestSmuggling,
-    SSRFProbe,
-    XXEProbe,
-    LFITraversal,
-)
-from tools.attack_modules.modules.network_smb import (
-    SMBGhost,
-    EternalBlue,
-    SMBRelay,
-    SMBNullSession,
-    PassTheHash,
-    DumpHashes,
-)
-from tools.attack_modules.modules.ssh import (
-    SSHBruteForce,
-    RegreSSHion,
-    OpenSSHCVECheck,
-)
-from tools.attack_modules.modules.services import (
-    RDPBlueKeep,
-    FTPAnonymous,
-    RedisExploit,
-    ElasticsearchExploit,
-    LDAPAnonymous,
-    RDPExploit,
+from tools.attack_modules.modules.ad import (
+    ADCSEnum,
+    BloodHoundCollect,
+    GoldenTicket,
+    ResponderRelay,
+    SMBSigningCheck,
 )
 from tools.attack_modules.modules.auth_creds import (
-    CredentialSpray,
-    PasswordSpray,
-    HashCrack,
-    ASREPRoast,
-    Kerberoasting,
-    DCSyncAttack,
     ADLDAPEnum,
-)
-from tools.attack_modules.modules.privesc import (
-    LinuxPrivescCheck,
-    WindowsPrivescCheck,
-    SUIDEnumeration,
-    KernelExploitCheck,
-    ContainerBreakout,
-    CloudPrivesc,
-    K8sPrivesc,
-)
-from tools.attack_modules.modules.persistence import (
-    LinuxPersistence,
-    WindowsPersistence,
-    WebShellPersistence,
+    ASREPRoast,
+    CredentialSpray,
+    DCSyncAttack,
+    HashCrack,
+    Kerberoasting,
+    PasswordSpray,
 )
 from tools.attack_modules.modules.crypto_jwt import JWTTamper
 from tools.attack_modules.modules.deserialize import DeserializeAttack
+from tools.attack_modules.modules.detection import (
+    DetectionCoverageProbe,
+    LogSourceEnum,
+    OPSECPostureReport,
+)
+from tools.attack_modules.modules.ics_iot import (
+    BACnetEnum,
+    DNP3Enum,
+    HMIDefaultCred,
+    IoTDefaultCred,
+    ModbusEnum,
+    ModbusWriteCoil,
+    ModbusWriteRegister,
+    S7Enum,
+    S7PlcStart,
+    S7PlcStop,
+)
+from tools.attack_modules.modules.network_smb import (
+    DumpHashes,
+    EternalBlue,
+    PassTheHash,
+    SMBGhost,
+    SMBNullSession,
+    SMBRelay,
+)
+from tools.attack_modules.modules.orchestrator_phases import (
+    LateralMovement,
+    LocalExploitSuggester,
+    ServiceMisconfiguration,
+    TokenImpersonation,
+    ValidateFinding,
+)
+from tools.attack_modules.modules.persistence import (
+    LinuxPersistence,
+    WebShellPersistence,
+    WindowsPersistence,
+)
+from tools.attack_modules.modules.privesc import (
+    CloudPrivesc,
+    ContainerBreakout,
+    DockerSockEscape,
+    IMDSExploit,
+    K8sPrivesc,
+    KernelExploitCheck,
+    LinuxPrivescCheck,
+    S3BucketTakeover,
+    SUIDEnumeration,
+    WindowsPrivescCheck,
+)
+from tools.attack_modules.modules.services import (
+    ElasticsearchExploit,
+    FTPAnonymous,
+    LDAPAnonymous,
+    RDPBlueKeep,
+    RDPExploit,
+    RedisExploit,
+)
+from tools.attack_modules.modules.ssh import (
+    OpenSSHCVECheck,
+    RegreSSHion,
+    SSHBruteForce,
+)
+from tools.attack_modules.modules.supply_chain import (
+    ArtifactExposure,
+    CICDMisconfig,
+    DependencyConfusion,
+    ExposedVCS,
+    SupplyChainRecon,
+)
 from tools.attack_modules.modules.synthesis import (
     CVEToExploit,
     DiffPatchAnalysis,
     FuzzToExploit,
     WeaponizedExploit,
 )
-from tools.attack_modules.modules.ics_iot import (
-    ModbusEnum,
-    DNP3Enum,
-    S7Enum,
-    BACnetEnum,
-    HMIDefaultCred,
-    IoTDefaultCred,
-)
-from tools.attack_modules.modules.supply_chain import (
-    ExposedVCS,
-    CICDMisconfig,
-    DependencyConfusion,
-    ArtifactExposure,
-    SupplyChainRecon,
-)
-from tools.attack_modules.modules.detection import (
-    DetectionCoverageProbe,
-    LogSourceEnum,
-    OPSECPostureReport,
-)
-from tools.attack_modules.modules.orchestrator_phases import (
-    TokenImpersonation,
-    ServiceMisconfiguration,
-    LateralMovement,
-    ValidateFinding,
-    LocalExploitSuggester,
-)
-from tools.attack_modules.modules.ad import (
-    ADCSEnum,
-    BloodHoundCollect,
-    ResponderRelay,
-    GoldenTicket,
-    SMBSigningCheck,
+from tools.attack_modules.modules.web import (
+    APIFuzzer,
+    BasicAuthBuster,
+    GraphQLIntrospect,
+    LFITraversal,
+    Log4jRCE,
+    RaceRequest,
+    RequestSmuggling,
+    SQLInjection,
+    SSRFProbe,
+    SSTIProbe,
+    TimingOracle,
+    WebShellUpload,
+    XSSScanner,
+    XXEProbe,
 )
 
 __all__ = [
@@ -156,12 +163,19 @@ __all__ = [
     "WeaponizedExploit",
     "CloudPrivesc",
     "K8sPrivesc",
+    "IMDSExploit",
+    "DockerSockEscape",
+    "S3BucketTakeover",
     "ModbusEnum",
     "DNP3Enum",
     "S7Enum",
     "BACnetEnum",
     "HMIDefaultCred",
     "IoTDefaultCred",
+    "ModbusWriteCoil",
+    "ModbusWriteRegister",
+    "S7PlcStop",
+    "S7PlcStart",
     "ExposedVCS",
     "CICDMisconfig",
     "DependencyConfusion",

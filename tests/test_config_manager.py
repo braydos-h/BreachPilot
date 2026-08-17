@@ -396,4 +396,6 @@ outcome_judgment:
         "min_evidence_references": 1,
         # Phase 1.2: Flow A exploit-engine outcome judgment toggle (opt-in, default OFF).
         "flow_a": False,
+        # D3: cross-model outcome grading (advisory; deterministic judge stays authority).
+        "peer_review": False,
     }

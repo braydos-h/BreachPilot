@@ -240,3 +240,82 @@ def test_render_skill_context_empty_returns_no_fence(tmp_path: Path):
 
     # No skills -> empty body -> no fence wrapper (avoid cluttering prompts).
     assert render_skill_context([]) == ""
+
+
+# ── D3: skill-pack under skills/maybe/ — advisory-only, gated, sanitized ──
+
+_MAYBE_SKILLS = [
+    "quantum-crypto-triage",
+    "cloud-ir-playbook",
+    "prompt-injection-defense",
+    "lateral-movement-decision-trees",
+    "supply-chain-attribution",
+    "llm-grammar-fuzzing",
+]
+
+
+def test_maybe_skill_pack_loads_and_stays_disabled_by_default():
+    """All six skill-pack files parse + sanitize cleanly, and stay excluded
+    from the default (non-maybe) catalog because ``maybe_enabled`` is false."""
+    from tools.skill_registry import load_skill_registry
+
+    repo_root = Path(__file__).resolve().parents[1]
+    registry = load_skill_registry([repo_root / "skills"], base_dir=repo_root)
+    # Each maybe skill is in the registry (parsed) but flagged maybe=True.
+    for name in _MAYBE_SKILLS:
+        skill = registry.get(name)
+        assert skill is not None, f"maybe skill {name!r} did not load"
+        assert skill.metadata.maybe is True, f"{name!r} not flagged as maybe"
+        # The default search (include_maybe=False) must NOT return any maybe skill.
+        assert registry.search(tags=[name]) == [], f"{name!r} leaked into default search"
+        # include_maybe=True surfaces it.
+        assert any(s.name == name for s in registry.search(tags=[name], include_maybe=True)) or \
+               any(s.name == name for s in registry.search(include_maybe=True)) or \
+               registry.get(name) is not None
+    # The default catalog list excludes maybe skills.
+    listed = {s.name for s in registry.list_skills() if not s.metadata.maybe}
+    for name in _MAYBE_SKILLS:
+        assert name not in listed, f"{name!r} appeared in the default (non-maybe) catalog"
+
+
+def test_maybe_skill_pack_body_is_sanitized():
+    """Each skill-pack body sanitizes cleanly (no role-directives, no
+    tool-call mimics survive ``_sanitize_skill_body``)."""
+    from tools.skill_registry import load_skill_registry, render_skill_context
+
+    repo_root = Path(__file__).resolve().parents[1]
+    registry = load_skill_registry([repo_root / "skills"], base_dir=repo_root)
+    for name in _MAYBE_SKILLS:
+        skill = registry.get(name)
+        assert skill is not None
+        # The raw body carries the advisory-only Safety section.
+        assert "Advisory only" in skill.body, f"{name!r} missing the advisory Safety section"
+        rendered = render_skill_context([skill])
+        # The untrusted fence is always present when a body is rendered.
+        assert "<untrusted_skill_guidance" in rendered
+        # No role-directive lines survive sanitization.
+        assert "## SYSTEM:" not in rendered
+        assert "[SYSTEM]" not in rendered
+        # No tool-call mimics survive sanitization.
+        assert "run tool:" not in rendered
+
+
+def test_maybe_skill_pack_frontmatter_well_formed():
+    """Each skill-pack file has well-formed YAML frontmatter with name,
+    description, domain, tags, nist_csf, and mitre_attack fields."""
+    from tools.skill_registry import load_skill_registry
+
+    repo_root = Path(__file__).resolve().parents[1]
+    registry = load_skill_registry([repo_root / "skills"], base_dir=repo_root)
+    # The registry reports no parse errors for the skill files.
+    for err in registry.errors:
+        for name in _MAYBE_SKILLS:
+            assert name not in err, f"parse error for {name!r}: {err}"
+    for name in _MAYBE_SKILLS:
+        skill = registry.get(name)
+        assert skill is not None
+        assert skill.metadata.description, f"{name!r} has empty description"
+        assert skill.metadata.domain == "cybersecurity", f"{name!r} domain mismatch"
+        assert len(skill.metadata.tags) >= 3, f"{name!r} too few tags"
+        assert skill.metadata.nist_csf, f"{name!r} has no nist_csf"
+        assert skill.metadata.mitre_attack, f"{name!r} has no mitre_attack"

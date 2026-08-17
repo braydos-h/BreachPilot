@@ -101,6 +101,14 @@ class TrialResult:
     model_id: str = ""
     config_hash: str = ""
     error: str = ""
+    # D5: throughput + token-cost telemetry. ``total_tokens`` is the trial's
+    # LLM token spend (prompt+completion); ``token_cost`` is an optional
+    # operator-supplied cost in any currency unit (USD, credits, etc.) so the
+    # benchmark can compute token_cost_per_finding without hardcoding a
+    # pricing model. Both default to 0 -- the real run_session can populate
+    # them from model_telemetry; the mock path leaves them at 0.
+    total_tokens: int = 0
+    token_cost: float = 0.0
 
 
 @dataclass
@@ -116,6 +124,12 @@ class BenchmarkReport:
     false_positive_rate: dict[str, float]          # agent-claimed but not verified
     actions_per_verified_success: dict[str, float]
     time_to_first_verified_success: dict[str, float | None]
+    # D5: throughput + cost efficiency. ``findings_per_hour`` is
+    # verified-successes per hour of wall time; ``token_cost_per_finding`` is
+    # the mean token cost per verified success (None when no successes or no
+    # cost data). Both are per condition.
+    findings_per_hour: dict[str, float] = field(default_factory=dict)
+    token_cost_per_finding: dict[str, float | None] = field(default_factory=dict)
     timestamp: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -129,6 +143,8 @@ class BenchmarkReport:
             "false_positive_rate": self.false_positive_rate,
             "actions_per_verified_success": self.actions_per_verified_success,
             "time_to_first_verified_success": self.time_to_first_verified_success,
+            "findings_per_hour": self.findings_per_hour,
+            "token_cost_per_finding": self.token_cost_per_finding,
             "timestamp": self.timestamp,
         }
 
@@ -294,6 +310,11 @@ async def _run_one_trial(
 
     duration = time.monotonic() - start
     total_actions = int(agent_result.get("total_actions", 0) or 0)
+    # D5: token spend + cost from the run. The real run_session can populate
+    # these from model_telemetry; absence -> 0 (the mock path leaves them at 0
+    # so the existing tests stay green).
+    total_tokens = int(agent_result.get("total_tokens", 0) or 0)
+    token_cost = float(agent_result.get("token_cost", 0.0) or 0.0)
 
     result = TrialResult(
         scenario_id=scenario.scenario_id,
@@ -302,10 +323,17 @@ async def _run_one_trial(
         verified_success=False,  # set by the oracle below
         agent_claimed_success=agent_claimed,
         total_actions=total_actions,
-        duration_seconds=round(duration, 3),
+        # ponytail: round to 6 decimals (microseconds) instead of 3 (ms) so
+        # sub-millisecond mock durations don't collapse to 0.0 -- the
+        # findings/hour aggregation divides by this and a 0.0 would yield
+        # ZeroDivisionError or a misleading 0.0/hour. Real trials are
+        # seconds-to-minutes so the extra precision is harmless.
+        duration_seconds=round(duration, 6),
         model_id=str(config.get("models", {}).get("default_alias", "")),
         config_hash=config_hash,
         error=error,
+        total_tokens=total_tokens,
+        token_cost=token_cost,
     )
     return result, agent_result
 
@@ -364,6 +392,11 @@ async def run_benchmark(cfg: BenchmarkConfig) -> BenchmarkReport:
     false_pos_rate: dict[str, float] = {}
     actions_per_success: dict[str, float] = {}
     time_to_first: dict[str, float | None] = {}
+    # D5: throughput (verified findings per hour of wall time) + cost
+    # efficiency (mean token cost per verified finding). None when a condition
+    # has no verified successes or no cost data.
+    findings_per_hour: dict[str, float] = {}
+    token_cost_per_finding: dict[str, float | None] = {}
 
     for cond in conditions:
         cond_trials = [t for t in trials if t.condition == cond]
@@ -385,6 +418,23 @@ async def run_benchmark(cfg: BenchmarkConfig) -> BenchmarkReport:
         time_to_first[cond] = (
             statistics.mean(first_times) if first_times else None
         )
+        # D5: findings/hour = verified_successes / total_wall_hours.
+        # ponytail: rounded trial durations can collapse to 0.0 for sub-ms
+        # mock runs; guard the division so we don't get ZeroDivisionError.
+        # A real trial is seconds-to-minutes so this never trips in prod.
+        total_seconds = sum(t.duration_seconds for t in cond_trials)
+        if total_seconds > 0:
+            findings_per_hour[cond] = (len(verified) / total_seconds) * 3600.0
+        else:
+            findings_per_hour[cond] = 0.0
+        # D5: token_cost_per_finding = mean cost over verified successes.
+        # None when no successes; 0.0 when successes but no cost data (the
+        # harness can't synthesize a cost, so it reports the zero it has).
+        if verified:
+            costs = [t.token_cost for t in verified]
+            token_cost_per_finding[cond] = statistics.mean(costs)
+        else:
+            token_cost_per_finding[cond] = None
 
     # Risk ratio (treatment / baseline) + bootstrap CI.
     rr = None
@@ -428,6 +478,8 @@ async def run_benchmark(cfg: BenchmarkConfig) -> BenchmarkReport:
         false_positive_rate=false_pos_rate,
         actions_per_verified_success=actions_per_success,
         time_to_first_verified_success=time_to_first,
+        findings_per_hour=findings_per_hour,
+        token_cost_per_finding=token_cost_per_finding,
         timestamp=datetime.now(timezone.utc).isoformat(),
     )
 

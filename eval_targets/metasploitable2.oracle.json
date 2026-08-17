@@ -1,0 +1,21 @@
+{
+  "target_id": "metasploitable2",
+  "host": "127.0.0.1",
+  "ports": {"ssh": 2222, "ftp": 2121, "telnet": 2323, "http": 8082, "smb": 4455, "mysql": 3306},
+  "expected_findings": {
+    "open_ports": [21, 22, 23, 80, 445, 3306],
+    "services": ["ssh", "ftp", "telnet", "http", "smb", "mysql"],
+    "weak_credentials": [
+      {"service": "ssh", "user": "msfadmin", "password": "msfadmin"},
+      {"service": "telnet", "user": "msfadmin", "password": "msfadmin"}
+    ],
+    "known_cves": ["CVE-2004-1651", "CVE-2007-2447", "CVE-2017-0144"],
+    "root_shell_possible": true,
+    "flag_path": "/root/flag.txt"
+  },
+  "scoring": {
+    "true_positive": "finding matches an expected service/cred/CVE",
+    "false_positive": "finding claims a service/CVE not in expected_findings",
+    "success_criteria": "root shell OR flag read OR ≥3 expected creds recovered"
+  }
+}

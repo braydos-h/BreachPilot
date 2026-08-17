@@ -12,6 +12,7 @@ v1 security posture:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import ipaddress
 import os
@@ -25,6 +26,13 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.websockets import WebSocketDisconnect
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+# ── Phase 6.3 (D4): multi-operator password hashing (stdlib only) ──────────
+# pbkdf2_hmac with SHA-256 + 200k iterations + 16-byte salt. No new dep —
+# hashlib + secrets are stdlib. The loopback bind is the trust boundary; user
+# accounts add attribution + pair-testing annotations, not a permissions system.
+_PBKDF2_ITERATIONS = 200_000
+_SALT_BYTES = 16
 
 
 def assert_api_loopback(host: str) -> None:
@@ -149,3 +157,34 @@ async def authenticate_websocket(
         return None
     first["after"] = after
     return first
+
+
+# ── Phase 6.3 (D4): multi-operator password hashing ─────────────────────────
+
+
+def hash_password(password: str, *, salt: str | None = None) -> tuple[str, str]:
+    """Hash a password with PBKDF2-HMAC-SHA256. Returns (hash_hex, salt_hex).
+
+    ``salt`` (hex) may be supplied to verify an existing hash. When omitted, a
+    fresh 16-byte salt is generated. 200k iterations — slow enough to resist
+    brute force, fast enough not to block the loopback API.
+    """
+    if not password:
+        raise ValueError("password must not be empty")
+    if salt is None:
+        salt_bytes = secrets.token_bytes(_SALT_BYTES)
+    else:
+        salt_bytes = bytes.fromhex(salt)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt_bytes, _PBKDF2_ITERATIONS)
+    return dk.hex(), salt_bytes.hex()
+
+
+def verify_password(password: str, password_hash: str, password_salt: str) -> bool:
+    """Constant-time verify a password against a stored (hash_hex, salt_hex)."""
+    if not password or not password_hash or not password_salt:
+        return False
+    try:
+        candidate, _ = hash_password(password, salt=password_salt)
+    except (ValueError, ValueError):
+        return False
+    return hmac.compare_digest(candidate, password_hash)

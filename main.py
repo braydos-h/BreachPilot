@@ -402,6 +402,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                         help="Run a safe localhost smoke test against 127.0.0.1 and exit")
     parser.add_argument("--eval", action="store_true",
                         help="Run the eval/benchmark harness against --target and write reports/eval/<run_id>/")
+    parser.add_argument("--ctf", action="store_true",
+                        help="CTF autopilot: run against --target and stop when the goal is heuristically met "
+                             "(flag marker / uid=0 / port-marker). Target-locked via the normal allowlist.")
+    parser.add_argument("--ctf-flag-path", dest="ctf_flag_path", default="",
+                        help="CTF goal: flag file path on the target (e.g. /root/flag.txt)")
+    parser.add_argument("--ctf-root-shell", dest="ctf_root_shell", action="store_true", default=True,
+                        help="CTF goal: treat uid=0 in any output as goal-met (default True)")
+    parser.add_argument("--ctf-port", dest="ctf_port", type=int, default=0,
+                        help="CTF goal: port to probe for the known-string marker")
+    parser.add_argument("--ctf-marker", dest="ctf_marker", default="",
+                        help="CTF goal: known-string marker expected from --ctf-port")
     parser.add_argument("--ultrathink", action="store_true",
                         help="Enable deep reasoning mode: verbose chain-of-thought and frequent reflection")
     # ── Runtime skills flags (advisory prompt-context layer) ──
@@ -1075,6 +1086,11 @@ def main(argv: list[str] | None = None) -> int:
         if getattr(args, "eval", False):
             from tools.eval_harness import run_eval
             return asyncio.run(run_eval(args))
+
+        # --ctf: CTF autopilot with goal-completion detection.
+        if getattr(args, "ctf", False):
+            from tools.ctf_mode import run_ctf
+            return run_ctf(args)
 
         # --demo: run against a local sandbox target (DVWA-style).
         if args.demo:

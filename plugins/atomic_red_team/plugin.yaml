@@ -1,0 +1,7 @@
+name: atomic_red_team
+version: 0.1.0
+description: Atomic Red Team test YAML generator - maps discovered weaknesses to MITRE ATT&CK techniques for detection validation. Local-only YAML generation (@audit_tool); no execution.
+author: NetAttackAi
+capabilities: [mcp_tool]
+# Lab build: enabled true. Local-only YAML generation (@audit_tool); no execution.
+enabled: true

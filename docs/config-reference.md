@@ -249,6 +249,14 @@ Read by the orchestrator from mission_config (merged from `config["autonomous"]`
 | `max_cycles` | int | `100` | Round cap when adaptive_replan is on | autonomous_orchestrator.py:1077 |
 | `max_pivot_depth` | int | `0` | Single-IP lock default | autonomous_orchestrator.py:1091 |
 
+### `orchestrator:` (config.yaml) — cross-mission learning consumer
+
+Semantic-memory consumer for the autonomous orchestrator. When true, the orchestrator builds a `SemanticMemoryManager` (from the `memory` config block's `embed_host`/`embedding_model`) and calls `store_lesson` on every confirmed module win so the campaign learns across missions, not just within the exploit loop. Advisory-only — read-only memory store consumer, no execution authority change. Distinct `action_type='orchestrator:module_success'` isolates these rows from the exploit-loop and swarm-reflection lessons. Lab default ON (matches `memory.semantic_enabled: true` — the orchestrator is the missing consumer of an already-on capability, not a new attack-path opt-in).
+
+| Key | Type | Default | Controls | Consumed at |
+|-----|------|---------|----------|-------------|
+| `semantic_memory` | bool | `true` | Build a SemanticMemoryManager + store cross-mission lessons on confirmed wins | autonomous_orchestrator.py:1095-1116 |
+
 ### `recon:` (config.yaml:251-274) — recon coverage & depth
 
 | Key | Type | Default | Controls | Consumed at |
@@ -334,6 +342,35 @@ Enabled by `--long-session` (main.py:374-376) or `enabled: true`.
 | `confirmation_threshold` / `refutation_threshold` | float | `0.75` | Evidence thresholds (0.5-1.0) | config_manager.py:744-753 |
 | `min_evidence_references` | int | `1` | Min evidence refs for a verdict | config_manager.py:754-762 |
 | `flow_a` | bool | `true` (config.yaml) / `false` (schema) | Wire OutcomeJudge into Flow A exploit loop (overrides shallow exit-code success) | cli_exploit_settings.py:154, eval_benchmark.py:231 |
+| `peer_review` | bool | `false` | D3: cross-model outcome grading (`peer_review_outcome` MCP tool — one alias plans, a different alias grades evidence; advisory-only, deterministic judge stays authority) | mcp_tools/peer_models.py:162 |
+
+### `poc_verification:` (config.yaml:264-271) — self-healing PoC verification (Killer Feature #3)
+
+When `enabled`, `cve_to_exploit_synth` syntax-checks its synthesized PoC inline
+(`py_compile`, no exec) and the `verify_poc` MCP tool compile-tests the PoC
+inside a fully-isolated Docker container. The PoC is NEVER executed on the
+operator box — this is a compile/import gate, not a sandbox guarantee.
+
+| Key | Type | Default | Controls | Consumed at |
+|-----|------|---------|----------|-------------|
+| `enabled` | bool | `false` | Master toggle (inline synth check + Docker compile path) | mcp_tools/attack_modules.py (cve_to_exploit_synth), mcp_tools/poc_verifier.py |
+| `docker_image` | str | `python:3.11-slim` | Image for the compile/import container | tools/poc_verifier.py:docker_check |
+| `compile_timeout_seconds` | int | `30` | Container run timeout | tools/poc_verifier.py:docker_check |
+| `max_retries` | int | `3` | Self-heal loop cap (synth → verify → LLM fix → re-verify) | mcp_tools/attack_modules.py (agent-driven) |
+| `docker_network` | str | `none` | Container network mode (always `none` — PoC must never reach target/network) | tools/poc_verifier.py:docker_check |
+| `docker_read_only` | bool | `true` | Mount container filesystem read-only | tools/poc_verifier.py:docker_check |
+| `docker_memory` | str | `256m` | Container memory cap | tools/poc_verifier.py:docker_check |
+
+### `replay_simulator:` (config.yaml:273) — pre-commit attack-plan critique (D2)
+
+When `enabled`, registers the `replay_simulate` MCP tool — a local-only
+`@audit_tool` (no target touch) that dry-runs an attack plan against a saved
+`ReconAssessment` JSON. The LLM critiques its own plan (confidence, branches);
+if the LLM is unavailable, degrades to rule-based scoring. Zero target touch.
+
+| Key | Type | Default | Controls | Consumed at |
+|-----|------|---------|----------|-------------|
+| `enabled` | bool | `false` | Registers the `replay_simulate` MCP tool | mcp_tools/replay_simulator.py |
 
 ### `adaptive_exploits:` (config.yaml:366-373) — exploit mutation
 

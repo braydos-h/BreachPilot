@@ -275,6 +275,10 @@ class AgentLoop:
             reflection_enabled=mission_config.get("reflection_enabled", True),
             event_callback=self._emit_event,
             state_path=self._swarm_state_path,
+            # Bounded critic↔exploit negotiation rounds (0 = legacy one-shot,
+            # the safety default). Opt in via ``swarm.negotiation_rounds`` in
+            # config.yaml.
+            negotiation_rounds=int(mission_config.get("swarm", {}).get("negotiation_rounds", 0)),
         )
 
         # Tier 1.3: on resume, restore the swarm's shared blackboard from the
@@ -1133,6 +1137,11 @@ class AgentLoop:
             model_client=self._swarm.model_client,
             critic_agent=CriticAgent() if self.critic_enabled else None,
             reflection_agent=ReflectionAgent() if self.reflection_enabled else None,
+            # D1: thread the cross-mission semantic-memory consumer through so
+            # the campaign engine learns across missions (store_lesson on
+            # confirmed wins). The manager was built in __init__ from the
+            # ``memory`` config block; None when semantic_enabled is false.
+            semantic_memory=self._semantic_memory,
         )
 
         # Run the campaign. Tier 1.3: when this AgentLoop was itself resumed

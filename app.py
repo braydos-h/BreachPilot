@@ -30,8 +30,10 @@ from tools.api.event_broker import EventBrokerRegistry
 from tools.api.persistence import ApiPersistence
 from tools.api.routes import decisions as decisions_routes
 from tools.api.routes import events as events_routes
+from tools.api.routes import graph as graph_routes
 from tools.api.routes import runs as runs_routes
 from tools.api.routes import system as system_routes
+from tools.api.routes import users as users_routes
 from tools.api.run_manager import RunManager
 
 
@@ -130,12 +132,22 @@ def create_app(
     runs_routes.configure(auth, persistence, run_manager)
     decisions_routes.configure(auth, run_manager)
     events_routes.configure(auth, event_registry, persistence, token, allowed_origins)
+    graph_routes.configure(auth, persistence, config)
+
+    # D4: multi-operator user accounts + annotations (loopback-only; no roles).
+    # Only wired when ``api.multi_operator`` is true — default false restores
+    # the legacy single-token mode with no user-account surface.
+    if bool(api_cfg.get("multi_operator", False)):
+        users_routes.configure(auth, persistence)
 
     # Mount routers.
     app.include_router(system_routes.router)
     app.include_router(runs_routes.router)
     app.include_router(decisions_routes.router)
     app.include_router(events_routes.router)
+    app.include_router(graph_routes.router)
+    if bool(api_cfg.get("multi_operator", False)):
+        app.include_router(users_routes.router)
 
     # Optional: serve the bundled WebUI from webui/dist/ when
     # ``api.serve_webui`` is true and the build exists. Mounted LAST so the

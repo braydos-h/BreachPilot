@@ -884,6 +884,38 @@ if __name__ == "__main__":
         result_lines.append("--- Exploit Script Template ---")
         result_lines.append(exploit_body)
 
+        # Self-healing PoC (Killer Feature #3): when ``poc_verification.enabled``
+        # is true in config, syntax-check the synthesized template inline so
+        # the agent sees the gate result before writing/running it. The agent
+        # then asks the LLM to fix any syntax error and re-verify (loop is
+        # driven by the agent calling ``verify_poc`` directly; this is the
+        # first-pass inline check).
+        try:
+            from tools.poc_verifier import poc_verification_config, syntax_check
+            pv_cfg = poc_verification_config(config)
+            if pv_cfg["enabled"]:
+                syn = syntax_check(exploit_body)
+                result_lines.append("")
+                result_lines.append("--- PoC Verification (syntax gate) ---")
+                if syn.syntax_ok:
+                    result_lines.append("SYNTAX_OK: true")
+                    result_lines.append(
+                        "INSTRUCTIONS: syntax verified. Use write_python_file to save, "
+                        "then call verify_poc for the optional Docker compile/import gate, "
+                        "then run_python_file."
+                    )
+                else:
+                    result_lines.append(f"SYNTAX_OK: false")
+                    result_lines.append(f"STDERR: {syn.stderr[:500]}")
+                    result_lines.append(
+                        "INSTRUCTIONS: the synthesized template has a syntax error. "
+                        "Fix the reported error, then call verify_poc to re-check before "
+                        "writing/running. Repeat up to max_retries."
+                    )
+        except Exception:
+            # Verification is opt-in; never let it break the synth path.
+            pass
+
         result_lines.append("")
         result_lines.append(
             "INSTRUCTIONS: Use write_python_file to save this script, "
@@ -1598,6 +1630,13 @@ if __name__ == "__main__":
                 # Phase 3: pass the MSF auto-local_exploit_suggester flag through
                 # so the privesc phase can dispatch the advisory follow-up.
                 "msf_auto_les": (config or {}).get("exploit", {}).get("msf", {}).get("auto_local_exploit_suggester", False),
+                # D1: pass the orchestrator.semantic_memory flag + ollama/embed
+                # config through so the orchestrator can build its own
+                # SemanticMemoryManager when no manager is supplied directly.
+                # Default false (opt-in per the new-attack-path rule).
+                "semantic_memory": bool((config or {}).get("orchestrator", {}).get("semantic_memory", False)),
+                "ollama": (config or {}).get("ollama", {}),
+                "embedding_model": (config or {}).get("memory", {}).get("embedding_model", "nomic-embed-text"),
                 "target": target_ip,
                 "goal": goal,
                 "aggression": agg.value,
@@ -1836,6 +1875,12 @@ if __name__ == "__main__":
                 "opsec": (config or {}).get("opsec", {}),
                 # Phase 3: pass the MSF auto-local_exploit_suggester flag through.
                 "msf_auto_les": (config or {}).get("exploit", {}).get("msf", {}).get("auto_local_exploit_suggester", False),
+                # D1: pass the orchestrator.semantic_memory flag + ollama/embed
+                # config through so the orchestrator can build its own
+                # SemanticMemoryManager when no manager is supplied directly.
+                "semantic_memory": bool((config or {}).get("orchestrator", {}).get("semantic_memory", False)),
+                "ollama": (config or {}).get("ollama", {}),
+                "embedding_model": (config or {}).get("memory", {}).get("embedding_model", "nomic-embed-text"),
                 "target": target_ip,
                 "goal": state_data.get("goal", "initial_access"),
                 "max_cycles": 1,

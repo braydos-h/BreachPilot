@@ -1,8 +1,27 @@
-"""RunManager: owns the single active run, MCP session, and tool-call serialization.
+"""RunManager: owns active runs, MCP sessions, and tool-call serialization.
 
-v1 supports one live run at a time (HTTP 409 on a second). This matches the
+v1 supported one live run at a time (HTTP 409 on a second). This matched the
 fixed MCP port, process-global ``EXPLOIT_TARGET`` env, plugin registry, and
-shared UI state. The manager:
+shared UI state.
+
+Phase 6.3 (``api.max_concurrent_runs``) lifts the one-active-run limit to N
+concurrent runs for authorized wide-scope assessments. The per-run allowlist
+lock is the highest-risk safety property here, so it is enforced per-handle,
+not globally:
+
+- **Each run carries its own allowlist snapshot** (``RunHandle.allowlist``)
+  derived from ``exploit.allowed_targets`` UNION the run's ``--target``. The
+  snapshot is frozen at prepare() time so Run A's target never appears in Run
+  B's allowlist even if both are live.
+- The MCP subprocess for each run gets its own ``env["EXPLOIT_TARGET"]`` (set
+  in ``tools/mcp_session.open_exploit_mcp_session``), so the target-IP lock is
+  process-isolated by the OS — Run A's subprocess env never leaks into Run B's
+  subprocess. The handle-level snapshot is defense-in-depth + the source the
+  WebUI's tool-call bridge uses to attribute target ownership.
+- Default ``api.max_concurrent_runs: 1`` restores the legacy one-active-run
+  behavior byte-for-byte (the 409 still fires on a second run).
+
+The manager:
 
 - Creates a run row + ``start_confirm`` decision on ``POST /runs``.
 - Transitions to ``queued`` -> ``running`` when the decision is answered.
@@ -65,10 +84,47 @@ class RunHandle:
         # permission/budgets/destructive verdicts stay valid even if the
         # operator PATCHes /config between confirmation and execution.
         self.config_snapshot: dict[str, Any] | None = None
+        # Per-run allowlist snapshot = config ``exploit.allowed_targets`` UNION
+        # this run's ``--target`` (primary + resolved IP + domain). Frozen at
+        # prepare() time so Run A's target never leaks into Run B's allowlist
+        # when ``api.max_concurrent_runs > 1``. The MCP subprocess also gets
+        # its own ``env["EXPLOIT_TARGET"]`` (set in mcp_session.py), so the OS
+        # process boundary is the primary isolation; this snapshot is the
+        # handle-level source of truth for the WebUI's target attribution.
+        self.allowlist: list[str] = []
+
+
+def _snapshot_allowlist(config: dict[str, Any], target: str) -> list[str]:
+    """Build the per-run allowlist = ``exploit.allowed_targets`` UNION target.
+
+    ``target`` is the run's ``--target`` (IP or domain). When it is a domain,
+    the resolved IP is also unioned in (the operator's ``--target`` is the
+    primary lock identity; the IP lets IP-based tools target the resolved host).
+    This mirrors ``tools/mcp_shared._allowed_target_list`` but is frozen per
+    run instead of re-read from the process env on each tool call.
+    """
+    exploit_cfg = (config or {}).get("exploit", {}) or {}
+    allowed = list(exploit_cfg.get("allowed_targets", []) or [])
+    target = (target or "").strip()
+    if target and target not in allowed:
+        allowed.append(target)
+    # ponytail: resolve domain → IP best-effort; the MCP subprocess env carries
+    # the authoritative resolved IP (set in mcp_session.py). Re-resolving here
+    # would add a DNS call per run and could diverge from what the subprocess
+    # actually got; the subprocess env is the lock, this snapshot is the
+    # handle-level mirror for the WebUI.
+    return allowed
 
 
 class RunManager:
-    """Single-active-run manager."""
+    """Active-run manager. Supports ``api.max_concurrent_runs`` (default 1).
+
+    With ``max_concurrent_runs == 1`` (the default) the behavior is
+    byte-for-byte the legacy one-active-run path: the second ``POST /runs``
+    gets a 409. With ``max_concurrent_runs > 1`` up to N runs may be live
+    concurrently, each carrying its own allowlist snapshot so Run A's target
+    never leaks into Run B's allowlist.
+    """
 
     def __init__(
         self,
@@ -84,12 +140,23 @@ class RunManager:
         self._config = config
         self._config_path = config_path
         self._callables = callables
-        self._active: RunHandle | None = None
+        # ponytail: dict keyed by run_id keeps the legacy single-run path O(1)
+        # (``has_active`` / ``active`` / 409 check are all ``len()`` / lookup).
+        # A list would scan; a dict is the natural shape since run_id is the
+        # key every caller already has.
+        self._active: dict[str, RunHandle] = {}
         self._lifecycle_lock = asyncio.Lock()
 
     @property
+    def max_concurrent_runs(self) -> int:
+        """Effective concurrent-run cap. ``api.max_concurrent_runs`` (default 1)."""
+        api_cfg = (self._config or {}).get("api", {}) or {}
+        n = int(api_cfg.get("max_concurrent_runs", 1) or 1)
+        return n if n >= 1 else 1
+
+    @property
     def has_active(self) -> bool:
-        return self._active is not None
+        return bool(self._active)
 
     @property
     def config(self) -> dict[str, Any]:
@@ -101,7 +168,21 @@ class RunManager:
 
     @property
     def active(self) -> RunHandle | None:
-        return self._active
+        """The first active handle (legacy compat for single-run callers).
+
+        With ``max_concurrent_runs == 1`` there is at most one. With N>1 this
+        returns *one* live handle but callers that need a specific run should
+        use ``active_for(run_id)``.
+        """
+        return next(iter(self._active.values()), None)
+
+    def active_for(self, run_id: str) -> RunHandle | None:
+        """Return the active handle for ``run_id`` or None."""
+        return self._active.get(run_id)
+
+    @property
+    def active_run_ids(self) -> list[str]:
+        return list(self._active.keys())
 
     async def create_run(self, request: RunRequest) -> tuple[str, RunPreview, Decision | None]:
         """Prepare a run and create a start_confirm decision (if needed).
@@ -116,8 +197,13 @@ class RunManager:
     async def _create_run_locked(
         self, request: RunRequest,
     ) -> tuple[str, RunPreview, Decision | None]:
-        if self._active is not None:
-            raise APIError("conflict", "A run is already active. Cancel it first.", status_code=409)
+        if len(self._active) >= self.max_concurrent_runs:
+            raise APIError(
+                "conflict",
+                f"{self.max_concurrent_runs} run(s) already active. Cancel one first "
+                f"(api.max_concurrent_runs).",
+                status_code=409,
+            )
 
         request.config_path = self._config_path
         request.reports_dir = self._persistence.reports_dir
@@ -140,16 +226,21 @@ class RunManager:
         # Freeze the config that produced this preview so execution sees the
         # same permission/budgets/destructive verdict the operator confirmed.
         handle.config_snapshot = copy.deepcopy(self._config)
+        # Per-run allowlist snapshot — Run A's target never appears in Run B's
+        # allowlist even when N runs are live concurrently.
+        handle.allowlist = _snapshot_allowlist(
+            handle.config_snapshot, preview.original_target or preview.target_ip,
+        )
         handle.event_broker = event_broker
         handle.decision_broker = DecisionBroker(preview.run_id, self._persistence)
-        self._active = handle
+        self._active[preview.run_id] = handle
 
         try:
             return await self._setup_handle_locked(handle, request, preview)
         except BaseException:
             handle.decision_broker.cancel_all()
             event_broker.close()
-            self._active = None
+            self._active.pop(preview.run_id, None)
             self._persistence.update_run_state(
                 preview.run_id, RunState.FAILED.value,
                 error="Run setup failed.",
@@ -254,8 +345,8 @@ class RunManager:
                 handle.decision_broker.cancel_all()
             handle.event_broker.close()
             async with self._lifecycle_lock:
-                if self._active is handle:
-                    self._active = None
+                if self._active.get(handle.run_id) is handle:
+                    self._active.pop(handle.run_id, None)
 
     async def _maybe_title_run(
         self, handle: "RunHandle", result_dict: dict[str, Any],
@@ -310,7 +401,7 @@ class RunManager:
                         await handle.event_broker.emit("state", {"state": RunState.CANCELLED.value})
                 finally:
                     handle.event_broker.close()
-                    self._active = None
+                    self._active.pop(run_id, None)
                 if event_error is not None:
                     raise event_error
                 return
@@ -387,8 +478,8 @@ class RunManager:
         return {"tool": tool_name, "result": text}
 
     def get_tool_schemas(self, run_id: str) -> list[dict[str, Any]]:
-        handle = self._active
-        if handle is None or handle.run_id != run_id:
+        handle = self._active.get(run_id)
+        if handle is None:
             return []
         return handle.tool_schemas
 
@@ -396,23 +487,26 @@ class RunManager:
         self, run_id: str, session: Any, schemas: list[dict[str, Any]], policy: Any,
     ) -> None:
         """Called by the service when the MCP session opens."""
-        handle = self._active
-        if handle is not None and handle.run_id == run_id:
+        handle = self._active.get(run_id)
+        if handle is not None:
             handle.mcp_session = session
             handle.tool_schemas = schemas
             handle.exploit_policy = policy
 
     async def shutdown(self) -> None:
-        """Clean up on daemon shutdown: cancel active run, flush events."""
+        """Clean up on daemon shutdown: cancel all active runs, flush events."""
         try:
-            if self._active:
-                await self.cancel_run(self._active.run_id)
+            for run_id in list(self._active.keys()):
+                try:
+                    await self.cancel_run(run_id)
+                except Exception:  # noqa: BLE001 -- best-effort, one bad cancel never blocks the rest
+                    pass
         finally:
             self._events.close_all()
 
     def _require_active(self, run_id: str) -> RunHandle:
-        handle = self._active
-        if handle is None or handle.run_id != run_id:
+        handle = self._active.get(run_id)
+        if handle is None:
             raise APIError("not_found", "No active run with that id.", status_code=404)
         return handle
 

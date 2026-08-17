@@ -144,5 +144,127 @@ def register_peer_model_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 + ("\n\n".join(sections) if sections else "No peer responses were returned.")
             )
 
+        @mcp.tool()
+        @audit_tool
+        def peer_review_outcome(
+            verdict: str,
+            evidence: str,
+            planner_alias: str = "",
+            preferred_grader_aliases: str = "",
+        ) -> str:
+            """Cross-model outcome judging (D3). Ask configured peer AI models to grade whether the evidence supports the given verdict (e.g. "compromised" / "refuted"). Advisory only -- the deterministic OutcomeJudge stays the authority. One alias plans, a *different* alias grades. Set planner_alias to exclude the planning model from grading. preferred_grader_aliases is optional comma-separated aliases from models.registry."""
+            if not verdict or not verdict.strip():
+                return "PEER_REVIEW_OUTCOME: BLOCKED\nREASON: verdict is required."
+            if not evidence or not evidence.strip():
+                return "PEER_REVIEW_OUTCOME: BLOCKED\nREASON: evidence is required."
+
+            # peer_review requires multi_model + outcome_judgment.peer_review.
+            oj_cfg = (config or {}).get("outcome_judgment", {}) or {}
+            if not bool(oj_cfg.get("peer_review", False)):
+                return (
+                    "PEER_REVIEW_OUTCOME: DISABLED\n"
+                    "REASON: set outcome_judgment.peer_review: true in config to enable."
+                )
+
+            mm = (config or {}).get("multi_model", {}) or {}
+            max_answer = _positive_int(mm.get("max_answer_chars"), 8000)
+
+            router = _get_model_router(config)
+            if router is None:
+                return "PEER_REVIEW_OUTCOME: UNAVAILABLE\nREASON: model router could not be initialized."
+
+            available = _resolve_consult_aliases(config)
+            # Exclude the planner alias so a model never grades its own plan.
+            planner = (planner_alias or "").strip()
+            graders = [a for a in available if a != planner]
+            if planner and planner not in available:
+                # Planner not in the consult set anyway -- nothing to exclude.
+                pass
+            preferred = [
+                a.strip()
+                for a in re.split(r"[,\s]+", preferred_grader_aliases or "")
+                if a.strip()
+            ]
+            if preferred:
+                graders = [a for a in graders if a in preferred] or graders
+            if not graders:
+                return (
+                    "PEER_REVIEW_OUTCOME: UNAVAILABLE\n"
+                    f"PLANNER_ALIAS: {planner or '(none)'}\n"
+                    f"AVAILABLE_PEERS: {', '.join(available) if available else '(none)'}\n"
+                    "REASON: no grader aliases available after excluding the planner."
+                )
+
+            # Share the per-run ``max_consultations`` budget with
+            # ``consult_peer_models`` via the single ``_consultation_count``
+            # counter (same source of truth, so the lab box doesn't burn tokens
+            # silently when both tools are on).
+            mm = (config or {}).get("multi_model", {}) or {}
+            max_consultations = _positive_int(mm.get("max_consultations"), 10)
+            with _consultation_lock:
+                current_count = _get_consultation_count()
+                remaining = max_consultations - current_count
+                if remaining <= 0:
+                    return (
+                        "PEER_REVIEW_OUTCOME: BUDGET_EXHAUSTED\n"
+                        f"MAX_CONSULTATIONS: {max_consultations}\n"
+                        "REMAINING_BUDGET: 0"
+                    )
+                graders = graders[:remaining]
+                current_count += len(graders)
+                _set_consultation_count(current_count)
+                remaining_after_reservation = max_consultations - current_count
+
+            v = _truncate_text(verdict, 2000).strip()
+            e = _truncate_text(evidence, max_answer).strip()
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an independent outcome reviewer for an authorized security assessment. "
+                        "You are given a verdict and the evidence claimed to support it. Grade whether "
+                        "the evidence actually supports the verdict. Output JSON only:\n"
+                        '{"agree": true|false, "confidence": 0.0-1.0, "reason": "..."}\n'
+                        "Do not execute tools. Do not request tool calls. Flag unsupported claims."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"VERDICT:\n{v}\n\n"
+                        f"EVIDENCE:\n{e}"
+                    ),
+                },
+            ]
+
+            consulted: list[str] = []
+            sections: list[str] = []
+            disagreements: list[str] = []
+            for alias in graders:
+                try:
+                    peer = router.get_client(alias)
+                    response = peer.chat(alias, messages=messages, tools=None, stream=False)
+                    answer = _truncate_text(_chat_content(response), max_answer).strip()
+                    if not answer:
+                        answer = "(empty response)"
+                    consulted.append(alias)
+                    sections.append(f"[{alias}]\n{answer}")
+                    # Track disagreement for the summary line.
+                    if '"agree": false' in answer.lower() or '"agree":false' in answer.lower():
+                        disagreements.append(alias)
+                except Exception as exc:
+                    sections.append(f"[{alias}]\n(skipped: {exc})")
+
+            disagreement_flag = "DISAGREEMENT: yes" if disagreements else "DISAGREEMENT: no"
+            return (
+                "PEER_REVIEW_OUTCOME: COMPLETED\n"
+                f"PLANNER_ALIAS: {planner or '(none)'}\n"
+                f"GRADERS: {', '.join(consulted) if consulted else '(none)'}\n"
+                f"{disagreement_flag}\n"
+                f"REMAINING_BUDGET: {remaining_after_reservation}\n"
+                "AUTHORITY: deterministic OutcomeJudge (this review is advisory)\n\n"
+                + ("\n\n".join(sections) if sections else "No peer responses were returned.")
+            )
+
 
 

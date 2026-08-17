@@ -107,12 +107,24 @@ cve_lookup:
   circuit_failure_threshold: 5
   circuit_recovery_timeout: 60.0
   search_rate_limit_per_minute: 10
-  epss_enabled: false
-  kev_enabled: false
+  epss_enabled: true
+  kev_enabled: true
   kev_cache_ttl_seconds: 86400
   kev_cache_path: ''
   github:
     token_env: GITHUB_TOKEN
+threat_intel:
+  enabled: true
+  cache_dir: exploit_workspace/.threat_intel
+  cache_ttl_seconds: 86400
+  sources:
+    osv: true
+    ghsa: true
+    kev: true
+    exploitdb_rss: false
+  max_results: 20
+  github_token_env: GITHUB_TOKEN
+  timeout_seconds: 30
 research:
   enabled: true
   provider: ollama
@@ -161,12 +173,30 @@ swarm:
   per_phase_concurrency: 3
   exploit_parallel: false
   subagent_timeout_seconds: 600
+  negotiation_rounds: 2
+witness:
+  enabled: true
+  log_path: reports/witness.jsonl
+  poll_interval_seconds: 5
+  escalate_to_event_broker: true
+  max_flags_per_signal_per_minute: 10
+  dos_failure_window_seconds: 60.0
+  dos_failure_threshold: 8
 autonomous:
   persistence_phase: false
   checkpoint_every: 0
   adaptive_replan: false
   max_cycles: 100
   max_pivot_depth: 0
+orchestrator:
+  # D1: cross-mission semantic-memory consumer. When true, the autonomous
+  # orchestrator builds a SemanticMemoryManager (from the ``memory`` config
+  # block's embed_host/embedding_model) and calls store_lesson on every
+  # confirmed module win so the campaign learns across missions. Lab default
+  # is ON (matches ``memory.semantic_enabled: true`` — the orchestrator is the
+  # missing campaign-level consumer of an already-on capability). Advisory-only
+  # — read-only memory store consumer, no execution authority change.
+  semantic_memory: true
 recon:
   extended_enumerators: true
   udp_top_ports: 100
@@ -238,6 +268,17 @@ outcome_judgment:
   refutation_threshold: 0.75
   min_evidence_references: 1
   flow_a: true
+  peer_review: true
+poc_verification:
+  enabled: true
+  docker_image: python:3.11-slim
+  compile_timeout_seconds: 30
+  max_retries: 3
+  docker_network: none
+  docker_read_only: true
+  docker_memory: 256m
+replay_simulator:
+  enabled: true
 adaptive_exploits:
   enabled: true
   max_mutations: 5
@@ -304,5 +345,85 @@ api:
   event_buffer_size: 256
   shutdown_timeout_seconds: 15
   serve_webui: true
+  # Phase 6.3 (D3): lift the one-active-run limit to N concurrent runs for
+  # authorized wide-scope assessments. Default 1 = legacy single-run behavior
+  # (HTTP 409 on a second run). Each concurrent run carries its own allowlist
+  # snapshot so Run A's target never leaks into Run B's allowlist.
+  max_concurrent_runs: 3
+  # Phase 6.3 (D4): multi-operator user accounts + per-run annotations for
+  # pair-testing collaboration. Default false = legacy single-token mode (no
+  # user-account surface). Auth is loopback-only; user accounts add attribution,
+  # not a permissions system.
+  multi_operator: true
+  # D3: attack-path DAG API route (GET /api/v1/runs/{id}/graph). Lab build:
+  # enabled true so the interactive reactflow graph renders in the WebUI.
+  graph_route: true
+# Phase 6.3 (D8): ICS write-side modules (ModbusWriteCoil/ModbusWriteRegister/
+# S7PlcStop/S7PlcStart) are DESTRUCTIVE — they change physical process state.
+# Default false: read-only ICS enum works without it. Set true ONLY for
+# authorized PLC testing. PHYSICAL-DAMAGE RISK: a coil/register write or PLC
+# stop can change real-world process state. Dual-gated: @require_allowlist on
+# run_attack_module (target in allowlist) AND ics.allow_write: true.
+ics:
+  allow_write: true
+plugins:
+  enabled:
+  - shodan_recon
+  - github_dorks
+  - webhook_notify
+  - sliver_c2
+  - bloodhound_ce
+  - zap_scan
+  - browser_attack
+  - mobile_attack
+  - wireless
+  - spiderfoot
+  - atomic_red_team
+  - caldera
+  - firmware_analysis
+  disabled: []
+  search_paths:
+  - plugins
+  entry_points: true
+webhook_notify:
+  # Lab build: enabled true. No-op without a url — logs once then drops events.
+  # Set ``url`` to a Slack/Discord incoming webhook to actually receive pings.
+  enabled: true
+  url: ''
+  events:
+  - finding
+  - state
+  timeout_seconds: 5
+  max_retries: 3
+  backoff_seconds: 2.0
+  max_payload_chars: 8192
+mitre:
+  # Lab build: enabled true. ``export_attack_navigator`` MCP tool writes
+  # Navigator layer JSON to navigator_output_dir for SOC handoff.
+  enabled: true
+  technique_map: tools/mitre_technique_map.json
+  navigator_output_dir: reports/mitre
+  include_skill_tags: true
+ticketing:
+  # Lab build: enabled true. No-op without provider/base_url/token — logs
+  # once then drops. Set provider (jira|github), base_url, and the named env
+  # var (token_env) to actually create tickets from confirmed findings.
+  enabled: true
+  provider: ''
+  base_url: ''
+  token_env: TICKETING_TOKEN
+  project_key: ''
+  max_retries: 3
+  backoff_seconds: 2.0
 chatgpt:
   enabled: true
+# Phase 6.3 (D6): Caldera adversary emulation plugin. Lab build: enabled true.
+# The Caldera server is target-side — operator adds its IP to
+# exploit.allowed_targets. The plugin's MCP tools (caldera_list_abilities,
+# caldera_run_ability) are @require_allowlist-gated on the target IP. Set
+# ``url`` to the Caldera server base URL and ``api_key_env`` to the env var
+# holding the Caldera API key (default CALDERA_API_KEY).
+caldera:
+  enabled: true
+  url: ''
+  api_key_env: CALDERA_API_KEY

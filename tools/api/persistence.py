@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 _API_DB_NAME = "api_runtime.db"
 
 _DDL = """
@@ -54,6 +54,34 @@ CREATE TABLE IF NOT EXISTS decisions (
 
 CREATE INDEX IF NOT EXISTS idx_decisions_run_id ON decisions(run_id);
 CREATE INDEX IF NOT EXISTS idx_runs_state ON runs(state);
+
+-- Phase 6.3 (D4): multi-operator user accounts + per-run annotations.
+-- Users: password-hash auth (stdlib hashlib.pbkdf2_hmac + secrets). No roles
+--   (AGENTS.md §E rejects a permissions system). The loopback bind is the
+--   trust boundary; user accounts add attribution + pair-testing annotations.
+-- Annotations: operator comments attached to a run's findings. Stored per
+--   run_id so the WebUI can render them inline with the run timeline.
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    password_salt TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    last_login TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS annotations (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    username TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    finding_ref TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_annotations_run_id ON annotations(run_id);
 """
 
 # v2: add ``title`` column to runs for AI-generated session titles.
@@ -61,6 +89,22 @@ CREATE INDEX IF NOT EXISTS idx_runs_state ON runs(state);
 # via _DDL above so this migration is a no-op there (PRAGMA table_info check).
 _MIGRATION_V2 = [
     "ALTER TABLE runs ADD COLUMN title TEXT NOT NULL DEFAULT ''",
+]
+
+# v3 (D4): add multi-operator user accounts + per-run annotations tables.
+# New DBs get them via _DDL; existing v2 DBs get them created idempotently
+# (CREATE TABLE IF NOT EXISTS is safe to re-run).
+_MIGRATION_V3 = [
+    "CREATE TABLE IF NOT EXISTS users ("
+    "id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, "
+    "password_hash TEXT NOT NULL, password_salt TEXT NOT NULL, "
+    "created_at TEXT NOT NULL, last_login TEXT NOT NULL DEFAULT '')",
+    "CREATE TABLE IF NOT EXISTS annotations ("
+    "id TEXT PRIMARY KEY, run_id TEXT NOT NULL, user_id TEXT NOT NULL, "
+    "username TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '', "
+    "finding_ref TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, "
+    "FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE)",
+    "CREATE INDEX IF NOT EXISTS idx_annotations_run_id ON annotations(run_id)",
 ]
 
 # Sort clauses for list_runs. Keys map to the public ``sort`` query param.
@@ -124,6 +168,13 @@ class ApiPersistence:
                     conn.execute(
                         "INSERT OR IGNORE INTO _migrations (version, applied_at) VALUES (?, ?)",
                         (2, _now_iso()),
+                    )
+                if 3 not in applied:
+                    for stmt in _MIGRATION_V3:
+                        conn.execute(stmt)
+                    conn.execute(
+                        "INSERT OR IGNORE INTO _migrations (version, applied_at) VALUES (?, ?)",
+                        (3, _now_iso()),
                     )
                 conn.execute(
                     "INSERT OR IGNORE INTO _migrations (version, applied_at) VALUES (?, ?)",
@@ -405,6 +456,111 @@ class ApiPersistence:
             conn = self._connect()
             try:
                 cur = conn.execute("DELETE FROM runs WHERE id=?", (run_id,))
+                conn.commit()
+                return cur.rowcount > 0
+            finally:
+                conn.close()
+
+    # ── Users (D4: multi-operator accounts) ────────────────────────────────
+
+    def create_user(self, username: str, password_hash: str, password_salt: str) -> str:
+        """Insert a user row. Returns the user id. Raises on duplicate username."""
+        uid = _new_id("usr")
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "INSERT INTO users (id, username, password_hash, password_salt, created_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (uid, username, password_hash, password_salt, _now_iso()),
+                )
+                conn.commit()
+            except sqlite3.IntegrityError as exc:
+                raise ValueError(f"username {username!r} already exists") from exc
+            finally:
+                conn.close()
+        return uid
+
+    def get_user_by_username(self, username: str) -> dict[str, Any] | None:
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    "SELECT * FROM users WHERE username=?", (username,)
+                ).fetchone()
+                return dict(row) if row else None
+            finally:
+                conn.close()
+
+    def get_user(self, user_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+                return dict(row) if row else None
+            finally:
+                conn.close()
+
+    def list_users(self) -> list[dict[str, Any]]:
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    "SELECT id, username, created_at, last_login FROM users ORDER BY created_at"
+                ).fetchall()
+                return [dict(r) for r in rows]
+            finally:
+                conn.close()
+
+    def touch_user_login(self, user_id: str) -> None:
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE users SET last_login=? WHERE id=?", (_now_iso(), user_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    # ── Annotations (D4: operator comments on findings) ───────────────────
+
+    def add_annotation(
+        self, run_id: str, user_id: str, username: str, body: str, finding_ref: str = "",
+    ) -> str:
+        """Attach an operator comment to a run. Returns the annotation id."""
+        aid = _new_id("ann")
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "INSERT INTO annotations (id, run_id, user_id, username, body, finding_ref, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (aid, run_id, user_id, username, body, finding_ref, _now_iso()),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        return aid
+
+    def list_annotations(self, run_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    "SELECT id, run_id, user_id, username, body, finding_ref, created_at "
+                    "FROM annotations WHERE run_id=? ORDER BY created_at",
+                    (run_id,),
+                ).fetchall()
+                return [dict(r) for r in rows]
+            finally:
+                conn.close()
+
+    def delete_annotation(self, annotation_id: str) -> bool:
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute("DELETE FROM annotations WHERE id=?", (annotation_id,))
                 conn.commit()
                 return cur.rowcount > 0
             finally:

@@ -59,6 +59,11 @@ class RunEventBroker:
                 except asyncio.QueueFull:
                     self._subscribers.remove(queue)
                     self._stop_queue(queue)
+        # Plugin event subscribers (outbound-only webhook/ticketing). Fired
+        # AFTER JSONL persistence + WS fan-out so a slow/failed subscriber
+        # never blocks the run or drops the event. Best-effort: any exception
+        # is swallowed. See tools/plugins.py::PluginRegistry.register_event_subscriber.
+        _fire_plugin_event_subscribers(event)
         return event
 
     async def replay(self, after: int = 0) -> list[dict[str, Any]]:
@@ -240,3 +245,28 @@ class EventBrokerRegistry:
         for b in self._brokers.values():
             b.close()
         self._brokers.clear()
+
+
+def _fire_plugin_event_subscribers(event: dict[str, Any]) -> None:
+    """Best-effort fan-out of an emitted event to plugin event subscribers.
+
+    Outbound-only subscribers (webhook/ticketing) registered via
+    ``PluginRegistry.register_event_subscriber`` are invoked after the event
+    is persisted to JSONL and pushed to live WS subscribers. Any exception is
+    swallowed so a broken/endpoint-down subscriber never blocks the run or
+    kills sibling subscribers. Import is lazy so ``tools.api.event_broker``
+    stays import-clean when no plugin has registered a subscriber.
+    """
+    try:
+        from tools.plugins import PLUGIN_REGISTRY
+        subscribers = list(PLUGIN_REGISTRY.event_subscribers)
+    except Exception:  # noqa: BLE001 -- plugins module import must never break emit
+        return
+    for fn in subscribers:
+        try:
+            fn(event)
+        except Exception:  # noqa: BLE001 -- one bad subscriber never breaks the rest
+            import logging as _logging
+            _logging.getLogger("tools.api.event_broker").warning(
+                "plugin event subscriber %r failed", getattr(fn, "__name__", fn), exc_info=True,
+            )

@@ -225,11 +225,11 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "circuit_recovery_timeout": 60.0,
         # Tier 1.8: process-wide shared NVD rate budget (per minute); 0 disables.
         "search_rate_limit_per_minute": 10,
-        # Phase 2: EPSS + KEV vuln-intel enrichment (opt-in, default OFF). When
-        # off, NVD output is unchanged (CVEEntry carries None/False). EPSS adds
-        # exploit-likelihood scoring; KEV flags CISA-known-exploited CVEs.
-        "epss_enabled": False,
-        "kev_enabled": False,
+        # Phase 2: EPSS + KEV vuln-intel enrichment (lab build: ON by default
+        # so enrichment is live out-of-the-box). EPSS adds exploit-likelihood
+        # scoring; KEV flags CISA-known-exploited CVEs. Set false to disable.
+        "epss_enabled": True,
+        "kev_enabled": True,
         "kev_cache_ttl_seconds": 86400,
         "kev_cache_path": "",
         # Gap 6: GitHub Search API token for cve_to_poc (CVE->verified-PoC URL
@@ -239,6 +239,26 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "github": {
             "token_env": "GITHUB_TOKEN",
         },
+    },
+    # Threat-intel feed (OSV.dev + GitHub Security Advisories + CISA KEV).
+    # Advisory-only, never touches the target. Lab build: ON by default so the
+    # feed is live out-of-the-box. Reuses cve_lookup's KEV catalog (shared
+    # disk cache). GHSA needs GITHUB_TOKEN (shared with
+    # cve_lookup.github.token_env); when absent, ghsa is silently dropped and
+    # osv+kev still answer.
+    "threat_intel": {
+        "enabled": True,
+        "cache_dir": "exploit_workspace/.threat_intel",
+        "cache_ttl_seconds": 86400,
+        "sources": {
+            "osv": True,
+            "ghsa": True,
+            "kev": True,
+            "exploitdb_rss": False,
+        },
+        "max_results": 20,
+        "github_token_env": "GITHUB_TOKEN",
+        "timeout_seconds": 30,
     },
     "research": {
         "enabled": True,
@@ -299,6 +319,33 @@ CONFIG_SCHEMA: dict[str, Any] = {
         # ``subagent_timeout_seconds`` is the ceiling for await_subagent so
         # a stuck sub-agent can't wedge the main AI's loop.
         "subagent_timeout_seconds": 600,
+        # Bounded critic↔exploit negotiation rounds. 0 (default) = legacy
+        # one-shot: the critic's ``modify`` is applied once and the task runs.
+        # N>0 = after a ``modify``, the modified task is re-reviewed by the
+        # critic up to N times until ``approve``/``deny``, a scope-expanding
+        # modification is proposed (rejected), or the same modification
+        # repeats (deadlock break). The negotiation is about HOW to execute a
+        # planned action (risk level, tool swap, mutation, rate limiting),
+        # never WHAT target/scope to hit — the allowlist lock is untouched.
+        "negotiation_rounds": 0,
+    },
+    # Witness agent — advisory real-time audit-stream watcher (agent-on-agent
+    # safety). Library default is OFF (conservative for downstream re-use);
+    # config.yaml (the lab runtime) flips it ON so a lab run streams
+    # anomaly telemetry by default. When enabled it polls the audit JSONL
+    # trails (exploit_audit.jsonl, activity.jsonl) mid-run and flags
+    # anomalies (allowlist breach, PoC escape, permission escalation,
+    # prompt-injection pattern, DoS drift) to a witness log + the event
+    # broker. It is advisory ONLY: it flags, it never blocks / modifies /
+    # kills a run. See tools/swarm/agents/witness_agent.py.
+    "witness": {
+        "enabled": False,
+        "log_path": "reports/witness.jsonl",
+        "poll_interval_seconds": 5,
+        "escalate_to_event_broker": True,
+        "max_flags_per_signal_per_minute": 10,
+        "dos_failure_window_seconds": 60.0,
+        "dos_failure_threshold": 8,
     },
     # Autonomous orchestrator Phase 2 capabilities (opt-in). All keys default
     # OFF / 0 so default behavior is unchanged -- the new attack-path
@@ -309,6 +356,16 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "adaptive_replan": False,       # Phase 2.4: per-target multi-round replan + vuln-chaining
         "max_cycles": 100,              # round cap when adaptive_replan is on
         "max_pivot_depth": 0,           # already consumed by the orchestrator (single-IP lock default)
+    },
+    # D1: cross-mission semantic-memory consumer for the autonomous
+    # orchestrator. When true, the orchestrator builds a
+    # SemanticMemoryManager and calls store_lesson on confirmed module wins.
+    # Advisory-only (read-only memory store consumer, no execution authority
+    # change). Lab default ON — matches ``memory.semantic_enabled: true``;
+    # the orchestrator is the missing campaign-level consumer of an
+    # already-on capability, not a new attack-path opt-in.
+    "orchestrator": {
+        "semantic_memory": True,
     },
     # Recon coverage & depth (Phase 3). These gate the additive enumerators
     # (TLS/SSL cert parse, SMTP/DB banner parse, web spider, passive OSINT +
@@ -418,6 +475,32 @@ CONFIG_SCHEMA: dict[str, Any] = {
         # to produce an evidence-grounded verdict that overrides the shallow
         # ``exit_code == 0`` success flag.
         "flow_a": False,
+        # D3: peer-model outcome judging. Advisory-only: one alias plans, a
+        # different alias grades the evidence. Deterministic judge stays the
+        # authority. Default OFF.
+        "peer_review": False,
+    },
+    # D1: self-healing PoC verification (Killer Feature #3). When enabled,
+    # ``cve_to_exploit_synth`` syntax-checks its synthesized PoC inline
+    # (``py_compile``, no exec) and the ``verify_poc`` MCP tool compile-tests
+    # the PoC inside a fully-isolated Docker container
+    # (``--network=none --read-only --memory=256m``). The PoC is NEVER executed
+    # on the operator box. Default OFF.
+    "poc_verification": {
+        "enabled": False,
+        "docker_image": "python:3.11-slim",
+        "compile_timeout_seconds": 30,
+        "max_retries": 3,
+        "docker_network": "none",
+        "docker_read_only": True,
+        "docker_memory": "256m",
+    },
+    # D2: replay simulator. When enabled, registers the ``replay_simulate``
+    # MCP tool -- a local-only ``@audit_tool`` that dry-runs an attack plan
+    # against a saved ReconAssessment JSON for pre-commit critique. Zero
+    # target touch. Default OFF.
+    "replay_simulator": {
+        "enabled": False,
     },
     "adaptive_exploits": {
         "enabled": True,
@@ -486,6 +569,42 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "search_paths": ["plugins"],
         "entry_points": True,
     },
+    # Outbound-only Slack/Discord run-status notifications (webhook_notify
+    # plugin). The plugin is OFF by default; enable here AND in
+    # ``plugins.enabled``. ``url`` is a secret — never logged in plaintext.
+    # ``events`` is the event-type filter list (e.g. ["finding","state"]).
+    # Lab build: enabled true (no-op without a url — logs once then drops).
+    "webhook_notify": {
+        "enabled": True,
+        "url": "",
+        "events": ["finding", "state"],
+        "timeout_seconds": 5,
+        "max_retries": 3,
+        "backoff_seconds": 2.0,
+        "max_payload_chars": 8192,
+    },
+    # MITRE ATT&CK Navigator export (mitre-attack-export). Maps the run's
+    # exploit_audit.jsonl → ATT&CK technique IDs → Navigator layer JSON the
+    # blue team opens in ATT&CK Navigator. Lab build: enabled true.
+    "mitre": {
+        "enabled": True,
+        "technique_map": "tools/mitre_technique_map.json",
+        "navigator_output_dir": "reports/mitre",
+        "include_skill_tags": True,
+    },
+    # Remediation ticket generation (remediation-tickets). Outbound-only
+    # Jira/GitHub ticket creation from confirmed findings. The token is read
+    # from the named env var — never copied into config or logs. Lab build:
+    # enabled true (no-op without provider/base_url/token — logs once).
+    "ticketing": {
+        "enabled": True,
+        "provider": "",
+        "base_url": "",
+        "token_env": "TICKETING_TOKEN",
+        "project_key": "",
+        "max_retries": 3,
+        "backoff_seconds": 2.0,
+    },
     # Local WebUI API daemon (``--demon`` / ``--daemon``). V1 is loopback-only;
     # there is no public-bind override. The bearer token is generated into
     # ``token_file`` (gitignored) on first boot, or overridden via
@@ -501,6 +620,8 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "event_buffer_size": 256,
         "shutdown_timeout_seconds": 15,
         "serve_webui": False,
+        # D3: attack-path DAG API route. Lab build: enabled true.
+        "graph_route": True,
     },
 }
 
@@ -948,6 +1069,17 @@ class ConfigValidator:
                     value = skills.get(key)
                     if value is not None and (not isinstance(value, int) or value < 1):
                         result.warnings.append(f"skills.{key} must be a positive integer.")
+
+        # D1: validate the orchestrator config section (cross-mission
+        # semantic-memory consumer for the autonomous orchestrator).
+        if "orchestrator" in self._config:
+            orch = self._config["orchestrator"]
+            if not isinstance(orch, dict):
+                result.errors.append("'orchestrator' must be a mapping.")
+            else:
+                sem_mem = orch.get("semantic_memory")
+                if sem_mem is not None and not isinstance(sem_mem, bool):
+                    result.warnings.append("orchestrator.semantic_memory must be a boolean.")
 
         # Validate eval/benchmark harness section
         if "eval" in self._config:

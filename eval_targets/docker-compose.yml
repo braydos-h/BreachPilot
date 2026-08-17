@@ -1,0 +1,70 @@
+# NetAttackAI — Standard Docker Target Suite for Benchmarking (D1)
+#
+# Spins up a set of deliberately vulnerable local-lab targets for eval/benchmark
+# runs. The operator adds the host ports to `exploit.allowed_targets` for the
+# run (the eval harness targets `localhost` / 127.0.0.1).
+#
+# Targets:
+#   - Metasploitable2  (tvisMetasploitable/metasploitable-2)  :  ports 21,22,23,80,445,3306,8080
+#   - DVWA             (vulnerables/web-dvwa)                  :  port 8081
+#   - juice-shop       (bkimminich/juice-shop)                 :  port 3000
+#   - vulnerable-k8s   (kinvolk/vulnerable-kubernetes-cluster) :  port 8082 (API on 6443 mapped)
+#
+# Usage:
+#   docker compose -f eval_targets/docker-compose.yml up -d
+#   docker compose -f eval_targets/docker-compose.yml down
+#
+# Safety: these are LOCAL LAB targets only. The compose file binds every port
+# to 127.0.0.1 so nothing is exposed to the network. Add `127.0.0.1` to
+# `exploit.allowed_targets` in config.yaml for the run.
+# ponytail: 127.0.0.1 bind on every port — no network exposure by construction.
+
+services:
+  metasploitable2:
+    image: tleemcandra/metasploitable2
+    container_name: netattackai-metasploitable2
+    ports:
+      - "127.0.0.1:8082:80"
+      - "127.0.0.1:2222:22"
+      - "127.0.0.1:2121:21"
+      - "127.0.0.1:2323:23"
+      - "127.0.0.1:4455:445"
+      - "127.0.0.1:3306:3306"
+    networks:
+      - eval_net
+    restart: "no"
+
+  dvwa:
+    image: vulnerables/web-dvwa
+    container_name: netattackai-dvwa
+    ports:
+      - "127.0.0.1:8081:80"
+    networks:
+      - eval_net
+    restart: "no"
+
+  juice_shop:
+    image: bkimminich/juice-shop
+    container_name: netattackai-juice-shop
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - eval_net
+    restart: "no"
+
+  # vulnerable k8s cluster — a small deliberately-misconfigured cluster for
+  # container-escape / RBAC-testing benchmarks. The API server is mapped to a
+  # loopback port so the eval harness can reach it.
+  vulnerable_k8s:
+    image: kinvolk/vulnerable-kubernetes-cluster
+    container_name: netattackai-vuln-k8s
+    ports:
+      - "127.0.0.1:8083:8080"
+    privileged: true
+    networks:
+      - eval_net
+    restart: "no"
+
+networks:
+  eval_net:
+    driver: bridge

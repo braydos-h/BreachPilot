@@ -8,7 +8,6 @@ with a TTL.
 """
 from __future__ import annotations
 
-import json
 import time
 from pathlib import Path
 
@@ -233,3 +232,69 @@ def test_format_cve_results_renders_epss_kev() -> None:
     assert "EPSS: 0.9700" in out
     assert "KEV: yes" in out
     assert "CVSS: 9.8" in out
+
+
+# ── End-to-end config wiring (D1) ────────────────────────────────────────────
+
+def test_build_cve_search_wires_kev_epss_from_config() -> None:
+    """build_cve_search must thread cve_lookup.kev_enabled / epss_enabled /
+    kev_cache_ttl_seconds / kev_cache_path into CVESearchSettings so the
+    enrichers are live at runtime, not silently dropped."""
+    from tools.mcp_shared import build_cve_search
+
+    config = {
+        "cve_lookup": {
+            "enabled": True,
+            "epss_enabled": True,
+            "kev_enabled": True,
+            "kev_cache_ttl_seconds": 3600,
+            "kev_cache_path": "/tmp/kev.json",
+        }
+    }
+    client = build_cve_search(config)
+    s = client.settings
+    assert s.epss_enabled is True
+    assert s.kev_enabled is True
+    assert s.kev_cache_ttl_seconds == 3600
+    assert s.kev_cache_path == "/tmp/kev.json"
+    # The enrichers are constructed only when the flag is on.
+    assert client._epss is not None
+    assert client._kev is not None
+
+
+def test_build_cve_search_defaults_flags_off() -> None:
+    """When the config omits the toggles, build_cve_search keeps them OFF so
+    first-run behavior is unchanged (no surprise network calls)."""
+    from tools.mcp_shared import build_cve_search
+
+    client = build_cve_search({"cve_lookup": {"enabled": True}})
+    assert client.settings.epss_enabled is False
+    assert client.settings.kev_enabled is False
+    assert client._epss is None
+    assert client._kev is None
+
+
+def test_vuln_agent_wires_kev_epss_from_config() -> None:
+    """VulnAgent must construct NVDClient with the kev/epss flags carried
+    through from config (it builds CVESearchSettings directly, so it could
+    silently drop them)."""
+    from tools.swarm.agents.vuln_agent import VulnAgent
+
+    agent = VulnAgent()
+    config = {
+        "cve_lookup": {
+            "enabled": True,
+            "epss_enabled": True,
+            "kev_enabled": True,
+            "kev_cache_ttl_seconds": 7200,
+        }
+    }
+    # Drive run() with an empty task + no model_client so the client is built
+    # then immediately exercised against an empty service list (no network).
+    result = agent.run(
+        task={"target": "10.0.0.5", "task_id": "T1", "services": []},
+        context={"config": config, "blackboard": {}},
+    )
+    # No services -> no CVE lookups -> no error, empty output.
+    assert result.error == ""
+    assert result.output["hypotheses"] == []

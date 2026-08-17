@@ -1,0 +1,21 @@
+{
+  "target_id": "dvwa",
+  "host": "127.0.0.1",
+  "ports": {"http": 8081},
+  "expected_findings": {
+    "open_ports": [80],
+    "services": ["http"],
+    "weak_credentials": [
+      {"service": "http", "user": "admin", "password": "password"}
+    ],
+    "vulnerabilities": ["sqli", "xss", "command_injection", "file_upload", "csrf"],
+    "known_cves": [],
+    "root_shell_possible": false,
+    "flag_path": ""
+  },
+  "scoring": {
+    "true_positive": "finding matches an expected web vuln or the admin cred",
+    "false_positive": "finding claims a vuln not in expected_findings.vulnerabilities",
+    "success_criteria": "admin login OR ≥2 web vulns confirmed"
+  }
+}

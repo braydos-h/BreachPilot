@@ -1,0 +1,12 @@
+name: spiderfoot
+version: 0.1.0
+description: SpiderFoot OSINT integration (passive) - DNS, whois, certs, leaks in one tool. Passive only; uses @audit_tool; plugin default-off.
+author: NetAttackAi
+capabilities: [mcp_tool]
+enabled: false
+config_section:
+  spiderfoot:
+    enabled: false
+    api_url: http://127.0.0.1:5001
+    api_key_env: SPIDERFOOT_API_KEY
+    timeout_seconds: 60

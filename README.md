@@ -246,7 +246,8 @@ python mcp_engine_server.py
 
 Notable flags: `--model <alias>`, `--mcp-transport stdio|http`,
 `--parallel-swarm`, `--multi-model-consult`, `--ultrathink`, `--skills on|off|hints|lookup`,
-`--skills-list`, `--eval`, `--resume <run_id>`, `--yes` (skip confirm gate).
+`--skills-list`, `--eval`, `--ctf` (CTF autopilot with goal-completion detection),
+`--resume <run_id>`, `--yes` (skip confirm gate).
 Run `python main.py --help` for the full list.
 
 ### Legacy research CLI (Flow B, SQLite-backed)
@@ -315,12 +316,24 @@ All runtime behavior lives in **`config.yaml`**. Key sections:
 | `chatgpt` | opt-in ChatGPT provider: `base_url` (loopback `127.0.0.1:10531`), `auto_start`, `local_repo`, `runtime`, `default_model`, `context_window`, discovery/login/proxy timeouts |
 | `exploit` | permission, attack_mode, timeouts, `allowed_targets`, `require_explicit_allowlist`, AD/Kerberos suite, MSF recipes, listeners |
 | `opsec` | target-aware OPSEC (pacing, UA rotation, DoH, `local_targets_off`) |
-| `swarm` | agents, `parallel_enabled`, `per_phase_concurrency` |
+| `cve_lookup` | NVD CVE lookup: rate limit, circuit breaker, `epss_enabled`/`kev_enabled` (EPSS + CISA KEV enrichment, lab default `true` — live out-of-the-box), `kev_cache_ttl_seconds`/`kev_cache_path`, `github.token_env` (`GITHUB_TOKEN`, shared with threat_intel + github_dorks) |
+| `threat_intel` | continuous OSV.dev + GitHub Security Advisories + CISA KEV feed ingestion (`search_threat_intel` MCP tool). Advisory-only, never touches the target. `enabled` (lab default `true`), `cache_dir`/`cache_ttl_seconds`, `sources` (osv/ghsa/kev/exploitdb_rss), `max_results`, `github_token_env`. Reuses `cve_lookup`'s KEV catalog. GHSA degrades to osv+kev when `GITHUB_TOKEN` is unset |
+| `swarm` | agents, `parallel_enabled`, `per_phase_concurrency`, `negotiation_rounds` (bounded critic↔exploit loop; 0 = legacy one-shot, 2 = lab default) |
+| `witness` | advisory audit-stream watcher (`enabled`, `log_path`, `poll_interval_seconds`, `escalate_to_event_broker`) — flags anomalies mid-run (allowlist breach, PoC escape, perm escalation, prompt injection, DoS drift), never blocks; lab default ON for telemetry |
 | `autonomous` | persistence phase, checkpoint, `adaptive_replan`, `max_cycles` |
-| `recon` | extended enumerators, UDP top-ports, Shodan, domain resolution |
-| `skills` | selection, re-selection, feedback, semantic matching |
-| `api` | WebUI daemon host/port/token/origins |
+| `orchestrator` | `semantic_memory` (cross-mission lesson consumer for the autonomous orchestrator; lab default `true` — matches `memory.semantic_enabled`) |
+| `recon` | extended enumerators, UDP top-ports, `shodan_api_key` (wired into the `shodan_recon` plugin — passive OSINT, advisory-only), domain resolution |
+| `skills` | selection, re-selection, feedback, semantic matching, `maybe_enabled` (gates the `skills/maybe/` opt-in pack; default `false`) |
+| `outcome_judgment` | evidence-grounded verdicts (`flow_a` wires OutcomeJudge into Flow A; `peer_review` enables cross-model outcome grading) |
+| `poc_verification` | self-healing PoC verification (Killer Feature #3): `cve_to_exploit_synth` syntax-checks its PoC inline; `verify_poc` MCP tool compile-tests in isolated Docker (`--network=none --read-only --memory=256m`) |
+| `replay_simulator` | pre-commit attack-plan critique (`replay_simulate` MCP tool — LLM critiques its own plan against saved ReconAssessment; rule-based fallback) |
+| `api` | WebUI daemon host/port/token/origins, `graph_route` (attack-path DAG), `max_concurrent_runs` (D3: N concurrent runs for wide-scope assessments; lab default 3; set 1 for legacy single-run 409), `multi_operator` (D4: user accounts + annotations; lab default true, loopback-only) |
+| `ics` | D8: `allow_write` (lab default **true** — operator runs against owned PLCs; physical-damage risk). Write-side ICS modules are DESTRUCTIVE. Dual-gated: `@require_allowlist` on `run_attack_module` AND `ics.allow_write: true`. Set false for read-only ICS enum |
 | `long_session` | multi-hour mode, request timeout, checkpoint |
+| `plugins` | out-of-tree plugin enable/disable, search paths, entry points |
+| `webhook_notify` | outbound Slack/Discord run-status notifications (url, event filter, retry/backoff) |
+| `mitre` | MITRE ATT&CK Navigator export (technique map, output dir, skill tags) |
+| `ticketing` | remediation ticket generation (Jira/GitHub, provider, base_url, token env) |
 
 Mission scope (allowed/disallowed assets, forbidden actions, risk profiles)
 for Flow B lives in **`mission.yaml`**. Three risk profiles:
@@ -360,6 +373,19 @@ can contribute an attack module, MCP tools, a skills directory, and a config
 section. Plugins are disabled by default — enable via `config plugins.enabled`.
 A reference plugin lives at `plugins/example_recon_report/`. See
 [`docs/plugin-development.md`](docs/plugin-development.md).
+
+Shipped plugins (lab build: enabled by default; two-gate enablement —
+`plugins.enabled` + the API key/token in `config.yaml`):
+
+- **`shodan_recon`** — passive Shodan OSINT (`shodan_host_lookup`,
+  `shodan_search` MCP tools). Advisory-only, never touches the target.
+  Requires `recon.shodan_api_key`; MCP tool returns `BLOCKED:` when unset.
+  Pure stdlib (urllib).
+- **`github_dorks`** — authorized-target code-leak discovery
+  (`search_github_dorks` MCP tool). Runs curated dorks against a target
+  org's public GitHub repos. Requires `GITHUB_TOKEN`
+  (`cve_lookup.github.token_env`); MCP tool returns `BLOCKED:` when unset.
+  Advisory-only.
 
 ## Documentation
 

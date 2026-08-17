@@ -33,6 +33,7 @@ import { EventList } from "@/components/EventList";
 import { DecisionCard } from "@/components/DecisionCard";
 import { ReconAssessmentCard } from "@/components/ReconAssessmentCard";
 import { AttackGraph } from "@/components/AttackGraph";
+import { AttackGraphDag } from "@/components/AttackGraphDag";
 import { LiveRunSummary } from "@/components/LiveRunSummary";
 import { PhaseTracker } from "@/components/PhaseTracker";
 import { SessionSummaryCard } from "@/components/SessionSummaryCard";
@@ -360,6 +361,7 @@ export function RunPage() {
           />
         </TabsContent>
         <TabsContent value="graph" className="space-y-3">
+          <AttackGraphDag runId={run.data.id} />
           <AttackGraph runId={run.data.id} ready={artifactReady("enhanced/enhanced_report.json")} />
         </TabsContent>
         <TabsContent value="summary" className="space-y-3">

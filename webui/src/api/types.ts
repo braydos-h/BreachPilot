@@ -773,3 +773,28 @@ export function stateCategory(state: RunState): "pending" | "active" | "done" {
   if (isActiveState(state)) return "active";
   return "done";
 }
+
+// ── Attack-path DAG (graph-viz-api) ─────────────────────────────────────────
+// Returned by GET /api/v1/runs/{id}/graph (default-off; gated by
+// api.graph_route). Nodes = findings/creds/access/tools; edges = "enables".
+
+export interface GraphNode {
+  id: string;
+  type: "tool" | "target" | "step";
+  label: string;
+  status?: string;
+  chain_id?: string;
+  result?: string;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  relation: "enables" | "targets";
+}
+
+export interface RunGraphResponse {
+  run_id: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
