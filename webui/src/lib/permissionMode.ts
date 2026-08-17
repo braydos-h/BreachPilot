@@ -61,6 +61,12 @@ export function autoAnswerFor(decision: DecisionListRow, mode: PermissionMode): 
 
   if (kind === "goal_select") return null;
 
+  // Mid-run operator checkpoints are NEVER auto-answered regardless of
+  // permission mode. The operator must explicitly choose whether to continue,
+  // change objective, finish, or cancel — a full_access posture must not
+  // silently auto-escalate or auto-pivot at the verified-access milestone.
+  if (kind === "campaign_next_step") return null;
+
   if (mode === "approve") {
     if (destructive) return null;
     // start_confirm / tool_approval, non-destructive

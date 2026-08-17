@@ -116,7 +116,72 @@ class TerminalDecisionProvider:
             except (EOFError, KeyboardInterrupt):
                 return ""
             return answer
+        if kind == "campaign_next_step":
+            return await self._request_campaign_next_step(decision)
         return ""
+
+    async def _request_campaign_next_step(self, decision: Decision) -> str:
+        """Terminal adapter for the mid-run operator checkpoint.
+
+        Reuses ``AttackUi._qselect`` (no new prompt framework). Renders the
+        evidence summary from ``decision.prompt_text`` as the question body,
+        then offers the action choices from ``decision.options``. For
+        ``change_goal``/``another_goal`` options that carry a nested ``goals``
+        list, a second ``_qselect`` picks the goal. Returns the answer encoded
+        as ``"<action>"`` or ``"<action>:<goal_name>"`` or
+        ``"<action>:custom:<custom_text>"`` to match the service closure.
+        """
+        from tools.attack_ui import Choice
+        options = decision.options or []
+        # First-level choices: the action buttons.
+        action_choices: list[Any] = []
+        for opt in options:
+            if not isinstance(opt, dict):
+                continue
+            action = str(opt.get("action", "") or "")
+            label = str(opt.get("label", action) or action)
+            if not action:
+                continue
+            action_choices.append(Choice(title=label, value=action))
+        if not action_choices:
+            return ""
+        try:
+            selected_action = await self._ui._qselect(
+                decision.prompt_text or "Operator checkpoint:", action_choices,
+                default=action_choices[0],
+            )
+        except (EOFError, KeyboardInterrupt):
+            return "finish"
+        selected_action = str(selected_action or "")
+        # If the selected action carries a nested goal list, pick a goal.
+        selected_opt = next((o for o in options if isinstance(o, dict) and str(o.get("action", "")) == selected_action), None)
+        nested_goals = (selected_opt or {}).get("goals") if isinstance(selected_opt, dict) else None
+        if isinstance(nested_goals, list) and nested_goals:
+            goal_choices: list[Any] = []
+            for g in nested_goals:
+                if not isinstance(g, dict):
+                    continue
+                gname = str(g.get("name", "") or "")
+                gdesc = str(g.get("description", "") or "")
+                if not gname:
+                    continue
+                goal_choices.append(Choice(title=f"{gname}: {gdesc}", value=gname))
+            if goal_choices:
+                try:
+                    selected_goal = await self._ui._qselect(
+                        "Select a goal:", goal_choices, default=goal_choices[0],
+                    )
+                except (EOFError, KeyboardInterrupt):
+                    selected_goal = ""
+                selected_goal = str(selected_goal or "")
+                if selected_goal == "custom":
+                    try:
+                        custom_text = await self._ui._qtext("Describe your custom goal:")
+                    except (EOFError, KeyboardInterrupt):
+                        custom_text = ""
+                    return f"{selected_action}:custom:{custom_text}"
+                return f"{selected_action}:{selected_goal}"
+        return selected_action
 
 
 class ApiDecisionProvider:

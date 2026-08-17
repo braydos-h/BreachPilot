@@ -10,13 +10,36 @@ export type RunState =
   | "interrupted"
   | "cancelling";
 
-export type DecisionKind = "start_confirm" | "goal_select" | "tool_approval";
+export type DecisionKind = "start_confirm" | "goal_select" | "tool_approval" | "campaign_next_step";
 export type DecisionStatus = "pending" | "answered" | "denied" | "expired";
 export type RiskTag = "safe" | "gated" | "high";
 export type RunMode = "recon" | "attack";
 export type RunKind = "agent";
 export type SkillsMode = "on" | "off" | "hints" | "lookup";
 export type ObserverMode = "heuristic" | "llm" | "hybrid";
+
+/**
+ * Mid-run operator checkpoint (CAMPAIGN_NEXT_STEP).
+ *
+ * The backend builds a Decision of kind "campaign_next_step" at two milestones:
+ *  - "access": the authoritative outcome classifier confirmed a compromise or
+ *    credential dump ("Verified access obtained").
+ *  - "no_path": the agent reached the safe natural-termination boundary after
+ *    meaningful recon/service enumeration/vulnerability research with no
+ *    verified foothold ("No verified access yet").
+ *
+ * Each option carries an ``action`` the WebUI submits back as the decision
+ * answer (possibly suffixed with a goal name for change_goal/another_goal).
+ * Options that offer a goal change include a nested ``goals`` list rendered
+ * via GoalSuggestionCard.
+ */
+export type CampaignCheckpointKind = "access" | "no_path";
+
+export interface CampaignNextStepOption {
+  action: string;
+  label: string;
+  goals?: Array<{ name: string; description: string }>;
+}
 
 export interface Capabilities {
   api_version: string;

@@ -11,6 +11,13 @@ import { GoalSuggestionCard } from "@/components/GoalSuggestionCard";
 import { useAnswerDecision } from "@/api/hooks";
 import { ApiError } from "@/api/client";
 import type { DecisionListRow, SuggestedGoal } from "@/api/types";
+import {
+  checkpointVisual,
+  detectCheckpointKind,
+  parseCheckpointOptions,
+  encodeCheckpointAnswer,
+  toSuggestedGoal,
+} from "@/lib/campaignCheckpoint";
 
 interface DecisionCardProps {
   decision: DecisionListRow;
@@ -180,7 +187,15 @@ export function DecisionCard({ decision, runId, className, autoAnswering = false
         </form>
       )}
 
-      {kind !== "goal_select" && !isAnswered && !autoAnswering && (
+      {kind === "campaign_next_step" && !isAnswered && !autoAnswering && (
+        <CampaignCheckpointForm
+          decision={decision}
+          submitted={submitted}
+          onSubmitAnswer={(value: string) => submitAnswer(value)}
+        />
+      )}
+
+      {kind !== "goal_select" && kind !== "campaign_next_step" && !isAnswered && !autoAnswering && (
         <form className="mt-3 space-y-2" onSubmit={onSubmit}>
           <Label htmlFor={`answer-${decision.id}`}>
             {isDestructive ? "Confirmation text" : "Answer"}
@@ -235,6 +250,124 @@ export function DecisionCard({ decision, runId, className, autoAnswering = false
           {decision.answered_at && <div className="mt-0.5">{decision.answered_at}</div>}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Mid-run operator checkpoint (CAMPAIGN_NEXT_STEP) ──────────────────────────
+// Renders the evidence summary with a visually distinct border (green for
+// "Verified access obtained", amber for "No verified access yet") and offers
+// the operator's choices as action buttons. Goal-bearing options reuse the
+// existing GoalSuggestionCard to pick a nested goal.
+
+interface CampaignCheckpointFormProps {
+  decision: DecisionListRow;
+  submitted: boolean;
+  onSubmitAnswer: (value: string) => void;
+}
+
+function CampaignCheckpointForm({ decision, submitted, onSubmitAnswer }: CampaignCheckpointFormProps) {
+  const promptText = decision.prompt_text ?? "";
+  const kind = detectCheckpointKind(promptText);
+  const visual = checkpointVisual(kind);
+  const options = useMemo(() => parseCheckpointOptions(decision.options_json ?? decision.options), [decision.options_json, decision.options]);
+  const [expandedAction, setExpandedAction] = useState<string | null>(null);
+  const [customText, setCustomText] = useState("");
+
+  const submit = (value: string) => {
+    if (submitted || !value) return;
+    onSubmitAnswer(value);
+  };
+
+  return (
+    <div className={cn("mt-3 space-y-3 rounded-md border p-3", visual.borderClass)}>
+      <div className="flex items-center gap-2">
+        <Badge variant="outline" className={visual.badgeClass}>
+          {visual.title}
+        </Badge>
+        <span className="text-xs text-muted-foreground">campaign checkpoint</span>
+      </div>
+
+      {/* Evidence summary — the backend's prompt_text, preserved as-is */}
+      <pre className="whitespace-pre-wrap break-words rounded bg-muted/40 p-2 font-mono text-xs">
+        {promptText || "Operator checkpoint."}
+      </pre>
+
+      <div className="space-y-2">
+        {options.map((opt) => {
+          const hasGoals = !!opt.goals && opt.goals.length > 0;
+          const isExpanded = expandedAction === opt.action;
+          return (
+            <div key={opt.action} className="space-y-2">
+              <Button
+                type="button"
+                variant={hasGoals ? "outline" : "default"}
+                size="sm"
+                className="w-full justify-start"
+                disabled={submitted}
+                onClick={() => {
+                  if (hasGoals) {
+                    setExpandedAction(isExpanded ? null : opt.action);
+                    setCustomText("");
+                    return;
+                  }
+                  submit(encodeCheckpointAnswer(opt));
+                }}
+              >
+                {submitted && expandedAction === opt.action ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                {opt.label}
+              </Button>
+              {hasGoals && isExpanded && (
+                <div className="space-y-1.5 rounded-md border bg-card/40 p-2">
+                  {opt.goals!.map((g) => (
+                    <GoalSuggestionCard
+                      key={g.name}
+                      goal={toSuggestedGoal(g)}
+                      onClick={submitted ? undefined : () => submit(encodeCheckpointAnswer(opt, g.name))}
+                    />
+                  ))}
+                  {/* Custom goal entry — the backend's "custom" pseudo-goal */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExpandedAction(opt.action);
+                      setCustomText("");
+                    }}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-md border p-2.5 text-left text-sm transition-colors hover:bg-accent",
+                      customText && "border-primary bg-accent ring-1 ring-primary",
+                    )}
+                  >
+                    <Pencil className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <span>Custom goal (type your own)</span>
+                  </button>
+                  {customText !== "" || expandedAction === opt.action ? (
+                    <div className="space-y-2">
+                      <Input
+                        value={customText}
+                        onChange={(e) => setCustomText(e.target.value)}
+                        placeholder="Describe your custom goal..."
+                        autoFocus
+                        disabled={submitted}
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="w-full"
+                        disabled={!customText.trim() || submitted}
+                        onClick={() => submit(encodeCheckpointAnswer(opt, "custom", customText))}
+                      >
+                        {submitted ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                        Submit custom goal
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -854,6 +854,115 @@ class AssessmentService:
         ticker_task = asyncio.create_task(_ticker())
 
         result: dict[str, Any] = {}
+        # Mid-run operator checkpoint (Flow A). The loop calls this hook at the
+        # verified-access / no-path milestones; the closure builds a
+        # CAMPAIGN_NEXT_STEP Decision from the CheckpointContext, asks the
+        # operator via the transport-neutral DecisionProvider (CLI questionary
+        # or API persisted decision + WebUI), and returns a CheckpointOutcome.
+        # ``_goal_box`` is a one-element mutable container so a goal transition
+        # selected at the checkpoint is visible to the post-session summary +
+        # RunResult (a bare rebind of the ``goal`` local would be lost). Only
+        # attack mode surfaces checkpoints; recon mode is read-only propose.
+        _goal_box: list[AttackGoal] = [goal]
+        _objective_transitions: list[dict[str, Any]] = []
+        _checkpoint_enabled = mode == "attack"
+
+        async def _checkpoint_hook(ctx: Any) -> Any:
+            """Build a CAMPAIGN_NEXT_STEP Decision from ``ctx`` and ask the operator."""
+            from tools.exploit_agent.loop import CheckpointOutcome
+            if not _checkpoint_enabled:
+                return None
+            kind = str(getattr(ctx, "kind", "") or "")
+            evidence = getattr(ctx, "evidence", {}) or {}
+            # Build the human-readable evidence summary the operator sees.
+            if kind == "access":
+                _shell = evidence.get("shell_type", "")
+                _priv = evidence.get("privilege_level", "")
+                _outcome = evidence.get("outcome", "compromise")
+                prompt_lines = [
+                    "VERIFIED ACCESS OBTAINED",
+                    f"Target: {target_ip}",
+                    f"Outcome: {_outcome}",
+                ]
+                if _shell:
+                    prompt_lines.append(f"Shell type: {_shell}")
+                if _priv:
+                    prompt_lines.append(f"Privilege level: {_priv}")
+                prompt_lines.append(f"Outcome summary: {evidence.get('outcome_summary', '')}")
+                # Access-kind actions: privesc, another goal, finish, cancel.
+                _presets = goal_engine.list_presets()
+                _goal_opts = [{"name": k, "description": d} for k, d in _presets] + [
+                    {"name": "custom", "description": "Type your own goal"},
+                ]
+                options = [
+                    {"action": "privesc", "label": "Escalate privileges on this target"},
+                    {"action": "another_goal", "label": "Continue with another goal on this target", "goals": _goal_opts},
+                    {"action": "finish", "label": "Finish and generate the report"},
+                    {"action": "cancel", "label": "Cancel the run"},
+                ]
+            else:  # no_path
+                prompt_lines = [
+                    "NO VERIFIED ACCESS YET",
+                    f"Target: {target_ip}",
+                    f"Services detected: {evidence.get('services_detected', 0)}",
+                    f"Versions identified: {evidence.get('versions_identified', 0)}",
+                    f"Blocked/thrash summary: {evidence.get('blocked_summary', '')}",
+                    "Research/service enumeration/vulnerability research completed; no verified foothold obtained.",
+                ]
+                _presets = goal_engine.list_presets()
+                _goal_opts = [{"name": k, "description": d} for k, d in _presets] + [
+                    {"name": "custom", "description": "Type your own goal"},
+                ]
+                options = [
+                    {"action": "continue", "label": "Continue assessing this target with a different approach"},
+                    {"action": "change_goal", "label": "Select a different mission goal for this target", "goals": _goal_opts},
+                    {"action": "finish", "label": "Finish and generate the report"},
+                    {"action": "cancel", "label": "Cancel the run"},
+                ]
+            decision = Decision(
+                id="", run_id=run_id, kind=DecisionKind.CAMPAIGN_NEXT_STEP,
+                prompt_text="\n".join(prompt_lines),
+                options=options,
+            )
+            try:
+                answer = await decision_provider.request(decision)
+            except (EOFError, KeyboardInterrupt):
+                return CheckpointOutcome(action="finish")
+            if not answer:
+                return CheckpointOutcome(action="finish")
+            # Answer encoding: "<action>" or "<action>:<goal_name>" for
+            # change_goal/another_goal, or "<action>:custom:<custom_text>".
+            _parts = answer.split(":", 2)
+            _action = _parts[0]
+            _new_goal_name = _parts[1] if len(_parts) > 1 else ""
+            _custom_text = _parts[2] if len(_parts) > 2 else ""
+            # Resolve a new objective if the operator picked a goal change.
+            _objective_text = ""
+            _from_goal = _goal_box[0].name
+            if _action in ("change_goal", "another_goal", "privesc"):
+                if _action == "privesc":
+                    _new_goal = goal_engine.get("privesc", "Escalate privileges on the compromised target.", risk_profile=risk_profile)
+                elif _new_goal_name == "custom" and _custom_text:
+                    _new_goal = goal_engine.get("custom", _custom_text, risk_profile=risk_profile)
+                elif _new_goal_name and goal_engine.is_preset(_new_goal_name):
+                    _new_goal = goal_engine.get(_new_goal_name, risk_profile=risk_profile)
+                else:
+                    # No/unknown goal name -- keep the current objective but
+                    # still inject a continue-style replanning instruction.
+                    _new_goal = _goal_box[0]
+                _goal_box[0] = _new_goal
+                _objective_transitions.append({
+                    "from": _from_goal,
+                    "to": _new_goal.name,
+                    "at_checkpoint": kind,
+                })
+                _objective_text = (
+                    f"NEW OBJECTIVE: {_new_goal.name} — {_new_goal.description}. "
+                    f"Continue against {target_ip}. Use your existing recon context; "
+                    "do not repeat failed actions; try a different approach."
+                )
+            return CheckpointOutcome(action=_action, objective_text=_objective_text)
+
         try:
             # Swarm attach callback.
             def _swarm_attach(session: Any, schemas: list[dict[str, Any]], policy: Any) -> None:
@@ -884,6 +993,7 @@ class AssessmentService:
                     resolved_ip=resolved_ip if resolved_domain else None,
                     recon_first=recon_first, resume_state=_resume_state,
                     event_sink=event_sink, cancellation=cancellation,
+                    checkpoint_hook=_checkpoint_hook,
                 )
             finally:
                 if session_attach is not None:
@@ -965,6 +1075,13 @@ class AssessmentService:
         _summary_outcome = result.get("outcome_summary")
         if _summary_outcome:
             summary_lines.append(f"- **Blocked/thrash summary**: {_summary_outcome}")
+        if _objective_transitions:
+            summary_lines.append("- **Objective transitions (operator-selected at checkpoints)**:")
+            for _tr in _objective_transitions:
+                summary_lines.append(
+                    f"  - {_tr.get('from', '?')} → {_tr.get('to', '?')} "
+                    f"(at {_tr.get('at_checkpoint', '?')} checkpoint)"
+                )
         _sw = result.get("swarm_result")
         if isinstance(_sw, dict) and _sw.get("tasks_completed") is not None:
             summary_lines.extend(["", "## Swarm", "",
@@ -1027,9 +1144,18 @@ class AssessmentService:
             "mode": mode,
         })
 
+        # Apply a goal transition selected at a mid-run checkpoint: the
+        # _goal_box closure variable holds the latest objective, which may
+        # differ from the ``goal`` resolved at execute start.
+        _final_goal = _goal_box[0]
+        # Operator cancelled at a checkpoint -> surface as cancelled, not
+        # completed/failed. The loop sets ``cancelled_by_operator`` in its
+        # result dict; RunManager._execute_run reads RunResult.cancelled.
+        _cancelled_by_operator = bool(result.get("cancelled_by_operator", False))
+
         return RunResult(
             run_id=run_id, target_ip=target_ip, mode=mode,
-            goal_name=goal.name, goal_description=goal.description,
+            goal_name=_final_goal.name, goal_description=_final_goal.description,
             total_actions=result.get("total_actions", 0),
             workspace=result.get("workspace", ""),
             audit_path=result.get("audit_path", ""),
@@ -1044,6 +1170,8 @@ class AssessmentService:
             reports_dir=str(reports_dir),
             summary_path=str(summary_path),
             run_json_path=str(run_json_path),
+            cancelled=_cancelled_by_operator,
+            objective_transitions=list(_objective_transitions),
         )
 
     # ------------------------------------------------------------------
@@ -1219,6 +1347,7 @@ class AssessmentService:
         original_target: str | None, resolved_ip: str | None,
         recon_first: bool, resume_state: tuple[Any, str, str] | None,
         event_sink: EventSink, cancellation: CancellationToken,
+        checkpoint_hook: Any = None,
     ) -> dict[str, Any]:
         config = _config_cli_load(config_path)
         http_port = int(config.get("mcp", {}).get("http_port", 8001))
@@ -1234,6 +1363,7 @@ class AssessmentService:
             swarm_attach=swarm_attach, heartbeat=heartbeat,
             original_target=original_target, resolved_ip=resolved_ip,
             event_sink=event_sink,
+            checkpoint_hook=checkpoint_hook,
         )
         ui.divider()
         ui.success(f"Session complete. {result.get('total_actions', 0)} actions executed.")

@@ -319,7 +319,17 @@ class RunManager:
                     handle.run_id, session, schemas, policy,
                 ),
             )
-            state = RunState.COMPLETED.value if not result.error else RunState.FAILED.value
+            # Operator cancelled at a mid-run checkpoint -> cancelled state
+            # (not completed/failed). The service sets RunResult.cancelled when
+            # the loop surfaces ``cancelled_by_operator``; this is distinct
+            # from RunManager.cancel_run (external cancel) which raises
+            # asyncio.CancelledError and lands in the except branch below.
+            if getattr(result, "cancelled", False):
+                state = RunState.CANCELLED.value
+            elif result.error:
+                state = RunState.FAILED.value
+            else:
+                state = RunState.COMPLETED.value
             result_dict = _result_to_dict(result)
             self._persistence.update_run_state(
                 handle.run_id, state, error=result.error,
@@ -574,4 +584,6 @@ def _result_to_dict(r: RunResult) -> dict[str, Any]:
         "telemetry": r.telemetry, "safety_review": r.safety_review,
         "reports_dir": r.reports_dir, "summary_path": r.summary_path,
         "run_json_path": r.run_json_path,
+        "cancelled": r.cancelled,
+        "objective_transitions": r.objective_transitions,
     }
