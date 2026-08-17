@@ -15,7 +15,8 @@
 ![Transport](https://img.shields.io/badge/transport-stdio%20%7C%20http-8b5cf6?style=flat-square)
 ![Context](https://img.shields.io/badge/context-976K-ec4899?style=flat-square)
 ![Audit](https://img.shields.io/badge/audit-SHA256%20chain-ef4444?style=flat-square)
-<img width="2880" height="1520" alt="{571D6154-4E9F-4166-B6B6-A70F007A8916}" src="https://github.com/user-attachments/assets/01d1a4ec-852c-4c8a-84ce-2ae7adee2bc7" />
+<img width="1725" height="912" alt="web" src="https://github.com/user-attachments/assets/45b6af2f-91e2-4eaf-a4cd-1352dbd42e0c" />
+
 
 **An AI-driven, local-first penetration testing & bug bounty research agent.**
 
