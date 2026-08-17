@@ -37,8 +37,8 @@ operator ── python main.py --target <ip> --mode attack
            │            --transport http --host 127.0.0.1 --port <8001>
            │            --config config.yaml --workspace exploit_workspace
            │            (mcp_session.py:635-651, stdout→mcp_exploit_server.log)
-           │       └─ wait_for_mcp_http_ready       (mcp_session.py:794; /mcp probe)
-           │       └─ _streamable_http_transport    (mcp_session.py:706; Bearer token)
+           │       └─ wait_for_mcp_http_ready       (owned-child TCP listener)
+           │       └─ _streamable_http_transport    (mcp_session.py:718; Bearer token)
            │       └─ ClientSession.initialize()    (mcp_session.py:486-497)
            │       └─ yield session  →  run_exploit_agent(loop.py) → call_tool
            └─ transport="stdio" (fallback / direct)
@@ -223,8 +223,9 @@ All three servers share `run_mcp_http_server` (`tools/mcp_shared.py:1064-1084`):
    middleware requiring `Authorization: Bearer <token>`, compared with
    `hmac.compare_digest` (no timing side channel); otherwise 401.
 3. **The client side sends the token** — `_streamable_http_transport`
-   (`mcp_session.py:706-725`) builds an httpx client with the Bearer header
-   when `MCP_HTTP_TOKEN` is configured.
+   (`mcp_session.py:717-737`) builds an httpx client with the Bearer header
+   when `MCP_HTTP_TOKEN` is configured. It sets `trust_env=False` because this
+   is always a loopback connection and must not be routed through an OS proxy.
 
 ## Exception-Group Handling (AGENTS.md rule 1)
 
@@ -274,22 +275,24 @@ async with stdio_client(server_params) as (read_stream, write_stream):
                                          arguments={"command": "id", "target_ip": target})
 ```
 
-The HTTP shape (`mcp_session.py:706-725`):
+The HTTP shape (`mcp_session.py:718-737`):
 
 ```python
+import httpx
 from mcp.client.streamable_http import streamable_http_client
 
-async with streamable_http_client(f"http://127.0.0.1:{port}/mcp") as streams:
-    async with ClientSession(*streams) as session:
-        await session.initialize()
-# with MCP_HTTP_TOKEN set, wrap with create_mcp_http_client(headers={...})
-# (mcp_session.py:720-725)
+headers = {"Authorization": f"Bearer {token}"} if token else None
+timeout = httpx.Timeout(30, read=300)
+async with httpx.AsyncClient(headers=headers, timeout=timeout, trust_env=False) as client:
+    async with streamable_http_client(url, http_client=client) as streams:
+        async with ClientSession(*streams) as session:
+            await session.initialize()
 ```
 
-Boot is always capped at `MCP_BOOT_TIMEOUT_SECONDS` (30s, `mcp_session.py:33`)
-via `asyncio.wait_for` on `initialize()`; the HTTP branch also probes `/mcp`
-readiness with a real JSON-RPC initialize POST before connecting
-(`_mcp_http_ready_probe`, `mcp_session.py:754-791`).
+Boot is always capped at `MCP_BOOT_TIMEOUT_SECONDS` (30s, `mcp_session.py:32`)
+via `asyncio.wait_for` on `initialize()`; the HTTP branch first waits for the
+owned Uvicorn child's TCP listener, which opens only after application startup.
+The real `ClientSession.initialize()` remains the authoritative MCP handshake.
 
 ## If the MCP Subprocess Dies
 

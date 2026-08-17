@@ -45,7 +45,9 @@ export function checkpointVisual(kind: CheckpointVariant): CheckpointVisual {
  */
 export function detectCheckpointKind(promptText: string | undefined): CheckpointVariant {
   const firstLine = String(promptText ?? "").split("\n", 1)[0]?.toUpperCase() ?? "";
-  if (firstLine.includes("VERIFIED ACCESS")) return "access";
+  // Check "NO VERIFIED ACCESS" first — "VERIFIED ACCESS" is a substring of it.
+  if (firstLine.startsWith("NO VERIFIED ACCESS")) return "no_path";
+  if (firstLine.startsWith("VERIFIED ACCESS")) return "access";
   return "no_path";
 }
 
