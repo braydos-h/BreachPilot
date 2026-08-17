@@ -172,7 +172,7 @@ def list_annotations(run_id: str, auth: str = Depends(_require_auth)) -> list[An
 
 
 @router.delete("/annotations/{annotation_id}", status_code=204)
-def delete_annotation(annotation_id: str, auth: str = Depends(_require_auth)) -> None:
+def delete_annotation(annotation_id: str, auth: str = Depends(_require_auth)):
     persistence = _persistence()
     if not persistence.delete_annotation(annotation_id):
         raise HTTPException(status_code=404, detail="annotation not found")
