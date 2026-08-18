@@ -24,25 +24,25 @@ class ADCSEnum(AttackModule):
     required_cves: list[str] = []
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": "Wraps the adcs_enum MCP tool (certipy find). Maps ESC1-8 misconfigurations to privesc/credential-theft paths.",
-            "workflow": [
-                "1. Obtain domain credentials (recovered via ASREPRoast / Kerberoasting / a credential dump on the owned target).",
-                f"2. Call adcs_enum(target_ip='{ctx.target_ip}', username=<u>, domain=<d>, password=<p> or ntlm_hash=<nt>) to enumerate AD CS templates.",
-                "3. Classify vulnerable templates (ESC1: editable SAN, ESC4: weak ACLs, ESC8: NTLM relay to HTTP enrollment) for privesc planning.",
-                "4. Chain to a golden_ticket / pass_the_hash against the owned target only.",
-            ],
-            "suggested_command": (
-                f"certipy find -u user@DOMAIN -p password -dc-ip {ctx.target_ip} "
-                f"-target {ctx.target_ip} -vulnerable"
-            ),
-            "references": [
+        return self._info_result(
+            ctx,
+            note="Wraps the adcs_enum MCP tool (certipy find). Maps ESC1-8 misconfigurations to privesc/credential-theft paths.",
+            evidence=[f"AD CS enumeration planned against {ctx.target_ip} (requires domain creds)"],
+            references=[
                 "https://github.com/ly4k/Certipy",
                 "https://specterops.io/wp-content/uploads/sites/3/2022/06/Certified_Pre-Owned.pdf",
             ],
-        }
+            suggested_command=(
+                f"certipy find -u user@DOMAIN -p password -dc-ip {ctx.target_ip} "
+                f"-target {ctx.target_ip} -vulnerable"
+            ),
+            workflow=[
+                "1. Obtain domain credentials (recovered via ASREPRoast / Kerberoasting / a credential dump on the owned target).",
+                f"2. Call adcs_enum(target_ip='{ctx.target_ip}', username=<u>, domain=<d>, password=<p> or ntlm_hash=<nt>) to enumerate AD CS templates.",
+                "3. Classify vulnerable templates: ESC1/6 -> PassTheHash (after certipy auth); ESC4 -> re-enroll as template owner -> PtH; ESC8 -> ResponderRelay against http://<ca>/certsrv; ESC2/3 -> certipy req -> PtH.",
+                "4. Chain to PassTheHash / ResponderRelay / GoldenTicket against the owned target only.",
+            ],
+        )
 
 
 class BloodHoundCollect(AttackModule):
@@ -53,25 +53,25 @@ class BloodHoundCollect(AttackModule):
     required_cves: list[str] = []
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": "Wraps the bloodhound_collect MCP tool (bloodhound-python -c All --zip). Feeds attack-path planning.",
-            "workflow": [
-                "1. Obtain any domain credential (even a low-priv domain user suffices for collection).",
-                f"2. Call bloodhound_collect(target_ip='{ctx.target_ip}', domain=<d>, username=<u>, password=<p>) to gather the graph dataset.",
-                "3. Import the zipped JSON into BloodHound on the operator box; run 'Shortest Paths to Domain Admin' / 'Kerberoastable' / 'DCSync-able' queries.",
-                "4. Feed identified paths into ASREPRoast / Kerberoasting / DCSync / golden_ticket against the owned target only.",
-            ],
-            "suggested_command": (
-                f"bloodhound-python -u user -p pass -d DOMAIN -dc {ctx.target_ip} "
-                f"-c All --zip"
-            ),
-            "references": [
+        return self._info_result(
+            ctx,
+            note="Wraps the bloodhound_collect MCP tool (bloodhound-python -c All --zip). Feeds attack-path planning.",
+            evidence=[f"BloodHound collection planned against {ctx.target_ip} (requires domain creds)"],
+            references=[
                 "https://github.com/dirkjanm/BloodHound.py",
                 "https://github.com/BloodHoundAD/BloodHound",
             ],
-        }
+            suggested_command=(
+                f"bloodhound-python -u user -p pass -d DOMAIN -dc {ctx.target_ip} "
+                f"-c All --zip"
+            ),
+            workflow=[
+                "1. Obtain any domain credential (even a low-priv domain user suffices for collection).",
+                f"2. Call bloodhound_collect(target_ip='{ctx.target_ip}', domain=<d>, username=<u>, password=<p>) to gather the graph dataset.",
+                "3. Import the zipped JSON into BloodHound on the operator box; run 'Shortest Paths to Domain Admin' / 'Kerberoastable' / 'DCSync-able' queries.",
+                "4. Feed identified paths: Kerberoastable -> Kerberoasting; AS-REP-Roastable -> ASREPRoast; DCSync-able -> DCSyncAttack; Shortest Paths -> LateralMovement.",
+            ],
+        )
 
 
 class ResponderRelay(AttackModule):

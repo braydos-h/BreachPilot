@@ -85,27 +85,52 @@ class RegreSSHion(AttackModule):
     name = "RegreSSHion"
     description = "OpenSSH regreSSHion RCE (CVE-2024-6387)"
     target_services = ["ssh"]
-    target_ports = [22, 2222]
+    target_ports = [22, 2222, 8022]
     required_cves = ["CVE-2024-6387"]
+    # Phase 3: version-gated -- vulnerable band is < 4.4p1 OR 8.5p1 <= v < 9.8p1.
+    target_versions = {
+        "ssh": [
+            "openssh_1.", "openssh_2.", "openssh_3.", "openssh_4.0", "openssh_4.1",
+            "openssh_4.2", "openssh_4.3", "openssh_8.5", "openssh_8.6", "openssh_8.7",
+            "openssh_8.8", "openssh_8.9", "openssh_9.0", "openssh_9.1", "openssh_9.2",
+            "openssh_9.3", "openssh_9.4", "openssh_9.5", "openssh_9.6", "openssh_9.7",
+        ],
+    }
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": "CVE-2024-6387: OpenSSH signal handler race condition leading to RCE. Affects < 4.4p1 and 8.5p1 < 9.8p1.",
-            "suggested_command": f"python3 regresshion_checker.py {ctx.target_ip}",
-            "references": [
+        return self._info_result(
+            ctx,
+            note=(
+                "CVE-2024-6387: OpenSSH signal handler race condition leading to "
+                "RCE. Affects < 4.4p1 and 8.5p1 <= v < 9.8p1 (9.8p1 is patched). "
+                "sshd child runs as root -> RCE = root. Clone the Qualys PoC via "
+                "git_clone and run it; the real exploit is a heap-overflow race "
+                "in sshd's SIGALRM handler."
+            ),
+            evidence=[f"regreSSHion (CVE-2024-6387) applicable to {ctx.target_ip}"],
+            references=[
                 "https://www.qualys.com/2024/07/01/cve-2024-6387/regresshion.txt",
                 "https://nvd.nist.gov/vuln/detail/CVE-2024-6387",
+                "https://github.com/qualys/regresshion",
             ],
-        }
+            suggested_command=(
+                f"git_clone(url='https://github.com/qualys/regresshion') && "
+                f"python3 regresshion.py {ctx.target_ip} 22"
+            ),
+            shell_type="reverse",
+            privilege_level="root",
+        )
 
 class OpenSSHCVECheck(AttackModule):
     name = "OpenSSHCVECheck"
     description = "Map OpenSSH version to known CVEs and generate exploit scripts"
     target_services = ["ssh"]
-    target_ports = [22, 2222]
+    target_ports = [22, 2222, 8022]
     required_cves = []
+    # Phase 3: any OpenSSH banner earns the +25 version bonus -- this module
+    # is literally a version->CVE mapper, so a fingerprinted version is
+    # exactly when it should rank high.
+    target_versions = {"ssh": ["openssh_"]}
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         version = ""
@@ -115,13 +140,18 @@ class OpenSSHCVECheck(AttackModule):
                 break
 
         cves = self._map_version_to_cves(version)
-        return {
-            "status": "info",
-            "module": self.name,
-            "version": version,
-            "cves": cves,
-            "note": f"OpenSSH {version} mapped to {len(cves)} known CVEs",
-        }
+        return self._info_result(
+            ctx,
+            note=f"OpenSSH {version} mapped to {len(cves)} known CVEs",
+            evidence=[f"OpenSSH {version} -> {len(cves)} CVEs: {', '.join(c['cve'] for c in cves)}"],
+            references=[f"https://nvd.nist.gov/vuln/detail/{c['cve']}" for c in cves],
+            suggested_command=(
+                f"nmap --script ssh2-enum-algorithms -p 22 {ctx.target_ip} && "
+                f"nmap --script ssh-auth-methods -p 22 {ctx.target_ip}"
+            ),
+            version=version,
+            cves=cves,
+        )
 
     @staticmethod
     def _map_version_to_cves(version: str) -> list[dict[str, str]]:
@@ -145,14 +175,24 @@ class OpenSSHCVECheck(AttackModule):
             minor = int(minor_str)
 
         mappings = [
+            # Phase 3: de-overlapped ranges -- CVE-2024-6387 upper bound is
+            # 9.7p1 (9.8p1 is patched); CVE-2023-38408 upper bound is 9.3p0
+            # (patched in 9.3p1). Added Terrapin (CVE-2023-48795) and the
+            # client-side injection CVEs.
             ((0, 0, 0), (4, 4, 0), "CVE-2024-6387", "regreSSHion RCE"),
-            ((8, 5, 0), (9, 8, 0), "CVE-2024-6387", "regreSSHion RCE"),
-            ((0, 0, 0), (9, 3, 1), "CVE-2023-38408", "PKCS#11 remote code execution"),
+            ((8, 5, 0), (9, 7, 1), "CVE-2024-6387", "regreSSHion RCE"),
+            ((0, 0, 0), (9, 3, 0), "CVE-2023-38408", "PKCS#11 remote code execution"),
             ((0, 0, 0), (9, 3, 0), "CVE-2023-28531", "ssh-agent forwarding vulnerability"),
+            # Terrapin prefix-truncation MITM -- affects all versions before
+            # the 9.6p1/8.9p1 protocol fix (strict key exchange).
+            ((0, 0, 0), (9, 5, 1), "CVE-2023-48795", "Terrapin prefix-truncation MITM"),
             ((6, 2, 0), (8, 8, 0), "CVE-2021-41617", "privilege escalation via supplemental groups"),
             ((0, 0, 0), (8, 3, 0), "CVE-2020-15778", "scp command injection"),
             ((0, 0, 0), (7, 7, 0), "CVE-2018-15473", "user enumeration"),
             ((0, 0, 0), (7, 2, 0), "CVE-2016-6210", "user enumeration via timing"),
+            ((7, 0, 0), (8, 1, 0), "CVE-2019-6109", "client ANSI escape injection"),
+            ((7, 0, 0), (8, 1, 0), "CVE-2019-6111", "SCP client code injection"),
+            ((7, 0, 0), (8, 4, 0), "CVE-2020-14145", "timing user enumeration"),
         ]
         for low, high, cve, desc in mappings:
             if low <= (major, minor, patch) <= high:
