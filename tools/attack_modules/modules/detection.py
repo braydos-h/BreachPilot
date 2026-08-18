@@ -89,7 +89,12 @@ class LogSourceEnum(AttackModule):
     target_versions: dict[str, list[str]] = {}
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        os_family = str(getattr(ctx, "os_family", None) or "").strip().lower()
+        # Phase 2: ModuleContext carries `target_os`, not `os_family` -- the
+        # old getattr(ctx, "os_family", None) was ALWAYS None, so every target
+        # (including Windows boxes) was classified as Linux and the Windows
+        # log-source list was unreachable. Fall back to os_family for legacy
+        # fakes that still expose the old field name.
+        os_family = str(getattr(ctx, "target_os", None) or getattr(ctx, "os_family", None) or "").strip().lower()
         if os_family != "windows":
             os_family = "linux"
 

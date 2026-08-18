@@ -599,6 +599,10 @@ class AttackModuleExecutor:
         # generate_dynamic_script records the correct service:version:os
         # signature for the ExperienceStore (audit: version was dropped here
         # too, so historical confidence never applied).
+        # Phase 1/2: also thread the recovered credentials, the task's
+        # parameters (e.g. {"exploit": ...} for ValidateFinding, callback_host
+        # for persistence), and the mission config so post-exploit modules
+        # (LateralMovement, ValidateFinding, persistence) can read them.
         ctx = ModuleContext(
             target_ip=task.target,
             target_os=state.recon_result.os_family if state.recon_result else None,
@@ -612,6 +616,9 @@ class AttackModuleExecutor:
                 }
                 for s in (state.recon_result.services if state.recon_result else [])
             ],
+            credentials=list(state.credentials_found),
+            parameters=dict(task.parameters),
+            config=self._mission_config,
         )
 
         # Phase 6.2: OPSEC pacing. Await the profile's pacing delay (jittered,
@@ -1905,6 +1912,10 @@ class AutonomousOrchestrator:
             target_os=state.recon_result.os_family if state.recon_result else "",
             services=services_full,
             cves=sorted(set(cves)),
+            # Phase 2: thread recovered creds + config so post-foothold modules
+            # (persistence callback host, lateral movement) can read them.
+            credentials=list(state.credentials_found),
+            config=self._mission_config,
         )
 
     async def _phase_persistence(self, state: AttackState) -> None:

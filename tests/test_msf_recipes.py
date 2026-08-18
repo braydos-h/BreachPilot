@@ -34,9 +34,12 @@ def test_recipes_present() -> None:
 
 def test_get_msf_recipe_returns_copy() -> None:
     r = get_msf_recipe("bluekeep")
-    assert r and r["module"] == "exploit/windows/smb/ms17_010_bluekeep"
+    # Phase 2: the recipe module path was a typo (exploit/windows/smb/
+    # ms17_010_bluekeep does not exist in msfconsole); the real module is the
+    # RDP one.
+    assert r and r["module"] == "exploit/windows/rdp/cve_2019_0708_bluekeep_rce"
     r["module"] = "mutated"
-    assert MSF_RECIPES["bluekeep"]["module"] == "exploit/windows/smb/ms17_010_bluekeep"  # copy, not alias
+    assert MSF_RECIPES["bluekeep"]["module"] == "exploit/windows/rdp/cve_2019_0708_bluekeep_rce"  # copy, not alias
 
 
 def test_get_msf_recipe_unknown() -> None:
@@ -100,7 +103,7 @@ def test_run_recipe_exploit_routes_to_run_exploit(monkeypatch, tmp_path: Path) -
     monkeypatch.setattr(b, "run_exploit", fake_exp)
     res = b.run_recipe("bluekeep", "10.0.0.1")
     assert res["success"] is True
-    assert captured["module"] == "exploit/windows/smb/ms17_010_bluekeep"
+    assert captured["module"] == "exploit/windows/rdp/cve_2019_0708_bluekeep_rce"
     assert captured["payload"] == "windows/x64/meterpreter/reverse_tcp"
 
 

