@@ -222,6 +222,11 @@ class AttackState:
     original_target: str = ""
     resolved_ip: str = ""
     discovered_subdomains: list[dict[str, str]] = field(default_factory=list)
+    # Phase 5: hard-target accounting. Counts adaptive rounds that produced no
+    # novel candidate modules and no access; when it crosses
+    # ``hard_target_max_rounds`` the campaign gives up on this target instead
+    # of burning the remaining ``max_cycles`` budget. Reset per target.
+    hard_target_rounds: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -245,6 +250,7 @@ class AttackState:
             "original_target": self.original_target,
             "resolved_ip": self.resolved_ip,
             "discovered_subdomains": list(self.discovered_subdomains),
+            "hard_target_rounds": int(self.hard_target_rounds),
         }
 
     @classmethod
@@ -292,6 +298,7 @@ class AttackState:
             discovered_subdomains=[
                 dict(s) for s in (data.get("discovered_subdomains", []) or []) if isinstance(s, dict)
             ],
+            hard_target_rounds=int(data.get("hard_target_rounds", 0) or 0),
         )
 
     def add_timeline_event(self, event_type: str, description: str, metadata: dict[str, Any] | None = None) -> None:
@@ -1293,6 +1300,26 @@ class AutonomousOrchestrator:
         self._auto_local_exploit_suggester = bool(
             mission_config.get("msf_auto_les", False)
             or ((mission_config.get("msf") or {}).get("auto_local_exploit_suggester", False))
+        )
+
+        # Phase 5: campaign-entry preflight (dedup + non-routable filter +
+        # scope-gate pre-check). All opt-in / default-off so a single-IP
+        # campaign is byte-identical to before. ``dedup_targets`` collapses
+        # duplicate IPs / CIDR overlap / hosts resolving to the same IP;
+        # ``skip_non_routable`` drops RFC1918/link-local/reserved addresses
+        # that are not the operator's own host (those are handled by the
+        # local-takeover playbook); ``max_targets_per_cidr`` caps CIDR
+        # expansion (0 = no expansion, preserves current behavior).
+        self._dedup_targets = bool(mission_config.get("dedup_targets", False))
+        self._skip_non_routable = bool(mission_config.get("skip_non_routable", False))
+        self._max_targets_per_cidr = max(0, int(mission_config.get("max_targets_per_cidr", 0) or 0))
+
+        # Phase 5: hard-target cutoff. After this many adaptive rounds with
+        # zero novel candidate modules AND zero access achieved, give up on
+        # the target instead of burning the remaining ``max_cycles`` budget.
+        # 0 = off (current behavior).
+        self._hard_target_max_rounds = max(
+            0, int(mission_config.get("hard_target_max_rounds", 0) or 0)
         )
 
         # Domain targeting: the operator's original --target (domain or IP) and
