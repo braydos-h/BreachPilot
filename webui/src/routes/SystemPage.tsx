@@ -1,6 +1,23 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Loader2, Plus, RefreshCw, ShieldCheck, Stethoscope, Trash2, Wrench } from "lucide-react";
+import {
+  Activity,
+  Blocks,
+  Bot,
+  Brain,
+  Cpu,
+  KeyRound,
+  Loader2,
+  MessageSquare,
+  Plus,
+  RefreshCw,
+  Settings,
+  ShieldCheck,
+  SlidersHorizontal,
+  Stethoscope,
+  Trash2,
+  Wrench,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,7 +26,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfigEditor } from "@/components/ConfigEditor";
 import { SkeletonRows } from "@/components/Loading";
-import { ProviderSetup } from "@/components/ProviderSetup";
+import { ProviderSetup, useProviderStatus } from "@/components/ProviderSetup";
 import {
   useAddModel,
   useDiagnostics,
@@ -25,20 +42,77 @@ import { ApiError } from "@/api/client";
 import { formatRelative } from "@/lib/utils";
 import type { DiagnosticsResponse } from "@/api/types";
 
+const TAB_DEFS = [
+  { key: "config", label: "Config", icon: SlidersHorizontal },
+  { key: "secrets", label: "Secrets", icon: KeyRound },
+  { key: "models", label: "Models", icon: Cpu },
+  { key: "telemetry", label: "Telemetry", icon: Activity },
+  { key: "memory", label: "Memory", icon: Brain },
+  { key: "plugins", label: "Plugins", icon: Blocks },
+  { key: "diagnostics", label: "Diagnostics", icon: Stethoscope },
+] as const;
+
 export function SystemPage() {
+  const [tab, setTab] = useState("config");
+
+  const secrets = useSecrets();
+  const plugins = usePlugins();
+  const models = useModels();
+  const live = useLiveModels();
+
+  const secretEntries = Object.entries(secrets.data?.keys ?? {});
+  const configuredSecrets = secretEntries.filter(([, s]) => s === "configured").length;
+  const pluginList = plugins.data?.plugins ?? [];
+  const loadedPlugins = pluginList.filter((p) => p.loaded).length;
+  const liveCount = live.data?.models?.length ?? 0;
+  const registryCount = Object.keys(models.data?.registry ?? {}).length;
+
+  const counts: Partial<Record<(typeof TAB_DEFS)[number]["key"], string>> = {
+    secrets: secretEntries.length > 0 ? `${configuredSecrets}/${secretEntries.length}` : undefined,
+    models: liveCount > 0 ? String(liveCount) : registryCount > 0 ? String(registryCount) : undefined,
+    plugins: pluginList.length > 0 ? `${loadedPlugins}/${pluginList.length}` : undefined,
+  };
+
   return (
     <div className="space-y-4 p-4 md:p-6">
-      <h1 className="text-lg font-semibold">System</h1>
-      <Tabs defaultValue="config">
-        <TabsList className="flex-wrap">
-          <TabsTrigger value="config">Config</TabsTrigger>
-          <TabsTrigger value="secrets">Secrets</TabsTrigger>
-          <TabsTrigger value="models">Models</TabsTrigger>
-          <TabsTrigger value="telemetry">Telemetry</TabsTrigger>
-          <TabsTrigger value="memory">Memory</TabsTrigger>
-          <TabsTrigger value="plugins">Plugins</TabsTrigger>
-          <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
-        </TabsList>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg border bg-card">
+            <Settings className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-lg font-semibold leading-tight">System</h1>
+            <p className="text-sm text-muted-foreground">Providers, configuration, secrets, and health diagnostics.</p>
+          </div>
+        </div>
+        <Button size="sm" variant="outline" className="ml-auto" onClick={() => setTab("diagnostics")}>
+          <Stethoscope className="h-4 w-4" />
+          Run doctor
+        </Button>
+      </div>
+
+      <HealthOverview />
+
+      <Tabs value={tab} onValueChange={setTab}>
+        <div className="sticky top-0 z-10 -mx-1 bg-background/90 px-1 py-2 backdrop-blur">
+          <TabsList className="flex-wrap">
+            {TAB_DEFS.map((t) => {
+              const Icon = t.icon;
+              const count = counts[t.key];
+              return (
+                <TabsTrigger key={t.key} value={t.key} className="gap-1.5">
+                  <Icon className="h-3.5 w-3.5" />
+                  {t.label}
+                  {count && (
+                    <span className="ml-0.5 rounded-full bg-muted px-1.5 py-px text-[10px] font-medium text-muted-foreground">
+                      {count}
+                    </span>
+                  )}
+                </TabsTrigger>
+              );
+            })}
+          </TabsList>
+        </div>
         <TabsContent value="config"><ConfigEditor /></TabsContent>
         <TabsContent value="secrets"><SecretsTab /></TabsContent>
         <TabsContent value="models"><ModelsTab /></TabsContent>
@@ -47,6 +121,105 @@ export function SystemPage() {
         <TabsContent value="plugins"><PluginsTab /></TabsContent>
         <TabsContent value="diagnostics"><DiagnosticsTab /></TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+function HealthOverview() {
+  const status = useProviderStatus();
+  const models = useModels();
+  const live = useLiveModels();
+  const secrets = useSecrets();
+  const plugins = usePlugins();
+
+  const secretEntries = Object.entries(secrets.data?.keys ?? {});
+  const configured = secretEntries.filter(([, s]) => s === "configured").length;
+  const missing = secretEntries.length - configured;
+  const pluginList = plugins.data?.plugins ?? [];
+  const loaded = pluginList.filter((p) => p.loaded).length;
+  const disabled = pluginList.filter((p) => !p.enabled).length;
+  const liveCount = live.data?.models?.length ?? 0;
+
+  return (
+    <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+      <HealthCard
+        icon={status.provider === "chatgpt" ? MessageSquare : Bot}
+        label="Provider"
+        value={
+          <span className="flex items-center gap-1.5">
+            {status.label}
+            <StatusDot online={status.online} />
+          </span>
+        }
+        sub={status.online ? `${status.liveCount} live models` : status.error ? "unreachable" : "offline"}
+        tone={status.online ? "ok" : "bad"}
+      />
+      <HealthCard
+        icon={Cpu}
+        label="Models"
+        value={models.isLoading ? "…" : liveCount > 0 ? String(liveCount) : registryCountLabel(models.data)}
+        sub={models.data?.default_alias ? `default: ${models.data.default_alias}` : "no registry configured"}
+      />
+      <HealthCard
+        icon={KeyRound}
+        label="Secrets"
+        value={secrets.isLoading ? "…" : `${configured}/${secretEntries.length}`}
+        sub={missing > 0 ? `${missing} missing` : "all configured"}
+        tone={missing > 0 ? "warn" : "ok"}
+      />
+      <HealthCard
+        icon={Blocks}
+        label="Plugins"
+        value={plugins.isLoading ? "…" : `${loaded}/${pluginList.length}`}
+        sub={disabled > 0 ? `${disabled} disabled` : "all enabled"}
+      />
+    </div>
+  );
+}
+
+function registryCountLabel(models: ReturnType<typeof useModels>["data"]): string {
+  return String(Object.keys(models?.registry ?? {}).length);
+}
+
+function StatusDot({ online }: { online: boolean }) {
+  return (
+    <span className="relative flex h-2 w-2">
+      {online && (
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/70" />
+      )}
+      <span className={cn("relative inline-flex h-2 w-2 rounded-full", online ? "bg-emerald-400" : "bg-muted-foreground/50")} />
+    </span>
+  );
+}
+
+function HealthCard({
+  icon: Icon,
+  label,
+  value,
+  sub,
+  tone = "ok",
+}: {
+  icon: typeof Bot;
+  label: string;
+  value: React.ReactNode;
+  sub: string;
+  tone?: "ok" | "warn" | "bad";
+}) {
+  return (
+    <div className="rounded-md border bg-card/40 p-3">
+      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+        <Icon className="h-3 w-3" />
+        {label}
+      </div>
+      <div className={cn("mt-1 flex items-center gap-1.5 truncate font-mono text-sm", tone === "bad" && "text-destructive")}>
+        {value}
+      </div>
+      <div className={cn(
+        "mt-0.5 truncate text-xs",
+        tone === "warn" ? "text-amber-300" : tone === "bad" ? "text-destructive/80" : "text-muted-foreground",
+      )}>
+        {sub}
+      </div>
     </div>
   );
 }
