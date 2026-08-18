@@ -98,7 +98,7 @@ def _connect_status(target: str, port: int, timeout: float) -> str:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
         err = sock.connect_ex((target, port))
-    except OSError as exc:
+    except OSError:
         # A hard resolution/creation failure (e.g. bad IP literal) is not a
         # reachability signal -- the caller handles syntax separately.
         return "unknown"

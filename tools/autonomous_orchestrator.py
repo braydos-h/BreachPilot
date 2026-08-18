@@ -33,19 +33,18 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from tools.logging_setup import get_logger
-from tools.recon_pipeline import ReconPipeline, ReconConfig, HostReconResult
-from tools.validation_utils import is_local_target
-from tools.attack_ui import get_ui
 from tools.attack_modules import (
     AttackModule,
     ModuleContext,
     ModuleResult,
+    _module_target_signature,
     find_modules,
     get_module,
-    list_modules,
-    _module_target_signature,
 )
+from tools.attack_ui import get_ui
+from tools.logging_setup import get_logger
+from tools.recon_pipeline import HostReconResult, ReconConfig, ReconPipeline
+from tools.validation_utils import is_local_target
 
 logger = get_logger()
 
@@ -1232,7 +1231,8 @@ class AutonomousOrchestrator:
         # target is read from mission_config["target"] (set by the MCP campaign
         # tools) or the EXPLOIT_TARGET env (set by mcp_session at boot).
         try:
-            from tools.opsec import OpsecManager, configure as _opsec_configure
+            from tools.opsec import OpsecManager
+            from tools.opsec import configure as _opsec_configure
             self._opsec = OpsecManager.from_config(mission_config or {})
             _primary_target = (mission_config or {}).get("target") or os.environ.get("EXPLOIT_TARGET", "")
             _ua_profile = self._opsec.profile
@@ -1376,12 +1376,12 @@ class AutonomousOrchestrator:
         if not targets:
             return []
 
+        from tools.mcp_shared import _check_allowlist
         from tools.validation_utils import (
             is_local_target,
             is_private_or_local_target,
             resolve_target_to_ip,
         )
-        from tools.mcp_shared import _check_allowlist
 
         seen_ips: set[str] = set()
         kept: list[str] = []
@@ -1747,8 +1747,8 @@ class AutonomousOrchestrator:
         # tool, but runs inline here (Path B has no MCP session).
         if state.original_target and state.original_target != state.target:
             try:
-                from tools.validation_utils import is_fqdn, is_subdomain_of, resolve_target_to_ip
                 from tools.mcp_shared import add_discovered_target
+                from tools.validation_utils import is_fqdn, is_subdomain_of, resolve_target_to_ip
                 if is_fqdn(state.original_target):
                     logger.info(
                         f"[RECON] Domain target {state.original_target} -- "

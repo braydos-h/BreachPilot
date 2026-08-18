@@ -403,6 +403,8 @@ Engineering docs in [`docs/`](docs/):
 **Integrators**
 - [Runtime Skills](docs/skills.md): advisory skill pipeline
 - [Plugin Development](docs/plugin-development.md): out-of-tree plugins
+- [Attack Modules](docs/attack-modules.md): pre-packaged exploit logic
+
 
 **Contributors**
 - [Architecture](docs/architecture.md): system shape, entry points, persistence

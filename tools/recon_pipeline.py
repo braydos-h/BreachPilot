@@ -36,7 +36,7 @@ from typing import Any, Coroutine
 
 from tools.logging_setup import get_logger
 from tools.nmap_priv import apply_nmap_privilege, is_privilege_error
-from tools.validation_utils import is_fqdn, is_subdomain_of, resolve_target_to_ip, validate_ipv4
+from tools.validation_utils import is_fqdn, is_subdomain_of, validate_ipv4
 
 logger = get_logger()
 
@@ -1903,8 +1903,8 @@ class SecondaryEnumerator:
     def _stdlib_fetch(url: str, *, timeout: int = 15, method: str = "GET",
                       headers: dict[str, str] | None = None) -> tuple[int, dict[str, str], str]:
         """Default HTTP fetch (urllib). Returns (status, headers, body)."""
-        import urllib.request
         import urllib.error
+        import urllib.request
         req = urllib.request.Request(url, method=method)
         for k, v in (headers or {}).items():
             req.add_header(k, v)
