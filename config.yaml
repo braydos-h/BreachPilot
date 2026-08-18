@@ -188,6 +188,16 @@ autonomous:
   adaptive_replan: false
   max_cycles: 100
   max_pivot_depth: 0
+  # Phase 5: campaign-entry preflight (all opt-in, default off).
+  # dedup_targets: collapse duplicate IPs / CIDR overlap / hosts resolving
+  #   to the same IP before any scan fires.
+  # skip_non_routable: drop RFC1918/link-local/reserved addresses that are
+  #   not the operator's own host (those use the local-takeover playbook).
+  # hard_target_max_rounds: give up on a target after this many adaptive
+  #   rounds with no access achieved (0 = off, current behavior).
+  dedup_targets: false
+  skip_non_routable: false
+  hard_target_max_rounds: 0
 orchestrator:
   # D1: cross-mission semantic-memory consumer. When true, the autonomous
   # orchestrator builds a SemanticMemoryManager (from the ``memory`` config
@@ -201,6 +211,14 @@ recon:
   extended_enumerators: true
   udp_top_ports: 100
   shodan_api_key: ''
+  # Phase 5: pre-flight reachability probe (opt-in, default off). When true,
+  # recon_host runs a couple of bare TCP connects before the full Nmap -p-
+  # scan and bails to no_attack_surface when every probe port is definitively
+  # refused. Ambiguous (timeout/filtered) results fall through to the full
+  # scan so a firewalled-but-live host is never skipped.
+  preflight_probe: false
+  preflight_ports: [80, 443]
+  preflight_timeout_ms: 1000
   # Nmap retry budget. On Windows, nmap -sS/-O can hang on Npcap driver
   # issues; set max_retries: 0 to skip straight to the native Python socket
   # fallback instead of burning ~45s on 3 retries with 5-7.5s backoff.

@@ -49,25 +49,6 @@ from tools.attack_modules import (
 
 logger = get_logger()
 
-
-def _is_cidr(value: str) -> bool:
-    """True when ``value`` parses as a CIDR network (not a bare host).
-
-    Used by the campaign preflight's CIDR cap so a ``/16`` cannot spawn an
-    unbounded number of per-host campaigns. A bare IP literal or a domain is
-    not a CIDR and is never capped.
-    """
-    if not value or "/" not in value:
-        return False
-    import ipaddress as _ip
-
-    try:
-        net = _ip.ip_network(value, strict=False)
-    except ValueError:
-        return False
-    # A /32 is a single host, not a range -- don't treat it as a CIDR.
-    return net.num_addresses > 1
-
 # Process-wide UI singleton for operator-visible phase/action lines. The
 # orchestrator's phase handlers previously emitted only ``logger.info`` lines
 # (log file only), so an operator running the autonomous campaign saw no
@@ -1327,11 +1308,9 @@ class AutonomousOrchestrator:
         # duplicate IPs / CIDR overlap / hosts resolving to the same IP;
         # ``skip_non_routable`` drops RFC1918/link-local/reserved addresses
         # that are not the operator's own host (those are handled by the
-        # local-takeover playbook); ``max_targets_per_cidr`` caps CIDR
-        # expansion (0 = no expansion, preserves current behavior).
+        # local-takeover playbook).
         self._dedup_targets = bool(mission_config.get("dedup_targets", False))
         self._skip_non_routable = bool(mission_config.get("skip_non_routable", False))
-        self._max_targets_per_cidr = max(0, int(mission_config.get("max_targets_per_cidr", 0) or 0))
 
         # Phase 5: hard-target cutoff. After this many adaptive rounds with
         # zero novel candidate modules AND zero access achieved, give up on
@@ -1377,11 +1356,11 @@ class AutonomousOrchestrator:
 
         1. **Scope gate pre-check** -- every target must already be authorized
            via the same matcher the MCP tool layer uses
-           (``is_target_in_allowlist`` / ``check_targets_allowlist``). When
-           ``exploit.require_explicit_allowlist`` is False this is a no-op.
-           This is the "avoid stuff that can't be attacked" lock applied one
-           layer earlier: previously an unauthorized target still got a full
-           Nmap scan before the tool-layer gate ever fired.
+           (``_check_allowlist``). When ``exploit.require_explicit_allowlist``
+           is False this is a no-op. This is the "avoid stuff that can't be
+           attacked" lock applied one layer earlier: previously an unauthorized
+           target still got a full Nmap scan before the tool-layer gate ever
+           fired.
         2. **Non-routable filter** -- drop RFC1918 / link-local / reserved
            addresses that are not the operator's own host. Those are handled
            by the local-takeover playbook (``is_local_target``), not by a
@@ -1390,8 +1369,6 @@ class AutonomousOrchestrator:
         3. **Dedup by resolved IP** -- collapse duplicate IPs, CIDR overlap,
            and hosts resolving to the same IP. Domains that fail DNS are kept
            (they may still be attackable via the hostname).
-        4. **CIDR cap** -- when a CIDR was passed, cap the expanded list so a
-           ``/16`` cannot spawn 65534 campaigns.
 
         Returns the filtered list. Skips are recorded as timeline events on a
         fresh ``AttackState`` so they survive into ``attack_states.json``.
@@ -1408,7 +1385,6 @@ class AutonomousOrchestrator:
 
         seen_ips: set[str] = set()
         kept: list[str] = []
-        cidr_expanded: dict[str, int] = {}
 
         for target in targets:
             target = (target or "").strip()
@@ -1460,19 +1436,6 @@ class AutonomousOrchestrator:
                 logger.info(f"[PREFLIGHT] {target} duplicate of {dedup_key} -- skipping")
                 continue
             seen_ips.add(dedup_key)
-
-            # 4. CIDR cap. Track how many hosts a CIDR expands to; if it
-            # exceeds the configured cap, drop the overflow rather than
-            # spawning hundreds of campaigns. A literal IP or domain is
-            # unaffected (cap only applies to CIDR inputs).
-            if self._max_targets_per_cidr and "/" in target and _is_cidr(target):
-                cidr_expanded[target] = cidr_expanded.get(target, 0) + 1
-                if cidr_expanded[target] > self._max_targets_per_cidr:
-                    logger.info(
-                        f"[PREFLIGHT] {target} exceeded CIDR cap "
-                        f"{self._max_targets_per_cidr} -- skipping overflow host"
-                    )
-                    continue
 
             kept.append(target)
 
