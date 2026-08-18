@@ -22,8 +22,18 @@ class JWTTamper(AttackModule):
             "status": "script_generated",
             "module": self.name,
             "script": script,
-            "note": "Tests JWT algorithm confusion (none), HMAC key confusion, and weak HMAC secrets.",
+            "note": (
+                "Tests JWT algorithm confusion (none), HMAC key confusion, and weak "
+                "HMAC secrets. On ALG:NONE BYPASS SUCCESS the orchestrator sets "
+                "status=success and records the forged token."
+            ),
             "techniques": ["alg:none", "HMAC-to-RSA", "kid injection", "weak secret brute-force"],
+            "evidence": [f"JWT tamper probes queued against {ctx.target_ip}"],
+            "references": [
+                "https://nvd.nist.gov/vuln/detail/CVE-2015-9235",
+                "https://nvd.nist.gov/vuln/detail/CVE-2016-10555",
+                "https://portswigger.net/web-security/jwt",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:

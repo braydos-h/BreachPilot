@@ -85,6 +85,12 @@ class BasicAuthBuster(AttackModule):
             "module": self.name,
             "script": script,
             "note": "Tests basic creds against HTTP basic auth. May trip rate limits.",
+            "credentials_found": ["<VALID_CREDS: printed by script on SUCCESS>"],
+            "evidence": [f"basic-auth credential test queued against {ctx.target_ip}"],
+            "references": [
+                "https://owasp.org/www-community/attacks/Brute_force_attack",
+                "https://book.hacktricks.wiki/en/network-services-pentesting/pentesting-web.html",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -247,6 +253,11 @@ class XSSScanner(AttackModule):
             "module": self.name,
             "script": script,
             "note": "Tests common XSS payloads against URL parameters and forms.",
+            "evidence": [f"XSS payload injection queued against {ctx.target_ip}"],
+            "references": [
+                "https://owasp.org/www-community/attacks/xss/",
+                "https://portswigger.net/web-security/cross-site-scripting",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -299,6 +310,11 @@ class SSTIProbe(AttackModule):
             "module": self.name,
             "script": script,
             "note": "Probes for SSTI across Jinja2, Twig, Freemarker, Velocity, Smarty, and Mako engines.",
+            "evidence": [f"SSTI probes queued against {ctx.target_ip}"],
+            "references": [
+                "https://portswigger.net/web-security/server-side-template-injection",
+                "https://book.hacktricks.wiki/en/pentesting-web/ssti-server-side-template-injection/index.html",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -396,6 +412,11 @@ class GraphQLIntrospect(AttackModule):
             "module": self.name,
             "script": script,
             "note": "Extracts GraphQL schema via introspection, tests query depth limits, and batch attacks.",
+            "evidence": [f"GraphQL introspection queued against {ctx.target_ip}"],
+            "references": [
+                "https://portswigger.net/web-security/graphql",
+                "https://book.hacktricks.wiki/en/network-services-pentesting/pentesting-web/graphql.html",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -547,6 +568,11 @@ class RaceRequest(AttackModule):
             "module": self.name,
             "script": script,
             "note": "Sends concurrent requests to exploit race conditions in rate limits, coupon codes, and transactions.",
+            "evidence": [f"race-condition probes queued against {ctx.target_ip}"],
+            "references": [
+                "https://portswigger.net/web-security/race-conditions",
+                "https://book.hacktricks.wiki/en/pentesting-web/race-condition.html",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -671,6 +697,11 @@ class TimingOracle(AttackModule):
             "module": self.name,
             "script": script,
             "note": "Measures response time differences to detect user enumeration, blind SQLi, and timing oracles.",
+            "evidence": [f"timing-oracle measurements queued against {ctx.target_ip}"],
+            "references": [
+                "https://owasp.org/www-community/attacks/Timing_Attacks",
+                "https://portswigger.net/web-security/sql-injection/blind",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -803,6 +834,11 @@ class RequestSmuggling(AttackModule):
             "module": self.name,
             "script": script,
             "note": "Tests CL.TE, TE.CL, and TE.TE smuggling variants. Can poison caches and hijack requests.",
+            "evidence": [f"request-smuggling probes queued against {ctx.target_ip}"],
+            "references": [
+                "https://portswigger.net/web-security/request-smuggling",
+                "https://book.hacktricks.wiki/en/pentesting-web/http-request-smuggling.html",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -951,6 +987,11 @@ class SSRFProbe(AttackModule):
             "module": self.name,
             "script": script,
             "note": "Injects internal-target URLs (loopback, link-local metadata, internal service ports) into fetch/proxy params on ctx.target_ip. The target is asked to fetch — no third-party pivot.",
+            "evidence": [f"SSRF probes queued against {ctx.target_ip}"],
+            "references": [
+                "https://owasp.org/www-community/attacks/Server_Side_Request_Forgery",
+                "https://portswigger.net/web-security/ssrf",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:

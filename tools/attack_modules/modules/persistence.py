@@ -62,6 +62,17 @@ class LinuxPersistence(AttackModule):
                 f"Callback host: {cb_host}:{cb_port} -- must be in exploit.allowed_targets "
                 "or the terminal target-lock blocks the reverse connection."
             ),
+            "shell_type": "reverse",
+            "privilege_level": "root",
+            "evidence": [
+                f"cron/systemd/authorized_keys persistence queued against {ctx.target_ip}",
+                f"callback: {cb_host}:{cb_port}",
+            ],
+            "references": [
+                "https://attack.mitre.org/techniques/T1053/",
+                "https://attack.mitre.org/techniques/T1543/",
+                "https://attack.mitre.org/techniques/T1098/",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -181,6 +192,17 @@ class WindowsPersistence(AttackModule):
                 f"Callback host: {cb_host}:{cb_port} -- must be in exploit.allowed_targets "
                 "or the terminal target-lock blocks the beacon connection."
             ),
+            "shell_type": "reverse",
+            "privilege_level": "system",
+            "evidence": [
+                f"schtask/registry/service persistence queued against {ctx.target_ip}",
+                f"callback: {cb_host}:{cb_port}",
+            ],
+            "references": [
+                "https://attack.mitre.org/techniques/T1053/",
+                "https://attack.mitre.org/techniques/T1547/",
+                "https://attack.mitre.org/techniques/T1543/",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -263,6 +285,13 @@ class WebShellPersistence(AttackModule):
             "module": self.name,
             "script": script,
             "note": "Drops a web shell into common web roots (Apache/Nginx/IIS) for command execution persistence.",
+            "shell_type": "webshell",
+            "privilege_level": "user",
+            "evidence": [f"webshell persistence queued against {ctx.target_ip}"],
+            "references": [
+                "https://attack.mitre.org/techniques/T1505/",
+                "https://attack.mitre.org/techniques/T1190/",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:

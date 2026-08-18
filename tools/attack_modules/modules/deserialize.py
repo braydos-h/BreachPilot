@@ -20,7 +20,18 @@ class DeserializeAttack(AttackModule):
             "status": "script_generated",
             "module": self.name,
             "script": script,
-            "note": "Tests for Java (ysoserial-style), PHP, and .NET deserialization vulnerabilities.",
+            "note": (
+                "Tests for Java (ysoserial-style), PHP, and .NET deserialization "
+                "vulnerabilities. On a confirmed deserialization error leak the "
+                "orchestrator sets status=success with shell_type=rce (advisory -- "
+                "the gadget chain is realizable via ysoserial/phpggc)."
+            ),
+            "evidence": [f"deserialization probes queued against {ctx.target_ip}"],
+            "references": [
+                "https://nvd.nist.gov/vuln/detail/CVE-2015-4852",
+                "https://nvd.nist.gov/vuln/detail/CVE-2017-7525",
+                "https://portswigger.net/web-security/deserialization",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:

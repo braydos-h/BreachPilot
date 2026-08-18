@@ -73,10 +73,12 @@ class ModbusEnum(AttackModule):
                 "(FC 43/0x0E) with a Read Input Registers (FC 04) fallback to unit IDs "
                 "1..247. No write function codes (05/06/15/16) are used."
             ),
+            "evidence": [f"Modbus FC43 device-id enumeration; unit-id sweep 1-247 against {ctx.target_ip}"],
             "references": [
                 "modbus.org MODBUS Messaging on TCP/IP Implementation Guide v1.0b",
                 "MBFuncCode 43 Read Device Identification (Encapsulated Interface Transport)",
             ],
+            "suggested_command": f"nmap --script modbus-discovery -p 502 {ctx.target_ip}",
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -220,11 +222,13 @@ class DNP3Enum(AttackModule):
                 "(function code 1) for object group 60 (class 0 data) to outstation "
                 "addresses 1..10. Function codes 2/3/4 (operate/direct-out) are NOT used."
             ),
+            "evidence": [f"DNP3 outstation sweep (addr 1-10) against {ctx.target_ip}:20000"],
             "references": [
                 "IEEE 1815-2012 DNP3 standard",
                 "DNP3 function code 1 = READ (read-only); 2 = RESPOND, 3 = MULTI-RESPOND, "
                 "4 = RDB (read database) -- operate/direct-out variants are write-side",
             ],
+            "suggested_command": f"nmap --script dnp3-info -p 20000 {ctx.target_ip}",
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -365,10 +369,12 @@ class S7Enum(AttackModule):
                 "identification / 0x001C CPU identification). No PLC stop/start, "
                 "no block read/write of user data, no control commands."
             ),
+            "evidence": [f"S7 SZL identity read against {ctx.target_ip}:102"],
             "references": [
                 "ISO 8073 (COTP) / RFC 1006 (TPKT) over TCP 102",
                 "Siemens S7comm protocol notes -- SZL IDs 0x0011 (module) and 0x001C (CPU)",
             ],
+            "suggested_command": f"nmap --script s7-info -p 102 {ctx.target_ip}",
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -525,11 +531,13 @@ class BACnetEnum(AttackModule):
                 "property identifier 77 (object-name) and 28 (vendor-name). No "
                 "WriteProperty, no reinitializeDevice, no control commands."
             ),
+            "evidence": [f"BACnet Who-Is + ReadProperty sweep against {ctx.target_ip}:47808"],
             "references": [
                 "ASHRAE 135 (BACnet) standard",
                 "BACnet APDU: Who-Is = unconfirmed request, service 0x08; "
                 "ReadProperty = confirmed request, service 0x0C",
             ],
+            "suggested_command": f"nmap --script bacnet-info -p 47808 {ctx.target_ip}",
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -698,6 +706,7 @@ class HMIDefaultCred(AttackModule):
                 "detected login endpoint. Cred-CHECK against the owned target only, "
                 "consistent with BasicAuthBuster -- not credential_theft."
             ),
+            "evidence": [f"HMI default-cred check queued against {ctx.target_ip}"],
             "references": [
                 "Siemens WinCC / Inductive Automation Ignition / Schneider Magelis / "
                 "Advantech WebAccess default credentials (vendor documentation)",
@@ -876,6 +885,7 @@ class IoTDefaultCred(AttackModule):
                 "admin/<blank>) -- the well-known IoT default-cred problem -- against the "
                 "owned target only. Notes TR-069/CWMP on 7547 if open. READ-ONLY cred check."
             ),
+            "evidence": [f"IoT default-cred check queued against {ctx.target_ip}"],
             "references": [
                 "Mirai-class IoT default credentials (public threat reporting)",
                 "TR-069 / CWMP (Broadband Forum TR-069) on TCP/UDP 7547",

@@ -43,6 +43,7 @@ from tools.mcp_session import (
 )
 from tools.model_router import build_router, format_model_choice
 from tools.model_telemetry import usage_log_path, workspace_root_from_sources
+from tools.run_log import RunLog
 from tools.run_service.models import (
     EVENT_ARTIFACT,
     EVENT_BOOT,
@@ -694,6 +695,11 @@ class AssessmentService:
         resolved_domain = preview.resolved_domain
         mode = preview.mode
 
+        # Per-run run.log: tees all console output (ui.*, print) and every
+        # logging record in this process into reports/<run_id>/run.log so
+        # failures can be traced after the fact. See tools/run_log.py.
+        RunLog.attach(reports_dir)
+
         await event_sink.emit(EVENT_STATE, {"state": RunState.RUNNING.value})
 
         # Write session_state.json for --resume.
@@ -1053,6 +1059,7 @@ class AssessmentService:
                 await asyncio.wait_for(ticker_task, timeout=0.1)
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 pass
+            RunLog.detach()
 
         # Telemetry.
         _tel = _telemetry_acc.snapshot()
@@ -1176,7 +1183,7 @@ class AssessmentService:
         # result dict; RunManager._execute_run reads RunResult.cancelled.
         _cancelled_by_operator = bool(result.get("cancelled_by_operator", False))
 
-        return RunResult(
+        _final_run_result = RunResult(
             run_id=run_id, target_ip=target_ip, mode=mode,
             goal_name=_final_goal.name, goal_description=_final_goal.description,
             total_actions=result.get("total_actions", 0),
@@ -1196,6 +1203,8 @@ class AssessmentService:
             cancelled=_cancelled_by_operator,
             objective_transitions=list(_objective_transitions),
         )
+        RunLog.detach()
+        return _final_run_result
 
     # ------------------------------------------------------------------
     # Helpers

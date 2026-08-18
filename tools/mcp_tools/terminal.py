@@ -156,6 +156,29 @@ def _check_env_default_tools() -> list[str]:
     return out
 
 
+def _find_windows_bash(config: Any) -> str | None:
+    """Locate a bash binary for ``run_exploit_terminal`` on Windows.
+
+    Unix pipelines (``curl ... | head -100``) fail under cmd.exe because
+    head/tail/grep don't exist there; Git Bash provides them. Resolution
+    order: the configured ``exploit.shell`` on PATH, then common Git Bash
+    install paths. Returns None when no bash is available (cmd.exe fallback).
+    """
+    _shell = str((config or {}).get("exploit", {}).get("shell", "bash")) or "bash"
+    found = shutil.which(_shell)
+    if found:
+        return found
+    if _shell in ("bash", "sh"):
+        for _cand in (
+            Path(r"C:\Program Files\Git\bin\bash.exe"),
+            Path(r"C:\Program Files\Git\usr\bin\bash.exe"),
+            Path(r"C:\Program Files (x86)\Git\bin\bash.exe"),
+        ):
+            if _cand.exists():
+                return str(_cand)
+    return None
+
+
 def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
     workspace = ctx.workspace
     config = ctx.config
@@ -216,18 +239,33 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
         start = time.monotonic()
-        if _platform_system() == "Windows":
+        is_windows = _platform_system() == "Windows"
+        # The header is written by Python, never echoed by the shell wrapper:
+        # an ``echo COMMAND: ...`` line lets cmd.exe/bash parse ``|``/``>``/
+        # ``&&`` inside the command text -- ``curl ... | head -100`` turns the
+        # echo into a pipe (``head`` is not a cmd.exe command, the batch
+        # aborts, log comes back empty), and ``echo COMMAND: rm x > f`` would
+        # even execute the redirect. The wrapper only runs the command and
+        # records its exit code.
+        header = f"{'=' * 60}\nCOMMAND: {sanitized_command}\n{'=' * 60}\n"
+        log_path.write_text(header, encoding="utf-8", errors="replace")
+
+        # On Windows prefer Git Bash when available so Unix pipelines like
+        # ``curl ... | head -100`` actually work (cmd.exe has no head/tail/
+        # grep). ``exploit.shell`` config is honored on all platforms.
+        _bash_on_windows = _find_windows_bash(config) if is_windows else None
+        if is_windows and _bash_on_windows is None:
+            # cmd.exe fallback (no bash on the box): the wrapper appends
+            # command output to terminal.log itself.
             wrapper = attempt_dir / "run_exploit.cmd"
             wrapper.write_text(
                 f"@echo off\r\n"
                 f"title AI Exploit Terminal\r\n"
-                f"cd /d {attempt_dir}\r\n"
-                f"echo {'='*60} > terminal.log\r\n"
-                f"echo COMMAND: {sanitized_command} >> terminal.log\r\n"
-                f"echo {'='*60} >> terminal.log\r\n"
+                f"cd /d \"{attempt_dir}\"\r\n"
                 f"{sanitized_command} >> terminal.log 2>&1\r\n"
                 f"echo EXIT_CODE: %ERRORLEVEL% >> terminal.log\r\n",
                 encoding="ascii",
+                errors="replace",
             )
             proc = subprocess.Popen(
                 ["cmd.exe", "/c", str(wrapper)],
@@ -235,20 +273,22 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
             )
         else:
-            # Native Linux/macOS: run via the configured shell (default bash),
-            # capture output synchronously. ``exploit.shell`` lets an operator
-            # point this at zsh/sh/ash when bash isn't the login shell.
-            _shell = str((config or {}).get("exploit", {}).get("shell", "bash")) or "bash"
-            _shell_bin = shutil.which(_shell) or _shell
+            # Native Linux/macOS, or Windows with Git Bash: run via the shell
+            # (default bash) and capture output synchronously. ``exploit.shell``
+            # lets an operator point this at zsh/sh/ash when bash isn't the
+            # login shell.
+            if _bash_on_windows:
+                _shell_bin = _bash_on_windows
+            else:
+                _shell = str((config or {}).get("exploit", {}).get("shell", "bash")) or "bash"
+                _shell_bin = shutil.which(_shell) or _shell
             wrapper = attempt_dir / "run_exploit.sh"
             wrapper.write_text(
                 f"#!{_shell_bin}\n"
-                f"cd {attempt_dir}\n"
-                f"echo {'='*60}\n"
-                f"echo COMMAND: {sanitized_command}\n"
-                f"echo {'='*60}\n"
+                f"cd \"{attempt_dir}\"\n"
                 f"{sanitized_command} 2>&1\n"
-                f"echo EXIT_CODE: $?\n"
+                f"echo EXIT_CODE: $?\n",
+                encoding="utf-8",
             )
             wrapper.chmod(0o755)
             proc = subprocess.Popen(
@@ -264,12 +304,12 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
         # ``proc.stdout.read()`` deadlocks once the OS pipe buffer (~64KB)
         # fills — the child blocks writing, we block waiting for it to exit,
         # neither progresses. ``communicate`` drains the pipe concurrently
-        # while waiting, so arbitrarily large output completes. Windows has
-        # no PIPE here (output goes to a new console window + terminal.log),
-        # so it stays on ``wait()``.
+        # while waiting, so arbitrarily large output completes. The cmd.exe
+        # fallback has no PIPE here (output goes to a new console window +
+        # terminal.log), so it stays on ``wait()``.
         out_bytes: bytes | str | None = None
         try:
-            if _platform_system() == "Windows":
+            if is_windows and _bash_on_windows is None:
                 exit_code = proc.wait(timeout=timeout)
                 status = "completed" if exit_code == 0 else "failed"
             else:
@@ -279,7 +319,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
         except subprocess.TimeoutExpired:
             # M2: kill the whole process group so shell-spawned children die
             # with the parent instead of surviving the kill.
-            if _platform_system() == "Windows":
+            if is_windows:
                 try:
                     proc.kill()
                 except ProcessLookupError:
@@ -294,7 +334,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         pass
             # Drain any buffered output after the kill so we don't leak the
             # pipe FD or lose the partial output that was already produced.
-            if _platform_system() != "Windows":
+            if not (is_windows and _bash_on_windows is None):
                 try:
                     out_bytes, _ = proc.communicate(timeout=5)
                 except Exception:
@@ -305,11 +345,13 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
         elapsed = time.monotonic() - start
         # Read actual command output
         output_tail = ""
-        if _platform_system() != "Windows" and out_bytes is not None:
-            # Linux: output captured via communicate()
+        if out_bytes is not None:
+            # bash path: output captured via communicate(). Prepend the
+            # Python-written header so terminal.log reads the same on both
+            # platforms.
             try:
                 text = out_bytes.decode("utf-8", errors="replace") if isinstance(out_bytes, bytes) else str(out_bytes)
-                log_path.write_text(text, encoding="utf-8", errors="replace")
+                log_path.write_text(header + text, encoding="utf-8", errors="replace")
                 output_tail = text[-4000:]
             except Exception:
                 pass

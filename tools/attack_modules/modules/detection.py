@@ -68,16 +68,20 @@ class DetectionCoverageProbe(AttackModule):
         from tools.detection_coverage import detection_probe_plan
 
         plan = detection_probe_plan(ctx.target_ip)
-        return {
-            "status": "info",
-            "module": self.name,
-            "probe_plan": plan,
-            "target_ip": ctx.target_ip,
-            "note": (
+        return self._info_result(
+            ctx,
+            note=(
                 "Operator deploys these canaries against the authorized target "
                 "and correlates with their SIEM/IDS/FIM."
             ),
-        }
+            evidence=[f"Planned {len(plan)} canaries across categories: {', '.join(c.get('category', '?') for c in plan)}"],
+            references=[
+                "https://attack.mitre.org/techniques/T1078/",
+                "https://attack.mitre.org/techniques/T1105/",
+            ],
+            probe_plan=plan,
+            target_ip=ctx.target_ip,
+        )
 
 
 class LogSourceEnum(AttackModule):
@@ -129,17 +133,21 @@ class LogSourceEnum(AttackModule):
                  "note": "Legacy auth log (RHEL-family)"},
             ]
 
-        return {
-            "status": "info",
-            "module": self.name,
-            "log_sources": log_sources,
-            "os_family": os_family,
-            "target_ip": ctx.target_ip,
-            "note": (
+        return self._info_result(
+            ctx,
+            note=(
                 "Candidate log/audit sources only. The executor reads these "
                 "during authorized assessment; this module does not read them."
             ),
-        }
+            evidence=[f"Enumerated {len(log_sources)} candidate log sources for {os_family} target {ctx.target_ip}"],
+            references=[
+                "https://attack.mitre.org/techniques/T1078/",
+                "https://attack.mitre.org/techniques/T1110/",
+            ],
+            log_sources=log_sources,
+            os_family=os_family,
+            target_ip=ctx.target_ip,
+        )
 
 
 class OPSECPostureReport(AttackModule):
@@ -191,15 +199,19 @@ class OPSECPostureReport(AttackModule):
         if isinstance(total, int) and total == 0:
             recommendations.append("No audit actions recorded yet")
 
-        return {
-            "status": "info",
-            "module": self.name,
-            "opsec_profile": profile,
-            "footprint": footprint,
-            "recommendations": recommendations,
-            "target_ip": ctx.target_ip,
-            "note": (
+        return self._info_result(
+            ctx,
+            note=(
                 "Read-only OPSEC posture + audit footprint summary. The audit "
                 "trail is append-only/tamper-evident and is never mutated."
             ),
-        }
+            evidence=[f"OPSEC posture reported for {ctx.target_ip}: {len(recommendations)} recommendations"],
+            references=[
+                "https://attack.mitre.org/techniques/T1027/",
+                "https://attack.mitre.org/techniques/T1070/",
+            ],
+            opsec_profile=profile,
+            footprint=footprint,
+            recommendations=recommendations,
+            target_ip=ctx.target_ip,
+        )

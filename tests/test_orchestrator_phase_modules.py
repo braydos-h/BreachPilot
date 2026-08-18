@@ -66,10 +66,12 @@ def test_lateral_movement_is_phase_only_and_target_locked() -> None:
     mod = LateralMovement()
     ctx = _ctx(target_ip="10.0.0.99")
     res = mod.run(ctx)
-    assert res["status"] == "info"
+    # Phase 3: script_generated (not info) so the dispatcher actually runs the
+    # lateral_exec command -- status="info" is no longer counted as success.
+    assert res["status"] == "script_generated"
     assert res["extra"].get("phase_only") is True
-    # The suggested command must reference only the module's own target_ip.
-    assert "10.0.0.99" in res["suggested_command"]
+    # The script must reference only the module's own target_ip.
+    assert "10.0.0.99" in res["script"]
     # Phase-only modules declare no target_services -> service-match scoring is 0,
     # so they are never auto-selected by find_modules (orchestrator instantiates by name).
     assert mod.target_services == []
@@ -79,10 +81,11 @@ def test_validate_finding_is_phase_only_and_target_locked() -> None:
     mod = ValidateFinding()
     ctx = _ctx(target_ip="10.0.0.77")
     res = mod.run(ctx)
-    assert res["status"] == "info"
+    # Phase 3: script_generated so the re-verification actually dispatches.
+    assert res["status"] == "script_generated"
     assert res["extra"].get("phase_only") is True
-    assert "10.0.0.77" in res["suggested_command"]
-    assert "whoami" in res["suggested_command"]
+    assert "10.0.0.77" in res["script"]
+    assert "whoami" in res["script"]
     assert mod.target_services == []
 
 

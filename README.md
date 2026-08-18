@@ -20,7 +20,7 @@
 
 **An AI-driven, local-first penetration testing & bug bounty research agent.**
 
-Plan, reconnoiter, exploit, and report — end to end — against targets you own
+Plan, reconnoiter, exploit, and report end to end against targets you own
 or are explicitly authorized to assess. An autonomous operator that thinks in
 kill-chains, not checklists: it scouts the surface, picks the attack, runs it,
 proves the outcome with evidence, and writes the report. Powered by Ollama
@@ -36,7 +36,7 @@ Lab-only, target-locked, fully audited.
 > you own or have explicit written authorization to test, on a throwaway
 > operator box.
 >
-> **Attack mode ships as `full_access`** — every action is auto-approved with
+> **Attack mode ships as `full_access`**: every action is auto-approved with
 > no command-content or scope inspection. The operator-box filesystem is
 > unrestricted (`write_python_file` / `read_workspace_file` reach any path).
 > The single remaining attack-path safety is the **target-IP allowlist lock**,
@@ -52,22 +52,22 @@ Lab-only, target-locked, fully audited.
 
 A coupled assessment engine, not an nmap wrapper with a chatbot on top:
 
-- **Assessment controller** (`main.py` / `app.py`) — opens an MCP exploit
+- **Assessment controller** (`main.py` / `app.py`): opens an MCP exploit
   session, dispatches tool calls, streams live events to a CLI or browser.
-- **Defensive MCP server** (`mcp_server.py`) — scope-gated Nmap, sanitized
+- **Defensive MCP server** (`mcp_server.py`): scope-gated Nmap, sanitized
   vulnerability search, NVD CVE lookup. Read-only by design.
-- **Permissive exploit MCP server** (`mcp_exploit_server.py`, port 8001) —
+- **Permissive exploit MCP server** (`mcp_exploit_server.py`, port 8001):
   terminal, Python write/run, searchsploit, Metasploit, msfvenom, impacket
   lateral movement, credential dumping, kerberoasting, web scanning, hash
   cracking. Gated by the target-IP allowlist lock at the tool layer.
-- **Multi-agent swarm** (`tools/swarm/`) — 6 specialist agents (recon, vuln,
+- **Multi-agent swarm** (`tools/swarm/`): 6 specialist agents (recon, vuln,
   exploit, post-exploit, critic, reflection) with a shared blackboard.
-- **Autonomous attack orchestrator** (`tools/autonomous_orchestrator.py`) —
+- **Autonomous attack orchestrator** (`tools/autonomous_orchestrator.py`):
   persistent multi-phase campaigns with adaptive aggression, vuln chaining,
   and auto-retry.
-- **Runtime skills system** — 140 advisory `SKILL.md` files indexed,
+- **Runtime skills system**: 140 advisory `SKILL.md` files indexed,
   deterministically + semantically selected, injected into LLM context per
-  phase. Advisory only — never grants execution authority.
+  phase. Advisory only, never grants execution authority.
 - **Bundled WebUI** (React + Vite + TypeScript) served by a loopback-only
   REST + WebSocket API daemon.
 
@@ -82,7 +82,7 @@ For the full architecture, Flow A/B split, and module map, see
   the same code path runs against it. Embeddings stay local via
   `nomic-embed-text`.
 - **Multi-model war room.** Ask Kimi K2.6, DeepSeek V4 Pro/Flash, GLM-5.2,
-  and Minimax M3 for advisory ideas mid-run — peers have no tool schemas and
+  and Minimax M3 for advisory ideas mid-run. Peers have no tool schemas and
   cannot execute commands.
 - **140-skill advisory brain.** Each `SKILL.md` carries NIST CSF + MITRE
   ATT&CK metadata. Selected deterministically + semantically, re-selected
@@ -96,8 +96,8 @@ For the full architecture, Flow A/B split, and module map, see
   Chain validity is verified and surfaced in the WebUI.
 - **Target-aware OPSEC.** Pacing, UA rotation, DNS-over-HTTPS, and
   quiet-command hints auto-disable for private/local IPs and engage for
-  public-routable targets. Advisory-only — never a gate.
-- **Domain targeting.** Pass `--target example.com` — the agent resolves it,
+  public-routable targets. Advisory-only, never a gate.
+- **Domain targeting.** Pass `--target example.com`; the agent resolves it,
   expands subdomains (crt.sh + DNS bruteforce + subfinder/amass), and
   auto-authorizes each discovered host through the allowlist lock.
 - **Long-session mode.** Opt-in multi-hour runs send the model's real context
@@ -105,7 +105,7 @@ For the full architecture, Flow A/B split, and module map, see
   compacted state for crash recovery.
 - **Eval harness.** Benchmark against target labs with JSON/Markdown/HTML
   reports under `reports/eval/<run_id>/`.
-- **179-test suite, all mocked.** No live Nmap, no live network — every test
+- **179-test suite, all mocked.** No live Nmap, no live network: every test
   mocks subprocess/network and runs offline.
 
 ## Quick start
@@ -114,12 +114,12 @@ For the full architecture, Flow A/B split, and module map, see
 
 - **Python 3.11+** (the `--doctor` check rejects 3.10)
 - `nmap` on `PATH` (or set `nmap.path` in `config.yaml`)
-- An Ollama endpoint — **cloud is the default** (`https://api.ollama.com`,
+- An Ollama endpoint: **cloud is the default** (`https://api.ollama.com`,
   needs `OLLAMA_API_KEY`) or a local daemon (`ollama.host:
   http://localhost:11434`)
 - Optional, Linux full arsenal: Metasploit, searchsploit, impacket, tmux
 - For the WebUI: Node.js + npm (only on first `--web` run)
-- **Optional — ChatGPT provider:** [bun](https://bun.sh) ≥ 1.3.11 to run the
+- **ChatGPT provider (optional):** [bun](https://bun.sh) ≥ 1.3.11 to run the
   vendored `oauth/` proxy from source (only when `models.provider:
   chatgpt`). A local Ollama is still required for embeddings even under the
   ChatGPT provider. See [docs/providers.md](docs/providers.md).
@@ -142,9 +142,9 @@ python -m pip install -r requirements.txt
 ```
 
 Linux nmap `-O`/`-sS` need root: set `nmap.sudo: true` (uses `sudo -n`) or run
-as root — otherwise `nmap.priv_fallback` (default true) auto-downgrades.
+as root; otherwise `nmap.priv_fallback` (default true) auto-downgrades.
 
-**Optional — ChatGPT provider one-time setup** (only if you'll set
+**ChatGPT provider one-time setup** (only if you'll set
 `models.provider: chatgpt`):
 
 ```bash
@@ -152,14 +152,14 @@ cd openai-oauth && bun install && cd ..   # bun@1.3.11; makes ./src/cli.ts runna
 ```
 
 `install.bat` / `install.sh` / `scripts/setup-linux.sh` run this best-effort
-when `bun` is on PATH — it never aborts the install if bun is missing, since
+when `bun` is on PATH; it never aborts the install if bun is missing, since
 ChatGPT is opt-in. No global Codex CLI install is required.
 
 ### 3. Configure API keys (before `--doctor`)
 
 The default cloud path requires `OLLAMA_API_KEY` or the doctor's Ollama
 reachability check will 401. Keys are read from **process environment
-variables** or `secr.json` — there is no `.env` auto-load. Set them with:
+variables** or `secr.json`; there is no `.env` auto-load. Set them with:
 
 ```bash
 python main.py --setup-api-keys      # prompts + writes secr.json (gitignored)
@@ -179,7 +179,7 @@ shell-load workflow, but the app itself does not read `.env`.
 > **ChatGPT provider** (opt-in, `models.provider: chatgpt`) does **not** use an
 > env API key. It authenticates via a browser "Sign in with ChatGPT" OAuth flow
 > whose tokens live in `~/.codex/auth.json` (managed by the vendored
-> `oauth/` proxy) — they are never copied into `config.yaml` or logged.
+> `oauth/` proxy). They are never copied into `config.yaml` or logged.
 > Run `python main.py` → choose **ChatGPT** → **Sign in with ChatGPT**, or see
 > [docs/providers.md](docs/providers.md).
 
@@ -196,8 +196,8 @@ python main.py --menu            # terminal interactive menu (legacy)
 a 1-token generation (the programmatic `ollama run`); local models report a
 `ollama pull <spec>` hint if missing. When `models.provider: chatgpt`, the
 doctor adds a ChatGPT block: openai-oauth source found, runtime (bun/node) on
-PATH, OAuth login present, proxy running, and `/v1/models` reachable — **never
-displaying token contents**.
+PATH, OAuth login present, proxy running, and `/v1/models` reachable. It never
+displays token contents.
 
 ## Choose an interface
 
@@ -273,10 +273,10 @@ target-locked**.
 
 | Context | Effective permission |
 |---|---|
-| `--mode recon` | Always `read_only` — gathers and proposes, no offensive execution |
+| `--mode recon` | Always `read_only`: gathers and proposes, no offensive execution |
 | `--mode attack` | Uses `exploit.permission` from `config.yaml` |
-| Shipped attack default | **`full_access`** — auto-approves every action, no content/scope inspection |
-| Safer attack posture | `approve_only` — prints an approval banner per action |
+| Shipped attack default | **`full_access`**: auto-approves every action, no content/scope inspection |
+| Safer attack posture | `approve_only`: prints an approval banner per action |
 
 **The one attack-mode safety: the target-IP allowlist lock**, enforced at the
 MCP tool layer (`tools/mcp_shared._allowed_target_list` +
@@ -318,19 +318,19 @@ All runtime behavior lives in **`config.yaml`**. Key sections:
 | `chatgpt` | opt-in ChatGPT provider: `base_url` (loopback `127.0.0.1:10531`), `auto_start`, `local_repo`, `runtime`, `default_model`, `context_window`, discovery/login/proxy timeouts |
 | `exploit` | permission, attack_mode, timeouts, `allowed_targets`, `require_explicit_allowlist`, AD/Kerberos suite, MSF recipes, listeners |
 | `opsec` | target-aware OPSEC (pacing, UA rotation, DoH, `local_targets_off`) |
-| `cve_lookup` | NVD CVE lookup: rate limit, circuit breaker, `epss_enabled`/`kev_enabled` (EPSS + CISA KEV enrichment, lab default `true` — live out-of-the-box), `kev_cache_ttl_seconds`/`kev_cache_path`, `github.token_env` (`GITHUB_TOKEN`, shared with threat_intel + github_dorks) |
+| `cve_lookup` | NVD CVE lookup: rate limit, circuit breaker, `epss_enabled`/`kev_enabled` (EPSS + CISA KEV enrichment, lab default `true`, live out of the box), `kev_cache_ttl_seconds`/`kev_cache_path`, `github.token_env` (`GITHUB_TOKEN`, shared with threat_intel + github_dorks) |
 | `threat_intel` | continuous OSV.dev + GitHub Security Advisories + CISA KEV feed ingestion (`search_threat_intel` MCP tool). Advisory-only, never touches the target. `enabled` (lab default `true`), `cache_dir`/`cache_ttl_seconds`, `sources` (osv/ghsa/kev/exploitdb_rss), `max_results`, `github_token_env`. Reuses `cve_lookup`'s KEV catalog. GHSA degrades to osv+kev when `GITHUB_TOKEN` is unset |
 | `swarm` | agents, `parallel_enabled`, `per_phase_concurrency`, `negotiation_rounds` (bounded critic↔exploit loop; 0 = legacy one-shot, 2 = lab default) |
-| `witness` | advisory audit-stream watcher (`enabled`, `log_path`, `poll_interval_seconds`, `escalate_to_event_broker`) — flags anomalies mid-run (allowlist breach, PoC escape, perm escalation, prompt injection, DoS drift), never blocks; lab default ON for telemetry |
+| `witness` | advisory audit-stream watcher (`enabled`, `log_path`, `poll_interval_seconds`, `escalate_to_event_broker`): flags anomalies mid-run (allowlist breach, PoC escape, perm escalation, prompt injection, DoS drift), never blocks; lab default ON for telemetry |
 | `autonomous` | persistence phase, checkpoint, `adaptive_replan`, `max_cycles` |
-| `orchestrator` | `semantic_memory` (cross-mission lesson consumer for the autonomous orchestrator; lab default `true` — matches `memory.semantic_enabled`) |
-| `recon` | extended enumerators, UDP top-ports, `shodan_api_key` (wired into the `shodan_recon` plugin — passive OSINT, advisory-only), domain resolution |
+| `orchestrator` | `semantic_memory` (cross-mission lesson consumer for the autonomous orchestrator; lab default `true`, matching `memory.semantic_enabled`) |
+| `recon` | extended enumerators, UDP top-ports, `shodan_api_key` (wired into the `shodan_recon` plugin: passive OSINT, advisory-only), domain resolution |
 | `skills` | selection, re-selection, feedback, semantic matching, `maybe_enabled` (gates the `skills/maybe/` opt-in pack; default `false`) |
 | `outcome_judgment` | evidence-grounded verdicts (`flow_a` wires OutcomeJudge into Flow A; `peer_review` enables cross-model outcome grading) |
-| `poc_verification` | self-healing PoC verification (Killer Feature #3): `cve_to_exploit_synth` syntax-checks its PoC inline; `verify_poc` MCP tool compile-tests in isolated Docker (`--network=none --read-only --memory=256m`) |
-| `replay_simulator` | pre-commit attack-plan critique (`replay_simulate` MCP tool — LLM critiques its own plan against saved ReconAssessment; rule-based fallback) |
+| `poc_verification` | self-healing PoC verification: `cve_to_exploit_synth` syntax-checks its PoC inline; `verify_poc` MCP tool compile-tests in isolated Docker (`--network=none --read-only --memory=256m`) |
+| `replay_simulator` | pre-commit attack-plan critique (`replay_simulate` MCP tool: LLM critiques its own plan against saved ReconAssessment, with rule-based fallback) |
 | `api` | WebUI daemon host/port/token/origins, `graph_route` (attack-path DAG), `max_concurrent_runs` (D3: N concurrent runs for wide-scope assessments; lab default 3; set 1 for legacy single-run 409), `multi_operator` (D4: user accounts + annotations; lab default true, loopback-only) |
-| `ics` | D8: `allow_write` (lab default **true** — operator runs against owned PLCs; physical-damage risk). Write-side ICS modules are DESTRUCTIVE. Dual-gated: `@require_allowlist` on `run_attack_module` AND `ics.allow_write: true`. Set false for read-only ICS enum |
+| `ics` | D8: `allow_write` (lab default **true**: operator runs against owned PLCs; physical-damage risk). Write-side ICS modules are DESTRUCTIVE. Dual-gated: `@require_allowlist` on `run_attack_module` AND `ics.allow_write: true`. Set false for read-only ICS enum |
 | `long_session` | multi-hour mode, request timeout, checkpoint |
 | `plugins` | out-of-tree plugin enable/disable, search paths, entry points |
 | `webhook_notify` | outbound Slack/Discord run-status notifications (url, event filter, retry/backoff) |
@@ -355,7 +355,7 @@ python -m pytest tests/ -v -k "scope"                   # by keyword
 python -m pytest --cov=tools --cov=main.py --cov=cli.py # coverage
 ```
 
-All tests mock subprocess/network — no live Nmap, no live network. pytest
+All tests mock subprocess/network: no live Nmap, no live network. pytest
 config: `asyncio_mode = "auto"`, `testpaths = ["tests"]`.
 
 ### Lint (opt-in, no CI)
@@ -372,18 +372,18 @@ ruff check .                        # line-length 120, select E/F/W/I, E501 igno
 
 Out-of-tree extensions managed by `tools/plugins.py` (pure stdlib). A plugin
 can contribute an attack module, MCP tools, a skills directory, and a config
-section. Plugins are disabled by default — enable via `config plugins.enabled`.
+section. Plugins are disabled by default; enable via `config plugins.enabled`.
 A reference plugin lives at `plugins/example_recon_report/`. See
 [`docs/plugin-development.md`](docs/plugin-development.md).
 
-Shipped plugins (lab build: enabled by default; two-gate enablement —
-`plugins.enabled` + the API key/token in `config.yaml`):
+Shipped plugins (lab build: enabled by default; enabling requires both
+`plugins.enabled` and the API key/token in `config.yaml`):
 
-- **`shodan_recon`** — passive Shodan OSINT (`shodan_host_lookup`,
+- **`shodan_recon`**: passive Shodan OSINT (`shodan_host_lookup`,
   `shodan_search` MCP tools). Advisory-only, never touches the target.
   Requires `recon.shodan_api_key`; MCP tool returns `BLOCKED:` when unset.
   Pure stdlib (urllib).
-- **`github_dorks`** — authorized-target code-leak discovery
+- **`github_dorks`**: authorized-target code-leak discovery
   (`search_github_dorks` MCP tool). Runs curated dorks against a target
   org's public GitHub repos. Requires `GITHUB_TOKEN`
   (`cve_lookup.github.token_env`); MCP tool returns `BLOCKED:` when unset.
@@ -394,35 +394,35 @@ Shipped plugins (lab build: enabled by default; two-gate enablement —
 Engineering docs in [`docs/`](docs/):
 
 **Operators**
-- [Getting Started](docs/getting-started.md) — setup, common commands, dev loop
-- [Model Providers](docs/providers.md) — Ollama (default) + ChatGPT (openai-oauth), proxy/login lifecycle
-- [Safety Model](docs/safety-model.md) — scope, risk, permission, audit
-- [WebUI](docs/webui.md) — the bundled React/Vite SPA
-- [WebUI API](docs/api.md) — `/api/v1` REST + WebSocket reference
+- [Getting Started](docs/getting-started.md): setup, common commands, dev loop
+- [Model Providers](docs/providers.md): Ollama (default) + ChatGPT (openai-oauth), proxy/login lifecycle
+- [Safety Model](docs/safety-model.md): scope, risk, permission, audit
+- [WebUI](docs/webui.md): the bundled React/Vite SPA
+- [WebUI API](docs/api.md): `/api/v1` REST + WebSocket reference
 
 **Integrators**
-- [Runtime Skills](docs/skills.md) — advisory skill pipeline
-- [Plugin Development](docs/plugin-development.md) — out-of-tree plugins
+- [Runtime Skills](docs/skills.md): advisory skill pipeline
+- [Plugin Development](docs/plugin-development.md): out-of-tree plugins
 
 **Contributors**
-- [Architecture](docs/architecture.md) — system shape, entry points, persistence
-- [Runtime Flows](docs/runtime-flows.md) — recon, execution, exploitation, swarm, MCP
-- [Module Guide](docs/module-guide.md) — responsibilities of top-level modules
-- [Extension Guide](docs/extension-guide.md) — exact edit points for in-tree changes
-- [Testing Guide](docs/testing-guide.md) — test layout, focused commands
-- [`AGENTS.md`](AGENTS.md) — compact agent guide with non-obvious rules
-- [`CLAUDE.md`](CLAUDE.md) — architecture/safety depth for AI coding agents
+- [Architecture](docs/architecture.md): system shape, entry points, persistence
+- [Runtime Flows](docs/runtime-flows.md): recon, execution, exploitation, swarm, MCP
+- [Module Guide](docs/module-guide.md): responsibilities of top-level modules
+- [Extension Guide](docs/extension-guide.md): exact edit points for in-tree changes
+- [Testing Guide](docs/testing-guide.md): test layout, focused commands
+- [`AGENTS.md`](AGENTS.md): compact agent guide with non-obvious rules
+- [`CLAUDE.md`](CLAUDE.md): architecture/safety depth for AI coding agents
 
 ## Contributing
 
-1. Read [`AGENTS.md`](AGENTS.md) first — it lists the non-obvious rules you
+1. Read [`AGENTS.md`](AGENTS.md) first: it lists the non-obvious rules you
    will otherwise break.
 2. Run `python main.py --doctor` and `python main.py --self-test` after
    safety-sensitive changes.
 3. Run `python -m pytest tests/ -v` before opening a PR. No CI is configured.
 4. Do not edit Flow B safety files (`scope_gate.py`, `safety_reviewer.py`,
    Flow B's `agent_loop.py`/`tool_router.py`/`risk_controller.py`/`mission.py`/
-   `db.py`) — recon safety depends on them.
+   `db.py`): recon safety depends on them.
 5. New exploit MCP tools must be registered twice: `@audit_tool` in
    `tools/mcp_tools/<family>.py`, then added to the tool list in
    `mcp_exploit_server.py`. Target-touching tools require a target IP and
@@ -432,7 +432,7 @@ Engineering docs in [`docs/`](docs/):
 
 ## License
 
-NetAttackAI — Copyright (c) 2026 NetAttackAI contributors.
+NetAttackAI, Copyright (c) 2026 NetAttackAI contributors.
 
 Licensed under the **GNU General Public License v3.0 only**. See
 [`LICENSE`](LICENSE) for the full text.

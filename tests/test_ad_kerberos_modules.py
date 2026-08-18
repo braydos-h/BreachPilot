@@ -54,7 +54,9 @@ class TestClassAttrs:
         assert m.name == "Kerberoasting"
         assert m.target_services == ["kerberos"]
         assert 88 in m.target_ports
-        assert 464 in m.target_ports
+        # Phase 3: 464 (kpasswd) is not used by Kerberoasting; 389 (LDAP) is
+        # where GetUserSPNs enumerates SPN-backed accounts.
+        assert 389 in m.target_ports
         assert m.required_cves == []
         assert m.description
 

@@ -31,8 +31,14 @@ class ExposedVCS(AttackModule):
             "note": (
                 "Read-only detection of exposed VCS metadata on the target. If a live "
                 ".git/HEAD is found, .git/config is downloaded to leak remote URLs / paths. "
-                "No write operations; targets only ctx.target_ip."
+                "No write operations; targets only ctx.target_ip. Remote URLs / tokens in "
+                ".git/config feed CredentialSpray against the upstream VCS host."
             ),
+            "evidence": [f"exposed-VCS detection queued against {ctx.target_ip}"],
+            "references": [
+                "https://attack.mitre.org/techniques/T1592/",
+                "https://attack.mitre.org/techniques/T1552/",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -100,8 +106,14 @@ class CICDMisconfig(AttackModule):
             "note": (
                 "Read-only detection of exposed CI/CD config + server fingerprints on the "
                 "target. Reports leaked secrets/injected env indicators. No writes; targets "
-                "only ctx.target_ip."
+                "only ctx.target_ip. CI injection points chain to WebShellUpload; leaked "
+                "secrets chain to HashCrack / CredentialSpray."
             ),
+            "evidence": [f"CI/CD misconfig detection queued against {ctx.target_ip}"],
+            "references": [
+                "https://attack.mitre.org/techniques/T1190/",
+                "https://attack.mitre.org/techniques/T1552/",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -200,21 +212,23 @@ class DependencyConfusion(AttackModule):
             "4. Build the risk list (package name, manifest, internal indicator, public-registry claim status) and report it back to the operator.",
             "5. Detection only. Do NOT register, publish, or squat any package in a public registry -- doing so would attack third-party infrastructure outside the operator's authorization. This module reports risk; it never performs the registration step.",
         ]
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": (
+        return self._info_result(
+            ctx,
+            note=(
                 "Detection-only dependency-confusion risk assessment against ctx.target_ip. "
                 "Reports internal package names that are unclaimed in public registries. "
                 "Explicitly forbids registering a malicious package in a public registry "
-                "(that attacks third-party infrastructure the operator does not own)."
+                "(that attacks third-party infrastructure the operator does not own). "
+                "The generated script checks unclaimed status via read-only GETs to "
+                "pypi.org / registry.npmjs.org JSON APIs (404 = unclaimed)."
             ),
-            "workflow": workflow,
-            "references": [
+            evidence=[f"dependency-confusion risk assessment queued against {ctx.target_ip}"],
+            references=[
                 "https://blog.sonatype.com/dependency-confusion",
                 "https://nvd.nist.gov/vuln/detail/CVE-2021-24105 (dependency-confusion concept)",
             ],
-        }
+            workflow=workflow,
+        )
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
         return ""
@@ -245,8 +259,14 @@ class ArtifactExposure(AttackModule):
             "note": (
                 "Read-only detection of exposed sensitive artifacts on the target. Reports "
                 "200/403/404 status for each path; does not exfiltrate secret contents beyond "
-                "a small banner peek. No writes; targets only ctx.target_ip."
+                "a small banner peek. No writes; targets only ctx.target_ip. Leaked AWS keys / "
+                "VCS tokens / private keys chain to CredentialSpray / HashCrack."
             ),
+            "evidence": [f"artifact-exposure detection queued against {ctx.target_ip}"],
+            "references": [
+                "https://attack.mitre.org/techniques/T1552/",
+                "https://attack.mitre.org/techniques/T1213/",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -317,22 +337,22 @@ class SupplyChainRecon(AttackModule):
             "5. Call fetch_webpage on any security advisory / GHSA / vendor bulletin URLs returned by steps 3-4 to enrich the report.",
             "6. Produce a supply-chain CVE report: dependency, version, CVE list, advisory references, exploit availability. Do NOT download or execute untrusted third-party packages.",
         ]
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": (
+        return self._info_result(
+            ctx,
+            note=(
                 "Orchestrator module. Combines exposed-repo and manifest findings into a "
                 "per-dependency supply-chain CVE report by routing through search_cve_intel, "
                 "search_web_exploit, and fetch_webpage. Detection / reporting only -- does not "
                 "download or execute untrusted third-party packages. Targets only ctx.target_ip."
             ),
-            "workflow": workflow,
-            "references": [
+            evidence=[f"supply-chain CVE report queued against {ctx.target_ip}"],
+            references=[
                 "https://nvd.nist.gov/",
                 "https://github.com/advisories",
                 "https://osv.dev/",
             ],
-        }
+            workflow=workflow,
+        )
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
         return ""
