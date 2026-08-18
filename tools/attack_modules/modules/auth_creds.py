@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from tools.attack_modules.base import AttackModule, ModuleContext
-import json
 from typing import Any
+
+from tools.attack_modules.base import AttackModule, ModuleContext
+
 
 class CredentialSpray(AttackModule):
     name = "CredentialSpray"
@@ -155,10 +156,10 @@ class HashCrack(AttackModule):
             evidence=["<CRACKED_POT: exploit_workspace/<ip>/<attempt>/hash.txt.potfile>"],
             references=["https://hashcat.net/wiki/doku.php?id=example_hashes"],
             suggested_commands=[
-                f"run_hash_crack(hash_value='<hash>', tool='hashcat')  # auto-identifies mode",
-                f"hashcat -m 1000 -a 3 ntlm_hashes.txt ?l?l?l?l?l?l?l?l",
-                f"hashcat -m 5600 -a 0 netntlmv2_hashes.txt rockyou.txt -r best64.rule",
-                f"john --wordlist=rockyou.txt --rules hashes.txt",
+                "run_hash_crack(hash_value='<hash>', tool='hashcat')  # auto-identifies mode",
+                "hashcat -m 1000 -a 3 ntlm_hashes.txt ?l?l?l?l?l?l?l?l",
+                "hashcat -m 5600 -a 0 netntlmv2_hashes.txt rockyou.txt -r best64.rule",
+                "john --wordlist=rockyou.txt --rules hashes.txt",
             ],
             hash_modes={
                 "0": "MD5",

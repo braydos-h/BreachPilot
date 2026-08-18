@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from tools.attack_modules.base import AttackModule, ModuleContext
-import json
-import base64
 from typing import Any
+
+from tools.attack_modules.base import AttackModule, ModuleContext
+
 
 class DeserializeAttack(AttackModule):
     name = "DeserializeAttack"

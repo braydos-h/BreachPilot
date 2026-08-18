@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import pytest
 
-from tools.attack_modules.base import ModuleContext
 from tools.attack_modules import registry
+from tools.attack_modules.base import ModuleContext
 from tools.attack_modules.modules.orchestrator_phases import (
-    TokenImpersonation,
-    ServiceMisconfiguration,
     LateralMovement,
+    ServiceMisconfiguration,
+    TokenImpersonation,
     ValidateFinding,
 )
 
@@ -150,7 +150,7 @@ async def test_privesc_phase_appends_les_when_access_achieved(tmp_path, monkeypa
     """When auto_les is on AND access_achieved, the privesc phase dispatches a
     LocalExploitSuggester info-task after the privesc batch. When access is NOT
     achieved, no LES task is dispatched."""
-    from tools.autonomous_orchestrator import AttackState, AggressionLevel
+    from tools.autonomous_orchestrator import AggressionLevel, AttackState
 
     o = _orchestrator({"target": "10.0.0.1", "msf_auto_les": True}, tmp_path)
     state = AttackState(target="10.0.0.1", aggression=AggressionLevel.NORMAL)
@@ -182,8 +182,7 @@ async def test_privesc_phase_appends_les_when_access_achieved(tmp_path, monkeypa
 
 @pytest.mark.asyncio
 async def test_privesc_phase_no_les_when_flag_off(tmp_path, monkeypatch) -> None:
-    from tools.autonomous_orchestrator import AttackState, AggressionLevel
-    from tools.autonomous_orchestrator import TaskStatus
+    from tools.autonomous_orchestrator import AggressionLevel, AttackState, TaskStatus
 
     o = _orchestrator({"target": "10.0.0.1"}, tmp_path)  # auto_les off
     assert o._auto_local_exploit_suggester is False

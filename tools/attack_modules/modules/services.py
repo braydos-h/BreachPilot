@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from tools.attack_modules.base import AttackModule, ModuleContext
 from typing import Any
+
+from tools.attack_modules.base import AttackModule, ModuleContext
+
 
 class RDPBlueKeep(AttackModule):
     name = "RDPBlueKeep"

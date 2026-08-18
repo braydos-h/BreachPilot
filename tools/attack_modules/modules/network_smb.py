@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from tools.attack_modules.base import AttackModule, ModuleContext
-import json
 from typing import Any
+
+from tools.attack_modules.base import AttackModule, ModuleContext
+
 
 class SMBGhost(AttackModule):
     name = "SMBGhost"
@@ -99,8 +100,8 @@ class SMBRelay(AttackModule):
                 "https://github.com/fortra/impacket/blob/master/examples/ntlmrelayx.py",
             ],
             suggested_command=(
-                f"ntlmrelayx.py -tf targets.txt -smb2support -c 'whoami' "
-                f"# relay victim must be in exploit.allowed_targets"
+                "ntlmrelayx.py -tf targets.txt -smb2support -c 'whoami' "
+                "# relay victim must be in exploit.allowed_targets"
             ),
             prerequisites=["SMB signing disabled on relay target", "relay victim allowlisted"],
         )

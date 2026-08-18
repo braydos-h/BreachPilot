@@ -132,7 +132,7 @@ class KernelExploitCheck(AttackModule):
                 "https://github.com/lucyoa/kernel-exploits",
                 "https://nvd.nist.gov/vuln/detail/CVE-2021-4034",
             ],
-            suggested_command=f"uname -a && cat /etc/os-release && search_exploit_db(query='linux kernel local privilege escalation')",
+            suggested_command="uname -a && cat /etc/os-release && search_exploit_db(query='linux kernel local privilege escalation')",
         )
 
 class ContainerBreakout(AttackModule):

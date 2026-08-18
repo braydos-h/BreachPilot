@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import base64
-import hmac
-import json
 from typing import Any
 
 from tools.attack_modules.base import AttackModule, ModuleContext
+
 
 class JWTTamper(AttackModule):
     name = "JWTTamper"

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from tools.attack_modules.base import AttackModule, ModuleContext
 from typing import Any
+
+from tools.attack_modules.base import AttackModule, ModuleContext
+
 
 class Log4jRCE(AttackModule):
     name = "Log4jRCE"
