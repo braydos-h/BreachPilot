@@ -23,6 +23,7 @@ import type { GraphEdge, GraphNode } from "@/api/types";
 interface AttackGraphDagProps {
   runId: string;
   className?: string;
+  height?: number;
 }
 
 const NODE_STYLE: Record<GraphNode["type"], { bg: string; border: string; label: string }> = {
@@ -72,7 +73,7 @@ function toFlowEdges(edges: GraphEdge[]): Edge[] {
   }));
 }
 
-export function AttackGraphDag({ runId, className }: AttackGraphDagProps) {
+export function AttackGraphDag({ runId, className, height = 360 }: AttackGraphDagProps) {
   const { data, isLoading, error } = useRunGraph(runId);
 
   if (isLoading) {
@@ -127,7 +128,7 @@ export function AttackGraphDag({ runId, className }: AttackGraphDagProps) {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div style={{ height: 360 }} className="rounded-md border bg-background">
+          <div style={{ height }} className="rounded-md border bg-background">
             <ReactFlow
               nodes={flowNodes}
               edges={flowEdges}

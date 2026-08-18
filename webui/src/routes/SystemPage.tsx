@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Loader2, Plus, RefreshCw, ShieldCheck, Stethoscope, Trash2, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,6 @@ import {
   useAddModel,
   useDiagnostics,
   useLiveModels,
-  useMemory,
   useModels,
   usePlugins,
   usePutSecrets,
@@ -310,112 +310,16 @@ function TelemetryTab() {
 }
 
 function MemoryTab() {
-  const memory = useMemory();
-  const confidence = memory.data?.confidence ?? [];
-  const lessons = memory.data?.lessons ?? [];
-  const attackMemory = memory.data?.attack_memory ?? [];
-
   return (
-    <div className="space-y-3">
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-sm">Skill outcome confidence</CardTitle>
-            <Button size="sm" variant="ghost" onClick={() => memory.refetch()} disabled={memory.isFetching}>
-              <RefreshCw className={cn("h-3.5 w-3.5", memory.isFetching && "animate-spin")} />
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {memory.isLoading && <SkeletonRows count={3} className="p-2" />}
-          {memory.error && <div className="text-sm text-destructive">Failed to load memory.</div>}
-          {confidence.length === 0 && (
-            <p className="text-sm text-muted-foreground">No cross-mission outcome data recorded yet.</p>
-          )}
-          {confidence.length > 0 && (
-            <div className="overflow-x-auto rounded-md border">
-              <table className="w-full border-collapse text-xs">
-                <thead>
-                  <tr>
-                    {["action", "obs", "success", "failure", "partial", "confidence", "last seen"].map((h) => (
-                      <th key={h} className="border-b p-2 text-left font-semibold">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {confidence.map((c) => (
-                    <tr key={c.action_type} className="even:bg-muted/20">
-                      <td className="max-w-[260px] truncate border-b p-2 font-mono" title={c.action_type}>{c.action_type}</td>
-                      <td className="border-b p-2 font-mono">{c.observations}</td>
-                      <td className="border-b p-2 font-mono text-emerald-400">{c.successes}</td>
-                      <td className="border-b p-2 font-mono text-destructive">{c.failures}</td>
-                      <td className="border-b p-2 font-mono">{c.partials}</td>
-                      <td className="border-b p-2 font-mono">{(c.confidence * 100).toFixed(0)}%</td>
-                      <td className="border-b p-2">{formatRelative(c.last_seen)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader><CardTitle className="text-sm">Cross-mission learnings</CardTitle></CardHeader>
-        <CardContent>
-          {lessons.length === 0 && <p className="text-sm text-muted-foreground">No recorded lessons.</p>}
-          {lessons.length > 0 && (
-            <ul className="space-y-1.5 text-xs">
-              {lessons.map((l) => (
-                <li key={l.id} className="rounded-md border p-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant={l.outcome === "success" ? "success" : l.outcome === "failure" ? "danger" : "outline"} className="text-[10px]">
-                      {l.outcome}
-                    </Badge>
-                    <span className="font-mono text-muted-foreground">{l.action_type}</span>
-                    <span className="ml-auto text-muted-foreground">{formatRelative(l.created_at)}</span>
-                  </div>
-                  {l.target_signature && (
-                    <div className="mt-1 font-mono text-muted-foreground">{l.target_signature}</div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader><CardTitle className="text-sm">Attack memory</CardTitle></CardHeader>
-        <CardContent>
-          {attackMemory.length === 0 && <p className="text-sm text-muted-foreground">No attack-memory items captured.</p>}
-          {attackMemory.length > 0 && (
-            <ul className="space-y-1.5 text-xs">
-              {attackMemory.map((m) => (
-                <li key={m.id} className="rounded-md border p-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline" className="text-[10px]">{m.category}</Badge>
-                    <span className="font-mono text-muted-foreground">{m.target_ip}</span>
-                    {m.success ? (
-                      <Badge variant="success" className="text-[10px]">ok</Badge>
-                    ) : (
-                      <Badge variant="danger" className="text-[10px]">fail</Badge>
-                    )}
-                    <span className="ml-auto text-muted-foreground">{formatRelative(m.last_seen_at)}</span>
-                  </div>
-                  <div className="mt-1 font-mono">
-                    {m.item_key && <span className="text-muted-foreground">{m.item_key}: </span>}
-                    <span className="break-words">{m.item_value}</span>
-                    {m.seen_count > 1 && <span className="text-muted-foreground"> ×{m.seen_count}</span>}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+    <Card>
+      <CardHeader><CardTitle className="text-sm">Memory &amp; Experience Store</CardTitle></CardHeader>
+      <CardContent className="space-y-2 text-sm text-muted-foreground">
+        <p>Cross-mission learnings, skill-outcome confidence, and attack memory now live on their own page.</p>
+        <Button asChild size="sm" variant="outline">
+          <Link to="/memory">Open Memory page</Link>
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 

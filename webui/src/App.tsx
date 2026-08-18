@@ -14,6 +14,8 @@ const NewRunPage = lazy(() => import("@/routes/NewRunPage").then((m) => ({ defau
 const RunPage = lazy(() => import("@/routes/RunPage").then((m) => ({ default: m.RunPage })));
 const ArtifactsPage = lazy(() => import("@/routes/ArtifactsPage").then((m) => ({ default: m.ArtifactsPage })));
 const LootPage = lazy(() => import("@/routes/LootPage").then((m) => ({ default: m.LootPage })));
+const GraphPage = lazy(() => import("@/routes/GraphPage").then((m) => ({ default: m.GraphPage })));
+const MemoryPage = lazy(() => import("@/routes/MemoryPage").then((m) => ({ default: m.MemoryPage })));
 const SkillsPage = lazy(() => import("@/routes/SkillsPage").then((m) => ({ default: m.SkillsPage })));
 const SystemPage = lazy(() => import("@/routes/SystemPage").then((m) => ({ default: m.SystemPage })));
 
@@ -54,7 +56,9 @@ export default function App() {
                     <Route path="/runs/:runId" element={<RunPage />} />
                     <Route path="/runs/:runId/artifacts" element={<ArtifactsPage />} />
                     <Route path="/runs/:runId/loot" element={<LootPage />} />
+                    <Route path="/runs/:runId/graph" element={<GraphPage />} />
                     <Route path="/skills" element={<SkillsPage />} />
+                    <Route path="/memory" element={<MemoryPage />} />
                     <Route path="/system" element={<SystemPage />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Route>

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { Activity, Cpu, Eye, Github, HelpCircle, Home, List, Moon, Settings, ShieldAlert, Sparkles, Sun, Terminal, X } from "lucide-react";
+import { Activity, Brain, Cpu, Eye, Github, HelpCircle, Home, List, Moon, Settings, ShieldAlert, Sparkles, Sun, Terminal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { to: "/", label: "Home", icon: Home, end: true },
   { to: "/sessions", label: "Sessions", icon: List, end: false },
   { to: "/skills", label: "Skills", icon: Sparkles, end: false },
+  { to: "/memory", label: "Memory", icon: Brain, end: false },
   { to: "/system", label: "System", icon: Settings, end: false },
 ];
 
