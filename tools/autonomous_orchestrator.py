@@ -1744,6 +1744,22 @@ class AutonomousOrchestrator:
         else:
             privesc_modules = ["LinuxPrivescCheck", "WindowsPrivescCheck", "ContainerBreakout"]
 
+        # Phase 4: cloud/container privesc modules were previously unreachable
+        # from Path B (they appeared in NO privesc list). Gate them on the
+        # recon port set intersecting the cloud/container API surface
+        # (Docker 2375/2376, kubelet 10250, kube-apiserver 6443, IMDS-adjacent
+        # 80/443) OR an os_family hint of cloud/container. The modules
+        # themselves stay target-locked (they run ON the owned target).
+        if state.recon_result:
+            open_ports = {s.port for s in state.recon_result.services}
+            cloud_ports = {2375, 2376, 10250, 6443, 443, 80}
+            os_hint = (state.recon_result.os_family or "").lower()
+            if open_ports & cloud_ports or "cloud" in os_hint or "container" in os_hint:
+                privesc_modules += [
+                    "CloudPrivesc", "K8sPrivesc", "IMDSExploit",
+                    "DockerSockEscape", "S3BucketTakeover",
+                ]
+
         tasks: list[AttackTask] = []
         for mod_name in privesc_modules:
             task = AttackTask(

