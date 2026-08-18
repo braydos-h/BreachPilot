@@ -666,6 +666,15 @@ export interface DiagnosticsResponse {
   output: string;
 }
 
+export interface SystemInfoResponse {
+  hostname: string;
+  platform: string;
+  os: string;
+  python: string;
+  local_ips: string[];
+  public_ip: string | null;
+}
+
 export interface TelemetrySummary {
   alias: string;
   aliases: string[];

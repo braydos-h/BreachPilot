@@ -6,6 +6,7 @@ import {
   Bot,
   Brain,
   Cpu,
+  Globe,
   KeyRound,
   Loader2,
   MessageSquare,
@@ -36,6 +37,7 @@ import {
   usePutSecrets,
   useRemoveModel,
   useSecrets,
+  useSystemInfo,
   useTelemetry,
 } from "@/api/hooks";
 import { ApiError } from "@/api/client";
@@ -43,6 +45,7 @@ import { formatRelative } from "@/lib/utils";
 import type { DiagnosticsResponse } from "@/api/types";
 
 const TAB_DEFS = [
+  { key: "info", label: "Info", icon: Globe },
   { key: "config", label: "Config", icon: SlidersHorizontal },
   { key: "secrets", label: "Secrets", icon: KeyRound },
   { key: "models", label: "Models", icon: Cpu },
@@ -113,6 +116,7 @@ export function SystemPage() {
             })}
           </TabsList>
         </div>
+        <TabsContent value="info"><InfoTab /></TabsContent>
         <TabsContent value="config"><ConfigEditor /></TabsContent>
         <TabsContent value="secrets"><SecretsTab /></TabsContent>
         <TabsContent value="models"><ModelsTab /></TabsContent>
@@ -221,6 +225,41 @@ function HealthCard({
         {sub}
       </div>
     </div>
+  );
+}
+
+function InfoTab() {
+  const info = useSystemInfo();
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm">Host</CardTitle>
+          <Button size="sm" variant="ghost" onClick={() => info.refetch()} disabled={info.isFetching}>
+            <RefreshCw className={cn("h-3.5 w-3.5", info.isFetching && "animate-spin")} />
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {info.isLoading && <SkeletonRows count={4} className="p-2" />}
+        {info.error && <div className="text-sm text-destructive">Failed to load system info.</div>}
+        {info.data && (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Stat label="Hostname" value={info.data.hostname} />
+            <Stat label="Public IP" value={info.data.public_ip ?? "unavailable"} />
+            <Stat label="OS" value={info.data.os} />
+            <Stat label="Python" value={info.data.python} />
+            <div className="sm:col-span-2">
+              <Stat label="Platform" value={info.data.platform} />
+            </div>
+            <div className="sm:col-span-2">
+              <Stat label="Local IPs" value={info.data.local_ips.join(", ") || "—"} />
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

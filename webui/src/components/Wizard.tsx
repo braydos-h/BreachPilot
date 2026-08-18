@@ -12,6 +12,7 @@ import {
   Target,
   Settings as SettingsIcon,
   ClipboardCheck,
+  ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isValidTarget } from "@/lib/targetValidation";
@@ -19,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -39,6 +41,7 @@ import {
   TriStateToggle,
 } from "@/components/RunForm";
 import { useDefaultModel, useModelOptions, useProviderStatus } from "@/components/ProviderSetup";
+import { useConfig, usePatchConfig } from "@/api/hooks";
 import {
   useAnswerDecision,
   useCapabilities,
@@ -61,10 +64,15 @@ interface WizardProps {
   onCreated?: (runId: string, state: string) => void;
 }
 
-const STEPS = ["settings", "target", "review"] as const;
+function cloneDeep<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+const STEPS = ["opsec", "settings", "target", "review"] as const;
 type Step = (typeof STEPS)[number];
 
 const STEP_META: Array<{ key: Step; label: string; icon: typeof Target }> = [
+  { key: "opsec", label: "OPSEC", icon: ShieldCheck },
   { key: "settings", label: "Settings", icon: SettingsIcon },
   { key: "target", label: "Target", icon: Target },
   { key: "review", label: "Review & confirm", icon: ClipboardCheck },
@@ -115,6 +123,27 @@ export function Wizard({ onCreated }: WizardProps) {
 
   // Target state
   const [target, setTarget] = useState("");
+
+  // OPSEC state
+  const opsecConfig = useConfig();
+  const patchConfig = usePatchConfig();
+  const [opsecDraft, setOpsecDraft] = useState<Record<string, unknown>>({});
+  const [opsecSaved, setOpsecSaved] = useState(false);
+  const [opsecError, setOpsecError] = useState("");
+  useEffect(() => {
+    const block = (opsecConfig.data as Record<string, unknown> | undefined)?.opsec;
+    if (block && typeof block === "object") setOpsecDraft(cloneDeep(block) as Record<string, unknown>);
+  }, [opsecConfig.data]);
+
+  const opsecDirty = JSON.stringify(opsecDraft) !== JSON.stringify(opsecConfig.data?.opsec);
+
+  const saveOpsec = () => {
+    setOpsecError("");
+    patchConfig.mutate({ opsec: opsecDraft }, {
+      onSuccess: () => setOpsecSaved(true),
+      onError: (err) => setOpsecError(err instanceof ApiError ? err.message : "Failed to save OPSEC settings."),
+    });
+  };
 
   // Review state
   const [createdRun, setCreatedRun] = useState<CreateRunResponse | null>(null);
@@ -191,7 +220,7 @@ export function Wizard({ onCreated }: WizardProps) {
   };
 
   const stepIndex = STEPS.indexOf(step);
-  const canGoNext = step === "settings" || (step === "target" && isValidTarget(target));
+  const canGoNext = step === "opsec" || step === "settings" || (step === "target" && isValidTarget(target));
 
   const goNext = () => {
     if (step === "target" && !createdRun) {
@@ -215,6 +244,20 @@ export function Wizard({ onCreated }: WizardProps) {
       </div>
 
       <Stepper current={step} />
+
+      {step === "opsec" && (
+        <OpsecPanel
+          mode={mode}
+          draft={opsecDraft}
+          setDraft={setOpsecDraft}
+          saved={opsecSaved}
+          error={opsecError}
+          saving={patchConfig.isPending}
+          loading={opsecConfig.isLoading}
+          dirty={opsecDirty}
+          onSave={saveOpsec}
+        />
+      )}
 
       {step === "settings" && (
         <SettingsPanel
@@ -633,6 +676,125 @@ function SettingsPanel(props: SettingsPanelProps) {
           <span className="ml-1.5 text-xs text-muted-foreground">Starts the assessment immediately after review.</span>
         </Label>
       </div>
+    </div>
+  );
+}
+
+interface OpsecPanelProps {
+  mode: RunMode;
+  draft: Record<string, unknown>;
+  setDraft: React.Dispatch<React.SetStateAction<Record<string, unknown>>>;
+  saved: boolean;
+  error: string;
+  saving: boolean;
+  loading: boolean;
+  dirty: boolean;
+  onSave: () => void;
+}
+
+const OPSEC_FIELDS: Array<{ key: string; label: string; hint: string }> = [
+  { key: "enabled", label: "OPSEC enabled", hint: "Master switch. Advisory only — never gates tool execution." },
+  { key: "ua_rotation", label: "User-Agent rotation", hint: "Rotate browser User-Agents on HTTP egress." },
+  { key: "doh", label: "DNS over HTTPS", hint: "Resolve DNS via DoH (cloudflare/google) instead of local resolver." },
+  { key: "min_gap_seconds", label: "Min gap (s)", hint: "Base pacing delay between actions." },
+  { key: "jitter_seconds", label: "Jitter (s)", hint: "Random +/- added to the pacing gap." },
+  { key: "rate_per_minute", label: "Rate cap (per min)", hint: "Token-bucket cap on actions. 0 = unlimited." },
+  { key: "noise_budget", label: "Noise budget", hint: "Max noisy commands. 0 = unlimited. Dormant — not a gate." },
+  { key: "local_targets_off", label: "Off for local targets", hint: "Private/RFC1918/local targets force OPSEC off so the AI moves freely on your own box." },
+  { key: "public_autonomy", label: "Public autonomy", hint: "Documentary: for public targets the AI chooses its own attacks." },
+  { key: "doh_provider", label: "DoH provider", hint: "cloudflare | google" },
+  { key: "quiet_command_patterns", label: "Quiet command patterns", hint: "Substrings refused when enabled (advisory)." },
+  { key: "local_cidrs", label: "Local CIDRs", hint: "Extra ranges treated as local (OPSEC off)." },
+];
+
+function OpsecPanel({ mode, draft, setDraft, saved, error, saving, loading, dirty, onSave }: OpsecPanelProps) {
+  const isAttack = mode === "attack";
+  const update = (key: string, next: unknown) => setDraft((prev) => ({ ...prev, [key]: next }));
+
+  return (
+    <Card>
+      <CardContent className="space-y-4 pt-6">
+        <div className="flex items-start gap-2 rounded-md border bg-background/30 px-3 py-2">
+          <ShieldCheck className={cn("mt-0.5 h-4 w-4 shrink-0", isAttack ? "text-amber-300" : "text-muted-foreground")} />
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            {isAttack
+              ? "Attack runs: OPSEC hardening (pacing, UA rotation, DoH) reduces your detection footprint. Target-aware — automatically off for local/private targets. Advisory only, never a gate."
+              : "Recon mode is always read-only. OPSEC posture is advisory and only applies to attack runs; you can review it here and it is saved for attack runs."}
+          </p>
+        </div>
+
+        {loading ? (
+          <Spinner label="Loading OPSEC settings..." className="py-4" />
+        ) : (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {OPSEC_FIELDS.map((f) => {
+                const v = draft[f.key];
+                return (
+                  <OpsecField key={f.key} label={f.label} hint={f.hint} value={v} onChange={(next) => update(f.key, next)} />
+                );
+              })}
+            </div>
+
+            {error && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-red-200">{error}</div>
+            )}
+            {saved && <p className="text-xs text-emerald-300">OPSEC settings saved.</p>}
+
+            <div className="flex items-center gap-2 border-t pt-3">
+              <Button type="button" size="sm" onClick={onSave} disabled={saving || !dirty}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save OPSEC settings
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                {dirty ? "Unsaved changes" : "Saved — matches config.yaml"}
+              </span>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function OpsecField({ label, hint, value, onChange }: { label: string; hint: string; value: unknown; onChange: (next: unknown) => void }) {
+  const id = `opsec-${label.replace(/[^a-zA-Z0-9]/g, "-")}`;
+  if (typeof value === "boolean") {
+    return (
+      <div className="space-y-1">
+        <div className="flex items-center justify-between gap-2">
+          <Label htmlFor={id} className="text-xs">{label}</Label>
+          <Switch id={id} checked={value} onCheckedChange={(v) => onChange(v === true)} />
+        </div>
+        <p className="text-[11px] text-muted-foreground">{hint}</p>
+      </div>
+    );
+  }
+  if (Array.isArray(value)) {
+    return (
+      <div className="space-y-1">
+        <Label htmlFor={id} className="text-xs">{label}</Label>
+        <Input
+          id={id}
+          value={value.join("\n")}
+          onChange={(e) => onChange(e.target.value.split("\n").map((l) => l.trim()).filter(Boolean))}
+          placeholder={hint}
+          autoComplete="off"
+        />
+        <p className="text-[11px] text-muted-foreground">{hint} — one per line.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-1">
+      <Label htmlFor={id} className="text-xs">{label}</Label>
+      <Input
+        id={id}
+        value={value === undefined ? "" : String(value)}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={hint}
+        autoComplete="off"
+      />
+      <p className="text-[11px] text-muted-foreground">{hint}</p>
     </div>
   );
 }

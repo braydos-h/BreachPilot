@@ -340,103 +340,129 @@ def _extract_tool_text(raw: Any) -> str:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        prog="main.py",
+        description="NetAttackAI — autonomous penetration testing AI. "
+                    "Run with no arguments for the interactive menu.",
+        epilog=(
+            "examples:\n"
+            "  python main.py                                          interactive menu\n"
+            "  python main.py --target 10.0.0.50 --mode attack --goal backdoor\n"
+            "  python main.py --target 10.0.0.50 --mode recon --goal initial_access\n"
+            "  python main.py --target 10.0.0.50 --ctf --ctf-flag-path /root/flag.txt\n"
+            "  python main.py --doctor                                  environment self-check\n"
+            "  python main.py --self-test                                safe localhost smoke test\n"
+            "  python main.py --web                                     WebUI + API daemon\n"
+            "  python main.py --resume <run_id>                          resume a prior run\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--version", action="version", version=f"NetAttackAI {__version__}")
-    parser.add_argument("--target", default="", help="Target IP address to attack or recon")
-    parser.add_argument("--mode", choices=("recon", "attack"), default="", help="recon = gather intel, attack = full exploitation")
-    parser.add_argument("--goal", default="", help="Preset goal name (e.g. backdoor, initial_access, privilege_escalation)")
-    parser.add_argument("--custom-goal", default="", help="Custom goal description")
-    parser.add_argument("--config", type=Path, default=Path("config.yaml"))
-    parser.add_argument("--model", default=None, help="Override default model alias (glm/kimi/deepseek/deepseek_flash/minimax)")
-    parser.add_argument("--model-strategy", choices=("default", "round-robin", "random", "specific"), default="default",
-                        help="How to pick model across targets")
-    parser.add_argument("--mcp-transport", choices=("stdio", "http"), default=None,
-                        help="MCP transport (ignored on the run path: always forced to http so the target-IP lock reaches the server)")
-    parser.add_argument("--http-port", type=int, default=None)
-    parser.add_argument("--reports-dir", type=Path, default=Path("reports"))
-    parser.add_argument("--setup-api-keys", action="store_true", help="Prompt for provider API keys and save them to secr.json")
-    parser.add_argument("--api-key-file", type=Path, default=DEFAULT_API_KEY_FILE, help="Local JSON file for saved provider API keys")
-    parser.add_argument("--no-api-key-prompt", action="store_true", help="Skip the interactive startup API-key prompt")
-    parser.add_argument("--plain", action="store_true", help="Disable color output")
-    parser.add_argument("--menu", action="store_true", help="Force interactive menu mode even with other args")
-    # Swarm / reasoning / adaptive exploit flags
-    parser.add_argument("--swarm", action="store_true", help="Enable multi-agent swarm mode")
-    parser.add_argument(
+
+    core = parser.add_argument_group("targeting")
+    core.add_argument("--target", default="", help="Target IP address or domain to attack or recon")
+    core.add_argument("--mode", choices=("recon", "attack"), default="", help="recon = gather intel, attack = full exploitation")
+    core.add_argument("--goal", default="", help="Preset goal name (e.g. backdoor, initial_access, privilege_escalation)")
+    core.add_argument("--custom-goal", default="", help="Custom goal description")
+    core.add_argument("--config", type=Path, default=Path("config.yaml"), help="Config file (default: config.yaml)")
+    core.add_argument("--model", default=None, help="Override default model alias (glm/kimi/deepseek/deepseek_flash/minimax)")
+    core.add_argument("--model-strategy", choices=("default", "round-robin", "random", "specific"), default="default",
+                      help="How to pick model across targets")
+    core.add_argument("--mcp-transport", choices=("stdio", "http"), default=None,
+                      help="MCP transport (ignored on the run path: always forced to http so the target-IP lock reaches the server)")
+    core.add_argument("--http-port", type=int, default=None, help="MCP HTTP port")
+    core.add_argument("--reports-dir", type=Path, default=Path("reports"), help="Where run artifacts are written (default: reports/)")
+
+    keys = parser.add_argument_group("api keys")
+    keys.add_argument("--setup-api-keys", action="store_true", help="Prompt for provider API keys and save them to secr.json")
+    keys.add_argument("--api-key-file", type=Path, default=DEFAULT_API_KEY_FILE, help="Local JSON file for saved provider API keys")
+    keys.add_argument("--no-api-key-prompt", action="store_true", help="Skip the interactive startup API-key prompt")
+
+    out = parser.add_argument_group("output")
+    out.add_argument("--plain", action="store_true", help="Disable color output")
+    out.add_argument("--menu", action="store_true", help="Force interactive menu mode even with other args")
+    out.add_argument("--json", action="store_true", help="Emit machine-readable JSON to stdout where supported")
+    out.add_argument("--quiet", action="store_true", help="Reduce output to warnings/errors only")
+    out.add_argument("--debug", action="store_true", help="Enable verbose debug output")
+
+    swarm = parser.add_argument_group("swarm & reasoning")
+    swarm.add_argument("--swarm", action="store_true", help="Enable multi-agent swarm mode")
+    swarm.add_argument(
         "--parallel-swarm", action="store_true",
         help="Enable parallel sub-agents (route_parallel + spawn_subagent MCP tool). "
              "Off by default; flips swarm.parallel_enabled to true. Recon-first: "
              "recon + vuln-research parallelize; exploit/post_exploit stay sequential "
              "unless swarm.exploit_parallel is also true.",
     )
-    parser.add_argument("--critic", action="store_true", help="Enable critic agent pre-approval (requires --swarm)")
-    parser.add_argument("--reflection", action="store_true", help="Enable reflection agent (requires --swarm)")
-    parser.add_argument("--adaptive-exploits", action="store_true", help="Enable adaptive exploit generation with mutation")
-    parser.add_argument("--long-session", dest="long_session", action="store_true",
-                        help="Raise context window (num_ctx), LLM call timeout, round/command/duration budgets, "
-                             "and the swarm cap for a multi-hour attack run; checkpoints compacted messages for crash-safe resume")
-    parser.add_argument("--multi-model-consult", dest="multi_model_consult", action="store_true", default=None,
-                        help="Allow the agent to ask configured peer models for advisory help")
-    parser.add_argument("--no-multi-model-consult", dest="multi_model_consult", action="store_false",
-                        help="Disable peer-model consultation for this run")
-    parser.add_argument("--observer-mode", choices=("heuristic", "llm", "hybrid"), default="hybrid", help="Observer mode for fact extraction")
-    parser.add_argument("--recon-first", action="store_true", default=None,
-                        help="Force recon-first mode: scan target, suggest rated goals, then ask for goal selection")
-    parser.add_argument("--no-recon-first", action="store_false", dest="recon_first",
-                        help="Skip recon-first mode; go directly to goal selection")
-    # Phase 2 power-ups: operational flags
-    parser.add_argument("--doctor", action="store_true",
-                        help="Run a self-check (Python, nmap, Ollama, config) and exit")
-    parser.add_argument("--demo", action="store_true",
-                        help="Run against a local sandbox target (DVWA-style)")
-    parser.add_argument("--resume", type=str, default="",
-                        help="Resume a prior run by run_id or session_id")
-    parser.add_argument("--json", action="store_true",
-                        help="Emit machine-readable JSON to stdout where supported")
-    parser.add_argument("--quiet", action="store_true",
-                        help="Reduce output to warnings/errors only")
-    parser.add_argument("--debug", action="store_true",
-                        help="Enable verbose debug output")
-    parser.add_argument("--yes", action="store_true",
-                        help="Skip the ready-to-begin confirmation gate (use with caution)")
-    parser.add_argument("--self-test", action="store_true",
-                        help="Run a safe localhost smoke test against 127.0.0.1 and exit")
-    parser.add_argument("--eval", action="store_true",
-                        help="Run the eval/benchmark harness against --target and write reports/eval/<run_id>/")
-    parser.add_argument("--ctf", action="store_true",
-                        help="CTF autopilot: run against --target and stop when the goal is heuristically met "
-                             "(flag marker / uid=0 / port-marker). Target-locked via the normal allowlist.")
-    parser.add_argument("--ctf-flag-path", dest="ctf_flag_path", default="",
-                        help="CTF goal: flag file path on the target (e.g. /root/flag.txt)")
-    parser.add_argument("--ctf-root-shell", dest="ctf_root_shell", action="store_true", default=True,
-                        help="CTF goal: treat uid=0 in any output as goal-met (default True)")
-    parser.add_argument("--ctf-port", dest="ctf_port", type=int, default=0,
-                        help="CTF goal: port to probe for the known-string marker")
-    parser.add_argument("--ctf-marker", dest="ctf_marker", default="",
-                        help="CTF goal: known-string marker expected from --ctf-port")
-    parser.add_argument("--ultrathink", action="store_true",
-                        help="Enable deep reasoning mode: verbose chain-of-thought and frequent reflection")
-    # ── Runtime skills flags (advisory prompt-context layer) ──
-    parser.add_argument("--skills", choices=("on", "off", "hints", "lookup"), default=None,
+    swarm.add_argument("--critic", action="store_true", help="Enable critic agent pre-approval (requires --swarm)")
+    swarm.add_argument("--reflection", action="store_true", help="Enable reflection agent (requires --swarm)")
+    swarm.add_argument("--adaptive-exploits", action="store_true", help="Enable adaptive exploit generation with mutation")
+    swarm.add_argument("--long-session", dest="long_session", action="store_true",
+                       help="Raise context window (num_ctx), LLM call timeout, round/command/duration budgets, "
+                            "and the swarm cap for a multi-hour attack run; checkpoints compacted messages for crash-safe resume")
+    swarm.add_argument("--multi-model-consult", dest="multi_model_consult", action="store_true", default=None,
+                       help="Allow the agent to ask configured peer models for advisory help")
+    swarm.add_argument("--no-multi-model-consult", dest="multi_model_consult", action="store_false",
+                       help="Disable peer-model consultation for this run")
+    swarm.add_argument("--observer-mode", choices=("heuristic", "llm", "hybrid"), default="hybrid", help="Observer mode for fact extraction")
+    swarm.add_argument("--recon-first", action="store_true", default=None,
+                       help="Force recon-first mode: scan target, suggest rated goals, then ask for goal selection")
+    swarm.add_argument("--no-recon-first", action="store_false", dest="recon_first",
+                       help="Skip recon-first mode; go directly to goal selection")
+    swarm.add_argument("--ultrathink", action="store_true",
+                       help="Enable deep reasoning mode: verbose chain-of-thought and frequent reflection")
+
+    ops = parser.add_argument_group("operational")
+    ops.add_argument("--doctor", action="store_true",
+                     help="Run a self-check (Python, nmap, Ollama, config) and exit")
+    ops.add_argument("--demo", action="store_true",
+                     help="Run against a local sandbox target (DVWA-style)")
+    ops.add_argument("--resume", type=str, default="",
+                     help="Resume a prior run by run_id or session_id")
+    ops.add_argument("--yes", action="store_true",
+                     help="Skip the ready-to-begin confirmation gate (use with caution)")
+    ops.add_argument("--self-test", action="store_true",
+                     help="Run a safe localhost smoke test against 127.0.0.1 and exit")
+    ops.add_argument("--eval", action="store_true",
+                     help="Run the eval/benchmark harness against --target and write reports/eval/<run_id>/")
+
+    ctf = parser.add_argument_group("ctf autopilot")
+    ctf.add_argument("--ctf", action="store_true",
+                     help="CTF autopilot: run against --target and stop when the goal is heuristically met "
+                          "(flag marker / uid=0 / port-marker). Target-locked via the normal allowlist.")
+    ctf.add_argument("--ctf-flag-path", dest="ctf_flag_path", default="",
+                     help="CTF goal: flag file path on the target (e.g. /root/flag.txt)")
+    ctf.add_argument("--ctf-root-shell", dest="ctf_root_shell", action="store_true", default=True,
+                     help="CTF goal: treat uid=0 in any output as goal-met (default True)")
+    ctf.add_argument("--ctf-port", dest="ctf_port", type=int, default=0,
+                     help="CTF goal: port to probe for the known-string marker")
+    ctf.add_argument("--ctf-marker", dest="ctf_marker", default="",
+                     help="CTF goal: known-string marker expected from --ctf-port")
+
+    skills = parser.add_argument_group("runtime skills")
+    skills.add_argument("--skills", choices=("on", "off", "hints", "lookup"), default=None,
                         help="Override runtime-skills behavior for this run: on=startup context injected, "
                              "hints=hints only (default), lookup=MCP tools only, off=skills disabled")
-    parser.add_argument("--skills-list", action="store_true",
+    skills.add_argument("--skills-list", action="store_true",
                         help="Print the runtime-skill catalog and exit (read-only)")
-    parser.add_argument("--skills-include", action="append", default=None, metavar="NAME",
+    skills.add_argument("--skills-include", action="append", default=None, metavar="NAME",
                         help="Force-include a skill by name for this run (sticky across re-selection). Repeatable.")
-    parser.add_argument("--skills-exclude", action="append", default=None, metavar="NAME",
+    skills.add_argument("--skills-exclude", action="append", default=None, metavar="NAME",
                         help="Exclude a skill by name for this run. Repeatable.")
-    parser.add_argument("--no-skills-reselect", action="store_true",
+    skills.add_argument("--no-skills-reselect", action="store_true",
                         help="Disable mid-run skill re-selection for this run")
-    # ── Plugin ecosystem flags ──
-    parser.add_argument("--list-plugins", dest="list_plugins", action="store_true",
-                        help="Print discovered plugins (name/version/capabilities/loaded) and exit")
-    # ── WebUI API daemon flags ──
-    parser.add_argument("--demon", "--daemon", dest="daemon", action="store_true",
-                        help="Start the local WebUI API server instead of the terminal menu")
-    parser.add_argument("--web", dest="web", action="store_true",
-                        help="Build the WebUI if needed, serve it from the daemon at /, and open a browser")
-    parser.add_argument("--api-host", default=None, help="API daemon bind host (loopback only; default 127.0.0.1)")
-    parser.add_argument("--api-port", type=int, default=None, help="API daemon port (default 8765)")
+
+    plugins = parser.add_argument_group("plugins")
+    plugins.add_argument("--list-plugins", dest="list_plugins", action="store_true",
+                         help="Print discovered plugins (name/version/capabilities/loaded) and exit")
+
+    webui = parser.add_argument_group("webui")
+    webui.add_argument("--demon", "--daemon", dest="daemon", action="store_true",
+                       help="Start the local WebUI API server instead of the terminal menu")
+    webui.add_argument("--web", dest="web", action="store_true",
+                       help="Build the WebUI if needed, serve it from the daemon at /, and open a browser")
+    webui.add_argument("--api-host", default=None, help="API daemon bind host (loopback only; default 127.0.0.1)")
+    webui.add_argument("--api-port", type=int, default=None, help="API daemon port (default 8765)")
     parsed = parser.parse_args(argv)
     return parsed
 

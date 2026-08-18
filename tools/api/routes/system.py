@@ -292,6 +292,47 @@ async def set_model_provider(request: Request, auth: str = Depends(_require_auth
     return {"status": "ok", "provider": provider}
 
 
+@router.get("/system/info")
+async def get_system_info(auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Host info: hostname, OS, Python, local IPs, public IP (best-effort).
+
+    The public-IP lookup hits an external service (api.ipify.org) with a short
+    timeout and never fails the request — it degrades to ``null`` offline.
+    """
+    import platform
+    import socket
+    import sys
+
+    def _local_ips() -> list[str]:
+        ips: list[str] = []
+        try:
+            for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+                ip = info[4][0]
+                if ip not in ips:
+                    ips.append(ip)
+        except OSError:
+            pass
+        return ips
+
+    def _public_ip() -> str:
+        import urllib.request
+        try:
+            with urllib.request.urlopen("https://api.ipify.org", timeout=3.0) as resp:
+                return resp.read().decode("utf-8").strip()
+        except Exception:
+            return ""
+
+    public_ip = await asyncio.to_thread(_public_ip)
+    return {
+        "hostname": socket.gethostname(),
+        "platform": platform.platform(),
+        "os": platform.system(),
+        "python": sys.version.split()[0],
+        "local_ips": _local_ips(),
+        "public_ip": public_ip or None,
+    }
+
+
 @router.get("/system/telemetry")
 async def get_telemetry(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     """LLM usage telemetry summary + recent records (numeric/categorical only).

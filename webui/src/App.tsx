@@ -20,6 +20,7 @@ const SkillsPage = lazy(() => import("@/routes/SkillsPage").then((m) => ({ defau
 const SystemPage = lazy(() => import("@/routes/SystemPage").then((m) => ({ default: m.SystemPage })));
 const AttackModulesPage = lazy(() => import("@/routes/AttackModulesPage").then((m) => ({ default: m.AttackModulesPage })));
 const GoalsPage = lazy(() => import("@/routes/GoalsPage").then((m) => ({ default: m.GoalsPage })));
+const StatsPage = lazy(() => import("@/routes/StatsPage").then((m) => ({ default: m.StatsPage })));
 const HelpPage = lazy(() => import("@/routes/HelpPage").then((m) => ({ default: m.HelpPage })));
 
 const queryClient = new QueryClient({
@@ -63,6 +64,7 @@ export default function App() {
                     <Route path="/skills" element={<SkillsPage />} />
                     <Route path="/modules" element={<AttackModulesPage />} />
                     <Route path="/goals" element={<GoalsPage />} />
+                    <Route path="/stats" element={<StatsPage />} />
                     <Route path="/help" element={<HelpPage />} />
                     <Route path="/memory" element={<MemoryPage />} />
                     <Route path="/system" element={<SystemPage />} />

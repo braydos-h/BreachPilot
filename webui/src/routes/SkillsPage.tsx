@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
-import { Loader2, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { FileText, Layers, Loader2, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/api/client";
 import {
@@ -26,9 +28,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { SkeletonRows } from "@/components/Loading";
+import { CopyButton } from "@/components/CopyButton";
 
 interface SkillsConfig {
   enabled?: boolean;
@@ -57,10 +61,17 @@ function skillState(name: string, cfg: SkillsConfig): SkillState {
   return "auto";
 }
 
+const STATE_BADGE: Record<SkillState, { variant: "success" | "danger" | "muted"; label: string }> = {
+  enabled: { variant: "success", label: "enabled" },
+  blocked: { variant: "danger", label: "blocked" },
+  auto: { variant: "muted", label: "auto" },
+};
+
 export function SkillsPage() {
   const config = useConfig();
   const skills = useSkills();
   const [query, setQuery] = useState("");
+  const [tag, setTag] = useState<string | null>(null);
   const search = useSkillSearch(query, query.trim().length > 0);
   const [selected, setSelected] = useState<string | null>(null);
   const detail = useSkillDetail(selected);
@@ -75,12 +86,38 @@ export function SkillsPage() {
   const [draftError, setDraftError] = useState("");
 
   const skillsCfg = useMemo(() => readSkillsConfig(config.data), [config.data]);
-  const list = query.trim() ? search.data?.results ?? [] : skills.data?.skills ?? [];
+
+  const tagByName = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const s of skills.data?.skills ?? []) map.set(s.name, s.tags);
+    return map;
+  }, [skills.data]);
+
+  const topTags = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const s of skills.data?.skills ?? []) {
+      for (const t of s.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 12);
+  }, [skills.data]);
+
+  const list = useMemo(() => {
+    const base = query.trim() ? search.data?.results ?? [] : skills.data?.skills ?? [];
+    if (!tag) return base;
+    return base.filter((s) => (tagByName.get(s.name) ?? []).includes(tag));
+  }, [query, search.data, skills.data, tag, tagByName]);
+
   const normalized = list.map((s) => ({
     name: s.name,
     description: s.description,
-    tags: "tags" in s ? (s as SkillSummary).tags : [],
+    tags: tagByName.get(s.name) ?? [],
   }));
+
+  const total = skills.data?.skills.length ?? 0;
+  const enabledCount = skillsCfg.default_enabled?.length ?? 0;
+  const blockedCount = skillsCfg.exclude_names?.length ?? 0;
 
   const patchSkills = (next: Partial<SkillsConfig>) => {
     patch.mutate({ skills: next } as Record<string, unknown>, {
@@ -180,9 +217,26 @@ export function SkillsPage() {
 
   return (
     <div className="space-y-4 p-4 md:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-lg font-semibold">Skills</h1>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-semibold">Skills</h1>
+          <p className="text-sm text-muted-foreground">
+            {total} skills ·{" "}
+            <span className="text-emerald-300">{enabledCount} enabled</span> ·{" "}
+            <span className="text-red-300">{blockedCount} blocked</span> ·{" "}
+            {Math.max(0, total - enabledCount - blockedCount)} auto
+          </p>
+        </div>
         <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search skills..."
+              className="h-8 w-full max-w-xs pl-7"
+            />
+          </div>
           <Button size="sm" variant="ghost" onClick={() => skills.refetch()} disabled={skills.isFetching}>
             <RefreshCw className={cn("h-3.5 w-3.5", skills.isFetching && "animate-spin")} />
           </Button>
@@ -225,12 +279,14 @@ export function SkillsPage() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-3 md:grid-cols-[280px_minmax(0,1fr)]">
+      <div className="grid gap-3 lg:grid-cols-[320px_minmax(0,1fr)]">
         <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Search className="h-3.5 w-3.5 text-muted-foreground" />
-              <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search skills" className="h-8" />
+          <CardHeader className="pb-2">
+            <div className="flex flex-wrap gap-1.5">
+              <TagChip active={tag === null} onClick={() => setTag(null)} label={`All (${total})`} />
+              {topTags.map(([t, count]) => (
+                <TagChip key={t} active={tag === t} onClick={() => setTag(t)} label={`${t} (${count})`} />
+              ))}
             </div>
           </CardHeader>
           <CardContent className="space-y-1">
@@ -241,7 +297,9 @@ export function SkillsPage() {
                 <Button size="sm" variant="outline" onClick={() => skills.refetch()}>Retry</Button>
               </div>
             )}
-            {list.length === 0 && !skills.isLoading && !skills.error && <p className="text-xs text-muted-foreground">No skills.</p>}
+            {list.length === 0 && !skills.isLoading && !skills.error && (
+              <p className="text-xs text-muted-foreground">No skills match.</p>
+            )}
             {normalized.map((s) => (
               <SkillRow
                 key={s.name}
@@ -261,43 +319,31 @@ export function SkillsPage() {
         </Card>
 
         <Card>
-          <CardHeader><CardTitle className="text-sm">{selected ?? "Select a skill"}</CardTitle></CardHeader>
+          <CardHeader className="pb-2">
+            {selected && detail.data ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <CardTitle className="font-mono text-sm">{detail.data.name}</CardTitle>
+                {detail.data.version && (
+                  <Badge variant="outline" className="text-[10px]">v{detail.data.version}</Badge>
+                )}
+                <Badge variant={STATE_BADGE[skillState(selected, skillsCfg)].variant} className="text-[10px]">
+                  {STATE_BADGE[skillState(selected, skillsCfg)].label}
+                </Badge>
+                <div className="ml-auto">
+                  <CopyButton value={detail.data.body} label="Copy markdown" size="sm" />
+                </div>
+              </div>
+            ) : (
+              <CardTitle className="text-sm">{selected ?? "Select a skill"}</CardTitle>
+            )}
+          </CardHeader>
           <CardContent>
             {!selected && <p className="text-sm text-muted-foreground">Choose a skill to view its body, sections, and references.</p>}
             {selected && detail.isLoading && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading...</div>
             )}
             {selected && detail.error && <div className="text-sm text-destructive">Failed to load skill.</div>}
-            {detail.data && (
-              <div className="space-y-3 text-sm">
-                <p className="text-muted-foreground">{detail.data.description}</p>
-                {detail.data.domain && (
-                  <div className="text-xs">Domain: {detail.data.domain}{detail.data.subdomain ? ` / ${detail.data.subdomain}` : ""}</div>
-                )}
-                {detail.data.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {detail.data.tags.map((t) => <Badge key={t} variant="outline" className="text-[10px]">{t}</Badge>)}
-                  </div>
-                )}
-                {detail.data.nist_csf.length > 0 && (
-                  <div className="text-xs"><span className="text-muted-foreground">NIST CSF:</span> {detail.data.nist_csf.join(", ")}</div>
-                )}
-                {detail.data.mitre_attack.length > 0 && (
-                  <div className="text-xs"><span className="text-muted-foreground">MITRE ATT&amp;CK:</span> {detail.data.mitre_attack.join(", ")}</div>
-                )}
-                <pre className="max-h-[50vh] overflow-auto rounded-md border bg-muted/30 p-3 font-mono text-xs whitespace-pre-wrap break-words scrollbar-thin">
-                  {detail.data.body}
-                </pre>
-                {detail.data.references.length > 0 && (
-                  <details>
-                    <summary className="cursor-pointer text-xs text-muted-foreground">References</summary>
-                    <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs">
-                      {detail.data.references.map((r) => <li key={r} className="font-mono">{r}</li>)}
-                    </ul>
-                  </details>
-                )}
-              </div>
-            )}
+            {detail.data && <SkillDetailPane detail={detail.data} />}
           </CardContent>
         </Card>
       </div>
@@ -369,6 +415,94 @@ export function SkillsPage() {
   );
 }
 
+function SkillDetailPane({ detail }: { detail: NonNullable<ReturnType<typeof useSkillDetail>["data"]> }) {
+  const sectionEntries = Object.entries(detail.sections ?? {});
+  return (
+    <div className="space-y-3 text-sm">
+      <p className="text-muted-foreground">{detail.description}</p>
+      {detail.domain && (
+        <div className="text-xs">
+          <span className="text-muted-foreground">Domain:</span> {detail.domain}
+          {detail.subdomain ? ` / ${detail.subdomain}` : ""}
+        </div>
+      )}
+      {detail.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {detail.tags.map((t) => <Badge key={t} variant="outline" className="text-[10px]">{t}</Badge>)}
+        </div>
+      )}
+      {(detail.nist_csf.length > 0 || detail.mitre_attack.length > 0) && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+          {detail.nist_csf.length > 0 && (
+            <span><span className="text-muted-foreground">NIST CSF:</span> {detail.nist_csf.join(", ")}</span>
+          )}
+          {detail.mitre_attack.length > 0 && (
+            <span><span className="text-muted-foreground">MITRE ATT&amp;CK:</span> {detail.mitre_attack.join(", ")}</span>
+          )}
+        </div>
+      )}
+      <Tabs defaultValue="body">
+        <TabsList>
+          <TabsTrigger value="body" className="gap-1.5 text-xs">
+            <FileText className="h-3.5 w-3.5" /> Body
+          </TabsTrigger>
+          {sectionEntries.length > 0 && (
+            <TabsTrigger value="sections" className="gap-1.5 text-xs">
+              <Layers className="h-3.5 w-3.5" /> Sections ({sectionEntries.length})
+            </TabsTrigger>
+          )}
+        </TabsList>
+        <TabsContent value="body">
+          <div className="prose prose-invert max-w-none rounded-md border bg-muted/30 p-3 text-sm prose-pre:rounded prose-pre:bg-background/60 prose-code:rounded prose-code:bg-background/60 prose-code:px-1 prose-code:py-0.5 prose-headings:mt-4 prose-headings:first:mt-0 prose-h2:text-base prose-h3:text-sm">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{detail.body}</ReactMarkdown>
+          </div>
+        </TabsContent>
+        {sectionEntries.length > 0 && (
+          <TabsContent value="sections">
+            <div className="space-y-1.5">
+              {sectionEntries.map(([title, content]) => (
+                <details key={title} className="group rounded-md border bg-muted/30">
+                  <summary className="cursor-pointer px-3 py-2 text-xs font-semibold capitalize transition-colors hover:bg-accent/50">
+                    {title}
+                  </summary>
+                  <div className="prose prose-invert max-w-none border-t px-3 py-2 text-sm prose-pre:rounded prose-pre:bg-background/60 prose-code:rounded prose-code:bg-background/60 prose-code:px-1 prose-code:py-0.5">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+                  </div>
+                </details>
+              ))}
+            </div>
+          </TabsContent>
+        )}
+      </Tabs>
+      {detail.references.length > 0 && (
+        <details>
+          <summary className="cursor-pointer text-xs text-muted-foreground">References</summary>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs">
+            {detail.references.map((r) => <li key={r} className="font-mono">{r}</li>)}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function TagChip({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-full border px-2.5 py-1 text-[11px] transition-colors",
+        active
+          ? "border-primary/60 bg-primary/10 text-primary"
+          : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+      )}
+    >
+      {label}
+    </button>
+  );
+}
+
 interface SkillRowProps {
   skill: SkillSummary;
   state: SkillState;
@@ -393,11 +527,17 @@ function SkillRow({ skill, state, selected, onSelect, onEnable, onDisable, onBlo
       <button type="button" onClick={onSelect} className="flex w-full flex-col items-start text-left">
         <span className="font-mono">{skill.name}</span>
         <span className="text-muted-foreground line-clamp-2">{skill.description}</span>
+        {skill.tags.length > 0 && (
+          <span className="mt-1 flex flex-wrap gap-1">
+            {skill.tags.slice(0, 3).map((t) => (
+              <span key={t} className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">{t}</span>
+            ))}
+            {skill.tags.length > 3 && <span className="text-[9px] text-muted-foreground">+{skill.tags.length - 3}</span>}
+          </span>
+        )}
       </button>
       <div className="mt-1.5 flex flex-wrap items-center gap-1">
-        {state === "enabled" && <Badge variant="success" className="text-[10px]">enabled</Badge>}
-        {state === "blocked" && <Badge variant="danger" className="text-[10px]">blocked</Badge>}
-        {state === "auto" && <Badge variant="muted" className="text-[10px]">auto</Badge>}
+        <Badge variant={STATE_BADGE[state].variant} className="text-[10px]">{STATE_BADGE[state].label}</Badge>
         <div className="ml-auto flex items-center gap-0.5">
           {state !== "enabled" && (
             <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" onClick={onEnable} disabled={pending}>

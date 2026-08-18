@@ -50,6 +50,7 @@ import type {
   SkillSearchResult,
   SkillSummary,
   SwarmStateResponse,
+  SystemInfoResponse,
   TelemetryResponse,
   ToolCallRequest,
   ToolCallResponse,
@@ -250,6 +251,15 @@ export function useProviders() {
     queryFn: () => apiFetch<ProvidersResponse>("/providers"),
     ...defaultQueryOptions,
     staleTime: 15_000,
+  });
+}
+
+export function useSystemInfo() {
+  return useQuery<SystemInfoResponse>({
+    queryKey: ["system", "info"],
+    queryFn: () => apiFetch<SystemInfoResponse>("/system/info"),
+    ...defaultQueryOptions,
+    staleTime: 60_000,
   });
 }
 
