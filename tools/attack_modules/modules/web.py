@@ -125,6 +125,11 @@ class APIFuzzer(AttackModule):
             "module": self.name,
             "script": script,
             "note": "Fuzzes /api, /v1, /graphql, etc. for 200/403 differences.",
+            "evidence": [f"API fuzzing queued against {ctx.target_ip}"],
+            "references": [
+                "https://owasp.org/www-community/attacks/API_Parameter_Tampering",
+                "https://book.hacktricks.wiki/en/network-services-pentesting/pentesting-web/api-endpoint.html",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -1083,6 +1088,11 @@ class XXEProbe(AttackModule):
             "module": self.name,
             "script": script,
             "note": "POSTs in-band (file:// /etc/passwd) and OOB external-entity XML payloads to XML-accepting endpoints on ctx.target_ip. Set the OOB listener host before running the OOB variant.",
+            "evidence": [f"XXE probes queued against {ctx.target_ip}"],
+            "references": [
+                "https://owasp.org/www-community/attacks/XML_External_Entity_(XXE)_Processing",
+                "https://portswigger.net/web-security/xxe",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -1222,6 +1232,11 @@ class LFITraversal(AttackModule):
             "module": self.name,
             "script": script,
             "note": "Injects ../, ....//, %2f, absolute-path, and php://filter traversal payloads into file/include params on ctx.target_ip. Flags responses containing /etc/passwd content or base64-looking output.",
+            "evidence": [f"LFI/traversal probes queued against {ctx.target_ip}"],
+            "references": [
+                "https://owasp.org/www-community/attacks/Path_Traversal",
+                "https://portswigger.net/web-security/file-path-traversal",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
