@@ -85,6 +85,15 @@ def test_probe_port_open_with_banner(monkeypatch):
     assert r["service_guess"] == "ssh"
 
 
+def test_probe_port_requires_two_successful_connections(monkeypatch):
+    sockets = [_FakeSocket(connect_result=0), _FakeSocket(connect_result=111)]
+    monkeypatch.setattr(socket, "socket", lambda *a, **k: sockets.pop(0))
+
+    r = _probe_port("10.0.0.5", 22, timeout=1.0)
+
+    assert r["open"] is False
+
+
 def test_probe_port_open_no_banner(monkeypatch):
     _patch_socket_factory(monkeypatch, connect_result=0, banner=b"")
     r = _probe_port("10.0.0.5", 80, timeout=1.0)

@@ -33,31 +33,36 @@ _SERVICE_GUESS: dict[int, str] = {
 
 
 def _probe_port(target: str, port: int, timeout: float = 3.0) -> dict:
-    """Synchronous single-port TCP connect probe with banner grab."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(timeout)
-    try:
-        if sock.connect_ex((target, port)) == 0:
-            banner = ""
-            try:
-                sock.settimeout(2.0)
-                banner = sock.recv(512).decode("utf-8", errors="replace").strip()[:200]
-            except Exception:
-                pass
-            return {
-                "port": port,
-                "open": True,
-                "banner": banner,
-                "service_guess": _SERVICE_GUESS.get(port, ""),
-            }
-        return {"port": port, "open": False, "banner": "", "service_guess": ""}
-    except Exception:
-        return {"port": port, "open": False, "banner": "", "service_guess": ""}
-    finally:
+    """Synchronous single-port TCP probe with a confirmation connection."""
+    closed = {"port": port, "open": False, "banner": "", "service_guess": ""}
+    banner = ""
+    for attempt in range(2):
+        sock = None
         try:
-            sock.close()
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            if sock.connect_ex((target, port)) != 0:
+                return closed
+            if attempt == 0:
+                try:
+                    sock.settimeout(2.0)
+                    banner = sock.recv(512).decode("utf-8", errors="replace").strip()[:200]
+                except Exception:
+                    pass
         except Exception:
-            pass
+            return closed
+        finally:
+            if sock is not None:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+    return {
+        "port": port,
+        "open": True,
+        "banner": banner,
+        "service_guess": _SERVICE_GUESS.get(port, ""),
+    }
 
 
 def socket_scan_sync(target: str, ports: list[int], timeout: float = 3.0) -> list[dict]:

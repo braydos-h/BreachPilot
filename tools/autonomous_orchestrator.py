@@ -1915,7 +1915,7 @@ class AutonomousOrchestrator:
             # Phase 2: thread recovered creds + config so post-foothold modules
             # (persistence callback host, lateral movement) can read them.
             credentials=list(state.credentials_found),
-            config=self._mission_config,
+            config=self._mission,
         )
 
     async def _phase_persistence(self, state: AttackState) -> None:

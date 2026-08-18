@@ -252,6 +252,45 @@ class AttackModule(ABC):
         """Execute the module. Returns a structured result dict."""
         ...
 
+    def _info_result(
+        self,
+        ctx: ModuleContext,
+        *,
+        note: str,
+        evidence: list[str] | None = None,
+        references: list[str] | None = None,
+        suggested_command: str = "",
+        suggested_msf: str = "",
+        **extra: Any,
+    ) -> dict[str, Any]:
+        """Phase 3: build a well-formed ``status="info"`` result dict.
+
+        Info-stub modules previously returned bare ``{"status": "info",
+        "module": self.name, "note": ...}`` with no evidence, references, or
+        actionable command -- so the orchestrator's audit trail and the
+        post-run report lost "what did this module actually find", and the
+        module was recorded as a failure (Phase 1) with nothing to show for
+        it. This helper pre-populates the fields ``ModuleResult`` /
+        ``record_success`` consume so every info module leaves an actionable
+        evidence trail. Extra kwargs pass through as top-level dict keys
+        (e.g. ``techniques=...``, ``log_sources=...``).
+        """
+        result: dict[str, Any] = {
+            "status": "info",
+            "module": self.name,
+            "note": note,
+        }
+        if evidence:
+            result["evidence"] = list(evidence)
+        if references:
+            result["references"] = list(references)
+        if suggested_command:
+            result["suggested_command"] = suggested_command
+        if suggested_msf:
+            result["suggested_msf"] = suggested_msf
+        result.update(extra)
+        return result
+
     def generate_python_script(self, ctx: ModuleContext) -> str:
         """Override to return a Python exploit script string."""
         return ""
