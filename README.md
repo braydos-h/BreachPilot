@@ -18,7 +18,7 @@
 <img width="1725" height="912" alt="web" src="https://github.com/user-attachments/assets/45b6af2f-91e2-4eaf-a4cd-1352dbd42e0c" />
 
 
-**An AI-driven, local-first penetration testing & bug bounty research agent.**
+**An AI-driven, local-first penetration testing & bug bounty research agent. All in One Web Interface!**
 
 Plan, reconnoiter, exploit, and report end to end against targets you own
 or are explicitly authorized to assess. An autonomous operator that thinks in
