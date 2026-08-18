@@ -7,10 +7,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { ArtifactViewer } from "@/components/ArtifactViewer";
 import { WorkspaceViewer } from "@/components/WorkspaceViewer";
-import { SkeletonRows, Spinner } from "@/components/Loading";
+import { AuditRecordsTable } from "@/components/AuditRecordsTable";
+import { EmptyState, SkeletonRows, Spinner } from "@/components/Loading";
 import { useArtifacts, useAudit, useRunLog, useWorkspace } from "@/api/hooks";
 import { ApiError } from "@/api/client";
 import { formatBytes } from "@/lib/utils";
@@ -59,12 +61,14 @@ export function ArtifactsPage() {
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
-          <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
-          <TabsTrigger value="workspace">Workspace</TabsTrigger>
-          <TabsTrigger value="audit">Audit</TabsTrigger>
-          <TabsTrigger value="logs">Logs</TabsTrigger>
-        </TabsList>
+        <ScrollArea type="scroll" className="w-full">
+          <TabsList>
+            <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
+            <TabsTrigger value="workspace">Workspace</TabsTrigger>
+            <TabsTrigger value="audit">Audit</TabsTrigger>
+            <TabsTrigger value="logs">Logs</TabsTrigger>
+          </TabsList>
+        </ScrollArea>
 
         <TabsContent value="artifacts" className="grid gap-4 md:grid-cols-[260px_minmax(0,1fr)]">
           <div className="space-y-1">
@@ -122,28 +126,12 @@ export function ArtifactsPage() {
             </div>
             <div className="mt-1 text-xs">{audit.data?.chain_reason ?? ""}</div>
           </div>
-          <div className="overflow-x-auto rounded-md border">
-            <table className="w-full border-collapse text-xs">
-              <thead>
-                <tr>
-                  {(audit.data?.records[0] ? Object.keys(audit.data.records[0]).slice(0, 6) : ["record"]).map((k) => (
-                    <th key={k}>{k}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {(audit.data?.records ?? []).map((rec, i) => (
-                  <tr key={i}>
-                    {(audit.data?.records[0] ? Object.keys(audit.data.records[0]).slice(0, 6) : ["record"]).map((k) => (
-                      <td key={k} className="max-w-xs truncate font-mono" title={String(rec[k] ?? "")}>
-                        {String(rec[k] ?? "")}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {audit.isLoading && <SkeletonRows count={3} />}
+          {audit.error && <div className="text-sm text-destructive">Failed to load audit.</div>}
+          {!audit.isLoading && !audit.error && (audit.data?.records.length ?? 0) === 0 && (
+            <EmptyState message="No audit records." />
+          )}
+          {(audit.data?.records.length ?? 0) > 0 && <AuditRecordsTable records={audit.data?.records ?? []} />}
         </TabsContent>
 
         <TabsContent value="logs">
@@ -250,7 +238,7 @@ function LogsPanel({ runId, attemptCandidates }: LogsPanelProps) {
         </div>
         <div className="space-y-1.5">
           <Label className="text-xs">Tail (lines)</Label>
-          <Input type="number" min={1} max={2000} value={tail} onChange={(e) => setTail(Number(e.target.value))} />
+          <Input type="number" min={1} max={2000} value={tail} onChange={(e) => { const v = Number(e.target.value); setTail(Number.isFinite(v) ? Math.min(2000, Math.max(1, v)) : 1); }} />
         </div>
         {isAttemptLog && (
           <>

@@ -103,7 +103,7 @@ export function RunForm({ className, onCreated }: RunFormProps) {
       recon_first: reconFirst,
       model: modelAlias || undefined,
       swarm,
-      parallel_swarm: parallelSwarm,
+      parallel_swarm: swarm && parallelSwarm,
       critic: swarm && critic,
       reflection: swarm && reflection,
       adaptive_exploits: adaptiveExploits,

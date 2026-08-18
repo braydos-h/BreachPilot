@@ -496,6 +496,28 @@ async def run_self_test(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     return {"exit_code": code, "output": buf.getvalue()}
 
 
+# ── Attack modules catalog ──────────────────────────────────────────────────
+
+@router.get("/attack/modules")
+async def list_attack_modules(auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """List the pre-packaged attack module catalog (metadata only, read-only)."""
+    from tools.attack_modules.registry import list_modules
+
+    out: list[dict[str, Any]] = []
+    for mod in list_modules():
+        family = mod.__class__.__module__.split(".")[-1]
+        out.append({
+            "name": mod.name,
+            "description": mod.description,
+            "family": family,
+            "target_services": list(mod.target_services),
+            "target_ports": list(mod.target_ports),
+            "required_cves": list(mod.required_cves),
+            "destructive_ics": bool(getattr(mod, "destructive_ics", False)),
+        })
+    return {"modules": out}
+
+
 # ── Goals (B4) ──────────────────────────────────────────────────────────────
 
 @router.get("/goals")

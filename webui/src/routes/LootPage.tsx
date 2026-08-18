@@ -1,5 +1,5 @@
 import { Link, useParams } from "react-router-dom";
-import { ChevronLeft, Expand } from "lucide-react";
+import { ChevronLeft, Expand, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,6 +21,9 @@ export function LootPage() {
           <Link to={`/runs/${runId}`}><ChevronLeft className="h-4 w-4" />Back to run</Link>
         </Button>
         <h1 className="text-sm font-mono text-muted-foreground">{runId}</h1>
+        <Button size="sm" variant="ghost" onClick={() => loot.refetch()} disabled={loot.isFetching} aria-label="Refresh loot">
+          <RefreshCw className={cn("h-3.5 w-3.5", loot.isFetching && "animate-spin")} />
+        </Button>
       </div>
 
       <section className="space-y-2">
@@ -31,7 +34,12 @@ export function LootPage() {
       <section className="space-y-2">
         <h2 className="text-sm font-semibold">Loot</h2>
         {loot.isLoading && <SkeletonCards count={2} />}
-        {loot.error && <div className="text-sm text-destructive">{loot.error instanceof ApiError ? loot.error.message : "Failed to load loot."}</div>}
+        {loot.error && (
+          <div className="flex items-center gap-2 text-sm text-destructive">
+            <span>{loot.error instanceof ApiError ? loot.error.message : "Failed to load loot."}</span>
+            <Button size="sm" variant="outline" onClick={() => loot.refetch()}>Retry</Button>
+          </div>
+        )}
         {!loot.isLoading && (loot.data?.loot.length ?? 0) === 0 && (
           <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">No loot captured.</div>
         )}
@@ -39,8 +47,9 @@ export function LootPage() {
           <div className="space-y-2">
             {loot.data?.loot.map((item, i) => {
               const isOpen = !!expanded[i];
+              const key = `${item.timestamp ?? i}-${item.loot_type}-${item.source_host ?? ""}`;
               return (
-                <Card key={i}>
+                <Card key={key}>
                   <CardHeader className="pb-2">
                     <div className="flex items-center gap-2">
                       <CardTitle className="text-xs font-mono">{item.loot_type}</CardTitle>

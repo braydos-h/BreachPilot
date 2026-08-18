@@ -55,7 +55,7 @@ export function LiveStatus({ compact = false }: { compact?: boolean }) {
   }
 
   return (
-    <div className="border-b p-3 text-xs">
+    <div className="hidden border-b p-3 text-xs md:block">
       <div className="mb-2 flex items-center gap-2">
         <Radio className={cn("h-3.5 w-3.5", apiOnline ? "text-emerald-400" : "text-red-400")} />
         <span className="font-mono uppercase tracking-wide text-muted-foreground">Live status</span>

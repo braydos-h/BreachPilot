@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -27,6 +28,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { SkeletonRows } from "@/components/Loading";
 
 interface SkillsConfig {
   enabled?: boolean;
@@ -67,6 +69,7 @@ export function SkillsPage() {
   const remove = useRemoveSkill();
   const { toast } = useToast();
   const [addOpen, setAddOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
   const [draftMarkdown, setDraftMarkdown] = useState("");
   const [draftError, setDraftError] = useState("");
@@ -120,7 +123,6 @@ export function SkillsPage() {
   };
 
   const onDelete = (name: string) => {
-    if (!window.confirm(`Delete skill "${name}" from disk? This removes its SKILL.md directory and cannot be undone.`)) return;
     // Also drop it from any config lists so toggles don't reference a gone skill.
     const enabled = new Set(skillsCfg.default_enabled ?? []);
     const exclude = new Set(skillsCfg.exclude_names ?? []);
@@ -232,8 +234,14 @@ export function SkillsPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-1">
-            {skills.isLoading && <div className="text-xs text-muted-foreground">Loading...</div>}
-            {list.length === 0 && !skills.isLoading && <p className="text-xs text-muted-foreground">No skills.</p>}
+            {skills.isLoading && <SkeletonRows count={4} />}
+            {skills.error && (
+              <div className="flex items-center gap-2 text-sm text-destructive">
+                <span>Failed to load skills.</span>
+                <Button size="sm" variant="outline" onClick={() => skills.refetch()}>Retry</Button>
+              </div>
+            )}
+            {list.length === 0 && !skills.isLoading && !skills.error && <p className="text-xs text-muted-foreground">No skills.</p>}
             {normalized.map((s) => (
               <SkillRow
                 key={s.name}
@@ -244,7 +252,7 @@ export function SkillsPage() {
                 onEnable={() => onEnable(s.name)}
                 onDisable={() => onDisable(s.name)}
                 onBlock={() => onBlock(s.name)}
-                onDelete={() => onDelete(s.name)}
+                onDelete={() => setConfirmDelete(s.name)}
                 pending={patch.isPending || remove.isPending}
                 removing={remove.isPending && remove.variables === s.name}
               />
@@ -326,6 +334,31 @@ export function SkillsPage() {
             <Button onClick={onInstall} disabled={install.isPending}>
               {install.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Install
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={confirmDelete !== null} onOpenChange={(open) => { if (!open) setConfirmDelete(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete skill?</DialogTitle>
+            <DialogDescription>
+              Delete skill <span className="font-mono">{confirmDelete}</span> from disk? This removes its SKILL.md directory and cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmDelete(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={remove.isPending}
+              onClick={() => {
+                if (confirmDelete) onDelete(confirmDelete);
+                setConfirmDelete(null);
+              }}
+            >
+              {remove.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Delete
             </Button>
           </DialogFooter>
         </DialogContent>

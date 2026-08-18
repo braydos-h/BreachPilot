@@ -163,6 +163,13 @@ function ModelsTab() {
       <Card>
         <CardHeader><CardTitle className="text-sm">{isChatgpt ? "Configured ChatGPT models" : "Registry"}</CardTitle></CardHeader>
         <CardContent>
+          {models.isLoading && <SkeletonRows count={3} className="p-2" />}
+          {models.error && (
+            <div className="flex items-center gap-2 text-sm text-destructive">
+              <span>Failed to load models.</span>
+              <Button size="sm" variant="outline" onClick={() => models.refetch()}>Retry</Button>
+            </div>
+          )}
           {isChatgpt ? (
             <ul className="space-y-1 font-mono text-xs">
               {(models.data?.chatgpt?.configured_models ?? []).map((m) => (
@@ -340,7 +347,13 @@ function PluginsTab() {
       <CardHeader><CardTitle className="text-sm">Plugins</CardTitle></CardHeader>
       <CardContent className="space-y-2">
         {plugins.isLoading && <SkeletonRows count={3} className="p-2" />}
-        {list.length === 0 && <p className="text-sm text-muted-foreground">No discovered plugins.</p>}
+        {plugins.error && (
+          <div className="flex items-center gap-2 text-sm text-destructive">
+            <span>Failed to load plugins.</span>
+            <Button size="sm" variant="outline" onClick={() => plugins.refetch()}>Retry</Button>
+          </div>
+        )}
+        {!plugins.isLoading && !plugins.error && list.length === 0 && <p className="text-sm text-muted-foreground">No discovered plugins.</p>}
         {list.map((p, i) => (
           <div key={i} className="rounded-md border p-2 text-xs">
             <div className="flex flex-wrap items-center gap-2">

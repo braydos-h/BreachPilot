@@ -205,7 +205,14 @@ export function HomePage() {
           </Button>
         </header>
 
-        {recent.length === 0 && !runs.isLoading && (
+        {runs.error && (
+          <div className="flex items-center gap-2 p-4 text-sm text-destructive">
+            <span>Failed to load recent sessions.</span>
+            <Button size="sm" variant="outline" onClick={() => runs.refetch()}>Retry</Button>
+          </div>
+        )}
+
+        {recent.length === 0 && !runs.isLoading && !runs.error && (
           <div className="flex flex-col items-center gap-2 p-6 text-center text-sm text-muted-foreground">
             <Target className="h-7 w-7 opacity-40" />
             <span>No past sessions yet. Start one above.</span>

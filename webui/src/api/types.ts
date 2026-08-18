@@ -169,6 +169,20 @@ export interface SkillSummary {
   tags: string[];
 }
 
+export interface AttackModuleSummary {
+  name: string;
+  description: string;
+  family: string;
+  target_services: string[];
+  target_ports: number[];
+  required_cves: string[];
+  destructive_ics: boolean;
+}
+
+export interface AttackModulesResponse {
+  modules: AttackModuleSummary[];
+}
+
 export interface SkillSearchResult {
   name: string;
   description: string;

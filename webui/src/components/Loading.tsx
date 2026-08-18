@@ -1,5 +1,6 @@
 import { Loader2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export { Skeleton };
@@ -41,6 +42,25 @@ export function SkeletonCards({ count = 3, className }: { count?: number; classN
           <Skeleton className="h-3 w-2/3" />
         </div>
       ))}
+    </div>
+  );
+}
+
+export function ErrorState({ message, onRetry }: { message?: string; onRetry?: () => void }) {
+  return (
+    <div className="flex items-center gap-2 text-sm text-destructive">
+      <span>{message ?? "Something went wrong."}</span>
+      {onRetry && (
+        <Button size="sm" variant="outline" onClick={onRetry}>Retry</Button>
+      )}
+    </div>
+  );
+}
+
+export function EmptyState({ message }: { message: string }) {
+  return (
+    <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+      {message}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Save } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -139,12 +139,22 @@ function ConfigField({ label, value, defaultValue, onChange }: ConfigFieldProps)
   const isRedacted = typeof value === "string" && value === REDACTED;
   const inferredType = inferType(defaultValue, value);
   const serializedValue = isRedacted ? REDACTED : safeStringify(value ?? {});
+  const listItems = Array.isArray(value) ? value : [];
   const [dictText, setDictText] = useState(serializedValue);
   const [dictInvalid, setDictInvalid] = useState(false);
+  const dirtyRef = useRef(false);
+  const [listText, setListText] = useState(isRedacted ? REDACTED : listItems.map((i) => String(i)).join("\n"));
+  const listDirtyRef = useRef(false);
 
   useEffect(() => {
+    if (dirtyRef.current) return;
     setDictText(serializedValue);
     setDictInvalid(false);
+  }, [serializedValue]);
+
+  useEffect(() => {
+    if (listDirtyRef.current) return;
+    setListText(isRedacted ? REDACTED : listItems.map((i) => String(i)).join("\n"));
   }, [serializedValue]);
 
   if (inferredType === "boolean") {
@@ -161,13 +171,16 @@ function ConfigField({ label, value, defaultValue, onChange }: ConfigFieldProps)
   }
 
   if (inferredType === "list") {
-    const items = Array.isArray(value) ? value : [];
     return (
       <div className="space-y-1.5">
         <Label className="text-xs">{label}</Label>
         <Textarea
-          value={isRedacted ? REDACTED : items.map((i) => String(i)).join("\n")}
-          onChange={(e) => onChange(parseList(e.target.value))}
+          value={isRedacted ? REDACTED : listText}
+          onChange={(e) => {
+            listDirtyRef.current = true;
+            setListText(e.target.value);
+            onChange(parseList(e.target.value));
+          }}
           disabled={isRedacted}
           className="min-h-[5rem] font-mono text-xs"
         />
@@ -183,6 +196,7 @@ function ConfigField({ label, value, defaultValue, onChange }: ConfigFieldProps)
         <Textarea
           value={dictText}
           onChange={(e) => {
+            dirtyRef.current = true;
             setDictText(e.target.value);
             try {
               onChange(JSON.parse(e.target.value));

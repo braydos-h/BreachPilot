@@ -459,6 +459,31 @@ List the runtime skills catalog (name, description, tags). Returns `{"skills": [
 
 ---
 
+### `GET /attack/modules`
+
+**Auth:** bearer.
+
+List the pre-packaged attack module catalog (read-only metadata). Returns `{"modules": []}` on error.
+
+**Response:** `200`
+```json
+{
+  "modules": [
+    {
+      "name": "Log4jRCE",
+      "description": "Log4j JNDI injection RCE (CVE-2021-44228)",
+      "family": "web",
+      "target_services": ["http", "https"],
+      "target_ports": [8080, 8443, 80, 443],
+      "required_cves": ["CVE-2021-44228"],
+      "destructive_ics": false
+    }
+  ]
+}
+```
+
+---
+
 ### `GET /skills/search`
 
 **Auth:** bearer.

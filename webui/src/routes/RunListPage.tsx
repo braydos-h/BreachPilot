@@ -6,6 +6,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -67,6 +75,7 @@ export function RunListPage() {
   const retitleRun = useRetitleRun();
   const navigate = useNavigate();
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [resumeTarget, setResumeTarget] = useState<string | null>(null);
   const [retitling, setRetitling] = useState<string | null>(null);
 
@@ -74,6 +83,10 @@ export function RunListPage() {
     const t = setTimeout(() => setDebouncedQ(q), 300);
     return () => clearTimeout(t);
   }, [q]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [debouncedQ]);
 
   const rows = runs.data?.runs ?? [];
   const total = runs.data?.total ?? 0;
@@ -84,6 +97,7 @@ export function RunListPage() {
   const onSortChange = (v: string) => {
     const next = v as RunSortKey;
     setSortKey(next);
+    setPage(0);
     try { localStorage.setItem(SORT_KEY_STORAGE, next); } catch { /* ignore */ }
   };
 
@@ -94,7 +108,6 @@ export function RunListPage() {
   };
 
   const onDelete = (runId: string) => {
-    if (!window.confirm(`Permanently delete run ${runId} and all of its artifacts?`)) return;
     setPendingDelete(runId);
     deleteRun.mutate(
       { runId, purge: true },
@@ -278,7 +291,7 @@ export function RunListPage() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => onDelete(row.id)}
+                          onClick={() => setConfirmDelete(row.id)}
                           disabled={active || pendingDelete === row.id}
                           aria-label="Delete run"
                           className="text-muted-foreground hover:text-destructive"
@@ -312,6 +325,31 @@ export function RunListPage() {
           </div>
         </div>
       )}
+
+      <Dialog open={confirmDelete !== null} onOpenChange={(open) => { if (!open) setConfirmDelete(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete run?</DialogTitle>
+            <DialogDescription>
+              Permanently delete run <span className="font-mono">{confirmDelete}</span> and all of its artifacts? This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmDelete(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={pendingDelete !== null}
+              onClick={() => {
+                if (confirmDelete) onDelete(confirmDelete);
+                setConfirmDelete(null);
+              }}
+            >
+              {pendingDelete !== null && <Loader2 className="h-4 w-4 animate-spin" />}
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

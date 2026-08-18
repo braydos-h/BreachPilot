@@ -525,7 +525,15 @@ function SettingsPanel(props: SettingsPanelProps) {
                     : "border-border bg-background/40 text-foreground",
                 )}
               >
-                <Checkbox checked={checked} disabled={disabled} className={cn(checked && "border-emerald-500/60 bg-emerald-500 text-emerald-950")} />
+                <span
+                  aria-hidden
+                  className={cn(
+                    "flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border",
+                    checked ? "border-emerald-500/60 bg-emerald-500 text-emerald-950" : "border-border",
+                  )}
+                >
+                  {checked && <Check className="h-3.5 w-3.5" />}
+                </span>
                 <span className="truncate">{p.label}</span>
               </button>
             );

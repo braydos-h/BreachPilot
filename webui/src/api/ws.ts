@@ -27,6 +27,10 @@ function backoffMs(attempt: number): number {
   return Math.min(MAX_BACKOFF, 1000 * 2 ** attempt);
 }
 
+function useSafeQueryClient(): QueryClient {
+  return useQueryClient();
+}
+
 export function useRunEvents(runId: string | null | undefined, options: UseRunEventsOptions = {}) {
   const { after: initialAfter = 0, enabled = true } = options;
   const [events, setEvents] = useState<RunEvent[]>([]);
@@ -46,14 +50,7 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
   const pendingRef = useRef<RunEvent[]>([]);
   const rafRef = useRef<number | null>(null);
 
-  // The hook may be mounted outside a QueryClientProvider (tests), where
-  // useQueryClient() throws. Fall back to a no-op cache patcher in that case.
-  let queryClient: QueryClient | null = null;
-  try {
-    queryClient = useQueryClient();
-  } catch {
-    queryClient = null;
-  }
+  const queryClient = useSafeQueryClient();
 
   const patchCaches = useCallback(
     (event: RunEvent) => {

@@ -127,7 +127,12 @@ main.tsx
                            ├─ "/runs/:runId"             → RunPage
                            ├─ "/runs/:runId/artifacts"   → ArtifactsPage
                            ├─ "/runs/:runId/loot"        → LootPage
+                           ├─ "/skills"                  → SkillsPage
+                           ├─ "/modules"                 → AttackModulesPage
+                           ├─ "/goals"                   → GoalsPage
+                           ├─ "/memory"                  → MemoryPage
                            ├─ "/system"                  → SystemPage
+                           ├─ "/help"                    → HelpPage
                            └─ "*"                        → <Navigate to="/">
 ```
 
@@ -302,6 +307,23 @@ See [Artifacts, Audit & Logs](#artifacts-audit--logs).
 ### Loot (`/runs/:runId/loot`)
 
 See [Loot & Credentials](#loot--credentials).
+
+### Modules (`/modules`)
+
+Read-only catalog of pre-packaged attack modules (`GET /attack/modules`): name,
+description, family, target services/ports, required CVEs, and a destructive-ICS
+flag. Search + family filter. `tools/attack_modules/` is the source; see
+[docs/attack-modules.md](attack-modules.md).
+
+### Goals (`/goals`)
+
+Read-only catalog of preset goals (`GET /goals`) grouped by risk requirement
+(safe / gated / high) with the opt-in requirement each level demands.
+
+### Help (`/help`)
+
+Static reference: quick-start steps, permission-mode explainer, run-phase
+overview, and links into the `docs/` guides.
 
 ### System (`/system`)
 

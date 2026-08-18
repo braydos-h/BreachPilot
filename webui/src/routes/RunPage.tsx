@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Dialog,
   DialogContent,
@@ -32,6 +33,7 @@ import {
 } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
 import { CopyButton } from "@/components/CopyButton";
+import { AuditRecordsTable } from "@/components/AuditRecordsTable";
 import { EventList } from "@/components/EventList";
 import { DecisionCard } from "@/components/DecisionCard";
 import { ReconAssessmentCard } from "@/components/ReconAssessmentCard";
@@ -98,6 +100,7 @@ export function RunPage() {
   const [selectedTool, setSelectedTool] = useState<string>("");
   const [toolArgs, setToolArgs] = useState<string>("{}");
   const [toolResult, setToolResult] = useState<string>("");
+  const [advisoryResult, setAdvisoryResult] = useState<string>("");
 
   const mergedDecisions = useMemo(() => {
     const rows = (decisions.data?.decisions ?? []).map((row) => ({ ...row }));
@@ -336,16 +339,18 @@ export function RunPage() {
       </div>
 
       <Tabs value={tab} onValueChange={setTab} className="mt-2">
-        <TabsList>
-          <TabsTrigger value="recon"><ScanSearch className="mr-1.5 h-3.5 w-3.5" />Recon</TabsTrigger>
-          <TabsTrigger value="graph"><Network className="mr-1.5 h-3.5 w-3.5" />Attack Path</TabsTrigger>
-          <TabsTrigger value="summary"><ClipboardList className="mr-1.5 h-3.5 w-3.5" />Summary</TabsTrigger>
-          <TabsTrigger value="tools"><Wrench className="mr-1.5 h-3.5 w-3.5" />Tools</TabsTrigger>
-          <TabsTrigger value="advisory"><FlaskConical className="mr-1.5 h-3.5 w-3.5" />Advisory</TabsTrigger>
-          <TabsTrigger value="audit">Audit</TabsTrigger>
-          <TabsTrigger value="swarm">Swarm</TabsTrigger>
-          <TabsTrigger value="campaign">Campaign</TabsTrigger>
-        </TabsList>
+        <ScrollArea type="scroll" className="w-full">
+          <TabsList>
+            <TabsTrigger value="recon"><ScanSearch className="mr-1.5 h-3.5 w-3.5" />Recon</TabsTrigger>
+            <TabsTrigger value="graph"><Network className="mr-1.5 h-3.5 w-3.5" />Attack Path</TabsTrigger>
+            <TabsTrigger value="summary"><ClipboardList className="mr-1.5 h-3.5 w-3.5" />Summary</TabsTrigger>
+            <TabsTrigger value="tools"><Wrench className="mr-1.5 h-3.5 w-3.5" />Tools</TabsTrigger>
+            <TabsTrigger value="advisory"><FlaskConical className="mr-1.5 h-3.5 w-3.5" />Advisory</TabsTrigger>
+            <TabsTrigger value="audit">Audit</TabsTrigger>
+            <TabsTrigger value="swarm">Swarm</TabsTrigger>
+            <TabsTrigger value="campaign">Campaign</TabsTrigger>
+          </TabsList>
+        </ScrollArea>
         <TabsContent value="recon" className="space-y-3">
           <ReconTab
             runId={run.data.id}
@@ -398,13 +403,13 @@ export function RunPage() {
               callTool.mutate(
                 { tool: name, arguments: parsedArgs },
                 {
-                  onSuccess: (data) => setToolResult(data.result || "(no output)"),
-                  onError: (err) => setToolResult(err instanceof ApiError ? err.message : "Tool call failed."),
+                  onSuccess: (data) => setAdvisoryResult(data.result || "(no output)"),
+                  onError: (err) => setAdvisoryResult(err instanceof ApiError ? err.message : "Tool call failed."),
                 },
               )
             }
             calling={callTool.isPending}
-            lastResult={toolResult}
+            lastResult={advisoryResult}
           />
         </TabsContent>
         <TabsContent value="audit" className="space-y-3">
@@ -588,28 +593,7 @@ function AuditView({ loading, error, records, chainValid, chainReason }: AuditVi
       {records.length === 0 ? (
         <p className="text-sm text-muted-foreground">No audit records.</p>
       ) : (
-        <div className="overflow-x-auto rounded-md border">
-          <table className="w-full border-collapse text-xs">
-            <thead>
-              <tr>
-                {Object.keys(records[0]).slice(0, 6).map((k) => (
-                  <th key={k}>{k}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {records.map((rec, i) => (
-                <tr key={i}>
-                  {Object.keys(records[0]).slice(0, 6).map((k) => (
-                    <td key={k} className="max-w-xs truncate font-mono" title={String(rec[k] ?? "")}>
-                      {String(rec[k] ?? "")}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <AuditRecordsTable records={records} />
       )}
     </div>
   );

@@ -90,8 +90,15 @@ export function MemoryPage() {
       <Card>
         <CardHeader><CardTitle className="text-sm">Cross-mission learnings</CardTitle></CardHeader>
         <CardContent>
-          {lessons.length === 0 && <p className="text-sm text-muted-foreground">No recorded lessons.</p>}
-          {lessons.length > 0 && (
+          {memory.isLoading && <SkeletonRows count={3} className="p-2" />}
+          {memory.error && (
+            <div className="flex items-center gap-2 text-sm text-destructive">
+              <span>Failed to load memory.</span>
+              <Button size="sm" variant="outline" onClick={() => memory.refetch()}>Retry</Button>
+            </div>
+          )}
+          {!memory.isLoading && !memory.error && lessons.length === 0 && <p className="text-sm text-muted-foreground">No recorded lessons.</p>}
+          {!memory.isLoading && !memory.error && lessons.length > 0 && (
             <ul className="space-y-1.5 text-xs">
               {lessons.map((l) => (
                 <li key={l.id} className="rounded-md border p-2">
@@ -141,8 +148,15 @@ export function MemoryPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {attackMemory.length === 0 && <p className="text-sm text-muted-foreground">No attack-memory items captured.</p>}
-          {attackMemory.length > 0 && (
+          {memory.isLoading && <SkeletonRows count={3} className="p-2" />}
+          {memory.error && (
+            <div className="flex items-center gap-2 text-sm text-destructive">
+              <span>Failed to load memory.</span>
+              <Button size="sm" variant="outline" onClick={() => memory.refetch()}>Retry</Button>
+            </div>
+          )}
+          {!memory.isLoading && !memory.error && attackMemory.length === 0 && <p className="text-sm text-muted-foreground">No attack-memory items captured.</p>}
+          {!memory.isLoading && !memory.error && attackMemory.length > 0 && (
             <>
               {filteredAttackMemory.length === 0 && (
                 <p className="text-sm text-muted-foreground">No items match the current filters.</p>

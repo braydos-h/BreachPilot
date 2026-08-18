@@ -18,6 +18,9 @@ const GraphPage = lazy(() => import("@/routes/GraphPage").then((m) => ({ default
 const MemoryPage = lazy(() => import("@/routes/MemoryPage").then((m) => ({ default: m.MemoryPage })));
 const SkillsPage = lazy(() => import("@/routes/SkillsPage").then((m) => ({ default: m.SkillsPage })));
 const SystemPage = lazy(() => import("@/routes/SystemPage").then((m) => ({ default: m.SystemPage })));
+const AttackModulesPage = lazy(() => import("@/routes/AttackModulesPage").then((m) => ({ default: m.AttackModulesPage })));
+const GoalsPage = lazy(() => import("@/routes/GoalsPage").then((m) => ({ default: m.GoalsPage })));
+const HelpPage = lazy(() => import("@/routes/HelpPage").then((m) => ({ default: m.HelpPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -58,6 +61,9 @@ export default function App() {
                     <Route path="/runs/:runId/loot" element={<LootPage />} />
                     <Route path="/runs/:runId/graph" element={<GraphPage />} />
                     <Route path="/skills" element={<SkillsPage />} />
+                    <Route path="/modules" element={<AttackModulesPage />} />
+                    <Route path="/goals" element={<GoalsPage />} />
+                    <Route path="/help" element={<HelpPage />} />
                     <Route path="/memory" element={<MemoryPage />} />
                     <Route path="/system" element={<SystemPage />} />
                     <Route path="*" element={<Navigate to="/" replace />} />

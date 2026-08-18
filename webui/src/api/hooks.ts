@@ -12,6 +12,7 @@ import {
 } from "@/api/client";
 import type {
   ArtifactListResponse,
+  AttackModulesResponse,
   AuditResponse,
   Capabilities,
   ChatgptLoginResponse,
@@ -308,6 +309,15 @@ export function usePlugins() {
   return useQuery<{ plugins: PluginSummary[] }>({
     queryKey: queryKeys.plugins,
     queryFn: () => apiFetch<{ plugins: PluginSummary[] }>("/plugins"),
+    ...defaultQueryOptions,
+    staleTime: 60_000,
+  });
+}
+
+export function useAttackModules() {
+  return useQuery<AttackModulesResponse>({
+    queryKey: ["attack", "modules"],
+    queryFn: () => apiFetch<AttackModulesResponse>("/attack/modules"),
     ...defaultQueryOptions,
     staleTime: 60_000,
   });

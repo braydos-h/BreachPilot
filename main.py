@@ -5,7 +5,7 @@ Usage:
     python main.py --target 10.0.0.50 --mode attack --goal backdoor
     python main.py --target 10.0.0.50 --mode recon --goal initial_access
 """
-
+#Made by the big b (Brayden H.) 2026
 from __future__ import annotations
 
 __version__ = "0.49.12"
