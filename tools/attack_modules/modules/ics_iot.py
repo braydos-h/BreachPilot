@@ -27,13 +27,19 @@ from tools.attack_modules.base import AttackModule, ModuleContext
 
 
 def _ics_write_allowed() -> bool:
-    """Return True only when ``ics.allow_write: true`` is set in config.
+    """Return True only when BOTH ``ics.allow_write: true`` AND
+    ``ics.destructive_ics: true`` are set in config.
 
-    Reads the config the same way the MCP layer does (``config.yaml`` at the
-    repo root or the path in ``AI_NMAP_CONFIG_PATH``). Default is False —
-    write-side ICS is opt-in and carries physical-damage risk. This is the
-    second gate of the dual lock; the first is ``@require_allowlist()`` on
-    ``run_attack_module`` (target must be in the allowlist).
+    Phase 1 safety: two independent flags must be set before any ICS write
+    module (ModbusWriteCoil/ModbusWriteRegister/S7PlcStop/S7PlcStart) can
+    fire. The checked-in ``config.yaml`` defaults both to false so the
+    repository is safe-by-default; an operator who has explicit written
+    authorization for destructive PLC testing sets both explicitly. This
+    is the second gate of the dual lock; the first is
+    ``@require_allowlist()`` on ``run_attack_module`` (target must be in
+    the allowlist). The Flow B ``scope_gate._HARD_FORBIDDEN_ACTIONS`` block
+    does NOT cover ICS writes (it is Flow B only); the live gate is here
+    + ``@require_allowlist``.
     """
     config_path = os.environ.get("AI_NMAP_CONFIG_PATH") or "config.yaml"
     try:
@@ -42,7 +48,8 @@ def _ics_write_allowed() -> bool:
             cfg = yaml.safe_load(handle) or {}
     except Exception:
         return False
-    return bool((cfg.get("ics", {}) or {}).get("allow_write", False))
+    ics_cfg = (cfg.get("ics", {}) or {})
+    return bool(ics_cfg.get("allow_write", False)) and bool(ics_cfg.get("destructive_ics", False))
 
 
 class ModbusEnum(AttackModule):
@@ -1064,6 +1071,10 @@ class ModbusWriteCoil(AttackModule):
     target_services = ["modbus", "tcp"]
     target_ports = [502]
     required_cves: list[str] = []
+    # Phase 1: hard-gate applicability at 0 unless both ics.allow_write +
+    # ics.destructive_ics are armed in config. Defense in depth with the
+    # run() _ics_write_allowed() re-check.
+    destructive_ics = True
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         if not _ics_write_allowed():
@@ -1163,6 +1174,7 @@ class ModbusWriteRegister(AttackModule):
     target_services = ["modbus", "tcp"]
     target_ports = [502]
     required_cves: list[str] = []
+    destructive_ics = True
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         if not _ics_write_allowed():
@@ -1256,6 +1268,7 @@ class S7PlcStop(AttackModule):
     target_services = ["iso-tsap", "s7", "s7comm"]
     target_ports = [102]
     required_cves: list[str] = []
+    destructive_ics = True
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         if not _ics_write_allowed():
@@ -1352,6 +1365,7 @@ class S7PlcStart(AttackModule):
     target_services = ["iso-tsap", "s7", "s7comm"]
     target_ports = [102]
     required_cves: list[str] = []
+    destructive_ics = True
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         if not _ics_write_allowed():

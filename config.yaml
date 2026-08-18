@@ -369,9 +369,12 @@ api:
 # Default false: read-only ICS enum works without it. Set true ONLY for
 # authorized PLC testing. PHYSICAL-DAMAGE RISK: a coil/register write or PLC
 # stop can change real-world process state. Dual-gated: @require_allowlist on
-# run_attack_module (target in allowlist) AND ics.allow_write: true.
+# run_attack_module (target in allowlist) AND ics.allow_write: true AND
+# ics.destructive_ics: true (Phase 1 safety: both flags must be set; the
+# allow_write default flipped to false so the checked-in config is safe).
 ics:
-  allow_write: true
+  allow_write: false
+  destructive_ics: false
 plugins:
   enabled:
   - shodan_recon

@@ -15,6 +15,14 @@ class ModuleContext:
     services: list[dict[str, str]] = field(default_factory=list)
     cves: list[str] = field(default_factory=list)
     workspace: Path = Path("exploit_workspace")
+    # Phase 1: thread recovered credentials + task parameters + config into
+    # modules. The orchestrator builds ctx from recon_result only, so
+    # post-exploit modules (LateralMovement, ValidateFinding) could not read
+    # the recovered cred or the task's {exploit: ...} parameter. Optional
+    # fields keep existing callers byte-identical.
+    credentials: list[dict[str, str]] = field(default_factory=list)
+    parameters: dict[str, Any] = field(default_factory=dict)
+    config: dict[str, Any] | None = None
 
 
 # Status values a module's run() may legitimately return. Kept loose (str) on
@@ -166,10 +174,34 @@ class AttackModule(ABC):
     target_ports: list[int] = []
     required_cves: list[str] = []
     target_versions: dict[str, list[str]] = {}
+    # Phase 1: OS-gated applicability path for post-foothold modules (privesc,
+    # persistence, detection) that don't key on a network service. When
+    # declared, applicability() adds +30 when ctx.target_os matches one of
+    # the listed OS hints (case-insensitive). Empty list (default) means no
+    # OS gating -- existing behavior unchanged.
+    target_os_hint: list[str] = []
+    # Phase 1: ICS destructive-write gate. When True, applicability() returns
+    # 0 unless _ics_write_allowed() (ics.allow_write + ics.destructive_ics both
+    # true in config) -- so the 4 write modules (ModbusWriteCoil,
+    # ModbusWriteRegister, S7PlcStop, S7PlcStart) are invisible to find_modules
+    # unless the operator has explicitly armed both flags. Default False
+    # keeps all non-ICS modules unchanged.
+    destructive_ics: bool = False
 
     def applicability(self, ctx: ModuleContext) -> int:
         """Return 0-100 score indicating how applicable this module is.
         Higher = more confident this module fits the target."""
+        # Phase 1: ICS destructive-write hard gate. Done before any
+        # service/port scoring so an unarmed write module never appears in
+        # find_modules even if its target service/port match. The live
+        # run() also re-checks via _ics_write_allowed() for defense in depth.
+        if self.destructive_ics:
+            try:
+                from tools.attack_modules.modules.ics_iot import _ics_write_allowed
+                if not _ics_write_allowed():
+                    return 0
+            except Exception:  # noqa: BLE001 -- best-effort gate
+                return 0
         score = 0
         svc_names = {s.get("service", "").lower() for s in ctx.services}
         svc_ports = {int(s.get("port", 0).split("/")[0]) for s in ctx.services if "/" in s.get("port", "")}
@@ -202,6 +234,16 @@ class AttackModule(ABC):
                     break
             if version_bonus:
                 score += 25
+
+        # Phase 1: OS-hint applicability for post-foothold modules. When a
+        # module declares target_os_hint (e.g. ["linux"], ["windows"]) and
+        # ctx.target_os matches, add +30 so privesc/persistence/detection
+        # modules can score >0 without coupling to a network service. Empty
+        # target_os_hint (default) short-circuits and changes nothing.
+        if self.target_os_hint and ctx.target_os:
+            ctx_os = ctx.target_os.lower()
+            if any(h.lower() in ctx_os or ctx_os in h.lower() for h in self.target_os_hint):
+                score += 30
 
         return min(score, 100)
 

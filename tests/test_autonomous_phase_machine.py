@@ -283,7 +283,15 @@ async def test_dispatch_keeps_loop_responsive_and_reports_monotonic_actions(tmp_
 @pytest.mark.asyncio
 async def test_info_stub_does_not_set_access(tmp_path: Path) -> None:
     """status=info with only a suggested_command must skip dispatch entirely --
-    no shell_type, no access_achieved, no false foothold."""
+    no shell_type, no access_achieved, no false foothold.
+
+    Phase 1: info-stubs no longer count as succeeded either -- they produce no
+    runnable artifact and no compromise signal, so the retry loop must re-queue
+    them. The module's suggested_command is dead data until the recipe emits a
+    dispatchable status (script_generated/success). This test encodes the
+    corrected behavior; pre-Phase-1 it asserted success=True (the silent
+    false-positive this fix removes).
+    """
     captured: list[str] = []
 
     def _exec(cmd: str, ctx: dict[str, Any]) -> str:
@@ -295,7 +303,7 @@ async def test_info_stub_does_not_set_access(tmp_path: Path) -> None:
 
     out = await ex.execute(_task("_InfoStub"), state)
 
-    assert out["success"] is True, "info-stubs count as succeeded (ran cleanly)"
+    assert out["success"] is False, "info-stubs must NOT count as succeeded (no artifact, no compromise)"
     assert state.access_achieved is False, "info-stub must NOT set access_achieved"
     assert state.shell_type == ""
     assert captured == [], "info-stub's suggested_command must NOT be dispatched"

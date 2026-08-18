@@ -44,6 +44,7 @@ from tools.attack_modules import (
     find_modules,
     get_module,
     list_modules,
+    _module_target_signature,
 )
 
 logger = get_logger()
@@ -451,10 +452,18 @@ class AttackModuleExecutor:
         tool_executor: Callable[[str, dict[str, Any]], str] | None = None,
         opsec_manager: Any | None = None,
         semantic_memory: Any | None = None,
+        experience_store: Any | None = None,
     ) -> None:
         self._scope_gate = scope_gate
         self._risk_controller = risk_controller
         self._evidence_store = evidence_store
+        # Phase 1: Bayesian ExperienceStore for the orchestrator's module-run
+        # learning loop. Distinct from ``_evidence_store`` (the per-attempt
+        # evidence capture). When wired (AutonomousOrchestrator passes its
+        # self._experience_store through), execute() records each module run
+        # outcome so find_modules on the next campaign reflects orchestrator
+        # history. None (legacy callers, most tests) -> best-effort skip.
+        self._experience_store = experience_store
         # Phase 6.2: optional OpsecManager. When wired (AutonomousOrchestrator
         # builds one from the ``opsec`` config block), execute() awaits
         # ``acquire_pacing(task.aggression.value)`` before each module run so
@@ -708,6 +717,27 @@ class AttackModuleExecutor:
             # extra keys are preserved by to_dict().
             result = mresult.to_dict()
 
+            # Phase 1: feed this module run into the ExperienceStore so the
+            # Bayesian learning loop reflects orchestrator history, not just
+            # the exploit-agent loop. Best-effort -- a None store (legacy
+            # callers) or a module with no target signature (no target_services)
+            # is silently skipped. Maps info -> partial (neutral), real
+            # compromise -> success, failure -> failure. This is the missing
+            # wiring that makes find_modules on the next campaign prefer
+            # proven modules and demote known-bad ones.
+            if self._experience_store is not None:
+                try:
+                    sig = _module_target_signature(module, ctx)
+                    if sig is not None:
+                        self._experience_store.record_module_outcome(
+                            target_signature=sig,
+                            module_name=module.name,
+                            status_str=str(result.get("status", "")),
+                            metadata={"target": task.target, "phase": state.current_phase.value},
+                        )
+                except Exception:  # noqa: BLE001 -- learning loop is best-effort
+                    logger.debug(f"ExperienceStore record skipped for {module.name}")
+
             # Process result
             task.result = result
             # A module that ran but did not achieve exploitation is NOT a success:
@@ -716,8 +746,18 @@ class AttackModuleExecutor:
             # result["success"] / task.status, so a ran-but-failed module must
             # report success=False and TaskStatus.FAILED -- otherwise failed
             # modules are counted as completed and never retried.
+            # Phase 1: stop counting status="info" as _succeeded. Info-stub
+            # modules produce no runnable artifact and no compromise signal --
+            # counting them as success was a silent false-positive that left
+            # ValidateFinding/LateralMovement "succeeding" without ever
+            # dispatching (the dispatcher at line 659 correctly skips info
+            # status, but _succeeded then counted them as wins). Now only
+            # success/exploited/script_generated count as succeeded; info
+            # modules are recorded as failures so the retry loop can re-queue
+            # them with a dispatchable status (the module recipe must emit
+            # script/suggested_command to actually win).
             _succeeded = (
-                result.get("status") in ("success", "exploited", "script_generated", "info")
+                result.get("status") in ("success", "exploited", "script_generated")
                 and not dispatch_failure
             )
             task.status = TaskStatus.COMPLETED if _succeeded else TaskStatus.FAILED
@@ -1200,6 +1240,7 @@ class AutonomousOrchestrator:
             tool_executor=tool_executor,
             opsec_manager=self._opsec,
             semantic_memory=self._semantic_memory,
+            experience_store=self._experience_store,
         )
 
         self._states: dict[str, AttackState] = {}

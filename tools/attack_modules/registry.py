@@ -51,6 +51,8 @@ from tools.attack_modules.modules import (
     Log4jRCE,
     LogSourceEnum,
     ModbusEnum,
+    ModbusWriteCoil,
+    ModbusWriteRegister,
     OpenSSHCVECheck,
     OPSECPostureReport,
     PassTheHash,
@@ -64,6 +66,8 @@ from tools.attack_modules.modules import (
     ResponderRelay,
     S3BucketTakeover,
     S7Enum,
+    S7PlcStart,
+    S7PlcStop,
     ServiceMisconfiguration,
     SMBGhost,
     SMBNullSession,
@@ -159,6 +163,15 @@ _MODULE_CLASSES: list[type[AttackModule]] = [
     BACnetEnum,
     HMIDefaultCred,
     IoTDefaultCred,
+    # --- Phase 6.3+: ICS/SCADA DESTRUCTIVE writes (dual-gated by
+    # ics.allow_write + ics.destructive_ics; applicability() returns 0
+    # unless BOTH flags are armed). Registered so run_attack_module /
+    # get_module can find them by name; find_modules drops them at the
+    # applicability gate when the flags are off (the safe default). ---
+    ModbusWriteCoil,
+    ModbusWriteRegister,
+    S7PlcStop,
+    S7PlcStart,
     # --- Phase 6.4: Supply-chain / CI-CD reconnaissance ---
     ExposedVCS,
     CICDMisconfig,
@@ -196,6 +209,27 @@ def _plugin_extra_module_classes() -> list[type]:
         return list(PLUGIN_REGISTRY.extra_module_classes)
     except Exception:  # noqa: BLE001 -- best-effort plugin consult
         return []
+
+
+# Phase 1: a class decorator that appends the decorated AttackModule subclass
+# to _MODULE_CLASSES and returns the class unchanged. New modules can use
+# ``@register_attack_module`` at class-definition time instead of editing the
+# central _MODULE_CLASSES literal (the old 3-place edit: define class, import
+# in modules/__init__.py, AND add to _MODULE_CLASSES here). The decorator
+# collapses it to 2 places (define + import for re-export). Idempotent: a
+# class already in _MODULE_CLASSES is not re-added (protects against double
+# decoration when modules/__init__.py imports trigger re-evaluation).
+def register_attack_module(cls: type) -> type:
+    """Register an AttackModule subclass in the central registry.
+
+    Usage::
+
+        @register_attack_module
+        class MyModule(AttackModule): ...
+    """
+    if cls not in _MODULE_CLASSES:
+        _MODULE_CLASSES.append(cls)
+    return cls
 
 
 def list_modules() -> list[AttackModule]:

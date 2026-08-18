@@ -300,6 +300,36 @@ class ExperienceStore:
         outcome = "success" if success else "failure"
         self.record_outcome(target_signature, action_type, outcome, metadata)
 
+    def record_module_outcome(
+        self,
+        target_signature: str,
+        module_name: str,
+        status_str: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Phase 1: map an AttackModule's run() status string to a Bayesian
+        outcome and record it. ``info`` → ``partial`` (neutral 0.5 weight --
+        the module ran but produced no compromise signal, so it should not
+        inflate or deflate confidence); ``success``/``exploited``/
+        ``script_generated`` → ``success``; ``failed``/``blocked`` →
+        ``failure``. This feeds the orchestrator's module runs into the
+        same ExperienceStore the exploit-agent loop writes to, so
+        ``find_modules`` on the next campaign reflects orchestrator history.
+        """
+        s = str(status_str or "").lower()
+        if s in ("success", "exploited", "script_generated"):
+            outcome = "success"
+        elif s in ("failed", "blocked", "error"):
+            outcome = "failure"
+        else:
+            outcome = "partial"
+        self.record_outcome(
+            target_signature=target_signature,
+            action_type=module_name,
+            outcome=outcome,
+            metadata=metadata,
+        )
+
     def update_from_exploit_result(
         self,
         service_name: str,
