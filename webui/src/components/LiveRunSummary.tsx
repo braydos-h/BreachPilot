@@ -1,6 +1,7 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { Activity, AlertTriangle, Clock, Cpu, FileCheck, Layers, MessageSquare, Terminal, Timer } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { fmtElapsed } from "@/lib/format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { RunEvent } from "@/api/types";
@@ -61,6 +62,7 @@ function derive(events: RunEvent[]): Derived {
             tokens: tel.total_tokens as number,
             ctxPct: typeof tel.last_ctx_pct === "number" ? (tel.last_ctx_pct as number) : null,
           });
+          if (telemetrySeries.length > 200) telemetrySeries.shift();
         }
         break;
       }
@@ -129,19 +131,13 @@ function derive(events: RunEvent[]): Derived {
   };
 }
 
-function fmtElapsed(s: number): string {
-  const m = Math.floor(s / 60);
-  const sec = s % 60;
-  return `${m}:${sec.toString().padStart(2, "0")}`;
-}
-
 function truncate(s: string, n: number): string {
   const one = s.replace(/\s+/g, " ").trim();
   return one.length <= n ? one : one.slice(0, n - 1) + "\u2026";
 }
 
 export const LiveRunSummary = memo(function LiveRunSummary({ events, className }: LiveRunSummaryProps) {
-  const d = derive(events);
+  const d = useMemo(() => derive(events), [events]);
   const ctxValues = d.telemetrySeries.map((s) => s.ctxPct).filter((v): v is number => v != null);
   const hasAny =
     d.phase || d.round != null || d.actions != null || d.lastTool || d.lastAssistant || d.bootTotal > 0;
@@ -275,8 +271,12 @@ function Sparkline({
   format?: (v: number) => string;
 }) {
   if (values.length < 2) return null;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  let min = values[0];
+  let max = values[0];
+  for (let i = 1; i < values.length; i++) {
+    if (values[i] < min) min = values[i];
+    if (values[i] > max) max = values[i];
+  }
   const span = max - min || 1;
   const W = 120;
   const H = 28;
