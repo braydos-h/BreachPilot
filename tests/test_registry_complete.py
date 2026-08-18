@@ -15,10 +15,10 @@ fresh subclass makes it appear in ``list_modules()`` without any edit to
 
 from __future__ import annotations
 
-from tools.attack_modules import list_modules, get_module, _MODULE_CLASSES
+import tools.attack_modules.modules as _modules_pkg
+from tools.attack_modules import _MODULE_CLASSES, get_module, list_modules
 from tools.attack_modules import registry as registry_mod
 from tools.attack_modules.base import AttackModule, ModuleContext
-import tools.attack_modules.modules as _modules_pkg
 from tools.attack_modules.modules import __all__ as MODULE_EXPORT_NAMES
 
 
