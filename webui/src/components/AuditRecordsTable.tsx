@@ -3,10 +3,11 @@ export function AuditRecordsTable({ records }: { records: Record<string, unknown
   return (
     <div className="overflow-x-auto rounded-md border">
       <table className="w-full border-collapse text-xs">
+        <caption className="sr-only">Audit records</caption>
         <thead>
           <tr>
             {columns.map((k) => (
-              <th key={k} className="bg-muted/40 px-3 py-2.5 text-left font-medium uppercase tracking-wide text-muted-foreground">
+              <th key={k} scope="col" className="bg-muted/40 px-3 py-2.5 text-left font-medium uppercase tracking-wide text-muted-foreground">
                 {k}
               </th>
             ))}

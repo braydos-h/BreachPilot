@@ -9,6 +9,7 @@ import { ToolCallCard } from "@/components/ToolCallCard";
 import { DecisionCard } from "@/components/DecisionCard";
 import { ReconAssessmentCard } from "@/components/ReconAssessmentCard";
 import { GoalSuggestionCard } from "@/components/GoalSuggestionCard";
+import { formatElapsed, formatTokens, safeStringify } from "@/lib/format";
 import type { RunEvent, SuggestedGoal, ReconAssessment } from "@/api/types";
 import type { DecisionListRow } from "@/api/types";
 
@@ -76,11 +77,16 @@ export function EventList({ events, decisions, runId, className, terminal = fals
   const [stick, setStick] = useState(true);
   const [visibleCount, setVisibleCount] = useState(500);
   const [filter, setFilter] = useState<FilterKey>("all");
+  const lastSeqRef = useRef<number>(-1);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    if (stick) el.scrollTop = 0;
+    const lastSeq = events.length > 0 ? events[events.length - 1].sequence : -1;
+    if (stick && lastSeq !== lastSeqRef.current) {
+      el.scrollTop = 0;
+      lastSeqRef.current = lastSeq;
+    }
   }, [events, stick]);
 
   useEffect(() => {
@@ -234,6 +240,7 @@ export function EventList({ events, decisions, runId, className, terminal = fals
             key={f.key}
             type="button"
             onClick={() => setFilter(f.key)}
+            aria-pressed={filter === f.key}
             className={cn(
               "rounded-full border px-2.5 py-1 text-xs transition-colors",
               filter === f.key
@@ -437,31 +444,4 @@ function renderSimpleEvent(event: RunEvent, key: string): React.ReactNode {
         </div>
       );
   }
-}
-
-function safeStringify(value: unknown): string {
-  try {
-    return typeof value === "string" ? value : JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function formatElapsed(totalSeconds: number): string {
-  const s = Math.max(0, Math.round(totalSeconds));
-  const m = Math.floor(s / 60);
-  const rem = s % 60;
-  if (m >= 60) {
-    const h = Math.floor(m / 60);
-    const mm = m % 60;
-    return `${h}h${String(mm).padStart(2, "0")}m`;
-  }
-  if (m > 0) return `${m}m${String(rem).padStart(2, "0")}s`;
-  return `${rem}s`;
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
 }

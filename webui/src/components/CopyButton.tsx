@@ -12,12 +12,16 @@ interface CopyButtonProps {
 
 export function CopyButton({ value, label = "Copy", className, size = "sm" }: CopyButtonProps) {
   const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), 2000);
+    if (!copied && !failed) return;
+    const timer = setTimeout(() => {
+      setCopied(false);
+      setFailed(false);
+    }, 2000);
     return () => clearTimeout(timer);
-  }, [copied]);
+  }, [copied, failed]);
 
   const onClick = useCallback(async () => {
     try {
@@ -34,7 +38,7 @@ export function CopyButton({ value, label = "Copy", className, size = "sm" }: Co
         document.execCommand("copy");
         setCopied(true);
       } catch {
-        // Ignore.
+        setFailed(true);
       }
       document.body.removeChild(el);
     }
@@ -47,10 +51,10 @@ export function CopyButton({ value, label = "Copy", className, size = "sm" }: Co
       size={size === "icon" ? "icon" : size}
       className={cn("gap-1.5", className)}
       onClick={onClick}
-      aria-label={copied ? "Copied" : label}
+      aria-label={copied ? "Copied" : failed ? "Copy failed" : label}
     >
       {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-      {size !== "icon" && <span>{copied ? "Copied" : label}</span>}
+      {size !== "icon" && <span>{copied ? "Copied" : failed ? "Copy failed" : label}</span>}
     </Button>
   );
 }

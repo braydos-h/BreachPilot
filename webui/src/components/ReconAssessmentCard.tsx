@@ -1,17 +1,12 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { riskColor } from "@/lib/risk";
 import type { ReconAssessment } from "@/api/types";
 
 interface ReconAssessmentCardProps {
   assessment: ReconAssessment;
   className?: string;
-}
-
-function riskColor(score: number): string {
-  if (score >= 80) return "text-emerald-400";
-  if (score >= 55) return "text-yellow-400";
-  return "text-red-400";
 }
 
 function osVerdictColor(verdict: string): string {
@@ -70,9 +65,12 @@ export function ReconAssessmentCard({ assessment, className }: ReconAssessmentCa
                 {svc.port != null && (
                   <span className="text-muted-foreground">port {String(svc.port)}/tcp</span>
                 )}
-                {svc.risk != null && (
-                  <span className={riskColor(Number(svc.risk))}>[risk:{String(svc.risk)}]</span>
-                )}
+                {svc.risk != null && (() => {
+                  const r = Number(svc.risk);
+                  return (
+                    <span className={Number.isFinite(r) ? riskColor(r) : ""}>[risk:{String(svc.risk)}]</span>
+                  );
+                })()}
                 {svc.banner && (
                   <span className="text-muted-foreground">banner: {String(svc.banner)}</span>
                 )}

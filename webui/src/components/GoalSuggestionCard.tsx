@@ -1,6 +1,7 @@
 import { Sparkles, Lock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { ratingColor, ratingBar } from "@/lib/risk";
 import type { SuggestedGoal } from "@/api/types";
 
 interface GoalSuggestionCardProps {
@@ -9,18 +10,6 @@ interface GoalSuggestionCardProps {
   onClick?: () => void;
   compact?: boolean;
   className?: string;
-}
-
-function ratingColor(rating: number): string {
-  if (rating >= 80) return "text-emerald-400";
-  if (rating >= 55) return "text-yellow-400";
-  return "text-red-400";
-}
-
-function ratingBar(rating: number): string {
-  if (rating >= 80) return "bg-emerald-500";
-  if (rating >= 55) return "bg-yellow-500";
-  return "bg-red-500";
 }
 
 function riskVariant(risk?: string): "success" | "warn" | "danger" | "muted" {

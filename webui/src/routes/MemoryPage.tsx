@@ -61,10 +61,11 @@ export function MemoryPage() {
           {confidence.length > 0 && (
             <div className="overflow-x-auto rounded-md border">
               <table className="w-full border-collapse text-xs">
+                <caption className="sr-only">Skill outcome confidence</caption>
                 <thead>
                   <tr>
                     {["action", "obs", "success", "failure", "partial", "confidence", "last seen"].map((h) => (
-                      <th key={h} className="border-b p-2 text-left font-semibold">{h}</th>
+                      <th key={h} scope="col" className="border-b p-2 text-left font-semibold">{h}</th>
                     ))}
                   </tr>
                 </thead>

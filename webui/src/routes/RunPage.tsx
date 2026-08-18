@@ -103,8 +103,10 @@ export function RunPage() {
   const [advisoryResult, setAdvisoryResult] = useState<string>("");
 
   const mergedDecisions = useMemo(() => {
-    const rows = (decisions.data?.decisions ?? []).map((row) => ({ ...row }));
+    const rows = decisions.data?.decisions ?? [];
     const byId = new Map(rows.map((row) => [row.id, row]));
+    const answeredOverrides = new Map<string, string | null>();
+    const wsAdded: DecisionListRow[] = [];
     for (const ev of events.events) {
       if (ev.type !== "approval") continue;
       const id = ev.payload.decision_id;
@@ -112,8 +114,7 @@ export function RunPage() {
       const existing = byId.get(id);
       if (ev.payload.status === "answered") {
         if (existing) {
-          existing.status = "answered";
-          if (typeof ev.payload.answer === "string") existing.answer = ev.payload.answer;
+          answeredOverrides.set(id, typeof ev.payload.answer === "string" ? ev.payload.answer : null);
         }
         continue;
       }
@@ -128,9 +129,16 @@ export function RunPage() {
         options: Array.isArray(ev.payload.options) ? ev.payload.options : [],
       };
       byId.set(id, row);
-      rows.unshift(row);
+      wsAdded.push(row);
     }
-    return rows;
+    const merged = rows.map((row) => {
+      if (!answeredOverrides.has(row.id)) return row;
+      const answer = answeredOverrides.get(row.id) ?? null;
+      return answer === null
+        ? { ...row, status: "answered" as const }
+        : { ...row, status: "answered" as const, answer };
+    });
+    return [...wsAdded, ...merged];
   }, [decisions.data, events.events]);
 
   const pendingDecisions = mergedDecisions.filter((d) => d.status === "pending");
@@ -164,6 +172,7 @@ export function RunPage() {
     }
   }, [mode, pendingDecisions, answerDecision]);
 
+  const lastEventSeq = events.events.length > 0 ? events.events[events.events.length - 1].sequence : -1;
   const liveTelemetry = useMemo<RunResultTelemetry | null>(() => {
     for (let i = events.events.length - 1; i >= 0; i--) {
       const ev = events.events[i];
@@ -173,7 +182,9 @@ export function RunPage() {
     }
     const finalTel = (run.data?.result ?? {}).telemetry as RunResultTelemetry | undefined;
     return finalTel && typeof finalTel === "object" ? finalTel : null;
-  }, [events.events, run.data?.result]);
+    // ponytail: events are append-only and capped at 1000, so the scan only
+    // re-runs when the last event's sequence advances (or the run result changes).
+  }, [lastEventSeq, run.data?.result]);
 
   if (run.isLoading) {
     return (
@@ -211,7 +222,13 @@ export function RunPage() {
 
   const preview = run.data.preview ?? {};
   const request = run.data.request ?? {};
-  const transportLabel = events.transport === "sse" ? "SSE" : events.transport === "websocket" ? "WS" : "\u2014";
+  const transportLabel =
+    events.transport === "sse" ? "SSE"
+    : events.transport === "websocket" ? "WS"
+    : events.status === "closed" ? "offline"
+    : events.status === "connecting" ? "connecting"
+    : events.status === "error" ? "error"
+    : "\u2014";
 
   return (
     <div className="flex flex-col gap-4 p-4 md:p-6">
@@ -353,7 +370,6 @@ export function RunPage() {
         </ScrollArea>
         <TabsContent value="recon" className="space-y-3">
           <ReconTab
-            runId={run.data.id}
             fetchArtifact={fetchArtifact}
             ready={artifactReady("recon_assessment.json")}
           />
@@ -600,7 +616,6 @@ function AuditView({ loading, error, records, chainValid, chainReason }: AuditVi
 }
 
 interface ReconTabProps {
-  runId: string;
   fetchArtifact: ReturnType<typeof useFetchArtifactBlob>;
   ready: boolean;
 }

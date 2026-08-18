@@ -173,16 +173,3 @@ function responseStatusText(status: number): string {
   };
   return map[status] ?? "";
 }
-
-export function wsUrlForRun(runId: string): string {
-  const token = getStoredToken();
-  const loc = window.location;
-  const scheme = loc.protocol === "https:" ? "wss" : "ws";
-  return `${scheme}://${loc.host}/api/v1/ws/v1/runs/${encodeURIComponent(runId)}?token=${encodeURIComponent(token)}`;
-}
-
-export function sseUrlForRun(runId: string, after: number): string {
-  const token = getStoredToken();
-  const loc = window.location;
-  return `${loc.origin}/api/v1/runs/${encodeURIComponent(runId)}/events/stream?after=${after}&token=${encodeURIComponent(token)}`;
-}

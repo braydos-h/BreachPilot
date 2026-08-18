@@ -106,15 +106,16 @@ export function CredentialTable({ runId, className }: CredentialTableProps) {
     <div className={cn("space-y-3", className)}>
       <div className="overflow-x-auto rounded-md border">
         <table className="w-full border-collapse text-sm">
+          <caption className="sr-only">Captured credentials</caption>
           <thead>
             <tr>
-              <th>#</th>
-              <th>Username</th>
-              <th>Target</th>
-              <th>Type</th>
-              <th>Source</th>
-              <th>Password</th>
-              <th className="text-right">Action</th>
+              <th scope="col">#</th>
+              <th scope="col">Username</th>
+              <th scope="col">Target</th>
+              <th scope="col">Type</th>
+              <th scope="col">Source</th>
+              <th scope="col">Password</th>
+              <th scope="col" className="text-right">Action</th>
             </tr>
           </thead>
           <tbody>

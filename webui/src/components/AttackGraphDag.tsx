@@ -128,7 +128,7 @@ export function AttackGraphDag({ runId, className, height = 360 }: AttackGraphDa
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div style={{ height }} className="rounded-md border bg-background">
+          <div style={{ height }} className="rounded-md border bg-background" role="application" aria-label="Attack path DAG">
             <ReactFlow
               nodes={flowNodes}
               edges={flowEdges}

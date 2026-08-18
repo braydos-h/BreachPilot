@@ -32,6 +32,7 @@ export function DecisionCard({ decision, runId, className, autoAnswering = false
   const [customMode, setCustomMode] = useState(false);
   const [customText, setCustomText] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [denying, setDenying] = useState(false);
 
   const kind = decision.kind;
   const isAnswered = decision.status !== "pending";
@@ -48,7 +49,7 @@ export function DecisionCard({ decision, runId, className, autoAnswering = false
   }, [answer.error]);
 
   const submitAnswer = (value: string) => {
-    if (submitted || isAnswered || autoAnswering || !value) return;
+    if (submitted || denying || isAnswered || autoAnswering || !value) return;
     setSubmitted(true);
     answer.mutate(
       { decisionId: decision.id, answer: value },
@@ -155,6 +156,7 @@ export function DecisionCard({ decision, runId, className, autoAnswering = false
             <button
               type="button"
               onClick={() => { setCustomMode(true); setText(""); setCustomText(""); }}
+              aria-pressed={customMode}
               className={cn(
                 "flex w-full items-center gap-2 rounded-md border p-2.5 text-left text-sm transition-colors hover:bg-accent",
                 customMode && "border-primary bg-accent ring-1 ring-primary",
@@ -220,7 +222,7 @@ export function DecisionCard({ decision, runId, className, autoAnswering = false
           )}
           {effectiveError && <p className="text-xs text-destructive">{effectiveError}</p>}
           <div className="flex gap-2">
-            <Button type="submit" disabled={submitted || (isDestructive ? text !== requiredText : !text)} className="flex-1">
+            <Button type="submit" disabled={submitted || denying || (isDestructive ? text !== requiredText : !text)} className="flex-1">
               {submitted ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
               Submit answer
             </Button>
@@ -228,15 +230,17 @@ export function DecisionCard({ decision, runId, className, autoAnswering = false
               <Button
                 type="button"
                 variant="outline"
-                disabled={submitted}
+                disabled={submitted || denying}
                 onClick={() => {
+                  setDenying(true);
                   answer.mutate(
                     { decisionId: decision.id, answer: "deny" },
-                    { onError: () => { /* leave form armed */ } },
+                    { onError: () => { setDenying(false); /* leave form armed */ } },
                   );
                 }}
                 className="text-destructive hover:text-destructive"
               >
+                {denying ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                 Deny
               </Button>
             )}
@@ -305,6 +309,8 @@ function CampaignCheckpointForm({ decision, submitted, onSubmitAnswer }: Campaig
                 size="sm"
                 className="w-full justify-start"
                 disabled={submitted}
+                aria-expanded={hasGoals ? isExpanded : undefined}
+                aria-controls={hasGoals ? `checkpoint-actions-${opt.action}` : undefined}
                 onClick={() => {
                   if (hasGoals) {
                     setExpandedAction(isExpanded ? null : opt.action);
@@ -318,7 +324,7 @@ function CampaignCheckpointForm({ decision, submitted, onSubmitAnswer }: Campaig
                 {opt.label}
               </Button>
               {hasGoals && isExpanded && (
-                <div className="space-y-1.5 rounded-md border bg-card/40 p-2">
+                <div id={`checkpoint-actions-${opt.action}`} className="space-y-1.5 rounded-md border bg-card/40 p-2">
                   {opt.goals!.map((g) => (
                     <GoalSuggestionCard
                       key={g.name}

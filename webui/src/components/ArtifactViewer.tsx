@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { CopyButton } from "@/components/CopyButton";
 import { Spinner } from "@/components/Loading";
 import { useFetchArtifactBlob } from "@/api/hooks";
-import { ApiError } from "@/api/client";
+import { useBlobText } from "@/lib/useBlobText";
 
 interface ArtifactViewerProps {
   runId: string;
@@ -15,49 +15,13 @@ interface ArtifactViewerProps {
 
 export function ArtifactViewer({ runId, name, className }: ArtifactViewerProps) {
   const fetchBlob = useFetchArtifactBlob(runId);
-  const [blob, setBlob] = useState<Blob | null>(null);
-  const [text, setText] = useState<string>("");
-  const [error, setError] = useState<string>("");
-  const [objectUrl, setObjectUrl] = useState("");
 
   const ext = useMemo(() => {
     const match = name.match(/\.([a-z0-9]+)$/i);
     return match ? match[1].toLowerCase() : "";
   }, [name]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setBlob(null);
-    setText("");
-    setError("");
-    fetchBlob.mutate(name, {
-      onSuccess: (data) => {
-        if (cancelled) return;
-        setBlob(data);
-        if (isTextExt(ext) || data.type.startsWith("text/")) {
-          data.text().then((t) => !cancelled && setText(t)).catch(() => !cancelled && setError("Could not decode text."));
-        }
-      },
-      onError: (err) => {
-        if (cancelled) return;
-        setError(err instanceof ApiError ? err.message : "Failed to load artifact.");
-      },
-    });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runId, name]);
-
-  useEffect(() => {
-    setObjectUrl("");
-    if (!blob || !["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext)) return;
-    const url = URL.createObjectURL(blob);
-    setObjectUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [blob, ext]);
-
-  const loading = fetchBlob.isPending && !blob && !error;
+  const { blob, text, error, isLoading, objectUrl } = useBlobText(fetchBlob, name, ext, "Failed to load artifact.");
 
   return (
     <div className={cn("flex flex-col gap-2", className)}>
@@ -65,18 +29,18 @@ export function ArtifactViewer({ runId, name, className }: ArtifactViewerProps) 
         <span className="truncate font-mono text-xs text-muted-foreground">{name}</span>
         {text && <CopyButton value={text} label="Copy" size="sm" />}
       </div>
-      {loading && <Spinner label="Loading artifact..." />}
+      {isLoading && <Spinner label="Loading artifact..." />}
       {error && <div className="rounded border border-destructive/40 bg-destructive/10 p-2 text-sm text-red-200">{error}</div>}
-      {blob && !loading && !error && (
+      {blob && !isLoading && !error && (
         <div className="overflow-auto rounded-md border bg-background/40 scrollbar-thin">
-          {renderByExtension(ext, blob, text, objectUrl)}
+          {renderByExtension(ext, blob, text, objectUrl, name)}
         </div>
       )}
     </div>
   );
 }
 
-export function renderByExtension(ext: string, blob: Blob, text: string, objectUrl: string): React.ReactNode {
+export function renderByExtension(ext: string, blob: Blob, text: string, objectUrl: string, name: string): React.ReactNode {
   if (ext === "md" && text) {
     return (
       <div className="prose prose-invert max-w-none p-4 text-sm prose-pre:rounded prose-pre:bg-muted prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5">
@@ -95,10 +59,10 @@ export function renderByExtension(ext: string, blob: Blob, text: string, objectU
     );
   }
   if ((ext === "png" || ext === "jpg" || ext === "jpeg" || ext === "gif" || ext === "webp" || ext === "svg") && blob) {
-    return objectUrl ? <img src={objectUrl} alt={ext} className="max-h-[70vh] w-full object-contain" /> : null;
+    return objectUrl ? <img src={objectUrl} alt={name} className="max-h-[70vh] w-full object-contain" /> : null;
   }
   if (ext === "csv" && text) {
-    return <CsvTable text={text} />;
+    return <CsvTable text={text} name={name} />;
   }
   if (isTextExt(ext) && text) {
     return (
@@ -118,7 +82,7 @@ export function isTextExt(ext: string): boolean {
   return ["md", "txt", "log", "json", "jsonl", "csv", "html", "py", "sh", "ps1", "yaml", "yml", "toml"].includes(ext);
 }
 
-function CsvTable({ text }: { text: string }) {
+function CsvTable({ text, name }: { text: string; name: string }) {
   const rows = useMemo(() => parseCsv(text), [text]);
   if (!rows.length) return <pre className="p-3 font-mono text-xs">{text}</pre>;
   const headers = rows[0];
@@ -126,10 +90,11 @@ function CsvTable({ text }: { text: string }) {
   return (
     <div className="max-h-[70vh] overflow-auto scrollbar-thin">
       <table className="w-full border-collapse text-xs">
+        <caption className="sr-only">{name}</caption>
         <thead className="sticky top-0 bg-muted/60">
           <tr>
             {headers.map((h, i) => (
-              <th key={i} className="border-b p-2 text-left font-semibold">{h}</th>
+              <th key={i} scope="col" className="border-b p-2 text-left font-semibold">{h}</th>
             ))}
           </tr>
         </thead>

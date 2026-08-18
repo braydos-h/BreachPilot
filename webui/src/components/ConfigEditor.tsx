@@ -145,6 +145,7 @@ function ConfigField({ label, value, defaultValue, onChange }: ConfigFieldProps)
   const dirtyRef = useRef(false);
   const [listText, setListText] = useState(isRedacted ? REDACTED : listItems.map((i) => String(i)).join("\n"));
   const listDirtyRef = useRef(false);
+  const fieldId = `cfg-${label.replace(/[^a-zA-Z0-9]/g, "-")}`;
 
   useEffect(() => {
     if (dirtyRef.current) return;
@@ -160,8 +161,9 @@ function ConfigField({ label, value, defaultValue, onChange }: ConfigFieldProps)
   if (inferredType === "boolean") {
     return (
       <div className="flex items-center justify-between gap-3">
-        <Label className="text-xs">{label}</Label>
+        <Label htmlFor={fieldId} className="text-xs">{label}</Label>
         <Switch
+          id={fieldId}
           checked={isRedacted ? false : Boolean(value)}
           disabled={isRedacted}
           onCheckedChange={onChange}
@@ -173,8 +175,9 @@ function ConfigField({ label, value, defaultValue, onChange }: ConfigFieldProps)
   if (inferredType === "list") {
     return (
       <div className="space-y-1.5">
-        <Label className="text-xs">{label}</Label>
+        <Label htmlFor={fieldId} className="text-xs">{label}</Label>
         <Textarea
+          id={fieldId}
           value={isRedacted ? REDACTED : listText}
           onChange={(e) => {
             listDirtyRef.current = true;
@@ -192,8 +195,9 @@ function ConfigField({ label, value, defaultValue, onChange }: ConfigFieldProps)
   if (inferredType === "dict") {
     return (
       <div className="space-y-1.5">
-        <Label className="text-xs">{label}</Label>
+        <Label htmlFor={fieldId} className="text-xs">{label}</Label>
         <Textarea
+          id={fieldId}
           value={dictText}
           onChange={(e) => {
             dirtyRef.current = true;
@@ -217,8 +221,9 @@ function ConfigField({ label, value, defaultValue, onChange }: ConfigFieldProps)
   if (inferredType === "int") {
     return (
       <div className="space-y-1.5">
-        <Label className="text-xs">{label}</Label>
+        <Label htmlFor={fieldId} className="text-xs">{label}</Label>
         <Input
+          id={fieldId}
           type="number"
           value={isRedacted ? REDACTED : String(value ?? "")}
           onChange={(e) => onChange(Number(e.target.value))}
@@ -230,8 +235,9 @@ function ConfigField({ label, value, defaultValue, onChange }: ConfigFieldProps)
 
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs">{label}</Label>
+      <Label htmlFor={fieldId} className="text-xs">{label}</Label>
       <Input
+        id={fieldId}
         value={isRedacted ? REDACTED : String(value ?? "")}
         onChange={(e) => onChange(e.target.value)}
         disabled={isRedacted}

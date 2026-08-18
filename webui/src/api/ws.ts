@@ -171,6 +171,26 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
     [handleEvent, closeSse],
   );
 
+  const seedEvents = useCallback(
+    async (id: string, isCancelled?: () => boolean) => {
+      try {
+        const res = await apiFetch<EventReplayResponse>(
+          `/runs/${encodeURIComponent(id)}/events?tail=1000`,
+        );
+        if (isCancelled?.()) return;
+        const seeded = res.events ?? [];
+        const latest = typeof res.latest_sequence === "number" ? res.latest_sequence : 0;
+        lastSeqRef.current = latest;
+        eventStore.set(id, seeded, latest);
+        setEvents(seeded);
+      } catch {
+        // Seed failed (run not found / network). Connect from the current
+        // cursor anyway; the WS/SSE path surfaces auth/404 errors.
+      }
+    },
+    [],
+  );
+
   const connectWs = useCallback(
     (id: string) => {
       if (wsRef.current) {
@@ -234,6 +254,7 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
           lastSeqRef.current = 0;
           setEvents([]);
           eventStore.clear(id);
+          void seedEvents(id);
         }
         if (event.code === WS_CLOSE_NOT_FOUND) {
           setAuthError("Run not found.");
@@ -252,7 +273,7 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
         }, backoffMs(attemptRef.current));
       };
     },
-    [handleEvent, connectSse],
+    [handleEvent, connectSse, seedEvents],
   );
 
   const reconnect = useCallback(() => {
@@ -290,22 +311,9 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
       lastSeqRef.current = initialAfter;
       setEvents([]);
       void (async () => {
-        try {
-          const res = await apiFetch<EventReplayResponse>(
-            `/runs/${encodeURIComponent(runId)}/events?tail=1000`,
-          );
-          if (cancelled) return;
-          const seeded = res.events ?? [];
-          const latest = typeof res.latest_sequence === "number" ? res.latest_sequence : 0;
-          lastSeqRef.current = latest;
-          eventStore.set(runId, seeded, latest);
-          setEvents(seeded);
-        } catch {
-          // Seed failed (run not found / network). Connect from the current
-          // cursor anyway; the WS/SSE path surfaces auth/404 errors.
-        } finally {
-          if (!cancelled) connectWs(runId);
-        }
+        await seedEvents(runId, () => cancelled);
+        if (cancelled) return;
+        connectWs(runId);
       })();
     }
 

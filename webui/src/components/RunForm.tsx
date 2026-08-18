@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Loader2, Play, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -72,9 +72,10 @@ export function RunForm({ className, onCreated }: RunFormProps) {
   const [submitError, setSubmitError] = useState("");
 
   const defaultModel = useDefaultModel();
+  const userTouchedModel = useRef(false);
 
   useEffect(() => {
-    if (!modelAlias && defaultModel) setModelAlias(defaultModel);
+    if (!userTouchedModel.current && !modelAlias && defaultModel) setModelAlias(defaultModel);
   }, [defaultModel, modelAlias]);
 
   const goalGroups = useMemo(() => {
@@ -221,7 +222,13 @@ export function RunForm({ className, onCreated }: RunFormProps) {
               Refresh
             </Button>
           </div>
-          <Select value={modelAlias} onValueChange={setModelAlias}>
+          <Select
+            value={modelAlias}
+            onValueChange={(v) => {
+              userTouchedModel.current = true;
+              setModelAlias(v);
+            }}
+          >
             <SelectTrigger>
               <SelectValue placeholder="Default model" />
             </SelectTrigger>

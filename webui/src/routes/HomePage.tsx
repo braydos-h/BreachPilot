@@ -181,7 +181,7 @@ export function HomePage() {
           icon={<Target className="h-6 w-6" />}
           title="Attack"
           desc="Run a full exploitation session against a target with a preset or custom goal."
-          accent="violet"
+          accent="cyan"
         />
       </section>
 
@@ -270,10 +270,6 @@ function Stat({
 
 const ACCENTS = {
   cyan: {
-    ring: "hover:border-primary/50 hover:glow-primary",
-    icon: "text-primary",
-  },
-  violet: {
     ring: "hover:border-primary/50 hover:glow-primary",
     icon: "text-primary",
   },

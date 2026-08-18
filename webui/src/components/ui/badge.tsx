@@ -16,7 +16,7 @@ const badgeVariants = cva(
         danger: "border-destructive/40 bg-destructive/10 text-red-300",
         info: "border-primary/40 bg-primary/10 text-primary",
         muted: "border-muted-foreground/30 text-muted-foreground",
-        violet: "border-primary/40 bg-primary/10 text-primary",
+        violet: "border-violet-500/40 bg-violet-500/10 text-violet-300",
       },
     },
     defaultVariants: { variant: "default" },

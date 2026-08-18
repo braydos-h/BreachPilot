@@ -309,8 +309,9 @@ export function SkillsPage() {
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <Label className="text-xs">Name</Label>
+              <Label htmlFor="skill-name" className="text-xs">Name</Label>
               <Input
+                id="skill-name"
                 value={draftName}
                 onChange={(e) => setDraftName(e.target.value)}
                 placeholder="my-skill-name"
@@ -319,8 +320,9 @@ export function SkillsPage() {
               <p className="text-xs text-muted-foreground">2-64 chars, lowercase letters / digits / hyphens. Used as the directory name.</p>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">SKILL.md markdown</Label>
+              <Label htmlFor="skill-markdown" className="text-xs">SKILL.md markdown</Label>
               <Textarea
+                id="skill-markdown"
                 value={draftMarkdown}
                 onChange={(e) => setDraftMarkdown(e.target.value)}
                 placeholder={"---\nname: my-skill-name\ndescription: What this skill advises\ntags:\n  - example\n---\n\n## When to use\n..."}

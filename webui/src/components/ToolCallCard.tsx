@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { CopyButton } from "@/components/CopyButton";
+import { safeStringify } from "@/lib/format";
 
 interface ToolCallCardProps {
   toolName: string;
@@ -45,6 +46,7 @@ export const ToolCallCard = memo(function ToolCallCard({
         className="flex w-full items-center gap-2 text-left"
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
+        aria-controls={`tool-panel-${toolName}`}
       >
         {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
         <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
@@ -63,7 +65,7 @@ export const ToolCallCard = memo(function ToolCallCard({
         </Badge>
       </button>
       {expanded && (
-        <div className="mt-2 space-y-2">
+        <div id={`tool-panel-${toolName}`} className="mt-2 space-y-2">
           {argText && (
             <div>
               <div className="flex items-center justify-between">
@@ -99,11 +101,3 @@ export const ToolCallCard = memo(function ToolCallCard({
     </div>
   );
 });
-
-function safeStringify(value: unknown): string {
-  try {
-    return typeof value === "string" ? value : JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}

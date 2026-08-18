@@ -184,12 +184,12 @@ function ModelsTab() {
               <div className="text-xs text-muted-foreground">Default alias: <span className="font-mono text-foreground">{models.data?.default_alias ?? "—"}</span></div>
               <div className="mt-3 flex flex-wrap items-end gap-2">
                 <div className="flex-1 min-w-[8rem]">
-                  <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Alias</label>
-                  <Input value={newAlias} onChange={(e) => setNewAlias(e.target.value)} placeholder="e.g. llama" className="h-8 font-mono text-xs" />
+                  <label htmlFor="new-alias" className="text-[10px] uppercase tracking-wide text-muted-foreground">Alias</label>
+                  <Input id="new-alias" value={newAlias} onChange={(e) => setNewAlias(e.target.value)} placeholder="e.g. llama" className="h-8 font-mono text-xs" />
                 </div>
                 <div className="flex-[2] min-w-[12rem]">
-                  <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Model id</label>
-                  <Input value={newModel} onChange={(e) => setNewModel(e.target.value)} placeholder="e.g. llama3.1:8b" className="h-8 font-mono text-xs" />
+                  <label htmlFor="new-model" className="text-[10px] uppercase tracking-wide text-muted-foreground">Model id</label>
+                  <Input id="new-model" value={newModel} onChange={(e) => setNewModel(e.target.value)} placeholder="e.g. llama3.1:8b" className="h-8 font-mono text-xs" />
                 </div>
                 <Button size="sm" onClick={onAdd} disabled={!newAlias.trim() || !newModel.trim() || addModel.isPending}>
                   {addModel.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
@@ -286,10 +286,11 @@ function TelemetryTab() {
           {recent.length > 0 && (
             <div className="overflow-x-auto rounded-md border">
               <table className="w-full border-collapse text-xs">
+                <caption className="sr-only">Recent LLM calls</caption>
                 <thead>
                   <tr>
                     {["alias", "model", "source", "tokens", "tok/s", "ctx %", "duration", "error"].map((h) => (
-                      <th key={h} className="border-b p-2 text-left font-semibold">{h}</th>
+                      <th key={h} scope="col" className="border-b p-2 text-left font-semibold">{h}</th>
                     ))}
                   </tr>
                 </thead>

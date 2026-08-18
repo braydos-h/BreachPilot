@@ -29,6 +29,10 @@ export function ArtifactsPage() {
 
   const artifactNames = artifacts.data?.artifacts.map((a) => a.name) ?? [];
   const effectiveSelected = selected || artifactNames[0] || "";
+  const artifactBytes = useMemo(
+    () => new Map((artifacts.data?.artifacts ?? []).map((a) => [a.name, a.bytes])),
+    [artifacts.data],
+  );
 
   const attemptCandidates = useMemo(() => {
     const out: Array<{ target: string; attempt: string }> = [];
@@ -91,7 +95,7 @@ export function ArtifactsPage() {
               >
                 <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 <span className="truncate font-mono">{name}</span>
-                <span className="ml-auto text-muted-foreground">{formatBytes(artifacts.data?.artifacts.find((a) => a.name === name)?.bytes ?? 0)}</span>
+                <span className="ml-auto text-muted-foreground">{formatBytes(artifactBytes.get(name) ?? 0)}</span>
               </button>
             ))}
           </div>

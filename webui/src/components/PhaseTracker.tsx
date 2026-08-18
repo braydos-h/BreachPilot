@@ -63,10 +63,20 @@ export const PhaseTracker = memo(function PhaseTracker({ events, runState, class
         </div>
       </div>
 
-      <div className="flex items-center gap-1">
+      <div
+        className="flex items-center gap-1"
+        role="progressbar"
+        aria-valuenow={orderIndex >= 0 ? orderIndex + 1 : 0}
+        aria-valuemin={0}
+        aria-valuemax={PHASE_ORDER.length}
+        aria-label="Phase progress"
+      >
         {PHASE_ORDER.filter((p) => p !== "starting").map((p) => {
           const idx = PHASE_ORDER.indexOf(p);
           const pInfo = infoFor(p);
+          // ponytail: orderIndex === -1 (phase not in PHASE_ORDER, e.g.
+          // research_assistant) shows no current segment; nearest prior
+          // segment highlighting is skipped as it adds little for a rare case.
           const isDone = terminal || (orderIndex > idx && orderIndex >= 0);
           const isCurrent = p === currentPhase;
           return (

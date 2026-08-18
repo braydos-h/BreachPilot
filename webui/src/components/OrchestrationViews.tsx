@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Activity, AlertTriangle, CheckCircle2, XCircle, Users, ListTree, ShieldCheck } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -115,12 +116,13 @@ export function SwarmView({ loading, error, state, witnessFlags, witnessLoading,
           ) : (
             <div className="overflow-x-auto rounded-md border">
               <table className="w-full border-collapse text-xs">
+                <caption className="sr-only">Swarm agents</caption>
                 <thead>
                   <tr className="border-b bg-muted/40 text-left">
-                    <th className="px-2 py-1.5 font-medium">Agent</th>
-                    <th className="px-2 py-1.5 font-medium">Type</th>
-                    <th className="px-2 py-1.5 font-medium">Status</th>
-                    <th className="px-2 py-1.5 font-medium">Task</th>
+                    <th scope="col" className="px-2 py-1.5 font-medium">Agent</th>
+                    <th scope="col" className="px-2 py-1.5 font-medium">Type</th>
+                    <th scope="col" className="px-2 py-1.5 font-medium">Status</th>
+                    <th scope="col" className="px-2 py-1.5 font-medium">Task</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -224,6 +226,7 @@ interface CampaignViewProps {
 }
 
 export function CampaignView({ loading, error, state }: CampaignViewProps) {
+  const [revealCreds, setRevealCreds] = useState(false);
   if (loading) return <Skeleton className="h-40 rounded-md" />;
   if (error) return <NotFound error={error} />;
 
@@ -234,10 +237,24 @@ export function CampaignView({ loading, error, state }: CampaignViewProps) {
 
   const targets = Object.entries(states);
   const taskEntries = Object.entries(tasks);
+  const credCount = targets.reduce(
+    (n, [, raw]) => n + asArray(asRecord(raw).credentials_found).length,
+    0,
+  );
 
   return (
     <div className="space-y-3">
       {savedAt && <p className="text-xs text-muted-foreground">Last saved: {savedAt}</p>}
+      {credCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setRevealCreds((v) => !v)}
+          className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+          aria-pressed={revealCreds}
+        >
+          {revealCreds ? "Hide" : "Reveal"} credentials ({credCount})
+        </button>
+      )}
 
       {targets.length === 0 ? (
         <EmptyState msg="No campaign state yet. The autonomous orchestrator writes state as it progresses." />
@@ -292,7 +309,7 @@ export function CampaignView({ loading, error, state }: CampaignViewProps) {
                         const rec = asRecord(c);
                         return (
                           <Badge key={i} variant="warn" className="font-mono text-[10px]">
-                            {str(rec.username)}:{str(rec.password)}
+                            {str(rec.username)}:{revealCreds ? str(rec.password) : "\u2022\u2022\u2022\u2022"}
                           </Badge>
                         );
                       })}
@@ -333,13 +350,14 @@ export function CampaignView({ loading, error, state }: CampaignViewProps) {
           <CardContent>
             <div className="overflow-x-auto rounded-md border">
               <table className="w-full border-collapse text-xs">
+                <caption className="sr-only">Campaign tasks</caption>
                 <thead>
                   <tr className="border-b bg-muted/40 text-left">
-                    <th className="px-2 py-1.5 font-medium">ID</th>
-                    <th className="px-2 py-1.5 font-medium">Status</th>
-                    <th className="px-2 py-1.5 font-medium">Priority</th>
-                    <th className="px-2 py-1.5 font-medium">Module</th>
-                    <th className="px-2 py-1.5 font-medium">Target</th>
+                    <th scope="col" className="px-2 py-1.5 font-medium">ID</th>
+                    <th scope="col" className="px-2 py-1.5 font-medium">Status</th>
+                    <th scope="col" className="px-2 py-1.5 font-medium">Priority</th>
+                    <th scope="col" className="px-2 py-1.5 font-medium">Module</th>
+                    <th scope="col" className="px-2 py-1.5 font-medium">Target</th>
                   </tr>
                 </thead>
                 <tbody>

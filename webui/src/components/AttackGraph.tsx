@@ -127,6 +127,7 @@ function ChainCard({ chain }: { chain: ExploitationChain }) {
   const entries = chain.entries ?? [];
   const width = Math.max(entries.length * (NODE_W + NODE_GAP_X) - NODE_GAP_X + PADDING * 2, 320);
   const height = NODE_H + PADDING * 2;
+  const markerId = `arrow-${chain.chain_id}`;
 
   return (
     <Card className="border-border/60">
@@ -174,7 +175,7 @@ function ChainCard({ chain }: { chain: ExploitationChain }) {
                         stroke="currentColor"
                         strokeWidth={1.5}
                         className="text-muted-foreground/60"
-                        markerEnd="url(#arrow)"
+                        markerEnd={`url(#${markerId})`}
                       />
                     )}
                     <rect
@@ -208,7 +209,7 @@ function ChainCard({ chain }: { chain: ExploitationChain }) {
               })}
               <defs>
                 <marker
-                  id="arrow"
+                  id={markerId}
                   viewBox="0 0 10 10"
                   refX="8"
                   refY="5"
@@ -250,13 +251,14 @@ function FindingsTable({ findings }: { findings: TechnicalFinding[] }) {
       <CardContent>
         <div className="overflow-x-auto rounded-md border">
           <table className="w-full border-collapse text-xs">
+            <caption className="sr-only">Technical findings</caption>
             <thead>
               <tr className="bg-muted/40">
-                <th className="p-2 text-left">Severity</th>
-                <th className="p-2 text-left">CVSS</th>
-                <th className="p-2 text-left">Finding</th>
-                <th className="p-2 text-left">Asset</th>
-                <th className="p-2 text-left">Class</th>
+                <th scope="col" className="p-2 text-left">Severity</th>
+                <th scope="col" className="p-2 text-left">CVSS</th>
+                <th scope="col" className="p-2 text-left">Finding</th>
+                <th scope="col" className="p-2 text-left">Asset</th>
+                <th scope="col" className="p-2 text-left">Class</th>
               </tr>
             </thead>
             <tbody>

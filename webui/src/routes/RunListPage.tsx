@@ -218,17 +218,18 @@ export function RunListPage() {
       {rows.length > 0 && (
         <div className="overflow-x-auto rounded-md border">
           <table className="w-full border-collapse text-sm">
+            <caption className="sr-only">Sessions</caption>
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Title</th>
-                <th>State</th>
-                <th>Target</th>
-                <th>Mode</th>
-                <th>Goal</th>
-                <th>Model</th>
-                <th>Created</th>
-                <th className="text-right">Actions</th>
+                <th scope="col">ID</th>
+                <th scope="col">Title</th>
+                <th scope="col">State</th>
+                <th scope="col">Target</th>
+                <th scope="col">Mode</th>
+                <th scope="col">Goal</th>
+                <th scope="col">Model</th>
+                <th scope="col">Created</th>
+                <th scope="col" className="text-right">Actions</th>
               </tr>
             </thead>
             <tbody>

@@ -2,6 +2,7 @@ import { Activity, Cpu, ShieldCheck, ShieldAlert, Zap, FileText } from "lucide-r
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { CopyButton } from "@/components/CopyButton";
 import type { RunResult } from "@/api/types";
 
 interface SessionSummaryCardProps {
@@ -141,7 +142,7 @@ export function SessionSummaryCard({ result, title, className }: SessionSummaryC
         {swarm && Object.keys(swarm).length > 0 && (
           <div className="space-y-1 rounded-md border bg-card/40 p-2 text-xs">
             <div className="text-muted-foreground">Swarm result</div>
-            <pre className="overflow-auto font-mono text-[11px] scrollbar-thin">{JSON.stringify(swarm, null, 2)}</pre>
+            <pre className="max-h-60 overflow-auto font-mono text-[11px] scrollbar-thin">{JSON.stringify(swarm, null, 2)}</pre>
           </div>
         )}
 
@@ -150,9 +151,27 @@ export function SessionSummaryCard({ result, title, className }: SessionSummaryC
             <div className="flex items-center gap-1.5 text-muted-foreground">
               <FileText className="h-3.5 w-3.5" /> Artifacts
             </div>
-            {result.reports_dir && <div><span className="text-muted-foreground">reports dir: </span><span className="font-mono">{result.reports_dir}</span></div>}
-            {result.summary_path && <div><span className="text-muted-foreground">summary: </span><span className="font-mono">{result.summary_path}</span></div>}
-            {result.audit_path && <div><span className="text-muted-foreground">audit: </span><span className="font-mono">{result.audit_path}</span></div>}
+            {result.reports_dir && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-muted-foreground">reports dir: </span>
+                <span className="font-mono">{result.reports_dir}</span>
+                <CopyButton value={result.reports_dir} size="icon" label="Copy reports dir" />
+              </div>
+            )}
+            {result.summary_path && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-muted-foreground">summary: </span>
+                <span className="font-mono">{result.summary_path}</span>
+                <CopyButton value={result.summary_path} size="icon" label="Copy summary path" />
+              </div>
+            )}
+            {result.audit_path && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-muted-foreground">audit: </span>
+                <span className="font-mono">{result.audit_path}</span>
+                <CopyButton value={result.audit_path} size="icon" label="Copy audit path" />
+              </div>
+            )}
           </div>
         )}
       </CardContent>
