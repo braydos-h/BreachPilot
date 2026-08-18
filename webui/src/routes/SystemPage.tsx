@@ -29,6 +29,14 @@ import { ConfigEditor } from "@/components/ConfigEditor";
 import { SkeletonRows } from "@/components/Loading";
 import { ProviderSetup, useProviderStatus } from "@/components/ProviderSetup";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   useAddModel,
   useDiagnostics,
   useLiveModels,
@@ -36,6 +44,7 @@ import {
   usePlugins,
   usePutSecrets,
   useRemoveModel,
+  useResetSystem,
   useSecrets,
   useSystemInfo,
   useTelemetry,
@@ -95,6 +104,8 @@ export function SystemPage() {
       </div>
 
       <HealthOverview />
+
+      <DangerZone />
 
       <Tabs value={tab} onValueChange={setTab}>
         <div className="sticky top-0 z-10 -mx-1 bg-background/90 px-1 py-2 backdrop-blur">
@@ -185,8 +196,81 @@ function registryCountLabel(models: ReturnType<typeof useModels>["data"]): strin
   return String(Object.keys(models?.registry ?? {}).length);
 }
 
-function StatusDot({ online }: { online: boolean }) {
+function DangerZone() {
+  const reset = useResetSystem();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+
+  const onReset = () => {
+    reset.mutate(undefined, {
+      onSuccess: () => {
+        setConfirmOpen(false);
+        setConfirmText("");
+      },
+    });
+  };
+
   return (
+    <Card className="border-destructive/40">
+      <CardHeader>
+        <CardTitle className="text-sm text-destructive">Danger zone</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          Reset wipes all past work: run history, reports, exploit/research/swarm workspaces, and
+          telemetry. This cannot be undone.
+        </p>
+        <Button
+          size="sm"
+          variant="destructive"
+          onClick={() => setConfirmOpen(true)}
+          disabled={reset.isPending}
+        >
+          {reset.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+          Reset all data
+        </Button>
+        {reset.error && (
+          <p className="text-xs text-destructive">
+            {reset.error instanceof ApiError ? reset.error.message : "Reset failed."}
+          </p>
+        )}
+        <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Reset all data?</DialogTitle>
+              <DialogDescription>
+                This permanently deletes every run, report, log, and workspace file. Type{" "}
+                <span className="font-mono">RESET</span> to confirm.
+              </DialogDescription>
+            </DialogHeader>
+            <Input
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              placeholder="RESET"
+              autoComplete="off"
+            />
+            <DialogFooter>
+              <Button size="sm" variant="outline" onClick={() => setConfirmOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={onReset}
+                disabled={confirmText !== "RESET" || reset.isPending}
+              >
+                {reset.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                Delete everything
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </CardContent>
+    </Card>
+  );
+}
+
+function StatusDot({ online }: { online: boolean }) {  return (
     <span className="relative flex h-2 w-2">
       {online && (
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/70" />

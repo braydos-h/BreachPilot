@@ -45,6 +45,7 @@ export function KillChain({ className }: { className?: string }) {
           style={{ animationDelay: `${i * 150}ms` }}
         >
           <circle cx={n.x} cy={Y} r={R} fill="hsl(var(--card))" stroke="hsl(var(--border))" />
+          <circle cx={n.x} cy={Y} r={R - 5} fill="none" stroke="hsl(var(--primary) / 0.15)" />
           <circle cx={n.x} cy={Y} r={4} fill="hsl(var(--primary))" className="animate-node-pulse" />
           <text
             x={n.x}

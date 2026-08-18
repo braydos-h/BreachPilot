@@ -224,8 +224,15 @@
     .animate-dash-flow,
     .animate-node-pulse,
     .animate-typing-caret,
-    .animate-float {
+    .animate-float,
+    .animate-in,
+    .animate-out {
       animation: none !important;
+    }
+    .transition-all,
+    .transition-transform,
+    .transition-colors {
+      transition: none !important;
     }
   }
 }

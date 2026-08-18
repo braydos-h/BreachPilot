@@ -5,7 +5,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, ArrowRight, Compass, Terminal, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Compass, ShieldCheck, Terminal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,19 +59,23 @@ function Hero({ onStart, onSkip }: { onStart: () => void; onSkip: () => void }) 
   const typed = useTypewriter(TAGLINE);
   return (
     <div className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground">
-      {/* Background: grid + scanline + floating glow */}
+      {/* Background: grid + scanline + floating glows */}
       <div className="absolute inset-0 bg-grid bg-radial-fade" aria-hidden />
       <div className="absolute inset-0 overflow-hidden" aria-hidden>
-        <div className="absolute inset-x-0 top-0 h-px animate-scan bg-gradient-to-r from-transparent via-primary/60 to-transparent" />
+        <div className="absolute inset-x-0 top-0 h-full animate-scan bg-gradient-to-b from-transparent via-primary/10 to-transparent" />
       </div>
       <div className="absolute inset-x-0 top-0 flex justify-center" aria-hidden>
         <div className="h-48 w-[60%] rounded-full bg-primary/10 blur-3xl animate-float" />
+      </div>
+      <div className="absolute inset-x-0 bottom-0 flex justify-center" aria-hidden>
+        <div className="h-40 w-[70%] rounded-full bg-primary/5 blur-3xl" />
       </div>
 
       <div className="relative flex w-full max-w-3xl flex-col items-center gap-6 text-center">
         <div className="flex items-center gap-2 animate-fade-in-up">
           <Terminal className="h-5 w-5 text-primary" />
-          <Badge variant="outline" className="text-[10px]">
+          <Badge variant="outline" className="gap-1.5 text-[10px]">
+            <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
             v{__APP_VERSION__} beta
           </Badge>
         </div>
@@ -82,6 +86,7 @@ function Hero({ onStart, onSkip }: { onStart: () => void; onSkip: () => void }) 
         >
           <span className="text-gradient-primary">NetAttack</span>
           <span className="text-foreground">AI</span>
+          <span className="text-primary/40">.</span>
         </h1>
 
         <p
@@ -103,7 +108,7 @@ function Hero({ onStart, onSkip }: { onStart: () => void; onSkip: () => void }) 
           className="flex flex-wrap items-center justify-center gap-3 animate-fade-in-up"
           style={{ animationDelay: "480ms" }}
         >
-          <Button size="lg" className="gap-1.5 glow-primary" onClick={onStart}>
+          <Button size="lg" className="gap-1.5 glow-primary-strong" onClick={onStart}>
             <Compass className="h-4 w-4" />
             Take the tour
           </Button>
@@ -113,9 +118,10 @@ function Hero({ onStart, onSkip }: { onStart: () => void; onSkip: () => void }) 
         </div>
 
         <p
-          className="text-[11px] text-muted-foreground animate-fade-in-up"
+          className="flex items-center gap-1.5 text-[11px] text-muted-foreground animate-fade-in-up"
           style={{ animationDelay: "600ms" }}
         >
+          <ShieldCheck className="h-3.5 w-3.5 text-primary/60" />
           Run only against assets you own or are explicitly authorized to test. Loopback only.
         </p>
       </div>

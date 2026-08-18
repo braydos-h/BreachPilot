@@ -293,7 +293,7 @@ export function Layout() {
             )}
           </div>
         )}
-        <div className="flex-1" key={location.pathname}>
+        <div className="flex-1 animate-fade-in-up" key={location.pathname}>
           <Outlet />
         </div>
         <footer className="flex items-center justify-between gap-2 border-t px-4 py-2 text-xs text-muted-foreground">

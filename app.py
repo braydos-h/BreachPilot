@@ -129,6 +129,7 @@ def create_app(
 
     # Configure route modules.
     system_routes.configure(auth, config, config_path)
+    system_routes.configure_run_manager(run_manager)
     runs_routes.configure(auth, persistence, run_manager)
     decisions_routes.configure(auth, run_manager)
     events_routes.configure(auth, event_registry, persistence, token, allowed_origins)

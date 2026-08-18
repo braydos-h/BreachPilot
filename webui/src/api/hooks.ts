@@ -406,6 +406,25 @@ export function useDiagnostics() {
   });
 }
 
+export function useResetSystem() {
+  const qc = useQueryClient();
+  return useMutation<
+    { status: string; runs_deleted: number; removed: string[] },
+    ApiError,
+    void
+  >({
+    mutationFn: () => apiFetch<{ status: string; runs_deleted: number; removed: string[] }>(
+      "/system/reset",
+      { method: "POST", body: {} },
+    ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["runs"] });
+      void qc.invalidateQueries({ queryKey: queryKeys.telemetry });
+      void qc.invalidateQueries({ queryKey: queryKeys.memory });
+    },
+  });
+}
+
 export function useRuns(limit = 50, offset = 0, sort: string = "created_desc", q = "", state = "") {
   return useQuery<RunListResponse>({
     queryKey: queryKeys.runs(limit, offset, sort, q, state),

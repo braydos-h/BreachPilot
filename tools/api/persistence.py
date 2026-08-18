@@ -461,6 +461,22 @@ class ApiPersistence:
             finally:
                 conn.close()
 
+    def reset_all(self) -> int:
+        """Delete all runs, decisions, and annotations (users are kept).
+
+        Decisions and annotations cascade via the runs FK. The DB file and
+        schema stay intact so the app's live persistence instance keeps
+        working after a reset.
+        """
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute("DELETE FROM runs")
+                conn.commit()
+                return cur.rowcount
+            finally:
+                conn.close()
+
     # ── Users (D4: multi-operator accounts) ────────────────────────────────
 
     def create_user(self, username: str, password_hash: str, password_salt: str) -> str:

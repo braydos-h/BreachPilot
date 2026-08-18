@@ -74,7 +74,7 @@ export function HomePage() {
     <div className="relative mx-auto max-w-5xl space-y-8 p-4 md:p-8">
       <FullAccessNotice />
       {/* Hero */}
-      <section className="relative overflow-hidden rounded-xl border bg-card/30">
+      <section className="relative overflow-hidden rounded-xl border bg-card/30 animate-fade-in-up">
         <div className="absolute inset-0 bg-grid bg-radial-fade" aria-hidden />
         <div className="absolute inset-0 overflow-hidden" aria-hidden>
           <div className="absolute inset-x-0 top-0 h-px animate-scan bg-gradient-to-r from-transparent via-primary/60 to-transparent" />
@@ -168,7 +168,7 @@ export function HomePage() {
       )}
 
       {/* Action cards */}
-      <section className="grid gap-3 sm:grid-cols-2">
+      <section className="grid gap-3 sm:grid-cols-2 animate-fade-in-up" style={{ animationDelay: "0.1s" }}>
         <ActionCard
           to="/runs/new?path=recon"
           icon={<ScanSearch className="h-6 w-6" />}
@@ -186,7 +186,7 @@ export function HomePage() {
       </section>
 
       {/* Recent sessions */}
-      <section className="rounded-xl border bg-card/30">
+      <section className="rounded-xl border bg-card/30 animate-fade-in-up" style={{ animationDelay: "0.2s" }}>
         <header className="flex items-center justify-between gap-2 border-b px-4 py-2.5">
           <div className="flex items-center gap-2">
             <History className="h-4 w-4 text-muted-foreground" />

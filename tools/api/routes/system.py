@@ -21,6 +21,7 @@ router = APIRouter(prefix="/api/v1", tags=["system"])
 _AUTH: BearerAuth | None = None
 _CONFIG: dict[str, Any] = {}
 _CONFIG_PATH: Path = Path("config.yaml")
+_RUN_MANAGER: Any = None
 
 
 def configure(auth: BearerAuth, config: dict[str, Any], config_path: Path) -> None:
@@ -28,6 +29,11 @@ def configure(auth: BearerAuth, config: dict[str, Any], config_path: Path) -> No
     _AUTH = auth
     _CONFIG = config
     _CONFIG_PATH = config_path
+
+
+def configure_run_manager(run_manager: Any) -> None:
+    global _RUN_MANAGER
+    _RUN_MANAGER = run_manager
 
 
 def _merge_config(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
@@ -468,6 +474,86 @@ def _load_memory_sync(config_path: Path, config: dict[str, Any]) -> dict[str, An
 async def get_memory(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     """Attack memory + experience-store learnings (cross-mission, no secrets)."""
     return await asyncio.to_thread(_load_memory_sync, _CONFIG_PATH, _CONFIG)
+
+
+@router.post("/system/reset")
+async def reset_system(request: Request, auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Wipe all past work: run history, reports/, exploit_workspace/,
+    research_workspace/, and swarm_workspace/.
+
+    Refuses while any run is active (running/queued/awaiting_input). The
+    api_runtime.db file itself is kept (its schema is the live persistence
+    instance's state); all rows are deleted. Users/annotations are removed
+    with the runs they belong to; user accounts are kept.
+    """
+    from tools.api.errors import APIError
+
+    if _RUN_MANAGER is None:
+        raise RuntimeError("Run manager not configured.")
+    if _RUN_MANAGER.has_active:
+        raise APIError(
+            "conflict",
+            "Cannot reset while a run is active. Cancel or wait for it to finish first.",
+            status_code=409,
+        )
+
+    reports_dir = _RUN_MANAGER._persistence.reports_dir.resolve()
+    # The api_runtime.db file lives inside reports_dir and is held open by the
+    # live ApiPersistence instance, so clear its rows first and keep the file.
+    runs_deleted = _RUN_MANAGER._persistence.reset_all()
+    removed: list[str] = []
+    for target in [reports_dir, (reports_dir.parent / "exploit_workspace").resolve(),
+                   (reports_dir.parent / "swarm_workspace").resolve()]:
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
+            removed.append(str(target))
+    # Recreate reports/ with a fresh (empty) api_runtime.db so the live
+    # persistence instance keeps working.
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    _RUN_MANAGER._persistence._init_db()
+
+    # research_workspace: research.db is held open by the Flow B singleton's
+    # thread-local connections (Windows locks open files, and the conn lives on
+    # a different thread than this request), so the file cannot be deleted.
+    # Wipe its tables in place and delete everything else in the dir.
+    research_dir = (reports_dir.parent / "research_workspace").resolve()
+    research_cleared = False
+    if research_dir.exists():
+        try:
+            import sqlite3
+            conn = sqlite3.connect(str(research_dir / "research.db"))
+            try:
+                tables = [
+                    r[0] for r in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' "
+                        "AND name NOT LIKE 'sqlite_%' AND name != '_migrations'"
+                    )
+                ]
+                for table in tables:
+                    conn.execute(f'DELETE FROM "{table}"')
+                conn.commit()
+            finally:
+                conn.close()
+            research_cleared = True
+        except Exception:
+            pass
+        for child in research_dir.iterdir():
+            if child.name == "research.db":
+                continue
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                try:
+                    child.unlink()
+                except OSError:
+                    pass
+
+    return {
+        "status": "ok",
+        "runs_deleted": runs_deleted,
+        "removed": removed,
+        "research_cleared": research_cleared,
+    }
 
 
 @router.get("/plugins")
