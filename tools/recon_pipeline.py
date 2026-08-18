@@ -36,7 +36,7 @@ from typing import Any, Coroutine
 
 from tools.logging_setup import get_logger
 from tools.nmap_priv import apply_nmap_privilege, is_privilege_error
-from tools.validation_utils import is_fqdn, is_subdomain_of, validate_ipv4
+from tools.validation_utils import is_fqdn, is_subdomain_of, resolve_target_to_ip, validate_ipv4
 
 logger = get_logger()
 
@@ -274,6 +274,17 @@ class ReconConfig:
     cloud_metadata_probe: bool = False
     snmp_enum: bool = False
     dns_zone_transfer: bool = False
+    # Pre-flight reachability probe (Phase 5). When True, ``recon_host`` runs
+    # a couple of bare TCP connects *before* the full Nmap -p- scan and bails
+    # to ``no_attack_surface`` when every probe port is definitively refused --
+    # a host that answers nothing on the probe set would only confirm the same
+    # thing after a 65535-port scan. Ambiguous (timeout/filtered) results fall
+    # through to the normal scan so a firewalled-but-live host is never skipped.
+    # Default OFF: the full scan is the existing, more thorough reachability
+    # test, and this is purely additive (it can only skip work, never add it).
+    preflight_probe: bool = False
+    preflight_ports: list[int] = field(default_factory=lambda: [80, 443])
+    preflight_timeout_ms: int = 1000
 
     @classmethod
     def from_config(cls, config: dict | None, **overrides: Any) -> "ReconConfig":
@@ -308,6 +319,12 @@ class ReconConfig:
             "asn_whois", "cloud_metadata_probe", "snmp_enum", "dns_zone_transfer",
         ):
             fields[flag] = bool(recon_cfg.get(flag, False))
+        # Pre-flight reachability probe (Phase 5). All opt-in / default-off so
+        # existing tests and single-IP campaigns are byte-identical.
+        fields["preflight_probe"] = bool(recon_cfg.get("preflight_probe", False))
+        _pp = recon_cfg.get("preflight_ports") or [80, 443]
+        fields["preflight_ports"] = [int(p) for p in _pp]
+        fields["preflight_timeout_ms"] = int(recon_cfg.get("preflight_timeout_ms", 1000))
         fields.update(overrides)
         return cls(**fields)
 
@@ -2215,6 +2232,39 @@ class ReconPipeline:
         """Run full reconnaissance pipeline against a single host."""
         logger.info(f"Starting full reconnaissance pipeline for {target}")
         start = time.monotonic()
+
+        # Pre-flight reachability probe (Phase 5, opt-in). Runs a couple of
+        # bare TCP connects *before* the expensive Nmap -p- scan. A host whose
+        # probe ports are all definitively refused would only confirm the same
+        # thing after a full 65535-port scan, so skip it now. Ambiguous results
+        # (timeout/filtered) fall through -- a firewalled host can still be
+        # attackable on a port the probe didn't cover, and this path can only
+        # skip work, never add it.
+        if self._config.preflight_probe:
+            from tools.socket_scan import probe_reachable
+
+            reachable = await probe_reachable(
+                target,
+                ports=list(self._config.preflight_ports),
+                timeout=self._config.preflight_timeout_ms / 1000.0,
+            )
+            if reachable is False:
+                logger.warning(
+                    f"Preflight probe: {target} refused on all probe ports "
+                    f"{self._config.preflight_ports} -- skipping full scan"
+                )
+                result = HostReconResult(target_ip=target)
+                result.errors.append(
+                    f"target unreachable (preflight probe refused on "
+                    f"{self._config.preflight_ports})"
+                )
+                result.scan_duration = max(time.monotonic() - start, 0.0001)
+                return result
+            elif reachable is None:
+                logger.info(
+                    f"Preflight probe: {target} ambiguous (timeout/filtered) "
+                    f"-- proceeding with full scan"
+                )
 
         # Primary reconnaissance
         result = await self._primary.scan_host(target)

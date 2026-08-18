@@ -70,6 +70,88 @@ def socket_scan_sync(target: str, ports: list[int], timeout: float = 3.0) -> lis
     return [_probe_port(target, p, timeout) for p in ports]
 
 
+# ponytail: errno -> reachability verdict. ECONNREFUSED/EHOSTUNREACH/
+# ENETUNREACH mean the host is definitively NOT answering on that port; a
+# timeout/filtered socket is "unknown" (a host can drop port 80 but still be
+# attackable on 22). This distinction is what lets preflight skip a dead host
+# without skipping a firewalled-but-live one.
+_REFUSED_ERRNOS = {
+    getattr(socket, "ECONNREFUSED", None),
+    getattr(socket, "EHOSTUNREACH", None),
+    getattr(socket, "ENETUNREACH", None),
+    getattr(socket, "EADDRNOTAVAIL", None),
+} - {None}
+
+
+def _connect_status(target: str, port: int, timeout: float) -> str:
+    """Single TCP connect attempt; return ``open`` / ``refused`` / ``unknown``.
+
+    ``open``   -- connect_ex returned 0 (the port answered).
+    ``refused`` -- connect_ex returned a "host definitively not answering"
+                   errno (RST / no route to host). The host exists but the
+                   port is closed -- it is NOT a dead host.
+    ``unknown``-- timeout, filtered, or any other errno. The host may be up
+                   behind a silent firewall; treat as reachable-by-default.
+    """
+    sock = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        err = sock.connect_ex((target, port))
+    except OSError as exc:
+        # A hard resolution/creation failure (e.g. bad IP literal) is not a
+        # reachability signal -- the caller handles syntax separately.
+        return "unknown"
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
+    if err == 0:
+        return "open"
+    if err in _REFUSED_ERRNOS:
+        return "refused"
+    return "unknown"
+
+
+async def probe_reachable(
+    target: str,
+    ports: list[int] | None = None,
+    timeout: float = 1.0,
+) -> bool | None:
+    """Pre-flight reachability probe before committing to a full scan.
+
+    Returns:
+        ``True``   -- at least one probe port connected. The host answers.
+        ``False``  -- every probe port was definitively refused (RST / no route).
+                     The host exists but has nothing open on the probe set.
+        ``None``   -- every probe timed out / was filtered. Ambiguous; the host
+                     may be up behind a silent firewall, so the caller must
+                     NOT skip it (a firewalled host can still be attackable on
+                     a port the probe didn't cover).
+
+    Cheap by design: a handful of bare ``connect_ex`` calls, no banner grab,
+    no SYN scan, no privileges. This is the "is this thing even worth a full
+    Nmap -p- scan" check -- see tools/recon_pipeline.py recon_host.
+    """
+    if not ports:
+        ports = [80, 443]
+    statuses: list[str] = []
+    for port in ports:
+        status = await asyncio.to_thread(_connect_status, target, port, timeout)
+        statuses.append(status)
+        if status == "open":
+            return True
+    # No port answered. If every probe was definitively refused, the host is
+    # up-but-closed on the probe set -> treat as unreachable for preflight
+    # purposes (a full scan would only confirm the same thing). If anything
+    # timed out, stay ambiguous and let the caller proceed.
+    if statuses and all(s == "refused" for s in statuses):
+        return False
+    return None
+
+
 async def socket_scan(target: str, ports: list[int], timeout: float = 3.0) -> list[dict]:
     """Async multi-port scan — runs probes concurrently in a thread pool so
     the event loop is not blocked on N blocking ``connect_ex`` calls."""
