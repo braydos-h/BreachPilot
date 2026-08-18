@@ -1,6 +1,4 @@
 """Phase 4: verify the new CVE-family templates dispatch correctly."""
-import asyncio
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -65,7 +63,8 @@ async def test_new_cve_templates_dispatch(tmp_path: Path, monkeypatch) -> None:
         )
         text = _text(res)
         assert f"TEMPLATE_DISPATCHED: {expect}" in text, (
-            f"{cve} should dispatch to {expect}, got: {[l for l in text.splitlines() if 'TEMPLATE_DISPATCHED' in l]}"
+            f"{cve} should dispatch to {expect}, got: "
+            f"{[line for line in text.splitlines() if 'TEMPLATE_DISPATCHED' in line]}"
         )
         # The generated script must be present and syntax-valid
         assert "--- Exploit Script Template ---" in text

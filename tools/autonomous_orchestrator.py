@@ -49,6 +49,25 @@ from tools.attack_modules import (
 
 logger = get_logger()
 
+
+def _is_cidr(value: str) -> bool:
+    """True when ``value`` parses as a CIDR network (not a bare host).
+
+    Used by the campaign preflight's CIDR cap so a ``/16`` cannot spawn an
+    unbounded number of per-host campaigns. A bare IP literal or a domain is
+    not a CIDR and is never capped.
+    """
+    if not value or "/" not in value:
+        return False
+    import ipaddress as _ip
+
+    try:
+        net = _ip.ip_network(value, strict=False)
+    except ValueError:
+        return False
+    # A /32 is a single host, not a range -- don't treat it as a CIDR.
+    return net.num_addresses > 1
+
 # Process-wide UI singleton for operator-visible phase/action lines. The
 # orchestrator's phase handlers previously emitted only ``logger.info`` lines
 # (log file only), so an operator running the autonomous campaign saw no
@@ -1348,6 +1367,121 @@ class AutonomousOrchestrator:
             self._states[target] = state
         return self._states[target]
 
+    # ── Campaign-entry preflight (Phase 5) ──────────────────────────────────────
+
+    def _preflight_targets(self, targets: list[str]) -> list[str]:
+        """Resolve, de-duplicate, scope-check and filter the campaign target list.
+
+        Runs before any scan is fired. Each filter is opt-in (default off), so
+        a single-IP campaign is byte-identical to before this method existed.
+
+        1. **Scope gate pre-check** -- every target must already be authorized
+           via the same matcher the MCP tool layer uses
+           (``is_target_in_allowlist`` / ``check_targets_allowlist``). When
+           ``exploit.require_explicit_allowlist`` is False this is a no-op.
+           This is the "avoid stuff that can't be attacked" lock applied one
+           layer earlier: previously an unauthorized target still got a full
+           Nmap scan before the tool-layer gate ever fired.
+        2. **Non-routable filter** -- drop RFC1918 / link-local / reserved
+           addresses that are not the operator's own host. Those are handled
+           by the local-takeover playbook (``is_local_target``), not by a
+           network campaign. ``169.254.169.254`` and ``0.0.0.0`` used to get
+           scanned for free.
+        3. **Dedup by resolved IP** -- collapse duplicate IPs, CIDR overlap,
+           and hosts resolving to the same IP. Domains that fail DNS are kept
+           (they may still be attackable via the hostname).
+        4. **CIDR cap** -- when a CIDR was passed, cap the expanded list so a
+           ``/16`` cannot spawn 65534 campaigns.
+
+        Returns the filtered list. Skips are recorded as timeline events on a
+        fresh ``AttackState`` so they survive into ``attack_states.json``.
+        """
+        if not targets:
+            return []
+
+        from tools.validation_utils import (
+            is_local_target,
+            is_private_or_local_target,
+            resolve_target_to_ip,
+        )
+        from tools.mcp_shared import _check_allowlist
+
+        seen_ips: set[str] = set()
+        kept: list[str] = []
+        cidr_expanded: dict[str, int] = {}
+
+        for target in targets:
+            target = (target or "").strip()
+            if not target:
+                continue
+
+            # 1. Scope gate pre-check (no-op when allowlist is off). Uses the
+            # same matcher the MCP tool layer uses so the lock is applied one
+            # layer earlier: previously an unauthorized target still got a full
+            # Nmap scan before the tool-layer gate ever fired.
+            allowed, reason = _check_allowlist(target, self._mission)
+            if not allowed:
+                state = self.get_state(target)
+                state.add_timeline_event(
+                    "target_skipped_out_of_scope",
+                    f"Target {target} is not authorized: {reason}; skipping",
+                    {"target": target, "reason": reason},
+                )
+                logger.info(f"[PREFLIGHT] {target} out of scope -- skipping")
+                continue
+
+            # Resolve for classification / dedup. A domain that fails DNS is
+            # kept verbatim (don't drop it -- it may be attackable by name).
+            resolved = resolve_target_to_ip(target)
+            effective = resolved or target
+
+            # 2. Non-routable filter. The operator's own host is NOT skipped
+            # here -- it has its own local-takeover path in _attack_target.
+            if self._skip_non_routable and is_private_or_local_target(effective):
+                if not is_local_target(effective):
+                    state = self.get_state(target)
+                    state.add_timeline_event(
+                        "target_skipped_non_routable",
+                        f"Target {target} is non-routable ({effective}); skipping network campaign",
+                        {"target": target, "resolved_ip": effective or ""},
+                    )
+                    logger.info(f"[PREFLIGHT] {target} non-routable -- skipping")
+                    continue
+
+            # 3. Dedup by resolved IP (or the literal when resolution failed).
+            dedup_key = effective if resolved else target
+            if dedup_key in seen_ips:
+                state = self.get_state(target)
+                state.add_timeline_event(
+                    "target_dedup",
+                    f"Target {target} resolves to {dedup_key}; already scheduled -- skipping duplicate",
+                    {"target": target, "resolved_ip": dedup_key},
+                )
+                logger.info(f"[PREFLIGHT] {target} duplicate of {dedup_key} -- skipping")
+                continue
+            seen_ips.add(dedup_key)
+
+            # 4. CIDR cap. Track how many hosts a CIDR expands to; if it
+            # exceeds the configured cap, drop the overflow rather than
+            # spawning hundreds of campaigns. A literal IP or domain is
+            # unaffected (cap only applies to CIDR inputs).
+            if self._max_targets_per_cidr and "/" in target and _is_cidr(target):
+                cidr_expanded[target] = cidr_expanded.get(target, 0) + 1
+                if cidr_expanded[target] > self._max_targets_per_cidr:
+                    logger.info(
+                        f"[PREFLIGHT] {target} exceeded CIDR cap "
+                        f"{self._max_targets_per_cidr} -- skipping overflow host"
+                    )
+                    continue
+
+            kept.append(target)
+
+        if len(kept) != len(targets):
+            logger.info(
+                f"[PREFLIGHT] {len(targets)} target(s) -> {len(kept)} after preflight"
+            )
+        return kept
+
     # ── Main campaign runner ─────────────────────────────────────────────
 
     async def run_autonomous_campaign(
@@ -1392,6 +1526,13 @@ class AutonomousOrchestrator:
 
         results: dict[str, Any] = {}
         completed = 0
+
+        # Phase 5: campaign-entry preflight. Resolve/dedupe/scope-check the
+        # target list BEFORE spending a single scan on it. A duplicate IP, a
+        # non-routable address, or an out-of-scope host would otherwise each
+        # get a full Nmap -p- scan + exploitation campaign. All three filters
+        # are opt-in (default off) so a single-IP campaign is byte-identical.
+        targets = self._preflight_targets(targets)
 
         for target in targets:
             if not self._running:
@@ -1485,6 +1626,27 @@ class AutonomousOrchestrator:
         else:
             # Phase 3: Exploitation - automatically select and run attack modules
             await self._phase_exploitation(state)
+
+            # Phase 5: hard-target cutoff (single-pass path). _phase_exploitation
+            # escalates aggression and retries once internally, so after it
+            # returns with no access AND aggression already at the configured
+            # ceiling there is nothing left to escalate into -- skip privesc /
+            # lateral and let validation run. Opt-in (default off).
+            if (
+                not state.access_achieved
+                and self._hard_target_max_rounds
+                and state.aggression >= self._max_aggression
+            ):
+                logger.info(
+                    f"[HARD] {state.target} at max aggression with no access "
+                    f"-- giving up (hard_target_max_rounds={self._hard_target_max_rounds})"
+                )
+                state.add_timeline_event(
+                    "hard_target_give_up",
+                    f"Target {state.target} reached max aggression "
+                    f"({state.aggression.value}) with no access; giving up.",
+                    {"aggression": state.aggression.value},
+                )
 
             # Phase 4: Privilege escalation
             if state.access_achieved and state.privilege_level not in ("system", "root", "admin"):
@@ -2109,6 +2271,34 @@ class AutonomousOrchestrator:
                 await self._phase_lateral_movement(state, _depth)
 
             self._schedule_vuln_chain(state)
+
+            # Phase 5: hard-target cutoff. If this round still produced no
+            # access, count it. After ``hard_target_max_rounds`` consecutive
+            # rounds without a foothold, give up on the target rather than
+            # burning the remaining ``max_cycles`` budget on a host that has
+            # answered nothing so far. Distinct from the no-novel-candidate
+            # stop above (that one fires when there is literally nothing left
+            # to try; this one fires when there IS plenty to try but it all
+            # keeps failing). 0 = off (current behavior).
+            if not state.access_achieved:
+                state.hard_target_rounds += 1
+                if (
+                    self._hard_target_max_rounds
+                    and state.hard_target_rounds >= self._hard_target_max_rounds
+                ):
+                    logger.info(
+                        f"[ADAPTIVE] {state.target} gave up after "
+                        f"{state.hard_target_rounds} rounds with no access "
+                        f"(hard_target_max_rounds={self._hard_target_max_rounds})"
+                    )
+                    state.add_timeline_event(
+                        "hard_target_give_up",
+                        f"Target {state.target} produced no access in "
+                        f"{state.hard_target_rounds} adaptive rounds; giving up "
+                        f"to preserve campaign budget for remaining targets.",
+                        {"rounds": state.hard_target_rounds},
+                    )
+                    break
 
             if not state.should_continue():
                 break

