@@ -58,6 +58,15 @@ def test_reset_wipes_runs_and_workspaces(tmp_path, monkeypatch):
     (tmp_path / "exploit_workspace").mkdir(exist_ok=True)
     (tmp_path / "research_workspace").mkdir(exist_ok=True)
     (tmp_path / "swarm_workspace").mkdir(exist_ok=True)
+    # Seed research.db with a mission row so the reset has data to clear.
+    import sqlite3
+    conn = sqlite3.connect(str(tmp_path / "research_workspace" / "research.db"))
+    try:
+        conn.execute("CREATE TABLE missions (id TEXT PRIMARY KEY)")
+        conn.execute("INSERT INTO missions VALUES ('M-0001')")
+        conn.commit()
+    finally:
+        conn.close()
 
     resp = client.post("/api/v1/system/reset", headers=_auth_headers())
     assert resp.status_code == 200
