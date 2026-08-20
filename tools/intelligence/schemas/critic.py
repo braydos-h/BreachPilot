@@ -15,6 +15,7 @@ class CriticReview:
     """The critic's verdict on a plan, with objections and gaps."""
 
     decision: str
+    objections: list[str] = field(default_factory=list)
     evidence_missing: list[str] = field(default_factory=list)
     alternate_explanations: list[str] = field(default_factory=list)
     stale_data: bool = False
