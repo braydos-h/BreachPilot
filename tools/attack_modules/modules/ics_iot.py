@@ -536,6 +536,12 @@ class BACnetEnum(AttackModule):
     target_services = ["bacnet"]
     target_ports = [47808]
     required_cves: list[str] = []
+    # Capability metadata: read-only BACnet enumeration.
+    requires = []
+    produces = []
+    read_only = True
+    cost = "low"
+    phase_hint = "enumerate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
