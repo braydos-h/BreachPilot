@@ -368,6 +368,12 @@ class S7Enum(AttackModule):
     target_services = ["iso-tsap", "s7", "s7comm"]
     target_ports = [102]
     required_cves: list[str] = []
+    # Capability metadata: read-only S7 PLC enumeration.
+    requires = []
+    produces = []
+    read_only = True
+    cost = "low"
+    phase_hint = "enumerate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
