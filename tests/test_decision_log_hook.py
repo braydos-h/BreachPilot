@@ -9,8 +9,6 @@ called and that a real ``decision_log.jsonl`` row lands on disk.
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 

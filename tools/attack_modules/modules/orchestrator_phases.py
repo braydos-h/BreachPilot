@@ -37,6 +37,12 @@ class TokenImpersonation(AttackModule):
     target_services = ["smb", "ms-wbt-server", "microsoft-ds"]
     target_ports = [445, 3389]
     required_cves: list[str] = []
+    # Capability metadata: token impersonation needs an existing foothold.
+    requires = ["foothold"]
+    produces = ["admin_priv"]
+    read_only = False
+    cost = "medium"
+    phase_hint = "escalate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -85,6 +91,12 @@ class ServiceMisconfiguration(AttackModule):
     target_services = ["smb", "microsoft-ds"]
     target_ports = [445, 139]
     required_cves: list[str] = []
+    # Capability metadata: service misconfig detection (read-only, suggests fixes).
+    requires = ["foothold"]
+    produces = ["admin_priv"]
+    read_only = True
+    cost = "low"
+    phase_hint = "escalate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -134,6 +146,12 @@ class LateralMovement(AttackModule):
     target_services: list[str] = []
     target_ports: list[int] = []
     required_cves: list[str] = []
+    # Capability metadata: lateral movement needs a foothold + recovered creds.
+    requires = ["foothold"]
+    produces = ["foothold"]
+    read_only = False
+    cost = "medium"
+    phase_hint = "pivot"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         # Phase 3: thread the actual recovered credential (Phase 1 added
@@ -204,6 +222,12 @@ class ValidateFinding(AttackModule):
     target_services: list[str] = []
     target_ports: list[int] = []
     required_cves: list[str] = []
+    # Capability metadata: validation is a read-only re-verification of a foothold.
+    requires = ["foothold"]
+    produces = []
+    read_only = True
+    cost = "low"
+    phase_hint = "validate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         # Phase 3: script_generated (not info) so the dispatcher actually
@@ -261,6 +285,12 @@ class LocalExploitSuggester(AttackModule):
     target_services: list[str] = []
     target_ports: list[int] = []
     required_cves: list[str] = []
+    # Capability metadata: advisor only -- needs an active shell/session.
+    requires = ["shell"]
+    produces = []
+    read_only = True
+    cost = "low"
+    phase_hint = "escalate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(

@@ -18,8 +18,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import pytest
-
+from tools.attack_modules import ModuleContext
 from tools.autonomous_orchestrator import (
     AttackModuleExecutor,
     AttackPhase,
@@ -91,7 +90,6 @@ def test_prereq_missing_schedules_producer_task(tmp_path: Path, monkeypatch) -> 
     """
     orch = AutonomousOrchestrator(_mission_config(tmp_path), tmp_path / "ws")
 
-    scheduled: list[AttackTask] = []
     executed: list[str] = []
 
     class _FailingExecutor:

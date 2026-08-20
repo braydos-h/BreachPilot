@@ -61,6 +61,12 @@ class ModbusEnum(AttackModule):
     target_services = ["modbus", "tcp"]
     target_ports = [502]
     required_cves: list[str] = []
+    # Capability metadata: read-only Modbus enumeration.
+    requires = []
+    produces = []
+    read_only = True
+    cost = "low"
+    phase_hint = "enumerate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -210,6 +216,12 @@ class DNP3Enum(AttackModule):
     target_services = ["dnp3", "tcp"]
     target_ports = [20000]
     required_cves: list[str] = []
+    # Capability metadata: read-only DNP3 enumeration.
+    requires = []
+    produces = []
+    read_only = True
+    cost = "low"
+    phase_hint = "enumerate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)

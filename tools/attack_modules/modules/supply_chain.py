@@ -21,6 +21,12 @@ class ExposedVCS(AttackModule):
     target_services = ["http", "https"]
     target_ports = [80, 443, 8080, 8443, 3000]
     required_cves: list[str] = []
+    # Capability metadata: read-only exposed-VCS detection.
+    requires = []
+    produces = []
+    read_only = True
+    cost = "low"
+    phase_hint = "recon"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -96,6 +102,12 @@ class CICDMisconfig(AttackModule):
     target_services = ["http", "https"]
     target_ports = [80, 443, 8080, 8443, 8081, 9090, 3000]
     required_cves: list[str] = []
+    # Capability metadata: read-only CI/CD misconfig detection.
+    requires = []
+    produces = []
+    read_only = True
+    cost = "low"
+    phase_hint = "recon"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -203,6 +215,12 @@ class DependencyConfusion(AttackModule):
     target_services = ["http", "https"]
     target_ports = [80, 443, 8080, 8443, 3000]
     required_cves: list[str] = []
+    # Capability metadata: read-only dependency-confusion risk assessment (info).
+    requires = []
+    produces = []
+    read_only = True
+    cost = "low"
+    phase_hint = "recon"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         workflow = [
@@ -249,6 +267,12 @@ class ArtifactExposure(AttackModule):
     target_services = ["http", "https"]
     target_ports = [80, 443, 8080, 8443, 3000, 8081]
     required_cves: list[str] = []
+    # Capability metadata: read-only exposed-artifact detection.
+    requires = []
+    produces = []
+    read_only = True
+    cost = "low"
+    phase_hint = "recon"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -327,6 +351,12 @@ class SupplyChainRecon(AttackModule):
     target_services = ["http", "https", "ssh", "smb", "microsoft-ds"]
     target_ports = [80, 443, 22, 445, 8080]
     required_cves: list[str] = []
+    # Capability metadata: read-only supply-chain CVE report orchestrator (info).
+    requires = []
+    produces = []
+    read_only = True
+    cost = "low"
+    phase_hint = "recon"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         workflow = [

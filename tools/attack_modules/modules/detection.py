@@ -171,6 +171,12 @@ class OPSECPostureReport(AttackModule):
     target_ports: list[int] = []
     required_cves: list[str] = []
     target_versions: dict[str, list[str]] = {}
+    # Capability metadata: read-only OPSEC posture reporting.
+    requires = []
+    produces = []
+    read_only = True
+    cost = "low"
+    phase_hint = "recon"
 
     def applicability(self, ctx: ModuleContext) -> int:
         # Baseline low-priority; always selectable.
