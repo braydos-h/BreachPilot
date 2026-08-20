@@ -329,6 +329,8 @@ class PlannerAgent:
                     priority=max(10, int(hypothesis_state.get("planning_score", 60)) - i),
                     success_criteria=success_criteria,
                     stop_conditions=stop_conditions,
+                    planning_score=hypothesis_state.get("planning_score"),
+                    expected_information_value=hypothesis_state.get("last_information_value"),
                 )
                 candidate["hypothesis_id"] = hypothesis_state.get("hypothesis_id", "")
                 candidate["hypothesis_confidence"] = hypothesis_state.get("confidence", 0.5)
@@ -441,8 +443,10 @@ class PlannerAgent:
         priority: int = 50,
         success_criteria: list[str] | None = None,
         stop_conditions: list[str] | None = None,
+        planning_score: int | None = None,
+        expected_information_value: float | None = None,
     ) -> dict[str, Any]:
-        return {
+        task = {
             "phase": phase,
             "target": target,
             "asset_type": asset_type,
@@ -457,6 +461,11 @@ class PlannerAgent:
             "stop_conditions": stop_conditions or [],
             "status": "pending",
         }
+        if planning_score is not None:
+            task["confidence"] = round(max(0.0, min(float(planning_score) / 100.0, 1.0)), 3)
+        if expected_information_value is not None:
+            task["expected_information_value"] = expected_information_value
+        return task
 
 
 def _primary_mission_target(mission: dict[str, Any]) -> str:

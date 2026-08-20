@@ -79,6 +79,14 @@ class TargetGraph:
             )
         eid = edge_id or _new_id("GE")
         with self._db.connection(write=True) as conn:
+            for node_id in (from_node, to_node):
+                if conn.execute(
+                    "SELECT 1 FROM graph_nodes WHERE id=? AND mission_id=?", (node_id, self._mission_id)
+                ).fetchone() is None:
+                    raise ValueError(
+                        "add_edge endpoints must be existing node ids; "
+                        "use add_edge_by_value for value-based wiring"
+                    )
             conn.execute(
                 """INSERT INTO graph_edges(id, mission_id, from_node_id, to_node_id, relation, metadata_json, created_at)
                 VALUES(?,?,?,?,?,?,?)""",

@@ -156,6 +156,15 @@ class ObserverAgent:
                 text=summary_text,
             )
 
+        # C4: populate the dead confidence field when parsers produced facts
+        if obs.confidence == 0.0 and obs.evidence_refs:
+            try:
+                from tools.intelligence.adapters.observer_adapter import ObserverAdapter
+
+                ObserverAdapter().infer_confidence(obs)
+            except ImportError:
+                pass
+
         return obs
 
     # ── Parsers ─────────────────────────────────────────────────────────

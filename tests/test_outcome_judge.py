@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from db import DatabaseManager, _new_id
+from db import DatabaseManager, _new_id, _SCHEMA_VERSION
 from executor import ExecutionResult
 from observer import Observation
 from outcome_judge import (
@@ -379,7 +379,7 @@ def test_version_three_database_migrates_without_inferred_success(tmp_path):
     db = DatabaseManager(path)
     with db.connection(write=True) as migrated:
         db.ensure_schema(migrated)
-        assert migrated.execute("SELECT MAX(version) FROM _migrations").fetchone()[0] == 4
+        assert migrated.execute("SELECT MAX(version) FROM _migrations").fetchone()[0] == _SCHEMA_VERSION
         task_columns = {
             row["name"] for row in migrated.execute("PRAGMA table_info(tasks)").fetchall()
         }
