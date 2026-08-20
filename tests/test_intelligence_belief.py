@@ -1,10 +1,8 @@
 """Tests for tools/intelligence/belief: evidence-driven confidence modelling."""
 
 from tools.intelligence.belief import (
-    CONFIRMED_THRESHOLD,
     BeliefState,
     BeliefStore,
-    ConfidenceCalculator,
     ConfidenceUpdate,
     DeterministicUpdater,
     EvidenceObservation,
@@ -70,14 +68,19 @@ def fresh_hypothesis():
 
 
 def test_dependent_evidence_changes_less_than_independent():
-    updater = DeterministicUpdater(rule=ConfidenceUpdate.STEP)
+    from tools.intelligence.belief import EvidenceUpdateRule
+
     h1 = fresh_hypothesis()
     h2 = fresh_hypothesis()
     indep = [obs(f"i{n}", EvidencePolarity.SUPPORTING, 0.5, independent=True) for n in range(2)]
     dep = [obs(f"d{n}", EvidencePolarity.SUPPORTING, 0.5, independent=False) for n in range(2)]
-    updater.apply(h1, indep)
-    updater.apply(h2, dep)
-    assert h1.current_confidence > h2.current_confidence
+    c1 = h1.current_confidence
+    for o in indep:
+        c1 = EvidenceUpdateRule.update_confidence(c1, o, h1)
+    c2 = h2.current_confidence
+    for o in dep:
+        c2 = EvidenceUpdateRule.update_confidence(c2, o, h2)
+    assert c1 > c2
 
 
 def test_deterministic_ordering_same_inputs_same_output():
@@ -154,7 +157,7 @@ def test_snapshot_load_round_trip():
 
 
 def test_top_unresolved_orders_by_uncertainty():
-    bs = new_state()
+    bs = BeliefState(mission_id="m-1")
     ids = [bs.add_hypothesis(statement=f"h{i}", target="10.0.0.5") for i in range(3)]
     bs.get(ids[0]).current_confidence = 0.5
     bs.get(ids[1]).current_confidence = 0.9

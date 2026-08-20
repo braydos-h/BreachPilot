@@ -117,15 +117,18 @@ class BeliefState:
     def register_evidence(
         self, hypothesis_id: str, evidence_observation: EvidenceObservation
     ) -> HypothesisState | None:
-        """Record evidence against a hypothesis.
+        """Record evidence against a hypothesis and update its confidence.
 
-        Appends to the matching polarity list, dedupes by evidence_ref, and
-        bumps the independent observation count for fresh independent refs.
+        Appends to the matching polarity list (deduped by evidence_ref), then
+        applies the deterministic default update rule so confidence moves with
+        the evidence. Returns the updated state, or None if unknown.
         """
         state = self.hypotheses.get(hypothesis_id)
         if state is None:
             return None
-        _apply_evidence(state, evidence_observation)
+        from .confidence import apply_observation
+
+        apply_observation(state, evidence_observation)
         return state
 
     def register_observation(

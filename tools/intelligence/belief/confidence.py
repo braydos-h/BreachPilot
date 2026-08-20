@@ -75,6 +75,14 @@ class ConfidenceUpdateRule(str, Enum):
 ConfidenceUpdate = ConfidenceUpdateRule
 
 
+def apply_observation(state: HypothesisState, obs: EvidenceObservation) -> None:
+    """Record an observation and apply the default update rule in one step."""
+    _apply_evidence(state, obs)
+    state.current_confidence = ConfidenceCalculator().update(
+        ConfidenceCalculator.default_rule, state.current_confidence, obs, state
+    )
+
+
 class ConfidenceCalculator:
     """Dispatches an observation to a rule for a hypothesis state."""
 
@@ -105,11 +113,10 @@ class ConfidenceCalculator:
         k = max(2, state.independent_observation_count)
         alpha = current * k
         beta = (1 - current) * k
-        bonus = _independence_bonus(obs)
         if obs.polarity is EvidencePolarity.SUPPORTING:
-            alpha += obs.weight * bonus
+            alpha += obs.weight
         else:
-            beta += obs.weight * bonus
+            beta += obs.weight
         return _clamp01(alpha / (alpha + beta))
 
 
@@ -175,6 +182,10 @@ class NonModelConfidence(str, Enum):
     VULNERABILITY_LIKELIHOOD = "vulnerability_likelihood"
     PATH_VIABILITY = "path_viability"
     FINDING_CONFIRMATION = "finding_confirmation"
+
+    def apply(self, value: float, source: str = "", note: str = "") -> "TaggedConfidence":
+        """Tag a value on this concept's scale without touching belief confidence."""
+        return TaggedConfidence(concept=self, value=min(1.0, max(0.0, value)), source=source, note=note)
 
 
 NonModelConfidenceTag = NonModelConfidence

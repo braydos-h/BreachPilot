@@ -38,6 +38,18 @@ class AttackStep:
     completed: bool = False
     success: bool | None = None
     result_summary: str = ""
+    # Capability-upgrade / task-graph fields (all defaulted; old plan JSON
+    # loads unchanged and to_json stays additive-only):
+    hypothesis: str = ""
+    priority: int = 50  # 0-100; higher runs first among ready steps
+    status: str = "pending"  # pending|running|done|failed|blocked|cancelled
+    attempt_count: int = 0
+    failure_class: str = ""  # tools/failure_taxonomy.FailureClass value
+    failure_reason: str = ""
+    capability: str = ""  # module/tool capability name when known
+    expected_evidence: list[str] = field(default_factory=list)
+    confidence: float | None = None
+    created_from: str = ""  # planner|recovery:prerequisite|operator|replan|...
 
 
 @dataclass
@@ -77,10 +89,101 @@ class AttackPlan:
             self.steps[index].completed = True
             self.steps[index].success = success
             self.steps[index].result_summary = summary[:2000]
+            self.steps[index].status = "done"
         self.updated_at = time.time()
 
     def is_complete(self) -> bool:
         return self.current_phase_index >= len(self.phases) - 1
+
+    # --- Task-graph (DAG) operations -------------------------------------
+    # depends_on edges already serialized; these are the scheduling semantics
+    # that were missing. All methods are pure-Python, no model calls.
+
+    _OPEN_STATUSES = ("pending", "running")
+
+    def _dep_satisfied(self, index: int) -> bool:
+        """A dependency is satisfied only when it completed AND succeeded."""
+        if not (0 <= index < len(self.steps)):
+            return True  # dangling dep reference: don't deadlock the graph
+        dep = self.steps[index]
+        return dep.completed and dep.success is True
+
+    def _dep_dead(self, index: int) -> bool:
+        """A dependency is dead when it can never satisfy (failed permanently
+        or cancelled)."""
+        if not (0 <= index < len(self.steps)):
+            return False
+        dep = self.steps[index]
+        return dep.status == "cancelled" or (dep.completed and dep.success is False)
+
+    def ready_steps(self) -> list[tuple[int, AttackStep]]:
+        """Executable steps now: open status, all depends_on succeeded.
+
+        Ordered by priority (desc) then insertion order so the scheduler and
+        the LLM see a deterministic next-action list.
+        """
+        ready = [
+            (i, s)
+            for i, s in enumerate(self.steps)
+            if s.status in self._OPEN_STATUSES
+            and not s.completed
+            and all(self._dep_satisfied(d) for d in s.depends_on)
+        ]
+        ready.sort(key=lambda t: (-t[1].priority, t[0]))
+        return ready
+
+    def blocked_steps(self) -> list[tuple[int, AttackStep, str]]:
+        """Open steps whose dependencies can never satisfy, with reason."""
+        out: list[tuple[int, AttackStep, str]] = []
+        for i, s in enumerate(self.steps):
+            if s.status not in self._OPEN_STATUSES or s.completed:
+                continue
+            dead = [d for d in s.depends_on if self._dep_dead(d)]
+            if dead:
+                out.append((i, s, f"dependency step(s) {dead} failed or cancelled"))
+        return out
+
+    def fail_step(self, index: int, failure_class: str = "", reason: str = "") -> None:
+        """Record a failed attempt without completing the step (retryable)."""
+        if 0 <= index < len(self.steps):
+            s = self.steps[index]
+            s.attempt_count += 1
+            s.status = "failed"
+            s.failure_class = failure_class
+            s.failure_reason = reason[:500]
+        self.updated_at = time.time()
+
+    def reset_step(self, index: int) -> None:
+        """Re-open a failed step for another attempt (e.g. after recovery)."""
+        if 0 <= index < len(self.steps):
+            s = self.steps[index]
+            if s.status in ("failed", "blocked") and not s.completed:
+                s.status = "pending"
+        self.updated_at = time.time()
+
+    def cancel_step(self, index: int, reason: str = "") -> None:
+        """Mark a step obsolete (e.g. its hypothesis was refuted elsewhere)."""
+        if 0 <= index < len(self.steps):
+            s = self.steps[index]
+            if not s.completed:
+                s.status = "cancelled"
+                s.failure_reason = reason[:500]
+        self.updated_at = time.time()
+
+    def graph_summary(self, max_steps: int = 40) -> str:
+        """Compact DAG view for prompts/state tools: ready/blocked counts +
+        per-step one-liners. Raw results stay in artifacts."""
+        lines = [
+            f"TASK GRAPH: {len(self.steps)} steps "
+            f"({len(self.ready_steps())} ready, {len(self.blocked_steps())} blocked)"
+        ]
+        for i, s in enumerate(self.steps[:max_steps]):
+            dep = f" <-{s.depends_on}" if s.depends_on else ""
+            hyp = f" hyp={s.hypothesis[:60]!r}" if s.hypothesis else ""
+            lines.append(f"  [{i}] {s.status}/{s.tool}{dep}{hyp}")
+        if len(self.steps) > max_steps:
+            lines.append(f"  ... (+{len(self.steps) - max_steps} more)")
+        return "\n".join(lines)
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -102,6 +205,18 @@ class AttackPlan:
                     "completed": s.completed,
                     "success": s.success,
                     "result_summary": s.result_summary,
+                    # Capability-upgrade fields (additive keys; old readers
+                    # ignore them, new readers get the DAG state):
+                    "hypothesis": s.hypothesis,
+                    "priority": s.priority,
+                    "status": s.status,
+                    "attempt_count": s.attempt_count,
+                    "failure_class": s.failure_class,
+                    "failure_reason": s.failure_reason,
+                    "capability": s.capability,
+                    "expected_evidence": s.expected_evidence,
+                    "confidence": s.confidence,
+                    "created_from": s.created_from,
                 }
                 for s in self.steps
             ],
@@ -134,6 +249,16 @@ class AttackPlan:
                 completed=s.get("completed", False),
                 success=s.get("success"),
                 result_summary=s.get("result_summary", ""),
+                hypothesis=s.get("hypothesis", ""),
+                priority=s.get("priority", 50),
+                status=s.get("status", "done" if s.get("completed") else "pending"),
+                attempt_count=s.get("attempt_count", 0),
+                failure_class=s.get("failure_class", ""),
+                failure_reason=s.get("failure_reason", ""),
+                capability=s.get("capability", ""),
+                expected_evidence=s.get("expected_evidence", []),
+                confidence=s.get("confidence"),
+                created_from=s.get("created_from", ""),
             )
             plan.steps.append(step)
         return plan

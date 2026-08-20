@@ -166,6 +166,20 @@ class ModelClient:
             self.model_id = self.name
 
 
+# Model roles recognized for role-aware routing (models.roles.<role> -> alias).
+# Every role defaults to the default alias, so an unconfigured roles block is
+# byte-identical to today's behavior; operators point a role at a stronger
+# alias only when one is available.
+MODEL_ROLES: tuple[str, ...] = (
+    "planner",
+    "executor",
+    "interpreter",
+    "code_generator",
+    "critic",
+    "summarizer",
+)
+
+
 class ModelRouter:
     """Manages multiple Ollama model backends."""
 
@@ -189,6 +203,43 @@ class ModelRouter:
             f"Model alias '{alias}' not registered. "
             f"Available: {list(self._clients)!r}"
         )
+
+    def get_client_for_role(
+        self,
+        role: str,
+        *,
+        config: Mapping[str, Any] | None = None,
+        fallback_alias: str | None = None,
+    ) -> ModelClient:
+        """Resolve a model client for a functional role.
+
+        Reads ``config['models']['roles'][role]`` (an alias or model id) and
+        resolves it through ``get_client`` (which tolerates concrete model
+        ids). Missing role config falls back to ``fallback_alias`` and then to
+        the ``models.default_alias`` value in config. Role resolution failures
+        fall back the same way -- a typo in a role mapping must never hard-fail
+        a run. ``config=None`` and no fallback returns the only client when
+        exactly one is registered, else raises (mirrors get_client semantics).
+        """
+        roles: Mapping[str, Any] = {}
+        default_alias: str = ""
+        if isinstance(config, Mapping):
+            models_cfg = config.get("models", {})
+            if isinstance(models_cfg, Mapping):
+                roles_raw = models_cfg.get("roles", {})
+                roles = roles_raw if isinstance(roles_raw, Mapping) else {}
+                default_alias = str(models_cfg.get("default_alias", "") or "")
+        candidates = [str(roles.get(role, "") or ""), fallback_alias or "", default_alias]
+        for alias in candidates:
+            if not alias:
+                continue
+            try:
+                return self.get_client(alias)
+            except KeyError:
+                continue
+        if len(self._clients) == 1:
+            return next(iter(self._clients.values()))
+        raise KeyError(f"No model client resolvable for role '{role}'.")
 
     def clients(self) -> list[ModelClient]:
         return list(self._clients.values())

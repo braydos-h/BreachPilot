@@ -13,8 +13,10 @@ from tools.attack_modules.base import (
 )
 from tools.attack_modules.registry import (
     find_modules,
+    find_producers,
     get_module,
     list_modules,
+    missing_prerequisites,
     _MODULE_CLASSES,
     _module_experience_confidence,
     _module_primary_service,
@@ -32,6 +34,8 @@ __all__ = [
     "ApplicabilityReport",
     "list_modules",
     "find_modules",
+    "find_producers",
+    "missing_prerequisites",
     "get_module",
     "_MODULE_CLASSES",
     "_module_primary_service",

@@ -369,6 +369,25 @@ def _module_experience_confidence(
     return sum(module_confs) / len(module_confs)
 
 
+def find_producers(artifact_kind: str) -> list[AttackModule]:
+    """Modules whose ``produces`` metadata claims artifact ``artifact_kind``.
+
+    The dynamic-composition primitive (capability A produces X -> capability B
+    requires X): when a module fails with ``prerequisite_missing`` or the
+    planner needs an artifact, resolve which capabilities could supply it
+    here instead of hard-coding chains in the orchestrator.
+    """
+    kind = artifact_kind.lower()
+    return [m for m in list_modules() if kind in {p.lower() for p in m.produces}]
+
+
+def missing_prerequisites(mod: AttackModule, ctx: ModuleContext) -> list[str]:
+    """Declared ``requires`` entries not satisfiable from the current ctx."""
+    from tools.attack_modules.base import _artifact_present
+
+    return [r for r in mod.requires if not _artifact_present(r, ctx)]
+
+
 def get_module(name: str) -> AttackModule | None:
     for cls in _MODULE_CLASSES:
         if cls.name.lower() == name.lower():
