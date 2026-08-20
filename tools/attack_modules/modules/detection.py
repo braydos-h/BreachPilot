@@ -97,6 +97,12 @@ class LogSourceEnum(AttackModule):
     target_ports = [22, 445, 139]
     required_cves: list[str] = []
     target_versions: dict[str, list[str]] = {}
+    # Capability metadata: read-only log source enumeration.
+    requires = []
+    produces = []
+    read_only = True
+    cost = "low"
+    phase_hint = "enumerate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         # Phase 2: ModuleContext carries `target_os`, not `os_family` -- the
