@@ -88,7 +88,7 @@ _GROUP_B: list[tuple[AttackModule, str]] = [
     (SUIDEnumeration, "privesc"),
     (KernelExploitCheck, "privesc"),
     (ContainerBreakout, "privesc"),
-    (CloudPrivilege, "privesc"),
+    (CloudPrivesc, "privesc"),
     (K8sPrivesc, "privesc"),
     (IMDSExploit, "privesc"),
     (DockerSockEscape, "privesc"),
@@ -159,14 +159,14 @@ def test_privesc_modules_require_foothold() -> None:
     """Post-foothold privesc enumeration/exploitation gates on a foothold and
     points at elevated privileges."""
     for cls in (LinuxPrivescCheck, WindowsPrivescCheck, SUIDEnumeration,
-                KernelExploitCheck, ContainerBreakout, CloudPrivilege, K8sPrivesc,
+                KernelExploitCheck, ContainerBreakout, CloudPrivesc, K8sPrivesc,
                 IMDSExploit, DockerSockEscape, S3BucketTakeover):
         assert "foothold" in cls.requires, f"{cls.__name__} should require foothold"
     for cls in (IMDSExploit, DockerSockEscape, S3BucketTakeover):
         assert cls.read_only is False, f"{cls.__name__} is active exploitation"
         assert cls.phase_hint == "escalate"
     for cls in (LinuxPrivescCheck, WindowsPrivescCheck, SUIDEnumeration,
-                KernelExploitCheck, ContainerBreakout, CloudPrivilege, K8sPrivesc):
+                KernelExploitCheck, ContainerBreakout, CloudPrivesc, K8sPrivesc):
         assert cls.read_only is True, f"{cls.__name__} is check-only"
 
 
