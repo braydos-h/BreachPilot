@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from db import DatabaseManager, _new_id, _SCHEMA_VERSION
+from db import _SCHEMA_VERSION, DatabaseManager, _new_id
 from executor import ExecutionResult
 from observer import Observation
 from outcome_judge import (
