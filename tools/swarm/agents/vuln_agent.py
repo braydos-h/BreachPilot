@@ -18,7 +18,7 @@ from tools.swarm.base import Agent, AgentResult, AgentStatus
 from tools.swarm.bb_compat import bb_set
 from tools.cve_lookup import NVDClient, CVESearchSettings, format_cve_results
 from tools.exploit_search import ExploitSearch, ExploitSearchSettings
-from tools.attack_modules import ModuleContext, find_modules
+from tools.attack_modules import ModuleContext, find_modules, get_module
 from tools.mcp_shared import build_researcher
 
 
@@ -235,6 +235,17 @@ class VulnAgent(Agent):
                              0.7 if has_exploit else \
                              0.5 if has_critical_cve else 0.3
 
+                # Derive missing prerequisites from the top matched module's
+                # declared ``requires`` (capability metadata). Empty when the
+                # module needs nothing or no module matched — downstream
+                # consumers (exploit agent, planner) read this to decide whether
+                # to schedule a producer module first.
+                prerequisite: list[str] = []
+                if top_modules:
+                    top_mod = get_module(top_modules[0][1])
+                    if top_mod is not None:
+                        prerequisite = list(getattr(top_mod, "requires", []) or [])
+
                 hypothesis = {
                     "service": name,
                     "version": version,
@@ -243,11 +254,15 @@ class VulnAgent(Agent):
                     "exploit_count": len(svc_exploits),
                     "confidence": confidence,
                     "matched_modules": top_modules,
+                    "prerequisite": prerequisite,
                     "reason": f"{len(cve_results)} CVEs, {len(svc_exploits)} exploits, {len(top_modules)} matching attack modules.",
                 }
                 output["hypotheses"].append(hypothesis)
 
-                # Generate exploit tasks for high-confidence findings
+                # Generate exploit tasks for high-confidence findings.
+                # depends_on=[target, "analysis"] engages route_parallel's
+                # milestone gating so exploit tasks wait for THIS host's vuln
+                # research to complete before running.
                 if confidence >= 0.7:
                     new_tasks.append({
                         "phase": "exploit",
@@ -261,6 +276,7 @@ class VulnAgent(Agent):
                         "service_context": json.dumps(svc),
                         "known_cves": [c.get("id", "") for c in (cves if isinstance(cves, list) else [])],
                         "matched_modules": [m[1] for m in top_modules],
+                        "depends_on": [target, "analysis"],
                     })
 
             output["cves"] = all_cves

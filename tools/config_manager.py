@@ -52,6 +52,17 @@ CONFIG_SCHEMA: dict[str, Any] = {
         # here so a missing config.yaml still yields the correct window per
         # alias (GLM-5.2 default = 976K); exploit_agent.py has no in-code
         # ``glm`` profile, so without this it would fall back to 128K.
+        # Model-role routing. Each role maps to a model alias; an empty
+        # string means "use models.default_alias" (so first-run behavior is
+        # unchanged). Consumed by tools/model_router.py::get_client_for_role.
+        "roles": {
+            "planner": "",
+            "executor": "",
+            "interpreter": "",
+            "code_generator": "",
+            "critic": "",
+            "summarizer": "",
+        },
         "info": {
             "kimi": {
                 "label": "Kimi K2.6",
@@ -623,6 +634,27 @@ CONFIG_SCHEMA: dict[str, Any] = {
         # D3: attack-path DAG API route. Lab build: enabled true.
         "graph_route": True,
     },
+    # Capability-upgrade agent block (design §23). Toggles + budgets for the
+    # task graph, capability discovery, AI-facing state tools, planner hints,
+    # structured decision logging, reflection, and retry/repair budgets.
+    # Defaults preserve today's behavior: every toggle that gates a new
+    # surface defaults to True so the schema advertises the capability, but
+    # the consumers read defensively (config_cli.load_config merges NO
+    # defaults, so each consumer does cfg.get("agent", {}).get(key, default)).
+    # ``max_actions: 0`` is the legacy-budget sentinel — consumption sites
+    # treat 0 as "use the existing exploit budgets" (max_commands_per_session
+    # etc.) rather than a hard zero cap.
+    "agent": {
+        "task_graph_enabled": True,
+        "capability_discovery_enabled": True,
+        "state_tools_enabled": True,
+        "planner_hints_enabled": True,
+        "decision_log_enabled": True,
+        "reflection_enabled": True,
+        "max_retries_per_task": 2,
+        "max_actions": 0,
+        "generated_code_repair_attempts": 3,
+    },
 }
 
 # Known top-level keys
@@ -741,6 +773,31 @@ class ConfigValidator:
                     result.warnings.append(
                         "models.provider should be one of: ollama, chatgpt."
                     )
+                # Model-role routing: each value should be a string alias (or
+                # empty = use default_alias). A non-string / non-alias value
+                # is ambiguous only when it doesn't resolve — warn, never
+                # reject (existing warn-not-reject convention).
+                roles = models.get("roles")
+                if roles is not None:
+                    if not isinstance(roles, dict):
+                        result.warnings.append("models.roles must be a mapping.")
+                    else:
+                        registry = models.get("registry", {}) or {}
+                        for role, alias in roles.items():
+                            if alias is None:
+                                continue
+                            if not isinstance(alias, str):
+                                result.warnings.append(
+                                    f"models.roles.{role} must be a string alias (empty = default_alias)."
+                                )
+                                continue
+                            stripped = alias.strip()
+                            if stripped == "":
+                                continue
+                            if isinstance(registry, dict) and stripped not in registry:
+                                result.warnings.append(
+                                    f"models.roles.{role} {stripped!r} is not in models.registry."
+                                )
 
         # Validate chatgpt provider block (opt-in; warn-only on absence).
         if "chatgpt" in self._config:
@@ -1080,6 +1137,34 @@ class ConfigValidator:
                 sem_mem = orch.get("semantic_memory")
                 if sem_mem is not None and not isinstance(sem_mem, bool):
                     result.warnings.append("orchestrator.semantic_memory must be a boolean.")
+
+        # Capability-upgrade agent block (design §23): warn-not-reject on
+        # type/range for the toggles + budgets. Bools/ints follow the existing
+        # convention (see chatgpt/skills blocks above).
+        if "agent" in self._config:
+            agent = self._config["agent"]
+            if not isinstance(agent, dict):
+                result.errors.append("'agent' must be a mapping.")
+            else:
+                for bkey in (
+                    "task_graph_enabled",
+                    "capability_discovery_enabled",
+                    "state_tools_enabled",
+                    "planner_hints_enabled",
+                    "decision_log_enabled",
+                    "reflection_enabled",
+                ):
+                    val = agent.get(bkey)
+                    if val is not None and not isinstance(val, bool):
+                        result.warnings.append(f"agent.{bkey} must be a boolean.")
+                for ikey in ("max_retries_per_task", "max_actions", "generated_code_repair_attempts"):
+                    val = agent.get(ikey)
+                    if val is not None and (
+                        not isinstance(val, int) or isinstance(val, bool) or val < 0
+                    ):
+                        result.warnings.append(
+                            f"agent.{ikey} must be a non-negative integer (0 = legacy default)."
+                        )
 
         # Validate eval/benchmark harness section
         if "eval" in self._config:

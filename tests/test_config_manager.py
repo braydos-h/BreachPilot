@@ -28,6 +28,7 @@ def test_config_validator_import():
     assert "adaptive_exploits" in CONFIG_SCHEMA
     assert "multi_model" in CONFIG_SCHEMA
     assert "skills" in CONFIG_SCHEMA
+    assert "agent" in CONFIG_SCHEMA
     assert "ollama" in KNOWN_TOP_KEYS
     assert "research" in KNOWN_TOP_KEYS
     assert "swarm" in KNOWN_TOP_KEYS
@@ -36,6 +37,7 @@ def test_config_validator_import():
     assert "adaptive_exploits" in KNOWN_TOP_KEYS
     assert "multi_model" in KNOWN_TOP_KEYS
     assert "skills" in KNOWN_TOP_KEYS
+    assert "agent" in KNOWN_TOP_KEYS
 
 
 def test_validation_result_defaults():

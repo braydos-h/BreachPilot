@@ -244,7 +244,10 @@ class ReconAgent(Agent):
             high_risk_services = [s for s in enriched_services if s["risk_score"] >= 70]
             web_services = [s for s in enriched_services if s["service"] in ("http", "https")]
 
-            # Vuln research tasks for high-risk services
+            # Vuln research tasks for high-risk services.
+            # depends_on=[target, "recon"] engages route_parallel's existing
+            # milestone gating so analysis tasks wait for THIS host's recon to
+            # finish (the mechanism was wired but no producer set depends_on).
             for svc in high_risk_services:
                 new_tasks.append({
                     "phase": "analysis",
@@ -256,6 +259,7 @@ class ReconAgent(Agent):
                     "risk_level": "low",
                     "priority": svc["risk_score"],
                     "service_context": json.dumps(svc),
+                    "depends_on": [target, "recon"],
                 })
 
             # Web-specific tasks
@@ -270,6 +274,7 @@ class ReconAgent(Agent):
                     "risk_level": "low",
                     "priority": 75,
                     "service_context": json.dumps(svc),
+                    "depends_on": [target, "recon"],
                 })
 
             # ── Stage 5: Determine recommended next phases ──

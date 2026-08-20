@@ -17,6 +17,12 @@ class LinuxPrivescCheck(AttackModule):
     # RDP foothold has no ssh service in ctx.services, so the old ssh key
     # scored 0 and the module was invisible to find_modules).
     target_os_hint = ["linux", "unix"]
+    # Capability metadata: post-foothold enumeration of Linux privesc paths.
+    requires = ["foothold"]
+    produces = ["admin_priv"]
+    read_only = True
+    cost = "low"
+    phase_hint = "escalate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -61,6 +67,12 @@ class WindowsPrivescCheck(AttackModule):
     required_cves = []
     # Phase 3: post-foothold -- OS-gated, not service-gated.
     target_os_hint = ["windows"]
+    # Capability metadata: post-foothold enumeration of Windows privesc paths.
+    requires = ["foothold"]
+    produces = ["admin_priv"]
+    read_only = True
+    cost = "low"
+    phase_hint = "escalate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -140,6 +152,12 @@ class SUIDEnumeration(AttackModule):
     required_cves = []
     # Phase 3: post-foothold -- OS-gated, not service-gated.
     target_os_hint = ["linux", "unix"]
+    # Capability metadata: post-foothold SUID/SGID enumeration (check-only).
+    requires = ["foothold"]
+    produces = ["admin_priv"]
+    read_only = True
+    cost = "low"
+    phase_hint = "escalate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -165,6 +183,12 @@ class KernelExploitCheck(AttackModule):
     required_cves = []
     # Phase 3: post-foothold -- OS-gated, not service-gated.
     target_os_hint = ["linux", "unix"]
+    # Capability metadata: post-foothold kernel LPE version check.
+    requires = ["foothold"]
+    produces = ["admin_priv"]
+    read_only = True
+    cost = "low"
+    phase_hint = "escalate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)

@@ -22,6 +22,14 @@ class Log4jRCE(AttackModule):
                  "log4j 2.15"],
         "https": ["log4j 2.0", "log4j 2.14", "log4j 2.15"],
     }
+    # Capability metadata: remote RCE primitive -- a confirmed JNDI callback is
+    # a reverse shell + foothold. No prerequisites (works against any vulnerable
+    # Log4j endpoint); callback host is an operator parameter, not an artifact.
+    requires: list[str] = []
+    produces: list[str] = ["shell", "foothold"]
+    read_only = False
+    cost = "medium"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -79,6 +87,12 @@ class BasicAuthBuster(AttackModule):
     target_services = ["http", "https"]
     target_ports = [80, 443, 8080, 8443]
     required_cves = []
+    # Capability metadata: a successful basic-auth brute yields credentials.
+    requires: list[str] = []
+    produces: list[str] = ["credentials"]
+    read_only = False
+    cost = "medium"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -119,6 +133,12 @@ class APIFuzzer(AttackModule):
     target_services = ["http", "https", "api"]
     target_ports = [80, 443, 8080, 3000, 5000, 8000, 8443]
     required_cves = []
+    # Capability metadata: endpoint fuzzing surfaces routes, not artifacts.
+    requires: list[str] = []
+    produces: list[str] = []
+    read_only = False
+    cost = "low"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -157,6 +177,12 @@ class WebShellUpload(AttackModule):
     target_services = ["http", "https"]
     target_ports = [80, 443, 8080, 8443, 8000, 3000]
     required_cves = []
+    # Capability metadata: a confirmed upload is a webshell foothold.
+    requires: list[str] = []
+    produces: list[str] = ["webshell", "foothold"]
+    read_only = False
+    cost = "medium"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -224,6 +250,14 @@ class SQLInjection(AttackModule):
     target_services = ["http", "https"]
     target_ports = [80, 443, 8080, 8443, 3000, 5000, 8000, 8888]
     required_cves = []
+    # Capability metadata: advisory info-stub (sqlmap recipe). The module itself
+    # does not execute; sqlmap escalation can yield a webshell foothold, but
+    # that is a downstream tool outcome, not a module artifact.
+    requires: list[str] = []
+    produces: list[str] = []
+    read_only = True
+    cost = "low"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -252,6 +286,13 @@ class XSSScanner(AttackModule):
     target_services = ["http", "https"]
     target_ports = [80, 443, 8080, 8443]
     required_cves = []
+    # Capability metadata: reflected-XSS detection -- surfaces a finding, no
+    # foothold/credential artifact.
+    requires: list[str] = []
+    produces: list[str] = []
+    read_only = False
+    cost = "low"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -309,6 +350,14 @@ class SSTIProbe(AttackModule):
     target_services = ["http", "https"]
     target_ports = [80, 443, 8080, 8443, 3000, 5000]
     required_cves = []
+    # Capability metadata: SSTI detection; a confirmed SSTI escalates to RCE
+    # via the inline RCE probe payloads (shell), but the module surfaces the
+    # finding rather than declaring a foothold.
+    requires: list[str] = []
+    produces: list[str] = []
+    read_only = False
+    cost = "medium"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -411,6 +460,13 @@ class GraphQLIntrospect(AttackModule):
     target_services = ["http", "https"]
     target_ports = [80, 443, 8080, 8443, 3000, 4000, 5000]
     required_cves = []
+    # Capability metadata: schema introspection is enumeration -- it surfaces
+    # types/fields, not a foothold or credential.
+    requires: list[str] = []
+    produces: list[str] = []
+    read_only = True
+    cost = "low"
+    phase_hint = "enumerate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -567,6 +623,13 @@ class RaceRequest(AttackModule):
     target_services = ["http", "https"]
     target_ports = [80, 443, 8080, 8443, 3000, 5000]
     required_cves = []
+    # Capability metadata: race-condition exploitation; a successful bypass
+    # surfaces a finding, not a durable artifact.
+    requires: list[str] = []
+    produces: list[str] = []
+    read_only = False
+    cost = "medium"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)

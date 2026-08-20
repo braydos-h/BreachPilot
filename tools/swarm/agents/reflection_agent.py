@@ -17,6 +17,64 @@ from typing import Any
 from tools.swarm.base import Agent, AgentResult, AgentStatus
 from tools.swarm.bb_compat import bb_set, bb_extend, bb_remove
 from tools.exceptions import _EXC_GROUP_CATCH
+from tools.failure_taxonomy import FailureClass
+
+
+# Structured failure taxonomy -> reflection prompt label. The reflection
+# system prompt already names the nine root-cause categories (TOOL_MISMATCH,
+# PROTOCOL_ERROR, ...); this maps a known ``FailureClass`` from a battle-log
+# entry onto the prompt's vocabulary so the LLM reflection can name a
+# structured class when one is already known instead of re-deriving it from
+# error text. Unmapped classes fall through to None (the prompt's free-text
+# categorization still applies). Augments — does NOT replace — the prompt
+# taxonomy.
+_FAILURE_CLASS_TO_REFLECTION_LABEL: dict[FailureClass, str] = {
+    FailureClass.TARGET_UNREACHABLE: "NETWORK_ISSUE",
+    FailureClass.TIMEOUT: "NETWORK_ISSUE",
+    FailureClass.TRANSPORT_ERROR: "NETWORK_ISSUE",
+    FailureClass.UNSUPPORTED_TARGET: "TOOL_MISMATCH",
+    FailureClass.MALFORMED_CODE: "TOOL_MISMATCH",
+    FailureClass.UNEXPECTED_OUTPUT: "TOOL_MISMATCH",
+    FailureClass.PREREQUISITE_MISSING: "AUTH_REQUIRED",
+    FailureClass.AUTH_FAILED: "AUTH_REQUIRED",
+    FailureClass.TOOL_UNAVAILABLE: "TOOL_MISSING",
+    FailureClass.SCOPE_BLOCKED: "FIREWALL_BLOCK",
+    FailureClass.SCHEMA_ERROR: "PROTOCOL_ERROR",
+    FailureClass.FALSE_POSITIVE: "PATCHED",
+    FailureClass.INSUFFICIENT_EVIDENCE: "TOOL_MISMATCH",
+}
+
+
+def _coerce_fc(fc: Any) -> FailureClass | None:
+    """Coerce a battle-log ``failure_class`` value (str | FailureClass) to a
+    FailureClass, or None when it doesn't resolve to a known member."""
+    if isinstance(fc, FailureClass):
+        return fc
+    try:
+        return FailureClass(str(fc))
+    except ValueError:
+        return None
+
+
+def _known_failure_classes(battle_log: list[dict[str, Any]]) -> list[str]:
+    """Return 'tool: LABEL (FailureClass.X)' lines for failures that carry a
+    structured ``failure_class`` the reflection prompt can name. Empty when no
+    entry has one (legacy/unknown failures keep the free-text path)."""
+    lines: list[str] = []
+    for e in battle_log:
+        if e.get("success"):
+            continue
+        fc = e.get("failure_class")
+        if not fc:
+            continue
+        resolved = _coerce_fc(fc)
+        if resolved is None:
+            continue
+        label = _FAILURE_CLASS_TO_REFLECTION_LABEL.get(resolved)
+        if not label:
+            continue
+        lines.append(f"{e.get('tool', 'unknown')}: {label} (FailureClass.{resolved.value})")
+    return lines
 
 
 _REFLECTION_SYSTEM_PROMPT = """You are a STRATEGIC REFLECTION agent in an autonomous penetration testing swarm.
@@ -346,12 +404,23 @@ class ReflectionAgent(Agent):
             log_summary = json.dumps(battle_log[-15:], indent=2)
             current_phase = session_state.get("current_phase", "unknown")
             remaining_budget = session_state.get("commands_remaining", "unknown")
+            # Surface any structured failure classes already classified upstream
+            # (ModuleResult.failure_class / decision log) so the LLM names the
+            # known category instead of re-deriving it from error text. Empty
+            # when no entry carries one — the prompt's free-text categorization
+            # still applies.
+            known_classes = _known_failure_classes(battle_log)
+            known_block = (
+                "KNOWN STRUCTURED FAILURE CLASSES (already classified — reuse these labels):\n"
+                + "\n".join(f"- {line}" for line in known_classes)
+                + "\n" if known_classes else ""
+            )
             prompt = f"""You are a senior penetration testing strategist analyzing recent actions.
 
 CURRENT PHASE: {current_phase}
 REMAINING COMMAND BUDGET: {remaining_budget}
 
-BATTLE LOG (last 15 actions):
+{known_block}BATTLE LOG (last 15 actions):
 {log_summary}
 
 CURRENT STATE:
