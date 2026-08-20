@@ -272,6 +272,12 @@ class ContainerBreakout(AttackModule):
     target_services = ["docker"]
     target_ports = [2375, 2376, 10250]
     required_cves = []
+    # Capability metadata: post-foothold container escape detection.
+    requires = ["foothold"]
+    produces = ["high_priv"]
+    read_only = True
+    cost = "medium"
+    phase_hint = "escalate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
