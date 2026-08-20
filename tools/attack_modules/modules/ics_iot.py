@@ -1227,6 +1227,12 @@ class ModbusWriteRegister(AttackModule):
     target_ports = [502]
     required_cves: list[str] = []
     destructive_ics = True
+    # Capability metadata: destructive register write; operator-authorized, needs foothold.
+    requires = ["foothold"]
+    produces = []
+    read_only = False
+    cost = "high"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         if not _ics_write_allowed():
@@ -1321,6 +1327,12 @@ class S7PlcStop(AttackModule):
     target_ports = [102]
     required_cves: list[str] = []
     destructive_ics = True
+    # Capability metadata: destructive PLC stop; operator-authorized, needs foothold.
+    requires = ["foothold"]
+    produces = []
+    read_only = False
+    cost = "high"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         if not _ics_write_allowed():
@@ -1418,6 +1430,12 @@ class S7PlcStart(AttackModule):
     target_ports = [102]
     required_cves: list[str] = []
     destructive_ics = True
+    # Capability metadata: write-side PLC control; operator-authorized, needs foothold.
+    requires = ["foothold"]
+    produces = []
+    read_only = False
+    cost = "high"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         if not _ics_write_allowed():
