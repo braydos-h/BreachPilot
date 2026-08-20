@@ -32,9 +32,10 @@ python -m pytest tests/test_recon_pipeline.py::TestClass::test_method # one test
 python -m pytest tests/ -v -k "scope"                                 # by keyword
 python -m pytest --cov=tools --cov=main.py --cov=cli.py               # coverage
 
-# Lint (opt-in, no CI)
-python -m pip install -e ".[dev]"   # ruff + pytest + coverage
-ruff check .                        # line-length 120, select E/F/W/I, E501 ignored
+# Lint (scoped in CI, full-tree `ruff check .` still has pre-existing violations)
+python -m pip install -e ".[dev]"   # ruff + pytest + coverage + mypy + build + twine
+ruff check app.py scope_gate.py tools/safety_reviewer.py tools/validation_utils.py tools/intelligence tools/providers
+mypy --follow-imports=skip summarizer.py planner.py observer.py target_graph.py outcome_judge.py db.py mcp_exploit_server.py tools/mcp_shared.py
 ```
 
 On Linux/macOS `make install|test|test-one F=…|run|doctor|mcp-exploit` work.
@@ -109,8 +110,11 @@ On Linux/macOS `make install|test|test-one F=…|run|doctor|mcp-exploit` work.
    `provider: chatgpt` (default Ollama doctor output unchanged). See
    [docs/providers.md](docs/providers.md).
 
-8. **No CI is configured.** Before a PR: run `python -m pytest tests/ -v`,
-   `ruff check .`, and verify README flags/config still match reality.
+8. **CI runs on every push/PR** (`.github/workflows/ci.yml` + codeql +
+   dependency-review, `.github/dependabot.yml`): mocked test suite on Python
+   3.11-3.13, coverage, scoped ruff/mypy (passing scopes documented in README
+   §CI), package build, WebUI build+tests. Before a PR run the local commands
+   listed in README §CI and verify README flags/config still match reality.
 
 ## Workspace dirs (all gitignored runtime state)
 
@@ -122,7 +126,8 @@ On Linux/macOS `make install|test|test-one F=…|run|doctor|mcp-exploit` work.
 
 ## Toolchain notes
 
-- Python 3.10+ (3.11+ recommended). `pytest asyncio_mode = "auto"`.
+- Python 3.11+ (`pyproject.toml` `requires-python = ">=3.11"`; CI matrix 3.11-3.13).
+  `pytest asyncio_mode = "auto"`.
 - `pyproject.toml` and `requirements.txt` overlap on runtime deps; `pyproject`
   adds dev extras (pytest, coverage, ruff). Keep both in sync when adding deps.
 - `ruff` config: line-length 120, `select = ["E","F","W","I"]`, `ignore = ["E501"]`.

@@ -358,15 +358,41 @@ python -m pytest --cov=tools --cov=main.py --cov=cli.py # coverage
 All tests mock subprocess/network: no live Nmap, no live network. pytest
 config: `asyncio_mode = "auto"`, `testpaths = ["tests"]`.
 
-### Lint (opt-in, no CI)
+### CI (GitHub Actions)
+
+CI runs on every push and pull request (concurrency-cancelled, no secrets
+required, nothing touches the network):
+
+- **Python tests** on Python 3.11, 3.12, and 3.13 — the full mocked/offline
+  suite (`python -m pytest tests/ -v`).
+- **Coverage** on Python 3.12: terminal report + `coverage.xml` artifact.
+- **Ruff** on the currently passing scope (safety core + intelligence +
+  providers): `app.py`, `scope_gate.py`, `tools/safety_reviewer.py`,
+  `tools/validation_utils.py`, `tools/intelligence`, `tools/providers`.
+  Repository-wide `ruff check .` still reports ~1800 pre-existing violations
+  (mostly import sorting) that are out of scope here.
+- **mypy** on the currently passing typed core (`--follow-imports=skip`):
+  `summarizer.py`, `planner.py`, `observer.py`, `target_graph.py`,
+  `outcome_judge.py`, `db.py`, `mcp_exploit_server.py`, `tools/mcp_shared.py`.
+  The rest of the codebase is not yet type-clean.
+- **Package build**: `python -m build` + `python -m twine check dist/*`.
+- **WebUI**: `npm ci`, `npm run build` (tsc + vite), `npm run test` (vitest).
+
+Security automation: CodeQL (Python + JavaScript/TypeScript) on push/PR/weekly,
+GitHub dependency review on pull requests, and Dependabot for pip / GitHub
+Actions / npm (weekly, grouped).
+
+Before opening a PR, run the same checks locally:
 
 ```bash
-python -m pip install -e ".[dev]"    # ruff + pytest + coverage
-ruff check .                        # line-length 120, select E/F/W/I, E501 ignored
+python -m pip install -e ".[dev]"
+python -m pytest tests/ -v
+ruff check app.py scope_gate.py tools/safety_reviewer.py tools/validation_utils.py tools/intelligence tools/providers
+mypy --follow-imports=skip summarizer.py planner.py observer.py target_graph.py outcome_judge.py db.py mcp_exploit_server.py tools/mcp_shared.py
+cd webui && npm ci && npm run build && npm run test
 ```
 
-**No CI is configured.** Before a PR: run `python -m pytest tests/ -v`,
-`ruff check .`, and verify README flags/config still match reality.
+and verify README flags/config still match reality.
 
 ## Plugins
 
@@ -421,7 +447,7 @@ Engineering docs in [`docs/`](docs/):
    will otherwise break.
 2. Run `python main.py --doctor` and `python main.py --self-test` after
    safety-sensitive changes.
-3. Run `python -m pytest tests/ -v` before opening a PR. No CI is configured.
+3. Run the CI checks locally before opening a PR — see [CI (GitHub Actions)](#ci-github-actions) above.
 4. Do not edit Flow B safety files (`scope_gate.py`, `safety_reviewer.py`,
    Flow B's `agent_loop.py`/`tool_router.py`/`risk_controller.py`/`mission.py`/
    `db.py`): recon safety depends on them.

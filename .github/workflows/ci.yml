@@ -1,0 +1,156 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Python ${{ matrix.python }} tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+      - name: Install project + dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Run test suite (offline/mocked)
+        run: python -m pytest tests/ -v
+
+  coverage:
+    name: Coverage report
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+      - name: Install project + dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Run tests with coverage
+        run: python -m coverage run -m pytest tests/
+      - name: Terminal coverage report
+        run: python -m coverage report
+      - name: XML coverage report
+        run: python -m coverage xml
+      - name: Upload coverage XML
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: error
+
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+      - name: Install project + dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      # Repository-wide `ruff check .` reports ~1800 pre-existing violations
+      # (mostly import sorting across the codebase). This scoped check is the
+      # narrowest useful set that currently passes: the recon safety core,
+      # the intelligence pipeline, and the model providers. See README §CI.
+      - name: Ruff check (scoped)
+        run: |
+          ruff check app.py scope_gate.py tools/safety_reviewer.py tools/validation_utils.py \
+            tools/intelligence tools/providers
+
+  types:
+    name: Type check (mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+      - name: Install project + dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      # Repository-wide mypy has hundreds of pre-existing errors, so it is
+      # scoped with --follow-imports=skip to the typed engine core that
+      # currently passes (incl. mcp_shared.py, home of the allowlist lock).
+      # See README §CI.
+      - name: Mypy check (scoped)
+        run: |
+          mypy --follow-imports=skip summarizer.py planner.py observer.py target_graph.py \
+            outcome_judge.py db.py mcp_exploit_server.py tools/mcp_shared.py
+
+  package:
+    name: Package build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+      - name: Build sdist + wheel
+        run: python -m build
+      - name: Verify distributions
+        run: python -m twine check dist/*
+
+  webui:
+    name: WebUI build + tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: webui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+      - name: Clean install
+        run: npm ci
+      - name: Build (tsc + vite)
+        run: npm run build
+      - name: Unit tests (vitest)
+        run: npm run test

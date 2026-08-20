@@ -33,6 +33,18 @@ def _load_plugin_module():
     return module
 
 
+def _example_factory_registered(registry: PluginRegistry) -> bool:
+    """True if the example plugin's own MCP factory is in the registry.
+
+    Filesystem plugins are loaded under a ``netattackai_plugin_<name>_<hash>``
+    module name (see tools/plugins._load_module_from_file), so match by prefix.
+    """
+    return any(
+        getattr(f, "__module__", "").startswith("netattackai_plugin_example_recon_report_")
+        for f in registry.mcp_tool_factories
+    )
+
+
 # ─── Fakes ────────────────────────────────────────────────────────────────────
 
 
@@ -244,9 +256,12 @@ def test_plugin_loads_from_real_directory_when_enabled():
 
     names = [m.name for m in loaded]
     assert "example_recon_report" in names
-    # Attack module + MCP factory both registered.
+    # Attack module + MCP factory both registered. Shipped plugins under
+    # plugins/ default to enabled, so other factories may be registered too;
+    # assert the example plugin's own factory is present rather than a total
+    # count.
     assert any(c.__name__ == "ExampleReportModule" for c in registry.extra_module_classes)
-    assert len(registry.mcp_tool_factories) == 1
+    assert _example_factory_registered(registry)
 
 
 def test_plugin_does_not_load_when_disabled_by_default():
@@ -257,8 +272,10 @@ def test_plugin_does_not_load_when_disabled_by_default():
 
     names = [m.name for m in loaded]
     assert "example_recon_report" not in names
-    assert registry.extra_module_classes == []
-    assert registry.mcp_tool_factories == []
+    # Shipped plugins under plugins/ default to enabled and may load here; the
+    # example plugin specifically must not register anything.
+    assert not any(c.__name__ == "ExampleReportModule" for c in registry.extra_module_classes)
+    assert not _example_factory_registered(registry)
 
 
 def test_plugin_does_not_load_when_explicitly_disabled():

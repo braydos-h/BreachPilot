@@ -496,8 +496,15 @@ def test_load_plugins_reads_config(tmp_path: Path):
     assert "foo" in PLUGIN_REGISTRY.loaded_plugins
 
 
-def test_load_plugins_tolerant_of_missing_config():
-    loaded = load_plugins(None, entry_point_loader=lambda group: [])
+def test_load_plugins_tolerant_of_missing_config(tmp_path):
+    # Missing config -> no plugins configured. Scope the search path to an
+    # empty dir so the result is deterministic: shipped plugins under plugins/
+    # default to enabled and would otherwise load here.
+    loaded = load_plugins(
+        None,
+        search_paths=[str(tmp_path)],
+        entry_point_loader=lambda group: [],
+    )
     assert loaded == []
 
 

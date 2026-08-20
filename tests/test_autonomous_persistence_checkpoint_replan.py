@@ -39,6 +39,7 @@ import tools.autonomous_orchestrator as orch_mod
 from tools.autonomous_orchestrator import (
     AttackPhase,
     AttackState,
+    AttackTask,
     AutonomousOrchestrator,
 )
 from tools.recon_pipeline import HostReconResult, ServiceInfo
@@ -406,7 +407,15 @@ async def test_adaptive_rounds_bounded_by_max_cycles(tmp_path: Path) -> None:
 
     async def _fake_exploit(state: AttackState, *, skip_failed: bool = False) -> None:
         call_count["n"] += 1
-        # Never achieve access -> should_continue stays True -> loop hits max_cycles.
+        # Add a novel task each round so the no-novel-candidate stop does not
+        # fire; never achieve access so should_continue stays True and the loop
+        # runs exactly max_cycles rounds (the bound under test).
+        orch._tasks[f"fake-{call_count['n']}"] = AttackTask(
+            task_id=f"fake-{call_count['n']}",
+            phase=AttackPhase.EXPLOITATION,
+            module_name="FakeExploit",
+            target="10.0.0.5",
+        )
 
     async def _noop(state: AttackState) -> None:
         return None
