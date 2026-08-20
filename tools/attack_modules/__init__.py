@@ -5,7 +5,12 @@ for common vulnerabilities, so it doesn't have to write every exploit
 from scratch.
 """
 
-from tools.attack_modules.base import AttackModule, ModuleContext, ModuleResult
+from tools.attack_modules.base import (
+    ApplicabilityReport,
+    AttackModule,
+    ModuleContext,
+    ModuleResult,
+)
 from tools.attack_modules.registry import (
     find_modules,
     get_module,
@@ -24,6 +29,7 @@ __all__ = [
     "AttackModule",
     "ModuleContext",
     "ModuleResult",
+    "ApplicabilityReport",
     "list_modules",
     "find_modules",
     "get_module",

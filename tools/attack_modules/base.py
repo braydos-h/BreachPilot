@@ -23,12 +23,51 @@ class ModuleContext:
     credentials: list[dict[str, str]] = field(default_factory=list)
     parameters: dict[str, Any] = field(default_factory=dict)
     config: dict[str, Any] | None = None
+    # Capability-upgrade (all optional; existing construction sites unchanged):
+    # compact assessment state so modules can reason about prerequisites
+    # (foothold/privilege/sessions) and prior evidence without raw logs.
+    sessions: list[dict[str, Any]] = field(default_factory=list)
+    findings: list[dict[str, Any]] = field(default_factory=list)
+    hypotheses: list[dict[str, Any]] = field(default_factory=list)
+    evidence_refs: list[str] = field(default_factory=list)
+    access_achieved: bool = False
+    privilege_level: str = ""
+    phase: str | None = None
 
 
 # Status values a module's run() may legitimately return. Kept loose (str) on
 # the dataclass so legacy modules that return ad-hoc strings ("exploited",
 # "executed", ...) still round-trip through ``to_result`` without raising.
 ModuleStatus = Literal["info", "script_generated", "success", "failed", "blocked"]
+
+
+@dataclass
+class ApplicabilityReport:
+    """Structured explanation of a module's applicability score (§6)."""
+
+    score: int
+    reasons: list[str] = field(default_factory=list)
+    penalties: list[str] = field(default_factory=list)
+
+
+_ARTIFACT_KINDS_FOOTHOLD = {"foothold", "shell", "session"}
+_ARTIFACT_KINDS_PRIV = {"admin_priv", "root_priv", "system_priv", "high_priv"}
+
+
+def _artifact_present(kind: str, ctx: ModuleContext) -> bool:
+    """Best-effort prerequisite check: is artifact ``kind`` available in ctx?"""
+    kind = kind.lower()
+    if kind in {"credentials", "creds", "password", "hash"}:
+        return bool(ctx.credentials)
+    if kind in _ARTIFACT_KINDS_FOOTHOLD:
+        return bool(ctx.access_achieved or ctx.sessions)
+    if kind in _ARTIFACT_KINDS_PRIV:
+        return ctx.privilege_level.lower() in {"admin", "administrator", "system", "root"}
+    if kind == "user_list":
+        return any("user" in c for c in ctx.credentials)
+    # Unknown artifact kinds cannot be verified from state; treat as present so
+    # a typo in a module's requires list never hides the module from ranking.
+    return True
 
 
 @dataclass
@@ -57,6 +96,14 @@ class ModuleResult:
     credentials_found: list[str] = field(default_factory=list)
     evidence: list[str] = field(default_factory=list)
     references: list[str] = field(default_factory=list)
+    # Capability-upgrade fields (additive; empty/None defaults serialize away
+    # so the flattened dict legacy consumers read is unchanged):
+    failure_class: str = ""  # tools/failure_taxonomy.FailureClass value
+    retryable: bool | None = None
+    confidence: float | None = None
+    produced_artifacts: list[str] = field(default_factory=list)
+    follow_ups: list[str] = field(default_factory=list)
+    unlocked_capabilities: list[str] = field(default_factory=list)
     # Extra keys a module may pass through that are not first-class fields
     # (e.g. ``techniques``, ``workflow``, ``prompt_template``). Preserved so the
     # MCP renderer's existing dict access (``result.get("suggested_command")``
@@ -94,6 +141,21 @@ class ModuleResult:
             out["evidence"] = list(self.evidence)
         if self.references:
             out["references"] = list(self.references)
+        # Capability-upgrade fields: emitted only when set, so legacy consumers
+        # (record_success key set, the MCP renderer) see an unchanged shape for
+        # modules that never populate them.
+        if self.failure_class:
+            out["failure_class"] = self.failure_class
+        if self.retryable is not None:
+            out["retryable"] = self.retryable
+        if self.confidence is not None:
+            out["confidence"] = self.confidence
+        if self.produced_artifacts:
+            out["produced_artifacts"] = list(self.produced_artifacts)
+        if self.follow_ups:
+            out["follow_ups"] = list(self.follow_ups)
+        if self.unlocked_capabilities:
+            out["unlocked_capabilities"] = list(self.unlocked_capabilities)
         # Pass-through extra keys win over the typed defaults only when the
         # module set them explicitly (modules that return dicts with extra
         # workflow/prompt_template data keep that data).
@@ -119,6 +181,8 @@ class ModuleResult:
             "status", "module", "script", "note", "suggested_command",
             "suggested_msf", "shell_type", "privilege_level",
             "credentials_found", "evidence", "references", "extra",
+            "failure_class", "retryable", "confidence",
+            "produced_artifacts", "follow_ups", "unlocked_capabilities",
         }
         # Modules historically used "credentials" (list[dict]) not
         # "credentials_found" (list[str]); normalize both onto the dataclass.
@@ -145,6 +209,12 @@ class ModuleResult:
             credentials_found=creds_list,
             evidence=list(d.get("evidence", []) or []),
             references=list(d.get("references", []) or []),
+            failure_class=str(d.get("failure_class", "") or ""),
+            retryable=d.get("retryable") if isinstance(d.get("retryable"), bool) else None,
+            confidence=d.get("confidence") if isinstance(d.get("confidence"), (int, float)) else None,
+            produced_artifacts=list(d.get("produced_artifacts", []) or []),
+            follow_ups=list(d.get("follow_ups", []) or []),
+            unlocked_capabilities=list(d.get("unlocked_capabilities", []) or []),
             extra=extra,
         )
 
@@ -187,6 +257,16 @@ class AttackModule(ABC):
     # unless the operator has explicitly armed both flags. Default False
     # keeps all non-ICS modules unchanged.
     destructive_ics: bool = False
+    # Capability-upgrade metadata (all defaulted; machine-readable via
+    # capability_record()). ``requires``/``produces`` name artifact kinds
+    # ("credentials", "foothold", "admin_priv", "hash_artifact", "user_list",
+    # ...) so the planner can discover module composition dynamically instead
+    # of hard-coding chains. read_only = does not change target state.
+    requires: list[str] = []
+    produces: list[str] = []
+    read_only: bool = False
+    cost: str = "medium"  # low|medium|high -- planning hint only
+    phase_hint: str = ""  # recon|enumerate|exploit|escalate|loot|pivot|... advisory
 
     def applicability(self, ctx: ModuleContext) -> int:
         """Return 0-100 score indicating how applicable this module is.
@@ -246,6 +326,82 @@ class AttackModule(ABC):
                 score += 30
 
         return min(score, 100)
+
+    def applicability_explain(self, ctx: ModuleContext) -> "ApplicabilityReport":
+        """Structured explanation of the applicability score.
+
+        The score itself delegates to ``applicability()`` so subclass overrides
+        (e.g. the fixed-score detection modules, the ICS gate) stay the single
+        source of truth; this method derives the human/AI-readable reasons and
+        penalties from the same metadata conditionals. The planner and the
+        capability MCP tools expose these so the model can see WHY a module
+        ranks where it does instead of trusting a bare number.
+        """
+        score = self.applicability(ctx)
+        reasons: list[str] = []
+        penalties: list[str] = []
+
+        svc_names = {s.get("service", "").lower() for s in ctx.services}
+        svc_ports = {int(s.get("port", 0).split("/")[0]) for s in ctx.services if "/" in s.get("port", "")}
+        cve_upper = {c.upper() for c in ctx.cves}
+
+        # ponytail: descriptive labels mirror applicability()'s conditionals by
+        # contract; the weights live only in applicability(). If a new scoring
+        # input is added there, add its label here.
+        matched_services = [s for s in self.target_services if s.lower() in svc_names]
+        if matched_services:
+            reasons.append(f"service matched: {', '.join(matched_services)}")
+        matched_ports = [p for p in self.target_ports if p in svc_ports]
+        if matched_ports:
+            reasons.append(f"port matched: {', '.join(str(p) for p in matched_ports)}")
+        matched_cves = [c for c in self.required_cves if c.upper() in cve_upper]
+        if matched_cves:
+            reasons.append(f"CVE matched: {', '.join(matched_cves)}")
+        if self.target_versions:
+            for s in ctx.services:
+                patterns = self.target_versions.get(s.get("service", "").lower())
+                version = (s.get("version", "") or "").lower()
+                if patterns and any(p.lower() in version for p in patterns):
+                    reasons.append(f"vulnerable version matched: {s.get('service')} {s.get('version')}")
+                    break
+        if self.target_os_hint and ctx.target_os:
+            ctx_os = ctx.target_os.lower()
+            if any(h.lower() in ctx_os or ctx_os in h.lower() for h in self.target_os_hint):
+                reasons.append(f"target OS matched: {ctx.target_os}")
+        # Prerequisite satisfaction (advisory signal — never changes the score).
+        missing = [r for r in self.requires if not _artifact_present(r, ctx)]
+        for r in self.requires:
+            if r not in missing:
+                reasons.append(f"prerequisite available: {r}")
+        for r in missing:
+            penalties.append(f"prerequisite missing: {r}")
+        if self.destructive_ics and score == 0:
+            penalties.append("ICS destructive-write gates not armed (ics.allow_write + ics.destructive_ics)")
+        if score == 0 and not reasons and not penalties:
+            penalties.append("no service/port/CVE/version/OS match")
+        return ApplicabilityReport(score=score, reasons=reasons, penalties=penalties)
+
+    def capability_record(self) -> dict[str, Any]:
+        """Full machine-readable capability record for discovery tools.
+
+        Superset of to_json() (which stays byte-identical for the WebUI/tests);
+        this is the shape query_capabilities/get_capability_details expose.
+        """
+        return {
+            "name": self.name,
+            "description": self.description,
+            "target_services": list(self.target_services),
+            "target_ports": list(self.target_ports),
+            "required_cves": list(self.required_cves),
+            "target_versions": {k: list(v) for k, v in self.target_versions.items()},
+            "target_os_hint": list(self.target_os_hint),
+            "destructive_ics": bool(self.destructive_ics),
+            "requires": list(self.requires),
+            "produces": list(self.produces),
+            "read_only": bool(self.read_only),
+            "cost": self.cost,
+            "phase_hint": self.phase_hint,
+        }
 
     @abstractmethod
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
