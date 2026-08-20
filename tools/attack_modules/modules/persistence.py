@@ -48,6 +48,12 @@ class LinuxPersistence(AttackModule):
     target_services = ["ssh"]
     target_ports = [22]
     required_cves: list[str] = []
+    # Capability metadata: persistence requires an existing foothold.
+    requires = ["foothold"]
+    produces = ["persistence"]
+    read_only = False
+    cost = "medium"
+    phase_hint = "persist"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -178,6 +184,12 @@ class WindowsPersistence(AttackModule):
     target_services = ["smb", "ms-wbt-server", "rdp"]
     target_ports = [445, 3389]
     required_cves: list[str] = []
+    # Capability metadata: persistence requires an existing foothold.
+    requires = ["foothold"]
+    produces = ["persistence"]
+    read_only = False
+    cost = "medium"
+    phase_hint = "persist"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -277,6 +289,12 @@ class WebShellPersistence(AttackModule):
     target_services = ["http", "https"]
     target_ports = [80, 443]
     required_cves: list[str] = []
+    # Capability metadata: web-shell persistence requires an existing foothold.
+    requires = ["foothold"]
+    produces = ["persistence"]
+    read_only = False
+    cost = "medium"
+    phase_hint = "persist"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)

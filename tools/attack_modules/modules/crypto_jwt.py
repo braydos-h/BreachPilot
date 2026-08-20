@@ -13,6 +13,13 @@ class JWTTamper(AttackModule):
     target_services = ["http", "https"]
     target_ports = [80, 443, 8080, 8443, 3000, 5000]
     required_cves = []
+    # Capability metadata: a successful alg:none / weak-secret / key-confusion
+    # bypass forges a valid token = credentials. No prerequisite artifacts.
+    requires: list[str] = []
+    produces: list[str] = ["credentials"]
+    read_only = False
+    cost = "low"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)

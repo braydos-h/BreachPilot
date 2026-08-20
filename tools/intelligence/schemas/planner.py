@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
-from .base import BaseSchema, ValidationResult, _clamp_float, _require_str
+from .base import BaseSchema, ValidationResult, _clamp_float
 
 MAX_STATEMENT_LEN = 500
 PLANNER_STATUSES = ("open", "confirmed", "refuted", "inconclusive", "exhausted")
@@ -68,8 +67,10 @@ class PlannerProposalSchema(BaseSchema):
             errors.append(f"statement exceeds {MAX_STATEMENT_LEN} chars")
         if not isinstance(raw.get("suggested_checks"), (list, type(None))):
             errors.append("suggested_checks must be a list")
-        confidence = raw.get("confidence", 0.5)
-        if not isinstance(confidence, (int, float)) or not 0.0 <= confidence <= 1.0:
+        confidence = raw.get("confidence")
+        if confidence is None:
+            errors.append("confidence missing")
+        elif not isinstance(confidence, (int, float)) or not 0.0 <= confidence <= 1.0:
             errors.append(f"confidence {confidence!r} out of range [0,1]")
         return ValidationResult(valid=not errors, errors=errors)
 
@@ -79,8 +80,11 @@ class PlannerProposalSchema(BaseSchema):
         if not isinstance(statement, str) or not statement.strip():
             fixed["statement"] = "untitled hypothesis"
             errors.append("statement repaired to 'untitled hypothesis'")
-        confidence = fixed.get("confidence", 0.5)
-        if not isinstance(confidence, (int, float)) or not 0.0 <= confidence <= 1.0:
+        confidence = fixed.get("confidence")
+        if confidence is None:
+            fixed["confidence"] = 0.5
+            errors.append("confidence repaired to 0.5")
+        elif not isinstance(confidence, (int, float)) or not 0.0 <= confidence <= 1.0:
             fixed["confidence"] = _clamp_float(confidence, 0.0, 1.0)
             errors.append(f"confidence clamped to {fixed['confidence']}")
         if not isinstance(fixed.get("suggested_checks"), list):

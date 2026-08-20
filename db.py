@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Generator
 
-_SCHEMA_VERSION = 5
+_SCHEMA_VERSION = 10
 _MIGRATIONS_TABLE = "_migrations"
 
 
@@ -397,6 +397,16 @@ class DatabaseManager:
             self._migrate_v4_outcome_judgment(conn)
         if version == 5:
             self._migrate_v5_lessons_text(conn)
+        if version == 6:
+            self._migrate_v6_graph_v2(conn)
+        if version == 7:
+            self._migrate_v7_belief_state(conn)
+        if version == 8:
+            self._migrate_v8_evidence_provenance(conn)
+        if version == 9:
+            self._migrate_v9_decision_telemetry(conn)
+        if version == 10:
+            self._migrate_v10_attempt_fingerprints(conn)
         conn.execute(
             f"INSERT INTO {_MIGRATIONS_TABLE}(version, applied_at) VALUES(?,?)",
             (version, _now_iso()),
@@ -709,6 +719,199 @@ class DatabaseManager:
             conn.execute(
                 "ALTER TABLE lessons ADD COLUMN text TEXT NOT NULL DEFAULT ''"
             )
+
+    # ------------------------------------------------------------------
+    def _migrate_v6_graph_v2(self, conn: sqlite3.Connection) -> None:
+        """Typed intelligence-graph tables (v2 pair).
+
+        Legacy graph_nodes/graph_edges stay untouched -- the intelligence
+        store re-populates the v2 tables from evidence.
+        """
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS graph_nodes_v2 (
+                id TEXT PRIMARY KEY,
+                scope TEXT,
+                node_type TEXT,
+                value TEXT,
+                properties_json TEXT,
+                confidence REAL,
+                status TEXT,
+                first_seen TEXT,
+                last_seen TEXT,
+                evidence_refs_json TEXT,
+                observation_count INTEGER,
+                contradiction_count INTEGER,
+                source TEXT,
+                created_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS graph_edges_v2 (
+                id TEXT PRIMARY KEY,
+                scope TEXT,
+                source_node_id TEXT,
+                target_node_id TEXT,
+                edge_type TEXT,
+                properties_json TEXT,
+                confidence REAL,
+                source TEXT,
+                first_seen TEXT,
+                last_seen TEXT,
+                evidence_refs_json TEXT,
+                observation_count INTEGER,
+                contradiction_count INTEGER,
+                created_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_graph_nodes_v2_type
+                ON graph_nodes_v2(node_type);
+            CREATE INDEX IF NOT EXISTS idx_graph_nodes_v2_scope_type_value
+                ON graph_nodes_v2(scope, node_type, value);
+            CREATE INDEX IF NOT EXISTS idx_graph_edges_v2_source
+                ON graph_edges_v2(source_node_id);
+            CREATE INDEX IF NOT EXISTS idx_graph_edges_v2_target
+                ON graph_edges_v2(target_node_id);
+            """
+        )
+
+    # ------------------------------------------------------------------
+    def _migrate_v7_belief_state(self, conn: sqlite3.Connection) -> None:
+        """Belief-state columns on hypotheses + belief transition log."""
+        hypothesis_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(hypotheses)").fetchall()
+        }
+        if "supporting_evidence_json" not in hypothesis_columns:
+            conn.execute(
+                "ALTER TABLE hypotheses ADD COLUMN supporting_evidence_json TEXT"
+            )
+        if "contradicting_evidence_json" not in hypothesis_columns:
+            conn.execute(
+                "ALTER TABLE hypotheses ADD COLUMN contradicting_evidence_json TEXT"
+            )
+        if "candidate_checks_json" not in hypothesis_columns:
+            conn.execute(
+                "ALTER TABLE hypotheses ADD COLUMN candidate_checks_json TEXT"
+            )
+        if "provenance" not in hypothesis_columns:
+            conn.execute("ALTER TABLE hypotheses ADD COLUMN provenance TEXT")
+        if "independent_check_count" not in hypothesis_columns:
+            conn.execute(
+                "ALTER TABLE hypotheses "
+                "ADD COLUMN independent_check_count INTEGER NOT NULL DEFAULT 0"
+            )
+        if "last_assessed_at" not in hypothesis_columns:
+            conn.execute(
+                "ALTER TABLE hypotheses ADD COLUMN last_assessed_at TEXT"
+            )
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS belief_transitions (
+                id TEXT PRIMARY KEY,
+                hypothesis_id TEXT,
+                from_status TEXT,
+                to_status TEXT,
+                reason TEXT,
+                evidence_refs_json TEXT,
+                created_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_belief_transitions_hypothesis
+                ON belief_transitions(hypothesis_id);
+            """
+        )
+
+    # ------------------------------------------------------------------
+    def _migrate_v8_evidence_provenance(self, conn: sqlite3.Connection) -> None:
+        """Provenance on evidence + cross-table evidence reference links."""
+        evidence_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(evidence)").fetchall()
+        }
+        if "provenance_json" not in evidence_columns:
+            conn.execute(
+                "ALTER TABLE evidence ADD COLUMN provenance_json TEXT"
+            )
+        observation_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(observations)").fetchall()
+        }
+        if "hypothesis_evidence_json" not in observation_columns:
+            conn.execute(
+                "ALTER TABLE observations ADD COLUMN "
+                "hypothesis_evidence_json TEXT NOT NULL DEFAULT '[]'"
+            )
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS evidence_references (
+                id TEXT PRIMARY KEY,
+                source_table TEXT,
+                source_id TEXT,
+                evidence_id TEXT,
+                relation TEXT,
+                weight REAL,
+                created_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_evidence_references_source
+                ON evidence_references(source_table, source_id);
+            """
+        )
+
+    # ------------------------------------------------------------------
+    def _migrate_v9_decision_telemetry(self, conn: sqlite3.Connection) -> None:
+        """Decision telemetry log for mission-level choices."""
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS decision_telemetry (
+                id TEXT PRIMARY KEY,
+                mission_id TEXT,
+                run_id TEXT,
+                timestamp TEXT,
+                agent TEXT,
+                event_type TEXT,
+                decision TEXT,
+                candidate_paths_json TEXT,
+                selected_path TEXT,
+                rejected_paths_json TEXT,
+                ranking_scores_json TEXT,
+                confidence REAL,
+                info_gain REAL,
+                graph_nodes_json TEXT,
+                hypotheses_json TEXT,
+                memory_retrieved_json TEXT,
+                critic_objections_json TEXT,
+                model_used TEXT,
+                tokens INTEGER,
+                latency_ms REAL,
+                created_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_decision_telemetry_mission_time
+                ON decision_telemetry(mission_id, timestamp);
+            CREATE INDEX IF NOT EXISTS idx_decision_telemetry_run
+                ON decision_telemetry(run_id);
+            """
+        )
+
+    # ------------------------------------------------------------------
+    def _migrate_v10_attempt_fingerprints(self, conn: sqlite3.Connection) -> None:
+        """Deduplication fingerprints for repeated exploit attempts."""
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS attempt_fingerprints (
+                id TEXT PRIMARY KEY,
+                mission_id TEXT,
+                fingerprint TEXT,
+                target TEXT,
+                service TEXT,
+                action_family TEXT,
+                status TEXT,
+                detail TEXT,
+                evidence_snapshot_json TEXT,
+                repeat_count INTEGER NOT NULL DEFAULT 0,
+                retry_justification TEXT,
+                timestamp TEXT,
+                created_at TEXT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_attempt_fingerprints_mission_fp
+                ON attempt_fingerprints(mission_id, fingerprint);
+            """
+        )
 
     # ------------------------------------------------------------------
     # High-level helpers used across modules

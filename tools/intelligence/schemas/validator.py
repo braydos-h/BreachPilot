@@ -55,6 +55,8 @@ def extract_json_block(text: str) -> Optional[str]:
             depth -= 1
             if depth == 0:
                 return text[start : i + 1]
+    if start is not None and depth > 0:
+        return text[start:]
     return None
 
 
@@ -112,6 +114,7 @@ class SafeSchemaLoader:
         repaired = self.validator.repair(dict(parsed), repair_errors)
         second = self.validator.validate(repaired)
         second.repaired = True
+        second.errors = repair_errors + second.errors
         if second.valid:
             try:
                 obj = self.validator.coerce(repaired)

@@ -13,6 +13,14 @@ class CredentialSpray(AttackModule):
     target_services = ["ssh", "smb", "microsoft-ds", "http", "https", "rdp", "ms-wbt-server"]
     target_ports = [22, 445, 80, 443, 3389]
     required_cves = []
+    # Capability metadata: spraying yields credentials; benefits from a
+    # pre-gathered user list (ADLDAPEnum / SMBNullSession) but does not require
+    # it (built-in wordlist).
+    requires: list[str] = ["user_list"]
+    produces: list[str] = ["credentials"]
+    read_only = False
+    cost = "high"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -41,6 +49,13 @@ class PasswordSpray(AttackModule):
     target_services = ["http", "https", "ssh", "smb", "microsoft-ds", "rdp", "ms-wbt-server"]
     target_ports = [80, 443, 22, 445, 3389]
     required_cves = []
+    # Capability metadata: a successful spray yields credentials; benefits
+    # from a user list (ADLDAPEnum) but the built-in wordlist stands alone.
+    requires: list[str] = ["user_list"]
+    produces: list[str] = ["credentials"]
+    read_only = False
+    cost = "medium"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -141,6 +156,14 @@ class HashCrack(AttackModule):
     target_services = ["smb", "microsoft-ds", "ssh", "http", "https"]
     target_ports = [445, 22, 80, 443]
     required_cves = []
+    # Capability metadata: local-only hash cracking consumes a hash artifact
+    # (from ASREPRoast / Kerberoasting / DCSync / DumpHashes) and produces
+    # plaintext credentials. read_only = no target touch (runs on operator box).
+    requires: list[str] = ["hash_artifact"]
+    produces: list[str] = ["credentials"]
+    read_only = True
+    cost = "high"
+    phase_hint = "loot"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -186,6 +209,14 @@ class ASREPRoast(AttackModule):
     target_services = ["kerberos"]
     target_ports = [88, 389]
     required_cves = []
+    # Capability metadata: roasts preauth-disabled accounts into an offline-
+    # crackable hash artifact. Benefits from a user list (ADLDAPEnum) to seed
+    # candidates; the hash feeds HashCrack -> credentials.
+    requires: list[str] = ["user_list"]
+    produces: list[str] = ["hash_artifact"]
+    read_only = False
+    cost = "medium"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -221,6 +252,14 @@ class Kerberoasting(AttackModule):
     target_services = ["kerberos"]
     target_ports = [88, 389]
     required_cves = []
+    # Capability metadata: roasts SPN-backed accounts into an offline-crackable
+    # TGS hash artifact. Benefits from a user list / SPN enumeration
+    # (ADLDAPEnum); the hash feeds HashCrack -> credentials.
+    requires: list[str] = ["user_list"]
+    produces: list[str] = ["hash_artifact"]
+    read_only = False
+    cost = "medium"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -257,6 +296,14 @@ class DCSyncAttack(AttackModule):
     target_services = ["ldap", "microsoft-ds", "smb", "drsuapi"]
     target_ports = [389, 445, 3268, 135]
     required_cves = []
+    # Capability metadata: DCSync requires domain-admin (replication) rights
+    # and pulls the full NTDS hash set + krbtgt -- the domain-compromise step.
+    # Produces hash artifacts and credentials (NTLM hashes are usable as creds).
+    requires: list[str] = ["admin_priv"]
+    produces: list[str] = ["hash_artifact", "credentials"]
+    read_only = False
+    cost = "high"
+    phase_hint = "escalate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -297,6 +344,13 @@ class ADLDAPEnum(AttackModule):
     target_services = ["ldap"]
     target_ports = [389, 3268, 636, 3269]
     required_cves = []
+    # Capability metadata: LDAP enumeration is read-only reconnaissance that
+    # produces a user list -- the seed for ASREPRoast / Kerberoasting / spraying.
+    requires: list[str] = []
+    produces: list[str] = ["user_list"]
+    read_only = True
+    cost = "low"
+    phase_hint = "enumerate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)

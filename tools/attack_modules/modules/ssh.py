@@ -13,6 +13,12 @@ class SSHBruteForce(AttackModule):
     target_services = ["ssh"]
     target_ports = [22, 2222, 8022]
     required_cves = []
+    # Capability metadata: SSH credential brute force; user_list optional input.
+    requires = []
+    produces = ["credentials"]
+    read_only = False
+    cost = "medium"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -98,6 +104,12 @@ class RegreSSHion(AttackModule):
             "openssh_9.3", "openssh_9.4", "openssh_9.5", "openssh_9.6", "openssh_9.7",
         ],
     }
+    # Capability metadata: regreSSHion version check (detection only).
+    requires = []
+    produces = []
+    read_only = True
+    cost = "low"
+    phase_hint = "enumerate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -133,6 +145,12 @@ class OpenSSHCVECheck(AttackModule):
     # is literally a version->CVE mapper, so a fingerprinted version is
     # exactly when it should rank high.
     target_versions = {"ssh": ["openssh_"]}
+    # Capability metadata: OpenSSH version->CVE mapping (info/check-only).
+    requires = []
+    produces = []
+    read_only = True
+    cost = "low"
+    phase_hint = "enumerate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         version = ""

@@ -327,6 +327,12 @@ class CloudPrivesc(AttackModule):
     target_services = ["docker", "k8s", "http", "https"]
     target_ports = [2375, 2376, 10250, 443, 80]
     required_cves: list[str] = []
+    # Capability metadata: post-foothold cloud privesc enumeration (check-only).
+    requires = ["foothold"]
+    produces = ["high_priv"]
+    read_only = True
+    cost = "medium"
+    phase_hint = "escalate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -425,6 +431,12 @@ class K8sPrivesc(AttackModule):
     target_services = ["k8s", "kubelet", "https"]
     target_ports = [6443, 10250, 8443, 443]
     required_cves: list[str] = []
+    # Capability metadata: k8s privesc probing; foothold or exposed API sufficient.
+    requires = ["foothold"]
+    produces = ["high_priv"]
+    read_only = True
+    cost = "medium"
+    phase_hint = "escalate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -555,6 +567,12 @@ class IMDSExploit(AttackModule):
     target_services = ["docker", "k8s", "http", "https"]
     target_ports = [2375, 2376, 10250, 443, 80]
     required_cves: list[str] = []
+    # Capability metadata: post-foothold IMDS credential extraction.
+    requires = ["foothold"]
+    produces = ["credentials", "high_priv"]
+    read_only = False
+    cost = "medium"
+    phase_hint = "escalate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -668,6 +686,12 @@ class DockerSockEscape(AttackModule):
     target_services = ["docker"]
     target_ports = [2375, 2376]
     required_cves: list[str] = []
+    # Capability metadata: post-foothold docker.sock escape (active exploit).
+    requires = ["foothold"]
+    produces = ["shell", "high_priv"]
+    read_only = False
+    cost = "high"
+    phase_hint = "escalate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -801,6 +825,12 @@ class S3BucketTakeover(AttackModule):
     target_services = ["http", "https"]
     target_ports = [80, 443, 8080, 8443, 3000, 5000]
     required_cves: list[str] = []
+    # Capability metadata: post-foothold S3 bucket takeover (active, writes marker).
+    requires = ["foothold"]
+    produces = ["credentials", "high_priv"]
+    read_only = False
+    cost = "medium"
+    phase_hint = "escalate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)

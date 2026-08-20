@@ -39,6 +39,7 @@ from tools.attack_modules import (
     ModuleResult,
     _module_target_signature,
     find_modules,
+    find_producers,
     get_module,
 )
 from tools.attack_ui import get_ui
@@ -131,6 +132,11 @@ class AttackTask:
     chain_parent: str | None = None  # Task ID that must complete first
     chain_children: list[str] = field(default_factory=list)
     prerequisites: list[str] = field(default_factory=list)
+    # Capability-upgrade: provenance tag. The dynamic-composition path sets
+    # this to "recovery:prerequisite" when it schedules a producer module to
+    # satisfy a missing artifact for a failed sibling. Empty for normal
+    # planner-created tasks. Additive; serialized for resume/debugging only.
+    created_from: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -153,6 +159,7 @@ class AttackTask:
             "chain_parent": self.chain_parent,
             "chain_children": self.chain_children,
             "prerequisites": self.prerequisites,
+            "created_from": self.created_from,
         }
 
     @classmethod
@@ -191,6 +198,7 @@ class AttackTask:
             chain_parent=data.get("chain_parent"),
             chain_children=list(data.get("chain_children", []) or []),
             prerequisites=list(data.get("prerequisites", []) or []),
+            created_from=str(data.get("created_from", "") or ""),
         )
 
 @dataclass
@@ -417,6 +425,18 @@ class RetryEngine:
         if attempt >= max_attempts:
             return False
 
+        # First, classify via the shared failure taxonomy. Permanent
+        # classes (scope_blocked / false_positive) are never retried -- the
+        # substring blacklist below stays as the conservative fallback for
+        # anything the classifier misses or when the taxonomy import fails.
+        try:
+            from tools.failure_taxonomy import classify_failure, is_permanent
+            fc = classify_failure(error)
+            if is_permanent(fc):
+                return False
+        except Exception:  # noqa: BLE001 -- taxonomy import must never break retries
+            pass
+
         # Don't retry on permanent failures
         permanent_errors = [
             "out of scope",
@@ -625,6 +645,17 @@ class AttackModuleExecutor:
             credentials=list(state.credentials_found),
             parameters=dict(task.parameters),
             config=self._mission_config,
+            # Capability-upgrade (§12): thread live attack state so modules
+            # can reason about prerequisites (foothold/privilege/sessions)
+            # and prior evidence without raw logs. Additive; the defaults in
+            # ModuleContext keep every other construction site byte-identical.
+            access_achieved=state.access_achieved,
+            privilege_level=state.privilege_level,
+            sessions=(
+                [{"shell": state.shell_type}] if state.access_achieved and state.shell_type else []
+            ),
+            phase=state.current_phase.value,
+            evidence_refs=list(state.loot)[-10:],
         )
 
         # Phase 6.2: OPSEC pacing. Await the profile's pacing delay (jittered,
@@ -1263,6 +1294,15 @@ class AutonomousOrchestrator:
         self._running = True
         self._max_cycles = mission_config.get("max_cycles", 100)
         self._max_aggression = AggressionLevel(mission_config.get("max_aggression", "maximum"))
+        # Capability-upgrade (§9): dynamic-composition counters. When a module
+        # fails with PREREQUISITE_MISSING, a producer module is scheduled for
+        # the missing artifact. Bounded: one prereq task per failing task (via
+        # the per-batch ``prereq_scheduled`` set) plus this campaign-level cap
+        # so a structural-missing chain cannot balloon the task queue. The cap
+        # rides on the existing per-module failure budget so no new knob is
+        # introduced.
+        self._prereq_tasks_added = 0
+        self._prereq_recovery_cap = max(1, int(self._max_module_failures))
         # Pivot-depth cap (Tier 0 item 0.6a): the lateral-movement phase recurses
         # into each discovered pivot target via _attack_target, which previously
         # had NO depth bound -- unbounded pivoting is a safety hole. Depth 0 is
@@ -2039,7 +2079,9 @@ class AutonomousOrchestrator:
         m = self._PERSISTENCE_MARKER_RE.search(str(output_text or ""))
         return m.group(1).lower() if m else None
 
-    def _module_context(self, state: AttackState) -> ModuleContext:
+    def _module_context(
+        self, state: AttackState, task: AttackTask | None = None,
+    ) -> ModuleContext:
         """Build the ModuleContext the attack modules expect from current state.
 
         Carries version + CPE + the full per-service CVE list (the audit flagged
@@ -2048,6 +2090,13 @@ class AutonomousOrchestrator:
         never fired). The CVE list now pulls from openssh_cves plus any CVE the
         recon pipeline attached to the service's scripts (broader than the
         OpenSSH-only gate).
+
+        Capability-upgrade (§12): threads live attack state (access/priv/
+        sessions/phase/evidence_refs) and, when a task is supplied, its
+        parameters -- the audit flagged this builder omitted ``parameters``
+        while the execute() builder omitted the live-state fields. The
+        ``task`` kwarg is optional so existing call sites (which pass only
+        ``state``) stay byte-identical (``parameters`` defaults to {}).
         """
         services_full = []
         cves: list[str] = []
@@ -2084,6 +2133,19 @@ class AutonomousOrchestrator:
             # (persistence callback host, lateral movement) can read them.
             credentials=list(state.credentials_found),
             config=self._mission,
+            # Capability-upgrade (§12): live attack state + task parameters so
+            # modules queried via find_modules (and persistence modules) see
+            # the same prerequisite/evidence surface the execute() builder
+            # threads. ``parameters`` is {} when no task is supplied (the
+            # legacy call shape) -> byte-identical with the prior builder.
+            parameters=dict(task.parameters) if task is not None else {},
+            access_achieved=state.access_achieved,
+            privilege_level=state.privilege_level,
+            sessions=(
+                [{"shell": state.shell_type}] if state.access_achieved and state.shell_type else []
+            ),
+            phase=state.current_phase.value,
+            evidence_refs=list(state.loot)[-10:],
         )
 
     async def _phase_persistence(self, state: AttackState) -> None:
@@ -2297,6 +2359,9 @@ class AutonomousOrchestrator:
     async def _execute_task_batch(self, tasks: list[AttackTask], state: AttackState) -> None:
         """Execute a batch of tasks with concurrency control."""
         semaphore = asyncio.Semaphore(3)  # Max 3 concurrent attacks
+        # Capability-upgrade (§9): per-batch guard so each failing task
+        # schedules at most one prerequisite-recovery task. Cleared per batch.
+        prereq_scheduled: set[str] = set()
 
         async def run_task(task: AttackTask) -> None:
             # Bug #6: the retry used to recurse (``await run_task(task)``) from
@@ -2314,6 +2379,23 @@ class AutonomousOrchestrator:
                 # Handle retry logic — semaphore is released here, so other
                 # tasks can run during the backoff sleep.
                 if not result.get("success") and not result.get("blocked"):
+                    # Capability-upgrade (§9): prerequisite-driven composition.
+                    # If the failure classifies as PREREQUISITE_MISSING, look
+                    # up a producer module for the missing artifact and run it
+                    # inline before retrying the original. Bounded by the
+                    # per-batch set + the campaign-level ``_prereq_recovery_cap``.
+                    # Recovery tasks are themselves exempt from re-scheduling
+                    # (created_from tag) so a missing chain cannot recurse.
+                    if (
+                        task.created_from != "recovery:prerequisite"
+                        and task.task_id not in prereq_scheduled
+                    ):
+                        prereq_task = self._maybe_schedule_prereq(
+                            task, state, result.get("error", ""),
+                        )
+                        if prereq_task is not None:
+                            prereq_scheduled.add(task.task_id)
+                            await run_task(prereq_task)
                     if RetryEngine.should_retry(
                         task.module_name,
                         result.get("error", ""),
@@ -2331,6 +2413,73 @@ class AutonomousOrchestrator:
                 return
 
         await asyncio.gather(*[run_task(t) for t in tasks], return_exceptions=True)
+
+    # ── Prerequisite-driven composition (§9) ───────────────────────────────
+
+    # Maps a PREREQUISITE_MISSING error text to the candidate artifact kinds a
+    # producer module could supply. Ordered by specificity; the first kind
+    # with a producer wins. Kinds mirror the ``produces`` metadata modules
+    # actually declare (credentials/hash_artifact/foothold/shell/webshell/
+    # high_priv/admin_priv).
+    _PREREQ_KIND_PATTERNS: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
+        (re.compile(r"credential|creds|password|hash", re.IGNORECASE), ("credentials", "hash_artifact")),
+        (re.compile(r"foothold|session|\bshell\b|webshell", re.IGNORECASE), ("foothold", "shell", "webshell")),
+        (re.compile(r"admin|root|privilege|high_priv|admin_priv", re.IGNORECASE), ("high_priv", "admin_priv")),
+    )
+
+    @classmethod
+    def _prereq_artifact_kinds(cls, error: str) -> list[str]:
+        """Derive candidate artifact kinds from a PREREQUISITE_MISSING error."""
+        kinds: list[str] = []
+        for pat, ks in cls._PREREQ_KIND_PATTERNS:
+            if pat.search(error or ""):
+                kinds.extend(ks)
+        return kinds
+
+    def _maybe_schedule_prereq(
+        self, task: AttackTask, state: AttackState, error: str,
+    ) -> AttackTask | None:
+        """Schedule a producer module for a missing prerequisite, if one exists.
+
+        Returns the new AttackTask (also registered in ``self._tasks``) or
+        None when the failure is not a missing-prerequisite signal, no
+        producer module is found, or the campaign-level recovery cap is hit.
+        Bounded: one prereq task per failing task (enforced by the caller's
+        ``prereq_scheduled`` set) and ``self._prereq_recovery_cap`` total.
+        """
+        try:
+            from tools.failure_taxonomy import FailureClass, classify_failure
+            fc = classify_failure(error)
+        except Exception:  # noqa: BLE001 -- taxonomy import must never break the batch
+            return None
+        if fc != FailureClass.PREREQUISITE_MISSING:
+            return None
+        kinds = self._prereq_artifact_kinds(error)
+        if not kinds:
+            return None
+        if self._prereq_tasks_added >= self._prereq_recovery_cap:
+            return None
+        for kind in kinds:
+            for mod in find_producers(kind):
+                if mod.name == task.module_name:
+                    continue  # don't recurse into the failing module
+                prereq_task = AttackTask(
+                    task_id=self._new_task_id(),
+                    phase=task.phase,
+                    module_name=mod.name,
+                    target=state.target,
+                    aggression=task.aggression,
+                    priority=min(100, task.priority + 10),
+                    created_from="recovery:prerequisite",
+                )
+                self._tasks[prereq_task.task_id] = prereq_task
+                self._prereq_tasks_added += 1
+                logger.info(
+                    f"[RECOVERY] Scheduled prerequisite producer {mod.name} "
+                    f"(produces {kind}) for failed {task.module_name} ({error!r})"
+                )
+                return prereq_task
+        return None
 
     async def _retry_failed_modules(self, state: AttackState) -> None:
         """Retry failed modules with escalated aggression."""

@@ -22,6 +22,14 @@ class ADCSEnum(AttackModule):
     target_services = ["ldap", "msrpc", "microsoft-ds"]
     target_ports = [389, 3268, 445]
     required_cves: list[str] = []
+    # Capability metadata: AD CS enumeration is read-only; requires domain
+    # credentials to bind. Surfaces ESC1-8 misconfig findings (no artifact kind
+    # -- the certipy JSON is operator-collected, not a planner artifact).
+    requires: list[str] = ["credentials"]
+    produces: list[str] = []
+    read_only = True
+    cost = "medium"
+    phase_hint = "enumerate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -51,6 +59,14 @@ class BloodHoundCollect(AttackModule):
     target_services = ["ldap", "kerberos", "microsoft-ds"]
     target_ports = [389, 445, 88]
     required_cves: list[str] = []
+    # Capability metadata: BloodHound collection is read-only graph export;
+    # requires any domain credential to bind. The zipped JSON is operator-
+    # consumed, not a planner artifact.
+    requires: list[str] = ["credentials"]
+    produces: list[str] = []
+    read_only = True
+    cost = "medium"
+    phase_hint = "enumerate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -80,6 +96,15 @@ class ResponderRelay(AttackModule):
     target_services = ["microsoft-ds", "smb", "netbios-ssn"]
     target_ports = [445, 139]
     required_cves: list[str] = []
+    # Capability metadata: NTLM relay captures hashes / executes commands on
+    # the relay target, producing credential artifacts (SAM hashes). Not
+    # read-only. No artifact prerequisite -- the coerced auth is an operator
+    # step (SMB signing should be off; check via SMBSigningCheck).
+    requires: list[str] = []
+    produces: list[str] = ["hash_artifact", "credentials"]
+    read_only = False
+    cost = "high"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -114,6 +139,15 @@ class GoldenTicket(AttackModule):
     target_services = ["kerberos", "ldap", "microsoft-ds", "drsuapi"]
     target_ports = [88, 389, 445, 3268]
     required_cves: list[str] = []
+    # Capability metadata: golden ticket requires the krbtgt NTLM hash +
+    # domain SID (recovered via DCSync, which itself requires admin_priv). The
+    # forged TGT is a credential artifact granting domain-wide access. This is
+    # the escalate / domain-persistence step.
+    requires: list[str] = ["admin_priv", "hash_artifact"]
+    produces: list[str] = ["credentials", "foothold"]
+    read_only = False
+    cost = "medium"
+    phase_hint = "escalate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -152,6 +186,14 @@ class SMBSigningCheck(AttackModule):
     target_services = ["microsoft-ds", "smb", "netbios-ssn"]
     target_ports = [445, 139]
     required_cves: list[str] = []
+    # Capability metadata: detection-only SMB signing posture check; no
+    # credentials sent, no exploitation. Read-only enumeration that gates the
+    # ResponderRelay / SMBRelay decision.
+    requires: list[str] = []
+    produces: list[str] = []
+    read_only = True
+    cost = "low"
+    phase_hint = "enumerate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(

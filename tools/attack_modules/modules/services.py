@@ -18,6 +18,12 @@ class RDPBlueKeep(AttackModule):
         "ms-wbt-server": ["windows xp", "2003", "windows 7", "2008", "2008 r2"],
         "rdp": ["5.1", "5.2", "6.0", "6.1"],
     }
+    # Capability metadata: BlueKeep RCE -> shell (lands as SYSTEM).
+    requires = []
+    produces = ["shell"]
+    read_only = False
+    cost = "high"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -51,6 +57,12 @@ class FTPAnonymous(AttackModule):
     target_services = ["ftp"]
     target_ports = [21]
     required_cves = []
+    # Capability metadata: anonymous FTP enumeration (read-only probe).
+    requires = []
+    produces = ["credentials"]
+    read_only = True
+    cost = "low"
+    phase_hint = "enumerate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -72,6 +84,12 @@ class RedisExploit(AttackModule):
     target_services = ["redis"]
     target_ports = [6379]
     required_cves = []
+    # Capability metadata: unauth Redis RCE -> foothold (SSH-key/cron write).
+    requires = []
+    produces = ["shell", "foothold"]
+    read_only = False
+    cost = "medium"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -108,6 +126,12 @@ class ElasticsearchExploit(AttackModule):
     target_versions = {
         "elasticsearch": ["1.", "2.", "5.", "6.", "7.0", "7.1", "7.2", "7.3", "7.4", "7.5", "7.6", "7.7", "7.8", "7.9"],
     }
+    # Capability metadata: exposed Elasticsearch data extraction (read-only enum).
+    requires = []
+    produces = ["credentials"]
+    read_only = True
+    cost = "low"
+    phase_hint = "enumerate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -131,6 +155,12 @@ class LDAPAnonymous(AttackModule):
     target_services = ["ldap", "ldaps"]
     target_ports = [389, 636, 3268]
     required_cves = []
+    # Capability metadata: anonymous LDAP enumeration (read-only).
+    requires = []
+    produces = ["user_list"]
+    read_only = True
+    cost = "low"
+    phase_hint = "enumerate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -156,6 +186,12 @@ class RDPExploit(AttackModule):
     target_services = ["ms-wbt-server", "rdp"]
     target_ports = [3389]
     required_cves = []
+    # Capability metadata: RDP credential testing -> foothold on success.
+    requires = []
+    produces = ["credentials", "foothold"]
+    read_only = False
+    cost = "medium"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(

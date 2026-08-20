@@ -759,6 +759,13 @@ class TimingOracle(AttackModule):
     target_services = ["http", "https"]
     target_ports = [80, 443, 8080, 8443]
     required_cves = []
+    # Capability metadata: timing side-channel detection = enumeration (user
+    # enumeration, blind extraction). Read-only: only measures response times.
+    requires: list[str] = []
+    produces: list[str] = []
+    read_only = True
+    cost = "low"
+    phase_hint = "enumerate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -896,6 +903,13 @@ class RequestSmuggling(AttackModule):
     target_services = ["http", "https"]
     target_ports = [80, 443, 8080, 8443]
     required_cves = []
+    # Capability metadata: smuggling detection; a confirmed desync can poison
+    # caches / hijack requests but surfaces as a finding, not an artifact.
+    requires: list[str] = []
+    produces: list[str] = []
+    read_only = False
+    cost = "medium"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -1049,6 +1063,13 @@ class SSRFProbe(AttackModule):
     target_services = ["http", "https"]
     target_ports = [80, 443, 8080, 8443, 3000, 5000]
     required_cves = []
+    # Capability metadata: SSRF detection; metadata-cred exfiltration is a
+    # downstream step, the probe itself surfaces a finding.
+    requires: list[str] = []
+    produces: list[str] = []
+    read_only = False
+    cost = "medium"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -1145,6 +1166,13 @@ class XXEProbe(AttackModule):
     target_services = ["http", "https"]
     target_ports = [80, 443, 8080, 8443, 3000, 5000]
     required_cves = []
+    # Capability metadata: XXE file-read/exfil detection; surfaces a finding
+    # (file content / OOB callback), not a durable foothold artifact.
+    requires: list[str] = []
+    produces: list[str] = []
+    read_only = False
+    cost = "medium"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -1289,6 +1317,13 @@ class LFITraversal(AttackModule):
     target_services = ["http", "https"]
     target_ports = [80, 443, 8080, 8443, 3000, 5000]
     required_cves = []
+    # Capability metadata: LFI/traversal detection; surfaces a file-read
+    # finding, escalates to RCE via log poisoning / wrappers downstream.
+    requires: list[str] = []
+    produces: list[str] = []
+    read_only = False
+    cost = "medium"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)

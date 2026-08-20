@@ -13,6 +13,14 @@ class CVEToExploit(AttackModule):
     target_services = ["http", "https", "ssh", "smb", "microsoft-ds", "rdp", "ms-wbt-server"]
     target_ports = [80, 443, 22, 445, 3389]
     required_cves = []
+    # Capability metadata: prompt-carrier info-stub. The module itself does not
+    # execute (the LLM emits a script via write_python_file downstream), so it
+    # is read-only and produces no planner artifact. Carries prompt_template.
+    requires: list[str] = []
+    produces: list[str] = []
+    read_only = True
+    cost = "low"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -57,6 +65,13 @@ class DiffPatchAnalysis(AttackModule):
     target_services = ["http", "https", "ssh", "smb", "microsoft-ds"]
     target_ports = [80, 443, 22, 445]
     required_cves = []
+    # Capability metadata: prompt-carrier info-stub (analysis_prompt seed).
+    # Read-only: the LLM produces the analysis JSON, not this module.
+    requires: list[str] = []
+    produces: list[str] = []
+    read_only = True
+    cost = "low"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -102,6 +117,14 @@ class FuzzToExploit(AttackModule):
     target_services = ["http", "https", "ssh", "smb", "microsoft-ds"]
     target_ports = [80, 443, 22, 445]
     required_cves = []
+    # Capability metadata: prompt-carrier info-stub (crash_prompt seed).
+    # Read-only: the LLM produces the trigger/delivery script from an external
+    # crash artifact; this module does not execute.
+    requires: list[str] = []
+    produces: list[str] = []
+    read_only = True
+    cost = "low"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -148,6 +171,14 @@ class WeaponizedExploit(AttackModule):
     target_services = ["http", "https", "ssh", "smb", "microsoft-ds", "rdp", "ms-wbt-server"]
     target_ports = [80, 443, 22, 445, 3389]
     required_cves: list[str] = []
+    # Capability metadata: prompt-carrier info-stub (weaponized synthesis
+    # prompt seed). Read-only: the LLM produces the exploit via
+    # write_python_file; the module itself carries the prompt_template.
+    requires: list[str] = []
+    produces: list[str] = []
+    read_only = True
+    cost = "low"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(

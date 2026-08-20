@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
 from .base import BaseSchema, ValidationResult, _clamp_float
 
@@ -43,8 +42,6 @@ class OutcomeAssessmentSchema(BaseSchema):
         confidence = raw.get("confidence", 0.5)
         if not isinstance(confidence, (int, float)) or not 0.0 <= confidence <= 1.0:
             errors.append(f"confidence {confidence!r} out of range [0,1]")
-        if raw.get("verdict") == "confirmed" and not isinstance(raw.get("criteria_satisfied"), list):
-            errors.append("confirmed verdict requires criteria_satisfied")
         return ValidationResult(valid=not errors, errors=errors)
 
     def repair(self, raw: dict, errors: list[str]) -> dict:

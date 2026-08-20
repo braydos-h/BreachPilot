@@ -21,6 +21,12 @@ class SMBGhost(AttackModule):
         "microsoft-ds": ["10.0 18362", "10.0 18363", "1903", "1909"],
         "smb": ["10.0 18362", "10.0 18363"],
     }
+    # Capability metadata: SMBGhost detection-only (crash risk acknowledged).
+    requires = []
+    produces = ["shell", "foothold"]
+    read_only = True
+    cost = "medium"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -57,6 +63,12 @@ class EternalBlue(AttackModule):
         "microsoft-ds": ["windows xp", "windows 7", "2003", "2008", "2008 r2"],
         "smb": ["6.1.7600", "6.0.6001", "6.0.6002", "5.1", "5.2"],
     }
+    # Capability metadata: EternalBlue RCE -> foothold (lands as SYSTEM).
+    requires = []
+    produces = ["shell", "foothold"]
+    read_only = False
+    cost = "high"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -84,6 +96,12 @@ class SMBRelay(AttackModule):
     target_services = ["microsoft-ds", "smb", "netbios-ssn"]
     target_ports = [445, 139]
     required_cves = []
+    # Capability metadata: SMB relay captures hashes (no foothold needed to start).
+    requires = []
+    produces = ["hash_artifact", "credentials"]
+    read_only = False
+    cost = "medium"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -112,6 +130,12 @@ class SMBNullSession(AttackModule):
     target_services = ["microsoft-ds", "smb", "netbios-ssn"]
     target_ports = [445, 139]
     required_cves = []
+    # Capability metadata: null session enumeration (read-only).
+    requires = []
+    produces = ["user_list"]
+    read_only = True
+    cost = "low"
+    phase_hint = "enumerate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -158,6 +182,12 @@ class PassTheHash(AttackModule):
     target_services = ["smb", "microsoft-ds"]
     target_ports = [445]
     required_cves = []
+    # Capability metadata: pass-the-hash consumes creds to land a shell.
+    requires = ["credentials"]
+    produces = ["shell", "foothold"]
+    read_only = False
+    cost = "medium"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(
@@ -190,6 +220,12 @@ class DumpHashes(AttackModule):
     target_services = ["smb", "microsoft-ds"]
     target_ports = [445]
     required_cves = []
+    # Capability metadata: hash dumping needs admin/foothold, produces hash artifacts.
+    requires = ["admin_priv"]
+    produces = ["hash_artifact", "credentials"]
+    read_only = False
+    cost = "medium"
+    phase_hint = "loot"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         return self._info_result(

@@ -401,3 +401,122 @@ outcome_judgment:
         # D3: cross-model outcome grading (advisory; deterministic judge stays authority).
         "peer_review": False,
     }
+
+
+def test_agent_block_schema_and_defaults():
+    """The capability-upgrade agent block is in CONFIG_SCHEMA and apply_defaults fills it."""
+    from tools.config_manager import CONFIG_SCHEMA, ConfigValidator
+
+    agent = CONFIG_SCHEMA["agent"]
+    assert agent["task_graph_enabled"] is True
+    assert agent["capability_discovery_enabled"] is True
+    assert agent["state_tools_enabled"] is True
+    assert agent["planner_hints_enabled"] is True
+    assert agent["decision_log_enabled"] is True
+    assert agent["reflection_enabled"] is True
+    assert agent["max_retries_per_task"] == 2
+    assert agent["max_actions"] == 0
+    assert agent["generated_code_repair_attempts"] == 3
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".yaml", delete=False, encoding="utf-8"
+    ) as f:
+        yaml.safe_dump({"ollama": {"host": "http://localhost:11434"}}, f)
+        temp_path = f.name
+    try:
+        validator = ConfigValidator(temp_path)
+        validator.load()
+        config = validator.apply_defaults()
+        assert config["agent"]["task_graph_enabled"] is True
+        assert config["agent"]["max_retries_per_task"] == 2
+        assert config["agent"]["max_actions"] == 0
+    finally:
+        Path(temp_path).unlink(missing_ok=True)
+
+
+def test_agent_block_disabled_validates_without_error(tmp_path: Path):
+    """agent.decision_log_enabled=false validates (warning-free for that key)."""
+    from tools.config_manager import ConfigValidator
+
+    path = tmp_path / "agent-config.yaml"
+    yaml.safe_dump({
+        "ollama": {"host": "http://localhost:11434"},
+        "models": {"registry": {"glm": "glm-5.2:cloud"}, "default_alias": "glm"},
+        "mcp": {"default_transport": "stdio"},
+        "exploit": {"enabled": True},
+        "agent": {"decision_log_enabled": False},
+    }, path.open("w", encoding="utf-8"))
+
+    validator = ConfigValidator(path)
+    _, result = validator.load_and_validate()
+    assert result.is_valid
+    assert "agent.decision_log_enabled" not in "\n".join(result.warnings)
+
+
+def test_agent_block_invalid_values_warn_not_error(tmp_path: Path):
+    """Bad agent.* types warn but keep config valid (warn-not-reject convention)."""
+    from tools.config_manager import ConfigValidator
+
+    path = tmp_path / "bad-agent.yaml"
+    yaml.safe_dump({
+        "ollama": {"host": "http://localhost:11434"},
+        "models": {"registry": {"glm": "glm-5.2:cloud"}, "default_alias": "glm"},
+        "mcp": {"default_transport": "stdio"},
+        "exploit": {"enabled": True},
+        "agent": {
+            "task_graph_enabled": "yes",
+            "max_retries_per_task": -1,
+            "max_actions": "many",
+            "generated_code_repair_attempts": True,
+        },
+    }, path.open("w", encoding="utf-8"))
+
+    validator = ConfigValidator(path)
+    _, result = validator.load_and_validate()
+    assert result.is_valid
+    joined = "\n".join(result.warnings)
+    assert "agent.task_graph_enabled" in joined
+    assert "agent.max_retries_per_task" in joined
+    assert "agent.max_actions" in joined
+    # bool is rejected for the int keys (isinstance(True, int) guard)
+    assert "agent.generated_code_repair_attempts" in joined
+
+
+def test_models_roles_schema_and_validation(tmp_path: Path):
+    """models.roles block defaults empty strings and warns on bad aliases."""
+    from tools.config_manager import ConfigValidator
+
+    # Schema advertises all six roles, each defaulting to empty string.
+    from tools.config_manager import CONFIG_SCHEMA
+    roles = CONFIG_SCHEMA["models"]["roles"]
+    for role in ("planner", "executor", "interpreter", "code_generator", "critic", "summarizer"):
+        assert roles[role] == ""
+
+    path = tmp_path / "roles-config.yaml"
+    yaml.safe_dump({
+        "ollama": {"host": "http://localhost:11434"},
+        "models": {
+            "registry": {"glm": "glm-5.2:cloud"},
+            "default_alias": "glm",
+            "roles": {
+                "planner": "glm",
+                "executor": "",
+                "critic": "no_such_alias",
+                "summarizer": 5,
+            },
+        },
+        "mcp": {"default_transport": "stdio"},
+        "exploit": {"enabled": True},
+    }, path.open("w", encoding="utf-8"))
+
+    validator = ConfigValidator(path)
+    _, result = validator.load_and_validate()
+    assert result.is_valid
+    joined = "\n".join(result.warnings)
+    # valid alias + empty string: no warning
+    assert "models.roles.planner" not in joined
+    assert "models.roles.executor" not in joined
+    # unknown alias: warn
+    assert "models.roles.critic" in joined
+    # non-string: warn
+    assert "models.roles.summarizer" in joined

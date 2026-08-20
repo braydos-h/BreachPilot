@@ -442,6 +442,41 @@ Advisory prompt context only — never permission/scope/audit (docs/skills.md:16
 
 - `reports_dir` (not in schema): `Path(config.get("reports_dir", "reports"))` — app.py:76; also `mcp_engine_server.py:74` defaults to `reports`.
 
+## `agent` — capability-upgrade agent block (design §23)
+
+Source of truth: `tools/config_manager.py::CONFIG_SCHEMA` (`"agent"` key, auto-whitelisted via `KNOWN_TOP_KEYS`). Mirrored into `config.yaml` under the `agent:` mapping. Validation: `ConfigValidator.validate` checks bools for the toggles and non-negative integers for the budgets (warn-not-reject — see `chatgpt` / `skills` precedent).
+
+All defaults preserve today's behavior. **`config_cli.load_config` merges no defaults**, so every consumer reads defensively: `cfg.get("agent", {}).get(key, default)`.
+
+| Key | Default | Type | Purpose |
+|-----|---------|------|---------|
+| `task_graph_enabled` | `true` | bool | Gate the live task-graph/DAG planner (AttackPlan/AttackStep). On = the agent drives the graph; off = legacy sequential planning. |
+| `capability_discovery_enabled` | `true` | bool | Gate AI-facing capability discovery (module `capability_record()` / `find_producers` / `missing_prerequisites`). |
+| `state_tools_enabled` | `true` | bool | Gate AI-facing state MCP tools (assessment state store + decision log surface). |
+| `planner_hints_enabled` | `true` | bool | Inject planner hints (hypothesis, expected_evidence, capability) into the agent system prompt. |
+| `decision_log_enabled` | `true` | bool | Append structured decisions to `decision_log.jsonl` via `tools/decision_log.py::log_decision`. |
+| `reflection_enabled` | `true` | bool | Gate post-step reflection / retry-with-modified-parameters behavior. |
+| `max_retries_per_task` | `2` | int | Per-task retry ceiling on retryable failure classes (see `tools/failure_taxonomy.py::is_retryable`). |
+| `max_actions` | `0` | int | Total action cap. **`0` is the legacy-budget sentinel** — consumption sites treat 0 as "use the existing exploit budgets" (`exploit.attack_max_commands` / `max_rounds`), not a hard zero cap. |
+| `generated_code_repair_attempts` | `3` | int | Max self-repair iterations on a generated PoC that fails `py_compile` (compile-only, never executed on the operator box). |
+
+## `models.roles` — model-role routing (design §23)
+
+Nested under the existing `models` key in `CONFIG_SCHEMA` (`tools/config_manager.py::CONFIG_SCHEMA["models"]["roles"]`). Mirrored into `config.yaml` under `models.roles`. Validation: `ConfigValidator.validate` warns when a value is not a string or when a non-empty alias is not in `models.registry` (warn-not-reject).
+
+Each role maps to a model alias; **an empty string means "use `models.default_alias`"** so first-run behavior is unchanged. Consumed by `tools/model_router.py::ModelRouter.get_client_for_role`, which falls back to `models.default_alias` when the role's alias is empty.
+
+| Role | Default | Purpose |
+|------|---------|---------|
+| `planner` | `""` | Task-graph / attack-plan generation. |
+| `executor` | `""` | Tool-call driving / terminal + MSF execution. |
+| `interpreter` | `""` | Recon / output parsing / evidence interpretation. |
+| `code_generator` | `""` | PoC synthesis + repair. |
+| `critic` | `""` | Pre-action risk critique. |
+| `summarizer` | `""` | Run reporting / outcome summarization. |
+
+Precedents for per-role model overrides: `research.assistant.model_alias`, `multi_model.consult_aliases`. Keep `models.registry` / `models.info` synchronized (context-window metadata feeds `tools/exploit_agent` adaptive context handling).
+
 ## CLI vs config precedence
 
 Explicit CLI flags win over config values; config wins over schema defaults:
