@@ -717,6 +717,12 @@ class HMIDefaultCred(AttackModule):
     target_services = ["http", "https"]
     target_ports = [80, 443, 8080, 8443]
     required_cves: list[str] = []
+    # Capability metadata: read-only HMI default-credential check.
+    requires = []
+    produces = ["credentials"]
+    read_only = True
+    cost = "low"
+    phase_hint = "enumerate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -895,6 +901,12 @@ class IoTDefaultCred(AttackModule):
     target_services = ["http", "https", "telnet", "mqtt"]
     target_ports = [23, 80, 443, 1883, 8883, 7547, 8000, 8080]
     required_cves: list[str] = []
+    # Capability metadata: read-only IoT default-credential check.
+    requires = []
+    produces = ["credentials"]
+    read_only = True
+    cost = "low"
+    phase_hint = "enumerate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -1109,6 +1121,12 @@ class ModbusWriteCoil(AttackModule):
     # ics.destructive_ics are armed in config. Defense in depth with the
     # run() _ics_write_allowed() re-check.
     destructive_ics = True
+    # Capability metadata: destructive coil write; operator-authorized, needs foothold.
+    requires = ["foothold"]
+    produces = []
+    read_only = False
+    cost = "high"
+    phase_hint = "exploit"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         if not _ics_write_allowed():
