@@ -75,6 +75,10 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
           void queryClient.invalidateQueries({ queryKey: queryKeys.runDecisions(id) });
         } else if (event.type === "artifact") {
           void queryClient.invalidateQueries({ queryKey: queryKeys.runArtifacts(id) });
+          // The attack graph is rebuilt from audit/report artifacts; a new
+          // artifact can change it, so invalidate the explorer queries too
+          // (lightweight refetch — the backend rebuilds lazily).
+          void queryClient.invalidateQueries({ queryKey: ["graphExplorer", id] });
         }
       } catch {
         // Cache patching is best-effort; never let it break the event stream.
