@@ -11,7 +11,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, formatRelative } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,6 +45,7 @@ const FILTERS = [
   { key: "all", label: "All" },
   { key: "tools", label: "Tools" },
   { key: "assistant", label: "Assistant" },
+  { key: "decisions", label: "Decisions" },
   { key: "errors", label: "Errors" },
   { key: "progress", label: "Progress" },
 ] as const;
@@ -59,6 +60,8 @@ function matchesFilter(type: string, filter: FilterKey): boolean {
       return type === "tool_request" || type === "tool_start" || type === "tool_result";
     case "assistant":
       return type === "assistant";
+    case "decisions":
+      return type === "approval";
     case "errors":
       return type === "error";
     case "progress":
@@ -229,7 +232,7 @@ export function EventViewer({
         continue;
       }
       if (event.type === "approval") {
-        if (filter !== "all") continue;
+        if (filter !== "all" && filter !== "decisions") continue;
         const decisionId = event.payload.decision_id;
         if (typeof decisionId !== "string") continue;
         const decision = decisions.find((d) => d.id === decisionId);
@@ -583,7 +586,11 @@ function renderSimpleEvent(event: RunEvent, key: string): React.ReactNode {
         <div key={key} className="flex items-center gap-2 rounded-md bg-secondary/40 px-3 py-1.5 text-sm">
           <Badge variant="secondary" className="text-xs">state</Badge>
           <span className="font-mono text-xs">{String(event.payload.state ?? "")}</span>
-          {event.timestamp && <span className="ml-auto text-xs text-muted-foreground">{event.timestamp}</span>}
+          {event.timestamp && (
+            <span className="ml-auto text-xs text-muted-foreground" title={event.timestamp}>
+              {formatRelative(event.timestamp)}
+            </span>
+          )}
         </div>
       );
     case "progress": {
@@ -663,7 +670,11 @@ function renderSimpleEvent(event: RunEvent, key: string): React.ReactNode {
           <span className="font-mono text-xs text-foreground">
             {String(event.payload.previous ?? "")} → {String(event.payload.phase ?? "")}
           </span>
-          {event.timestamp && <span className="ml-auto text-xs text-muted-foreground">{event.timestamp}</span>}
+          {event.timestamp && (
+            <span className="ml-auto text-xs text-muted-foreground" title={event.timestamp}>
+              {formatRelative(event.timestamp)}
+            </span>
+          )}
         </div>
       );
     case "recon_assessment": {
@@ -702,6 +713,15 @@ function renderSimpleEvent(event: RunEvent, key: string): React.ReactNode {
         <div key={key} className="flex items-center gap-2 rounded-md border bg-card/30 px-3 py-1.5 text-xs">
           <Badge variant="outline">artifact</Badge>
           <span className="truncate font-mono">{String(event.payload.name ?? event.payload.path ?? "")}</span>
+        </div>
+      );
+    case "title":
+      return (
+        <div key={key} className="flex items-center gap-2 rounded-md bg-muted/30 px-3 py-1.5 text-xs">
+          <Badge variant="outline" className="text-[10px] uppercase">title</Badge>
+          <span className="truncate font-mono text-foreground">
+            {String(event.payload.title ?? "")}
+          </span>
         </div>
       );
     case "completion":

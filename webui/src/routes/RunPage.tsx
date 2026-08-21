@@ -4,16 +4,18 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
+  ClipboardList,
+  Flag,
   FlaskConical,
   Loader2,
+  Network,
   Play,
+  ScanSearch,
+  ScrollText,
+  Share2,
   Square,
   Terminal,
   Wrench,
-  ScanSearch,
-  ClipboardList,
-  Gauge,
-  Network,
 } from "lucide-react";
 import { cn, formatRelative } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -31,11 +33,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { StatusBadge } from "@/components/StatusBadge";
 import { CopyButton } from "@/components/CopyButton";
 import { AuditRecordsTable } from "@/components/AuditRecordsTable";
 import { EventViewer } from "@/components/events/EventViewer";
-import { DecisionCard } from "@/components/DecisionCard";
 import { ReconAssessmentCard } from "@/components/ReconAssessmentCard";
 import { AttackGraph } from "@/components/AttackGraph";
 import { AttackGraphDag } from "@/components/AttackGraphDag";
@@ -44,6 +44,13 @@ import { PhaseTracker } from "@/components/PhaseTracker";
 import { SessionSummaryCard } from "@/components/SessionSummaryCard";
 import { SwarmView, CampaignView } from "@/components/OrchestrationViews";
 import { Skeleton, SkeletonCards, SkeletonRows, Spinner } from "@/components/Loading";
+import { RunCommandHeader } from "@/components/run/RunCommandHeader";
+import { RunNowCard } from "@/components/run/RunNowCard";
+import { RunTelemetryCard } from "@/components/run/RunTelemetryCard";
+import { RunOutcomeCard } from "@/components/run/RunOutcomeCard";
+import { RunAttentionBanner } from "@/components/run/RunAttentionBanner";
+import { PendingDecisionPanel } from "@/components/run/PendingDecisionPanel";
+import { deriveRunState } from "@/lib/deriveRun";
 import { useRunEvents } from "@/api/ws";
 import {
   useAnswerDecision,
@@ -63,7 +70,7 @@ import {
   useWitness,
 } from "@/api/hooks";
 import { ApiError } from "@/api/client";
-import { isActiveState, isTerminalState, type RunState, type ReconAssessment, type RunResult, type RunResultTelemetry, type DecisionListRow } from "@/api/types";
+import { isActiveState, isTerminalState, type RunState, type ReconAssessment, type RunResult, type DecisionListRow } from "@/api/types";
 import { autoAnswerFor, usePermissionMode } from "@/lib/permissionMode";
 
 export function RunPage() {
@@ -148,6 +155,14 @@ export function RunPage() {
   const active = isActiveState(currentState as RunState);
   const terminal = isTerminalState(currentState as RunState);
 
+  // Single-pass derivation over the live event buffer — one scan feeds the
+  // header, phase stepper, Now card, telemetry card and rail summary.
+  const derived = useMemo(() => deriveRunState(events.events), [events.events]);
+  const telemetry = useMemo(
+    () => derived.lastTelemetry ?? (run.data?.result?.telemetry ?? null),
+    [derived, run.data?.result],
+  );
+
   // Permission-mode auto-answer loop. For each pending decision the armed
   // mode covers, submit the resolved answer via useAnswerDecision. Tracked in
   // a ref set so a slow mutate + re-render doesn't double-submit.
@@ -172,34 +187,42 @@ export function RunPage() {
     }
   }, [mode, pendingDecisions, answerDecision]);
 
-  const lastEventSeq = events.events.length > 0 ? events.events[events.events.length - 1].sequence : -1;
-  const liveTelemetry = useMemo<RunResultTelemetry | null>(() => {
-    for (let i = events.events.length - 1; i >= 0; i--) {
-      const ev = events.events[i];
-      if (ev.type !== "progress") continue;
-      const tel = ev.payload.telemetry as RunResultTelemetry | undefined;
-      if (tel && typeof tel === "object") return tel;
-    }
-    const finalTel = (run.data?.result ?? {}).telemetry as RunResultTelemetry | undefined;
-    return finalTel && typeof finalTel === "object" ? finalTel : null;
-    // ponytail: events are append-only and capped at 1000, so the scan only
-    // re-runs when the last event's sequence advances (or the run result changes).
-  }, [lastEventSeq, run.data?.result]);
+  // Which pending decisions the armed mode is currently auto-answering
+  // (cosmetic "auto-answering…" indicator on the DecisionCard).
+  const autoAnsweringIds = new Set(
+    pendingDecisions
+      .filter((d) => mode !== "read_only" && inFlight.current.has(d.id))
+      .map((d) => d.id),
+  );
+
+  const transportLabel =
+    events.transport === "sse" ? "SSE"
+    : events.transport === "websocket" ? "WS"
+    : events.status === "reconnecting" ? "reconnecting"
+    : events.status === "closed" ? "offline"
+    : events.status === "connecting" ? "connecting"
+    : events.status === "error" ? "error"
+    : "—";
 
   if (run.isLoading) {
     return (
       <div className="space-y-4 p-4 md:p-6" role="status" aria-live="polite">
-        <div className="flex items-center gap-2">
-          <Skeleton className="h-4 w-40" />
-          <Skeleton className="h-5 w-16 rounded-full" />
-        </div>
-        <div className="flex flex-wrap gap-x-3 gap-y-1">
-          <Skeleton className="h-3 w-32" />
-          <Skeleton className="h-3 w-24" />
-          <Skeleton className="h-3 w-28" />
+        <div className="rounded-lg border bg-card/50 p-3 md:p-4">
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-6 w-40" />
+            <Skeleton className="h-5 w-16 rounded-full" />
+          </div>
+          <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+            <Skeleton className="h-3 w-32" />
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-3 w-28" />
+          </div>
         </div>
         <div className="grid flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-          <Skeleton className="h-[40vh] rounded-md" />
+          <div className="space-y-3">
+            <Skeleton className="h-28 rounded-md" />
+            <Skeleton className="h-[40vh] rounded-md" />
+          </div>
           <SkeletonCards count={2} />
         </div>
       </div>
@@ -220,248 +243,174 @@ export function RunPage() {
     );
   }
 
-  const preview = run.data.preview ?? {};
-  const request = run.data.request ?? {};
-  const transportLabel =
-    events.transport === "sse" ? "SSE"
-    : events.transport === "websocket" ? "WS"
-    : events.status === "reconnecting" ? "reconnecting"
-    : events.status === "closed" ? "offline"
-    : events.status === "connecting" ? "connecting"
-    : events.status === "error" ? "error"
-    : "\u2014";
+  const runData = run.data;
+  const gotoSummary = () => setTab("summary");
 
   return (
     <div className="flex flex-col gap-4 p-4 md:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <h1 className="font-mono text-sm">
-            <span className="text-gradient-primary">{run.data.id}</span>
-          </h1>
-            <CopyButton value={run.data.id} size="icon" label="Copy ID" />
-            {currentState && <StatusBadge state={currentState as RunState} />}
-            <Badge variant="outline" className="text-xs">
-              {transportLabel}
-              {active && (events.status === "connecting" || events.status === "closed") && (
-                <span className="ml-1 inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-                  <Loader2 className="h-2.5 w-2.5 animate-spin" /> reconnecting
-                </span>
-              )}
-            </Badge>
-          </div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            <span><span className="text-muted-foreground/70">target:</span> <span className="font-mono text-foreground">{String(preview.target_ip ?? request.target ?? "\u2014")}</span></span>
-            <span><span className="text-muted-foreground/70">mode:</span> <span className="text-foreground">{String(request.mode ?? preview.mode ?? "\u2014")}</span></span>
-            <span><span className="text-muted-foreground/70">goal:</span> <span className="text-foreground">{String(preview.goal_name ?? request.goal_name ?? "\u2014")}</span></span>
-            <span><span className="text-muted-foreground/70">model:</span> <span className="font-mono text-foreground">{String(preview.model_alias ?? request.model_alias ?? "\u2014")}</span></span>
-            <span><span className="text-muted-foreground/70">permission:</span> <span className="text-foreground">{String(preview.permission ?? "\u2014")}</span></span>
-          </div>
-          {liveTelemetry && (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-              <span className="inline-flex items-center gap-1">
-                <Gauge className="h-3 w-3" />
-                <span className="text-muted-foreground/70">tokens:</span>{" "}
-                <span className="font-mono tabular-nums text-foreground">{Number(liveTelemetry.total_tokens ?? 0).toLocaleString()}</span>
-              </span>
-              {liveTelemetry.calls != null && (
-                <span>
-                  <span className="text-muted-foreground/70">calls:</span>{" "}
-                  <span className="font-mono tabular-nums text-foreground">{Number(liveTelemetry.calls)}</span>
-                </span>
-              )}
-              {liveTelemetry.context_window_tokens != null && (
-                <span>
-                  <span className="text-muted-foreground/70">ctx window:</span>{" "}
-                  <span className="font-mono tabular-nums text-foreground">{Number(liveTelemetry.context_window_tokens).toLocaleString()}</span>
-                </span>
-              )}
-              {liveTelemetry.last_ctx_pct != null && (
-                <span>
-                  <span className="text-muted-foreground/70">ctx used:</span>{" "}
-                  <span className="font-mono tabular-nums text-foreground">{Number(liveTelemetry.last_ctx_pct).toFixed(1)}%</span>
-                </span>
-              )}
-              {liveTelemetry.last_estimated_context_tokens != null && liveTelemetry.context_window_tokens != null && (
-                <span className="hidden sm:inline">
-                  <span className="text-muted-foreground/70">remaining:</span>{" "}
-                  <span className="font-mono tabular-nums text-foreground">
-                    {Math.max(0, Number(liveTelemetry.context_window_tokens) - Number(liveTelemetry.last_estimated_context_tokens)).toLocaleString()}
-                  </span>
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-        <div className="flex flex-col items-end gap-2">
-          <PhaseTracker events={events.events} runState={currentState as RunState} className="w-full max-w-sm" />
-          <div className="flex items-center gap-2">
-            {active && (
-              <Button variant="destructive" size="sm" onClick={() => setShowCancel(true)} disabled={cancel.isPending}>
-                {cancel.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-4 w-4" />}
-                Cancel
-              </Button>
-            )}
-            {terminal && (
-              <Button size="sm" onClick={() => resume.mutate(run.data.id, { onSuccess: (data) => navigate(`/runs/${data.run_id}`) })} disabled={resume.isPending}>
-                {resume.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                Resume
-              </Button>
-            )}
-            <Button asChild size="sm" variant="outline">
-              <Link to={`/runs/${run.data.id}/artifacts`}>Artifacts</Link>
-            </Button>
-            <Button asChild size="sm" variant="outline">
-              <Link to={`/runs/${run.data.id}/loot`}>Loot</Link>
-            </Button>
-          </div>
-        </div>
-      </div>
+      <RunCommandHeader
+        run={runData}
+        state={currentState as RunState}
+        active={active}
+        terminal={terminal}
+        transportLabel={transportLabel}
+        eventsStatus={events.status}
+        derived={derived}
+        onCancelRequest={() => setShowCancel(true)}
+        cancelPending={cancel.isPending}
+        onResume={() => resume.mutate(runData.id, { onSuccess: (data) => navigate(`/runs/${data.run_id}`) })}
+        resumePending={resume.isPending}
+      />
 
-      {events.authError && (
-        <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-red-200">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          {events.authError}
-        </div>
-      )}
+      <RunAttentionBanner
+        authError={events.authError}
+        pendingCount={pendingDecisions.length}
+        active={active}
+        eventsStatus={events.status}
+      />
+
+      <PhaseTracker derived={derived} runState={currentState as RunState} className="rounded-lg border bg-card/50 p-3 md:p-4" />
 
       <div className="grid flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="flex-1">
+        <div className="min-w-0 space-y-4">
+          {pendingDecisions.length > 0 && (
+            <PendingDecisionPanel
+              decisions={pendingDecisions}
+              runId={runData.id}
+              autoAnsweringIds={autoAnsweringIds}
+            />
+          )}
+
+          {terminal ? (
+            <RunOutcomeCard
+              run={runData}
+              state={currentState as RunState}
+              derived={derived}
+              onShowSummary={stateSummary}
+              onResume={() => resume.mutate(runData.id, { onSuccess: (data) => navigate(`/runs/${data.run_id}`) })}
+              resumePending={resume.isPending}
+            />
+          ) : (
+            <RunNowCard derived={derived} active={active} state={currentState as RunState} />
+          )}
+
           <EventViewer
             events={events.events}
             decisions={mergedDecisions}
-            runId={run.data.id}
+            runId={runData.id}
             status={events.status}
             transport={events.transport}
             authError={events.authError}
             dropped={events.dropped}
             terminal={terminal}
-            className="h-[70vh]"
+            className="h-[52vh] min-h-[360px]"
           />
+
+          <Tabs value={tab} onValueChange={setTab} className="mt-2">
+            <ScrollArea type="scroll" className="w-full">
+              <TabsList>
+                <TabsTrigger value="recon"><ScanSearch className="mr-1.5 h-3.5 w-3.5" />Recon</TabsTrigger>
+                <TabsTrigger value="graph"><Network className="mr-1.5 h-3.5 w-3.5" />Attack Path</TabsTrigger>
+                <TabsTrigger value="summary"><ClipboardList className="mr-1.5 h-3.5 w-3.5" />Summary</TabsTrigger>
+                <span aria-hidden className="mx-1 hidden h-6 w-px bg-border sm:block" />
+                <TabsTrigger value="tools"><Wrench className="mr-1.5 h-3.5 w-3.5" />Tools</TabsTrigger>
+                <TabsTrigger value="advisory"><FlaskConical className="mr-1.5 h-3.5 w-3.5" />Advisory</TabsTrigger>
+                <TabsTrigger value="audit"><ScrollText className="mr-1.5 h-3.5 w-3.5" />Audit</TabsTrigger>
+                <TabsTrigger value="swarm"><Share2 className="mr-1.5 h-3.5 w-3.5" />Swarm</TabsTrigger>
+                <TabsTrigger value="campaign"><Flag className="mr-1.5 h-3.5 w-3.5" />Campaign</TabsTrigger>
+              </TabsList>
+            </ScrollArea>
+            <TabsContent value="recon" className="space-y-3">
+              <ReconTab
+                fetchArtifact={fetchArtifact}
+                ready={artifactReady("recon_assessment.json")}
+              />
+            </TabsContent>
+            <TabsContent value="graph" className="space-y-3">
+              <div className="flex justify-end">
+                <Button asChild size="sm" variant="outline">
+                  <Link to={`/runs/${runData.id}/graph`}>Open in full page <Network className="ml-1.5 h-3.5 w-3.5" /></Link>
+                </Button>
+              </div>
+              <AttackGraphDag runId={runData.id} />
+              <AttackGraph runId={runData.id} ready={artifactReady("enhanced/enhanced_report.json")} />
+            </TabsContent>
+            <TabsContent value="summary" className="space-y-3">
+              <SessionSummaryCard result={(runData.result ?? {}) as RunResult} title={runData.title} />
+            </TabsContent>
+            <TabsContent value="tools" className="space-y-3">
+              <ManualToolPanel
+                runId={runData.id}
+                tools={tools.data?.tools ?? []}
+                isLoading={tools.isLoading}
+                selectedTool={selectedTool}
+                onSelect={setSelectedTool}
+                args={toolArgs}
+                onArgs={setToolArgs}
+                result={toolResult}
+                onResult={setToolResult}
+                onCall={(name, parsedArgs) =>
+                  callTool.mutate(
+                    { tool: name, arguments: parsedArgs },
+                    {
+                      onSuccess: (data) => setToolResult(data.result || "(no output)"),
+                      onError: (err) => setToolResult(err instanceof ApiError ? err.message : "Tool call failed."),
+                    },
+                  )
+                }
+                calling={callTool.isPending}
+              />
+            </TabsContent>
+            <TabsContent value="advisory" className="space-y-3">
+              <AdvisoryPanel
+                tools={tools.data?.tools ?? []}
+                toolsLoading={tools.isLoading}
+                features={capabilities.data?.features ?? []}
+                runActive={active}
+                onCall={(name, parsedArgs) =>
+                  callTool.mutate(
+                    { tool: name, arguments: parsedArgs },
+                    {
+                      onSuccess: (data) => setAdvisoryResult(data.result || "(no output)"),
+                      onError: (err) => setAdvisoryResult(err instanceof ApiError ? err.message : "Tool call failed."),
+                    },
+                  )
+                }
+                calling={callTool.isPending}
+                lastResult={advisoryResult}
+              />
+            </TabsContent>
+            <TabsContent value="audit" className="space-y-3">
+              <AuditView
+                loading={audit.isLoading}
+                error={audit.error}
+                records={audit.data?.records ?? []}
+                chainValid={audit.data?.chain_valid ?? false}
+                chainReason={audit.data?.chain_reason ?? ""}
+              />
+            </TabsContent>
+            <TabsContent value="swarm">
+              <SwarmView
+                loading={swarm.isLoading}
+                error={swarm.error}
+                state={swarm.data?.state}
+                witnessFlags={witness.data?.flags}
+                witnessLoading={witness.isLoading}
+                negotiationRounds={Number((config.data?.swarm as Record<string, unknown> | undefined)?.negotiation_rounds ?? 0) || 0}
+              />
+            </TabsContent>
+            <TabsContent value="campaign">
+              <CampaignView loading={campaign.isLoading} error={campaign.error} state={campaign.data?.state} />
+            </TabsContent>
+          </Tabs>
         </div>
-        <div className="space-y-3">
-          <LiveRunSummary events={events.events} />
 
-          <Card className={cn(pendingDecisions.length > 0 && "border-primary/40 glow-primary")}>
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                Pending decisions
-                {pendingDecisions.length > 0 && (
-                  <Badge variant="info" className="tabular-nums">{pendingDecisions.length}</Badge>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {pendingDecisions.length === 0 ? (
-                <p className="text-xs text-muted-foreground">No pending input.</p>
-              ) : (
-                pendingDecisions.map((d) => (
-                  <DecisionCard key={d.id} decision={d} runId={run.data.id} autoAnswering={inFlight.current.has(d.id) && mode !== "read_only"} />
-                ))
-              )}
-            </CardContent>
-          </Card>
-
+        <aside className="min-w-0 space-y-3 lg:sticky lg:top-4 lg:self-start">
+          <RunTelemetryCard telemetry={telemetry} derived={derived} />
+          <LiveRunSummary derived={derived} runState={currentState as RunState} />
           <DecisionHistoryCard decisions={mergedDecisions} />
-        </div>
+        </aside>
       </div>
-
-      <Tabs value={tab} onValueChange={setTab} className="mt-2">
-        <ScrollArea type="scroll" className="w-full">
-          <TabsList>
-            <TabsTrigger value="recon"><ScanSearch className="mr-1.5 h-3.5 w-3.5" />Recon</TabsTrigger>
-            <TabsTrigger value="graph"><Network className="mr-1.5 h-3.5 w-3.5" />Attack Path</TabsTrigger>
-            <TabsTrigger value="summary"><ClipboardList className="mr-1.5 h-3.5 w-3.5" />Summary</TabsTrigger>
-            <TabsTrigger value="tools"><Wrench className="mr-1.5 h-3.5 w-3.5" />Tools</TabsTrigger>
-            <TabsTrigger value="advisory"><FlaskConical className="mr-1.5 h-3.5 w-3.5" />Advisory</TabsTrigger>
-            <TabsTrigger value="audit">Audit</TabsTrigger>
-            <TabsTrigger value="swarm">Swarm</TabsTrigger>
-            <TabsTrigger value="campaign">Campaign</TabsTrigger>
-          </TabsList>
-        </ScrollArea>
-        <TabsContent value="recon" className="space-y-3">
-          <ReconTab
-            fetchArtifact={fetchArtifact}
-            ready={artifactReady("recon_assessment.json")}
-          />
-        </TabsContent>
-        <TabsContent value="graph" className="space-y-3">
-          <div className="flex justify-end">
-            <Button asChild size="sm" variant="outline">
-              <Link to={`/runs/${run.data.id}/graph`}>Open in full page <Network className="ml-1.5 h-3.5 w-3.5" /></Link>
-            </Button>
-          </div>
-          <AttackGraphDag runId={run.data.id} />
-          <AttackGraph runId={run.data.id} ready={artifactReady("enhanced/enhanced_report.json")} />
-        </TabsContent>
-        <TabsContent value="summary" className="space-y-3">
-          <SessionSummaryCard result={(run.data.result ?? {}) as RunResult} title={run.data.title} />
-        </TabsContent>
-        <TabsContent value="tools" className="space-y-3">
-          <ManualToolPanel
-            runId={run.data.id}
-            tools={tools.data?.tools ?? []}
-            isLoading={tools.isLoading}
-            selectedTool={selectedTool}
-            onSelect={setSelectedTool}
-            args={toolArgs}
-            onArgs={setToolArgs}
-            result={toolResult}
-            onResult={setToolResult}
-            onCall={(name, parsedArgs) =>
-              callTool.mutate(
-                { tool: name, arguments: parsedArgs },
-                {
-                  onSuccess: (data) => setToolResult(data.result || "(no output)"),
-                  onError: (err) => setToolResult(err instanceof ApiError ? err.message : "Tool call failed."),
-                },
-              )
-            }
-            calling={callTool.isPending}
-          />
-        </TabsContent>
-        <TabsContent value="advisory" className="space-y-3">
-          <AdvisoryPanel
-            tools={tools.data?.tools ?? []}
-            toolsLoading={tools.isLoading}
-            features={capabilities.data?.features ?? []}
-            runActive={active}
-            onCall={(name, parsedArgs) =>
-              callTool.mutate(
-                { tool: name, arguments: parsedArgs },
-                {
-                  onSuccess: (data) => setAdvisoryResult(data.result || "(no output)"),
-                  onError: (err) => setAdvisoryResult(err instanceof ApiError ? err.message : "Tool call failed."),
-                },
-              )
-            }
-            calling={callTool.isPending}
-            lastResult={advisoryResult}
-          />
-        </TabsContent>
-        <TabsContent value="audit" className="space-y-3">
-          <AuditView
-            loading={audit.isLoading}
-            error={audit.error}
-            records={audit.data?.records ?? []}
-            chainValid={audit.data?.chain_valid ?? false}
-            chainReason={audit.data?.chain_reason ?? ""}
-          />
-        </TabsContent>
-        <TabsContent value="swarm">
-          <SwarmView
-            loading={swarm.isLoading}
-            error={swarm.error}
-            state={swarm.data?.state}
-            witnessFlags={witness.data?.flags}
-            witnessLoading={witness.isLoading}
-            negotiationRounds={Number((config.data?.swarm as Record<string, unknown> | undefined)?.negotiation_rounds ?? 0) || 0}
-          />
-        </TabsContent>
-        <TabsContent value="campaign">
-          <CampaignView loading={campaign.isLoading} error={campaign.error} state={campaign.data?.state} />
-        </TabsContent>
-      </Tabs>
 
       <Dialog open={showCancel} onOpenChange={setShowCancel}>
         <DialogContent>
@@ -476,7 +425,7 @@ export function RunPage() {
             <Button
               variant="destructive"
               onClick={() => {
-                cancel.mutate(run.data.id, { onSettled: () => setShowCancel(false) });
+                cancel.mutate(runData.id, { onSettled: () => setShowCancel(false) });
               }}
               disabled={cancel.isPending}
             >
@@ -877,7 +826,7 @@ function NavigatorResult({ result }: { result: string }) {
   );
 }
 
-function KeyValueResult({ result, title }: { result: string; title: string }) {
+function KeyReviewResult({ result, title }: { result: string; title: string }) {
   const status = result.startsWith(`${title}: COMPLETED`) ? "success"
     : result.startsWith(`${title}: BLOCKED`) ? "warn"
     : result.startsWith(`${title}: DISABLED`) ? "muted"
@@ -907,9 +856,9 @@ function JsonResult({ result }: { result: string }) {
 }
 
 // ── Decision history (answered decisions) ───────────────────────────────────
-// Replaces the old one-line "Decisions" card. Pending decisions render above
-// via <DecisionCard>; this card shows the answered history with prompt text,
-// options, answer, and timestamp — collapsible to avoid dominating the column.
+// Pending decisions render at the top of the page via <PendingDecisionPanel>;
+// this card shows the answered history with prompt text, options, answer, and
+// timestamp — collapsible to avoid dominating the rail.
 
 interface DecisionHistoryCardProps {
   decisions: DecisionListRow[];

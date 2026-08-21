@@ -21,7 +21,7 @@ const NAV_ITEMS = [
   { to: "/stats", label: "Stats", icon: BarChart3, end: false },
   { to: "/skills", label: "Skills", icon: Sparkles, end: false },
   { to: "/memory", label: "Memory", icon: Brain, end: false },
-  { to: "/system", label: "System", icon: Settings, end: false },
+  { to: "/system", label: "Settings", icon: Settings, end: false },
   { to: "/help", label: "Help", icon: BookOpen, end: false },
 ];
 

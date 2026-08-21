@@ -3,6 +3,7 @@ import ReactFlow, {
   Background,
   BackgroundVariant,
   Controls,
+  MiniMap,
   ReactFlowProvider,
   useReactFlow,
   applyEdgeChanges,
@@ -11,14 +12,23 @@ import ReactFlow, {
   type EdgeChange,
   type Node,
   type NodeChange,
+  type Viewport,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { cn } from "@/lib/utils";
+import { useTheme } from "@/lib/useTheme";
 import { GraphFlowNode, type GraphFlowNodeData } from "@/features/graph/GraphNodeTypes";
-import { toFlowEdges, toFlowNodes } from "@/features/graph/graphTransforms";
+import { edgeMeta, toFlowEdges, toFlowNodes } from "@/features/graph/graphTransforms";
 import type { GraphExplorerEdge, GraphExplorerNode } from "@/features/graph/graphTypes";
 
 const nodeTypes = { graph: GraphFlowNode };
+
+/** Zoom at/above which non-essential edge labels become visible. */
+const EDGE_LABEL_ZOOM = 0.6;
+
+interface EdgeViewData {
+  edgeType?: string;
+}
 
 export interface AttackGraphCanvasProps {
   nodes: GraphExplorerNode[];
@@ -28,21 +38,34 @@ export interface AttackGraphCanvasProps {
   /** ids of nodes/edges to emphasize (attack path, search result) */
   pathNodeIds?: Set<string>;
   pathEdgeIds?: Set<string>;
+  /** path overlay endpoints — visually distinct start/destination */
+  pathStartNodeId?: string | null;
+  pathEndNodeId?: string | null;
   /** non-null triggers a fit-to-node request (ts breaks ties for same id) */
   focusRequest?: { nodeId: string; ts: number } | null;
   /** increments to re-fit the whole graph (fit-to-screen button) */
   fitRequest?: number;
   /** increments to reset drag positions back to the deterministic layout */
   resetRequest?: number;
+  /** toggle the reactflow minimap */
+  showMinimap?: boolean;
+  /** double-click a node to expand its neighborhood by one hop */
+  onNodeDoubleClick?: (id: string) => void;
   className?: string;
 }
 
 function CanvasInner(props: AttackGraphCanvasProps) {
   const { fitView } = useReactFlow();
+  const { theme } = useTheme();
   const [flowNodes, setFlowNodes] = useState<Node[]>([]);
   const [flowEdges, setFlowEdges] = useState<Edge[]>([]);
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
+  const [hoverEdgeId, setHoverEdgeId] = useState<string | null>(null);
+  const [edgeLabelsVisible, setEdgeLabelsVisible] = useState(true);
   const focusNodeRef = useRef<string | null>(null);
+  const edgeLabelsVisibleRef = useRef(true);
+  const lastFlowCount = useRef(0);
+  const prevPathKey = useRef("");
 
   const baseNodes = useMemo(
     () => toFlowNodes(props.nodes).map((n) => ({ ...n, position: positions[n.id] ?? n.position })),
@@ -50,55 +73,125 @@ function CanvasInner(props: AttackGraphCanvasProps) {
   );
   const baseEdges = useMemo(() => toFlowEdges(props.edges), [props.edges]);
 
-  // Merge base + expanded edges into reactflow state. Only include an edge
-  // when both endpoints are present (scope + graph consistency guaranteed by
-  // the backend; this guard keeps a stray node-id from rendering a dangling edge).
+  // Nodes/edges directly connected to the current selection (for emphasis).
+  const connected = useMemo(() => {
+    const nodes = new Set<string>();
+    const edges = new Set<string>();
+    const selectedId = props.selectedNodeId;
+    if (selectedId) {
+      for (const e of props.edges) {
+        if (e.source_node_id === selectedId || e.target_node_id === selectedId) {
+          edges.add(e.edge_id);
+          nodes.add(e.source_node_id === selectedId ? e.target_node_id : e.source_node_id);
+        }
+      }
+    }
+    return { nodes, edges };
+  }, [props.edges, props.selectedNodeId]);
+
+  const pathActive = !!(props.pathNodeIds && props.pathNodeIds.size > 0);
+
+  // Merge base + expanded nodes/edges into reactflow state. Only include an
+  // edge when both endpoints are present (scope + graph consistency guaranteed
+  // by the backend; this guard keeps a stray node-id from rendering a dangling
+  // edge). Existing entries (drag positions, emphasis) are preserved.
   useEffect(() => {
+    const prevNodes = new Map(flowNodes.map((n) => [n.id, n]));
     const nextNodes = new Map<string, Node>();
-    baseNodes.forEach((n) => {
-      const prev = flowNodes.find((p) => p.id === n.id);
-      nextNodes.set(n.id, prev ?? n);
-    });
+    for (const n of baseNodes) {
+      nextNodes.set(n.id, prevNodes.get(n.id) ?? n);
+    }
+    const prevEdges = new Map(flowEdges.map((e) => [e.id, e]));
     const nextEdges = new Map<string, Edge>();
-    baseEdges.forEach((e) => {
-      if (nextNodes.has(e.source) && nextNodes.has(e.target)) nextEdges.set(e.id, e);
-    });
+    for (const e of baseEdges) {
+      if (nextNodes.has(e.source) && nextNodes.has(e.target)) {
+        nextEdges.set(e.id, prevEdges.get(e.id) ?? e);
+      }
+    }
     setFlowNodes([...nextNodes.values()]);
     setFlowEdges([...nextEdges.values()]);
   }, [baseNodes, baseEdges]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Path / focus emphasis. Dims non-path nodes when a path is shown; focused
-  // (search-result) node gets a pulsing highlight via a data flag.
+  // Node emphasis: path / selection / focus context → data flags + dimming.
   useEffect(() => {
+    const pathNodes = props.pathNodeIds;
     setFlowNodes((prev) =>
       prev.map((n) => {
-        const isPath = props.pathNodeIds?.has(n.id) ?? false;
-        const isFocus = focusNodeRef.current === n.id;
+        const id = n.id;
+        const isPath = pathNodes?.has(id) ?? false;
+        const isStart = isPath && props.pathStartNodeId === id;
+        const isEnd = isPath && props.pathEndNodeId === id;
+        const isFocus = focusNodeRef.current === id;
+        const isSelected = props.selectedNodeId === id;
+        let dimmed = false;
+        if (pathNodes && pathNodes.size > 0) {
+          dimmed = !isPath;
+        } else if (props.selectedNodeId) {
+          dimmed = !isSelected && !connected.nodes.has(id);
+        }
         const data = n.data as GraphFlowNodeData;
-        const dimmed = props.pathNodeIds && props.pathNodeIds.size > 0 && !isPath;
         return {
           ...n,
-          data: { ...data, node: data.node, path: isPath, focus: isFocus },
+          data: {
+            ...data,
+            node: data.node,
+            path: isPath,
+            focus: isFocus,
+            start: isStart,
+            end: isEnd,
+            dimmed,
+            selected: isSelected,
+          },
           className: cn("transition-opacity", dimmed ? "opacity-40" : "opacity-100"),
         };
       }),
     );
-  }, [props.pathNodeIds, props.selectedNodeId]);
+  }, [props.pathNodeIds, props.pathStartNodeId, props.pathEndNodeId, props.selectedNodeId, connected.nodes]);
 
-  // Emphasis edges: path edges get a brighter stroke.
+  // Edge emphasis: attack-path edges are prominent; selection-connected edges
+  // are easier to trace; the rest dim to keep the selected path readable.
   useEffect(() => {
+    const pathEdges = props.pathEdgeIds;
     setFlowEdges((prev) =>
       prev.map((e) => {
-        const isPath = props.pathEdgeIds?.has(e.id) ?? false;
+        const id = e.id;
+        const isPath = pathEdges?.has(id) ?? false;
+        const isConnected = connected.edges.has(id);
+        const isHover = hoverEdgeId === id;
+        const type = (e.data as EdgeViewData | undefined)?.edgeType ?? (e.label as string) ?? "related_to";
+        const base = edgeMeta(type as GraphExplorerEdge["edge_type"]);
+        const showLabel = isPath || isConnected || isHover || edgeLabelsVisible;
+
+        let stroke = base.color;
+        let width = 1.25;
+        let dash: string | undefined = base.dashed ? "5 4" : undefined;
+        let opacity = 0.85;
+        if (isPath) {
+          stroke = "rgb(52,211,153)";
+          width = 2.75;
+          opacity = 1;
+          dash = undefined;
+        } else if (pathEdges && pathEdges.size > 0) {
+          opacity = 0.15;
+        } else if (props.selectedNodeId) {
+          if (isConnected) {
+            width = 2;
+            opacity = 1;
+          } else {
+            opacity = 0.3;
+          }
+        }
+
+        const marker = e.markerEnd as { color?: string } | undefined;
         return {
           ...e,
-          style: isPath
-            ? { stroke: "rgb(52,211,153)", strokeWidth: 2.25 }
-            : { stroke: "rgb(148,163,184)", strokeWidth: 1.25 },
+          label: showLabel ? type : "",
+          style: { stroke, strokeWidth: width, opacity, ...(dash ? { strokeDasharray: dash } : {}) },
+          markerEnd: { ...(marker as object), color: stroke },
         };
       }),
     );
-  }, [props.pathEdgeIds, props.pathNodeIds]);
+  }, [props.pathEdgeIds, props.selectedNodeId, connected.edges, hoverEdgeId, edgeLabelsVisible]);
 
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     setFlowNodes((nds) => applyNodeChanges(changes, nds));
@@ -117,6 +210,25 @@ function CanvasInner(props: AttackGraphCanvasProps) {
     setFlowEdges((eds) => applyEdgeChanges(changes, eds));
   }, []);
 
+  // Zoom-level-dependent edge labels: show at a sufficient zoom, hide at a
+  // distance so the graph doesn't become noise (labels still appear on hover
+  // and for selected/path edges — see the emphasis effect).
+  const updateLabelVisibility = useCallback((zoom: number) => {
+    const on = zoom >= EDGE_LABEL_ZOOM;
+    if (on !== edgeLabelsVisibleRef.current) {
+      edgeLabelsVisibleRef.current = on;
+      setEdgeLabelsVisible(on);
+    }
+  }, []);
+  const onMove = useCallback(
+    (_event: unknown, viewport: Viewport) => updateLabelVisibility(viewport.zoom),
+    [updateLabelVisibility],
+  );
+  const onMoveEnd = useCallback(
+    (_event: unknown, viewport: Viewport) => updateLabelVisibility(viewport.zoom),
+    [updateLabelVisibility],
+  );
+
   // Fit-to-screen request from the toolbar.
   useEffect(() => {
     if (props.fitRequest) void fitView({ padding: 0.15, duration: 300 });
@@ -126,7 +238,10 @@ function CanvasInner(props: AttackGraphCanvasProps) {
   useEffect(() => {
     if (!props.resetRequest) return;
     setPositions({});
-    setFlowNodes((nds) => nds.map((n) => ({ ...n, position: (baseNodes.find((b) => b.id === n.id) ?? n).position })));
+    setFlowNodes((nds) => {
+      const baseById = new Map(baseNodes.map((b) => [b.id, b]));
+      return nds.map((n) => ({ ...n, position: baseById.get(n.id)?.position ?? n.position }));
+    });
   }, [props.resetRequest]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Focus a specific node (search result / path endpoint).
@@ -142,6 +257,52 @@ function CanvasInner(props: AttackGraphCanvasProps) {
     }
   }, [props.focusRequest?.ts]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Auto-fit the first time nodes arrive (graph load / run switch).
+  useEffect(() => {
+    if (lastFlowCount.current === 0 && flowNodes.length > 0) {
+      void fitView({ padding: 0.15, duration: 300 });
+    }
+    lastFlowCount.current = flowNodes.length;
+  }, [flowNodes.length, fitView]);
+
+  // When a path overlay appears, frame the path.
+  useEffect(() => {
+    if (!props.pathNodeIds || props.pathNodeIds.size === 0) return;
+    const key = [...props.pathNodeIds].sort().join("|");
+    if (key === prevPathKey.current) return;
+    prevPathKey.current = key;
+    const pathNodes = flowNodes.filter((n) => props.pathNodeIds?.has(n.id));
+    if (pathNodes.length) void fitView({ nodes: pathNodes, padding: 0.3, duration: 500 });
+  }, [props.pathNodeIds, flowNodes, fitView]);
+
+  const onPaneClick = useCallback(() => {
+    props.onSelectNode(null);
+  }, [props.onSelectNode]);
+
+  const onKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (e.key === "Escape") {
+        props.onSelectNode(null);
+        return;
+      }
+      if (e.key === "Enter" || e.key === " ") {
+        const id = target?.closest?.("[data-id]")?.getAttribute("data-id");
+        if (id) {
+          e.preventDefault();
+          props.onSelectNode(id);
+        }
+      }
+    },
+    [props.onSelectNode],
+  );
+
+  const minimapNodeColor = useCallback((node: Node) => {
+    const data = node.data as GraphFlowNodeData | undefined;
+    if (!data?.node) return "rgb(148,163,184)";
+    return nodeTypeMeta(data.node.node_type).color;
+  }, []);
+
   return (
     <ReactFlow
       nodes={flowNodes}
@@ -150,18 +311,14 @@ function CanvasInner(props: AttackGraphCanvasProps) {
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onNodeClick={(_, node) => props.onSelectNode(node.id)}
-      onPaneClick={() => props.onSelectNode(null)}
-      onKeyDown={(e) => {
-        // Keyboard selection: nodes render as focusable [data-id] elements.
-        if (e.key === "Enter" || e.key === " ") {
-          const id = (e.target as HTMLElement).getAttribute?.("data-id");
-          if (id) {
-            e.preventDefault();
-            props.onSelectNode(id);
-          }
-        }
-      }}
-      fitView
+      onNodeDoubleClick={(_, node) => props.onNodeDoubleClick?.(node.id)}
+      onPaneClick={onPaneClick}
+      onEdgeMouseEnter={(_, edge) => setHoverEdgeId(edge.id)}
+      onEdgeMouseLeave={() => setHoverEdgeId(null)}
+      onMove={onMove}
+      onMoveEnd={onMoveEnd}
+      onKeyDown={onKeyDown}
+      fitView={false}
       fitViewOptions={{ padding: 0.15 }}
       nodesDraggable
       nodesConnectable={false}
@@ -173,8 +330,25 @@ function CanvasInner(props: AttackGraphCanvasProps) {
       className={props.className}
       deleteKeyCode={null}
     >
-      <Background variant={BackgroundVariant.Dots} gap={18} size={1} />
+      <Background
+        variant={BackgroundVariant.Dots}
+        gap={18}
+        size={1}
+        color={theme === "dark" ? "rgba(148,163,184,0.4)" : "rgba(100,116,139,0.4)"}
+      />
       <Controls showInteractive={false} />
+      {props.showMinimap !== false && (
+        <MiniMap
+          nodeColor={minimapNodeColor}
+          nodeStrokeColor={minimapNodeColor}
+          nodeBorderRadius={4}
+          maskColor={theme === "dark" ? "rgba(2,6,23,0.6)" : "rgba(2,6,23,0.3)"}
+          pannable
+          zoomable
+          ariaLabel="Graph minimap"
+          className="!bottom-2 !right-2"
+        />
+      )}
     </ReactFlow>
   );
 }

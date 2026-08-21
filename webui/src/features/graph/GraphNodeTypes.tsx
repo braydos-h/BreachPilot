@@ -2,62 +2,107 @@ import { memo } from "react";
 import type { NodeProps } from "reactflow";
 import { cn } from "@/lib/utils";
 import type { GraphExplorerNode } from "@/features/graph/graphTypes";
-import { nodeTypeMeta, statusMeta } from "@/features/graph/graphTransforms";
+import { nodeTypeMeta, severityMeta, statusMeta } from "@/features/graph/graphTransforms";
 
 export interface GraphFlowNodeData {
   label: string;
   node: GraphExplorerNode;
+  /** part of the active attack-path overlay */
   path?: boolean;
+  /** search-result focus highlight (transient) */
   focus?: boolean;
+  /** path start endpoint */
+  start?: boolean;
+  /** path destination endpoint */
+  end?: boolean;
+  /** de-emphasized by path/selection context */
+  dimmed?: boolean;
+  /** selected node id from the page (source of truth) */
+  selected?: boolean;
 }
 
-// Custom node for the explorer canvas. Selected state is shown with both a
+// Custom node for the explorer canvas. Selected state is shown with BOTH a
 // color ring AND a solid outline + dot (non-color-only). Path-emphasis nodes
-// get a dashed outer ring; the focus (search-result) node pulses.
+// get a dashed outer ring; path endpoints get labelled START/DEST chips; the
+// focus (search-result) node pulses its icon dot. Nodes are focusable
+// [data-id] elements so keyboard users can select them with Enter/Space.
 export const GraphFlowNode = memo(function GraphFlowNode({ data, selected }: NodeProps<GraphFlowNodeData>) {
   const meta = nodeTypeMeta(data.node.node_type);
   const status = statusMeta(data.node.status);
   const props = data.node.properties;
   const cvss = typeof props.cvss_score === "number" ? props.cvss_score : null;
-  const severity = typeof props.severity === "string" ? (props.severity as string) : null;
+  const severity = typeof props.severity === "string" && props.severity ? (props.severity as string) : null;
+  const sevMeta = severity ? severityMeta(severity) : null;
+  const Icon = meta.icon;
+  const isSelected = selected || data.selected;
 
   return (
     <div
+      data-id={data.node.node_id}
+      role="button"
+      tabIndex={0}
+      aria-label={`${meta.label} node: ${data.node.value}${data.node.status !== "unknown" ? ` (${status.label})` : ""}`}
+      title={data.node.value}
       className={cn(
-        "rounded-md px-2 py-1.5 font-mono text-[11px] leading-tight transition-shadow",
-        selected && "ring-2 ring-foreground shadow-lg",
-        data.focus && "animate-pulse",
+        "relative flex min-w-[150px] max-w-[240px] cursor-pointer flex-col gap-1 rounded-md px-2 py-1.5 font-mono text-[11px] leading-tight transition-opacity focus-visible:outline-2 focus-visible:outline-ring",
+        data.dimmed && "opacity-40",
+        isSelected && "ring-2 ring-foreground shadow-lg",
       )}
       style={{
         background: meta.bg,
         border: `1.5px solid ${meta.color}`,
-        outline: selected
-          ? "1px solid color-mix(in srgb, currentColor 60%, transparent)"
-          : data.path
-            ? "1.5px dashed rgb(52,211,153)"
-            : undefined,
+        outline: data.path && !isSelected ? "1.5px dashed rgb(52,211,153)" : undefined,
       }}
     >
-      <div className="flex items-center gap-1">
-        <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: meta.color }} aria-hidden />
-        <span className="truncate font-medium" title={data.node.value}>{data.label}</span>
+      <div className="flex items-center gap-1.5">
+        {data.focus ? (
+          <span
+            className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-amber-400 motion-reduce:animate-none"
+            aria-hidden
+          />
+        ) : (
+          <Icon className="h-3 w-3 shrink-0" style={{ color: meta.color }} aria-hidden />
+        )}
+        <span className="truncate font-medium">{data.label}</span>
+        {isSelected && (
+          <span className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-foreground" aria-label="Selected node" />
+        )}
       </div>
-      <div className="mt-0.5 flex flex-wrap items-center gap-1">
-        <span className="rounded bg-black/20 px-1 text-[9px] uppercase tracking-wide dark:bg-white/10">
+      <div className="flex flex-wrap items-center gap-1">
+        <span
+          className="rounded bg-black/20 px-1 text-[9px] uppercase tracking-wide dark:bg-white/10"
+          style={{ color: meta.color }}
+        >
           {meta.label}
         </span>
+        {data.start && (
+          <span className="rounded bg-emerald-500/15 px-1 text-[9px] font-semibold uppercase tracking-wide text-emerald-300">
+            start
+          </span>
+        )}
+        {data.end && (
+          <span className="rounded bg-rose-500/15 px-1 text-[9px] font-semibold uppercase tracking-wide text-rose-300">
+            dest
+          </span>
+        )}
         {status.label !== "Unknown" && (
-          <span className="rounded bg-black/20 px-1 text-[9px] uppercase tracking-wide dark:bg-white/10">
+          <span
+            className="rounded bg-black/20 px-1 text-[9px] uppercase tracking-wide dark:bg-white/10"
+            style={{ color: status.color }}
+          >
             {status.label}
           </span>
         )}
         {cvss !== null && (
-          <span className="rounded bg-black/20 px-1 text-[9px] tabular-nums dark:bg-white/10">
-            CVSS {cvss.toFixed(1)}
-          </span>
+          <span className="rounded bg-black/20 px-1 text-[9px] tabular-nums dark:bg-white/10">CVSS {cvss.toFixed(1)}</span>
         )}
-        {severity !== null && (
-          <span className="rounded bg-black/20 px-1 text-[9px] uppercase dark:bg-white/10">{severity}</span>
+        {severity && sevMeta && (
+          <span
+            className="rounded bg-black/20 px-1 text-[9px] uppercase dark:bg-white/10"
+            style={{ color: sevMeta.color }}
+          >
+            {severity}
+          </span>
         )}
       </div>
     </div>
