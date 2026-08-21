@@ -325,6 +325,12 @@ Read-only catalog of preset goals (`GET /goals`) grouped by risk requirement
 Static reference: quick-start steps, permission-mode explainer, run-phase
 overview, and links into the `docs/` guides.
 
+### Attack Graph (`/graph`)
+
+Interactive three-panel investigation of a run's Attack Graph v2 store. See
+[Attack Graph Page](#attack-graph-page). Enabled by `api.graph_route: true`
+in `config.yaml`; when disabled the page shows the disabled-route error.
+
 ### System (`/system`)
 
 See [System Page](#system-page).
