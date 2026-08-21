@@ -1,19 +1,20 @@
 import sys
 import traceback
 
-_orig_import = builtins_import = None
+_ORIG = None
+
+
+def _patched(name, *a, **k):
+    if name == "main":
+        print("=== IMPORTING main ===", flush=True)
+        traceback.print_stack(limit=20, file=sys.stdout)
+        print("=== END STACK ===", flush=True)
+    return _ORIG(name, *a, **k)
 
 
 def pytest_configure(config):
     import builtins
 
-    global _orig_import
-    _orig_import = builtins.__import__
-
-    def _patched(name, *a, **k):
-        if name == "main":
-            print("=== IMPORTING main, stack ===", flush=True)
-            traceback.print_stack(limit=16, file=sys.stdout)
-        return _orig_import(name, *a, **k)
-
+    global _ORIG
+    _ORIG = builtins.__import__
     builtins.__import__ = _patched
