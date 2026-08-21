@@ -9,6 +9,9 @@ import { HomePage } from "@/routes/HomePage";
 import { Spinner } from "@/components/Loading";
 import { Toaster } from "@/components/Toaster";
 
+const AttackGraphPage = lazy(() =>
+  import("@/features/graph/AttackGraphPage").then((m) => ({ default: m.AttackGraphPage })),
+);
 const RunListPage = lazy(() => import("@/routes/RunListPage").then((m) => ({ default: m.RunListPage })));
 const NewRunPage = lazy(() => import("@/routes/NewRunPage").then((m) => ({ default: m.NewRunPage })));
 const RunPage = lazy(() => import("@/routes/RunPage").then((m) => ({ default: m.RunPage })));
@@ -64,6 +67,7 @@ export default function App() {
                     <Route path="/skills" element={<SkillsPage />} />
                     <Route path="/modules" element={<AttackModulesPage />} />
                     <Route path="/goals" element={<GoalsPage />} />
+                    <Route path="/graph" element={<AttackGraphPage />} />
                     <Route path="/stats" element={<StatsPage />} />
                     <Route path="/help" element={<HelpPage />} />
                     <Route path="/memory" element={<MemoryPage />} />
