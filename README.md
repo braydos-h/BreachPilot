@@ -112,7 +112,13 @@ For the full architecture, Flow A/B split, and module map, see
 - **Long-session mode.** Opt-in multi-hour runs send the model's real context
   window to Ollama, bound each LLM call with an httpx timeout, and checkpoint
   compacted state for crash recovery.
-- **Eval harness.** Benchmark against target labs with JSON/Markdown/HTML
+- **Interactive Attack Graph.** A dedicated WebUI page (`/graph`) renders each
+  run's Attack Graph v2 as a pan/zoom/reactable React Flow canvas — filter by
+  node type/status/confidence, search, expand neighborhoods (+1/+2 hops),
+  find bounded attack paths, inspect node provenance, and surface merge
+  conflicts, with live refresh while the run is active. Read-only, scoped per
+  run, gated by `api.graph_route`.
+- **Eval harness.** Benchmark regression against target labs with JSON/Markdown/HTML
   reports under `reports/eval/<run_id>/`.
 - **179-test suite, all mocked.** No live Nmap, no live network: every test
   mocks subprocess/network and runs offline.
@@ -220,7 +226,11 @@ displays token contents.
 WebUI: bearer token auto-generated into `.webui_secret_key` (gitignored) or
 set `NETATTACKAI_API_TOKEN`. Loopback-only, one active run at a time (HTTP
 409 on conflict). Docs at `http://127.0.0.1:8765/docs`. Full SPA reference in
-[`docs/webui.md`](docs/webui.md) and [`docs/api.md`](docs/api.md).
+[`docs/webui.md`](docs/webui.md) and [`docs/api.md`](docs/api.md). The WebUI
+includes an interactive **Attack Graph** page at `/graph` (requires
+`api.graph_route: true` in `config.yaml`) — see
+[`docs/webui.md`](docs/webui.md#attack-graph-page) and the graph routes in
+[`docs/api.md`](docs/api.md#graph-explorer-routes).
 
 ### Choose an AI provider
 
