@@ -835,6 +835,7 @@ class AttackUi:
         print(f"\n{self._c('bold')}Select mode:{self._c('reset')}")
         print(f"  {self._c('blue')}1.{self._c('reset')} Recon  - Safer default; gather intelligence only")
         print(f"  {self._c('blue')}2.{self._c('reset')} Attack - Full exploitation path; requires explicit authorization")
+        print(f"  {self._c('blue')}3.{self._c('reset')} Fast   - Parallel recon preset then AI takeover (fast)")
         while True:
             try:
                 choice = input("  > ").strip().lower()
@@ -844,7 +845,9 @@ class AttackUi:
                     return "recon"
                 if choice in ("2", "attack"):
                     return "attack"
-                print(f"  {self._c('red')}Invalid choice. Enter 1/recon or 2/attack.{self._c('reset')}")
+                if choice in ("3", "fast"):
+                    return "fast"
+                print(f"  {self._c('red')}Invalid choice. Enter 1/recon, 2/attack, or 3/fast.{self._c('reset')}")
             except EOFError:
                 return "recon"
 

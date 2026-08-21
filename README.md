@@ -220,7 +220,7 @@ displays token contents.
 |---|---|---|
 | **WebUI** | `python main.py` | Default. Builds `webui/dist/` on first run (needs Node/npm), opens `http://127.0.0.1:8765` |
 | **CLI menu** | `python main.py --menu` | Guided questionary flow; no extra deps |
-| **CLI direct** | `python main.py --target <ip> --mode recon\|attack` | Flags below |
+| **CLI direct** | `python main.py --target <ip> --mode recon\|attack\|fast` | Flags below. `fast` runs bounded parallel recon first, then gives the completed context to the AI agent. |
 | **API only** | `python main.py --demon` | Daemon without the SPA |
 
 WebUI: bearer token auto-generated into `.webui_secret_key` (gitignored) or

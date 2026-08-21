@@ -591,7 +591,6 @@ class FastReconCoordinator:
                     continue
                 product, version = qv
                 query = f"{product} {version}"
-                key = f"cve:{product}:{version}"
                 if query not in dedup:
                     dedup[query] = (svc["port"], svc["protocol"], svc["service"], product, version)
 
