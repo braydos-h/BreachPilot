@@ -138,7 +138,7 @@ beforeEach(() => {
   useRunsMock.mockReturnValue({ data: { runs: [runRow] }, isLoading: false, error: null } as never);
 });
 
-async function renderPage() {
+function renderPage() {
   const user = userEvent.setup();
   render(<AttackGraphPage />);
   return { user };
