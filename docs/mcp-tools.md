@@ -447,6 +447,34 @@ via `--show`.
 `input_text` keystrokes are gated because they can issue a pivot command
 inside a running session (defense-in-depth).
 
+### Assessment State & Capability Discovery — `tools/mcp_tools/assessment_state.py` (capability upgrade §8/§16)
+
+Six tools let the agent inspect its own state, discover capabilities, and
+drive the task graph / hypothesis store instead of reconstructing context from
+conversation history. Registered via `register_assessment_state_tools(mcp, ctx)`
+in `mcp_exploit_server.py`; backed by `tools/assessment_state.py`
+(`aggregate_state`, `AssessmentStateStore`) and `tools/attack_modules`
+(`capability_record`, `applicability_explain`, `find_producers`).
+
+| Tool | Params | Target | Lock |
+|---|---|---|---|
+| `get_assessment_state` | `target_ip` | yes | allowlist |
+| `query_capabilities` | `scope` ("modules"\|"tools"\|"skills"), `service` | — | audit |
+| `get_capability_details` | `name`, `scope` | — | audit |
+| `get_evidence` | `target_ip`, `limit`, `tool` | yes | allowlist |
+| `record_hypothesis` | `target_ip`, `statement`, `confidence`, `expected_evidence`, `created_from` | yes | allowlist + re-validate |
+| `update_task` | `target_ip`, `step_index`, `action` (complete\|fail\|cancel\|reset), `success`, `summary`, `failure_class`, `reason` | yes | allowlist + re-validate |
+
+`get_assessment_state` renders a compact `ASSESSMENT_STATE:` snapshot from
+`aggregate_state` (goal/phase, hypotheses, plan-DAG ready/blocked summary, newest
+recon services/CVEs, credential count, audit rollup). `get_evidence` emits
+`exploit_audit:<target>:<attempt_id>` refs only — never raw command/args.
+`record_hypothesis` / `update_task` write LLM-owned state files, so their
+handlers re-validate the target against the allowlist before writing (the
+`run_campaign_step` precedent) — the returned blocks are `ASSESSMENT_STATE:` /
+`CAPABILITIES:` / `CAPABILITY_DETAILS:` / `EVIDENCE:` / `HYPOTHESIS_RECORDED:` /
+`TASK_UPDATED:`.
+
 ## Adding a New Exploit MCP Tool (checklist)
 
 Matches AGENTS.md rule 4 and `mcp_exploit_server.py:153-168`.
