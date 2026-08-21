@@ -78,6 +78,12 @@ def test_goals_list(tmp_path, monkeypatch):
     for g in data["goals"]:
         assert g["risk"] in {"safe", "gated", "high"}
         assert "description" in g and g["description"]
+    # compatible reflects the conservative baseline: safe/gated available,
+    # high-risk goals need high_authorized_testing.
+    by_name = {g["name"]: g for g in data["goals"]}
+    assert by_name["recon_only"]["compatible"] is True
+    assert by_name["initial_access"]["compatible"] is True
+    assert by_name["backdoor"]["compatible"] is False
 
 
 # ── Config schema (B5) ───────────────────────────────────────────────────────

@@ -649,7 +649,14 @@ async def list_attack_modules(auth: str = Depends(_require_auth)) -> dict[str, A
 
 @router.get("/goals")
 async def list_goals(auth: str = Depends(_require_auth)) -> dict[str, Any]:
-    """List all preset goals with full descriptions and risk requirement tags."""
+    """List all preset goals with full descriptions and risk requirement tags.
+
+    ``compatible`` reflects the conservative baseline risk profile
+    (``standard_authorized``): safe and gated goals are selectable, while
+    high-risk goals report ``compatible: false`` until the profile is raised to
+    ``high_authorized_testing`` (attack runs). The WebUI renders that as an
+    "Unavailable" state; it never bypasses the backend goal gates.
+    """
     from tools.goal_engine import GoalEngine
     engine = GoalEngine()
     out: list[dict[str, Any]] = []
@@ -658,7 +665,7 @@ async def list_goals(auth: str = Depends(_require_auth)) -> dict[str, Any]:
             "name": name,
             "description": goal.description,
             "risk": goal.risk_requirement,
-            "compatible": True,
+            "compatible": engine.is_compatible(name, "standard_authorized"),
         })
     return {"goals": out}
 

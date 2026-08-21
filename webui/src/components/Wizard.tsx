@@ -167,6 +167,23 @@ export function Wizard({ onCreated }: WizardProps) {
     return groups;
   }, [goals.data]);
 
+  // ponytail: ?goal=<name> from the Goals page preselects a preset goal, but
+  // only when it actually exists AND the backend reports it compatible — never
+  // trust arbitrary URL input. Mode comes from ?path= (set by the Goals CTA).
+  const paramGoal = useMemo(() => searchParams.get("goal")?.trim().toLowerCase() ?? "", [searchParams]);
+  const paramGoalValid = useMemo(() => {
+    if (!paramGoal) return null;
+    const found = (goals.data?.goals ?? []).find((g) => g.name === paramGoal);
+    return found?.compatible ? found.name : null;
+  }, [paramGoal, goals.data]);
+
+  useEffect(() => {
+    if (paramGoalValid && !goal) {
+      setGoalMode("preset");
+      setGoal(paramGoalValid);
+    }
+  }, [paramGoalValid, goal]);
+
   const flags = capabilities.data?.run_options.flags ?? [];
   const skillsList = skills.data?.skills ?? [];
 
