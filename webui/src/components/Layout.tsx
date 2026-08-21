@@ -4,7 +4,7 @@ import { Activity, BarChart3, BookOpen, Brain, Cpu, Crosshair, Eye, GitBranch, G
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { SegmentedControl } from "@/components/RunForm";
+import { PermissionControl } from "@/components/permission/PermissionControl";
 import { useModels, useRuns } from "@/api/hooks";
 import { isActiveState, type DecisionListRow } from "@/api/types";
 import { clearStoredToken } from "@/api/client";
@@ -23,12 +23,6 @@ const NAV_ITEMS = [
   { to: "/memory", label: "Memory", icon: Brain, end: false },
   { to: "/system", label: "System", icon: Settings, end: false },
   { to: "/help", label: "Help", icon: BookOpen, end: false },
-];
-
-const PERMISSION_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: "read_only", label: "Read" },
-  { value: "approve", label: "Approve" },
-  { value: "full_access", label: "Full" },
 ];
 
 const MODE_TITLES: Record<PermissionMode, string> = {
@@ -64,6 +58,7 @@ export function Layout() {
   const { theme, toggle: toggleTheme } = useTheme();
   const activeRuns = runs.data?.runs.filter((r) => isActiveState(r.state)) ?? [];
   const [showHelp, setShowHelp] = useState(false);
+  const [permOpen, setPermOpen] = useState(false);
 
   const onSignOut = () => {
     clearStoredToken();
@@ -134,18 +129,7 @@ export function Layout() {
                 <HelpCircle className="h-3 w-3" />
               </button>
             </div>
-            <SegmentedControl
-              value={mode}
-              onChange={(v) => setMode(v as PermissionMode)}
-              options={PERMISSION_OPTIONS}
-            />
-            <p className="text-[10px] leading-tight text-muted-foreground">
-              {mode === "read_only"
-                ? "Decisions wait for you."
-                : mode === "approve"
-                  ? "Auto-approves non-destructive decisions."
-                  : "Auto-answers ALL decisions incl. destructive."}
-            </p>
+            <PermissionControl mode={mode} onModeChange={setMode} />
           </div>
           <div className="flex items-center gap-2 rounded-md px-3 py-1.5 text-xs text-muted-foreground">
             <span className="relative flex h-2 w-2">
@@ -215,13 +199,9 @@ export function Layout() {
                   ? "bg-yellow-500/15 text-yellow-300"
                   : "bg-destructive/15 text-red-200",
             )}
-            onClick={() => {
-              const next: PermissionMode =
-                mode === "read_only" ? "approve" : mode === "approve" ? "full_access" : "read_only";
-              setMode(next);
-            }}
+            onClick={() => setPermOpen(true)}
             aria-label={`Permission mode: ${mode}`}
-            title={`Permission mode: ${mode} (tap to cycle)`}
+            title={`Permission mode: ${mode}`}
           >
             {mode === "read_only" ? "R" : mode === "approve" ? "A" : "F"}
           </button>
@@ -313,6 +293,21 @@ export function Layout() {
           </a>
         </footer>
       </main>
+
+      <Dialog open={permOpen} onOpenChange={setPermOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShieldAlert className="h-4 w-4 text-primary" />
+              Permission mode
+            </DialogTitle>
+            <DialogDescription className="text-sm">
+              Controls how you answer the agent&apos;s decisions when you&apos;re not watching.
+            </DialogDescription>
+          </DialogHeader>
+          <PermissionControl mode={mode} onModeChange={setMode} />
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={showHelp} onOpenChange={setShowHelp}>
         <DialogContent className="max-w-3xl">
