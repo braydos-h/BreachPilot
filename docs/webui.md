@@ -480,6 +480,56 @@ run always goes through the confirmation gate (`yes=false`).
 
 ---
 
+## Attack Graph Page
+
+`AttackGraphPage.tsx` + `features/graph/*` — interactive investigation of the
+run's Attack Graph v2 store (the same store `graph_builder` ingests from
+`reports/<run_id>/`). Read-only, scope-isolated per run, gated by
+`api.graph_route: true` (`404 graph_disabled` renders the disabled-route
+message + config hint). Route: `/graph`.
+
+Three-panel grid (`260px` filters / canvas / `340px` details):
+
+| Panel | Component | What it does |
+|-------|-----------|--------------|
+| Left — filters | `GraphFilters` | Run/scope select (active runs first), server-side search (`q`, debounced), NodeType checkboxes, Status checkboxes, confidence slider (client-side view filter). Changing any filter resets the view to the base graph. |
+| Center — canvas | `AttackGraphCanvas` + `GraphToolbar` + `GraphStats` | React Flow v11 graph: pan/zoom/fit/reset layout, drag nodes, click to select, keyboard-accessible. Toolbar: fit, reset, **+1 hop / +2 hops** neighborhood expansion, **Path** mode, **Merge conflicts** toggle, focus search. Stats chips (Nodes, Hosts, Services, Findings, Confirmed, Hypotheses…) from `summary`; conflict count + highest-degree hub. |
+| Right — details | `GraphDetailsPanel` | Node ID, type, value, status, confidence, scope, source, first/last seen, observation/contradiction counts, properties, evidence refs, connected nodes grouped by edge type. Renders **only real metadata** — a node with no `severity`/`cvss_score`/`vuln_class` shows no such badge, and keys surfaced in dedicated rows are not repeated under generic Metadata. |
+
+Behavior notes:
+
+- **Search** matches value, type, status, source, id, evidence refs, and
+  property values (CVSS, severity, vuln class). `nodeMatchesQuery` drives both
+  the toolbar's focus-jump and the details panel.
+- **Path mode** (`GraphPathFinder`): pick start/end nodes, set
+  `max_length`/`max_paths`, request bounded paths, show the best path overlaid
+  (non-path nodes dimmed).
+- **Neighborhood expansion** merges BFS results into the local view state;
+  filters are re-applied by resetting the view. Never mutates graph facts —
+  view state is separate from the backend source of truth.
+- **Large graphs**: the backend clamps `limit` to 500; the page shows a
+  "Graph is large — refine filters" banner when `truncated` or >500 total
+  nodes.
+- **Live refresh**: WS artifact events invalidate `["graphExplorer", runId]`
+  queries (`ws.ts`), and `useGraphPolling` refetches the graph every ~10s
+  while the run is active. The page never streams the whole graph over the
+  wire.
+- **Merge conflicts** (`conflictsOpen`): a yellow "Merge conflicts" toolbar
+  button opens the panel listing node, existing→proposed confidence, and
+  reason. Conflicts are never hidden.
+- **Accessibility**: keyboard-accessible controls, selected node shown with a
+  ring (not color-only), details panel is usable without the graph.
+
+Hooks (all in `features/graph/graphApi.ts`, TanStack Query, `graphKeys`
+prefix): `useGraphRun`, `useGraphSummary`, `useGraphConflicts`, `useGraphNode`,
+`useGraphNeighbors`, `useGraphPaths`, `useGraphPolling`, `useInvalidateGraph`.
+Pure mapping + search live in `graphTransforms.ts` (enum→presentation
+metadata, reactflow layout, evidence-ref parsing, summary chips) — nothing
+there mutates graph facts. DTO types mirror the backend `to_dict()` shapes
+exactly in `graphTypes.ts`.
+
+---
+
 ## Artifacts, Audit & Logs
 
 `ArtifactsPage.tsx` — three tabs.
@@ -715,13 +765,28 @@ webui/
    ├─ App.tsx                    # QueryClient + BrowserRouter + gates + routes
    ├─ index.css                  # HSL vars, base + utilities
    ├─ vite-env.d.ts
+   ├─ test/setup.ts              # jest-dom matchers + RTL cleanup per test
    ├─ lib/utils.ts               # cn, truncateId, formatRelative, formatBytes
    ├─ hooks/use-toast.ts         # toast store
    ├─ api/
    │  ├─ client.ts               # apiFetch, ApiError, token storage, ws/sse URL builders
-   │  ├─ ws.ts                   # useRunEvents (WS + SSE fallback)
+   │  ├─ ws.ts                   # useRunEvents (WS + SSE fallback) + graph invalidation
    │  ├─ hooks.ts                # TanStack Query hooks + queryKeys
    │  └─ types.ts                # all API types + state helpers
+   ├─ features/graph/            # Attack Graph page (see Attack Graph Page)
+   │  ├─ AttackGraphPage.tsx     # three-panel layout + state orchestration
+   │  ├─ AttackGraphCanvas.tsx   # React Flow v11 canvas (pan/zoom/fit/drag/select)
+   │  ├─ GraphNodeTypes.tsx      # custom graph node renderer
+   │  ├─ GraphFilters.tsx        # run/node-type/status/search/confidence
+   │  ├─ GraphToolbar.tsx        # fit/reset/expand/path/conflicts/focus-search
+   │  ├─ GraphStats.tsx          # summary chips + conflict count + hub
+   │  ├─ GraphDetailsPanel.tsx   # real-metadata node inspector
+   │  ├─ GraphPathFinder.tsx     # bounded start→end path requests
+   │  ├─ graphApi.ts             # TanStack Query hooks (graphKeys)
+   │  ├─ graphTransforms.ts      # pure DTO→UI mapping + search
+   │  ├─ graphTypes.ts           # explorer API DTO types + enums
+   │  ├─ index.ts
+   │  └─ __tests__/              # vitest (jsdom) coverage
    ├─ components/
    │  ├─ Layout.tsx
    │  ├─ TokenGate.tsx
