@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, Crosshair, Expand, LayoutGrid, Maximize, Route, Search } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { nodeMatchesQuery } from "@/features/graph/graphTransforms";
@@ -95,9 +96,9 @@ export function GraphToolbar(props: GraphToolbarProps) {
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              variant={props.conflictsOpen ? "warn" : "outline"}
+              variant="outline"
               size="sm"
-              className="h-8 gap-1 px-2 text-xs"
+              className={cn("h-8 gap-1 px-2 text-xs", props.conflictsOpen && "border-yellow-500/50 bg-yellow-500/10 text-yellow-300")}
               onClick={props.onToggleConflicts}
               aria-pressed={props.conflictsOpen}
               aria-label={`Merge conflicts${props.conflictCount ? `: ${props.conflictCount}` : ""}`}

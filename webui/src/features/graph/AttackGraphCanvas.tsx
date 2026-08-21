@@ -50,11 +50,10 @@ function CanvasInner(props: AttackGraphCanvasProps) {
   );
   const baseEdges = useMemo(() => toFlowEdges(props.edges), [props.edges]);
 
-  // Merge base + expanded/path edges into reactflow state. Only include an edge
+  // Merge base + expanded edges into reactflow state. Only include an edge
   // when both endpoints are present (scope + graph consistency guaranteed by
   // the backend; this guard keeps a stray node-id from rendering a dangling edge).
   useEffect(() => {
-    const byId = new Map(baseNodes.map((n) => [n.id, n]));
     const nextNodes = new Map<string, Node>();
     baseNodes.forEach((n) => {
       const prev = flowNodes.find((p) => p.id === n.id);
@@ -152,10 +151,14 @@ function CanvasInner(props: AttackGraphCanvasProps) {
       onEdgesChange={onEdgesChange}
       onNodeClick={(_, node) => props.onSelectNode(node.id)}
       onPaneClick={() => props.onSelectNode(null)}
-      onNodeKeyDown={(e, node) => {
+      onKeyDown={(e) => {
+        // Keyboard selection: nodes render as focusable [data-id] elements.
         if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          props.onSelectNode(String(node.id));
+          const id = (e.target as HTMLElement).getAttribute?.("data-id");
+          if (id) {
+            e.preventDefault();
+            props.onSelectNode(id);
+          }
         }
       }}
       fitView

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Loader2, X } from "lucide-react";
+import { X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -11,7 +11,7 @@ import type { GraphExplorerEdge, GraphExplorerNode } from "@/features/graph/grap
 export interface GraphDetailsPanelProps {
   runId: string;
   nodeId: string | null;
-  onSelectNode: (id: string | null) => void;
+  onSelect: (id: string | null) => void;
   onClose: () => void;
 }
 
@@ -123,7 +123,7 @@ function PropertyRow({ label, value, mono }: { label: string; value: string; mon
 // Render extra properties as label: value pairs. Never fabricate labels.
 function MetadataSection({ properties }: { properties: Record<string, unknown> }) {
   const entries = useMemo(
-    () => Object.entries(properties).filter(([k, v]) => v !== undefined && v !== null && v !== ""),
+    () => Object.entries(properties).filter(([, v]) => v !== undefined && v !== null && v !== ""),
     [properties],
   );
   if (entries.length === 0) return null;

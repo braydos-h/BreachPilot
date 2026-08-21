@@ -1,7 +1,8 @@
 // Pure transforms between the explorer API DTOs and reactflow / UI shapes.
 // Nothing here mutates graph facts — it only maps them for display.
 
-import type { Edge, Node, Position } from "reactflow";
+import type { Edge, Node } from "reactflow";
+import { Position } from "reactflow";
 import type {
   GraphExplorerEdge,
   GraphExplorerNode,
@@ -70,8 +71,8 @@ export function toFlowNodes(nodes: GraphExplorerNode[]): Node<FlowNodeData>[] {
   // Deterministic column-per-type grid. Fine up to the backend's 500-node
   // ceiling; reactflow handles pan/zoom/drag on top.
   const counts: Record<string, number> = {};
-  const colOf = NODE_TYPES_ORDER.reduce((acc, t, i) => ({ ...acc, [t]: i }), {} as Record<string, number>);
-  const xOf = (t: string) => (colOf[t] ?? NODE_TYPES_ORDER.length) * 250;
+  const colOf = NODE_TYPE_ORDER.reduce((acc, t, i) => ({ ...acc, [t]: i }), {} as Record<string, number>);
+  const xOf = (t: string) => (colOf[t] ?? NODE_TYPE_ORDER.length) * 250;
   return nodes.map((n) => {
     const meta = nodeTypeMeta(n.node_type);
     const y = (counts[n.node_type] ?? 0) * 86;
