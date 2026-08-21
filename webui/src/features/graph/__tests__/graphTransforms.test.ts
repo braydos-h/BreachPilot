@@ -10,7 +10,7 @@ import {
   toFlowEdges,
   toFlowNodes,
 } from "@/features/graph/graphTransforms";
-import type { GraphExplorerEdge, GraphExplorerNode, GraphSummaryStats } from "@/features/graph/graphTypes";
+import type { GraphExplorerEdge, GraphExplorerNode, GraphNodeStatus, GraphSummaryStats } from "@/features/graph/graphTypes";
 
 function node(overrides: Partial<GraphExplorerNode> = {}): GraphExplorerNode {
   return {
@@ -140,7 +140,7 @@ describe("metadata maps", () => {
   });
 
   it("unknown status falls back to unknown label", () => {
-    expect(statusMeta("definitely_fake").label).toBe("Unknown");
+    expect(statusMeta("definitely_fake" as GraphNodeStatus).label).toBe("Unknown");
   });
 });
 

@@ -76,16 +76,6 @@ const findingNode: GraphExplorerNode = {
   source: "enhanced_report",
 };
 
-const observationNode: GraphExplorerNode = {
-  ...ipNode,
-  node_id: "run:r1|observation|sqlmap-on-10-0-0-5",
-  node_type: "observation",
-  value: "sqlmap on 10.0.0.5",
-  properties: { tool: "sqlmap" },
-  status: "unknown",
-  source: "exploit_audit",
-};
-
 const graphResponse = {
   run_id: "r1",
   scope: "run:r1",
@@ -223,7 +213,7 @@ describe("AttackGraphPage", () => {
     await user.type(screen.getByLabelText(/find node in graph/i), "10.0.0.5");
     await user.click(await screen.findByRole("button", { name: /focus 10\.0\.0\.5/i }));
     const before = screen.getByTestId("canvas").getAttribute("data-nodes");
-    await user.click(screen.getByRole("button", { name: /expand neighborhood of selected node by one hop/i }));
+    await user.click(screen.getByRole("button", { name: /expand neighborhood by one hop/i }));
     await waitFor(() => expect(screen.getByTestId("canvas").getAttribute("data-nodes")).not.toBe(before));
     expect(screen.getByTestId("canvas").getAttribute("data-nodes")).toBe(String(Number(before) + 1));
   });

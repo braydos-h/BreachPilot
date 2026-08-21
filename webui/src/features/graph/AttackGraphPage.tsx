@@ -81,9 +81,7 @@ export function AttackGraphPage() {
 
   const handleExpand = useCallback((hops: number) => {
     if (!selectedNodeId || !runId) return;
-    const req = { nodeId: selectedNodeId, hops, ts: Date.now() };
-    lastExpansionTs.current = req.ts;
-    setExpansion(req);
+    setExpansion({ nodeId: selectedNodeId, hops, ts: Date.now() });
   }, [selectedNodeId, runId]);
 
   // Client-side confidence filter (view-only; never mutates graph facts).

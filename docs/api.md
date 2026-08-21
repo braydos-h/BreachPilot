@@ -42,7 +42,14 @@ the CLI uses.
    - [Search Skills](#get-skillssearch)
    - [Run Doctor](#post-diagnosticsdoctor)
    - [Run Self-Test](#post-diagnosticsself-test)
-6. [Run Routes](#run-routes)
+6. [Graph Explorer Routes](#graph-explorer-routes)
+   - [Graph](#get-graph-runsrun_id)
+   - [Summary](#get-graph-runsrun_idsummary)
+   - [Conflicts](#get-graph-runsrun_idconflicts)
+   - [Node](#get-graph-runsrun_idnodesnode_id)
+   - [Neighbors](#get-graph-runsrun_idnodesnode_idneighbors)
+   - [Paths](#get-graph-runsrun_idpaths)
+7. [Run Routes](#run-routes)
    - [Create Run](#post-runs)
    - [List Runs](#get-runs)
    - [Get Run](#get-runsrun_id)
@@ -53,14 +60,14 @@ the CLI uses.
 7. [Decision Routes](#decision-routes)
    - [List Decisions](#get-runsrun_iddecisions)
    - [Answer Decision](#post-runsrun_iddecisionsdecision_id)
-8. [Event Routes](#event-routes)
+9. [Event Routes](#event-routes)
    - [Replay Events](#get-runsrun_idevents)
    - [WebSocket Stream](#ws-ws-v1runsrun_id)
-9. [Data Models](#data-models)
-10. [Event Types](#event-types)
-11. [Config Reference](#config-reference)
-12. [Persistence Schema](#persistence-schema)
-13. [End-to-End Flow](#end-to-end-flow)
+10. [Data Models](#data-models)
+11. [Event Types](#event-types)
+12. [Config Reference](#config-reference)
+13. [Persistence Schema](#persistence-schema)
+14. [End-to-End Flow](#end-to-end-flow)
 
 ---
 
@@ -521,6 +528,191 @@ Run the safe localhost smoke test (`tools.self_test.run_self_test`).
 **Response:** `200`
 ```json
 {"exit_code": 0}
+```
+
+---
+
+## Graph Explorer Routes
+
+Source: `tools/api/routes/graph_explorer.py` (backed by `tools/api/graph_service.py`).
+Prefix `/api/v1/graph`, tag `graph-explorer`.
+
+Read-only interactive investigation of the **Attack Graph v2** store that
+`graph_builder` ingests per run from `reports/<run_id>/` (audit + enhanced
+report artifacts). Scope-isolated per run (scope = run id); every query is
+bounded; unknown node ids return `404`. All routes are gated behind
+`api.graph_route: true` in `config.yaml` — when disabled, each returns
+`404 graph_disabled`. Never touches a target; never mutates run artifacts.
+
+**Bounds (authoritative ceilings, clamped server-side):**
+
+| Parameter | Ceiling | Default |
+|---|---|---|
+| `limit` (graph) | 500 | 300 |
+| `max_hops` (neighbors) | 4 | 1 |
+| `max_nodes` (neighbors) | 200 | 50 |
+| `max_length` (paths) | 8 | 4 |
+| `max_paths` (paths) | 8 | 5 |
+
+**Errors:** `graph_disabled` (404), `run_not_found` (404), `node_not_found` (404).
+
+### `GET /graph/runs/{run_id}`
+
+**Auth:** bearer.
+
+Filtered nodes + edges for a run. Unknown enum values in `node_type`/`status`
+are silently ignored (never raise).
+
+| Param | Type | Default | Notes |
+|---|---|---|---|
+| `node_type` | repeated string | — | `NodeType` enum values (`ip`, `host`, `service`, `finding`, `evidence`, …) |
+| `status` | repeated string | — | `NodeStatus` values (`confirmed`, `likely`, `suspected`, `unknown`, `refuted`, `exhausted`) |
+| `q` | string | `""` | substring match on node value |
+| `limit` | int | 300 | clamped to 1–500; `truncated` becomes `true` when hit |
+
+```json
+{
+  "run_id": "r1",
+  "scope": "run:r1",
+  "nodes": [{
+    "node_id": "run:r1|ip|10-0-0-5",
+    "node_type": "ip",
+    "value": "10.0.0.5",
+    "scope": "run:r1",
+    "properties": {},
+    "confidence": 0.9,
+    "first_seen": "2026-08-01T10:00:00Z",
+    "last_seen": "2026-08-01T10:00:00Z",
+    "evidence_refs": [],
+    "observation_count": 0,
+    "contradiction_count": 0,
+    "status": "unknown",
+    "source": "run"
+  }],
+  "edges": [{
+    "edge_id": "…", "source_node_id": "…", "target_node_id": "…",
+    "edge_type": "observed_on", "scope": "run:r1", "properties": {},
+    "confidence": 0.5, "source": "nmap", "first_seen": "t", "last_seen": "t",
+    "evidence_refs": [], "observation_count": 0, "contradiction_count": 0
+  }],
+  "total_nodes": 17,
+  "truncated": false
+}
+```
+
+`node_type` values are the real `tools/intelligence/graph/types.py::NodeType`
+members — never invented: `asset`, `host`, `domain`, `ip`, `service`, `port`,
+`endpoint`, `application`, `technology`, `version`, `identity`, `role`,
+`credential_reference`, `trust_boundary`, `network_segment`,
+`vulnerability_candidate`, `finding`, `hypothesis`, `evidence`, `capability`,
+`security_control`, `observation`. Edge types: `resolves_to`, `hosts`,
+`exposes`, `runs`, `depends_on`, `reachable_from`, `authenticates_to`,
+`has_role`, `trusts`, `related_to`, `supported_by`, `contradicted_by`,
+`derived_from`, `affected_by`, `protected_by`, `connected_to`, `same_as`,
+`observed_on`.
+
+### `GET /graph/runs/{run_id}/summary`
+
+**Auth:** bearer.
+
+Counts + stats chips for the run's **full** graph (independent of the filtered
+view). `highest_degree_node` is `null` when the graph has no edges.
+
+```json
+{
+  "run_id": "r1",
+  "summary": {
+    "nodes": { "ip": 1, "finding": 1 },
+    "edges": { "affected_by": 1 },
+    "total_nodes": 2,
+    "total_edges": 1
+  },
+  "stats": {
+    "hosts": 0, "domains": 0, "ips": 1, "services": 0, "findings": 1,
+    "hypotheses": 0, "evidence": 0, "observations": 1,
+    "vulnerability_candidates": 0,
+    "confirmed": 1, "likely": 0, "refuted": 0,
+    "highest_degree_node": {
+      "node_id": "run:r1|ip|10.0.0.5", "value": "10.0.0.5",
+      "node_type": "ip", "degree": 3
+    },
+    "conflict_count": 0
+  }
+}
+```
+
+### `GET /graph/runs/{run_id}/conflicts`
+
+**Auth:** bearer.
+
+Merge-engine conflicts observed while ingesting this run's artifacts — merge
+conflicts are **never silently hidden**:
+
+```json
+{
+  "run_id": "r1",
+  "conflicts": [{
+    "node_value": "10.0.0.5",
+    "reason": "type conflict: proposed as host, existing as ip",
+    "existing_confidence": 0.5,
+    "proposed_confidence": 0.6,
+    "node_id": "run:r1|ip|10.0.0.5",
+    "scope": "run:r1",
+    "built_at": "2026-08-01T10:00:00Z"
+  }]
+}
+```
+
+### `GET /graph/runs/{run_id}/nodes/{node_id}`
+
+**Auth:** bearer.
+
+Node details plus up to 100 connected edges and their neighbor nodes. Returns
+`404 node_not_found` when the node is unknown or outside the run's scope.
+
+```json
+{
+  "run_id": "r1",
+  "node": { "…same shape as a graph node…" },
+  "edges": [],
+  "neighbors": []
+}
+```
+
+### `GET /graph/runs/{run_id}/nodes/{node_id}/neighbors`
+
+**Auth:** bearer.
+
+Bounded BFS neighborhood **including the start node**. `max_hops` clamps to
+1–4, `max_nodes` to 1–200. Returns `404 node_not_found` for an unknown start
+node.
+
+```json
+{
+  "run_id": "r1",
+  "start_node": { "…" },
+  "nodes": [],
+  "edges": []
+}
+```
+
+### `GET /graph/runs/{run_id}/paths`
+
+**Auth:** bearer.
+
+Bounded simple paths between two nodes. `max_length` clamps to 1–8,
+`max_paths` to 1–8. Unknown endpoints return an empty `paths` array (no
+error). Each step pairs a node with the edge taken to reach it (`edge` is
+`null` for the start step):
+
+```json
+{
+  "run_id": "r1",
+  "paths": [[
+    { "distance": 0, "node": { "…" }, "edge": null },
+    { "distance": 1, "node": { "…" }, "edge": { "…" } }
+  ]]
+}
 ```
 
 ---
