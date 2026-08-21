@@ -34,7 +34,7 @@ import {
 import { StatusBadge } from "@/components/StatusBadge";
 import { CopyButton } from "@/components/CopyButton";
 import { AuditRecordsTable } from "@/components/AuditRecordsTable";
-import { EventList } from "@/components/EventList";
+import { EventViewer } from "@/components/events/EventViewer";
 import { DecisionCard } from "@/components/DecisionCard";
 import { ReconAssessmentCard } from "@/components/ReconAssessmentCard";
 import { AttackGraph } from "@/components/AttackGraph";
@@ -327,7 +327,17 @@ export function RunPage() {
 
       <div className="grid flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="flex-1">
-          <EventList events={events.events} decisions={mergedDecisions} runId={run.data.id} terminal={terminal} className="h-[70vh]" />
+          <EventViewer
+            events={events.events}
+            decisions={mergedDecisions}
+            runId={run.data.id}
+            status={events.status}
+            transport={events.transport}
+            authError={events.authError}
+            dropped={events.dropped}
+            terminal={terminal}
+            className="h-[70vh]"
+          />
         </div>
         <div className="space-y-3">
           <LiveRunSummary events={events.events} />

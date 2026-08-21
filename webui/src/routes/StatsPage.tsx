@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { ApiError } from "@/api/client";
 import { useRuns, useTelemetry } from "@/api/hooks";
-import { isActiveState, type RunListRow, type RunState, type TelemetryRecord, type TelemetrySummary } from "@/api/types";
+import { isActiveState, isTerminalState, type RunListRow, type RunState, type TelemetryRecord, type TelemetrySummary } from "@/api/types";
 import { ErrorState, Skeleton } from "@/components/Loading";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Badge } from "@/components/ui/badge";
@@ -80,8 +80,8 @@ interface StateMeta {
 const STATE_META: Record<RunState, StateMeta> = {
   draft: { label: "Draft", barClass: "bg-muted-foreground/45" },
   awaiting_confirmation: { label: "Awaiting confirmation", barClass: "bg-amber-500/80" },
-  queued: { label: "Queued", barClass: "bg-primary/65" },
-  running: { label: "Running", barClass: "bg-blue-500/80" },
+  queued: { label: "Queued", barClass: "bg-muted-foreground/50" },
+  running: { label: "Running", barClass: "bg-amber-500/80" },
   awaiting_input: { label: "Awaiting input", barClass: "bg-amber-500/80" },
   completed: { label: "Completed", barClass: "bg-emerald-500/85" },
   failed: { label: "Failed", barClass: "bg-destructive/85" },
@@ -239,7 +239,7 @@ export function StatsPage() {
   const failed = stateCounts.get("failed") ?? 0;
   const cancelled = stateCounts.get("cancelled") ?? 0;
   const interrupted = stateCounts.get("interrupted") ?? 0;
-  const terminal = completed + failed + cancelled + interrupted;
+  const terminal = rows.filter((row) => isTerminalState(row.state)).length;
   const successRate = ratioPercent(completed, terminal);
   const llmCalls = summary?.calls ?? 0;
   const llmSuccessRate = summary ? ratioPercent(summary.successful_calls, llmCalls) : null;
@@ -674,7 +674,10 @@ function DailyStackedBarChart({
         <div className="absolute bottom-6 left-8 right-0 top-0 flex gap-1.5">
           {data.map((point) => {
             const stackTotal = segments.reduce((total, segment) => total + safeNonNegative(point.values[segment.key]), 0);
-            const ariaLabelForPoint = `${formatFullDay(point.date)}: ${formatValue(point.total)} total`;
+            const breakdown = segments
+              .map((segment) => `${segment.label} ${formatValue(safeNonNegative(point.values[segment.key]))}`)
+              .join(", ");
+            const ariaLabelForPoint = `${formatFullDay(point.date)}: ${formatValue(point.total)} total, ${breakdown}`;
             return (
               <Tooltip key={point.date}>
                 <TooltipTrigger asChild>

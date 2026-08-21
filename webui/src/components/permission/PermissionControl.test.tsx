@@ -22,11 +22,15 @@ describe("PermissionControl", () => {
 
   it("applies read-only and approve immediately without a confirmation dialog", async () => {
     const user = userEvent.setup();
-    const { onModeChange } = setup();
+    const onModeChange = vi.fn();
+    const { rerender } = render(<PermissionControl mode="read_only" onModeChange={onModeChange} />);
+
     await user.click(screen.getByRole("radio", { name: /Approve/ }));
     expect(onModeChange).toHaveBeenCalledWith("approve");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
+    // Parent adopts the new mode; the control is fully controlled.
+    rerender(<PermissionControl mode="approve" onModeChange={onModeChange} />);
     await user.click(screen.getByRole("radio", { name: /Read-only/ }));
     expect(onModeChange).toHaveBeenCalledWith("read_only");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

@@ -56,12 +56,13 @@ export function PermissionControl({ mode, onModeChange, className }: PermissionC
     setError("");
     try {
       await onModeChange("full_access");
-      setConfirmOpen(false);
     } catch (err) {
-      // Server rejected the change — retain the old displayed mode.
+      // Server rejected the change — retain the old displayed mode and show
+      // the failure inline (the dialog closes so the error is visible).
       setError(err instanceof Error ? err.message : "Failed to enable Full access.");
     } finally {
       setApplying(false);
+      setConfirmOpen(false);
     }
   };
 

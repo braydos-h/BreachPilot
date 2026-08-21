@@ -1,9 +1,9 @@
 import { useNavigate } from "react-router-dom";
-import { Wizard } from "@/components/Wizard";
+import { RunWizard } from "@/components/run-create/RunWizard";
 
 export function NewRunPage() {
   const navigate = useNavigate();
   return (
-    <Wizard onCreated={(runId) => navigate(`/runs/${runId}`)} />
+    <RunWizard onCreated={(runId) => navigate(`/runs/${runId}`)} />
   );
 }
