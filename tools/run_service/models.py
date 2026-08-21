@@ -64,7 +64,22 @@ class DecisionStatus(str, Enum):
 # Run request / preview / result
 # ---------------------------------------------------------------------------
 
-RunMode = Literal["recon", "attack"]
+RunMode = Literal["recon", "attack", "fast"]
+
+
+def is_agent_attack_mode(mode: str) -> bool:
+    """Return True if the mode is attack-capable (attack or fast).
+
+    Fast Mode reuses the existing agent/attack workflow after its parallel
+    recon preset completes. Centralizing the check avoids scattering
+    ``mode in (...)`` across the codebase and prevents recon-only branches
+    from accidentally catching ``fast``.
+    """
+    return mode in {"attack", "fast"}
+
+
+def is_fast_mode(mode: str) -> bool:
+    return mode == "fast"
 
 
 @dataclass
@@ -236,3 +251,11 @@ EVENT_SWARM = "swarm"                     # swarm progress update
 EVENT_ARTIFACT = "artifact"               # file written (reports/audit/etc)
 EVENT_COMPLETION = "completion"
 EVENT_ERROR = "error"
+# Fast Mode events (parallel recon progress).
+EVENT_FAST_RECON_STARTED = "fast_recon_started"
+EVENT_FAST_RECON_TASK_STARTED = "fast_recon_task_started"
+EVENT_FAST_RECON_TASK_COMPLETED = "fast_recon_task_completed"
+EVENT_FAST_RECON_TASK_FAILED = "fast_recon_task_failed"
+EVENT_FAST_RECON_PROGRESS = "fast_recon_progress"
+EVENT_FAST_RECON_COMPLETED = "fast_recon_completed"
+EVENT_AI_TAKEOVER_STARTED = "ai_takeover_started"

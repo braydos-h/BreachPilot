@@ -251,6 +251,19 @@ recon:
   cloud_metadata_probe: false
   snmp_enum: false
   dns_zone_transfer: false
+  fast:
+    enabled: true
+    max_concurrency: 8
+    service_concurrency: 6
+    cve_concurrency: 8
+    per_task_timeout_seconds: 60
+    overall_timeout_seconds: 180
+    tcp_discovery: true
+    udp_top_ports: 50
+    passive_osint: true
+    service_enumeration: true
+    cve_lookup: true
+    cache_ttl_seconds: 300
 opsec:
   enabled: false
   ua_rotation: false
