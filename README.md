@@ -91,6 +91,15 @@ For the full architecture, Flow A/B split, and module map, see
   structured observations; `OutcomeJudge` evaluates them against task
   criteria and persists a terminal `confirmed` / `refuted` / `exhausted`
   verdict. Execution success ≠ evidential success.
+- **Capability model + task graph.** Every attack module declares what it
+  *requires* and *produces*; `find_producers()` resolves missing prerequisites
+  dynamically, `AttackPlan` exposes a real DAG (ready/blocked steps, priority,
+  per-step status/hypothesis), and a shared failure taxonomy
+  (`tools/failure_taxonomy.py`) decides retry-with-params vs. create-prereq vs.
+  switch-capability vs. stop. The agent can inspect its own state and drive the
+  graph through six new MCP tools (`get_assessment_state`, `query_capabilities`,
+  `get_capability_details`, `get_evidence`, `record_hypothesis`, `update_task`)
+  — decisions land in an append-only `decision_log.jsonl` per run.
 - **Tamper-evident audit chain.** Every target-touching action lands in
   `exploit_workspace/<ip>/exploit_audit.jsonl` with SHA256 of generated code.
   Chain validity is verified and surfaced in the WebUI.
@@ -322,6 +331,8 @@ All runtime behavior lives in **`config.yaml`**. Key sections:
 | `threat_intel` | continuous OSV.dev + GitHub Security Advisories + CISA KEV feed ingestion (`search_threat_intel` MCP tool). Advisory-only, never touches the target. `enabled` (lab default `true`), `cache_dir`/`cache_ttl_seconds`, `sources` (osv/ghsa/kev/exploitdb_rss), `max_results`, `github_token_env`. Reuses `cve_lookup`'s KEV catalog. GHSA degrades to osv+kev when `GITHUB_TOKEN` is unset |
 | `swarm` | agents, `parallel_enabled`, `per_phase_concurrency`, `negotiation_rounds` (bounded critic↔exploit loop; 0 = legacy one-shot, 2 = lab default) |
 | `witness` | advisory audit-stream watcher (`enabled`, `log_path`, `poll_interval_seconds`, `escalate_to_event_broker`): flags anomalies mid-run (allowlist breach, PoC escape, perm escalation, prompt injection, DoS drift), never blocks; lab default ON for telemetry |
+| `models.roles` | per-role model routing (`planner`/`executor`/`interpreter`/`code_generator`/`critic`/`summarizer`); empty string = `models.default_alias`, so first-run behavior is unchanged. Consumed by `ModelRouter.get_client_for_role` |
+| `agent` | capability-upgrade toggles + budgets: `task_graph_enabled`, `capability_discovery_enabled`, `state_tools_enabled`, `planner_hints_enabled`, `decision_log_enabled`, `reflection_enabled`, `max_retries_per_task`, `max_actions` (0 = legacy exploit budgets), `generated_code_repair_attempts` — all default to today's behavior |
 | `autonomous` | persistence phase, checkpoint, `adaptive_replan`, `max_cycles` |
 | `orchestrator` | `semantic_memory` (cross-mission lesson consumer for the autonomous orchestrator; lab default `true`, matching `memory.semantic_enabled`) |
 | `recon` | extended enumerators, UDP top-ports, `shodan_api_key` (wired into the `shodan_recon` plugin: passive OSINT, advisory-only), domain resolution |
@@ -429,7 +440,8 @@ Engineering docs in [`docs/`](docs/):
 **Integrators**
 - [Runtime Skills](docs/skills.md): advisory skill pipeline
 - [Plugin Development](docs/plugin-development.md): out-of-tree plugins
-- [Attack Modules](docs/attack-modules.md): pre-packaged exploit logic
+- [Attack Modules](docs/attack-modules.md): pre-packaged exploit logic + capability metadata
+- [Capability Upgrade Design](docs/capability-upgrade-design.md): task graph, hypotheses, failure taxonomy, assessment state (the 28-section upgrade map)
 
 
 **Contributors**

@@ -146,6 +146,47 @@ Inconclusive states can continue only through a new check fingerprint. Outcome
 judgment may stop or redirect work, but it never bypasses scope, risk,
 permission, approval, target-lock, or tool-routing controls.
 
+## Capability Model, Task Graph, and Failure Taxonomy (Flow A)
+
+The Flow A agent loop is wired to behave like: *understand target state →
+build hypotheses → construct a task graph → select capabilities → execute →
+interpret → update state → reflect → choose next action → recover from failure
+→ validate → produce evidence*. Four new/changed seams carry that loop:
+
+- **Capability metadata** (`tools/attack_modules/base.py`): every module
+  declares `requires` / `produces` / `read_only` / `cost` / `phase_hint`.
+  `find_producers(kind)` (`registry.py`) resolves which capability supplies a
+  missing artifact — the dynamic-composition primitive used for
+  prerequisite-recovery scheduling. `applicability_explain(ctx)` returns
+  `ApplicabilityReport(score, reasons, penalties)` without disturbing
+  `applicability()` scoring. `capability_record()` is the superset metadata
+  dict; `to_json()` stays byte-identical.
+- **Task graph** (`tools/attack_planner.py`): `AttackStep` gained
+  `hypothesis`, `priority`, `status` (pending/running/done/failed/blocked/
+  cancelled), `attempt_count`, `failure_class`, `failure_reason`, `capability`,
+  `expected_evidence`, `confidence`, `created_from`. `AttackPlan` gained
+  `ready_steps()` (open steps whose `depends_on` succeeded, priority-ordered),
+  `blocked_steps()` (deps permanently failed/cancelled), `fail_step()`
+  (retryable — does not complete), `reset_step()`, `cancel_step()`,
+  `graph_summary()`. `to_json`/`from_json` stay tolerant (additive keys).
+- **Assessment state** (`tools/assessment_state.py`): per-target
+  `AssessmentState` (goal/phase/hypotheses/notes) persisted to
+  `plans/<ip>_assessment.json`; `aggregate_state()` merges the plan DAG, the
+  newest `recon_result.json`, credential-vault count, and an audit rollup into
+  one compact snapshot. LLM-writable through the `record_hypothesis` /
+  `update_task` MCP tools, which re-validate the target against the allowlist
+  before writing.
+- **Failure taxonomy** (`tools/failure_taxonomy.py`): single deterministic
+  source for "why failed" (`FailureClass`) and "what to do next"
+  (`RecoveryAction` — retry-same / retry-with-params / repair-code /
+  create-prerequisite / switch-capability / gather-info / stop). RetryEngine,
+  the replan prompts, and the reflection taxonomy express on top of it;
+  permanent classes (scope-blocked, false-positive) never retry.
+
+Observability: every outcome-normalized step appends one record to a per-run
+`decision_log.jsonl` (`tools/decision_log.py`) — `{round, tool, outcome,
+failure_class, success, evidence_refs}` fields only, never raw chain-of-thought.
+
 ## Tooling Layer
 
 `tools/` contains the operational helpers:

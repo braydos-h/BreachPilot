@@ -22,10 +22,41 @@ attack knowledge. It has two contracts:
   script generation through the PayloadCrafter when a mutator is supplied).
 
 `ModuleContext` (`base.py:11-17`) carries `target_ip`, `target_os`, `services`
-(list of `{service, port, version}` dicts), `cves`, and the workspace path.
-`ModuleResult` (`base.py:26-141`) is the typed outcome shape the autonomous
+(list of `{service, port, version}` dicts), `cves`, and the workspace path. The
+capability upgrade added defaulted fields the orchestrator threads from
+`AttackState`: `sessions`, `findings`, `hypotheses`, `evidence_refs`,
+`access_achieved`, `privilege_level`, and `phase` — constructors that don't
+supply them keep the ABC defaults.
+`ModuleResult` (`base.py:26-156`) is the typed outcome shape the autonomous
 orchestrator and MCP renderer read; `ModuleResult.to_result()` adapts a legacy
-dict return so old modules keep working unchanged (`base.py:97-141`).
+dict return so old modules keep working unchanged. It gained defaulted
+`failure_class`, `retryable`, `confidence`, `produced_artifacts`, `follow_ups`,
+and `unlocked_capabilities` fields (emitted by `to_dict` only when set, so the
+legacy contract is byte-identical).
+
+### Capability metadata (capability upgrade §1/§19)
+
+Every `AttackModule` subclass declares five additional class attributes so the
+planner can do dynamic composition (find what *produces* a missing artifact)
+and prerequisite gating (find what a module *requires*):
+
+| Attr | Default | Meaning |
+|---|---|---|
+| `requires` | `[]` | Artifacts the module needs before it can run (`credentials`, `foothold`, `admin_priv`, `user_list`, `hash_artifact`, `shell`, …) |
+| `produces` | `[]` | Artifacts the module yields on success (`foothold`, `shell`, `credentials`, `hash_artifact`, `user_list`, `persistence`, `webshell`, `high_priv`, `admin_priv`, …) |
+| `read_only` | `False` | `True` = enumeration/check only, never writes to the target |
+| `cost` | `"medium"` | `low` / `medium` / `high` — operator-attention heuristic |
+| `phase_hint` | `""` | Planning bucket: `recon` / `enumerate` / `exploit` / `escalate` / `loot` / `persist` / `validate` / `pivot` |
+
+`find_producers(artifact_kind)` (`registry.py`) returns the modules whose
+`produces` claims the kind — the dynamic-composition primitive for
+prerequisite-recovery scheduling. `missing_prerequisites(mod, ctx)` reports
+declared `requires` not satisfiable from a `ModuleContext`.
+`capability_record()` (`base.py`) is the superset metadata dict for discovery
+tools; `to_json()` stays byte-identical and does **not** leak the new attrs.
+`applicability_explain(ctx)` returns an `ApplicabilityReport(score, reasons,
+penalties)` while delegating the score to `applicability()`, so subclass
+overrides (ICS destructive zero-gate, `ics_iot` write flags) stay authoritative.
 
 ### Applicability scoring
 
@@ -295,6 +326,12 @@ class MyProbe(AttackModule):
     target_services = ["http", "https"]
     target_ports = [80, 443]
     required_cves = []
+    # Capability metadata (required for find_producers composition + gating):
+    requires = ["credentials"]   # artifacts needed before this can run
+    produces = ["high_priv"]     # artifacts yielded on success
+    read_only = True             # False if it writes to the target
+    cost = "low"
+    phase_hint = "enumerate"
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         script = self.generate_python_script(ctx)
@@ -319,23 +356,30 @@ print(f"probing {{host}}")
 2. **Set metadata**: `name` (stable — tests and orchestrators reference it),
    `description`, `target_services`, `target_ports`, `required_cves`, and
    `target_versions` if version-aware scoring is needed.
-3. **Implement `run(ctx) -> dict`**; override `applicability(ctx)` only if the
+3. **Declare capability metadata**: `requires` (artifacts the module needs),
+   `produces` (artifacts it yields — use the shared vocabulary:
+   `credentials` / `foothold` / `shell` / `user_list` / `hash_artifact` /
+   `admin_priv` / `high_priv` / `persistence` / `webshell`), `read_only`
+   (False only when it actually writes to the target), `cost`, and an explicit
+   `phase_hint` (recon/enumerate/exploit/escalate/loot/persist/validate/pivot).
+   `tests/test_module_capability_metadata_{a,b}.py` assert these are set.
+4. **Implement `run(ctx) -> dict`**; override `applicability(ctx)` only if the
    base scoring is not enough (`docs/extension-guide.md:85-86`).
-4. **Return structured data**: status, script text, suggested commands, or
+5. **Return structured data**: status, script text, suggested commands, or
    workflow instructions as dict keys; never embed credentials in plain output
    (`docs/extension-guide.md:98-100`).
-5. **Re-export** the class from `tools/attack_modules/modules/__init__.py`
+6. **Re-export** the class from `tools/attack_modules/modules/__init__.py`
    (`modules/__init__.py:3-105`) and add it to `__all__`
    (`modules/__init__.py:106-183`).
-6. **Register** the class in `_MODULE_CLASSES` in
+7. **Register** the class in `_MODULE_CLASSES` in
    `tools/attack_modules/registry.py` (`registry.py:87-178`). Out-of-tree:
    use `registry.register_attack_module(cls)` via the plugin system instead
    (`docs/extension-guide.md:102`, `docs/plugin-development.md:153-188`).
-7. **Add tests** to `tests/test_attack_modules.py` covering registry
+8. **Add tests** to `tests/test_attack_modules.py` covering registry
    registration, applicability, run output, and edge cases
    (`docs/extension-guide.md:88`).
-8. **Run the suite**: `python -m pytest tests/ -v` and `ruff check .`
-   (AGENTS.md §Commands).
+9. **Run the suite**: `python -m pytest tests/ -v` and `ruff check .`
+   (`AGENTS.md §Commands`).
 
 Read-only / detection modules should follow the detection-family conventions:
 no `shell_type`/`privilege_level` in results, target-locked to `ctx.target_ip`,
