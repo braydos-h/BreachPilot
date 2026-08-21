@@ -98,28 +98,26 @@ async def get_events(
 @router.get("/runs/{run_id}/events/stream", response_model=None)
 async def stream_events(
     run_id: str,
-    request: Request,
     after: int = Query(0, ge=0),
-    token: str = Query("", description="Bearer token (EventSource cannot set headers)"),
+    auth: str = Depends(_require_auth),
 ) -> StreamingResponse:
     """Server-Sent Events stream: replays from ``after`` then streams live.
 
-    Auth via ``?token=<bearer>`` query param (browser EventSource cannot set
-    Authorization headers). Each event is sent as ``data: {json}\\n\\n``; a
-    ``: heartbeat`` comment keeps the connection alive every 30s.
+    Auth via the standard ``Authorization: Bearer <token>`` header (same as
+    every other API route). The bearer token is never accepted in the query
+    string — tokens must not be placed in URLs/history. Each event is sent as
+    ``data: {json}\\n\\n``; a ``: heartbeat`` comment keeps the connection
+    alive every 30s.
 
     Returns a concrete ``StreamingResponse`` (not the bare ``Response`` base
     class) so FastAPI's OpenAPI schema generator can resolve the return
     annotation without raising ``PydanticUserError`` (ForwardRef 'Response'
     not fully defined), which previously made ``/openapi.json`` return 500.
     """
-    import hmac
     if _PERSISTENCE is None or _PERSISTENCE.get_run(run_id) is None:
         raise HTTPException(status_code=404, detail="Run not found")
     if _EVENTS is None:
         raise HTTPException(status_code=503, detail="Event service unavailable")
-    if not token or not hmac.compare_digest(token, _TOKEN):
-        raise HTTPException(status_code=401, detail="Invalid or missing token")
 
     broker = _EVENTS.get_or_create(run_id)
     subscription = await broker.subscribe(after=after)

@@ -523,11 +523,11 @@ def test_get_single_decision_wrong_run(tmp_path, monkeypatch):
 # ── SSE auth (D4) ────────────────────────────────────────────────────────────
 
 def test_sse_rejects_missing_token(tmp_path, monkeypatch):
+    """SSE stream requires the Authorization: Bearer header (no query token)."""
     client = _make_client(tmp_path, monkeypatch)
     created = _create_run(client)
     resp = client.get(
         f"/api/v1/runs/{created['run_id']}/events/stream?after=0",
-        headers=_auth(),  # auth header doesn't help SSE; needs ?token=
     )
     assert resp.status_code == 401
 
@@ -536,8 +536,19 @@ def test_sse_rejects_wrong_token(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
     created = _create_run(client)
     resp = client.get(
-        f"/api/v1/runs/{created['run_id']}/events/stream?after=0&token=wrong",
-        headers=_auth(),
+        f"/api/v1/runs/{created['run_id']}/events/stream?after=0",
+        headers={"Authorization": "Bearer wrong-token"},
+    )
+    assert resp.status_code == 401
+
+
+def test_sse_rejects_token_in_query_string(tmp_path, monkeypatch):
+    """?token= must no longer authenticate the stream — tokens belong in the
+    Authorization header, never in URLs/history."""
+    client = _make_client(tmp_path, monkeypatch)
+    created = _create_run(client)
+    resp = client.get(
+        f"/api/v1/runs/{created['run_id']}/events/stream?after=0&token=test-token",
     )
     assert resp.status_code == 401
 
@@ -549,7 +560,7 @@ def test_sse_accepts_correct_token(tmp_path, monkeypatch):
     # after replaying buffered events (avoids hanging the TestClient).
     client.post(f"/api/v1/runs/{created['run_id']}/cancel", headers=_auth())
     resp = client.get(
-        f"/api/v1/runs/{created['run_id']}/events/stream?after=0&token=test-token",
+        f"/api/v1/runs/{created['run_id']}/events/stream?after=0",
         headers=_auth(),
     )
     assert resp.status_code == 200
