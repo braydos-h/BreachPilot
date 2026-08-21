@@ -105,7 +105,7 @@ def _write_artifacts(run_dir: Path) -> None:
 
 def _make(tmp_path: Path, runs: dict[str, dict[str, Any]] | None = None):
     reports = tmp_path / "reports"
-    reports.mkdir()
+    reports.mkdir(exist_ok=True)
     if runs is None:
         runs = {"run-1": _sample_run()}
         _write_artifacts(reports / "run-1")
@@ -254,10 +254,9 @@ def test_neighbors_bounded_and_clamped(tmp_path):
 
 def test_neighbors_unknown_node_404(tmp_path):
     client = _make(tmp_path)
-    resp = client.get("/api/v1/graph/runs/run-1/nodes/run%2Fnope/neighbors")
-    assert resp.status_code in (404, 422)
-    if resp.status_code == 404:
-        assert resp.json()["error"]["code"] == "node_not_found"
+    resp = client.get("/api/v1/graph/runs/run-1/nodes/run:nope|ip|1-2-3-4/neighbors")
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "node_not_found"
 
 
 def test_paths_bounded(tmp_path):
