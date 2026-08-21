@@ -361,7 +361,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
     core = parser.add_argument_group("targeting")
     core.add_argument("--target", default="", help="Target IP address or domain to attack or recon")
-    core.add_argument("--mode", choices=("recon", "attack"), default="", help="recon = gather intel, attack = full exploitation")
+    core.add_argument("--mode", choices=("recon", "attack", "fast"), default="", help="recon = gather intel, attack = full exploitation, fast = parallel recon preset then attack")
     core.add_argument("--goal", default="", help="Preset goal name (e.g. backdoor, initial_access, privilege_escalation)")
     core.add_argument("--custom-goal", default="", help="Custom goal description")
     core.add_argument("--config", type=Path, default=Path("config.yaml"), help="Config file (default: config.yaml)")

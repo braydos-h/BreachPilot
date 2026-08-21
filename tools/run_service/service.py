@@ -535,7 +535,7 @@ class AssessmentService:
 
         # Determine mode.
         mode = request.mode
-        if mode not in ("recon", "attack"):
+        if mode not in ("recon", "attack", "fast"):
             raise ValueError(f"Invalid mode: {mode!r}")
 
         # Determine goal (preset/custom). Recon-first and goal selection via
@@ -544,7 +544,8 @@ class AssessmentService:
         goal_engine = self._c.goal_engine_cls()
         goal_name = request.goal_name.strip().lower()
         custom_text = request.custom_goal.strip()
-        risk_profile = "high_authorized_testing" if mode == "attack" else "standard_authorized"
+        from tools.run_service.models import is_agent_attack_mode  # local to avoid cycle
+        risk_profile = "high_authorized_testing" if is_agent_attack_mode(mode) else "standard_authorized"
 
         recon_first = request.recon_first
         if recon_first is None:
@@ -598,12 +599,13 @@ class AssessmentService:
         # Effective settings for preview.
         exploit_cfg = config.get("exploit", {}) or {}
         permission_effective = str(exploit_cfg.get("permission", "read_only"))
-        attack_mode_effective = mode == "attack"
+        from tools.run_service.models import is_agent_attack_mode as _is_attack
+        attack_mode_effective = _is_attack(mode)
         swarm_effective = request.swarm or bool((config.get("swarm", {}) or {}).get("enabled", False))
         parallel_swarm_effective = request.parallel_swarm or bool(
             (config.get("swarm", {}) or {}).get("parallel_enabled", False)
         )
-        destructive = permission_effective == "full_access" and mode == "attack"
+        destructive = permission_effective == "full_access" and _is_attack(mode)
         _models_cfg = config.get("models", {}) if isinstance(config, dict) else {}
         model_label = format_model_choice(
             model_alias, registry=_models_cfg.get("registry", {}), registry_info=_models_cfg.get("info", {})
@@ -729,7 +731,8 @@ class AssessmentService:
 
         # Resolve goal (recon-first / interactive / preset / custom).
         goal_engine = self._c.goal_engine_cls()
-        risk_profile = "high_authorized_testing" if mode == "attack" else "standard_authorized"
+        from tools.run_service.models import is_agent_attack_mode as _is_attack_mode2
+        risk_profile = "high_authorized_testing" if _is_attack_mode2(mode) else "standard_authorized"
         assessment: ReconAssessment | None = None
 
         # Resume state.
@@ -748,7 +751,28 @@ class AssessmentService:
         if _resume_state is not None:
             recon_first = False
 
-        if recon_first:
+        # Fast mode: always runs parallel recon then auto-selects goal if none supplied.
+        if mode == "fast" and _resume_state is None:
+            assessment, goal = await self._fast_recon(
+                request=request,
+                config=config,
+                config_path=config_path,
+                target_ip=target_ip,
+                original_target=original_target,
+                resolved_ip=resolved_ip,
+                resolved_domain=resolved_domain,
+                reports_dir=reports_dir,
+                model_client=model_client,
+                model_alias=model_alias,
+                risk_profile=risk_profile,
+                goal_engine=goal_engine,
+                decision_provider=decision_provider,
+                event_sink=event_sink,
+                cancellation=cancellation,
+            )
+            # Fast recon implies recon_first semantics for downstream context.
+            recon_first = True
+        elif recon_first:
             assessment, goal = await self._recon_first(
                 request=request,
                 config=config,
@@ -793,7 +817,7 @@ class AssessmentService:
         if _resume_state is not None:
             _rg_name, _rg_desc = _resume_state[1], _resume_state[2]
             if _rg_name:
-                _rg_risk = "high_authorized_testing" if mode == "attack" else "standard_authorized"
+                _rg_risk = "high_authorized_testing" if _is_attack_mode2(mode) else "standard_authorized"
                 goal = goal_engine.get(_rg_name, _rg_desc, risk_profile=_rg_risk)
 
         # Build exploit settings.
@@ -893,7 +917,8 @@ class AssessmentService:
         # attack mode surfaces checkpoints; recon mode is read-only propose.
         _goal_box: list[AttackGoal] = [goal]
         _objective_transitions: list[dict[str, Any]] = []
-        _checkpoint_enabled = mode == "attack"
+        from tools.run_service.models import is_agent_attack_mode as _ckpt_attack
+        _checkpoint_enabled = _ckpt_attack(mode)
 
         async def _checkpoint_hook(ctx: Any) -> Any:
             """Build a CAMPAIGN_NEXT_STEP Decision from ``ctx`` and ask the operator."""
@@ -1316,6 +1341,162 @@ class AssessmentService:
 
         return assessment, goal
 
+    async def _fast_recon(
+        self, *, request: RunRequest, config: dict[str, Any], config_path: Path,
+        target_ip: str, original_target: str, resolved_ip: str | None,
+        resolved_domain: str | None, reports_dir: Path, model_client: Any,
+        model_alias: str, risk_profile: str, goal_engine: GoalEngine,
+        decision_provider: DecisionProvider, event_sink: EventSink,
+        cancellation: CancellationToken,
+    ) -> tuple[ReconAssessment, AttackGoal]:
+        """Fast Mode: parallel recon preset, then auto goal + AI takeover.
+
+        - Runs FastReconCoordinator (dependency-aware parallel tasks).
+        - Persists fast_recon.json + recon_assessment.json (resume-aware).
+        - Auto-selects goal if none supplied (highest-ranked compatible).
+        - Emits fast_recon_* events + recon_assessment + goal_suggestions.
+        - Tells the AI not to repeat completed recon (compact summary).
+
+        Reuses the existing MCP session boundary: a short-lived recon session is
+        opened for the preset, then a second session is opened for the agent.
+        Reusing one session would save one boot cycle but requires brittle global
+        state (the session holds target-locked env + tool schemas + policy); the
+        current split keeps the boundary testable and cancellation-safe.
+        """
+        ui.status("FAST MODE: Running parallel recon preset before AI takeover...")
+        ui.divider()
+
+        workspace = Path("exploit_workspace")
+        workspace.mkdir(parents=True, exist_ok=True)
+        http_port = int(config.get("mcp", {}).get("http_port", 8001))
+
+        # Resume: if a prior fast_recon.json is already on disk and recon is
+        # valid, reuse it instead of rescanning (resume should continue with
+        # persisted state). This is distinct from the short-lived cache.
+        resume_assessment: ReconAssessment | None = None
+        fast_json = reports_dir / "fast_recon.json"
+        recon_json = reports_dir / "recon_assessment.json"
+        if recon_json.exists():
+            try:
+                raw = json.loads(recon_json.read_text(encoding="utf-8"))
+                resume_assessment = ReconAssessment.from_dict(raw)
+                ui.info(f"FAST RECON RESUME: loaded assessment from {recon_json}")
+            except Exception:
+                resume_assessment = None
+
+        if resume_assessment is not None and resume_assessment.services:
+            assessment = resume_assessment
+            # fabricate a minimal fast bundle for events
+            await event_sink.emit(EVENT_RECON, {"assessment": assessment.to_dict()})
+        else:
+            # Run coordinator
+            from tools.fast_recon import FastReconConfig, FastReconCoordinator
+
+            fast_cfg = FastReconConfig.from_config(config)
+            coordinator = FastReconCoordinator(
+                config=fast_cfg, reports_dir=reports_dir,
+                event_sink=event_sink, cancellation=cancellation,
+            )
+            assessment = None
+            try:
+                async with self._c.open_session(
+                    transport="http", config_path=config_path, target_ip=target_ip,
+                    exploit_port=http_port, workspace=workspace,
+                    multi_model_enabled=bool(request.multi_model_consult),
+                    active_model_alias=model_alias, soft_fail=True,
+                    original_target=original_target if resolved_domain else None,
+                    resolved_ip=resolved_ip if resolved_domain else None,
+                ) as recon_session:
+                    if recon_session is None:
+                        ui.info("MCP recon unavailable — falling back to UNKNOWN assessment.")
+                        assessment = ReconAssessment(target_ip=target_ip, os_verdict="UNKNOWN", services=[], cve_findings=[])
+                        # persist fallback so resume works
+                        fast_bundle = {"target": target_ip, "recon_complete": False, "warnings": ["MCP unavailable"]}
+                        (reports_dir / "fast_recon.json").write_text(json.dumps(fast_bundle, indent=2), encoding="utf-8")
+                        (reports_dir / "recon_assessment.json").write_text(json.dumps(assessment.to_dict(), indent=2), encoding="utf-8")
+                    else:
+                        fast_result = await coordinator.run(recon_session, target_ip)
+                        assessment = fast_result.assessment or ReconAssessment(
+                            target_ip=target_ip, os_verdict=fast_result.os.get("verdict","UNKNOWN"),
+                            services=fast_result.services, cve_findings=fast_result.cves,
+                        )
+                        # log summary (compact, not raw)
+                        if fast_result.summary_text:
+                            ui.info("Fast Recon summary:\n" + fast_result.summary_text)
+                        if fast_result.cache_hit:
+                            ui.info(f"FAST RECON CACHE HIT: loaded assessment (age < {fast_cfg.cache_ttl_seconds}s)")
+            except _EXC_GROUP_CATCH as exc:
+                log_path = reports_dir / "recon_first_error.log"
+                try:
+                    log_path.write_text("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)), encoding="utf-8")
+                except OSError:
+                    pass
+                ui.warning(f"Fast recon hit an unexpected error: {exc}")
+                if _is_exception_group(exc):
+                    _log_nested_exceptions(exc)
+                assessment = ReconAssessment(target_ip=target_ip, os_verdict="UNKNOWN", services=[], cve_findings=[])
+            if assessment is None:
+                assessment = ReconAssessment(target_ip=target_ip, os_verdict="UNKNOWN", services=[], cve_findings=[])
+
+            ui.display_recon_assessment(assessment)
+            await event_sink.emit(EVENT_RECON, {"assessment": assessment.to_dict()})
+
+        # Goal suggestion + auto-selection (no blocking dialog unless required).
+        suggestions = goal_engine.suggest_goals(assessment, risk_profile)
+        suggestions_path = reports_dir / "goal_suggestions.json"
+        suggestions_path.write_text(json.dumps([s.to_dict() for s in suggestions], indent=2), encoding="utf-8")
+        await event_sink.emit(EVENT_ARTIFACT, {"name": "goal_suggestions.json"})
+        ui.display_goal_suggestions(suggestions)
+        await event_sink.emit("goal_suggestions", {"suggestions": [s.to_dict() for s in suggestions]})
+
+        # If operator supplied a goal, honour it. No blocking prompt.
+        goal: AttackGoal | None = None
+        if request.custom_goal.strip():
+            goal = goal_engine.get("custom", request.custom_goal.strip(), risk_profile=risk_profile)
+        elif request.goal_name.strip().lower() and goal_engine.is_preset(request.goal_name.strip().lower()):
+            goal = goal_engine.get(request.goal_name.strip().lower(), risk_profile=risk_profile)
+        else:
+            # Auto-select highest-ranked compatible goal
+            compatible = [s for s in suggestions if s.compatible]
+            picked = compatible[0] if compatible else (suggestions[0] if suggestions else None)
+            if picked:
+                if getattr(picked, "is_ai_generated", False):
+                    goal = goal_engine.get("custom", picked.description, risk_profile=risk_profile)
+                    goal.name = picked.name
+                else:
+                    goal = goal_engine.get(picked.name, risk_profile=risk_profile)
+                ui.info(f"Fast Mode auto-selected goal: {goal.name} ({picked.exploit_likelihood}, rating {picked.success_rating})")
+                await event_sink.emit("fast_recon_goal_selected", {"goal": goal.name, "description": goal.description, "rating": picked.success_rating, "likelihood": picked.exploit_likelihood})
+            else:
+                goal = goal_engine.get("custom", "Prioritize the highest-value authorized path based on completed recon. Do not repeat reconnaissance already performed.", risk_profile=risk_profile)
+                await event_sink.emit("fast_recon_goal_selected", {"goal": goal.name, "description": goal.description})
+
+        # Tag assessment with chosen goal for resume
+        try:
+            if recon_json.exists():
+                data = json.loads(recon_json.read_text(encoding="utf-8"))
+                data["chosen_goal"] = goal.name
+                data["chosen_goal_description"] = goal.description
+                recon_json.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+        # Persist fast_recon artifact marker if not already
+        if fast_json.exists():
+            await event_sink.emit(EVENT_ARTIFACT, {"name": "fast_recon.json"})
+        await event_sink.emit(EVENT_ARTIFACT, {"name": "recon_assessment.json"})
+
+        # Tell next stage that recon is complete (model-facing hint)
+        await event_sink.emit("ai_takeover_started", {
+            "recon_complete": True,
+            "recon_strategy": "fast",
+            "known_open_ports": assessment.open_ports if assessment else [],
+            "known_services": assessment.services if assessment else [],
+            "recon_artifact": str(recon_json),
+            "compact_summary": (fast_result.summary_text if 'fast_result' in locals() and hasattr(fast_result, 'summary_text') else ""),
+        })
+        ui.status("Fast Recon complete — AI agent taking over with completed recon context (do not repeat discovery unless gap identified).")
+        return assessment, goal
+
     async def _setup_swarm(
         self, *, request: RunRequest, config: dict[str, Any], target_ip: str,
         goal: AttackGoal, mode: str, exploit_settings: ExploitSettings,
@@ -1326,14 +1507,16 @@ class AssessmentService:
         from agent_loop import AgentLoop
 
         exploit_cfg = config.get("exploit", {}) or {}
+        from tools.run_service.models import is_agent_attack_mode as _swarm_is_attack
+        _is_attack = _swarm_is_attack(mode)
         swarm_mission_config = {
             "program_name": f"Swarm: {target_ip}",
             "objective": goal.description or f"Swarm against {target_ip}",
-            "risk_profile": "high_authorized_testing" if mode == "attack" else "standard_authorized",
+            "risk_profile": "high_authorized_testing" if _is_attack else "standard_authorized",
             "allowed_assets": [str(target_ip)],
             "disallowed_assets": [],
             "forbidden_actions": ["denial_of_service", "social_engineering", "physical_attack"],
-            "testing_modes": ["recon", "test", "exploit", "report"] if mode == "attack" else ["recon", "analysis", "report"],
+            "testing_modes": ["recon", "test", "exploit", "report"] if _is_attack else ["recon", "analysis", "report"],
             "rate_limits": {"default_requests_per_second": 2, "max_concurrent_requests": 3},
             "accounts": [],
             "use_swarm": True,

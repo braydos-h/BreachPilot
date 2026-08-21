@@ -62,7 +62,7 @@ def _run_dir(run_id: str) -> Path:
 
 
 _ARTIFACT_WHITELIST = frozenset({
-    "session_summary.md", "run.json", "recon_assessment.json",
+    "session_summary.md", "run.json", "recon_assessment.json", "fast_recon.json",
     "goal_suggestions.json", "activity.jsonl", "exploit_audit.jsonl",
     "events.jsonl", "session_error.log", "recon_first_error.log",
 })
@@ -127,7 +127,7 @@ def _safe_workspace_path(ws_root: Path, rel_path: str) -> Path:
 
 class RunCreateRequest(BaseModel):
     target: str = Field(..., description="Target IP or domain")
-    mode: str = Field("attack", pattern="^(recon|attack)$")
+    mode: str = Field("attack", pattern="^(recon|attack|fast)$")
     goal: str = ""
     custom_goal: str = ""
     recon_first: bool | None = None

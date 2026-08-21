@@ -90,7 +90,7 @@ async def capabilities(auth: str = Depends(_require_auth)) -> dict[str, Any]:
             "manual_tool_calls": True,
         },
         "run_options": {
-            "modes": ["recon", "attack"],
+            "modes": ["recon", "attack", "fast"],
             "kinds": ["agent"],
             "flags": ["swarm", "parallel_swarm", "critic", "reflection", "adaptive_exploits",
                        "long_session", "multi_model_consult", "ultrathink", "recon_first"],
