@@ -32,8 +32,10 @@ export function GraphPathFinder({ runId, nodes, onShowPath, onClose }: GraphPath
   const paths = useGraphPaths(runId, start || null, end || null, maxLength, maxPaths, !!start && !!end);
 
   const showPath = (path: Array<{ distance: number; node: GraphExplorerNode; edge: { edge_id: string } }>) => {
+    // The backend path omits the start node; include it so the overlay shows
+    // the full route (start → first hop is step 1's edge).
     onShowPath(
-      new Set(path.map((s) => s.node.node_id)),
+      new Set([start, ...path.map((s) => s.node.node_id)]),
       new Set(path.filter((s) => s.edge).map((s) => s.edge.edge_id)),
     );
   };

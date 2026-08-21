@@ -702,15 +702,16 @@ node.
 
 Bounded simple paths between two nodes. `max_length` clamps to 1–8,
 `max_paths` to 1–8. Unknown endpoints return an empty `paths` array (no
-error). Each step pairs a node with the edge taken to reach it (`edge` is
-`null` for the start step):
+error). Each path is a list of steps **starting at distance 1** (the start
+node itself is not emitted); each step pairs the reached node with the edge
+traversed to get there:
 
 ```json
 {
   "run_id": "r1",
   "paths": [[
-    { "distance": 0, "node": { "…" }, "edge": null },
-    { "distance": 1, "node": { "…" }, "edge": { "…" } }
+    { "distance": 1, "node": { "…" }, "edge": { "…" } },
+    { "distance": 2, "node": { "…" }, "edge": { "…" } }
   ]]
 }
 ```
