@@ -42,7 +42,8 @@ class AttackGraphService:
 
     def __init__(self, persistence: Any, reports_dir: Path | None = None) -> None:
         self._persistence = persistence
-        self._reports_dir = Path(reports_dir) if reports_dir else Path("reports")
+        inherited = getattr(persistence, "reports_dir", None)
+        self._reports_dir = Path(reports_dir) if reports_dir else (Path(inherited) if inherited else Path("reports"))
         self._cache: dict[str, _Store] = {}
 
     # ── entry lifecycle ───────────────────────────────────────────────────
@@ -247,7 +248,7 @@ class AttackGraphService:
         store = entry.store
         start = store.get_node(node_id)
         if start is None or start.scope != store.scope:
-            return {"node": None, "nodes": [], "edges": [], "max_hops": max_hops}
+            return {"start_node": None, "nodes": [], "edges": []}
         results = store.neighbors(
             node_id,
             max_hops=max(1, min(int(max_hops), _NEIGHBOR_MAX_HOPS)),
