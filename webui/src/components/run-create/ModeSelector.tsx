@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { Check, ScanSearch, Swords } from "lucide-react";
+import { Check, ScanSearch, Swords, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { RunMode } from "@/api/types";
 
@@ -26,6 +26,12 @@ const MODE_OPTIONS: Array<{
     title: "Attack",
     blurb: "Run the autonomous offensive workflow against the selected target.",
   },
+  {
+    value: "fast",
+    icon: Zap,
+    title: "Fast",
+    blurb: "Run optimized parallel recon first, then give the complete recon context to the AI agent.",
+  },
 ];
 
 /** Two compact selectable cards for Recon vs Attack — a visually meaningful
@@ -40,7 +46,7 @@ export function ModeSelector({ value, onChange }: ModeSelectorProps) {
   };
 
   return (
-    <div role="radiogroup" aria-label="Run mode" className="grid gap-3 sm:grid-cols-2">
+    <div role="radiogroup" aria-label="Run mode" className="grid gap-3 sm:grid-cols-3">
       {MODE_OPTIONS.map((m, i) => {
         const Icon = m.icon;
         const selected = value === m.value;

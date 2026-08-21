@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertTriangle, Check, Loader2, Play, ShieldAlert } from "lucide-react";
+import { AlertTriangle, Check, Loader2, Play, ShieldAlert, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -101,7 +101,8 @@ export function RunReview({
   const skillsLabel = skillsMode === "off" ? "Off" : skillsMode.charAt(0).toUpperCase() + skillsMode.slice(1);
   const observerLabel = observerMode.charAt(0).toUpperCase() + observerMode.slice(1);
   const isAttack = mode === "attack";
-  const launchLabel = isAttack ? "Launch Attack" : "Start Recon";
+  const isFast = mode === "fast";
+  const launchLabel = isFast ? "Launch Fast Run" : isAttack ? "Launch Attack" : "Start Recon";
 
   const submitConfirm = (e: React.FormEvent, overrideAnswer?: string) => {
     e.preventDefault();
@@ -131,7 +132,7 @@ export function RunReview({
         <CardContent>
           <dl className="divide-y divide-border/60">
             <Row label="Target" value={target || NONE} editTo="target" onEdit={onEdit} />
-            <Row label="Mode" value={isAttack ? "Attack" : "Recon"} editTo="settings" onEdit={onEdit} />
+            <Row label="Mode" value={isFast ? "Fast" : isAttack ? "Attack" : "Recon"} editTo="settings" onEdit={onEdit} />
             <Row label="Goal" value={goalValue} editTo="settings" onEdit={onEdit} />
             <Row label="Model" value={model || NONE} editTo="settings" onEdit={onEdit} />
             <Row

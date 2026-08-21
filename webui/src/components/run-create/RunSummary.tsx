@@ -1,4 +1,4 @@
-import { Swords } from "lucide-react";
+import { Swords, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { executionProfileLabel, type ExecutionProfileId } from "./profile";
@@ -52,6 +52,7 @@ export function RunSummary({
   const reconLabel =
     reconFirst === null ? "Auto" : reconFirst ? "On" : "Off";
   const isAttack = mode === "attack";
+  const isFast = mode === "fast";
 
   return (
     <Card className="h-fit">
@@ -62,21 +63,23 @@ export function RunSummary({
               "flex h-8 w-8 items-center justify-center rounded-md border",
               isAttack
                 ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                : isFast
+                ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
                 : "border-primary/30 bg-primary/10 text-primary",
             )}
             aria-hidden
           >
-            <Swords className="h-4 w-4" />
+            {isFast ? <Zap className="h-4 w-4" /> : <Swords className="h-4 w-4" />}
           </span>
           <div>
-            <h2 className="text-sm font-semibold">{isAttack ? "Attack run" : "Recon run"}</h2>
+            <h2 className="text-sm font-semibold">{isAttack ? "Attack run" : isFast ? "Fast run" : "Recon run"}</h2>
             <p className="text-xs text-muted-foreground">Live configuration summary</p>
           </div>
         </div>
 
         <dl className="divide-y divide-border/60">
           <Row label="Target" value={target || NONE} />
-          <Row label="Mode" value={mode === "attack" ? "Attack" : "Recon"} />
+          <Row label="Mode" value={mode === "attack" ? "Attack" : mode === "fast" ? "Fast" : "Recon"} />
           <Row label="Goal" value={goalValue} />
           <Row label="Model" value={model || NONE} />
           <Row label="Profile" value={executionProfileLabel(profile)} />

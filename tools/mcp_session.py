@@ -728,7 +728,10 @@ async def _streamable_http_transport(
     from mcp.client.streamable_http import streamable_http_client
 
     headers = {"Authorization": f"Bearer {token}"} if token else None
-    timeout = httpx.Timeout(MCP_BOOT_TIMEOUT_SECONDS, read=300.0)
+    # read must exceed the longest tool timeout (600s msf / some terminal
+    # commands) plus agent idle time between calls, or a slow tool call trips
+    # the SSE/POST read timeout and kills the whole MCP session.
+    timeout = httpx.Timeout(MCP_BOOT_TIMEOUT_SECONDS, read=1800.0)
     async with httpx.AsyncClient(
         follow_redirects=True,
         headers=headers,

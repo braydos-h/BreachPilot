@@ -37,8 +37,12 @@ export function RunWizard({ onCreated }: RunWizardProps) {
   const [step, setStep] = useState<Step>("settings");
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
-  // ?path= query param preselects recon vs attack mode.
-  const modeParam: RunMode = searchParams.get("path") === "attack" ? "attack" : "recon";
+  // ?path= query param preselects recon vs attack vs fast mode.
+  const modeParam: RunMode = (() => {
+    const p = searchParams.get("path");
+    if (p === "attack" || p === "fast") return p;
+    return "recon";
+  })();
   const [mode, setMode] = useState<RunMode>(modeParam);
 
   // Settings state (mirrors the legacy wizard field-for-field).
@@ -123,6 +127,23 @@ export function RunWizard({ onCreated }: RunWizardProps) {
     setPowerUps((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
+  // Fast Mode per-run defaults (performance-oriented, overridable in Advanced).
+  // Applied once when user selects fast; manual edits flip profile to custom.
+  const handleModeChange = (next: RunMode) => {
+    setMode(next);
+    if (next === "fast") {
+      applyingRef.current = true;
+      setReconFirst(true);
+      setObserverMode("hybrid");
+      setPowerUps({
+        swarm: false, parallel_swarm: false, critic: false, reflection: false,
+        adaptive_exploits: false, long_session: false, multi_model_consult: false, ultrathink: false,
+      });
+      applyingRef.current = false;
+      // Don't force profile id; keep standard but per-run fields are fast-optimized.
+    }
+  };
+
   const buildRequest = (): RunCreateRequest => ({
     target: target.trim(),
     mode,
@@ -200,7 +221,7 @@ export function RunWizard({ onCreated }: RunWizardProps) {
   return (
     <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 px-4 py-4 md:px-6 md:py-5">
       <header>
-        <h1 className="text-lg font-semibold">New {mode === "attack" ? "attack" : "recon"} run</h1>
+        <h1 className="text-lg font-semibold">New {mode === "fast" ? "fast" : mode === "attack" ? "attack" : "recon"} run</h1>
         <p className="text-sm text-muted-foreground">Guided setup — mirrors the CLI flow.</p>
       </header>
 
@@ -212,7 +233,7 @@ export function RunWizard({ onCreated }: RunWizardProps) {
 
           {step === "settings" && (
             <div className="space-y-5">
-              <ModeSelector value={mode} onChange={setMode} />
+              <ModeSelector value={mode} onChange={handleModeChange} />
               <GoalSelector
                 mode={mode}
                 goalMode={goalMode}
