@@ -49,6 +49,7 @@ import { RunOutcomeCard } from "@/components/run/RunOutcomeCard";
 import { RunAttentionBanner } from "@/components/run/RunAttentionBanner";
 import { PendingDecisionPanel } from "@/components/run/PendingDecisionPanel";
 import { deriveRunState } from "@/lib/deriveRun";
+import { FastReconProgress } from "@/components/FastReconProgress";
 import { useRunEvents } from "@/api/ws";
 import {
   useAnswerDecision,
@@ -272,6 +273,10 @@ export function RunPage() {
       />
 
       <PhaseTracker derived={derived} runState={currentState as RunState} className="shrink-0 rounded-md border bg-card/40 px-2.5 py-1.5" />
+
+      {(runData.request?.mode === "fast" || runData.preview?.mode === "fast" || (runData as unknown as Record<string, unknown>).mode === "fast") && (
+        <FastReconProgress events={events.events} />
+      )}
 
       <div className="flex min-h-0 flex-1 flex-col gap-2 xl:flex-row xl:overflow-hidden">
         <div className="flex min-w-0 flex-1 flex-col gap-2 xl:min-h-0 xl:overflow-hidden">

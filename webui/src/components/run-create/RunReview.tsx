@@ -156,6 +156,14 @@ export function RunReview({
               </p>
             </div>
           )}
+          {isFast && (
+            <div className="mt-3 flex items-start gap-2 rounded-md border border-cyan-500/25 bg-cyan-500/5 px-3 py-2.5">
+              <Zap className="mt-0.5 h-4 w-4 shrink-0 text-cyan-300" aria-hidden />
+              <p className="text-xs leading-relaxed text-cyan-100/90">
+                Fast runs a bounded, dependency-aware parallel recon preset first, aggregates results, then starts the AI agent with completed recon context to reduce duplicate tool calls and model latency.
+              </p>
+            </div>
+          )}
 
           {createError && !createdRun && (
             <div className="mt-3 flex items-center justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-red-200">
@@ -178,7 +186,7 @@ export function RunReview({
           <Button
             type="button"
             size="lg"
-            className={cn("gap-2", isAttack && "bg-amber-600 text-amber-950 hover:bg-amber-500")}
+            className={cn("gap-2", isAttack && "bg-amber-600 text-amber-950 hover:bg-amber-500", isFast && "bg-cyan-600 text-cyan-950 hover:bg-cyan-500")}
             onClick={onCreate}
             disabled={isCreating}
           >

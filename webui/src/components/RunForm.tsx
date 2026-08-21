@@ -151,7 +151,7 @@ export function RunForm({ className, onCreated }: RunFormProps) {
           <SegmentedControl
             value={mode}
             onChange={(v) => setMode(v as RunMode)}
-            options={[{ value: "recon", label: "Recon" }, { value: "attack", label: "Attack" }]}
+            options={[{ value: "recon", label: "Recon" }, { value: "attack", label: "Attack" }, { value: "fast", label: "Fast" }]}
           />
         </div>
 
