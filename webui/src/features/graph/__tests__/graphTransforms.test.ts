@@ -164,7 +164,7 @@ describe("summaryChips", () => {
   it("summarizes the stat keys used by the UI", () => {
     const chips = summaryChips(stats);
     expect(chips.map((c) => c.label)).toEqual(["Nodes", "Hosts", "Services", "Findings", "Confirmed", "Hypotheses"]);
-    expect(chips.find((c) => c.label === "Nodes")?.value).toBe(12); // 1+0+1+2+3+0+1+4+1
+    expect(chips.find((c) => c.label === "Nodes")?.value).toBe(14); // 1+0+1+2+3+0+2+4+1
   });
 
   it("returns an empty list when stats are undefined", () => {

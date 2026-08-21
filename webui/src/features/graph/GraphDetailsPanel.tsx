@@ -120,10 +120,23 @@ function PropertyRow({ label, value, mono }: { label: string; value: string; mon
   );
 }
 
+// Properties already surfaced in dedicated rows/badges above — don't repeat
+// them here. This is de-duplication, not fabrication.
+const HANDLED_PROP_KEYS = new Set([
+  "cvss_score",
+  "severity",
+  "vuln_class",
+  "exploitation_result",
+  "privilege_level_gained",
+]);
+
 // Render extra properties as label: value pairs. Never fabricate labels.
 function MetadataSection({ properties }: { properties: Record<string, unknown> }) {
   const entries = useMemo(
-    () => Object.entries(properties).filter(([, v]) => v !== undefined && v !== null && v !== ""),
+    () =>
+      Object.entries(properties).filter(
+        ([k, v]) => !HANDLED_PROP_KEYS.has(k) && v !== undefined && v !== null && v !== "",
+      ),
     [properties],
   );
   if (entries.length === 0) return null;

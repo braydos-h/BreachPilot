@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { GraphDetailsPanel } from "@/features/graph/GraphDetailsPanel";
@@ -77,6 +77,10 @@ function renderPanel(nodeId: string | null) {
   return { onSelect, onClose };
 }
 
+beforeEach(() => {
+  mockedUseGraphNode.mockReturnValue({ data: undefined, isLoading: false, error: null } as never);
+});
+
 describe("GraphDetailsPanel", () => {
   it("shows the empty state when no node is selected", () => {
     renderPanel(null);
@@ -88,7 +92,7 @@ describe("GraphDetailsPanel", () => {
     renderPanel("run:r1|node|f-1-sqli");
 
     expect(screen.getByText("F-0001 · SQL injection in login")).toBeInTheDocument();
-    expect(screen.getByText("confirmed")).toBeInTheDocument();
+    expect(screen.getByText("Confirmed")).toBeInTheDocument();
     expect(screen.getByText("critical")).toBeInTheDocument();
     expect(screen.getByText("CVSS 9.8")).toBeInTheDocument();
     expect(screen.getByText("9.80")).toBeInTheDocument(); // confidence
@@ -120,7 +124,9 @@ describe("GraphDetailsPanel", () => {
     mockedUseGraphNode.mockReturnValue({ data: detail(), isLoading: false, error: null } as never);
     const { onSelect } = renderPanel("run:r1|node|f-1-sqli");
     expect(screen.getByText("supported_by")).toBeInTheDocument();
-    await user.click(screen.getByText("ev:nmap:10.0.0.5:abc123:2026-08-01"));
+    // the ref also appears verbatim in the evidence/provenance list, so target
+    // the connected-node button by role, not by text
+    await user.click(screen.getByRole("button", { name: /ev:nmap:10\.0\.0\.5:abc123:2026-08-01/ }));
     expect(onSelect).toHaveBeenCalledWith("run:r1|evidence|ev-nmap-10-0-0-5");
   });
 
