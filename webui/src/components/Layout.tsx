@@ -67,7 +67,7 @@ export function Layout() {
   };
 
   return (
-    <div className="flex min-h-dvh flex-col bg-background text-foreground md:flex-row">
+    <div className="flex min-h-dvh flex-col bg-background text-foreground md:flex-row xl:h-dvh xl:overflow-hidden">
       <aside className="hidden w-56 shrink-0 border-r bg-card/30 md:flex md:flex-col">
         <div className="relative flex items-center gap-2 overflow-hidden border-b px-4 py-4">
           <div className="absolute inset-0 bg-grid-sm bg-radial-fade opacity-40" aria-hidden />
@@ -224,7 +224,7 @@ export function Layout() {
         </nav>
       </header>
 
-      <main className="flex min-w-0 flex-1 flex-col">
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col xl:overflow-hidden">
         {mode === "approve" && (
           <div
             className="flex items-center gap-2 border-b border-yellow-500/30 bg-yellow-500/10 px-4 py-1.5 text-xs text-yellow-300"
@@ -274,7 +274,7 @@ export function Layout() {
             )}
           </div>
         )}
-        <div className="flex-1 animate-fade-in-up" key={location.pathname}>
+        <div className="flex min-h-0 flex-1 flex-col overflow-auto min-w-0 animate-fade-in-up" key={location.pathname}>
           <Outlet />
         </div>
         <footer className="flex items-center justify-between gap-2 border-t px-4 py-2 text-xs text-muted-foreground">

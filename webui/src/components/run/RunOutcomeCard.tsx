@@ -56,16 +56,16 @@ export const RunOutcomeCard = memo(function RunOutcomeCard({
             : "border-border"
       }
     >
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2 text-base">
+      <CardHeader className="px-2.5 py-2 pb-1">
+        <CardTitle className="flex items-center gap-1.5 text-xs">
           {ok ? (
-            <CheckCircle2 className="h-5 w-5 text-emerald-400" aria-hidden />
+            <CheckCircle2 className="h-4 w-4 text-emerald-400" aria-hidden />
           ) : failed ? (
-            <AlertTriangle className="h-5 w-5 text-red-400" aria-hidden />
+            <AlertTriangle className="h-4 w-4 text-red-400" aria-hidden />
           ) : (
-            <Square className="h-4 w-4 text-muted-foreground" aria-hidden />
+            <Square className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
           )}
-          <span>
+          <span className="text-xs">
             {ok
               ? "Run completed"
               : failed
@@ -77,67 +77,66 @@ export const RunOutcomeCard = memo(function RunOutcomeCard({
                     : "Run ended"}
           </span>
           {(cancelled || interrupted) && run.cancelled_at && (
-            <Badge variant="outline" className="text-[10px] font-normal">
+            <Badge variant="outline" className="text-[9px] font-normal leading-none">
               {formatRelative(run.cancelled_at)}
             </Badge>
           )}
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-2.5 text-sm">
+      <CardContent className="space-y-1.5 px-2.5 pb-2 pt-0 text-xs">
         {ok && result.outcome_summary && (
-          <div className="whitespace-pre-wrap break-words rounded-md border border-emerald-500/30 bg-emerald-500/10 p-2.5 text-xs text-emerald-100">
+          <div className="whitespace-pre-wrap break-words rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5 text-[11px] leading-snug text-emerald-100">
             {result.outcome_summary}
           </div>
         )}
         {failed && (
-          <div className="space-y-1.5">
-            <div className="whitespace-pre-wrap break-words rounded-md border border-destructive/40 bg-destructive/10 p-2.5 text-xs text-red-200">
+          <div className="space-y-1">
+            <div className="whitespace-pre-wrap break-words rounded border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-[11px] leading-snug text-red-200">
               {String(result.error ?? run.error ?? "The run ended with an unreported error.")}
             </div>
             {reachedPhase && (
-              <p className="text-xs text-muted-foreground">
-                Reached phase: <span className="font-mono text-foreground">{reachedPhase}</span>
+              <p className="text-[11px] leading-none text-muted-foreground">
+                Reached: <span className="font-mono text-foreground">{reachedPhase}</span>
               </p>
             )}
           </div>
         )}
         {(cancelled || interrupted) && (
-          <p className="text-xs text-muted-foreground">
-            The run stopped at the next agent boundary. Progress up to that point is preserved in the event log
-            below.
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            Stopped at next agent boundary. Progress preserved in log.
           </p>
         )}
 
-        <div className="grid grid-cols-2 gap-2 font-mono text-xs sm:grid-cols-4">
+        <div className="grid grid-cols-4 gap-1 font-mono text-[11px]">
           <OutcomeStat
-            label="duration"
+            label="dur"
             value={derived.elapsedSeconds != null ? fmtElapsed(derived.elapsedSeconds) : "—"}
           />
-          <OutcomeStat label="actions" value={String(result.total_actions ?? derived.actions ?? "—")} />
+          <OutcomeStat label="acts" value={String(result.total_actions ?? derived.actions ?? "—")} />
           <OutcomeStat label="tools" value={String(derived.toolCount)} />
-          <OutcomeStat label="artifacts" value={String(derived.artifacts)} />
+          <OutcomeStat label="arts" value={String(derived.artifacts)} />
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 pt-1">
+        <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
           {(failed || cancelled || interrupted) && (
-            <Button size="sm" onClick={onResume} disabled={resumePending}>
-              {resumePending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+            <Button size="sm" className="h-7 text-xs" onClick={onResume} disabled={resumePending}>
+              {resumePending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
               Resume
             </Button>
           )}
-          <Button size="sm" variant={ok ? "default" : "outline"} onClick={onShowSummary}>
-            View summary
+          <Button size="sm" className="h-7 text-xs" variant={ok ? "default" : "outline"} onClick={onShowSummary}>
+            Summary
           </Button>
-          <Button asChild size="sm" variant="outline">
+          <Button asChild size="sm" variant="outline" className="h-7 text-xs">
             <Link to={`/runs/${run.id}/artifacts`}>
-              <FileStack className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-              Artifacts
+              <FileStack className="mr-1 h-3 w-3" aria-hidden />
+              Arts
             </Link>
           </Button>
           {(finalTokens != null || finalCalls != null) && (
-            <span className="ml-auto inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-              final: {finalTokens != null ? finalTokens.toLocaleString() : "—"} tokens
-              {finalCalls != null ? ` · ${finalCalls} calls` : ""}
+            <span className="ml-auto inline-flex items-center gap-1 text-[10px] leading-none text-muted-foreground">
+              {finalTokens != null ? finalTokens.toLocaleString() : "—"} tok
+              {finalCalls != null ? ` · ${finalCalls}` : ""}
             </span>
           )}
         </div>
@@ -148,8 +147,8 @@ export const RunOutcomeCard = memo(function RunOutcomeCard({
 
 function OutcomeStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="space-y-0.5 rounded-md border bg-card/40 p-1.5">
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+    <div className="space-y-0 rounded border bg-card/40 px-1.5 py-1">
+      <div className="text-[9px] uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className="tabular-nums text-foreground">{value}</div>
     </div>
   );

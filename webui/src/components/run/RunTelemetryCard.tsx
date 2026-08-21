@@ -38,43 +38,52 @@ export const RunTelemetryCard = memo(function RunTelemetryCard({
   derived,
   className,
 }: RunTelemetryCardProps) {
-  const ctxPct = telemetry?.last_ctx_pct ?? null;
-  const ctxWindow = telemetry?.context_window_tokens ?? null;
-  const ctxUsed = telemetry?.last_estimated_context_tokens ?? null;
+  const rawCtxPct = telemetry?.last_ctx_pct;
+  const rawCtxWindow = telemetry?.context_window_tokens;
+  const rawCtxUsed = telemetry?.last_estimated_context_tokens;
+  const rawCalls = telemetry?.calls;
+  const rawTokens = telemetry?.total_tokens ?? derived.tokens ?? null;
+  const ctxPct = typeof rawCtxPct === "number" && Number.isFinite(rawCtxPct) ? rawCtxPct : null;
+  const ctxWindow = typeof rawCtxWindow === "number" && Number.isFinite(rawCtxWindow) ? rawCtxWindow : null;
+  const ctxUsed = typeof rawCtxUsed === "number" && Number.isFinite(rawCtxUsed) ? rawCtxUsed : null;
   const remaining =
-    ctxUsed != null && ctxWindow != null ? Math.max(0, ctxWindow - ctxUsed) : null;
-  const calls = telemetry?.calls ?? null;
-  const tokens = telemetry?.total_tokens ?? derived.tokens ?? null;
-  const ctxSeries = derived.telemetrySeries.map((s) => s.ctxPct).filter((v): v is number => v != null);
-  const tokenSeries = derived.telemetrySeries.map((s) => s.tokens);
-  const hasSpark = derived.telemetrySeries.length >= 2;
+    ctxUsed != null && ctxWindow != null && Number.isFinite(ctxWindow - ctxUsed)
+      ? Math.max(0, ctxWindow - ctxUsed)
+      : null;
+  const calls = typeof rawCalls === "number" && Number.isFinite(rawCalls) ? rawCalls : null;
+  const tokens = typeof rawTokens === "number" && Number.isFinite(rawTokens) ? rawTokens : null;
+  const ctxSeries = derived.telemetrySeries
+    .map((s) => s.ctxPct)
+    .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+  const tokenSeries = derived.telemetrySeries.map((s) => s.tokens).filter((v) => typeof v === "number" && Number.isFinite(v));
+  const hasSpark = tokenSeries.length >= 2 || ctxSeries.length >= 2;
 
   const level = ctxPct != null ? ctxLevel(ctxPct) : null;
   const meta = level ? LEVEL_META[level] : null;
   const barPct = ctxPct != null ? Math.max(0, Math.min(100, Math.round(ctxPct))) : null;
 
   return (
-    <Card className={cn(className)}>
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2 text-sm">
-          <Cpu className="h-4 w-4 text-primary" aria-hidden />
+    <Card className={cn("overflow-hidden", className)}>
+      <CardHeader className="px-2.5 py-2 pb-1">
+        <CardTitle className="flex items-center gap-1.5 text-xs">
+          <Cpu className="h-3.5 w-3.5 text-primary" aria-hidden />
           Telemetry
           {meta && (
-            <Badge variant={meta.badge} className="ml-auto text-[10px]">
+            <Badge variant={meta.badge} className="ml-auto text-[9px] leading-none">
               {meta.label}
             </Badge>
           )}
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-2.5 text-xs">
+      <CardContent className="space-y-2 px-2.5 pb-2 pt-0 text-xs">
         {ctxPct == null ? (
-          <p className="text-muted-foreground">
-            No telemetry yet — the agent reports context usage with the first heartbeat.
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            No telemetry yet.
           </p>
         ) : (
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-              <span>Context window used</span>
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-[11px] leading-none text-muted-foreground">
+              <span>Context</span>
               <span className="font-mono tabular-nums text-foreground">{ctxPct.toFixed(1)}%</span>
             </div>
             <div
@@ -91,15 +100,14 @@ export const RunTelemetryCard = memo(function RunTelemetryCard({
               />
             </div>
             {ctxUsed != null && ctxWindow != null && (
-              <p className="text-[11px] text-muted-foreground">
+              <p className="truncate text-[11px] leading-none text-muted-foreground">
                 <span className="font-mono tabular-nums text-foreground">
                   {formatTokens(ctxUsed)}
                 </span>{" "}
-                of <span className="font-mono tabular-nums">{formatTokens(ctxWindow)}</span>{" "}
+                / <span className="font-mono tabular-nums">{formatTokens(ctxWindow)}</span>{" "}
                 {remaining != null && (
                   <>
-                    · <span className="font-mono tabular-nums text-foreground">{formatTokens(remaining)}</span>{" "}
-                    remaining
+                    · <span className="font-mono tabular-nums text-foreground">{formatTokens(remaining)}</span> left
                   </>
                 )}
               </p>
@@ -108,27 +116,27 @@ export const RunTelemetryCard = memo(function RunTelemetryCard({
         )}
 
         {(tokens != null || calls != null) && (
-          <div className="grid grid-cols-2 gap-2 font-mono">
+          <div className="grid grid-cols-2 gap-1.5 font-mono text-[11px]">
             {tokens != null && (
-              <StatCell label="total tokens" value={tokens.toLocaleString()} />
+              <StatCell label="tokens" value={tokens.toLocaleString()} />
             )}
-            {calls != null && <StatCell label="LLM calls" value={String(calls)} />}
+            {calls != null && <StatCell label="calls" value={String(calls)} />}
           </div>
         )}
 
         {hasSpark && (
-          <div className={cn("grid gap-2", ctxSeries.length >= 2 ? "grid-cols-2" : "grid-cols-1")}>
+          <div className={cn("grid gap-1.5", ctxSeries.length >= 2 ? "grid-cols-2" : "grid-cols-1")}>
             <Sparkline
               label="tokens"
               values={tokenSeries}
-              className="rounded-md border bg-card/40 p-1.5"
+              className="rounded border bg-card/40 p-1"
             />
             {ctxSeries.length >= 2 && (
               <Sparkline
                 label="ctx %"
                 values={ctxSeries}
                 format={(v) => `${v.toFixed(1)}%`}
-                className="rounded-md border bg-card/40 p-1.5"
+                className="rounded border bg-card/40 p-1"
               />
             )}
           </div>
@@ -140,8 +148,8 @@ export const RunTelemetryCard = memo(function RunTelemetryCard({
 
 function StatCell({ label, value }: { label: string; value: string }) {
   return (
-    <div className="space-y-0.5 rounded-md border bg-card/40 p-1.5">
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+    <div className="space-y-0 rounded border bg-card/40 px-1.5 py-1">
+      <div className="text-[9px] uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className="tabular-nums text-foreground">{value}</div>
     </div>
   );

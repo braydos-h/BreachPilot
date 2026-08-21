@@ -27,21 +27,16 @@ export const PendingDecisionPanel = memo(function PendingDecisionPanel({
       id="pending-decisions"
       className="border-yellow-500/40 bg-yellow-500/[0.06]"
     >
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2 text-sm text-yellow-200">
-          <AlertTriangle className="h-4 w-4 animate-pulse" aria-hidden />
-          <span>Run is waiting on the operator</span>
-          <Badge variant="warn" className="ml-auto tabular-nums">
-            {decisions.length} pending
+      <CardHeader className="px-2.5 py-2 pb-1">
+        <CardTitle className="flex items-center gap-1.5 text-xs text-yellow-200">
+          <AlertTriangle className="h-3.5 w-3.5 animate-pulse" aria-hidden />
+          <span>Waiting on operator</span>
+          <Badge variant="warn" className="ml-auto text-[9px] leading-none tabular-nums">
+            {decisions.length}
           </Badge>
         </CardTitle>
-        <p className="text-xs text-muted-foreground">
-          {decisions.length === 1
-            ? "The agent is paused until this decision is answered."
-            : "The agent is paused until these decisions are answered."}
-        </p>
       </CardHeader>
-      <CardContent className="space-y-2">
+      <CardContent className="space-y-1.5 px-2.5 pb-2 pt-0">
         {decisions.map((d) => (
           <DecisionCard
             key={d.id}
