@@ -33,7 +33,7 @@ function detail(overrides: Partial<GraphNodeDetail> = {}): GraphNodeDetail {
     edges: [
       {
         edge_id: "e1",
-        source_node_id: "run:r1|node|f-1-sqli",
+        source_node_id: "run:r1|finding|f-1-sqli",
         target_node_id: "run:r1|evidence|ev-nmap-10-0-0-5",
         edge_type: "supported_by",
         scope: "run:r1",
@@ -95,8 +95,8 @@ describe("GraphDetailsPanel", () => {
     expect(screen.getByText("Confirmed")).toBeInTheDocument();
     expect(screen.getByText("critical")).toBeInTheDocument();
     expect(screen.getByText("CVSS 9.8")).toBeInTheDocument();
-    expect(screen.getByText("9.80")).toBeInTheDocument(); // confidence
-    expect(screen.getByText("run:r1|node|f-1-sqli")).toBeInTheDocument();
+    expect(screen.getByText("0.90")).toBeInTheDocument(); // confidence
+    expect(screen.getByText("run:r1|finding|f-1-sqli")).toBeInTheDocument();
     expect(screen.getByText("r1")).toBeInTheDocument(); // run id
     expect(screen.getByText("verified")).toBeInTheDocument(); // exploitation_result
     expect(screen.getByText("SQL Injection")).toBeInTheDocument(); // vuln_class
