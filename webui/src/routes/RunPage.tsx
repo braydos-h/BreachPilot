@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
-  AlertTriangle,
   ChevronDown,
   ChevronRight,
   ClipboardList,
@@ -9,7 +8,6 @@ import {
   FlaskConical,
   Loader2,
   Network,
-  Play,
   ScanSearch,
   ScrollText,
   Share2,
@@ -245,6 +243,8 @@ export function RunPage() {
 
   const runData = run.data;
   const gotoSummary = () => setTab("summary");
+  const resumeRun = () =>
+    resume.mutate(runData.id, { onSuccess: (data) => navigate(`/runs/${data.run_id}`) });
 
   return (
     <div className="flex flex-col gap-4 p-4 md:p-6">
@@ -258,7 +258,7 @@ export function RunPage() {
         derived={derived}
         onCancelRequest={() => setShowCancel(true)}
         cancelPending={cancel.isPending}
-        onResume={() => resume.mutate(runData.id, { onSuccess: (data) => navigate(`/runs/${data.run_id}`) })}
+        onResume={resumeRun}
         resumePending={resume.isPending}
       />
 
@@ -286,8 +286,8 @@ export function RunPage() {
               run={runData}
               state={currentState as RunState}
               derived={derived}
-              onShowSummary={stateSummary}
-              onResume={() => resume.mutate(runData.id, { onSuccess: (data) => navigate(`/runs/${data.run_id}`) })}
+              onShowSummary={gotoSummary}
+              onResume={resumeRun}
               resumePending={resume.isPending}
             />
           ) : (
