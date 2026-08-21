@@ -11,7 +11,6 @@ Read-only: never touches a target, never mutates run artifacts.
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,7 +18,7 @@ from typing import Any
 from tools.api.graph_builder import build_graph_store, scope_for_run
 from tools.intelligence.graph.merge import GraphMergeConflict
 from tools.intelligence.graph.store import AttackGraphStore
-from tools.intelligence.graph.types import EdgeType, GraphEdge, GraphNode, NodeStatus, NodeType
+from tools.intelligence.graph.types import GraphNode, NodeStatus, NodeType
 
 _CACHE_MAX = 8
 _GRAPH_LIMIT_MAX = 500

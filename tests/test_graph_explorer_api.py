@@ -317,7 +317,7 @@ def test_builder_records_merge_conflict_on_skipped_edge():
     """An edge referencing a missing node is recorded as a conflict, not fatal."""
     from tools.api.graph_builder import _safe_apply
     from tools.intelligence.graph.store import AttackGraphStore
-    from tools.intelligence.graph.types import EdgeType, GraphEdge, GraphUpdate, NodeStatus
+    from tools.intelligence.graph.types import EdgeType, GraphEdge, GraphUpdate
 
     store = AttackGraphStore(":memory:", scope="run:x")
     update = GraphUpdate(
