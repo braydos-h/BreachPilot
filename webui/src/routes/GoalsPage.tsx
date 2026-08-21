@@ -360,7 +360,9 @@ function EmptyGoals({ onClear }: { onClear?: () => void }) {
   return (
     <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed p-8 text-center">
       <SearchX className="h-7 w-7 text-muted-foreground/60" aria-hidden />
-      <p className="text-sm text-muted-foreground">No goals match your filters.</p>
+      <p className="text-sm text-muted-foreground">
+        {onClear ? "No goals match your filters." : "No goals available."}
+      </p>
       {onClear && (
         <Button type="button" size="sm" variant="outline" className="mt-1" onClick={onClear}>
           Clear filters

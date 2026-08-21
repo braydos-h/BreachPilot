@@ -178,11 +178,11 @@ export function Wizard({ onCreated }: WizardProps) {
   }, [paramGoal, goals.data]);
 
   useEffect(() => {
-    if (paramGoalValid && !goal) {
+    if (paramGoalValid && !goal && goalMode !== "custom") {
       setGoalMode("preset");
       setGoal(paramGoalValid);
     }
-  }, [paramGoalValid, goal]);
+  }, [paramGoalValid, goal, goalMode]);
 
   const flags = capabilities.data?.run_options.flags ?? [];
   const skillsList = skills.data?.skills ?? [];
