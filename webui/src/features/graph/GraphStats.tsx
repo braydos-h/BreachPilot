@@ -1,4 +1,4 @@
-import { AlertTriangle, Crosshair, GitMerge } from "lucide-react";
+import { Crosshair, GitMerge } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import type { GraphSummaryResponse } from "@/features/graph/graphTypes";
@@ -9,11 +9,13 @@ export interface GraphStatsProps {
   onOpenConflicts?: () => void;
 }
 
+type ChipTone = "default" | "accent" | "emerald" | "danger";
+
 interface StatChip {
   key: string;
   label: string;
   value: number;
-  tone?: "default" | "accent" | "warn" | "danger";
+  tone?: ChipTone;
   onClick?: () => void;
 }
 
@@ -84,7 +86,7 @@ function Chip({
 }: {
   label: string;
   value: number;
-  tone?: "default" | "accent" | "emerald" | "danger";
+  tone?: ChipTone;
   onClick?: () => void;
   icon?: React.ComponentType<{ className?: string }>;
 }) {

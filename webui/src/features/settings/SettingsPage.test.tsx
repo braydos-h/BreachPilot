@@ -215,7 +215,7 @@ describe("SettingsPage", () => {
     await goTo(user, "Advanced");
     expect(screen.getByText("Danger zone")).toBeInTheDocument();
     expect(screen.getByText("System information")).toBeInTheDocument();
-    expect(screen.getByText("Diagnostics")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Diagnostics" })).toBeInTheDocument();
   });
 
   it("surfaces unknown fields under Advanced with their raw key", async () => {

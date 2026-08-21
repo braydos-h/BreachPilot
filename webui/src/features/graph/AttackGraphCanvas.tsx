@@ -3,6 +3,7 @@ import ReactFlow, {
   Background,
   BackgroundVariant,
   Controls,
+  MarkerType,
   MiniMap,
   ReactFlowProvider,
   useReactFlow,
@@ -18,7 +19,7 @@ import "reactflow/dist/style.css";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/useTheme";
 import { GraphFlowNode, type GraphFlowNodeData } from "@/features/graph/GraphNodeTypes";
-import { edgeMeta, toFlowEdges, toFlowNodes } from "@/features/graph/graphTransforms";
+import { edgeMeta, nodeTypeMeta, toFlowEdges, toFlowNodes } from "@/features/graph/graphTransforms";
 import type { GraphExplorerEdge, GraphExplorerNode } from "@/features/graph/graphTypes";
 
 const nodeTypes = { graph: GraphFlowNode };
@@ -88,8 +89,6 @@ function CanvasInner(props: AttackGraphCanvasProps) {
     }
     return { nodes, edges };
   }, [props.edges, props.selectedNodeId]);
-
-  const pathActive = !!(props.pathNodeIds && props.pathNodeIds.size > 0);
 
   // Merge base + expanded nodes/edges into reactflow state. Only include an
   // edge when both endpoints are present (scope + graph consistency guaranteed
@@ -182,12 +181,11 @@ function CanvasInner(props: AttackGraphCanvasProps) {
           }
         }
 
-        const marker = e.markerEnd as { color?: string } | undefined;
         return {
           ...e,
           label: showLabel ? type : "",
           style: { stroke, strokeWidth: width, opacity, ...(dash ? { strokeDasharray: dash } : {}) },
-          markerEnd: { ...(marker as object), color: stroke },
+          markerEnd: { type: MarkerType.ArrowClosed, color: stroke } as unknown as Edge["markerEnd"],
         };
       }),
     );

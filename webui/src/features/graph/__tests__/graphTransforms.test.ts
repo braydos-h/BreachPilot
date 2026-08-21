@@ -70,9 +70,10 @@ describe("toFlowNodes", () => {
     expect(flow[0].position.y).not.toBe(flow[1].position.y);
   });
 
-  it("falls back to a default style for unknown node types", () => {
+  it("caps node width so the deterministic layout stays dense", () => {
     const flow = toFlowNodes([node({ node_type: "bogus" as GraphExplorerNode["node_type"] })]);
-    expect(flow[0].style?.background).toContain("rgb");
+    expect(flow[0].style?.minWidth).toBe(150);
+    expect(flow[0].style?.maxWidth).toBe(240);
   });
 });
 

@@ -6,7 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { useGraphNode } from "@/features/graph/graphApi";
 import { edgeMeta, nodeTypeMeta, parseEvidenceRef, severityMeta, statusMeta } from "@/features/graph/graphTransforms";
-import type { GraphExplorerEdge, GraphExplorerNode } from "@/features/graph/graphTypes";
+import type { GraphEdgeType, GraphExplorerEdge, GraphExplorerNode } from "@/features/graph/graphTypes";
 
 export interface GraphDetailsPanelProps {
   runId: string;
@@ -273,7 +273,7 @@ function RelationshipsSection({
       </h3>
       <div className="space-y-2">
         {grouped.map(([edgeType, es]) => {
-          const meta = edgeMeta(edgeType);
+          const meta = edgeMeta(edgeType as GraphEdgeType);
           return (
             <div key={edgeType}>
               <div className="mb-0.5 flex items-center gap-1 text-[10px] font-mono uppercase" style={{ color: meta.color }}>

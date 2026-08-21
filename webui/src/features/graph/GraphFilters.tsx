@@ -42,7 +42,6 @@ export function GraphFilters({ filters, onChange, summary }: GraphFiltersProps) 
 
   const [typeQuery, setTypeQuery] = useState("");
   const typeCounts = summary?.summary.nodes;
-  const allSelected = ALL_TYPES.every((t) => filters.nodeTypes.includes(t));
 
   const toggleType = (t: string) =>
     onChange({
