@@ -9,16 +9,19 @@ function messagesFrom(...chunks: string[]): SseMessage[] {
   return out;
 }
 
-async function waitFor(assert: () => void): Promise<void> {
-  for (let i = 0; i < 50; i++) {
+async function waitFor(assert: () => void, timeoutMs = 500): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
     try {
       assert();
       return;
     } catch {
+      if (Date.now() >= deadline) {
+        assert(); // throw the real error once out of time
+      }
       await new Promise((r) => setTimeout(r, 10));
     }
   }
-  assert();
 }
 
 function sseResponse(chunks: string[]): Response {
@@ -156,11 +159,14 @@ describe("streamSSE", () => {
   });
 
   it("reconnects after a transient network failure", async () => {
-    const bodies: Response[] = [
-      sseResponse(['data: {"seq":1}\n\n']),
-      sseResponse(['data: {"seq":2}\n\n']),
-    ];
-    const fetchMock = vi.fn(async () => bodies.shift() ?? sseResponse([""]));
+    let failFirst = true;
+    const fetchMock = vi.fn(async () => {
+      if (failFirst) {
+        failFirst = false;
+        throw new TypeError("network unreachable");
+      }
+      return sseResponse(['data: {"seq":2}\n\n']);
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const events: string[] = [];
@@ -175,14 +181,13 @@ describe("streamSSE", () => {
       onStatus: (s) => statuses.push(s),
     });
 
-    await new Promise((r) => setTimeout(r, 1500));
+    // First retry waits 2s of backoff, so allow a generous poll window.
+    await waitFor(() => expect(events).toContain('{"seq":2}'), 3500);
     controller.abort();
 
-    expect(events).toContain('{"seq":1}');
-    expect(events).toContain('{"seq":2}');
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
     expect(statuses).toContain("reconnecting");
     expect(statuses).toContain("open");
-    expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
   });
 
   it("streams multiple events split across network reads", async () => {
