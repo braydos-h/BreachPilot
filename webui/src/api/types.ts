@@ -13,7 +13,7 @@ export type RunState =
 export type DecisionKind = "start_confirm" | "goal_select" | "tool_approval" | "campaign_next_step";
 export type DecisionStatus = "pending" | "answered" | "denied" | "expired";
 export type RiskTag = "safe" | "gated" | "high";
-export type RunMode = "recon" | "attack";
+export type RunMode = "recon" | "attack" | "fast";
 export type RunKind = "agent";
 export type SkillsMode = "on" | "off" | "hints" | "lookup";
 export type ObserverMode = "heuristic" | "llm" | "hybrid";
@@ -643,7 +643,15 @@ export type EventType =
   | "completion"
   | "error"
   | "title"
-  | "heartbeat";
+  | "heartbeat"
+  | "fast_recon_started"
+  | "fast_recon_task_started"
+  | "fast_recon_task_completed"
+  | "fast_recon_task_failed"
+  | "fast_recon_progress"
+  | "fast_recon_completed"
+  | "fast_recon_goal_selected"
+  | "ai_takeover_started";
 
 export interface RunEvent {
   sequence: number;
