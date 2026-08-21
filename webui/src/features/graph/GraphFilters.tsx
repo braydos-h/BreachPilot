@@ -4,15 +4,14 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { useRuns } from "@/api/hooks";
-import { isActiveState } from "@/api/types";
-import type { RunListRow } from "@/api/types";
+import { cn } from "@/lib/utils";
 import {
   NODE_STATUS_ORDER,
-  NODE_TYPE_ORDER,
+  NODE_TYPE_CATEGORIES,
   nodeTypeMeta,
   statusMeta,
 } from "@/features/graph/graphTransforms";
+import type { GraphSummaryResponse } from "@/features/graph/graphTypes";
 
 export interface GraphFilterState {
   runId: string;
@@ -25,21 +24,25 @@ export interface GraphFilterState {
 export interface GraphFiltersProps {
   filters: GraphFilterState;
   onChange: (patch: Partial<GraphFilterState>) => void;
+  /** Real per-type counts from the run summary — shown when available, never invented. */
+  summary?: GraphSummaryResponse | undefined;
 }
 
-export function GraphFilters({ filters, onChange }: GraphFiltersProps) {
-  const runs = useRuns(50, 0);
-  const rows = runs.data?.runs ?? [];
-  // Runs with graphs (any run may have one) — sort active first, then newest.
-  const sorted = useMemo(
-    () => [...rows].sort((a, b) => (isActiveState(a.state) ? -1 : isActiveState(b.state) ? 1 : 0)),
-    [rows],
-  );
+const ALL_TYPES = NODE_TYPE_CATEGORIES.flatMap((c) => c.types);
+
+// Server-side filters: value search, node types (with real counts from the
+// summary), status, and a client-side minimum-confidence threshold. The run
+// scope selector lives in the page header, not here.
+export function GraphFilters({ filters, onChange, summary }: GraphFiltersProps) {
   const [searchDraft, setSearchDraft] = useState(filters.q);
   useEffect(() => {
     const timer = setTimeout(() => onChange({ q: searchDraft.trim() }), 350);
     return () => clearTimeout(timer);
   }, [searchDraft, onChange]);
+
+  const [typeQuery, setTypeQuery] = useState("");
+  const typeCounts = summary?.summary.nodes;
+  const allSelected = ALL_TYPES.every((t) => filters.nodeTypes.includes(t));
 
   const toggleType = (t: string) =>
     onChange({
@@ -54,27 +57,21 @@ export function GraphFilters({ filters, onChange }: GraphFiltersProps) {
         : [...filters.statuses, s],
     });
 
+  const visibleCategories = useMemo(() => {
+    const needle = typeQuery.trim().toLowerCase();
+    return NODE_TYPE_CATEGORIES.map((cat) => ({
+      ...cat,
+      types: cat.types.filter((t) => {
+        if (!needle) return true;
+        const meta = nodeTypeMeta(t);
+        return meta.label.toLowerCase().includes(needle) || t.toLowerCase().includes(needle);
+      }),
+    })).filter((cat) => cat.types.length > 0);
+  }, [typeQuery]);
+
   return (
     <div className="space-y-4">
-      {/* Run / scope / target filter */}
-      <div className="space-y-1.5">
-        <Label htmlFor="graph-run-select" className="text-xs">Run (scope)</Label>
-        <select
-          id="graph-run-select"
-          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
-          value={filters.runId}
-          onChange={(e) => onChange({ runId: e.target.value })}
-        >
-          <option value="">Select a run…</option>
-          {sorted.map((r) => (
-            <option key={r.id} value={r.id}>
-              {runLabel(r)} — {r.id.slice(0, 8)}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Search by IP / host / domain / service / CVE / finding */}
+      {/* Server-side search by value */}
       <div className="space-y-1.5">
         <Label htmlFor="graph-search" className="text-xs">Search</Label>
         <div className="relative">
@@ -102,24 +99,60 @@ export function GraphFilters({ filters, onChange }: GraphFiltersProps) {
         <p className="text-[10px] text-muted-foreground">Refines the graph server-side by node value.</p>
       </div>
 
-      {/* Node types */}
+      {/* Node types: searchable, grouped, with real counts */}
       <fieldset className="space-y-1.5">
         <legend className="text-xs font-medium text-foreground">Node types</legend>
-        <div className="grid max-h-56 grid-cols-1 gap-1 overflow-y-auto pr-1">
-          {NODE_TYPE_ORDER.map((t) => {
-            const meta = nodeTypeMeta(t);
-            return (
-              <label
-                key={t}
-                className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-xs hover:bg-accent"
-              >
-                <Checkbox checked={filters.nodeTypes.includes(t)} onCheckedChange={() => toggleType(t)} />
-                <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: meta.color }} aria-hidden />
-                <span className="truncate">{meta.label}</span>
-                <span className="ml-auto font-mono text-[10px] text-muted-foreground">{t}</span>
-              </label>
-            );
-          })}
+        <div className="flex items-center gap-1">
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={typeQuery}
+              onChange={(e) => setTypeQuery(e.target.value)}
+              placeholder="Filter types…"
+              aria-label="Filter node types"
+              className="h-7 pl-6 text-xs"
+            />
+          </div>
+          <Button variant="ghost" size="sm" className="h-7 shrink-0 px-2 text-[11px]" onClick={() => onChange({ nodeTypes: ALL_TYPES })}>
+            All
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 shrink-0 px-2 text-[11px]"
+            onClick={() => onChange({ nodeTypes: [] })}
+            disabled={filters.nodeTypes.length === 0}
+          >
+            None
+          </Button>
+        </div>
+        <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+          {visibleCategories.map((cat) => (
+            <div key={cat.key}>
+              <div className="text-[9px] uppercase tracking-wide text-muted-foreground/70">{cat.label}</div>
+              {cat.types.map((t) => {
+                const meta = nodeTypeMeta(t);
+                const count = typeCounts?.[t] ?? 0;
+                const selected = filters.nodeTypes.includes(t);
+                return (
+                  <label
+                    key={t}
+                    className={cn(
+                      "flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-xs hover:bg-accent",
+                      selected && "bg-accent/50",
+                    )}
+                  >
+                    <Checkbox checked={selected} onCheckedChange={() => toggleType(t)} />
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: meta.color }} aria-hidden />
+                    <span className="truncate">{meta.label}</span>
+                    {count > 0 && (
+                      <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">{count}</span>
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+          ))}
         </div>
       </fieldset>
 
@@ -129,9 +162,10 @@ export function GraphFilters({ filters, onChange }: GraphFiltersProps) {
         <div className="grid grid-cols-2 gap-1">
           {NODE_STATUS_ORDER.map((s) => {
             const meta = statusMeta(s);
+            const selected = filters.statuses.includes(s);
             return (
-              <label key={s} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-xs hover:bg-accent">
-                <Checkbox checked={filters.statuses.includes(s)} onCheckedChange={() => toggleStatus(s)} />
+              <label key={s} className={cn("flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-xs hover:bg-accent", selected && "bg-accent/50")}>
+                <Checkbox checked={selected} onCheckedChange={() => toggleStatus(s)} />
                 <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: meta.color }} aria-hidden />
                 <span className="truncate">{meta.label}</span>
               </label>
@@ -160,10 +194,4 @@ export function GraphFilters({ filters, onChange }: GraphFiltersProps) {
       </div>
     </div>
   );
-}
-
-function runLabel(r: RunListRow): string {
-  const target = r.target || r.target_ip || "";
-  const title = r.title || target || "";
-  return title ? `${title} (${target})` : (r.target_ip || r.id.slice(0, 8));
 }

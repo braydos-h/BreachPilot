@@ -1,6 +1,5 @@
 import { memo } from "react";
 import { AlertTriangle, ArrowDown, WifiOff } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import type { WsStatus } from "@/api/ws";
 

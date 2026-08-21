@@ -121,7 +121,6 @@ function argsSummary(args: unknown): string {
  */
 export function deriveRunState(events: RunEvent[]): DerivedRun {
   let phase = "starting";
-  let phaseIndex = -1;
   let lastReachedIndex = -1;
   let round: number | null = null;
   let actions: number | null = null;

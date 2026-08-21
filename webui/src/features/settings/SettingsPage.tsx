@@ -34,7 +34,7 @@ function SettingsPageInner() {
     // Scroll to the field once the category renders (no-op if it's hidden
     // behind "Show advanced settings" — the user lands on the right category).
     requestAnimationFrame(() => {
-      document.getElementById(`setting-${section}-${field}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      document.getElementById(`setting-${section}-${field}`)?.scrollIntoView?.({ behavior: "smooth", block: "center" });
     });
   };
 

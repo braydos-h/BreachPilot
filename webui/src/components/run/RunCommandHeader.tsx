@@ -68,7 +68,7 @@ export const RunCommandHeader = memo(function RunCommandHeader({
             <Badge variant="info" className="gap-1 font-mono text-[10px] uppercase">
               {phase.label}
             </Badge>
-            <ConnectionBadge status={eventsStatus} transportLabel={transportLabel} />
+            <ConnectionBadge state={eventsStatus} transportLabel={transportLabel} />
           </div>
 
           <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">

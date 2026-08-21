@@ -826,7 +826,7 @@ function NavigatorResult({ result }: { result: string }) {
   );
 }
 
-function KeyReviewResult({ result, title }: { result: string; title: string }) {
+function KeyValueResult({ result, title }: { result: string; title: string }) {
   const status = result.startsWith(`${title}: COMPLETED`) ? "success"
     : result.startsWith(`${title}: BLOCKED`) ? "warn"
     : result.startsWith(`${title}: DISABLED`) ? "muted"
