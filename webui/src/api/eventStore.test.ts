@@ -104,4 +104,34 @@ describe("eventStore", () => {
     eventStore.clear(id);
     expect(eventStore.get(id)).toBeUndefined();
   });
+
+  it("tracks dropped count seeded from server-side omitted history", () => {
+    const id = rid();
+    // 3,427 older events exist server-side; tail seeded events start at seq 3428.
+    eventStore.set(id, Array.from({ length: 1000 }, (_, i) => ev(i + 3428, id)), 4427, 3427);
+    const entry = eventStore.get(id);
+    expect(entry?.dropped).toBe(3427);
+    expect(entry?.events[0].sequence).toBe(3428);
+  });
+
+  it("increments dropped as live appends overflow the window", () => {
+    const id = rid();
+    eventStore.set(id, Array.from({ length: 1000 }, (_, i) => ev(i + 1, id)), 1000, 0);
+    expect(eventStore.get(id)?.dropped).toBe(0);
+    // Overflow by 2 events: both the new ones keep the newest window.
+    eventStore.append(id, ev(1001, id));
+    eventStore.append(id, ev(1002, id));
+    const entry = eventStore.get(id);
+    expect(entry?.events.length).toBe(1000);
+    expect(entry?.events[0].sequence).toBe(3);
+    expect(entry?.events[999].sequence).toBe(1002);
+    expect(entry?.dropped).toBe(2);
+  });
+
+  it("reset clears dropped alongside events", () => {
+    const id = rid();
+    eventStore.set(id, [ev(1, id)], 1, 99);
+    eventStore.clear(id);
+    expect(eventStore.get(id)).toBeUndefined();
+  });
 });

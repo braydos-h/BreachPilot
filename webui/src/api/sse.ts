@@ -163,7 +163,6 @@ export function streamSSE(options: StreamSseOptions): SseHandle {
   let attempt = 0;
   let activeController: AbortController | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  let lastEventId: string | null = null;
 
   const emitStatus = (state: SseConnectionState) => options.onStatus?.(state);
   const fatal = (error: SseFatalError) => {
@@ -230,20 +229,11 @@ export function streamSSE(options: StreamSseOptions): SseHandle {
         const { done, value } = await reader.read();
         if (done) break;
         const text = decoder.decode(value, { stream: true });
-        for (const message of parser.push(text)) {
-          if (message.id) lastEventId = message.id;
-          options.onEvent(message);
-        }
+        for (const message of parser.push(text)) options.onEvent(message);
       }
       // Flush any bytes still in the decoder, then any unterminated event.
-      for (const message of parser.push(decoder.decode())) {
-        if (message.id) lastEventId = message.id;
-        options.onEvent(message);
-      }
-      for (const message of parser.finish()) {
-        if (message.id) lastEventId = message.id;
-        options.onEvent(message);
-      }
+      for (const message of parser.push(decoder.decode())) options.onEvent(message);
+      for (const message of parser.finish()) options.onEvent(message);
       if (closed || gen !== generation) return;
       if (signal.aborted) {
         close();

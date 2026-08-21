@@ -1,17 +1,20 @@
 import type { RunEvent } from "@/api/types";
+import { appendBounded } from "@/api/eventBuffer";
 
-const MAX_EVENTS = 1000;
 const MAX_RUNS = 10;
 
 interface Entry {
   events: RunEvent[];
   cursor: number;
+  /** Events omitted from this window this session (older than the cap). */
+  dropped: number;
 }
 
 /**
  * Session-only LRU cache of per-run events. Pure in-memory (no React, no
  * localStorage/IndexedDB) so revisiting a run can resume its live stream from
- * the last seen cursor instead of replaying from zero.
+ * the last seen cursor instead of replaying from zero. Shares the same
+ * MAX_EVENTS_PER_RUN bound as the live UI state via appendBounded.
  */
 class EventStore {
   private runs = new Map<string, Entry>();
@@ -25,18 +28,17 @@ class EventStore {
     return entry;
   }
 
-  set(runId: string, events: RunEvent[], cursor: number): void {
-    const trimmed =
-      events.length > MAX_EVENTS ? events.slice(events.length - MAX_EVENTS) : events;
+  set(runId: string, events: RunEvent[], cursor: number, dropped = 0): void {
+    const trimmed = appendBounded([], events);
     this.runs.delete(runId);
-    this.runs.set(runId, { events: trimmed, cursor });
+    this.runs.set(runId, { events: trimmed.events, cursor, dropped });
     this.evict();
   }
 
   append(runId: string, event: RunEvent): void {
     const entry = this.runs.get(runId);
     if (!entry) {
-      this.runs.set(runId, { events: [event], cursor: event.sequence });
+      this.runs.set(runId, { events: [event], cursor: event.sequence, dropped: 0 });
       this.evict();
       return;
     }
@@ -44,10 +46,9 @@ class EventStore {
     entry.cursor = event.sequence;
     // Immutable append so a caller holding the previous array (e.g. React
     // state) is never mutated in place.
-    entry.events =
-      entry.events.length >= MAX_EVENTS
-        ? [...entry.events.slice(entry.events.length - MAX_EVENTS + 1), event]
-        : [...entry.events, event];
+    const result = appendBounded(entry.events, [event]);
+    entry.events = result.events;
+    entry.dropped += result.dropped;
     this.runs.delete(runId);
     this.runs.set(runId, entry);
   }

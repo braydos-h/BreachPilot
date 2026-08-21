@@ -225,6 +225,7 @@ export function RunPage() {
   const transportLabel =
     events.transport === "sse" ? "SSE"
     : events.transport === "websocket" ? "WS"
+    : events.status === "reconnecting" ? "reconnecting"
     : events.status === "closed" ? "offline"
     : events.status === "connecting" ? "connecting"
     : events.status === "error" ? "error"

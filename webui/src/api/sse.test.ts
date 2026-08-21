@@ -111,7 +111,9 @@ describe("SseParser", () => {
 
 describe("streamSSE", () => {
   it("authenticates with the Authorization header and never puts the token in the URL", async () => {
-    const fetchMock = vi.fn(async () => sseResponse(['data: {"seq":1}\n\n']));
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      sseResponse(['data: {"seq":1}\n\n']),
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const events: string[] = [];
@@ -128,9 +130,9 @@ describe("streamSSE", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).not.toContain("super-secret-token");
     expect(String(url)).not.toContain("token=");
-    const headers = (init as RequestInit).headers as Record<string, string>;
-    expect(headers.Authorization).toBe("Bearer super-secret-token");
-    expect(headers.Accept).toBe("text/event-stream");
+    const headers = init?.headers as Record<string, string> | undefined;
+    expect(headers?.Authorization).toBe("Bearer super-secret-token");
+    expect(headers?.Accept).toBe("text/event-stream");
   });
 
   it("rejects 401 without reconnecting", async () => {

@@ -3,9 +3,11 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { apiFetch, clearStoredToken } from "@/api/client";
 import { queryKeys } from "@/api/hooks";
 import { eventStore } from "@/api/eventStore";
+import { MAX_EVENTS_PER_RUN, appendBounded } from "@/api/eventBuffer";
+import { streamSSE, type SseHandle } from "@/api/sse";
 import type { EventReplayResponse, RunDetail, RunEvent, RunState } from "@/api/types";
 
-export type WsStatus = "idle" | "connecting" | "open" | "closed" | "error";
+export type WsStatus = "idle" | "connecting" | "open" | "reconnecting" | "closed" | "error";
 
 interface UseRunEventsOptions {
   after?: number;
@@ -37,15 +39,20 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
   const [status, setStatus] = useState<WsStatus>("idle");
   const [authError, setAuthError] = useState<string>("");
   const [transport, setTransport] = useState<"websocket" | "sse" | "none">("none");
+  const [dropped, setDropped] = useState<number>(0);
 
   const lastSeqRef = useRef<number>(initialAfter);
+  // Mirror of `events` so bounded appends can be computed without reading
+  // stale state inside a setState updater (kept pure and StrictMode-safe).
+  const eventsRef = useRef<RunEvent[]>([]);
+  const droppedRef = useRef<number>(0);
   const wsRef = useRef<WebSocket | null>(null);
-  const esRef = useRef<EventSource | null>(null);
+  const sseHandleRef = useRef<SseHandle | null>(null);
+  const sseAbortRef = useRef<AbortController | null>(null);
   const attemptRef = useRef<number>(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closedByUnmountRef = useRef(false);
   const wsFailureCountRef = useRef(0);
-  const sseActiveRef = useRef(false);
   const runIdRef = useRef<string | null>(null);
   const pendingRef = useRef<RunEvent[]>([]);
   const rafRef = useRef<number | null>(null);
@@ -92,7 +99,11 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
     const batch = pendingRef.current;
     if (batch.length === 0) return;
     pendingRef.current = [];
-    setEvents((prev) => [...prev, ...batch]);
+    const result = appendBounded(eventsRef.current, batch);
+    eventsRef.current = result.events;
+    droppedRef.current += result.dropped;
+    setEvents(result.events);
+    setDropped(droppedRef.current);
   }, []);
 
   const scheduleFlush = useCallback(() => {
@@ -109,7 +120,7 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
         return;
       }
       if (typeof event.sequence === "number") {
-        if (event.sequence <= lastSeqRef.current) return;
+        if (event.sequence <= lastSeqRef.current) return; // dedupe (sequence is the stable ID)
         lastSeqRef.current = event.sequence;
       }
       const id = runIdRef.current ?? event.run_id;
@@ -122,7 +133,11 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
         }
         const pending = pendingRef.current;
         pendingRef.current = [];
-        setEvents((prev) => [...prev, ...pending, event]);
+        const result = appendBounded(eventsRef.current, [...pending, event]);
+        eventsRef.current = result.events;
+        droppedRef.current += result.dropped;
+        setEvents(result.events);
+        setDropped(droppedRef.current);
       } else {
         pendingRef.current.push(event);
         scheduleFlush();
@@ -132,11 +147,12 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
   );
 
   const closeSse = useCallback(() => {
-    if (esRef.current) {
-      esRef.current.close();
-      esRef.current = null;
+    sseHandleRef.current?.close();
+    sseHandleRef.current = null;
+    if (sseAbortRef.current) {
+      sseAbortRef.current.abort();
+      sseAbortRef.current = null;
     }
-    sseActiveRef.current = false;
   }, []);
 
   const connectSse = useCallback(
@@ -144,33 +160,41 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
       closeSse();
       const token = sessionStorage.getItem("netattackai.apiToken.v1") ?? "";
       const loc = window.location;
-      const url =
-        `${loc.origin}/api/v1/runs/${encodeURIComponent(id)}/events/stream` +
-        `?after=${lastSeqRef.current}&token=${encodeURIComponent(token)}`;
-      const es = new EventSource(url);
-      esRef.current = es;
-      sseActiveRef.current = true;
+      const controller = new AbortController();
+      sseAbortRef.current = controller;
       setTransport("sse");
-      setStatus("open");
-
-      es.onmessage = (msg) => {
-        try {
-          const event = JSON.parse(msg.data) as RunEvent;
-          handleEvent(event);
-        } catch {
-          // Ignore malformed frames.
-        }
-      };
-      es.onerror = () => {
-        setStatus("error");
-        closeSse();
-        setTransport("none");
-        if (closedByUnmountRef.current) return;
-        attemptRef.current += 1;
-        reconnectTimerRef.current = setTimeout(() => {
-          if (runIdRef.current === id && !closedByUnmountRef.current) connectSse(id);
-        }, backoffMs(attemptRef.current));
-      };
+      const handle = streamSSE({
+        // Reconnect re-invokes the factory with the freshest cursor.
+        url: () =>
+          `${loc.origin}/api/v1/runs/${encodeURIComponent(id)}/events/stream` +
+          `?after=${lastSeqRef.current}`,
+        token,
+        signal: controller.signal,
+        onEvent: (msg) => {
+          try {
+            const event = JSON.parse(msg.data ?? "") as RunEvent;
+            handleEvent(event);
+          } catch {
+            // Ignore malformed frames; keep the stream alive.
+          }
+        },
+        onStatus: (state) => {
+          if (state === "open") setStatus("open");
+          else if (state === "connecting") setStatus("connecting");
+          else if (state === "reconnecting") setStatus("reconnecting");
+          else setStatus("closed");
+        },
+        onFatal: (error) => {
+          if (error.authError) {
+            setAuthError("Authentication failed. Token rejected by the API.");
+            clearStoredToken();
+          } else {
+            setAuthError(error.message);
+          }
+          setStatus("error");
+        },
+      });
+      sseHandleRef.current = handle;
     },
     [handleEvent, closeSse],
   );
@@ -179,14 +203,23 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
     async (id: string, isCancelled?: () => boolean) => {
       try {
         const res = await apiFetch<EventReplayResponse>(
-          `/runs/${encodeURIComponent(id)}/events?tail=1000`,
+          `/runs/${encodeURIComponent(id)}/events?tail=${MAX_EVENTS_PER_RUN}`,
         );
         if (isCancelled?.()) return;
         const seeded = res.events ?? [];
         const latest = typeof res.latest_sequence === "number" ? res.latest_sequence : 0;
+        // Events older than the tail window still exist server-side; count them
+        // so the UI can say "N older events omitted" without implying deletion.
+        const older =
+          res.has_more_before && typeof res.oldest_sequence === "number"
+            ? res.oldest_sequence - 1
+            : 0;
         lastSeqRef.current = latest;
-        eventStore.set(id, seeded, latest);
+        eventStore.set(id, seeded, latest, older);
+        eventsRef.current = seeded;
+        droppedRef.current = older;
         setEvents(seeded);
+        setDropped(older);
       } catch {
         // Seed failed (run not found / network). Connect from the current
         // cursor anyway; the WS/SSE path surfaces auth/404 errors.
@@ -256,7 +289,10 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
         }
         if (event.code === WS_CLOSE_CURSOR) {
           lastSeqRef.current = 0;
+          eventsRef.current = [];
+          droppedRef.current = 0;
           setEvents([]);
+          setDropped(0);
           eventStore.clear(id);
           void seedEvents(id);
         }
@@ -309,11 +345,17 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
     if (cached) {
       // Reuse the in-memory cursor + events instead of replaying from zero.
       lastSeqRef.current = cached.cursor;
+      eventsRef.current = cached.events;
+      droppedRef.current = cached.dropped;
       setEvents(cached.events);
+      setDropped(cached.dropped);
       connectWs(runId);
     } else {
       lastSeqRef.current = initialAfter;
+      eventsRef.current = [];
+      droppedRef.current = 0;
       setEvents([]);
+      setDropped(0);
       void (async () => {
         await seedEvents(runId, () => cancelled);
         if (cancelled) return;
@@ -341,5 +383,5 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId, enabled]);
 
-  return { events, status, authError, transport, reconnect, lastSeq: lastSeqRef };
+  return { events, status, authError, transport, reconnect, lastSeq: lastSeqRef, dropped };
 }
