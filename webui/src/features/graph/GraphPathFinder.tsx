@@ -1,25 +1,44 @@
 import { useMemo, useState } from "react";
-import { Loader2, Route } from "lucide-react";
+import { Check, Flag, Loader2, MapPin, Route, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { useGraphPaths } from "@/features/graph/graphApi";
-import type { GraphExplorerNode } from "@/features/graph/graphTypes";
+import { edgeMeta, nodeTypeMeta } from "@/features/graph/graphTransforms";
+import type { GraphExplorerNode, GraphPathStep } from "@/features/graph/graphTypes";
 
 export interface GraphPathFinderProps {
   runId: string;
   nodes: GraphExplorerNode[];
+  /** currently selected node — offered as "set as start/end" */
+  selectedNodeId: string | null;
   onShowPath: (nodeIds: Set<string>, edgeIds: Set<string>) => void;
+  onSelectNode: (id: string) => void;
   onClose: () => void;
+  /** an attack-path overlay is currently shown on the canvas */
+  active: boolean;
+  onClearPath: () => void;
 }
 
-// Bounded attack-path mode: pick start/end nodes, request a bounded path
-// (backend clamps max_length to 8 / max_paths to 8). Results are rendered as
-// steps and can be highlighted on the canvas.
-export function GraphPathFinder({ runId, nodes, onShowPath, onClose }: GraphPathFinderProps) {
+// Bounded attack-path mode: pick start/end (from the graph selection or the
+// dropdowns), request a bounded path (backend clamps length to 8 / count to 8).
+// Results render as "start → edge → node → … → destination" chains; the active
+// result is highlighted and re-shown on the canvas when clicked.
+export function GraphPathFinder({
+  runId,
+  nodes,
+  selectedNodeId,
+  onShowPath,
+  onSelectNode,
+  onClose,
+  active,
+  onClearPath,
+}: GraphPathFinderProps) {
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [maxLength, setMaxLength] = useState(4);
   const [maxPaths, setMaxPaths] = useState(5);
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
 
   const options = useMemo(() => {
     const byValue = new Map<string, GraphExplorerNode>();
@@ -29,9 +48,12 @@ export function GraphPathFinder({ runId, nodes, onShowPath, onClose }: GraphPath
     return [...byValue.values()];
   }, [nodes]);
 
+  const selected = nodes.find((n) => n.node_id === selectedNodeId) ?? null;
+
   const paths = useGraphPaths(runId, start || null, end || null, maxLength, maxPaths, !!start && !!end);
 
-  const showPath = (path: Array<{ distance: number; node: GraphExplorerNode; edge: { edge_id: string } }>) => {
+  const showPath = (path: GraphPathStep[], i: number) => {
+    setActiveIndex(i);
     // The backend path omits the start node; include it so the overlay shows
     // the full route (start → first hop is step 1's edge).
     onShowPath(
@@ -40,14 +62,47 @@ export function GraphPathFinder({ runId, nodes, onShowPath, onClose }: GraphPath
     );
   };
 
+  const startNode = options.find((n) => n.node_id === start);
+
   return (
-    <div className="space-y-3 border-t p-3">
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           <Route className="h-3.5 w-3.5" />
           Attack path
         </h3>
-        <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={onClose}>Close</Button>
+        <div className="flex items-center gap-1">
+          {active && (
+            <Button variant="ghost" size="sm" className="h-6 gap-1 px-2 text-[11px] text-emerald-300" onClick={onClearPath}>
+              <X className="h-3 w-3" /> Clear path
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={onClose}>Close</Button>
+        </div>
+      </div>
+
+      {/* Set endpoints from the selected graph node */}
+      <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 justify-start gap-1.5 px-2 text-[11px]"
+          disabled={!selectedNodeId}
+          onClick={() => selected && setStart(selected.node_id)}
+        >
+          <Flag className="h-3 w-3 text-amber-300" aria-hidden />
+          Set selected as start
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 justify-start gap-1.5 px-2 text-[11px]"
+          disabled={!selectedNodeId}
+          onClick={() => selected && setEnd(selected.node_id)}
+        >
+          <MapPin className="h-3 w-3 text-rose-300" aria-hidden />
+          Set selected as destination
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -92,28 +147,71 @@ export function GraphPathFinder({ runId, nodes, onShowPath, onClose }: GraphPath
       {paths.data && paths.data.paths.length > 0 && (
         <ul className="space-y-1.5">
           {paths.data.paths.map((path, i) => (
-            <li key={i} className="rounded border border-border/60 bg-card/40 px-2 py-1.5">
-              <div className="mb-1 flex items-center justify-between">
-                <Badge variant="outline" className="font-mono text-[10px]">path {i + 1} · {path.length} steps</Badge>
-                <Button size="sm" variant="ghost" className="h-5 px-1.5 text-[10px]" onClick={() => showPath(path)}>
-                  Show on graph
-                </Button>
-              </div>
-              <ol className="space-y-0.5">
-                {path.map((step, j) => (
-                  <li key={j} className="flex items-center gap-1.5 text-[11px]">
-                    <span className="w-4 shrink-0 text-right font-mono text-muted-foreground">{step.distance}</span>
-                    <span className="w-px shrink-0 self-stretch bg-border" aria-hidden />
-                    <span className="truncate font-mono" title={step.node.value}>{step.node.value}</span>
-                    <span className="ml-auto shrink-0 font-mono text-[9px] text-muted-foreground">{step.node.node_type}</span>
-                  </li>
-                ))}
-              </ol>
+            <li key={i}>
+              <button
+                type="button"
+                onClick={() => showPath(path, i)}
+                aria-pressed={i === activeIndex}
+                className={cn(
+                  "w-full rounded-md border px-2 py-1.5 text-left transition-colors",
+                  i === activeIndex
+                    ? "border-emerald-500/50 bg-emerald-500/10"
+                    : "border-border/60 bg-card/40 hover:border-emerald-500/30",
+                )}
+              >
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <Badge variant="outline" className="font-mono text-[10px]">
+                    path {i + 1} · {path.length} {path.length === 1 ? "hop" : "hops"}
+                  </Badge>
+                  <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                    {i === activeIndex && (
+                      <span className="inline-flex items-center gap-0.5 text-emerald-300">
+                        <Check className="h-3 w-3" /> on graph
+                      </span>
+                    )}
+                    Click to show
+                  </span>
+                </div>
+                <PathChain start={startNode} steps={path} />
+              </button>
             </li>
           ))}
         </ul>
       )}
     </div>
+  );
+}
+
+function PathChain({ start, steps }: { start: GraphExplorerNode | undefined; steps: GraphPathStep[] }) {
+  const edges = steps.filter((s) => s.edge).map((s) => edgeMeta(s.edge.edge_type));
+  return (
+    <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-[11px]">
+      {start && <NodeName node={start} />}
+      {steps.map((step, j) => (
+        <span key={j} className="flex items-center gap-1">
+          <span className="text-emerald-400" aria-hidden>→</span>
+          {edges[j] && (
+            <span className="text-[9px] text-muted-foreground" title={edges[j].label}>
+              {edges[j].label}
+            </span>
+          )}
+          <span className="text-emerald-400" aria-hidden>→</span>
+          <NodeName node={step.node} />
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function NodeName({ node }: { node: GraphExplorerNode }) {
+  const meta = nodeTypeMeta(node.node_type);
+  return (
+    <span className="inline-flex max-w-full items-center gap-1">
+      <span className="truncate font-mono" title={node.value}>{node.value}</span>
+      <span className="shrink-0 font-mono text-[8px] uppercase text-muted-foreground" style={{ color: meta.color }}>
+        {meta.label}
+      </span>
+    </span>
   );
 }
 
