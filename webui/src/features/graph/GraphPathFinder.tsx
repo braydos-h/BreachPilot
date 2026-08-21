@@ -13,7 +13,6 @@ export interface GraphPathFinderProps {
   /** currently selected node — offered as "set as start/end" */
   selectedNodeId: string | null;
   onShowPath: (nodeIds: Set<string>, edgeIds: Set<string>) => void;
-  onSelectNode: (id: string) => void;
   onClose: () => void;
   /** an attack-path overlay is currently shown on the canvas */
   active: boolean;
@@ -29,7 +28,6 @@ export function GraphPathFinder({
   nodes,
   selectedNodeId,
   onShowPath,
-  onSelectNode,
   onClose,
   active,
   onClearPath,

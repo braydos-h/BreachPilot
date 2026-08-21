@@ -55,7 +55,7 @@ function SettingsPageInner() {
           <div className="ml-auto flex items-center gap-2">
             <Button size="sm" variant="outline" onClick={() => setCategory("advanced")}>
               <Stethoscope className="h-4 w-4" />
-              Run doctor
+              Diagnostics
             </Button>
             <SettingsSearch onSelect={onSearchSelect} />
           </div>
