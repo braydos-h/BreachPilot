@@ -14,17 +14,9 @@ import yaml
 
 from tools.api_key_store import DEFAULT_API_KEY_FILE, bootstrap_api_keys
 from tools.attack_ui import AttackUi
+from tools.kernel.config import load_config  # canonical; re-export for back-compat
 
 ui = AttackUi(plain=False)
-
-def load_config(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    with path.open("r", encoding="utf-8") as handle:
-        loaded = yaml.safe_load(handle) or {}
-    if not isinstance(loaded, dict):
-        raise ValueError(f"{path} must contain a YAML mapping.")
-    return loaded
 
 
 def add_target_to_allowlist(path: Path, target_ip: str) -> bool:

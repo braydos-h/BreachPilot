@@ -12,7 +12,7 @@ import signal
 from pathlib import Path
 from typing import Any
 
-import yaml
+from tools.kernel.config import load_config
 
 from tools.cve_lookup import CVESearchSettings, NVDClient
 from tools.exploit_search import ExploitSearch, ExploitSearchSettings
@@ -102,17 +102,6 @@ def _shared_nvd_limiter(per_minute: float) -> RateLimiter:
         lim = RateLimiter.from_per_minute(per_minute, burst=1)
         _SHARED_NVD_LIMITERS[per_minute] = lim
     return lim
-
-
-def load_config(path: Path) -> dict[str, Any]:
-    """Load a YAML config mapping, returning an empty dict if missing."""
-    if not path.exists():
-        return {}
-    with path.open("r", encoding="utf-8") as handle:
-        loaded = yaml.safe_load(handle) or {}
-    if not isinstance(loaded, dict):
-        raise ValueError(f"{path} must contain a YAML mapping.")
-    return loaded
 
 
 def build_search(config: dict[str, Any]) -> ExploitSearch:
