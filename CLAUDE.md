@@ -105,11 +105,13 @@ python mcp_exploit_server.py   # defaults: stdio, port 8001
 ```
 The HTTP transport refuses to bind to non-loopback interfaces unless `--allow-public-bind` AND `MCP_ALLOW_PUBLIC_BIND=1` are both set.
 
-### Lint / type-check (opt-in, no CI)
+### Lint / type-check (CI-enforced, repo-wide)
 ```bash
 python -m pip install -e ".[dev]"   # includes ruff
-ruff check .                         # line-length 120, select E/F/W/I
-python -m pytest --cov=tools --cov=main.py --cov=cli.py
+ruff check .                         # must pass (0 errors)
+ruff format --check .                # must pass (0 diffs)
+mypy --follow-imports=skip tools     # must pass (216 files)
+python -m pytest --cov=tools --cov=main --cov=cli
 ```
 
 ## Configuration
@@ -130,7 +132,7 @@ Mission scope (allowed/disallowed assets, forbidden_actions, risk_profile, testi
 
 ## High-Level Architecture
 
-Two parallel control flows exist in the same checkout and are partially redundant by design. Knowing which one is in play matters when reading any file.
+Two control flows exist: **Flow A is the active engine**; **Flow B is frozen in `legacy/`** (see `legacy/README.md`). Knowing which one is in play matters when reading any file. Root shims (`cli.py`, `agent_loop.py`, etc.) are `DeprecationWarning` proxies to `legacy.*` for one release.
 
 ### Flow A — Exploitation engine (modern, `main.py` / `app.py`)
 The "what the user actually runs" path. Async, MCP-based, multi-agent-capable.
@@ -184,14 +186,15 @@ operator ──► main.py (or app.py)
 
 `mcp_exploit_server.py` exposes the actual offensive tools: `run_exploit_terminal`, `write_python_file`, `run_python_file`, `search_exploit_db`, `search_web_exploit`, `search_cve_intel`, `run_msf_module`, `read_workspace_file`, `list_workspace`, `check_os`, `generate_payload` (msfvenom), `lateral_exec` (impacket), `dump_credentials`, `kerberoast`, `run_web_scan` (nikto/nuclei/sqlmap/gobuster/... — target-IP allowlist-locked), `run_hash_crack` (hashcat/john — local-only, audit-only). When `multi_model.enabled` is true or `--multi-model-consult` is passed, it also exposes `consult_peer_models`, an advisory-only tool that asks other configured model aliases for ideas without tool schemas. All target-touching tools require a target IP, are workspace-contained under `exploit_workspace/<ip>/`, and write to `exploit_audit.jsonl`.
 
-### Flow B — Legacy research loop (`cli.py` + `agent_loop.py` / `db.py`)
-Database-driven, scope-gated, suitable for headless/CI. Uses SQLite (`research_workspace/research.db`).
+### Flow B — Legacy research loop (`legacy/cli.py` + `legacy/agent_loop.py` / `db.py`) — Frozen
+
+Frozen in `legacy/` — root `cli.py`/`agent_loop.py`/… are `DeprecationWarning` shims for one release (see `legacy/README.md`). Database-driven, scope-gated, suitable for headless/CI. Uses SQLite (`research_workspace/research.db`).
 
 ```
-cli.py command
+legacy/cli.py command
     └─► mission.yaml ─► MissionController.create_from_config()
     └─► ScopeGate.check_scope()  ← every executor action passes through here
-    └─► AgentLoop (agent_loop.py)  ←─ Mission / DB / Memory / Evidence / TargetGraph
+    └─► AgentLoop (legacy/agent_loop.py)  ←─ Mission / DB / Memory / Evidence / TargetGraph
          PlannerAgent → TaskQueue → ExecutorAgent → ObserverAgent
               ↓
          ToolRouter → SafetyReviewer.preflight_check()
