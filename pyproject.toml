@@ -144,9 +144,9 @@ python_version = "3.11"
 warn_return_any = false
 warn_unused_configs = true
 ignore_missing_imports = true
-# ponytail: expand from 8 to all tools/* + main.py/cli.py/db.py/mission.py gradually.
-# Disable the noisiest codes that currently block `mypy tools` (359 errors) until
-# each family is typed incrementally. No `Any` in new code; use Optional/TypedDict.
+# ponytail: `mypy --follow-imports=skip tools` passes (216 files) with these disables.
+# Without disables: 298 errors in 80 files (verified 2026-08-24). Incremental per-family
+# re-enable: remove one disable, fix family, re-measure. No `Any` in new code; use Optional/TypedDict.
 disable_error_code = [
     "no-any-return",
     "attr-defined",
