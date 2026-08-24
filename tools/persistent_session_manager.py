@@ -705,7 +705,7 @@ class ProcessTracker:
             )
             lines = result.stdout.splitlines()
             if pattern:
-                lines = [l for l in lines if pattern.lower() in l.lower()]
+                lines = [line for line in lines if pattern.lower() in line.lower()]
             processes = []
             for line in lines[1:]:  # Skip header
                 parts = line.split(None, 10)

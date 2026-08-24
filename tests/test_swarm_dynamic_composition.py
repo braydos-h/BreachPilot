@@ -286,11 +286,11 @@ def test_known_failure_classes_surfaces_structured_labels() -> None:
     ]
     lines = _known_failure_classes(log)
     # auth_failed -> AUTH_REQUIRED, scope_blocked -> FIREWALL_BLOCK.
-    assert any("smb_relay: AUTH_REQUIRED" in l for l in lines)
-    assert any("redis_rce: FIREWALL_BLOCK" in l for l in lines)
+    assert any("smb_relay: AUTH_REQUIRED" in line for line in lines)
+    assert any("redis_rce: FIREWALL_BLOCK" in line for line in lines)
     # The unmapped-string and no-failure_class entries are skipped.
-    assert all("mystery" not in l for l in lines)
-    assert all("old_tool" not in l for l in lines)
+    assert all("mystery" not in line for line in lines)
+    assert all("old_tool" not in line for line in lines)
 
 
 def test_known_failure_classes_empty_when_no_structured_classes() -> None:

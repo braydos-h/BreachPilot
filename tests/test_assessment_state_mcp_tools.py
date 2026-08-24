@@ -130,7 +130,7 @@ def test_query_capabilities_modules_service_filter(tmp_path: Path) -> None:
     assert out.startswith("CAPABILITIES: scope=modules")
     # every listed module line should be a module that targets http-ish service;
     # we just assert the filter narrows the set and is internally consistent.
-    total_line = [l for l in out.splitlines() if l.startswith("TOTAL:")][0]
+    total_line = [line for line in out.splitlines() if line.startswith("TOTAL:")][0]
     total = int(total_line.split(":", 1)[1].strip())
     assert total >= 0
 

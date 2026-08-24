@@ -336,8 +336,8 @@ def test_find_similar_lessons_skips_corrupt_metadata_json(temp_db):
         )
 
     lessons = mgr.find_similar_lessons("lesson text", top_k=10)
-    ids = {l["id"] for l in lessons}
-    assert any("ssh:8.2:linux" == l["target_signature"] and l["id"] != "LSN-CORRUPT" for l in lessons)
+    ids = {lesson["id"] for lesson in lessons}
+    assert any("ssh:8.2:linux" == lesson["target_signature"] and lesson["id"] != "LSN-CORRUPT" for lesson in lessons)
     assert "LSN-CORRUPT" not in ids
 
 
