@@ -37,24 +37,24 @@ Python-only exploits, Linux attackers get the full Kali toolkit
 
 ## Install (step by step)
 
-### Windows (PowerShell)
+### Windows (one-click)
 
-This repo's primary dev platform. From the repository root:
+This repo's primary dev platform. **New users: double-click `install.bat` in
+Explorer** — no PowerShell knowledge needed. From a terminal:
 
 ```powershell
-# 1. Virtualenv + runtime deps
+# Easiest path (recommended for new users):
+.\install.bat          # one-click: checks/installs Python/Node/Nmap/Ollama via winget,
+                       # creates .venv, installs deps, builds WebUI, pulls models,
+                       # guides OLLAMA_API_KEY setup, runs --doctor, installs `natai`
+.\START.bat            # after install: double-click to launch (WebUI at http://127.0.0.1:8765)
+# Options: install.bat --check  (audit only), --yes (non-interactive), --help, --uninstall
+
+# Manual alternative (if you prefer to do it step by step):
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-
-# 2. Optional: editable install with dev extras (ruff + pytest + coverage)
-python -m pip install -e ".[dev]"
-
-# 3. One-shot bootstrap alternative (venv + deps + nmap/Ollama checks +
-#    model pulls + --doctor + `natai` launcher on PATH)
-.\install.bat
-
-# 4. Configure API keys, then verify
+python -m pip install -e ".[dev]"   # optional: dev extras (ruff + pytest + coverage)
 python main.py --setup-api-keys
 python main.py --doctor
 python main.py --self-test
@@ -62,7 +62,8 @@ python main.py --self-test
 
 `install.bat` is idempotent and non-fatal on missing optional tools; it also
 installs a `natai` command to `%USERPROFILE%\.local\bin` that always runs from
-the repo root (install.bat:124-141). Uninstall with `install.bat --uninstall`.
+the repo root. Uninstall with `install.bat --uninstall`. `START.bat` is a
+double-click launcher that passes args through (e.g. `START.bat --menu`).
 
 ### Linux (make targets / setup-linux.sh)
 
