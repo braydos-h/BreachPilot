@@ -452,16 +452,65 @@ code -> shipped: tools/kernel/{allowlist,audit,workspace} + mcp_shared re-export
 | 10 `attack_modules.py:131` ruff F405 | 131 errors | 22 audit decorators added, but `import *` still 619 F405 overall — deferred to Phase 4 explicit imports | Partial |
 | 4,5,6,7,8,11-14 | unchanged | deferred | — |
 
-**Remaining debt (Phase 4):**
+**Remaining debt (Phase 4):** *(now partially shipped — see §12)*
 
-- De-god `tools/recon_pipeline.py:2385` → `tools/recon/` pkg, `tools/autonomous_orchestrator.py:2720` → `tools/campaign/` pkg, `tools/exploit_agent/loop.py:2215` → <400 + `tools/kernel/parse.py`, `tools/run_service/service.py:1731` cycle break — all with shim imports for 248 tests
-- Expand `pyproject.toml:tool.ruff` +5 files/PR and `tool.mypy` +5 files/PR, add `CONFIG_SCHEMA` drift test for `caldera`/`ics`
-- Phase 6 `pkgutil.iter_modules` for `tools/attack_modules/registry.py:_MODULE_CLASSES` (already has `@register_attack_module` decorator, but literal still 83)
+- ~~De-god `tools/recon_pipeline.py:2385` → `tools/recon/` pkg~~ → **Shim shipped §12** (real body move deferred to keep PR <400)
+- ~~`tools/autonomous_orchestrator.py:2720` → `tools/campaign/` pkg~~ → **Shim shipped §12**
+- ~~`tools/exploit_agent/loop.py:2215` → <400 + `tools/kernel/parse.py`~~ → **Shim shipped §12** (`tools/kernel/parse.py` re-exports `_filter_and_validate_tool_calls` + `_parse_reasoning_block`)
+- Expand `pyproject.toml:tool.ruff` +5 files/PR and `tool.mypy` +5 files/PR, add `CONFIG_SCHEMA` drift test for `caldera`/`ics` — deferred to Phase 5
+- Phase 6 `pkgutil.iter_modules` for `tools/attack_modules/registry.py:_MODULE_CLASSES` (already has `@register_attack_module` decorator, but literal still 83) — deferred to Phase 6
 
 ```
 code -> shipped: collect_tools() single source + decorator validation + read_workspace/_extract_scanner_targets → kernel + 22 @audit_tool fixes + mcp_shared/mcp_exploit_server wiring
       -> skipped: Phase 4 de-god splits, Phase 5 lint/type +5/pr, Phase 6 attack-module auto-discovery
       -> add when Phase 4 lands (tools/recon/ + tools/campaign/ splits)
+```
+
+## 12. Phase 4a Complete — De-god Shims (2026-08-24)
+
+**Status:** Done. Ponytail lazy split — packages + shims, no large code move, <400-line boundary (actual +85 lines). Keeps `from tools.recon_pipeline import ReconPipeline` and `from tools.autonomous_orchestrator import AutonomousOrchestrator` working for 248 tests while new paths are available.
+
+**What shipped (this PR):**
+
+| Artifact | File | Lines | Note |
+|----------|------|-------|------|
+| `tools/recon/__init__.py:13` | new | 28 | Re-exports `ServiceInfo`, `HostReconResult`, `ReconConfig`, `ToolAvailability`, `PrimaryReconScanner`, `SecondaryEnumerator`, `ReconPipeline` from `tools.recon_pipeline` — both old and new paths work |
+| `tools/recon/pipeline.py:8` | new | 8 | `from tools.recon_pipeline import ReconPipeline` shim — body will move here next sub-PR (100 lines orchestrator) |
+| `tools/recon/scanner.py:5` | new | 5 | Shim for `PrimaryReconScanner` |
+| `tools/recon/config.py:7` | new | 7 | Shim for `ReconConfig` etc. |
+| `tools/campaign/__init__.py:28` | new | 28 | Re-exports `AggressionLevel`, `AttackPhase`, `AttackState`, `AttackTask`, `AutonomousOrchestrator`, `TaskStatus` |
+| `tools/campaign/state.py:5` | new | 5 | Shim for `AttackState`, `AttackTask` |
+| `tools/campaign/phases.py:5` | new | 5 | Shim for `AttackPhase` |
+| `tools/campaign/executor.py:5` | new | 5 | Shim for `AttackModuleExecutor` |
+| `tools/kernel/parse.py:14` | new | 14 | Re-exports `_filter_and_validate_tool_calls` (from `tool_calls.py`) + `_parse_reasoning_block` (from `context.py`) for `loop.py` <400 work |
+
+**What was *not* shipped (deferred to keep PR <400):**
+
+- Real body moves: `ReconPipeline` (167 lines) → `tools/recon/pipeline.py`, `PrimaryReconScanner` (575) → `scanner.py`, `SecondaryEnumerator` (1160) → `enrichers.py`, etc. — would be ~1900 lines moved, exceeding 400. Next sub-PR will move `ReconPipeline` only (167 lines) and make `tools/recon_pipeline.py` a shim.
+- `AutonomousOrchestrator` (1551) → `tools/campaign/executor.py` + `AttackState/Task` → `state.py` — deferred.
+- `tools/exploit_agent/loop.py:2215` → <400 — deferred; `tools/kernel/parse.py` is the seam, loop will import from there next.
+
+**Verification (Phase 4a DoD):**
+
+- `python -c "from tools.recon import ReconPipeline; from tools.recon.pipeline import ReconPipeline; from tools.recon_pipeline import ReconPipeline; assert ReconPipeline is not None"` — **ok** (all three paths same object)
+- `python -c "from tools.campaign import AutonomousOrchestrator; from tools.campaign.state import AttackState; from tools.autonomous_orchestrator import AutonomousOrchestrator; assert AutonomousOrchestrator is not None"` — **ok**
+- `python -c "from tools.kernel.parse import _filter_and_validate_tool_calls, _parse_reasoning_block; assert callable(...)"` — **ok**
+- `python -m pytest tests/test_recon_pipeline.py tests/test_autonomous_phase_machine.py tests/test_attack_modules.py -q` — **97 passed**
+- `python -m ruff check tools/recon/ tools/campaign/ tools/kernel/parse.py` — **All checks passed** (F401 via `__all__` + `noqa`)
+- No `scope_gate.py` etc. edited, no allowlist weakened, `pyproject.toml`/`requirements.txt` synced, working tree clean except these 9 new files
+
+**Debt delta vs §6:**
+
+| Rank | Before Phase 4a | After Phase 4a | Delta |
+|------|----------------|---------------|-------|
+| 4 `recon_pipeline:2385` | 2385 LOC god, no package | 2385 LOC + `tools/recon/` shims (real move deferred) | **Shim available, still god — next sub-PR moves body** |
+| 5 `autonomous_orchestrator:2720` | 2720 LOC god | 2720 LOC + `tools/campaign/` shims | **Shim available** |
+| 6 `loop.py:2215` | 2215, inline parse | `tools/kernel/parse.py` seam available, loop still 2215 | **Seam available** |
+
+```
+code -> shipped: tools/recon/{__init__,pipeline,scanner,config} + tools/campaign/{__init__,state,phases,executor} + tools/kernel/parse shims (all re-exports, no body moves)
+      -> skipped: Phase 4b real body moves (ReconPipeline 167 → pipeline.py, AttackState 173 → state.py, loop.py <400), Phase 5 lint/type, Phase 6 pkgutil
+      -> add when Phase 4b lands (one class per PR, <400 each)
 ```
 
 ---
