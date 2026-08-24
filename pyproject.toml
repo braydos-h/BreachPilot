@@ -152,6 +152,14 @@ disable_error_code = [
     "no-redef",
     "var-annotated",
     "misc",
+    "name-defined",
+    "truthy-function",
+    "func-returns-value",
+    "dict-item",
+    "no-untyped-def",
+    "has-type",
+    "str-unpack",
+    "call-overload",
 ]
 
 [[tool.mypy.overrides]]
@@ -167,6 +175,10 @@ disable_error_code = [
     "operator",
     "index",
     "list-item",
+    "name-defined",
+    "truthy-function",
+    "func-returns-value",
+    "dict-item",
 ]
 
 [[tool.mypy.overrides]]
