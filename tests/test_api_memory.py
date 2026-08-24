@@ -69,7 +69,7 @@ def test_memory_returns_lessons_and_attack_memory(tmp_path, monkeypatch):
     resp = client.get("/api/v1/system/memory", headers=_auth())
     assert resp.status_code == 200
     data = resp.json()
-    assert any(l["action_type"] == "mod:strat" for l in data["lessons"])
+    assert any(lesson["action_type"] == "mod:strat" for lesson in data["lessons"])
     assert any(c["action_type"] == "mod:strat" for c in data["confidence"])
     assert any(m["category"] == "services" for m in data["attack_memory"])
 
