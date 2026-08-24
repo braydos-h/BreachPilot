@@ -18,10 +18,7 @@ import json
 from typing import Any
 
 from db import DatabaseManager, _new_id, _now_iso
-
-
 from tools.semantic_memory import SemanticMemoryManager
-
 
 VALID_MEMORY_TYPES = frozenset({
     "working",

@@ -5,11 +5,12 @@ Analyzes PCAP files to extract conversations, DNS queries, HTTP
 objects, detect beaconing patterns, and identify C2 communications.
 """
 
-import pyshark
 import json
 import sys
 from collections import defaultdict
 from pathlib import Path
+
+import pyshark
 
 
 class NetworkForensicsAgent:

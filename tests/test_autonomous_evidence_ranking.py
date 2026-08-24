@@ -74,7 +74,6 @@ def test_module_context_carries_cves_from_scripts(tmp_path):
 def test_orchestrator_threads_experience_store_into_find_modules(tmp_path, monkeypatch):
     """find_modules must receive the orchestrator's experience_store so the
     dormant Bayesian boost/demotion actually fires (audit: it never did)."""
-    import pytest
 
     captured: dict = {}
 

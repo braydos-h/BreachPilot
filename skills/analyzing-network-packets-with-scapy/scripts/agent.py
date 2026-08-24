@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Network packet analysis agent using Scapy for pcap parsing and anomaly detection."""
 
+import argparse
 import json
 import math
-import argparse
-from collections import defaultdict, Counter
+from collections import Counter, defaultdict
 from datetime import datetime
 
-from scapy.all import rdpcap, IP, TCP, UDP, DNS, DNSQR, ICMP
+from scapy.all import DNS, DNSQR, ICMP, IP, TCP, UDP, rdpcap
 
 
 def load_pcap(filepath):

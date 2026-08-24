@@ -25,17 +25,16 @@ from __future__ import annotations
 import asyncio
 import functools
 import inspect
-import logging
 import math
 import signal
 import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Coroutine, TypeVar, ParamSpec
+from typing import Any, Callable, Coroutine, ParamSpec, TypeVar
 
-from tools.logging_setup import get_logger
 from tools.exceptions import _EXC_GROUP_CATCH
+from tools.logging_setup import get_logger
 
 logger = get_logger()
 

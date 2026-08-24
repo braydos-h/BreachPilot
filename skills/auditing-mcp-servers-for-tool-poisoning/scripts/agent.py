@@ -116,6 +116,7 @@ def _walk_descriptions(obj):
 def run_enum(args):
     try:
         import asyncio
+
         from mcp import ClientSession, StdioServerParameters
         from mcp.client.stdio import stdio_client
     except ImportError:

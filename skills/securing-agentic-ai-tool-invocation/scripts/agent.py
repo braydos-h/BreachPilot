@@ -18,7 +18,7 @@ import sys
 from datetime import datetime, timezone
 
 try:
-    from jsonschema import validate, ValidationError
+    from jsonschema import ValidationError, validate
 except ImportError:
     print("Install: pip install jsonschema", file=sys.stderr)
     sys.exit(1)

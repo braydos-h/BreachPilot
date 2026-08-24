@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Agent for XSS testing workflows complementing Burp Suite during authorized assessments."""
 
-import requests
-import re
-import json
 import argparse
-import urllib3
+import json
+import re
 from datetime import datetime
-from urllib.parse import urljoin, quote, urlparse
+from urllib.parse import quote, urljoin, urlparse
+
+import requests
+import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -151,7 +152,7 @@ def analyze_csp(base_url):
             findings.append({"type": "CSP_WEAKNESS", "detail": w, "severity": "HIGH"})
             print(f"  [!] CSP weakness: {w}")
         if not weaknesses:
-            print(f"  [+] CSP appears well-configured")
+            print("  [+] CSP appears well-configured")
     except requests.RequestException:
         pass
     return findings

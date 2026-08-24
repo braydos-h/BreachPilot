@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from tools.mcp_tools.registry import _extract_scanner_targets
 
-
 # ── pure-function extraction ────────────────────────────────────────────────
 
 

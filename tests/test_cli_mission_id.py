@@ -15,9 +15,6 @@ latest-active, which would be a silent wrong-mission hazard).
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import pytest
 
 import cli

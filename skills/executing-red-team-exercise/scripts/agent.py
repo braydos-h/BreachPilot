@@ -5,8 +5,8 @@
 import argparse
 import json
 import logging
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from dataclasses import dataclass, field, asdict
 from typing import List
 
 try:

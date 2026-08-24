@@ -10,12 +10,12 @@ local storage auditing, and API traffic interception assessment.
 """
 
 import json
-import sys
 import os
 import re
 import sqlite3
-from pathlib import Path
+import sys
 from datetime import datetime
+from pathlib import Path
 
 _SAFE_TABLE_RE = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
 

@@ -9,10 +9,9 @@ WARNING: Only use with explicit written authorization for the target application
 
 import sys
 from datetime import datetime, timezone
-from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import requests
-
 
 TRAVERSAL_PAYLOADS = [
     "../../../etc/passwd",

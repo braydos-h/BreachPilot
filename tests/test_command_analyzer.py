@@ -18,10 +18,8 @@ LAB BUILD posture covered here:
 """
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 
@@ -30,7 +28,6 @@ from tools.command_analyzer import (
     analyze_command,
     infer_language,
 )
-
 
 # ── 1. analyze_command: basics & benign ──────────────────────────────────────
 
@@ -337,8 +334,8 @@ async def test_policy_auto_approves_destructive_python_payload_flow(tmp_path: Pa
 
 def _make_server(tmp_path: Path, *, require_allowlist: bool = False, allowed_targets: list[str] | None = None):
     from mcp_exploit_server import create_mcp_server
+    from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
-    from tools.cve_lookup import NVDClient, CVESearchSettings
     from tools.web_researcher import WebResearcher, WebResearcherSettings
     config: dict[str, Any] = {
         "exploit": {"require_explicit_allowlist": require_allowlist, "allowed_targets": allowed_targets or []}

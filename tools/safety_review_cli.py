@@ -6,7 +6,7 @@ from typing import Any
 
 from tools.attack_ui import AttackUi
 from tools.goal_engine import AttackGoal
-from tools.safety_reviewer import SafetyReviewer, SafetyReview
+from tools.safety_reviewer import SafetyReview, SafetyReviewer
 
 ui = AttackUi(plain=False)
 

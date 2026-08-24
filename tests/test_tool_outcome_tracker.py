@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from tools.exploit_agent.tool_calls import _ToolOutcomeTracker
 
-
 # ── record_compromise ──────────────────────────────────────────────────────
 
 

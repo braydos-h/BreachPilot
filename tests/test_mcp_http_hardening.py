@@ -19,13 +19,11 @@ uvicorn bind), which is all that is needed on a box without the deps.
 from __future__ import annotations
 
 import asyncio
-import os
 from typing import Any
 
 import pytest
 
 from tools.mcp_shared import _wrap_http_auth, assert_loopback_bind
-
 
 # ── assert_loopback_bind ───────────────────────────────────────────────────────
 

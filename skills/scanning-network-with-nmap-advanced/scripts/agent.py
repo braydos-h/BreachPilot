@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Automated network scanning agent using python-nmap for authorized assessments."""
 
-import nmap
-import json
-import csv
-import sys
-import os
 import argparse
+import csv
+import json
+import os
+import sys
 from datetime import datetime
+
+import nmap
 
 
 def discover_hosts(scanner, target, timing="T4"):

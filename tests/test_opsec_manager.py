@@ -15,14 +15,13 @@ from typing import Any
 import pytest
 
 from tools.opsec import (
+    _DEFAULT_PROFILE,
     AGGRESSION_FACTOR,
     OpsecManager,
     OpsecProfile,
-    _DEFAULT_PROFILE,
     configure,
     process_user_agent,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fakes

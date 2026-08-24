@@ -4,9 +4,9 @@
 # It is the end user's responsibility to obey all applicable local, state and federal laws.
 """BloodHound Attack Path Analysis Agent - Queries Neo4j for AD attack paths to Domain Admin."""
 
+import argparse
 import json
 import logging
-import argparse
 from datetime import datetime
 
 from neo4j import GraphDatabase

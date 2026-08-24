@@ -15,10 +15,10 @@ result that follows the ``BLOCKED:`` / ``TOOL_EXECUTION_ERROR:`` conventions).
 from __future__ import annotations
 
 from .poe_verifier import (
-    verify_compromise,
-    verify_compromise_sync,
     classify_privilege,
     extract_output,
+    verify_compromise,
+    verify_compromise_sync,
 )
 
 __all__ = [

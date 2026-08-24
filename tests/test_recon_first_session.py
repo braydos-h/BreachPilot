@@ -38,10 +38,9 @@ import time
 from argparse import Namespace
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 
 # ── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -146,6 +145,7 @@ class TestDuplicateInitializeRegression:
         # The contract we're verifying is: the implementation calls
         # ``session.initialize()`` exactly once inside the ``async with``.
         import contextlib as _cl
+
         from main import open_exploit_mcp_session  # noqa: F401  (import smoke)
         session = MagicMock()
         session.initialize = AsyncMock(return_value=None)
@@ -959,7 +959,6 @@ class TestOpenExploitMcpSessionSoftFail:
     @pytest.mark.asyncio
     async def test_soft_fail_yields_none_on_init_failure(self, tmp_path) -> None:
         """soft_fail=True + boot-time BaseExceptionGroup → yields None."""
-        import main as main_mod
         import contextlib
 
         @contextlib.asynccontextmanager
@@ -1044,8 +1043,9 @@ class TestReconFirstInteractiveCascadeGone:
         """The full async_main recon-first flow against a dead MCP server
         should produce NO `[ERROR]` lines and exactly one `[WARN] Booting
         MCP server` line, then proceed to goal suggestion."""
-        import main as main_mod
         import contextlib
+
+        import main as main_mod
 
         # 1) Fake open_exploit_mcp_session: raises on entry (simulating
         # MCP subprocess death), soft_fail catches it and yields None.
@@ -1078,8 +1078,8 @@ class TestReconFirstInteractiveCascadeGone:
             def get_client(self, name): return object()
         monkeypatch.setattr(main_mod, "build_router", lambda *a, **kw: _StubRouter())
         import tools.goal_engine as ge_mod
-        from tools.goal_suggester import SuggestedGoal
         from tools.goal_engine import AttackGoal
+        from tools.goal_suggester import SuggestedGoal
         class _GE:
             def __init__(self): pass
             def suggest_goals(self, assessment, risk):
@@ -1142,8 +1142,9 @@ class TestReconFirstInteractiveCascadeGone:
         self, monkeypatch, tmp_path, capfd
     ) -> None:
         """MCP boots OK, but check_os raises McpError mid-call. No [ERROR] lines."""
-        import main as main_mod
         import contextlib
+
+        import main as main_mod
 
         # 1) Fake open_exploit_mcp_session: boots OK, yields a session whose
         # call_tool raises. The recon-first block catches the per-tool error.
@@ -1172,8 +1173,8 @@ class TestReconFirstInteractiveCascadeGone:
             def get_client(self, name): return object()
         monkeypatch.setattr(main_mod, "build_router", lambda *a, **kw: _StubRouter())
         import tools.goal_engine as ge_mod
-        from tools.goal_suggester import SuggestedGoal
         from tools.goal_engine import AttackGoal
+        from tools.goal_suggester import SuggestedGoal
         class _GE:
             def __init__(self): pass
             def suggest_goals(self, assessment, risk):
@@ -1504,8 +1505,9 @@ class TestMcpBootTimeout:
         the context manager yields ``None`` and a ``[WARN]`` line is
         emitted.
         """
-        import main as main_mod
         import contextlib
+
+        import main as main_mod
 
         # Make the timeout effectively 0.2 s so the test runs in
         # ~quarter-of-a-second instead of waiting the full 30 s. We
@@ -1593,8 +1595,9 @@ class TestMcpBootTimeout:
         ``soft_fail=False`` (the default for the post-recon attack
         path, where a hung MCP is fatal).
         """
-        import main as main_mod
         import contextlib
+
+        import main as main_mod
 
         monkeypatch.setattr(main_mod, "MCP_BOOT_TIMEOUT_SECONDS", 0.2)
 
@@ -1659,8 +1662,9 @@ class TestReconFirstBootStuckShowsProgress:
         recon-first path must complete (not abort) and end with a
         ``[WARN]`` or ``[INFO]`` line — never ``[ERROR]``.
         """
-        import main as main_mod
         import contextlib
+
+        import main as main_mod
 
         # Shorten the boot timeout so the test runs quickly. The fake
         # session's initialize() sleeps 0.6 s — longer than the

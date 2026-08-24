@@ -24,14 +24,13 @@ from db import DatabaseManager, _new_id
 from evidence import EvidenceStore, promote_exploit_audit
 from tools.enhanced_reporting import (
     EnhancedReportGenerator,
-    _confidence_from_verdict,
-    _resolve_verdict,
-    _cvss_profile_from_services,
-    _service_indicates_vulnerable_version,
     _bump_cia,
+    _confidence_from_verdict,
+    _cvss_profile_from_services,
+    _resolve_verdict,
+    _service_indicates_vulnerable_version,
     _sev_class,
 )
-
 
 # ── Fixtures ───────────────────────────────────────────────────────────────
 

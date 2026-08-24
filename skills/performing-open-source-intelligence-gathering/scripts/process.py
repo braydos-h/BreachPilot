@@ -27,17 +27,15 @@ import socket
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any
-from urllib.parse import urlparse
 
 try:
     import dns.resolver
     import requests
     from bs4 import BeautifulSoup
     from rich.console import Console
-    from rich.table import Table
     from rich.panel import Panel
     from rich.progress import Progress, SpinnerColumn, TextColumn
+    from rich.table import Table
 except ImportError:
     print("[!] Missing dependencies. Install with:")
     print("    pip install requests dnspython beautifulsoup4 rich")
@@ -450,7 +448,7 @@ def generate_report(domain: str, results: dict, output_dir: Path):
         for path in robots_txt.get("disallowed_paths", []):
             report += f"- `{path}`\n"
 
-    report += f"""
+    report += """
 ---
 
 ## 7. Recommendations for Attack Planning

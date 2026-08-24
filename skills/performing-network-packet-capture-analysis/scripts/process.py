@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """PCAP Forensic Analyzer - Analyzes packet captures for forensic investigation."""
-import json, os, sys
-from collections import defaultdict, Counter
-from datetime import datetime
+import json
+import os
+import sys
+from collections import Counter, defaultdict
+
 try:
-    from scapy.all import rdpcap, IP, TCP, UDP, DNS, DNSQR
+    from scapy.all import DNS, DNSQR, IP, TCP, UDP, rdpcap
 except ImportError:
     print("Install scapy: pip install scapy"); sys.exit(1)
 

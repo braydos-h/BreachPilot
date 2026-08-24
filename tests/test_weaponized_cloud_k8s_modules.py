@@ -7,10 +7,9 @@ other agents.
 
 from __future__ import annotations
 
-from tools.attack_modules.modules.synthesis import WeaponizedExploit
-from tools.attack_modules.modules.privesc import CloudPrivesc, K8sPrivesc
 from tools.attack_modules.base import ModuleContext
-
+from tools.attack_modules.modules.privesc import CloudPrivesc, K8sPrivesc
+from tools.attack_modules.modules.synthesis import WeaponizedExploit
 
 # ---------------------------------------------------------------------------
 # WeaponizedExploit

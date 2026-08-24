@@ -9,7 +9,6 @@ import pytest
 from db import DatabaseManager, _new_id
 from evidence import EvidenceStore, promote_exploit_audit, record_run_output
 
-
 # ── Fixtures ───────────────────────────────────────────────────────────────
 
 

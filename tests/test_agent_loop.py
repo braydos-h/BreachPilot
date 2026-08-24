@@ -14,23 +14,22 @@ from __future__ import annotations
 
 import asyncio
 import json
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 from pathlib import Path
-from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from tools.autonomous_orchestrator import (
-    AutonomousOrchestrator,
+    AggressionLevel,
+    AttackModuleExecutor,
+    AttackPhase,
     AttackState,
     AttackTask,
-    AttackPhase,
-    AggressionLevel,
-    TaskStatus,
+    AutonomousOrchestrator,
     RetryEngine,
-    AttackModuleExecutor,
+    TaskStatus,
 )
 from tools.recon_pipeline import HostReconResult, ServiceInfo
-
 
 # ── Fixtures ───────────────────────────────────────────────────────────────
 

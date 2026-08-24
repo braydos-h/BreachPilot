@@ -22,7 +22,6 @@ from tools.plugins import (
     load_plugins,
 )
 
-
 # ─── helpers ──────────────────────────────────────────────────────────────────
 
 def _make_manifest(**kw) -> PluginManifest:

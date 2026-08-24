@@ -9,7 +9,6 @@ a full ExploitRecord that was never trimmed. This test pins the cap.
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import pytest

@@ -83,10 +83,10 @@ explicitly authorized to test, on a throwaway operator box. An explicit
 
 **The one full-access safety kept is the target-IP lock (no pivoting to other
 hosts).** It is enforced at the MCP tool layer: `tools/mcp_shared._allowed_target_list`
-unions `os.environ["EXPLOIT_TARGET"]` (the runtime `--target`, set in
-`tools/mcp_session.py`) with `exploit.allowed_targets`; `@require_allowlist` on
+(`tools/mcp_shared.py:494-534`) unions `os.environ["EXPLOIT_TARGET"]` (the runtime `--target`, set in
+`tools/mcp_session.py:255`) with `exploit.allowed_targets` **plus** `EXPLOIT_TARGET_IP` (resolved IP for domain targets), `EXPLOIT_TARGET_DOMAIN` (domain string), and `EXPLOIT_DISCOVERED_TARGETS` (comma-separated subdomains/IPs auto-authorized mid-run via `tools/mcp_shared.add_discovered_target:537-555`); `is_target_in_allowlist` (`tools/validation_utils.py:380-420`) supports domains + `*.wildcard` + CIDR. `@require_allowlist` on
 every target-touching tool plus `tools/mcp_tools/terminal._target_lock_block`
-refuse any destination IP that is not the runtime target. The lock is applied
+(`tools/mcp_tools/terminal.py:57-94`) refuse any destination that is not in the union. The lock is applied
 wherever a non-target host can be named:
 
 - `run_exploit_terminal` / `run_as_root`: `_target_lock_block` scans the shell
@@ -119,14 +119,14 @@ containment where relevant.
 
 ```yaml
 exploit:
-  permission: full_access
+  permission: full_access            # lab build; missing-key fallback is read_only (tools/cli_exploit_settings.py:12-30)
   attack_mode: true
-  require_explicit_allowlist: true   # the target-IP lock
-  allowed_targets: []               # Start New Session saves targets here; runtime --target is also injected via EXPLOIT_TARGET
+  require_explicit_allowlist: true   # the target-IP lock (tools/mcp_shared.py:494-534)
+  allowed_targets: [127.0.0.1]        # lab checked-in default; schema default is [] (config_manager.py:183)
   disallowed_assets: []
   forbidden_actions: []
 multi_model:
-  enabled: false
+  enabled: true                      # lab default true (schema False); advisory peer consultation
 ```
 
 Recon safety is retained when `permission: read_only` is configured: the

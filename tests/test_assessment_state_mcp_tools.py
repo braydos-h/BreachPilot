@@ -34,10 +34,10 @@ class _StubMCP:
 
 
 def _build_ctx(tmp_path: Path, *, require_allowlist_flag: bool = True, allowed: tuple[str, ...] = ("10.0.0.50",)) -> Any:
+    from tools.cve_lookup import CVESearchSettings, NVDClient
+    from tools.exploit_search import ExploitSearch, ExploitSearchSettings
     from tools.mcp_shared import make_audit_tool, make_require_allowlist
     from tools.mcp_tools.registry import ToolContext
-    from tools.exploit_search import ExploitSearch, ExploitSearchSettings
-    from tools.cve_lookup import NVDClient, CVESearchSettings
     from tools.web_researcher import WebResearcher, WebResearcherSettings
 
     config: dict[str, Any] = {
@@ -86,7 +86,7 @@ def test_get_assessment_state_blocked_when_target_not_allowed(tmp_path: Path) ->
 
 def test_get_assessment_state_reflects_hypotheses_and_plan(tmp_path: Path) -> None:
     from tools.assessment_state import AssessmentStateStore
-    from tools.attack_planner import AttackPlanner, AttackStep, AttackPhase
+    from tools.attack_planner import AttackPlanner, AttackStep
 
     mcp, ctx = _register(tmp_path)
     # seed owned assessment state
@@ -388,8 +388,8 @@ def test_tool_signatures_preserved() -> None:
 async def test_tools_registered_in_full_server(tmp_path: Path) -> None:
     """End-to-end registration smoke: the full server exposes the new tools."""
     from mcp_exploit_server import create_mcp_server
+    from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
-    from tools.cve_lookup import NVDClient, CVESearchSettings
     from tools.web_researcher import WebResearcher, WebResearcherSettings
 
     mcp = create_mcp_server(

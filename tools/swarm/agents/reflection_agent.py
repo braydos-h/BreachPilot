@@ -14,11 +14,10 @@ import json
 import time
 from typing import Any
 
-from tools.swarm.base import Agent, AgentResult, AgentStatus
-from tools.swarm.bb_compat import bb_set, bb_extend, bb_remove
 from tools.exceptions import _EXC_GROUP_CATCH
 from tools.failure_taxonomy import FailureClass
-
+from tools.swarm.base import Agent, AgentResult, AgentStatus
+from tools.swarm.bb_compat import bb_extend, bb_remove, bb_set
 
 # Structured failure taxonomy -> reflection prompt label. The reflection
 # system prompt already names the nine root-cause categories (TOOL_MISMATCH,

@@ -4,11 +4,11 @@
 # It is the end user's responsibility to obey all applicable local, state and federal laws.
 """Agent for performing JWT 'none' algorithm attack testing."""
 
-import json
 import argparse
 import base64
-import hmac
 import hashlib
+import hmac
+import json
 from datetime import datetime
 
 

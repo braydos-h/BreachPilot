@@ -6,12 +6,12 @@ WebSocket Hijacking (CSWSH), injection attacks, message flooding,
 and authorization bypass vulnerabilities.
 """
 
+import asyncio
 import json
 import sys
-import asyncio
 import time
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 try:
     import websockets

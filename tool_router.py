@@ -18,10 +18,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from db import DatabaseManager, _now_iso
-from scope_gate import ScopeGate, ScopeCheckResult
-from risk_controller import RiskController, RiskAssessment
+from db import DatabaseManager
 from evidence import EvidenceStore
+from risk_controller import RiskController
+from scope_gate import ScopeGate
 from summarizer import summarize_tool_output
 
 

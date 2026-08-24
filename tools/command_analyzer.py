@@ -69,7 +69,6 @@ from dataclasses import dataclass, field
 
 from tools.validation_utils import extract_ips_from_command, is_target_in_allowlist
 
-
 # ── Destructive tokens ──────────────────────────────────────────────────────
 #
 # Bare ``rm`` / ``rmdir`` are matched with word boundaries so common substrings

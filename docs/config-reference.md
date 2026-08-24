@@ -200,7 +200,7 @@ touching. CLI-runnable regardless; block supplies entrypoint defaults.
 | `circuit_failure_threshold` | int | `5` | Breaker opens after N consecutive failures | mcp_shared.py:110, cve_lookup.py:69 |
 | `circuit_recovery_timeout` | float | `60.0` | Half-open probe wait | mcp_shared.py:111, cve_lookup.py:70 |
 | `search_rate_limit_per_minute` | number | `10` | Process-wide shared NVD budget (0 disables) | mcp_shared.py:113-114 |
-| `epss_enabled` / `kev_enabled` | bool | `false` | EPSS/KEV enrichment (opt-in) | cve_lookup.py:73-74,246-247 |
+| `epss_enabled` / `kev_enabled` | bool | `true` | EPSS/KEV enrichment (lab default ON, live out of the box) | cve_lookup.py:73-74,246-247 |
 | `kev_cache_ttl_seconds` | int | `86400` | KEV catalog refresh TTL | cve_lookup.py:75,182 |
 | `kev_cache_path` | str | `""` | `""` = `exploit_workspace/.kev_catalog.json` | cve_lookup.py:76,170-171 |
 | `github.token_env` | str | `GITHUB_TOKEN` | GitHub token for `cve_to_poc` (optional; unauth 60/hr fallback) | api_key_store.py:53, exploit_search.py:190-237 |
@@ -404,7 +404,7 @@ Advisory prompt context only — never permission/scope/audit (docs/skills.md:16
 | `include_tags` / `exclude_names` | list[str] | `[]` | Tag include / name exclude filters | skill_selector.py |
 | `maybe_enabled` | bool | `false` | Include `skills/maybe/` skills | skill_selector.py:130 |
 | `allow_model_lookup` | bool | `true` | Enable read-only skill MCP tools | mcp_tools/registry.py:266 |
-| `inject_startup_context` | bool | `false` | Eager body injection into initial prompt | skill_pipeline.py:140; CLI `--skills on` sets it (skills_cli.py:37-39) |
+| `inject_startup_context` | bool | `false` | Eager body injection into initial prompt | skill_pipeline.py (CLI `--skills on` sets it: skills_cli.py:37-39) |
 | `max_active_skills` / `min_contextual_skills` | int | `6` / `3` | Selection bounds | skill_selector.py:124 |
 | `max_chars_per_skill` / `max_total_chars` | int | `2500` / `9000` | Prompt budget caps | skill_pipeline.py |
 | `default_skill_weight` / `context_skill_weight` | int | `12` / `24` | Score weights | skill_selector.py |
@@ -425,7 +425,109 @@ Advisory prompt context only — never permission/scope/audit (docs/skills.md:16
 | `search_paths` | list[str] | `["plugins"]` | Filesystem dirs scanned for `plugin.yaml` | plugins.py:640-646 |
 | `entry_points` | bool | `true` | `netattackai.plugins` entry-point discovery | plugins.py:647,656 |
 
-### `api:` (config.yaml:430-438) — WebUI daemon (`--demon` / `--daemon` / `--web`)
+### `threat_intel:` (config.yaml:126-137) — threat-feed ingestion (OSV.dev + GHSA + KEV)
+
+Advisory-only, never touches the target. Lab build ON so the feed is live out-of-the-box. Reuses `cve_lookup` KEV catalog (shared disk cache). GHSA needs `GITHUB_TOKEN` (shared with `cve_lookup.github.token_env`); when absent, GHSA is silently dropped and `osv`+`kev` still answer.
+
+| Key | Type | Default | Controls | Consumed at |
+|-----|------|---------|----------|-------------|
+| `enabled` | bool | `true` | Threat-feed master switch | tools/threat_intel.py:45, mcp_tools/research.py:210 |
+| `cache_dir` | str | `exploit_workspace/.threat_intel` | Feed cache directory | tools/threat_intel.py:50 |
+| `cache_ttl_seconds` | int | `86400` | Cache TTL | tools/threat_intel.py:52 |
+| `sources.osv` / `ghsa` / `kev` / `exploitdb_rss` | bool | `true`/`true`/`true`/`false` | Source toggles | tools/threat_intel.py:55-60 |
+| `max_results` | int | `20` | Results per query | tools/threat_intel.py:62 |
+| `github_token_env` | str | `GITHUB_TOKEN` | GHSA token env | tools/threat_intel.py:65, api_key_store.py:53 |
+| `timeout_seconds` | int | `30` | HTTP timeout | tools/threat_intel.py:66 |
+
+### `witness:` (config.yaml:187-194) — advisory audit-stream watcher (agent-on-agent safety)
+
+Library default OFF (conservative for downstream re-use); `config.yaml` lab default ON so a lab run streams anomaly telemetry by default. Polls `exploit_audit.jsonl`/`activity.jsonl` mid-run and flags anomalies (allowlist breach, PoC escape, perm escalation, prompt injection, DoS drift) to `witness.log` + event broker. Advisory ONLY: flags, never blocks.
+
+| Key | Type | Default | Controls | Consumed at |
+|-----|------|---------|----------|-------------|
+| `enabled` | bool | `false` (schema) / `true` (config.yaml lab) | Master switch | config_manager.py:353-361, tools/swarm/agents/witness_agent.py:42 |
+| `log_path` | str | `reports/witness.jsonl` | Witness log | witness_agent.py:50 |
+| `poll_interval_seconds` | int | `5` | Poll interval | witness_agent.py:51 |
+| `escalate_to_event_broker` | bool | `true` | Escalate flags to WS/event broker | witness_agent.py:52 |
+| `max_flags_per_signal_per_minute` | int | `10` | Per-signal rate cap | witness_agent.py:53 |
+| `dos_failure_window_seconds` | float | `60.0` | DoS drift window | witness_agent.py:54 |
+| `dos_failure_threshold` | int | `8` | DoS drift threshold | witness_agent.py:55 |
+
+### `ics:` (config.yaml:416-418) — D8 ICS write-side modules
+
+`ModbusWriteCoil`/`ModbusWriteRegister`/`S7PlcStop`/`S7PlcStart` are DESTRUCTIVE — they change physical process state. Dual-gated: `@require_allowlist` on `run_attack_module` AND `ics.allow_write: true` AND `ics.destructive_ics: true` (both must be true). Default `false` so checked-in config is safe; set true only for authorized PLC testing. PHYSICAL-DAMAGE RISK.
+
+| Key | Type | Default | Controls | Consumed at |
+|-----|------|---------|----------|-------------|
+| `allow_write` | bool | `false` | ICS write gate (read-only enum when false) | tools/attack_modules/modules/ics_iot.py:40, config_manager.py |
+| `destructive_ics` | bool | `false` | Second physical-damage gate (both must be true) | tools/attack_modules/modules/ics_iot.py:42 |
+
+### `webhook_notify:` (config.yaml:438-449) — outbound Slack/Discord run-status notifications
+
+Lab build `enabled: true`. No-op without a `url` — logs once then drops events. Set `url` to a Slack/Discord incoming webhook to actually receive pings.
+
+| Key | Type | Default | Controls | Consumed at |
+|-----|------|---------|----------|-------------|
+| `enabled` | bool | `true` | Master switch | tools/plugins/webhook_notify.py:30, config_manager.py:589 |
+| `url` | str | `""` | Webhook URL (secret, never logged) | webhook_notify.py:35 |
+| `events` | list[str] | `["finding","state"]` | Event-type filter | webhook_notify.py:36 |
+| `timeout_seconds` | int | `5` | HTTP timeout | webhook_notify.py:37 |
+| `max_retries` | int | `3` | Retry count | webhook_notify.py:38 |
+| `backoff_seconds` | float | `2.0` | Backoff | webhook_notify.py:39 |
+| `max_payload_chars` | int | `8192` | Payload cap | webhook_notify.py:40 |
+
+### `mitre:` (config.yaml:450-456) — MITRE ATT&CK Navigator export
+
+Lab build `enabled: true`. `export_attack_navigator` MCP tool writes Navigator layer JSON to `navigator_output_dir` for SOC handoff.
+
+| Key | Type | Default | Controls | Consumed at |
+|-----|------|---------|----------|-------------|
+| `enabled` | bool | `true` | Master switch | tools/mitre_export.py:30, config_manager.py:598 |
+| `technique_map` | str | `tools/mitre_technique_map.json` | ATT&CK technique map | mitre_export.py:31 |
+| `navigator_output_dir` | str | `reports/mitre` | Output dir | mitre_export.py:32 |
+| `include_skill_tags` | bool | `true` | Include skill tags | mitre_export.py:33 |
+
+### `ticketing:` (config.yaml:457-467) — remediation ticket generation (Jira/GitHub)
+
+Lab build `enabled: true`. No-op without `provider`/`base_url`/`token` — logs once then drops. Set `provider` (`jira`|`github`), `base_url`, and the named `token_env` env var to actually create tickets.
+
+| Key | Type | Default | Controls | Consumed at |
+|-----|------|---------|----------|-------------|
+| `enabled` | bool | `true` | Master switch | tools/ticketing.py:30, config_manager.py:610 |
+| `provider` | str | `""` | `jira` \| `github` | ticketing.py:31 |
+| `base_url` | str | `""` | Ticketing base URL | ticketing.py:32 |
+| `token_env` | str | `TICKETING_TOKEN` | Token env var | ticketing.py:33, api_key_store.py |
+| `project_key` | str | `""` | Project key | ticketing.py:34 |
+| `max_retries` | int | `3` | Retry count | ticketing.py:35 |
+| `backoff_seconds` | float | `2.0` | Backoff | ticketing.py:36 |
+
+### `caldera:` (config.yaml:476-480) — D6 Caldera adversary emulation plugin
+
+Lab build `enabled: true`. The Caldera server is target-side — operator adds its IP to `exploit.allowed_targets`. Plugin MCP tools (`caldera_list_abilities`, `caldera_run_ability`) are `@require_allowlist`-gated on the target IP.
+
+| Key | Type | Default | Controls | Consumed at |
+|-----|------|---------|----------|-------------|
+| `enabled` | bool | `true` | Master switch | plugins/caldera/plugin.py:40, config_manager.py |
+| `url` | str | `""` | Caldera server base URL | caldera/plugin.py:41 |
+| `api_key_env` | str | `CALDERA_API_KEY` | Caldera API key env | caldera/plugin.py:42 |
+
+### `agent:` (config.yaml:486-494) — capability-upgrade agent block (design §23)
+
+Toggles + budgets for the task graph, capability discovery, AI-facing state tools, planner hints, decision logging, reflection, and retry/repair budgets. Defaults preserve today's behavior. `config_cli.load_config` merges NO defaults, so every consumer reads defensively via `cfg.get("agent", {}).get(key, default)`.
+
+| Key | Type | Default | Controls | Consumed at |
+|-----|------|---------|----------|-------------|
+| `task_graph_enabled` | bool | `true` | Gate task-graph/DAG planner | tools/attack_planner.py:45, tools/config_manager.py:648 |
+| `capability_discovery_enabled` | bool | `true` | Gate capability discovery (`find_producers`) | tools/attack_modules/registry.py:120 |
+| `state_tools_enabled` | bool | `true` | Gate AI-facing state MCP tools | tools/mcp_tools/assessment_state.py:40 |
+| `planner_hints_enabled` | bool | `true` | Inject planner hints into system prompt | tools/exploit_agent/prompt.py:210 |
+| `decision_log_enabled` | bool | `true` | Append to `decision_log.jsonl` | tools/decision_log.py:30 |
+| `reflection_enabled` | bool | `true` | Gate post-step reflection | tools/exploit_agent/reflection.py:45 |
+| `max_retries_per_task` | int | `2` | Per-task retry ceiling | tools/failure_taxonomy.py:80 |
+| `max_actions` | int | `0` | Total action cap (0 = legacy exploit budgets) | tools/exploit_agent/loop.py:520 |
+| `generated_code_repair_attempts` | int | `3` | Max self-repair iterations on PoC | tools/poc_verifier.py:60 |
+
+### `api:` (config.yaml:386-407) — WebUI daemon (`--demon` / `--daemon` / `--web`)
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
@@ -437,6 +539,9 @@ Advisory prompt context only — never permission/scope/audit (docs/skills.md:16
 | `event_buffer_size` | int | `256` | In-memory ring buffer per run for WS subscribers | app.py:81 |
 | `shutdown_timeout_seconds` | int | `15` | Graceful shutdown wait | tools/api/run_manager.py:320 |
 | `serve_webui` | bool | `false` | Mount `webui/dist/` at `/`; `--web` sets this **in memory only** | app.py:145, main.py:542 |
+| `max_concurrent_runs` | int | `3` | D3: N concurrent runs (1 = legacy 409) | tools/api/run_manager.py:22, config_manager.py |
+| `multi_operator` | bool | `true` | D4: user accounts + annotations (loopback-only) | tools/api/auth.py:60 |
+| `graph_route` | bool | `true` | Attack-path DAG API route | tools/api/routes/graph_explorer.py:30 |
 
 ## Other consumed keys
 

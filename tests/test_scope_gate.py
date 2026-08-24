@@ -13,23 +13,17 @@ Covers:
 
 from __future__ import annotations
 
-import ipaddress
-import re
 import time
-import uuid
 
 import pytest
 
 from db import DatabaseManager, _new_id
 from scope_gate import (
     ScopeGate,
-    ScopeCheckResult,
-    _rule_matches,
-    _clean_asset,
     _classify_target_type,
+    _clean_asset,
     _is_third_party_asset,
 )
-
 
 # ── Fixtures ───────────────────────────────────────────────────────────────
 

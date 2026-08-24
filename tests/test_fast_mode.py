@@ -1,17 +1,14 @@
 """Fast Mode tests — backend contracts, orchestration, dedup, policy regression."""
 
 import asyncio
-import json
 import time
 from pathlib import Path
 
 import pytest
 
-from tools.fast_recon import FastReconConfig, FastReconCoordinator
-from tools.goal_suggester import ReconAssessment
-from tools.run_service.models import is_agent_attack_mode, is_fast_mode
 from tools.api.routes.runs import RunCreateRequest
-
+from tools.fast_recon import FastReconConfig, FastReconCoordinator
+from tools.run_service.models import is_agent_attack_mode, is_fast_mode
 
 # ---------------------------------------------------------------------------
 # Backend contracts

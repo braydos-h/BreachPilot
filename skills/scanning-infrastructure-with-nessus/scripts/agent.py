@@ -10,9 +10,10 @@ import json
 import os
 import sys
 import time
-import urllib3
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
+import urllib3
 
 try:
     import requests

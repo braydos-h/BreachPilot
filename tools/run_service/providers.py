@@ -15,7 +15,7 @@ import asyncio
 import inspect
 from typing import Any, Protocol, runtime_checkable
 
-from tools.run_service.models import Decision, Event
+from tools.run_service.models import Decision
 
 
 def _maybe_await(value: Any) -> Any:

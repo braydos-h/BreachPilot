@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
+
 import pytest
-from pathlib import Path
 
 from db import DatabaseManager, _now_iso
-from tools.semantic_memory import SemanticMemoryManager
 from tools.experience_store import ExperienceStore
+from tools.semantic_memory import SemanticMemoryManager
 
 
 @pytest.fixture
@@ -158,7 +158,7 @@ def test_get_confidence_min_samples_gate(temp_db):
 
 def test_get_confidence_time_decay(temp_db):
     """An ancient outcome weighs less than a recent one (exponential decay)."""
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
 
     store = ExperienceStore(temp_db, min_samples=1, time_decay_days=30.0)
     for _ in range(3):
@@ -179,7 +179,7 @@ def test_get_confidence_time_decay(temp_db):
 
 def test_get_confidence_no_decay_when_disabled(temp_db):
     """time_decay_days<=0 means every row weighs 1.0 (pre-1.1 behavior)."""
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
 
     store = ExperienceStore(temp_db, min_samples=1, time_decay_days=0.0)
     for _ in range(3):

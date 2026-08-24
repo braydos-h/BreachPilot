@@ -16,8 +16,8 @@ from __future__ import annotations
 import shutil
 import subprocess
 
-from tools.mcp_tools.registry import *
 from tools.mcp_shared import _allowed_target_list
+from tools.mcp_tools.registry import *
 
 
 def _ad_cfg(config: dict[str, Any] | None) -> dict[str, Any]:

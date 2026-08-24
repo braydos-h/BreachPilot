@@ -24,15 +24,14 @@ from typing import Any
 
 import pytest
 
-
 # ── Harness helpers ─────────────────────────────────────────────────────────
 
 
 def _make_server(tmp_path: Path, *, opsec: dict[str, Any] | None = None,
                  require_allowlist: bool = False) -> Any:
     from mcp_exploit_server import create_mcp_server
+    from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
-    from tools.cve_lookup import NVDClient, CVESearchSettings
     from tools.web_researcher import WebResearcher, WebResearcherSettings
 
     config: dict[str, Any] = {
@@ -89,8 +88,8 @@ class _Popen(subprocess.Popen):
 
 class TestOpsecBriefing:
     def test_public_target_briefing_non_empty(self) -> None:
-        from tools.opsec import OpsecProfile
         from tools.exploit_agent.prompt import build_opsec_briefing
+        from tools.opsec import OpsecProfile
 
         briefing = build_opsec_briefing(OpsecProfile(enabled=True), "8.8.8.8")
         assert briefing  # non-empty for a public target with OPSEC on
@@ -101,16 +100,16 @@ class TestOpsecBriefing:
         assert "-T2" in briefing
 
     def test_local_target_briefing_empty(self) -> None:
-        from tools.opsec import OpsecProfile
         from tools.exploit_agent.prompt import build_opsec_briefing
+        from tools.opsec import OpsecProfile
 
         # local_targets_off defaults True -> 127.0.0.1 resolves to OPSEC OFF
         briefing = build_opsec_briefing(OpsecProfile(enabled=True), "127.0.0.1")
         assert briefing == ""
 
     def test_disabled_briefing_empty(self) -> None:
-        from tools.opsec import OpsecProfile
         from tools.exploit_agent.prompt import build_opsec_briefing
+        from tools.opsec import OpsecProfile
 
         # OPSEC off even for a public target -> no briefing
         assert build_opsec_briefing(OpsecProfile(enabled=False), "8.8.8.8") == ""
@@ -192,10 +191,9 @@ class TestTerminalAdvisory:
         STILL executes. is_quiet_blocked / noise_budget must NOT be re-gated
         onto the attack path -- the advisory is informational only."""
         import tools.mcp_tools.terminal as term
-        from tools.opsec import OpsecManager
 
         # Sanity: the dormant gate would block this if it were wired.
-        from tools.opsec import OpsecProfile
+        from tools.opsec import OpsecManager, OpsecProfile
         blocking = OpsecManager(OpsecProfile(
             enabled=True, quiet_command_patterns=("nmap",)
         ))

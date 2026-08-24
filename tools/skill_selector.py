@@ -8,7 +8,6 @@ from typing import Any, Iterable
 
 from tools.skill_registry import LoadedSkill, SkillRegistry, normalized_skill_tags, render_skill_context
 
-
 _SERVICE_TAGS: dict[str, set[str]] = {
     "http": {"web", "web-application", "http", "security-headers"},
     # HTTPS is primarily a web-service signal. TLS methodology is selected

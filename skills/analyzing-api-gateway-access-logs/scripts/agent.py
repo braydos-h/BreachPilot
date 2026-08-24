@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Agent for analyzing API Gateway access logs for security threats."""
 
-import re
-import json
 import argparse
+import json
+import re
 from datetime import datetime
 
 import pandas as pd

@@ -20,17 +20,15 @@ Requirements:
 
 import argparse
 import json
-import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
 
 try:
     import yaml
     from rich.console import Console
-    from rich.table import Table
     from rich.panel import Panel
+    from rich.table import Table
 except ImportError:
     print("[!] Missing dependencies. Install with: pip install pyyaml rich")
     sys.exit(1)
@@ -368,7 +366,7 @@ behavior to test the organization's detection and response capabilities.
     else:
         roe += "\n[Techniques to be defined based on threat profile selection]\n"
 
-    roe += f"""
+    roe += """
 ### 4.2 Prohibited Actions
 - Denial of Service attacks against production systems
 - Data destruction or modification of production data

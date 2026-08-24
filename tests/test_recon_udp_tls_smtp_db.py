@@ -6,8 +6,9 @@ the established pattern in ``tests/test_recon_pipeline.py``. No real network.
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 from tools.recon_pipeline import (
     HostReconResult,

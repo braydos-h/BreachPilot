@@ -8,6 +8,7 @@ from pathlib import Path
 
 from tools.goal_suggester import ReconAssessment
 
+
 def _load_resume_state(
     reports_dir: Path, args: argparse.Namespace
 ) -> tuple[ReconAssessment, str, str] | None:

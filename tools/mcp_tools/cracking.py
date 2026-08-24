@@ -11,8 +11,8 @@ from __future__ import annotations
 import shutil
 import subprocess
 
-from tools.mcp_tools.registry import *
 from tools.mcp_tools.attack_modules import _identify_hash_modes
+from tools.mcp_tools.registry import *
 
 
 def register_cracking_tools(mcp: Any, *, ctx: ToolContext) -> None:

@@ -18,7 +18,6 @@ import pytest
 
 from tools.persistent_session_manager import ListenerHelper, PersistentSessionManager
 
-
 # ── ListenerHelper: clean-fail when the binary is absent ─────────────────────
 
 def test_start_dns_clean_fail_without_binary(monkeypatch, tmp_path: Path) -> None:
@@ -188,8 +187,8 @@ def test_psm_start_listener_unknown_type(monkeypatch, tmp_path: Path) -> None:
 def _make_server(tmp_path: Path, *, require_allowlist: bool = False, allowed: list[str] | None = None,
                  listeners: dict[str, bool] | None = None):
     from mcp_exploit_server import create_mcp_server
+    from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
-    from tools.cve_lookup import NVDClient, CVESearchSettings
     from tools.web_researcher import WebResearcher, WebResearcherSettings
 
     config: dict[str, Any] = {

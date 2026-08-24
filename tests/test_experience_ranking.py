@@ -18,23 +18,20 @@ RELATIVE ordering -- instead of hardcoding numbers.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from db import DatabaseManager
-from tools.experience_store import ExperienceStore
-
 from tools.attack_modules import (
     AttackModule,
     ModuleContext,
-    find_modules,
-    _module_target_signature,
     SSHBruteForce,
+    _module_target_signature,
+    find_modules,
 )
-
+from tools.experience_store import ExperienceStore
 
 # ── Fakes ─────────────────────────────────────────────────────────────────
 
@@ -406,9 +403,9 @@ async def test_run_exploit_agent_uses_provided_experience_store(monkeypatch, tmp
     (no agent loop runs). Triple non-vacuous assertion: the spy fired (the
     store block was reached), the provided store is the one captured, and
     get_default_db was never called (no rebuild)."""
+    import db as _db
     from tools import exploit_agent as ea
     from tools.exploit_mutator import ExploitMutator
-    import db as _db
 
     class RecordingStore:
         def get_all_confidences(self, sig): return {}

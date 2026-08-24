@@ -7,10 +7,11 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+
 def test_orchestrator_emits_agent_started_and_complete():
     """SwarmOrchestrator should emit agent_started and agent_complete events."""
-    from tools.swarm.orchestrator import SwarmOrchestrator
     from tools.swarm.base import Agent, AgentResult, AgentStatus
+    from tools.swarm.orchestrator import SwarmOrchestrator
 
     class DummyAgent(Agent):
         def run(self, task: dict[str, Any], context: dict[str, Any]) -> AgentResult:
@@ -42,8 +43,8 @@ def test_orchestrator_emits_agent_started_and_complete():
 
 def test_orchestrator_emits_blocked_when_critic_denies():
     """Critic deny decision should emit critic_decision and agent_blocked."""
-    from tools.swarm.orchestrator import SwarmOrchestrator
     from tools.swarm.base import Agent, AgentResult, AgentStatus
+    from tools.swarm.orchestrator import SwarmOrchestrator
 
     class DummyAgent(Agent):
         def run(self, task: dict[str, Any], context: dict[str, Any]) -> AgentResult:
@@ -81,8 +82,8 @@ def test_orchestrator_emits_blocked_when_critic_denies():
 
 def test_orchestrator_persists_state_file():
     """SwarmOrchestrator should write swarm_state.json when state_path is set."""
-    from tools.swarm.orchestrator import SwarmOrchestrator
     from tools.swarm.base import Agent, AgentResult, AgentStatus
+    from tools.swarm.orchestrator import SwarmOrchestrator
 
     class DummyAgent(Agent):
         def run(self, task: dict[str, Any], context: dict[str, Any]) -> AgentResult:

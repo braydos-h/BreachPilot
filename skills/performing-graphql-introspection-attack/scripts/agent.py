@@ -4,8 +4,8 @@
 # It is the end user's responsibility to obey all applicable local, state and federal laws.
 """Agent for performing GraphQL introspection attack and schema analysis."""
 
-import json
 import argparse
+import json
 
 try:
     import requests

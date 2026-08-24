@@ -8,7 +8,6 @@ import argparse
 import json
 from datetime import datetime, timezone
 
-
 MITRE_TACTICS = [
     "Reconnaissance", "Resource Development", "Initial Access",
     "Execution", "Persistence", "Privilege Escalation",

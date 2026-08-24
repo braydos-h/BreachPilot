@@ -10,7 +10,6 @@ discovered subdomains as a set of operator-authorized hosts.
 from __future__ import annotations
 
 import os
-from unittest.mock import patch
 
 import pytest
 
@@ -92,7 +91,7 @@ def test_allowed_target_list_deduplicates(monkeypatch):
 
 def test_add_discovered_target_adds_host(monkeypatch):
     _clear_env(monkeypatch)
-    from tools.mcp_shared import add_discovered_target, _allowed_target_list
+    from tools.mcp_shared import _allowed_target_list, add_discovered_target
     add_discovered_target("new.example.com", "5.6.7.8")
     result = _allowed_target_list({"exploit": {"allowed_targets": []}})
     assert "new.example.com" in result
@@ -101,7 +100,7 @@ def test_add_discovered_target_adds_host(monkeypatch):
 
 def test_add_discovered_target_deduplicates(monkeypatch):
     _clear_env(monkeypatch)
-    from tools.mcp_shared import add_discovered_target, _allowed_target_list
+    from tools.mcp_shared import _allowed_target_list, add_discovered_target
     add_discovered_target("sub.example.com", "1.2.3.4")
     add_discovered_target("sub.example.com", "1.2.3.4")  # duplicate
     result = _allowed_target_list({"exploit": {"allowed_targets": []}})
@@ -112,7 +111,7 @@ def test_add_discovered_target_deduplicates(monkeypatch):
 def test_add_discovered_target_appends_to_existing(monkeypatch):
     _clear_env(monkeypatch)
     monkeypatch.setenv("EXPLOIT_DISCOVERED_TARGETS", "existing.example.com")
-    from tools.mcp_shared import add_discovered_target, _allowed_target_list
+    from tools.mcp_shared import _allowed_target_list, add_discovered_target
     add_discovered_target("new.example.com", "9.10.11.12")
     result = _allowed_target_list({"exploit": {"allowed_targets": []}})
     assert "existing.example.com" in result

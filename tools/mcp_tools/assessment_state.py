@@ -236,7 +236,6 @@ def register_assessment_state_tools(mcp: Any, *, ctx: ToolContext) -> None:
     @require_allowlist()
     def get_evidence(target_ip: str, limit: int = 25, tool: str = "") -> str:
         """Read recent exploit_audit.jsonl entries for one target and return compact evidence refs (exploit_audit:<target>:<attempt_id> with tool/status/duration only -- raw command/args are never emitted, they may contain secrets). target must be in the allowlist. Returns an EVIDENCE: block."""
-        from tools.assessment_state import _safe_target_name
 
         max_items = max(1, min(_positive_int(limit, 25), 200))
         tool_filter = (tool or "").strip().lower()

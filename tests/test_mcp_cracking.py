@@ -15,7 +15,6 @@ import pytest
 
 from tools.mcp_tools.attack_modules import _identify_hash_modes
 
-
 # ── Unit: _identify_hash_modes (shared with hash_crack_identify) ──────────────
 
 

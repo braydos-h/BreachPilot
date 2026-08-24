@@ -22,12 +22,10 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 
 from tools.mcp_tools.parallel_agents import _SubagentManager
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 

@@ -28,7 +28,6 @@ from html.parser import HTMLParser
 from typing import Any, Callable, Iterable
 from urllib.parse import urljoin, urlparse, urlunparse
 
-
 RESEARCH_DISABLED = "RESEARCH_DISABLED"
 RESEARCH_PROVIDER_UNAVAILABLE = "RESEARCH_PROVIDER_UNAVAILABLE"
 RESEARCH_API_KEY_MISSING = "RESEARCH_API_KEY_MISSING"

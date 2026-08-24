@@ -10,7 +10,6 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-
 SQL_INJECTION_PATTERNS = [
     r"(?i)(\bunion\b\s+\bselect\b)",
     r"(?i)(\bor\b\s+1\s*=\s*1)",

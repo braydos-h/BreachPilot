@@ -19,8 +19,6 @@ from __future__ import annotations
 
 import time
 
-import pytest
-
 
 def _force_tty(monkeypatch) -> None:
     """Make the spinner take the animated (threaded) branch in a non-TTY test."""

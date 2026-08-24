@@ -25,7 +25,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-
 # ── 1. adapter unit tests ───────────────────────────────────────────────────
 
 
@@ -374,8 +373,7 @@ def _tool_result(text: str):
 async def test_loop_flow_a_compromise_records_compromise(tmp_path, monkeypatch):
     """With flow_a=True, a Meterpreter result drives record_compromise and a
     'completed' audit status."""
-    from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings
-    from tools.exploit_agent import run_exploit_agent
+    from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings, run_exploit_agent
 
     settings = ExploitSettings(
         enabled=True,
@@ -426,8 +424,7 @@ async def test_loop_flow_a_disabled_behavior_unchanged(tmp_path):
     hypothesis-verdict layer). The old contract (no taxonomy without flow_a)
     let false positives through; the new contract is: compromise detection is
     always on, flow_a only adds the CONFIRMED/REFUTED hypothesis verdict."""
-    from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings
-    from tools.exploit_agent import run_exploit_agent
+    from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings, run_exploit_agent
 
     settings = ExploitSettings(
         enabled=True,
@@ -470,10 +467,9 @@ async def test_loop_flow_a_disabled_behavior_unchanged(tmp_path):
 async def test_loop_flow_a_refuted_records_exploit_failure(tmp_path, monkeypatch):
     """A REFUTED verdict (mocked) sets success=False and records an exploit
     failure, so the audit row is 'executed' not 'completed'."""
-    from outcome_judge import HypothesisStatus
-    from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings
-    from tools.exploit_agent import run_exploit_agent
     import tools.exploit_agent.outcome_adapter as adapter_mod
+    from outcome_judge import HypothesisStatus
+    from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings, run_exploit_agent
 
     settings = ExploitSettings(
         enabled=True,
@@ -523,10 +519,9 @@ async def test_loop_flow_a_inconclusive_keeps_exit_code_success(tmp_path, monkey
     """An INCONCLUSIVE verdict (mocked) keeps the exit_code-based success flag.
     With exit_code=0 the audit row is 'completed'; no compromise/cred/partial
     taxonomy is recorded for a non-partial classification."""
-    from outcome_judge import HypothesisStatus
-    from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings
-    from tools.exploit_agent import run_exploit_agent
     import tools.exploit_agent.outcome_adapter as adapter_mod
+    from outcome_judge import HypothesisStatus
+    from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings, run_exploit_agent
 
     settings = ExploitSettings(
         enabled=True,
@@ -577,9 +572,8 @@ async def test_loop_flow_a_inconclusive_keeps_exit_code_success(tmp_path, monkey
 async def test_loop_flow_a_judge_failure_does_not_crash(tmp_path, monkeypatch):
     """If judge_flow_a raises, the loop must not crash -- it falls back to the
     exit-code flag and emits a warning."""
-    from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings
-    from tools.exploit_agent import run_exploit_agent
     import tools.exploit_agent.outcome_adapter as adapter_mod
+    from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings, run_exploit_agent
 
     settings = ExploitSettings(
         enabled=True,
@@ -666,8 +660,7 @@ async def test_loop_terminates_naturally_after_compromise(tmp_path):
     that attack mode otherwise only stopped via round/command budget
     exhaustion -- up to 200 rounds in long-session config -- because no tool
     maps to the ``reporting`` phase minimum)."""
-    from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings
-    from tools.exploit_agent import run_exploit_agent
+    from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings, run_exploit_agent
 
     settings = ExploitSettings(
         enabled=True,
@@ -712,8 +705,7 @@ async def test_loop_does_not_terminate_early_without_compromise(tmp_path):
     """Without a verified compromise, a no-tool answer still triggers the
     phase-minimum gate (the model can't skip recon by saying 'done' before
     doing anything)."""
-    from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings
-    from tools.exploit_agent import run_exploit_agent
+    from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings, run_exploit_agent
 
     settings = ExploitSettings(
         enabled=True,

@@ -13,9 +13,8 @@ import json
 
 import pytest
 
-from report_generator import ReportGenerator, _severity_label
 from db import DatabaseManager, _new_id
-
+from report_generator import ReportGenerator, _severity_label
 
 # ── Fixtures ───────────────────────────────────────────────────────────────
 

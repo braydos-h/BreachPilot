@@ -13,7 +13,6 @@ from typing import Any
 
 from tools.attack_modules.base import AttackModule, ModuleContext
 
-
 # --- test-only module fixtures -------------------------------------------------
 
 class _VersionModule(AttackModule):

@@ -25,8 +25,8 @@ import asyncio
 import json
 import socket
 import urllib.request
-from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Optional, Sequence, Union
+from dataclasses import dataclass
+from typing import Any, Awaitable, Callable, Optional, Sequence
 
 # ---------------------------------------------------------------------------
 # Aggression -> pacing factor

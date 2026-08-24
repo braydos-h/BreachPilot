@@ -5,16 +5,14 @@ Tests are written to PASS (see Windows pytest 9.0.3 PosixPath INTERNALERROR
 note in the task brief — a failing test crashes pytest before naming itself).
 """
 
-import pytest
 
 from tools.recon_enrichers import (
-    parse_tls_info,
-    parse_smtp_banner,
-    parse_db_banner,
-    parse_udp_nmap_output,
     http_spider,
+    parse_db_banner,
+    parse_smtp_banner,
+    parse_tls_info,
+    parse_udp_nmap_output,
 )
-
 
 # ---------------------------------------------------------------------------
 # parse_tls_info

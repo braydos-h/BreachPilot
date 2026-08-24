@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Agent for testing business logic vulnerabilities during authorized assessments."""
 
-import requests
-import json
 import argparse
-import urllib3
+import json
 import threading
 from datetime import datetime
 from urllib.parse import urljoin
+
+import requests
+import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -89,7 +90,7 @@ def test_coupon_reuse(base_url, token, coupon_endpoint="/api/cart/apply-coupon",
         })
         print(f"  [!] Coupon applied {success_count} times!")
     else:
-        print(f"  [+] Coupon properly limited")
+        print("  [+] Coupon properly limited")
     return findings
 
 
@@ -159,7 +160,7 @@ def test_self_referral(base_url, token, referral_endpoint="/api/referrals/invite
         resp = requests.post(url, headers=headers, json={"referral_email": email},
                              timeout=10, verify=False)
         if resp.status_code in (200, 201):
-            print(f"  [!] Self-referral accepted")
+            print("  [!] Self-referral accepted")
             return [{"type": "SELF_REFERRAL", "severity": "MEDIUM"}]
         else:
             print(f"  [+] Self-referral blocked (status {resp.status_code})")

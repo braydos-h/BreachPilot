@@ -8,8 +8,8 @@ to detect missing per-object authorization checks. OWASP API1:2023.
 
 import json
 import sys
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 try:
     import requests

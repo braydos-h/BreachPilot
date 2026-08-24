@@ -15,10 +15,7 @@ from __future__ import annotations
 import threading
 from unittest.mock import patch
 
-import pytest
-
-from tools.cve_lookup import CVESearchSettings, CVEEntry, NVDClient
-
+from tools.cve_lookup import CVEEntry, CVESearchSettings, NVDClient
 
 SAMPLE_NVD_RESPONSE = {
     "vulnerabilities": [

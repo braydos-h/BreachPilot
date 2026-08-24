@@ -14,23 +14,20 @@ Tests:
 from __future__ import annotations
 
 import asyncio
-import json
-import signal
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, mock_open
-from pathlib import Path
 
 from tools.recon_pipeline import (
-    ReconPipeline,
-    ReconConfig,
-    PrimaryReconScanner,
-    SecondaryEnumerator,
     HostReconResult,
+    PrimaryReconScanner,
+    ReconConfig,
+    ReconPipeline,
+    SecondaryEnumerator,
     ServiceInfo,
     ToolAvailability,
     run_command,
 )
-
 
 # ── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -633,6 +630,7 @@ class TestRegressions:
         """M15: _kill_process targets the process group via os.killpg when
         available (POSIX), falling back to proc.kill() otherwise."""
         from types import SimpleNamespace
+
         from tools.recon_pipeline import _kill_process
 
         # POSIX path: os.killpg present -> killpg used, proc.kill not called.

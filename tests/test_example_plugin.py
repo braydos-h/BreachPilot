@@ -11,8 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
-import pytest
-
 from tools.attack_modules.base import ModuleContext
 from tools.plugins import Plugin, PluginManager, PluginRegistry
 
@@ -288,7 +286,7 @@ def test_plugin_does_not_load_when_explicitly_disabled():
 
 def test_plugin_discovered_but_not_loaded_appears_in_discovered_list():
     """list_discovered_plugins reports it; loaded flag is False when disabled."""
-    from tools.plugins import list_discovered_plugins, _reset_discovered
+    from tools.plugins import _reset_discovered, list_discovered_plugins
 
     _reset_discovered()
     registry = PluginRegistry()

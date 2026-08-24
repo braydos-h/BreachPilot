@@ -21,7 +21,6 @@ import pytest
 
 from tools.mcp_shared import _extract_msf_rhosts, check_targets_allowlist
 
-
 # ── Unit: extraction + allowlist helper ───────────────────────────────────────
 
 

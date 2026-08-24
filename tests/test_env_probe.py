@@ -94,8 +94,8 @@ def test_windows_guidance_names_specific_failure_modes():
     showed failing: use `python` not `python3`, no pip installs, no netcat, and
     that nmap 0xC0000005 crashes are deterministic (not retried). Generic
     guidance let the AI burn rounds on pip/python3/nc."""
-    from tools.exploit_agent import build_exploit_system_prompt
     from tools.env_probe import ENV_TOOLS
+    from tools.exploit_agent import build_exploit_system_prompt
 
     prompt = build_exploit_system_prompt(attacker_os="Windows", target_ip="10.0.0.5")
     assert "WINDOWS ATTACKER GUIDANCE" in prompt
@@ -115,7 +115,7 @@ def test_windows_guidance_names_specific_failure_modes():
 
 def test_env_tools_public_and_alias_backward_compat():
     """ENV_TOOLS is the public registry; _ENV_TOOLS is the same list object."""
-    from tools.env_probe import ENV_TOOLS, _ENV_TOOLS
+    from tools.env_probe import _ENV_TOOLS, ENV_TOOLS
 
     assert ENV_TOOLS is _ENV_TOOLS
     # Sanity: a few core pentest tools are present.

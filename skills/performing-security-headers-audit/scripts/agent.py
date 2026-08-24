@@ -6,11 +6,12 @@ cookie security attributes, and information disclosure to identify
 missing or misconfigured browser-level protections.
 """
 
-import requests
 import json
-import sys
 import re
+import sys
 from datetime import datetime
+
+import requests
 
 
 class SecurityHeadersAgent:

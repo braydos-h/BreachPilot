@@ -7,8 +7,9 @@ so no network is touched. The enumerators are exercised through
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 from tools.recon_pipeline import (
     HostReconResult,

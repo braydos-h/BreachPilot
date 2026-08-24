@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Agent for testing XXE injection vulnerabilities during authorized assessments."""
 
-import requests
-import json
 import argparse
-import urllib3
+import json
 from datetime import datetime
 from urllib.parse import urljoin
+
 import defusedxml.ElementTree as safe_ET
+import requests
+import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -151,7 +152,7 @@ def test_xxe_payloads(base_url, endpoint, token=None, callback=None):
                     "type": "XXE_DOS_POSSIBLE", "payload_name": name,
                     "endpoint": endpoint, "severity": "HIGH",
                 })
-                print(f"  [!] Possible DoS via entity expansion (request timed out)")
+                print("  [!] Possible DoS via entity expansion (request timed out)")
     return findings
 
 

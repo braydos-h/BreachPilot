@@ -2,9 +2,9 @@
 # For authorized penetration testing and lab environments only
 """Forced Browsing Authentication Bypass Agent - Tests for unprotected endpoints."""
 
+import argparse
 import json
 import logging
-import argparse
 from datetime import datetime
 from urllib.parse import urljoin
 

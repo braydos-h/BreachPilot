@@ -16,16 +16,14 @@ Usage:
 """
 
 import argparse
-import json
 import os
 import sys
 import time
 from datetime import datetime
-from pathlib import Path
 
-import requests
 import defusedxml.ElementTree as ET
 import pandas as pd
+import requests
 
 # Suppress SSL warnings for self-signed Nessus certs
 requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)

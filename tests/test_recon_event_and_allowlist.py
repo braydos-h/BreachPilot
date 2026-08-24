@@ -15,9 +15,6 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
-
-
 # ── 1. recon_assessment event ──────────────────────────────────────────────
 
 
@@ -43,12 +40,12 @@ class _StubDecisionProvider:
 
 def test_recon_first_emits_recon_assessment_event(tmp_path):
     """``_recon_first`` must emit ``recon_assessment`` before ``goal_suggestions``."""
-    from tools.run_service import AssessmentService
-    from tools.run_service.service import Callables
-    from tools.run_service.models import RunRequest
-    from tools.run_service.providers import CancellationToken
     from tools.goal_engine import GoalEngine
     from tools.goal_suggester import ReconAssessment
+    from tools.run_service import AssessmentService
+    from tools.run_service.models import RunRequest
+    from tools.run_service.providers import CancellationToken
+    from tools.run_service.service import Callables
 
     assessment = ReconAssessment(
         target_ip="10.0.0.50",

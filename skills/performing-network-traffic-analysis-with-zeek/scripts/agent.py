@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Agent for performing network traffic analysis with Zeek (Bro) log files."""
 
-import json
 import argparse
+import json
 import subprocess
-from pathlib import Path
 from collections import Counter
+from pathlib import Path
 
 
 def parse_zeek_log(log_file, delimiter="\t"):

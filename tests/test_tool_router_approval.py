@@ -10,10 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-import pytest
-
-from tool_router import RoutedToolResult, ToolRouter
-
+from tool_router import ToolRouter
 
 # ── Lightweight stubs ──────────────────────────────────────────────────────
 # We avoid importing the real ScopeGate/RiskController/EvidenceStore/Database

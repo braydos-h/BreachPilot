@@ -246,7 +246,7 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
             )
 
             lines = [
-                f"RECON_RESULT: completed",
+                "RECON_RESULT: completed",
                 f"ATTEMPT_ID: {attempt_id}",
                 f"TARGET: {target_ip}",
                 f"OS: {result.os_name or 'Unknown'} (family: {result.os_family}, accuracy: {result.os_accuracy}%)",

@@ -26,9 +26,7 @@ import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from pathlib import Path
 from typing import Any
-
 
 _DVWA_IMAGE = "vulnerables/web-dvwa"
 _DVWA_HOST_PORT = 8081

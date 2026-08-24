@@ -11,8 +11,13 @@ import pytest
 def test_menu_module_imports():
     """Verify the interactive_menu module can be imported."""
     from tools.interactive_menu import (
-        BANNER, run_interactive_menu, _show_banner,
-        _main_menu, _show_help, _view_reports, _edit_settings,
+        BANNER,
+        _edit_settings,
+        _main_menu,
+        _show_banner,
+        _show_help,
+        _view_reports,
+        run_interactive_menu,
     )
     assert BANNER is not None
     assert callable(run_interactive_menu)
@@ -33,8 +38,9 @@ def test_banner_contains_app_name():
 
 def test_help_text():
     """Help text should contain key sections."""
-    from tools.interactive_menu import _show_help
     import io
+
+    from tools.interactive_menu import _show_help
     old_stdout = sys.stdout
     sys.stdout = io.StringIO()
     try:

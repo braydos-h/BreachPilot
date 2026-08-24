@@ -6,12 +6,12 @@ validates live hosts with httpx, resolves DNS, and generates
 an attack surface report.
 """
 
-import subprocess
 import json
+import subprocess
 import sys
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from collections import defaultdict
 
 
 class SubdomainEnumerationAgent:

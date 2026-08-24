@@ -9,15 +9,12 @@ Usage:
     python process.py --subnet 10.0.0.0/24 --domain corp.local --dc-ip 10.0.0.5 --output ./results
 """
 
-import subprocess
+import argparse
+import datetime
 import json
 import os
-import sys
-import argparse
-import socket
-import datetime
+import subprocess
 from pathlib import Path
-from typing import Optional
 
 
 def run_command(cmd: list[str], timeout: int = 300) -> tuple[str, str, int]:

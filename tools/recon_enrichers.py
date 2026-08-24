@@ -23,14 +23,13 @@ from __future__ import annotations
 
 import json
 import re
-import urllib.request
 import urllib.error
+import urllib.request
 from collections import deque
 from html.parser import HTMLParser
 from typing import Callable, Optional
 
 from tools.opsec import process_user_agent
-
 
 # ---------------------------------------------------------------------------
 # Internal helpers

@@ -32,7 +32,6 @@ import urllib.request
 
 from tools.mcp_tools.registry import *
 
-
 # Built-in subdomain wordlist for DNS bruteforce (reused from
 # recon_pipeline._enumerate_vhosts + common additions). ~200 prefixes.
 _SUBDOMAIN_WORDLIST = [
@@ -335,7 +334,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
         all_records = _dns_resolve_all(dom, resolver_fn=resolver_fn)
         lines = [
-            f"DNS_RESULT: completed",
+            "DNS_RESULT: completed",
             f"DOMAIN: {dom}",
         ]
         if resolver_fn is None:
@@ -527,7 +526,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         })
 
         lines = [
-            f"SUBDOMAIN_RESULT: completed",
+            "SUBDOMAIN_RESULT: completed",
             f"DOMAIN: {dom}",
             f"SOURCES: {', '.join(srcs)}",
             f"DISCOVERED: {len(resolved_pairs)} resolvable subdomains",
@@ -588,7 +587,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
         allow_axfr = bool(zone_transfer and recon_cfg.get("dns_zone_transfer", False))
 
         lines = [
-            f"DNS_RECON_RESULT: completed",
+            "DNS_RECON_RESULT: completed",
             f"DOMAIN: {dom}",
         ]
         records: dict[str, list[str]] = {}
@@ -977,14 +976,14 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
             dns_provider = f"unknown (NS: {nameservers[0]})"
 
         lines = [
-            f"WHOIS_RESULT: completed",
+            "WHOIS_RESULT: completed",
             f"DOMAIN: {dom}",
             f"REGISTRAR: {registrar or '(not found)'}",
             f"CREATION_DATE: {creation_date or '(not found)'}",
             f"EXPIRY_DATE: {expiry_date or '(not found)'}",
             f"REGISTRANT_ORG: {registrant_org or '(not found)'}",
             f"DNS_PROVIDER: {dns_provider}",
-            f"NAMESERVERS:",
+            "NAMESERVERS:",
         ]
         for ns in nameservers[:10]:
             lines.append(f"  {ns}")

@@ -14,10 +14,8 @@ Usage:
 """
 
 import argparse
-import sys
 
 import pandas as pd
-
 
 WEIGHTS = {
     "business_function": 0.25,

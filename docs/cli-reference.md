@@ -96,6 +96,11 @@ Startup key loading lives in `tools/config_cli.py:175` (`bootstrap_startup_api_k
 | `--skills-exclude <name>` | Exclude a skill for this run. Repeatable | `main.py:415` |
 | `--no-skills-reselect` | Disable mid-run skill re-selection | `main.py:417` |
 | `--list-plugins` | Print discovered plugins (name/version/capabilities/loaded) and exit | `main.py:420` |
+| `--ctf` | CTF autopilot: hunt flag file and exit when found | `main.py:431` |
+| `--ctf-flag-path <path>` | CTF flag file path (default `/flag.txt`) | `main.py:432` |
+| `--ctf-marker <str>` | CTF known-string marker expected from `--ctf-port` | `main.py:434` |
+| `--ctf-port <n>` | CTF port to probe for marker | `main.py:433` |
+| `--ctf-root-shell` | CTF: assume root shell | `main.py:435` |
 
 ### WebUI / API daemon flags
 

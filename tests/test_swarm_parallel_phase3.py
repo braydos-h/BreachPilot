@@ -18,7 +18,6 @@ Verifies the two headline behaviors of the re-enabled ``route_parallel``:
 
 from __future__ import annotations
 
-import asyncio
 import time
 from typing import Any
 
@@ -26,7 +25,6 @@ import pytest
 
 from tools.swarm.base import Agent, AgentResult, AgentStatus
 from tools.swarm.orchestrator import SwarmOrchestrator
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 

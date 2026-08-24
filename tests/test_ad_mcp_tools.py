@@ -14,7 +14,6 @@ from typing import Any
 
 import pytest
 
-
 _AD_ON = {
     "enabled": True,
     "asrep_roast": True,
@@ -35,8 +34,8 @@ def _make_server(
     ad_kerberos: dict[str, Any] | None = _AD_ON,
 ):
     from mcp_exploit_server import create_mcp_server
+    from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
-    from tools.cve_lookup import NVDClient, CVESearchSettings
     from tools.web_researcher import WebResearcher, WebResearcherSettings
 
     config: dict[str, Any] = {

@@ -27,7 +27,6 @@ from typing import Any
 
 from db import DatabaseManager, _new_id, _now_iso
 
-
 # ── Finding states ─────────────────────────────────────────────────────────
 
 VALID_STATUS_TRANSITIONS = {

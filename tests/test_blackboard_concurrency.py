@@ -18,11 +18,8 @@ from __future__ import annotations
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-import pytest
-
+from tools.swarm.bb_compat import bb_append, bb_extend, bb_remove, bb_set
 from tools.swarm.blackboard import Blackboard
-from tools.swarm.bb_compat import bb_set, bb_append, bb_extend, bb_remove
-
 
 # ── Atomic list ops ───────────────────────────────────────────────────────
 

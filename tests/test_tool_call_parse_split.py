@@ -77,8 +77,7 @@ async def test_parse_error_surfaces_as_internal_parse_error(tmp_path) -> None:
     """A result that cannot be parsed must surface as
     ``INTERNAL_PARSE_ERROR:`` and must NOT trigger the blocked-tool
     accounting (no ``Repeated blocked or unavailable`` terminal prompt)."""
-    from tools.exploit_agent import ExploitPolicy, ExploitPermission, ExploitSettings
-    from tools.exploit_agent import run_exploit_agent
+    from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings, run_exploit_agent
 
     # Keep the turn count small: parse errors do not call record_blocked, so
     # the loop runs until max rounds.

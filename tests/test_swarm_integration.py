@@ -6,17 +6,17 @@ without requiring a live Ollama instance or MCP session.
 
 from __future__ import annotations
 
-import json
-import pytest
 from pathlib import Path
 
+import pytest
+
 from agent_loop import AgentLoop
-from tools.swarm.orchestrator import SwarmOrchestrator
-from tools.semantic_memory import SemanticMemoryManager
-from tools.experience_store import ExperienceStore
-from tools.payload_crafter import PayloadCrafter, CraftedPayload
-from tools.exploit_mutator import ExploitMutator
 from db import DatabaseManager
+from tools.experience_store import ExperienceStore
+from tools.exploit_mutator import ExploitMutator
+from tools.payload_crafter import PayloadCrafter
+from tools.semantic_memory import SemanticMemoryManager
+from tools.swarm.orchestrator import SwarmOrchestrator
 
 
 @pytest.fixture
@@ -68,10 +68,6 @@ def test_agent_loop_with_swarm_and_semantic_memory(temp_db, mock_executor, tmp_p
 
 def test_swarm_orchestrator_routes_all_agent_types():
     """Verify the orchestrator can route to every specialist agent type."""
-    from tools.swarm.agents import (
-        ReconAgent, VulnAgent, ExploitAgent, PostExploitAgent,
-        CriticAgent, ReflectionAgent,
-    )
 
     orch = SwarmOrchestrator(
         context={},

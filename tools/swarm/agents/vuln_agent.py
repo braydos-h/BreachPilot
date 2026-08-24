@@ -14,13 +14,12 @@ import json
 import time
 from typing import Any
 
+from tools.attack_modules import ModuleContext, find_modules, get_module
+from tools.cve_lookup import CVESearchSettings, NVDClient, format_cve_results
+from tools.exploit_search import ExploitSearch, ExploitSearchSettings
+from tools.mcp_shared import build_researcher
 from tools.swarm.base import Agent, AgentResult, AgentStatus
 from tools.swarm.bb_compat import bb_set
-from tools.cve_lookup import NVDClient, CVESearchSettings, format_cve_results
-from tools.exploit_search import ExploitSearch, ExploitSearchSettings
-from tools.attack_modules import ModuleContext, find_modules, get_module
-from tools.mcp_shared import build_researcher
-
 
 _VULN_SYSTEM_PROMPT = """You are a VULNERABILITY RESEARCH SPECIALIST agent in an autonomous penetration testing swarm.
 

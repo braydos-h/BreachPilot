@@ -10,13 +10,10 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import unittest.mock as _mock
-from pathlib import Path
 
 import pytest
 
 from tools.mcp_shared import _check_allowlist, _run_with_pgrp_timeout
-
 
 # ── _check_allowlist: CIDR / wildcard via is_target_in_allowlist (M1) ─────────
 

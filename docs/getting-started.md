@@ -2,9 +2,9 @@
 
 ## Prerequisites
 
-- Python 3.10 or newer. The project metadata targets Python 3.10 to 3.12 and tests are currently being run locally with Python 3.11/3.13 bytecode artifacts present.
-- `nmap` installed and available on `PATH` for scan features.
-- Ollama running at `http://localhost:11434` for AI-backed flows.
+- **Python 3.11+** (`pyproject.toml:11` `requires-python = ">=3.11"`; `tools/doctor.py:31` rejects <3.11, CI matrix 3.11–3.13).
+- `nmap` on `PATH` (or set `nmap.path` in `config.yaml`).
+- An Ollama endpoint: **cloud is the default** (`https://api.ollama.com`, needs `OLLAMA_API_KEY`) or a local daemon (`ollama.host: http://localhost:11434`). Embeddings stay local via `ollama.embed_host` (`http://localhost:11434`).
 - Optional external tools depending on feature area: Metasploit, `searchsploit`, `tmux`/session tooling on Unix-like systems, and package managers used by install tools.
 
 ## Setup

@@ -161,7 +161,7 @@ def _summarize_generic(output: str, max_chars: int) -> str:
 def _cap(text: str, max_chars: int) -> str:
     if len(text) <= max_chars:
         return text
-    return text[:max_chars] + f"\n... [truncated, full output saved as evidence]"
+    return text[:max_chars] + "\n... [truncated, full output saved as evidence]"
 
 
 def summarize_observation(obs_dict: dict[str, Any]) -> str:

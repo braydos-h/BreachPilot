@@ -4,8 +4,8 @@
 # It is the end user's responsibility to obey all applicable local, state and federal laws.
 """Agent for performing GraphQL depth limit attack testing."""
 
-import json
 import argparse
+import json
 import time
 from datetime import datetime
 

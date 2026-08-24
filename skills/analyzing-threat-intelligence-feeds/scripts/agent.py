@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Agent for analyzing threat intelligence feeds via TAXII 2.1 and STIX 2.1."""
 
-import os
-import json
 import argparse
+import json
+import os
 from datetime import datetime, timedelta, timezone
 
-from taxii2client.v21 import Server, Collection, as_pages
-from stix2 import Indicator, Bundle
+from stix2 import Bundle, Indicator
+from taxii2client.v21 import Collection, Server, as_pages
 
 
 def discover_taxii_server(url, user=None, password=None):

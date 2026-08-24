@@ -18,8 +18,8 @@ import json
 import os
 import sys
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 
 DA_SHORTEST_PATH = (
     'MATCH p=shortestPath((n {owned:true})-[*1..]->(g:Group)) '

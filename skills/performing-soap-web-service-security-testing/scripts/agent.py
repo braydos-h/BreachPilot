@@ -7,10 +7,10 @@ SOAPAction spoofing, and WS-Security bypass vulnerabilities.
 
 import json
 import os
-import requests
 import sys
-from lxml import etree
 
+import requests
+from lxml import etree
 
 SOAP_NS = {
     "wsdl": "http://schemas.xmlsoap.org/wsdl/",

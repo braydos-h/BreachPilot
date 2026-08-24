@@ -11,21 +11,21 @@ from tools.attack_modules.base import (
     ModuleContext,
     ModuleResult,
 )
+
+# Re-export module classes for tests that import them by name
+from tools.attack_modules.modules import *  # noqa: F403
+from tools.attack_modules.modules import __all__ as _MODULE_EXPORTS
 from tools.attack_modules.registry import (
+    _MODULE_CLASSES,
+    _module_experience_confidence,
+    _module_primary_service,
+    _module_target_signature,
     find_modules,
     find_producers,
     get_module,
     list_modules,
     missing_prerequisites,
-    _MODULE_CLASSES,
-    _module_experience_confidence,
-    _module_primary_service,
-    _module_target_signature,
 )
-
-# Re-export module classes for tests that import them by name
-from tools.attack_modules.modules import *  # noqa: F403
-from tools.attack_modules.modules import __all__ as _MODULE_EXPORTS
 
 __all__ = [
     "AttackModule",

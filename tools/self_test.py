@@ -24,20 +24,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import yaml
-
-from tools.doctor import (
-    _check_config,
-    _check_imports,
-    _check_models,
-    _check_nmap,
-    _check_ollama,
-    _check_port,
-    _check_python,
-    _check_workspace,
-)
-from tools.config_manager import load_validated_config
-
 # Reuse MCP lifecycle helpers from main.py. main.py only imports this module at
 # runtime inside ``main()``, so there is no import cycle at module load.
 from main import (
@@ -48,7 +34,17 @@ from main import (
     open_exploit_mcp_session,
     ui,
 )
-
+from tools.config_manager import load_validated_config
+from tools.doctor import (
+    _check_config,
+    _check_imports,
+    _check_models,
+    _check_nmap,
+    _check_ollama,
+    _check_port,
+    _check_python,
+    _check_workspace,
+)
 
 _SELF_TEST_ALLOWED_TOOLS = {
     "check_os",

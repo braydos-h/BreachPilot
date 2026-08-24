@@ -3,18 +3,13 @@
 
 from __future__ import annotations
 
-import argparse
 import asyncio
-import functools
-import hashlib
-import inspect
 import ipaddress
 import json
 import os
 import platform
 import re
 import shlex
-import shutil
 import signal
 import socket
 import ssl as _ssl_module
@@ -27,13 +22,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from db import DatabaseManager, get_default_db
 from tools.api_key_store import (
     DEFAULT_API_KEY_FILE,
     disabled_research_tools_message,
     load_api_keys_into_env,
     research_api_keys_available,
 )
-from tools.attack_modules import list_modules, get_module, ModuleContext
+from tools.attack_modules import ModuleContext, get_module, list_modules
 from tools.attack_planner import (
     AttackPlanner,
     build_planning_prompt,
@@ -42,10 +38,12 @@ from tools.attack_planner import (
     parse_replan_json,
 )
 from tools.autonomous_orchestrator import (
-    AutonomousOrchestrator,
     AggressionLevel,
-    AttackPhase as OrchAttackPhase,
+    AutonomousOrchestrator,
     TaskStatus,
+)
+from tools.autonomous_orchestrator import (
+    AttackPhase as OrchAttackPhase,
 )
 from tools.config_manager import CONFIG_SCHEMA
 from tools.credential_store import CredentialRecord, CredentialStore
@@ -55,12 +53,7 @@ from tools.exploit_mutator import ExploitMutator
 from tools.exploit_search import ExploitSearch
 from tools.mcp_shared import (
     _attempt_dir,
-    _allowed_target_list,
     _extract_msf_rhosts,
-    _find_file,
-    _is_inside_workspace,
-    _resolve_workspace_file,
-    _run_with_pgrp_timeout as _shared_run_with_pgrp_timeout,
     add_discovered_target,
     build_cve_search,
     build_researcher,
@@ -70,10 +63,13 @@ from tools.mcp_shared import (
     make_audit_tool,
     make_require_allowlist,
 )
+from tools.mcp_shared import (
+    _run_with_pgrp_timeout as _shared_run_with_pgrp_timeout,
+)
 from tools.metasploit_bridge import MetasploitBridge, get_metasploit_bridge
 from tools.payload_crafter import CraftedPayload
 from tools.persistent_session_manager import PersistentSessionManager, get_session_manager
-from tools.recon_pipeline import ReconPipeline, ReconConfig, HostReconResult
+from tools.recon_pipeline import HostReconResult, ReconConfig, ReconPipeline
 from tools.skill_registry import load_skill_registry, render_skill_context
 from tools.validation_utils import (
     extract_ips_from_command,
@@ -88,7 +84,6 @@ from tools.validation_utils import (
     validate_target_or_ip,
 )
 from tools.web_researcher import WebResearcher
-from db import DatabaseManager, get_default_db
 
 _ORIGINAL_SUBPROCESS_RUN = subprocess.run
 
@@ -155,8 +150,8 @@ def _get_model_router_impl(config: dict[str, Any] | None) -> Any | None:
             return _model_router_cache
         _model_router_init_attempted = True
         try:
-            from tools.model_router import build_router
             from tools.config_manager import get_ai_provider, get_chatgpt_config
+            from tools.model_router import build_router
             registry = (config or {}).get("models", {}).get("registry", {})
             host = (config or {}).get("ollama", {}).get("host", "http://localhost:11434")
             provider = get_ai_provider(config)

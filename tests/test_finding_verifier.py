@@ -12,9 +12,8 @@ from __future__ import annotations
 
 import pytest
 
-from finding_verifier import FindingVerifier, _row_to_finding, VULN_CLASSES
 from db import DatabaseManager, _new_id
-
+from finding_verifier import VULN_CLASSES, FindingVerifier
 
 # ── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -75,7 +74,6 @@ def test_validate_valid_candidate(verifier):
     )
 
     # Create reproduction steps manually via DB update
-    from db import DatabaseManager
     db = verifier._db  # type: ignore
     with db.connection(write=True) as conn:  # type: ignore
         import json
@@ -139,7 +137,6 @@ def test_list_report_ready(verifier):
         impact="Sensitive data leaked.",
         evidence_refs=["E-001"],
     )
-    from db import DatabaseManager, _new_id
     db = verifier._db  # type: ignore
     with db.connection(write=True) as conn:  # type: ignore
         import json

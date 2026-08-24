@@ -14,11 +14,11 @@ from pathlib import Path
 
 try:
     from sslyze import (
-        Scanner,
-        ServerScanRequest,
-        ServerNetworkLocation,
         ScanCommand,
         ScanCommandAttemptStatusEnum,
+        Scanner,
+        ServerNetworkLocation,
+        ServerScanRequest,
     )
 except ImportError:
     Scanner = None

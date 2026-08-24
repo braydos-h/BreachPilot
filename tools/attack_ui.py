@@ -12,7 +12,6 @@ NEW: Full questionary-based interactive settings menu for all CLI flags.
 from __future__ import annotations
 
 import contextlib
-import ipaddress
 import itertools
 import re
 import sys
@@ -891,11 +890,11 @@ class AttackUi:
             print(f"  {self._c('red')}[WARN] Proceed with caution{self._c('reset')}")
         print(f"  Reasoning: {review.reasoning}")
         if review.concerns:
-            print(f"  Concerns:")
+            print("  Concerns:")
             for c in review.concerns:
                 print(f"    - {c}")
         if review.recommended_next_steps:
-            print(f"  Recommended:")
+            print("  Recommended:")
             for s in review.recommended_next_steps:
                 print(f"    - {s}")
 

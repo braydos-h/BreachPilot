@@ -22,7 +22,6 @@ Safety invariants asserted:
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
@@ -32,11 +31,10 @@ from tools.exploit_agent import (
     ExploitPermission,
     ExploitPolicy,
     ExploitSettings,
-    _ToolOutcomeTracker,
     _consult_peers_inline,
+    _ToolOutcomeTracker,
 )
 from tools.mcp_tools.peer_models import _get_consultation_count, _set_consultation_count
-
 
 # ── _ToolOutcomeTracker: consecutive exploit-failure tracking ────────────
 

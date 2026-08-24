@@ -35,7 +35,6 @@ from tools.exploit_agent import (
     _sanitize_reflection_field,
 )
 
-
 # ── _parse_reasoning_block ──────────────────────────────────────────────
 
 def test_parse_reasoning_block_extracts_content():

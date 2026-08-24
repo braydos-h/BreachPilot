@@ -41,7 +41,6 @@ from __future__ import annotations
 import threading
 from typing import Any
 
-
 _GLOBAL = "__global__"
 
 

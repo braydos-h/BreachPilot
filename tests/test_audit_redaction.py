@@ -32,7 +32,6 @@ from tools.mcp_shared import (
     make_require_allowlist,
 )
 
-
 # ── 1. _redact_args unit coverage ───────────────────────────────────────────
 
 
@@ -347,7 +346,7 @@ def test_mask_impacket_hashes():
     nt = "aad3b435b51404eeaad3b435b51404ee"
     # empty-LM form (:NT)
     out = _masked(nt, f"impacket-secretsdump CORP/admin -hashes :{nt} 10.0.0.50")
-    assert out == f"impacket-secretsdump CORP/admin -hashes ***REDACTED*** 10.0.0.50"
+    assert out == "impacket-secretsdump CORP/admin -hashes ***REDACTED*** 10.0.0.50"
     # full LM:NT form
     lm = "31d6cfe0d16ae931b73c59d7e0c089c0"
     out2 = _masked(nt, f"secretsdump -hashes {lm}:{nt} host")

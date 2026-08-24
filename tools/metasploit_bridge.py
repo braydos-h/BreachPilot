@@ -27,7 +27,6 @@ from typing import Any
 
 from tools.persistent_session_manager import PersistentSessionManager, get_session_manager
 
-
 _LOG = logging.getLogger(__name__)
 
 

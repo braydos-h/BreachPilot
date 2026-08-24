@@ -17,7 +17,6 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-
 # Kept for backwards compatibility (tests import this name). Matching is now
 # done by the word-boundary regexes in ``_DESTRUCTIVE_PATTERNS`` below, which
 # normalize whitespace/shell separators and avoid the substring false-positive

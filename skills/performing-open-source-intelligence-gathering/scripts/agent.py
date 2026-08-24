@@ -4,8 +4,8 @@
 # It is the end user's responsibility to obey all applicable local, state and federal laws.
 """Agent for performing open source intelligence (OSINT) gathering."""
 
-import json
 import argparse
+import json
 import re
 
 try:

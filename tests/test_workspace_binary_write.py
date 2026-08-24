@@ -16,14 +16,13 @@ from typing import Any
 
 import pytest
 
-
 # ── Harness (mirrors tests/test_mcp_injection_hardening.py) ─────────────────
 
 
 def _make_server(tmp_path: Path):
     from mcp_exploit_server import create_mcp_server
+    from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
-    from tools.cve_lookup import NVDClient, CVESearchSettings
     from tools.web_researcher import WebResearcher, WebResearcherSettings
 
     search = ExploitSearch(ExploitSearchSettings())

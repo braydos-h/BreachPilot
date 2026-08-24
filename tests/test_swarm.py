@@ -7,13 +7,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from tools.swarm.base import Agent, AgentResult, AgentStatus
-from tools.swarm.orchestrator import SwarmOrchestrator, _DEFAULT_AGENT_MAP
-from tools.swarm.agents.recon_agent import ReconAgent
-from tools.swarm.agents.vuln_agent import VulnAgent
-from tools.swarm.agents.exploit_agent import ExploitAgent
 from tools.swarm.agents.critic_agent import CriticAgent
+from tools.swarm.agents.exploit_agent import ExploitAgent
+from tools.swarm.agents.recon_agent import ReconAgent
 from tools.swarm.agents.reflection_agent import ReflectionAgent
+from tools.swarm.agents.vuln_agent import VulnAgent
+from tools.swarm.base import Agent, AgentResult, AgentStatus
+from tools.swarm.orchestrator import SwarmOrchestrator
 
 
 class DummyAgent(Agent):
@@ -149,8 +149,9 @@ def test_orchestrator_reflection_disabled():
 
 def test_agent_loop_swarm_flag():
     """Verify AgentLoop accepts use_swarm in mission_config."""
-    from agent_loop import AgentLoop
     from unittest.mock import MagicMock
+
+    from agent_loop import AgentLoop
 
     config = {
         "program_name": "Test",
@@ -178,8 +179,9 @@ def test_agent_loop_reads_nested_max_parallel_agents():
     ``swarm_max_parallel`` key, so the configured value was NEVER applied
     (always fell back to 3). This test would have caught that: it sets the
     nested key to 5 and asserts the orchestrator got 5, not the default 3."""
-    from agent_loop import AgentLoop
     from unittest.mock import MagicMock
+
+    from agent_loop import AgentLoop
 
     config = {
         "program_name": "Test",
@@ -205,8 +207,9 @@ def test_agent_loop_reads_nested_max_parallel_agents():
 def test_agent_loop_nested_key_takes_precedence_over_legacy_top_level():
     """When BOTH the nested key and the legacy top-level key are present, the
     nested config.yaml key wins (it is the documented key)."""
-    from agent_loop import AgentLoop
     from unittest.mock import MagicMock
+
+    from agent_loop import AgentLoop
 
     config = {
         "program_name": "Test",
@@ -230,8 +233,9 @@ def test_agent_loop_nested_key_takes_precedence_over_legacy_top_level():
 def test_agent_loop_max_parallel_defaults_to_3_when_unconfigured():
     """No swarm config at all -> the documented default of 3 (not silently
     something else)."""
-    from agent_loop import AgentLoop
     from unittest.mock import MagicMock
+
+    from agent_loop import AgentLoop
 
     config = {
         "program_name": "Test",

@@ -34,11 +34,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from tools.recon_pipeline import HostReconResult, ServiceInfo
 from tools.autonomous_orchestrator import (
     AggressionLevel,
     AttackPhase,
@@ -47,8 +46,8 @@ from tools.autonomous_orchestrator import (
     AutonomousOrchestrator,
     TaskStatus,
 )
+from tools.recon_pipeline import HostReconResult, ServiceInfo
 from tools.swarm.orchestrator import SwarmOrchestrator
-
 
 # ── Recon round-trip ────────────────────────────────────────────────────────
 
@@ -372,7 +371,6 @@ def test_main_writes_session_state_json_and_matcher_finds_it(tmp_path, monkeypat
     with its session_id; a later ``--resume <session_id>`` re-finds that exact
     run dir by the id (not just by the timestamped dir name). Pre-1.3 the
     session_id branch read a never-written session.json, so this would fail."""
-    import main
 
     reports_root = tmp_path / "reports"
     reports_root.mkdir(parents=True, exist_ok=True)

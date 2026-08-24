@@ -8,6 +8,7 @@ from typing import Any
 
 from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
 
+
 class SwarmMcpBridge:
     """Bridge the (sync) swarm tool_executor / ``ExploitAgent.run`` to the live
     MCP ``ClientSession`` owned by ``run_exploit_session``.

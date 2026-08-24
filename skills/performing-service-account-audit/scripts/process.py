@@ -7,11 +7,10 @@ infrastructure. Identifies orphaned, over-privileged, and non-compliant
 service accounts with remediation recommendations.
 """
 
-import json
 import datetime
-from typing import Dict, List, Optional
-from dataclasses import dataclass, field
 from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
 
 
 @dataclass

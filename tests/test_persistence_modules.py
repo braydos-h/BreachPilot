@@ -7,8 +7,8 @@ import subprocess
 from tools.attack_modules import ModuleContext
 from tools.attack_modules.modules.persistence import (
     LinuxPersistence,
-    WindowsPersistence,
     WebShellPersistence,
+    WindowsPersistence,
 )
 from tools.attack_modules.registry import list_modules
 
@@ -68,10 +68,8 @@ def test_linux_persistence_plants_real_ssh_key(tmp_path, monkeypatch) -> None:
     placeholder string that could never authenticate). Execs the generated
     script in-process with a patched subprocess.run + HOME=tmp_path so no real
     box is touched and the test is cross-platform (no ssh-keygen on PATH)."""
-    import builtins
-    import io
-    import os
     import contextlib
+    import io
 
     home = tmp_path / "home"
     home.mkdir()

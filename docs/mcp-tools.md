@@ -10,7 +10,7 @@ audit, and the target-IP allowlist lock live in `tools/mcp_shared.py`.
 
 | Server | File | Role | Tools |
 |---|---|---|---|
-| Exploit | `mcp_exploit_server.py` | Permissive exploitation surface for the exploit agent / recon-first paths. Full terminal, workspace, Metasploit, credentials, AD/Kerberos, payloads, recon, research, sessions. Target-IP allowlist lock + audit trail. | ~90 tools across 16 families (`tools/mcp_tools/`) |
+| Exploit | `mcp_exploit_server.py` | Permissive exploitation surface for the exploit agent / recon-first paths. Full terminal, workspace, Metasploit, credentials, AD/Kerberos, payloads, recon, research, sessions. Target-IP allowlist lock + audit trail. | ~90 tools across 19 families (`tools/mcp_tools/`: 19 `register_*_tools` in `mcp_exploit_server.py:153-177`) |
 | Engine | `mcp_engine_server.py` | Advisory + history surface for foreign assistants (Claude Desktop, Cursor). Read-only: skill search/lookup, NVD CVE lookup, run history. No target touching, no terminal, no exploit surface (`mcp_engine_server.py:1-11`). | `search_skills`, `get_skill`, `cve_lookup`, `list_runs`, `get_run` (`mcp_engine_server.py:89-188`) |
 | Legacy (defensive) | `mcp_server.py` | Scope-enforced Nmap scanning against `research.allowed_assets`. No exploit tools; every tool checks `_is_in_allowlist` (`mcp_server.py:79-108`) and the terminal is allowlisted Nmap shapes only (`mcp_server.py:283-312`). | `run_nmap_ping_sweep`, `run_nmap_triage_scan`, `run_nmap_basic_scan`, `run_nmap_service_scan`, `run_nmap_vuln_scan`, `run_limited_terminal`, `search_vulnerability_intel`, `search_cve_intel` |
 
@@ -203,7 +203,7 @@ an `Exception` subclass — so bare `except Exception` around
 Registration requirement (AGENTS.md rule 4): every exploit MCP tool is
 decorated (`@mcp.tool()` + `@audit_tool` or `@require_allowlist(...)`) inside
 its family module **and** the family's `register_*_tools(mcp, ctx=ctx)` call
-must be present in `mcp_exploit_server.py:153-168`.
+must be present in `mcp_exploit_server.py:153-177` (19 families).
 
 Legend: **Lock** = `@require_allowlist` (structured `target_ip`/`domain` param
 gated by the allowlist), `audit` = `@audit_tool`, `targets` = manual
@@ -477,7 +477,7 @@ handlers re-validate the target against the allowlist before writing (the
 
 ## Adding a New Exploit MCP Tool (checklist)
 
-Matches AGENTS.md rule 4 and `mcp_exploit_server.py:153-168`.
+Matches AGENTS.md rule 4 and `mcp_exploit_server.py:153-177` (19 families).
 
 1. **Add the tool in its family module** (`tools/mcp_tools/<family>.py`) as a
    function nested inside `register_<family>_tools(mcp, *, ctx)` with

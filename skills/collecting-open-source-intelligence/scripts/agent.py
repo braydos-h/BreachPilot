@@ -2,9 +2,9 @@
 # For authorized penetration testing and lab environments only
 """OSINT Collection Agent - Gathers open-source intelligence on targets using Shodan and crt.sh."""
 
+import argparse
 import json
 import logging
-import argparse
 from datetime import datetime
 
 import requests

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Agent for performing IP reputation analysis using the Shodan API."""
 
-import json
 import argparse
+import json
 from datetime import datetime
 
 try:

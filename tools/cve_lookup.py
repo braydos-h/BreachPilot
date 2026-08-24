@@ -23,9 +23,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from tools.opsec import process_user_agent
-
 from tools.reliability import CircuitBreaker, RateLimiter
-
 
 NVD_API_BASE = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 

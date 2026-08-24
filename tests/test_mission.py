@@ -12,18 +12,16 @@ from __future__ import annotations
 
 import pytest
 
+from db import DatabaseManager
 from mission import (
-    Mission,
-    MissionController,
-    _validate_asset_string,
-    _classify_asset,
-    _normalize_config,
     _RISK_PROFILES,
     DEFAULT_OBJECTIVE,
+    Mission,
+    MissionController,
+    _classify_asset,
+    _normalize_config,
+    _validate_asset_string,
 )
-
-from db import DatabaseManager, _new_id
-
 
 # ── Fixtures ───────────────────────────────────────────────────────────────
 

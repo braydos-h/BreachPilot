@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Agent for testing sensitive data exposure vulnerabilities during authorized assessments."""
 
-import requests
-import re
-import json
 import argparse
-import urllib3
+import json
+import re
 from datetime import datetime
 from urllib.parse import urljoin
+
+import requests
+import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -147,16 +148,16 @@ def check_tls_config(host):
         else:
             location = resp.headers.get("Location", "")
             if location.startswith("https://"):
-                print(f"  [+] HTTP redirects to HTTPS")
+                print("  [+] HTTP redirects to HTTPS")
     except requests.RequestException:
-        print(f"  [+] HTTP not accessible (HTTPS only)")
+        print("  [+] HTTP not accessible (HTTPS only)")
 
     try:
         resp = requests.get(f"https://{host}/", timeout=5, verify=False)
         hsts = resp.headers.get("Strict-Transport-Security", "")
         if not hsts:
             findings.append({"type": "MISSING_HSTS", "host": host, "severity": "MEDIUM"})
-            print(f"  [!] Missing HSTS header")
+            print("  [!] Missing HSTS header")
         else:
             print(f"  [+] HSTS: {hsts}")
     except requests.RequestException:

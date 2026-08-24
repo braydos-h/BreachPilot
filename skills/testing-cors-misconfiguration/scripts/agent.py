@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Agent for testing CORS misconfiguration vulnerabilities during authorized assessments."""
 
-import os
-import requests
-import json
 import argparse
-import urllib3
+import json
+import os
 from datetime import datetime
 from urllib.parse import urlparse
+
+import requests
+import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -99,10 +100,10 @@ def test_wildcard_with_credentials(url):
         acao = resp.headers.get("Access-Control-Allow-Origin", "")
         acac = resp.headers.get("Access-Control-Allow-Credentials", "")
         if acao == "*" and acac.lower() == "true":
-            print(f"  [!] CRITICAL: Wildcard (*) with credentials=true")
+            print("  [!] CRITICAL: Wildcard (*) with credentials=true")
             return [{"url": url, "issue": "wildcard_with_credentials", "severity": "CRITICAL"}]
         elif acao == "*":
-            print(f"  [+] Wildcard (*) without credentials (acceptable for public APIs)")
+            print("  [+] Wildcard (*) without credentials (acceptable for public APIs)")
     except requests.RequestException:
         pass
     return []
@@ -123,7 +124,7 @@ def test_null_origin(url, cookies=None):
             return [{"url": url, "issue": "null_origin_accepted",
                       "credentials": creds, "severity": severity}]
         else:
-            print(f"  [+] Null origin not reflected")
+            print("  [+] Null origin not reflected")
     except requests.RequestException:
         pass
     return []
@@ -196,7 +197,7 @@ def main():
     parser.add_argument("-o", "--output", default="cors_report.json")
     args = parser.parse_args()
 
-    print(f"[*] CORS Misconfiguration Assessment")
+    print("[*] CORS Misconfiguration Assessment")
     print(f"[*] Target: {args.base_url}")
     findings = scan_endpoints(args.base_url, args.endpoints, args.token)
     generate_report(findings, args.output)

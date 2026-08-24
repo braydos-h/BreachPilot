@@ -9,13 +9,13 @@ bypass, weak HMAC secrets, kid injection, missing claims, and
 token forgery to detect authentication bypass risks.
 """
 
-import json
 import base64
-import hmac
 import hashlib
+import hmac
+import json
 import sys
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 try:
     import requests

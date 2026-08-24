@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Agent for performing network packet capture analysis with scapy and tshark."""
 
-import json
 import argparse
+import json
 import subprocess
 from collections import Counter
 
 try:
-    from scapy.all import rdpcap, IP, TCP, UDP, DNS, DNSQR
+    from scapy.all import DNS, DNSQR, IP, TCP, UDP, rdpcap
     HAS_SCAPY = True
 except ImportError:
     HAS_SCAPY = False

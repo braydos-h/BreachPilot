@@ -11,7 +11,6 @@ from __future__ import annotations
 import socket
 from unittest.mock import patch
 
-
 # ── is_fqdn ──────────────────────────────────────────────────────────────────
 
 def test_fqdn_accepts_simple_domain():
@@ -162,10 +161,11 @@ def test_is_local_target_resolves_domain_to_loopback():
 
 
 def test_is_local_target_domain_resolves_to_remote():
-    from tools.validation_utils import is_local_target
     # Mock getaddrinfo to return 8.8.8.8 only for the domain; return [] for
     # the operator's own hostname so the local-interface check doesn't match.
     import socket as _sock
+
+    from tools.validation_utils import is_local_target
     def fake_getaddrinfo(host, *a, **k):
         if host == "remote.example.com":
             return [(_sock.AF_INET, _sock.SOCK_STREAM, 6, "", ("8.8.8.8", 0))]

@@ -23,8 +23,8 @@ import pytest
 
 def _make_server(tmp_path: Path):
     from mcp_exploit_server import create_mcp_server
+    from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
-    from tools.cve_lookup import NVDClient, CVESearchSettings
     from tools.web_researcher import WebResearcher, WebResearcherSettings
 
     search = ExploitSearch(ExploitSearchSettings())
@@ -126,8 +126,8 @@ async def test_run_as_root_target_lock_still_wins(monkeypatch, tmp_path: Path) -
     _patch_pgrp_nospawn(monkeypatch)
     # Build an allowlist-enforcing server directly (require_explicit_allowlist=True).
     from mcp_exploit_server import create_mcp_server
+    from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
-    from tools.cve_lookup import NVDClient, CVESearchSettings
     from tools.web_researcher import WebResearcher, WebResearcherSettings
     mcp = create_mcp_server(
         ExploitSearch(ExploitSearchSettings()), NVDClient(CVESearchSettings()),

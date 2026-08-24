@@ -145,8 +145,8 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return "BLOCKED: target_ip is required."
 
         import base64 as _b64
-        import hmac as _hmac
         import hashlib as _hashlib
+        import hmac as _hmac
 
         result_lines = [f"JWT_TAMPER_RESULTS: {target_ip}", ""]
 
@@ -363,7 +363,7 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     if "__schema" in resp or "queryType" in resp:
                         found = ep
                         result_lines.append(f"[+] GraphQL endpoint found: {ep}")
-                        result_lines.append(f"  Introspection ENABLED!")
+                        result_lines.append("  Introspection ENABLED!")
                         # Extract type names
                         type_matches = re.findall(r'"name"\s*:\s*"([^"]+)"', resp)
                         if type_matches:
@@ -523,9 +523,9 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
             diff = abs(mv - mi)
             result_lines.append(f"  Valid user mean: {mv:.1f}ms, Invalid: {mi:.1f}ms, Diff: {diff:.1f}ms")
             if diff > 50:
-                result_lines.append(f"  [+] TIMING ORACLE DETECTED! User enumeration possible via timing.")
+                result_lines.append("  [+] TIMING ORACLE DETECTED! User enumeration possible via timing.")
             else:
-                result_lines.append(f"  [-] No significant timing difference.")
+                result_lines.append("  [-] No significant timing difference.")
         else:
             result_lines.append("  Insufficient samples.")
 
@@ -540,9 +540,9 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
             diff = abs(me - mn)
             result_lines.append(f"  Exist mean: {me:.1f}ms, No-exist: {mn:.1f}ms, Diff: {diff:.1f}ms")
             if diff > 50:
-                result_lines.append(f"  [+] TIMING ORACLE DETECTED! Email enumeration via password reset.")
+                result_lines.append("  [+] TIMING ORACLE DETECTED! Email enumeration via password reset.")
             else:
-                result_lines.append(f"  [-] No significant timing difference.")
+                result_lines.append("  [-] No significant timing difference.")
         else:
             result_lines.append("  Insufficient samples.")
 
@@ -1564,7 +1564,7 @@ if __name__ == "__main__":
                         "then run_python_file."
                     )
                 else:
-                    result_lines.append(f"SYNTAX_OK: false")
+                    result_lines.append("SYNTAX_OK: false")
                     result_lines.append(f"STDERR: {syn.stderr[:500]}")
                     result_lines.append(
                         "INSTRUCTIONS: the synthesized template has a syntax error. "
@@ -2068,7 +2068,7 @@ if __name__ == "__main__":
             sidecar_path.write_text(json.dumps(sidecar, indent=2, default=str), encoding="utf-8")
 
             lines = [
-                f"CRAFT_EXPLOIT_RESULT: generated",
+                "CRAFT_EXPLOIT_RESULT: generated",
                 f"GENERATION_ID: {payload.generation_id}",
                 f"SCRIPT_PATH: {script_path}",
                 f"SIDECAR_PATH: {sidecar_path}",
@@ -2079,7 +2079,7 @@ if __name__ == "__main__":
                 f"OS_HINT: {os_hint}",
                 f"MODULE: {module_name or 'none'}",
                 "",
-                f"SCRIPT_PREVIEW (first 500 chars):",
+                "SCRIPT_PREVIEW (first 500 chars):",
                 payload.script[:500],
             ]
             return "\n".join(lines)
@@ -2211,7 +2211,7 @@ if __name__ == "__main__":
             new_sidecar_path.write_text(json.dumps(new_sidecar, indent=2, default=str), encoding="utf-8")
 
             lines = [
-                f"MUTATE_EXPLOIT_RESULT: mutated",
+                "MUTATE_EXPLOIT_RESULT: mutated",
                 f"GENERATION_ID: {mutated.generation_id}",
                 f"PARENT_ID: {mutated.parent_id}",
                 f"SCRIPT_PATH: {new_script_path}",
@@ -2220,7 +2220,7 @@ if __name__ == "__main__":
                 f"MUTATION_STRATEGY: {mutated.mutation_strategy}",
                 f"ATTEMPT_NUMBER: {attempt_number}",
                 "",
-                f"SCRIPT_PREVIEW (first 500 chars):",
+                "SCRIPT_PREVIEW (first 500 chars):",
                 mutated.script[:500],
             ]
             return "\n".join(lines)
@@ -2407,7 +2407,7 @@ if __name__ == "__main__":
                 f"TARGET: {target_ip}",
                 f"GOAL: {goal}",
                 f"AGGRESSION: {agg.value}",
-                f"STATUS: started",
+                "STATUS: started",
                 f"CAMPAIGN_DIR: {campaign_dir}",
                 f"STATE_FILE: {campaign_dir / 'state.json'}",
                 "",
@@ -2631,7 +2631,7 @@ if __name__ == "__main__":
             )
 
             lines = [
-                f"CAMPAIGN_STEP_RESULT: executed",
+                "CAMPAIGN_STEP_RESULT: executed",
                 f"MODULE: {best_module.name}",
                 f"TARGET: {target_ip}",
                 f"APPLICABILITY_SCORE: {best_score}",

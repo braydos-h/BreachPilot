@@ -18,7 +18,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Generator
 
-
 ATTACK_MEMORY_DB = "attack_memory.db"
 
 

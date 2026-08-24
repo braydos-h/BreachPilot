@@ -15,9 +15,9 @@ import json
 import time
 from typing import Any
 
+from tools.recon_pipeline import ReconConfig, ReconPipeline
 from tools.swarm.base import Agent, AgentResult, AgentStatus
 from tools.swarm.bb_compat import bb_set
-from tools.recon_pipeline import ReconPipeline, ReconConfig
 
 
 def _run_coro(coro: "Any") -> Any:

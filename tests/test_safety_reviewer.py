@@ -1,10 +1,8 @@
 """Tests for safety reviewer."""
 
-import pytest
 from tools.safety_reviewer import (
     build_safety_review_prompt,
     parse_safety_review,
-    SafetyReview,
 )
 
 

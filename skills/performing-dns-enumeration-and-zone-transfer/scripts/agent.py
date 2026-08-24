@@ -11,10 +11,10 @@ import json
 import sys
 from datetime import datetime, timezone
 
-import dns.resolver
-import dns.zone
 import dns.query
 import dns.rdatatype
+import dns.resolver
+import dns.zone
 
 
 def enumerate_dns_records(domain: str) -> dict:

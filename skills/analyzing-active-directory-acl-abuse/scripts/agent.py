@@ -5,8 +5,7 @@ import argparse
 import json
 import struct
 
-from ldap3 import Server, Connection, ALL, NTLM, SUBTREE
-
+from ldap3 import ALL, NTLM, SUBTREE, Connection, Server
 
 DANGEROUS_MASKS = {
     "GenericAll": 0x10000000,

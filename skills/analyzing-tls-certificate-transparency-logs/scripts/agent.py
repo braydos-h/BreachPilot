@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Agent for analyzing Certificate Transparency logs for phishing detection."""
 
-import json
 import argparse
+import json
 from datetime import datetime
 
 import requests

@@ -7,8 +7,8 @@ exercise the class contract and generated-script shape; no network is touched.
 
 from __future__ import annotations
 
-from tools.attack_modules.modules.web import SSRFProbe, XXEProbe, LFITraversal
 from tools.attack_modules.base import ModuleContext
+from tools.attack_modules.modules.web import LFITraversal, SSRFProbe, XXEProbe
 
 
 def _http_ctx() -> ModuleContext:

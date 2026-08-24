@@ -11,7 +11,6 @@ import pytest
 
 from mcp_server import _is_in_allowlist
 
-
 # ── _is_in_allowlist: CIDR-subset-of-CIDR (the gap the old matcher missed) ─────
 
 

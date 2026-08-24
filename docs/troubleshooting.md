@@ -11,7 +11,7 @@ an exact fix. When in doubt, start with the diagnostics table below — the
 |---|---|---|
 | `python main.py --doctor` | Python >= 3.11, imports, nmap binary, workspace writable, config validity, Ollama reachability + model registry, MCP/WebUI port free, (Linux) root/sudo + Kali tooling | 0 = all pass, 1 = any fail (`tools/doctor.py:305`) |
 | `python main.py --self-test` | Safe localhost-only smoke test; writes `reports/self_test_<run_id>/self_test_report.{json,md}` | 0 = pass, 1 = fail (`tools/self_test.py:65`) |
-| `python -m pytest tests/ -v` | Full suite (179 files, all mocked — no live nmap/network) | 0 = pass |
+| `python -m pytest tests/ -v` | Full suite (248 files, all mocked — no live nmap/network) | 0 = pass |
 | `ruff check .` | Lint (line-length 120, E/F/W/I, E501 ignored) | 0 = clean |
 | `python main.py --setup-api-keys` | Prompt for provider keys, save to `secr.json` (gitignored) | — |
 
@@ -308,7 +308,7 @@ an exact fix. When in doubt, start with the diagnostics table below — the
 - **Symptom:** a test fails with `nmap not found` or tries to reach the
   network.
 - **Cause:** you ran a test that isn't mocked — but the whole suite is
-  designed to be offline. All 179 tests mock subprocess/network; no live
+  designed to be offline. All 248 tests mock subprocess/network; no live
   Nmap, no live network (README §Testing).
 - **Check:** `python -m pytest tests/ -v`
 - **Fix:** nothing to install. If a specific test still hits the network,

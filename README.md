@@ -8,9 +8,9 @@
 ![Models](https://img.shields.io/badge/LLM-Ollama%20Cloud-22c55e?style=flat-square)
 ![MCP](https://img.shields.io/badge/MCP-1.27%2B-f97316?style=flat-square)
 ![WebUI](https://img.shields.io/badge/WebUI-React%20%2B%20Vite-06b6d4?style=flat-square)
-![Skills](https://img.shields.io/badge/skills-140-a855f7?style=flat-square)
+![Skills](https://img.shields.io/badge/skills-146-a855f7?style=flat-square)
 ![Swarm](https://img.shields.io/badge/swarm-6%20agents-f59e0b?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-179%20mocked-10b981?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-248%20mocked-10b981?style=flat-square)
 ![Models](https://img.shields.io/badge/peers-Kimi%20%7C%20DeepSeek%20%7C%20GLM%20%7C%20Minimax-3b82f6?style=flat-square)
 ![Transport](https://img.shields.io/badge/transport-stdio%20%7C%20http-8b5cf6?style=flat-square)
 ![Context](https://img.shields.io/badge/context-976K-ec4899?style=flat-square)
@@ -24,7 +24,7 @@ Plan, reconnoiter, exploit, and report end to end against targets you own
 or are explicitly authorized to assess. An autonomous operator that thinks in
 kill-chains, not checklists: it scouts the surface, picks the attack, runs it,
 proves the outcome with evidence, and writes the report. Powered by Ollama
-LLMs, the Model Context Protocol, and a 140-skill advisory knowledge base.
+LLMs, the Model Context Protocol, and a 146-skill advisory knowledge base.
 Lab-only, target-locked, fully audited.
 
 </div>
@@ -65,7 +65,7 @@ A coupled assessment engine, not an nmap wrapper with a chatbot on top:
 - **Autonomous attack orchestrator** (`tools/autonomous_orchestrator.py`):
   persistent multi-phase campaigns with adaptive aggression, vuln chaining,
   and auto-retry.
-- **Runtime skills system**: 140 advisory `SKILL.md` files indexed,
+- **Runtime skills system**: 146 advisory `SKILL.md` files indexed,
   deterministically + semantically selected, injected into LLM context per
   phase. Advisory only, never grants execution authority.
 - **Bundled WebUI** (React + Vite + TypeScript) served by a loopback-only
@@ -84,7 +84,7 @@ For the full architecture, Flow A/B split, and module map, see
 - **Multi-model war room.** Ask Kimi K2.6, DeepSeek V4 Pro/Flash, GLM-5.2,
   and Minimax M3 for advisory ideas mid-run. Peers have no tool schemas and
   cannot execute commands.
-- **140-skill advisory brain.** Each `SKILL.md` carries NIST CSF + MITRE
+- **146-skill advisory brain.** Each `SKILL.md` carries NIST CSF + MITRE
   ATT&CK metadata. Selected deterministically + semantically, re-selected
   mid-run as new services/CVEs surface, with cross-mission Bayesian feedback.
 - **Hypothesis-driven outcome judgment.** Every executed check produces
@@ -120,7 +120,7 @@ For the full architecture, Flow A/B split, and module map, see
   run, gated by `api.graph_route`.
 - **Eval harness.** Benchmark regression against target labs with JSON/Markdown/HTML
   reports under `reports/eval/<run_id>/`.
-- **179-test suite, all mocked.** No live Nmap, no live network: every test
+- **248-test suite, all mocked.** No live Nmap, no live network: every test
   mocks subprocess/network and runs offline.
 
 ## Quick start
@@ -351,7 +351,7 @@ All runtime behavior lives in **`config.yaml`**. Key sections:
 | `poc_verification` | self-healing PoC verification: `cve_to_exploit_synth` syntax-checks its PoC inline; `verify_poc` MCP tool compile-tests in isolated Docker (`--network=none --read-only --memory=256m`) |
 | `replay_simulator` | pre-commit attack-plan critique (`replay_simulate` MCP tool: LLM critiques its own plan against saved ReconAssessment, with rule-based fallback) |
 | `api` | WebUI daemon host/port/token/origins, `graph_route` (attack-path DAG), `max_concurrent_runs` (D3: N concurrent runs for wide-scope assessments; lab default 3; set 1 for legacy single-run 409), `multi_operator` (D4: user accounts + annotations; lab default true, loopback-only) |
-| `ics` | D8: `allow_write` (lab default **true**: operator runs against owned PLCs; physical-damage risk). Write-side ICS modules are DESTRUCTIVE. Dual-gated: `@require_allowlist` on `run_attack_module` AND `ics.allow_write: true`. Set false for read-only ICS enum |
+| `ics` | D8: `allow_write` (default **false**: read-only ICS enum). Write-side ICS modules are DESTRUCTIVE — `ModbusWriteCoil/ModbusWriteRegister/S7PlcStop/S7PlcStart` change physical process state. Dual-gated: `@require_allowlist` on `run_attack_module` AND `ics.allow_write: true` AND `ics.destructive_ics: true`. Set true only for authorized PLC testing |
 | `long_session` | multi-hour mode, request timeout, checkpoint |
 | `plugins` | out-of-tree plugin enable/disable, search paths, entry points |
 | `webhook_notify` | outbound Slack/Discord run-status notifications (url, event filter, retry/backoff) |
@@ -369,11 +369,11 @@ Hard-blocked actions regardless of config: `denial_of_service`,
 ## Testing
 
 ```bash
-python -m pytest tests/ -v                              # full suite (179 files)
+python -m pytest tests/ -v                              # full suite (248 files)
 python -m pytest tests/test_scope_gate.py -v            # single file
 python -m pytest tests/test_recon_pipeline.py::TestClass::test_method  # one test
 python -m pytest tests/ -v -k "scope"                   # by keyword
-python -m pytest --cov=tools --cov=main.py --cov=cli.py # coverage
+python -m pytest --cov=tools --cov=main --cov=cli # coverage
 ```
 
 All tests mock subprocess/network: no live Nmap, no live network. pytest

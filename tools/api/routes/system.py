@@ -597,6 +597,7 @@ def _run_doctor_sync(config_path: Path) -> tuple[int, str]:
     """Run the environment self-check off-thread and capture its stdout."""
     import contextlib
     import io
+
     from tools.doctor import run_doctor as _run
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -616,6 +617,7 @@ async def run_self_test(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     """Run the safe localhost smoke test and capture its stdout output."""
     import contextlib
     import io
+
     from tools.self_test import run_self_test as _run
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):

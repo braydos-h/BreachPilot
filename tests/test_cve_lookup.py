@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import patch
+
 import pytest
 
 from tools.cve_lookup import (
-    CVESearchSettings,
     CVEEntry,
+    CVESearchSettings,
     NVDClient,
     NVDHTTPError,
     format_cve_results,
 )
-
 
 SAMPLE_NVD_RESPONSE = {
     "vulnerabilities": [
@@ -335,7 +334,7 @@ def test_build_cve_search_wires_shared_limiter_from_config():
     """build_cve_search reads search_rate_limit_per_minute and wires a shared
     RateLimiter into the NVDClient (making the previously-unused mission/config
     search-rate budget live)."""
-    from tools.mcp_shared import build_cve_search, _SHARED_NVD_LIMITERS
+    from tools.mcp_shared import _SHARED_NVD_LIMITERS, build_cve_search
 
     _SHARED_NVD_LIMITERS.clear()
     client = build_cve_search({"cve_lookup": {"search_rate_limit_per_minute": 30}})
@@ -347,7 +346,7 @@ def test_build_cve_search_wires_shared_limiter_from_config():
 def test_build_cve_search_zero_disables_shared_limiter():
     """search_rate_limit_per_minute=0 disables the shared limiter (falls back
     to per-instance rate_limit_seconds) -- operator opt-out."""
-    from tools.mcp_shared import build_cve_search, _SHARED_NVD_LIMITERS
+    from tools.mcp_shared import _SHARED_NVD_LIMITERS, build_cve_search
 
     _SHARED_NVD_LIMITERS.clear()
     client = build_cve_search({"cve_lookup": {"search_rate_limit_per_minute": 0}})
@@ -356,7 +355,7 @@ def test_build_cve_search_zero_disables_shared_limiter():
 
 def test_build_cve_search_default_limiter_when_key_absent():
     """Default (key absent) wires the 10/min limiter (the ~6s NVD gap)."""
-    from tools.mcp_shared import build_cve_search, _SHARED_NVD_LIMITERS
+    from tools.mcp_shared import _SHARED_NVD_LIMITERS, build_cve_search
 
     _SHARED_NVD_LIMITERS.clear()
     client = build_cve_search({})
@@ -368,7 +367,7 @@ def test_build_cve_search_limiter_is_process_wide_singleton():
     """Two build_cve_search calls with the SAME rate share ONE limiter object
     (the whole point: concurrent MCP requests share one NVD budget, not one
     per NVDClient instance). Different rates get different limiters."""
-    from tools.mcp_shared import build_cve_search, _SHARED_NVD_LIMITERS
+    from tools.mcp_shared import _SHARED_NVD_LIMITERS, build_cve_search
 
     _SHARED_NVD_LIMITERS.clear()
     c1 = build_cve_search({"cve_lookup": {"search_rate_limit_per_minute": 20}})

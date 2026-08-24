@@ -8,12 +8,14 @@ import shutil
 import subprocess
 import sys
 
-from tools.mcp_tools.registry import *
 from tools.command_analyzer import (
     _endpoint_ips as _cmd_endpoint_ips,
+)
+from tools.command_analyzer import (
     _extract_destinations as _cmd_extract_destinations,
 )
 from tools.mcp_shared import _allowed_target_list, _is_inside_workspace
+from tools.mcp_tools.registry import *
 from tools.opsec import OpsecManager
 
 

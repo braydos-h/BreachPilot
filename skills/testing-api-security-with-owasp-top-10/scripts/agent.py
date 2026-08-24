@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Agent for automated API security testing against OWASP API Security Top 10."""
 
-import os
-import requests
-import json
 import argparse
-import urllib3
+import json
+import os
 from datetime import datetime
 from urllib.parse import urljoin
+
+import requests
+import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -204,7 +205,7 @@ def main():
     parser.add_argument("-o", "--output", default="api_security_report.json")
     args = parser.parse_args()
 
-    print(f"[*] OWASP API Security Top 10 Assessment")
+    print("[*] OWASP API Security Top 10 Assessment")
     print(f"[*] Target: {args.base_url}")
     all_findings = []
     all_findings.extend(test_security_headers(args.base_url))

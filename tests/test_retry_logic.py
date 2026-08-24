@@ -13,26 +13,25 @@ Tests:
 from __future__ import annotations
 
 import asyncio
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from tools.reliability import (
+    _KILL_SIGNAL,
+    AsyncExecutionPool,
+    CircuitBreaker,
+    CircuitState,
+    ErrorRecord,
+    ErrorTracker,
+    GracefulDegradation,
+    ToolFallback,
+    safe_execute,
     with_retry,
     with_timeout,
     with_timeout_sync,
-    ToolFallback,
-    ToolResult,
-    CircuitBreaker,
-    CircuitState,
-    AsyncExecutionPool,
-    ErrorTracker,
-    ErrorRecord,
-    GracefulDegradation,
-    safe_execute,
-    _KILL_SIGNAL,
 )
-
 
 # ── Retry Decorator Tests ────────────────────────────────────────────────────
 
@@ -852,7 +851,6 @@ class TestToolFallbackDeadlineAndProcessGroup:
         worst-case wall time would be ~2x timeout. With a single deadline, the
         communicate wait_for is bounded by (deadline - now), which is small once
         spawn consumed most of the budget."""
-        import time
 
         with patch("shutil.which", side_effect=["/usr/bin/nmap"]):
             # Record every timeout handed to asyncio.wait_for during this call.

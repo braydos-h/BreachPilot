@@ -11,7 +11,6 @@ import sys
 import uuid
 from datetime import datetime
 
-
 STRIDE_BY_ELEMENT = {
     "process": ["Spoofing", "Tampering", "Repudiation",
                 "Information Disclosure", "Denial of Service",

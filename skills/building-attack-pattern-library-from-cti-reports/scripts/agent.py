@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Attack Pattern Library Builder Agent - Extracts attack patterns from CTI reports and maps to MITRE ATT&CK."""
 
-import json
-import re
-import logging
 import argparse
-from datetime import datetime
+import json
+import logging
+import re
 from collections import Counter, defaultdict
-
+from datetime import datetime
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)

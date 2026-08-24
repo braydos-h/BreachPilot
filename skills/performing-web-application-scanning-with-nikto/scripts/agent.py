@@ -6,8 +6,8 @@ parses XML/JSON output, classifies findings by OSVDB/CVE, and
 generates a structured security assessment report.
 """
 
-import subprocess
 import json
+import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from datetime import datetime

@@ -23,7 +23,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import ipaddress
-import os
 import re
 import subprocess
 import sys
@@ -40,21 +39,20 @@ except ImportError as exc:  # pragma: no cover - import guard
         "python -m pip install -r requirements.txt"
     ) from exc
 
-from tools.mcp_shared import build_cve_search, build_researcher, load_config, run_mcp_http_server
-from tools.cve_lookup import format_cve_results
 from tools.api_key_store import (
     DEFAULT_API_KEY_FILE,
     disabled_research_tools_message,
     load_api_keys_into_env,
     research_api_keys_available,
 )
+from tools.cve_lookup import format_cve_results
+from tools.mcp_shared import build_cve_search, build_researcher, load_config, run_mcp_http_server
 from tools.validation_utils import (
     is_target_in_allowlist,
     preflight_command_check,
     sanitize_target_in_command,
     validate_ipv4,
 )
-
 
 # ── Scope helpers ───────────────────────────────────────────────────
 

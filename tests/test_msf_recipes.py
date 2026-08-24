@@ -20,7 +20,6 @@ from tools.metasploit_bridge import (
     get_msf_recipe,
 )
 
-
 # ── catalog ──────────────────────────────────────────────────────────────────
 
 def test_recipes_present() -> None:
@@ -176,8 +175,8 @@ def test_run_recipe_handler_routes_to_start_handler(monkeypatch, tmp_path: Path)
 def _make_server(tmp_path: Path, *, require_allowlist: bool = False,
                  allowed: list[str] | None = None, recipes_enabled: bool = True):
     from mcp_exploit_server import create_mcp_server
+    from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
-    from tools.cve_lookup import NVDClient, CVESearchSettings
     from tools.web_researcher import WebResearcher, WebResearcherSettings
 
     config: dict[str, Any] = {

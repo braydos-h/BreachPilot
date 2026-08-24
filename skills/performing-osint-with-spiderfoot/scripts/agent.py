@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """OSINT automation agent using SpiderFoot REST API for target profiling and reconnaissance."""
 
-import os
-import json
-import time
 import argparse
+import json
+import os
+import time
 from datetime import datetime
 
 import requests

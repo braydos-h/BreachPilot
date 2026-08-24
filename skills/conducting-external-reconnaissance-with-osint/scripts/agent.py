@@ -2,9 +2,9 @@
 # For authorized penetration testing and lab environments only
 """External Reconnaissance Agent - Maps organization attack surface using passive OSINT."""
 
+import argparse
 import json
 import logging
-import argparse
 from datetime import datetime
 
 import requests

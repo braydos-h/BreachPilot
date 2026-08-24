@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 try:
-    from jinja2 import Environment, BaseLoader
+    from jinja2 import BaseLoader, Environment
 except ImportError:
     sys.exit("jinja2 required: pip install jinja2")
 

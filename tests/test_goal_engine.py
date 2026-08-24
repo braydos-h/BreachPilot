@@ -1,7 +1,6 @@
 """Tests for the goal engine."""
 
-import pytest
-from tools.goal_engine import GoalEngine, AttackGoal, PRESET_GOALS
+from tools.goal_engine import PRESET_GOALS, AttackGoal, GoalEngine
 
 
 def test_preset_goals_exist():

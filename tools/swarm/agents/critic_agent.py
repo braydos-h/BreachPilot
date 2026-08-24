@@ -14,9 +14,8 @@ import json
 import time
 from typing import Any
 
-from tools.swarm.base import Agent, AgentResult, AgentStatus
 from tools.exceptions import _EXC_GROUP_CATCH
-
+from tools.swarm.base import Agent, AgentResult, AgentStatus
 
 _CRITIC_SYSTEM_PROMPT = """You are a SAFETY & POLICY CRITIC agent in an autonomous penetration testing swarm.
 

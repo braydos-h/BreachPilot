@@ -14,7 +14,6 @@ from typing import Any, Iterable
 
 import yaml
 
-
 _FRONT_MATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 _HEADING_RE = re.compile(r"^##+\s+(.+?)\s*$", re.MULTILINE)
 

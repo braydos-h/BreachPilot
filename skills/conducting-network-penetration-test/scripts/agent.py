@@ -2,9 +2,9 @@
 # For authorized penetration testing and lab environments only
 """Network Penetration Testing Agent - Automates host discovery, port scanning, and vuln assessment."""
 
+import argparse
 import json
 import logging
-import argparse
 from datetime import datetime
 
 import nmap

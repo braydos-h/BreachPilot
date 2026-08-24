@@ -34,8 +34,8 @@ from typing import Any
 
 import pytest
 
-from tools.attack_modules import AttackModule, ModuleContext
 import tools.autonomous_orchestrator as orch_mod
+from tools.attack_modules import AttackModule, ModuleContext
 from tools.autonomous_orchestrator import (
     AttackPhase,
     AttackState,
@@ -43,7 +43,6 @@ from tools.autonomous_orchestrator import (
     AutonomousOrchestrator,
 )
 from tools.recon_pipeline import HostReconResult, ServiceInfo
-
 
 # ── Fake persistence modules (handler-logic tests) ──────────────────────────
 

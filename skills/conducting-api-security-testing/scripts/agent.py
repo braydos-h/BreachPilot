@@ -2,9 +2,9 @@
 # For authorized penetration testing and lab environments only
 """API Security Testing Agent - Tests REST/GraphQL APIs for OWASP API Top 10 vulnerabilities."""
 
+import argparse
 import json
 import logging
-import argparse
 from datetime import datetime
 from urllib.parse import urljoin
 

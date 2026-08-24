@@ -3,7 +3,6 @@
 
 import datetime
 
-
 KILL_CHAIN_PHASES = {
     1: {
         "name": "Reconnaissance",

@@ -11,44 +11,32 @@ Tests:
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
-from unittest.mock import MagicMock, patch
-from pathlib import Path
 
 from tools.attack_modules import (
-    AttackModule,
+    ContainerBreakout,
+    DeserializeAttack,
+    FTPAnonymous,
+    LDAPAnonymous,
+    LinuxPrivescCheck,
+    Log4jRCE,
     ModuleContext,
-    list_modules,
+    OpenSSHCVECheck,
+    RedisExploit,
+    RegreSSHion,
+    SMBGhost,
+    SMBNullSession,
+    SMBRelay,
+    SQLInjection,
+    SSHBruteForce,
+    WebShellUpload,
+    XSSScanner,
     find_modules,
     get_module,
-    Log4jRCE,
-    SMBGhost,
-    EternalBlue,
-    BasicAuthBuster,
-    APIFuzzer,
-    RDPBlueKeep,
-    SSHBruteForce,
-    RegreSSHion,
-    OpenSSHCVECheck,
-    SMBRelay,
-    SMBNullSession,
-    WebShellUpload,
-    SQLInjection,
-    XSSScanner,
-    CredentialSpray,
-    LinuxPrivescCheck,
-    WindowsPrivescCheck,
-    SUIDEnumeration,
-    KernelExploitCheck,
-    ContainerBreakout,
-    FTPAnonymous,
-    RedisExploit,
-    ElasticsearchExploit,
-    LDAPAnonymous,
-    RDPExploit,
-    DeserializeAttack,
+    list_modules,
 )
-
 
 # ── Fixtures ───────────────────────────────────────────────────────────────
 

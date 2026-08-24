@@ -16,9 +16,6 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-import pytest
-
-
 # ── api_key_store wiring ────────────────────────────────────────────────────
 
 

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Network traffic analysis agent using tshark and pyshark for PCAP analysis."""
 
+import argparse
 import json
 import math
-import subprocess
-import argparse
 import re
+import subprocess
+from collections import Counter, defaultdict
 from datetime import datetime
-from collections import defaultdict, Counter
 
 try:
     import pyshark

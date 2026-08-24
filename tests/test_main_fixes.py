@@ -24,9 +24,6 @@ from argparse import Namespace
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
-
 # ── Shared helpers ─────────────────────────────────────────────────────────
 
 

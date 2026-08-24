@@ -4,17 +4,14 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from tools.run_service.models import (
     RunKind,
-    RunMode,
     RunPreview,
     RunRequest,
     RunResult,
-    RunState,
 )
 from tools.run_service.providers import (
     CancellationToken,
@@ -22,7 +19,6 @@ from tools.run_service.providers import (
     TerminalDecisionProvider,
     TerminalEventSink,
 )
-
 
 # ── Models ───────────────────────────────────────────────────────────────────
 
@@ -109,9 +105,10 @@ def test_terminal_approval_provider_deny():
 
 
 def test_prepare_resolves_target_ip(tmp_path):
+    from unittest.mock import MagicMock
+
     from tools.run_service import AssessmentService
     from tools.run_service.service import Callables
-    from unittest.mock import MagicMock
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         "ollama:\n  host: http://localhost:11434\n"
@@ -135,9 +132,10 @@ def test_prepare_resolves_target_ip(tmp_path):
 
 
 def test_prepare_rejects_invalid_target(tmp_path):
+    from unittest.mock import MagicMock
+
     from tools.run_service import AssessmentService
     from tools.run_service.service import Callables
-    from unittest.mock import MagicMock
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         "ollama:\n  host: http://localhost:11434\n"
@@ -156,9 +154,10 @@ def test_prepare_rejects_invalid_target(tmp_path):
 
 
 def test_prepare_recon_mode_not_destructive(tmp_path):
+    from unittest.mock import MagicMock
+
     from tools.run_service import AssessmentService
     from tools.run_service.service import Callables
-    from unittest.mock import MagicMock
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         "ollama:\n  host: http://localhost:11434\n"

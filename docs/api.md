@@ -11,7 +11,7 @@ the CLI uses.
 - **Spec endpoints:** `GET /docs` (Swagger UI), `GET /openapi.json`
 - **Auth:** Bearer token on every route except `GET /health`
 - **Transport:** HTTP/1.1 + WebSocket; loopback-only bind (no public override in v1)
-- **Concurrency:** one active run at a time (HTTP 409 on a second)
+- **Concurrency:** `api.max_concurrent_runs` (lab default **3**, legacy `1` → HTTP 409 on a second; per-run allowlist snapshot so Run A's target never leaks into Run B's allowlist — `tools/api/run_manager.py:22`, `config.yaml:399`)
 - **Persistence:** `reports/api_runtime.db` (SQLite; Flow B's `research.db` untouched)
 - **Bundled WebUI:** `python main.py --web` builds `webui/dist/` (if needed), sets
   `api.serve_webui: true` in memory, and serves the SPA at `/` with a deep-link
@@ -176,7 +176,7 @@ draft ──POST /runs──▶ awaiting_confirmation ──answer start_confirm
 
 On daemon startup, `persistence.recover_interrupted()` marks any run in a live state (`draft`/`awaiting_confirmation`/`running`/`awaiting_input`/`queued`/`cancelling`) as `interrupted` and expires its pending decisions.
 
-The **single-active-run** invariant is enforced by `RunManager`: a second `POST /runs` while one is live returns `409 conflict`. Cancel the active run first.
+The **concurrency** invariant is enforced by `RunManager` (`tools/api/run_manager.py:22`): when `api.max_concurrent_runs` concurrent runs are live, the next `POST /runs` returns `409 conflict`. Lab default is `3`; legacy single-run behavior is `max_concurrent_runs: 1` (then cancel the active run first). Each concurrent run carries its own allowlist snapshot.
 
 ---
 
@@ -239,7 +239,7 @@ API features, supported run options, constraints, and tool groups.
   "api_version": "v1",
   "features": ["runs", "decisions", "events", "websocket", "tool_gateway", "config", "secrets"],
   "constraints": {
-    "max_concurrent_runs": 1,
+    "max_concurrent_runs": 3,
     "loopback_only": true,
     "manual_tool_calls": true
   },
@@ -1223,6 +1223,9 @@ api:
   event_buffer_size: 256       # in-memory ring buffer per run
   shutdown_timeout_seconds: 15 # graceful shutdown wait
   serve_webui: false           # mount built webui/dist/ at / when true (--web sets this in memory)
+  max_concurrent_runs: 3       # D3: N concurrent runs (lab default 3; 1 = legacy single-run 409)
+  multi_operator: true         # D4: user accounts + annotations (loopback-only)
+  graph_route: true            # D3: attack-path DAG API route
 ```
 
 | Key | Type | Default | Notes |
@@ -1235,6 +1238,9 @@ api:
 | `event_buffer_size` | int | 256 | In-memory ring per run; ≥ 1 |
 | `shutdown_timeout_seconds` | int | 15 | Graceful cancel wait before forcing cleanup |
 | `serve_webui` | bool | false | Mount `webui/dist/` at `/` when true. `--web` sets this in memory only (never written to `config.yaml`). Requires `webui/dist/index.html` to exist. |
+| `max_concurrent_runs` | int | 3 | D3: N concurrent runs; 1 = legacy single-run 409 (`tools/api/run_manager.py:22`) |
+| `multi_operator` | bool | true | D4: user accounts + annotations (`tools/api/auth.py:60`) |
+| `graph_route` | bool | true | Attack-path DAG route (`tools/api/routes/graph_explorer.py:30`) |
 
 **Env overrides:**
 - `NETATTACKAI_API_TOKEN` — bearer token (precedes `token_file`).

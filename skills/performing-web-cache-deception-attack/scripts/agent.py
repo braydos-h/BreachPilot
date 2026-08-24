@@ -10,10 +10,10 @@ whether CDN/proxy caches serve personalized content to other users.
 
 import json
 import os
-import requests
 import sys
 from datetime import datetime
 
+import requests
 
 CACHE_EXTENSIONS = [".css", ".js", ".png", ".jpg", ".gif", ".ico",
                     ".svg", ".woff", ".woff2", ".pdf", ".txt"]

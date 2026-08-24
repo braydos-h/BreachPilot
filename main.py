@@ -14,7 +14,6 @@ import argparse
 import asyncio
 import contextlib
 import ipaddress
-import json
 import os
 import shutil
 import subprocess
@@ -23,24 +22,21 @@ import threading
 import time
 import traceback
 import webbrowser
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable
 
-from tools.activity_log import ActivityLog
+from tools.api_key_store import DEFAULT_API_KEY_FILE
 from tools.attack_ui import get_ui
-from tools.goal_engine import GoalEngine, AttackGoal
-from tools.goal_suggester import ReconAssessment
-from tools.safety_reviewer import SafetyReview
+from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group
 from tools.exploit_agent import (
     ExploitSettings,
     run_exploit_agent,
 )
-from tools.model_router import build_router, format_model_choice
+from tools.goal_engine import AttackGoal, GoalEngine
+from tools.goal_suggester import ReconAssessment
+from tools.model_router import build_router
 from tools.model_telemetry import usage_log_path, workspace_root_from_sources
-from tools.api_key_store import DEFAULT_API_KEY_FILE
-from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group
-
+from tools.safety_reviewer import SafetyReview
 
 # ---------------------------------------------------------------------------
 # UI
@@ -62,8 +58,6 @@ def bootstrap_startup_api_keys(args: argparse.Namespace, *, prompt: bool = False
 
 
 from tools.skills_cli import (
-    _apply_runtime_skill_selection,
-    _build_runtime_skill_selection,
     apply_skills_cli_overrides,
     print_skills_catalog,
 )
@@ -95,6 +89,8 @@ def _log_nested_exceptions(exc: BaseException, *, prefix: str = "") -> None:
 from tools import mcp_session as _mcp_session
 from tools.mcp_session import (
     MCP_BOOT_TIMEOUT_SECONDS as _DEFAULT_MCP_BOOT_TIMEOUT_SECONDS,
+)
+from tools.mcp_session import (
     mcp_tools_to_ollama,
 )
 
@@ -147,7 +143,6 @@ async def _elapsed_ticker(
 # ---------------------------------------------------------------------------
 
 from tools import exploit_session as _exploit_session
-from tools.swarm_bridge import SwarmMcpBridge
 
 
 async def run_exploit_session(
@@ -198,10 +193,6 @@ async def run_exploit_session(
 
 
 
-from tools.cli_exploit_settings import (
-    _compute_swarm_timeout,
-    build_cli_exploit_settings,
-)
 
 
 
@@ -467,7 +458,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parsed
 
 
-from tools.resume_state import _load_resume_state
 
 
 def _ensure_webui_build(ui: Any) -> int:

@@ -18,8 +18,6 @@ Covers three fixes:
 from __future__ import annotations
 
 import os
-import sys
-
 
 # ── sanitize_output / _resolve_attacker_os (no third-party deps) ───────────
 

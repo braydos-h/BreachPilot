@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Agent for performing Linux privilege escalation enumeration — authorized testing only."""
 
-import json
 import argparse
-import subprocess
+import json
 import os
 import re
+import subprocess
 from datetime import datetime
 from pathlib import Path
 

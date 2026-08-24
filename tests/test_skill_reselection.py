@@ -3,9 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import pytest
-
-from tools.exploit_agent import _SkillReselectState, _maybe_reselect_skills
+from tools.exploit_agent import _maybe_reselect_skills, _SkillReselectState
 from tools.skill_registry import load_skill_registry
 
 

@@ -24,7 +24,6 @@ from typing import Any
 
 import pytest
 
-
 # ── Harness helpers ─────────────────────────────────────────────────────────
 
 
@@ -35,8 +34,8 @@ def _make_server(
     allowed_targets: list[str] | None = None,
 ):
     from mcp_exploit_server import create_mcp_server
+    from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
-    from tools.cve_lookup import NVDClient, CVESearchSettings
     from tools.web_researcher import WebResearcher, WebResearcherSettings
 
     search = ExploitSearch(ExploitSearchSettings())

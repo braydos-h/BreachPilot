@@ -38,16 +38,16 @@ from typing import Any
 
 import pytest
 
+import tools.autonomous_orchestrator as orch_mod
 from tools.attack_modules import AttackModule, ModuleContext
 from tools.attack_modules.base import ModuleResult
-import tools.autonomous_orchestrator as orch_mod
 from tools.autonomous_orchestrator import (
+    AggressionLevel,
     AttackModuleExecutor,
     AttackPhase,
     AttackState,
     AttackTask,
     AutonomousOrchestrator,
-    AggressionLevel,
     observe_autonomous_progress,
 )
 from tools.recon_pipeline import HostReconResult, ServiceInfo

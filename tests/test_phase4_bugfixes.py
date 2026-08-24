@@ -24,10 +24,8 @@ from __future__ import annotations
 
 import asyncio
 import re
-import subprocess
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 from unittest.mock import MagicMock
 
 import pytest
@@ -62,7 +60,6 @@ from tools.persistent_session_manager import (
     _is_inside_workspace,
     _validate_name,
 )
-
 
 # ── #1: scope_gate CIDR scope-escape ───────────────────────────────────────
 
@@ -216,7 +213,8 @@ async def test_execute_task_batch_no_deadlock_with_many_retryable(tmp_path: Path
 async def test_orchestrator_domain_campaign_runs_subdomain_expansion(tmp_path: Path, monkeypatch):
     """A domain-target campaign populates state.discovered_subdomains."""
     import json as _json
-    from tools.autonomous_orchestrator import AutonomousOrchestrator, AttackPhase
+
+    from tools.autonomous_orchestrator import AutonomousOrchestrator
 
     orch = AutonomousOrchestrator(
         mission_config={"max_cycles": 1, "max_pivot_depth": 0},
@@ -286,7 +284,7 @@ async def test_orchestrator_domain_campaign_runs_subdomain_expansion(tmp_path: P
 
 def test_attack_state_to_dict_serializes_domain_fields():
     """to_dict must persist original_target, resolved_ip, discovered_subdomains."""
-    from tools.autonomous_orchestrator import AttackState, AttackPhase, AggressionLevel
+    from tools.autonomous_orchestrator import AttackState
     state = AttackState(target="93.184.216.34")
     state.original_target = "example.com"
     state.resolved_ip = "93.184.216.34"

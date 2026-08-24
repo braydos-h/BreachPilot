@@ -1,0 +1,106 @@
+"""Workspace path helpers — pure, no I/O beyond Path checks.
+
+Extracted from ``tools.mcp_shared`` (Phase 2 kernel). Both flows and
+``tools.persistent_session_manager`` import from here; ``tools.mcp_shared``
+re-exports for backwards compat.
+"""
+
+from __future__ import annotations
+
+import secrets
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def _is_inside_workspace(workspace: Path, target: Path) -> bool:
+    """True if ``target`` (resolved) is equal to or nested under ``workspace``.
+
+    Ponytail: single source for the predicate previously duplicated in
+    ``tools.mcp_shared`` and ``tools.persistent_session_manager``.
+    Handles ``OSError`` (broken symlink / permission) and treats the
+    workspace root itself as inside (equality check).
+    """
+    try:
+        root = workspace.resolve()
+        resolved = target.resolve()
+    except OSError:
+        return False
+    try:
+        resolved.relative_to(root)
+        return True
+    except ValueError:
+        return resolved == root
+
+
+def _resolve_workspace_file(workspace: Path, filename: str, suffix: str | None = None) -> Path:
+    """Resolve a workspace file by absolute path, relative path, or basename.
+
+    Mirrors ``tools.mcp_shared._resolve_workspace_file`` verbatim (Phase 2
+    move, no behavior change). See that function for the full docstring.
+    """
+    workspace.mkdir(parents=True, exist_ok=True)
+    root = workspace.resolve()
+    raw = str(filename or "").strip().strip("\"'")
+    if not raw:
+        return root / "__missing__"
+
+    normalized = raw.replace("\\", "/")
+    raw_path = Path(raw)
+    candidates: list[Path] = []
+    if raw_path.is_absolute():
+        candidates.append(raw_path)
+    elif "/" in normalized:
+        candidates.append(root / normalized)
+
+    safe_name = Path(normalized).name.lstrip("/").lstrip("\\")
+    if safe_name:
+        candidates.append(root / safe_name)
+
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if not _is_inside_workspace(root, resolved):
+            continue
+        if resolved.is_file() and (suffix is None or resolved.name.endswith(suffix)):
+            return resolved
+
+    if not safe_name:
+        return root / "__missing__"
+
+    matches: list[Path] = []
+    for candidate in root.rglob(safe_name):
+        if not candidate.is_file() or (suffix is not None and not candidate.name.endswith(suffix)):
+            continue
+        try:
+            resolved_cand = candidate.resolve()
+        except OSError:
+            continue
+        if _is_inside_workspace(root, resolved_cand):
+            matches.append(resolved_cand)
+    if matches:
+        return max(matches, key=lambda p: p.stat().st_mtime if p.exists() else 0)
+
+    return root / safe_name
+
+
+def _find_file(workspace: Path, filename: str) -> Path | None:
+    resolved = _resolve_workspace_file(workspace, filename)
+    if not resolved.exists() or not resolved.is_file():
+        return None
+    root = workspace.resolve()
+    try:
+        if not _is_inside_workspace(root, resolved.resolve()):
+            return None
+    except OSError:
+        return None
+    return resolved
+
+
+def _attempt_dir(workspace: Path) -> tuple[Path, str]:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+    attempt_id = f"{stamp}_{secrets.token_hex(4)}"
+    attempt_dir = workspace / attempt_id
+    attempt_dir.mkdir(parents=True, exist_ok=True)
+    return attempt_dir, attempt_id

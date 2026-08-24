@@ -25,17 +25,17 @@ python main.py --doctor          # env check (Python/nmap/Ollama/config)
 python main.py --self-test       # safe localhost smoke test
 python main.py                   # interactive menu (default no-args)
 
-# Tests (168 files in tests/, all mock subprocess/network — no live Nmap)
+# Tests (248 files in tests/, all mock subprocess/network — no live Nmap)
 python -m pytest tests/ -v                                            # full suite
 python -m pytest tests/test_scope_gate.py -v                          # one file
 python -m pytest tests/test_recon_pipeline.py::TestClass::test_method # one test
 python -m pytest tests/ -v -k "scope"                                 # by keyword
-python -m pytest --cov=tools --cov=main.py --cov=cli.py               # coverage
+python -m pytest --cov=tools --cov=main --cov=cli               # coverage
 
-# Lint (scoped in CI, full-tree `ruff check .` still has pre-existing violations)
+# Lint (scoped in CI, full-tree `ruff check .` still has ~27835 pre-existing violations)
 python -m pip install -e ".[dev]"   # ruff + pytest + coverage + mypy + build + twine
-ruff check app.py scope_gate.py tools/safety_reviewer.py tools/validation_utils.py tools/intelligence tools/providers
-mypy --follow-imports=skip summarizer.py planner.py observer.py target_graph.py outcome_judge.py db.py mcp_exploit_server.py tools/mcp_shared.py
+ruff check app.py scope_gate.py tools/safety_reviewer.py tools/validation_utils.py tools/intelligence tools/providers  # scoped must pass (1849 violations full-tree)
+mypy --follow-imports=skip summarizer.py planner.py observer.py target_graph.py outcome_judge.py db.py mcp_exploit_server.py tools/mcp_shared.py  # scoped must pass
 ```
 
 On Linux/macOS `make install|test|test-one F=…|run|doctor|mcp-exploit` work.
@@ -76,16 +76,16 @@ On Linux/macOS `make install|test|test-one F=…|run|doctor|mcp-exploit` work.
 
 5. **`opencode.json` is editor-local config** (gitignored) for the opencode.ai
    editor's own model provider — it is NOT application config. Don't treat it
-   as app state. App config lives in `config.yaml`.
+   as app state. App config lives in `config.yaml`. **Never copy `~/.codex/auth.json` OAuth tokens into `config.yaml` or logs** (provider `chatgpt` only).
 
 6. **`--target` accepts an IP or a domain** (Phase 4). Domains resolve via
-   `tools/validation_utils.resolve_target_to_ip` and thread
+   `tools/validation_utils.resolve_target_to_ip` (`tools/mcp_session.py:255` threads `original_target`/`resolved_ip`) and thread
    `EXPLOIT_TARGET`/`EXPLOIT_TARGET_IP`/`EXPLOIT_TARGET_DOMAIN`/`EXPLOIT_DISCOVERED_TARGETS`
-   env vars into the MCP server. The allowlist matcher supports
-   domains + `*.wildcard` + CIDR by design.
+   (`tools/mcp_shared.py:494-534`) env vars into the MCP server. The allowlist matcher supports
+   domains + `*.wildcard` + CIDR by design (`tools/validation_utils.py:380-420`).
 
 7. **Ollama Cloud is the default model path.** `ollama.host` defaults to
-   `https://api.ollama.com`; the ollama Python client auto-attaches
+   `https://api.ollama.com` (`config.yaml:3`); the ollama Python client auto-attaches
    `Authorization: Bearer $OLLAMA_API_KEY` to every chat/generate request, so
    a host swap is the whole wiring (no probe, no local→cloud fallback).
    Override `ollama.host` in config.yaml to point at a local daemon and the

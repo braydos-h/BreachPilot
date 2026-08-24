@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from risk_controller import RiskController, RiskAssessment, DESTRUCTIVE_KEYWORDS, DANGEROUS_TOOL_PATTERNS
+from risk_controller import RiskController
 
 
 @pytest.fixture

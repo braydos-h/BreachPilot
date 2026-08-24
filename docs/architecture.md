@@ -37,16 +37,7 @@ main.py
 
 The main launcher for interactive menu, recon, attack, doctor, demo, self-test, resume, swarm, and model selection flows. It loads `config.yaml`, starts or connects to MCP transport, routes model calls through the configured provider (`models.provider: ollama` default, or `chatgpt` via the vendored `oauth/` loopback proxy — see [providers.md](providers.md)), and runs recon/attack sessions.
 
-Important functions:
-
-- `load_config`
-- `open_exploit_mcp_session`
-- `start_exploit_http_server`
-- `run_exploit_session`
-- `run_safety_review`
-- `run_recon_assessment`
-- `parse_args`
-- `async_main`
+Important functions (`main.py:342-430` `parse_args`; `tools/config_cli.py:30` `load_config`; `tools/mcp_session.py:117` `open_exploit_mcp_session`; `tools/mcp_session.py:609` `start_exploit_http_server`; `tools/exploit_session.py:70` `run_exploit_session`; `tools/safety_review_cli.py` `run_safety_review`; `tools/recon_assessment_cli.py` `run_recon_assessment`; `main.py:566` `async_main`):
 
 Note: `open_exploit_mcp_session` and several of the functions above are re-wrapped/imported from the Flow A CLI orchestration layer — a set of top-level `tools/*.py` modules (`config_cli.py`, `cli_exploit_settings.py`, `exploit_session.py`, `mcp_session.py`, `recon_assessment_cli.py`, `resume_state.py`, `safety_review_cli.py`, `skills_cli.py`, `swarm_bridge.py`) extracted from `main.py` during the cleanup. See "## Flow A CLI Orchestration Layer" below.
 
@@ -68,11 +59,12 @@ Commands:
 - `generate-report`
 - `status`
 
-### MCP Servers
+### MCP Servers (all share `tools/mcp_shared.run_mcp_http_server:1064-1084` hardening)
 
-- `mcp_server.py`: defensive scanner surface. Tools are scope-aware and focused on nmap, limited terminal commands, and vulnerability intelligence.
-- `mcp_exploit_server.py`: thin exploit MCP wiring layer. It parses CLI args, loads config, creates shared services and the `FastMCP` instance, registers tool categories from `tools/mcp_tools/`, and runs the server.
-- `tools/mcp_tools/`: focused exploit MCP tool registration modules for terminal/workspace access, research, runtime skills, peer models, Metasploit, credentials, payloads, recon, attack modules, and sessions. `registry.py` holds MCP-local shared helper state and dependency bundling.
+- `mcp_server.py` (`mcp_server.py:346-349` HTTP `8000`): defensive scanner surface. Tools are scope-aware and focused on nmap, limited terminal commands, and vulnerability intelligence.
+- `mcp_exploit_server.py` (`mcp_exploit_server.py:76-184` wiring `create_mcp_server`; `206-208` default `8001`): thin exploit MCP wiring layer. It parses CLI args, loads config, creates shared services and the `FastMCP` instance, registers 19 tool families from `tools/mcp_tools/` (`mcp_exploit_server.py:153-177`), and runs the server.
+- `mcp_engine_server.py` (`mcp_engine_server.py:200-203` HTTP `8002`): advisory engine server for foreign assistants (`search_skills`, `get_skill`, `cve_lookup`, `list_runs`, `get_run`).
+- `tools/mcp_tools/` (19 families, `mcp_exploit_server.py:40-64` imports): terminal/workspace, research, runtime skills, peer models, Metasploit, credentials, payloads, recon, attack modules, sessions, domain, cracking, web_scan, assessment_state, parallel_agents, poc_verifier, replay_simulator, mitre, ad. `registry.py:104-112` `ToolContext` wiring + `registry.py:478-495` shared helpers.
 
 The exploit server intentionally says its tools are gated at the policy layer, not in the server itself. Treat `tools.exploit_agent.ExploitPolicy` as the control point for tool approval. Tool modules must still keep their existing defense-in-depth gates such as allowlist checks, audit logging, command preflight, workspace containment, credential redaction, and research API-key gating.
 
@@ -231,3 +223,25 @@ This mirrors CLAUDE.md's "Flow A CLI orchestration layer" bullet list.
 - `critic_agent.py`: pre-execution scope, risk, and policy review.
 - `reflection_agent.py`: strategy review and lessons learned.
 - `orchestrator.py`: task routing, parallel dispatch, reflection, state persistence.
+
+## ADR-001: Flow B Freeze (Phase 2)
+
+**Status:** Accepted 2026-08-24 (Phase 2 — no behavior change).
+
+**Context:** Two control flows coexist in one checkout (`AGENTS.md` §Non-obvious rules, `CLAUDE.md` §High-Level Architecture). Flow A (`main.py`/`app.py` → `tools/exploit_agent/` / `tools/mcp_tools/` / `tools/swarm/` / `tools/autonomous_orchestrator.py` / `tools/run_service/` / `tools/api/`) is what users run. Flow B (`cli.py` + `agent_loop.py` / `db.py` / `mission.py` / `scope_gate.py` / `risk_controller.py` / `tool_router.py` / `planner.py` / `executor.py` / `observer.py` / `task_queue.py`) is the legacy SQLite research loop and still carries recon safety. `db.py` and `mission.py` are shared schema.
+
+**Decision:**
+
+1. **Flow B is frozen as `legacy` namespace.** New code MUST NOT add features to Flow B files. Root-level files `agent_loop.py`, `executor.py`, `planner.py`, `observer.py`, `task_queue.py` are conceptually `legacy.*` — their public import paths remain at the repo root for one release (shim) to avoid breaking 248 tests, but the canonical location for new Flow B work (if any) is `legacy/`. Physical move of files to `legacy/` is deferred to a later phase to keep the Phase 2 diff <400 lines.
+2. **Shared kernel stays at repo root / `tools/kernel/`.** `db.py`, `mission.py`, `scope_gate.py` remain at the root because both flows import them (see `docs/phase2-audit/architecture-debt.md` §1.2 import maps: `db.py` 62 sites, `scope_gate.py` 7 sites including 2 Flow A consumers for the Path B target lock). They are not moved in Phase 2. `tools/kernel/` (`allowlist.py`, `audit.py`, `workspace.py`) is the shared-kernel extraction for pure functions previously duplicated between `tools/mcp_shared.py` and `tools/mcp_tools/registry.py` / `tools/persistent_session_manager.py`.
+3. **Safety files are untouched.** `scope_gate.py`, `safety_reviewer.py`, `agent_loop.py`, `tool_router.py`, `risk_controller.py`, `mission.py`, `db.py` are not edited for Flow A features (invariant `AGENTS.md` §2). Flow B safety stays intact.
+4. **Deprecation signal:** Any new import of a Flow B module from Flow A code SHOULD emit a `DeprecationWarning` via `warnings.warn("Flow B is legacy; use tools.kernel / tools/run_service", DeprecationWarning, stacklevel=2)` — advisory only, not a gate.
+
+**Consequences:**
+
+- `tools/kernel/` is the single source for `allowlist` / `audit` / `workspace` pure functions; `tools/mcp_shared.py` and `tools/mcp_tools/registry.py` re-export for backwards compat (`from tools.kernel.allowlist import _allowed_target_list` etc.).
+- `tools/persistent_session_manager.py:_is_inside_workspace` duplicate is deleted; it imports from `tools/kernel/workspace.py`.
+- No behavior change: `python -m pytest tests/ -q` + `python main.py --doctor` + `python main.py --self-test` remain green.
+- Future phases (3–6) may add `collect_tools()` introspection, `tools/recon/` / `tools/campaign/` splits, and `pkgutil.iter_modules` module discovery without touching the frozen surface.
+
+**Alternatives considered:** Physical `legacy/` directory move in Phase 2 (rejected — would touch 12+ import sites and exceed 400-line budget); deleting Flow B outright (rejected — `cli.py` workflow still used deterministically, and tests cover it).

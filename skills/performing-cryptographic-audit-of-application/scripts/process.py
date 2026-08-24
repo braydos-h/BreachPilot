@@ -15,15 +15,13 @@ Usage:
     python process.py test-samples  # Run against built-in test samples
 """
 
-import os
-import re
-import sys
-import json
 import argparse
+import json
 import logging
+import re
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
-from dataclasses import dataclass, asdict
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)

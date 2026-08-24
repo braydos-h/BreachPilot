@@ -14,7 +14,6 @@ code reads it.
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +26,6 @@ from tools.plugins import (
     PluginRegistry,
     list_discovered_plugins,
 )
-
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
 

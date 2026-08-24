@@ -11,8 +11,8 @@ Host header and alternative host header manipulation.
 
 import json
 import sys
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 try:
     import requests

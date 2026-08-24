@@ -7,10 +7,10 @@ OIDC ID token validation weaknesses.
 """
 
 import json
-import sys
 import secrets
-from pathlib import Path
+import sys
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import urlencode
 
 try:

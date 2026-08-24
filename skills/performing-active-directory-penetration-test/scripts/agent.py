@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 try:
-    from ldap3 import Server, Connection, ALL, SUBTREE
+    from ldap3 import ALL, SUBTREE, Connection, Server
 except ImportError:
     print("Install ldap3: pip install ldap3", file=sys.stderr)
     sys.exit(1)

@@ -14,8 +14,8 @@ Architecture:
 
 from __future__ import annotations
 
-import os
 import asyncio
+import os
 from pathlib import Path
 from typing import Any
 
@@ -81,9 +81,10 @@ def _fallback_main_menu() -> str | None:
 def _manage_missions() -> None:
     """Mission management submenu — list, create, delete missions."""
     try:
+        from pathlib import Path
+
         from db import DatabaseManager
         from mission import MissionController
-        from pathlib import Path
 
         ws = Path(os.environ.get("RESEARCH_WORKSPACE", "research_workspace"))
         ws.mkdir(parents=True, exist_ok=True)
@@ -146,8 +147,8 @@ def _fallback_mission_menu(missions: list[dict[str, Any]]) -> None:
     for i, m in enumerate(missions, 1):
         status = "✓" if m.get("status") == "active" else " "
         print(f"  {i}. [{status}] {m.get('program_name', '?')} ({m.get('risk_profile', '?')})")
-    print(f"  n. Create New Mission")
-    print(f"  b. Back to Main Menu")
+    print("  n. Create New Mission")
+    print("  b. Back to Main Menu")
     try:
         choice = input("\n  > ").strip().lower()
         if choice == "b":

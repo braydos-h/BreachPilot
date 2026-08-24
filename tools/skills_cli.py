@@ -13,10 +13,13 @@ from tools.goal_engine import AttackGoal
 from tools.goal_suggester import ReconAssessment
 from tools.skill_pipeline import (
     apply_skill_selection as _apply_skill_selection_to_context,
+)
+from tools.skill_pipeline import (
     build_skill_selection_for_context,
 )
 from tools.skill_registry_cache import get_registry as _get_skill_registry
 from tools.skill_selector import SkillSelection
+
 
 def _skills_config(config: dict[str, Any]) -> dict[str, Any]:
     base = dict(CONFIG_SCHEMA.get("skills", {}) or {})
@@ -134,8 +137,8 @@ def _build_runtime_skill_selection(
     service_context: str = "",
     is_domain: bool = False,
 ) -> SkillSelection:
-    from tools.skill_feedback import get_shared_skill_store
     from tools.skill_embeddings import get_shared_skill_embedder
+    from tools.skill_feedback import get_shared_skill_store
 
     return build_skill_selection_for_context(
         config,

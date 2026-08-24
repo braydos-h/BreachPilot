@@ -10,13 +10,11 @@ Covers:
 from __future__ import annotations
 
 import hashlib
-import json
 
 import pytest
 
-from evidence import EvidenceStore
 from db import DatabaseManager, _new_id
-
+from evidence import EvidenceStore
 
 # ── Fixtures ───────────────────────────────────────────────────────────────
 

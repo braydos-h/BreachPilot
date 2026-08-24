@@ -7,10 +7,10 @@ generates a risk-classified compliance report.
 """
 
 import json
-import sys
 import subprocess
-from datetime import datetime
+import sys
 from collections import defaultdict
+from datetime import datetime
 
 
 class ServiceAccountAuditor:

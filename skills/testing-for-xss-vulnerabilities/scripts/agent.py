@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Agent for testing Cross-Site Scripting (XSS) vulnerabilities during authorized assessments."""
 
-import requests
-import json
 import argparse
-import urllib3
+import json
 from datetime import datetime
-from urllib.parse import urljoin, quote
+from urllib.parse import quote, urljoin
+
+import requests
+import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 

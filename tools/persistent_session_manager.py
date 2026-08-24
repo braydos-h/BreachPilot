@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from tools.kernel.workspace import _is_inside_workspace as _kernel_is_inside
 
 _LOG = logging.getLogger(__name__)
 
@@ -61,19 +62,11 @@ def _validate_name(name: str) -> str:
 def _is_inside_workspace(path: Path, workspace: Path) -> bool:
     """True if ``path`` (resolved) is equal to or nested under ``workspace``.
 
-    Used to keep model-supplied serve/clone directories from escaping the
-    per-target exploit workspace (e.g. ``directory='/etc'``).
+    Ponytail: wrapper for backwards compat — old signature was (path, workspace)
+    while ``tools.kernel.workspace._is_inside_workspace`` is (workspace, target).
+    Delegates to the kernel and preserves call sites (e.g. ``_is_inside_workspace(serve_dir, self.workspace)``).
     """
-    try:
-        resolved = path.resolve()
-        root = workspace.resolve()
-    except OSError:
-        return False
-    try:
-        resolved.relative_to(root)
-        return True
-    except ValueError:
-        return resolved == root
+    return _kernel_is_inside(workspace, path)
 
 
 # ---------------------------------------------------------------------------

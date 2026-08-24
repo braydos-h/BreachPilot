@@ -1,13 +1,12 @@
 """Tests for tools.recon_osint — all fakes injected, no real network."""
 
 from tools.recon_osint import (
+    crtsh_cert_transparency,
     passive_ipv6_lookup,
     reverse_dns,
-    crtsh_cert_transparency,
-    shodan_lookup,
     run_osint,
+    shodan_lookup,
 )
-
 
 # --- passive_ipv6_lookup ---------------------------------------------------
 

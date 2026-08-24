@@ -7,7 +7,6 @@ import datetime
 import hashlib
 import os
 import re
-import shutil
 import signal
 import subprocess
 import sys

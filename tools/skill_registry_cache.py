@@ -18,7 +18,6 @@ from typing import Any
 
 from tools.skill_registry import SkillRegistry, load_skill_registry
 
-
 _cache: dict[tuple[Path, ...], SkillRegistry] = {}
 
 

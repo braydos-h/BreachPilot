@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """NetFlow Analysis Agent - Parses NetFlow v9/IPFIX for anomalies, port scans, and exfiltration."""
 
-import json
-import math
-import logging
 import argparse
+import json
+import logging
+import math
 from collections import defaultdict
 from datetime import datetime
 

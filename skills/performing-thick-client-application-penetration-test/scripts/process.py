@@ -9,13 +9,11 @@ Usage:
     python process.py --app-dir "C:/Program Files/TargetApp" --output ./results
 """
 
-import os
-import re
-import json
 import argparse
 import datetime
+import os
+import re
 from pathlib import Path
-
 
 SENSITIVE_PATTERNS = {
     "password": re.compile(r'(?i)(password|passwd|pwd)\s*[=:]\s*["\']?([^\s"\']+)'),

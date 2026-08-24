@@ -20,21 +20,17 @@ Plain-dict blackboard, dummy agents, no live targets — mirrors the existing
 """
 from __future__ import annotations
 
-from unittest.mock import patch
-from unittest.mock import AsyncMock
-
-import pytest
+from unittest.mock import AsyncMock, patch
 
 from tools.failure_taxonomy import FailureClass
 from tools.recon_pipeline import HostReconResult, ServiceInfo
 from tools.swarm.agents.recon_agent import ReconAgent
 from tools.swarm.agents.reflection_agent import (
-    ReflectionAgent,
     _FAILURE_CLASS_TO_REFLECTION_LABEL,
+    ReflectionAgent,
     _known_failure_classes,
 )
 from tools.swarm.agents.vuln_agent import VulnAgent
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 

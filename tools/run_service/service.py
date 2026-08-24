@@ -17,10 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
-import contextlib
-import ipaddress
 import json
-import os
 import threading
 import time
 import traceback
@@ -32,13 +29,11 @@ from typing import Any, Callable
 from tools.activity_log import ActivityLog
 from tools.attack_ui import get_ui
 from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
-from tools.exploit_agent import ExploitPolicy, ExploitSettings, run_exploit_agent
-from tools.goal_engine import GoalEngine, AttackGoal
+from tools.exploit_agent import ExploitSettings
+from tools.goal_engine import AttackGoal, GoalEngine
 from tools.goal_suggester import ReconAssessment
 from tools.mcp_session import (
-    MCP_BOOT_TIMEOUT_SECONDS,
     _RunHeartbeat,
-    mcp_tools_to_ollama,
     open_exploit_mcp_session,
 )
 from tools.model_router import build_router, format_model_choice
@@ -46,7 +41,6 @@ from tools.model_telemetry import usage_log_path, workspace_root_from_sources
 from tools.run_log import RunLog
 from tools.run_service.models import (
     EVENT_ARTIFACT,
-    EVENT_BOOT,
     EVENT_COMPLETION,
     EVENT_ERROR,
     EVENT_PROGRESS,
@@ -55,22 +49,17 @@ from tools.run_service.models import (
     EVENT_SWARM,
     Decision,
     DecisionKind,
-    DecisionStatus,
     RunPreview,
     RunRequest,
     RunResult,
     RunState,
 )
 from tools.run_service.providers import (
-    ApprovalProvider,
     CancellationToken,
     DecisionProvider,
     EventSink,
-    TerminalApprovalProvider,
 )
-from tools.safety_reviewer import SafetyReview
 from tools.swarm_bridge import SwarmMcpBridge
-
 
 # Exploit-action tool names that count toward ``successful_exploits`` in the
 # derived campaign_result. Recon/research tools with exit_code==0 are NOT
@@ -491,7 +480,8 @@ class AssessmentService:
         from tools import config_cli as _config_cli
         from tools.cli_exploit_settings import build_cli_exploit_settings
         from tools.skills_cli import _build_runtime_skill_selection, apply_skills_cli_overrides
-        from tools.validation_utils import validate_target as _validate_target, resolve_target as _resolve_target
+        from tools.validation_utils import resolve_target as _resolve_target
+        from tools.validation_utils import validate_target as _validate_target
 
         config_path = request.config_path
         config = copy.deepcopy(
@@ -675,14 +665,13 @@ class AssessmentService:
         construction. ``config`` may be None (loaded from ``request.config_path``).
         """
         from tools import config_cli as _config_cli
-        from tools.cli_exploit_settings import _compute_swarm_timeout, build_cli_exploit_settings
+        from tools.cli_exploit_settings import build_cli_exploit_settings
         from tools.resume_state import _load_resume_state
         from tools.skills_cli import (
             _apply_runtime_skill_selection,
             _build_runtime_skill_selection,
             apply_skills_cli_overrides,
         )
-        from tools.validation_utils import resolve_target as _resolve_target
 
         config_path = request.config_path
         config = copy.deepcopy(

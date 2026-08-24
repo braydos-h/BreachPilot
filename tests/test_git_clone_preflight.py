@@ -8,7 +8,6 @@ URLs. Also tests the shared ``tools.exploit_search.url_exists`` verdict helper.
 """
 from __future__ import annotations
 
-import subprocess
 import urllib.error
 from pathlib import Path
 from typing import Any
@@ -18,8 +17,8 @@ import pytest
 
 def _make_server(tmp_path: Path):
     from mcp_exploit_server import create_mcp_server
+    from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
-    from tools.cve_lookup import NVDClient, CVESearchSettings
     from tools.web_researcher import WebResearcher, WebResearcherSettings
 
     search = ExploitSearch(ExploitSearchSettings())
@@ -149,7 +148,6 @@ async def test_git_clone_silent_when_url_ok(monkeypatch, tmp_path: Path) -> None
 @pytest.mark.asyncio
 async def test_git_clone_import_failure_does_not_block(monkeypatch, tmp_path: Path) -> None:
     """If the url_exists import itself blows up, the clone still proceeds."""
-    import tools.mcp_tools.terminal as term
 
     def _boom(*a, **k):
         raise ImportError("simulated")

@@ -23,7 +23,6 @@ from typing import Any
 
 from db import DatabaseManager, _new_id, _now_iso
 
-
 _EVIDENCE_SUBDIRS = {
     "raw_output": "raw_output",
     "http_response": "http_responses",

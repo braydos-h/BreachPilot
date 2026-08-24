@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import json
-from unittest.mock import patch
 
 
 def _make_search():
@@ -116,6 +115,7 @@ def test_prompt_forbids_url_guessing():
 
 def test_mcp_instructions_forbid_url_guessing():
     import inspect
+
     import mcp_exploit_server
 
     src = inspect.getsource(mcp_exploit_server)

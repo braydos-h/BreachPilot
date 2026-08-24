@@ -118,7 +118,7 @@ def cmd_init_mission(args: argparse.Namespace) -> int:
         return 1
 
     print(f"\n{'='*60}")
-    print(f"  MISSION CREATED")
+    print("  MISSION CREATED")
     print(f"{'='*60}")
     print(f"  ID:              {mission.mission_id}")
     print(f"  Program:         {mission.program_name}")
@@ -168,8 +168,8 @@ def cmd_list_scope(args: argparse.Namespace) -> int:
         return 1
 
     mid = mission["id"]
-    from scope_gate import ScopeGate
     from mission import Mission
+    from scope_gate import ScopeGate
     m = Mission.from_dict(mission)
     gate = ScopeGate(
         db, mid,
@@ -216,7 +216,7 @@ def cmd_next_task(args: argparse.Namespace) -> int:
         print("No pending tasks. Planning needed.")
         return 0
 
-    print(f"\n=== NEXT TASK ===")
+    print("\n=== NEXT TASK ===")
     print(f"  ID:        {task['task_id']}")
     print(f"  Phase:     {task['phase']}")
     print(f"  Target:    {task['target']}")
@@ -327,7 +327,7 @@ def cmd_run_task(args: argparse.Namespace) -> int:
         print(f"\n  BLOCKED: {risk.reason}")
         queue.block_task(task["task_id"], risk.reason)
         return 1
-    print(f"  Risk:     PASSED")
+    print("  Risk:     PASSED")
 
     # H16: honor requires_human_approval from either the scope check or the
     # risk assessment. ``ScopeCheckResult`` may return allowed=True with
@@ -359,7 +359,7 @@ def cmd_run_task(args: argparse.Namespace) -> int:
 
     if result.success:
         queue.complete_task(task["task_id"], result.output_summary, result.evidence_refs)
-        print(f"\n  ✓ Task completed successfully.")
+        print("\n  ✓ Task completed successfully.")
         print(f"  Summary: {result.output_summary[:300]}")
         print(f"  Evidence: {result.evidence_refs}")
     else:
@@ -428,10 +428,10 @@ def cmd_validate_finding(args: argparse.Namespace) -> int:
 
     mid = mission["id"]
 
-    from finding_verifier import FindingVerifier
-    from scope_gate import ScopeGate
     from evidence import EvidenceStore
+    from finding_verifier import FindingVerifier
     from mission import Mission
+    from scope_gate import ScopeGate
 
     verifier = FindingVerifier(db, mid)
     m = Mission.from_dict(mission)
@@ -474,21 +474,21 @@ def cmd_status(args: argparse.Namespace) -> int:
 
     mid = mission["id"]
 
-    from task_queue import TaskQueue
     from finding_verifier import FindingVerifier
+    from task_queue import TaskQueue
 
     queue = TaskQueue(db, mid)
     verifier = FindingVerifier(db, mid)
     counts = queue.count_by_status()
     findings = verifier.list_all()
 
-    print(f"\n=== Agent Status ===")
+    print("\n=== Agent Status ===")
     print(f"  Mission:    {mission.get('program_name','')} ({mid})")
     print(f"  Risk:       {mission.get('risk_profile','')}")
     print(f"  Status:     {mission.get('status','')}")
     print(f"  Created:    {mission.get('created_at','')}")
     print()
-    print(f"  Tasks:")
+    print("  Tasks:")
     for st, cnt in sorted(counts.items()):
         print(f"    {st:12}: {cnt}")
     print(f"\n  Findings:   {len(findings)} total")

@@ -484,10 +484,8 @@ def test_agent_block_invalid_values_warn_not_error(tmp_path: Path):
 
 def test_models_roles_schema_and_validation(tmp_path: Path):
     """models.roles block defaults empty strings and warns on bad aliases."""
-    from tools.config_manager import ConfigValidator
-
     # Schema advertises all six roles, each defaulting to empty string.
-    from tools.config_manager import CONFIG_SCHEMA
+    from tools.config_manager import CONFIG_SCHEMA, ConfigValidator
     roles = CONFIG_SCHEMA["models"]["roles"]
     for role in ("planner", "executor", "interpreter", "code_generator", "critic", "summarizer"):
         assert roles[role] == ""

@@ -46,7 +46,6 @@ from typing import Any
 from tools.mcp_tools.registry import *
 from tools.validation_utils import validate_target_or_ip
 
-
 # ── SubagentManager (process-singleton, lifecycle tied to the MCP server) ──
 #
 # One instance per MCP server process. Holds the asyncio tasks for live

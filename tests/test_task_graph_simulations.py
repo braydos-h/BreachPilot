@@ -15,13 +15,11 @@ simulation does not depend on the module-metadata sweep landing first.
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
-from tools.attack_planner import AttackPlan, AttackPhase, AttackStep
-from tools.assessment_state import AssessmentState, AssessmentStateStore
+from tools.assessment_state import AssessmentStateStore
+from tools.attack_planner import AttackPlan, AttackStep
 from tools.failure_taxonomy import (
     FailureClass,
     RecoveryAction,

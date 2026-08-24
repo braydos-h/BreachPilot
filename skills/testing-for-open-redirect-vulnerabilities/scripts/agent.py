@@ -11,9 +11,9 @@ domain confusion, and parameter pollution.
 
 import json
 import sys
-from pathlib import Path
 from datetime import datetime
-from urllib.parse import urlparse, quote
+from pathlib import Path
+from urllib.parse import quote, urlparse
 
 try:
     import requests

@@ -7,7 +7,6 @@ filesystem reads instead of network brute-force against the agent's own host.
 
 from __future__ import annotations
 
-import socket
 from unittest.mock import patch
 
 

@@ -6,12 +6,12 @@ including SUID binaries, sudo misconfigurations, writable cron jobs,
 capabilities, and kernel version checks.
 """
 
-import subprocess
-import shlex
 import json
+import shlex
+import subprocess
 import sys
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 
 class PrivescAssessmentAgent:
@@ -216,7 +216,6 @@ class PrivescAssessmentAgent:
 
     def generate_report(self):
         """Run all enumeration checks and generate report."""
-        import os
         report = {
             "report_date": datetime.utcnow().isoformat(),
             "system_info": self.get_system_info(),

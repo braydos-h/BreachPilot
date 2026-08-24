@@ -7,9 +7,10 @@ a risk-prioritized remediation report.
 """
 
 import json
-import requests
-from datetime import datetime
 from collections import defaultdict
+from datetime import datetime
+
+import requests
 
 CVSS_WEIGHTS = {
     "AV": {"N": 0.85, "A": 0.62, "L": 0.55, "P": 0.20},

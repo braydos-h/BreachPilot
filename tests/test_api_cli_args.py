@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
 
 
 def test_demon_flag_alias(monkeypatch):
@@ -160,6 +159,7 @@ def test_web_setup_api_keys_does_not_bypass_gate(monkeypatch):
 def test_ensure_webui_build_returns_zero_when_dist_exists(monkeypatch, tmp_path):
     """_ensure_webui_build returns 0 immediately when dist/index.html exists."""
     from pathlib import Path
+
     import main
 
     webui_dir = Path(main.__file__).resolve().parent / "webui"
@@ -182,8 +182,9 @@ def test_ensure_webui_build_returns_zero_when_dist_exists(monkeypatch, tmp_path)
 
 def test_ensure_webui_build_errors_when_npm_missing(monkeypatch, tmp_path):
     """_ensure_webui_build returns 1 when npm/node are not on PATH and dist is absent."""
-    import main
     from pathlib import Path
+
+    import main
 
     monkeypatch.setattr(main.shutil, "which", lambda name: None)
     # Force the dist-absent branch by patching Path.exists for index.html only.

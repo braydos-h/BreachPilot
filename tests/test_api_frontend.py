@@ -376,6 +376,7 @@ def test_log_per_attempt_requires_params(tmp_path, monkeypatch):
 
 def _seed_credentials(run_id: str, password="s3cr3t"):
     import time
+
     from tools.credential_store import CredentialRecord, CredentialStore
     ws = Path("reports") / run_id / "exploit_workspace"
     ws.mkdir(parents=True, exist_ok=True)
@@ -574,6 +575,7 @@ def test_replay_reads_jsonl_when_cursor_outside_ring():
     cover the requested cursor (previously dead code returned [] silently).
     """
     import asyncio
+
     from tools.api.event_broker import RunEventBroker
     rd = Path(__import__("tempfile").mkdtemp()) / "run"
     rd.mkdir(parents=True, exist_ok=True)
@@ -595,6 +597,7 @@ def test_replay_jsonl_after_close():
     """After the broker closes, a replay cursor outside the ring must still
     read from events.jsonl (the bug fix path)."""
     import asyncio
+
     from tools.api.event_broker import RunEventBroker
     rd = Path(__import__("tempfile").mkdtemp()) / "run"
     rd.mkdir(parents=True, exist_ok=True)

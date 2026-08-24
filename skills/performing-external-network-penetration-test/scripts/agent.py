@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Agent for performing external network penetration test reconnaissance and scanning."""
 
-import json
 import argparse
-import subprocess
+import json
 import socket
+import subprocess
 from datetime import datetime
 
 

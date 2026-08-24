@@ -5,9 +5,10 @@ Tests GraphQL endpoints for introspection leaks, authorization flaws,
 query depth/complexity DoS, and injection vulnerabilities.
 """
 
-import requests
 import json
 import sys
+
+import requests
 
 
 class GraphQLSecurityAgent:

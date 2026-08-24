@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
 from tools.verification import (
-    verify_compromise,
-    verify_compromise_sync,
     classify_privilege,
     extract_output,
+    verify_compromise,
+    verify_compromise_sync,
 )
-
 
 # ── Fakes ─────────────────────────────────────────────────────────────────
 

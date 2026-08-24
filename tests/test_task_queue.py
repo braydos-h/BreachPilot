@@ -12,9 +12,8 @@ from __future__ import annotations
 
 import pytest
 
-from task_queue import TaskQueue
 from db import DatabaseManager, _new_id
-
+from task_queue import TaskQueue
 
 # ── Fixtures ───────────────────────────────────────────────────────────────
 
