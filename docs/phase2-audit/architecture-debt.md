@@ -580,6 +580,30 @@ code -> shipped: CONFIG_SCHEMA +2 blocks (caldera/ics) + drift test (30 lines)
       -> add when Phase 5b lands (update README §CI + pyproject per-file-ignores)
 ```
 
+## 13b. Phase 5b Complete — Lint/Type Scope +5 (2026-08-24)
+
+**Status:** Done. Docs only, no behavior change, <30 lines.
+
+**What shipped:**
+
+| Artifact | File | Change |
+|----------|------|--------|
+| `README.md:382` | `README.md:382` | CI `ruff` scope `intelligence/providers` → `+ tools/mcp_shared.py tools/model_router.py tools/config_manager.py tools/mcp_tools/registry.py tools/kernel` (was 3, now 8 + kernel). `mypy` scope `mcp_exploit_server.py tools/mcp_shared.py` → `+ tools/validation_utils.py tools/model_router.py tools/config_manager.py tools/mcp_tools/registry.py tools/kernel/allowlist.py` (was 8, now 13). Both scopes already verified **All checks passed** before this doc update (see §13 verification). |
+| `AGENTS.md:35` | `AGENTS.md:35` | Same scoped lists updated for `ruff`/`mypy` (keeps `AGENTS` truthful). Also updates **Non-obvious rule #4** from double-registration to single-source `collect_tools()` (was 2-place, now 1). |
+| `pyproject.toml:101` | `pyproject.toml:101` | No code change needed — `tool.ruff.lint.per-file-ignores` already has `tools/mcp_tools/*.py: [F405,F403,F401,F841,E402]` and `tools/kernel/*.py: [F401]` so the 5 new files pass without new ignores. `tool.mypy` already has `disable_error_code` relaxations so the 5 new files pass with `--follow-imports=skip`. |
+
+**Verification:**
+
+- `ruff check app.py scope_gate.py tools/safety_reviewer.py tools/validation_utils.py tools/mcp_shared.py tools/model_router.py tools/config_manager.py tools/mcp_tools/registry.py tools/kernel tools/intelligence tools/providers` — **All checks passed**
+- `mypy --follow-imports=skip summarizer.py … tools/kernel/allowlist.py` — **0 errors** (13 files)
+- No `scope_gate.py` etc. edited, no allowlist weakened, `pyproject`/`requirements` synced
+
+```
+code -> shipped: README + AGENTS CI lists +5 (doc only, already verified)
+      -> skipped: Phase 4b real bodies (still shims), Phase 6 pkgutil (already done)
+      -> add when Phase 4b lands
+```
+
 ## 14. Phase 6 Complete — Attack Module Auto-Discovery (2026-08-24)
 
 **Status:** Done. Single-source via filesystem, no manual list, <100 lines net.
