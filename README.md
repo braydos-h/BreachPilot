@@ -293,11 +293,16 @@ Notable flags: `--model <alias>`, `--mcp-transport stdio|http`,
 `--resume <run_id>`, `--yes` (skip confirm gate).
 Run `python main.py --help` for the full list.
 
-### Legacy research CLI (Flow B, SQLite-backed)
+### Legacy research CLI (Flow B, SQLite-backed, frozen)
+
+> **Flow B is frozen** — canonical code lives in `legacy/` (see `legacy/README.md`). Root shims
+> (`cli.py`, `agent_loop.py`, `mission.py`, …) remain for one release and emit `DeprecationWarning`.
+> New code must use Flow A (`main.py` / `app.py` → `tools/exploit_agent/` / `tools/mcp_tools/`).
+> Active engine is Flow A; Flow B is a frozen SQLite reference loop.
 
 ```bash
-python cli.py init-mission --config mission.yaml
-python cli.py next-task
+python -m legacy.cli init-mission --config mission.yaml  # canonical
+python cli.py next-task                                   # shim (deprecated)
 python cli.py run-task T-00001
 python cli.py list-findings
 python cli.py generate-report F-00001
@@ -305,7 +310,7 @@ python cli.py status
 ```
 
 Flow B is the database-driven, scope-gated research loop. See
-[`docs/runtime-flows.md`](docs/runtime-flows.md).
+[`docs/runtime-flows.md`](docs/runtime-flows.md) and [`legacy/README.md`](legacy/README.md).
 
 ## Safety model
 
@@ -409,19 +414,13 @@ required, nothing touches the network):
 - **Python tests** on Python 3.11, 3.12, and 3.13 — the full mocked/offline
   suite (`python -m pytest tests/ -v`).
 - **Coverage** on Python 3.12: terminal report + `coverage.xml` artifact.
-- **Ruff** on the currently passing scope (safety core + intelligence +
-  providers + kernel): `app.py`, `scope_gate.py`, `tools/safety_reviewer.py`,
-  `tools/validation_utils.py`, `tools/mcp_shared.py`, `tools/model_router.py`,
-  `tools/config_manager.py`, `tools/mcp_tools/registry.py`, `tools/kernel`,
-  `tools/intelligence`, `tools/providers`.
-  Repository-wide `ruff check .` still reports ~1800 pre-existing violations
-  (mostly import sorting) that are out of scope here.
-- **mypy** on the currently passing typed core (`--follow-imports=skip`):
-  `summarizer.py`, `planner.py`, `observer.py`, `target_graph.py`,
-  `outcome_judge.py`, `db.py`, `mcp_exploit_server.py`, `tools/mcp_shared.py`,
-  `tools/validation_utils.py`, `tools/model_router.py`, `tools/config_manager.py`,
-  `tools/mcp_tools/registry.py`, `tools/kernel/allowlist.py`.
-  The rest of the codebase is not yet type-clean.
+- **Ruff** repo-wide: `ruff check .` and `ruff format --check .` (0 errors, 0 format diffs).
+  Per-file-ignores document intentional patterns: `tools/mcp_tools/*.py` star-import helpers,
+  `tools/exploit_agent/__init__.py` facade re-exports, `skills/**/*.py` try/except availability checks,
+  `main.py`/`tools/exploit_agent/loop.py` late imports after `ui` bootstrap.
+- **mypy** repo-wide: `mypy --follow-imports=skip tools` (216 files, 0 errors with current
+  `disable_error_code` masks; without masks 298 errors — incremental per-family re-enable tracked in
+  `pyproject.toml:136` comment). No scoped core — whole `tools/` is checked.
 - **Package build**: `python -m build` + `python -m twine check dist/*`.
 - **WebUI**: `npm ci`, `npm run build` (tsc + vite), `npm run test` (vitest).
 
@@ -434,8 +433,9 @@ Before opening a PR, run the same checks locally:
 ```bash
 python -m pip install -e ".[dev]"
 python -m pytest tests/ -v
-ruff check app.py scope_gate.py tools/safety_reviewer.py tools/validation_utils.py tools/mcp_shared.py tools/model_router.py tools/config_manager.py tools/mcp_tools/registry.py tools/kernel tools/intelligence tools/providers
-mypy --follow-imports=skip summarizer.py planner.py observer.py target_graph.py outcome_judge.py db.py mcp_exploit_server.py tools/mcp_shared.py tools/validation_utils.py tools/model_router.py tools/config_manager.py tools/mcp_tools/registry.py tools/kernel/allowlist.py
+ruff check .
+ruff format --check .
+mypy --follow-imports=skip tools
 cd webui && npm ci && npm run build && npm run test
 ```
 

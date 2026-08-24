@@ -32,10 +32,11 @@ python -m pytest tests/test_recon_pipeline.py::TestClass::test_method # one test
 python -m pytest tests/ -v -k "scope"                                 # by keyword
 python -m pytest --cov=tools --cov=main --cov=cli               # coverage
 
-# Lint (scoped in CI, full-tree `ruff check .` still has ~27835 pre-existing violations — now ~1800 with new per-file-ignores)
+# Lint (repo-wide, CI honest: 0 errors, 0 format diffs)
 python -m pip install -e ".[dev]"   # ruff + pytest + coverage + mypy + build + twine
-ruff check app.py scope_gate.py tools/safety_reviewer.py tools/validation_utils.py tools/mcp_shared.py tools/model_router.py tools/config_manager.py tools/mcp_tools/registry.py tools/kernel tools/intelligence tools/providers  # scoped must pass (1849 violations full-tree → ~1800)
-mypy --follow-imports=skip summarizer.py planner.py observer.py target_graph.py outcome_judge.py db.py mcp_exploit_server.py tools/mcp_shared.py tools/validation_utils.py tools/model_router.py tools/config_manager.py tools/mcp_tools/registry.py tools/kernel/allowlist.py  # scoped must pass
+ruff check .                        # must pass (0 errors; per-file-ignores document intentional patterns)
+ruff format --check .               # must pass (0 diffs)
+mypy --follow-imports=skip tools    # must pass (216 files; disables documented in pyproject.toml:136)
 ```
 
 On Linux/macOS `make install|test|test-one F=…|run|doctor|mcp-exploit` work.
@@ -50,14 +51,15 @@ On Linux/macOS `make install|test|test-one F=…|run|doctor|mcp-exploit` work.
    from `tools/exceptions.py`. Bare `except Exception` will hide the real error.
 
 2. **Do not edit Flow B safety files.** `scope_gate.py`, `safety_reviewer.py`,
-   and Flow B's `agent_loop.py`, `tool_router.py`, `risk_controller.py`,
-   `mission.py`, `db.py` carry recon safety. Two flows coexist in one checkout:
-   - **Flow A** (modern, what users run): `main.py` / `app.py` →
+   and `legacy/` (`legacy/agent_loop.py`, `legacy/tool_router.py`, `legacy/risk_controller.py`,
+   `legacy/mission.py`, `db.py` carry recon safety). Flow B is frozen in `legacy/` — root shims
+   (`cli.py`, `agent_loop.py`, etc.) are `DeprecationWarning` shims for one release; new code must
+   use Flow A or `legacy.*` for frozen reference. See `legacy/README.md`.
+   - **Flow A** (modern, canonical): `main.py` / `app.py` →
      `tools/exploit_agent/`, `tools/mcp_tools/`, `tools/swarm/`,
      `tools/autonomous_orchestrator.py`, `tools/run_service/`, `tools/api/`.
-   - **Flow B** (legacy, SQLite-backed): `cli.py` + the root-level
-     `agent_loop.py` / `db.py` / `mission.py` / `scope_gate.py` / etc.
-   They share `db.py` and `mission.py` schemas only.
+   - **Flow B** (legacy, frozen `legacy/`): `legacy/cli.py` + `legacy/agent_loop.py` /
+     `legacy/mission.py` / `db.py` / `scope_gate.py` / etc. Shares `db.py`/`mission.py` schemas only.
 
 3. **The one attack-mode safety is the target-IP allowlist lock**, enforced in
    the MCP tool layer (`tools/mcp_shared._allowed_target_list` +
@@ -108,8 +110,7 @@ On Linux/macOS `make install|test|test-one F=…|run|doctor|mcp-exploit` work.
 
 8. **CI runs on every push/PR** (`.github/workflows/ci.yml` + codeql +
    dependency-review, `.github/dependabot.yml`): mocked test suite on Python
-   3.11-3.13, coverage, scoped ruff/mypy (passing scopes documented in README
-   §CI), package build, WebUI build+tests. Before a PR run the local commands
+   3.11-3.13, coverage, repo-wide `ruff check .` + `ruff format --check .` + `mypy --follow-imports=skip tools`, package build, WebUI build+tests. Before a PR run the local commands
    listed in README §CI and verify README flags/config still match reality.
 
 ## Workspace dirs (all gitignored runtime state)
@@ -124,8 +125,7 @@ On Linux/macOS `make install|test|test-one F=…|run|doctor|mcp-exploit` work.
 
 - Python 3.11+ (`pyproject.toml` `requires-python = ">=3.11"`; CI matrix 3.11-3.13).
   `pytest asyncio_mode = "auto"`.
-- `pyproject.toml` and `requirements.txt` overlap on runtime deps; `pyproject`
-  adds dev extras (pytest, coverage, ruff). Keep both in sync when adding deps.
+- `pyproject.toml` and `requirements.txt` are synced — both list runtime + dev (`pip install -e ".[dev]" == pip install -r requirements.txt`). `requirements.txt` header says “Synced from pyproject.toml”.
 - `ruff` config: line-length 120, `select = ["E","F","W","I"]`, `ignore = ["E501"]`.
   Keep security-sensitive diffs readable — don't add heavy lint presets.
 - Linux nmap `-O`/`-sS` need root: set `nmap.sudo: true` (uses `sudo -n`) or
