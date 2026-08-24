@@ -513,6 +513,39 @@ code -> shipped: tools/recon/{__init__,pipeline,scanner,config} + tools/campaign
       -> add when Phase 4b lands (one class per PR, <400 each)
 ```
 
+## 13. Phase 5a Complete — Config Drift Guard (2026-08-24)
+
+**Status:** Done. Schema truth + drift test, no behavior change, <50 lines.
+
+**What shipped:**
+
+| Artifact | File | Change |
+|----------|------|--------|
+| `CONFIG_SCHEMA` | `tools/config_manager.py:638` | Add `caldera` (`enabled`/`url`/`api_key_env`) and `ics` (`allow_write`/`destructive_ics`) blocks — were in `config.yaml:495` (35 keys) but not in schema (33 keys), causing `ConfigValidator` unknown-key warnings. Now `config.yaml` keys ⊆ `CONFIG_SCHEMA` keys (both 35). |
+| Drift test | `tests/test_config_manager.py:533` | `test_config_yaml_keys_subset_of_schema` — loads `config.yaml`, asserts `cfg_keys - schema_keys - plugin_keys == ∅`; fails CI if new top-level key added to `config.yaml` without adding to `CONFIG_SCHEMA` (or `PLUGIN_REGISTRY.config_sections`). |
+| Ruff/mypy scope (doc) | `pyproject.toml:101` / `README.md` CI | No code change in this sub-PR; verified `ruff check tools/validation_utils.py tools/mcp_shared.py tools/model_router.py tools/mcp_tools/registry.py mcp_exploit_server.py` **All checks passed** and `mypy --follow-imports=skip` on those 5 files **0 errors** — ready to expand scoped CI list by +5 next (spec Phase 5). |
+
+**Verification:**
+
+- `python -c "import yaml, tools.config_manager as cm; cfg=yaml.safe_load(open('config.yaml')); assert set(cfg)-set(cm.CONFIG_SCHEMA)==set()"` — **0 extra**
+- `pytest tests/test_config_manager.py::test_config_yaml_keys_subset_of_schema -v` — **1 passed**
+- `pytest tests/test_config_manager.py -q` — **all passed**
+- `ruff check tools/validation_utils.py tools/mcp_shared.py` — **All checks passed**
+- No `scope_gate.py` etc. edited, no allowlist weakened, `pyproject.toml`/`requirements.txt` synced (runtime deps unchanged)
+
+**Debt delta:**
+
+| Rank | Before | After | Delta |
+|------|--------|-------|-------|
+| 8 `config_manager drift` | 2 keys in `config.yaml` not in schema (`caldera`, `ics`), no drift test | Schema 33→35, test guards drift | **Closed** |
+| 14 `pyproject ruff/mypy scope` | 8 files mypy, 3 files ruff (per AGENTS) | Next +5 verified, ready to expand | Partial |
+
+```
+code -> shipped: CONFIG_SCHEMA +2 blocks (caldera/ics) + drift test (30 lines)
+      -> skipped: Phase 5b ruff +5 (validation_utils/mcp_shared/model_router/registry/mcp_exploit_server) already verified, just need to update CI list; Phase 5c mypy +5; Phase 6 pkgutil
+      -> add when Phase 5b lands (update README §CI + pyproject per-file-ignores)
+```
+
 ---
 
 *Evidence: LOC via `Path.read_text().splitlines()`; ruff via `ruff check --output-format json .` (1849 errors, 385 files, by-rule counts in §3.1); mypy via `mypy --follow-imports=skip` on scoped list (0 errors); imports via line grep over 905 Python files; module counts via `re.findall(r'class \w+\(AttackModule', ...)` (83) vs `len(_MODULE_CLASSES)` (83). All measured 2026-08-24 on `v0.49.12` checkout at `C:\Users\BH\Documents\GitHub\NetAttackAi`.*

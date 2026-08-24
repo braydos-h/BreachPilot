@@ -656,6 +656,15 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "max_actions": 0,
         "generated_code_repair_attempts": 3,
     },
+    "caldera": {
+        "enabled": False,
+        "url": "",
+        "api_key_env": "CALDERA_API_KEY",
+    },
+    "ics": {
+        "allow_write": False,
+        "destructive_ics": False,
+    },
 }
 
 # Known top-level keys

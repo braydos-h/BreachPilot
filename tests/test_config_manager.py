@@ -518,3 +518,32 @@ def test_models_roles_schema_and_validation(tmp_path: Path):
     assert "models.roles.critic" in joined
     # non-string: warn
     assert "models.roles.summarizer" in joined
+
+def test_config_yaml_keys_subset_of_schema():
+    """Phase 5 drift guard: every top-level key in config.yaml must be in CONFIG_SCHEMA.
+
+    Prevents silent drift where a checked-in config adds a new block (e.g.
+    caldera/ics) that the validator then warns as unknown. The schema is the
+    runtime truth; config.yaml must not contain keys outside it (except
+    plugin-registered sections, which are allowed via PLUGIN_REGISTRY).
+    """
+    import yaml
+
+    from tools.config_manager import CONFIG_SCHEMA
+
+    cfg_path = Path("config.yaml")
+    assert cfg_path.exists(), "config.yaml must exist at repo root"
+    cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    assert isinstance(cfg, dict), "config.yaml must be a mapping"
+    schema_keys = set(CONFIG_SCHEMA.keys())
+    cfg_keys = set(cfg.keys())
+    # plugin sections are allowed to be extra (they are not in schema)
+    try:
+        from tools.plugins import PLUGIN_REGISTRY
+
+        plugin_keys = set(PLUGIN_REGISTRY.config_sections.keys())
+    except Exception:
+        plugin_keys = set()
+    extra = cfg_keys - schema_keys - plugin_keys
+    assert not extra, f"config.yaml has keys not in CONFIG_SCHEMA: {sorted(extra)} (add them to CONFIG_SCHEMA or PLUGIN_REGISTRY.config_sections)"
+
