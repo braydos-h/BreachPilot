@@ -104,3 +104,29 @@ def _attempt_dir(workspace: Path) -> tuple[Path, str]:
     attempt_dir = workspace / attempt_id
     attempt_dir.mkdir(parents=True, exist_ok=True)
     return attempt_dir, attempt_id
+
+
+def read_workspace(workspace: Path, filename: str) -> str:
+    """Read any file on the operator box by path (Phase 3 kernel move).
+
+    LAB BUILD: operator-box filesystem is unrestricted — verbatim move from
+    ``tools.mcp_tools.registry.read_workspace``. See that function for
+    full docstring. Re-exported from ``tools.mcp_shared`` / ``registry`` for
+    backwards compat.
+    """
+    raw = str(filename or "").strip()
+    if not raw:
+        return "BLOCKED: empty filename."
+    target = Path(raw)
+    if not target.is_absolute():
+        workspace.mkdir(parents=True, exist_ok=True)
+        target = workspace / raw
+    if not target.exists() or not target.is_file():
+        return f"FILE_NOT_FOUND: {Path(filename).name}"
+    try:
+        text = target.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return f"BLOCKED: could not read {filename!r}: {exc}"
+    if len(text) > 120_000:
+        text = text[:120_000] + "\n[truncated]"
+    return text
