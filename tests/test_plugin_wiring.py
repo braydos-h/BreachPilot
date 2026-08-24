@@ -301,19 +301,10 @@ def test_list_plugins_source_string_present():
 
 def test_create_mcp_server_invokes_plugin_mcp_factories(monkeypatch, tmp_path):
     """create_mcp_server calls plugin-registered mcp tool factories."""
-    # Neutralize every built-in register_*_tools so the only thing exercised is
-    # the plugin consult block. They all accept (mcp, *, ctx) or (mcp, ctx=...).
+    # Neutralize built-ins via collect_tools so only plugin factories are exercised.
     import mcp_exploit_server as srv
 
-    for fn_name in [
-        "register_runtime_skill_tools", "register_peer_model_tools",
-        "register_terminal_tools", "register_workspace_tools",
-        "register_research_tools", "register_metasploit_tools",
-        "register_credential_tools", "register_recon_tools",
-        "register_payload_tools", "register_attack_module_tools",
-        "register_session_tools",
-    ]:
-        monkeypatch.setattr(srv, fn_name, lambda mcp, *, ctx=None: None)
+    monkeypatch.setattr("tools.mcp_tools.registry.collect_tools", lambda: [])
 
     # Stub the workspace helpers that create_mcp_server calls.
     monkeypatch.setattr(srv, "_ensure_workspace_dirs", lambda ws: None)
@@ -342,15 +333,7 @@ def test_create_mcp_server_survives_plugin_factory_failure(monkeypatch, tmp_path
     """A raising plugin factory does not abort create_mcp_server."""
     import mcp_exploit_server as srv
 
-    for fn_name in [
-        "register_runtime_skill_tools", "register_peer_model_tools",
-        "register_terminal_tools", "register_workspace_tools",
-        "register_research_tools", "register_metasploit_tools",
-        "register_credential_tools", "register_recon_tools",
-        "register_payload_tools", "register_attack_module_tools",
-        "register_session_tools",
-    ]:
-        monkeypatch.setattr(srv, fn_name, lambda mcp, *, ctx=None: None)
+    monkeypatch.setattr("tools.mcp_tools.registry.collect_tools", lambda: [])
     monkeypatch.setattr(srv, "_ensure_workspace_dirs", lambda ws: None)
 
     def _bad_factory(mcp, ctx):  # noqa: ARG001

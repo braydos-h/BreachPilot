@@ -62,6 +62,10 @@ from tools.skills_cli import (
     apply_skills_cli_overrides,
     print_skills_catalog,
 )
+from tools.skills_cli import _apply_runtime_skill_selection as _apply_runtime_skill_selection  # noqa: F401 - re-export for tests/back-compat
+from tools.cli_exploit_settings import build_cli_exploit_settings as build_cli_exploit_settings  # noqa: F401 - re-export for tests/back-compat
+from tools.cli_exploit_settings import _compute_swarm_timeout as _compute_swarm_timeout  # noqa: F401 - re-export for tests/back-compat
+from tools.resume_state import _load_resume_state as _load_resume_state  # noqa: F401 - re-export for tests/back-compat
 
 
 def _log_nested_exceptions(exc: BaseException, *, prefix: str = "") -> None:
