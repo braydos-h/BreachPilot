@@ -271,6 +271,8 @@ def make_require_allowlist(workspace: Path, config: dict[str, Any] | None):
                     return result
 
                 async_wrapper.__signature__ = sig  # type: ignore[attr-defined]
+                async_wrapper.__wrapped_require_allowlist__ = True  # type: ignore[attr-defined]
+                async_wrapper.__wrapped_audit_tool__ = bool(audit)  # type: ignore[attr-defined]
                 return async_wrapper
             else:
 
@@ -310,6 +312,8 @@ def make_require_allowlist(workspace: Path, config: dict[str, Any] | None):
                     return result
 
                 wrapper.__signature__ = sig  # type: ignore[attr-defined]
+                wrapper.__wrapped_require_allowlist__ = True  # type: ignore[attr-defined]
+                wrapper.__wrapped_audit_tool__ = bool(audit)  # type: ignore[attr-defined]
                 return wrapper
 
         return decorator
@@ -348,6 +352,7 @@ def make_audit_tool(workspace: Path):
                 return result
 
             async_wrapper.__signature__ = sig  # type: ignore[attr-defined]
+            async_wrapper.__wrapped_audit_tool__ = True  # type: ignore[attr-defined]
             return async_wrapper
         else:
 
@@ -377,6 +382,7 @@ def make_audit_tool(workspace: Path):
                 return result
 
             wrapper.__signature__ = sig  # type: ignore[attr-defined]
+            wrapper.__wrapped_audit_tool__ = True  # type: ignore[attr-defined]
             return wrapper
 
     return audit_tool

@@ -51,6 +51,8 @@ from tools.cve_lookup import NVDClient, format_cve_results
 from tools.experience_store import ExperienceStore
 from tools.exploit_mutator import ExploitMutator
 from tools.exploit_search import ExploitSearch
+from tools.kernel.allowlist import _extract_scanner_targets
+from tools.kernel.workspace import read_workspace
 from tools.mcp_shared import (
     _attempt_dir,
     _extract_msf_rhosts,
@@ -341,142 +343,19 @@ def _discover_tool_registrars() -> list[Any]:
 
 
 
-def read_workspace(workspace: Path, filename: str) -> str:
-    """Read any file on the operator box by path.
-
-    LAB BUILD: operator-box filesystem is unrestricted. The path-traversal,
-    sensitive-credential, hardlink, and TOCTOU gates were removed -- the AI
-    may inspect any path (e.g. /etc/hosts, workspace logs, loot). A 120k-char
-    truncation guard is kept solely to avoid OOM on very large files; the
-    returned text notes truncation.
-    """
-    raw = str(filename or "").strip()
-    if not raw:
-        return "BLOCKED: empty filename."
-    target = Path(raw)
-    if not target.is_absolute():
-        workspace.mkdir(parents=True, exist_ok=True)
-        target = workspace / raw
-    if not target.exists() or not target.is_file():
-        return f"FILE_NOT_FOUND: {Path(filename).name}"
-    try:
-        text = target.read_text(encoding="utf-8", errors="replace")
-    except OSError as exc:
-        return f"BLOCKED: could not read {filename!r}: {exc}"
-    if len(text) > 120_000:
-        text = text[:120_000] + "\n[truncated]"
-    return text
-
+# -- Kernel re-exports (Phase 3) --
+# read_workspace now lives in tools.kernel.workspace; re-export for backwards compat
+# (from tools.mcp_tools.registry import read_workspace still works).
+# See tools/kernel/workspace.py
 
 def ps_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-# H4: scanner verbs whose positional arguments are the scan targets.
-# ``command_analyzer._NETVERB_HOST_RE`` covers ssh/nc/curl/... but omits scanners
-# (nmap/masscan/rustscan/...), so a bare hostname/CIDR/FQDN target after a
-# scanner would slip past the allowlist gate. The old single-regex approach
-# treated every ``-flag`` as value-less, so a space-separated value flag like
-# nmap ``-p 445,139,135,389`` had its *port list* captured as the "target" and
-# the whole command was blocked even when the real target was authorized. The
-# argv-walk below fixes that.
-
-_SCANNER_VERBS = {
-    "nmap", "masscan", "rustscan", "nikto", "nuclei", "gobuster", "feroxbuster",
-    "sqlmap", "smbclient", "enum4linux", "hydra", "whatweb", "wpscan",
-    "dirb", "dirbuster", "amass", "sublist3r",
-}
-
-# Flags whose space-separated value is a dotted/host-shaped token that is NOT
-# the scan target -- output files (-oN scan.txt), wordlists (-w rockyou.txt),
-# exclude/include files (-iL/--excludefile), request/config files, the source
-# IP (-S), and the proxy. Skipping their value prevents a dotted filename or a
-# source IP from being mistaken for the target. Bare/dashed non-host values
-# (ports via ``-p``, script names via ``--script``, interface via ``-e``, rate
-# numbers) are dropped later by the host-shape predicate, so they do NOT need
-# to be listed here -- keep this set tight to host-shaped-but-not-target flags.
-_SCANNER_VALUE_FLAGS = {
-    "-o", "--output", "-oN", "-oX", "-oG", "-oA", "-oS", "-oM", "--output-file",
-    "-w", "--wordlist", "-iL", "--excludefile", "--includefile",
-    "-r", "--request-file", "-c", "--config-file", "--config",
-    "-L", "-P", "--proxy", "--proxy-file", "--auth-file",
-    "-S", "--source-ip",
-}
-
-_SHELL_SEPARATORS = {"|", ";", "&&", "||", ">", "<", ">>", "2>", "&"}
-
-
-def _scanner_token_is_host(token: str) -> bool:
-    """True if ``token`` is host-shaped (IPv4/IPv6/CIDR/FQDN/wildcard) and thus
-    a plausible scan target worth checking against the allowlist."""
-    if not token:
-        return False
-    if validate_target(token):  # IPv4 / IPv6 / FQDN (incl. *.wildcard)
-        return True
-    try:  # CIDR like 192.168.1.0/24 or IPv6 network
-        ipaddress.ip_network(token, strict=False)
-        return True
-    except ValueError:
-        pass
-    if token.startswith("*."):  # defensive: allowlist matcher supports *.host
-        rest = token[2:]
-        return bool(rest) and is_fqdn(rest)
-    return False
-
-
-def _is_scanner_verb_token(token: str) -> bool:
-    """True if ``token`` invokes a scanner (matches the basename, so both
-    ``nmap`` and ``/usr/bin/nmap`` are recognized; ``nmap.py`` is not)."""
-    base = token.replace("\\", "/").split("/")[-1]
-    return base.lower() in _SCANNER_VERBS
-
-
-def _extract_scanner_targets(command: str) -> list[str]:
-    """Extract the host-shaped scan-target tokens from a scanner command so they
-    can be checked against the target allowlist. See the _SCANNER_VERBS comment
-    for why this is an argv-walk rather than a regex.
-
-    After a scanner verb it skips value-flags + their following token (the
-    file/output/source-IP flags whose value is host-shaped but not a target),
-    skips boolean flags, and collects the remaining positionals, keeping only
-    host-shaped ones. Port specs, script names, interfaces, and rate numbers
-    are not host-shaped and are dropped, so::
-
-        nmap -p 445,139,135,389 --script smb-vuln-ms17-010 -Pn --open 209.38.90.131
-
-    yields just ``["209.38.90.131"]``.
-    """
-    try:
-        tokens = shlex.split(command)
-    except ValueError:
-        tokens = command.split()
-    targets: list[str] = []
-    i = 0
-    n = len(tokens)
-    while i < n:
-        if _is_scanner_verb_token(tokens[i]):
-            i += 1
-            while i < n:
-                t = tokens[i]
-                if t in _SHELL_SEPARATORS or _is_scanner_verb_token(t):
-                    break  # end of this scanner's argv
-                if t.startswith("-"):
-                    # Value flag whose value is a separate token? Skip both.
-                    if t in _SCANNER_VALUE_FLAGS and i + 1 < n:
-                        i += 2
-                        continue
-                    # Boolean flag, or value attached as -p445 / --script=foo:
-                    # the value is inline, not a separate positional.
-                    i += 1
-                    continue
-                if _scanner_token_is_host(t) and t not in targets:
-                    targets.append(t)
-                i += 1
-            continue
-        i += 1
-    return targets
-
-
+# -- Kernel re-exports (Phase 3) --
+# _extract_scanner_targets + helpers now live in tools.kernel.allowlist;
+# re-export for backwards compat (from tools.mcp_tools.registry import _extract_scanner_targets still works).
+# See tools/kernel/allowlist.py
 
 __all__ = [
     "AggressionLevel",
