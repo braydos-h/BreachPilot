@@ -53,6 +53,32 @@ from tools.web_researcher import (
     WebResearcherSettings,
 )
 
+__all__ = [  # re-exports for backwards compat (F401 suppression via __all__)
+    "_MSF_PIVOT_RE",
+    "_MSF_RHOSTS_RE",
+    "_REDACTED",
+    "_SECRET_ARG_NAMES",
+    "_WHOLESALE_REDACT_FIELDS",
+    "_BLOCKED_RESULT_MARKERS",
+    "_allowed_target_list",
+    "_attempt_dir",
+    "_audit_log",
+    "_check_allowlist",
+    "_extract_audit_target",
+    "_extract_msf_rhosts",
+    "_find_file",
+    "_is_inside_workspace",
+    "_mask_secret_content",
+    "_redact_args",
+    "_redact_nested",
+    "_resolve_workspace_file",
+    "_result_is_blocked",
+    "add_discovered_target",
+    "check_targets_allowlist",
+    "make_audit_tool",
+    "make_require_allowlist",
+]
+
 # Tier 1.8: process-wide shared NVD rate budget. Keyed by the configured
 # per-minute rate so that concurrent MCP requests -- each of which calls
 # build_cve_search() and would otherwise get its OWN NVDClient with its own

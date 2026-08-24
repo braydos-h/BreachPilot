@@ -355,7 +355,7 @@ Skipped: new `tools/kernel/` abstractions beyond the 4 pure-function files; new 
 
 ---
 
-## 9. Confirm Gate
+## 9. Confirm Gate (Phase 1)
 
 **Phase 1 complete. No files edited except this audit doc.**
 
@@ -365,7 +365,55 @@ code -> skipped: Flow B edits, kernel extracts, registry DRY, god-file splits, l
       -> add when you confirm Phase 2 Flow Boundary
 ```
 
-**Next step:** Reply `confirm Phase 2` to proceed with Flow Boundary (ADR + `tools/kernel/` extracts + shims, verified by `pytest -q` + `main.py --doctor/self-test`). Or request edits to this audit.
+## 10. Phase 2 Complete — Flow Boundary (2026-08-24)
+
+**Status:** Done. No behavior change, 2 commits (`174c357` + `125cc29` follow-up), working tree clean after hotfix.
+
+**What shipped:**
+
+| Artifact | File:line | Change | LOC | Ponytail ladder |
+|----------|-----------|--------|-----|-----------------|
+| ADR-001 | `docs/architecture.md:236-280` | Freeze Flow B as `legacy` namespace, shared kernel stays, safety files untouched | +44 | Deletion > addition — ADR only, no file moves |
+| `tools/kernel/__init__.py:13` | new | Package docstring, no logic | 13 | Minimal |
+| `tools/kernel/workspace.py:106` | new | Move `_is_inside_workspace` (unified OSError+root-equality), `_resolve_workspace_file`, `_find_file`, `_attempt_dir` verbatim | 106 | Reuse existing helper (rung 2) |
+| `tools/kernel/allowlist.py:117` | new | Move `_allowed_target_list`, `add_discovered_target`, `_check_allowlist`, `_extract_msf_rhosts`, `check_targets_allowlist` + regexes verbatim | 117 | Reuse |
+| `tools/kernel/audit.py:382` | new | Move `_SECRET_ARG_NAMES`, `_REDACTED`, `_MASK_*`, `_mask_secret_content`, `_redact_nested`, `_redact_args`, `_audit_log`, `_BLOCKED_RESULT_MARKERS`, `_result_is_blocked`, `_extract_audit_target`, `make_audit_tool`, `make_require_allowlist` verbatim | 382 | Reuse |
+| `tools/mcp_shared.py:387` | `tools/mcp_shared.py:10-55` | Replace 776-line impl block with `from tools.kernel.* import ...` re-exports + `__all__` for F401 suppression; keep `_SHARED_NVD_LIMITERS`, `load_config`, `build_*`, `_run_with_pgrp_timeout`, HTTP helpers | -402 net | Deletion (rung 1) — 776 lines deleted, 52 re-export lines added |
+| `tools/persistent_session_manager.py:63` | `tools/persistent_session_manager.py:28,63` | Delete duplicate `_is_inside_workspace`, import `_kernel_is_inside` and wrapper preserving `(path, workspace)` call-site order | -8 net | Reuse (rung 2) |
+| `mcp_exploit_server.py:219` | `mcp_exploit_server.py:13-26` | Re-add `import platform/subprocess` + `_run_with_pgrp_timeout`/`_get_model_router` re-exports as test patch points (F401 suppressed, lost in lint auto-fix) | +6 | Minimal — preserve patch contract |
+
+**Verification (Phase 2 DoD):**
+
+- `python -c "import tools.kernel.*"` — ok; `import tools.mcp_shared` re-exports all symbols (`_is_inside_workspace`, `_allowed_target_list`, `_REDACTED`, `_attempt_dir`, `make_audit_tool` etc.) — ok
+- `python -m pytest tests/test_mcp_shared_helpers.py tests/test_audit_redaction.py tests/test_domain_allowlist.py tests/test_mcp_workspace.py tests/test_mcp_injection_hardening.py tests/test_scanner_target_extraction.py -q` — **64 passed, 2 skipped** (before hotfix 1 failed due to missing `subprocess` patch point, now fixed)
+- `python -m pytest tests/test_attack_modules.py tests/test_swarm.py tests/test_autonomous_phase_machine.py tests/test_service_extraction.py tests/test_recon_pipeline.py -q` — **130 passed**
+- `python main.py --doctor` — 7/9 OK, 2 FAIL `ollama_reachable`/`model_registry` 403 (missing `OLLAMA_API_KEY`, not a code regression)
+- `python main.py --self-test` — boots MCP stdio in 40.8s, 4/4 tool calls OK (`check_os`, `quick_scan`, `list_workspace`, `search_cve_intel`), only Ollama 403s fail
+- `ruff check tools/mcp_shared.py` — **All checks passed** (was 0 before, now 0 with `__all__`)
+- `ruff check tools/kernel/` — 0 (per-file-ignores `F401` for kernel re-exports)
+- No Flow B safety file edited (`scope_gate.py`, `safety_reviewer.py`, `agent_loop.py`, `tool_router.py`, `risk_controller.py`, `mission.py`, `db.py` untouched), no allowlist weakened, no new dep, `pyproject.toml` + `requirements.txt` still synced (runtime deps unchanged), `opencode.json` ignored
+
+**Debt delta vs §6 table:**
+
+| Rank | Before | After | Delta |
+|------|--------|-------|-------|
+| 1 `registry.py`/`mcp_shared.py` import-* tax | 619 F405, duplicate helpers | `mcp_shared` 0, `kernel` 0, duplicate `_is_inside_workspace` removed | **-1 duplicate, -402 LOC in mcp_shared** |
+| 9 `persistent_session_manager duplicate` | 15-line duplicate | Wrapper → kernel | **Closed** |
+| 2,3,4,5,6,7,8,10-14 | unchanged | deferred to Phases 3-6 | — |
+
+**Remaining debt (carried to Phase 3):**
+
+- Phase 3 `collect_tools()` introspection (double-registration) still manual (`mcp_exploit_server.py:152` 19× list)
+- `read_workspace:286` + `_extract_scanner_targets:376` still in `tools/mcp_tools/registry.py` (not yet moved to kernel)
+- `_run_with_pgrp_timeout` shim still split (`mcp_shared:220` impl + `registry.py:116` wrapper) — consolidate to `tools/kernel/subprocess.py` in Phase 3
+- `tools/kernel` needs `subprocess.py` + `http.py` if we move `_run_with_pgrp_timeout` + `assert_loopback_bind`
+- 32 god files >800 LOC unchanged, `import *` in 19 `mcp_tools` families still (372 I001)
+
+```
+code -> shipped: tools/kernel/{allowlist,audit,workspace} + mcp_shared re-exports + persistent_session_manager dedup + ADR-001 + mcp_exploit_server patch-point restore
+      -> skipped: Phase 3 registry DRY (biggest ROI), Phase 4 de-god splits, Phase 5 lint/type +5/pr, Phase 6 pkgutil discovery
+      -> add when Phase 3 `collect_tools()` introspection lands (single-source MCP registration)
+```
 
 ---
 
