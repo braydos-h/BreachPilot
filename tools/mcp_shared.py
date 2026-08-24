@@ -39,11 +39,13 @@ from tools.kernel.audit import (
     make_audit_tool,
     make_require_allowlist,
 )
+from tools.kernel.allowlist import _extract_scanner_targets
 from tools.kernel.workspace import (
     _attempt_dir,
     _find_file,
     _is_inside_workspace,
     _resolve_workspace_file,
+    read_workspace,
 )
 from tools.reliability import RateLimiter
 from tools.web_researcher import (
@@ -66,6 +68,7 @@ __all__ = [  # re-exports for backwards compat (F401 suppression via __all__)
     "_check_allowlist",
     "_extract_audit_target",
     "_extract_msf_rhosts",
+    "_extract_scanner_targets",
     "_find_file",
     "_is_inside_workspace",
     "_mask_secret_content",
@@ -77,6 +80,7 @@ __all__ = [  # re-exports for backwards compat (F401 suppression via __all__)
     "check_targets_allowlist",
     "make_audit_tool",
     "make_require_allowlist",
+    "read_workspace",
 ]
 
 # Tier 1.8: process-wide shared NVD rate budget. Keyed by the configured

@@ -506,5 +506,7 @@ __all__ = [
     "_TOOL_REGISTRARS",
     "register_tool_family",
     "_discover_tool_registrars",
+    "collect_tools",
+    "_validate_mcp_tool_decorators",
     "Any",
 ]
