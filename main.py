@@ -28,6 +28,8 @@ from typing import Any, AsyncIterator, Callable
 from tools.api_key_store import DEFAULT_API_KEY_FILE
 from tools.attack_ui import get_ui
 from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group
+from tools.swarm_bridge import SwarmMcpBridge as SwarmMcpBridge  # noqa: F401 - re-export for tests/back-compat
+from tools.swarm_bridge import SwarmMcpBridge as SwarmMcpBridge  # noqa: F401 - re-export for tests/back-compat
 from tools.exploit_agent import (
     ExploitSettings,
     run_exploit_agent,
