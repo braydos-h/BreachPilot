@@ -9,10 +9,7 @@ from __future__ import annotations
 
 import os
 import signal
-from pathlib import Path
 from typing import Any
-
-from tools.kernel.config import load_config
 
 from tools.cve_lookup import CVESearchSettings, NVDClient
 from tools.exploit_search import ExploitSearch, ExploitSearchSettings
@@ -40,6 +37,7 @@ from tools.kernel.audit import (
     make_audit_tool,
     make_require_allowlist,
 )
+from tools.kernel.config import load_config  # re-export for back-compat
 from tools.kernel.workspace import (
     _attempt_dir,
     _find_file,
@@ -79,6 +77,7 @@ __all__ = [  # re-exports for backwards compat (F401 suppression via __all__)
     "add_discovered_target",
     "check_targets_allowlist",
     "make_audit_tool",
+    "load_config",
     "make_require_allowlist",
     "read_workspace",
 ]
