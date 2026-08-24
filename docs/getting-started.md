@@ -11,20 +11,39 @@
 
 From the repository root.
 
+**Windows — one-click (recommended for new users):**
+
+```powershell
+# Double-click install.bat in Explorer, or from PowerShell:
+.\install.bat          # checks/installs Python/Node/Nmap/Ollama, venv, WebUI, --doctor
+.\START.bat            # after install: double-click to launch (WebUI at http://127.0.0.1:8765)
+```
+
+`install.bat` does everything: it checks for Python 3.11+, Node.js, Nmap and Ollama
+(offering to install anything missing via `winget` when you approve), creates
+`.venv`, installs `requirements.txt`, builds `webui/dist/` if Node is present,
+starts Ollama, pulls the default model + embedding model, walks you through
+`OLLAMA_API_KEY`, runs `python main.py --doctor`, and wires the `natai`
+launcher. Safe to re-run; try `install.bat --check` for an audit-only pass
+or `install.bat --help` for options.
+
+**Windows — manual (PowerShell):**
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+```
+
 **Linux / macOS:**
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-```
-
-**Windows (PowerShell):**
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+# one-shot bootstraps (pick one):
+./install.sh               # full bootstrap (OS prereqs + Ollama + venv + natai)
+./scripts/setup-linux.sh   # lightweight: venv + deps + doctor
 ```
 
 For editable package metadata and dev extras (either shell):

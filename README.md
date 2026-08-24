@@ -141,19 +141,41 @@ For the full architecture, Flow A/B split, and module map, see
 
 ### 2. Install
 
+#### Windows — one-click (recommended for new users)
+
 ```powershell
-# Windows PowerShell (this repo's primary dev platform)
+# Double-click install.bat in Explorer, or from PowerShell:
+.\install.bat          # walks you through Python/Node/Nmap/Ollama + venv + WebUI + --doctor
+.\START.bat            # after install: double-click to launch (WebUI at http://127.0.0.1:8765)
+```
+
+`install.bat` is the easy path: it checks for Python 3.11+, Node.js, Nmap, and
+Ollama (offers to install any missing tool via `winget` when you approve),
+creates `.venv`, installs Python deps, builds the WebUI (`webui/dist/`),
+starts Ollama and pulls `glm-5.2:cloud` + `nomic-embed-text`, guides you
+through `OLLAMA_API_KEY`, runs `python main.py --doctor`, and installs the
+`natai` launcher to `%USERPROFILE%\.local\bin` (added to your user PATH).
+Safe to re-run any time. Options: `install.bat --check` (audit only),
+`install.bat --yes` (non-interactive), `install.bat --uninstall` (remove
+`natai`), `install.bat --help`. `START.bat` is a double-click launcher that
+passes extra args through (e.g. `START.bat --menu`, `START.bat --help`).
+
+#### Windows — manual
+
+```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 ```
 
+#### Linux / macOS
+
 ```bash
-# Linux / macOS
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 ./scripts/setup-linux.sh        # one-shot bootstrap: venv + deps + doctor
+# or: ./install.sh              # full bootstrap (OS prereqs + Ollama + venv + natai)
 ```
 
 Linux nmap `-O`/`-sS` need root: set `nmap.sudo: true` (uses `sudo -n`) or run
