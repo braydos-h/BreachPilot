@@ -32,10 +32,10 @@ python -m pytest tests/test_recon_pipeline.py::TestClass::test_method # one test
 python -m pytest tests/ -v -k "scope"                                 # by keyword
 python -m pytest --cov=tools --cov=main --cov=cli               # coverage
 
-# Lint (scoped in CI, full-tree `ruff check .` still has ~27835 pre-existing violations)
+# Lint (scoped in CI, full-tree `ruff check .` still has ~27835 pre-existing violations — now ~1800 with new per-file-ignores)
 python -m pip install -e ".[dev]"   # ruff + pytest + coverage + mypy + build + twine
-ruff check app.py scope_gate.py tools/safety_reviewer.py tools/validation_utils.py tools/intelligence tools/providers  # scoped must pass (1849 violations full-tree)
-mypy --follow-imports=skip summarizer.py planner.py observer.py target_graph.py outcome_judge.py db.py mcp_exploit_server.py tools/mcp_shared.py  # scoped must pass
+ruff check app.py scope_gate.py tools/safety_reviewer.py tools/validation_utils.py tools/mcp_shared.py tools/model_router.py tools/config_manager.py tools/mcp_tools/registry.py tools/kernel tools/intelligence tools/providers  # scoped must pass (1849 violations full-tree → ~1800)
+mypy --follow-imports=skip summarizer.py planner.py observer.py target_graph.py outcome_judge.py db.py mcp_exploit_server.py tools/mcp_shared.py tools/validation_utils.py tools/model_router.py tools/config_manager.py tools/mcp_tools/registry.py tools/kernel/allowlist.py  # scoped must pass
 ```
 
 On Linux/macOS `make install|test|test-one F=…|run|doctor|mcp-exploit` work.
@@ -68,11 +68,7 @@ On Linux/macOS `make install|test|test-one F=…|run|doctor|mcp-exploit` work.
    you're de-restricting — the allowlist IS the lock. Recon stays `read_only`
    via `_resolve_exploit_permission`'s missing-key fallback.
 
-4. **New exploit MCP tools must be registered twice**: `@audit_tool` decorator
-   in `tools/mcp_tools/<family>.py`, then added to the tool list in
-   `mcp_exploit_server.py`. `tools/mcp_tools/registry.py` is the central wiring
-   point. Target-touching tools require a target IP and the
-   `@require_allowlist()` gate.
+4. **New exploit MCP tools: single-source registration** — add `@audit_tool` (or `@require_allowlist()` for target-touching) in `tools/mcp_tools/<family>.py` only; `mcp_exploit_server.py` auto-discovers every `register_*_tools` via `tools/mcp_tools/registry.py:collect_tools()` (pkgutil + AST validation, fails CI if decorator missing). No manual list edit in `mcp_exploit_server.py`. `tools/mcp_tools/registry.py` is central wiring. Target-touching = `@require_allowlist()` + `validate_target_or_ip`.
 
 5. **`opencode.json` is editor-local config** (gitignored) for the opencode.ai
    editor's own model provider — it is NOT application config. Don't treat it
