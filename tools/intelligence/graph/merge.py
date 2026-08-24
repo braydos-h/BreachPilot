@@ -18,9 +18,7 @@ from tools.intelligence.graph.types import (
     NodeType,
 )
 
-_CASE_FOLD_TYPES = frozenset(
-    {NodeType.IP, NodeType.HOST, NodeType.DOMAIN, NodeType.ASSET, NodeType.ENDPOINT}
-)
+_CASE_FOLD_TYPES = frozenset({NodeType.IP, NodeType.HOST, NodeType.DOMAIN, NodeType.ASSET, NodeType.ENDPOINT})
 
 _TYPE_CONFLICT = "type conflict: same value observed as different node types"
 _DOWNGRADE_WITHOUT_EVIDENCE = "downgrade without evidence"
@@ -83,11 +81,7 @@ class GraphMergeEngine:
         """Dry run: report conflicts without mutating the store."""
         existing = self._index_nodes()
         proposed = {self._key(n): n for n in update.node_updates}
-        return [
-            c
-            for n in update.node_updates
-            if (c := self._check_node_conflict(n, existing, proposed)) is not None
-        ]
+        return [c for n in update.node_updates if (c := self._check_node_conflict(n, existing, proposed)) is not None]
 
     # -- conflict detection ----------------------------------------------------
 

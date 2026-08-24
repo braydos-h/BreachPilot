@@ -79,6 +79,7 @@ def test_model_router_records_usage_for_chat_call_styles(tmp_path: Path, monkeyp
         def chat(self, model: str, **kwargs):
             assert model == "glm-5.2:cloud"
             if kwargs.get("stream"):
+
                 def chunks():
                     yield {"message": {"content": "hi"}}
                     yield {

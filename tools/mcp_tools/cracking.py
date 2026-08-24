@@ -145,9 +145,7 @@ def register_cracking_tools(mcp: Any, *, ctx: ToolContext) -> None:
             if plain:
                 cracked.append((left, plain))
 
-        cracked_lines = "\n".join(
-            f"  {left} : {plain}" for left, plain in cracked[:50]
-        )
+        cracked_lines = "\n".join(f"  {left} : {plain}" for left, plain in cracked[:50])
 
         return (
             f"CRACK_RESULT: {crack_status}\n"

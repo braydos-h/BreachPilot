@@ -45,6 +45,7 @@ logger = get_logger()
 # Data structures
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ServiceInfo:
     port: int
@@ -185,10 +186,7 @@ class HostReconResult:
         """
         if not isinstance(data, dict):
             return cls(target_ip=str(data) if data else "")
-        services = [
-            ServiceInfo.from_dict(s) for s in (data.get("services", []) or [])
-            if isinstance(s, dict)
-        ]
+        services = [ServiceInfo.from_dict(s) for s in (data.get("services", []) or []) if isinstance(s, dict)]
         ttl = data.get("ttl")
         return cls(
             target_ip=str(data.get("target_ip", "") or ""),
@@ -293,10 +291,11 @@ class ReconConfig:
         for path/sudo/priv_fallback. Extra keyword overrides (e.g.
         ``aggression_level``) are applied on top so callers don't lose fields
         they used to pass positionally."""
-        nmap = ((config or {}).get("nmap") or {})
-        recon_cfg = ((config or {}).get("recon") or {})
+        nmap = (config or {}).get("nmap") or {}
+        recon_cfg = (config or {}).get("recon") or {}
         import os as _os
-        shodan_key = (recon_cfg.get("shodan_api_key") or _os.environ.get("SHODAN_API_KEY", "") or "")
+
+        shodan_key = recon_cfg.get("shodan_api_key") or _os.environ.get("SHODAN_API_KEY", "") or ""
         fields: dict[str, Any] = dict(
             nmap_path=nmap.get("path") or "nmap",
             sudo=bool(nmap.get("sudo", False)),
@@ -316,8 +315,13 @@ class ReconConfig:
         )
         # Phase: extended depth enumerators (all default False / opt-in).
         for flag in (
-            "subdomain_enum", "vhost_discovery", "waf_fingerprint",
-            "asn_whois", "cloud_metadata_probe", "snmp_enum", "dns_zone_transfer",
+            "subdomain_enum",
+            "vhost_discovery",
+            "waf_fingerprint",
+            "asn_whois",
+            "cloud_metadata_probe",
+            "snmp_enum",
+            "dns_zone_transfer",
         ):
             fields[flag] = bool(recon_cfg.get(flag, False))
         # Pre-flight reachability probe (Phase 5). All opt-in / default-off so
@@ -333,6 +337,7 @@ class ReconConfig:
 # ---------------------------------------------------------------------------
 # Tool availability checker
 # ---------------------------------------------------------------------------
+
 
 class ToolAvailability:
     """Cache of which external tools are available on the system."""
@@ -359,14 +364,16 @@ class ToolAvailability:
 # retried 2x with 5s/7.5s sleeps after a 0xC0000005 access violation). Like
 # ``is_privilege_error``, these short-circuit before the retry sleep so the
 # caller can fall through to the next argv in the fallback chain.
-_NON_RETRYABLE_EXIT_CODES = frozenset({
-    127,            # POSIX: command not found
-    126,            # POSIX: found but not executable
-    9009,           # Windows CMD: command not recognized
-    3221225477,     # 0xC0000005 NTSTATUS_ACCESS_VIOLATION (nmap crash)
-    3221225786,     # 0xC0000135 DLL not found
-    3221225776,     # 0xC0000142 DLL initialization failed
-})
+_NON_RETRYABLE_EXIT_CODES = frozenset(
+    {
+        127,  # POSIX: command not found
+        126,  # POSIX: found but not executable
+        9009,  # Windows CMD: command not recognized
+        3221225477,  # 0xC0000005 NTSTATUS_ACCESS_VIOLATION (nmap crash)
+        3221225786,  # 0xC0000135 DLL not found
+        3221225776,  # 0xC0000142 DLL initialization failed
+    }
+)
 
 
 async def _kill_process(proc: Any) -> None:
@@ -425,9 +432,7 @@ async def run_command(
                 ),
                 timeout=timeout,
             )
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout
-            )
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             elapsed = max(time.monotonic() - start, 0.0001)
             stdout = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
             stderr = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
@@ -437,7 +442,7 @@ async def run_command(
                 return True, stdout, stderr, elapsed
             else:
                 last_error = f"Exit code {proc.returncode}: {stderr[:500]}"
-                logger.warning(f"Command failed (attempt {attempt+1}): {last_error}")
+                logger.warning(f"Command failed (attempt {attempt + 1}): {last_error}")
                 # A raw-socket scan that fails for lack of root fails
                 # identically on every retry. Don't burn the retry budget --
                 # return now so the caller can downgrade the argv (``-sS`` ->
@@ -446,14 +451,12 @@ async def run_command(
                     logger.warning(f"Privilege-related failure, not retrying: {last_error}")
                     return False, stdout, stderr, elapsed
                 if proc.returncode in _NON_RETRYABLE_EXIT_CODES:
-                    logger.warning(
-                        f"Non-retryable exit code {proc.returncode}, not retrying: {last_error}"
-                    )
+                    logger.warning(f"Non-retryable exit code {proc.returncode}, not retrying: {last_error}")
                     return False, stdout, stderr, elapsed
 
         except asyncio.TimeoutError:
             last_error = f"Timeout after {timeout}s"
-            logger.warning(f"Command timeout (attempt {attempt+1}): {' '.join(cmd[:5])}...")
+            logger.warning(f"Command timeout (attempt {attempt + 1}): {' '.join(cmd[:5])}...")
             if proc and proc.returncode is None:
                 try:
                     await _kill_process(proc)
@@ -467,7 +470,7 @@ async def run_command(
                 except Exception:
                     pass
             last_error = str(exc)
-            logger.warning(f"Command exception (attempt {attempt+1}): {last_error}")
+            logger.warning(f"Command exception (attempt {attempt + 1}): {last_error}")
 
         if attempt < max_retries:
             logger.info(f"Retrying in {retry_delay}s...")
@@ -480,6 +483,7 @@ async def run_command(
 # ---------------------------------------------------------------------------
 # Primary reconnaissance: Nmap with fallback chain
 # ---------------------------------------------------------------------------
+
 
 class PrimaryReconScanner:
     """Runs comprehensive host scanning with automatic fallback."""
@@ -556,9 +560,7 @@ class PrimaryReconScanner:
                         "unavailable or failed). Service versions are guesses."
                     )
                     result.scan_duration = max(time.monotonic() - start_time, 0.0001)
-                    logger.info(
-                        f"Socket scan complete: {len(result.open_ports)} ports on {target}"
-                    )
+                    logger.info(f"Socket scan complete: {len(result.open_ports)} ports on {target}")
                     return result
             except Exception as exc:
                 result.errors.append(f"Socket scan fallback failed: {exc}")
@@ -575,37 +577,50 @@ class PrimaryReconScanner:
         result = HostReconResult(target_ip=target, scan_tool="nmap")
         cmd = [
             self._config.nmap_path,
-            "-sS", "-sV", "-O", "-Pn", "-T4",
+            "-sS",
+            "-sV",
+            "-O",
+            "-Pn",
+            "-T4",
             "--script=vuln,default",
             "-p-",
-            "-oX", "-",  # XML output to stdout
+            "-oX",
+            "-",  # XML output to stdout
             target,
         ]
 
         if self._config.aggression_level == "stealth":
             cmd = [
                 self._config.nmap_path,
-                "-sS", "-Pn", "--data-length", "50",
-                "--randomize-hosts", "-T2",
+                "-sS",
+                "-Pn",
+                "--data-length",
+                "50",
+                "--randomize-hosts",
+                "-T2",
                 "-p-",
-                "-oX", "-",
+                "-oX",
+                "-",
                 target,
             ]
         elif self._config.aggression_level == "aggressive":
             cmd = [
                 self._config.nmap_path,
-                "-sS", "-sV", "-O", "-Pn", "-T5",
+                "-sS",
+                "-sV",
+                "-O",
+                "-Pn",
+                "-T5",
                 "--script=vuln,default",
                 "-p-",
-                "-oX", "-",
+                "-oX",
+                "-",
                 target,
             ]
 
         # Apply sudo-prefix / unprivileged downgrade (``-sS``/``-O`` -> ``-sT``)
         # up front so a non-root operator box does not fail on raw-packet scans.
-        cmd, note = apply_nmap_privilege(
-            cmd, sudo=self._config.sudo, priv_fallback=self._config.priv_fallback
-        )
+        cmd, note = apply_nmap_privilege(cmd, sudo=self._config.sudo, priv_fallback=self._config.priv_fallback)
         if note:
             result.warnings.append(note)
 
@@ -621,9 +636,7 @@ class PrimaryReconScanner:
         # run_command returns immediately on privilege errors (no retry), so
         # downgrade once and retry a single time instead of aborting recon.
         if not success and is_privilege_error(stderr) and not note:
-            cmd2, note2 = apply_nmap_privilege(
-                cmd, sudo=self._config.sudo, priv_fallback=True
-            )
+            cmd2, note2 = apply_nmap_privilege(cmd, sudo=self._config.sudo, priv_fallback=True)
             if note2:
                 result.warnings.append(note2)
             success, stdout, stderr, elapsed = await run_command(
@@ -655,9 +668,7 @@ class PrimaryReconScanner:
 
         return result
 
-    async def _run_nmap_udp(
-        self, target: str, top_ports: int = 100
-    ) -> HostReconResult | None:
+    async def _run_nmap_udp(self, target: str, top_ports: int = 100) -> HostReconResult | None:
         """Run a targeted UDP scan against the single target.
 
         Uses ``nmap -sU --top-ports <N> -sV --script=default,vuln -Pn``. UDP
@@ -681,16 +692,18 @@ class PrimaryReconScanner:
 
         cmd = [
             self._config.nmap_path,
-            "-sU", "-sV", "-Pn",
-            "--top-ports", str(top_ports),
+            "-sU",
+            "-sV",
+            "-Pn",
+            "--top-ports",
+            str(top_ports),
             "--script=default,vuln",
-            "-oX", "-",
+            "-oX",
+            "-",
             target,
         ]
 
-        cmd, note = apply_nmap_privilege(
-            cmd, sudo=self._config.sudo, priv_fallback=self._config.priv_fallback
-        )
+        cmd, note = apply_nmap_privilege(cmd, sudo=self._config.sudo, priv_fallback=self._config.priv_fallback)
         if note:
             result.warnings.append(note)
 
@@ -708,15 +721,17 @@ class PrimaryReconScanner:
             reduced = max(min(top_ports // 2, 50), 10)
             cmd2 = [
                 self._config.nmap_path,
-                "-sU", "-sV", "-Pn",
-                "--top-ports", str(reduced),
+                "-sU",
+                "-sV",
+                "-Pn",
+                "--top-ports",
+                str(reduced),
                 "--script=default",
-                "-oX", "-",
+                "-oX",
+                "-",
                 target,
             ]
-            cmd2, note2 = apply_nmap_privilege(
-                cmd2, sudo=self._config.sudo, priv_fallback=True
-            )
+            cmd2, note2 = apply_nmap_privilege(cmd2, sudo=self._config.sudo, priv_fallback=True)
             if note2:
                 result.warnings.append(note2)
             success, stdout, stderr, elapsed = await run_command(
@@ -778,10 +793,14 @@ class PrimaryReconScanner:
         # RustScan for port discovery
         rust_cmd = [
             self._config.rustscan_path,
-            "-a", target,
-            "-t", "2000",
-            "-b", "1000",
-            "--range", "1-65535",
+            "-a",
+            target,
+            "-t",
+            "2000",
+            "-b",
+            "1000",
+            "--range",
+            "1-65535",
             "--accessible",  # No emoji, machine-friendly
         ]
 
@@ -807,15 +826,18 @@ class PrimaryReconScanner:
         port_str = ",".join(str(p) for p in ports[:50])  # Limit to top 50 for speed
         nmap_cmd = [
             self._config.nmap_path,
-            "-sS", "-sV", "-Pn", "-T4",
+            "-sS",
+            "-sV",
+            "-Pn",
+            "-T4",
             "--script=default,vuln",
-            "-p", port_str,
-            "-oX", "-",
+            "-p",
+            port_str,
+            "-oX",
+            "-",
             target,
         ]
-        nmap_cmd, _ = apply_nmap_privilege(
-            nmap_cmd, sudo=self._config.sudo, priv_fallback=self._config.priv_fallback
-        )
+        nmap_cmd, _ = apply_nmap_privilege(nmap_cmd, sudo=self._config.sudo, priv_fallback=self._config.priv_fallback)
 
         nmap_success, nmap_stdout, nmap_stderr, nmap_elapsed = await run_command(
             nmap_cmd,
@@ -843,9 +865,12 @@ class PrimaryReconScanner:
             self._config.masscan_path,
             target,
             "-p1-65535",
-            "--rate", "1000",
-            "--wait", "5",
-            "-oJ", "-",  # JSON output to stdout
+            "--rate",
+            "1000",
+            "--wait",
+            "5",
+            "-oJ",
+            "-",  # JSON output to stdout
         ]
 
         success, stdout, stderr, elapsed = await run_command(
@@ -874,9 +899,14 @@ class PrimaryReconScanner:
             port_str = ",".join(str(p) for p in ports[:50])
             nmap_cmd = [
                 self._config.nmap_path,
-                "-sS", "-sV", "-Pn", "-T4",
-                "-p", port_str,
-                "-oX", "-",
+                "-sS",
+                "-sV",
+                "-Pn",
+                "-T4",
+                "-p",
+                port_str,
+                "-oX",
+                "-",
                 target,
             ]
             nmap_cmd, _ = apply_nmap_privilege(
@@ -1056,6 +1086,7 @@ class PrimaryReconScanner:
 # Secondary enumeration: service-aware deep scanning
 # ---------------------------------------------------------------------------
 
+
 class SecondaryEnumerator:
     """Performs deep, service-specific enumeration based on primary recon results."""
 
@@ -1086,7 +1117,9 @@ class SecondaryEnumerator:
             coros.append(self._enumerate_ssh(result, ssh_services))
 
         # SMB enumeration
-        smb_services = [s for s in result.services if s.service.lower() in ("microsoft-ds", "smb", "netbios-ssn", "netbios-ns")]
+        smb_services = [
+            s for s in result.services if s.service.lower() in ("microsoft-ds", "smb", "netbios-ssn", "netbios-ns")
+        ]
         if smb_services:
             coros.append(self._enumerate_smb(result, smb_services))
 
@@ -1129,7 +1162,8 @@ class SecondaryEnumerator:
             # TLS deep cert enumeration on TLS-likely ports.
             _TLS_LIKELY_PORTS = {443, 8443, 993, 995, 465, 636}
             tls_services = [
-                s for s in result.services
+                s
+                for s in result.services
                 if s.port in _TLS_LIKELY_PORTS
                 or s.service.lower() in ("https", "imaps", "pop3s", "smtps", "ldaps", "ftps")
             ]
@@ -1138,8 +1172,7 @@ class SecondaryEnumerator:
 
             # SMTP banner / capability enumeration.
             smtp_services = [
-                s for s in result.services
-                if s.service.lower() in ("smtp", "smtps") or s.port in (25, 465, 587)
+                s for s in result.services if s.service.lower() in ("smtp", "smtps") or s.port in (25, 465, 587)
             ]
             if smtp_services:
                 coros.append(self._enumerate_smtp(result, smtp_services))
@@ -1147,20 +1180,22 @@ class SecondaryEnumerator:
             # Database banner enumeration.
             _DB_PORTS = {3306, 5432, 1433, 27017, 6379, 1521}
             _DB_SERVICE_NAMES = {
-                "mysql", "postgresql", "mssql", "mongod", "mongodb", "redis", "oracle",
-                "oracle-tns", "ms-sql-s",
+                "mysql",
+                "postgresql",
+                "mssql",
+                "mongod",
+                "mongodb",
+                "redis",
+                "oracle",
+                "oracle-tns",
+                "ms-sql-s",
             }
-            db_services = [
-                s for s in result.services
-                if s.port in _DB_PORTS or s.service.lower() in _DB_SERVICE_NAMES
-            ]
+            db_services = [s for s in result.services if s.port in _DB_PORTS or s.service.lower() in _DB_SERVICE_NAMES]
             if db_services:
                 coros.append(self._enumerate_db(result, db_services))
 
             # Bounded web spider on http/https services.
-            web_spider_services = [
-                s for s in result.services if s.service.lower() in ("http", "https", "http-proxy")
-            ]
+            web_spider_services = [s for s in result.services if s.service.lower() in ("http", "https", "http-proxy")]
             if web_spider_services:
                 coros.append(self._enumerate_web_spider(result, web_spider_services))
 
@@ -1214,9 +1249,12 @@ class SecondaryEnumerator:
             if ToolAvailability.check(self._config.nikto_path):
                 cmd = [
                     self._config.nikto_path,
-                    "-h", base_url,
-                    "-C", "all",
-                    "-o", "-",  # Output to stdout
+                    "-h",
+                    base_url,
+                    "-C",
+                    "all",
+                    "-o",
+                    "-",  # Output to stdout
                 ]
                 success, stdout, stderr, _ = await run_command(
                     cmd,
@@ -1233,8 +1271,10 @@ class SecondaryEnumerator:
             if ToolAvailability.check(self._config.feroxbuster_path):
                 cmd = [
                     self._config.feroxbuster_path,
-                    "-u", base_url,
-                    "-w", self._config.wordlist_path,
+                    "-u",
+                    base_url,
+                    "-w",
+                    self._config.wordlist_path,
                     "-q",  # Quiet mode
                     "--json",
                 ]
@@ -1254,8 +1294,10 @@ class SecondaryEnumerator:
                 cmd = [
                     self._config.gobuster_path,
                     "dir",
-                    "-u", base_url,
-                    "-w", self._config.wordlist_path,
+                    "-u",
+                    base_url,
+                    "-w",
+                    self._config.wordlist_path,
                     "-q",
                 ]
                 success, stdout, stderr, _ = await run_command(
@@ -1271,8 +1313,10 @@ class SecondaryEnumerator:
             if ToolAvailability.check(self._config.nuclei_path):
                 cmd = [
                     self._config.nuclei_path,
-                    "-u", base_url,
-                    "-s", "critical,high,medium",
+                    "-u",
+                    base_url,
+                    "-s",
+                    "critical,high,medium",
                     "-json",
                     "-silent",
                 ]
@@ -1289,9 +1333,12 @@ class SecondaryEnumerator:
             if ToolAvailability.check(self._config.curl_path):
                 cmd = [
                     self._config.curl_path,
-                    "-sI", "-L",
-                    "--max-time", "10",
-                    "--connect-timeout", "5",
+                    "-sI",
+                    "-L",
+                    "--max-time",
+                    "10",
+                    "--connect-timeout",
+                    "5",
                     base_url,
                 ]
                 success, stdout, stderr, _ = await run_command(
@@ -1318,8 +1365,10 @@ class SecondaryEnumerator:
             if ToolAvailability.check(self._config.nmap_path):
                 cmd = [
                     self._config.nmap_path,
-                    "-p", str(port),
-                    "--script", "ssh2-enum-algos,ssh-hostkey,ssh-auth-methods",
+                    "-p",
+                    str(port),
+                    "--script",
+                    "ssh2-enum-algos,ssh-hostkey,ssh-auth-methods",
                     result.target_ip,
                 ]
                 success, stdout, stderr, _ = await run_command(
@@ -1339,7 +1388,9 @@ class SecondaryEnumerator:
 
             # 2. Check for default credentials with Hydra (only if explicitly enabled)
             # Note: This is gated by risk profile, we'll add the script but not auto-run
-            svc.scripts["hydra_ready"] = f"hydra -t 4 -V -f -L users.txt -P passwords.txt ssh://{result.target_ip}:{port}"
+            svc.scripts["hydra_ready"] = (
+                f"hydra -t 4 -V -f -L users.txt -P passwords.txt ssh://{result.target_ip}:{port}"
+            )
 
             # 3. Map OpenSSH version to known CVEs
             version = svc.version.lower()
@@ -1361,7 +1412,8 @@ class SecondaryEnumerator:
             if ToolAvailability.check(self._config.enum4linux_path):
                 cmd = [
                     self._config.enum4linux_path,
-                    "-a", result.target_ip,
+                    "-a",
+                    result.target_ip,
                 ]
                 success, stdout, stderr, _ = await run_command(
                     cmd,
@@ -1380,7 +1432,8 @@ class SecondaryEnumerator:
             if ToolAvailability.check(self._config.smbclient_path):
                 cmd = [
                     self._config.smbclient_path,
-                    "-L", f"//{result.target_ip}/",
+                    "-L",
+                    f"//{result.target_ip}/",
                     "-N",  # No password (null session)
                 ]
                 success, stdout, stderr, _ = await run_command(
@@ -1397,14 +1450,18 @@ class SecondaryEnumerator:
                         shares = self._extract_smb_shares(stdout)
                         svc.scripts["smb_shares"] = json.dumps(shares)
                         if shares:
-                            result.warnings.append(f"Accessible SMB shares on {result.target_ip}:{port}: {', '.join(shares[:5])}")
+                            result.warnings.append(
+                                f"Accessible SMB shares on {result.target_ip}:{port}: {', '.join(shares[:5])}"
+                            )
 
             # 3. Nmap SMB scripts
             if ToolAvailability.check(self._config.nmap_path):
                 cmd = [
                     self._config.nmap_path,
-                    "-p", str(port),
-                    "--script", "smb-enum-shares,smb-enum-users,smb-os-discovery,smb-security-mode,smb-vuln-*",
+                    "-p",
+                    str(port),
+                    "--script",
+                    "smb-enum-shares,smb-enum-users,smb-os-discovery,smb-security-mode,smb-vuln-*",
                     result.target_ip,
                 ]
                 success, stdout, stderr, _ = await run_command(
@@ -1431,9 +1488,12 @@ class SecondaryEnumerator:
                 cmd = [
                     self._config.ldapsearch_path,
                     "-x",  # Simple authentication
-                    "-H", f"{protocol}://{result.target_ip}:{port}",
-                    "-b", "dc=example,dc=com",  # Base DN guess
-                    "-s", "base",
+                    "-H",
+                    f"{protocol}://{result.target_ip}:{port}",
+                    "-b",
+                    "dc=example,dc=com",  # Base DN guess
+                    "-s",
+                    "base",
                     "(objectClass=*)",
                 ]
                 success, stdout, stderr, _ = await run_command(
@@ -1453,8 +1513,10 @@ class SecondaryEnumerator:
             if ToolAvailability.check(self._config.nmap_path):
                 cmd = [
                     self._config.nmap_path,
-                    "-p", str(port),
-                    "--script", "ldap-search,ldap-rootdse",
+                    "-p",
+                    str(port),
+                    "--script",
+                    "ldap-search,ldap-rootdse",
                     result.target_ip,
                 ]
                 success, stdout, stderr, _ = await run_command(
@@ -1479,8 +1541,10 @@ class SecondaryEnumerator:
             if ToolAvailability.check(self._config.curl_path):
                 cmd = [
                     self._config.curl_path,
-                    "-v", f"ftp://anonymous:anonymous@{result.target_ip}:{port}/",
-                    "--max-time", "10",
+                    "-v",
+                    f"ftp://anonymous:anonymous@{result.target_ip}:{port}/",
+                    "--max-time",
+                    "10",
                 ]
                 success, stdout, stderr, _ = await run_command(
                     cmd,
@@ -1498,8 +1562,10 @@ class SecondaryEnumerator:
             if ToolAvailability.check(self._config.nmap_path):
                 cmd = [
                     self._config.nmap_path,
-                    "-p", str(port),
-                    "--script", "ftp-anon,ftp-vsftpd-backdoor,ftp-proftpd-backdoor,ftp-libopie",
+                    "-p",
+                    str(port),
+                    "--script",
+                    "ftp-anon,ftp-vsftpd-backdoor,ftp-proftpd-backdoor,ftp-libopie",
                     result.target_ip,
                 ]
                 success, stdout, stderr, _ = await run_command(
@@ -1529,9 +1595,7 @@ class SecondaryEnumerator:
         # target_ip can never reach a subprocess argument list. A domain is
         # accepted (nc/redis-cli resolve it); a bare garbage string is refused.
         if not (validate_ipv4(result.target_ip) or is_fqdn(result.target_ip)):
-            logger.warning(
-                f"Skipping Redis enumeration: invalid target {result.target_ip!r}"
-            )
+            logger.warning(f"Skipping Redis enumeration: invalid target {result.target_ip!r}")
             return result
 
         for svc in services:
@@ -1539,7 +1603,11 @@ class SecondaryEnumerator:
 
             try:
                 proc = await asyncio.create_subprocess_exec(
-                    "nc", "-w", "3", result.target_ip, str(port),
+                    "nc",
+                    "-w",
+                    "3",
+                    result.target_ip,
+                    str(port),
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
@@ -1549,9 +1617,7 @@ class SecondaryEnumerator:
                 continue
 
             try:
-                stdout_bytes, _ = await asyncio.wait_for(
-                    proc.communicate(input=b"INFO\n"), timeout=10
-                )
+                stdout_bytes, _ = await asyncio.wait_for(proc.communicate(input=b"INFO\n"), timeout=10)
             except asyncio.TimeoutError:
                 await _kill_process(proc)
                 continue
@@ -1580,8 +1646,10 @@ class SecondaryEnumerator:
             if ToolAvailability.check(self._config.curl_path):
                 cmd = [
                     self._config.curl_path,
-                    "-s", f"{base_url}/_cluster/health",
-                    "--max-time", "10",
+                    "-s",
+                    f"{base_url}/_cluster/health",
+                    "--max-time",
+                    "10",
                 ]
                 success, stdout, stderr, _ = await run_command(
                     cmd,
@@ -1595,8 +1663,10 @@ class SecondaryEnumerator:
                 # Index enumeration
                 cmd = [
                     self._config.curl_path,
-                    "-s", f"{base_url}/_cat/indices?v",
-                    "--max-time", "10",
+                    "-s",
+                    f"{base_url}/_cat/indices?v",
+                    "--max-time",
+                    "10",
                 ]
                 success, stdout, stderr, _ = await run_command(
                     cmd,
@@ -1624,8 +1694,10 @@ class SecondaryEnumerator:
                 if ToolAvailability.check(self._config.curl_path):
                     cmd = [
                         self._config.curl_path,
-                        "-s", f"{scheme}://{result.target_ip}:{port}/version",
-                        "--max-time", "10",
+                        "-s",
+                        f"{scheme}://{result.target_ip}:{port}/version",
+                        "--max-time",
+                        "10",
                     ]
                     success, stdout, stderr, _ = await run_command(
                         cmd,
@@ -1642,9 +1714,11 @@ class SecondaryEnumerator:
                 if ToolAvailability.check(self._config.curl_path):
                     cmd = [
                         self._config.curl_path,
-                        "-s", "-k",
+                        "-s",
+                        "-k",
                         f"https://{result.target_ip}:{port}/api",
-                        "--max-time", "10",
+                        "--max-time",
+                        "10",
                     ]
                     success, stdout, stderr, _ = await run_command(
                         cmd,
@@ -1661,9 +1735,11 @@ class SecondaryEnumerator:
                 if ToolAvailability.check(self._config.curl_path):
                     cmd = [
                         self._config.curl_path,
-                        "-s", "-k",
+                        "-s",
+                        "-k",
                         f"https://{result.target_ip}:{port}/pods",
-                        "--max-time", "10",
+                        "--max-time",
+                        "10",
                     ]
                     success, stdout, stderr, _ = await run_command(
                         cmd,
@@ -1687,8 +1763,10 @@ class SecondaryEnumerator:
             if ToolAvailability.check(self._config.nmap_path):
                 cmd = [
                     self._config.nmap_path,
-                    "-p", str(port),
-                    "--script", "rdp-enum-encryption,rdp-vuln-ms12-020",
+                    "-p",
+                    str(port),
+                    "--script",
+                    "rdp-enum-encryption,rdp-vuln-ms12-020",
                     result.target_ip,
                 ]
                 success, stdout, stderr, _ = await run_command(
@@ -1712,9 +1790,7 @@ class SecondaryEnumerator:
     # ``run_command`` (so tests can mock it) or the bounded Round 1 helpers.
     # -----------------------------------------------------------------------
 
-    async def _enumerate_tls(
-        self, result: HostReconResult, services: list[ServiceInfo]
-    ) -> HostReconResult:
+    async def _enumerate_tls(self, result: HostReconResult, services: list[ServiceInfo]) -> HostReconResult:
         """Deep TLS certificate enumeration on TLS-likely ports.
 
         Runs ``nmap --script ssl-cert,ssl-enum`` on each TLS-likely port and
@@ -1731,14 +1807,18 @@ class SecondaryEnumerator:
                 continue
             cmd = [
                 self._config.nmap_path,
-                "-p", str(port),
-                "--script", "ssl-cert,ssl-enum",
+                "-p",
+                str(port),
+                "--script",
+                "ssl-cert,ssl-enum",
                 "-Pn",
                 result.target_ip,
             ]
             try:
                 success, stdout, stderr, _ = await run_command(
-                    cmd, timeout=60, max_retries=1,
+                    cmd,
+                    timeout=60,
+                    max_retries=1,
                 )
             except Exception as exc:
                 result.warnings.append(f"TLS enum failed on port {port}: {exc}")
@@ -1749,9 +1829,7 @@ class SecondaryEnumerator:
                 result.evidence_refs.append(f"ssl_cert:{port}")
         return result
 
-    async def _enumerate_smtp(
-        self, result: HostReconResult, services: list[ServiceInfo]
-    ) -> HostReconResult:
+    async def _enumerate_smtp(self, result: HostReconResult, services: list[ServiceInfo]) -> HostReconResult:
         """SMTP banner / capability enumeration on smtp-service ports.
 
         Runs ``nmap --script smtp-commands,smtp-open-relay`` and parses the
@@ -1767,14 +1845,18 @@ class SecondaryEnumerator:
             if ToolAvailability.check(self._config.nmap_path):
                 cmd = [
                     self._config.nmap_path,
-                    "-p", str(port),
-                    "--script", "smtp-commands,smtp-open-relay",
+                    "-p",
+                    str(port),
+                    "--script",
+                    "smtp-commands,smtp-open-relay",
                     "-Pn",
                     result.target_ip,
                 ]
                 try:
                     success, stdout, stderr, _ = await run_command(
-                        cmd, timeout=60, max_retries=1,
+                        cmd,
+                        timeout=60,
+                        max_retries=1,
                     )
                 except Exception as exc:
                     result.warnings.append(f"SMTP enum failed on port {port}: {exc}")
@@ -1787,9 +1869,7 @@ class SecondaryEnumerator:
                 svc.smtp_info = parse_smtp_banner(banner_text)
         return result
 
-    async def _enumerate_db(
-        self, result: HostReconResult, services: list[ServiceInfo]
-    ) -> HostReconResult:
+    async def _enumerate_db(self, result: HostReconResult, services: list[ServiceInfo]) -> HostReconResult:
         """Database banner enumeration on mysql/postgres/mssql/mongo/redis/oracle.
 
         Runs a targeted ``nmap --script`` banner grab per port and parses with
@@ -1805,14 +1885,18 @@ class SecondaryEnumerator:
             if ToolAvailability.check(self._config.nmap_path):
                 cmd = [
                     self._config.nmap_path,
-                    "-p", str(port),
-                    "--script", "banner,default",
+                    "-p",
+                    str(port),
+                    "--script",
+                    "banner,default",
                     "-Pn",
                     result.target_ip,
                 ]
                 try:
                     success, stdout, stderr, _ = await run_command(
-                        cmd, timeout=60, max_retries=1,
+                        cmd,
+                        timeout=60,
+                        max_retries=1,
                     )
                 except Exception as exc:
                     result.warnings.append(f"DB enum failed on port {port}: {exc}")
@@ -1825,9 +1909,7 @@ class SecondaryEnumerator:
                 svc.db_info = parse_db_banner(banner_text, service=svc.service)
         return result
 
-    async def _enumerate_web_spider(
-        self, result: HostReconResult, services: list[ServiceInfo]
-    ) -> HostReconResult:
+    async def _enumerate_web_spider(self, result: HostReconResult, services: list[ServiceInfo]) -> HostReconResult:
         """Bounded stdlib web spider on http/https services.
 
         Calls :func:`tools.recon_enrichers.http_spider` (a bounded BFS spider
@@ -1841,15 +1923,9 @@ class SecondaryEnumerator:
         logger.info(f"Starting web spider on {result.target_ip}")
         for svc in services:
             port = svc.port
-            scheme = (
-                "https"
-                if svc.service.lower() == "https" or port in (443, 8443)
-                else "http"
-            )
+            scheme = "https" if svc.service.lower() == "https" or port in (443, 8443) else "http"
             try:
-                spider = http_spider(
-                    result.target_ip, port, scheme=scheme, max_pages=20
-                )
+                spider = http_spider(result.target_ip, port, scheme=scheme, max_pages=20)
             except Exception as exc:
                 result.warnings.append(f"Web spider failed on port {port}: {exc}")
                 continue
@@ -1858,9 +1934,7 @@ class SecondaryEnumerator:
                 result.evidence_refs.append(f"spider:{port}")
         return result
 
-    async def _enumerate_osint(
-        self, result: HostReconResult, services: list[ServiceInfo]
-    ) -> HostReconResult:
+    async def _enumerate_osint(self, result: HostReconResult, services: list[ServiceInfo]) -> HostReconResult:
         """Passive OSINT aggregation for the single target.
 
         Calls :func:`tools.recon_osint.run_osint` (PASSIVE ONLY: reverse DNS,
@@ -1901,11 +1975,13 @@ class SecondaryEnumerator:
     # -----------------------------------------------------------------------
 
     @staticmethod
-    def _stdlib_fetch(url: str, *, timeout: int = 15, method: str = "GET",
-                      headers: dict[str, str] | None = None) -> tuple[int, dict[str, str], str]:
+    def _stdlib_fetch(
+        url: str, *, timeout: int = 15, method: str = "GET", headers: dict[str, str] | None = None
+    ) -> tuple[int, dict[str, str], str]:
         """Default HTTP fetch (urllib). Returns (status, headers, body)."""
         import urllib.error
         import urllib.request
+
         req = urllib.request.Request(url, method=method)
         for k, v in (headers or {}).items():
             req.add_header(k, v)
@@ -1914,7 +1990,11 @@ class SecondaryEnumerator:
                 body = resp.read(200000).decode(errors="replace")
                 return resp.status, dict(resp.headers.items()), body
         except urllib.error.HTTPError as e:
-            return e.code, dict(e.headers.items()) if e.headers else {}, (e.read(2000).decode(errors="replace") if e.fp else "")
+            return (
+                e.code,
+                dict(e.headers.items()) if e.headers else {},
+                (e.read(2000).decode(errors="replace") if e.fp else ""),
+            )
         except Exception:
             return 0, {}, ""
 
@@ -1949,7 +2029,12 @@ class SecondaryEnumerator:
                                     subs.add(s)
                 except Exception:
                     pass
-            result.extended["subdomains"] = {"enabled": True, "domain": domain, "count": len(subs), "subdomains": sorted(subs)[:500]}
+            result.extended["subdomains"] = {
+                "enabled": True,
+                "domain": domain,
+                "count": len(subs),
+                "subdomains": sorted(subs)[:500],
+            }
             result.evidence_refs.append(f"crt.sh:{domain}")
         except Exception as exc:
             result.warnings.append(f"subdomain_enum failed for {result.target_ip}: {exc}")
@@ -1963,7 +2048,21 @@ class SecondaryEnumerator:
                 result.extended["vhosts"] = {"enabled": False, "note": "no web service or hostname"}
                 return result
             fetch = fetch_fn or self._stdlib_fetch
-            words = ["www", "mail", "admin", "api", "dev", "staging", "test", "vpn", "portal", "git", "jenkins", "jira", "internal"]
+            words = [
+                "www",
+                "mail",
+                "admin",
+                "api",
+                "dev",
+                "staging",
+                "test",
+                "vpn",
+                "portal",
+                "git",
+                "jenkins",
+                "jira",
+                "internal",
+            ]
             found = []
             for svc in services:
                 scheme = "https" if svc.port in (443, 8443) else "http"
@@ -1992,7 +2091,9 @@ class SecondaryEnumerator:
                 "Akamai": (lambda h: "x-akamai" in h or "akamai" in h.get("server", "").lower()),
                 "AWS CloudFront": (lambda h: "x-amz-cf-id" in h or "cloudfront" in h.get("server", "").lower()),
                 "Sucuri": (lambda h: "sucuri" in h.get("server", "").lower() or "x-sucuri-id" in h),
-                "Imperva Incapsula": (lambda h: "incap" in h.get("x-iinfo", "").lower() or "incapsula" in h.get("server", "").lower()),
+                "Imperva Incapsula": (
+                    lambda h: "incap" in h.get("x-iinfo", "").lower() or "incapsula" in h.get("server", "").lower()
+                ),
                 "F5 BIG-IP": (lambda h: "bigipserver" in str(h.get("set-cookie", "")).lower()),
             }
             detected = []
@@ -2043,7 +2144,9 @@ class SecondaryEnumerator:
             result.warnings.append(f"asn_whois failed for {result.target_ip}: {exc}")
         return result
 
-    async def _enumerate_cloud_metadata(self, result: HostReconResult, services: list, *, fetch_fn=None) -> HostReconResult:
+    async def _enumerate_cloud_metadata(
+        self, result: HostReconResult, services: list, *, fetch_fn=None
+    ) -> HostReconResult:
         """Probe the link-local cloud metadata endpoint (169.254.169.254).
 
         NOTE: this queries the *operator* box's IMDS from the operator's
@@ -2060,7 +2163,12 @@ class SecondaryEnumerator:
             info: dict[str, Any] = {"enabled": True, "imdsv1_reachable": s1 == 200}
             # IMDSv2 (PUT a session token, then GET with it)
             try:
-                s2, _h2, token = fetch("http://169.254.169.254/latest/api/token", timeout=4, method="PUT", headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"})
+                s2, _h2, token = fetch(
+                    "http://169.254.169.254/latest/api/token",
+                    timeout=4,
+                    method="PUT",
+                    headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"},
+                )
                 info["imdsv2_reachable"] = False
                 if s2 == 200 and token:
                     s3, _h3, _b3 = fetch(base, timeout=4, headers={"X-aws-ec2-metadata-token": token.strip()})
@@ -2069,7 +2177,9 @@ class SecondaryEnumerator:
                 info["imdsv2_reachable"] = False
             if s1 == 200 and body1:
                 info["instance_id_hint"] = body1.strip().splitlines()[0][:80]
-            info["note"] = ("operator-box IMDS reachable -- your own metadata is exposed; re-run from the target after a foothold for target IMDS")
+            info["note"] = (
+                "operator-box IMDS reachable -- your own metadata is exposed; re-run from the target after a foothold for target IMDS"
+            )
             result.extended["cloud_metadata"] = info
             result.evidence_refs.append("imds:probe")
         except Exception as exc:
@@ -2105,7 +2215,9 @@ class SecondaryEnumerator:
             result.warnings.append(f"snmp_enum failed for {result.target_ip}: {exc}")
         return result
 
-    async def _enumerate_dns_zone_transfer(self, result: HostReconResult, services: list, *, run_fn=None) -> HostReconResult:
+    async def _enumerate_dns_zone_transfer(
+        self, result: HostReconResult, services: list, *, run_fn=None
+    ) -> HostReconResult:
         """DNS AXFR via `dig axfr @<target_ip> <zone>` (zone inferred from hostname)."""
         try:
             domain = self._domain_of(result.hostname or "")
@@ -2114,7 +2226,12 @@ class SecondaryEnumerator:
             bin_ = shutil.which("dig") or "dig"
             proc = run([bin_, "axfr", f"@{result.target_ip}", zone], capture_output=True, text=True, timeout=30)
             out = getattr(proc, "stdout", "") or ""
-            info: dict[str, Any] = {"enabled": True, "tool": bin_, "zone": zone, "returncode": getattr(proc, "returncode", None)}
+            info: dict[str, Any] = {
+                "enabled": True,
+                "tool": bin_,
+                "zone": zone,
+                "returncode": getattr(proc, "returncode", None),
+            }
             records = []
             for line in out.splitlines():
                 if line and not line.startswith(";") and "\t" in line:
@@ -2188,9 +2305,7 @@ class SecondaryEnumerator:
 
         # CVE-2024-6387 (regreSSHion) - OpenSSH < 4.4p1 (if not patched for CVE-2006-5051)
         # and 8.5p1 <= version < 9.8p1
-        if (major < 4 or (major == 4 and minor < 4) or
-            (major == 8 and minor >= 5) or
-            (major == 9 and minor < 8)):
+        if major < 4 or (major == 4 and minor < 4) or (major == 8 and minor >= 5) or (major == 9 and minor < 8):
             cves.append("CVE-2024-6387 (regreSSHion)")
 
         # CVE-2023-38408 - OpenSSH < 9.3p2
@@ -2220,4 +2335,3 @@ class SecondaryEnumerator:
 # This shim keeps `from tools.recon_pipeline import ReconPipeline` working for 248 tests
 # and for `tools/recon/__init__.py` re-exports during the 1-release window.
 from tools.recon.pipeline import ReconPipeline  # noqa: F401, E402
-

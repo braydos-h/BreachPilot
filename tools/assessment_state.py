@@ -229,9 +229,7 @@ def aggregate_state(target: str, workspace: Path | str, config: dict[str, Any] |
 
     # Credential vault: counts only.
     creds_dir = ws / "credentials" / _safe_target_name(target)
-    snap["credentials_available"] = (
-        sum(1 for p in creds_dir.glob("*.jsonl") ) if creds_dir.is_dir() else 0
-    )
+    snap["credentials_available"] = sum(1 for p in creds_dir.glob("*.jsonl")) if creds_dir.is_dir() else 0
 
     # Audit rollup (last entries for this target).
     snap["activity"] = _audit_rollup(ws, target)

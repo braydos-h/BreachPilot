@@ -34,11 +34,18 @@ class SecurityHeadersAgent:
                 "status": resp.status_code,
                 "headers": dict(resp.headers),
                 "cookies": [
-                    {"name": c.name, "value": c.value[:20], "attributes": {
-                        "secure": c.secure, "httponly": "httponly" in c._rest,
-                        "samesite": c._rest.get("SameSite", c._rest.get("samesite", "Not set")),
-                        "path": c.path, "domain": c.domain,
-                    }} for c in resp.cookies
+                    {
+                        "name": c.name,
+                        "value": c.value[:20],
+                        "attributes": {
+                            "secure": c.secure,
+                            "httponly": "httponly" in c._rest,
+                            "samesite": c._rest.get("SameSite", c._rest.get("samesite", "Not set")),
+                            "path": c.path,
+                            "domain": c.domain,
+                        },
+                    }
+                    for c in resp.cookies
                 ],
             }
         except requests.RequestException as e:
@@ -164,12 +171,14 @@ class SecurityHeadersAgent:
         for h in disclosure_headers:
             value = headers.get(h, headers.get(h.lower(), ""))
             if value:
-                findings.append({
-                    "header": h,
-                    "value": value,
-                    "severity": "Low",
-                    "recommendation": f"Remove or genericize {h} header",
-                })
+                findings.append(
+                    {
+                        "header": h,
+                        "value": value,
+                        "severity": "Low",
+                        "recommendation": f"Remove or genericize {h} header",
+                    }
+                )
         return findings
 
     def check_cookie_security(self, cookies):
@@ -187,11 +196,13 @@ class SecurityHeadersAgent:
                 issues.append(f"SameSite={samesite}")
 
             if issues:
-                findings.append({
-                    "cookie": cookie["name"],
-                    "issues": issues,
-                    "severity": "High" if "Secure" in str(issues) else "Medium",
-                })
+                findings.append(
+                    {
+                        "cookie": cookie["name"],
+                        "issues": issues,
+                        "severity": "High" if "Secure" in str(issues) else "Medium",
+                    }
+                )
         return findings
 
     def calculate_grade(self, header_findings):
@@ -247,9 +258,14 @@ class SecurityHeadersAgent:
         header_checks = []
         if all_findings:
             f = all_findings[0]
-            header_checks = [f["hsts"], f["csp"], f["x_frame_options"],
-                            f["x_content_type_options"], f["referrer_policy"],
-                            f["permissions_policy"]]
+            header_checks = [
+                f["hsts"],
+                f["csp"],
+                f["x_frame_options"],
+                f["x_content_type_options"],
+                f["referrer_policy"],
+                f["permissions_policy"],
+            ]
 
         report = {
             "target": self.target_url,

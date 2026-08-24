@@ -165,8 +165,10 @@ class KEVCatalog:
     def __init__(self, settings: CVESearchSettings, *, cache_path: str = "", fetch_fn=None) -> None:
         self.settings = settings
         self._fetch_fn = fetch_fn
-        self._path = cache_path or settings.kev_cache_path or os.path.join(
-            os.environ.get("EXPLOIT_WORKSPACE", "exploit_workspace"), ".kev_catalog.json"
+        self._path = (
+            cache_path
+            or settings.kev_cache_path
+            or os.path.join(os.environ.get("EXPLOIT_WORKSPACE", "exploit_workspace"), ".kev_catalog.json")
         )
         self._cves: set[str] | None = None
 
@@ -177,7 +179,10 @@ class KEVCatalog:
         data: dict[str, Any] | None = None
         try:
             fresh = True
-            if os.path.exists(self._path) and (time.time() - os.path.getmtime(self._path)) < self.settings.kev_cache_ttl_seconds:
+            if (
+                os.path.exists(self._path)
+                and (time.time() - os.path.getmtime(self._path)) < self.settings.kev_cache_ttl_seconds
+            ):
                 with open(self._path, "r", encoding="utf-8") as fh:
                     data = json.load(fh)
                 fresh = False
@@ -185,7 +190,9 @@ class KEVCatalog:
                 if self._fetch_fn is not None:
                     data = self._fetch_fn(self.KEV_URL)
                 else:
-                    req = urllib.request.Request(self.KEV_URL, headers={"User-Agent": process_user_agent("netattackai-kev/1.0")})
+                    req = urllib.request.Request(
+                        self.KEV_URL, headers={"User-Agent": process_user_agent("netattackai-kev/1.0")}
+                    )
                     with urllib.request.urlopen(req, timeout=self.settings.timeout_seconds) as resp:
                         raw = resp.read().decode("utf-8", errors="replace")
                     data = json.loads(raw)
@@ -215,8 +222,7 @@ class KEVCatalog:
 class NVDClient:
     """Async-safe NVD API 2.0 client with rate limiting and LRU cache."""
 
-    def __init__(self, settings: CVESearchSettings,
-                 rate_limiter: RateLimiter | None = None) -> None:
+    def __init__(self, settings: CVESearchSettings, rate_limiter: RateLimiter | None = None) -> None:
         self.settings = settings
         self._last_request_time: float = 0.0
         self._lock = asyncio.Lock()
@@ -368,27 +374,33 @@ class NVDClient:
         finds regreSSHion without needing CPE construction.
         """
         try:
-            entries = self._fetch_by_params({
-                "keywordSearch": query,
-                "resultsPerPage": str(self.settings.max_results),
-            })
+            entries = self._fetch_by_params(
+                {
+                    "keywordSearch": query,
+                    "resultsPerPage": str(self.settings.max_results),
+                }
+            )
         except NVDHTTPError as exc:
             # 404 on a product+version query is NVD's intermittent no-match
             # edge — fall back to product-only if the query had a version.
             if 400 <= exc.code < 500 and " " in query.strip():
                 product_only = query.split(" ", 1)[0]
-                return self._fetch_by_params({
-                    "keywordSearch": product_only,
-                    "resultsPerPage": str(self.settings.max_results),
-                })
+                return self._fetch_by_params(
+                    {
+                        "keywordSearch": product_only,
+                        "resultsPerPage": str(self.settings.max_results),
+                    }
+                )
             raise
         if not entries and " " in query.strip():
             # Zero results for product+version — try product-only.
             product_only = query.split(" ", 1)[0]
-            return self._fetch_by_params({
-                "keywordSearch": product_only,
-                "resultsPerPage": str(self.settings.max_results),
-            })
+            return self._fetch_by_params(
+                {
+                    "keywordSearch": product_only,
+                    "resultsPerPage": str(self.settings.max_results),
+                }
+            )
         return entries
 
     def _fetch_by_params(self, params: dict[str, str]) -> list[CVEEntry]:
@@ -402,9 +414,7 @@ class NVDClient:
         # stdlib urlencode defaults to '+' (via quote_via=quote_plus); pass
         # quote_via=urllib.parse.quote to emit %20. '+' is a contributing
         # cause of intermittent 404s on keywordSearch queries.
-        url = NVD_API_BASE + "?" + urllib.parse.urlencode(
-            params, quote_via=urllib.parse.quote
-        )
+        url = NVD_API_BASE + "?" + urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
         # M23b: NVD rejects requests without a User-Agent. Send an identifying
         # UA so the request is not filtered/blocked at the edge.
         request = urllib.request.Request(
@@ -427,10 +437,12 @@ class NVDClient:
         """Synchronous NVD search by CPE name (cpeName parameter)."""
         if not self.settings.enabled or not cpe:
             return []
-        return self._fetch_by_params({
-            "cpeName": cpe,
-            "resultsPerPage": str(self.settings.max_results),
-        })
+        return self._fetch_by_params(
+            {
+                "cpeName": cpe,
+                "resultsPerPage": str(self.settings.max_results),
+            }
+        )
 
     async def search_by_cpe(self, cpe: str) -> list[CVEEntry]:
         loop = asyncio.get_running_loop()

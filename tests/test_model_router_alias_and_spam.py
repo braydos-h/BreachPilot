@@ -1,4 +1,4 @@
-﻿"""Regression tests for two model-router boot failures.
+"""Regression tests for two model-router boot failures.
 
 1. ``ModelRouter.get_client`` raises ``KeyError`` when a caller passes a
    concrete model id (e.g. ``"glm-5.2:cloud"`` from ``config.ollama.model``)
@@ -19,7 +19,12 @@ from tools.model_router import ModelClient, ModelRouter
 class TestGetClientResolvesModelId:
     def _router_with_glm(self) -> ModelRouter:
         r = ModelRouter()
-        r.register("glm", ModelClient(name="glm-5.2:cloud", chat=lambda *a, **k: {}, stream=lambda *a, **k: {}, model_id="glm-5.2:cloud"))
+        r.register(
+            "glm",
+            ModelClient(
+                name="glm-5.2:cloud", chat=lambda *a, **k: {}, stream=lambda *a, **k: {}, model_id="glm-5.2:cloud"
+            ),
+        )
         return r
 
     def test_alias_passes_through(self) -> None:

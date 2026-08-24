@@ -43,6 +43,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
         # cmd /c ``msfconsole -x "..."`` string).
         opts = options.strip() if options else ""
         import shlex as _shlex
+
         set_lines: list[str] = []
         rejected_opts: list[str] = []
         if opts:
@@ -169,11 +170,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Stop the interactive msfconsole session."""
         bridge = _get_msf_bridge()
         result = bridge.stop_console()
-        return (
-            f"MSFCONSOLE_STOPPED\n"
-            f"SUCCESS: {result.get('success')}\n"
-            f"MESSAGE: {result.get('message', '')}"
-        )
+        return f"MSFCONSOLE_STOPPED\nSUCCESS: {result.get('success')}\nMESSAGE: {result.get('message', '')}"
 
     @mcp.tool()
     @audit_tool
@@ -188,16 +185,14 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
         bridge = _get_msf_bridge()
         result = bridge.console_command(command, wait_seconds, read_lines)
         if result.get("success"):
-            return (
-                f"MSFCONSOLE_COMMAND: {command}\n"
-                f"WAIT: {wait_seconds}s\n"
-                f"OUTPUT:\n{result.get('output', '')}"
-            )
+            return f"MSFCONSOLE_COMMAND: {command}\nWAIT: {wait_seconds}s\nOUTPUT:\n{result.get('output', '')}"
         return f"MSFCONSOLE_COMMAND_FAILED: {result.get('error', 'unknown error')}"
 
     @mcp.tool()
     @require_allowlist()
-    def msf_run_exploit(module: str, target_ip: str, options: str = "", payload: str = "", wait_seconds: float = 30.0) -> str:
+    def msf_run_exploit(
+        module: str, target_ip: str, options: str = "", payload: str = "", wait_seconds: float = 30.0
+    ) -> str:
         """Run a Metasploit exploit module against a target using the persistent msfconsole. Provide module path (e.g., 'exploit/multi/http/log4shell_header_injection'), target IP, and optional key=value options separated by spaces. Returns the full exploit output including any session that was created."""
         if not validate_target_or_ip(target_ip):
             return "ERROR: Invalid target (IP or domain)."
@@ -217,7 +212,9 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
         ]
         if result.get("session_created"):
             sess = result["session_created"]
-            lines.append(f"SESSION_OPENED: id={sess.get('session_id')} type={sess.get('session_type')} target={sess.get('target_ip')}")
+            lines.append(
+                f"SESSION_OPENED: id={sess.get('session_id')} type={sess.get('session_type')} target={sess.get('target_ip')}"
+            )
         if result.get("error"):
             lines.append(f"ERROR: {result['error']}")
         lines.append(f"OUTPUT:\n{result.get('output', '')[:2000]}")
@@ -238,11 +235,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     opts[k] = v
         result = bridge.run_auxiliary(module, target_ip, opts, wait_seconds)
         if result.get("success"):
-            return (
-                f"MSF_AUXILIARY_RESULT: {module}\n"
-                f"TARGET: {target_ip}\n"
-                f"OUTPUT:\n{result.get('output', '')[:2000]}"
-            )
+            return f"MSF_AUXILIARY_RESULT: {module}\nTARGET: {target_ip}\nOUTPUT:\n{result.get('output', '')[:2000]}"
         return f"MSF_AUXILIARY_FAILED: {result.get('error', 'unknown error')}"
 
     @mcp.tool()
@@ -294,11 +287,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     opts[k] = v
         result = bridge.run_post_module(module, session_id, opts)
         if result.get("success"):
-            return (
-                f"MSF_POST_RESULT: {module}\n"
-                f"SESSION: {session_id}\n"
-                f"OUTPUT:\n{result.get('output', '')[:2000]}"
-            )
+            return f"MSF_POST_RESULT: {module}\nSESSION: {session_id}\nOUTPUT:\n{result.get('output', '')[:2000]}"
         return f"MSF_POST_FAILED: {result.get('error', 'unknown error')}"
 
     @mcp.tool()
@@ -315,7 +304,17 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
     @mcp.tool()
     @audit_tool
-    def msf_generate_payload(payload_type: str, lhost: str, lport: int = 4444, fmt: str = "exe", platform: str = "windows", arch: str = "x64", options: str = "", encoder: str = "", iterations: int = 1) -> str:
+    def msf_generate_payload(
+        payload_type: str,
+        lhost: str,
+        lport: int = 4444,
+        fmt: str = "exe",
+        platform: str = "windows",
+        arch: str = "x64",
+        options: str = "",
+        encoder: str = "",
+        iterations: int = 1,
+    ) -> str:
         """Generate a payload using msfvenom through the Metasploit bridge. Supports encoders and bad character avoidance. Returns the path to the generated payload file."""
         # Tool-layer scope gate: lhost is the payload's callback host. A payload
         # that calls back to an out-of-scope host is an egress path the allowlist
@@ -351,10 +350,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
         bridge = _get_msf_bridge()
         result = bridge.run_resource_script(script_content)
         if result.get("success"):
-            return (
-                f"MSF_RESOURCE_SCRIPT_EXECUTED\n"
-                f"OUTPUT:\n{result.get('output', '')[:2000]}"
-            )
+            return f"MSF_RESOURCE_SCRIPT_EXECUTED\nOUTPUT:\n{result.get('output', '')[:2000]}"
         return f"MSF_RESOURCE_FAILED: {result.get('error', 'unknown error')}"
 
     # ── Phase 3: recipe dispatch + handler orchestration + post wrappers ──
@@ -400,7 +396,9 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
     @mcp.tool()
     @audit_tool
-    def msf_start_handler(lhost: str, lport: int = 4444, payload: str = "windows/meterpreter/reverse_tcp", options: str = "") -> str:
+    def msf_start_handler(
+        lhost: str, lport: int = 4444, payload: str = "windows/meterpreter/reverse_tcp", options: str = ""
+    ) -> str:
         """Start exploit/multi/handler as a backgrounded job to catch a generated payload. lhost is the operator callback host (must be in allowed_targets). Pairs with msf_generate_payload: generate a reverse payload, then start a handler on the same LHOST/LPORT."""
         # Allowlist gate: lhost is the payload's callback host (operator box).
         allowed, reason = check_targets_allowlist([lhost], config)
@@ -429,9 +427,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
         bridge = _get_msf_bridge()
         result = bridge.stop_handler()
         return (
-            f"MSF_HANDLER_STOPPED\n"
-            f"SUCCESS: {result.get('success', False)}\n"
-            f"OUTPUT:\n{result.get('output', '')[:500]}"
+            f"MSF_HANDLER_STOPPED\nSUCCESS: {result.get('success', False)}\nOUTPUT:\n{result.get('output', '')[:500]}"
         )
 
     def _post_module(session_id: int, module: str, label: str, options: str = "") -> str:
@@ -447,11 +443,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     opts[k] = v
         result = bridge.run_post_module(module, int(session_id), opts)
         if result.get("success"):
-            return (
-                f"MSF_POST_RESULT: {label}\n"
-                f"SESSION: {session_id}\n"
-                f"OUTPUT:\n{result.get('output', '')[:2000]}"
-            )
+            return f"MSF_POST_RESULT: {label}\nSESSION: {session_id}\nOUTPUT:\n{result.get('output', '')[:2000]}"
         return f"MSF_POST_FAILED: {result.get('error', 'unknown error')}"
 
     @mcp.tool()
@@ -474,8 +466,12 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if not allowed:
             return f"BLOCKED: {reason}\nTOOL: msf_post_portfwd\nREMOTE: {remote_host}"
         lp = int(local_port or 0)
-        return _post_module(session_id, "post/multi/manage/portfwd", "portfwd",
-                            f"remote_host={remote_host} remote_port={remote_port} local_port={lp}")
+        return _post_module(
+            session_id,
+            "post/multi/manage/portfwd",
+            "portfwd",
+            f"remote_host={remote_host} remote_port={remote_port} local_port={lp}",
+        )
 
     @mcp.tool()
     @audit_tool
@@ -486,7 +482,3 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if not allowed:
             return f"BLOCKED: {reason}\nTOOL: msf_post_route\nSUBNET: {subnet}"
         return _post_module(session_id, "post/multi/manage/autoroute", "route", f"subnet={subnet}")
-
-
-
-

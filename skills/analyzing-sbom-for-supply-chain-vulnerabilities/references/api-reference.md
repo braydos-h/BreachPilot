@@ -31,7 +31,7 @@ resp = requests.get(
     "https://services.nvd.nist.gov/rest/json/cves/2.0",
     params={"cpeName": "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*"},
     headers={"apiKey": "YOUR_KEY"},
-    timeout=30
+    timeout=30,
 )
 data = resp.json()
 for vuln in data.get("vulnerabilities", []):

@@ -23,6 +23,7 @@ Invariants verified here:
   Bayesian row.
 * Existing callers that do not pass the new params stay green (default None).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -144,14 +145,19 @@ async def test_confirmed_verdict_triggers_evidential_bridge(tmp_path):
     mem = _RecordingSemanticMemory()
     exp = _RecordingExperienceStore()
     plan = AttackPlan(target_ip="10.0.0.50")
-    msgs = _messages_with_tool_results(
-        {"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22,21"}
-    )
+    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22,21"})
 
     result = await _llm_reflect_inline(
-        client, "glm-5.2:cloud", msgs, plan, 4,
-        semantic_memory=mem, policy=policy, target_ip="10.0.0.50",
-        experience_store=exp, verdict_signal=_confirmed_signal(),
+        client,
+        "glm-5.2:cloud",
+        msgs,
+        plan,
+        4,
+        semantic_memory=mem,
+        policy=policy,
+        target_ip="10.0.0.50",
+        experience_store=exp,
+        verdict_signal=_confirmed_signal(),
     )
 
     # The LLM reflection ran.
@@ -179,14 +185,19 @@ async def test_refuted_verdict_triggers_evidential_bridge(tmp_path):
     mem = _RecordingSemanticMemory()
     exp = _RecordingExperienceStore()
     plan = AttackPlan(target_ip="10.0.0.50")
-    msgs = _messages_with_tool_results(
-        {"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22,21"}
-    )
+    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22,21"})
 
     await _llm_reflect_inline(
-        client, "glm-5.2:cloud", msgs, plan, 6,
-        semantic_memory=mem, policy=policy, target_ip="10.0.0.50",
-        experience_store=exp, verdict_signal=_refuted_signal(),
+        client,
+        "glm-5.2:cloud",
+        msgs,
+        plan,
+        6,
+        semantic_memory=mem,
+        policy=policy,
+        target_ip="10.0.0.50",
+        experience_store=exp,
+        verdict_signal=_refuted_signal(),
     )
 
     assert len(exp.evidential_calls) == 1
@@ -210,16 +221,23 @@ async def test_inconclusive_verdict_does_not_bridge(tmp_path):
     mem = _RecordingSemanticMemory()
     exp = _RecordingExperienceStore()
     plan = AttackPlan(target_ip="10.0.0.50")
-    msgs = _messages_with_tool_results(
-        {"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"}
-    )
+    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"})
 
     await _llm_reflect_inline(
-        client, "glm-5.2:cloud", msgs, plan, 4,
-        semantic_memory=mem, policy=policy, target_ip="10.0.0.50",
+        client,
+        "glm-5.2:cloud",
+        msgs,
+        plan,
+        4,
+        semantic_memory=mem,
+        policy=policy,
+        target_ip="10.0.0.50",
         experience_store=exp,
-        verdict_signal={"status": "inconclusive", "confidence": 0.5,
-                        "evidence_refs": ["tool_result:10.0.0.50:nmap_scan"]},
+        verdict_signal={
+            "status": "inconclusive",
+            "confidence": 0.5,
+            "evidence_refs": ["tool_result:10.0.0.50:nmap_scan"],
+        },
     )
 
     assert exp.evidential_calls == []
@@ -234,13 +252,17 @@ async def test_open_verdict_does_not_bridge(tmp_path):
     mem = _RecordingSemanticMemory()
     exp = _RecordingExperienceStore()
     plan = AttackPlan(target_ip="10.0.0.50")
-    msgs = _messages_with_tool_results(
-        {"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"}
-    )
+    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"})
 
     await _llm_reflect_inline(
-        client, "glm-5.2:cloud", msgs, plan, 4,
-        semantic_memory=mem, policy=policy, target_ip="10.0.0.50",
+        client,
+        "glm-5.2:cloud",
+        msgs,
+        plan,
+        4,
+        semantic_memory=mem,
+        policy=policy,
+        target_ip="10.0.0.50",
         experience_store=exp,
         verdict_signal={"status": "open", "confidence": 0.5, "evidence_refs": ["x"]},
     )
@@ -255,13 +277,17 @@ async def test_exhausted_verdict_does_not_bridge(tmp_path):
     mem = _RecordingSemanticMemory()
     exp = _RecordingExperienceStore()
     plan = AttackPlan(target_ip="10.0.0.50")
-    msgs = _messages_with_tool_results(
-        {"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"}
-    )
+    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"})
 
     await _llm_reflect_inline(
-        client, "glm-5.2:cloud", msgs, plan, 4,
-        semantic_memory=mem, policy=policy, target_ip="10.0.0.50",
+        client,
+        "glm-5.2:cloud",
+        msgs,
+        plan,
+        4,
+        semantic_memory=mem,
+        policy=policy,
+        target_ip="10.0.0.50",
         experience_store=exp,
         verdict_signal={"status": "exhausted", "confidence": 0.5, "evidence_refs": ["x"]},
     )
@@ -277,13 +303,17 @@ async def test_none_verdict_signal_does_not_bridge(tmp_path):
     mem = _RecordingSemanticMemory()
     exp = _RecordingExperienceStore()
     plan = AttackPlan(target_ip="10.0.0.50")
-    msgs = _messages_with_tool_results(
-        {"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"}
-    )
+    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"})
 
     await _llm_reflect_inline(
-        client, "glm-5.2:cloud", msgs, plan, 4,
-        semantic_memory=mem, policy=policy, target_ip="10.0.0.50",
+        client,
+        "glm-5.2:cloud",
+        msgs,
+        plan,
+        4,
+        semantic_memory=mem,
+        policy=policy,
+        target_ip="10.0.0.50",
         experience_store=exp,  # verdict_signal intentionally omitted
     )
 
@@ -299,13 +329,17 @@ async def test_empty_evidence_refs_does_not_bridge(tmp_path):
     mem = _RecordingSemanticMemory()
     exp = _RecordingExperienceStore()
     plan = AttackPlan(target_ip="10.0.0.50")
-    msgs = _messages_with_tool_results(
-        {"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"}
-    )
+    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"})
 
     await _llm_reflect_inline(
-        client, "glm-5.2:cloud", msgs, plan, 4,
-        semantic_memory=mem, policy=policy, target_ip="10.0.0.50",
+        client,
+        "glm-5.2:cloud",
+        msgs,
+        plan,
+        4,
+        semantic_memory=mem,
+        policy=policy,
+        target_ip="10.0.0.50",
         experience_store=exp,
         verdict_signal={"status": "confirmed", "confidence": 0.9, "evidence_refs": []},
     )
@@ -322,14 +356,18 @@ async def test_no_experience_store_with_terminal_verdict_is_noop(tmp_path):
     client = _FakeOllamaClient(_VALID_REFLECTION_JSON)
     mem = _RecordingSemanticMemory()
     plan = AttackPlan(target_ip="10.0.0.50")
-    msgs = _messages_with_tool_results(
-        {"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"}
-    )
+    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"})
 
     # No experience_store passed; verdict_signal is terminal. Must not raise.
     result = await _llm_reflect_inline(
-        client, "glm-5.2:cloud", msgs, plan, 4,
-        semantic_memory=mem, policy=policy, target_ip="10.0.0.50",
+        client,
+        "glm-5.2:cloud",
+        msgs,
+        plan,
+        4,
+        semantic_memory=mem,
+        policy=policy,
+        target_ip="10.0.0.50",
         verdict_signal=_confirmed_signal(),
     )
 
@@ -343,14 +381,19 @@ async def test_experience_store_none_with_verdict_is_noop(tmp_path):
     client = _FakeOllamaClient(_VALID_REFLECTION_JSON)
     mem = _RecordingSemanticMemory()
     plan = AttackPlan(target_ip="10.0.0.50")
-    msgs = _messages_with_tool_results(
-        {"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"}
-    )
+    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"})
 
     result = await _llm_reflect_inline(
-        client, "glm-5.2:cloud", msgs, plan, 4,
-        semantic_memory=mem, policy=policy, target_ip="10.0.0.50",
-        experience_store=None, verdict_signal=_confirmed_signal(),
+        client,
+        "glm-5.2:cloud",
+        msgs,
+        plan,
+        4,
+        semantic_memory=mem,
+        policy=policy,
+        target_ip="10.0.0.50",
+        experience_store=None,
+        verdict_signal=_confirmed_signal(),
     )
     assert isinstance(result, dict)
 
@@ -369,14 +412,19 @@ async def test_heuristic_only_path_does_not_bridge(tmp_path):
     mem = _RecordingSemanticMemory()
     exp = _RecordingExperienceStore()
     plan = AttackPlan(target_ip="10.0.0.50")
-    msgs = _messages_with_tool_results(
-        {"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"}
-    )
+    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"})
 
     result = await _llm_reflect_inline(
-        client, "glm-5.2:cloud", msgs, plan, 4,
-        semantic_memory=mem, policy=policy, target_ip="10.0.0.50",
-        experience_store=exp, verdict_signal=_confirmed_signal(),
+        client,
+        "glm-5.2:cloud",
+        msgs,
+        plan,
+        4,
+        semantic_memory=mem,
+        policy=policy,
+        target_ip="10.0.0.50",
+        experience_store=exp,
+        verdict_signal=_confirmed_signal(),
     )
 
     # Heuristic base returned; LLM never called; no bridge.
@@ -396,16 +444,19 @@ async def test_verdict_status_is_case_insensitive(tmp_path):
     mem = _RecordingSemanticMemory()
     exp = _RecordingExperienceStore()
     plan = AttackPlan(target_ip="10.0.0.50")
-    msgs = _messages_with_tool_results(
-        {"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"}
-    )
+    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"})
 
     await _llm_reflect_inline(
-        client, "glm-5.2:cloud", msgs, plan, 4,
-        semantic_memory=mem, policy=policy, target_ip="10.0.0.50",
+        client,
+        "glm-5.2:cloud",
+        msgs,
+        plan,
+        4,
+        semantic_memory=mem,
+        policy=policy,
+        target_ip="10.0.0.50",
         experience_store=exp,
-        verdict_signal={"status": "CONFIRMED", "confidence": 0.9,
-                        "evidence_refs": ["r1"]},
+        verdict_signal={"status": "CONFIRMED", "confidence": 0.9, "evidence_refs": ["r1"]},
     )
 
     assert len(exp.evidential_calls) == 1
@@ -426,15 +477,20 @@ async def test_bridge_failure_does_not_break_loop(tmp_path):
             raise RuntimeError("db locked")
 
     plan = AttackPlan(target_ip="10.0.0.50")
-    msgs = _messages_with_tool_results(
-        {"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"}
-    )
+    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"})
 
     # Must not raise even though the store blows up.
     result = await _llm_reflect_inline(
-        client, "glm-5.2:cloud", msgs, plan, 4,
-        semantic_memory=mem, policy=policy, target_ip="10.0.0.50",
-        experience_store=_BoomStore(), verdict_signal=_confirmed_signal(),
+        client,
+        "glm-5.2:cloud",
+        msgs,
+        plan,
+        4,
+        semantic_memory=mem,
+        policy=policy,
+        target_ip="10.0.0.50",
+        experience_store=_BoomStore(),
+        verdict_signal=_confirmed_signal(),
     )
     assert isinstance(result, dict)
     assert "recommended_strategy_shift" in result
@@ -453,13 +509,17 @@ async def test_legacy_caller_without_new_params_stays_green(tmp_path):
     client = _FakeOllamaClient(_VALID_REFLECTION_JSON)
     mem = _RecordingSemanticMemory()
     plan = AttackPlan(target_ip="10.0.0.50")
-    msgs = _messages_with_tool_results(
-        {"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22,21"}
-    )
+    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22,21"})
 
     result = await _llm_reflect_inline(
-        client, "glm-5.2:cloud", msgs, plan, 4,
-        semantic_memory=mem, policy=policy, target_ip="10.0.0.50",
+        client,
+        "glm-5.2:cloud",
+        msgs,
+        plan,
+        4,
+        semantic_memory=mem,
+        policy=policy,
+        target_ip="10.0.0.50",
     )
 
     assert client.chat_calls == 1

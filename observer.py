@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from tools.semantic_memory import SemanticMemoryManager
 
+
 @dataclass
 class Observation:
     """Structured output from the Observer after processing a tool result."""
@@ -172,9 +173,7 @@ class ObserverAgent:
     @staticmethod
     def _parse_nmap_output(obs: Observation, output: str, target: str) -> None:
         # Extract open ports with services
-        port_pattern = re.compile(
-            r"(\d+)/(tcp|udp)\s+(\w+)\s+(\S.*?)(?:\s{2,}|\n|$)"
-        )
+        port_pattern = re.compile(r"(\d+)/(tcp|udp)\s+(\w+)\s+(\S.*?)(?:\s{2,}|\n|$)")
         for m in port_pattern.finditer(output):
             port = m.group(1)
             proto = m.group(2)
@@ -217,12 +216,10 @@ class ObserverAgent:
 
         # Interesting header patterns
         if "X-Powered-By" in output:
-            obs.new_technologies.append(
-                output.split("X-Powered-By:", 1)[1].split("\n")[0].strip()
-            )
+            obs.new_technologies.append(output.split("X-Powered-By:", 1)[1].split("\n")[0].strip())
 
         # Endpoints found
-        url_pattern = re.findall(r'(?:GET|POST|PUT|DELETE|HEAD)\s+([^\s]+)', output)
+        url_pattern = re.findall(r"(?:GET|POST|PUT|DELETE|HEAD)\s+([^\s]+)", output)
         for u in url_pattern[:10]:
             if u not in obs.new_endpoints:
                 obs.new_endpoints.append(u)
@@ -244,12 +241,14 @@ class ObserverAgent:
             try:
                 if float(score) >= 7.0:
                     obs.interesting_signals.append(f"High severity CVE (CVSS {score}) affecting {target}")
-                    obs.possible_findings.append({
-                        "type": "cve_with_high_cvss",
-                        "cve": cve_ids[0] if cve_ids else "unknown",
-                        "cvss": float(score),
-                        "target": target,
-                    })
+                    obs.possible_findings.append(
+                        {
+                            "type": "cve_with_high_cvss",
+                            "cve": cve_ids[0] if cve_ids else "unknown",
+                            "cvss": float(score),
+                            "target": target,
+                        }
+                    )
             except ValueError:
                 pass
 

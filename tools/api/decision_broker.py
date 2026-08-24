@@ -26,21 +26,24 @@ class DecisionBroker:
 
     async def create(self, decision: Decision) -> str:
         """Persist a decision row and register an awaitable future."""
-        did = self._persistence.create_decision({
-            "id": decision.id,
-            "run_id": self._run_id,
-            "kind": decision.kind.value,
-            "prompt_text": decision.prompt_text,
-            "required_text": decision.required_text,
-            "options": decision.options,
-        })
+        did = self._persistence.create_decision(
+            {
+                "id": decision.id,
+                "run_id": self._run_id,
+                "kind": decision.kind.value,
+                "prompt_text": decision.prompt_text,
+                "required_text": decision.required_text,
+                "options": decision.options,
+            }
+        )
         decision.id = did
         decision.run_id = self._run_id
         loop = asyncio.get_running_loop()
         self._pending[did] = loop.create_future()
         if decision.kind != DecisionKind.START_CONFIRM:
             self._persistence.update_run_state(
-                self._run_id, RunState.AWAITING_INPUT.value,
+                self._run_id,
+                RunState.AWAITING_INPUT.value,
             )
         return did
 

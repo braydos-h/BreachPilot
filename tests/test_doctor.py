@@ -21,6 +21,7 @@ and reports ``result.is_valid``; ``_check_models`` now takes registry *values*
 untagged base. Call sites in both ``doctor.py`` and ``self_test.py`` pass
 ``models_cfg.values()``.
 """
+
 from __future__ import annotations
 
 import json
@@ -72,7 +73,9 @@ def test_check_config_missing_file(tmp_path: Path):
 def test_check_config_valid_yaml_passes(tmp_path: Path):
     from tools.doctor import _check_config
 
-    path = _write_config(tmp_path / "config.yaml", """
+    path = _write_config(
+        tmp_path / "config.yaml",
+        """
 ollama:
   host: http://localhost:11434
   model: kimi-k2.6:cloud
@@ -85,7 +88,8 @@ mcp:
   http_port: 8001
 exploit:
   permission: read_only
-""")
+""",
+    )
     result = _check_config(path)
     assert result["ok"] is True, result
     assert result["errors"] == []
@@ -100,7 +104,9 @@ def test_check_config_detects_real_error(tmp_path: Path):
     """
     from tools.doctor import _check_config
 
-    path = _write_config(tmp_path / "config.yaml", """
+    path = _write_config(
+        tmp_path / "config.yaml",
+        """
 ollama: not-a-mapping
 models:
   registry:
@@ -109,7 +115,8 @@ mcp:
   http_port: 8001
 exploit:
   permission: read_only
-""")
+""",
+    )
     result = _check_config(path)
     assert result["ok"] is False
     assert any("ollama" in e and "mapping" in e for e in result["errors"])
@@ -119,7 +126,9 @@ def test_check_config_unknown_keys_are_advisory_not_errors(tmp_path: Path):
     """Unknown top-level keys are warnings, not failures."""
     from tools.doctor import _check_config
 
-    path = _write_config(tmp_path / "config.yaml", """
+    path = _write_config(
+        tmp_path / "config.yaml",
+        """
 ollama:
   host: http://localhost:11434
 models:
@@ -131,7 +140,8 @@ exploit:
   permission: read_only
 experimental_plugin:
   enabled: true
-""")
+""",
+    )
     result = _check_config(path)
     assert result["ok"] is True
     assert "experimental_plugin" in result["unknown_keys"]
@@ -220,8 +230,7 @@ def test_check_models_alias_is_not_a_match(tmp_path: Path):
 def test_check_models_unreachable_ollama():
     from tools.doctor import _check_models
 
-    with patch("tools.doctor.urllib.request.urlopen",
-               MagicMock(side_effect=urllib.error.URLError("conn refused"))):
+    with patch("tools.doctor.urllib.request.urlopen", MagicMock(side_effect=urllib.error.URLError("conn refused"))):
         result = _check_models("http://localhost:11434", ["kimi-k2.6:cloud"])
     assert result["ok"] is False
     assert "error" in result
@@ -246,8 +255,7 @@ def test_ping_cloud_model_returns_false_on_error():
     """An unreachable/unknown cloud model must not be reported as recovered."""
     from tools.doctor import _ping_cloud_model
 
-    with patch("tools.doctor.urllib.request.urlopen",
-               MagicMock(side_effect=urllib.error.URLError("conn refused"))):
+    with patch("tools.doctor.urllib.request.urlopen", MagicMock(side_effect=urllib.error.URLError("conn refused"))):
         assert _ping_cloud_model("http://localhost:11434", "zzz-not-real:cloud") is False
 
 
@@ -260,7 +268,9 @@ def test_run_doctor_self_heals_missing_cloud_model(tmp_path: Path):
     """
     from tools import doctor
 
-    config_path = _write_config(tmp_path / "config.yaml", """
+    config_path = _write_config(
+        tmp_path / "config.yaml",
+        """
 ollama:
   host: http://localhost:11434
 models:
@@ -274,7 +284,8 @@ exploit:
   permission: read_only
 research:
   workspace_dir: research_workspace
-""")
+""",
+    )
 
     # /api/tags lists only glm-5.2:cloud -> ghost-cloud:cloud is "missing".
     payload = {"models": [{"name": "glm-5.2:cloud"}]}
@@ -284,14 +295,16 @@ research:
         assert spec == "ghost-cloud:cloud"
         return True
 
-    with patch("tools.doctor._check_python", return_value={"name": "python_version", "ok": True}), \
-         patch("tools.doctor._check_imports", return_value={"name": "python_imports", "ok": True}), \
-         patch("tools.doctor._check_nmap", return_value={"name": "nmap_binary", "ok": True}), \
-         patch("tools.doctor._check_workspace", return_value={"name": "workspace_writable", "ok": True}), \
-         patch("tools.doctor._check_ollama", return_value={"name": "ollama_reachable", "ok": True}), \
-         patch("tools.doctor.urllib.request.urlopen", _fake_urlopen(payload)), \
-         patch("tools.doctor._ping_cloud_model", side_effect=_ping), \
-         patch("tools.doctor._check_port", return_value={"name": "port_free", "ok": True}):
+    with (
+        patch("tools.doctor._check_python", return_value={"name": "python_version", "ok": True}),
+        patch("tools.doctor._check_imports", return_value={"name": "python_imports", "ok": True}),
+        patch("tools.doctor._check_nmap", return_value={"name": "nmap_binary", "ok": True}),
+        patch("tools.doctor._check_workspace", return_value={"name": "workspace_writable", "ok": True}),
+        patch("tools.doctor._check_ollama", return_value={"name": "ollama_reachable", "ok": True}),
+        patch("tools.doctor.urllib.request.urlopen", _fake_urlopen(payload)),
+        patch("tools.doctor._ping_cloud_model", side_effect=_ping),
+        patch("tools.doctor._check_port", return_value={"name": "port_free", "ok": True}),
+    ):
         rc = doctor.run_doctor(config_path)
 
     assert rc == 0
@@ -302,7 +315,9 @@ def test_run_doctor_keeps_local_pull_hint_for_missing_local_model(tmp_path: Path
     (the self-heal ping is cloud-only — never auto-pull a multi-GB local model)."""
     from tools import doctor
 
-    config_path = _write_config(tmp_path / "config.yaml", """
+    config_path = _write_config(
+        tmp_path / "config.yaml",
+        """
 ollama:
   host: http://localhost:11434
 models:
@@ -316,19 +331,22 @@ exploit:
   permission: read_only
 research:
   workspace_dir: research_workspace
-""")
+""",
+    )
 
     payload = {"models": [{"name": "glm-5.2:cloud"}]}
 
-    with patch("tools.doctor._check_python", return_value={"name": "python_version", "ok": True}), \
-         patch("tools.doctor._check_imports", return_value={"name": "python_imports", "ok": True}), \
-         patch("tools.doctor._check_nmap", return_value={"name": "nmap_binary", "ok": True}), \
-         patch("tools.doctor._check_workspace", return_value={"name": "workspace_writable", "ok": True}), \
-         patch("tools.doctor._check_ollama", return_value={"name": "ollama_reachable", "ok": True}), \
-         patch("tools.doctor.urllib.request.urlopen", _fake_urlopen(payload)), \
-         patch("tools.doctor._ping_cloud_model", return_value=False), \
-         patch("tools.doctor._check_port", return_value={"name": "port_free", "ok": True}), \
-         patch("builtins.print") as _print:
+    with (
+        patch("tools.doctor._check_python", return_value={"name": "python_version", "ok": True}),
+        patch("tools.doctor._check_imports", return_value={"name": "python_imports", "ok": True}),
+        patch("tools.doctor._check_nmap", return_value={"name": "nmap_binary", "ok": True}),
+        patch("tools.doctor._check_workspace", return_value={"name": "workspace_writable", "ok": True}),
+        patch("tools.doctor._check_ollama", return_value={"name": "ollama_reachable", "ok": True}),
+        patch("tools.doctor.urllib.request.urlopen", _fake_urlopen(payload)),
+        patch("tools.doctor._ping_cloud_model", return_value=False),
+        patch("tools.doctor._check_port", return_value={"name": "port_free", "ok": True}),
+        patch("builtins.print") as _print,
+    ):
         rc = doctor.run_doctor(config_path)
 
     assert rc == 1  # missing local model is a real failure
@@ -344,7 +362,9 @@ def test_run_doctor_passes_registry_values_to_check_models(tmp_path: Path):
     """run_doctor must pass models.registry *values* (specs), not alias keys."""
     from tools import doctor
 
-    config_path = _write_config(tmp_path / "config.yaml", """
+    config_path = _write_config(
+        tmp_path / "config.yaml",
+        """
 ollama:
   host: http://localhost:11434
 models:
@@ -358,7 +378,8 @@ exploit:
   permission: read_only
 research:
   workspace_dir: research_workspace
-""")
+""",
+    )
     captured: dict[str, Any] = {}
 
     real_check_models = doctor._check_models
@@ -368,14 +389,16 @@ research:
         return real_check_models(host, configured, timeout)
 
     payload = {"models": [{"name": "kimi-k2.6:cloud"}, {"name": "deepseek-v4-pro:cloud"}]}
-    with patch("tools.doctor._check_models", _spy), \
-         patch("tools.doctor._check_python", return_value={"name": "python_version", "ok": True}), \
-         patch("tools.doctor._check_imports", return_value={"name": "python_imports", "ok": True}), \
-         patch("tools.doctor._check_nmap", return_value={"name": "nmap_binary", "ok": True}), \
-         patch("tools.doctor._check_workspace", return_value={"name": "workspace_writable", "ok": True}), \
-         patch("tools.doctor._check_ollama", return_value={"name": "ollama_reachable", "ok": True}), \
-         patch("tools.doctor.urllib.request.urlopen", _fake_urlopen(payload)), \
-         patch("tools.doctor._check_port", return_value={"name": "port_free", "ok": True}):
+    with (
+        patch("tools.doctor._check_models", _spy),
+        patch("tools.doctor._check_python", return_value={"name": "python_version", "ok": True}),
+        patch("tools.doctor._check_imports", return_value={"name": "python_imports", "ok": True}),
+        patch("tools.doctor._check_nmap", return_value={"name": "nmap_binary", "ok": True}),
+        patch("tools.doctor._check_workspace", return_value={"name": "workspace_writable", "ok": True}),
+        patch("tools.doctor._check_ollama", return_value={"name": "ollama_reachable", "ok": True}),
+        patch("tools.doctor.urllib.request.urlopen", _fake_urlopen(payload)),
+        patch("tools.doctor._check_port", return_value={"name": "port_free", "ok": True}),
+    ):
         rc = doctor.run_doctor(config_path)
 
     assert rc == 0
@@ -407,6 +430,7 @@ def test_check_nmap_honors_configured_path(monkeypatch):
 
 def test_check_nmap_default_when_no_config(monkeypatch):
     from tools import doctor
+
     monkeypatch.setattr(doctor.shutil, "which", lambda b: "/usr/bin/nmap" if b == "nmap" else None)
     res = doctor._check_nmap(None)
     assert res["ok"] is True
@@ -447,6 +471,7 @@ def test_check_linux_privilege_non_root_off_windows(monkeypatch):
 
 def test_check_linux_privilege_windows_is_na(monkeypatch):
     from tools import doctor
+
     monkeypatch.setattr(doctor.os, "name", "nt")
     res = doctor._check_linux_privilege()
     assert res["ok"] is True

@@ -206,7 +206,9 @@ class ReportGenerator:
         suggested_goals_raw = finding.get("suggested_goals_json", "")
         if suggested_goals_raw:
             try:
-                goals_list = json.loads(suggested_goals_raw) if isinstance(suggested_goals_raw, str) else suggested_goals_raw
+                goals_list = (
+                    json.loads(suggested_goals_raw) if isinstance(suggested_goals_raw, str) else suggested_goals_raw
+                )
                 goal_lines = []
                 for g in goals_list[:5]:
                     name = g.get("name", "?")
@@ -345,6 +347,7 @@ class ReportGenerator:
             row = cur.fetchone()
             if row:
                 from finding_verifier import _row_to_finding
+
                 return _row_to_finding(dict(row))
         return None
 
@@ -355,6 +358,7 @@ class ReportGenerator:
                 (self._mission_id, status),
             )
             from finding_verifier import _row_to_finding
+
             return [_row_to_finding(dict(row)) for row in cur.fetchall()]
 
     @staticmethod

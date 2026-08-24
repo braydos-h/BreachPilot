@@ -3,6 +3,7 @@
 Pure-stdlib, no real network, no real filesystem entry points. Filesystem
 discovery uses tmp_path; entry-point discovery uses an injected loader.
 """
+
 from __future__ import annotations
 
 import sys
@@ -23,6 +24,7 @@ from tools.plugins import (
 )
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
+
 
 def _make_manifest(**kw) -> PluginManifest:
     return PluginManifest.from_dict(kw)
@@ -61,6 +63,7 @@ def _reset_registry():
     """Isolate every test from the module-level singleton."""
     PLUGIN_REGISTRY.reset()
     from tools import plugins as plugins_mod
+
     plugins_mod._reset_discovered()
     yield
     PLUGIN_REGISTRY.reset()
@@ -68,6 +71,7 @@ def _reset_registry():
 
 
 # ─── PluginManifest ───────────────────────────────────────────────────────────
+
 
 def test_manifest_defaults():
     m = PluginManifest(name="foo")
@@ -141,16 +145,21 @@ def test_manifest_to_dict_round_trip():
 
 # ─── PluginRegistry ───────────────────────────────────────────────────────────
 
+
 def test_registry_register_attack_module():
     reg = PluginRegistry()
+
     class Foo: ...
+
     reg.register_attack_module(Foo)
     assert reg.extra_module_classes == [Foo]
 
 
 def test_registry_register_mcp_tools():
     reg = PluginRegistry()
+
     def factory(mcp, ctx): ...
+
     reg.register_mcp_tools(factory)
     assert reg.mcp_tool_factories == [factory]
 
@@ -185,7 +194,9 @@ def test_registry_mark_plugin_loaded_and_accessors():
 
 def test_registry_reset_clears_everything():
     reg = PluginRegistry()
+
     class C: ...
+
     reg.register_attack_module(C)
     reg.register_mcp_tools(lambda mcp, ctx: None)
     reg.register_skill_dir("/x")
@@ -204,6 +215,7 @@ def test_get_plugin_registry_returns_singleton():
 
 
 # ─── PluginManager.discover_filesystem ────────────────────────────────────────
+
 
 def test_discover_filesystem_loads_plugin(tmp_path: Path):
     pdir = tmp_path / "foo"
@@ -301,6 +313,7 @@ def test_discover_filesystem_ignores_non_plugin_subdirs(tmp_path: Path):
 
 # ─── PluginManager.discover_entry_points ──────────────────────────────────────
 
+
 class _FakeEP:
     def __init__(self, name: str, obj):
         self.name = name
@@ -314,6 +327,7 @@ def test_discover_entry_points_with_injected_loader():
     class EP(Plugin):
         def __init__(self):
             self.manifest = PluginManifest(name="epplugin", enabled=True)
+
         def register(self, registry: PluginRegistry) -> None:
             registry.register_config_section("epplugin", {})
 
@@ -332,6 +346,7 @@ def test_discover_entry_points_factory_returning_plugin():
     class P(Plugin):
         def __init__(self):
             self.manifest = PluginManifest(name="factoryplug")
+
         def register(self, registry: PluginRegistry) -> None: ...
 
     def loader(group: str):
@@ -358,6 +373,7 @@ def test_discover_entry_points_tolerates_load_failure():
 
 
 # ─── PluginManager.load_all enablement gating ─────────────────────────────────
+
 
 def _fs_plugin(tmp_path: Path, name: str, *, enabled: bool = False) -> Path:
     pdir = tmp_path / name
@@ -461,9 +477,11 @@ def test_load_all_register_failure_skips_without_aborting_siblings(tmp_path: Pat
 
 def test_load_all_entry_points_combined_with_filesystem(tmp_path: Path):
     _fs_plugin(tmp_path, "fsplug", enabled=True)
+
     class EP(Plugin):
         def __init__(self):
             self.manifest = PluginManifest(name="epplug", enabled=True)
+
         def register(self, registry: PluginRegistry) -> None:
             registry.register_config_section("epplug", {})
 
@@ -479,6 +497,7 @@ def test_load_all_entry_points_combined_with_filesystem(tmp_path: Path):
 
 
 # ─── load_plugins / list_discovered_plugins ───────────────────────────────────
+
 
 def test_load_plugins_reads_config(tmp_path: Path):
     _fs_plugin(tmp_path, "foo", enabled=False)
@@ -550,8 +569,16 @@ def test_list_discovered_plugins_shape(tmp_path: Path):
     by_name = {d["name"]: d for d in listed}
     assert set(by_name) == {"foo", "bar"}
     foo = by_name["foo"]
-    assert set(foo.keys()) == {"name", "version", "description", "author",
-                               "capabilities", "loaded", "enabled", "config_section"}
+    assert set(foo.keys()) == {
+        "name",
+        "version",
+        "description",
+        "author",
+        "capabilities",
+        "loaded",
+        "enabled",
+        "config_section",
+    }
     assert foo["loaded"] is True
     assert by_name["bar"]["loaded"] is False
 
@@ -566,6 +593,7 @@ def test_list_discovered_plugins_empty_when_nothing_discovered():
 
 # ─── Plugin ABC ───────────────────────────────────────────────────────────────
 
+
 def test_plugin_abc_cannot_instantiate_without_register():
     with pytest.raises(TypeError):
         Plugin()  # type: ignore[abstract]
@@ -573,9 +601,11 @@ def test_plugin_abc_cannot_instantiate_without_register():
 
 # ─── import hygiene ───────────────────────────────────────────────────────────
 
+
 def test_no_flow_b_imports_at_runtime():
     """plugins.py must not import any Flow B entanglement modules."""
     import subprocess
+
     forbidden = [
         "tools.recon_pipeline",
         "tools.scope_gate",
@@ -612,6 +642,7 @@ def test_no_flow_b_imports_at_runtime():
 
 def test_manifest_only_plugin_is_a_plugin_subclass():
     from tools.plugins import _ManifestOnlyPlugin
+
     m = PluginManifest(name="x")
     p = _ManifestOnlyPlugin(m)
     assert isinstance(p, Plugin)

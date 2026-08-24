@@ -30,12 +30,14 @@ def list_scan_configs(gmp):
     response = gmp.get_scan_configs()
     configs = []
     for config in response.findall(".//config"):
-        configs.append({
-            "id": config.get("id"),
-            "name": config.findtext("name", ""),
-            "type": config.findtext("type", ""),
-            "family_count": config.findtext("family_count/growing", ""),
-        })
+        configs.append(
+            {
+                "id": config.get("id"),
+                "name": config.findtext("name", ""),
+                "type": config.findtext("type", ""),
+                "family_count": config.findtext("family_count/growing", ""),
+            }
+        )
     return configs
 
 
@@ -44,12 +46,14 @@ def list_credentials(gmp):
     response = gmp.get_credentials()
     creds = []
     for cred in response.findall(".//credential"):
-        creds.append({
-            "id": cred.get("id"),
-            "name": cred.findtext("name", ""),
-            "type": cred.findtext("type", ""),
-            "login": cred.findtext("login", ""),
-        })
+        creds.append(
+            {
+                "id": cred.get("id"),
+                "name": cred.findtext("name", ""),
+                "type": cred.findtext("type", ""),
+                "login": cred.findtext("login", ""),
+            }
+        )
     return creds
 
 
@@ -102,7 +106,9 @@ def get_task_status(gmp, task_id):
         "name": task.findtext("name", ""),
         "status": task.findtext("status", ""),
         "progress": task.findtext("progress", "0"),
-        "report_id": task.find(".//last_report/report").get("id", "") if task.find(".//last_report/report") is not None else "",
+        "report_id": task.find(".//last_report/report").get("id", "")
+        if task.find(".//last_report/report") is not None
+        else "",
     }
 
 
@@ -116,16 +122,18 @@ def get_report_results(gmp, report_id, min_qod=70):
     results = []
     for result in response.findall(".//result"):
         nvt = result.find("nvt")
-        results.append({
-            "name": nvt.findtext("name", "") if nvt is not None else "",
-            "oid": nvt.get("oid", "") if nvt is not None else "",
-            "host": result.findtext("host", ""),
-            "port": result.findtext("port", ""),
-            "severity": result.findtext("severity", "0"),
-            "threat": result.findtext("threat", ""),
-            "qod": result.findtext("qod/value", ""),
-            "description": result.findtext("description", "")[:200],
-        })
+        results.append(
+            {
+                "name": nvt.findtext("name", "") if nvt is not None else "",
+                "oid": nvt.get("oid", "") if nvt is not None else "",
+                "host": result.findtext("host", ""),
+                "port": result.findtext("port", ""),
+                "severity": result.findtext("severity", "0"),
+                "threat": result.findtext("threat", ""),
+                "qod": result.findtext("qod/value", ""),
+                "description": result.findtext("description", "")[:200],
+            }
+        )
     return results
 
 
@@ -136,24 +144,26 @@ def parse_openvas_xml_report(xml_path):
     results = []
     for result in root.findall(".//result"):
         nvt = result.find("nvt")
-        results.append({
-            "name": nvt.findtext("name", "") if nvt is not None else "",
-            "host": result.findtext("host", ""),
-            "port": result.findtext("port", ""),
-            "severity": float(result.findtext("severity", "0")),
-            "threat": result.findtext("threat", ""),
-            "description": result.findtext("description", "")[:200],
-        })
+        results.append(
+            {
+                "name": nvt.findtext("name", "") if nvt is not None else "",
+                "host": result.findtext("host", ""),
+                "port": result.findtext("port", ""),
+                "severity": float(result.findtext("severity", "0")),
+                "threat": result.findtext("threat", ""),
+                "description": result.findtext("description", "")[:200],
+            }
+        )
     results.sort(key=lambda x: x["severity"], reverse=True)
     return results
 
 
 def run_audit(args):
     """Execute OpenVAS scan audit and analysis."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("  OPENVAS AUTHENTICATED SCAN AUDIT")
     print(f"  Generated: {datetime.utcnow().isoformat()} UTC")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     report = {}
 
@@ -166,8 +176,10 @@ def run_audit(args):
             severity_counts[threat] = severity_counts.get(threat, 0) + 1
         report["severity_distribution"] = severity_counts
         print(f"--- SCAN RESULTS ({len(results)} vulnerabilities) ---")
-        print(f"  High: {severity_counts['High']} | Medium: {severity_counts['Medium']} | "
-              f"Low: {severity_counts['Low']} | Log: {severity_counts['Log']}")
+        print(
+            f"  High: {severity_counts['High']} | Medium: {severity_counts['Medium']} | "
+            f"Low: {severity_counts['Low']} | Log: {severity_counts['Log']}"
+        )
         print("\n--- TOP VULNERABILITIES ---")
         for r in results[:15]:
             print(f"  [{r['threat']}] {r['host']}:{r['port']} — {r['name'][:70]}")
@@ -194,16 +206,14 @@ def run_audit(args):
             status = get_task_status(gmp, args.task_id)
             report["task_status"] = status
             print("\n--- TASK STATUS ---")
-            print(f"  {status.get('name','')}: {status.get('status','')} "
-                  f"({status.get('progress','')}%)")
+            print(f"  {status.get('name', '')}: {status.get('status', '')} ({status.get('progress', '')}%)")
 
     return report
 
 
 def main():
     parser = argparse.ArgumentParser(description="OpenVAS Authenticated Scan Agent")
-    parser.add_argument("--socket", default="/run/gvmd/gvmd.sock",
-                        help="GVM Unix socket path")
+    parser.add_argument("--socket", default="/run/gvmd/gvmd.sock", help="GVM Unix socket path")
     parser.add_argument("--gvm-user", help="GVM admin username")
     parser.add_argument("--gvm-pass", help="GVM admin password")
     parser.add_argument("--task-id", help="Existing task ID to check status")

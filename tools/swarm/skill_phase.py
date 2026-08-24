@@ -15,12 +15,8 @@ from __future__ import annotations
 
 _PHASE_TAGS: dict[str, frozenset[str]] = {
     "recon": frozenset({"reconnaissance", "nmap", "network-security", "osint"}),
-    "vuln": frozenset(
-        {"vulnerability-scanning", "cve", "vulnerability-triage", "cvss"}
-    ),
-    "exploit": frozenset(
-        {"exploit-research", "exploit", "web", "api", "database", "sql-injection"}
-    ),
+    "vuln": frozenset({"vulnerability-scanning", "cve", "vulnerability-triage", "cvss"}),
+    "exploit": frozenset({"exploit-research", "exploit", "web", "api", "database", "sql-injection"}),
     "post_exploit": frozenset(
         {
             "post-exploit",

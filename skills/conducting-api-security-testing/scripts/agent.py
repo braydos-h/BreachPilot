@@ -19,11 +19,13 @@ def test_bola(base_url, endpoint_template, id_field, valid_id, other_id, auth_to
     headers = {"Authorization": f"Bearer {auth_token}"}
     own_resp = requests.get(
         urljoin(base_url, endpoint_template.replace(f"{{{id_field}}}", str(valid_id))),
-        headers=headers, timeout=10,
+        headers=headers,
+        timeout=10,
     )
     other_resp = requests.get(
         urljoin(base_url, endpoint_template.replace(f"{{{id_field}}}", str(other_id))),
-        headers=headers, timeout=10,
+        headers=headers,
+        timeout=10,
     )
     vulnerable = other_resp.status_code == 200 and len(other_resp.content) > 50
     result = {
@@ -46,17 +48,21 @@ def test_bfla(base_url, admin_endpoints, low_priv_token):
         for method in ["GET", "POST", "DELETE"]:
             try:
                 resp = requests.request(
-                    method, urljoin(base_url, endpoint),
-                    headers=headers, timeout=10,
+                    method,
+                    urljoin(base_url, endpoint),
+                    headers=headers,
+                    timeout=10,
                 )
                 vulnerable = resp.status_code in (200, 201, 204)
-                results.append({
-                    "test": "BFLA (API5:2023)",
-                    "endpoint": endpoint,
-                    "method": method,
-                    "status": resp.status_code,
-                    "vulnerable": vulnerable,
-                })
+                results.append(
+                    {
+                        "test": "BFLA (API5:2023)",
+                        "endpoint": endpoint,
+                        "method": method,
+                        "status": resp.status_code,
+                        "vulnerable": vulnerable,
+                    }
+                )
                 if vulnerable:
                     logger.warning("BFLA: %s %s accessible with low-priv token", method, endpoint)
             except requests.RequestException:
@@ -69,7 +75,9 @@ def test_mass_assignment(base_url, endpoint, auth_token, extra_fields):
     headers = {"Authorization": f"Bearer {auth_token}", "Content-Type": "application/json"}
     resp = requests.put(
         urljoin(base_url, endpoint),
-        headers=headers, json=extra_fields, timeout=10,
+        headers=headers,
+        json=extra_fields,
+        timeout=10,
     )
     verify = requests.get(urljoin(base_url, endpoint), headers=headers, timeout=10)
     verify_data = verify.json() if verify.status_code == 200 else {}
@@ -124,6 +132,7 @@ def test_rate_limiting(base_url, endpoint, num_requests=100):
 def test_jwt_none_algorithm(base_url, endpoint, jwt_token):
     """Test for JWT 'none' algorithm bypass."""
     import base64
+
     parts = jwt_token.split(".")
     if len(parts) != 3:
         return {"test": "JWT None Algorithm", "vulnerable": False, "error": "Invalid JWT"}
@@ -152,7 +161,8 @@ def test_graphql_introspection(base_url, graphql_endpoint="/graphql"):
     query = {"query": "{__schema{types{name,fields{name,args{name,type{name}}}}}}"}
     resp = requests.post(
         urljoin(base_url, graphql_endpoint),
-        json=query, timeout=10,
+        json=query,
+        timeout=10,
     )
     has_schema = "types" in resp.text if resp.status_code == 200 else False
     return {

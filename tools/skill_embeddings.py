@@ -177,11 +177,7 @@ def get_shared_skill_embedder(config: dict[str, Any] | None) -> SkillEmbedder:
                 # ponytail: embeddings stay on local Ollama (embed_host) when
                 # set; falls back to ollama.host for cloud-only installs.
                 _ollama_cfg = (config or {}).get("ollama", {}) or {}
-                host = str(
-                    _ollama_cfg.get("embed_host")
-                    or _ollama_cfg.get("host")
-                    or "https://api.ollama.com"
-                )
+                host = str(_ollama_cfg.get("embed_host") or _ollama_cfg.get("host") or "https://api.ollama.com")
                 sm = SemanticMemoryManager(get_default_db(), ollama_host=host, embedding_model=model)
         except Exception:
             sm = None

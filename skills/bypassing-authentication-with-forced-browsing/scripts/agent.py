@@ -14,17 +14,49 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 DEFAULT_ADMIN_PATHS = [
-    "/admin", "/administrator", "/admin-panel", "/wp-admin", "/cpanel",
-    "/phpmyadmin", "/adminer", "/manager", "/console", "/debug",
-    "/actuator", "/actuator/env", "/actuator/health", "/actuator/beans",
-    "/swagger-ui", "/swagger-ui.html", "/api-docs", "/graphql", "/graphiql",
-    "/.env", "/server-status", "/server-info", "/.git/HEAD", "/.git/config",
-    "/web.config", "/phpinfo.php", "/robots.txt", "/sitemap.xml",
+    "/admin",
+    "/administrator",
+    "/admin-panel",
+    "/wp-admin",
+    "/cpanel",
+    "/phpmyadmin",
+    "/adminer",
+    "/manager",
+    "/console",
+    "/debug",
+    "/actuator",
+    "/actuator/env",
+    "/actuator/health",
+    "/actuator/beans",
+    "/swagger-ui",
+    "/swagger-ui.html",
+    "/api-docs",
+    "/graphql",
+    "/graphiql",
+    "/.env",
+    "/server-status",
+    "/server-info",
+    "/.git/HEAD",
+    "/.git/config",
+    "/web.config",
+    "/phpinfo.php",
+    "/robots.txt",
+    "/sitemap.xml",
 ]
 
 SENSITIVE_EXTENSIONS = [
-    ".bak", ".old", ".orig", ".save", ".swp", ".tmp", ".config",
-    ".sql", ".gz", ".tar", ".zip", ".env",
+    ".bak",
+    ".old",
+    ".orig",
+    ".save",
+    ".swp",
+    ".tmp",
+    ".config",
+    ".sql",
+    ".gz",
+    ".tar",
+    ".zip",
+    ".env",
 ]
 
 
@@ -42,8 +74,11 @@ def test_endpoint(base_url, path, session_cookie=None, timeout=10):
     auth_resp = None
     if session_cookie:
         auth_resp = requests.get(
-            url, cookies={"session": session_cookie},
-            timeout=timeout, allow_redirects=False, verify=False,
+            url,
+            cookies={"session": session_cookie},
+            timeout=timeout,
+            allow_redirects=False,
+            verify=False,
         )
 
     result = {
@@ -56,7 +91,8 @@ def test_endpoint(base_url, path, session_cookie=None, timeout=10):
         result["auth_status"] = auth_resp.status_code
         result["auth_size"] = len(auth_resp.content)
         result["auth_bypass"] = (
-            unauth_resp.status_code == 200 and auth_resp.status_code == 200
+            unauth_resp.status_code == 200
+            and auth_resp.status_code == 200
             and abs(result["unauth_size"] - result["auth_size"]) < 100
         )
     return result
@@ -73,7 +109,9 @@ def enumerate_directories(base_url, wordlist, session_cookie=None):
                 findings.append(result)
                 logger.info(
                     "Found: %s (status: %d, size: %d)",
-                    path, result["unauth_status"], result["unauth_size"],
+                    path,
+                    result["unauth_status"],
+                    result["unauth_size"],
                 )
         except requests.RequestException:
             continue
@@ -120,8 +158,15 @@ def test_path_traversal_bypass(base_url, path):
 def check_sensitive_files(base_url):
     """Check for exposed backup and configuration files."""
     sensitive_paths = [
-        ".env", ".git/HEAD", ".git/config", "web.config", "wp-config.php.bak",
-        "config.php.old", ".htpasswd", "database.yml", "phpinfo.php",
+        ".env",
+        ".git/HEAD",
+        ".git/config",
+        "web.config",
+        "wp-config.php.bak",
+        "config.php.old",
+        ".htpasswd",
+        "database.yml",
+        "phpinfo.php",
     ]
     exposed = []
     for path in sensitive_paths:
@@ -146,8 +191,9 @@ def generate_report(findings, method_results, sensitive_files):
         "sensitive_files_exposed": sensitive_files,
     }
     bypasses = len(report["auth_bypass_candidates"])
-    logger.info("Report: %d endpoints, %d auth bypasses, %d sensitive files",
-                len(findings), bypasses, len(sensitive_files))
+    logger.info(
+        "Report: %d endpoints, %d auth bypasses, %d sensitive files", len(findings), bypasses, len(sensitive_files)
+    )
     return report
 
 

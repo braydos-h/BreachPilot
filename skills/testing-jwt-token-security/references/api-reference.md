@@ -10,6 +10,7 @@ pip install PyJWT
 ### Encoding (Creating Tokens)
 ```python
 import jwt
+
 token = jwt.encode(payload, secret, algorithm="HS256")
 ```
 

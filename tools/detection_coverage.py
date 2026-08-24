@@ -26,8 +26,16 @@ from typing import Any
 # _NOISY_PATTERNS). A record counts as noisy when its ``noisy`` flag is set OR
 # its command string matches one of these (case-insensitive substring).
 _NOISY_PATTERNS: tuple[str, ...] = (
-    "-t5", "--script=vuln", "masscan", "hydra", "nuclei",
-    "ffuf", "gobuster", "dirb", "crackmapexec", "nmap -su",
+    "-t5",
+    "--script=vuln",
+    "masscan",
+    "hydra",
+    "nuclei",
+    "ffuf",
+    "gobuster",
+    "dirb",
+    "crackmapexec",
+    "nmap -su",
 )
 
 _IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
@@ -95,8 +103,7 @@ def detection_probe_plan(target_ip: str) -> list[dict[str, Any]]:
         canary_command(
             category="auth",
             description="Failed SSH login from a synthetic source IP",
-            command=f"ssh -o StrictHostKeyChecking=no -o BatchMode=yes "
-            f"operator_canary@{target_ip} true",
+            command=f"ssh -o StrictHostKeyChecking=no -o BatchMode=yes operator_canary@{target_ip} true",
             detection_hint="SIEM / auth logs: failed SSH login from a new source IP",
             target_ip=target_ip,
         ),
@@ -144,9 +151,7 @@ def footprint_summary(audit_records: list[Any] | None) -> dict[str, Any]:
             continue
         total += 1
         cmd_str = str(rec.get("command") or "")
-        is_noisy = bool(rec.get("noisy")) or any(
-            p in cmd_str.lower() for p in _NOISY_PATTERNS
-        )
+        is_noisy = bool(rec.get("noisy")) or any(p in cmd_str.lower() for p in _NOISY_PATTERNS)
         if is_noisy:
             noisy += 1
             if cmd_str and len(noisy_examples) < 5:

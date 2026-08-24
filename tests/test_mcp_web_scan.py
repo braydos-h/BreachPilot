@@ -4,6 +4,7 @@ Covers: registration, the scanner allowlist, IPv4 validation, the target-IP
 allowlist lock (via ``@require_allowlist``), shell-metachar ``options``
 rejection, the happy path, and the not-installed friendly message.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -60,8 +61,7 @@ def _patch_pgrp(monkeypatch, returncode=0, out="ok\n", err=""):
 
     captured: list[Any] = []
 
-    def _fake(args, timeout, stdout=None, stderr=None, cwd=None, env=None,
-              input_text=None, **popen_kwargs):
+    def _fake(args, timeout, stdout=None, stderr=None, cwd=None, env=None, input_text=None, **popen_kwargs):
         captured.append(list(args))
         return returncode, out, err
 
@@ -79,9 +79,12 @@ async def test_run_web_scan_is_registered(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_run_web_scan_rejects_unsupported_scanner(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path, require_allowlist=False)
-    text = _text(await mcp.call_tool(
-        "run_web_scan", {"scanner": "nessus", "target_ip": "10.0.0.50"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "run_web_scan",
+            {"scanner": "nessus", "target_ip": "10.0.0.50"},
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "unsupported scanner" in text
 
@@ -89,9 +92,12 @@ async def test_run_web_scan_rejects_unsupported_scanner(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_run_web_scan_rejects_invalid_target_ip(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path, require_allowlist=False)
-    text = _text(await mcp.call_tool(
-        "run_web_scan", {"scanner": "nikto", "target_ip": "not-an-ip"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "run_web_scan",
+            {"scanner": "nikto", "target_ip": "not-an-ip"},
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "valid IP address or domain" in text
 
@@ -99,9 +105,12 @@ async def test_run_web_scan_rejects_invalid_target_ip(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_run_web_scan_blocks_out_of_allowlist_target(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path, allowed_targets=["10.0.0.50"])
-    text = _text(await mcp.call_tool(
-        "run_web_scan", {"scanner": "nikto", "target_ip": "10.0.0.99"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "run_web_scan",
+            {"scanner": "nikto", "target_ip": "10.0.0.99"},
+        )
+    )
     # @require_allowlist blocks before the function body runs.
     assert text.startswith("BLOCKED:")
     assert "10.0.0.99" in text
@@ -110,10 +119,12 @@ async def test_run_web_scan_blocks_out_of_allowlist_target(tmp_path: Path) -> No
 @pytest.mark.asyncio
 async def test_run_web_scan_rejects_shell_metachar_options(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path, require_allowlist=False)
-    text = _text(await mcp.call_tool(
-        "run_web_scan",
-        {"scanner": "nikto", "target_ip": "10.0.0.50", "options": "x; rm -rf /"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "run_web_scan",
+            {"scanner": "nikto", "target_ip": "10.0.0.50", "options": "x; rm -rf /"},
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "metacharacters" in text
 
@@ -124,10 +135,12 @@ async def test_run_web_scan_happy_path(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
     captured = _patch_pgrp(monkeypatch, returncode=0, out="Server: nginx\n", err="")
 
-    text = _text(await mcp.call_tool(
-        "run_web_scan",
-        {"scanner": "nikto", "target_ip": "10.0.0.50", "port": 8080},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "run_web_scan",
+            {"scanner": "nikto", "target_ip": "10.0.0.50", "port": 8080},
+        )
+    )
     assert "WEB_SCAN_RESULT: completed" in text
     assert "SCANNER: nikto" in text
     assert "TARGET: 10.0.0.50:8080" in text
@@ -142,9 +155,12 @@ async def test_run_web_scan_happy_path(tmp_path: Path, monkeypatch) -> None:
 async def test_run_web_scan_not_installed(tmp_path: Path, monkeypatch) -> None:
     mcp = _make_server(tmp_path, require_allowlist=False)
     monkeypatch.setattr(shutil, "which", lambda name: None)
-    text = _text(await mcp.call_tool(
-        "run_web_scan", {"scanner": "nikto", "target_ip": "10.0.0.50"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "run_web_scan",
+            {"scanner": "nikto", "target_ip": "10.0.0.50"},
+        )
+    )
     assert text.startswith("SCANNER_NOT_INSTALLED:")
 
 

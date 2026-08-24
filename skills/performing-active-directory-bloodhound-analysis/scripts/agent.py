@@ -75,8 +75,7 @@ def find_kerberoastable_users(driver):
 def find_asrep_roastable(driver):
     """Find users with Kerberos pre-auth disabled (AS-REP Roastable)."""
     query = (
-        "MATCH (u:User) WHERE u.dontreqpreauth = true AND u.enabled = true "
-        "RETURN u.name AS user, u.enabled AS enabled"
+        "MATCH (u:User) WHERE u.dontreqpreauth = true AND u.enabled = true RETURN u.name AS user, u.enabled AS enabled"
     )
     with driver.session() as session:
         results = [dict(record) for record in session.run(query)]

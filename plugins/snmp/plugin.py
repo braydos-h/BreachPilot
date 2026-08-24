@@ -31,7 +31,16 @@ _MANIFEST_PATH = Path(__file__).resolve().parent / "plugin.yaml"
 # cheap and 'public' wins on most lab targets. A larger wordlist is a config/arg
 # concern, not a code concern.
 _DEFAULT_COMMUNITY_LIST: list[str] = [
-    "public", "private", "community", "admin", "snmp", "read", "write", "cisco", "default", "secret",
+    "public",
+    "private",
+    "community",
+    "admin",
+    "snmp",
+    "read",
+    "write",
+    "cisco",
+    "default",
+    "secret",
 ]
 
 
@@ -202,7 +211,9 @@ def _register_snmp_tools(mcp: Any, ctx: Any) -> None:
             return "BLOCKED: snmp plugin not enabled in config (snmp.enabled)."
         community = community.strip() or os.environ.get(cfg.get("community_env", "SNMP_COMMUNITY")) or "public"
         version = version.strip() or cfg.get("default_version", "2c")
-        rc, output = _run_community_walk(target_ip, community, version=version, oid=oid.strip(), timeout=_snmp_timeout(config))
+        rc, output = _run_community_walk(
+            target_ip, community, version=version, oid=oid.strip(), timeout=_snmp_timeout(config)
+        )
         if rc != 0:
             return f"SNMP_ENUM_ERROR: returncode {rc}\n{output}"
         return (
@@ -232,7 +243,9 @@ def _register_snmp_tools(mcp: Any, ctx: Any) -> None:
                 return f"SNMP_COMMUNITY_ERROR: could not read wordlist: {exc}"
         else:
             tokens = list(_DEFAULT_COMMUNITY_LIST)
-        results = _guess_communities(target_ip, tokens, timeout=_snmp_timeout(config), version=cfg.get("default_version", "2c"))
+        results = _guess_communities(
+            target_ip, tokens, timeout=_snmp_timeout(config), version=cfg.get("default_version", "2c")
+        )
         lines = [f"COMMUNITY: {r['community']} -> {'OK' if r['works'] else 'FAIL'}" for r in results]
         worked = [r for r in results if r["works"]]
         if not worked:

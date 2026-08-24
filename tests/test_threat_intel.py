@@ -10,6 +10,7 @@ tests cover:
   - SSRF guard: a URL-shaped query is rejected (only package/CVE accepted)
   - ``demo()`` self-check runs without real HTTP
 """
+
 from __future__ import annotations
 
 import json
@@ -31,6 +32,7 @@ from tools.threat_intel import (
 )
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
+
 
 def _cfg(tmp_path: Path, **overrides) -> dict:
     base = {
@@ -82,6 +84,7 @@ _GHSA_PAYLOAD = {
 
 def _fetch_router(osv_fn=None, ghsa_fn=None):
     """Return a fetch_fn that routes by URL so one callable handles both."""
+
     def _fetch(url, method, body_str, headers):
         if "osv.dev" in url:
             if osv_fn is None:
@@ -92,10 +95,12 @@ def _fetch_router(osv_fn=None, ghsa_fn=None):
                 return _GHSA_PAYLOAD
             return ghsa_fn(url, method, body_str, headers)
         raise ValueError(f"unexpected url {url}")
+
     return _fetch
 
 
 # ── _clean / _validate_query ─────────────────────────────────────────────────
+
 
 def test_clean_strips_control_chars_and_caps_length():
     assert _clean("abc\x00def\t\n") == "abcdef"
@@ -123,14 +128,21 @@ def test_validate_query_rejects_url_and_metachar():
 
 # ── OSV ──────────────────────────────────────────────────────────────────────
 
+
 def test_search_osv_parses_and_caches(tmp_path: Path):
     calls = {"n": 0}
+
     def osv_fn(url, method, body_str, headers):
         calls["n"] += 1
         return _OSV_PAYLOAD_REQUESTS
-    settings = ThreatIntelSettings(enabled=True, cache_dir=str(tmp_path), cache_ttl_seconds=3600,
-                                   sources={"osv": True, "ghsa": False, "kev": False, "exploitdb_rss": False},
-                                   max_results=5)
+
+    settings = ThreatIntelSettings(
+        enabled=True,
+        cache_dir=str(tmp_path),
+        cache_ttl_seconds=3600,
+        sources={"osv": True, "ghsa": False, "kev": False, "exploitdb_rss": False},
+        max_results=5,
+    )
     res1 = search_osv("requests", settings, tmp_path, fetch_fn=_fetch_router(osv_fn=osv_fn))
     assert res1["vulns"][0]["id"] == "PYSEC-2018-96"
     assert res1["vulns"][0]["references"][0] == "https://example.com/pysec"
@@ -143,8 +155,12 @@ def test_search_osv_parses_and_caches(tmp_path: Path):
 def test_search_osv_network_error_returns_error_dict(tmp_path: Path):
     def boom(url, method, body_str, headers):
         raise urllib.error.URLError("net down")
-    settings = ThreatIntelSettings(enabled=True, cache_dir=str(tmp_path),
-                                   sources={"osv": True, "ghsa": False, "kev": False, "exploitdb_rss": False})
+
+    settings = ThreatIntelSettings(
+        enabled=True,
+        cache_dir=str(tmp_path),
+        sources={"osv": True, "ghsa": False, "kev": False, "exploitdb_rss": False},
+    )
     res = search_osv("requests", settings, tmp_path, fetch_fn=boom)
     assert "error" in res
     assert "osv fetch failed" in res["error"]
@@ -152,11 +168,16 @@ def test_search_osv_network_error_returns_error_dict(tmp_path: Path):
 
 def test_search_osv_cve_query_uses_version_field(tmp_path: Path):
     captured = {}
+
     def osv_fn(url, method, body_str, headers):
         captured["body"] = json.loads(body_str)
         return {"vulns": []}
-    settings = ThreatIntelSettings(enabled=True, cache_dir=str(tmp_path),
-                                   sources={"osv": True, "ghsa": False, "kev": False, "exploitdb_rss": False})
+
+    settings = ThreatIntelSettings(
+        enabled=True,
+        cache_dir=str(tmp_path),
+        sources={"osv": True, "ghsa": False, "kev": False, "exploitdb_rss": False},
+    )
     search_osv("CVE-2021-44228", settings, tmp_path, fetch_fn=_fetch_router(osv_fn=osv_fn))
     # CVE queries go to the version field, not the package field.
     assert "version" in captured["body"]
@@ -165,11 +186,15 @@ def test_search_osv_cve_query_uses_version_field(tmp_path: Path):
 
 # ── GHSA ─────────────────────────────────────────────────────────────────────
 
+
 def test_search_ghsa_parses_and_requires_token(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN", "fake-token")
-    settings = ThreatIntelSettings(enabled=True, cache_dir=str(tmp_path),
-                                   sources={"osv": False, "ghsa": True, "kev": False, "exploitdb_rss": False},
-                                   github_token_env="GITHUB_TOKEN")
+    settings = ThreatIntelSettings(
+        enabled=True,
+        cache_dir=str(tmp_path),
+        sources={"osv": False, "ghsa": True, "kev": False, "exploitdb_rss": False},
+        github_token_env="GITHUB_TOKEN",
+    )
     res = search_ghsa("requests", settings, tmp_path, fetch_fn=_fetch_router(ghsa_fn=lambda *a: _GHSA_PAYLOAD))
     assert res["advisories"][0]["ghsa_id"] == "GHSA-1"
     assert res["advisories"][0]["severity"] == "HIGH"
@@ -177,8 +202,11 @@ def test_search_ghsa_parses_and_requires_token(tmp_path: Path, monkeypatch):
 
 def test_search_ghsa_token_missing_returns_error(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
-    settings = ThreatIntelSettings(enabled=True, cache_dir=str(tmp_path),
-                                   sources={"osv": False, "ghsa": True, "kev": False, "exploitdb_rss": False})
+    settings = ThreatIntelSettings(
+        enabled=True,
+        cache_dir=str(tmp_path),
+        sources={"osv": False, "ghsa": True, "kev": False, "exploitdb_rss": False},
+    )
     res = search_ghsa("requests", settings, tmp_path, fetch_fn=_fetch_router())
     assert res.get("error") == "ghsa token missing"
 
@@ -226,6 +254,7 @@ def test_search_kev_none_catalog_returns_disabled_note():
 
 # ── ThreatIntelClient.search end-to-end ─────────────────────────────────────
 
+
 def test_client_search_combines_sources(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN", "fake-token")
     client = ThreatIntelClient.from_config(_cfg(tmp_path), fetch_fn=_fetch_router())
@@ -267,8 +296,10 @@ def test_client_search_source_filtering(tmp_path: Path, monkeypatch):
 def test_client_search_prompt_injection_cap(tmp_path: Path):
     """A >200-char summary in the feed is capped by _clean."""
     long = "X" * 500
+
     def osv_fn(url, method, body_str, headers):
         return {"vulns": [{"id": "L", "summary": long, "references": []}]}
+
     client = ThreatIntelClient.from_config(_cfg(tmp_path), fetch_fn=_fetch_router(osv_fn=osv_fn))
     res = client.search("longpkg", sources="osv")
     assert len(res["sources"]["osv"]["vulns"][0]["summary"]) <= 200
@@ -277,8 +308,10 @@ def test_client_search_prompt_injection_cap(tmp_path: Path):
 def test_client_search_max_results_enforced(tmp_path: Path, monkeypatch):
     """max_results caps the returned vuln list."""
     monkeypatch.setenv("GITHUB_TOKEN", "fake-token")
+
     def osv_fn(url, method, body_str, headers):
         return {"vulns": [{"id": f"V{i}", "summary": "s"} for i in range(50)]}
+
     cfg = _cfg(tmp_path)
     cfg["threat_intel"]["max_results"] = 3
     client = ThreatIntelClient.from_config(cfg, fetch_fn=_fetch_router(osv_fn=osv_fn))
@@ -295,9 +328,11 @@ def test_search_threat_intel_module_entry_point(tmp_path: Path, monkeypatch):
 
 # ── demo() self-check ────────────────────────────────────────────────────────
 
+
 def test_demo_runs_without_network(monkeypatch):
     """The ``python -m tools.threat_intel`` self-check passes with fakes."""
     from tools.threat_intel import _demo
+
     # _demo manages its own tempdir + GITHUB_TOKEN; just confirm it doesn't raise.
     monkeypatch.setenv("GITHUB_TOKEN", "fake-token")
     _demo()

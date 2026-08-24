@@ -226,8 +226,7 @@ def test_synthesis_stubs_are_read_only_info_carriers() -> None:
 
 def test_enumerate_phase_modules() -> None:
     """Read-only detection/enumeration modules bucket into phase_hint='enumerate'."""
-    for cls in (ADLDAPEnum, GraphQLIntrospect, TimingOracle, SMBSigningCheck,
-                ADCSEnum, BloodHoundCollect):
+    for cls in (ADLDAPEnum, GraphQLIntrospect, TimingOracle, SMBSigningCheck, ADCSEnum, BloodHoundCollect):
         assert cls.phase_hint == "enumerate", f"{cls.__name__} should be enumerate"
 
 
@@ -235,8 +234,7 @@ def test_to_json_unchanged_shape() -> None:
     """to_json() must stay byte-identical (the test-pinned 5-key contract) -- the
     new capability attrs must NOT leak into to_json()."""
     j = Log4jRCE().to_json()
-    assert set(j.keys()) == {"name", "description", "target_services",
-                             "target_ports", "required_cves"}
+    assert set(j.keys()) == {"name", "description", "target_services", "target_ports", "required_cves"}
 
 
 def test_capability_record_carries_new_attrs() -> None:

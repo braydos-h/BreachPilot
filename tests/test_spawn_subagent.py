@@ -43,6 +43,7 @@ def _make_manager(tmp_path: Path, config: dict[str, Any] | None = None) -> _Suba
 # AgentResult so it can serialize it.
 class _FakeAgentResult:
     """Mimics tools.swarm.base.AgentResult for the patched route()."""
+
     def __init__(self, task_id: str, status: str = "complete", output: dict | None = None):
         self.task_id = task_id
         self.status = type("S", (), {"value": status})()
@@ -55,12 +56,15 @@ class _FakeAgentResult:
 def _patch_route(manager: _SubagentManager, *, delay: float = 0.0, status: str = "complete"):
     """Replace manager._get_orchestrator() with a stub that returns a
     fake route() callable. Avoids building a real SwarmOrchestrator."""
+
     class _StubOrch:
         def route(self, task):
             if delay:
                 import time as _t
+
                 _t.sleep(delay)
             return _FakeAgentResult(task.get("task_id", ""), status=status)
+
     manager._orchestrator = _StubOrch()
     return manager
 
@@ -189,6 +193,7 @@ async def test_subagent_crash_records_failed_result(tmp_path):
     class _CrashingOrch:
         def route(self, task):
             raise RuntimeError("agent exploded")
+
     mgr._orchestrator = _CrashingOrch()
 
     spawn = await mgr.spawn("recon", "10.0.0.5", "doom")
@@ -232,12 +237,15 @@ async def test_multiple_subagents_run_concurrently(tmp_path):
 class _FakeMcp:
     """Captures @mcp.tool() decorated functions so a test can call them
     directly without a real MCP server."""
+
     def __init__(self):
         self.tools = {}
+
     def tool(self):
         def deco(fn):
             self.tools[fn.__name__] = fn
             return fn
+
         return deco
 
 
@@ -246,6 +254,7 @@ def _register_and_get_tools(tmp_path, *, parallel_enabled: bool, config_override
     {name: callable} dict. Mirrors how mcp_exploit_server.py wires them."""
     from tools.mcp_tools.parallel_agents import register_parallel_agent_tools
     from tools.mcp_tools.registry import ToolContext, make_audit_tool, make_require_allowlist
+
     ws = tmp_path / "exploit_workspace"
     ws.mkdir(parents=True, exist_ok=True)
     config = {"swarm": {"parallel_enabled": parallel_enabled}, "exploit": {"permission": "full_access"}}
@@ -254,8 +263,13 @@ def _register_and_get_tools(tmp_path, *, parallel_enabled: bool, config_override
     audit_tool = make_audit_tool(ws)
     require_allowlist = make_require_allowlist(ws, config)
     ctx = ToolContext(
-        workspace=ws, config=config, search=None, nvd=None, researcher=None,
-        audit_tool=audit_tool, require_allowlist=require_allowlist,
+        workspace=ws,
+        config=config,
+        search=None,
+        nvd=None,
+        researcher=None,
+        audit_tool=audit_tool,
+        require_allowlist=require_allowlist,
     )
     mcp = _FakeMcp()
     register_parallel_agent_tools(mcp, ctx=ctx)
@@ -281,6 +295,7 @@ async def test_spawn_subagent_refuses_out_of_allowlist_target(tmp_path):
     )
     # Patch the manager's orchestrator so a successful spawn wouldn't hang.
     from tools.mcp_tools.parallel_agents import _get_manager
+
     mgr = _get_manager(ws, config)
     mgr._orchestrator = type("O", (), {"route": lambda self, t: _FakeAgentResult("ok")})()
 
@@ -301,6 +316,7 @@ async def test_spawn_subagent_rejects_invalid_phase(tmp_path):
     """spawn_subagent rejects an unsupported phase."""
     tools, ws, config = _register_and_get_tools(tmp_path, parallel_enabled=True)
     from tools.mcp_tools.parallel_agents import _get_manager
+
     mgr = _get_manager(ws, config)
     mgr._orchestrator = type("O", (), {"route": lambda self, t: _FakeAgentResult("ok")})()
 
@@ -315,6 +331,7 @@ async def test_spawn_subagent_rejects_invalid_target(tmp_path):
     """spawn_subagent rejects a non-IP/non-FQDN target string."""
     tools, ws, config = _register_and_get_tools(tmp_path, parallel_enabled=True)
     from tools.mcp_tools.parallel_agents import _get_manager
+
     mgr = _get_manager(ws, config)
     mgr._orchestrator = type("O", (), {"route": lambda self, t: _FakeAgentResult("ok")})()
 

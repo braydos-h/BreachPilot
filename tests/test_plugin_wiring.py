@@ -12,6 +12,7 @@ real MCP server over a socket. A fresh ``PluginRegistry`` is used and the
 module-level ``PLUGIN_REGISTRY`` singleton is monkeypatched where the wired
 code reads it.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -29,6 +30,7 @@ from tools.plugins import (
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
 
+
 class _DummyMod(AttackModule):
     name = "plugin-dummy-mod"
     description = "plugin-registered test module"
@@ -44,6 +46,7 @@ def _reset_singleton():
     """Isolate every test from the module-level singleton."""
     PLUGIN_REGISTRY.reset()
     from tools import plugins as plugins_mod
+
     plugins_mod._reset_discovered()
     yield
     PLUGIN_REGISTRY.reset()
@@ -59,6 +62,7 @@ def _set_singleton(reg: PluginRegistry, monkeypatch) -> None:
 
 
 # ─── attack_modules registry ──────────────────────────────────────────────────
+
 
 def test_list_modules_includes_plugin_module(monkeypatch):
     reg = PluginRegistry()
@@ -145,8 +149,10 @@ def test_plugin_import_failure_does_not_break_list_modules(monkeypatch):
 
 # ─── config_manager ───────────────────────────────────────────────────────────
 
+
 def _validator_with(config: dict[str, Any]):
     from tools.config_manager import ConfigValidator
+
     v = ConfigValidator("config.yaml")
     v._config = config
     return v
@@ -171,6 +177,7 @@ def test_config_validator_accepts_plugin_section_after_registration(monkeypatch)
 
 def test_config_schema_has_plugins_block():
     from tools.config_manager import CONFIG_SCHEMA, KNOWN_TOP_KEYS
+
     assert "plugins" in CONFIG_SCHEMA
     plugins = CONFIG_SCHEMA["plugins"]
     assert plugins["enabled"] == []
@@ -189,16 +196,13 @@ def test_config_validator_plugins_block_not_unknown():
 
 # ─── skill_registry ───────────────────────────────────────────────────────────
 
+
 def _write_skill(root: Path, name: str) -> Path:
     sdir = root / name
     sdir.mkdir(parents=True, exist_ok=True)
     path = sdir / "SKILL.md"
     path.write_text(
-        "---\n"
-        f"name: {name}\n"
-        "description: plugin skill\n"
-        "domain: cybersecurity\n"
-        "---\n# Skill\n\nbody\n",
+        f"---\nname: {name}\ndescription: plugin skill\ndomain: cybersecurity\n---\n# Skill\n\nbody\n",
         encoding="utf-8",
     )
     return path
@@ -213,6 +217,7 @@ def test_load_skill_registry_walks_plugin_skill_dir(monkeypatch, tmp_path):
     _set_singleton(reg, monkeypatch)
 
     from tools.skill_registry import load_skill_registry
+
     # An empty (non-existent) baseline root so only the plugin dir contributes.
     registry = load_skill_registry([tmp_path / "empty_baseline"], base_dir=tmp_path)
     assert registry.get("plugin-skill") is not None
@@ -228,6 +233,7 @@ def test_load_skill_registry_dedups_plugin_dir_already_in_roots(monkeypatch, tmp
     _set_singleton(reg, monkeypatch)
 
     from tools.skill_registry import load_skill_registry
+
     registry = load_skill_registry([plugin_skills], base_dir=tmp_path)
     # the plugin skill is discovered exactly once
     assert registry.get("plugin-skill") is not None
@@ -237,6 +243,7 @@ def test_load_skill_registry_dedups_plugin_dir_already_in_roots(monkeypatch, tmp
 
 
 # ─── list_discovered_plugins ─────────────────────────────────────────────────
+
 
 def test_list_discovered_plugins_shape_and_loaded_flag(tmp_path):
     from tools.plugins import load_plugins
@@ -263,8 +270,16 @@ def test_list_discovered_plugins_shape_and_loaded_flag(tmp_path):
     by_name = {d["name"]: d for d in listed}
     assert set(by_name) == {"alpha", "beta"}
     alpha = by_name["alpha"]
-    assert set(alpha.keys()) == {"name", "version", "description", "author",
-                                 "capabilities", "loaded", "enabled", "config_section"}
+    assert set(alpha.keys()) == {
+        "name",
+        "version",
+        "description",
+        "author",
+        "capabilities",
+        "loaded",
+        "enabled",
+        "config_section",
+    }
     assert alpha["loaded"] is True
     assert by_name["beta"]["loaded"] is False
     assert alpha["capabilities"] == ["attack_module"]
@@ -276,15 +291,18 @@ def test_list_discovered_plugins_empty():
 
 # ─── main.py --list-plugins ───────────────────────────────────────────────────
 
+
 def test_list_plugins_argparse_flag_accepted():
     """parse_args accepts --list-plugins and sets list_plugins=True."""
     from main import parse_args
+
     args = parse_args(["--list-plugins", "--target", "10.0.0.1"])
     assert getattr(args, "list_plugins", False) is True
 
 
 def test_list_plugins_flag_absent_defaults_false():
     from main import parse_args
+
     args = parse_args(["--target", "10.0.0.1"])
     assert getattr(args, "list_plugins", False) is False
 
@@ -298,6 +316,7 @@ def test_list_plugins_source_string_present():
 
 
 # ─── mcp_exploit_server plugin MCP tool factories ────────────────────────────
+
 
 def test_create_mcp_server_invokes_plugin_mcp_factories(monkeypatch, tmp_path):
     """create_mcp_server calls plugin-registered mcp tool factories."""

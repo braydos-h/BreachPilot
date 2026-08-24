@@ -12,6 +12,7 @@ out-of-scope host. The fix extracts RHOSTS/RHOST (or lhost) and runs them
 through ``check_targets_allowlist`` at the top of each tool, returning a
 ``BLOCKED:`` marker for any host outside ``exploit.allowed_targets``.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -121,10 +122,12 @@ def _text(result) -> str:
 @pytest.mark.asyncio
 async def test_msfconsole_command_blocks_out_of_scope_rhosts(tmp_path: Path):
     mcp = _make_server(tmp_path, allowed_targets=["10.0.0.50"])
-    text = _text(await mcp.call_tool(
-        "msfconsole_command",
-        {"command": "use exploit/multi/handler; set RHOSTS 10.0.0.99; run"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "msfconsole_command",
+            {"command": "use exploit/multi/handler; set RHOSTS 10.0.0.99; run"},
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "10.0.0.99" in text
 
@@ -132,20 +135,24 @@ async def test_msfconsole_command_blocks_out_of_scope_rhosts(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_msfconsole_command_blocks_out_of_scope_rhost(tmp_path: Path):
     mcp = _make_server(tmp_path, allowed_targets=["10.0.0.50"])
-    text = _text(await mcp.call_tool(
-        "msfconsole_command",
-        {"command": "set RHOST 10.0.0.99"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "msfconsole_command",
+            {"command": "set RHOST 10.0.0.99"},
+        )
+    )
     assert text.startswith("BLOCKED:")
 
 
 @pytest.mark.asyncio
 async def test_msf_run_resource_script_blocks_out_of_scope_rhosts(tmp_path: Path):
     mcp = _make_server(tmp_path, allowed_targets=["10.0.0.50"])
-    text = _text(await mcp.call_tool(
-        "msf_run_resource_script",
-        {"script_content": "use auxiliary/scanner/portscan/tcp\nset RHOSTS 10.0.0.99\nrun"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "msf_run_resource_script",
+            {"script_content": "use auxiliary/scanner/portscan/tcp\nset RHOSTS 10.0.0.99\nrun"},
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "10.0.0.99" in text
 
@@ -153,11 +160,12 @@ async def test_msf_run_resource_script_blocks_out_of_scope_rhosts(tmp_path: Path
 @pytest.mark.asyncio
 async def test_msf_generate_payload_blocks_out_of_scope_lhost(tmp_path: Path):
     mcp = _make_server(tmp_path, allowed_targets=["10.0.0.50"])
-    text = _text(await mcp.call_tool(
-        "msf_generate_payload",
-        {"payload_type": "windows/x64/meterpreter/reverse_tcp",
-         "lhost": "10.0.0.99", "lport": 4444, "fmt": "exe"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "msf_generate_payload",
+            {"payload_type": "windows/x64/meterpreter/reverse_tcp", "lhost": "10.0.0.99", "lport": 4444, "fmt": "exe"},
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "10.0.0.99" in text
 
@@ -165,11 +173,19 @@ async def test_msf_generate_payload_blocks_out_of_scope_lhost(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_generate_payload_blocks_out_of_scope_lhost(tmp_path: Path):
     mcp = _make_server(tmp_path, allowed_targets=["10.0.0.50"])
-    text = _text(await mcp.call_tool(
-        "generate_payload",
-        {"payload_type": "reverse_tcp", "lhost": "10.0.0.99", "lport": 4444,
-         "format": "raw", "platform": "linux", "arch": "x64"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "generate_payload",
+            {
+                "payload_type": "reverse_tcp",
+                "lhost": "10.0.0.99",
+                "lport": 4444,
+                "format": "raw",
+                "platform": "linux",
+                "arch": "x64",
+            },
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "10.0.0.99" in text
 
@@ -188,8 +204,11 @@ async def test_msfconsole_command_passes_scope_when_no_rhosts(tmp_path: Path, mo
 
     monkeypatch.setattr(msf_mod, "get_metasploit_bridge", lambda ws: _FakeBridge())
 
-    text = _text(await mcp.call_tool(
-        "msfconsole_command", {"command": "sessions -l"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "msfconsole_command",
+            {"command": "sessions -l"},
+        )
+    )
     assert text.startswith("MSFCONSOLE_COMMAND:")
     assert "BLOCKED:" not in text

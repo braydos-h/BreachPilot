@@ -17,6 +17,7 @@ from typing import Optional
 @dataclass
 class RedTeamAction:
     """Represents a single red team action during an engagement."""
+
     timestamp: str
     phase: str
     mitre_tactic: str
@@ -37,6 +38,7 @@ class RedTeamAction:
 @dataclass
 class EngagementConfig:
     """Configuration for a red team engagement."""
+
     engagement_id: str
     client_name: str
     start_date: str
@@ -138,11 +140,7 @@ class RedTeamEngagementTracker:
         # Calculate TTP coverage
         unique_techniques = set(a.mitre_technique_id for a in self.actions)
         detected_techniques = set(a.mitre_technique_id for a in detected_actions)
-        ttp_coverage = (
-            len(detected_techniques) / len(unique_techniques) * 100
-            if unique_techniques
-            else 0
-        )
+        ttp_coverage = len(detected_techniques) / len(unique_techniques) * 100 if unique_techniques else 0
 
         # Tactic-level detection rates
         tactic_stats = {}
@@ -157,9 +155,7 @@ class RedTeamEngagementTracker:
                 }
 
         # Objective completion
-        objectives_achieved = sum(
-            1 for obj in self.config.objectives if obj.get("achieved", False)
-        )
+        objectives_achieved = sum(1 for obj in self.config.objectives if obj.get("achieved", False))
 
         return {
             "engagement_id": self.config.engagement_id,
@@ -212,9 +208,7 @@ class RedTeamEngagementTracker:
             },
         }
 
-        output_path = os.path.join(
-            self.output_dir, f"{self.config.engagement_id}_navigator.json"
-        )
+        output_path = os.path.join(self.output_dir, f"{self.config.engagement_id}_navigator.json")
         with open(output_path, "w") as f:
             json.dump(navigator_layer, f, indent=2)
 
@@ -243,10 +237,7 @@ class RedTeamEngagementTracker:
 
         for tactic_name, stats in metrics.get("tactic_detection_rates", {}).items():
             bar = "#" * int(stats["rate"] / 5) + "-" * (20 - int(stats["rate"] / 5))
-            lines.append(
-                f"  {tactic_name:<25} [{bar}] {stats['rate']:.0f}% "
-                f"({stats['detected']}/{stats['total']})"
-            )
+            lines.append(f"  {tactic_name:<25} [{bar}] {stats['rate']:.0f}% ({stats['detected']}/{stats['total']})")
 
         lines.append("")
         lines.append("-" * 70)
@@ -257,9 +248,7 @@ class RedTeamEngagementTracker:
             tech_info = COMMON_TECHNIQUES.get(tid, {})
             name = tech_info.get("name", "Unknown")
             lines.append(f"  [!] {tid} - {name}")
-            relevant_actions = [
-                a for a in self.actions if a.mitre_technique_id == tid and not a.detected
-            ]
+            relevant_actions = [a for a in self.actions if a.mitre_technique_id == tid and not a.detected]
             for action in relevant_actions:
                 lines.append(f"      Tool: {action.tool_used} | Target: {action.target_host}")
 
@@ -293,9 +282,7 @@ class RedTeamEngagementTracker:
 
         report_text = "\n".join(lines)
 
-        report_path = os.path.join(
-            self.output_dir, f"{self.config.engagement_id}_gap_report.txt"
-        )
+        report_path = os.path.join(self.output_dir, f"{self.config.engagement_id}_gap_report.txt")
         with open(report_path, "w") as f:
             f.write(report_text)
 
@@ -304,24 +291,44 @@ class RedTeamEngagementTracker:
 
     def export_timeline_csv(self) -> str:
         """Export engagement timeline as CSV for analysis."""
-        csv_path = os.path.join(
-            self.output_dir, f"{self.config.engagement_id}_timeline.csv"
-        )
+        csv_path = os.path.join(self.output_dir, f"{self.config.engagement_id}_timeline.csv")
         with open(csv_path, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow([
-                "Timestamp", "Phase", "Tactic", "Technique ID", "Technique Name",
-                "Description", "Target", "Tool", "Outcome", "Detected",
-                "Detection Time", "Detection Source", "Operator",
-            ])
+            writer.writerow(
+                [
+                    "Timestamp",
+                    "Phase",
+                    "Tactic",
+                    "Technique ID",
+                    "Technique Name",
+                    "Description",
+                    "Target",
+                    "Tool",
+                    "Outcome",
+                    "Detected",
+                    "Detection Time",
+                    "Detection Source",
+                    "Operator",
+                ]
+            )
             for action in sorted(self.actions, key=lambda a: a.timestamp):
-                writer.writerow([
-                    action.timestamp, action.phase, action.mitre_tactic,
-                    action.mitre_technique_id, action.mitre_technique_name,
-                    action.description, action.target_host, action.tool_used,
-                    action.outcome, action.detected, action.detection_time,
-                    action.detection_source, action.operator,
-                ])
+                writer.writerow(
+                    [
+                        action.timestamp,
+                        action.phase,
+                        action.mitre_tactic,
+                        action.mitre_technique_id,
+                        action.mitre_technique_name,
+                        action.description,
+                        action.target_host,
+                        action.tool_used,
+                        action.outcome,
+                        action.detected,
+                        action.detection_time,
+                        action.detection_source,
+                        action.operator,
+                    ]
+                )
 
         print(f"[+] Timeline CSV saved to: {csv_path}")
         return csv_path
@@ -338,17 +345,17 @@ Period: {self.config.start_date} to {self.config.end_date}
 Threat Profile: {self.config.threat_profile}
 
 KEY FINDINGS:
-- {metrics['unique_techniques_used']} unique ATT&CK techniques were executed
-- {metrics['detection_rate']:.0f}% of red team actions were detected by the SOC
-- {metrics['ttp_coverage_pct']:.0f}% of techniques used had at least one detection
-- {len(metrics.get('undetected_techniques', []))} technique(s) had ZERO detection coverage
-- {metrics['objectives_achieved']}/{metrics['objectives_total']} engagement objectives achieved
+- {metrics["unique_techniques_used"]} unique ATT&CK techniques were executed
+- {metrics["detection_rate"]:.0f}% of red team actions were detected by the SOC
+- {metrics["ttp_coverage_pct"]:.0f}% of techniques used had at least one detection
+- {len(metrics.get("undetected_techniques", []))} technique(s) had ZERO detection coverage
+- {metrics["objectives_achieved"]}/{metrics["objectives_total"]} engagement objectives achieved
 
-RISK RATING: {'CRITICAL' if metrics['detection_rate'] < 30 else 'HIGH' if metrics['detection_rate'] < 50 else 'MEDIUM' if metrics['detection_rate'] < 70 else 'LOW'}
+RISK RATING: {"CRITICAL" if metrics["detection_rate"] < 30 else "HIGH" if metrics["detection_rate"] < 50 else "MEDIUM" if metrics["detection_rate"] < 70 else "LOW"}
 
-The red team {'successfully' if metrics['success_rate'] > 50 else 'partially'} achieved the defined objectives,
+The red team {"successfully" if metrics["success_rate"] > 50 else "partially"} achieved the defined objectives,
 demonstrating that the organization's current security posture requires
-{'immediate remediation' if metrics['detection_rate'] < 30 else 'significant improvement' if metrics['detection_rate'] < 50 else 'targeted improvements' if metrics['detection_rate'] < 70 else 'minor tuning'}.
+{"immediate remediation" if metrics["detection_rate"] < 30 else "significant improvement" if metrics["detection_rate"] < 50 else "targeted improvements" if metrics["detection_rate"] < 70 else "minor tuning"}.
 """
         return summary
 
@@ -499,9 +506,7 @@ def main():
     print(tracker.generate_executive_summary())
 
     metrics = tracker.calculate_metrics()
-    metrics_path = os.path.join(
-        tracker.output_dir, f"{config.engagement_id}_metrics.json"
-    )
+    metrics_path = os.path.join(tracker.output_dir, f"{config.engagement_id}_metrics.json")
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2, default=str)
     print(f"[+] Metrics saved to: {metrics_path}")

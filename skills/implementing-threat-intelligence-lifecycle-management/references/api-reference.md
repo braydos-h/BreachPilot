@@ -48,6 +48,7 @@ def search_events(tags=None, date_from=None, published=True):
 ```python
 from pymisp import MISPEvent, MISPAttribute
 
+
 def create_ti_event(info, threat_level=2, analysis=1):
     event = MISPEvent()
     event.info = info
@@ -147,19 +148,23 @@ def misp_to_stix(event):
     stix_objects = []
     for attr in event.get("Attribute", []):
         if attr["type"] == "ip-dst":
-            stix_objects.append(stix2.Indicator(
-                name=f"Malicious IP: {attr['value']}",
-                pattern=f"[ipv4-addr:value = '{attr['value']}']",
-                pattern_type="stix",
-                valid_from=attr["timestamp"],
-            ))
+            stix_objects.append(
+                stix2.Indicator(
+                    name=f"Malicious IP: {attr['value']}",
+                    pattern=f"[ipv4-addr:value = '{attr['value']}']",
+                    pattern_type="stix",
+                    valid_from=attr["timestamp"],
+                )
+            )
         elif attr["type"] == "domain":
-            stix_objects.append(stix2.Indicator(
-                name=f"Malicious Domain: {attr['value']}",
-                pattern=f"[domain-name:value = '{attr['value']}']",
-                pattern_type="stix",
-                valid_from=attr["timestamp"],
-            ))
+            stix_objects.append(
+                stix2.Indicator(
+                    name=f"Malicious Domain: {attr['value']}",
+                    pattern=f"[domain-name:value = '{attr['value']}']",
+                    pattern_type="stix",
+                    valid_from=attr["timestamp"],
+                )
+            )
     return stix2.Bundle(objects=stix_objects)
 ```
 

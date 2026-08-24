@@ -8,6 +8,7 @@ shared audit file is also appended to by the MCP tool layer
 those rows have no ``hash`` field and must be skipped by the verifier (not
 flagged as tampered), and by ``_load_last_hash`` when seeding the chain tail.
 """
+
 from __future__ import annotations
 
 import json
@@ -103,8 +104,16 @@ async def test_unchained_mcp_tool_rows_skipped_by_verifier(tmp_path: Path):
     audit = tmp_path / "exploit_audit.jsonl"
     # An unchained MCP-tool-style row FIRST (no hash/prev_hash).
     audit.write_text(
-        json.dumps({"timestamp": "t", "target_ip": "10.0.0.50", "tool_name": "msfconsole_command",
-                    "approved": True, "status": "completed", "command": "set RHOSTS 10.0.0.50"})
+        json.dumps(
+            {
+                "timestamp": "t",
+                "target_ip": "10.0.0.50",
+                "tool_name": "msfconsole_command",
+                "approved": True,
+                "status": "completed",
+                "command": "set RHOSTS 10.0.0.50",
+            }
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -122,8 +131,14 @@ async def test_unchained_mcp_tool_rows_skipped_by_verifier(tmp_path: Path):
 
 def test_record_chain_hash_excludes_hash_field():
     rec = ExploitRecord(
-        timestamp="t", target_ip="10.0.0.50", action="x", approved=True,
-        status="completed", command="c", detail="", attempt_id="",
+        timestamp="t",
+        target_ip="10.0.0.50",
+        action="x",
+        approved=True,
+        status="completed",
+        command="c",
+        detail="",
+        attempt_id="",
     )
     rec.prev_hash = "abc"
     h1 = _record_chain_hash(rec)

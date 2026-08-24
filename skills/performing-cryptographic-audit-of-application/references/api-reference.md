@@ -23,6 +23,7 @@ pip install cryptography
 import ssl
 import socket
 
+
 def check_tls_config(hostname, port=443):
     context = ssl.create_default_context()
     with socket.create_connection((hostname, port), timeout=10) as sock:
@@ -43,6 +44,7 @@ WEAK_PROTOCOLS = {
     ssl.PROTOCOL_TLSv1_1: "TLSv1.1",
 }
 
+
 def test_weak_tls(hostname, port=443):
     findings = []
     for protocol_const, name in WEAK_PROTOCOLS.items():
@@ -52,12 +54,14 @@ def test_weak_tls(hostname, port=443):
             ctx.verify_mode = ssl.CERT_NONE
             with socket.create_connection((hostname, port), timeout=5) as sock:
                 with ctx.wrap_socket(sock) as ssock:
-                    findings.append({
-                        "protocol": name,
-                        "supported": True,
-                        "severity": "high",
-                        "issue": f"{name} is supported — deprecated and insecure",
-                    })
+                    findings.append(
+                        {
+                            "protocol": name,
+                            "supported": True,
+                            "severity": "high",
+                            "issue": f"{name} is supported — deprecated and insecure",
+                        }
+                    )
         except (ssl.SSLError, ConnectionRefusedError, OSError):
             findings.append({"protocol": name, "supported": False})
     return findings
@@ -66,8 +70,16 @@ def test_weak_tls(hostname, port=443):
 ### Enumerate Supported Cipher Suites
 ```python
 WEAK_CIPHERS = {
-    "RC4", "DES", "3DES", "MD5", "NULL", "EXPORT", "anon", "CBC",
+    "RC4",
+    "DES",
+    "3DES",
+    "MD5",
+    "NULL",
+    "EXPORT",
+    "anon",
+    "CBC",
 }
+
 
 def check_cipher_suites(hostname, port=443):
     context = ssl.create_default_context()
@@ -78,12 +90,14 @@ def check_cipher_suites(hostname, port=443):
             with context.wrap_socket(sock, server_hostname=hostname) as ssock:
                 cipher_name, protocol, bits = ssock.cipher()
                 is_weak = any(w in cipher_name for w in WEAK_CIPHERS)
-                findings.append({
-                    "cipher": cipher_name,
-                    "bits": bits,
-                    "weak": is_weak,
-                    "severity": "high" if is_weak else "pass",
-                })
+                findings.append(
+                    {
+                        "cipher": cipher_name,
+                        "bits": bits,
+                        "weak": is_weak,
+                        "severity": "high" if is_weak else "pass",
+                    }
+                )
     except ssl.SSLError as e:
         findings.append({"error": str(e)})
     return findings
@@ -96,6 +110,7 @@ def check_cipher_suites(hostname, port=443):
 from cryptography import x509
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 from datetime import datetime, timezone
+
 
 def audit_certificate(hostname, port=443):
     context = ssl.create_default_context()
@@ -111,28 +126,34 @@ def audit_certificate(hostname, port=443):
     if isinstance(pub_key, rsa.RSAPublicKey):
         key_size = pub_key.key_size
         if key_size < 2048:
-            findings.append({
-                "check": "key_size",
-                "severity": "critical",
-                "detail": f"RSA key {key_size} bits — minimum 2048 required",
-            })
+            findings.append(
+                {
+                    "check": "key_size",
+                    "severity": "critical",
+                    "detail": f"RSA key {key_size} bits — minimum 2048 required",
+                }
+            )
     elif isinstance(pub_key, ec.EllipticCurvePublicKey):
         key_size = pub_key.curve.key_size
         if key_size < 256:
-            findings.append({
-                "check": "key_size",
-                "severity": "high",
-                "detail": f"EC key {key_size} bits — minimum 256 required",
-            })
+            findings.append(
+                {
+                    "check": "key_size",
+                    "severity": "high",
+                    "detail": f"EC key {key_size} bits — minimum 256 required",
+                }
+            )
 
     # Signature algorithm
     sig_algo = cert.signature_algorithm_oid._name
     if "sha1" in sig_algo.lower():
-        findings.append({
-            "check": "signature_algorithm",
-            "severity": "high",
-            "detail": f"SHA-1 signature ({sig_algo}) — deprecated",
-        })
+        findings.append(
+            {
+                "check": "signature_algorithm",
+                "severity": "high",
+                "detail": f"SHA-1 signature ({sig_algo}) — deprecated",
+            }
+        )
 
     # Validity period
     now = datetime.now(timezone.utc)
@@ -159,6 +180,7 @@ def audit_certificate(hostname, port=443):
 ### Check HSTS Header
 ```python
 import requests
+
 
 def check_hsts(url):
     resp = requests.get(url, timeout=10, allow_redirects=True)

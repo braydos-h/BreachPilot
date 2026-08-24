@@ -16,6 +16,7 @@ The provider is selected by ``ticketing.provider`` (``"jira"`` or
 are skipped (not crashed on). The ticket payload is built from
 ``build_ticket_payload(finding)`` which is pure + testable without network.
 """
+
 from __future__ import annotations
 
 import json
@@ -187,6 +188,7 @@ def create_ticket(
     max_retries = int(cfg.get("max_retries", 3))
     backoff = float(cfg.get("backoff_seconds", 2.0))
     import time as _time
+
     last_status = ""
     for attempt in range(max_retries):
         ok, status, resp_headers = _post_ticket(url, payload, headers, timeout_seconds)
@@ -204,9 +206,10 @@ def create_ticket(
             except (TypeError, ValueError):
                 pass
         if attempt + 1 < max_retries:
-            _time.sleep(backoff * (2 ** attempt))
-    log.warning("ticketing: dropped finding %s after %d attempts: %s",
-                finding.get("finding_id", "?"), max_retries, last_status)
+            _time.sleep(backoff * (2**attempt))
+    log.warning(
+        "ticketing: dropped finding %s after %d attempts: %s", finding.get("finding_id", "?"), max_retries, last_status
+    )
     return {"created": False, "status": last_status, "url": ""}
 
 

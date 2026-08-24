@@ -152,12 +152,14 @@ async def run_self_test(args: Any) -> int:
 
                 for tool_name in _SELF_TEST_ALLOWED_TOOLS:
                     if tool_name not in available_tools:
-                        tool_results.append({
-                            "tool": tool_name,
-                            "ok": False,
-                            "skipped": True,
-                            "reason": "tool not registered",
-                        })
+                        tool_results.append(
+                            {
+                                "tool": tool_name,
+                                "ok": False,
+                                "skipped": True,
+                                "reason": "tool not registered",
+                            }
+                        )
                         continue
 
                     arguments: dict[str, Any] = {"target_ip": target_ip}
@@ -170,22 +172,26 @@ async def run_self_test(args: Any) -> int:
                     try:
                         raw = await session.call_tool(tool_name, arguments)
                         text = _extract_tool_text(raw)
-                        tool_results.append({
-                            "tool": tool_name,
-                            "ok": True,
-                            "duration_seconds": round(time.monotonic() - start, 3),
-                            "text": text[:1000],
-                        })
+                        tool_results.append(
+                            {
+                                "tool": tool_name,
+                                "ok": True,
+                                "duration_seconds": round(time.monotonic() - start, 3),
+                                "text": text[:1000],
+                            }
+                        )
                         print(f"  [✓] Tool call {tool_name} ({len(text)} chars)")
                     except _EXC_GROUP_CATCH as exc:
                         overall_ok = False
                         err = f"{type(exc).__name__}: {exc}"
-                        tool_results.append({
-                            "tool": tool_name,
-                            "ok": False,
-                            "duration_seconds": round(time.monotonic() - start, 3),
-                            "error": err,
-                        })
+                        tool_results.append(
+                            {
+                                "tool": tool_name,
+                                "ok": False,
+                                "duration_seconds": round(time.monotonic() - start, 3),
+                                "error": err,
+                            }
+                        )
                         print(f"  [✗] Tool call {tool_name}: {err}")
                         if _is_exception_group(exc):
                             _log_nested_exceptions(exc)
@@ -231,11 +237,13 @@ async def run_self_test(args: Any) -> int:
         if not stage.get("ok"):
             err = stage.get("error") or stage.get("missing") or stage.get("issues") or ""
             md_lines.append(f"  - {err}")
-    md_lines.extend([
-        "",
-        "## Tool Calls",
-        "",
-    ])
+    md_lines.extend(
+        [
+            "",
+            "## Tool Calls",
+            "",
+        ]
+    )
     for tr in tool_results:
         status = "PASS" if tr.get("ok") else "FAIL"
         md_lines.append(f"- [{status}] `{tr.get('tool')}`")

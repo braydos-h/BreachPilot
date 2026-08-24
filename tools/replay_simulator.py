@@ -87,7 +87,9 @@ def _rule_based_score(plan: dict[str, Any], recon: dict[str, Any]) -> Simulation
     recon_ip = str(recon.get("target_ip", "")).strip()
     steps = plan.get("steps", []) or []
     open_ports = set(recon.get("open_ports", []) or [])
-    cves = {str(c.get("cve", c.get("id", ""))).upper() for c in recon.get("cve_findings", []) or [] if isinstance(c, dict)}
+    cves = {
+        str(c.get("cve", c.get("id", ""))).upper() for c in recon.get("cve_findings", []) or [] if isinstance(c, dict)
+    }
     cves |= set(recon.get("target_cves", []) or [])
 
     confidence = 0.0
@@ -141,10 +143,7 @@ def _rule_based_score(plan: dict[str, Any], recon: dict[str, Any]) -> Simulation
             confidence += 0.1
 
         # Pivot / off-target step
-        pivots = [
-            s for s in steps
-            if str(s.get("target_ip", "")).strip() and plan_ip and s.get("target_ip") != plan_ip
-        ]
+        pivots = [s for s in steps if str(s.get("target_ip", "")).strip() and plan_ip and s.get("target_ip") != plan_ip]
         if pivots:
             confidence -= 0.2
             critique_bits.append(f"{len(pivots)} step(s) target a host other than {plan_ip} -- potential pivot.")
@@ -159,13 +158,15 @@ def _rule_based_score(plan: dict[str, Any], recon: dict[str, Any]) -> Simulation
             if re.search(rf"(?<!\d){re.escape(str(p))}(?!\d)", blob):
                 covered_ports.add(p)
     for p in sorted(open_ports - covered_ports):
-        branches.append({
-            "phase": "enumerate",
-            "tool": "quick_scan",
-            "reason": f"Recon found port {p} open but no plan step references it.",
-            "target_ip": plan_ip,
-            "arguments": {"target_ip": plan_ip, "ports": str(p)},
-        })
+        branches.append(
+            {
+                "phase": "enumerate",
+                "tool": "quick_scan",
+                "reason": f"Recon found port {p} open but no plan step references it.",
+                "target_ip": plan_ip,
+                "arguments": {"target_ip": plan_ip, "ports": str(p)},
+            }
+        )
 
     critique = " ".join(critique_bits) or "Rule-based scoring: plan covers the recon surface."
     return SimulationResult(
@@ -305,10 +306,12 @@ def simulate_from_files(
 
 def render_simulation_result(result: SimulationResult) -> str:
     """Render the result as the MCP tool's text return."""
-    branch_lines = "\n".join(
-        f"  - [{b.get('phase', '?')}] {b.get('tool', '?')}: {b.get('reason', '')[:120]}"
-        for b in result.branches
-    ) or "  (none)"
+    branch_lines = (
+        "\n".join(
+            f"  - [{b.get('phase', '?')}] {b.get('tool', '?')}: {b.get('reason', '')[:120]}" for b in result.branches
+        )
+        or "  (none)"
+    )
     return (
         f"REPLAY_SIMULATION_RESULT:\n"
         f"SOURCE: {result.source}\n"

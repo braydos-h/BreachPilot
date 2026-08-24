@@ -55,6 +55,7 @@ async def _require_auth(request: Request) -> str:
 
 class EventOut(BaseModel):
     """Typed event shape for OpenAPI codegen."""
+
     sequence: int
     timestamp: str
     run_id: str

@@ -314,6 +314,7 @@ CREATE INDEX IF NOT EXISTS idx_lessons_outcome ON lessons(outcome, confidence);
 
 # ── Database manager ───────────────────────────────────────────────────────
 
+
 class DatabaseManager:
     """Thread-safe SQLite wrapper for the research agent.
 
@@ -377,9 +378,7 @@ class DatabaseManager:
         """Create tables and run pending migrations. Idempotent."""
         conn.executescript(DDL)
 
-        cur = conn.execute(
-            f"SELECT version FROM {_MIGRATIONS_TABLE} ORDER BY version DESC LIMIT 1"
-        )
+        cur = conn.execute(f"SELECT version FROM {_MIGRATIONS_TABLE} ORDER BY version DESC LIMIT 1")
         installed = cur.fetchone()
         current = installed["version"] if installed else 0
 
@@ -415,9 +414,7 @@ class DatabaseManager:
     # ------------------------------------------------------------------
     def _migrate_v2_task_phases(self, conn: sqlite3.Connection) -> None:
         """Allow swarm-created exploit/post_exploit tasks in existing DBs."""
-        row = conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'"
-        ).fetchone()
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").fetchone()
         table_sql = row["sql"] if row else ""
         if "post_exploit" in table_sql and "'exploit'" in table_sql:
             return
@@ -522,26 +519,15 @@ class DatabaseManager:
     # ------------------------------------------------------------------
     def _migrate_v4_outcome_judgment(self, conn: sqlite3.Connection) -> None:
         """Add hypothesis state, assessment persistence, and task check identity."""
-        task_columns = {
-            row["name"] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()
-        }
+        task_columns = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()}
         if "hypothesis_id" not in task_columns:
-            conn.execute(
-                "ALTER TABLE tasks ADD COLUMN hypothesis_id TEXT NOT NULL DEFAULT ''"
-            )
+            conn.execute("ALTER TABLE tasks ADD COLUMN hypothesis_id TEXT NOT NULL DEFAULT ''")
         if "check_fingerprint" not in task_columns:
-            conn.execute(
-                "ALTER TABLE tasks ADD COLUMN check_fingerprint TEXT NOT NULL DEFAULT ''"
-            )
+            conn.execute("ALTER TABLE tasks ADD COLUMN check_fingerprint TEXT NOT NULL DEFAULT ''")
 
-        observation_columns = {
-            row["name"] for row in conn.execute("PRAGMA table_info(observations)").fetchall()
-        }
+        observation_columns = {row["name"] for row in conn.execute("PRAGMA table_info(observations)").fetchall()}
         if "hypothesis_evidence_json" not in observation_columns:
-            conn.execute(
-                "ALTER TABLE observations ADD COLUMN "
-                "hypothesis_evidence_json TEXT NOT NULL DEFAULT '[]'"
-            )
+            conn.execute("ALTER TABLE observations ADD COLUMN hypothesis_evidence_json TEXT NOT NULL DEFAULT '[]'")
 
         # DDL creates these tables before migrations run. Repeating the
         # definitions here makes this migration independently idempotent for
@@ -599,17 +585,9 @@ class DatabaseManager:
             );
             """
         )
-        assessment_columns = {
-            row["name"]
-            for row in conn.execute(
-                "PRAGMA table_info(outcome_assessments)"
-            ).fetchall()
-        }
+        assessment_columns = {row["name"] for row in conn.execute("PRAGMA table_info(outcome_assessments)").fetchall()}
         if "attempt_count" not in assessment_columns:
-            conn.execute(
-                "ALTER TABLE outcome_assessments "
-                "ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0"
-            )
+            conn.execute("ALTER TABLE outcome_assessments ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0")
 
         # Backfill identity for historical tasks without inferring evidential
         # success from their execution status.
@@ -644,8 +622,7 @@ class DatabaseManager:
                 str(task.get("target", "")),
             )
             existing = conn.execute(
-                "SELECT id, candidate_checks_json FROM hypotheses "
-                "WHERE mission_id=? AND hypothesis_key=?",
+                "SELECT id, candidate_checks_json FROM hypotheses WHERE mission_id=? AND hypothesis_key=?",
                 (task["mission_id"], key),
             ).fetchone()
             if existing is None:
@@ -712,13 +689,9 @@ class DatabaseManager:
         migration adds the column to existing DBs (the DDL already includes it
         for fresh creates). Tolerant of the column already existing.
         """
-        lessons_columns = {
-            row["name"] for row in conn.execute("PRAGMA table_info(lessons)").fetchall()
-        }
+        lessons_columns = {row["name"] for row in conn.execute("PRAGMA table_info(lessons)").fetchall()}
         if "text" not in lessons_columns:
-            conn.execute(
-                "ALTER TABLE lessons ADD COLUMN text TEXT NOT NULL DEFAULT ''"
-            )
+            conn.execute("ALTER TABLE lessons ADD COLUMN text TEXT NOT NULL DEFAULT ''")
 
     # ------------------------------------------------------------------
     def _migrate_v6_graph_v2(self, conn: sqlite3.Connection) -> None:
@@ -775,33 +748,19 @@ class DatabaseManager:
     # ------------------------------------------------------------------
     def _migrate_v7_belief_state(self, conn: sqlite3.Connection) -> None:
         """Belief-state columns on hypotheses + belief transition log."""
-        hypothesis_columns = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(hypotheses)").fetchall()
-        }
+        hypothesis_columns = {row["name"] for row in conn.execute("PRAGMA table_info(hypotheses)").fetchall()}
         if "supporting_evidence_json" not in hypothesis_columns:
-            conn.execute(
-                "ALTER TABLE hypotheses ADD COLUMN supporting_evidence_json TEXT"
-            )
+            conn.execute("ALTER TABLE hypotheses ADD COLUMN supporting_evidence_json TEXT")
         if "contradicting_evidence_json" not in hypothesis_columns:
-            conn.execute(
-                "ALTER TABLE hypotheses ADD COLUMN contradicting_evidence_json TEXT"
-            )
+            conn.execute("ALTER TABLE hypotheses ADD COLUMN contradicting_evidence_json TEXT")
         if "candidate_checks_json" not in hypothesis_columns:
-            conn.execute(
-                "ALTER TABLE hypotheses ADD COLUMN candidate_checks_json TEXT"
-            )
+            conn.execute("ALTER TABLE hypotheses ADD COLUMN candidate_checks_json TEXT")
         if "provenance" not in hypothesis_columns:
             conn.execute("ALTER TABLE hypotheses ADD COLUMN provenance TEXT")
         if "independent_check_count" not in hypothesis_columns:
-            conn.execute(
-                "ALTER TABLE hypotheses "
-                "ADD COLUMN independent_check_count INTEGER NOT NULL DEFAULT 0"
-            )
+            conn.execute("ALTER TABLE hypotheses ADD COLUMN independent_check_count INTEGER NOT NULL DEFAULT 0")
         if "last_assessed_at" not in hypothesis_columns:
-            conn.execute(
-                "ALTER TABLE hypotheses ADD COLUMN last_assessed_at TEXT"
-            )
+            conn.execute("ALTER TABLE hypotheses ADD COLUMN last_assessed_at TEXT")
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS belief_transitions (
@@ -821,22 +780,12 @@ class DatabaseManager:
     # ------------------------------------------------------------------
     def _migrate_v8_evidence_provenance(self, conn: sqlite3.Connection) -> None:
         """Provenance on evidence + cross-table evidence reference links."""
-        evidence_columns = {
-            row["name"] for row in conn.execute("PRAGMA table_info(evidence)").fetchall()
-        }
+        evidence_columns = {row["name"] for row in conn.execute("PRAGMA table_info(evidence)").fetchall()}
         if "provenance_json" not in evidence_columns:
-            conn.execute(
-                "ALTER TABLE evidence ADD COLUMN provenance_json TEXT"
-            )
-        observation_columns = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(observations)").fetchall()
-        }
+            conn.execute("ALTER TABLE evidence ADD COLUMN provenance_json TEXT")
+        observation_columns = {row["name"] for row in conn.execute("PRAGMA table_info(observations)").fetchall()}
         if "hypothesis_evidence_json" not in observation_columns:
-            conn.execute(
-                "ALTER TABLE observations ADD COLUMN "
-                "hypothesis_evidence_json TEXT NOT NULL DEFAULT '[]'"
-            )
+            conn.execute("ALTER TABLE observations ADD COLUMN hypothesis_evidence_json TEXT NOT NULL DEFAULT '[]'")
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS evidence_references (
@@ -931,7 +880,9 @@ class DatabaseManager:
             (
                 mid,
                 fields.get("program_name", ""),
-                fields.get("objective", "Find valid, in-scope, non-destructive, reproducible vulnerabilities with evidence."),
+                fields.get(
+                    "objective", "Find valid, in-scope, non-destructive, reproducible vulnerabilities with evidence."
+                ),
                 fields.get("risk_profile", "low_noise_non_destructive"),
                 json.dumps(fields.get("testing_modes", [])),
                 json.dumps(fields.get("target_assets", [])),
@@ -964,9 +915,7 @@ class DatabaseManager:
         )
         return sid
 
-    def get_scope_rules(
-        self, conn: sqlite3.Connection, mission_id: str
-    ) -> list[dict[str, Any]]:
+    def get_scope_rules(self, conn: sqlite3.Connection, mission_id: str) -> list[dict[str, Any]]:
         cur = conn.execute(
             "SELECT * FROM scope_rules WHERE mission_id=? ORDER BY created_at",
             (mission_id,),

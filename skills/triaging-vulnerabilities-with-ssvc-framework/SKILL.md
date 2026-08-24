@@ -104,7 +104,7 @@ import json
 # Fetch CISA KEV catalog
 kev_url = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
 kev_data = requests.get(kev_url).json()
-kev_cves = {v['cveID'] for v in kev_data['vulnerabilities']}
+kev_cves = {v["cveID"] for v in kev_data["vulnerabilities"]}
 
 # Fetch EPSS scores for context
 epss_url = "https://api.first.org/data/v1/epss"
@@ -117,21 +117,20 @@ def evaluate_exploitation(cve_id, kev_set):
     """Determine exploitation status from CISA KEV and EPSS data."""
     if cve_id in kev_set:
         return "active"
-    epss = requests.get(
-        "https://api.first.org/data/v1/epss",
-        params={"cve": cve_id}
-    ).json()
+    epss = requests.get("https://api.first.org/data/v1/epss", params={"cve": cve_id}).json()
     if epss.get("data"):
         score = float(epss["data"][0].get("epss", 0))
         if score > 0.5:
             return "poc"
     return "none"
 
+
 def evaluate_technical_impact(cvss_vector):
     """Parse CVSS vector for scope and impact metrics."""
     if "S:C" in cvss_vector or "C:H/I:H/A:H" in cvss_vector:
         return "total"
     return "partial"
+
 
 def evaluate_automatability(cvss_vector, cve_description):
     """Check if attack vector is network-based with low complexity."""

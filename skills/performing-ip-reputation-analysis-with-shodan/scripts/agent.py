@@ -7,12 +7,14 @@ from datetime import datetime
 
 try:
     import shodan
+
     HAS_SHODAN = True
 except ImportError:
     HAS_SHODAN = False
 
 try:
     import requests
+
     HAS_REQUESTS = True
 except ImportError:
     HAS_REQUESTS = False
@@ -37,8 +39,12 @@ def shodan_host_lookup(api_key, ip):
         "hostnames": result.get("hostnames", []),
         "last_update": result.get("last_update"),
         "services": [
-            {"port": s.get("port"), "transport": s.get("transport"),
-             "product": s.get("product"), "version": s.get("version")}
+            {
+                "port": s.get("port"),
+                "transport": s.get("transport"),
+                "product": s.get("product"),
+                "version": s.get("version"),
+            }
             for s in result.get("data", [])
         ][:20],
     }
@@ -46,8 +52,12 @@ def shodan_host_lookup(api_key, ip):
 
 def abuseipdb_check(api_key, ip, max_age_days=90):
     """Check IP reputation on AbuseIPDB."""
-    resp = requests.get(ABUSEIPDB_URL, headers={"Key": api_key, "Accept": "application/json"},
-                        params={"ipAddress": ip, "maxAgeInDays": max_age_days}, timeout=15)
+    resp = requests.get(
+        ABUSEIPDB_URL,
+        headers={"Key": api_key, "Accept": "application/json"},
+        params={"ipAddress": ip, "maxAgeInDays": max_age_days},
+        timeout=15,
+    )
     resp.raise_for_status()
     data = resp.json().get("data", {})
     return {
@@ -99,8 +109,8 @@ def main():
     parser.add_argument("--shodan-key", required=True, help="Shodan API key")
     parser.add_argument("--abuseipdb-key", help="AbuseIPDB API key")
     sub = parser.add_subparsers(dest="command")
-    l = sub.add_parser("lookup", help="Look up single IP")
-    l.add_argument("--ip", required=True)
+    lookup_parser = sub.add_parser("lookup", help="Look up single IP")
+    lookup_parser.add_argument("--ip", required=True)
     b = sub.add_parser("bulk", help="Analyze multiple IPs")
     b.add_argument("--ips", nargs="+", required=True)
     args = parser.parse_args()

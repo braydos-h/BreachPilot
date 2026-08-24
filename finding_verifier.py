@@ -248,7 +248,9 @@ class FindingVerifier:
             return f"Finding {finding_id} not found."
 
         if finding["status"] != "validated":
-            return f"Finding {finding_id} must be 'validated' before marking report_ready (current: {finding['status']})."
+            return (
+                f"Finding {finding_id} must be 'validated' before marking report_ready (current: {finding['status']})."
+            )
 
         return self._update_status(finding_id, "report_ready")
 
@@ -291,8 +293,7 @@ class FindingVerifier:
         with self._db.connection() as conn:
             if status:
                 cur = conn.execute(
-                    "SELECT * FROM findings WHERE mission_id=? AND status=? "
-                    "ORDER BY updated_at DESC",
+                    "SELECT * FROM findings WHERE mission_id=? AND status=? ORDER BY updated_at DESC",
                     (self._mission_id, status),
                 )
             else:
@@ -354,32 +355,36 @@ class FindingVerifier:
         missing = finding.get("missing_validation", [])
 
         if "evidence" in missing:
-            tasks.append({
-                "phase": "validate",
-                "target": finding.get("affected_asset", ""),
-                "asset_type": "endpoint",
-                "objective": f"Capture evidence for finding: {finding.get('title', '')}",
-                "hypothesis": "Evidence can be captured to support this finding.",
-                "allowed_tools": ["raw_output"],
-                "risk_level": "low",
-                "priority": 75,
-                "success_criteria": ["Evidence captured and stored."],
-                "stop_conditions": ["Unable to reproduce after 3 attempts."],
-            })
+            tasks.append(
+                {
+                    "phase": "validate",
+                    "target": finding.get("affected_asset", ""),
+                    "asset_type": "endpoint",
+                    "objective": f"Capture evidence for finding: {finding.get('title', '')}",
+                    "hypothesis": "Evidence can be captured to support this finding.",
+                    "allowed_tools": ["raw_output"],
+                    "risk_level": "low",
+                    "priority": 75,
+                    "success_criteria": ["Evidence captured and stored."],
+                    "stop_conditions": ["Unable to reproduce after 3 attempts."],
+                }
+            )
 
         if "reproduction_steps" in missing:
-            tasks.append({
-                "phase": "validate",
-                "target": finding.get("affected_asset", ""),
-                "asset_type": "endpoint",
-                "objective": f"Document reproduction steps for: {finding.get('title', '')}",
-                "hypothesis": "This finding can be reproduced with reliable steps.",
-                "allowed_tools": [],
-                "risk_level": "low",
-                "priority": 70,
-                "success_criteria": ["Reproduction steps documented."],
-                "stop_conditions": [],
-            })
+            tasks.append(
+                {
+                    "phase": "validate",
+                    "target": finding.get("affected_asset", ""),
+                    "asset_type": "endpoint",
+                    "objective": f"Document reproduction steps for: {finding.get('title', '')}",
+                    "hypothesis": "This finding can be reproduced with reliable steps.",
+                    "allowed_tools": [],
+                    "risk_level": "low",
+                    "priority": 70,
+                    "success_criteria": ["Reproduction steps documented."],
+                    "stop_conditions": [],
+                }
+            )
 
         return tasks
 

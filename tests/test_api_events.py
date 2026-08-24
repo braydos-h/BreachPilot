@@ -20,6 +20,7 @@ def broker(tmp_path):
 
 def test_event_sequence_monotonic(broker):
     """Events get monotonically increasing sequence IDs."""
+
     async def _run():
         e1 = await broker.emit("state", {"v": 1})
         e2 = await broker.emit("state", {"v": 2})
@@ -29,11 +30,13 @@ def test_event_sequence_monotonic(broker):
         assert e3["sequence"] == 3
         assert e1["run_id"] == "test-run-001"
         assert e1["type"] == "state"
+
     asyncio.run(_run())
 
 
 def test_event_jsonl_persisted(broker):
     """Events are written to events.jsonl."""
+
     async def _run():
         await broker.emit("state", {"v": 1})
         await broker.emit("progress", {"round": 1})
@@ -45,17 +48,20 @@ def test_event_jsonl_persisted(broker):
         e1 = json.loads(lines[0])
         assert e1["sequence"] == 1
         assert e1["type"] == "state"
+
     asyncio.run(_run())
 
 
 def test_event_replay_cursor(broker):
     """Replay returns events with sequence > after."""
+
     async def _run():
         for i in range(5):
             await broker.emit("state", {"i": i})
         events = await broker.replay(after=2)
         assert len(events) == 3  # seq 3, 4, 5
         assert events[0]["sequence"] == 3
+
     asyncio.run(_run())
 
 
@@ -70,15 +76,18 @@ def test_event_ring_buffer_bounded(tmp_path):
         for i in range(5):
             await broker.emit("state", {"i": i})
         assert len(broker._ring) == 3  # only last 3 retained
+
     asyncio.run(_run())
 
 
 def test_event_sanitize_secrets(broker):
     """Events are sanitized — secret-looking keys are redacted."""
+
     async def _run():
         e = await broker.emit("test", {"api_key": "secret123", "normal": "ok"})
         assert e["payload"]["api_key"] == "[REDACTED]"
         assert e["payload"]["normal"] == "ok"
+
     asyncio.run(_run())
 
 
@@ -94,14 +103,11 @@ def test_registry_get_or_create(tmp_path):
 
 def test_concurrent_event_order_matches_jsonl(broker):
     async def _run():
-        await asyncio.gather(*(
-            broker.emit("progress", {"i": i}) for i in range(20)
-        ))
+        await asyncio.gather(*(broker.emit("progress", {"i": i}) for i in range(20)))
         replayed = await broker.replay()
         assert [event["sequence"] for event in replayed] == list(range(1, 21))
         persisted = [
-            json.loads(line)["sequence"]
-            for line in broker._events_path.read_text(encoding="utf-8").splitlines()
+            json.loads(line)["sequence"] for line in broker._events_path.read_text(encoding="utf-8").splitlines()
         ]
         assert persisted == list(range(1, 21))
 
@@ -122,6 +128,7 @@ def test_subscription_is_async_iterable_and_closes(broker):
 
 def test_replay_page_tail(broker):
     """replay_page(tail=N) returns the newest N events ascending + metadata."""
+
     async def _run():
         for i in range(5):
             await broker.emit("state", {"i": i})
@@ -136,6 +143,7 @@ def test_replay_page_tail(broker):
 
 def test_replay_page_before_limit(broker):
     """replay_page(before=X, limit=N) pages older events newest-first."""
+
     async def _run():
         for i in range(10):
             await broker.emit("state", {"i": i})
@@ -149,6 +157,7 @@ def test_replay_page_before_limit(broker):
 
 def test_replay_page_before_limit_exhausted(broker):
     """When the page reaches the oldest event, has_more_before is False."""
+
     async def _run():
         for i in range(5):
             await broker.emit("state", {"i": i})
@@ -161,6 +170,7 @@ def test_replay_page_before_limit_exhausted(broker):
 
 def test_replay_page_after_metadata(broker):
     """replay_page(after=X) keeps ascending order and reports full-set bounds."""
+
     async def _run():
         for i in range(3):
             await broker.emit("state", {"i": i})
@@ -175,6 +185,7 @@ def test_replay_page_after_metadata(broker):
 
 def test_replay_page_empty(broker):
     """An empty broker yields empty events and None bounds."""
+
     async def _run():
         page = await broker.replay_page(tail=5)
         assert page["events"] == []

@@ -26,15 +26,16 @@ _logger: logging.Logger | None = None
 
 # ── Formatter ──────────────────────────────────────────────────────────────
 
+
 class ColoredFormatter(logging.Formatter):
     """Formatter with ANSI colors for console output."""
 
     COLORS = {
-        "DEBUG": "\x1b[36m",     # Cyan
-        "INFO": "\x1b[32m",      # Green
-        "WARNING": "\x1b[33m",   # Yellow
-        "ERROR": "\x1b[31m",     # Red
-        "CRITICAL": "\x1b[1;31m", # Bold Red
+        "DEBUG": "\x1b[36m",  # Cyan
+        "INFO": "\x1b[32m",  # Green
+        "WARNING": "\x1b[33m",  # Yellow
+        "ERROR": "\x1b[31m",  # Red
+        "CRITICAL": "\x1b[1;31m",  # Bold Red
     }
     RESET = "\x1b[0m"
 
@@ -46,6 +47,7 @@ class ColoredFormatter(logging.Formatter):
 
 
 # ── Setup ──────────────────────────────────────────────────────────────────
+
 
 def setup_logging(
     *,
@@ -80,9 +82,7 @@ def setup_logging(
     if console:
         console_handler = logging.StreamHandler(sys.stderr)
         console_handler.setLevel(level)
-        console_formatter = ColoredFormatter(
-            "[%(levelname)-22s] %(message)s"
-        )
+        console_formatter = ColoredFormatter("[%(levelname)-22s] %(message)s")
         console_handler.setFormatter(console_formatter)
         logger.addHandler(console_handler)
 
@@ -133,6 +133,7 @@ def get_logger() -> logging.Logger:
 
 
 # ── Convenience functions ──────────────────────────────────────────────────
+
 
 def log_info(msg: str, *args: Any) -> None:
     get_logger().info(msg, *args)

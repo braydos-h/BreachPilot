@@ -35,6 +35,7 @@ from tools.reliability import (
 
 # ── Retry Decorator Tests ────────────────────────────────────────────────────
 
+
 class TestWithRetry:
     def test_sync_success_first_try(self) -> None:
         call_count = 0
@@ -171,6 +172,7 @@ class TestWithRetry:
 
 # ── Timeout Tests ────────────────────────────────────────────────────────────
 
+
 class TestWithTimeout:
     @pytest.mark.asyncio
     async def test_timeout_success(self) -> None:
@@ -216,6 +218,7 @@ class TestWithTimeout:
 
 
 # ── Tool Fallback Tests ────────────────────────────────────────────────────────
+
 
 class TestToolFallback:
     def test_init_checks_tools(self) -> None:
@@ -307,6 +310,7 @@ class TestToolFallback:
 
 # ── Circuit Breaker Tests ────────────────────────────────────────────────────
 
+
 class TestCircuitBreaker:
     def test_initial_state(self) -> None:
         cb = CircuitBreaker("nmap", failure_threshold=3, recovery_timeout=30)
@@ -334,6 +338,7 @@ class TestCircuitBreaker:
         assert cb.can_execute() is False
         # Wait for recovery timeout
         import time
+
         time.sleep(0.2)
         assert cb.can_execute() is True  # Half-open
         assert cb.get_state() == "half_open"
@@ -342,6 +347,7 @@ class TestCircuitBreaker:
         cb = CircuitBreaker("nmap", failure_threshold=1, recovery_timeout=0.1, half_open_max_calls=2)
         cb.record_failure()
         import time
+
         time.sleep(0.2)
         assert cb.can_execute() is True
         cb.record_success()
@@ -353,6 +359,7 @@ class TestCircuitBreaker:
         cb = CircuitBreaker("nmap", failure_threshold=1, recovery_timeout=0.1)
         cb.record_failure()
         import time
+
         time.sleep(0.2)
         assert cb.can_execute() is True
         cb.record_failure()
@@ -362,6 +369,7 @@ class TestCircuitBreaker:
         cb = CircuitBreaker("nmap", failure_threshold=1, recovery_timeout=0.1, half_open_max_calls=2)
         cb.record_failure()
         import time
+
         time.sleep(0.2)
         assert cb.can_execute() is True  # First half-open call
         assert cb.can_execute() is True  # Second half-open call
@@ -369,6 +377,7 @@ class TestCircuitBreaker:
 
 
 # ── Async Execution Pool Tests ───────────────────────────────────────────────
+
 
 class TestAsyncExecutionPool:
     @pytest.mark.asyncio
@@ -437,6 +446,7 @@ class TestAsyncExecutionPool:
 
 
 # ── Error Tracker Tests ──────────────────────────────────────────────────────
+
 
 class TestErrorTracker:
     def test_record_error(self) -> None:
@@ -520,6 +530,7 @@ class TestErrorTracker:
 
 # ── Graceful Degradation Tests ─────────────────────────────────────────────────
 
+
 class TestGracefulDegradation:
     def test_get_tool_substitution_nmap(self) -> None:
         subs = GracefulDegradation.get_tool_substitution("nmap")
@@ -550,6 +561,7 @@ class TestGracefulDegradation:
 
 
 # ── Safe Execute Tests ───────────────────────────────────────────────────────
+
 
 class TestSafeExecute:
     @pytest.mark.asyncio
@@ -674,7 +686,10 @@ class TestExceptionGroupSafety:
             raise ExceptionGroup("mcp subprocess died", [RuntimeError("x")])
 
         result = await safe_execute(
-            boom, timeout=5, max_retries=1, fallback_value="FALLBACK",
+            boom,
+            timeout=5,
+            max_retries=1,
+            fallback_value="FALLBACK",
         )
         assert result == "FALLBACK"
         # Caught + retried (initial + 1 retry = 2 calls). If not caught, the
@@ -743,9 +758,7 @@ class TestWithTimeoutSyncNonBlocking:
         # threading.enumerate() once they finish, but right now it should be
         # alive.
         assert worker_started.is_set(), "worker never started"
-        assert not worker_done.is_set(), (
-            "worker finished within the timeout window — test is invalid"
-        )
+        assert not worker_done.is_set(), "worker finished within the timeout window — test is invalid"
         new_threads = set(threading.enumerate()) - worker_threads_before
         assert any(t.is_alive() for t in new_threads), (
             "worker thread was joined/killed before finishing — H11 regression"
@@ -762,9 +775,7 @@ class TestCircuitBreakerHalfOpenReset:
     def test_failure_in_half_open_resets_success_count(self) -> None:
         import time
 
-        cb = CircuitBreaker(
-            "nmap", failure_threshold=1, recovery_timeout=0.05, half_open_max_calls=3
-        )
+        cb = CircuitBreaker("nmap", failure_threshold=1, recovery_timeout=0.05, half_open_max_calls=3)
         # Trip to OPEN.
         cb.record_failure()
         assert cb.get_state() == "open"
@@ -787,9 +798,7 @@ class TestCircuitBreakerHalfOpenReset:
         # successes to CLOSE early.
         cb.record_failure()
         assert cb.get_state() == "open"
-        assert cb._success_count == 0, (
-            "success_count was not reset on HALF_OPEN->OPEN (M16 regression)"
-        )
+        assert cb._success_count == 0, "success_count was not reset on HALF_OPEN->OPEN (M16 regression)"
         assert cb._half_open_calls == 0
 
     def test_subsequent_success_does_not_prematurely_close(self) -> None:
@@ -798,9 +807,7 @@ class TestCircuitBreakerHalfOpenReset:
         breaker prematurely. Verify it does not."""
         import time
 
-        cb = CircuitBreaker(
-            "nmap", failure_threshold=1, recovery_timeout=0.05, half_open_max_calls=3
-        )
+        cb = CircuitBreaker("nmap", failure_threshold=1, recovery_timeout=0.05, half_open_max_calls=3)
         cb.record_failure()
         time.sleep(0.1)
         assert cb.can_execute() is True  # -> HALF_OPEN
@@ -823,9 +830,7 @@ class TestCircuitBreakerHalfOpenReset:
         also reset success_count so a leftover from a prior cycle can't apply."""
         import time
 
-        cb = CircuitBreaker(
-            "nmap", failure_threshold=1, recovery_timeout=0.05, half_open_max_calls=2
-        )
+        cb = CircuitBreaker("nmap", failure_threshold=1, recovery_timeout=0.05, half_open_max_calls=2)
         # Force a stale success_count directly (simulating a prior partial
         # half-open cycle that was interrupted).
         cb._state = CircuitState.OPEN
@@ -835,8 +840,7 @@ class TestCircuitBreakerHalfOpenReset:
         assert cb.can_execute() is True  # OPEN -> HALF_OPEN
         assert cb.get_state() == "half_open"
         assert cb._success_count == 0, (
-            "can_execute did not reset success_count on OPEN->HALF_OPEN "
-            "(M16 defense-in-depth regression)"
+            "can_execute did not reset success_count on OPEN->HALF_OPEN (M16 defense-in-depth regression)"
         )
 
 
@@ -879,9 +883,7 @@ class TestToolFallbackDeadlineAndProcessGroup:
                     result = await fallback.execute_async(["-p-", "target"])
 
             # Two wait_for calls: [spawn_timeout, communicate_timeout].
-            assert len(wait_for_timeouts) == 2, (
-                f"expected 2 wait_for calls, got {wait_for_timeouts}"
-            )
+            assert len(wait_for_timeouts) == 2, f"expected 2 wait_for calls, got {wait_for_timeouts}"
             spawn_timeout, communicate_timeout = wait_for_timeouts
             # Spawn gets (close to) the full budget.
             assert spawn_timeout is not None and spawn_timeout > 0.3
@@ -900,6 +902,7 @@ class TestToolFallbackDeadlineAndProcessGroup:
         captured_kwargs: dict[str, Any] = {}
 
         with patch("shutil.which", side_effect=["/usr/bin/nmap"]):
+
             async def fake_spawn(*cmd, **kwargs):
                 captured_kwargs.update(kwargs)
                 proc = AsyncMock()
@@ -912,8 +915,7 @@ class TestToolFallbackDeadlineAndProcessGroup:
                 await fallback.execute_async(["-p-", "target"])
 
         assert captured_kwargs.get("start_new_session") is True, (
-            "start_new_session=True was not passed to create_subprocess_exec "
-            "(M17 regression)"
+            "start_new_session=True was not passed to create_subprocess_exec (M17 regression)"
         )
 
     @pytest.mark.asyncio
@@ -928,13 +930,11 @@ class TestToolFallbackDeadlineAndProcessGroup:
 
         # Inject POSIX process-group primitives (absent on Windows) so the
         # killpg branch is exercised on every platform.
-        with patch("os.getpgid", side_effect=lambda pid: (getpgid_calls.append(pid) or pid), create=True):
+        with patch("os.getpgid", side_effect=lambda pid: getpgid_calls.append(pid) or pid, create=True):
             with patch("os.killpg", side_effect=lambda pgid, sig: killpg_calls.append((pgid, sig)), create=True):
                 await ToolFallback._kill_process(mock_proc)
 
-        assert getpgid_calls == [4242], (
-            "os.getpgid was not called with the proc pid (M17 regression)"
-        )
+        assert getpgid_calls == [4242], "os.getpgid was not called with the proc pid (M17 regression)"
         assert killpg_calls and killpg_calls[0][0] == 4242, (
             "os.killpg was not called with the process group id (M17 regression)"
         )
@@ -976,7 +976,9 @@ class TestToolFallbackDeadlineAndProcessGroup:
 
         with patch("os.getpgid", side_effect=ProcessLookupError("no such process"), create=True):
             # killpg should never be reached because getpgid raised first.
-            with patch("os.killpg", side_effect=AssertionError("killpg must not be called when getpgid raises"), create=True):
+            with patch(
+                "os.killpg", side_effect=AssertionError("killpg must not be called when getpgid raises"), create=True
+            ):
                 await ToolFallback._kill_process(mock_proc)
 
         # Fall-back path: proc.kill() was called.

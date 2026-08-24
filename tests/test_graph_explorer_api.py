@@ -6,6 +6,7 @@ endpoints return bounded, scope-isolated graph data with the right shape.
 Covers: default-off gating, summary, neighborhood bounds, path bounds, node
 404s, scope isolation, conflicts, empty graph, and malformed params.
 """
+
 from __future__ import annotations
 
 import json
@@ -44,6 +45,7 @@ def _make_app(reports_dir: Path, runs: dict[str, dict[str, Any]], graph_enabled:
         persistence=_FakePersistence(reports_dir, runs),
         config={"api": {"graph_route": graph_enabled}},
     )
+
     async def _bypass_auth(request):
         return "test"
 
@@ -66,39 +68,57 @@ def _write_artifacts(run_dir: Path) -> None:
     """Write a realistic audit trail + enhanced report with one finding."""
     run_dir.mkdir(parents=True, exist_ok=True)
     audit = [
-        {"timestamp": "2026-08-01T10:00:00Z", "target_ip": "10.0.0.5", "tool_name": "nmap", "status": "success", "attempt_id": "a1", "code_sha256": "abc"},
-        {"timestamp": "2026-08-01T10:01:00Z", "target_ip": "10.0.0.5", "tool_name": "run_exploit_terminal", "status": "success", "attempt_id": "a2", "code_sha256": "def"},
+        {
+            "timestamp": "2026-08-01T10:00:00Z",
+            "target_ip": "10.0.0.5",
+            "tool_name": "nmap",
+            "status": "success",
+            "attempt_id": "a1",
+            "code_sha256": "abc",
+        },
+        {
+            "timestamp": "2026-08-01T10:01:00Z",
+            "target_ip": "10.0.0.5",
+            "tool_name": "run_exploit_terminal",
+            "status": "success",
+            "attempt_id": "a2",
+            "code_sha256": "def",
+        },
     ]
-    (run_dir / "exploit_audit.jsonl").write_text(
-        "\n".join(json.dumps(r) for r in audit), encoding="utf-8"
-    )
+    (run_dir / "exploit_audit.jsonl").write_text("\n".join(json.dumps(r) for r in audit), encoding="utf-8")
     enhanced = run_dir / "enhanced"
     enhanced.mkdir(parents=True, exist_ok=True)
     (enhanced / "enhanced_report.json").write_text(
-        json.dumps({
-            "report_metadata": {"generated_at": "2026-08-01T10:05:00Z"},
-            "technical_findings": [{
-                "finding_id": "F-0001",
-                "title": "SQL injection in login",
-                "affected_asset": "10.0.0.5",
-                "vuln_class": "SQL Injection",
-                "severity": "high",
-                "cvss": {"base_score": 9.0, "severity": "critical"},
-                "confidence": 0.9,
-                "evidence_refs": ["ev:nmap:10.0.0.5:abc123:2026-08-01"],
-                "exploitation_result": "Exploit verified",
-                "references": ["https://nvd.nist.gov/vuln/detail/CVE-2021-44228"],
-                "attack_chain": {"chain_id": "chain1"},
-            }],
-            "exploitation_chains": [{
-                "chain_id": "chain1",
-                "target": "10.0.0.5",
-                "entries": [
-                    {"module": "nmap", "result": "ports found"},
-                    {"module": "sqlmap", "result": "injected"},
+        json.dumps(
+            {
+                "report_metadata": {"generated_at": "2026-08-01T10:05:00Z"},
+                "technical_findings": [
+                    {
+                        "finding_id": "F-0001",
+                        "title": "SQL injection in login",
+                        "affected_asset": "10.0.0.5",
+                        "vuln_class": "SQL Injection",
+                        "severity": "high",
+                        "cvss": {"base_score": 9.0, "severity": "critical"},
+                        "confidence": 0.9,
+                        "evidence_refs": ["ev:nmap:10.0.0.5:abc123:2026-08-01"],
+                        "exploitation_result": "Exploit verified",
+                        "references": ["https://nvd.nist.gov/vuln/detail/CVE-2021-44228"],
+                        "attack_chain": {"chain_id": "chain1"},
+                    }
                 ],
-            }],
-        }),
+                "exploitation_chains": [
+                    {
+                        "chain_id": "chain1",
+                        "target": "10.0.0.5",
+                        "entries": [
+                            {"module": "nmap", "result": "ports found"},
+                            {"module": "sqlmap", "result": "injected"},
+                        ],
+                    }
+                ],
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -180,7 +200,10 @@ def test_graph_empty_run_is_not_an_error(tmp_path):
     reports = tmp_path / "reports"
     reports.mkdir()
     (reports / "run-empty").mkdir()
-    client = _make(tmp_path, runs={"run-empty": {"id": "run-empty", "created_at": "t", "updated_at": "t", "request": {}, "preview": {}}})
+    client = _make(
+        tmp_path,
+        runs={"run-empty": {"id": "run-empty", "created_at": "t", "updated_at": "t", "request": {}, "preview": {}}},
+    )
     resp = client.get("/api/v1/graph/runs/run-empty")
     assert resp.status_code == 200
     body = resp.json()
@@ -298,7 +321,13 @@ def test_scope_isolation_between_runs(tmp_path):
     (reports / "run-2").mkdir()
     runs = {
         "run-1": _sample_run(),
-        "run-2": {"id": "run-2", "created_at": "t", "updated_at": "t", "request": {"target": "10.0.0.9"}, "preview": {"target_ip": "10.0.0.9", "original_target": "10.0.0.9"}},
+        "run-2": {
+            "id": "run-2",
+            "created_at": "t",
+            "updated_at": "t",
+            "request": {"target": "10.0.0.9"},
+            "preview": {"target_ip": "10.0.0.9", "original_target": "10.0.0.9"},
+        },
     }
     client = _make(tmp_path, runs=runs)
     run1_ids = {n["node_id"] for n in client.get("/api/v1/graph/runs/run-1").json()["nodes"]}
@@ -321,10 +350,17 @@ def test_builder_records_merge_conflict_on_skipped_edge():
 
     store = AttackGraphStore(":memory:", scope="run:x")
     update = GraphUpdate(
-        edge_updates=[GraphEdge(
-            edge_id="e1", source_node_id="missing-a", target_node_id="missing-b",
-            edge_type=EdgeType.OBSERVED_ON, scope="run:x", first_seen="t", last_seen="t",
-        )]
+        edge_updates=[
+            GraphEdge(
+                edge_id="e1",
+                source_node_id="missing-a",
+                target_node_id="missing-b",
+                edge_type=EdgeType.OBSERVED_ON,
+                scope="run:x",
+                first_seen="t",
+                last_seen="t",
+            )
+        ]
     )
     conflicts: list[Any] = []
     _safe_apply(store, update, conflicts)
@@ -340,10 +376,12 @@ def test_builder_surfaces_intrabatch_type_conflict():
     from tools.intelligence.graph.types import GraphNode, GraphUpdate, NodeStatus, NodeType
 
     store = AttackGraphStore(":memory:", scope="run:x")
-    update = GraphUpdate(node_updates=[
-        GraphNode(node_id="a", node_type=NodeType.HOST, value="10.0.0.5", scope="run:x", status=NodeStatus.UNKNOWN),
-        GraphNode(node_id="b", node_type=NodeType.IP, value="10.0.0.5", scope="run:x", status=NodeStatus.UNKNOWN),
-    ])
+    update = GraphUpdate(
+        node_updates=[
+            GraphNode(node_id="a", node_type=NodeType.HOST, value="10.0.0.5", scope="run:x", status=NodeStatus.UNKNOWN),
+            GraphNode(node_id="b", node_type=NodeType.IP, value="10.0.0.5", scope="run:x", status=NodeStatus.UNKNOWN),
+        ]
+    )
     conflicts: list[Any] = []
     _safe_apply(store, update, conflicts)
     assert any("type conflict" in c.reason for c in conflicts)

@@ -39,6 +39,7 @@ from tools.validation_utils import (
 
 # ── IPv4 Validation Tests ──────────────────────────────────────────────────
 
+
 class TestIPv4Validation:
     def test_strict_valid_ipv4(self) -> None:
         assert validate_ipv4("192.168.1.1") is True
@@ -64,6 +65,7 @@ class TestIPv4Validation:
 
 
 # ── Command Sanitization Tests ─────────────────────────────────────────────
+
 
 class TestCommandSanitization:
     def test_sanitize_nmap_command(self) -> None:
@@ -130,6 +132,7 @@ class TestCommandSanitization:
 
 # ── Tool Call Filtering Tests ──────────────────────────────────────────────
 
+
 class TestToolCallFiltering:
     def test_empty_tool_call_filtered(self) -> None:
         raw = [{"function": {"name": "", "arguments": {}}}]
@@ -166,6 +169,7 @@ class TestToolCallFiltering:
 
 # ── Auto-Retry Correction Tests ────────────────────────────────────────────
 
+
 class TestAutoRetryCorrection:
     def test_retry_fixes_malformed_ip(self) -> None:
         args = {"target_ip": "43.229.61.92oos", "command": "nmap -sV"}
@@ -197,6 +201,7 @@ class TestAutoRetryCorrection:
 
 
 # ── Phase Tracker Tests ────────────────────────────────────────────────────
+
 
 class TestPhaseTracker:
     def test_recon_minimum_enforced(self) -> None:
@@ -251,6 +256,7 @@ class TestPhaseTracker:
 
 # ── Banner Parsing Tests ───────────────────────────────────────────────────
 
+
 class TestBannerParsing:
     def test_parse_check_os_output(self) -> None:
         sample = """OS_CHECK_RESULTS:
@@ -292,6 +298,7 @@ HINTS: Port 22/tcp open - likely Linux/Unix (SSH)
 
 # ── Allowlist Enforcement Tests ────────────────────────────────────────────
 
+
 class TestAllowlistEnforcement:
     def test_ip_in_allowlist_exact(self) -> None:
         assert is_target_in_allowlist("192.168.1.50", ["192.168.1.50"]) is True
@@ -312,6 +319,7 @@ class TestAllowlistEnforcement:
 
 
 # ── Exploit Agent Loop Integration Tests ───────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_run_exploit_agent_filters_invalid_tool_calls() -> None:
@@ -414,9 +422,7 @@ async def test_run_exploit_agent_retries_on_syntax_error() -> None:
     # First call fails with syntax error, second succeeds
     session.call_tool.side_effect = [
         Exception("malformed target address"),
-        MagicMock(
-            content=[{"text": "TERMINAL_RESULT: completed\nCOMMAND_SANITIZED: nmap -sV 43.229.61.92"}]
-        ),
+        MagicMock(content=[{"text": "TERMINAL_RESULT: completed\nCOMMAND_SANITIZED: nmap -sV 43.229.61.92"}]),
     ]
 
     with patch("tools.exploit_agent._stream_ollama", new_callable=AsyncMock) as mock_stream:
@@ -491,6 +497,7 @@ async def test_run_exploit_agent_phase_enforcement_prevents_early_exit() -> None
 
 
 # ── Agent Loop Replanning Tests ────────────────────────────────────────────
+
 
 class TestAgentLoopReplanning:
     def test_failure_driven_replanning_creates_retry_task(self) -> None:
@@ -588,6 +595,7 @@ class TestAgentLoopReplanning:
 
 
 # ── MCP Server Allowlist Integration Test ────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_mcp_run_exploit_terminal_blocked_when_allowlist_required(tmp_path: Path) -> None:

@@ -143,6 +143,7 @@ def _start_marker_server(port: int, marker: str) -> socket.socket:
     threading.Thread(target=_serve, daemon=True).start()
     # Give the listener a moment to bind.
     import time
+
     time.sleep(0.1)
     return srv
 
@@ -179,6 +180,7 @@ def test_run_ctf_requires_target(tmp_path, monkeypatch):
     """``--ctf`` without ``--target`` returns 2 (usage error)."""
     monkeypatch.chdir(tmp_path)
     from argparse import Namespace
+
     args = Namespace(target="", ctf=True, config=tmp_path / "config.yaml")
     rc = run_ctf(args)
     assert rc == 2
@@ -198,19 +200,27 @@ def test_run_ctf_respects_allowlist(tmp_path, monkeypatch):
         seen["target"] = getattr(args, "target", "")
         # Write a minimal eval report so the goal-completion path can read it.
         import json
+
         eval_dir = tmp_path / "reports" / "eval" / "run1"
         eval_dir.mkdir(parents=True, exist_ok=True)
         (eval_dir / "eval_report.json").write_text(
-            json.dumps({"outcome_summary": "FLAG{ctf_test_win}"}), encoding="utf-8",
+            json.dumps({"outcome_summary": "FLAG{ctf_test_win}"}),
+            encoding="utf-8",
         )
         return 0
 
     monkeypatch.setattr("tools.eval_harness.run_eval", _fake_run_eval)
     # goal_met_from_result will find the flag marker in the stub report.
     from argparse import Namespace
+
     args = Namespace(
-        target="10.0.0.50", ctf=True, config=tmp_path / "config.yaml",
-        ctf_flag_path="", ctf_root_shell=True, ctf_port=0, ctf_marker="",
+        target="10.0.0.50",
+        ctf=True,
+        config=tmp_path / "config.yaml",
+        ctf_flag_path="",
+        ctf_root_shell=True,
+        ctf_port=0,
+        ctf_marker="",
     )
     rc = run_ctf(args)
     assert rc == 0  # goal met (FLAG marker in report)
@@ -223,18 +233,26 @@ def test_run_ctf_goal_not_met_returns_1(tmp_path, monkeypatch):
 
     async def _fake_run_eval(args):
         import json
+
         eval_dir = tmp_path / "reports" / "eval" / "run2"
         eval_dir.mkdir(parents=True, exist_ok=True)
         (eval_dir / "eval_report.json").write_text(
-            json.dumps({"outcome_summary": "compromises: 0; no access"}), encoding="utf-8",
+            json.dumps({"outcome_summary": "compromises: 0; no access"}),
+            encoding="utf-8",
         )
         return 0
 
     monkeypatch.setattr("tools.eval_harness.run_eval", _fake_run_eval)
     from argparse import Namespace
+
     args = Namespace(
-        target="10.0.0.50", ctf=True, config=tmp_path / "config.yaml",
-        ctf_flag_path="", ctf_root_shell=False, ctf_port=0, ctf_marker="",
+        target="10.0.0.50",
+        ctf=True,
+        config=tmp_path / "config.yaml",
+        ctf_flag_path="",
+        ctf_root_shell=False,
+        ctf_port=0,
+        ctf_marker="",
     )
     # default_goal_for_target kicks in (root_shell=True), but the report has
     # no uid=0 and no flag marker → not met.
@@ -251,9 +269,15 @@ def test_run_ctf_eval_failure_returns_1(tmp_path, monkeypatch):
 
     monkeypatch.setattr("tools.eval_harness.run_eval", _fake_run_eval)
     from argparse import Namespace
+
     args = Namespace(
-        target="10.0.0.50", ctf=True, config=tmp_path / "config.yaml",
-        ctf_flag_path="", ctf_root_shell=True, ctf_port=0, ctf_marker="",
+        target="10.0.0.50",
+        ctf=True,
+        config=tmp_path / "config.yaml",
+        ctf_flag_path="",
+        ctf_root_shell=True,
+        ctf_port=0,
+        ctf_marker="",
     )
     rc = run_ctf(args)
     assert rc == 1

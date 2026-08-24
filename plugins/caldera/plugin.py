@@ -52,6 +52,7 @@ class CalderaPlugin(Plugin):
     def _load_manifest() -> PluginManifest:
         text = _MANIFEST_PATH.read_text(encoding="utf-8")
         from tools.plugins import _parse_manifest_yaml  # type: ignore
+
         return PluginManifest.from_dict(_parse_manifest_yaml(text))
 
     def register(self, registry: PluginRegistry) -> None:

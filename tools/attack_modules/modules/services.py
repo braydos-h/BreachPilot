@@ -51,6 +51,7 @@ class RDPBlueKeep(AttackModule):
 # SSH Modules
 # ---------------------------------------------------------------------------
 
+
 class FTPAnonymous(AttackModule):
     name = "FTPAnonymous"
     description = "Test anonymous FTP login and enumerate files"
@@ -77,6 +78,7 @@ class FTPAnonymous(AttackModule):
             suggested_command=f"python -c \"import ftplib; f=ftplib.FTP('{ctx.target_ip}'); f.login('anonymous','anonymous@'); print(f.nlst())\"",
             credentials_found=["anonymous:anonymous@"],
         )
+
 
 class RedisExploit(AttackModule):
     name = "RedisExploit"
@@ -115,6 +117,7 @@ class RedisExploit(AttackModule):
             privilege_level="root",
         )
 
+
 class ElasticsearchExploit(AttackModule):
     name = "ElasticsearchExploit"
     description = "Extract data from exposed Elasticsearch clusters"
@@ -149,6 +152,7 @@ class ElasticsearchExploit(AttackModule):
             suggested_command=f"curl -s http://{ctx.target_ip}:9200/_cat/indices?v",
         )
 
+
 class LDAPAnonymous(AttackModule):
     name = "LDAPAnonymous"
     description = "Enumerate LDAP directory via anonymous bind"
@@ -179,6 +183,7 @@ class LDAPAnonymous(AttackModule):
             ],
             suggested_command=f"ldapsearch -x -H ldap://{ctx.target_ip} -b '' -s base '(objectClass=*)' defaultNamingContext",
         )
+
 
 class RDPExploit(AttackModule):
     name = "RDPExploit"
@@ -211,4 +216,3 @@ class RDPExploit(AttackModule):
 # ---------------------------------------------------------------------------
 # Advanced Web Exploitation Modules
 # ---------------------------------------------------------------------------
-

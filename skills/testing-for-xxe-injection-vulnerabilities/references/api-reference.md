@@ -10,6 +10,7 @@ pip install defusedxml
 ### Safe Parsing
 ```python
 import defusedxml.ElementTree as ET
+
 # Blocks external entities, DTD processing, entity expansion
 tree = ET.fromstring(xml_string)
 ```

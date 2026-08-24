@@ -46,10 +46,14 @@ def test_parameter_precedence(url, param_name="id", headers=None):
             uses_last = val2 in body and val1 not in body
             uses_both = val1 in body and val2 in body
             precedence = "FIRST" if uses_first else "LAST" if uses_last else "BOTH" if uses_both else "UNKNOWN"
-            results.append({
-                "values": [val1, val2], "precedence": precedence,
-                "status": resp.status_code, "content_length": len(body),
-            })
+            results.append(
+                {
+                    "values": [val1, val2],
+                    "precedence": precedence,
+                    "status": resp.status_code,
+                    "content_length": len(body),
+                }
+            )
         except Exception as e:
             results.append({"values": [val1, val2], "error": str(e)})
     return {"url": url, "param": param_name, "precedence_tests": results}
@@ -72,22 +76,36 @@ def test_hpp_payloads(url, method="GET", headers=None):
                     test_url = f"{url}?{payload['params']}" if "?" not in url else f"{url}&{payload['params']}"
                     resp = requests.get(test_url, headers=hdrs, timeout=10, allow_redirects=False)
                 else:
-                    resp = requests.post(url, data=payload["params"], headers={**hdrs, "Content-Type": "application/x-www-form-urlencoded"}, timeout=10)
+                    resp = requests.post(
+                        url,
+                        data=payload["params"],
+                        headers={**hdrs, "Content-Type": "application/x-www-form-urlencoded"},
+                        timeout=10,
+                    )
                 anomaly = False
                 if baseline:
                     anomaly = abs(len(resp.text) - baseline["length"]) > 100 or resp.status_code != baseline["status"]
-                results.append({
-                    "category": category, "payload": payload["params"],
-                    "desc": payload["desc"], "status": resp.status_code,
-                    "response_length": len(resp.text), "anomaly": anomaly,
-                })
+                results.append(
+                    {
+                        "category": category,
+                        "payload": payload["params"],
+                        "desc": payload["desc"],
+                        "status": resp.status_code,
+                        "response_length": len(resp.text),
+                        "anomaly": anomaly,
+                    }
+                )
             except Exception as e:
                 results.append({"category": category, "payload": payload["params"], "error": str(e)})
     anomalies = [r for r in results if r.get("anomaly")]
     return {
-        "url": url, "method": method, "baseline": baseline,
-        "total_tests": len(results), "anomalies_found": len(anomalies),
-        "results": results, "anomaly_details": anomalies,
+        "url": url,
+        "method": method,
+        "baseline": baseline,
+        "total_tests": len(results),
+        "anomalies_found": len(anomalies),
+        "results": results,
+        "anomaly_details": anomalies,
         "finding": "HPP_VULNERABLE" if anomalies else "HPP_NOT_DETECTED",
         "severity": "MEDIUM" if anomalies else "INFO",
     }
@@ -116,7 +134,9 @@ def test_waf_bypass(url, blocked_param, blocked_value, headers=None):
             results.append({"name": test["name"], "error": str(e)})
     bypasses = [r for r in results if not r.get("blocked_by_waf") and not r.get("error") and r.get("status") == 200]
     return {
-        "url": url, "param": blocked_param, "tests": results,
+        "url": url,
+        "param": blocked_param,
+        "tests": results,
         "bypass_found": len(bypasses) > 1,
         "bypass_methods": [b["name"] for b in bypasses],
     }

@@ -100,7 +100,7 @@ omit = [
 
 [tool.ruff]
 line-length = 120
-# ponytail: exclude generated/runtime dirs + non-Python webui/oauth so `ruff check .` stays <200
+# ponytail: exclude generated/runtime dirs + non-Python webui/oauth so `ruff check .` passes (0 errors)
 exclude = [
     ".git",
     "__pycache__",
@@ -115,6 +115,10 @@ exclude = [
     "docs",
 ]
 
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
 ignore = ["E501", "F405", "F403", "F841"]
@@ -127,6 +131,13 @@ ignore = ["E501", "F405", "F403", "F841"]
 "tools/mcp_tools/*.py" = ["F405", "F403", "F401", "F841", "E402"]
 "tools/kernel/*.py" = ["F401"]
 "tests/*.py" = ["F401", "F841", "E402"]
+# facade re-exports intentional — public API via __all__, private helpers patched via sys.modules
+"tools/exploit_agent/__init__.py" = ["F401"]
+# advisory skill scripts use try/except import-availability pattern; not core engine
+"skills/**/*.py" = ["F401"]
+# main.py and exploit loop use late imports after ui bootstrap (ui = get_ui() must precede)
+"main.py" = ["E402"]
+"tools/exploit_agent/loop.py" = ["E402"]
 
 [tool.mypy]
 python_version = "3.11"

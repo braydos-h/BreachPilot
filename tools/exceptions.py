@@ -6,6 +6,7 @@ ClientSession.initialize, session.call_tool, etc.) MUST use
 task groups raise ``BaseExceptionGroup`` on subprocess death, which is
 *not* a subclass of ``Exception``.
 """
+
 from __future__ import annotations
 
 import sys

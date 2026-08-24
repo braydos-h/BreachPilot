@@ -35,6 +35,7 @@ ALL_CLASSES = [ModbusEnum, DNP3Enum, S7Enum, BACnetEnum, HMIDefaultCred, IoTDefa
 # Class attributes
 # ---------------------------------------------------------------------------
 
+
 def test_modbus_class_attrs():
     m = ModbusEnum()
     assert m.name == "ModbusEnum"
@@ -87,6 +88,7 @@ def test_iot_class_attrs():
 # run() contract
 # ---------------------------------------------------------------------------
 
+
 def test_run_returns_script_generated_and_contains_target():
     ctx = _ctx()
     for cls in ALL_CLASSES:
@@ -101,6 +103,7 @@ def test_run_returns_script_generated_and_contains_target():
 # ---------------------------------------------------------------------------
 # generate_python_script() content
 # ---------------------------------------------------------------------------
+
 
 def test_scripts_have_readonly_marker():
     ctx = _ctx()
@@ -149,6 +152,7 @@ def test_iot_script_has_default_cred_and_login_path():
 # ---------------------------------------------------------------------------
 # Applicability scoring
 # ---------------------------------------------------------------------------
+
 
 def test_modbus_applicability_matches_and_misses():
     m = ModbusEnum()

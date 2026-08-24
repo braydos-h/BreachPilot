@@ -63,17 +63,11 @@ class ReconPipeline:
                     f"{self._config.preflight_ports} -- skipping full scan"
                 )
                 result = HostReconResult(target_ip=target)
-                result.errors.append(
-                    f"target unreachable (preflight probe refused on "
-                    f"{self._config.preflight_ports})"
-                )
+                result.errors.append(f"target unreachable (preflight probe refused on {self._config.preflight_ports})")
                 result.scan_duration = max(time.monotonic() - start, 0.0001)
                 return result
             elif reachable is None:
-                logger.info(
-                    f"Preflight probe: {target} ambiguous (timeout/filtered) "
-                    f"-- proceeding with full scan"
-                )
+                logger.info(f"Preflight probe: {target} ambiguous (timeout/filtered) -- proceeding with full scan")
 
         # Primary reconnaissance
         result = await self._primary.scan_host(target)
@@ -138,46 +132,57 @@ class ReconPipeline:
 
             # High-value targets
             if name in ("ssh", "rdp", "smb", "microsoft-ds"):
-                attack_surface["high_value_targets"].append({
-                    "port": svc.port,
-                    "service": svc.service,
-                    "version": svc.version,
-                    "cves": svc.scripts.get("openssh_cves", []),
-                })
-                attack_surface["credential_targets"].append({
-                    "port": svc.port,
-                    "service": svc.service,
-                    "version": svc.version,
-                })
+                attack_surface["high_value_targets"].append(
+                    {
+                        "port": svc.port,
+                        "service": svc.service,
+                        "version": svc.version,
+                        "cves": svc.scripts.get("openssh_cves", []),
+                    }
+                )
+                attack_surface["credential_targets"].append(
+                    {
+                        "port": svc.port,
+                        "service": svc.service,
+                        "version": svc.version,
+                    }
+                )
 
             # Web targets
             if name in ("http", "https", "http-proxy"):
-                attack_surface["web_targets"].append({
-                    "port": svc.port,
-                    "service": svc.service,
-                    "technologies": svc.scripts.get("http_headers", ""),
-                    "directories": svc.scripts.get("feroxbuster", ""),
-                    "vulns": svc.scripts.get("nuclei", ""),
-                })
+                attack_surface["web_targets"].append(
+                    {
+                        "port": svc.port,
+                        "service": svc.service,
+                        "technologies": svc.scripts.get("http_headers", ""),
+                        "directories": svc.scripts.get("feroxbuster", ""),
+                        "vulns": svc.scripts.get("nuclei", ""),
+                    }
+                )
 
             # Lateral movement
             if name in ("smb", "microsoft-ds", "ldap", "ldaps"):
-                attack_surface["lateral_movement_targets"].append({
-                    "port": svc.port,
-                    "service": svc.service,
-                    "version": svc.version,
-                })
+                attack_surface["lateral_movement_targets"].append(
+                    {
+                        "port": svc.port,
+                        "service": svc.service,
+                        "version": svc.version,
+                    }
+                )
 
             # Privilege escalation hints
             if "docker" in name or svc.port in (2375, 2376, 10250):
-                attack_surface["privilege_escalation_hints"].append({
-                    "port": svc.port,
-                    "service": svc.service,
-                    "hint": "Container/Docker access may allow privilege escalation",
-                })
+                attack_surface["privilege_escalation_hints"].append(
+                    {
+                        "port": svc.port,
+                        "service": svc.service,
+                        "hint": "Container/Docker access may allow privilege escalation",
+                    }
+                )
 
         # Map to attack modules
         from tools.attack_modules import ModuleContext, find_modules
+
         ctx = ModuleContext(
             target_ip=result.target_ip,
             target_os=result.os_family,
@@ -186,8 +191,7 @@ class ReconPipeline:
         )
         scored_modules = find_modules(ctx)
         attack_surface["recommended_attack_modules"] = [
-            {"name": mod.name, "score": score, "description": mod.description}
-            for score, mod in scored_modules[:10]
+            {"name": mod.name, "score": score, "description": mod.description} for score, mod in scored_modules[:10]
         ]
 
         return attack_surface

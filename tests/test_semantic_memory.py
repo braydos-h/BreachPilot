@@ -62,6 +62,7 @@ def test_find_similar_lessons(temp_db):
 
 def test_cosine_similarity():
     import numpy as np
+
     a = np.array([1.0, 0.0, 0.0], dtype=np.float32)
     b = np.array([1.0, 0.0, 0.0], dtype=np.float32)
     assert SemanticMemoryManager._cosine_similarity(a, b) == pytest.approx(1.0)
@@ -231,9 +232,7 @@ def test_store_lesson_skips_when_embedding_fails(temp_db):
     """store_lesson returns None and writes no row when no embedding can be made."""
     mgr = SemanticMemoryManager(temp_db)
     mgr._generate_embedding = lambda text: None
-    lid = mgr.store_lesson(
-        "ssh:8.2:linux", "SSHBruteForce", "success", "lesson text", confidence=0.9
-    )
+    lid = mgr.store_lesson("ssh:8.2:linux", "SSHBruteForce", "success", "lesson text", confidence=0.9)
     assert lid is None
     with temp_db.connection() as conn:
         n = conn.execute("SELECT COUNT(*) AS c FROM lessons").fetchone()["c"]

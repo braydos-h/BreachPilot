@@ -64,7 +64,9 @@ def run_introspection(url, headers=None):
         "mutations": mutations,
         "sensitive_fields": sensitive_fields,
         "finding": "CRITICAL: Introspection enabled — full schema exposed" if user_types else "Schema empty",
-        "types": [{"name": t["name"], "kind": t["kind"], "field_count": len(t.get("fields", []) or [])} for t in user_types][:50],
+        "types": [
+            {"name": t["name"], "kind": t["kind"], "field_count": len(t.get("fields", []) or [])} for t in user_types
+        ][:50],
     }
 
 

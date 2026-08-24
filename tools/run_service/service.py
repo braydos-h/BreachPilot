@@ -64,15 +64,24 @@ from tools.swarm_bridge import SwarmMcpBridge
 # Exploit-action tool names that count toward ``successful_exploits`` in the
 # derived campaign_result. Recon/research tools with exit_code==0 are NOT
 # exploits. Mirrors the _EXPLOIT_ACTIONS set used by the loop's outcome tracker.
-_EXPLOIT_TOOL_ACTIONS = frozenset({
-    "run_exploit_terminal", "run_python_file", "run_msf_module",
-    "msf_run_exploit", "run_attack_module", "lateral_exec",
-    "generate_payload", "msf_generate_payload", "craft_exploit",
-})
+_EXPLOIT_TOOL_ACTIONS = frozenset(
+    {
+        "run_exploit_terminal",
+        "run_python_file",
+        "run_msf_module",
+        "msf_run_exploit",
+        "run_attack_module",
+        "lateral_exec",
+        "generate_payload",
+        "msf_generate_payload",
+        "craft_exploit",
+    }
+)
 
 
 def _build_campaign_result_from_records(
-    result: dict[str, Any], target_ip: str,
+    result: dict[str, Any],
+    target_ip: str,
 ) -> dict[str, Any] | None:
     """Build a minimal ``campaign_result`` for EnhancedReportGenerator.
 
@@ -98,9 +107,7 @@ def _build_campaign_result_from_records(
     # as successful, inflating ``successful_exploits`` and the WebUI attack
     # graph with runs that never got a shell.
     summary = str(result.get("outcome_summary", "") or "")
-    _run_verified_compromise = (
-        "compromises: " in summary and "compromises: 0" not in summary
-    ) or (
+    _run_verified_compromise = ("compromises: " in summary and "compromises: 0" not in summary) or (
         "cred dumps: " in summary and "cred dumps: 0" not in summary
     )
     for rec in records:
@@ -114,12 +121,33 @@ def _build_campaign_result_from_records(
         is_exploit = action in _EXPLOIT_TOOL_ACTIONS
         if status in {"blocked", "analyzer_error", "SCOPE_DENIED"} or (exit_code is not None and int(exit_code) != 0):
             failed.setdefault(action, []).append(detail[:200] or status)
-            timeline.append({"timestamp": ts, "event_type": "failure", "description": detail[:200] or status, "metadata": {"module": action}})
+            timeline.append(
+                {
+                    "timestamp": ts,
+                    "event_type": "failure",
+                    "description": detail[:200] or status,
+                    "metadata": {"module": action},
+                }
+            )
         elif status == "completed" and is_exploit and _run_verified_compromise:
             successful.append(action)
-            timeline.append({"timestamp": ts, "event_type": "success", "description": detail[:200] or action, "metadata": {"module": action}})
+            timeline.append(
+                {
+                    "timestamp": ts,
+                    "event_type": "success",
+                    "description": detail[:200] or action,
+                    "metadata": {"module": action},
+                }
+            )
         else:
-            timeline.append({"timestamp": ts, "event_type": status or "observation", "description": detail[:200] or action, "metadata": {"module": action}})
+            timeline.append(
+                {
+                    "timestamp": ts,
+                    "event_type": status or "observation",
+                    "description": detail[:200] or action,
+                    "metadata": {"module": action},
+                }
+            )
     # Heuristic privilege level from the outcome summary string if present.
     for label in ("root", "SYSTEM", "system", "admin", "NT AUTHORITY"):
         if label.lower() in summary.lower():
@@ -137,6 +165,7 @@ def _build_campaign_result_from_records(
             },
         },
     }
+
 
 ui = get_ui()
 
@@ -160,6 +189,7 @@ def _llm_usage_line_count() -> int:
 def _run_telemetry(start_lines: int) -> dict[str, Any] | None:
     """Aggregate llm_usage.jsonl records appended after ``start_lines``."""
     import json as _json
+
     try:
         path = usage_log_path(workspace_root_from_sources())
         if not path.exists():
@@ -230,6 +260,7 @@ class _TelemetryAccumulator:
 
     def snapshot(self) -> dict[str, Any] | None:
         import json as _json
+
         try:
             size = self._path.stat().st_size
         except OSError:
@@ -252,7 +283,7 @@ class _TelemetryAccumulator:
                 return self._aggregate()
             last_nl = data.rfind(b"\n")
             if last_nl != -1:
-                complete = data[:last_nl + 1]
+                complete = data[: last_nl + 1]
                 self._offset += len(complete)
                 for raw in complete.splitlines():
                     line = raw.decode("utf-8", errors="replace").strip()
@@ -299,6 +330,7 @@ class _TelemetryAccumulator:
 def _read_swarm_snapshot(swarm_workspace: Path) -> str:
     """One-line live progress string from swarm_state.json, or ""."""
     import json as _json
+
     path = swarm_workspace / "swarm_state.json"
     try:
         if not path.exists():
@@ -326,27 +358,32 @@ def _read_swarm_snapshot(swarm_workspace: Path) -> str:
 # keep working. The API path leaves these as the direct-import defaults.
 # ---------------------------------------------------------------------------
 
+
 def _run_session_default(**kwargs: Any) -> Any:
     """Default run_exploit_session — imports lazily to avoid cycles."""
     from tools.exploit_session import run_exploit_session
+
     return run_exploit_session(**kwargs)
 
 
 def _run_recon_default(**kwargs: Any) -> Any:
     """Default run_recon_assessment — imports lazily."""
     from tools.recon_assessment_cli import run_recon_assessment
+
     return run_recon_assessment(**kwargs)
 
 
 def _run_safety_default(*args: Any, **kwargs: Any) -> Any:
     """Default run_safety_review — imports lazily."""
     from tools.safety_review_cli import run_safety_review
+
     return run_safety_review(*args, **kwargs)
 
 
 @dataclass
 class Callables:
     """Bundle of callables the service uses, overridable by the CLI path."""
+
     build_router: Callable[..., Any] = field(default=build_router)
     open_session: Callable[..., Any] = field(default=open_exploit_mcp_session)
     run_session: Callable[..., Any] = field(default=_run_session_default)
@@ -388,9 +425,7 @@ class AssessmentService:
     # kwargs so test fakes that don't accept the new provider kwargs stay
     # byte-compatible; the chatgpt path forwards the extra kwargs (no test
     # exercises chatgpt with a fake router).
-    def _build_router_for_config(
-        self, config: dict[str, Any], req_timeout: float | None
-    ) -> Any:
+    def _build_router_for_config(self, config: dict[str, Any], req_timeout: float | None) -> Any:
         from tools.config_manager import get_ai_provider, get_chatgpt_config
 
         ollama_host = config.get("ollama", {}).get("host", "https://api.ollama.com")
@@ -405,9 +440,7 @@ class AssessmentService:
                 chatgpt_config=get_chatgpt_config(config),
                 config=config,
             )
-        return self._c.build_router(
-            registry, host=ollama_host, request_timeout_seconds=req_timeout
-        )
+        return self._c.build_router(registry, host=ollama_host, request_timeout_seconds=req_timeout)
 
     def _ensure_client_registered(
         self,
@@ -429,9 +462,9 @@ class AssessmentService:
         if get_ai_provider(config) == "chatgpt":
             from tools.model_router import build_model_client_for_provider
 
-            router.register(model_alias, build_model_client_for_provider(
-                config, model_alias, request_timeout_seconds=req_timeout
-            ))
+            router.register(
+                model_alias, build_model_client_for_provider(config, model_alias, request_timeout_seconds=req_timeout)
+            )
         else:
             from tools.model_router import _build_model_client
 
@@ -484,15 +517,14 @@ class AssessmentService:
         from tools.validation_utils import validate_target as _validate_target
 
         config_path = request.config_path
-        config = copy.deepcopy(
-            self._config if self._config is not None else _config_cli.load_config(config_path)
-        )
+        config = copy.deepcopy(self._config if self._config is not None else _config_cli.load_config(config_path))
         # Apply skills CLI overrides to the in-memory config.
         config = apply_skills_cli_overrides(config, _request_to_args(request))
 
         # Load plugins (best-effort; failure never blocks boot).
         try:
             from tools.plugins import load_plugins
+
             with _COLD_INIT_LOCK:
                 load_plugins(config)
         except Exception:  # noqa: BLE001
@@ -535,6 +567,7 @@ class AssessmentService:
         goal_name = request.goal_name.strip().lower()
         custom_text = request.custom_goal.strip()
         from tools.run_service.models import is_agent_attack_mode  # local to avoid cycle
+
         risk_profile = "high_authorized_testing" if is_agent_attack_mode(mode) else "standard_authorized"
 
         recon_first = request.recon_first
@@ -590,6 +623,7 @@ class AssessmentService:
         exploit_cfg = config.get("exploit", {}) or {}
         permission_effective = str(exploit_cfg.get("permission", "read_only"))
         from tools.run_service.models import is_agent_attack_mode as _is_attack
+
         attack_mode_effective = _is_attack(mode)
         swarm_effective = request.swarm or bool((config.get("swarm", {}) or {}).get("enabled", False))
         parallel_swarm_effective = request.parallel_swarm or bool(
@@ -607,9 +641,13 @@ class AssessmentService:
             required_text = f"ALLOW {target_ip}"
 
         budgets = {
-            "commands": getattr(exploit_settings, "attack_max_commands" if attack_mode_effective else "max_commands_per_session", "n/a"),
+            "commands": getattr(
+                exploit_settings, "attack_max_commands" if attack_mode_effective else "max_commands_per_session", "n/a"
+            ),
             "rounds": getattr(exploit_settings, "attack_max_rounds" if attack_mode_effective else "max_rounds", "n/a"),
-            "duration_minutes": getattr(exploit_settings, "attack_max_duration_minutes", "n/a") if attack_mode_effective else None,
+            "duration_minutes": getattr(exploit_settings, "attack_max_duration_minutes", "n/a")
+            if attack_mode_effective
+            else None,
         }
 
         return RunPreview(
@@ -634,9 +672,7 @@ class AssessmentService:
             destructive=destructive,
             required_confirmation_text=required_text,
             budgets=budgets,
-            skill_activations=[
-                {"name": a.name, "reason": a.reason} for a in skill_selection.activations
-            ],
+            skill_activations=[{"name": a.name, "reason": a.reason} for a in skill_selection.activations],
             skill_errors=list(skill_selection.errors),
             resumed_from=request.resume_source,
         )
@@ -674,9 +710,7 @@ class AssessmentService:
         )
 
         config_path = request.config_path
-        config = copy.deepcopy(
-            config if config is not None else _config_cli.load_config(config_path)
-        )
+        config = copy.deepcopy(config if config is not None else _config_cli.load_config(config_path))
         config = apply_skills_cli_overrides(config, _request_to_args(request))
         reports_dir = preview.reports_dir
         run_id = preview.run_id
@@ -721,6 +755,7 @@ class AssessmentService:
         # Resolve goal (recon-first / interactive / preset / custom).
         goal_engine = self._c.goal_engine_cls()
         from tools.run_service.models import is_agent_attack_mode as _is_attack_mode2
+
         risk_profile = "high_authorized_testing" if _is_attack_mode2(mode) else "standard_authorized"
         assessment: ReconAssessment | None = None
 
@@ -787,14 +822,19 @@ class AssessmentService:
             # Interactive goal selection via decision provider.
             presets = goal_engine.list_presets()
             decision = Decision(
-                id="", run_id=run_id, kind=DecisionKind.GOAL_SELECT,
+                id="",
+                run_id=run_id,
+                kind=DecisionKind.GOAL_SELECT,
                 prompt_text="Select mission goal:",
-                options=[{"name": k, "description": d} for k, d in presets] + [{"name": "custom", "description": "Type your own goal"}],
+                options=[{"name": k, "description": d} for k, d in presets]
+                + [{"name": "custom", "description": "Type your own goal"}],
             )
             answer = await decision_provider.request(decision)
             if answer == "custom":
                 custom_decision = Decision(
-                    id="", run_id=run_id, kind=DecisionKind.GOAL_SELECT,
+                    id="",
+                    run_id=run_id,
+                    kind=DecisionKind.GOAL_SELECT,
                     prompt_text="Describe your custom goal:",
                 )
                 custom_text = await decision_provider.request(custom_decision)
@@ -814,15 +854,24 @@ class AssessmentService:
         if multi_model_consult is None:
             multi_model_consult = bool((config.get("multi_model", {}) or {}).get("enabled", False))
         exploit_settings = build_cli_exploit_settings(
-            mode=mode, target_ip=target_ip, goal=goal, config=config,
-            adaptive_exploits=request.adaptive_exploits, swarm=request.swarm,
-            critic=request.critic, reflection=request.reflection,
+            mode=mode,
+            target_ip=target_ip,
+            goal=goal,
+            config=config,
+            adaptive_exploits=request.adaptive_exploits,
+            swarm=request.swarm,
+            critic=request.critic,
+            reflection=request.reflection,
             multi_model_enabled=bool(multi_model_consult),
-            observer_mode=request.observer_mode, ultrathink=request.ultrathink,
-            debug=request.debug, long_session=request.long_session,
+            observer_mode=request.observer_mode,
+            ultrathink=request.ultrathink,
+            debug=request.debug,
+            long_session=request.long_session,
         )
         skill_selection = _build_runtime_skill_selection(
-            config=config, goal=goal, mode=mode,
+            config=config,
+            goal=goal,
+            mode=mode,
             assessment=assessment if (recon_first or _resume_state is not None) else None,
             is_domain=bool(resolved_domain),
         )
@@ -841,12 +890,21 @@ class AssessmentService:
         swarm_workspace: Path | None = None
         if request.swarm:
             swarm_loop, swarm_task, swarm_workspace = await self._setup_swarm(
-                request=request, config=config, target_ip=target_ip, goal=goal, mode=mode,
-                exploit_settings=exploit_settings, model_client=model_client,
-                model_alias=model_alias, swarm_bridge=swarm_bridge,
-                original_target=original_target, resolved_ip=resolved_ip,
-                resolved_domain=resolved_domain, event_sink=event_sink,
-                reports_dir=reports_dir, progress_heartbeat=_swarm_heartbeat,
+                request=request,
+                config=config,
+                target_ip=target_ip,
+                goal=goal,
+                mode=mode,
+                exploit_settings=exploit_settings,
+                model_client=model_client,
+                model_alias=model_alias,
+                swarm_bridge=swarm_bridge,
+                original_target=original_target,
+                resolved_ip=resolved_ip,
+                resolved_domain=resolved_domain,
+                event_sink=event_sink,
+                reports_dir=reports_dir,
+                progress_heartbeat=_swarm_heartbeat,
             )
 
         # Activity log.
@@ -864,11 +922,7 @@ class AssessmentService:
                     return
                 m, s = divmod(int(time.monotonic() - start), 60)
                 _live_tel = _telemetry_acc.snapshot() or {}
-                swarm_active = (
-                    swarm_task is not None
-                    and not swarm_task.done()
-                    and _swarm_heartbeat.phase != "starting"
-                )
+                swarm_active = swarm_task is not None and not swarm_task.done() and _swarm_heartbeat.phase != "starting"
                 live = _swarm_heartbeat if swarm_active else _heartbeat
                 source = "swarm" if swarm_active else "agent"
                 progress = {
@@ -882,10 +936,7 @@ class AssessmentService:
                     progress["round"] = live.round
                 await event_sink.emit(EVENT_PROGRESS, progress)
                 if swarm_active:
-                    ui.info(
-                        f"Swarm still running... {m}:{s:02d} elapsed "
-                        f"({live.action} actions, {live.phase})"
-                    )
+                    ui.info(f"Swarm still running... {m}:{s:02d} elapsed ({live.action} actions, {live.phase})")
                 else:
                     ui.info(
                         f"Exploit agent still running... {m}:{s:02d} elapsed "
@@ -907,11 +958,13 @@ class AssessmentService:
         _goal_box: list[AttackGoal] = [goal]
         _objective_transitions: list[dict[str, Any]] = []
         from tools.run_service.models import is_agent_attack_mode as _ckpt_attack
+
         _checkpoint_enabled = _ckpt_attack(mode)
 
         async def _checkpoint_hook(ctx: Any) -> Any:
             """Build a CAMPAIGN_NEXT_STEP Decision from ``ctx`` and ask the operator."""
             from tools.exploit_agent.loop import CheckpointOutcome
+
             if not _checkpoint_enabled:
                 return None
             kind = str(getattr(ctx, "kind", "") or "")
@@ -938,7 +991,11 @@ class AssessmentService:
                 ]
                 options = [
                     {"action": "privesc", "label": "Escalate privileges on this target"},
-                    {"action": "another_goal", "label": "Continue with another goal on this target", "goals": _goal_opts},
+                    {
+                        "action": "another_goal",
+                        "label": "Continue with another goal on this target",
+                        "goals": _goal_opts,
+                    },
                     {"action": "finish", "label": "Finish and generate the report"},
                     {"action": "cancel", "label": "Cancel the run"},
                 ]
@@ -957,12 +1014,18 @@ class AssessmentService:
                 ]
                 options = [
                     {"action": "continue", "label": "Continue assessing this target with a different approach"},
-                    {"action": "change_goal", "label": "Select a different mission goal for this target", "goals": _goal_opts},
+                    {
+                        "action": "change_goal",
+                        "label": "Select a different mission goal for this target",
+                        "goals": _goal_opts,
+                    },
                     {"action": "finish", "label": "Finish and generate the report"},
                     {"action": "cancel", "label": "Cancel the run"},
                 ]
             decision = Decision(
-                id="", run_id=run_id, kind=DecisionKind.CAMPAIGN_NEXT_STEP,
+                id="",
+                run_id=run_id,
+                kind=DecisionKind.CAMPAIGN_NEXT_STEP,
                 prompt_text="\n".join(prompt_lines),
                 options=options,
             )
@@ -983,7 +1046,9 @@ class AssessmentService:
             _from_goal = _goal_box[0].name
             if _action in ("change_goal", "another_goal", "privesc"):
                 if _action == "privesc":
-                    _new_goal = goal_engine.get("privesc", "Escalate privileges on the compromised target.", risk_profile=risk_profile)
+                    _new_goal = goal_engine.get(
+                        "privesc", "Escalate privileges on the compromised target.", risk_profile=risk_profile
+                    )
                 elif _new_goal_name == "custom" and _custom_text:
                     _new_goal = goal_engine.get("custom", _custom_text, risk_profile=risk_profile)
                 elif _new_goal_name and goal_engine.is_preset(_new_goal_name):
@@ -993,11 +1058,13 @@ class AssessmentService:
                     # still inject a continue-style replanning instruction.
                     _new_goal = _goal_box[0]
                 _goal_box[0] = _new_goal
-                _objective_transitions.append({
-                    "from": _from_goal,
-                    "to": _new_goal.name,
-                    "at_checkpoint": kind,
-                })
+                _objective_transitions.append(
+                    {
+                        "from": _from_goal,
+                        "to": _new_goal.name,
+                        "at_checkpoint": kind,
+                    }
+                )
                 _objective_text = (
                     f"NEW OBJECTIVE: {_new_goal.name} — {_new_goal.description}. "
                     f"Continue against {target_ip}. Use your existing recon context; "
@@ -1024,17 +1091,25 @@ class AssessmentService:
             # Run the exploit session.
             try:
                 result = await self._run_session(
-                    model_client=model_client, model_alias=model_alias,
-                    target_ip=target_ip, mode=mode, goal=goal,
-                    exploit_settings=exploit_settings, config_path=config_path,
-                    reports_dir=reports_dir, assessment=assessment,
-                    approval_prompt=None, approval_provider=approval_provider,
+                    model_client=model_client,
+                    model_alias=model_alias,
+                    target_ip=target_ip,
+                    mode=mode,
+                    goal=goal,
+                    exploit_settings=exploit_settings,
+                    config_path=config_path,
+                    reports_dir=reports_dir,
+                    assessment=assessment,
+                    approval_prompt=None,
+                    approval_provider=approval_provider,
                     swarm_attach=_swarm_attach if (request.swarm or session_attach is not None) else None,
                     heartbeat=_heartbeat,
                     original_target=original_target if resolved_domain else None,
                     resolved_ip=resolved_ip if resolved_domain else None,
-                    recon_first=recon_first, resume_state=_resume_state,
-                    event_sink=event_sink, cancellation=cancellation,
+                    recon_first=recon_first,
+                    resume_state=_resume_state,
+                    event_sink=event_sink,
+                    cancellation=cancellation,
                     checkpoint_hook=_checkpoint_hook,
                 )
             finally:
@@ -1045,9 +1120,13 @@ class AssessmentService:
             # cancelling it before this wait left the API with frozen status.
             if swarm_task is not None and swarm_workspace is not None:
                 result = await self._wait_swarm(
-                    swarm_task=swarm_task, swarm_bridge=swarm_bridge,
-                    swarm_workspace=swarm_workspace, config=config,
-                    request=request, result=result, event_sink=event_sink,
+                    swarm_task=swarm_task,
+                    swarm_bridge=swarm_bridge,
+                    swarm_workspace=swarm_workspace,
+                    config=config,
+                    request=request,
+                    result=result,
+                    event_sink=event_sink,
                 )
         except _EXC_GROUP_CATCH as exc:
             log_path = reports_dir / "session_error.log"
@@ -1063,9 +1142,13 @@ class AssessmentService:
                 _log_nested_exceptions(exc)
             await event_sink.emit(EVENT_ERROR, {"message": str(exc), "log_path": str(log_path)})
             return RunResult(
-                run_id=run_id, target_ip=target_ip, mode=mode,
-                goal_name=goal.name, goal_description=goal.description,
-                error=str(exc), reports_dir=str(reports_dir),
+                run_id=run_id,
+                target_ip=target_ip,
+                mode=mode,
+                goal_name=goal.name,
+                goal_description=goal.description,
+                error=str(exc),
+                reports_dir=str(reports_dir),
             )
         finally:
             ticker_task.cancel()
@@ -1097,7 +1180,8 @@ class AssessmentService:
         # Write session summary + run.json.
         summary_path = reports_dir / "session_summary.md"
         summary_lines = [
-            f"# Session Summary — {target_ip}", "",
+            f"# Session Summary — {target_ip}",
+            "",
             f"- **Date**: {datetime.now(timezone.utc).isoformat()}",
             f"- **Target**: {target_ip}",
             f"- **Mode**: {mode}",
@@ -1111,7 +1195,9 @@ class AssessmentService:
             _ctx = ""
             if _tel["avg_ctx"] is not None:
                 _ctx = f", avg ctx {_tel['avg_ctx']:.0f}%"
-            summary_lines.append(f"- **Model usage**: {_tel['total_tokens']:,} tokens across {_tel['calls']} calls{_ctx}")
+            summary_lines.append(
+                f"- **Model usage**: {_tel['total_tokens']:,} tokens across {_tel['calls']} calls{_ctx}"
+            )
         _summary_skills = result.get("active_skills") or []
         if _summary_skills:
             _skill_names = ", ".join(str(s.get("name", "unknown")) for s in _summary_skills if isinstance(s, dict))
@@ -1123,18 +1209,24 @@ class AssessmentService:
             summary_lines.append("- **Objective transitions (operator-selected at checkpoints)**:")
             for _tr in _objective_transitions:
                 summary_lines.append(
-                    f"  - {_tr.get('from', '?')} → {_tr.get('to', '?')} "
-                    f"(at {_tr.get('at_checkpoint', '?')} checkpoint)"
+                    f"  - {_tr.get('from', '?')} → {_tr.get('to', '?')} (at {_tr.get('at_checkpoint', '?')} checkpoint)"
                 )
         _sw = result.get("swarm_result")
         if isinstance(_sw, dict) and _sw.get("tasks_completed") is not None:
-            summary_lines.extend(["", "## Swarm", "",
-                f"- **Completed**: {_sw.get('tasks_completed', 0)}",
-                f"- **Blocked**: {_sw.get('tasks_blocked', 0)}",
-                f"- **Failed**: {_sw.get('tasks_failed', 0)}",
-                f"- **Report-ready findings**: {_sw.get('findings_report_ready', 0)}",
-            ])
-        summary_lines.extend(["", "## Results", "", "See the exploit workspace for full logs, scripts, and audit trails.", ""])
+            summary_lines.extend(
+                [
+                    "",
+                    "## Swarm",
+                    "",
+                    f"- **Completed**: {_sw.get('tasks_completed', 0)}",
+                    f"- **Blocked**: {_sw.get('tasks_blocked', 0)}",
+                    f"- **Failed**: {_sw.get('tasks_failed', 0)}",
+                    f"- **Report-ready findings**: {_sw.get('findings_report_ready', 0)}",
+                ]
+            )
+        summary_lines.extend(
+            ["", "## Results", "", "See the exploit workspace for full logs, scripts, and audit trails.", ""]
+        )
         summary_path.write_text("\n".join(summary_lines), encoding="utf-8")
 
         run_json_path = reports_dir / "run.json"
@@ -1155,8 +1247,11 @@ class AssessmentService:
             campaign_result = _build_campaign_result_from_records(result, target_ip)
             if campaign_result is not None:
                 from tools.enhanced_reporting import EnhancedReportGenerator
+
                 generator = EnhancedReportGenerator(
-                    db=None, mission_id=run_id, workspace=reports_dir,
+                    db=None,
+                    mission_id=run_id,
+                    workspace=reports_dir,
                 )
                 paths = generator.generate_full_report(campaign_result, output_format="all")
                 # Stable names so the WebUI can fetch /artifacts/enhanced/enhanced_report.{json,md,html}
@@ -1172,21 +1267,27 @@ class AssessmentService:
         except Exception as exc:  # noqa: BLE001 -- reporting is best-effort
             ui.warning(f"Could not write enhanced report: {exc}")
 
-        await event_sink.emit(EVENT_ARTIFACT, {
-            "name": "session_summary.md",
-            "reports_dir": str(reports_dir),
-            "session_summary": str(summary_path),
-            "run_json": str(run_json_path),
-            "audit_path": result.get("audit_path", ""),
-            "workspace": result.get("workspace", ""),
-        })
+        await event_sink.emit(
+            EVENT_ARTIFACT,
+            {
+                "name": "session_summary.md",
+                "reports_dir": str(reports_dir),
+                "session_summary": str(summary_path),
+                "run_json": str(run_json_path),
+                "audit_path": result.get("audit_path", ""),
+                "workspace": result.get("workspace", ""),
+            },
+        )
 
-        await event_sink.emit(EVENT_COMPLETION, {
-            "total_actions": result.get("total_actions", 0),
-            "goal": goal.name,
-            "target": target_ip,
-            "mode": mode,
-        })
+        await event_sink.emit(
+            EVENT_COMPLETION,
+            {
+                "total_actions": result.get("total_actions", 0),
+                "goal": goal.name,
+                "target": target_ip,
+                "mode": mode,
+            },
+        )
 
         # Apply a goal transition selected at a mid-run checkpoint: the
         # _goal_box closure variable holds the latest objective, which may
@@ -1198,8 +1299,11 @@ class AssessmentService:
         _cancelled_by_operator = bool(result.get("cancelled_by_operator", False))
 
         _final_run_result = RunResult(
-            run_id=run_id, target_ip=target_ip, mode=mode,
-            goal_name=_final_goal.name, goal_description=_final_goal.description,
+            run_id=run_id,
+            target_ip=target_ip,
+            mode=mode,
+            goal_name=_final_goal.name,
+            goal_description=_final_goal.description,
             total_actions=result.get("total_actions", 0),
             workspace=result.get("workspace", ""),
             audit_path=result.get("audit_path", ""),
@@ -1243,11 +1347,22 @@ class AssessmentService:
         return None
 
     async def _recon_first(
-        self, *, request: RunRequest, config: dict[str, Any], config_path: Path,
-        target_ip: str, original_target: str, resolved_ip: str | None,
-        resolved_domain: str | None, reports_dir: Path, model_client: Any,
-        model_alias: str, risk_profile: str, goal_engine: GoalEngine,
-        decision_provider: DecisionProvider, event_sink: EventSink,
+        self,
+        *,
+        request: RunRequest,
+        config: dict[str, Any],
+        config_path: Path,
+        target_ip: str,
+        original_target: str,
+        resolved_ip: str | None,
+        resolved_domain: str | None,
+        reports_dir: Path,
+        model_client: Any,
+        model_alias: str,
+        risk_profile: str,
+        goal_engine: GoalEngine,
+        decision_provider: DecisionProvider,
+        event_sink: EventSink,
         cancellation: CancellationToken,
     ) -> tuple[ReconAssessment, AttackGoal]:
         """Recon-first: scan target, suggest goals, let operator pick."""
@@ -1261,24 +1376,34 @@ class AssessmentService:
         assessment: ReconAssessment | None = None
         try:
             async with self._c.open_session(
-                transport="http", config_path=config_path, target_ip=target_ip,
-                exploit_port=http_port, workspace=workspace,
+                transport="http",
+                config_path=config_path,
+                target_ip=target_ip,
+                exploit_port=http_port,
+                workspace=workspace,
                 multi_model_enabled=bool(request.multi_model_consult),
-                active_model_alias=model_alias, soft_fail=True,
+                active_model_alias=model_alias,
+                soft_fail=True,
                 original_target=original_target if resolved_domain else None,
                 resolved_ip=resolved_ip if resolved_domain else None,
             ) as recon_session:
                 if recon_session is None:
                     ui.info("MCP recon unavailable — falling back to UNKNOWN OS verdict.")
-                    assessment = ReconAssessment(target_ip=target_ip, os_verdict="UNKNOWN", services=[], cve_findings=[])
+                    assessment = ReconAssessment(
+                        target_ip=target_ip, os_verdict="UNKNOWN", services=[], cve_findings=[]
+                    )
                 else:
                     assessment = await self._c.run_recon_assessment(
-                        session=recon_session, target_ip=target_ip, reports_dir=reports_dir,
+                        session=recon_session,
+                        target_ip=target_ip,
+                        reports_dir=reports_dir,
                     )
         except _EXC_GROUP_CATCH as exc:
             log_path = reports_dir / "recon_first_error.log"
             try:
-                log_path.write_text("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)), encoding="utf-8")
+                log_path.write_text(
+                    "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)), encoding="utf-8"
+                )
             except OSError:
                 pass
             ui.warning(f"Recon-first session hit an unexpected error: {exc}")
@@ -1299,13 +1424,18 @@ class AssessmentService:
         ui.info(f"Goal suggestions saved to: {suggestions_path}")
         ui.display_goal_suggestions(suggestions)
 
-        await event_sink.emit(EVENT_GOAL_SUGGESTIONS := "goal_suggestions", {
-            "suggestions": [s.to_dict() for s in suggestions],
-        })
+        await event_sink.emit(
+            EVENT_GOAL_SUGGESTIONS := "goal_suggestions",
+            {
+                "suggestions": [s.to_dict() for s in suggestions],
+            },
+        )
 
         # Ask operator to pick a goal via decision provider.
         decision = Decision(
-            id="", run_id="", kind=DecisionKind.GOAL_SELECT,
+            id="",
+            run_id="",
+            kind=DecisionKind.GOAL_SELECT,
             prompt_text="Select a goal from the suggestions:",
             options=[s.to_dict() for s in suggestions],
         )
@@ -1331,11 +1461,22 @@ class AssessmentService:
         return assessment, goal
 
     async def _fast_recon(
-        self, *, request: RunRequest, config: dict[str, Any], config_path: Path,
-        target_ip: str, original_target: str, resolved_ip: str | None,
-        resolved_domain: str | None, reports_dir: Path, model_client: Any,
-        model_alias: str, risk_profile: str, goal_engine: GoalEngine,
-        decision_provider: DecisionProvider, event_sink: EventSink,
+        self,
+        *,
+        request: RunRequest,
+        config: dict[str, Any],
+        config_path: Path,
+        target_ip: str,
+        original_target: str,
+        resolved_ip: str | None,
+        resolved_domain: str | None,
+        reports_dir: Path,
+        model_client: Any,
+        model_alias: str,
+        risk_profile: str,
+        goal_engine: GoalEngine,
+        decision_provider: DecisionProvider,
+        event_sink: EventSink,
         cancellation: CancellationToken,
     ) -> tuple[ReconAssessment, AttackGoal]:
         """Fast Mode: parallel recon preset, then auto goal + AI takeover.
@@ -1383,31 +1524,45 @@ class AssessmentService:
 
             fast_cfg = FastReconConfig.from_config(config)
             coordinator = FastReconCoordinator(
-                config=fast_cfg, reports_dir=reports_dir,
-                event_sink=event_sink, cancellation=cancellation,
+                config=fast_cfg,
+                reports_dir=reports_dir,
+                event_sink=event_sink,
+                cancellation=cancellation,
             )
             assessment = None
             try:
                 async with self._c.open_session(
-                    transport="http", config_path=config_path, target_ip=target_ip,
-                    exploit_port=http_port, workspace=workspace,
+                    transport="http",
+                    config_path=config_path,
+                    target_ip=target_ip,
+                    exploit_port=http_port,
+                    workspace=workspace,
                     multi_model_enabled=bool(request.multi_model_consult),
-                    active_model_alias=model_alias, soft_fail=True,
+                    active_model_alias=model_alias,
+                    soft_fail=True,
                     original_target=original_target if resolved_domain else None,
                     resolved_ip=resolved_ip if resolved_domain else None,
                 ) as recon_session:
                     if recon_session is None:
                         ui.info("MCP recon unavailable — falling back to UNKNOWN assessment.")
-                        assessment = ReconAssessment(target_ip=target_ip, os_verdict="UNKNOWN", services=[], cve_findings=[])
+                        assessment = ReconAssessment(
+                            target_ip=target_ip, os_verdict="UNKNOWN", services=[], cve_findings=[]
+                        )
                         # persist fallback so resume works
                         fast_bundle = {"target": target_ip, "recon_complete": False, "warnings": ["MCP unavailable"]}
-                        (reports_dir / "fast_recon.json").write_text(json.dumps(fast_bundle, indent=2), encoding="utf-8")
-                        (reports_dir / "recon_assessment.json").write_text(json.dumps(assessment.to_dict(), indent=2), encoding="utf-8")
+                        (reports_dir / "fast_recon.json").write_text(
+                            json.dumps(fast_bundle, indent=2), encoding="utf-8"
+                        )
+                        (reports_dir / "recon_assessment.json").write_text(
+                            json.dumps(assessment.to_dict(), indent=2), encoding="utf-8"
+                        )
                     else:
                         fast_result = await coordinator.run(recon_session, target_ip)
                         assessment = fast_result.assessment or ReconAssessment(
-                            target_ip=target_ip, os_verdict=fast_result.os.get("verdict","UNKNOWN"),
-                            services=fast_result.services, cve_findings=fast_result.cves,
+                            target_ip=target_ip,
+                            os_verdict=fast_result.os.get("verdict", "UNKNOWN"),
+                            services=fast_result.services,
+                            cve_findings=fast_result.cves,
                         )
                         # log summary (compact, not raw)
                         if fast_result.summary_text:
@@ -1417,7 +1572,9 @@ class AssessmentService:
             except _EXC_GROUP_CATCH as exc:
                 log_path = reports_dir / "recon_first_error.log"
                 try:
-                    log_path.write_text("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)), encoding="utf-8")
+                    log_path.write_text(
+                        "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)), encoding="utf-8"
+                    )
                 except OSError:
                     pass
                 ui.warning(f"Fast recon hit an unexpected error: {exc}")
@@ -1454,10 +1611,24 @@ class AssessmentService:
                     goal.name = picked.name
                 else:
                     goal = goal_engine.get(picked.name, risk_profile=risk_profile)
-                ui.info(f"Fast Mode auto-selected goal: {goal.name} ({picked.exploit_likelihood}, rating {picked.success_rating})")
-                await event_sink.emit("fast_recon_goal_selected", {"goal": goal.name, "description": goal.description, "rating": picked.success_rating, "likelihood": picked.exploit_likelihood})
+                ui.info(
+                    f"Fast Mode auto-selected goal: {goal.name} ({picked.exploit_likelihood}, rating {picked.success_rating})"
+                )
+                await event_sink.emit(
+                    "fast_recon_goal_selected",
+                    {
+                        "goal": goal.name,
+                        "description": goal.description,
+                        "rating": picked.success_rating,
+                        "likelihood": picked.exploit_likelihood,
+                    },
+                )
             else:
-                goal = goal_engine.get("custom", "Prioritize the highest-value authorized path based on completed recon. Do not repeat reconnaissance already performed.", risk_profile=risk_profile)
+                goal = goal_engine.get(
+                    "custom",
+                    "Prioritize the highest-value authorized path based on completed recon. Do not repeat reconnaissance already performed.",
+                    risk_profile=risk_profile,
+                )
                 await event_sink.emit("fast_recon_goal_selected", {"goal": goal.name, "description": goal.description})
 
         # Tag assessment with chosen goal for resume
@@ -1475,28 +1646,50 @@ class AssessmentService:
         await event_sink.emit(EVENT_ARTIFACT, {"name": "recon_assessment.json"})
 
         # Tell next stage that recon is complete (model-facing hint)
-        await event_sink.emit("ai_takeover_started", {
-            "recon_complete": True,
-            "recon_strategy": "fast",
-            "known_open_ports": assessment.open_ports if assessment else [],
-            "known_services": assessment.services if assessment else [],
-            "recon_artifact": str(recon_json),
-            "compact_summary": (fast_result.summary_text if 'fast_result' in locals() and hasattr(fast_result, 'summary_text') else ""),
-        })
-        ui.status("Fast Recon complete — AI agent taking over with completed recon context (do not repeat discovery unless gap identified).")
+        await event_sink.emit(
+            "ai_takeover_started",
+            {
+                "recon_complete": True,
+                "recon_strategy": "fast",
+                "known_open_ports": assessment.open_ports if assessment else [],
+                "known_services": assessment.services if assessment else [],
+                "recon_artifact": str(recon_json),
+                "compact_summary": (
+                    fast_result.summary_text
+                    if "fast_result" in locals() and hasattr(fast_result, "summary_text")
+                    else ""
+                ),
+            },
+        )
+        ui.status(
+            "Fast Recon complete — AI agent taking over with completed recon context (do not repeat discovery unless gap identified)."
+        )
         return assessment, goal
 
     async def _setup_swarm(
-        self, *, request: RunRequest, config: dict[str, Any], target_ip: str,
-        goal: AttackGoal, mode: str, exploit_settings: ExploitSettings,
-        model_client: Any, model_alias: str, swarm_bridge: SwarmMcpBridge,
-        original_target: str, resolved_ip: str | None, resolved_domain: str | None,
-        event_sink: EventSink, reports_dir: Path, progress_heartbeat: Any,
+        self,
+        *,
+        request: RunRequest,
+        config: dict[str, Any],
+        target_ip: str,
+        goal: AttackGoal,
+        mode: str,
+        exploit_settings: ExploitSettings,
+        model_client: Any,
+        model_alias: str,
+        swarm_bridge: SwarmMcpBridge,
+        original_target: str,
+        resolved_ip: str | None,
+        resolved_domain: str | None,
+        event_sink: EventSink,
+        reports_dir: Path,
+        progress_heartbeat: Any,
     ) -> tuple[Any, asyncio.Task[Any] | None, Path]:
         from agent_loop import AgentLoop
 
         exploit_cfg = config.get("exploit", {}) or {}
         from tools.run_service.models import is_agent_attack_mode as _swarm_is_attack
+
         _is_attack = _swarm_is_attack(mode)
         swarm_mission_config = {
             "program_name": f"Swarm: {target_ip}",
@@ -1510,7 +1703,9 @@ class AssessmentService:
             "accounts": [],
             "use_swarm": True,
             "critic_enabled": bool(getattr(exploit_settings, "target_context", {}).get("critic_enabled", False)),
-            "reflection_enabled": bool(getattr(exploit_settings, "target_context", {}).get("reflection_enabled", False)),
+            "reflection_enabled": bool(
+                getattr(exploit_settings, "target_context", {}).get("reflection_enabled", False)
+            ),
             "adaptive_exploits_enabled": bool(getattr(exploit_settings, "adaptive_exploits_enabled", False)),
             "reflection_every_n_actions": 10,
             "attack_max_rounds": int(exploit_cfg.get("max_rounds", 30)),
@@ -1518,8 +1713,11 @@ class AssessmentService:
         swarm_workspace = reports_dir / "swarm_workspace"
         swarm_workspace.mkdir(parents=True, exist_ok=True)
         swarm_loop = AgentLoop(
-            mission_config=swarm_mission_config, workspace_root=swarm_workspace,
-            tool_executor=swarm_bridge.dispatch, console_ui=ui, state_dir=swarm_workspace,
+            mission_config=swarm_mission_config,
+            workspace_root=swarm_workspace,
+            tool_executor=swarm_bridge.dispatch,
+            console_ui=ui,
+            state_dir=swarm_workspace,
             original_target=original_target if resolved_domain else "",
             resolved_ip=resolved_ip if resolved_domain else "",
         )
@@ -1540,6 +1738,7 @@ class AssessmentService:
             try:
                 if mode == "attack":
                     from tools.autonomous_orchestrator import observe_autonomous_progress
+
                     with observe_autonomous_progress(_track_progress):
                         return await swarm_loop.run_autonomous_campaign([target_ip])
                 max_cycles = int(exploit_cfg.get("max_rounds", 30))
@@ -1549,33 +1748,57 @@ class AssessmentService:
                 return {"error": str(exc)}
 
         swarm_task = asyncio.create_task(_run_swarm())
-        ui.info(f"Swarm mode ENABLED (critic={request.critic}, reflection={request.reflection}, adaptive_exploits={request.adaptive_exploits}).")
+        ui.info(
+            f"Swarm mode ENABLED (critic={request.critic}, reflection={request.reflection}, adaptive_exploits={request.adaptive_exploits})."
+        )
         await event_sink.emit(EVENT_SWARM, {"status": "started", "workspace": str(swarm_workspace)})
         return swarm_loop, swarm_task, swarm_workspace
 
     async def _run_session(
-        self, *, model_client: Any, model_alias: str, target_ip: str, mode: str,
-        goal: AttackGoal, exploit_settings: ExploitSettings, config_path: Path,
-        reports_dir: Path, assessment: ReconAssessment | None,
-        approval_prompt: Any, approval_provider: Any, swarm_attach: Any, heartbeat: Any,
-        original_target: str | None, resolved_ip: str | None,
-        recon_first: bool, resume_state: tuple[Any, str, str] | None,
-        event_sink: EventSink, cancellation: CancellationToken,
+        self,
+        *,
+        model_client: Any,
+        model_alias: str,
+        target_ip: str,
+        mode: str,
+        goal: AttackGoal,
+        exploit_settings: ExploitSettings,
+        config_path: Path,
+        reports_dir: Path,
+        assessment: ReconAssessment | None,
+        approval_prompt: Any,
+        approval_provider: Any,
+        swarm_attach: Any,
+        heartbeat: Any,
+        original_target: str | None,
+        resolved_ip: str | None,
+        recon_first: bool,
+        resume_state: tuple[Any, str, str] | None,
+        event_sink: EventSink,
+        cancellation: CancellationToken,
         checkpoint_hook: Any = None,
     ) -> dict[str, Any]:
         config = _config_cli_load(config_path)
         http_port = int(config.get("mcp", {}).get("http_port", 8001))
 
         result = await self._c.run_session(
-            client=model_client, model=model_alias, target_ip=target_ip,
-            mode=mode, goal=goal, exploit_settings=exploit_settings,
-            config_path=config_path, mcp_transport="http", exploit_port=http_port,
+            client=model_client,
+            model=model_alias,
+            target_ip=target_ip,
+            mode=mode,
+            goal=goal,
+            exploit_settings=exploit_settings,
+            config_path=config_path,
+            mcp_transport="http",
+            exploit_port=http_port,
             reports_dir=reports_dir,
             assessment=assessment if (recon_first or resume_state is not None) else None,
             approval_prompt=approval_prompt,
             approval_provider=approval_provider,
-            swarm_attach=swarm_attach, heartbeat=heartbeat,
-            original_target=original_target, resolved_ip=resolved_ip,
+            swarm_attach=swarm_attach,
+            heartbeat=heartbeat,
+            original_target=original_target,
+            resolved_ip=resolved_ip,
             event_sink=event_sink,
             checkpoint_hook=checkpoint_hook,
         )
@@ -1594,11 +1817,21 @@ class AssessmentService:
             if isinstance(_tel2, dict):
                 _ctx_part = ""
                 if _tel2.get("avg_ctx") is not None:
-                    _ctx_part = f" (avg ctx {_tel2['avg_ctx']:.0f}%, max {_tel2['max_ctx']:.0f}%)" if _tel2.get("max_ctx") is not None else f" (avg ctx {_tel2['avg_ctx']:.0f}%)"
+                    _ctx_part = (
+                        f" (avg ctx {_tel2['avg_ctx']:.0f}%, max {_tel2['max_ctx']:.0f}%)"
+                        if _tel2.get("max_ctx") is not None
+                        else f" (avg ctx {_tel2['avg_ctx']:.0f}%)"
+                    )
                 ui.info(f"Model usage: {_tel2['total_tokens']:,} tokens across {_tel2['calls']} calls{_ctx_part}")
         final_skills = result.get("active_skills") or exploit_settings.target_context.get("active_skills", [])
         if final_skills:
-            ui.skills([f"{item.get('name', 'unknown')} - {item.get('reason', 'selected')}" for item in final_skills if isinstance(item, dict)])
+            ui.skills(
+                [
+                    f"{item.get('name', 'unknown')} - {item.get('reason', 'selected')}"
+                    for item in final_skills
+                    if isinstance(item, dict)
+                ]
+            )
         ui.status("Artifacts written:")
         ui.info(f"  reports dir:        {reports_dir}")
         ui.info(f"  audit trail:        {result.get('audit_path', 'unknown')}")
@@ -1608,11 +1841,18 @@ class AssessmentService:
         return result
 
     async def _wait_swarm(
-        self, *, swarm_task: asyncio.Task[Any], swarm_bridge: SwarmMcpBridge,
-        swarm_workspace: Path, config: dict[str, Any], request: RunRequest,
-        result: dict[str, Any], event_sink: EventSink,
+        self,
+        *,
+        swarm_task: asyncio.Task[Any],
+        swarm_bridge: SwarmMcpBridge,
+        swarm_workspace: Path,
+        config: dict[str, Any],
+        request: RunRequest,
+        result: dict[str, Any],
+        event_sink: EventSink,
     ) -> dict[str, Any]:
         from tools.cli_exploit_settings import _compute_swarm_timeout
+
         swarm_start = time.monotonic()
         swarm_timeout = _compute_swarm_timeout(config, _request_to_args(request))
         swarm_result = None
@@ -1632,7 +1872,10 @@ class AssessmentService:
                         snap = _read_swarm_snapshot(swarm_workspace)
                         detail = f" — {snap}" if snap else ""
                         ui.info(f"Swarm running {elapsed}s elapsed (timeout {int(swarm_timeout)}s){detail}")
-                        await event_sink.emit(EVENT_SWARM, {"elapsed_seconds": elapsed, "timeout_seconds": int(swarm_timeout), "snapshot": snap})
+                        await event_sink.emit(
+                            EVENT_SWARM,
+                            {"elapsed_seconds": elapsed, "timeout_seconds": int(swarm_timeout), "snapshot": snap},
+                        )
                     continue
             if swarm_result is None and not swarm_task.cancelled():
                 swarm_result = swarm_task.result()
@@ -1665,6 +1908,7 @@ class AssessmentService:
 
 def _config_cli_load(path: Path) -> dict[str, Any]:
     from tools import config_cli as _config_cli
+
     return _config_cli.load_config(path)
 
 
@@ -1672,6 +1916,7 @@ def _request_to_args(request: RunRequest) -> Any:
     """Build a lightweight argparse.Namespace stand-in from a RunRequest so the
     existing skills/resume/CLI helpers (which take ``args``) work unchanged."""
     import argparse
+
     ns = argparse.Namespace()
     ns.config = request.config_path
     ns.model = request.model_alias or None

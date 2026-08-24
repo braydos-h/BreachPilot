@@ -77,6 +77,7 @@ def test_validate_valid_candidate(verifier):
     db = verifier._db  # type: ignore
     with db.connection(write=True) as conn:  # type: ignore
         import json
+
         conn.execute(
             "UPDATE findings SET reproduction_steps_json=? WHERE id=?",
             (json.dumps(["Step 1: Login as user A", "Step 2: Access /admin/user/B's/data"]), fid),
@@ -108,9 +109,7 @@ def test_reject(verifier):
 
 
 def test_reject_terminal(verifier):
-    fid = verifier.create_candidate(
-        title="Rejected candidate", affected_asset="test.com", summary="Test."
-    )
+    fid = verifier.create_candidate(title="Rejected candidate", affected_asset="test.com", summary="Test.")
     verifier.reject(fid, "Duplicate")
     # Re-reject should fail
     msg = verifier.reject(fid, "Again")
@@ -131,7 +130,8 @@ def test_list_candidates(verifier):
 
 def test_list_report_ready(verifier):
     fid = verifier.create_candidate(
-        title="Ready test", affected_asset="test.com",
+        title="Ready test",
+        affected_asset="test.com",
         summary="Adequate summary text for testing purposes. This is long enough.",
         vuln_class="Sensitive Data Exposure",
         impact="Sensitive data leaked.",
@@ -140,6 +140,7 @@ def test_list_report_ready(verifier):
     db = verifier._db  # type: ignore
     with db.connection(write=True) as conn:  # type: ignore
         import json
+
         conn.execute(
             "UPDATE findings SET reproduction_steps_json=?, status=? WHERE id=?",
             (json.dumps(["Step 1: Request /api/users"]), "report_ready", fid),
@@ -154,8 +155,11 @@ def test_list_report_ready(verifier):
 
 def test_idor_impact_score(verifier):
     fid = verifier.create_candidate(
-        title="IDOR test", affected_asset="test.com", summary="IDOR found.",
-        vuln_class="IDOR", impact="Access other users' private data",
+        title="IDOR test",
+        affected_asset="test.com",
+        summary="IDOR found.",
+        vuln_class="IDOR",
+        impact="Access other users' private data",
     )
     score = verifier.score_impact(fid)
     assert score >= 50  # IDOR base + vuln class bonus
@@ -163,8 +167,11 @@ def test_idor_impact_score(verifier):
 
 def test_low_impact_score(verifier):
     fid = verifier.create_candidate(
-        title="Minor thing", affected_asset="test.com", summary="Minor.",
-        vuln_class="Information Disclosure", impact="Server version exposed.",
+        title="Minor thing",
+        affected_asset="test.com",
+        summary="Minor.",
+        vuln_class="Information Disclosure",
+        impact="Server version exposed.",
     )
     score = verifier.score_impact(fid)
     assert score <= 70  # lower than IDOR
@@ -175,7 +182,8 @@ def test_low_impact_score(verifier):
 
 def test_generate_validation_tasks(verifier):
     fid = verifier.create_candidate(
-        title="Need evidence", affected_asset="test.com",
+        title="Need evidence",
+        affected_asset="test.com",
         summary="Finding without evidence.",
     )
     verifier.mark_needs_validation(fid, ["evidence", "reproduction_steps"])

@@ -15,8 +15,10 @@ from tools.attack_modules.base import AttackModule, ModuleContext
 
 # --- test-only module fixtures -------------------------------------------------
 
+
 class _VersionModule(AttackModule):
     """Module declaring a known-vulnerable version pattern for http."""
+
     name = "_VersionModule"
     description = "test"
     target_services = ["http"]
@@ -30,6 +32,7 @@ class _VersionModule(AttackModule):
 
 class _DefaultVersionModule(AttackModule):
     """Module with the default empty target_versions (backward-compat baseline)."""
+
     name = "_DefaultVersionModule"
     description = "test"
     target_services = ["http"]
@@ -44,6 +47,7 @@ class _DefaultVersionModule(AttackModule):
 class _HighScoreModule(AttackModule):
     """Module that already maxes the score via services+ports+CVE so we can
     confirm the version bonus cannot push past the 100 cap."""
+
     name = "_HighScoreModule"
     description = "test"
     target_services = ["http"]
@@ -57,6 +61,7 @@ class _HighScoreModule(AttackModule):
 
 # --- context helpers -----------------------------------------------------------
 
+
 def _ctx(version: str, cves: list[str] | None = None) -> ModuleContext:
     return ModuleContext(
         target_ip="10.0.0.5",
@@ -67,6 +72,7 @@ def _ctx(version: str, cves: list[str] | None = None) -> ModuleContext:
 
 
 # --- tests ---------------------------------------------------------------------
+
 
 def test_matching_version_adds_exactly_25():
     """A matching version string yields exactly +25 over the no-version baseline."""
@@ -109,6 +115,7 @@ def test_bonus_capped_at_100():
 def test_bonus_is_once_per_module_not_per_pattern_or_service():
     """Multiple matching patterns AND multiple matching services still yield a
     single +25, not +25 per match."""
+
     class _MultiMatchModule(AttackModule):
         name = "_MultiMatchModule"
         description = "test"

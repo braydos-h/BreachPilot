@@ -59,8 +59,7 @@ import pandas as pd
 
 df = pd.read_json("api_gateway_logs.json", lines=True)
 # Detect BOLA: same user accessing many different resource IDs
-bola = df.groupby(["user_id", "endpoint"]).agg(
-    unique_ids=("resource_id", "nunique")).reset_index()
+bola = df.groupby(["user_id", "endpoint"]).agg(unique_ids=("resource_id", "nunique")).reset_index()
 suspicious = bola[bola["unique_ids"] > 50]
 ```
 

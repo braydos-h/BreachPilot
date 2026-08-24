@@ -114,7 +114,7 @@ def test_reserve_charges_exactly_once_per_call():
     be 0.4+; if a call lost its charge it would stay 0.1. This is the
     "reserve-then-sleep, no re-acquire" invariant -- one charge per call."""
     lim = RateLimiter(rate_per_second=10.0, burst=1)  # 0.1s/token
-    assert lim._reserve("k") == 0.0                          # burst token
+    assert lim._reserve("k") == 0.0  # burst token
     assert lim._reserve("k") == pytest.approx(0.1, abs=0.02)  # 1 token debt
     assert lim._reserve("k") == pytest.approx(0.2, abs=0.03)  # 2 tokens debt
     assert lim._reserve("k") == pytest.approx(0.3, abs=0.03)  # 3 tokens debt (linear)
@@ -162,8 +162,8 @@ def test_rate_zero_returns_inf_and_restores_reservation():
     (empty, not refillable); a reset re-fills the burst so the next call is
     immediate again."""
     lim = RateLimiter(rate_per_second=0.0, burst=1)
-    assert lim._reserve("k") == 0.0            # burst token consumed -> bucket 0
-    assert lim._reserve("k") == float("inf")   # no refill possible -> inf
+    assert lim._reserve("k") == 0.0  # burst token consumed -> bucket 0
+    assert lim._reserve("k") == float("inf")  # no refill possible -> inf
     with lim._lock:
         tokens, _ = lim._buckets["k"]
     assert tokens == 0.0  # undo kept the bucket at 0, NOT -1 (no starvation debt)
@@ -210,7 +210,7 @@ def test_bucket_state_persists_across_event_loops():
         await lim.acquire("shared")  # must wait ~0.1s -- deficit from first loop
         return time.monotonic() - t0
 
-    asyncio.run(first())          # loop 1
+    asyncio.run(first())  # loop 1
     waited = asyncio.run(second())  # loop 2 (fresh event loop)
     assert waited >= 0.08  # the first loop's reservation carried across
 

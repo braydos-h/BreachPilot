@@ -70,20 +70,23 @@ def test_config_validator_accepts_reasoning_ultrathink(tmp_path: Path):
     from tools.config_manager import ConfigValidator
 
     config_path = tmp_path / "config.yaml"
-    yaml.safe_dump({
-        "ollama": {"host": "http://localhost:11434"},
-        "models": {"registry": {"kimi": "kimi-k2.6:cloud"}, "default_alias": "kimi"},
-        "mcp": {"default_transport": "stdio", "http_port": 8001},
-        "exploit": {"enabled": True},
-        "reasoning": {
-            "chain_of_thought": True,
-            "reflection_every_n_actions": 10,
-            "critic_enabled": True,
-            "observer_mode": "hybrid",
-            "ultrathink": True,
-            "ultrathink_reflection_interval": 2,
+    yaml.safe_dump(
+        {
+            "ollama": {"host": "http://localhost:11434"},
+            "models": {"registry": {"kimi": "kimi-k2.6:cloud"}, "default_alias": "kimi"},
+            "mcp": {"default_transport": "stdio", "http_port": 8001},
+            "exploit": {"enabled": True},
+            "reasoning": {
+                "chain_of_thought": True,
+                "reflection_every_n_actions": 10,
+                "critic_enabled": True,
+                "observer_mode": "hybrid",
+                "ultrathink": True,
+                "ultrathink_reflection_interval": 2,
+            },
         },
-    }, config_path.open("w", encoding="utf-8"))
+        config_path.open("w", encoding="utf-8"),
+    )
 
     validator = ConfigValidator(config_path)
     config, result = validator.load_and_validate()
@@ -97,13 +100,16 @@ def test_config_validator_warns_on_invalid_ultrathink_interval(tmp_path: Path):
     from tools.config_manager import ConfigValidator
 
     config_path = tmp_path / "config.yaml"
-    yaml.safe_dump({
-        "ollama": {"host": "http://localhost:11434"},
-        "models": {"registry": {"kimi": "kimi-k2.6:cloud"}, "default_alias": "kimi"},
-        "mcp": {"default_transport": "stdio"},
-        "exploit": {"enabled": True},
-        "reasoning": {"ultrathink_reflection_interval": 0},
-    }, config_path.open("w", encoding="utf-8"))
+    yaml.safe_dump(
+        {
+            "ollama": {"host": "http://localhost:11434"},
+            "models": {"registry": {"kimi": "kimi-k2.6:cloud"}, "default_alias": "kimi"},
+            "mcp": {"default_transport": "stdio"},
+            "exploit": {"enabled": True},
+            "reasoning": {"ultrathink_reflection_interval": 0},
+        },
+        config_path.open("w", encoding="utf-8"),
+    )
 
     validator = ConfigValidator(config_path)
     _, result = validator.load_and_validate()

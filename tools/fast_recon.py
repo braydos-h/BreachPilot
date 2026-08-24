@@ -53,6 +53,7 @@ from tools.goal_suggester import ReconAssessment, build_assessment_from_mcp_resu
 # Config
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class FastReconConfig:
     enabled: bool = True
@@ -88,9 +89,11 @@ class FastReconConfig:
             cache_ttl_seconds=int(raw.get("cache_ttl_seconds", 300) or 300),
         )
 
+
 # ---------------------------------------------------------------------------
 # Result bundle
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class FastReconResult:
@@ -140,11 +143,13 @@ class FastReconResult:
     def to_assessment(self) -> ReconAssessment | None:
         return self.assessment
 
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-_GENERIC_SERVICE_NAMES = frozenset({"dns","ftp","http","https","imap","pop3","smtp","ssh","telnet"})
+_GENERIC_SERVICE_NAMES = frozenset({"dns", "ftp", "http", "https", "imap", "pop3", "smtp", "ssh", "telnet"})
+
 
 def _cve_query_from_banner(banner: str) -> tuple[str, str] | None:
     if not banner:
@@ -152,11 +157,14 @@ def _cve_query_from_banner(banner: str) -> tuple[str, str] | None:
     m = re.search(r"\b(?P<product>OpenSSH)[_\s/-]*v?(?P<version>\d+(?:\.\d+)+(?:p\d+)?)", banner, re.IGNORECASE)
     if m:
         return "OpenSSH", m.group("version")
-    for match in re.finditer(r"\b(?P<product>[A-Za-z][A-Za-z0-9_.+-]*)[\s/_-]+v?(?P<version>\d+(?:\.\d+)+(?:[A-Za-z0-9._+-]*)?)", banner):
+    for match in re.finditer(
+        r"\b(?P<product>[A-Za-z][A-Za-z0-9_.+-]*)[\s/_-]+v?(?P<version>\d+(?:\.\d+)+(?:[A-Za-z0-9._+-]*)?)", banner
+    ):
         product = match.group("product")
         if product.lower() not in _GENERIC_SERVICE_NAMES:
             return product, match.group("version")
     return None
+
 
 def _extract_tool_text(raw: Any) -> str:
     if isinstance(raw, str):
@@ -177,6 +185,7 @@ def _extract_tool_text(raw: Any) -> str:
             return content
     return str(raw)
 
+
 def _parse_os_result(text: str) -> dict[str, Any]:
     verdict = "UNKNOWN"
     m = re.search(r"OS_VERDICT:\s*(\S+)", text)
@@ -187,6 +196,7 @@ def _parse_os_result(text: str) -> dict[str, Any]:
     if hm:
         hints = [h.strip() for h in hm.group(1).split(";") if h.strip()]
     return {"verdict": verdict, "hints": hints, "raw": text[:2000]}
+
 
 def _parse_scan_ports(text: str) -> tuple[list[int], list[dict[str, Any]]]:
     open_ports: list[int] = []
@@ -204,6 +214,7 @@ def _parse_scan_ports(text: str) -> tuple[list[int], list[dict[str, Any]]]:
             services.append({"port": port, "protocol": proto, "service": service, "banner": banner})
     return open_ports, services
 
+
 def _build_compact_summary(result: FastReconResult, scan_raw: str, os_raw: str) -> str:
     lines: list[str] = []
     lines.append(f"Target: {result.target}")
@@ -213,11 +224,11 @@ def _build_compact_summary(result: FastReconResult, scan_raw: str, os_raw: str) 
     if result.udp_ports:
         lines.append(f"Open UDP: {', '.join(str(p) for p in result.udp_ports)}")
     for svc in result.services[:8]:
-        banner = svc.get("banner","")
+        banner = svc.get("banner", "")
         # keep banner short
         if len(banner) > 80:
             banner = banner[:77] + "..."
-        lines.append(f"{svc.get('port')}: {svc.get('service','unknown')} {banner}")
+        lines.append(f"{svc.get('port')}: {svc.get('service', 'unknown')} {banner}")
     if result.technologies:
         lines.append(f"Likely technologies: {', '.join(result.technologies[:6])}")
     if result.cves:
@@ -232,20 +243,24 @@ def _build_compact_summary(result: FastReconResult, scan_raw: str, os_raw: str) 
     # do NOT dump raw scanner output (token bloat)
     return "\n".join(lines)
 
+
 # ---------------------------------------------------------------------------
 # Caching
 # ---------------------------------------------------------------------------
+
 
 def _cache_key(target: str, config: FastReconConfig) -> str:
     # normalized target + preset/version + relevant recon config
     payload = json.dumps({"target": target.strip().lower(), "fast": config.__dict__}, sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
+
 def _cache_path(reports_dir: Path, target: str, config: FastReconConfig) -> Path:
     # global cache under exploit_workspace/.fast_recon_cache (not per-run)
     # also mirrored per-run for resume reuse
     key = _cache_key(target, config)
     return Path("exploit_workspace") / ".fast_recon_cache" / f"{key}.json"
+
 
 def _try_load_cache(target: str, config: FastReconConfig, reports_dir: Path) -> FastReconResult | None:
     if config.cache_ttl_seconds <= 0:
@@ -275,7 +290,7 @@ def _try_load_cache(target: str, config: FastReconConfig, reports_dir: Path) -> 
             task_timings=dict(data.get("task_timings", {})),
             cache_hit=True,
             assessment=ra,
-            summary_text=str(data.get("summary_text","")),
+            summary_text=str(data.get("summary_text", "")),
         )
         res.coverage = dict(data.get("coverage", {}))
         res.web = dict(data.get("web", {}))
@@ -283,6 +298,7 @@ def _try_load_cache(target: str, config: FastReconConfig, reports_dir: Path) -> 
         return res
     except Exception:
         return None
+
 
 def _save_cache(result: FastReconResult, config: FastReconConfig, reports_dir: Path) -> None:
     if config.cache_ttl_seconds <= 0:
@@ -312,9 +328,11 @@ def _save_cache(result: FastReconResult, config: FastReconConfig, reports_dir: P
     except Exception:
         pass
 
+
 # ---------------------------------------------------------------------------
 # Coordinator
 # ---------------------------------------------------------------------------
+
 
 class FastReconCoordinator:
     """Dependency-aware parallel recon preset."""
@@ -379,11 +397,27 @@ class FastReconCoordinator:
                 )
                 text = _extract_tool_text(raw)
                 self._record_timing(task_key, started, "completed", len(text))
-                await self._emit("fast_recon_task_completed", {"task": task_key, "label": tool, "status": "completed", "duration_ms": self._timings[task_key]["duration_ms"]})
+                await self._emit(
+                    "fast_recon_task_completed",
+                    {
+                        "task": task_key,
+                        "label": tool,
+                        "status": "completed",
+                        "duration_ms": self._timings[task_key]["duration_ms"],
+                    },
+                )
                 return text
         except asyncio.TimeoutError:
             self._record_timing(task_key, started, "timeout")
-            await self._emit("fast_recon_task_failed", {"task": task_key, "label": tool, "status": "timeout", "duration_ms": self._timings[task_key]["duration_ms"]})
+            await self._emit(
+                "fast_recon_task_failed",
+                {
+                    "task": task_key,
+                    "label": tool,
+                    "status": "timeout",
+                    "duration_ms": self._timings[task_key]["duration_ms"],
+                },
+            )
             return None
         except asyncio.CancelledError:
             self._record_timing(task_key, started, "cancelled")
@@ -391,13 +425,17 @@ class FastReconCoordinator:
             return None
         except _EXC_GROUP_CATCH as exc:
             self._record_timing(task_key, started, "failed")
-            await self._emit("fast_recon_task_failed", {"task": task_key, "label": tool, "status": "failed", "error": str(exc)[:300]})
+            await self._emit(
+                "fast_recon_task_failed", {"task": task_key, "label": tool, "status": "failed", "error": str(exc)[:300]}
+            )
             if _is_exception_group(exc):
                 _log_nested_exceptions(exc)
             return None
         except Exception as exc:
             self._record_timing(task_key, started, "failed")
-            await self._emit("fast_recon_task_failed", {"task": task_key, "label": tool, "status": "failed", "error": str(exc)[:300]})
+            await self._emit(
+                "fast_recon_task_failed", {"task": task_key, "label": tool, "status": "failed", "error": str(exc)[:300]}
+            )
             return None
 
     async def run(self, session: Any, target_ip: str) -> FastReconResult:
@@ -409,14 +447,24 @@ class FastReconCoordinator:
         cached = _try_load_cache(target_ip, self.config, self.reports_dir)
         if cached is not None:
             # emit cache hit progress
-            await self._emit("fast_recon_completed", {"target": target_ip, "cache_hit": True, "duration_seconds": cached.duration_seconds, "open_ports": cached.open_ports})
+            await self._emit(
+                "fast_recon_completed",
+                {
+                    "target": target_ip,
+                    "cache_hit": True,
+                    "duration_seconds": cached.duration_seconds,
+                    "open_ports": cached.open_ports,
+                },
+            )
             # also persist per-run copy for resume
             try:
                 out = self.reports_dir / "fast_recon.json"
                 out.parent.mkdir(parents=True, exist_ok=True)
                 out.write_text(json.dumps(cached.to_dict(), indent=2), encoding="utf-8")
                 if cached.assessment:
-                    (self.reports_dir / "recon_assessment.json").write_text(json.dumps(cached.assessment.to_dict(), indent=2), encoding="utf-8")
+                    (self.reports_dir / "recon_assessment.json").write_text(
+                        json.dumps(cached.assessment.to_dict(), indent=2), encoding="utf-8"
+                    )
             except Exception:
                 pass
             return cached
@@ -432,11 +480,16 @@ class FastReconCoordinator:
             elapsed = time.monotonic() - overall_start
             # Build partial from what we have (best-effort)
             result = FastReconResult(target=target_ip, duration_seconds=elapsed)
-            result.warnings.append(f"Fast recon overall timeout after {self.config.overall_timeout_seconds}s — partial results")
+            result.warnings.append(
+                f"Fast recon overall timeout after {self.config.overall_timeout_seconds}s — partial results"
+            )
             result.coverage = {"timed_out": True, "overall_timeout_seconds": self.config.overall_timeout_seconds}
             result.task_timings = dict(self._timings)
             result.summary_text = f"Target: {target_ip}\nRecon timed out after {elapsed:.1f}s (partial)"
-            await self._emit("fast_recon_completed", {"target": target_ip, "timed_out": True, "duration_seconds": elapsed, "warnings": result.warnings})
+            await self._emit(
+                "fast_recon_completed",
+                {"target": target_ip, "timed_out": True, "duration_seconds": elapsed, "warnings": result.warnings},
+            )
         return result
 
     async def _run_inner(self, session: Any, target_ip: str, overall_start: float) -> FastReconResult:
@@ -452,22 +505,42 @@ class FastReconCoordinator:
         # Stage A — independent discovery (parallel)
         # ------------------------------------------------------------------
         async def os_task():
-            return await self._call_with_timeout(session, "check_os", {"target_ip": target_ip}, f"osint:{target_ip}" if False else f"os-probe:{target_ip}")
+            return await self._call_with_timeout(
+                session,
+                "check_os",
+                {"target_ip": target_ip},
+                f"osint:{target_ip}" if False else f"os-probe:{target_ip}",
+            )
 
         async def tcp_task():
             if not self.config.tcp_discovery:
                 return None
-            return await self._call_with_timeout(session, "quick_scan", {"target_ip": target_ip, "ports": "21,22,23,25,53,80,110,111,135,139,143,443,445,993,995,1723,3306,3389,5900,8080,8443,9000,27017,6379"}, f"tcp-discovery:{target_ip}")
+            return await self._call_with_timeout(
+                session,
+                "quick_scan",
+                {
+                    "target_ip": target_ip,
+                    "ports": "21,22,23,25,53,80,110,111,135,139,143,443,445,993,995,1723,3306,3389,5900,8080,8443,9000,27017,6379",
+                },
+                f"tcp-discovery:{target_ip}",
+            )
 
         async def osint_task():
             if not self.config.passive_osint:
                 return None
-            return await self._call_with_timeout(session, "run_osint_recon", {"target_ip": target_ip}, f"osint:{target_ip}")
+            return await self._call_with_timeout(
+                session, "run_osint_recon", {"target_ip": target_ip}, f"osint:{target_ip}"
+            )
 
         async def udp_task():
             if self.config.udp_top_ports <= 0:
                 return None
-            return await self._call_with_timeout(session, "run_udp_recon", {"target_ip": target_ip, "top_ports": self.config.udp_top_ports}, f"udp-discovery:{target_ip}")
+            return await self._call_with_timeout(
+                session,
+                "run_udp_recon",
+                {"target_ip": target_ip, "top_ports": self.config.udp_top_ports},
+                f"udp-discovery:{target_ip}",
+            )
 
         # fire Stage A concurrently
         stage_a = await asyncio.gather(os_task(), tcp_task(), osint_task(), udp_task(), return_exceptions=True)
@@ -479,8 +552,12 @@ class FastReconCoordinator:
                 return None
             return v
 
-        os_text = _unpack(stage_a[0]) or f"OS_CHECK_RESULTS:\nTARGET: {target_ip}\nOS_VERDICT: UNKNOWN\nHINTS: unavailable"
-        scan_text = _unpack(stage_a[1]) or f"QUICK_SCAN_RESULTS: {target_ip}\nSUMMARY: 0/0 ports open\nNOTE: scan unavailable"
+        os_text = (
+            _unpack(stage_a[0]) or f"OS_CHECK_RESULTS:\nTARGET: {target_ip}\nOS_VERDICT: UNKNOWN\nHINTS: unavailable"
+        )
+        scan_text = (
+            _unpack(stage_a[1]) or f"QUICK_SCAN_RESULTS: {target_ip}\nSUMMARY: 0/0 ports open\nNOTE: scan unavailable"
+        )
         osint_text = _unpack(stage_a[2]) or ""
         udp_text = _unpack(stage_a[3]) or ""
 
@@ -551,7 +628,9 @@ class FastReconCoordinator:
             key = f"service-fingerprint:{target_ip}:{port}"
             # dedup key already handled in _call_with_timeout, but also check locally
             async with self._svc_sem:
-                text = await self._call_with_timeout(session, "get_service_fingerprint", {"target_ip": target_ip, "port": port}, key)
+                text = await self._call_with_timeout(
+                    session, "get_service_fingerprint", {"target_ip": target_ip, "port": port}, key
+                )
                 if text:
                     fingerprints[port] = text
 
@@ -569,7 +648,7 @@ class FastReconCoordinator:
                     m = re.search(r"BANNER:\s*(.+)", fp)
                     if m and m.group(1).strip() and m.group(1).strip() != "(no banner)":
                         # prefer longer banner
-                        if len(m.group(1).strip()) > len(svc.get("banner","")):
+                        if len(m.group(1).strip()) > len(svc.get("banner", "")):
                             svc["banner"] = m.group(1).strip()[:400]
                     # technologies from TLS etc could be extracted
                     if "SSL/TLS INFO" in fp:
@@ -583,7 +662,7 @@ class FastReconCoordinator:
             # deduplicate product+version
             dedup: dict[str, tuple[str, str, str, str]] = {}  # query -> (port, proto, service, product, version)
             for svc in services:
-                banner = svc.get("banner","")
+                banner = svc.get("banner", "")
                 if banner.strip() == "(no banner)":
                     banner = ""
                 qv = _cve_query_from_banner(banner)
@@ -600,20 +679,41 @@ class FastReconCoordinator:
                 if ckey in self._seen_keys and ckey in self._cve_cache:
                     # already fetched this run
                     cached_text = self._cve_cache[ckey]
-                    return {"service": service, "product": product, "version": version, "port": str(port), "results": cached_text}
+                    return {
+                        "service": service,
+                        "product": product,
+                        "version": version,
+                        "port": str(port),
+                        "results": cached_text,
+                    }
                 async with self._cve_sem:
                     # per-tool dedup already; check cache
                     if ckey in self._cve_cache:
-                        return {"service": service, "product": product, "version": version, "port": str(port), "results": self._cve_cache[ckey]}
+                        return {
+                            "service": service,
+                            "product": product,
+                            "version": version,
+                            "port": str(port),
+                            "results": self._cve_cache[ckey],
+                        }
                     text = await self._call_with_timeout(session, "search_cve_intel", {"query": query}, ckey)
                     if text is None:
                         text = "NO_CVE_RESULTS: timeout or error"
                     self._cve_cache[ckey] = text[:4000]
-                    return {"service": service, "product": product, "version": version, "port": str(port), "results": text[:4000]}
+                    return {
+                        "service": service,
+                        "product": product,
+                        "version": version,
+                        "port": str(port),
+                        "results": text[:4000],
+                    }
 
             # Build tasks; semaphore bounds concurrency inside cve_one
             if dedup:
-                await self._emit("fast_recon_progress", {"task": "cve_lookup", "completed": 0, "total": len(dedup), "status": "running"})
+                await self._emit(
+                    "fast_recon_progress",
+                    {"task": "cve_lookup", "completed": 0, "total": len(dedup), "status": "running"},
+                )
                 coros = [cve_one(q, meta) for q, meta in dedup.items()]
                 cve_outs = await asyncio.gather(*coros, return_exceptions=True)
                 for item in cve_outs:
@@ -622,7 +722,10 @@ class FastReconCoordinator:
                         continue
                     if isinstance(item, dict):
                         cve_results.append(item)
-                await self._emit("fast_recon_progress", {"task": "cve_lookup", "completed": len(cve_results), "total": len(dedup), "status": "completed"})
+                await self._emit(
+                    "fast_recon_progress",
+                    {"task": "cve_lookup", "completed": len(cve_results), "total": len(dedup), "status": "completed"},
+                )
 
         result.cves = cve_results
 
@@ -670,32 +773,40 @@ class FastReconCoordinator:
         # keep existing recon_assessment.json for consumers
         try:
             if result.assessment:
-                (self.reports_dir / "recon_assessment.json").write_text(json.dumps(result.assessment.to_dict(), indent=2), encoding="utf-8")
+                (self.reports_dir / "recon_assessment.json").write_text(
+                    json.dumps(result.assessment.to_dict(), indent=2), encoding="utf-8"
+                )
         except Exception:
             pass
         # cache
         _save_cache(result, self.config, self.reports_dir)
         # emit completion
-        await self._emit("fast_recon_completed", {
-            "target": result.target,
-            "duration_seconds": elapsed,
-            "open_ports": result.open_ports,
-            "udp_ports": result.udp_ports,
-            "services": len(result.services),
-            "cves": len(result.cves),
-            "cache_hit": result.cache_hit,
-            "task_timings": result.task_timings,
-            "coverage": result.coverage,
-        })
+        await self._emit(
+            "fast_recon_completed",
+            {
+                "target": result.target,
+                "duration_seconds": elapsed,
+                "open_ports": result.open_ports,
+                "udp_ports": result.udp_ports,
+                "services": len(result.services),
+                "cves": len(result.cves),
+                "cache_hit": result.cache_hit,
+                "task_timings": result.task_timings,
+                "coverage": result.coverage,
+            },
+        )
         # emit recon_assessment for legacy consumers
         await self._emit("recon_assessment", {"assessment": result.assessment.to_dict() if result.assessment else {}})
         # emit progress summary log
         try:
             from tools.attack_ui import get_ui
+
             ui = get_ui()
-            ui.info(f"Fast Recon completed in {elapsed:.1f}s: {len(result.open_ports)} ports, {len(result.services)} services, {len(result.cves)} CVE lookups")
+            ui.info(
+                f"Fast Recon completed in {elapsed:.1f}s: {len(result.open_ports)} ports, {len(result.services)} services, {len(result.cves)} CVE lookups"
+            )
             # timing breakdown
             for task, t in result.task_timings.items():
-                ui.info(f"  {task}: {t.get('duration_ms',0)/1000:.1f}s ({t.get('status')})")
+                ui.info(f"  {task}: {t.get('duration_ms', 0) / 1000:.1f}s ({t.get('status')})")
         except Exception:
             pass

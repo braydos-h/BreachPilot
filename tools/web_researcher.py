@@ -399,7 +399,9 @@ class SerpAPIResearchProvider(ResearchProvider):
 
     name = "serpapi"
 
-    def __init__(self, settings: SerpAPIResearchSettings, *, timeout_seconds: int, max_content_chars: int, user_agent: str) -> None:
+    def __init__(
+        self, settings: SerpAPIResearchSettings, *, timeout_seconds: int, max_content_chars: int, user_agent: str
+    ) -> None:
         super().__init__(timeout_seconds=timeout_seconds, max_content_chars=max_content_chars)
         self.settings = settings
         self.user_agent = user_agent
@@ -642,7 +644,9 @@ class WebResearcher:
         fallback_used = False
         provider_used = "none"
         try:
-            search_results, provider_used, provider_warnings, fallback_used = await self._search_structured_async(clean_query)
+            search_results, provider_used, provider_warnings, fallback_used = await self._search_structured_async(
+                clean_query
+            )
             warnings.extend(provider_warnings)
         except ResearchProviderError as exc:
             warnings.append(exc.public_message())
@@ -669,7 +673,9 @@ class WebResearcher:
                 )
 
         ranked_results = self._dedupe_and_rank(search_results)
-        searched_sources = [self._source_from_search_result(result) for result in ranked_results[: self.settings.max_results]]
+        searched_sources = [
+            self._source_from_search_result(result) for result in ranked_results[: self.settings.max_results]
+        ]
         fetch_candidates = self._select_fetch_candidates(ranked_results)
         if not fetch_candidates and ranked_results:
             warnings.append("Only low-quality search results were available; using top snippets only.")
@@ -887,9 +893,7 @@ class WebResearcher:
     def _select_fetch_candidates(self, results: list[SearchResult]) -> list[SearchResult]:
         threshold = _quality_threshold(self.settings.min_source_quality)
         candidates = [
-            result
-            for result in results
-            if source_quality_score(result.url, result.title, result.content) >= threshold
+            result for result in results if source_quality_score(result.url, result.title, result.content) >= threshold
         ]
         return candidates[: self.settings.max_fetch_depth]
 
@@ -1304,14 +1308,7 @@ def is_private_or_internal_host(hostname: str) -> bool:
         ip = ipaddress.ip_address(host)
     except ValueError:
         return False
-    return (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_reserved
-        or ip.is_multicast
-        or ip.is_unspecified
-    )
+    return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified
 
 
 def canonicalize_url(url: str) -> str:

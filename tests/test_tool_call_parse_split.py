@@ -33,9 +33,7 @@ def _tool_call_msg(name="check_os", args=None):
     return {
         "message": {
             "content": "probing",
-            "tool_calls": [
-                {"function": {"name": name, "arguments": args or {"target_ip": "10.0.0.1"}}}
-            ],
+            "tool_calls": [{"function": {"name": name, "arguments": args or {"target_ip": "10.0.0.1"}}}],
         }
     }
 
@@ -113,17 +111,11 @@ async def test_parse_error_surfaces_as_internal_parse_error(tmp_path) -> None:
         )
 
     tool_msgs = [m for m in result["messages"] if m.get("role") == "tool"]
-    parse_msgs = [
-        m for m in tool_msgs if str(m.get("content", "")).startswith("INTERNAL_PARSE_ERROR:")
-    ]
-    assert parse_msgs, (
-        f"expected an INTERNAL_PARSE_ERROR tool message, got {tool_msgs!r}"
-    )
+    parse_msgs = [m for m in tool_msgs if str(m.get("content", "")).startswith("INTERNAL_PARSE_ERROR:")]
+    assert parse_msgs, f"expected an INTERNAL_PARSE_ERROR tool message, got {tool_msgs!r}"
     # None of the tool messages should be a transport-style ERROR:
     assert not any(str(m.get("content", "")).startswith("ERROR:") for m in tool_msgs)
 
     # record_blocked must NOT have fired -> no terminal-constraint prompt.
-    all_feedback = "\n".join(
-        str(m.get("content", "")) for m in result["messages"]
-    )
+    all_feedback = "\n".join(str(m.get("content", "")) for m in result["messages"])
     assert "Repeated blocked or unavailable tool outcomes" not in all_feedback

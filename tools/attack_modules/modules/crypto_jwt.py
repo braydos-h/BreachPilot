@@ -161,4 +161,3 @@ if jwt_token:
 else:
     print("No JWT token found on target. Try authenticated endpoints.")
 '''
-

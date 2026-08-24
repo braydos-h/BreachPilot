@@ -31,9 +31,7 @@ def recon_config() -> ReconConfig:
 
 class TestWebSpiderEnumerator:
     @pytest.mark.asyncio
-    async def test_enumerate_web_spider_appends_result(
-        self, recon_config: ReconConfig
-    ) -> None:
+    async def test_enumerate_web_spider_appends_result(self, recon_config: ReconConfig) -> None:
         """_enumerate_web_spider appends the http_spider result dict to
         result.spider_results."""
         canned = {
@@ -64,9 +62,7 @@ class TestWebSpiderEnumerator:
         assert "spider:80" in updated.evidence_refs
 
     @pytest.mark.asyncio
-    async def test_enumerate_web_spider_https_scheme(
-        self, recon_config: ReconConfig
-    ) -> None:
+    async def test_enumerate_web_spider_https_scheme(self, recon_config: ReconConfig) -> None:
         """https service / 443 port -> scheme=https."""
         canned = {"target_ip": "10.0.0.50", "port": 443, "urls_visited": ["/"]}
         with patch("tools.recon_enrichers.http_spider", return_value=canned) as mock_spider:
@@ -80,9 +76,7 @@ class TestWebSpiderEnumerator:
         assert kwargs.get("scheme") == "https"
 
     @pytest.mark.asyncio
-    async def test_enumerate_web_spider_swallows_exception(
-        self, recon_config: ReconConfig
-    ) -> None:
+    async def test_enumerate_web_spider_swallows_exception(self, recon_config: ReconConfig) -> None:
         """A spider exception must not crash the pipeline."""
         with patch("tools.recon_enrichers.http_spider", side_effect=RuntimeError("boom")):
             enumerator = SecondaryEnumerator(recon_config)
@@ -97,9 +91,7 @@ class TestWebSpiderEnumerator:
 
 class TestOsintEnumerator:
     @pytest.mark.asyncio
-    async def test_enumerate_osint_populates_osint_and_ipv6(
-        self, recon_config: ReconConfig
-    ) -> None:
+    async def test_enumerate_osint_populates_osint_and_ipv6(self, recon_config: ReconConfig) -> None:
         """_enumerate_osint stores run_osint dict in result.osint and copies
         ipv6_addresses into result.ipv6_addresses."""
         canned = {
@@ -120,9 +112,7 @@ class TestOsintEnumerator:
         assert updated.ipv6_addresses == ["2001:db8::1", "2001:db8::2"]
 
     @pytest.mark.asyncio
-    async def test_enumerate_osint_swallows_failure(
-        self, recon_config: ReconConfig
-    ) -> None:
+    async def test_enumerate_osint_swallows_failure(self, recon_config: ReconConfig) -> None:
         """An OSINT failure must never break the pipeline — osint stays {}."""
         with patch("tools.recon_osint.run_osint", side_effect=RuntimeError("dns down")):
             enumerator = SecondaryEnumerator(recon_config)
@@ -133,9 +123,7 @@ class TestOsintEnumerator:
         assert any("osint" in w.lower() for w in updated.warnings)
 
     @pytest.mark.asyncio
-    async def test_enumerate_osint_empty_ipv6_is_safe(
-        self, recon_config: ReconConfig
-    ) -> None:
+    async def test_enumerate_osint_empty_ipv6_is_safe(self, recon_config: ReconConfig) -> None:
         """run_osint returning no ipv6 must leave ipv6_addresses as [] (no crash)."""
         canned = {
             "target_ip": "10.0.0.50",

@@ -6,6 +6,7 @@ off, ``NVDClient`` does not construct the enricher and ``_parse`` output is
 unchanged. EPSS batches CVEs per call; KEV caches the CISA catalog to disk
 with a TTL.
 """
+
 from __future__ import annotations
 
 import time
@@ -47,12 +48,16 @@ def _nvd_payload(cve_id: str) -> dict:
 
 # ── EPSSClient ────────────────────────────────────────────────────────────────
 
+
 def test_epss_get_batch_parses_response() -> None:
     def fake_fetch(url):
-        return {"data": [
-            {"cve": "CVE-2021-44228", "epss": "0.97", "percentile": "0.999"},
-            {"cve": "CVE-2020-1234", "epss": "0.50", "percentile": "0.90"},
-        ]}
+        return {
+            "data": [
+                {"cve": "CVE-2021-44228", "epss": "0.97", "percentile": "0.999"},
+                {"cve": "CVE-2020-1234", "epss": "0.50", "percentile": "0.90"},
+            ]
+        }
+
     client = EPSSClient(_settings(epss_enabled=True))
     recs = client.get_batch(["CVE-2021-44228", "CVE-2020-1234"], fetch_fn=fake_fetch)
     assert recs["CVE-2021-44228"]["epss"] == pytest.approx(0.97)
@@ -62,9 +67,11 @@ def test_epss_get_batch_parses_response() -> None:
 
 def test_epss_get_batch_caches_results() -> None:
     calls = {"n": 0}
+
     def fake_fetch(url):
         calls["n"] += 1
         return {"data": [{"cve": "CVE-X", "epss": "0.1", "percentile": "0.2"}]}
+
     client = EPSSClient(_settings(epss_enabled=True))
     client.get_batch(["CVE-X"], fetch_fn=fake_fetch)
     client.get_batch(["CVE-X"], fetch_fn=fake_fetch)  # second call served from cache
@@ -79,16 +86,20 @@ def test_epss_get_batch_empty_input() -> None:
 def test_epss_get_batch_failure_returns_empty() -> None:
     def boom(url):
         raise RuntimeError("net down")
+
     client = EPSSClient(_settings(epss_enabled=True))
     assert client.get_batch(["CVE-1"], fetch_fn=boom) == {}
 
 
 def test_epss_get_batch_skips_garbage_rows() -> None:
     def fake_fetch(url):
-        return {"data": [
-            {"cve": "CVE-1", "epss": "not-a-number", "percentile": "0.5"},
-            {"cve": "CVE-2", "epss": "0.3", "percentile": "0.4"},
-        ]}
+        return {
+            "data": [
+                {"cve": "CVE-1", "epss": "not-a-number", "percentile": "0.5"},
+                {"cve": "CVE-2", "epss": "0.3", "percentile": "0.4"},
+            ]
+        }
+
     client = EPSSClient(_settings(epss_enabled=True))
     recs = client.get_batch(["CVE-1", "CVE-2"], fetch_fn=fake_fetch)
     assert "CVE-1" not in recs  # garbage epss dropped
@@ -116,9 +127,11 @@ def test_kev_is_known_exploited_from_fetch(tmp_path: Path) -> None:
 def test_kev_caches_to_disk(tmp_path: Path) -> None:
     cache = tmp_path / "kev.json"
     calls = {"n": 0}
+
     def fake_fetch(url):
         calls["n"] += 1
         return _KEV_FEED
+
     cat = KEVCatalog(_settings(kev_enabled=True), cache_path=str(cache), fetch_fn=fake_fetch)
     cat.is_known_exploited("CVE-2021-44228")
     assert cache.exists(), "KEV catalog should be written to disk cache"
@@ -131,15 +144,18 @@ def test_kev_caches_to_disk(tmp_path: Path) -> None:
 def test_kev_refreshes_after_ttl(tmp_path: Path) -> None:
     cache = tmp_path / "kev.json"
     calls = {"n": 0}
+
     def fake_fetch(url):
         calls["n"] += 1
         return _KEV_FEED
+
     # TTL of 1s so we can expire it.
     cat = KEVCatalog(_settings(kev_enabled=True, kev_cache_ttl_seconds=1), cache_path=str(cache), fetch_fn=fake_fetch)
     cat.is_known_exploited("CVE-2021-44228")
     assert calls["n"] == 1
     # Backdate the cache file so it's older than TTL.
     import os
+
     old = time.time() - 10
     os.utime(cache, (old, old))
     cat2 = KEVCatalog(_settings(kev_enabled=True, kev_cache_ttl_seconds=1), cache_path=str(cache), fetch_fn=fake_fetch)
@@ -150,11 +166,13 @@ def test_kev_refreshes_after_ttl(tmp_path: Path) -> None:
 def test_kev_failure_returns_false(tmp_path: Path) -> None:
     def boom(url):
         raise RuntimeError("cisa down")
+
     cat = KEVCatalog(_settings(kev_enabled=True), cache_path=str(tmp_path / "kev.json"), fetch_fn=boom)
     assert cat.is_known_exploited("CVE-2021-44228") is False
 
 
 # ── NVDClient enrichment wiring ───────────────────────────────────────────────
+
 
 def test_nvd_parse_enriches_when_enabled(tmp_path: Path) -> None:
     """With epss_enabled + kev_enabled ON, _parse populates CVEEntry fields."""
@@ -201,8 +219,8 @@ def test_nvd_parse_kev_only_when_epss_off(tmp_path: Path) -> None:
     client._kev._fetch_fn = lambda u: _KEV_FEED
     entries = client._parse(_nvd_payload("CVE-2021-44228"))
     e = entries[0]
-    assert e.epss is None       # EPSS off -> untouched
-    assert e.kev is True        # KEV on -> populated
+    assert e.epss is None  # EPSS off -> untouched
+    assert e.kev is True  # KEV on -> populated
 
 
 def test_search_by_cpe_sync_builds_cpe_param(monkeypatch) -> None:
@@ -226,8 +244,9 @@ def test_search_by_cpe_sync_empty_cpe_returns_empty() -> None:
 
 
 def test_format_cve_results_renders_epss_kev() -> None:
-    e = CVEEntry(cve_id="CVE-2021-44228", severity="CRITICAL", cvss_score=9.8,
-                 epss=0.97, epss_percentile=0.999, kev=True)
+    e = CVEEntry(
+        cve_id="CVE-2021-44228", severity="CRITICAL", cvss_score=9.8, epss=0.97, epss_percentile=0.999, kev=True
+    )
     out = __import__("tools.cve_lookup", fromlist=["format_cve_results"]).format_cve_results([e], "log4j")
     assert "EPSS: 0.9700" in out
     assert "KEV: yes" in out
@@ -235,6 +254,7 @@ def test_format_cve_results_renders_epss_kev() -> None:
 
 
 # ── End-to-end config wiring (D1) ────────────────────────────────────────────
+
 
 def test_build_cve_search_wires_kev_epss_from_config() -> None:
     """build_cve_search must thread cve_lookup.kev_enabled / epss_enabled /

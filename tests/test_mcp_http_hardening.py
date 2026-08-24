@@ -16,6 +16,7 @@ CLAUDE.md documents but were previously missing or only partially present:
 These tests exercise the gate and the auth wrapper directly (no live
 uvicorn bind), which is all that is needed on a box without the deps.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -101,6 +102,7 @@ def _dummy_app():
     async def app(scope, receive, send):
         await send({"type": "http.response.start", "status": 200, "headers": []})
         await send({"type": "http.response.body", "body": b"OK"})
+
     return app
 
 

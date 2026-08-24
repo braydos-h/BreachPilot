@@ -6,6 +6,7 @@ clearing, no EDR defeat, no audit-trail mutation. These tests are hermetic --
 no real network, no real sleep -- using injected fakes for rng / fetch_fn /
 rate_limiter / sleep_fn / socket resolver.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -211,8 +212,8 @@ def test_pacing_delay_ordering_stealth_normal_aggressive_maximum(paced_profile):
     assert s > n > a > m
     assert s == pytest.approx(20.0)  # 10 * 2.0
     assert n == pytest.approx(10.0)  # 10 * 1.0
-    assert a == pytest.approx(5.0)   # 10 * 0.5
-    assert m == 0.0                  # 10 * 0.0
+    assert a == pytest.approx(5.0)  # 10 * 0.5
+    assert m == 0.0  # 10 * 0.0
 
 
 def test_pacing_delay_unknown_aggression_defaults_to_normal_factor(paced_profile):
@@ -348,7 +349,9 @@ def test_suggest_rewrites_t5_and_t4():
 def test_suggest_rewrites_masscan_and_ffuf():
     mgr = OpsecManager(OpsecProfile(enabled=True))
     assert mgr.suggest_low_noise_alternative("masscan 10.0.0.0/24 -p1-65535") == "nmap -sS -Pn 10.0.0.0/24 -p1-65535"
-    assert mgr.suggest_low_noise_alternative("ffuf -u https://x/FUZZ -w wl.txt") == "nmap -sV -u https://x/FUZZ -w wl.txt"
+    assert (
+        mgr.suggest_low_noise_alternative("ffuf -u https://x/FUZZ -w wl.txt") == "nmap -sV -u https://x/FUZZ -w wl.txt"
+    )
 
 
 def test_suggest_returns_none_for_benign():
@@ -372,7 +375,9 @@ def _doh_payload(ips: list[str]) -> dict:
 
 def test_doh_resolve_with_canned_fetch_returns_parsed_ips(monkeypatch):
     # Make sure system resolver is NOT touched on the happy path.
-    monkeypatch.setattr("tools.opsec.socket.getaddrinfo", lambda *a, **k: pytest.fail("system resolver must not be used"))
+    monkeypatch.setattr(
+        "tools.opsec.socket.getaddrinfo", lambda *a, **k: pytest.fail("system resolver must not be used")
+    )
     p = OpsecProfile(enabled=True, doh=True, doh_provider="cloudflare")
     fetch = make_canned_fetch(_doh_payload(["93.184.216.34", "93.184.216.35"]))
     mgr = OpsecManager(p, fetch_fn=fetch)
@@ -380,7 +385,9 @@ def test_doh_resolve_with_canned_fetch_returns_parsed_ips(monkeypatch):
 
 
 def test_doh_resolve_dedupes(monkeypatch):
-    monkeypatch.setattr("tools.opsec.socket.getaddrinfo", lambda *a, **k: pytest.fail("system resolver must not be used"))
+    monkeypatch.setattr(
+        "tools.opsec.socket.getaddrinfo", lambda *a, **k: pytest.fail("system resolver must not be used")
+    )
     p = OpsecProfile(enabled=True, doh=True, doh_provider="google")
     fetch = make_canned_fetch(_doh_payload(["1.2.3.4", "1.2.3.4", "5.6.7.8"]))
     mgr = OpsecManager(p, fetch_fn=fetch)
@@ -390,9 +397,12 @@ def test_doh_resolve_dedupes(monkeypatch):
 def test_doh_resolve_fetch_failure_falls_back_to_system(monkeypatch):
     p = OpsecProfile(enabled=True, doh=True, doh_provider="cloudflare")
     fetch = make_canned_fetch(_doh_payload(["9.9.9.9"]), raise_on=1)
-    monkeypatch.setattr("tools.opsec.socket.getaddrinfo", lambda host, *a, **k: [
-        (0, 0, 0, "", ("203.0.113.10", 0)),
-    ])
+    monkeypatch.setattr(
+        "tools.opsec.socket.getaddrinfo",
+        lambda host, *a, **k: [
+            (0, 0, 0, "", ("203.0.113.10", 0)),
+        ],
+    )
     mgr = OpsecManager(p, fetch_fn=fetch)
     # fetch raises -> falls back to system resolver -> never raises.
     assert mgr.doh_resolve("fail.example") == ["203.0.113.10"]
@@ -417,9 +427,12 @@ def test_doh_resolve_when_doh_off_uses_system_resolver(monkeypatch):
 
 def test_doh_resolve_bad_provider_falls_back(monkeypatch):
     p = OpsecProfile(enabled=True, doh=True, doh_provider="bogus")
-    monkeypatch.setattr("tools.opsec.socket.getaddrinfo", lambda host, *a, **k: [
-        (0, 0, 0, "", ("198.51.100.7", 0)),
-    ])
+    monkeypatch.setattr(
+        "tools.opsec.socket.getaddrinfo",
+        lambda host, *a, **k: [
+            (0, 0, 0, "", ("198.51.100.7", 0)),
+        ],
+    )
     mgr = OpsecManager(p, fetch_fn=lambda url, headers: pytest.fail("fetch must not be called for bad provider"))
     assert mgr.doh_resolve("bad.example") == ["198.51.100.7"]
 
@@ -455,6 +468,7 @@ def test_manager_from_config_builds_profile_and_forwards_kwargs():
 def test_process_user_agent_unconfigured_returns_default():
     # The module starts unconfigured (or configured off). Reset to be safe.
     import tools.opsec as opsec_mod
+
     opsec_mod._process_manager = None
     assert process_user_agent("NetAttackAi-OSINT/1.0") == "NetAttackAi-OSINT/1.0"
     assert process_user_agent() == "NetAttackAi/1.0"
@@ -462,6 +476,7 @@ def test_process_user_agent_unconfigured_returns_default():
 
 def test_process_user_agent_after_configure_with_rotation_returns_pool_ua():
     import tools.opsec as opsec_mod
+
     opsec_mod._process_manager = None
     p = OpsecProfile(enabled=True, ua_rotation=True)
     configure(p, rng=lambda: 0.0)
@@ -474,6 +489,7 @@ def test_process_user_agent_after_configure_with_rotation_returns_pool_ua():
 
 def test_process_user_agent_after_configure_without_rotation_returns_default():
     import tools.opsec as opsec_mod
+
     opsec_mod._process_manager = None
     p = OpsecProfile(enabled=True, ua_rotation=False)
     configure(p)

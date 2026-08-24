@@ -37,8 +37,7 @@ def log_decision(
     success: bool | None = None,
     evidence_refs: list[str] | None = None,
 ) -> None:
-    """Append one decision record. Never raises (observability is best-effort).
-    """
+    """Append one decision record. Never raises (observability is best-effort)."""
     try:
         record: dict[str, Any] = {
             "ts": time.time(),

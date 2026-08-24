@@ -105,6 +105,7 @@ def register_workspace_tools(mcp: Any, *, ctx: ToolContext) -> None:
         local_script = attempt_dir / cleaned
         if script_path != local_script:
             import shutil
+
             shutil.copy2(str(script_path), str(local_script))
             script_path = local_script
 
@@ -143,13 +144,15 @@ def register_workspace_tools(mcp: Any, *, ctx: ToolContext) -> None:
             exe = ps_quote(argv[0])
             args = ", ".join(ps_quote(a) for a in argv[1:])
             wrapper.write_text(
-                "\n".join([
-                    "$ErrorActionPreference = 'Continue'",
-                    f"$Host.UI.RawUI.WindowTitle = {ps_quote('AI Exploit Python: ' + str(target_ip))}",
-                    f"Set-Location -LiteralPath {ps_quote(str(attempt_dir))}",
-                    f"$args = @({args})",
-                    f"& {exe} @args 2>&1 | Tee-Object -FilePath {ps_quote(str(log_path))}",
-                ]),
+                "\n".join(
+                    [
+                        "$ErrorActionPreference = 'Continue'",
+                        f"$Host.UI.RawUI.WindowTitle = {ps_quote('AI Exploit Python: ' + str(target_ip))}",
+                        f"Set-Location -LiteralPath {ps_quote(str(attempt_dir))}",
+                        f"$args = @({args})",
+                        f"& {exe} @args 2>&1 | Tee-Object -FilePath {ps_quote(str(log_path))}",
+                    ]
+                ),
                 encoding="utf-8",
             )
             proc = subprocess.Popen(
@@ -206,7 +209,6 @@ def register_workspace_tools(mcp: Any, *, ctx: ToolContext) -> None:
             f"LOG_TAIL:\n{log_tail}"
         )
 
-
     @mcp.tool()
     @audit_tool
     def read_workspace_file(filename: str) -> str:
@@ -236,7 +238,8 @@ def register_workspace_tools(mcp: Any, *, ctx: ToolContext) -> None:
             pass
         files = sorted(
             entries,
-            key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True,
+            key=lambda p: p.stat().st_mtime if p.exists() else 0,
+            reverse=True,
         )
         if not files:
             return "WORKSPACE: empty."
@@ -251,6 +254,3 @@ def register_workspace_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 rel = f.relative_to(ws)
                 lines.append(f"  {rel}/ (directory)")
         return "\n".join(lines)
-
-
-

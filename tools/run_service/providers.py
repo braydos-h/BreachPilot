@@ -27,15 +27,18 @@ def _maybe_await(value: Any) -> Any:
     """
     if inspect.isawaitable(value):
         return value
+
     # Wrap sync returns in a coroutine so the caller can always ``await``.
     async def _wrap() -> Any:
         return value
+
     return _wrap()
 
 
 # ---------------------------------------------------------------------------
 # Decision provider
 # ---------------------------------------------------------------------------
+
 
 @runtime_checkable
 class DecisionProvider(Protocol):
@@ -71,9 +74,7 @@ class TerminalDecisionProvider:
             if decision.required_text:
                 try:
                     proceed = await _maybe_await(
-                        self._ui.ask_destructive_confirm(
-                            decision.required_text.replace("ALLOW ", "")
-                        )
+                        self._ui.ask_destructive_confirm(decision.required_text.replace("ALLOW ", ""))
                     )
                 except (EOFError, KeyboardInterrupt):
                     return ""
@@ -87,20 +88,23 @@ class TerminalDecisionProvider:
             # ponytail: options are transport-neutral dicts ([{name, compatible, ...}]);
             # AttackUi reads attrs. Rehydrate to SuggestedGoal at the terminal boundary.
             from tools.goal_suggester import SuggestedGoal
+
             options = []
             for opt in decision.options:
                 if isinstance(opt, dict):
-                    options.append(SuggestedGoal(
-                        name=opt.get("name", ""),
-                        description=opt.get("description", ""),
-                        exploit_likelihood=opt.get("exploit_likelihood", "Possible"),
-                        success_rating=int(opt.get("success_rating", 0)),
-                        rationale=opt.get("rationale", ""),
-                        compatible=bool(opt.get("compatible", True)),
-                        blocked_reason=opt.get("blocked_reason", ""),
-                        risk_requirement=opt.get("risk_requirement", "safe"),
-                        is_ai_generated=bool(opt.get("is_ai_generated", False)),
-                    ))
+                    options.append(
+                        SuggestedGoal(
+                            name=opt.get("name", ""),
+                            description=opt.get("description", ""),
+                            exploit_likelihood=opt.get("exploit_likelihood", "Possible"),
+                            success_rating=int(opt.get("success_rating", 0)),
+                            rationale=opt.get("rationale", ""),
+                            compatible=bool(opt.get("compatible", True)),
+                            blocked_reason=opt.get("blocked_reason", ""),
+                            risk_requirement=opt.get("risk_requirement", "safe"),
+                            is_ai_generated=bool(opt.get("is_ai_generated", False)),
+                        )
+                    )
                 else:
                     options.append(opt)
             try:
@@ -110,9 +114,7 @@ class TerminalDecisionProvider:
             return custom if custom else name
         if kind == "tool_approval":
             try:
-                answer = await _maybe_await(
-                    self._ui.ask_tool_approval(decision.prompt_text, decision.required_text)
-                )
+                answer = await _maybe_await(self._ui.ask_tool_approval(decision.prompt_text, decision.required_text))
             except (EOFError, KeyboardInterrupt):
                 return ""
             return answer
@@ -132,6 +134,7 @@ class TerminalDecisionProvider:
         ``"<action>:custom:<custom_text>"`` to match the service closure.
         """
         from tools.attack_ui import Choice
+
         options = decision.options or []
         # First-level choices: the action buttons.
         action_choices: list[Any] = []
@@ -147,14 +150,17 @@ class TerminalDecisionProvider:
             return ""
         try:
             selected_action = await self._ui._qselect(
-                decision.prompt_text or "Operator checkpoint:", action_choices,
+                decision.prompt_text or "Operator checkpoint:",
+                action_choices,
                 default=action_choices[0],
             )
         except (EOFError, KeyboardInterrupt):
             return "finish"
         selected_action = str(selected_action or "")
         # If the selected action carries a nested goal list, pick a goal.
-        selected_opt = next((o for o in options if isinstance(o, dict) and str(o.get("action", "")) == selected_action), None)
+        selected_opt = next(
+            (o for o in options if isinstance(o, dict) and str(o.get("action", "")) == selected_action), None
+        )
         nested_goals = (selected_opt or {}).get("goals") if isinstance(selected_opt, dict) else None
         if isinstance(nested_goals, list) and nested_goals:
             goal_choices: list[Any] = []
@@ -169,7 +175,9 @@ class TerminalDecisionProvider:
             if goal_choices:
                 try:
                     selected_goal = await self._ui._qselect(
-                        "Select a goal:", goal_choices, default=goal_choices[0],
+                        "Select a goal:",
+                        goal_choices,
+                        default=goal_choices[0],
                     )
                 except (EOFError, KeyboardInterrupt):
                     selected_goal = ""
@@ -196,21 +204,24 @@ class ApiDecisionProvider:
 
     def __init__(self, run_id: str, broker: Any, emit_event: Any) -> None:
         self._run_id = run_id
-        self._broker = broker            # DecisionBroker
-        self._emit_event = emit_event     # callable: emit decision event to EventBroker
+        self._broker = broker  # DecisionBroker
+        self._emit_event = emit_event  # callable: emit decision event to EventBroker
 
     async def request(self, decision: Decision) -> str:
         decision.run_id = self._run_id
         await self._broker.create(decision)
         await self._emit_event("state", {"state": "awaiting_input"})
         # Notify subscribers that a decision is pending.
-        await self._emit_event("approval", {
-            "decision_id": decision.id,
-            "kind": decision.kind.value,
-            "prompt_text": decision.prompt_text,
-            "required_text": decision.required_text,
-            "options": decision.options,
-        })
+        await self._emit_event(
+            "approval",
+            {
+                "decision_id": decision.id,
+                "kind": decision.kind.value,
+                "prompt_text": decision.prompt_text,
+                "required_text": decision.required_text,
+                "options": decision.options,
+            },
+        )
         answer = await self._broker.await_answer(decision.id)
         return answer
 
@@ -218,6 +229,7 @@ class ApiDecisionProvider:
 # ---------------------------------------------------------------------------
 # Event sink
 # ---------------------------------------------------------------------------
+
 
 @runtime_checkable
 class EventSink(Protocol):
@@ -255,6 +267,7 @@ class ApiEventSink:
 # Approval provider
 # ---------------------------------------------------------------------------
 
+
 @runtime_checkable
 class ApprovalProvider(Protocol):
     """Gate a single tool call. Used by ``ExploitPolicy.approve_action``.
@@ -290,14 +303,11 @@ class TerminalApprovalProvider:
         host = str(target or "target")
         prompt = (
             "\n" + "=" * 70 + "\n"
-            "  EXPLOIT ACTION REQUIRES APPROVAL\n"
-            + "=" * 70 + "\n"
+            "  EXPLOIT ACTION REQUIRES APPROVAL\n" + "=" * 70 + "\n"
             f"  Target:   {target}\n"
             f"  Action:   {action}\n"
             f"  Detail:   {detail[:300] if detail else 'n/a'}\n"
-            f"  Command:  {command[:200]}\n"
-            + "-" * 70
-            + f"\nType ALLOW {host} to approve, anything else to deny: "
+            f"  Command:  {command[:200]}\n" + "-" * 70 + f"\nType ALLOW {host} to approve, anything else to deny: "
         )
         try:
             answer = await asyncio.to_thread(self._prompt_func, prompt)
@@ -316,6 +326,7 @@ class ApiApprovalProvider:
 
     async def approve(self, action: str, command: str, detail: str, target: str) -> bool:
         from tools.run_service.models import Decision, DecisionKind
+
         decision = Decision(
             id="",  # broker assigns
             run_id=self._run_id,
@@ -330,6 +341,7 @@ class ApiApprovalProvider:
 # ---------------------------------------------------------------------------
 # Cancellation
 # ---------------------------------------------------------------------------
+
 
 class CancellationToken:
     """Cooperative cancellation flag for a run.

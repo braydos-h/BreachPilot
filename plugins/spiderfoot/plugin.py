@@ -136,12 +136,7 @@ def _register_spiderfoot_tools(mcp: Any, ctx: Any) -> None:
             scan_id = json.loads(body_text).get("scan_id", "")
         except Exception:  # noqa: BLE001
             scan_id = ""
-        return (
-            f"SPIDERFOOT_SCAN_RESULT: started\n"
-            f"SCAN_ID: {scan_id}\n"
-            f"TARGET: {target}\n"
-            f"RESPONSE: {body_text[:2000]}"
-        )
+        return f"SPIDERFOOT_SCAN_RESULT: started\nSCAN_ID: {scan_id}\nTARGET: {target}\nRESPONSE: {body_text[:2000]}"
 
     @mcp.tool()
     @audit_tool

@@ -269,26 +269,32 @@ def test_forbidden_actions_empty_fills_defaults():
 # ── M31: _validate_asset_string per-label validation ─────────────────────
 
 
-@pytest.mark.parametrize("bad", [
-    "....",       # all empty labels
-    "-.-.",       # hyphen-only labels
-    "*.-.com",    # wildcard with leading-hyphen label
-    "---.com",    # leading-hyphen label
-    "example..com",  # empty interior label
-    "-example.com",  # leading hyphen
-    "example-.com",  # trailing hyphen
-])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "....",  # all empty labels
+        "-.-.",  # hyphen-only labels
+        "*.-.com",  # wildcard with leading-hyphen label
+        "---.com",  # leading-hyphen label
+        "example..com",  # empty interior label
+        "-example.com",  # leading hyphen
+        "example-.com",  # trailing hyphen
+    ],
+)
 def test_validate_asset_string_rejects_malformed_domains(bad: str) -> None:
     assert _validate_asset_string(bad) is False
 
 
-@pytest.mark.parametrize("good", [
-    "example.com",
-    "sub.example.com",
-    "*.example.com",
-    "a-b.example.com",
-    "x.example.com",
-])
+@pytest.mark.parametrize(
+    "good",
+    [
+        "example.com",
+        "sub.example.com",
+        "*.example.com",
+        "a-b.example.com",
+        "x.example.com",
+    ],
+)
 def test_validate_asset_string_accepts_well_formed_domains(good: str) -> None:
     assert _validate_asset_string(good) is True
 

@@ -88,8 +88,8 @@ api = shodan.Shodan("YOUR_SHODAN_API_KEY")
 
 # Search for specific C2 framework signatures (Cobalt Strike beacon)
 results = api.search('product:"Cobalt Strike" port:443')
-for r in results['matches']:
-    print(r['ip_str'], r['port'], r['org'], r.get('ssl', {}).get('cert', {}).get('subject', ''))
+for r in results["matches"]:
+    print(r["ip_str"], r["port"], r["org"], r.get("ssl", {}).get("cert", {}).get("subject", ""))
 
 # Find infrastructure associated with a known threat actor's ASN
 results = api.search('asn:AS12345 http.title:"Redirector"')

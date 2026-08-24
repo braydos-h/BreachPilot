@@ -6,6 +6,7 @@ the layer has the right technique IDs, scores, unknown tools skipped, and the
 schema matches Navigator 4.5. Also tests the full export_attack_navigator()
 path (audit file read, path-traversal guard, empty audit trail).
 """
+
 from __future__ import annotations
 
 import json
@@ -89,6 +90,7 @@ def test_build_layer_no_target_filter_counts_all():
 def test_build_layer_comment_capped():
     """Comment length is capped at _MAX_COMMENT_CHARS."""
     from tools.mitre_export import _MAX_COMMENT_CHARS
+
     big = "x" * 500
     records = [{"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.5", "status": big}]
     layer = build_navigator_layer(records, _DEFAULT_MAP, target_ip="10.0.0.5", include_skills=False)
@@ -99,6 +101,7 @@ def test_build_layer_comment_capped():
 def test_build_layer_techniques_capped():
     """The technique set is capped at _MAX_TECHNIQUES."""
     from tools.mitre_export import _MAX_TECHNIQUES
+
     # generate records with more unique techniques than the cap
     records = []
     for i in range(_MAX_TECHNIQUES + 50):
@@ -172,10 +175,13 @@ def _write_audit(tmp_path: Path, records: list) -> Path:
 
 
 def test_export_writes_layer_file(tmp_path):
-    audit = _write_audit(tmp_path, [
-        {"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.5", "status": "completed"},
-        {"tool_name": "dump_credentials", "target_ip": "10.0.0.5", "status": "completed"},
-    ])
+    audit = _write_audit(
+        tmp_path,
+        [
+            {"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.5", "status": "completed"},
+            {"tool_name": "dump_credentials", "target_ip": "10.0.0.5", "status": "completed"},
+        ],
+    )
     out_dir = tmp_path / "mitre"
     result = export_attack_navigator(
         "10.0.0.5",
@@ -212,9 +218,11 @@ def test_export_empty_audit_returns_empty_techniques(tmp_path):
 def test_export_skips_malformed_jsonl_lines(tmp_path):
     audit = tmp_path / "audit.jsonl"
     audit.write_text(
-        json.dumps({"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.5", "status": "completed"}) + "\n"
+        json.dumps({"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.5", "status": "completed"})
+        + "\n"
         + "not json at all\n"
-        + json.dumps({"tool_name": "dump_credentials", "target_ip": "10.0.0.5", "status": "completed"}) + "\n",
+        + json.dumps({"tool_name": "dump_credentials", "target_ip": "10.0.0.5", "status": "completed"})
+        + "\n",
         encoding="utf-8",
     )
     out_dir = tmp_path / "mitre"
@@ -228,7 +236,9 @@ def test_export_skips_malformed_jsonl_lines(tmp_path):
 
 
 def test_export_path_traversal_coerced_under_output_dir(tmp_path):
-    audit = _write_audit(tmp_path, [{"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.5", "status": "completed"}])
+    audit = _write_audit(
+        tmp_path, [{"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.5", "status": "completed"}]
+    )
     out_dir = tmp_path / "mitre"
     # attempt to escape via ../
     result = export_attack_navigator(
@@ -272,7 +282,9 @@ def test_export_missing_audit_file_returns_empty(tmp_path):
 
 
 def test_export_makes_output_dir(tmp_path):
-    audit = _write_audit(tmp_path, [{"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.5", "status": "completed"}])
+    audit = _write_audit(
+        tmp_path, [{"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.5", "status": "completed"}]
+    )
     out_dir = tmp_path / "deeply" / "nested" / "mitre"
     assert not out_dir.exists()
     result = export_attack_navigator(

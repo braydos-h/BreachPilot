@@ -204,9 +204,7 @@ def run_osint(
     # Certificate transparency only meaningful for a hostname (domain).
     if resolved_hostname:
         try:
-            result["cert_transparency"] = crtsh_cert_transparency(
-                resolved_hostname, fetch_fn=fetch_fn
-            )
+            result["cert_transparency"] = crtsh_cert_transparency(resolved_hostname, fetch_fn=fetch_fn)
         except Exception as exc:
             result["cert_transparency"] = {
                 "domain": resolved_hostname,
@@ -217,9 +215,7 @@ def run_osint(
 
     # Optional Shodan lookup (read-only, gated on api_key).
     try:
-        result["shodan"] = shodan_lookup(
-            target_ip, shodan_api_key, fetch_fn=fetch_fn
-        )
+        result["shodan"] = shodan_lookup(target_ip, shodan_api_key, fetch_fn=fetch_fn)
     except Exception as exc:
         result["shodan"] = {"enabled": bool(shodan_api_key), "error": "osint failed: %s" % exc}
 

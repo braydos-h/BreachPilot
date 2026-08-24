@@ -22,23 +22,31 @@ def _tools(*names):
 
 def test_recon_phase_keeps_recon_and_universal_drops_exploit():
     all_tools = _tools(
-        "check_os", "quick_scan", "run_full_recon",        # recon
-        "run_exploit_terminal", "write_python_file",      # universal
-        "run_msf_module", "generate_payload",              # exploit
-        "dump_credentials",                                # post-exploit
+        "check_os",
+        "quick_scan",
+        "run_full_recon",  # recon
+        "run_exploit_terminal",
+        "write_python_file",  # universal
+        "run_msf_module",
+        "generate_payload",  # exploit
+        "dump_credentials",  # post-exploit
     )
     selected = select_tools_for_phase(all_tools, "recon")
     names = {t["function"]["name"] for t in selected}
     assert "quick_scan" in names
-    assert "run_exploit_terminal" in names        # universal
-    assert "run_msf_module" not in names           # exploit dropped in recon
+    assert "run_exploit_terminal" in names  # universal
+    assert "run_msf_module" not in names  # exploit dropped in recon
     assert "dump_credentials" not in names
 
 
 def test_validation_phase_keeps_exploit_drops_recon():
     all_tools = _tools(
-        "check_os", "quick_scan", "run_full_recon",
-        "run_msf_module", "generate_payload", "run_python_file",
+        "check_os",
+        "quick_scan",
+        "run_full_recon",
+        "run_msf_module",
+        "generate_payload",
+        "run_python_file",
     )
     selected = select_tools_for_phase(all_tools, "validation")
     names = {t["function"]["name"] for t in selected}
@@ -60,8 +68,8 @@ def test_universal_set_always_kept():
 def test_hidden_control_plane_tools_dropped():
     all_tools = _tools(
         "run_exploit_terminal",  # universal
-        "create_attack_plan",    # hidden
-        "replan",                # hidden
+        "create_attack_plan",  # hidden
+        "replan",  # hidden
         "start_autonomous_campaign",  # hidden
     )
     for phase in PHASE_TOOL_FAMILIES:
@@ -75,9 +83,7 @@ def test_hidden_control_plane_tools_dropped():
 def test_available_mcp_names_filter_applied():
     all_tools = _tools("check_os", "quick_scan", "run_full_recon")
     # Only check_os is registered on the live MCP session.
-    selected = select_tools_for_phase(
-        all_tools, "recon", available_mcp_names={"check_os"}
-    )
+    selected = select_tools_for_phase(all_tools, "recon", available_mcp_names={"check_os"})
     names = {t["function"]["name"] for t in selected}
     assert names == {"check_os"}
 
@@ -119,7 +125,8 @@ def test_present_required_passes():
 
 def test_wrong_type_returns_error():
     schema = _schema_with_required(
-        "quick_scan", ["target_ip"],
+        "quick_scan",
+        ["target_ip"],
         {"target_ip": {"type": "string"}, "ports": {"type": "string"}},
     )
     err = validate_tool_call("quick_scan", {"target_ip": "10.0.0.5", "ports": 22}, [schema])
@@ -130,7 +137,8 @@ def test_wrong_type_returns_error():
 
 def test_enum_violation_returns_error():
     schema = _schema_with_required(
-        "run_msf_module", ["module"],
+        "run_msf_module",
+        ["module"],
         {"module": {"type": "string", "enum": ["exploit/windows/smb/ms17_010", "auxiliary/scanner/smb/smb_version"]}},
     )
     err = validate_tool_call("run_msf_module", {"module": "bogus/module"}, [schema])
@@ -140,7 +148,8 @@ def test_enum_violation_returns_error():
 
 def test_valid_call_returns_none():
     schema = _schema_with_required(
-        "quick_scan", ["target_ip"],
+        "quick_scan",
+        ["target_ip"],
         {"target_ip": {"type": "string"}, "ports": {"type": "string"}},
     )
     assert validate_tool_call("quick_scan", {"target_ip": "10.0.0.5", "ports": "22,80"}, [schema]) is None

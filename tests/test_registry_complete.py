@@ -62,6 +62,7 @@ def test_registered_modules_have_unique_names() -> None:
 
 def test_register_attack_module_decorator_appends() -> None:
     """Decorating a fresh subclass registers it without editing _MODULE_CLASSES."""
+
     class _TempModule(AttackModule):
         name = "_TempModuleForTest"
         description = "test fixture"

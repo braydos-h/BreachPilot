@@ -19,9 +19,9 @@ from typing import Any
 
 # ── Risk requirement tags ──────────────────────────────────────────────────
 
-SAFE = "safe"                # always allowed
-GATED = "gated"              # needs standard_authorized or higher
-HIGH = "high"                # needs high_authorized_testing
+SAFE = "safe"  # always allowed
+GATED = "gated"  # needs standard_authorized or higher
+HIGH = "high"  # needs high_authorized_testing
 
 
 # ── Preset goals with risk categorization ──────────────────────────────────
@@ -60,7 +60,6 @@ PRESET_GOALS: dict[str, dict[str, Any]] = {
         ),
         "risk_requirement": SAFE,
     },
-
     # ── Gated presets (need standard_authorized or higher) ──
     "initial_access": {
         "description": (
@@ -80,7 +79,6 @@ PRESET_GOALS: dict[str, dict[str, Any]] = {
         ),
         "risk_requirement": GATED,
     },
-
     # ── High presets (need high_authorized_testing) ──
     "backdoor": {
         "description": (
@@ -174,6 +172,7 @@ def _goal_compatible(goal_requirement: str, risk_profile: str) -> bool:
 
 # ── AttackGoal dataclass ───────────────────────────────────────────────────
 
+
 @dataclass
 class AttackGoal:
     name: str
@@ -203,9 +202,15 @@ If you are stuck after multiple attempts, try a completely different angle rathe
         # block (dump_credentials / lateral_exec / persistence) would directly
         # contradict the goal's own scope. verify_cves gets the base block only.
         attack_goals = {
-            "initial_access", "backdoor", "privilege_escalation", "full_compromise",
-            "credential_dumping", "pivot_and_discovery", "lateral_movement",
-            "data_exfiltration", "whatever_it_takes",
+            "initial_access",
+            "backdoor",
+            "privilege_escalation",
+            "full_compromise",
+            "credential_dumping",
+            "pivot_and_discovery",
+            "lateral_movement",
+            "data_exfiltration",
+            "whatever_it_takes",
         }
         if self.name in attack_goals:
             base += """
@@ -253,6 +258,7 @@ POST-EXPLOITATION PRIORITY:
 
 # ── GoalEngine ─────────────────────────────────────────────────────────────
 
+
 class GoalEngine:
     """Manages attack goals with risk-profile compatibility checking."""
 
@@ -273,9 +279,7 @@ class GoalEngine:
             result.append((key, desc))
         return result
 
-    def list_presets_with_risk(
-        self, risk_profile: str | None = None
-    ) -> list[tuple[str, str, str]]:
+    def list_presets_with_risk(self, risk_profile: str | None = None) -> list[tuple[str, str, str]]:
         """Return (name, description_snippet, compat_status) for all presets."""
         result: list[tuple[str, str, str]] = []
         for key, goal in self.presets.items():
@@ -286,9 +290,7 @@ class GoalEngine:
             result.append((key, desc, compat))
         return result
 
-    def list_compatible_presets(
-        self, risk_profile: str
-    ) -> list[tuple[str, str]]:
+    def list_compatible_presets(self, risk_profile: str) -> list[tuple[str, str]]:
         """Return (name, description_snippet) for presets compatible with the risk profile."""
         result: list[tuple[str, str]] = []
         for key, goal in self.presets.items():

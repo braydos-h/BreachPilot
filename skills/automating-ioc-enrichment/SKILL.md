@@ -78,6 +78,7 @@ from typing import Optional
 
 RATE_LIMIT_DELAY = 0.25  # 4 requests/second for VT free tier
 
+
 @dataclass
 class EnrichmentResult:
     ioc_value: str
@@ -89,14 +90,12 @@ class EnrichmentResult:
     misp_events: list = field(default_factory=list)
     confidence_score: int = 0
 
+
 def enrich_ip(ip: str, vt_key: str, abuse_key: str, shodan_key: str) -> EnrichmentResult:
     result = EnrichmentResult(ip, "ip")
 
     # VirusTotal IP lookup
-    vt_resp = requests.get(
-        f"https://www.virustotal.com/api/v3/ip_addresses/{ip}",
-        headers={"x-apikey": vt_key}
-    )
+    vt_resp = requests.get(f"https://www.virustotal.com/api/v3/ip_addresses/{ip}", headers={"x-apikey": vt_key})
     if vt_resp.status_code == 200:
         stats = vt_resp.json()["data"]["attributes"]["last_analysis_stats"]
         result.vt_malicious = stats.get("malicious", 0)
@@ -108,25 +107,22 @@ def enrich_ip(ip: str, vt_key: str, abuse_key: str, shodan_key: str) -> Enrichme
     abuse_resp = requests.get(
         "https://api.abuseipdb.com/api/v2/check",
         headers={"Key": abuse_key, "Accept": "application/json"},
-        params={"ipAddress": ip, "maxAgeInDays": 90}
+        params={"ipAddress": ip, "maxAgeInDays": 90},
     )
     if abuse_resp.status_code == 200:
         result.abuse_confidence = abuse_resp.json()["data"]["abuseConfidenceScore"]
 
     # Calculate composite confidence score
     result.confidence_score = min(
-        (result.vt_malicious / max(result.vt_total, 1)) * 60 +
-        (result.abuse_confidence / 100) * 40, 100
+        (result.vt_malicious / max(result.vt_total, 1)) * 60 + (result.abuse_confidence / 100) * 40, 100
     )
 
     return result
 
+
 def enrich_hash(sha256: str, vt_key: str) -> EnrichmentResult:
     result = EnrichmentResult(sha256, "sha256")
-    vt_resp = requests.get(
-        f"https://www.virustotal.com/api/v3/files/{sha256}",
-        headers={"x-apikey": vt_key}
-    )
+    vt_resp = requests.get(f"https://www.virustotal.com/api/v3/files/{sha256}", headers={"x-apikey": vt_key})
     if vt_resp.status_code == 200:
         stats = vt_resp.json()["data"]["attributes"]["last_analysis_stats"]
         result.vt_malicious = stats.get("malicious", 0)
@@ -154,10 +150,13 @@ In Cortex XSOAR, create an enrichment playbook:
 import time
 from functools import wraps
 
+
 def rate_limited(max_per_second):
     min_interval = 1.0 / max_per_second
+
     def decorator(func):
         last_called = [0.0]
+
         @wraps(func)
         def wrapper(*args, **kwargs):
             elapsed = time.time() - last_called[0]
@@ -167,8 +166,11 @@ def rate_limited(max_per_second):
             result = func(*args, **kwargs)
             last_called[0] = time.time()
             return result
+
         return wrapper
+
     return decorator
+
 
 def retry_on_429(max_retries=3):
     def decorator(func):
@@ -181,7 +183,9 @@ def retry_on_429(max_retries=3):
                     time.sleep(retry_after)
                 else:
                     return response
+
         return wrapper
+
     return decorator
 ```
 

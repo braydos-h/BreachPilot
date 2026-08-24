@@ -32,6 +32,7 @@ def register_replay_simulator_tools(mcp: Any, *, ctx: ToolContext) -> None:
     def replay_simulate(plan_json: str, recon_json: str) -> str:
         """Dry-run an attack plan against a saved ReconAssessment JSON for pre-commit critique. Both arguments are JSON strings. Returns confidence (0..1), critique text, and branch proposals. Zero target touch -- pure simulation. When the LLM is unavailable, degrades to rule-based scoring."""
         import json as _json
+
         if not plan_json or not plan_json.strip():
             return "BLOCKED: plan_json is required."
         if not recon_json or not recon_json.strip():

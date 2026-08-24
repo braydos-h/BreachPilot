@@ -74,6 +74,7 @@ import shodan
 import json
 from datetime import datetime
 
+
 class ShodanEnricher:
     def __init__(self, api_key):
         self.api = shodan.Shodan(api_key)
@@ -121,9 +122,11 @@ class ShodanEnricher:
 
             # Calculate reputation score
             enrichment["reputation"] = self._calculate_reputation(enrichment)
-            print(f"[+] {ip_address}: {len(enrichment['ports'])} ports, "
-                  f"{len(enrichment['vulns'])} vulns, "
-                  f"reputation: {enrichment['reputation']['level']}")
+            print(
+                f"[+] {ip_address}: {len(enrichment['ports'])} ports, "
+                f"{len(enrichment['vulns'])} vulns, "
+                f"reputation: {enrichment['reputation']['level']}"
+            )
             return enrichment
 
         except shodan.APIError as e:
@@ -148,8 +151,7 @@ class ShodanEnricher:
             factors.append(f"{vuln_count} known vulnerabilities")
 
         # Suspicious port analysis
-        suspicious_ports = {4444, 5555, 6666, 8888, 9090, 1234, 31337,
-                           6667, 6697, 8080, 8443, 3128, 1080}
+        suspicious_ports = {4444, 5555, 6666, 8888, 9090, 1234, 31337, 6667, 6697, 8080, 8443, 3128, 1080}
         open_ports = set(data.get("ports", []))
         sus_found = open_ports.intersection(suspicious_ports)
         if sus_found:
@@ -170,26 +172,25 @@ class ShodanEnricher:
             score += 15
             factors.append(f"excessive open ports ({port_count})")
 
-        level = (
-            "critical" if score >= 50
-            else "high" if score >= 35
-            else "medium" if score >= 15
-            else "low"
-        )
+        level = "critical" if score >= 50 else "high" if score >= 35 else "medium" if score >= 15 else "low"
 
         return {"score": score, "level": level, "factors": factors}
 
     def enrich_ip_free(self, ip_address):
         """Quick IP enrichment using free InternetDB API."""
         import requests
+
         resp = requests.get(f"https://internetdb.shodan.io/{ip_address}", timeout=10)
         if resp.status_code == 200:
             data = resp.json()
-            print(f"[+] InternetDB: {ip_address} -> "
-                  f"{len(data.get('ports', []))} ports, "
-                  f"{len(data.get('vulns', []))} vulns")
+            print(
+                f"[+] InternetDB: {ip_address} -> "
+                f"{len(data.get('ports', []))} ports, "
+                f"{len(data.get('vulns', []))} vulns"
+            )
             return data
         return None
+
 
 enricher = ShodanEnricher("YOUR_SHODAN_API_KEY")
 result = enricher.enrich_ip("8.8.8.8")
@@ -201,6 +202,7 @@ print(json.dumps(result, indent=2, default=str))
 ```python
 import time
 
+
 def batch_ip_reputation(enricher, ip_list, output_file="ip_reputation.json"):
     """Check reputation for a list of IP addresses."""
     results = []
@@ -209,7 +211,7 @@ def batch_ip_reputation(enricher, ip_list, output_file="ip_reputation.json"):
         if result:
             results.append(result)
         if (i + 1) % 10 == 0:
-            print(f"  [{i+1}/{len(ip_list)}] Processed")
+            print(f"  [{i + 1}/{len(ip_list)}] Processed")
             time.sleep(1)  # Rate limiting
 
     # Sort by reputation score (highest risk first)
@@ -230,6 +232,7 @@ def batch_ip_reputation(enricher, ip_list, output_file="ip_reputation.json"):
         print(f"  {level.upper()}: {count}")
 
     return results
+
 
 suspicious_ips = ["203.0.113.1", "198.51.100.5", "192.0.2.100"]
 results = batch_ip_reputation(enricher, suspicious_ips)
@@ -256,11 +259,13 @@ def correlate_infrastructure(enricher, ip_address):
         try:
             results = enricher.api.search(f'org:"{org}"', limit=20)
             for match in results.get("matches", []):
-                correlations["same_org"].append({
-                    "ip": match.get("ip_str", ""),
-                    "port": match.get("port", 0),
-                    "product": match.get("product", ""),
-                })
+                correlations["same_org"].append(
+                    {
+                        "ip": match.get("ip_str", ""),
+                        "port": match.get("port", 0),
+                        "product": match.get("product", ""),
+                    }
+                )
         except shodan.APIError:
             pass
 
@@ -273,10 +278,12 @@ def correlate_infrastructure(enricher, ip_address):
                 try:
                     results = enricher.api.search(f'ssl.cert.subject.CN:"{cn}"', limit=20)
                     for match in results.get("matches", []):
-                        correlations["shared_ssl"].append({
-                            "ip": match.get("ip_str", ""),
-                            "cn": cn,
-                        })
+                        correlations["shared_ssl"].append(
+                            {
+                                "ip": match.get("ip_str", ""),
+                                "cn": cn,
+                            }
+                        )
                 except shodan.APIError:
                     pass
 

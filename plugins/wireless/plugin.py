@@ -100,16 +100,16 @@ def _register_wireless_tools(mcp: Any, ctx: Any) -> None:
             return "BLOCKED: wireless plugin not enabled in config."
         iface = interface or str(cfg.get("interface", "wlan0mon"))
         binary = shutil.which(str(cfg.get("bettercap_path", "bettercap"))) or "bettercap"
-        argv = ["-iface", iface, "-eval", f"wifi.recon on; sleep {int(cfg.get('channel_timeout_seconds', 30))}; wifi.show"]
+        argv = [
+            "-iface",
+            iface,
+            "-eval",
+            f"wifi.recon on; sleep {int(cfg.get('channel_timeout_seconds', 30))}; wifi.show",
+        ]
         out, rc, err = _run_tool(binary, argv, timeout=int(cfg.get("channel_timeout_seconds", 30)) + 30)
         if rc is None or rc != 0:
             return f"WIRELESS_RECON_ERROR: {err or out}"
-        return (
-            f"WIRELESS_RECON_RESULT: success\n"
-            f"BSSID_FOCUS: {target_ip}\n"
-            f"INTERFACE: {iface}\n"
-            f"OUTPUT:\n{out[:4000]}"
-        )
+        return f"WIRELESS_RECON_RESULT: success\nBSSID_FOCUS: {target_ip}\nINTERFACE: {iface}\nOUTPUT:\n{out[:4000]}"
 
     @mcp.tool()
     @require_allowlist(target_param="target_ip", audit=True)
@@ -156,10 +156,12 @@ def _register_wireless_tools(mcp: Any, ctx: Any) -> None:
         workspace.mkdir(parents=True, exist_ok=True)
         out_file = workspace / f"pmkid_{target_ip.replace(':', '')}.pcapng"
         argv = [
-            "-i", iface,
+            "-i",
+            iface,
             "--filtermode=2",
             f"--filterlist_ap={target_ip}",
-            "-o", str(out_file),
+            "-o",
+            str(out_file),
             "--active_estimate=10",
         ]
         out, rc, err = _run_tool(binary, argv, timeout=60)
@@ -175,7 +177,9 @@ def _register_wireless_tools(mcp: Any, ctx: Any) -> None:
 
     @mcp.tool()
     @require_allowlist(target_param="target_ip", audit=True)
-    def wireless_crack_pmkid(target_ip: str, capture_path: str, wordlist: str = "/usr/share/wordlists/rockyou.txt") -> str:
+    def wireless_crack_pmkid(
+        target_ip: str, capture_path: str, wordlist: str = "/usr/share/wordlists/rockyou.txt"
+    ) -> str:
         """Crack a PMKID capture file with aircrack-ng.
 
         ``target_ip`` is the BSSID for audit-trail attribution (the capture

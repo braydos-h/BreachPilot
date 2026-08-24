@@ -99,21 +99,15 @@ def _ce_api_key(config: dict[str, Any] | None) -> str:
 # dynamic query builder.
 _QUERIES = {
     "shortest_path_to_domain_admin": (
-        "MATCH (n), (m:Domain) WHERE m.name CONTAINS 'DOMAIN' "
-        "MATCH p=shortestPath((n)-[*1..15]->(m)) RETURN p LIMIT 50"
+        "MATCH (n), (m:Domain) WHERE m.name CONTAINS 'DOMAIN' MATCH p=shortestPath((n)-[*1..15]->(m)) RETURN p LIMIT 50"
     ),
     "kerberoastable_users": (
         "MATCH (u:User) WHERE u.kerberoastable=true RETURN u.name, u.serviceprincipalnames LIMIT 200"
     ),
-    "asrep_roastable_users": (
-        "MATCH (u:User) WHERE u.dontreqpreauth=true RETURN u.name LIMIT 200"
-    ),
-    "dcsync_users": (
-        "MATCH (u:User) WHERE u.owned=true OR u.dcsync=true RETURN u.name LIMIT 200"
-    ),
+    "asrep_roastable_users": ("MATCH (u:User) WHERE u.dontreqpreauth=true RETURN u.name LIMIT 200"),
+    "dcsync_users": ("MATCH (u:User) WHERE u.owned=true OR u.dcsync=true RETURN u.name LIMIT 200"),
     "all_admins": (
-        "MATCH (u:User)-[:MemberOf]->(g:Group) WHERE g.name CONTAINS 'ADMIN' "
-        "RETURN u.name, g.name LIMIT 200"
+        "MATCH (u:User)-[:MemberOf]->(g:Group) WHERE g.name CONTAINS 'ADMIN' RETURN u.name, g.name LIMIT 200"
     ),
 }
 
@@ -251,10 +245,7 @@ def _register_bloodhound_ce_tools(mcp: Any, ctx: Any) -> None:
             return "BLOCKED: query_name is required."
         key = query_name.strip().lower()
         if key not in _QUERIES:
-            return (
-                f"BLOCKED: unknown query '{query_name}'. Supported: "
-                f"{', '.join(sorted(_QUERIES.keys()))}"
-            )
+            return f"BLOCKED: unknown query '{query_name}'. Supported: {', '.join(sorted(_QUERIES.keys()))}"
         if not isinstance(limit, int) or limit <= 0 or limit > 500:
             limit = 50
 
@@ -274,11 +265,7 @@ def _register_bloodhound_ce_tools(mcp: Any, ctx: Any) -> None:
                     f"NOTE: neo4j driver unavailable and CE REST API did not respond. "
                     f"Install the 'neo4j' package or start bloodhound-ce."
                 )
-            return (
-                f"BLOODHOUND_CE_QUERY_RESULT: http_{status}\n"
-                f"QUERY: {key}\n"
-                f"RESPONSE: {body[:4000]}"
-            )
+            return f"BLOODHOUND_CE_QUERY_RESULT: http_{status}\nQUERY: {key}\nRESPONSE: {body[:4000]}"
         try:
             results = _run_cypher(driver, _QUERIES[key], limit=limit)
         except Exception as exc:  # noqa: BLE001

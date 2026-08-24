@@ -43,6 +43,7 @@ def test_compose_binds_loopback_only():
     text = compose.read_text(encoding="utf-8")
     # Every port mapping must start with 127.0.0.1:
     import re
+
     port_lines = re.findall(r'"([^"]*:\d+:\d+)"', text)
     assert port_lines, "expected at least one port mapping in compose"
     for mapping in port_lines:
@@ -60,9 +61,15 @@ def test_compose_has_four_targets():
 # ── Oracle files ─────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("oracle_name", [
-    "metasploitable2", "dvwa", "juice_shop", "vulnerable_k8s",
-])
+@pytest.mark.parametrize(
+    "oracle_name",
+    [
+        "metasploitable2",
+        "dvwa",
+        "juice_shop",
+        "vulnerable_k8s",
+    ],
+)
 def test_oracle_files_parse(oracle_name):
     path = Path("eval_targets") / f"{oracle_name}.oracle.json"
     assert path.exists(), f"missing oracle: {path}"
@@ -233,16 +240,28 @@ async def test_run_eval_suite_scores_against_oracles(tmp_path, monkeypatch):
     # Build a fake oracle dir with two minimal oracles.
     oracle_dir = tmp_path / "targets"
     oracle_dir.mkdir()
-    (oracle_dir / "a.oracle.json").write_text(json.dumps({
-        "target_id": "a", "host": "127.0.0.1",
-        "expected_findings": {"services": ["ssh", "http"], "known_cves": ["CVE-2021-44228"]},
-        "scoring": {"success_criteria": "≥3 expected creds recovered"},
-    }), encoding="utf-8")
-    (oracle_dir / "b.oracle.json").write_text(json.dumps({
-        "target_id": "b", "host": "127.0.0.1",
-        "expected_findings": {"services": ["ftp"], "vulnerabilities": ["sqli"]},
-        "scoring": {"success_criteria": "≥2 web vulns confirmed"},
-    }), encoding="utf-8")
+    (oracle_dir / "a.oracle.json").write_text(
+        json.dumps(
+            {
+                "target_id": "a",
+                "host": "127.0.0.1",
+                "expected_findings": {"services": ["ssh", "http"], "known_cves": ["CVE-2021-44228"]},
+                "scoring": {"success_criteria": "≥3 expected creds recovered"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (oracle_dir / "b.oracle.json").write_text(
+        json.dumps(
+            {
+                "target_id": "b",
+                "host": "127.0.0.1",
+                "expected_findings": {"services": ["ftp"], "vulnerabilities": ["sqli"]},
+                "scoring": {"success_criteria": "≥2 web vulns confirmed"},
+            }
+        ),
+        encoding="utf-8",
+    )
 
     # Mock docker compose + run_eval.
     monkeypatch.setattr("tools.eval_harness.docker_suite_up", lambda *a, **k: 0)
@@ -252,6 +271,7 @@ async def test_run_eval_suite_scores_against_oracles(tmp_path, monkeypatch):
         # Write a synthetic eval report that mentions expected tokens so the
         # heuristic finding extractor picks them up.
         import json as _json
+
         eval_dir = Path("reports/eval") / f"run-{args.target}"
         eval_dir.mkdir(parents=True, exist_ok=True)
         # Mention ssh + http + CVE-2021-44228 for target 127.0.0.1 (oracle a).
@@ -267,6 +287,7 @@ async def test_run_eval_suite_scores_against_oracles(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     from argparse import Namespace
+
     args = Namespace(target="127.0.0.1", config=tmp_path / "config.yaml")
     report = await run_eval_suite(args, compose_up=True, compose_down=True, oracle_dir=oracle_dir)
 

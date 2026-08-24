@@ -71,11 +71,7 @@ class HypothesisState:
 
     @property
     def check_fingerprints(self) -> set[str]:
-        return {
-            str(item.get("fingerprint", ""))
-            for item in self.check_history
-            if item.get("fingerprint")
-        }
+        return {str(item.get("fingerprint", "")) for item in self.check_history if item.get("fingerprint")}
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -272,7 +268,9 @@ class OutcomeJudge:
             elif unsatisfied:
                 reason_bits.append("Required success criteria remain unsatisfied.")
             if triggered_stops:
-                reason_bits.append("A stop condition was observed, but it did not by itself prove or disprove the claim.")
+                reason_bits.append(
+                    "A stop condition was observed, but it did not by itself prove or disprove the claim."
+                )
             if not has_terminal_evidence:
                 reason_bits.append("There are not enough persisted evidence references for a terminal judgment.")
 
@@ -366,9 +364,7 @@ class HypothesisRepository:
                         "UPDATE hypotheses SET candidate_checks_json=?, updated_at=? WHERE id=?",
                         (json.dumps(merged), now, state.hypothesis_id),
                     )
-                    row = conn.execute(
-                        "SELECT * FROM hypotheses WHERE id=?", (state.hypothesis_id,)
-                    ).fetchone()
+                    row = conn.execute("SELECT * FROM hypotheses WHERE id=?", (state.hypothesis_id,)).fetchone()
         return _row_to_hypothesis(dict(row)) if row is not None else None
 
     def prepare_task(self, task: Mapping[str, Any]) -> tuple[HypothesisState | None, str]:
@@ -444,9 +440,7 @@ class HypothesisRepository:
             ).fetchone()
             if existing is not None:
                 persisted = _row_to_assessment(dict(existing))
-                current = conn.execute(
-                    "SELECT * FROM hypotheses WHERE id=?", (state.hypothesis_id,)
-                ).fetchone()
+                current = conn.execute("SELECT * FROM hypotheses WHERE id=?", (state.hypothesis_id,)).fetchone()
                 return persisted, _row_to_hypothesis(dict(current)) if current else state
 
             history = list(state.check_history)
@@ -460,12 +454,8 @@ class HypothesisRepository:
                         "phase": str(task.get("phase", "")),
                         "risk_level": str(task.get("risk_level", "low")),
                         "estimated_cost": task.get("estimated_cost", 0.1),
-                        "success_criteria": _criterion_list(
-                            task.get("success_criteria", [])
-                        ),
-                        "stop_conditions": _criterion_list(
-                            task.get("stop_conditions", [])
-                        ),
+                        "success_criteria": _criterion_list(task.get("success_criteria", [])),
+                        "stop_conditions": _criterion_list(task.get("stop_conditions", [])),
                         "execution_outcome": assessment.execution_outcome.value,
                         "hypothesis_status": assessment.hypothesis_status.value,
                         "evidence_refs": assessment.evidence_refs,
@@ -473,13 +463,7 @@ class HypothesisRepository:
                     }
                 )
             merged_refs = _merge_refs(state.evidence_refs, assessment.evidence_refs)
-            independent_count = len(
-                {
-                    item.get("fingerprint")
-                    for item in history
-                    if item.get("fingerprint")
-                }
-            )
+            independent_count = len({item.get("fingerprint") for item in history if item.get("fingerprint")})
             persisted = replace(
                 assessment,
                 assessment_id=assessment_id,
@@ -562,9 +546,7 @@ class HypothesisRepository:
                 task_id=assessment.task_id,
                 metadata=persisted.to_dict(),
             )
-            row = conn.execute(
-                "SELECT * FROM hypotheses WHERE id=?", (state.hypothesis_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM hypotheses WHERE id=?", (state.hypothesis_id,)).fetchone()
         return persisted, _row_to_hypothesis(dict(row)) if row else state
 
     def get_assessment_for_task(self, task_id: str) -> OutcomeAssessment | None:
@@ -595,9 +577,7 @@ def build_check_fingerprint(task: Mapping[str, Any]) -> str:
     if not tool:
         payload["method"] = _normalize_text(explicit_method)
         if not explicit_method:
-            payload["objective"] = _normalize_retry_objective(
-                str(task.get("objective", ""))
-            )
+            payload["objective"] = _normalize_retry_objective(str(task.get("objective", "")))
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
@@ -623,9 +603,7 @@ def _execution_outcome(result: Any) -> ExecutionOutcome:
     if bool(_get(result, "success", False)):
         return ExecutionOutcome.SUCCEEDED
     error = str(_get(result, "error", "")).lower()
-    gate_passed = bool(_get(result, "scope_gate_passed", False)) or bool(
-        _get(result, "risk_gate_passed", False)
-    )
+    gate_passed = bool(_get(result, "scope_gate_passed", False)) or bool(_get(result, "risk_gate_passed", False))
     blocked_markers = ("out of scope", "blocked", "approval", "not authorized", "scope gate")
     if not gate_passed and any(marker in error for marker in blocked_markers):
         return ExecutionOutcome.BLOCKED
@@ -745,9 +723,7 @@ def _text_criterion_met(criterion: str, observation: Mapping[str, Any]) -> bool:
     signals = _flatten_text(observation.get("interesting_signals", []))
     evidence_items = _flatten_text(observation.get("hypothesis_evidence", []))
     dead_ends = _flatten_text(observation.get("dead_ends", []))
-    structured = (
-        facts + endpoints + technologies + assets + signals + evidence_items + dead_ends
-    )
+    structured = facts + endpoints + technologies + assets + signals + evidence_items + dead_ends
 
     if "endpoints" in criterion_norm and "technologies" in criterion_norm:
         return bool(endpoints) and bool(technologies)
@@ -794,9 +770,7 @@ def _explicit_evidence_scores(observation: Mapping[str, Any]) -> tuple[float, fl
         entries = [entries]
     for entry in entries if isinstance(entries, (list, tuple)) else []:
         if isinstance(entry, Mapping):
-            polarity = str(
-                entry.get("polarity", entry.get("status", entry.get("hypothesis_status", "")))
-            ).lower()
+            polarity = str(entry.get("polarity", entry.get("status", entry.get("hypothesis_status", "")))).lower()
             confidence = _clamp(entry.get("confidence", 1.0))
         else:
             polarity = str(entry).lower()
@@ -833,12 +807,14 @@ def _texts_contradict(expected: str, actual: str) -> bool:
     expected_norm = _normalize_text(expected)
     actual_norm = _normalize_text(actual)
     pairs = (
-        ({"open", "reachable", "present", "enabled", "allowed", "responds", "exposes"}, {
-            "closed", "unreachable", "absent", "disabled", "denied", "down", "filtered"
-        }),
-        ({"closed", "unreachable", "absent", "disabled", "denied", "down"}, {
-            "open", "reachable", "present", "enabled", "allowed", "up"
-        }),
+        (
+            {"open", "reachable", "present", "enabled", "allowed", "responds", "exposes"},
+            {"closed", "unreachable", "absent", "disabled", "denied", "down", "filtered"},
+        ),
+        (
+            {"closed", "unreachable", "absent", "disabled", "denied", "down"},
+            {"open", "reachable", "present", "enabled", "allowed", "up"},
+        ),
     )
     expected_tokens = _meaningful_tokens(expected_norm)
     actual_tokens = _meaningful_tokens(actual_norm)
@@ -851,10 +827,7 @@ def _texts_contradict(expected: str, actual: str) -> bool:
         anchors_match = bool(expected_numbers & actual_numbers)
     if not anchors_match:
         return False
-    if any(
-        (expected_tokens & positive) and (actual_tokens & negative)
-        for positive, negative in pairs
-    ):
+    if any((expected_tokens & positive) and (actual_tokens & negative) for positive, negative in pairs):
         return True
     if re.search(r"\b(no|not|never|without)\b", actual_norm):
         positive_expected = expected_tokens & _POLARITY_TOKENS
@@ -1071,15 +1044,11 @@ def _row_to_assessment(data: Mapping[str, Any]) -> OutcomeAssessment:
         confidence=_clamp(data.get("confidence", 0.5)),
         satisfied_criteria=_json_list(data.get("satisfied_criteria_json", "[]")),
         unsatisfied_criteria=_json_list(data.get("unsatisfied_criteria_json", "[]")),
-        triggered_stop_conditions=_json_list(
-            data.get("triggered_stop_conditions_json", "[]")
-        ),
+        triggered_stop_conditions=_json_list(data.get("triggered_stop_conditions_json", "[]")),
         evidence_refs=_json_list(data.get("evidence_refs_json", "[]")),
         reasoning=str(data.get("reasoning", "")),
         information_value=_clamp(data.get("information_value", 0.0)),
-        another_investigation_justified=bool(
-            data.get("another_investigation_justified", 0)
-        ),
+        another_investigation_justified=bool(data.get("another_investigation_justified", 0)),
         check_fingerprint=str(data.get("check_fingerprint", "")),
         independent_check=bool(data.get("independent_check", 0)),
         attempt_count=int(data.get("attempt_count", 0) or 0),

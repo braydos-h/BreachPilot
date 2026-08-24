@@ -36,6 +36,7 @@ def temp_db(tmp_path):
 def mock_executor():
     def _exec(tool: str, args: dict) -> str:
         return f"Mock output for {tool}"
+
     return _exec
 
 
@@ -182,6 +183,7 @@ def test_semantic_memory_similarity_roundtrip(temp_db):
 def test_config_yaml_has_new_sections():
     """Verify config.yaml contains all new configuration sections."""
     import yaml
+
     config_path = Path("config.yaml")
     assert config_path.exists()
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
@@ -212,15 +214,20 @@ def test_main_cli_parses_new_flags():
     """Verify main.py parse_args handles all new CLI flags."""
     from main import parse_args
 
-    args = parse_args([
-        "--target", "10.0.0.1",
-        "--mode", "attack",
-        "--swarm",
-        "--critic",
-        "--reflection",
-        "--adaptive-exploits",
-        "--observer-mode", "llm",
-    ])
+    args = parse_args(
+        [
+            "--target",
+            "10.0.0.1",
+            "--mode",
+            "attack",
+            "--swarm",
+            "--critic",
+            "--reflection",
+            "--adaptive-exploits",
+            "--observer-mode",
+            "llm",
+        ]
+    )
     assert args.swarm is True
     assert args.critic is True
     assert args.reflection is True

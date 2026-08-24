@@ -123,13 +123,15 @@ def generate_atomic_yaml(findings: list[str]) -> str:
         if tid in seen_techniques:
             continue
         seen_techniques.add(tid)
-        lines.extend([
-            f"  - technique_id: {tid}",
-            f"    technique_name: {tech['technique_name']}",
-            f"    atomic_test: {tech['atomic_test']}",
-            f"    platform: {tech['platform']}",
-            f"    source_finding: {finding}",
-        ])
+        lines.extend(
+            [
+                f"  - technique_id: {tid}",
+                f"    technique_name: {tech['technique_name']}",
+                f"    atomic_test: {tech['atomic_test']}",
+                f"    platform: {tech['platform']}",
+                f"    source_finding: {finding}",
+            ]
+        )
     if unmapped:
         lines.append("unmapped_findings:")
         for u in unmapped:
@@ -152,6 +154,7 @@ class AtomicRedTeamPlugin(Plugin):
     def _load_manifest() -> PluginManifest:
         text = _MANIFEST_PATH.read_text(encoding="utf-8")
         from tools.plugins import _parse_manifest_yaml  # type: ignore
+
         return PluginManifest.from_dict(_parse_manifest_yaml(text))
 
     def register(self, registry: PluginRegistry) -> None:

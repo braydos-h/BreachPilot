@@ -32,9 +32,7 @@ _FQDN_RE = re.compile(
 )
 
 # Regex to find an IP-like substring that may have trailing garbage.
-_LOOSE_IPV4_RE = re.compile(
-    r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})([^0-9\.].*)?$"
-)
+_LOOSE_IPV4_RE = re.compile(r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})([^0-9\.].*)?$")
 
 # Token that is a valid IPv4 optionally followed by a CIDR suffix (/NN) and/or
 # a port suffix (:NNNN). Such tokens are legitimate and must NOT be "corrected"
@@ -259,11 +257,13 @@ def sanitize_target_in_command(command: str) -> tuple[str, list[dict[str, Any]]]
             # Otherwise try to sanitize trailing garbage
             fixed = sanitize_ipv4(token)
             if fixed:
-                corrections.append({
-                    "original": token,
-                    "sanitized": fixed,
-                    "valid": True,
-                })
+                corrections.append(
+                    {
+                        "original": token,
+                        "sanitized": fixed,
+                        "valid": True,
+                    }
+                )
                 new_tokens.append(fixed)
                 continue
         new_tokens.append(token)
@@ -449,9 +449,7 @@ def is_subdomain_of(candidate: str, parent: str) -> bool:
     return c.endswith("." + p)
 
 
-def is_private_or_local_target(
-    target_ip: str, extra_local_cidrs: Sequence[str] | None = None
-) -> bool:
+def is_private_or_local_target(target_ip: str, extra_local_cidrs: Sequence[str] | None = None) -> bool:
     """True when ``target_ip`` is a private / local-network address (not public-routable).
 
     This is the "local vs public" classifier used by the target-aware OPSEC
@@ -568,9 +566,17 @@ def parse_service_banners(text: str) -> list[dict[str, Any]]:
 
         # Infer service from port
         common_ports = {
-            22: "ssh", 23: "telnet", 25: "smtp", 53: "dns",
-            80: "http", 110: "pop3", 143: "imap", 443: "https",
-            445: "smb", 3389: "rdp", 8080: "http-proxy",
+            22: "ssh",
+            23: "telnet",
+            25: "smtp",
+            53: "dns",
+            80: "http",
+            110: "pop3",
+            143: "imap",
+            443: "https",
+            445: "smb",
+            3389: "rdp",
+            8080: "http-proxy",
         }
         service = common_ports.get(port, "unknown")
 
@@ -594,16 +600,18 @@ def parse_service_banners(text: str) -> list[dict[str, Any]]:
             service = "rdp"
 
         seen_ports.add((port, protocol))
-        records.append({
-            "host": host,
-            "port": port,
-            "protocol": protocol,
-            "service": service,
-            "product": product,
-            "version": version,
-            "os_guess": os_guess,
-            "raw_banner": banner,
-        })
+        records.append(
+            {
+                "host": host,
+                "port": port,
+                "protocol": protocol,
+                "service": service,
+                "product": product,
+                "version": version,
+                "os_guess": os_guess,
+                "raw_banner": banner,
+            }
+        )
 
     # quick_scan / socket_scan format -- merge into the same records list,
     # skipping ports the check_os/nmap regex already captured.
@@ -620,15 +628,17 @@ def parse_service_banners(text: str) -> list[dict[str, Any]]:
         if banner == "(no banner)":
             banner = ""
         seen_ports.add((port, protocol))
-        records.append({
-            "host": host,
-            "port": port,
-            "protocol": protocol,
-            "service": service,
-            "product": "",
-            "version": "",
-            "os_guess": os_guess,
-            "raw_banner": banner,
-        })
+        records.append(
+            {
+                "host": host,
+                "port": port,
+                "protocol": protocol,
+                "service": service,
+                "product": "",
+                "version": "",
+                "os_guess": os_guess,
+                "raw_banner": banner,
+            }
+        )
 
     return records

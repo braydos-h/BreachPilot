@@ -137,11 +137,7 @@ def _mask_secret_content(value: Any) -> Any:
 def _redact_nested(value: Any) -> Any:
     if isinstance(value, dict):
         return {
-            k: (
-                _REDACTED
-                if isinstance(k, str) and k.lower() in _SECRET_ARG_NAMES
-                else _redact_nested(v)
-            )
+            k: (_REDACTED if isinstance(k, str) and k.lower() in _SECRET_ARG_NAMES else _redact_nested(v))
             for k, v in value.items()
         }
     if isinstance(value, str):
@@ -251,12 +247,7 @@ def make_require_allowlist(workspace: Path, config: dict[str, Any] | None):
                             args=_redact_args(dict(bound.arguments)),
                         )
                     if not allowed:
-                        return (
-                            f"BLOCKED: {reason}\n"
-                            f"ATTEMPT_ID: preflight\n"
-                            f"TOOL: {fn.__name__}\n"
-                            f"TARGET: {target_ip}"
-                        )
+                        return f"BLOCKED: {reason}\nATTEMPT_ID: preflight\nTOOL: {fn.__name__}\nTARGET: {target_ip}"
                     result = await fn(*args, **kwargs)
                     if audit:
                         blocked = _result_is_blocked(result)
@@ -292,12 +283,7 @@ def make_require_allowlist(workspace: Path, config: dict[str, Any] | None):
                             args=_redact_args(dict(bound.arguments)),
                         )
                     if not allowed:
-                        return (
-                            f"BLOCKED: {reason}\n"
-                            f"ATTEMPT_ID: preflight\n"
-                            f"TOOL: {fn.__name__}\n"
-                            f"TARGET: {target_ip}"
-                        )
+                        return f"BLOCKED: {reason}\nATTEMPT_ID: preflight\nTOOL: {fn.__name__}\nTARGET: {target_ip}"
                     result = fn(*args, **kwargs)
                     if audit:
                         blocked = _result_is_blocked(result)

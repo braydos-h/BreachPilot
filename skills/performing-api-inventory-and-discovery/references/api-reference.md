@@ -23,6 +23,7 @@
 
 ```python
 import requests
+
 spec = requests.get("https://target.com/openapi.json").json()
 for path, methods in spec["paths"].items():
     for method, details in methods.items():

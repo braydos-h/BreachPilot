@@ -59,7 +59,7 @@ def test_serve_webui_returns_index_html(tmp_path, monkeypatch):
     assert resp.status_code == 200
     assert "text/html" in resp.headers.get("content-type", "")
     body = resp.text
-    assert "<div id=\"root\"></div>" in body
+    assert '<div id="root"></div>' in body
     assert "NetAttackAI" in body or "root" in body
 
 
@@ -69,7 +69,7 @@ def test_serve_webui_deep_link_returns_spa(tmp_path, monkeypatch):
     for path in ("/runs/123", "/runs/abc/artifacts", "/system", "/runs/new"):
         resp = client.get(path, follow_redirects=False)
         assert resp.status_code == 200, f"{path} returned {resp.status_code}"
-        assert "<div id=\"root\"></div>" in resp.text
+        assert '<div id="root"></div>' in resp.text
 
 
 @skip_if_no_build
@@ -105,8 +105,7 @@ def test_serve_webui_off_leaves_root_404(tmp_path, monkeypatch):
 def test_serve_webui_in_memory_override_does_not_persist(tmp_path, monkeypatch):
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "ollama:\n  host: http://localhost:11434\n"
-        "api:\n  host: 127.0.0.1\n  port: 8765\n",
+        "ollama:\n  host: http://localhost:11434\napi:\n  host: 127.0.0.1\n  port: 8765\n",
         encoding="utf-8",
     )
     _make_client(tmp_path, monkeypatch, serve_webui=True)

@@ -59,7 +59,8 @@ logger = get_logger()
 ui = get_ui()
 
 _AUTONOMOUS_PROGRESS: ContextVar[Callable[[dict[str, Any]], None] | None] = ContextVar(
-    "autonomous_progress", default=None,
+    "autonomous_progress",
+    default=None,
 )
 
 
@@ -83,15 +84,18 @@ def _report_autonomous_progress(**payload: Any) -> None:
         except Exception:  # noqa: BLE001 -- observability must never stop a campaign
             pass
 
+
 # ---------------------------------------------------------------------------
 # Enums and data structures
 # ---------------------------------------------------------------------------
+
 
 class AggressionLevel(Enum):
     STEALTH = "stealth"
     NORMAL = "normal"
     AGGRESSIVE = "aggressive"
     MAXIMUM = "maximum"
+
 
 class AttackPhase(Enum):
     RECONNAISSANCE = "recon"
@@ -103,6 +107,7 @@ class AttackPhase(Enum):
     VALIDATION = "validation"
     REPORTING = "report"
 
+
 class TaskStatus(Enum):
     PENDING = "pending"
     RUNNING = "running"
@@ -111,6 +116,7 @@ class TaskStatus(Enum):
     RETRYING = "retrying"
     BLOCKED = "blocked"
     CHAINED = "chained"  # Waiting for prerequisite
+
 
 @dataclass
 class AttackTask:
@@ -173,6 +179,7 @@ class AttackTask:
         and the started/completed timestamps are preserved verbatim so retry
         accounting and timeline ordering survive the round-trip.
         """
+
         def _enum(enum_cls, value, default):
             try:
                 return enum_cls(value)
@@ -202,9 +209,11 @@ class AttackTask:
             created_from=str(data.get("created_from", "") or ""),
         )
 
+
 @dataclass
 class AttackState:
     """Persistent attack state for a target."""
+
     target: str
     current_phase: AttackPhase = AttackPhase.RECONNAISSANCE
     aggression: AggressionLevel = AggressionLevel.NORMAL
@@ -274,6 +283,7 @@ class AttackState:
         via ``HostReconResult.from_dict`` so the prior scan's open ports live
         on across the restart.
         """
+
         def _enum(enum_cls, value, default):
             try:
                 return enum_cls(value)
@@ -310,12 +320,14 @@ class AttackState:
         )
 
     def add_timeline_event(self, event_type: str, description: str, metadata: dict[str, Any] | None = None) -> None:
-        self.timeline.append({
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "event_type": event_type,
-            "description": description,
-            "metadata": metadata or {},
-        })
+        self.timeline.append(
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "event_type": event_type,
+                "description": description,
+                "metadata": metadata or {},
+            }
+        )
 
     def record_failure(self, module_name: str, error: str) -> None:
         if module_name not in self.failed_attempts:
@@ -376,6 +388,7 @@ class AttackState:
 # Retry engine with parameter modification
 # ---------------------------------------------------------------------------
 
+
 class RetryEngine:
     """Intelligent retry with parameter modification."""
 
@@ -391,9 +404,9 @@ class RetryEngine:
             {"timeout": 90, "relay": True, "signing_check": False},
         ],
         "WebShellUpload": [
-            {"extensions": [".php",".phtml",".php5"]},
-            {"extensions": [".jsp",".jspx",".war"], "bypass": "double_extension"},
-            {"extensions": [".aspx",".ashx",".asmx"], "bypass": "null_byte", "encoding": "utf-16"},
+            {"extensions": [".php", ".phtml", ".php5"]},
+            {"extensions": [".jsp", ".jspx", ".war"], "bypass": "double_extension"},
+            {"extensions": [".aspx", ".ashx", ".asmx"], "bypass": "null_byte", "encoding": "utf-16"},
         ],
         "SQLInjection": [
             {"technique": "union", "level": 1},
@@ -432,6 +445,7 @@ class RetryEngine:
         # anything the classifier misses or when the taxonomy import fails.
         try:
             from tools.failure_taxonomy import classify_failure, is_permanent
+
             fc = classify_failure(error)
             if is_permanent(fc):
                 return False
@@ -461,6 +475,7 @@ class RetryEngine:
 # ---------------------------------------------------------------------------
 # Attack module executor
 # ---------------------------------------------------------------------------
+
 
 class AttackModuleExecutor:
     """Executes attack modules with scope checking, evidence capture, and retry logic."""
@@ -603,7 +618,9 @@ class AttackModuleExecutor:
                 state.add_timeline_event("critic_deny", task.error)
                 self._record_failure_on_blackboard(task.module_name)
                 return {
-                    "success": False, "error": task.error, "blocked": True,
+                    "success": False,
+                    "error": task.error,
+                    "blocked": True,
                     "critic": critic_decision,
                 }
             if decision == "modify":
@@ -652,9 +669,7 @@ class AttackModuleExecutor:
             # ModuleContext keep every other construction site byte-identical.
             access_achieved=state.access_achieved,
             privilege_level=state.privilege_level,
-            sessions=(
-                [{"shell": state.shell_type}] if state.access_achieved and state.shell_type else []
-            ),
+            sessions=([{"shell": state.shell_type}] if state.access_achieved and state.shell_type else []),
             phase=state.current_phase.value,
             evidence_refs=list(state.loot)[-10:],
         )
@@ -801,10 +816,7 @@ class AttackModuleExecutor:
             # modules are recorded as failures so the retry loop can re-queue
             # them with a dispatchable status (the module recipe must emit
             # script/suggested_command to actually win).
-            _succeeded = (
-                result.get("status") in ("success", "exploited", "script_generated")
-                and not dispatch_failure
-            )
+            _succeeded = result.get("status") in ("success", "exploited", "script_generated") and not dispatch_failure
             task.status = TaskStatus.COMPLETED if _succeeded else TaskStatus.FAILED
             task.completed_at = time.monotonic()
 
@@ -837,7 +849,10 @@ class AttackModuleExecutor:
             # low. Advisory -- exceptions are swallowed so reflection can't stall
             # the campaign. No-op when no reflection agent is wired.
             await asyncio.to_thread(
-                self._run_reflection, task, state, {"success": _succeeded, "result": result},
+                self._run_reflection,
+                task,
+                state,
+                {"success": _succeeded, "result": result},
             )
 
             return {"success": _succeeded, "result": result}
@@ -911,9 +926,7 @@ class AttackModuleExecutor:
                 try:
                     modules_dir = ctx.workspace / "modules"
                     modules_dir.mkdir(parents=True, exist_ok=True)
-                    safe_name = re.sub(
-                        r"[^A-Za-z0-9_.-]", "_", f"{module.name}_{ctx.target_ip}.py"
-                    )
+                    safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{module.name}_{ctx.target_ip}.py")
                     script_path = modules_dir / safe_name
                     script_path.write_text(script_text, encoding="utf-8")
                     command = f"python {script_path} {ctx.target_ip}"
@@ -1003,7 +1016,8 @@ class AttackModuleExecutor:
         except Exception as exc:  # fail open -- see docstring
             logger.warning(
                 "Critic pre-check raised for %s (failing open): %r",
-                task.module_name, exc,
+                task.module_name,
+                exc,
             )
         return None
 
@@ -1022,7 +1036,8 @@ class AttackModuleExecutor:
             task.aggression = AggressionLevel.AGGRESSIVE
             task.parameters["critic_risk_downgrade"] = "high->medium"
         elif risk_level == "low" and task.aggression in (
-            AggressionLevel.MAXIMUM, AggressionLevel.AGGRESSIVE,
+            AggressionLevel.MAXIMUM,
+            AggressionLevel.AGGRESSIVE,
         ):
             task.aggression = AggressionLevel.NORMAL
             task.parameters["critic_risk_downgrade"] = "->low"
@@ -1093,7 +1108,10 @@ class AttackModuleExecutor:
         inner = result.get("result") if isinstance(result, dict) else None
         status = inner.get("status", "") if isinstance(inner, dict) else ""
         success = bool(result.get("success")) and status in (
-            "success", "exploited", "script_generated", "info",
+            "success",
+            "exploited",
+            "script_generated",
+            "info",
         )
         battle_entry = {
             "tool": task.module_name,
@@ -1118,7 +1136,8 @@ class AttackModuleExecutor:
         except Exception as exc:  # advisory -- never stall the campaign
             logger.warning(
                 "Reflection post-check raised for %s (continuing): %r",
-                task.module_name, exc,
+                task.module_name,
+                exc,
             )
 
     def _record_lesson_on_success(
@@ -1166,6 +1185,7 @@ class AttackModuleExecutor:
 # ---------------------------------------------------------------------------
 # Autonomous orchestrator
 # ---------------------------------------------------------------------------
+
 
 class AutonomousOrchestrator:
     """Main autonomous attack orchestrator.
@@ -1218,6 +1238,7 @@ class AutonomousOrchestrator:
             try:
                 from db import get_default_db
                 from tools.experience_store import ExperienceStore
+
                 self._experience_store = ExperienceStore(get_default_db())
             except Exception:  # noqa: BLE001 -- ranking degrades to static-only
                 self._experience_store = None
@@ -1236,7 +1257,8 @@ class AutonomousOrchestrator:
             try:
                 from db import get_default_db
                 from tools.semantic_memory import SemanticMemoryManager
-                _ollama_cfg = (mission_config.get("ollama", {}) or {})
+
+                _ollama_cfg = mission_config.get("ollama", {}) or {}
                 # ponytail: embeddings stay on local Ollama (embed_host) when
                 # set; falls back to ollama.host for cloud-only installs.
                 _embed_host = _ollama_cfg.get("embed_host") or _ollama_cfg.get("host", "https://api.ollama.com")
@@ -1265,6 +1287,7 @@ class AutonomousOrchestrator:
         try:
             from tools.opsec import OpsecManager
             from tools.opsec import configure as _opsec_configure
+
             self._opsec = OpsecManager.from_config(mission_config or {})
             _primary_target = (mission_config or {}).get("target") or os.environ.get("EXPLOIT_TARGET", "")
             _ua_profile = self._opsec.profile
@@ -1277,7 +1300,9 @@ class AutonomousOrchestrator:
         # critic pre-check / reflection post-check / shared blackboard
         # (Tier 0 item 0.6b). Unwired -> AttackModuleExecutor behaves as before.
         self._executor = AttackModuleExecutor(
-            scope_gate, risk_controller, evidence_store,
+            scope_gate,
+            risk_controller,
+            evidence_store,
             blackboard=blackboard,
             mission_config=mission_config,
             model_client=model_client,
@@ -1357,9 +1382,7 @@ class AutonomousOrchestrator:
         # zero novel candidate modules AND zero access achieved, give up on
         # the target instead of burning the remaining ``max_cycles`` budget.
         # 0 = off (current behavior).
-        self._hard_target_max_rounds = max(
-            0, int(mission_config.get("hard_target_max_rounds", 0) or 0)
-        )
+        self._hard_target_max_rounds = max(0, int(mission_config.get("hard_target_max_rounds", 0) or 0))
 
         # Domain targeting: the operator's original --target (domain or IP) and
         # the resolved IP for a domain target. Threaded in from
@@ -1481,9 +1504,7 @@ class AutonomousOrchestrator:
             kept.append(target)
 
         if len(kept) != len(targets):
-            logger.info(
-                f"[PREFLIGHT] {len(targets)} target(s) -> {len(kept)} after preflight"
-            )
+            logger.info(f"[PREFLIGHT] {len(targets)} target(s) -> {len(kept)} after preflight")
         return kept
 
     # ── Main campaign runner ─────────────────────────────────────────────
@@ -1550,9 +1571,7 @@ class AutonomousOrchestrator:
             except Exception as exc:  # noqa: BLE001 -- crash-bounded: one target shouldn't kill the campaign
                 logger.exception(f"Crash-bounded: _attack_target({target}) raised {exc}")
                 state = self.get_state(target)
-                state.add_timeline_event(
-                    "target_crash", f"Target {target} aborted: {exc}", {"error": str(exc)}
-                )
+                state.add_timeline_event("target_crash", f"Target {target} aborted: {exc}", {"error": str(exc)})
                 result = {"status": "crashed", "error": str(exc), "state": state.to_dict()}
             results[target] = result
             completed += 1
@@ -1604,9 +1623,7 @@ class AutonomousOrchestrator:
         if is_local_target(state.target):
             await self._phase_local_takeover(state)
             await self._phase_validation(state)
-            state.add_timeline_event(
-                "campaign_end", "Local-takeover campaign completed for local target"
-            )
+            state.add_timeline_event("campaign_end", "Local-takeover campaign completed for local target")
             return {"status": "complete", "state": state.to_dict()}
 
         # Phase 1: Deep reconnaissance
@@ -1636,11 +1653,7 @@ class AutonomousOrchestrator:
             # returns with no access AND aggression already at the configured
             # ceiling there is nothing left to escalate into -- skip privesc /
             # lateral and let validation run. Opt-in (default off).
-            if (
-                not state.access_achieved
-                and self._hard_target_max_rounds
-                and state.aggression >= self._max_aggression
-            ):
+            if not state.access_achieved and self._hard_target_max_rounds and state.aggression >= self._max_aggression:
                 logger.info(
                     f"[HARD] {state.target} at max aggression with no access "
                     f"-- giving up (hard_target_max_rounds={self._hard_target_max_rounds})"
@@ -1689,9 +1702,7 @@ class AutonomousOrchestrator:
         callback when wired; if it is None (standalone orchestrator), the reads
         are skipped and only the privesc modules run.
         """
-        logger.info(
-            f"[LOCAL] Target {state.target} is this host -- local-takeover phase"
-        )
+        logger.info(f"[LOCAL] Target {state.target} is this host -- local-takeover phase")
         ui.phase_change("local_takeover")
         state.current_phase = AttackPhase.PRIVILEGE_ESCALATION
         _report_autonomous_progress(phase=state.current_phase.value, target=state.target)
@@ -1719,11 +1730,11 @@ class AutonomousOrchestrator:
             for cmd in local_cmds:
                 try:
                     out = await asyncio.to_thread(
-                        self._tool_executor, cmd, {"target": state.target},
+                        self._tool_executor,
+                        cmd,
+                        {"target": state.target},
                     )
-                    state.add_timeline_event(
-                        "local_read", cmd, {"output_len": len(str(out or ""))}
-                    )
+                    state.add_timeline_event("local_read", cmd, {"output_len": len(str(out or ""))})
                 except Exception as exc:  # noqa: BLE001 -- best-effort reads
                     state.add_timeline_event("local_read_err", f"{cmd}: {exc}")
         else:
@@ -1755,8 +1766,7 @@ class AutonomousOrchestrator:
 
         if state.recon_result and state.recon_result.open_ports:
             logger.info(
-                f"[RECON] Resuming with prior recon ({len(state.recon_result.open_ports)} "
-                f"ports) — skipping re-scan"
+                f"[RECON] Resuming with prior recon ({len(state.recon_result.open_ports)} ports) — skipping re-scan"
             )
             state.add_timeline_event(
                 "recon_reused",
@@ -1790,6 +1800,7 @@ class AutonomousOrchestrator:
             try:
                 from tools.mcp_shared import add_discovered_target
                 from tools.validation_utils import is_fqdn, is_subdomain_of, resolve_target_to_ip
+
                 if is_fqdn(state.original_target):
                     logger.info(
                         f"[RECON] Domain target {state.original_target} -- "
@@ -1798,6 +1809,7 @@ class AutonomousOrchestrator:
                     # Reuse the crt.sh passive source (no external dep).
                     import json as _json
                     import urllib.request as _urlreq
+
                     dom = state.original_target.strip().lower()
                     try:
                         req = _urlreq.Request(
@@ -1817,14 +1829,10 @@ class AutonomousOrchestrator:
                         for sub in sorted(subs)[:200]:
                             ip = resolve_target_to_ip(sub)
                             if ip:
-                                state.discovered_subdomains.append(
-                                    {"subdomain": sub, "ip": ip}
-                                )
+                                state.discovered_subdomains.append({"subdomain": sub, "ip": ip})
                                 add_discovered_target(sub, ip)
                     except Exception as exc:
-                        logger.warning(
-                            f"[RECON] Subdomain expansion failed for {dom}: {exc}"
-                        )
+                        logger.warning(f"[RECON] Subdomain expansion failed for {dom}: {exc}")
                     if state.discovered_subdomains:
                         state.add_timeline_event(
                             "subdomain_expansion",
@@ -1949,8 +1957,11 @@ class AutonomousOrchestrator:
             os_hint = (state.recon_result.os_family or "").lower()
             if open_ports & cloud_ports or "cloud" in os_hint or "container" in os_hint:
                 privesc_modules += [
-                    "CloudPrivesc", "K8sPrivesc", "IMDSExploit",
-                    "DockerSockEscape", "S3BucketTakeover",
+                    "CloudPrivesc",
+                    "K8sPrivesc",
+                    "IMDSExploit",
+                    "DockerSockEscape",
+                    "S3BucketTakeover",
                 ]
 
         tasks: list[AttackTask] = []
@@ -2081,7 +2092,9 @@ class AutonomousOrchestrator:
         return m.group(1).lower() if m else None
 
     def _module_context(
-        self, state: AttackState, task: AttackTask | None = None,
+        self,
+        state: AttackState,
+        task: AttackTask | None = None,
     ) -> ModuleContext:
         """Build the ModuleContext the attack modules expect from current state.
 
@@ -2102,14 +2115,17 @@ class AutonomousOrchestrator:
         services_full = []
         cves: list[str] = []
         import re as _re
-        for s in (state.recon_result.services if state.recon_result else []):
-            services_full.append({
-                "service": s.service,
-                "port": f"{s.port}/{s.protocol}",
-                "version": s.version,
-                "cpe": list(s.cpe),
-                "banner": s.banner,
-            })
+
+        for s in state.recon_result.services if state.recon_result else []:
+            services_full.append(
+                {
+                    "service": s.service,
+                    "port": f"{s.port}/{s.protocol}",
+                    "version": s.version,
+                    "cpe": list(s.cpe),
+                    "banner": s.banner,
+                }
+            )
             # openssh_cves may be a list of CVE IDs OR a single string. Handle
             # both (the audit flagged a character-iteration bug where a string
             # value was iterated char-by-char into the CVE list).
@@ -2142,9 +2158,7 @@ class AutonomousOrchestrator:
             parameters=dict(task.parameters) if task is not None else {},
             access_achieved=state.access_achieved,
             privilege_level=state.privilege_level,
-            sessions=(
-                [{"shell": state.shell_type}] if state.access_achieved and state.shell_type else []
-            ),
+            sessions=([{"shell": state.shell_type}] if state.access_achieved and state.shell_type else []),
             phase=state.current_phase.value,
             evidence_refs=list(state.loot)[-10:],
         )
@@ -2177,9 +2191,7 @@ class AutonomousOrchestrator:
         else:
             mod_names.append("LinuxPersistence")
         web_services = {"http", "https"}
-        if state.recon_result and any(
-            (s.service or "").lower() in web_services for s in state.recon_result.services
-        ):
+        if state.recon_result and any((s.service or "").lower() in web_services for s in state.recon_result.services):
             mod_names.append("WebShellPersistence")
 
         if not self._tool_executor:
@@ -2265,9 +2277,7 @@ class AutonomousOrchestrator:
         rounds = 0
         while rounds < max_rounds and self._running:
             rounds += 1
-            state.add_timeline_event(
-                "adaptive_round", f"Adaptive round {rounds}/{max_rounds}"
-            )
+            state.add_timeline_event("adaptive_round", f"Adaptive round {rounds}/{max_rounds}")
             logger.info(f"[ADAPTIVE] {state.target} round {rounds}/{max_rounds}")
 
             # Pre-round replan: skip_failed drops modules that already failed
@@ -2308,10 +2318,7 @@ class AutonomousOrchestrator:
             # keeps failing). 0 = off (current behavior).
             if not state.access_achieved:
                 state.hard_target_rounds += 1
-                if (
-                    self._hard_target_max_rounds
-                    and state.hard_target_rounds >= self._hard_target_max_rounds
-                ):
+                if self._hard_target_max_rounds and state.hard_target_rounds >= self._hard_target_max_rounds:
                     logger.info(
                         f"[ADAPTIVE] {state.target} gave up after "
                         f"{state.hard_target_rounds} rounds with no access "
@@ -2387,12 +2394,11 @@ class AutonomousOrchestrator:
                     # per-batch set + the campaign-level ``_prereq_recovery_cap``.
                     # Recovery tasks are themselves exempt from re-scheduling
                     # (created_from tag) so a missing chain cannot recurse.
-                    if (
-                        task.created_from != "recovery:prerequisite"
-                        and task.task_id not in prereq_scheduled
-                    ):
+                    if task.created_from != "recovery:prerequisite" and task.task_id not in prereq_scheduled:
                         prereq_task = self._maybe_schedule_prereq(
-                            task, state, result.get("error", ""),
+                            task,
+                            state,
+                            result.get("error", ""),
                         )
                         if prereq_task is not None:
                             prereq_scheduled.add(task.task_id)
@@ -2404,12 +2410,12 @@ class AutonomousOrchestrator:
                         task.max_retries,
                     ):
                         task.retry_count += 1
-                        task.parameters.update(
-                            RetryEngine.get_retry_parameters(task.module_name, task.retry_count)
-                        )
+                        task.parameters.update(RetryEngine.get_retry_parameters(task.module_name, task.retry_count))
                         task.status = TaskStatus.RETRYING
-                        logger.info(f"Retrying {task.module_name} with modified parameters (attempt {task.retry_count})")
-                        await asyncio.sleep(2 ** task.retry_count)  # Exponential backoff
+                        logger.info(
+                            f"Retrying {task.module_name} with modified parameters (attempt {task.retry_count})"
+                        )
+                        await asyncio.sleep(2**task.retry_count)  # Exponential backoff
                         continue
                 return
 
@@ -2438,7 +2444,10 @@ class AutonomousOrchestrator:
         return kinds
 
     def _maybe_schedule_prereq(
-        self, task: AttackTask, state: AttackState, error: str,
+        self,
+        task: AttackTask,
+        state: AttackState,
+        error: str,
     ) -> AttackTask | None:
         """Schedule a producer module for a missing prerequisite, if one exists.
 
@@ -2450,6 +2459,7 @@ class AutonomousOrchestrator:
         """
         try:
             from tools.failure_taxonomy import FailureClass, classify_failure
+
             fc = classify_failure(error)
         except Exception:  # noqa: BLE001 -- taxonomy import must never break the batch
             return None
@@ -2488,15 +2498,11 @@ class AutonomousOrchestrator:
         # ponytail: drop modules over the campaign-level failure cap so a
         # structurally-failing exploit (e.g. Log4jRCE vs a non-vulnerable
         # target) doesn't get re-queued forever on every aggression step.
-        failed_modules = {
-            m for m in all_failed
-            if len(state.failed_attempts.get(m, [])) < self._max_module_failures
-        }
+        failed_modules = {m for m in all_failed if len(state.failed_attempts.get(m, [])) < self._max_module_failures}
         dropped = all_failed - failed_modules
         if dropped:
             logger.info(
-                f"Not retrying {len(dropped)} module(s) at failure cap "
-                f"({self._max_module_failures}): {sorted(dropped)}"
+                f"Not retrying {len(dropped)} module(s) at failure cap ({self._max_module_failures}): {sorted(dropped)}"
             )
 
         tasks: list[AttackTask] = []
@@ -2531,105 +2537,125 @@ class AutonomousOrchestrator:
 
             # SSH tasks
             if service == "ssh":
-                tasks.append(AttackTask(
-                    task_id=self._new_task_id(),
-                    phase=AttackPhase.EXPLOITATION,
-                    module_name="SSHBruteForce",
-                    target=state.target,
-                    parameters={"port": port, "version": svc.version},
-                    priority=75,
-                ))
-                if "CVE-2024-6387" in str(svc.scripts.get("openssh_cves", "")):
-                    tasks.append(AttackTask(
+                tasks.append(
+                    AttackTask(
                         task_id=self._new_task_id(),
                         phase=AttackPhase.EXPLOITATION,
-                        module_name="RegreSSHion",
+                        module_name="SSHBruteForce",
                         target=state.target,
-                        parameters={"port": port},
-                        priority=95,
-                    ))
+                        parameters={"port": port, "version": svc.version},
+                        priority=75,
+                    )
+                )
+                if "CVE-2024-6387" in str(svc.scripts.get("openssh_cves", "")):
+                    tasks.append(
+                        AttackTask(
+                            task_id=self._new_task_id(),
+                            phase=AttackPhase.EXPLOITATION,
+                            module_name="RegreSSHion",
+                            target=state.target,
+                            parameters={"port": port},
+                            priority=95,
+                        )
+                    )
 
             # SMB tasks
             elif service in ("microsoft-ds", "smb", "netbios-ssn"):
-                tasks.append(AttackTask(
-                    task_id=self._new_task_id(),
-                    phase=AttackPhase.EXPLOITATION,
-                    module_name="SMBRelay",
-                    target=state.target,
-                    parameters={"port": port},
-                    priority=70,
-                ))
-                tasks.append(AttackTask(
-                    task_id=self._new_task_id(),
-                    phase=AttackPhase.EXPLOITATION,
-                    module_name="SMBNullSession",
-                    target=state.target,
-                    parameters={"port": port},
-                    priority=65,
-                ))
+                tasks.append(
+                    AttackTask(
+                        task_id=self._new_task_id(),
+                        phase=AttackPhase.EXPLOITATION,
+                        module_name="SMBRelay",
+                        target=state.target,
+                        parameters={"port": port},
+                        priority=70,
+                    )
+                )
+                tasks.append(
+                    AttackTask(
+                        task_id=self._new_task_id(),
+                        phase=AttackPhase.EXPLOITATION,
+                        module_name="SMBNullSession",
+                        target=state.target,
+                        parameters={"port": port},
+                        priority=65,
+                    )
+                )
 
             # HTTP/HTTPS tasks
             elif service in ("http", "https", "http-proxy"):
-                tasks.append(AttackTask(
-                    task_id=self._new_task_id(),
-                    phase=AttackPhase.EXPLOITATION,
-                    module_name="WebShellUpload",
-                    target=state.target,
-                    parameters={"port": port, "scheme": service},
-                    priority=70,
-                ))
-                tasks.append(AttackTask(
-                    task_id=self._new_task_id(),
-                    phase=AttackPhase.EXPLOITATION,
-                    module_name="SQLInjection",
-                    target=state.target,
-                    parameters={"port": port, "scheme": service},
-                    priority=65,
-                ))
+                tasks.append(
+                    AttackTask(
+                        task_id=self._new_task_id(),
+                        phase=AttackPhase.EXPLOITATION,
+                        module_name="WebShellUpload",
+                        target=state.target,
+                        parameters={"port": port, "scheme": service},
+                        priority=70,
+                    )
+                )
+                tasks.append(
+                    AttackTask(
+                        task_id=self._new_task_id(),
+                        phase=AttackPhase.EXPLOITATION,
+                        module_name="SQLInjection",
+                        target=state.target,
+                        parameters={"port": port, "scheme": service},
+                        priority=65,
+                    )
+                )
 
             # FTP tasks
             elif service == "ftp":
-                tasks.append(AttackTask(
-                    task_id=self._new_task_id(),
-                    phase=AttackPhase.EXPLOITATION,
-                    module_name="FTPAnonymous",
-                    target=state.target,
-                    parameters={"port": port},
-                    priority=60,
-                ))
+                tasks.append(
+                    AttackTask(
+                        task_id=self._new_task_id(),
+                        phase=AttackPhase.EXPLOITATION,
+                        module_name="FTPAnonymous",
+                        target=state.target,
+                        parameters={"port": port},
+                        priority=60,
+                    )
+                )
 
             # Redis tasks
             elif service == "redis":
-                tasks.append(AttackTask(
-                    task_id=self._new_task_id(),
-                    phase=AttackPhase.EXPLOITATION,
-                    module_name="RedisExploit",
-                    target=state.target,
-                    parameters={"port": port},
-                    priority=75,
-                ))
+                tasks.append(
+                    AttackTask(
+                        task_id=self._new_task_id(),
+                        phase=AttackPhase.EXPLOITATION,
+                        module_name="RedisExploit",
+                        target=state.target,
+                        parameters={"port": port},
+                        priority=75,
+                    )
+                )
 
             # Docker/K8s tasks
             elif port in (2375, 2376, 6443, 10250):
-                tasks.append(AttackTask(
-                    task_id=self._new_task_id(),
-                    phase=AttackPhase.EXPLOITATION,
-                    module_name="ContainerBreakout",
-                    target=state.target,
-                    parameters={"port": port},
-                    priority=80,
-                ))
+                tasks.append(
+                    AttackTask(
+                        task_id=self._new_task_id(),
+                        phase=AttackPhase.EXPLOITATION,
+                        module_name="ContainerBreakout",
+                        target=state.target,
+                        parameters={"port": port},
+                        priority=80,
+                    )
+                )
 
             # RDP tasks
             elif service in ("ms-wbt-server", "rdp"):
-                tasks.append(AttackTask(
-                    task_id=self._new_task_id(),
-                    phase=AttackPhase.EXPLOITATION,
-                    module_name="RDPExploit",
-                    target=state.target,
-                    parameters={"port": port},
-                    priority=70,
-                ))
+                tasks.append(
+                    AttackTask(
+                        task_id=self._new_task_id(),
+                        phase=AttackPhase.EXPLOITATION,
+                        module_name="RDPExploit",
+                        target=state.target,
+                        parameters={"port": port},
+                        priority=70,
+                    )
+                )
 
         for task in tasks:
             self._tasks[task.task_id] = task
@@ -2708,10 +2734,7 @@ class AutonomousOrchestrator:
             except Exception as exc:
                 logger.warning(f"load_state: skipping task {tid} ({exc})")
 
-        logger.info(
-            f"Attack state loaded from {path} "
-            f"({loaded_states} states, {loaded_tasks} tasks)"
-        )
+        logger.info(f"Attack state loaded from {path} ({loaded_states} states, {loaded_tasks} tasks)")
         return loaded_states > 0 or loaded_tasks > 0
 
     def stop(self) -> None:

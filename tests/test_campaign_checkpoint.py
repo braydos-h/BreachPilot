@@ -41,6 +41,7 @@ def _tool_result(text: str):
 
 def _settings(tmp_path, **overrides):
     from tools.exploit_agent import ExploitPermission, ExploitSettings
+
     base = dict(
         enabled=True,
         permission=ExploitPermission.FULL_ACCESS,
@@ -57,6 +58,7 @@ def _settings(tmp_path, **overrides):
 
 def _policy(tmp_path):
     from tools.exploit_agent import ExploitPolicy
+
     return ExploitPolicy(_settings(tmp_path), tmp_path)
 
 
@@ -90,9 +92,12 @@ async def test_verified_compromise_creates_access_checkpoint(tmp_path):
     with patch("tools.exploit_agent._stream_ollama", new_callable=AsyncMock) as stream:
         stream.return_value = {"role": "assistant", "content": "done"}
         await run_exploit_agent(
-            client=client, model="glm", session=session,
+            client=client,
+            model="glm",
+            session=session,
             exploit_tools=[{"type": "function", "function": {"name": "run_exploit_terminal"}}],
-            policy=policy, target_ip="10.0.0.50",
+            policy=policy,
+            target_ip="10.0.0.50",
             config={"outcome_judgment": {"flow_a": False}},
             checkpoint_hook=hook,
         )
@@ -118,9 +123,12 @@ async def test_cred_dump_creates_access_checkpoint(tmp_path):
     with patch("tools.exploit_agent._stream_ollama", new_callable=AsyncMock) as stream:
         stream.return_value = {"role": "assistant", "content": "done"}
         await run_exploit_agent(
-            client=client, model="glm", session=session,
+            client=client,
+            model="glm",
+            session=session,
             exploit_tools=[{"type": "function", "function": {"name": "dump_credentials"}}],
-            policy=policy, target_ip="10.0.0.50",
+            policy=policy,
+            target_ip="10.0.0.50",
             config={"outcome_judgment": {"flow_a": False}},
             checkpoint_hook=hook,
         )
@@ -197,13 +205,18 @@ async def test_natural_no_foothold_termination_creates_no_path_checkpoint(tmp_pa
     session = AsyncMock()
     session.call_tool.return_value = _tool_result("ok\nno vulnerabilities found")
 
-    with patch("tools.exploit_agent._stream_ollama", new_callable=AsyncMock) as stream, \
-         patch("tools.exploit_agent.loop._PhaseTracker.can_terminate", return_value=(True, "minima satisfied")):
+    with (
+        patch("tools.exploit_agent._stream_ollama", new_callable=AsyncMock) as stream,
+        patch("tools.exploit_agent.loop._PhaseTracker.can_terminate", return_value=(True, "minima satisfied")),
+    ):
         stream.return_value = {"role": "assistant", "content": "done"}
         await run_exploit_agent(
-            client=client, model="glm", session=session,
+            client=client,
+            model="glm",
+            session=session,
             exploit_tools=[{"type": "function", "function": {"name": "check_os"}}],
-            policy=policy, target_ip="10.0.0.50",
+            policy=policy,
+            target_ip="10.0.0.50",
             config={"outcome_judgment": {"flow_a": False}},
             checkpoint_hook=hook,
         )
@@ -233,6 +246,7 @@ async def test_single_failed_tool_call_no_checkpoint(tmp_path):
     # set max_rounds=1 so the single round ends after the push-back continue.
     settings = _settings(tmp_path, attack_max_rounds=1)
     from tools.exploit_agent import ExploitPolicy
+
     policy = ExploitPolicy(settings, tmp_path)
     client = MagicMock()
     client.chat.side_effect = [_tool_call_msg(), _done_msg()]
@@ -242,9 +256,12 @@ async def test_single_failed_tool_call_no_checkpoint(tmp_path):
     with patch("tools.exploit_agent._stream_ollama", new_callable=AsyncMock) as stream:
         stream.return_value = {"role": "assistant", "content": "done"}
         await run_exploit_agent(
-            client=client, model="glm", session=session,
+            client=client,
+            model="glm",
+            session=session,
             exploit_tools=[{"type": "function", "function": {"name": "run_exploit_terminal"}}],
-            policy=policy, target_ip="10.0.0.50",
+            policy=policy,
+            target_ip="10.0.0.50",
             config={"outcome_judgment": {"flow_a": False}},
             checkpoint_hook=hook,
         )
@@ -273,9 +290,12 @@ async def test_continue_injects_objective_and_keeps_history(tmp_path):
     with patch("tools.exploit_agent._stream_ollama", new_callable=AsyncMock) as stream:
         stream.return_value = {"role": "assistant", "content": "done"}
         result = await run_exploit_agent(
-            client=client, model="glm", session=session,
+            client=client,
+            model="glm",
+            session=session,
             exploit_tools=[{"type": "function", "function": {"name": "run_exploit_terminal"}}],
-            policy=policy, target_ip="10.0.0.50",
+            policy=policy,
+            target_ip="10.0.0.50",
             config={"outcome_judgment": {"flow_a": False}},
             checkpoint_hook=hook,
         )
@@ -303,9 +323,12 @@ async def test_cancel_sets_cancelled_flag(tmp_path):
     with patch("tools.exploit_agent._stream_ollama", new_callable=AsyncMock) as stream:
         stream.return_value = {"role": "assistant", "content": "done"}
         result = await run_exploit_agent(
-            client=client, model="glm", session=session,
+            client=client,
+            model="glm",
+            session=session,
             exploit_tools=[{"type": "function", "function": {"name": "run_exploit_terminal"}}],
-            policy=policy, target_ip="10.0.0.50",
+            policy=policy,
+            target_ip="10.0.0.50",
             config={"outcome_judgment": {"flow_a": False}},
             checkpoint_hook=hook,
         )
@@ -328,9 +351,12 @@ async def test_finish_breaks_loop(tmp_path):
     with patch("tools.exploit_agent._stream_ollama", new_callable=AsyncMock) as stream:
         stream.return_value = {"role": "assistant", "content": "done"}
         result = await run_exploit_agent(
-            client=client, model="glm", session=session,
+            client=client,
+            model="glm",
+            session=session,
             exploit_tools=[{"type": "function", "function": {"name": "run_exploit_terminal"}}],
-            policy=policy, target_ip="10.0.0.50",
+            policy=policy,
+            target_ip="10.0.0.50",
             config={"outcome_judgment": {"flow_a": False}},
             checkpoint_hook=hook,
         )
@@ -350,10 +376,12 @@ async def test_no_path_decision_loop_guard_requires_fresh_actions(tmp_path):
     from tools.exploit_agent.loop import CheckpointOutcome
 
     # First call: continue. Second call: finish (so the loop stops).
-    outcomes = iter([
-        CheckpointOutcome(action="continue", objective_text="NEW OBJECTIVE: retry."),
-        CheckpointOutcome(action="finish"),
-    ])
+    outcomes = iter(
+        [
+            CheckpointOutcome(action="continue", objective_text="NEW OBJECTIVE: retry."),
+            CheckpointOutcome(action="finish"),
+        ]
+    )
     calls = []
 
     async def _hook(ctx):
@@ -373,13 +401,18 @@ async def test_no_path_decision_loop_guard_requires_fresh_actions(tmp_path):
     session = AsyncMock()
     session.call_tool.return_value = _tool_result("ok\nno vulns")
 
-    with patch("tools.exploit_agent._stream_ollama", new_callable=AsyncMock) as stream, \
-         patch("tools.exploit_agent.loop._PhaseTracker.can_terminate", return_value=(True, "minima satisfied")):
+    with (
+        patch("tools.exploit_agent._stream_ollama", new_callable=AsyncMock) as stream,
+        patch("tools.exploit_agent.loop._PhaseTracker.can_terminate", return_value=(True, "minima satisfied")),
+    ):
         stream.return_value = {"role": "assistant", "content": "done"}
         await run_exploit_agent(
-            client=client, model="glm", session=session,
+            client=client,
+            model="glm",
+            session=session,
             exploit_tools=[{"type": "function", "function": {"name": "check_os"}}],
-            policy=policy, target_ip="10.0.0.50",
+            policy=policy,
+            target_ip="10.0.0.50",
             config={"outcome_judgment": {"flow_a": False}},
             checkpoint_hook=hook,
         )
@@ -408,9 +441,12 @@ async def test_no_hook_means_no_checkpoint_and_normal_termination(tmp_path):
     with patch("tools.exploit_agent._stream_ollama", new_callable=AsyncMock) as stream:
         stream.return_value = {"role": "assistant", "content": "done"}
         result = await run_exploit_agent(
-            client=client, model="glm", session=session,
+            client=client,
+            model="glm",
+            session=session,
             exploit_tools=[{"type": "function", "function": {"name": "run_exploit_terminal"}}],
-            policy=policy, target_ip="10.0.0.50",
+            policy=policy,
+            target_ip="10.0.0.50",
             config={"outcome_judgment": {"flow_a": False}},
         )
 

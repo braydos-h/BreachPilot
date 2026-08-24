@@ -76,12 +76,14 @@ def attempt_zone_transfer(domain: str, nameservers: list[dict]) -> dict:
             for name, node in zone.nodes.items():
                 for rdataset in node.rdatasets:
                     for rdata in rdataset:
-                        results["records"].append({
-                            "name": str(name),
-                            "type": dns.rdatatype.to_text(rdataset.rdtype),
-                            "ttl": rdataset.ttl,
-                            "data": str(rdata),
-                        })
+                        results["records"].append(
+                            {
+                                "name": str(name),
+                                "type": dns.rdatatype.to_text(rdataset.rdtype),
+                                "ttl": rdataset.ttl,
+                                "data": str(rdata),
+                            }
+                        )
 
         except dns.exception.FormError:
             server_result["error"] = "Transfer refused (FORMERR)"
@@ -124,10 +126,12 @@ def check_email_security(domain: str) -> dict:
         try:
             dkim = dns.resolver.resolve(f"{selector}._domainkey.{domain}", "TXT")
             for txt in dkim:
-                security["dkim_selectors"].append({
-                    "selector": selector,
-                    "record": str(txt).strip('"')[:100],
-                })
+                security["dkim_selectors"].append(
+                    {
+                        "selector": selector,
+                        "record": str(txt).strip('"')[:100],
+                    }
+                )
         except dns.exception.DNSException:
             pass
 
@@ -138,11 +142,37 @@ def brute_force_subdomains(domain: str, wordlist: list[str] = None) -> list[dict
     """Brute-force subdomain discovery via DNS resolution."""
     if wordlist is None:
         wordlist = [
-            "www", "mail", "ftp", "admin", "api", "dev", "staging",
-            "test", "vpn", "portal", "app", "login", "secure",
-            "m", "blog", "shop", "cdn", "ns1", "ns2", "mx",
-            "remote", "gateway", "intranet", "extranet", "webmail",
-            "owa", "autodiscover", "sso", "auth", "git", "ci",
+            "www",
+            "mail",
+            "ftp",
+            "admin",
+            "api",
+            "dev",
+            "staging",
+            "test",
+            "vpn",
+            "portal",
+            "app",
+            "login",
+            "secure",
+            "m",
+            "blog",
+            "shop",
+            "cdn",
+            "ns1",
+            "ns2",
+            "mx",
+            "remote",
+            "gateway",
+            "intranet",
+            "extranet",
+            "webmail",
+            "owa",
+            "autodiscover",
+            "sso",
+            "auth",
+            "git",
+            "ci",
         ]
 
     found = []
@@ -170,8 +200,12 @@ def brute_force_subdomains(domain: str, wordlist: list[str] = None) -> list[dict
 
 
 def generate_report(
-    domain: str, records: dict, nameservers: list, zone_transfer: dict,
-    email_security: dict, subdomains: list,
+    domain: str,
+    records: dict,
+    nameservers: list,
+    zone_transfer: dict,
+    email_security: dict,
+    subdomains: list,
 ) -> str:
     """Generate DNS enumeration report."""
     lines = [
@@ -186,30 +220,36 @@ def generate_report(
         if recs:
             lines.append(f"  {rtype}: {', '.join(recs[:5])}")
 
-    lines.extend([
-        "",
-        f"NAMESERVERS ({len(nameservers)}):",
-    ])
+    lines.extend(
+        [
+            "",
+            f"NAMESERVERS ({len(nameservers)}):",
+        ]
+    )
     for ns in nameservers:
         if "error" not in ns:
             lines.append(f"  {ns['name']} ({ns['ip']})")
 
     vuln = "VULNERABLE" if zone_transfer["vulnerable"] else "NOT VULNERABLE"
-    lines.extend([
-        "",
-        f"ZONE TRANSFER: {vuln}",
-        f"  Records Leaked: {len(zone_transfer['records'])}",
-    ])
+    lines.extend(
+        [
+            "",
+            f"ZONE TRANSFER: {vuln}",
+            f"  Records Leaked: {len(zone_transfer['records'])}",
+        ]
+    )
 
-    lines.extend([
-        "",
-        "EMAIL SECURITY:",
-        f"  SPF: {'Present' if email_security['spf'] else 'MISSING'}",
-        f"  DMARC: {'Present' if email_security['dmarc'] else 'MISSING'}",
-        f"  DKIM Selectors Found: {len(email_security['dkim_selectors'])}",
-        "",
-        f"SUBDOMAINS DISCOVERED: {len(subdomains)}",
-    ])
+    lines.extend(
+        [
+            "",
+            "EMAIL SECURITY:",
+            f"  SPF: {'Present' if email_security['spf'] else 'MISSING'}",
+            f"  DMARC: {'Present' if email_security['dmarc'] else 'MISSING'}",
+            f"  DKIM Selectors Found: {len(email_security['dkim_selectors'])}",
+            "",
+            f"SUBDOMAINS DISCOVERED: {len(subdomains)}",
+        ]
+    )
     for sub in subdomains[:15]:
         ips = sub.get("ips", sub.get("cnames", []))
         lines.append(f"  {sub['subdomain']} -> {', '.join(ips)}")
@@ -246,6 +286,15 @@ if __name__ == "__main__":
 
     output = f"dns_enum_{domain.replace('.', '_')}_{datetime.now(timezone.utc).strftime('%Y%m%d')}.json"
     with open(output, "w") as f:
-        json.dump({"records": records, "nameservers": nameservers, "zone_transfer": zone_transfer,
-                    "email_security": email_security, "subdomains": subdomains}, f, indent=2)
+        json.dump(
+            {
+                "records": records,
+                "nameservers": nameservers,
+                "zone_transfer": zone_transfer,
+                "email_security": email_security,
+                "subdomains": subdomains,
+            },
+            f,
+            indent=2,
+        )
     print(f"\n[*] Results saved to {output}")

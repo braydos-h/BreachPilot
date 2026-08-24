@@ -269,8 +269,12 @@ def generate_report(report_type: str, data_path: str, output_dir: str) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description="Threat Intelligence Report Generator")
-    parser.add_argument("--type", required=True, choices=list(REPORT_TEMPLATES.keys()),
-                        help="Report type: strategic, operational, tactical, flash")
+    parser.add_argument(
+        "--type",
+        required=True,
+        choices=list(REPORT_TEMPLATES.keys()),
+        help="Report type: strategic, operational, tactical, flash",
+    )
     parser.add_argument("--data", required=True, help="Path to JSON data file with report content")
     parser.add_argument("--output-dir", default=".", help="Output directory")
     parser.add_argument("--output", default="report_meta.json")

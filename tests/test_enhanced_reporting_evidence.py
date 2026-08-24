@@ -181,6 +181,7 @@ def test_confidence_reflects_verdict(generator, verdict, expected):
 
 def test_confidence_from_outcome_assessment_object(generator):
     """Duck-typed OutcomeAssessment (object with .hypothesis_status enum)."""
+
     class _Status:
         def __init__(self, value: str) -> None:
             self.value = value
@@ -294,12 +295,8 @@ def test_cvss_helpers():
     assert _cvss_profile_from_services([{"port": 445}]) == ("N", "L", "N", "N", "H", "H", "H", "C")
     assert _cvss_profile_from_services([{"port": 80, "product": "http"}]) == ("N", "L", "N", "N", "L", "L", "N", "U")
     assert _cvss_profile_from_services([]) == ("N", "L", "N", "N", "H", "H", "H", "U")
-    assert _service_indicates_vulnerable_version(
-        [{"product": "OpenSSH", "version": "7.9"}]
-    ) is True
-    assert _service_indicates_vulnerable_version(
-        [{"product": "nginx", "version": "1.25"}]
-    ) is False
+    assert _service_indicates_vulnerable_version([{"product": "OpenSSH", "version": "7.9"}]) is True
+    assert _service_indicates_vulnerable_version([{"product": "nginx", "version": "1.25"}]) is False
     assert _bump_cia("N") == "L"
     assert _bump_cia("L") == "H"
     assert _bump_cia("H") == "H"

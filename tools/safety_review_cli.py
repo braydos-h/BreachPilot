@@ -10,6 +10,7 @@ from tools.safety_reviewer import SafetyReview, SafetyReviewer
 
 ui = AttackUi(plain=False)
 
+
 async def run_safety_review(
     client: Any,
     model: str,
@@ -38,4 +39,3 @@ async def run_safety_review(
 # ---------------------------------------------------------------------------
 # Recon-first assessment — scan target, suggest goals with exploit ratings
 # ---------------------------------------------------------------------------
-

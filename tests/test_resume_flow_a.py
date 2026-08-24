@@ -54,9 +54,14 @@ from tools.swarm.orchestrator import SwarmOrchestrator
 
 def test_serviceinfo_round_trip():
     s = ServiceInfo(
-        port=445, protocol="tcp", service="microsoft-ds", version="3.1.1",
-        banner="SMB", cpe=["cpe:/a:samba:samba:3.1.1"],
-        scripts={"smb-os-discovery": "Windows 10"}, confidence=9,
+        port=445,
+        protocol="tcp",
+        service="microsoft-ds",
+        version="3.1.1",
+        banner="SMB",
+        cpe=["cpe:/a:samba:samba:3.1.1"],
+        scripts={"smb-os-discovery": "Windows 10"},
+        confidence=9,
     )
     restored = ServiceInfo.from_dict(s.to_dict())
     assert restored.port == 445
@@ -77,13 +82,17 @@ def test_serviceinfo_from_dict_tolerates_garbage():
 
 def test_hostreconresult_round_trip_preserves_ports_and_services():
     r = HostReconResult(
-        target_ip="10.0.0.50", os_family="Linux", ttl=64,
-        open_ports=[22, 80, 445], filtered_ports=[443],
+        target_ip="10.0.0.50",
+        os_family="Linux",
+        ttl=64,
+        open_ports=[22, 80, 445],
+        filtered_ports=[443],
         services=[
             ServiceInfo(port=22, service="ssh", version="OpenSSH 8.5p1"),
             ServiceInfo(port=80, service="http"),
         ],
-        evidence_refs=["E-1"], warnings=["rate limited"],
+        evidence_refs=["E-1"],
+        warnings=["rate limited"],
     )
     restored = HostReconResult.from_dict(r.to_dict())
     assert restored.target_ip == "10.0.0.50"
@@ -104,11 +113,23 @@ def test_hostreconresult_round_trip_preserves_ports_and_services():
 
 def test_attacktask_round_trip_preserves_status_chain_and_timestamps():
     t = AttackTask(
-        task_id="ATK-001", phase=AttackPhase.EXPLOITATION, module_name="SMBRelay",
-        target="10.0.0.50", status=TaskStatus.COMPLETED, aggression=AggressionLevel.AGGRESSIVE,
-        priority=80, retry_count=2, max_retries=5, created_at=1000.0, started_at=1001.0,
-        completed_at=1002.0, result={"shell": "reverse"}, error="",
-        evidence_refs=["E-1"], chain_parent="ATK-000", chain_children=["ATK-002"],
+        task_id="ATK-001",
+        phase=AttackPhase.EXPLOITATION,
+        module_name="SMBRelay",
+        target="10.0.0.50",
+        status=TaskStatus.COMPLETED,
+        aggression=AggressionLevel.AGGRESSIVE,
+        priority=80,
+        retry_count=2,
+        max_retries=5,
+        created_at=1000.0,
+        started_at=1001.0,
+        completed_at=1002.0,
+        result={"shell": "reverse"},
+        error="",
+        evidence_refs=["E-1"],
+        chain_parent="ATK-000",
+        chain_children=["ATK-002"],
         prerequisites=["ATK-000"],
     )
     restored = AttackTask.from_dict(t.to_dict())
@@ -126,10 +147,14 @@ def test_attacktask_round_trip_preserves_status_chain_and_timestamps():
 def test_attacktask_from_dict_tolerates_unknown_enum_strings():
     """A state file from a newer/older version with an unrecognized enum value
     must degrade to a default, not raise (forward/back-compat for resume)."""
-    t = AttackTask.from_dict({
-        "task_id": "X", "phase": "post_exploit",  # not a known AttackPhase
-        "status": "weird_status", "aggression": "mega",
-    })
+    t = AttackTask.from_dict(
+        {
+            "task_id": "X",
+            "phase": "post_exploit",  # not a known AttackPhase
+            "status": "weird_status",
+            "aggression": "mega",
+        }
+    )
     assert t.phase is AttackPhase.RECONNAISSANCE  # default fallback
     assert t.status is TaskStatus.PENDING
     assert t.aggression is AggressionLevel.NORMAL
@@ -138,10 +163,15 @@ def test_attacktask_from_dict_tolerates_unknown_enum_strings():
 def test_attackstate_round_trip_preserves_recon_and_progress():
     recon = HostReconResult(target_ip="10.0.0.50", os_family="Linux", open_ports=[22, 80])
     s = AttackState(
-        target="10.0.0.50", current_phase=AttackPhase.EXPLOITATION,
-        privilege_level="user", access_achieved=True, shell_type="reverse",
-        successful_exploits=["SMBRelay"], failed_attempts={"WebShellUpload": ["timeout"]},
-        credentials_found=[{"user": "admin", "pass": "p"}], recon_result=recon,
+        target="10.0.0.50",
+        current_phase=AttackPhase.EXPLOITATION,
+        privilege_level="user",
+        access_achieved=True,
+        shell_type="reverse",
+        successful_exploits=["SMBRelay"],
+        failed_attempts={"WebShellUpload": ["timeout"]},
+        credentials_found=[{"user": "admin", "pass": "p"}],
+        recon_result=recon,
     )
     restored = AttackState.from_dict(s.to_dict())
     assert restored.target == "10.0.0.50"
@@ -167,8 +197,7 @@ def test_attackstate_from_dict_missing_recon_is_none():
 
 def _orch(tmp_path: Path) -> AutonomousOrchestrator:
     return AutonomousOrchestrator(
-        mission_config={"max_cycles": 5, "max_aggression": "maximum",
-                        "allowed_assets": ["10.0.0.50"]},
+        mission_config={"max_cycles": 5, "max_aggression": "maximum", "allowed_assets": ["10.0.0.50"]},
         workspace_root=tmp_path / "auto_ws",
     )
 
@@ -180,8 +209,11 @@ def test_save_load_state_round_trip(tmp_path):
     state.successful_exploits = ["SMBRelay"]
     state.current_phase = AttackPhase.EXPLOITATION
     orch._tasks["ATK-001"] = AttackTask(
-        task_id="ATK-001", phase=AttackPhase.EXPLOITATION, module_name="SMBRelay",
-        target="10.0.0.50", status=TaskStatus.COMPLETED,
+        task_id="ATK-001",
+        phase=AttackPhase.EXPLOITATION,
+        module_name="SMBRelay",
+        target="10.0.0.50",
+        status=TaskStatus.COMPLETED,
     )
     save_path = orch.save_state()
     assert save_path.exists()
@@ -229,20 +261,25 @@ async def test_resume_reuses_prior_recon_and_skips_rescan(tmp_path):
     # Seed saved state: a target whose recon already found open ports.
     state = orch.get_state("10.0.0.50")
     state.recon_result = HostReconResult(
-        target_ip="10.0.0.50", os_family="Linux", open_ports=[22, 80],
+        target_ip="10.0.0.50",
+        os_family="Linux",
+        open_ports=[22, 80],
         services=[ServiceInfo(port=22, service="ssh"), ServiceInfo(port=80, service="http")],
     )
     state.current_phase = AttackPhase.EXPLOITATION
     orch.save_state()
 
     orch2 = _orch(tmp_path)
-    with patch(
-        "tools.autonomous_orchestrator.ReconPipeline.recon_host",
-        new_callable=AsyncMock,
-    ) as mock_recon, patch(
-        "tools.autonomous_orchestrator.AttackModuleExecutor.execute",
-        new_callable=AsyncMock,
-        return_value={"success": True, "result": {"status": "exploited"}},
+    with (
+        patch(
+            "tools.autonomous_orchestrator.ReconPipeline.recon_host",
+            new_callable=AsyncMock,
+        ) as mock_recon,
+        patch(
+            "tools.autonomous_orchestrator.AttackModuleExecutor.execute",
+            new_callable=AsyncMock,
+            return_value={"success": True, "result": {"status": "exploited"}},
+        ),
     ):
         await orch2.run_autonomous_campaign(["10.0.0.50"], resume=True)
         # The resumed campaign reused prior recon -> recon_host was NEVER called.
@@ -259,16 +296,22 @@ async def test_fresh_campaign_still_scans(tmp_path):
     normal run never silently skips recon."""
     orch = _orch(tmp_path)
     sample = HostReconResult(
-        target_ip="10.0.0.50", os_family="Linux", open_ports=[22],
+        target_ip="10.0.0.50",
+        os_family="Linux",
+        open_ports=[22],
         services=[ServiceInfo(port=22, service="ssh")],
     )
-    with patch(
-        "tools.autonomous_orchestrator.ReconPipeline.recon_host",
-        new_callable=AsyncMock, return_value=sample,
-    ) as mock_recon, patch(
-        "tools.autonomous_orchestrator.AttackModuleExecutor.execute",
-        new_callable=AsyncMock,
-        return_value={"success": True, "result": {"status": "exploited"}},
+    with (
+        patch(
+            "tools.autonomous_orchestrator.ReconPipeline.recon_host",
+            new_callable=AsyncMock,
+            return_value=sample,
+        ) as mock_recon,
+        patch(
+            "tools.autonomous_orchestrator.AttackModuleExecutor.execute",
+            new_callable=AsyncMock,
+            return_value={"success": True, "result": {"status": "exploited"}},
+        ),
     ):
         await orch.run_autonomous_campaign(["10.0.0.50"])
         mock_recon.assert_called_once()
@@ -279,15 +322,18 @@ async def test_resume_with_no_state_file_falls_back_to_fresh(tmp_path):
     """resume=True but no attack_states.json -> graceful fresh start (scans),
     not an error. The operator resumed a run that never saved state."""
     orch = _orch(tmp_path)
-    sample = HostReconResult(target_ip="10.0.0.50", open_ports=[80],
-                             services=[ServiceInfo(port=80, service="http")])
-    with patch(
-        "tools.autonomous_orchestrator.ReconPipeline.recon_host",
-        new_callable=AsyncMock, return_value=sample,
-    ) as mock_recon, patch(
-        "tools.autonomous_orchestrator.AttackModuleExecutor.execute",
-        new_callable=AsyncMock,
-        return_value={"success": True, "result": {"status": "exploited"}},
+    sample = HostReconResult(target_ip="10.0.0.50", open_ports=[80], services=[ServiceInfo(port=80, service="http")])
+    with (
+        patch(
+            "tools.autonomous_orchestrator.ReconPipeline.recon_host",
+            new_callable=AsyncMock,
+            return_value=sample,
+        ) as mock_recon,
+        patch(
+            "tools.autonomous_orchestrator.AttackModuleExecutor.execute",
+            new_callable=AsyncMock,
+            return_value={"success": True, "result": {"status": "exploited"}},
+        ),
     ):
         result = await orch.run_autonomous_campaign(["10.0.0.50"], resume=True)
         # No state to reuse -> it scanned.
@@ -346,12 +392,17 @@ def test_swarm_load_state_merges_lists_without_dup(tmp_path):
     duplicate them. This is what makes the blackboard accumulate across a
     crash/restart instead of resetting or double-counting."""
     state_path = tmp_path / "swarm_state.json"
-    state_path.write_text(json.dumps({
-        "blackboard": {
-            "discovered_services": [{"service": "ssh", "port": 22}],
-            "credentials_found": [{"user": "admin"}],
-        }
-    }), encoding="utf-8")
+    state_path.write_text(
+        json.dumps(
+            {
+                "blackboard": {
+                    "discovered_services": [{"service": "ssh", "port": 22}],
+                    "credentials_found": [{"user": "admin"}],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
 
     orch = SwarmOrchestrator(context={}, critic_enabled=False)
     # Simulate the resumed run having already re-discovered ssh before load,
@@ -395,7 +446,8 @@ def test_main_writes_session_state_json_and_matcher_finds_it(tmp_path, monkeypat
     other_dir = reports_root / "renamed_dir"
     other_dir.mkdir(parents=True, exist_ok=True)
     (other_dir / "session_state.json").write_text(
-        json.dumps({"session_id": "SESSION-XYZ"}), encoding="utf-8",
+        json.dumps({"session_id": "SESSION-XYZ"}),
+        encoding="utf-8",
     )
 
     match: Path | None = None

@@ -86,11 +86,13 @@ class TestBuildCliExploitSettingsPermission:
 
     def _goal(self):
         from tools.goal_engine import AttackGoal
+
         return AttackGoal(name="recon_only", description="recon")
 
     def test_recon_mode_read_only_config_is_not_full_access(self):
         from main import build_cli_exploit_settings
         from tools.exploit_agent import ExploitPermission
+
         settings = build_cli_exploit_settings(
             mode="recon",
             target_ip="10.0.0.50",
@@ -98,8 +100,7 @@ class TestBuildCliExploitSettingsPermission:
             config={"exploit": {"permission": "read_only"}},
         )
         assert settings.permission != ExploitPermission.FULL_ACCESS, (
-            "read_only config resolved to FULL_ACCESS — first-run users could "
-            "accidentally fire exploits"
+            "read_only config resolved to FULL_ACCESS — first-run users could accidentally fire exploits"
         )
 
     def test_attack_mode_read_only_config_does_not_upgrade_to_full_access(self):
@@ -107,6 +108,7 @@ class TestBuildCliExploitSettingsPermission:
         ignoring a read_only config. It must now honor the config."""
         from main import build_cli_exploit_settings
         from tools.exploit_agent import ExploitPermission
+
         settings = build_cli_exploit_settings(
             mode="attack",
             target_ip="10.0.0.50",
@@ -122,6 +124,7 @@ class TestBuildCliExploitSettingsPermission:
     def test_attack_mode_explicit_full_access_config_upgrades(self):
         from main import build_cli_exploit_settings
         from tools.exploit_agent import ExploitPermission
+
         settings = build_cli_exploit_settings(
             mode="attack",
             target_ip="10.0.0.50",
@@ -135,6 +138,7 @@ class TestBuildCliExploitSettingsPermission:
         """A garbage config value must not raise nor grant full access."""
         from main import build_cli_exploit_settings
         from tools.exploit_agent import ExploitPermission
+
         settings = build_cli_exploit_settings(
             mode="attack",
             target_ip="10.0.0.50",
@@ -147,6 +151,7 @@ class TestBuildCliExploitSettingsPermission:
         """No ``permission`` key at all -> defaults to read_only (safe)."""
         from main import build_cli_exploit_settings
         from tools.exploit_agent import ExploitPermission
+
         settings = build_cli_exploit_settings(
             mode="attack",
             target_ip="10.0.0.50",
@@ -208,6 +213,7 @@ class TestRuntimeSkillPromptContext:
         assert "FULL SKILL BODY" in settings.target_context["skill_context"]
         assert "scanning-network-with-nmap-advanced" in settings.target_context["skill_hints"]
 
+
 # ── M21: --resume restores goal + assessment ───────────────────────────────
 
 
@@ -229,9 +235,7 @@ class TestResumeStateLoader:
             "chosen_goal": "backdoor",
             "chosen_goal_description": "establish persistence",
         }
-        (tmp_path / "recon_assessment.json").write_text(
-            json.dumps(data), encoding="utf-8"
-        )
+        (tmp_path / "recon_assessment.json").write_text(json.dumps(data), encoding="utf-8")
 
         args = _make_args(tmp_path)
         result = _load_resume_state(tmp_path, args)
@@ -245,14 +249,14 @@ class TestResumeStateLoader:
 
     def test_returns_none_when_file_missing(self, tmp_path):
         from main import _load_resume_state
+
         args = _make_args(tmp_path)
         assert _load_resume_state(tmp_path, args) is None
 
     def test_returns_none_on_corrupt_json(self, tmp_path):
         from main import _load_resume_state
-        (tmp_path / "recon_assessment.json").write_text(
-            "{not valid json", encoding="utf-8"
-        )
+
+        (tmp_path / "recon_assessment.json").write_text("{not valid json", encoding="utf-8")
         args = _make_args(tmp_path)
         assert _load_resume_state(tmp_path, args) is None
 
@@ -260,6 +264,7 @@ class TestResumeStateLoader:
         """A run started without recon-first has no chosen_goal saved; the
         loader falls back to args.goal so resume still has a goal to restore."""
         from main import _load_resume_state
+
         data = {
             "target_ip": "10.0.0.50",
             "os_verdict": "UNKNOWN",
@@ -269,9 +274,7 @@ class TestResumeStateLoader:
             "cve_findings": [],
             "overall_risk_score": 0,
         }
-        (tmp_path / "recon_assessment.json").write_text(
-            json.dumps(data), encoding="utf-8"
-        )
+        (tmp_path / "recon_assessment.json").write_text(json.dumps(data), encoding="utf-8")
         args = _make_args(tmp_path, goal="initial_access", custom_goal="custom obj")
         result = _load_resume_state(tmp_path, args)
         assert result is not None
@@ -284,18 +287,14 @@ class TestResumeRestoresInAsyncMain:
     """M21 end-to-end: a successful --resume loads recon_assessment.json and
     overrides the goal/assessment, and recon-first is skipped."""
 
-    def test_resume_overrides_goal_and_skips_recon_first(
-        self, monkeypatch, tmp_path
-    ):
+    def test_resume_overrides_goal_and_skips_recon_first(self, monkeypatch, tmp_path):
         import main as main_mod
 
         # Pre-create the reports dir with a run subdir to resume into, plus a
         # saved recon_assessment.json carrying a chosen_goal.
         run_dir = tmp_path / "reports" / "20240101_000000"
         run_dir.mkdir(parents=True)
-        (run_dir / "session_state.json").write_text(
-            json.dumps({"session_id": "20240101_000000"}), encoding="utf-8"
-        )
+        (run_dir / "session_state.json").write_text(json.dumps({"session_id": "20240101_000000"}), encoding="utf-8")
         assessment_data = {
             "target_ip": "10.0.0.50",
             "os_verdict": "LINUX",
@@ -307,16 +306,16 @@ class TestResumeRestoresInAsyncMain:
             "chosen_goal": "backdoor",
             "chosen_goal_description": "establish persistence",
         }
-        (run_dir / "recon_assessment.json").write_text(
-            json.dumps(assessment_data), encoding="utf-8"
-        )
+        (run_dir / "recon_assessment.json").write_text(json.dumps(assessment_data), encoding="utf-8")
 
         # Stub the router so we never touch Ollama.
         class _StubRouter:
             def __init__(self, *a, **kw):
                 self._clients = {"glm": object()}
+
             def get_client(self, name):
                 return object()
+
         monkeypatch.setattr(main_mod, "build_router", lambda *a, **kw: _StubRouter())
 
         # Use the real GoalEngine so the resume override path exercises it, but
@@ -336,19 +335,18 @@ class TestResumeRestoresInAsyncMain:
                 "records": [],
                 "messages": [],
             }
+
         monkeypatch.setattr(main_mod, "run_exploit_session", _fake_session)
 
         # Skip the confirm gate.
-        monkeypatch.setattr(
-            main_mod.ui, "ask_confirm", AsyncMock(return_value=True), raising=False
-        )
+        monkeypatch.setattr(main_mod.ui, "ask_confirm", AsyncMock(return_value=True), raising=False)
 
         args = _make_args(
             tmp_path,
             mode="attack",
             goal="recon_only",  # a preset so goal resolution doesn't prompt;
-                                # the resume override below replaces it with
-                                # the saved chosen_goal ("backdoor").
+            # the resume override below replaces it with
+            # the saved chosen_goal ("backdoor").
             resume="20240101_000000",
             recon_first=None,  # let the resume path force it False
         )
@@ -385,13 +383,21 @@ class TestSwarmModeRouting:
         class _FakeAgentLoop:
             def __init__(self, **kwargs):
                 self.run_autonomous_campaign = AsyncMock(
-                    return_value={"tasks_completed": 1, "tasks_blocked": 0,
-                                  "tasks_failed": 0, "findings_report_ready": 0}
+                    return_value={
+                        "tasks_completed": 1,
+                        "tasks_blocked": 0,
+                        "tasks_failed": 0,
+                        "findings_report_ready": 0,
+                    }
                 )
-                self.run = MagicMock(return_value={
-                    "tasks_completed": 2, "tasks_blocked": 0,
-                    "tasks_failed": 0, "findings_report_ready": 0,
-                })
+                self.run = MagicMock(
+                    return_value={
+                        "tasks_completed": 2,
+                        "tasks_blocked": 0,
+                        "tasks_failed": 0,
+                        "findings_report_ready": 0,
+                    }
+                )
                 instances.append(self)
 
         monkeypatch.setattr(al_mod, "AgentLoop", _FakeAgentLoop)
@@ -403,8 +409,10 @@ class TestSwarmModeRouting:
         class _StubRouter:
             def __init__(self, *a, **kw):
                 self._clients = {"glm": object()}
+
             def get_client(self, name):
                 return object()
+
         monkeypatch.setattr(main_mod, "build_router", lambda *a, **kw: _StubRouter())
 
         async def _fake_session(**kwargs):
@@ -416,10 +424,9 @@ class TestSwarmModeRouting:
                 "records": [],
                 "messages": [],
             }
+
         monkeypatch.setattr(main_mod, "run_exploit_session", _fake_session)
-        monkeypatch.setattr(
-            main_mod.ui, "ask_confirm", AsyncMock(return_value=True), raising=False
-        )
+        monkeypatch.setattr(main_mod.ui, "ask_confirm", AsyncMock(return_value=True), raising=False)
 
     def test_attack_mode_calls_run_autonomous_campaign(self, monkeypatch, tmp_path):
         import main as main_mod

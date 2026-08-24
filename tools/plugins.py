@@ -28,6 +28,7 @@ pathlib, typing, re). No import-time network/time/random. All discovery
 surfaces (entry points, search paths) accept injectable fakes so the test
 suite never touches the real filesystem entry-point database.
 """
+
 from __future__ import annotations
 
 import importlib.metadata
@@ -198,6 +199,7 @@ def _parse_manifest_yaml(text: str) -> dict[str, Any]:
 
 # ─── Manifest ─────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class PluginManifest:
     """Declares a plugin's identity, capabilities, and enablement default."""
@@ -253,6 +255,7 @@ class PluginManifest:
 
 # ─── Plugin base class ────────────────────────────────────────────────────────
 
+
 class Plugin(ABC):
     """Base class plugins implement. Subclasses set ``.manifest`` and implement ``register()``."""
 
@@ -279,6 +282,7 @@ class _ManifestOnlyPlugin(Plugin):
 
 
 # ─── Registry ─────────────────────────────────────────────────────────────────
+
 
 class PluginRegistry:
     """Holds dynamic registrations contributed by loaded plugins.

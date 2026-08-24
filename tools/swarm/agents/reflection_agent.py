@@ -209,7 +209,9 @@ class ReflectionAgent(Agent):
             # Connection refused pattern
             refused_count = sum(1 for e in failures if "refused" in str(e.get("error", "")).lower())
             if refused_count >= 3:
-                patterns.append(f"Connection refused {refused_count} times — target may have firewall or service is down.")
+                patterns.append(
+                    f"Connection refused {refused_count} times — target may have firewall or service is down."
+                )
 
             # Timeout pattern
             timeout_count = sum(1 for e in failures if "timeout" in str(e.get("error", "")).lower())
@@ -223,7 +225,9 @@ class ReflectionAgent(Agent):
                     tool = e.get("tool", "unknown")
                     success_tools[tool] = success_tools.get(tool, 0) + 1
                 best_tool = max(success_tools, key=success_tools.get)
-                patterns.append(f"Tool '{best_tool}' most successful ({success_tools[best_tool]} times) — prioritize this approach.")
+                patterns.append(
+                    f"Tool '{best_tool}' most successful ({success_tools[best_tool]} times) — prioritize this approach."
+                )
 
             output["patterns_identified"] = patterns
 
@@ -249,29 +253,42 @@ class ReflectionAgent(Agent):
                     f"Confirmed {len(successes)} successful vectors; target likely vulnerable to similar techniques."
                 )
             else:
-                output["new_hypothesis"] = "No confirmed vectors yet; consider alternative service paths or expanded recon."
+                output["new_hypothesis"] = (
+                    "No confirmed vectors yet; consider alternative service paths or expanded recon."
+                )
 
             # ── Strategy shift ──
             if len(failures) > len(successes) * 3:
-                output["recommended_strategy_shift"] = "MAJOR PIVOT: Current approach failing. Return to reconnaissance and re-evaluate attack surface."
+                output["recommended_strategy_shift"] = (
+                    "MAJOR PIVOT: Current approach failing. Return to reconnaissance and re-evaluate attack surface."
+                )
                 output["confidence"] = 0.9
             elif len(failures) > len(successes) * 2:
-                output["recommended_strategy_shift"] = "PIVOT: Try different service or attack vector. Current path has low success rate."
+                output["recommended_strategy_shift"] = (
+                    "PIVOT: Try different service or attack vector. Current path has low success rate."
+                )
                 output["confidence"] = 0.7
             elif successes and not failures:
-                output["recommended_strategy_shift"] = "ACCELERATE: High confidence in current vectors. Increase aggression and expand exploitation."
+                output["recommended_strategy_shift"] = (
+                    "ACCELERATE: High confidence in current vectors. Increase aggression and expand exploitation."
+                )
                 output["confidence"] = 0.9
             elif not successes and not failures:
                 output["recommended_strategy_shift"] = "PROCEED: No data yet. Continue with planned approach."
                 output["confidence"] = 0.5
             else:
-                output["recommended_strategy_shift"] = "MIXED: Continue with caution. Validate each finding before escalation."
+                output["recommended_strategy_shift"] = (
+                    "MIXED: Continue with caution. Validate each finding before escalation."
+                )
                 output["confidence"] = 0.6
 
             # ── LLM-driven deep reflection ──
             if model_client:
                 llm_reflection = self._llm_reflect(
-                    model_client, battle_log, session_state, blackboard,
+                    model_client,
+                    battle_log,
+                    session_state,
+                    blackboard,
                     skill_selection=context.get("skill_selection"),
                 )
                 if llm_reflection:
@@ -308,12 +325,14 @@ class ReflectionAgent(Agent):
                 bb_extend(blackboard, "successful_modules", list(success_tools))
 
             # ── Store in semantic memory ──
-            memory_updates.append({
-                "target": session_state.get("target_ip", ""),
-                "memory_type": "reflection",
-                "content": json.dumps(output),
-                "tags": ["reflection", "strategy", "learning"],
-            })
+            memory_updates.append(
+                {
+                    "target": session_state.get("target_ip", ""),
+                    "memory_type": "reflection",
+                    "content": json.dumps(output),
+                    "tags": ["reflection", "strategy", "learning"],
+                }
+            )
 
             # ── Tier 1.1: persist the reflection as a cross-mission lesson ──
             # The lessons-table write (real embedding) lets future engagements
@@ -326,11 +345,7 @@ class ReflectionAgent(Agent):
             # (autonomous_orchestrator) reflection paths.
             shift = output.get("recommended_strategy_shift", "")
             if semantic_memory is not None and shift:
-                target = (
-                    session_state.get("target_ip", "")
-                    or task.get("target", "")
-                    or "unknown"
-                )
+                target = session_state.get("target_ip", "") or task.get("target", "") or "unknown"
                 try:
                     semantic_memory.store_lesson(
                         target_signature=target,
@@ -412,7 +427,9 @@ class ReflectionAgent(Agent):
             known_block = (
                 "KNOWN STRUCTURED FAILURE CLASSES (already classified — reuse these labels):\n"
                 + "\n".join(f"- {line}" for line in known_classes)
-                + "\n" if known_classes else ""
+                + "\n"
+                if known_classes
+                else ""
             )
             prompt = f"""You are a senior penetration testing strategist analyzing recent actions.
 
@@ -423,10 +440,10 @@ REMAINING COMMAND BUDGET: {remaining_budget}
 {log_summary}
 
 CURRENT STATE:
-- Target: {session_state.get('target_ip', 'unknown')}
-- Access achieved: {blackboard.get('access_achieved', False)}
-- Attack surface score: {blackboard.get('attack_surface_score', 'N/A')}
-- Prior strategy shift: {blackboard.get('strategy_shift', 'none')}
+- Target: {session_state.get("target_ip", "unknown")}
+- Access achieved: {blackboard.get("access_achieved", False)}
+- Attack surface score: {blackboard.get("attack_surface_score", "N/A")}
+- Prior strategy shift: {blackboard.get("strategy_shift", "none")}
 
 Analyze:
 1. What patterns do you see in successes and failures?

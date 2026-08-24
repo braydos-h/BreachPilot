@@ -86,11 +86,13 @@ def distill_tool_sequence(
         tool = str(raw.get("tool_name") or raw.get("tool") or "").strip()
         if not tool:
             continue
-        rows.append({
-            "tool": tool[:_MAX_TOOL_NAME_CHARS],
-            "status": str(raw.get("status") or "unknown").lower(),
-            "command": str(raw.get("command") or "")[:200],
-        })
+        rows.append(
+            {
+                "tool": tool[:_MAX_TOOL_NAME_CHARS],
+                "status": str(raw.get("status") or "unknown").lower(),
+                "command": str(raw.get("command") or "")[:200],
+            }
+        )
     if len(rows) < _MIN_TOOL_CALLS:
         return {"skipped": "no tool calls"}
 
@@ -309,7 +311,11 @@ def _demo() -> None:
 
         # 3. Empty sequence -> skipped.
         result = distill_tool_sequence(
-            [], skill_name="empty", description="x", out_dir=out, maybe_enabled=True,
+            [],
+            skill_name="empty",
+            description="x",
+            out_dir=out,
+            maybe_enabled=True,
         )
         assert result.get("skipped") == "no tool calls", result
         print("[demo] empty sequence -> skipped: OK")
@@ -323,7 +329,11 @@ def _demo() -> None:
             {"tool_name": "c", "status": "success"},
         ]
         result = distill_tool_sequence(
-            mixed, skill_name="mixed", description="x", out_dir=out, maybe_enabled=True,
+            mixed,
+            skill_name="mixed",
+            description="x",
+            out_dir=out,
+            maybe_enabled=True,
         )
         assert result.get("tool_count") == 3, result
         print("[demo] malformed lines skipped (3 of 5 kept): OK")

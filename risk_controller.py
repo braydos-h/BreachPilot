@@ -21,11 +21,28 @@ from typing import Any
 # done by the word-boundary regexes in ``_DESTRUCTIVE_PATTERNS`` below, which
 # normalize whitespace/shell separators and avoid the substring false-positive
 # / false-negative problems the old frozenset had (M32).
-DESTRUCTIVE_KEYWORDS = frozenset({
-    "delete", "drop", "truncate", "overwrite", "rm ", "rm -rf", "dd if",
-    "format", "wipe", "shred", "mkfs", "fdisk", "parted",
-    "chmod 777", "chown", "unlink", "kill -9", "pkill",
-})
+DESTRUCTIVE_KEYWORDS = frozenset(
+    {
+        "delete",
+        "drop",
+        "truncate",
+        "overwrite",
+        "rm ",
+        "rm -rf",
+        "dd if",
+        "format",
+        "wipe",
+        "shred",
+        "mkfs",
+        "fdisk",
+        "parted",
+        "chmod 777",
+        "chown",
+        "unlink",
+        "kill -9",
+        "pkill",
+    }
+)
 
 # Destructive command patterns with word boundaries. Whitespace and shell
 # separators (;|&) are normalized to single spaces before matching so that
@@ -33,9 +50,9 @@ DESTRUCTIVE_KEYWORDS = frozenset({
 # (M32). The verb set is broadened beyond the original ``rm``/``dd if`` pair
 # to include shred, wipe, format, truncate, overwrite and mkfs variants.
 _DESTRUCTIVE_PATTERNS = [
-    re.compile(r"\brm\b\s*[-rf]?"),          # rm with optional -r/-f flags
-    re.compile(r"\bdd\b\s+(?:if|of)\b"),      # dd if=/of=
-    re.compile(r"\bkill(?:all)?\b\s*-"),     # kill -9, killall -HUP
+    re.compile(r"\brm\b\s*[-rf]?"),  # rm with optional -r/-f flags
+    re.compile(r"\bdd\b\s+(?:if|of)\b"),  # dd if=/of=
+    re.compile(r"\bkill(?:all)?\b\s*-"),  # kill -9, killall -HUP
     re.compile(r"\bpkill\b"),
     re.compile(r"\bshred\b"),
     re.compile(r"\bwipe\b"),
@@ -58,8 +75,18 @@ _DESTRUCTIVE_PATTERNS = [
 # are intentionally NOT matched here: their source-vs-destination ambiguity
 # would block safe reads like ``cp /etc/passwd /tmp/backup``.
 _SENSITIVE_SYSTEM_DIRS = (
-    "etc", "usr", "bin", "sbin", "boot", "lib", "lib64",
-    "root", "proc", "sys", "dev", "var/log",
+    "etc",
+    "usr",
+    "bin",
+    "sbin",
+    "boot",
+    "lib",
+    "lib64",
+    "root",
+    "proc",
+    "sys",
+    "dev",
+    "var/log",
 )
 _SENSITIVE_OVERWRITE_PATTERNS = [
     # `echo x > /etc/passwd`, `cat y >> /etc/shadow`, `2> /etc/cron.d/x`, `&> /etc/x`
@@ -68,15 +95,40 @@ _SENSITIVE_OVERWRITE_PATTERNS = [
     re.compile(r"\btee\b\s+(?:-[a-z]+\s+)?/(?:" + "|".join(_SENSITIVE_SYSTEM_DIRS) + r")(?:/|\b)"),
 ]
 
-DANGEROUS_TOOL_PATTERNS = frozenset({
-    "hydra", "medusa", "ncrack", "patator", "brute", "crackmapexec",
-    "msfvenom", "msfconsole", "exploit/multi/", "exploit/windows/",
-    "meterpreter", "payload/", "reverse_", "bind_", "shell_reverse",
-    "mimikatz", "lsadump", "sekurlsa", "hashdump",
-    "generate_payload", "lateral_exec", "dump_credentials", "kerberoast",
-    "wmiexec", "smbexec", "psexec", "atexec",
-    "secretsdump", "GetUserSPNs", "GetUserSPNs.py",
-})
+DANGEROUS_TOOL_PATTERNS = frozenset(
+    {
+        "hydra",
+        "medusa",
+        "ncrack",
+        "patator",
+        "brute",
+        "crackmapexec",
+        "msfvenom",
+        "msfconsole",
+        "exploit/multi/",
+        "exploit/windows/",
+        "meterpreter",
+        "payload/",
+        "reverse_",
+        "bind_",
+        "shell_reverse",
+        "mimikatz",
+        "lsadump",
+        "sekurlsa",
+        "hashdump",
+        "generate_payload",
+        "lateral_exec",
+        "dump_credentials",
+        "kerberoast",
+        "wmiexec",
+        "smbexec",
+        "psexec",
+        "atexec",
+        "secretsdump",
+        "GetUserSPNs",
+        "GetUserSPNs.py",
+    }
+)
 
 
 @dataclass
@@ -221,10 +273,7 @@ class RiskController:
                 )
 
         # ── 2. Exploitation gating ──
-        is_exploit_action = any(
-            pat in tool_name.lower() or pat in cmd_lower
-            for pat in DANGEROUS_TOOL_PATTERNS
-        )
+        is_exploit_action = any(pat in tool_name.lower() or pat in cmd_lower for pat in DANGEROUS_TOOL_PATTERNS)
         if is_exploit_action and not self._allow_exploitation:
             return RiskAssessment(
                 allowed=False,
@@ -238,8 +287,7 @@ class RiskController:
 
         # ── 3. Pivoting gating ──
         is_pivot_action = any(
-            kw in cmd_lower
-            for kw in ("pivot", "lateral", "proxy", "tunnel", "port_forward", "_scan ")
+            kw in cmd_lower for kw in ("pivot", "lateral", "proxy", "tunnel", "port_forward", "_scan ")
         )
         if is_pivot_action and not self._allow_pivoting:
             return RiskAssessment(

@@ -16,8 +16,7 @@ def _svc(port, service="http", version=None, banner=None, ssl_info=None, scripts
     }
 
 
-def _snap(target_ip="10.0.0.50", os_family="Linux", open_ports=None,
-          filtered_ports=None, services=None):
+def _snap(target_ip="10.0.0.50", os_family="Linux", open_ports=None, filtered_ports=None, services=None):
     return {
         "target_ip": target_ip,
         "os_family": os_family,
@@ -97,12 +96,16 @@ def test_ssl_info_appearance():
 
 
 def test_new_and_lost_cves():
-    old = _snap(services=[
-        _svc(443, "https", scripts={"vulners": "CVE-2021-44228 found"}),
-    ])
-    new = _snap(services=[
-        _svc(443, "https", scripts={"vulners": "CVE-2022-22965 found"}),
-    ])
+    old = _snap(
+        services=[
+            _svc(443, "https", scripts={"vulners": "CVE-2021-44228 found"}),
+        ]
+    )
+    new = _snap(
+        services=[
+            _svc(443, "https", scripts={"vulners": "CVE-2022-22965 found"}),
+        ]
+    )
     d = diff_recon(old, new)
     assert "CVE-2022-22965" in d["new_cves"]
     assert "CVE-2021-44228" in d["lost_cves"]
@@ -142,8 +145,7 @@ def test_missing_keys_do_not_raise():
 
 def test_diff_recon_files_loads_and_diffs(tmp_path):
     old = _snap(open_ports=[22], services=[_svc(22, "ssh", version="OpenSSH 8.2")])
-    new = _snap(open_ports=[22, 80], services=[_svc(22, "ssh", version="OpenSSH 8.9"),
-                                                _svc(80, "http")])
+    new = _snap(open_ports=[22, 80], services=[_svc(22, "ssh", version="OpenSSH 8.9"), _svc(80, "http")])
     old_path = tmp_path / "old.json"
     new_path = tmp_path / "new.json"
     old_path.write_text(__import__("json").dumps(old), encoding="utf-8")

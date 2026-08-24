@@ -69,14 +69,13 @@ import time
 WS_URL = "wss://target-api.example.com/ws"
 AUTH_TOKEN = "Bearer <token>"
 
+
 # Capture and analyze the WebSocket handshake
 async def analyze_handshake():
     """Analyze WebSocket upgrade request and response headers."""
     try:
         async with websockets.connect(
-            WS_URL,
-            extra_headers={"Authorization": AUTH_TOKEN},
-            ssl=ssl.create_default_context()
+            WS_URL, extra_headers={"Authorization": AUTH_TOKEN}, ssl=ssl.create_default_context()
         ) as ws:
             print(f"Connected to: {WS_URL}")
             print(f"Protocol: {ws.subprotocol}")
@@ -96,6 +95,7 @@ async def analyze_handshake():
         print(f"Connection error: {e}")
         return False
 
+
 asyncio.run(analyze_handshake())
 ```
 
@@ -111,11 +111,7 @@ async def test_ws_authentication():
         async with websockets.connect(WS_URL) as ws:
             await ws.send(json.dumps({"type": "get_user_data"}))
             resp = await asyncio.wait_for(ws.recv(), timeout=5)
-            results.append({
-                "test": "No authentication",
-                "status": "VULNERABLE",
-                "response": resp[:200]
-            })
+            results.append({"test": "No authentication", "status": "VULNERABLE", "response": resp[:200]})
             print(f"[VULN] WebSocket accessible without authentication")
     except websockets.exceptions.InvalidStatusCode:
         results.append({"test": "No authentication", "status": "SECURE"})
@@ -124,15 +120,10 @@ async def test_ws_authentication():
 
     # Test 2: Connect with invalid token
     try:
-        async with websockets.connect(WS_URL,
-            extra_headers={"Authorization": "Bearer invalid_token"}) as ws:
+        async with websockets.connect(WS_URL, extra_headers={"Authorization": "Bearer invalid_token"}) as ws:
             await ws.send(json.dumps({"type": "get_user_data"}))
             resp = await asyncio.wait_for(ws.recv(), timeout=5)
-            results.append({
-                "test": "Invalid token",
-                "status": "VULNERABLE",
-                "response": resp[:200]
-            })
+            results.append({"test": "Invalid token", "status": "VULNERABLE", "response": resp[:200]})
     except websockets.exceptions.InvalidStatusCode:
         results.append({"test": "Invalid token", "status": "SECURE"})
     except Exception as e:
@@ -141,8 +132,7 @@ async def test_ws_authentication():
     # Test 3: Connect with expired token
     expired_token = "Bearer eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjE2MDAwMDAwMDB9.expired"
     try:
-        async with websockets.connect(WS_URL,
-            extra_headers={"Authorization": expired_token}) as ws:
+        async with websockets.connect(WS_URL, extra_headers={"Authorization": expired_token}) as ws:
             await ws.send(json.dumps({"type": "get_user_data"}))
             resp = await asyncio.wait_for(ws.recv(), timeout=5)
             results.append({"test": "Expired token", "status": "VULNERABLE"})
@@ -154,10 +144,9 @@ async def test_ws_authentication():
         async with websockets.connect(f"{WS_URL}?token={AUTH_TOKEN}") as ws:
             await ws.send(json.dumps({"type": "ping"}))
             resp = await asyncio.wait_for(ws.recv(), timeout=5)
-            results.append({
-                "test": "Token in URL",
-                "status": "INFO - Token accepted in query parameter (may leak in logs)"
-            })
+            results.append(
+                {"test": "Token in URL", "status": "INFO - Token accepted in query parameter (may leak in logs)"}
+            )
     except Exception:
         results.append({"test": "Token in URL", "status": "REJECTED"})
 
@@ -165,6 +154,7 @@ async def test_ws_authentication():
         print(f"  [{r['status'][:10]}] {r['test']}")
 
     return results
+
 
 asyncio.run(test_ws_authentication())
 ```
@@ -178,12 +168,12 @@ async def test_cswsh():
     # An attacker's website can connect to the legitimate WebSocket and steal data
 
     origins_to_test = [
-        None,                                    # No Origin header
-        "https://evil.com",                      # Attacker domain
+        None,  # No Origin header
+        "https://evil.com",  # Attacker domain
         "https://target-api.example.com.evil.com",  # Subdomain confusion
-        "null",                                  # Null origin (sandboxed iframe)
-        "https://target-api.example.com",        # Legitimate origin
-        "http://target-api.example.com",         # HTTP downgrade
+        "null",  # Null origin (sandboxed iframe)
+        "https://target-api.example.com",  # Legitimate origin
+        "http://target-api.example.com",  # HTTP downgrade
     ]
 
     print("=== CSWSH Testing ===\n")
@@ -206,6 +196,7 @@ async def test_cswsh():
             print(f"[BLOCKED] Origin '{origin}' -> Rejected ({e.status_code})")
         except Exception as e:
             print(f"[ERROR] Origin '{origin}' -> {e}")
+
 
 asyncio.run(test_cswsh())
 
@@ -278,9 +269,7 @@ async def test_ws_injection():
         ],
     }
 
-    async with websockets.connect(WS_URL,
-        extra_headers={"Authorization": AUTH_TOKEN}) as ws:
-
+    async with websockets.connect(WS_URL, extra_headers={"Authorization": AUTH_TOKEN}) as ws:
         for category, payloads in INJECTION_PAYLOADS.items():
             for payload in payloads:
                 try:
@@ -310,6 +299,7 @@ async def test_ws_injection():
                     # Reconnect
                     break
 
+
 asyncio.run(test_ws_injection())
 ```
 
@@ -322,8 +312,7 @@ async def test_ws_dos():
 
     # Test 1: Message flooding
     async def flood_test():
-        async with websockets.connect(WS_URL,
-            extra_headers={"Authorization": AUTH_TOKEN}) as ws:
+        async with websockets.connect(WS_URL, extra_headers={"Authorization": AUTH_TOKEN}) as ws:
             count = 0
             start = time.time()
             for i in range(10000):
@@ -333,16 +322,16 @@ async def test_ws_dos():
                 except websockets.exceptions.ConnectionClosed:
                     break
             elapsed = time.time() - start
-            print(f"  Flood test: {count} messages in {elapsed:.1f}s ({count/elapsed:.0f} msg/s)")
+            print(f"  Flood test: {count} messages in {elapsed:.1f}s ({count / elapsed:.0f} msg/s)")
 
     await flood_test()
 
     # Test 2: Large message
     async def large_message_test():
         sizes = [1024, 10240, 102400, 1024000, 10240000]  # 1KB to 10MB
-        async with websockets.connect(WS_URL,
-            extra_headers={"Authorization": AUTH_TOKEN},
-            max_size=20*1024*1024) as ws:
+        async with websockets.connect(
+            WS_URL, extra_headers={"Authorization": AUTH_TOKEN}, max_size=20 * 1024 * 1024
+        ) as ws:
             for size in sizes:
                 try:
                     large_msg = json.dumps({"type": "data", "payload": "A" * size})
@@ -360,8 +349,7 @@ async def test_ws_dos():
         connections = []
         for i in range(100):
             try:
-                ws = await websockets.connect(WS_URL,
-                    extra_headers={"Authorization": AUTH_TOKEN})
+                ws = await websockets.connect(WS_URL, extra_headers={"Authorization": AUTH_TOKEN})
                 connections.append(ws)
             except Exception:
                 break
@@ -370,6 +358,7 @@ async def test_ws_dos():
             await ws.close()
 
     await connection_exhaustion()
+
 
 asyncio.run(test_ws_dos())
 ```

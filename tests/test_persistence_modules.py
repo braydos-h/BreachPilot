@@ -19,6 +19,7 @@ def _ctx() -> ModuleContext:
 
 class _FakeProc:
     """Minimal subprocess.run stand-in for the persistence-script exec tests."""
+
     def __init__(self, returncode: int = 0) -> None:
         self.returncode = returncode
         self.stdout = ""
@@ -88,9 +89,7 @@ def test_linux_persistence_plants_real_ssh_key(tmp_path, monkeypatch) -> None:
                     f = argv[i + 1]
             if f:
                 open(f, "w").write("PRIVKEY\n")
-                open(f + ".pub", "w").write(
-                    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIREALKEY persist@host\n"
-                )
+                open(f + ".pub", "w").write("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIREALKEY persist@host\n")
             return _FakeProc(0)
         # All other shell calls (crontab/systemctl/sc) succeed silently.
         return _FakeProc(0)
@@ -101,10 +100,12 @@ def test_linux_persistence_plants_real_ssh_key(tmp_path, monkeypatch) -> None:
     # The generated script targets Linux (`import pwd`); inject a stub so it
     # execs on the Windows test host. Only the SSH block is asserted here.
     import types as _types
+
     _pwd = _types.ModuleType("pwd")
 
     class _pw:
         pw_name = "root"
+
     _pwd.getpwuid = lambda uid: _pw()
     monkeypatch.setitem(__import__("sys").modules, "pwd", _pwd)
     ns: dict = {"__name__": "__persistence_test__"}

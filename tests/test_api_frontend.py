@@ -37,6 +37,7 @@ def _make_client(tmp_path, monkeypatch, token="test-token", ollama_host="http://
 
     class _FakeRouter:
         _clients = {"glm": MagicMock()}
+
         def get_client(self, name):
             return self._clients[name]
 
@@ -48,6 +49,7 @@ def _make_client(tmp_path, monkeypatch, token="test-token", ollama_host="http://
 
     callables = Callables(build_router=_fake_build_router, run_session=_fake_run_session)
     from app import create_app
+
     app = create_app(config_path=config_path, callables=callables)
     return TestClient(app)
 
@@ -57,14 +59,21 @@ def _auth(token="test-token"):
 
 
 def _create_run(client, target="10.0.0.50"):
-    resp = client.post("/api/v1/runs", json={
-        "target": target, "mode": "attack", "goal": "recon_only",
-    }, headers=_auth())
+    resp = client.post(
+        "/api/v1/runs",
+        json={
+            "target": target,
+            "mode": "attack",
+            "goal": "recon_only",
+        },
+        headers=_auth(),
+    )
     assert resp.status_code == 201
     return resp.json()
 
 
 # ── Goals (B4) ───────────────────────────────────────────────────────────────
+
 
 def test_goals_list(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
@@ -88,6 +97,7 @@ def test_goals_list(tmp_path, monkeypatch):
 
 # ── Config schema (B5) ───────────────────────────────────────────────────────
 
+
 def test_config_schema(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
     resp = client.get("/api/v1/config/schema", headers=_auth())
@@ -99,6 +109,7 @@ def test_config_schema(tmp_path, monkeypatch):
 
 
 # ── Enriched diagnostics (B6) ────────────────────────────────────────────────
+
 
 def test_doctor_returns_output(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
@@ -120,6 +131,7 @@ def test_self_test_returns_output(tmp_path, monkeypatch):
 
 
 # ── Live Ollama models (C1) ──────────────────────────────────────────────────
+
 
 def test_models_live_falls_back_when_ollama_unreachable(tmp_path, monkeypatch):
     # Point the route at a closed port so the 503 fallback fires deterministically,
@@ -152,6 +164,7 @@ def _make_chatgpt_client(tmp_path, monkeypatch, token="test-token"):
 
     class _FakeRouter:
         _clients = {"glm": MagicMock()}
+
         def get_client(self, name):
             return self._clients[name]
 
@@ -163,6 +176,7 @@ def _make_chatgpt_client(tmp_path, monkeypatch, token="test-token"):
 
     callables = Callables(build_router=_fake_build_router, run_session=_fake_run_session)
     from app import create_app
+
     app = create_app(config_path=config_path, callables=callables)
     return TestClient(app)
 
@@ -171,6 +185,7 @@ def _patch_chatgpt_manager(monkeypatch, ensure_return):
     """Patch ChatGptProxyManager.get() to return a fake whose ensure_running returns
     the given dict. Returns the fake so the test can assert call counts."""
     from tools.providers import chatgpt_provider
+
     fake = MagicMock()
     fake.ensure_running.return_value = ensure_return
     monkeypatch.setattr(chatgpt_provider.ChatGptProxyManager, "get", lambda *a, **k: fake)
@@ -206,6 +221,7 @@ def test_models_live_chatgpt_not_authenticated_no_spawn(tmp_path, monkeypatch):
 
 # ── Skill detail (C2) ────────────────────────────────────────────────────────
 
+
 def test_skill_detail_not_found(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
     resp = client.get("/api/v1/skills/nonexistent_skill", headers=_auth())
@@ -214,6 +230,7 @@ def test_skill_detail_not_found(tmp_path, monkeypatch):
 
 
 # ── Enriched run list (B1) ───────────────────────────────────────────────────
+
 
 def test_list_runs_includes_target_and_mode(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
@@ -226,6 +243,7 @@ def test_list_runs_includes_target_and_mode(tmp_path, monkeypatch):
 
 
 # ── Artifacts (B2-B3) ────────────────────────────────────────────────────────
+
 
 def test_list_artifacts_empty_for_new_run(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
@@ -278,6 +296,7 @@ def test_get_artifact_rejects_non_whitelisted_name(tmp_path, monkeypatch):
 
 # ── Audit trail (C6) ─────────────────────────────────────────────────────────
 
+
 def test_audit_empty_when_no_file(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
     created = _create_run(client)
@@ -305,6 +324,7 @@ def test_audit_reads_records_and_verifies_chain(tmp_path, monkeypatch):
 
 
 # ── Swarm + campaign state (C7-C8) ───────────────────────────────────────────
+
 
 def test_swarm_state_not_found(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
@@ -338,6 +358,7 @@ def test_campaign_state_returns_json(tmp_path, monkeypatch):
 
 
 # ── Log tailing (C9) ─────────────────────────────────────────────────────────
+
 
 def test_log_not_found_for_unknown_name(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
@@ -374,22 +395,26 @@ def test_log_per_attempt_requires_params(tmp_path, monkeypatch):
 
 # ── Credentials + loot (C3-C5) ──────────────────────────────────────────────
 
+
 def _seed_credentials(run_id: str, password="s3cr3t"):
     import time
 
     from tools.credential_store import CredentialRecord, CredentialStore
+
     ws = Path("reports") / run_id / "exploit_workspace"
     ws.mkdir(parents=True, exist_ok=True)
     store = CredentialStore(ws)
-    store.add(CredentialRecord(
-        timestamp=time.time(),
-        source_host="10.0.0.50",
-        target_host="10.0.0.99",
-        username="admin",
-        password=password,
-        credential_type="password",
-        source_action="dump_credentials",
-    ))
+    store.add(
+        CredentialRecord(
+            timestamp=time.time(),
+            source_host="10.0.0.50",
+            target_host="10.0.0.99",
+            username="admin",
+            password=password,
+            credential_type="password",
+            source_action="dump_credentials",
+        )
+    )
 
 
 def test_credentials_redacted(tmp_path, monkeypatch):
@@ -409,7 +434,8 @@ def test_credential_reveal_returns_plaintext_and_audits(tmp_path, monkeypatch):
     created = _create_run(client)
     _seed_credentials(created["run_id"], password="hunter2")
     resp = client.post(
-        f"/api/v1/runs/{created['run_id']}/credentials/0/reveal", headers=_auth(),
+        f"/api/v1/runs/{created['run_id']}/credentials/0/reveal",
+        headers=_auth(),
     )
     assert resp.status_code == 200
     data = resp.json()
@@ -427,7 +453,8 @@ def test_credential_reveal_out_of_range(tmp_path, monkeypatch):
     created = _create_run(client)
     _seed_credentials(created["run_id"])
     resp = client.post(
-        f"/api/v1/runs/{created['run_id']}/credentials/99/reveal", headers=_auth(),
+        f"/api/v1/runs/{created['run_id']}/credentials/99/reveal",
+        headers=_auth(),
     )
     assert resp.status_code == 404
 
@@ -444,13 +471,19 @@ def test_loot_returns_items(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
     created = _create_run(client)
     from tools.credential_store import LootItem, LootStore
+
     ws = Path("reports") / created["run_id"] / "exploit_workspace"
     ws.mkdir(parents=True, exist_ok=True)
     store = LootStore(ws)
-    store.add(LootItem(
-        timestamp=1.0, source_host="10.0.0.99", loot_type="file",
-        description="/etc/shadow", content="root:...",
-    ))
+    store.add(
+        LootItem(
+            timestamp=1.0,
+            source_host="10.0.0.99",
+            loot_type="file",
+            description="/etc/shadow",
+            content="root:...",
+        )
+    )
     resp = client.get(f"/api/v1/runs/{created['run_id']}/loot", headers=_auth())
     assert resp.status_code == 200
     loot = resp.json()["loot"]
@@ -459,6 +492,7 @@ def test_loot_returns_items(tmp_path, monkeypatch):
 
 
 # ── DELETE run (D1) ───────────────────────────────────────────────────────────
+
 
 def test_delete_run_after_cancel(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
@@ -486,7 +520,8 @@ def test_delete_run_purge_removes_directory(tmp_path, monkeypatch):
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "session_summary.md").write_text("x", encoding="utf-8")
     resp = client.delete(
-        f"/api/v1/runs/{created['run_id']}?purge=true", headers=_auth(),
+        f"/api/v1/runs/{created['run_id']}?purge=true",
+        headers=_auth(),
     )
     assert resp.status_code == 200
     assert resp.json()["purged"] is True
@@ -494,6 +529,7 @@ def test_delete_run_purge_removes_directory(tmp_path, monkeypatch):
 
 
 # ── Single decision GET (D2) ─────────────────────────────────────────────────
+
 
 def test_get_single_decision(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
@@ -522,6 +558,7 @@ def test_get_single_decision_wrong_run(tmp_path, monkeypatch):
 
 
 # ── SSE auth (D4) ────────────────────────────────────────────────────────────
+
 
 def test_sse_rejects_missing_token(tmp_path, monkeypatch):
     """SSE stream requires the Authorization: Bearer header (no query token)."""
@@ -570,6 +607,7 @@ def test_sse_accepts_correct_token(tmp_path, monkeypatch):
 
 # ── Event replay bug fix (A1) ────────────────────────────────────────────────
 
+
 def test_replay_reads_jsonl_when_cursor_outside_ring():
     """The fixed _replay_locked must read events.jsonl when the ring doesn't
     cover the requested cursor (previously dead code returned [] silently).
@@ -577,6 +615,7 @@ def test_replay_reads_jsonl_when_cursor_outside_ring():
     import asyncio
 
     from tools.api.event_broker import RunEventBroker
+
     rd = Path(__import__("tempfile").mkdtemp()) / "run"
     rd.mkdir(parents=True, exist_ok=True)
     broker = RunEventBroker("r1", rd, buffer_size=2)
@@ -599,6 +638,7 @@ def test_replay_jsonl_after_close():
     import asyncio
 
     from tools.api.event_broker import RunEventBroker
+
     rd = Path(__import__("tempfile").mkdtemp()) / "run"
     rd.mkdir(parents=True, exist_ok=True)
     broker = RunEventBroker("r2", rd, buffer_size=1)

@@ -37,6 +37,7 @@ def _fake_registry_with_skills():
         _skill("performing-subdomain-enumeration-with-subfinder", ("subdomain-enumeration", "reconnaissance")),
         _skill("scanning-network-with-nmap-advanced", ("nmap", "network-security", "reconnaissance")),
     ]
+
     # search(tags=[...]) returns skills whose tags intersect the query.
     def _search(tags=None, **_):
         if not tags:
@@ -62,8 +63,7 @@ def test_tag_signals_emits_domain_tags_when_is_domain_true():
         is_domain=True,
     )
     # The domain-attack tags must all be present with a target:domain signal.
-    for expected in ("domain-attack", "subdomain-enumeration", "dns-recon",
-                     "subdomain-takeover", "attack-surface"):
+    for expected in ("domain-attack", "subdomain-enumeration", "dns-recon", "subdomain-takeover", "attack-surface"):
         assert expected in tags, f"expected {expected} in tags when is_domain=True, got {sorted(tags)}"
         assert "target:domain" in tags[expected]
 
@@ -143,6 +143,4 @@ def test_build_skill_selection_for_context_threads_is_domain():
         is_domain=True,
     )
     names = {a.name for a in selection.activations}
-    assert "attacking-domains-end-to-end" in names, (
-        f"expected domain skill surfaced via is_domain, got {sorted(names)}"
-    )
+    assert "attacking-domains-end-to-end" in names, f"expected domain skill surfaced via is_domain, got {sorted(names)}"

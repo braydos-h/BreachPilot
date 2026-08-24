@@ -52,7 +52,9 @@ def _zap_api_key(config: dict[str, Any] | None) -> str:
     return os.environ.get(env_name, "")
 
 
-def _zap_get(config: dict[str, Any] | None, path: str, params: dict[str, Any] | None = None, timeout: int = 30) -> tuple[int, str]:
+def _zap_get(
+    config: dict[str, Any] | None, path: str, params: dict[str, Any] | None = None, timeout: int = 30
+) -> tuple[int, str]:
     """GET against the ZAP REST API. Returns (status, body)."""
     base = _zap_base(config)
     qs = []
@@ -73,7 +75,9 @@ def _zap_get(config: dict[str, Any] | None, path: str, params: dict[str, Any] | 
         return 0, f"ZAP request failed: {exc}"
 
 
-def _zap_post(config: dict[str, Any] | None, path: str, params: dict[str, Any] | None = None, timeout: int = 30) -> tuple[int, str]:
+def _zap_post(
+    config: dict[str, Any] | None, path: str, params: dict[str, Any] | None = None, timeout: int = 30
+) -> tuple[int, str]:
     """POST against the ZAP REST API. Returns (status, body)."""
     import urllib.parse
 
@@ -85,7 +89,9 @@ def _zap_post(config: dict[str, Any] | None, path: str, params: dict[str, Any] |
     body = urllib.parse.urlencode(data).encode()
     url = base + path
     try:
-        req = urllib.request.Request(url, data=body, method="POST", headers={"Content-Type": "application/x-www-form-urlencoded"})
+        req = urllib.request.Request(
+            url, data=body, method="POST", headers={"Content-Type": "application/x-www-form-urlencoded"}
+        )
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, r.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
@@ -160,11 +166,7 @@ def _register_zap_tools(mcp: Any, ctx: Any) -> None:
         except Exception:  # noqa: BLE001
             scan_id = ""
         return (
-            f"ZAP_SPIDER_RESULT: started\n"
-            f"SCAN_ID: {scan_id}\n"
-            f"URL: {url}\n"
-            f"MAX_DEPTH: {max_depth}\n"
-            f"TARGET: {target_ip}"
+            f"ZAP_SPIDER_RESULT: started\nSCAN_ID: {scan_id}\nURL: {url}\nMAX_DEPTH: {max_depth}\nTARGET: {target_ip}"
         )
 
     @mcp.tool()
@@ -195,12 +197,7 @@ def _register_zap_tools(mcp: Any, ctx: Any) -> None:
             scan_id = json.loads(body).get("scan", "")
         except Exception:  # noqa: BLE001
             scan_id = ""
-        return (
-            f"ZAP_ACTIVE_SCAN_RESULT: started\n"
-            f"SCAN_ID: {scan_id}\n"
-            f"URL: {url}\n"
-            f"TARGET: {target_ip}"
-        )
+        return f"ZAP_ACTIVE_SCAN_RESULT: started\nSCAN_ID: {scan_id}\nURL: {url}\nTARGET: {target_ip}"
 
     @mcp.tool()
     @require_allowlist(target_param="target_ip", audit=True)
@@ -228,11 +225,7 @@ def _register_zap_tools(mcp: Any, ctx: Any) -> None:
             alerts = obj.get("alerts", [])
         except Exception:  # noqa: BLE001
             alerts = []
-        return (
-            f"ZAP_ALERTS_RESULT: count={len(alerts)}\n"
-            f"TARGET: {target_ip}\n"
-            f"ALERTS:\n{body[:4000]}"
-        )
+        return f"ZAP_ALERTS_RESULT: count={len(alerts)}\nTARGET: {target_ip}\nALERTS:\n{body[:4000]}"
 
 
 def create_plugin() -> Plugin:

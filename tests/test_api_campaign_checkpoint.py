@@ -79,9 +79,12 @@ class _CheckpointService:
 
     async def execute(self, request, preview, *, decision_provider, event_sink, cancellation, **kw):
         from tools.run_service.models import Decision, DecisionKind
+
         # Simulate the loop surfacing a no-path checkpoint.
         decision = Decision(
-            id="", run_id=preview.run_id, kind=DecisionKind.CAMPAIGN_NEXT_STEP,
+            id="",
+            run_id=preview.run_id,
+            kind=DecisionKind.CAMPAIGN_NEXT_STEP,
             prompt_text="NO VERIFIED ACCESS YET\nTarget: 10.0.0.50",
             options=[
                 {"action": "continue", "label": "Continue"},
@@ -93,8 +96,11 @@ class _CheckpointService:
         # The answer encodes the operator's choice.
         cancelled = answer.startswith("cancel")
         return RunResult(
-            run_id=preview.run_id, target_ip=preview.target_ip, mode=preview.mode,
-            goal_name=preview.goal_name, goal_description=preview.goal_description,
+            run_id=preview.run_id,
+            target_ip=preview.target_ip,
+            mode=preview.mode,
+            goal_name=preview.goal_name,
+            goal_description=preview.goal_description,
             cancelled=cancelled,
         )
 
@@ -179,4 +185,6 @@ async def _await_terminal(manager: RunManager, run_id: str, timeout: float = 5.0
         if run and run["state"] in terminal:
             return
         await asyncio.sleep(0.02)
-    raise AssertionError(f"run {run_id} did not reach terminal state within {timeout}s (state={manager._persistence.get_run(run_id)['state']})")
+    raise AssertionError(
+        f"run {run_id} did not reach terminal state within {timeout}s (state={manager._persistence.get_run(run_id)['state']})"
+    )

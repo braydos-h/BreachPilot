@@ -44,11 +44,12 @@ def _ics_write_allowed() -> bool:
     config_path = os.environ.get("AI_NMAP_CONFIG_PATH") or "config.yaml"
     try:
         import yaml  # local import keeps the module importable without PyYAML
+
         with open(config_path, "r", encoding="utf-8") as handle:
             cfg = yaml.safe_load(handle) or {}
     except Exception:
         return False
-    ics_cfg = (cfg.get("ics", {}) or {})
+    ics_cfg = cfg.get("ics", {}) or {}
     return bool(ics_cfg.get("allow_write", False)) and bool(ics_cfg.get("destructive_ics", False))
 
 

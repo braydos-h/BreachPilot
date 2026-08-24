@@ -205,7 +205,9 @@ def main():
         print(f"  Enriching {ioc_type}: {ioc_val}...")
         result = enrich_ioc(ioc_val, ioc_type, args.vt_key, args.abuse_key)
         results.append(result)
-        verdict = "MALICIOUS" if result.confidence_score >= 70 else "SUSPICIOUS" if result.confidence_score >= 40 else "CLEAN"
+        verdict = (
+            "MALICIOUS" if result.confidence_score >= 70 else "SUSPICIOUS" if result.confidence_score >= 40 else "CLEAN"
+        )
         print(f"    VT: {result.vt_malicious}/{result.vt_total} | Confidence: {result.confidence_score} | {verdict}")
 
     report = {

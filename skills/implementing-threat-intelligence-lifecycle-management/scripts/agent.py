@@ -6,6 +6,7 @@ processing/normalization of IOCs, analysis/enrichment via VirusTotal
 and AbuseIPDB, dissemination to SIEM/firewalls, and tracking of
 IOC aging and confidence scoring.
 """
+
 import argparse
 import csv
 import hashlib
@@ -21,13 +22,13 @@ except ImportError:
 
 
 IOC_PATTERNS = {
-    "ipv4": re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b'),
-    "domain": re.compile(r'\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}\b', re.I),
-    "md5": re.compile(r'\b[a-fA-F0-9]{32}\b'),
-    "sha1": re.compile(r'\b[a-fA-F0-9]{40}\b'),
-    "sha256": re.compile(r'\b[a-fA-F0-9]{64}\b'),
+    "ipv4": re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
+    "domain": re.compile(r"\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}\b", re.I),
+    "md5": re.compile(r"\b[a-fA-F0-9]{32}\b"),
+    "sha1": re.compile(r"\b[a-fA-F0-9]{40}\b"),
+    "sha256": re.compile(r"\b[a-fA-F0-9]{64}\b"),
     "url": re.compile(r'https?://[^\s<>"{}|\\^`\[\]]+'),
-    "email": re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'),
+    "email": re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"),
 }
 
 
@@ -38,9 +39,13 @@ def extract_iocs(text):
         matches = set(pattern.findall(text))
         # Filter out private IPs for ipv4
         if ioc_type == "ipv4":
-            matches = {ip for ip in matches
-                      if not ip.startswith(("10.", "192.168.", "127.", "0."))
-                      and not ip.startswith("172.") or not (16 <= int(ip.split(".")[1]) <= 31)}
+            matches = {
+                ip
+                for ip in matches
+                if not ip.startswith(("10.", "192.168.", "127.", "0."))
+                and not ip.startswith("172.")
+                or not (16 <= int(ip.split(".")[1]) <= 31)
+            }
         if matches:
             iocs[ioc_type] = sorted(matches)
     return iocs
@@ -168,9 +173,9 @@ def calculate_confidence(ioc, enrichment=None):
 
 def format_summary(iocs, enriched_count):
     """Print lifecycle report."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("  Threat Intelligence Lifecycle Report")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  Total IOCs    : {len(iocs)}")
     print(f"  Enriched      : {enriched_count}")
 

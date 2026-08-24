@@ -23,12 +23,21 @@ class NiktoScanAgent:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.findings = []
 
-    def run_scan(self, ports="80,443", tuning=None, plugins=None,
-                 ssl_mode=False, timeout=600):
+    def run_scan(self, ports="80,443", tuning=None, plugins=None, ssl_mode=False, timeout=600):
         """Execute Nikto scan against the target."""
         xml_output = self.output_dir / f"nikto_{self.target.replace('/', '_')}.xml"
-        cmd = ["nikto", "-h", self.target, "-port", ports,
-               "-Format", "xml", "-output", str(xml_output), "-nointeractive"]
+        cmd = [
+            "nikto",
+            "-h",
+            self.target,
+            "-port",
+            ports,
+            "-Format",
+            "xml",
+            "-output",
+            str(xml_output),
+            "-nointeractive",
+        ]
         if ssl_mode:
             cmd.extend(["-ssl"])
         if tuning:
@@ -37,11 +46,12 @@ class NiktoScanAgent:
             cmd.extend(["-Plugins", plugins])
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True,
-                                    timeout=timeout)
-            return {"return_code": result.returncode,
-                    "xml_output": str(xml_output),
-                    "stderr": result.stderr[:500] if result.stderr else ""}
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            return {
+                "return_code": result.returncode,
+                "xml_output": str(xml_output),
+                "stderr": result.stderr[:500] if result.stderr else "",
+            }
         except FileNotFoundError:
             return {"error": "nikto not installed. Install: apt install nikto"}
         except subprocess.TimeoutExpired:
@@ -88,18 +98,19 @@ class NiktoScanAgent:
 
     def run_quick_scan(self, timeout=300):
         """Run a fast Nikto scan with essential checks only."""
-        cmd = ["nikto", "-h", self.target, "-Tuning", "123", "-maxtime",
-               str(timeout) + "s", "-nointeractive"]
+        cmd = ["nikto", "-h", self.target, "-Tuning", "123", "-maxtime", str(timeout) + "s", "-nointeractive"]
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True,
-                                    timeout=timeout + 30)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 30)
             lines = result.stdout.splitlines()
             for line in lines:
                 if "+ " in line and "OSVDB" in line:
-                    self.findings.append({
-                        "description": line.strip().lstrip("+ "),
-                        "severity": "Medium", "source": "stdout",
-                    })
+                    self.findings.append(
+                        {
+                            "description": line.strip().lstrip("+ "),
+                            "severity": "Medium",
+                            "source": "stdout",
+                        }
+                    )
             return {"lines": len(lines), "findings": len(self.findings)}
         except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
             return {"error": str(exc)}

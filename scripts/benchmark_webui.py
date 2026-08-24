@@ -67,6 +67,7 @@ def _pct(samples: list[float]) -> tuple[float, float, float]:
 
 # ── Event broker ───────────────────────────────────────────────────────────
 
+
 async def _bench_events(reports_dir: Path, n: int, payload_size: int):
     payload = {"data": "x" * payload_size}
     broker = RunEventBroker("bench", reports_dir)
@@ -90,20 +91,17 @@ def _run_events(tmp: Path) -> None:
         print(f"event broker: skipped ({_EVENT_BROKER_ERR})")
         return
     print("Event broker (emit + replay):")
-    print(f"  {'events':>8} {'payload':>8} {'emit/s':>10} "
-          f"{'p50 ms':>8} {'p95 ms':>8} {'p99 ms':>8} {'replay ms':>10}")
+    print(f"  {'events':>8} {'payload':>8} {'emit/s':>10} {'p50 ms':>8} {'p95 ms':>8} {'p99 ms':>8} {'replay ms':>10}")
     for n in (256, 1_000, 10_000, 100_000):
         for size in (1024, 16 * 1024):
             sub = tmp / f"events-{n}-{size}"
             sub.mkdir(parents=True, exist_ok=True)
-            throughput, p50, p95, p99, replay_ms, count = asyncio.run(
-                _bench_events(sub, n, size)
-            )
-            print(f"  {n:>8} {size:>8} {throughput:>10.0f} "
-                  f"{p50:>8.3f} {p95:>8.3f} {p99:>8.3f} {replay_ms:>10.1f}")
+            throughput, p50, p95, p99, replay_ms, count = asyncio.run(_bench_events(sub, n, size))
+            print(f"  {n:>8} {size:>8} {throughput:>10.0f} {p50:>8.3f} {p95:>8.3f} {p99:>8.3f} {replay_ms:>10.1f}")
 
 
 # ── Persistence ────────────────────────────────────────────────────────────
+
 
 def _run_persistence(tmp: Path) -> None:
     if ApiPersistence is None:
@@ -136,6 +134,7 @@ def _run_persistence(tmp: Path) -> None:
 
 # ── Telemetry accumulator ──────────────────────────────────────────────────
 
+
 def _run_telemetry(tmp: Path) -> None:
     if _TelemetryAccumulator is None:
         print(f"telemetry: skipped ({_TELEMETRY_ERR})")
@@ -143,14 +142,17 @@ def _run_telemetry(tmp: Path) -> None:
     path = tmp / "llm_usage.jsonl"
     acc = _TelemetryAccumulator(path)
     n = 10_000
-    line = json.dumps(
-        {
-            "total_tokens": 100,
-            "context_usage_pct": 50.0,
-            "context_window_tokens": 128000,
-            "estimated_context_tokens": 5000,
-        }
-    ) + "\n"
+    line = (
+        json.dumps(
+            {
+                "total_tokens": 100,
+                "context_usage_pct": 50.0,
+                "context_window_tokens": 128000,
+                "estimated_context_tokens": 5000,
+            }
+        )
+        + "\n"
+    )
     with path.open("a", encoding="utf-8") as f:
         f.writelines([line] * n)
     t0 = time.perf_counter()
@@ -162,6 +164,7 @@ def _run_telemetry(tmp: Path) -> None:
 
 
 # ── Audit read ─────────────────────────────────────────────────────────────
+
 
 def _run_audit(tmp: Path) -> None:
     path = tmp / "exploit_audit.jsonl"

@@ -35,9 +35,7 @@ def _write_skill(root: Path, name: str, tags: list[str]) -> None:
         "---\n"
         f"name: {name}\n"
         "description: Runtime skill test.\n"
-        "tags:\n"
-        + "".join(f"- {tag}\n" for tag in tags)
-        + "---\n"
+        "tags:\n" + "".join(f"- {tag}\n" for tag in tags) + "---\n"
         "# Skill\n\n## When to Use\nUse for authorized runtime guidance.\n\n## Workflow\nStay in scope.",
         encoding="utf-8",
     )
@@ -157,11 +155,15 @@ async def test_list_skill_references_disabled_by_config(tmp_path: Path):
         NVDClient(CVESearchSettings(enabled=False)),
         WebResearcher(WebResearcherSettings(enabled=False)),
         tmp_path / "workspace",
-        {"skills": {
-            "enabled": True, "allow_model_lookup": True,
-            "roots": [str(skill_root)], "default_enabled": [],
-            "allow_reference_listing": False,
-        }},
+        {
+            "skills": {
+                "enabled": True,
+                "allow_model_lookup": True,
+                "roots": [str(skill_root)],
+                "default_enabled": [],
+                "allow_reference_listing": False,
+            }
+        },
     )
     out = _text(await mcp.call_tool("list_skill_references", {"name": "bundled-skill"}))
     assert "disabled" in out

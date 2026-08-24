@@ -13,6 +13,7 @@ def test_model_router():
     # We can't call Ollama without a running server, but we can test the router
     try:
         from tools.model_router import build_router
+
         router = build_router()
         aliases = {c.name for c in router.clients()}
         assert "kimi-k2.6:cloud" in aliases
@@ -42,6 +43,7 @@ def test_main_cli_parse():
 
 def test_config_defaults():
     import yaml
+
     cfg = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
     assert cfg["models"]["registry"]["kimi"] == "kimi-k2.6:cloud"
     assert cfg["models"]["registry"]["deepseek"] == "deepseek-v4-pro:cloud"
@@ -76,6 +78,7 @@ def test_mcp_exploit_server_startup():
 
     # Verify create_mcp_server is importable
     import mcp_exploit_server as _mcp_mod
+
     assert hasattr(_mcp_mod, "create_mcp_server"), "create_mcp_server not defined"
     assert callable(_mcp_mod.create_mcp_server), "create_mcp_server not callable"
     print("MCP exploit server startup OK")

@@ -140,15 +140,17 @@ def export_report_csv(gmp, report_id, output_path):
         port = result.find("port")
         severity = result.find("severity")
         cve_refs = nvt.find("cve")
-        results.append({
-            "host": host.text if host is not None else "",
-            "port": port.text if port is not None else "",
-            "nvt_name": nvt.findtext("name", ""),
-            "nvt_oid": nvt.get("oid", ""),
-            "severity": severity.text if severity is not None else "",
-            "cve": cve_refs.text if cve_refs is not None else "",
-            "description": result.findtext("description", "")[:500],
-        })
+        results.append(
+            {
+                "host": host.text if host is not None else "",
+                "port": port.text if port is not None else "",
+                "nvt_name": nvt.findtext("name", ""),
+                "nvt_oid": nvt.get("oid", ""),
+                "severity": severity.text if severity is not None else "",
+                "cve": cve_refs.text if cve_refs is not None else "",
+                "description": result.findtext("description", "")[:500],
+            }
+        )
 
     with open(output_path, "w", newline="", encoding="utf-8") as f:
         if results:

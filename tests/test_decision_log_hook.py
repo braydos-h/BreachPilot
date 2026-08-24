@@ -16,9 +16,7 @@ def _tool_call_msg(name="run_exploit_terminal", args=None):
     return {
         "message": {
             "content": "running exploit",
-            "tool_calls": [
-                {"function": {"name": name, "arguments": args or {"command": "exploit"}}}
-            ],
+            "tool_calls": [{"function": {"name": name, "arguments": args or {"command": "exploit"}}}],
         }
     }
 
@@ -61,21 +59,16 @@ async def test_decision_log_hook_writes_row_on_success(tmp_path):
     client.chat.side_effect = [_tool_call_msg(), _done_msg()]
     session = AsyncMock()
     session.call_tool.return_value = _tool_result(
-        "COMPROMISE: shell gained target=10.0.0.50\n"
-        "evidence saved to exploit_workspace/10.0.0.50/ATT-1/terminal.log"
+        "COMPROMISE: shell gained target=10.0.0.50\nevidence saved to exploit_workspace/10.0.0.50/ATT-1/terminal.log"
     )
 
-    with patch(
-        "tools.exploit_agent._stream_ollama", new_callable=AsyncMock
-    ) as stream:
+    with patch("tools.exploit_agent._stream_ollama", new_callable=AsyncMock) as stream:
         stream.return_value = {"role": "assistant", "content": "done"}
         await run_exploit_agent(
             client=client,
             model="glm",
             session=session,
-            exploit_tools=[
-                {"type": "function", "function": {"name": "run_exploit_terminal"}}
-            ],
+            exploit_tools=[{"type": "function", "function": {"name": "run_exploit_terminal"}}],
             policy=policy,
             target_ip="10.0.0.50",
             reports_dir=reports,
@@ -110,21 +103,15 @@ async def test_decision_log_hook_records_failure_class_on_failure(tmp_path):
     session = AsyncMock()
     # A failure result: non-zero exit + failure marker. classify_failure maps
     # "VULN_NOT_CONFIRMED" to FALSE_POSITIVE.
-    session.call_tool.return_value = _tool_result(
-        "VULN_NOT_CONFIRMED: target not vulnerable\nexit code: 1"
-    )
+    session.call_tool.return_value = _tool_result("VULN_NOT_CONFIRMED: target not vulnerable\nexit code: 1")
 
-    with patch(
-        "tools.exploit_agent._stream_ollama", new_callable=AsyncMock
-    ) as stream:
+    with patch("tools.exploit_agent._stream_ollama", new_callable=AsyncMock) as stream:
         stream.return_value = {"role": "assistant", "content": "done"}
         await run_exploit_agent(
             client=client,
             model="glm",
             session=session,
-            exploit_tools=[
-                {"type": "function", "function": {"name": "run_exploit_terminal"}}
-            ],
+            exploit_tools=[{"type": "function", "function": {"name": "run_exploit_terminal"}}],
             policy=policy,
             target_ip="10.0.0.50",
             reports_dir=reports,
@@ -160,22 +147,16 @@ async def test_decision_log_hook_never_breaks_loop_when_logdir_unwritable(tmp_pa
     client = MagicMock()
     client.chat.side_effect = [_tool_call_msg(), _done_msg()]
     session = AsyncMock()
-    session.call_tool.return_value = _tool_result(
-        "COMPROMISE: shell gained target=10.0.0.50"
-    )
+    session.call_tool.return_value = _tool_result("COMPROMISE: shell gained target=10.0.0.50")
 
-    with patch(
-        "tools.exploit_agent._stream_ollama", new_callable=AsyncMock
-    ) as stream:
+    with patch("tools.exploit_agent._stream_ollama", new_callable=AsyncMock) as stream:
         stream.return_value = {"role": "assistant", "content": "done"}
         # Should not raise even though logging cannot write.
         result = await run_exploit_agent(
             client=client,
             model="glm",
             session=session,
-            exploit_tools=[
-                {"type": "function", "function": {"name": "run_exploit_terminal"}}
-            ],
+            exploit_tools=[{"type": "function", "function": {"name": "run_exploit_terminal"}}],
             policy=policy,
             target_ip="10.0.0.50",
             reports_dir=reports,

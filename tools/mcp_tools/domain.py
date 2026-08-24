@@ -35,57 +35,346 @@ from tools.mcp_tools.registry import *
 # Built-in subdomain wordlist for DNS bruteforce (reused from
 # recon_pipeline._enumerate_vhosts + common additions). ~200 prefixes.
 _SUBDOMAIN_WORDLIST = [
-    "www", "mail", "smtp", "imap", "pop", "pop3", "webmail", "ns1", "ns2",
-    "dns", "dns1", "dns2", "vpn", "remote", "secure", "portal", "admin",
-    "administrator", "webadmin", "api", "api1", "api2", "app", "apps",
-    "app1", "app2", "staging", "stage", "stg", "test", "testing", "qa",
-    "dev", "dev1", "dev2", "development", "uat", "sandbox", "beta", "alpha",
-    "demo", "preview", "git", "github", "gitlab", "gitea", "ci", "cd",
-    "jenkins", "jira", "confluence", "wiki", "docs", "doc", "help", "support",
-    "kb", "status", "monitor", "monitoring", "grafana", "kibana",
-    "elastic", "elasticsearch", "log", "logs", "logging", "splunk",
-    "backup", "backups", "bk", "bak", "old", "new", "v1", "v2", "v3",
-    "internal", "intranet", "corp", "private", "secure", "ssl", "tls",
-    "auth", "sso", "oauth", "id", "identity", "login", "signin", "register",
-    "account", "accounts", "user", "users", "profile", "dashboard",
-    "panel", "cpanel", "whm", "plesk", "ftp", "sftp", "tftp", "file",
-    "files", "share", "shared", "storage", "data", "db", "database",
-    "mysql", "postgres", "pg", "redis", "mongo", "mongodb", "couch",
-    "couchdb", "cassandra", "elastic", "mq", "rabbit", "rabbitmq",
-    "shop", "store", "cart", "checkout", "pay", "payment", "billing",
-    "order", "orders", "client", "clients", "customer", "customers",
-    "service", "services", "svc", "bus", "esb", "soap", "rest", "graphql",
-    "ws", "websocket", "socket", "io", "stream", "streaming", "media",
-    "cdn", "static", "assets", "img", "images", "image", "pic", "pics",
-    "video", "videos", "audio", "download", "downloads", "upload",
-    "uploads", "cdn1", "cdn2", "edge", "origin", "cache", "proxy",
-    "lb", "load", "loadbalancer", "haproxy", "nginx", "apache", "iis",
-    "tomcat", "jboss", "wildfly", "glassfish", "jetty", "weblogic",
-    "mssql", "sqlserver", "oracle", "db2", "sybase", "informix",
-    "ldap", "ldaps", "ad", "dc", "dc1", "dc2", "domain", "forest",
-    "exchange", "exch", "owa", "ecp", "autodiscover", "mapi", "ews",
-    "office", "o365", "saml", "adfs", "fs", "federation", "trust",
-    "print", "printer", "printers", "scan", "scanner", "fax",
-    "camera", "cam", "cctv", "dvr", "nvr", "iot", "sensor", "sensors",
-    "building", "facility", "facilities", "energy", "power", "ups",
-    "hr", "finance", "legal", "marketing", "sales", "ops", "it",
-    "eng", "engineering", "prod", "production", "lab", "labs", "train",
-    "training", "edu", "education", "research", "rd", "r&d",
-    "m", "mobile", "wap", "app", "mobile-api", "mobile-api-1",
-    "go", "rust", "java", "python", "node", "nodejs", "php", "ruby",
-    "rails", "django", "flask", "spring", "dotnet", "asp",
-    "test1", "test2", "test3", "qa1", "qa2", "stg1", "stg2",
-    "preprod", "pre-prod", "prod1", "prod2", "prod3",
-    "aws", "gcp", "azure", "cloud", "cloud1", "cloud2",
-    "k8s", "kubernetes", "kubernetes-master", "k8s-master",
-    "swarm", "docker", "docker-registry", "registry", "harbor",
-    "minio", "s3", "ceph", "gluster", "nfs", "iscsi",
-    "prometheus", "alertmanager", "thanos", "vault", "consul",
-    "nomad", "terraform", "ansible", "puppet", "chef", "salt",
-    "nexus", "sonar", "sonarqube", "sonatype", "fortify",
-    "squid", "foreman", "spacewalk", "katello", "pulp",
-    "zabbix", "nagios", "checkmk", "pnp4nagios", "icinga",
-    "librenms", "observium", "ntop", "cacti", "mrtg",
+    "www",
+    "mail",
+    "smtp",
+    "imap",
+    "pop",
+    "pop3",
+    "webmail",
+    "ns1",
+    "ns2",
+    "dns",
+    "dns1",
+    "dns2",
+    "vpn",
+    "remote",
+    "secure",
+    "portal",
+    "admin",
+    "administrator",
+    "webadmin",
+    "api",
+    "api1",
+    "api2",
+    "app",
+    "apps",
+    "app1",
+    "app2",
+    "staging",
+    "stage",
+    "stg",
+    "test",
+    "testing",
+    "qa",
+    "dev",
+    "dev1",
+    "dev2",
+    "development",
+    "uat",
+    "sandbox",
+    "beta",
+    "alpha",
+    "demo",
+    "preview",
+    "git",
+    "github",
+    "gitlab",
+    "gitea",
+    "ci",
+    "cd",
+    "jenkins",
+    "jira",
+    "confluence",
+    "wiki",
+    "docs",
+    "doc",
+    "help",
+    "support",
+    "kb",
+    "status",
+    "monitor",
+    "monitoring",
+    "grafana",
+    "kibana",
+    "elastic",
+    "elasticsearch",
+    "log",
+    "logs",
+    "logging",
+    "splunk",
+    "backup",
+    "backups",
+    "bk",
+    "bak",
+    "old",
+    "new",
+    "v1",
+    "v2",
+    "v3",
+    "internal",
+    "intranet",
+    "corp",
+    "private",
+    "secure",
+    "ssl",
+    "tls",
+    "auth",
+    "sso",
+    "oauth",
+    "id",
+    "identity",
+    "login",
+    "signin",
+    "register",
+    "account",
+    "accounts",
+    "user",
+    "users",
+    "profile",
+    "dashboard",
+    "panel",
+    "cpanel",
+    "whm",
+    "plesk",
+    "ftp",
+    "sftp",
+    "tftp",
+    "file",
+    "files",
+    "share",
+    "shared",
+    "storage",
+    "data",
+    "db",
+    "database",
+    "mysql",
+    "postgres",
+    "pg",
+    "redis",
+    "mongo",
+    "mongodb",
+    "couch",
+    "couchdb",
+    "cassandra",
+    "elastic",
+    "mq",
+    "rabbit",
+    "rabbitmq",
+    "shop",
+    "store",
+    "cart",
+    "checkout",
+    "pay",
+    "payment",
+    "billing",
+    "order",
+    "orders",
+    "client",
+    "clients",
+    "customer",
+    "customers",
+    "service",
+    "services",
+    "svc",
+    "bus",
+    "esb",
+    "soap",
+    "rest",
+    "graphql",
+    "ws",
+    "websocket",
+    "socket",
+    "io",
+    "stream",
+    "streaming",
+    "media",
+    "cdn",
+    "static",
+    "assets",
+    "img",
+    "images",
+    "image",
+    "pic",
+    "pics",
+    "video",
+    "videos",
+    "audio",
+    "download",
+    "downloads",
+    "upload",
+    "uploads",
+    "cdn1",
+    "cdn2",
+    "edge",
+    "origin",
+    "cache",
+    "proxy",
+    "lb",
+    "load",
+    "loadbalancer",
+    "haproxy",
+    "nginx",
+    "apache",
+    "iis",
+    "tomcat",
+    "jboss",
+    "wildfly",
+    "glassfish",
+    "jetty",
+    "weblogic",
+    "mssql",
+    "sqlserver",
+    "oracle",
+    "db2",
+    "sybase",
+    "informix",
+    "ldap",
+    "ldaps",
+    "ad",
+    "dc",
+    "dc1",
+    "dc2",
+    "domain",
+    "forest",
+    "exchange",
+    "exch",
+    "owa",
+    "ecp",
+    "autodiscover",
+    "mapi",
+    "ews",
+    "office",
+    "o365",
+    "saml",
+    "adfs",
+    "fs",
+    "federation",
+    "trust",
+    "print",
+    "printer",
+    "printers",
+    "scan",
+    "scanner",
+    "fax",
+    "camera",
+    "cam",
+    "cctv",
+    "dvr",
+    "nvr",
+    "iot",
+    "sensor",
+    "sensors",
+    "building",
+    "facility",
+    "facilities",
+    "energy",
+    "power",
+    "ups",
+    "hr",
+    "finance",
+    "legal",
+    "marketing",
+    "sales",
+    "ops",
+    "it",
+    "eng",
+    "engineering",
+    "prod",
+    "production",
+    "lab",
+    "labs",
+    "train",
+    "training",
+    "edu",
+    "education",
+    "research",
+    "rd",
+    "r&d",
+    "m",
+    "mobile",
+    "wap",
+    "app",
+    "mobile-api",
+    "mobile-api-1",
+    "go",
+    "rust",
+    "java",
+    "python",
+    "node",
+    "nodejs",
+    "php",
+    "ruby",
+    "rails",
+    "django",
+    "flask",
+    "spring",
+    "dotnet",
+    "asp",
+    "test1",
+    "test2",
+    "test3",
+    "qa1",
+    "qa2",
+    "stg1",
+    "stg2",
+    "preprod",
+    "pre-prod",
+    "prod1",
+    "prod2",
+    "prod3",
+    "aws",
+    "gcp",
+    "azure",
+    "cloud",
+    "cloud1",
+    "cloud2",
+    "k8s",
+    "kubernetes",
+    "kubernetes-master",
+    "k8s-master",
+    "swarm",
+    "docker",
+    "docker-registry",
+    "registry",
+    "harbor",
+    "minio",
+    "s3",
+    "ceph",
+    "gluster",
+    "nfs",
+    "iscsi",
+    "prometheus",
+    "alertmanager",
+    "thanos",
+    "vault",
+    "consul",
+    "nomad",
+    "terraform",
+    "ansible",
+    "puppet",
+    "chef",
+    "salt",
+    "nexus",
+    "sonar",
+    "sonarqube",
+    "sonatype",
+    "fortify",
+    "squid",
+    "foreman",
+    "spacewalk",
+    "katello",
+    "pulp",
+    "zabbix",
+    "nagios",
+    "checkmk",
+    "pnp4nagios",
+    "icinga",
+    "librenms",
+    "observium",
+    "ntop",
+    "cacti",
+    "mrtg",
 ]
 
 # DNS record types resolved by resolve_domain (the bridge primitive).
@@ -322,12 +611,14 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
         resolver_fn = None
         try:
             import dns.resolver  # type: ignore
+
             def _dnspython_resolver(d: str, rt: str) -> list[str]:
                 try:
                     answers = dns.resolver.resolve(d, rt)
                     return [str(r.to_text()) for r in answers]
                 except Exception:
                     return []
+
             resolver_fn = _dnspython_resolver
         except ImportError:
             pass
@@ -338,8 +629,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
             f"DOMAIN: {dom}",
         ]
         if resolver_fn is None:
-            lines.append("NOTE: dnspython not installed -- only A/AAAA resolved. "
-                         "Install with: pip install dnspython")
+            lines.append("NOTE: dnspython not installed -- only A/AAAA resolved. Install with: pip install dnspython")
         for rt in requested:
             vals = all_records.get(rt, [])
             if vals:
@@ -402,7 +692,8 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
             # lose all subdomains (the json.loads fails and the except: pass
             # swallows it). Pass a 5MB cap so the full response is parsed.
             status, _hdr, body = _stdlib_fetch(
-                f"https://crt.sh/?q=%25.{dom}&output=json", timeout=20,
+                f"https://crt.sh/?q=%25.{dom}&output=json",
+                timeout=20,
                 max_bytes=5_000_000,
             )
             if status == 200 and body:
@@ -422,6 +713,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
         # releases it during the syscall.
         if "dns_bruteforce" in srcs:
             from concurrent.futures import ThreadPoolExecutor
+
             candidates = [f"{prefix}.{dom}" for prefix in _SUBDOMAIN_WORDLIST if f"{prefix}.{dom}" not in subs]
 
             def _resolve_one(cand: str) -> tuple[str, str | None]:
@@ -437,7 +729,11 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
             try:
                 argv = ["subfinder", "-d", dom, "-silent", "-nc"]
                 rc, out, _err = _run_with_pgrp_timeout(
-                    argv, 120, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                    argv,
+                    120,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
                 )
                 if rc == 0 and out:
                     for line in out.splitlines():
@@ -452,7 +748,11 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
             try:
                 argv = ["amass", "enum", "-passive", "-d", dom]
                 rc, out, _err = _run_with_pgrp_timeout(
-                    argv, 120, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                    argv,
+                    120,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
                 )
                 if rc == 0 and out:
                     for line in out.splitlines():
@@ -480,6 +780,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 cname_target = ""
                 try:
                     import dns.resolver  # type: ignore
+
                     answers = dns.resolver.resolve(sub, "CNAME")
                     for r in answers:
                         cname_target = str(r.to_text()).rstrip(".")
@@ -505,25 +806,26 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                                     if _status and body:
                                         body_lower = body.lower()
                                         if any(m.lower() in body_lower for m in markers):
-                                            status = (
-                                                f"CONFIRMED takeover -- body matches {svc} "
-                                                f"(HTTP {_status})"
-                                            )
+                                            status = f"CONFIRMED takeover -- body matches {svc} (HTTP {_status})"
                                             break
-                            takeover_candidates.append({
-                                "subdomain": sub,
-                                "cname": cname_target,
-                                "service": svc,
-                                "status": status,
-                            })
+                            takeover_candidates.append(
+                                {
+                                    "subdomain": sub,
+                                    "cname": cname_target,
+                                    "service": svc,
+                                    "status": status,
+                                }
+                            )
                             break
                     else:
-                        takeover_candidates.append({
-                            "subdomain": sub,
-                            "cname": cname_target,
-                            "service": "unknown",
-                            "status": "unresolvable -- investigate",
-                        })
+                        takeover_candidates.append(
+                            {
+                                "subdomain": sub,
+                                "cname": cname_target,
+                                "service": "unknown",
+                                "status": "unresolvable -- investigate",
+                            }
+                        )
 
         lines = [
             "SUBDOMAIN_RESULT: completed",
@@ -540,9 +842,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
             lines.append("")
             lines.append("TAKEOVER_CANDIDATES:")
             for tc in takeover_candidates:
-                lines.append(
-                    f"  {tc['subdomain']} (CNAME -> {tc['cname']}, {tc['service']}): {tc['status']}"
-                )
+                lines.append(f"  {tc['subdomain']} (CNAME -> {tc['cname']}, {tc['service']}): {tc['status']}")
         lines.append("")
         lines.append(
             "AUTO_AUTHORIZED: each discovered host added to EXPLOIT_DISCOVERED_TARGETS; "
@@ -603,6 +903,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
             import dns.rdatatype  # type: ignore
             import dns.resolver  # type: ignore
             import dns.zone  # type: ignore
+
             try:
                 import dns.xfr  # type: ignore  # dnspython 2.x (TransferError lives here)
             except ImportError:
@@ -699,8 +1000,10 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
         except ImportError:
             # Fall back to socket-based A/AAAA only.
             records = _dns_resolve_all(dom)
-            lines.append("NOTE: dnspython not installed -- only A/AAAA resolved. "
-                         "Install with: pip install dnspython for full DNS recon.")
+            lines.append(
+                "NOTE: dnspython not installed -- only A/AAAA resolved. "
+                "Install with: pip install dnspython for full DNS recon."
+            )
             axfr_result = "AXFR_UNAVAILABLE: requires dnspython"
             dnssec_status = "unknown (requires dnspython)"
             ns_version = "unknown (requires dnspython)"
@@ -726,9 +1029,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
         # Persist the full result for the audit trail.
         attempt_dir, attempt_id = _attempt_dir(workspace)
         try:
-            (attempt_dir / "dns_recon.json").write_text(
-                json.dumps(records, indent=2, default=str), encoding="utf-8"
-            )
+            (attempt_dir / "dns_recon.json").write_text(json.dumps(records, indent=2, default=str), encoding="utf-8")
         except OSError:
             pass
 
@@ -791,10 +1092,36 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
         scheme = "https" if port in (443, 8443) else "http"
         base_url = f"{scheme}://{target_ip}:{port}/"
 
-        words = ["www", "mail", "admin", "api", "dev", "staging", "test", "vpn",
-                 "portal", "git", "jenkins", "jira", "internal", "blog", "shop",
-                 "app", "secure", "remote", "support", "help", "docs", "wiki",
-                 "status", "monitor", "dashboard", "cdn", "static", "assets"]
+        words = [
+            "www",
+            "mail",
+            "admin",
+            "api",
+            "dev",
+            "staging",
+            "test",
+            "vpn",
+            "portal",
+            "git",
+            "jenkins",
+            "jira",
+            "internal",
+            "blog",
+            "shop",
+            "app",
+            "secure",
+            "remote",
+            "support",
+            "help",
+            "docs",
+            "wiki",
+            "status",
+            "monitor",
+            "dashboard",
+            "cdn",
+            "static",
+            "assets",
+        ]
         if wordlist and wordlist.strip():
             words.extend([w.strip().lower() for w in wordlist.split(",") if w.strip()])
 
@@ -821,14 +1148,16 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 # status OR content hash. The hash catches same-length
                 # different-content responses the old length-only check missed.
                 if len(body) != base_len or s != _b_status or body_hash != base_hash:
-                    found.append({
-                        "vhost": host,
-                        "status": s,
-                        "length": len(body),
-                        "baseline_length": base_len,
-                        "hash": body_hash,
-                        "baseline_hash": base_hash,
-                    })
+                    found.append(
+                        {
+                            "vhost": host,
+                            "status": s,
+                            "length": len(body),
+                            "baseline_length": base_len,
+                            "hash": body_hash,
+                            "baseline_hash": base_hash,
+                        }
+                    )
 
         lines = [
             "VHOST_RESULT: completed",
@@ -892,6 +1221,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
         # Try python-whois first (structured fields — preferred over binary parsing)
         try:
             import whois  # type: ignore
+
             w = whois.whois(dom)
             registrar = str(getattr(w, "registrar", "") or "")
             # python-whois returns dates as a list for some TLDs (e.g. .com) —
@@ -920,7 +1250,11 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
             try:
                 argv = ["whois", dom]
                 rc, out, _err = _run_with_pgrp_timeout(
-                    argv, 30, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                    argv,
+                    30,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
                 )
                 if rc == 0 and out:
                     # Parse common WHOIS fields heuristically. Different

@@ -6,13 +6,17 @@
 ```python
 import threading
 
+
 def send_request():
     resp = requests.post(url, headers=headers, json=payload)
     results.append(resp.status_code)
 
+
 threads = [threading.Thread(target=send_request) for _ in range(10)]
-for t in threads: t.start()
-for t in threads: t.join()
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
 ```
 
 ## Business Logic Test Categories

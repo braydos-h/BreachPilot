@@ -315,11 +315,7 @@ def select_runtime_skills(
     diversity_penalty = _non_negative_int(cfg.get("diversity_penalty"), 12)
     ranked_all = _diversified_rank(candidates.values(), diversity_penalty)
     contextual = [item for item in ranked_all if _is_contextual(item)]
-    default_names = {
-        str(name).strip()
-        for name in (cfg.get("default_enabled", []) or [])
-        if str(name).strip()
-    }
+    default_names = {str(name).strip() for name in (cfg.get("default_enabled", []) or []) if str(name).strip()}
     selected: list[_Candidate] = []
     if sticky_defaults and default_names:
         # Keep configured defaults across re-selections (safety-relevant
@@ -431,21 +427,14 @@ def _tag_signals(
 def _looks_attack_only(skill: LoadedSkill) -> bool:
     name = skill.name.lower()
     tags = normalized_skill_tags(skill.metadata.tags)
-    return (
-        any(term in name for term in _ATTACK_ONLY_NAME_TERMS)
-        or bool(tags & _ATTACK_ONLY_TERMS)
-    )
+    return any(term in name for term in _ATTACK_ONLY_NAME_TERMS) or bool(tags & _ATTACK_ONLY_TERMS)
 
 
 def _context_terms(text: str) -> set[str]:
     terms: set[str] = set()
     for raw in re.findall(r"[a-zA-Z0-9_.+-]{2,}", text.lower()):
         terms.add(raw)
-        terms.update(
-            part
-            for part in re.split(r"[_.+-]+", raw)
-            if len(part) >= 2
-        )
+        terms.update(part for part in re.split(r"[_.+-]+", raw) if len(part) >= 2)
     return terms
 
 
@@ -478,11 +467,9 @@ def _diversified_rank(
 
     remaining = list(candidates)
     selected: list[_Candidate] = []
-    tag_cache = {
-        item.skill.name: normalized_skill_tags(item.skill.metadata.tags)
-        for item in remaining
-    }
+    tag_cache = {item.skill.name: normalized_skill_tags(item.skill.metadata.tags) for item in remaining}
     while remaining:
+
         def rank_key(item: _Candidate) -> tuple[float, int, str]:
             tags = tag_cache[item.skill.name]
             max_overlap = 0.0

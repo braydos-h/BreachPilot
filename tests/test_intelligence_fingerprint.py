@@ -84,7 +84,9 @@ def test_justifier_no_change_is_none():
 def test_is_repetition_true_unchanged_after_failed():
     tracker = AttemptTracker()
     attempt = _attempt()
-    key = tracker.record(attempt, AttemptStatus.FAILED, detail="auth failed", evidence_snapshot={"version_known": "2.0"})
+    key = tracker.record(
+        attempt, AttemptStatus.FAILED, detail="auth failed", evidence_snapshot={"version_known": "2.0"}
+    )
     is_rep, reason, detail = tracker.is_repetition(key, {"version_known": "2.0"})
     assert is_rep is True
     assert reason is RetryJustification.NONE

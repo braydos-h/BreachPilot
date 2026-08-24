@@ -41,25 +41,24 @@ def score_assets(df):
     """Calculate criticality scores for all assets."""
     scores = []
     for _, row in df.iterrows():
-        weighted = sum(
-            row.get(factor, 3) * weight
-            for factor, weight in WEIGHTS.items()
-        )
+        weighted = sum(row.get(factor, 3) * weight for factor, weight in WEIGHTS.items())
         score = round(weighted, 2)
 
         tier, label, sla_mod = 5, "Minimal", 0.50
-        for threshold, t, l, s in TIERS:
+        for threshold, t, tier_label, s in TIERS:
             if score >= threshold:
-                tier, label, sla_mod = t, l, s
+                tier, label, sla_mod = t, tier_label, s
                 break
 
-        scores.append({
-            **row.to_dict(),
-            "criticality_score": score,
-            "tier": tier,
-            "tier_label": label,
-            "sla_modifier": sla_mod,
-        })
+        scores.append(
+            {
+                **row.to_dict(),
+                "criticality_score": score,
+                "tier": tier,
+                "tier_label": label,
+                "sla_modifier": sla_mod,
+            }
+        )
 
     return pd.DataFrame(scores).sort_values("criticality_score", ascending=False)
 
@@ -82,13 +81,15 @@ def apply_to_vulns(assets_df, vulns_df):
         base_sla = BASE_SLA.get(severity, 60)
         adjusted_sla = max(1, int(base_sla * (1 + asset["sla_modifier"])))
 
-        results.append({
-            **vuln.to_dict(),
-            "asset_tier": asset["tier"],
-            "asset_label": asset["label"],
-            "base_sla_days": base_sla,
-            "adjusted_sla_days": adjusted_sla,
-        })
+        results.append(
+            {
+                **vuln.to_dict(),
+                "asset_tier": asset["tier"],
+                "asset_label": asset["label"],
+                "base_sla_days": base_sla,
+                "adjusted_sla_days": adjusted_sla,
+            }
+        )
 
     return pd.DataFrame(results)
 

@@ -45,8 +45,9 @@ class GraphQLSecurityAgent:
         has_schema = "data" in result.get("body", {}) and "__schema" in result.get("body", {}).get("data", {})
         types = []
         if has_schema:
-            types = [t["name"] for t in result["body"]["data"]["__schema"].get("types", [])
-                     if not t["name"].startswith("__")]
+            types = [
+                t["name"] for t in result["body"]["data"]["__schema"].get("types", []) if not t["name"].startswith("__")
+            ]
         return {
             "vulnerable": has_schema,
             "severity": "Medium",
@@ -119,14 +120,14 @@ class GraphQLSecurityAgent:
         for query, test_name in queries:
             result = self._query(query)
             has_data = "data" in result.get("body", {})
-            has_null_data = has_data and all(
-                v is None for v in result["body"]["data"].values()
-            ) if has_data else False
-            results.append({
-                "test": test_name,
-                "accessible": has_data and not has_null_data,
-                "status": result.get("status"),
-            })
+            has_null_data = has_data and all(v is None for v in result["body"]["data"].values()) if has_data else False
+            results.append(
+                {
+                    "test": test_name,
+                    "accessible": has_data and not has_null_data,
+                    "status": result.get("status"),
+                }
+            )
         if saved_auth:
             self.session.headers["Authorization"] = saved_auth
         accessible_count = sum(1 for r in results if r["accessible"])
@@ -139,7 +140,7 @@ class GraphQLSecurityAgent:
 
     def test_alias_overloading(self, count=50):
         """Test for alias-based resource exhaustion."""
-        aliases = " ".join(f'a{i}: __typename' for i in range(count))
+        aliases = " ".join(f"a{i}: __typename" for i in range(count))
         query = f"{{ {aliases} }}"
         result = self._query(query)
         has_error = "errors" in result.get("body", {})

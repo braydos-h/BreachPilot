@@ -56,9 +56,7 @@ def test_unsupported_confidence_requires_threshold_and_evidence():
     state = {"evidence_refs": [], "attempt_count": 0}
     assert PlannerAdapter.unsupported_confidence({"confidence": 0.7}, state) is False
     assert PlannerAdapter.unsupported_confidence({"confidence": 0.9, "evidence_refs": ["ev:nmap:x"]}, state) is False
-    assert PlannerAdapter.unsupported_confidence(
-        {"confidence": 0.9, "hypothesis_attempt_count": 2}, state
-    ) is False
+    assert PlannerAdapter.unsupported_confidence({"confidence": 0.9, "hypothesis_attempt_count": 2}, state) is False
 
 
 # (b) AttackPhaseBridge never raises ───────────────────────────────────────────
@@ -97,7 +95,5 @@ def test_add_edge_by_value_is_idempotent(graph):
     second = TargetGraphV2Adapter.add_edge_by_value(g, "host", "10.0.0.1", "service", "ssh", "exposes")
     assert first == second
     with db.connection() as conn:
-        count = conn.execute(
-            "SELECT COUNT(*) FROM graph_edges WHERE mission_id=?", (mid,)
-        ).fetchone()[0]
+        count = conn.execute("SELECT COUNT(*) FROM graph_edges WHERE mission_id=?", (mid,)).fetchone()[0]
     assert count == 1

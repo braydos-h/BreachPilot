@@ -36,8 +36,7 @@ def _write_skill(root: Path, name: str, tags: list[str]) -> None:
         "---\n"
         f"name: {name}\n"
         f"description: {name} description.\n"
-        "tags:\n" + "".join(f"- {t}\n" for t in tags)
-        + "---\n# Skill\n\n## Workflow\nAuthorized use only.",
+        "tags:\n" + "".join(f"- {t}\n" for t in tags) + "---\n# Skill\n\n## Workflow\nAuthorized use only.",
         encoding="utf-8",
     )
 
@@ -109,17 +108,19 @@ def _select(store, registry, *, feedback_min=3, feedback_weight=8, services=None
 
     return select_runtime_skills(
         registry,
-        config={"skills": {
-            "enabled": True,
-            "default_enabled": [],
-            "max_active_skills": 6,
-            "min_contextual_skills": 0,
-            "default_skill_weight": 5,
-            "context_skill_weight": 10,
-            "feedback_enabled": True,
-            "feedback_skill_weight": feedback_weight,
-            "feedback_min_observations": feedback_min,
-        }},
+        config={
+            "skills": {
+                "enabled": True,
+                "default_enabled": [],
+                "max_active_skills": 6,
+                "min_contextual_skills": 0,
+                "default_skill_weight": 5,
+                "context_skill_weight": 10,
+                "feedback_enabled": True,
+                "feedback_skill_weight": feedback_weight,
+                "feedback_min_observations": feedback_min,
+            }
+        },
         goal_name="recon",
         goal_description="recon",
         mode="recon",
@@ -178,7 +179,10 @@ def test_negative_outcome_does_not_exclude_skill(tmp_path, store):
     assert skill_prior(store, "beta-skill") < 0.5
 
     sel = _select(
-        store, registry, feedback_min=3, feedback_weight=8,
+        store,
+        registry,
+        feedback_min=3,
+        feedback_weight=8,
         services=["https 443 graphql api"],
     )
     names = {a.name for a in sel.activations}
@@ -196,15 +200,17 @@ def test_selector_feedback_disabled_skips_boost(tmp_path, store):
 
     sel = select_runtime_skills(
         registry,
-        config={"skills": {
-            "enabled": True,
-            "default_enabled": [],
-            "max_active_skills": 6,
-            "min_contextual_skills": 0,
-            "default_skill_weight": 5,
-            "context_skill_weight": 10,
-            "feedback_enabled": False,
-        }},
+        config={
+            "skills": {
+                "enabled": True,
+                "default_enabled": [],
+                "max_active_skills": 6,
+                "min_contextual_skills": 0,
+                "default_skill_weight": 5,
+                "context_skill_weight": 10,
+                "feedback_enabled": False,
+            }
+        },
         goal_name="recon",
         goal_description="recon",
         mode="recon",

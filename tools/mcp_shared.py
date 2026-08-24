@@ -269,9 +269,7 @@ def _run_with_pgrp_timeout(
     import subprocess
 
     text_mode = bool(
-        popen_kwargs.get("text")
-        or popen_kwargs.get("universal_newlines")
-        or popen_kwargs.get("encoding") is not None
+        popen_kwargs.get("text") or popen_kwargs.get("universal_newlines") or popen_kwargs.get("encoding") is not None
     )
     proc = subprocess.Popen(
         args,
@@ -368,14 +366,16 @@ def _wrap_http_auth(app: Any, token: str) -> Any:
         headers = {k.lower(): v for k, v in scope.get("headers", [])}
         if hmac.compare_digest(headers.get(b"authorization", b""), expected):
             return await app(scope, receive, send)
-        await send({
-            "type": "http.response.start",
-            "status": 401,
-            "headers": [
-                (b"content-type", b"text/plain"),
-                (b"www-authenticate", b'Bearer realm="mcp"'),
-            ],
-        })
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 401,
+                "headers": [
+                    (b"content-type", b"text/plain"),
+                    (b"www-authenticate", b'Bearer realm="mcp"'),
+                ],
+            }
+        )
         await send({"type": "http.response.body", "body": b"Unauthorized: MCP_HTTP_TOKEN required"})
 
     return auth_app
@@ -392,14 +392,13 @@ def run_mcp_http_server(mcp: Any, host: str, port: int, *, allow_public_bind: bo
     assert_loopback_bind(host, allow_public_bind=allow_public_bind)
     try:
         import uvicorn
+
         app = mcp.streamable_http_app()
     except ImportError as exc:
         raise RuntimeError(
-            "HTTP MCP transport needs uvicorn and starlette. "
-            "Run: python -m pip install -r requirements.txt"
+            "HTTP MCP transport needs uvicorn and starlette. Run: python -m pip install -r requirements.txt"
         ) from exc
     token = os.environ.get("MCP_HTTP_TOKEN", "").strip()
     if token:
         app = _wrap_http_auth(app, token)
     uvicorn.run(app, host=host, port=port, log_level="info")
-

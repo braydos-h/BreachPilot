@@ -65,9 +65,7 @@ def _format_state_block(snap: dict[str, Any]) -> str:
     recon = snap.get("recon")
     if recon:
         services = recon.get("services", [])
-        svc_summary = ", ".join(
-            f"{s.get('service', '')}:{s.get('port', '')}" for s in services[:15]
-        )
+        svc_summary = ", ".join(f"{s.get('service', '')}:{s.get('port', '')}" for s in services[:15])
         lines.append(
             f"RECON: os={recon.get('os', '') or '?'} "
             f"services={recon.get('service_count', 0)} cves={len(recon.get('cves', []))}"
@@ -90,10 +88,7 @@ def _format_state_block(snap: dict[str, Any]) -> str:
     lines.append(f"CREDENTIALS_AVAILABLE: {snap.get('credentials_available', 0)}")
 
     activity = snap.get("activity", {}) or {}
-    lines.append(
-        f"ACTIVITY: tool_calls={activity.get('tool_calls', 0)} "
-        f"blocked={activity.get('blocked', 0)}"
-    )
+    lines.append(f"ACTIVITY: tool_calls={activity.get('tool_calls', 0)} blocked={activity.get('blocked', 0)}")
     by_tool = activity.get("by_tool", {}) or {}
     if by_tool:
         top = sorted(by_tool.items(), key=lambda kv: kv[1], reverse=True)[:10]
@@ -159,7 +154,9 @@ def register_assessment_state_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 for n in names:
                     lines.append(f"- {n}")
             else:
-                lines.append("NOTE: tools scope lists registered MCP tool names; in-process registry not introspectable here.")
+                lines.append(
+                    "NOTE: tools scope lists registered MCP tool names; in-process registry not introspectable here."
+                )
             return "\n".join(lines)
         if scope_lc == "skills":
             lines = ["CAPABILITIES: scope=skills"]
@@ -267,8 +264,7 @@ def register_assessment_state_tools(mcp: Any, *, ctx: ToolContext) -> None:
                             duration = rec.get("duration")
                         dur_str = f"{duration}" if duration is not None else "-"
                         rows.append(
-                            f"exploit_audit:{target_ip}:{attempt} tool={tname} "
-                            f"status={status} duration={dur_str}"
+                            f"exploit_audit:{target_ip}:{attempt} tool={tname} status={status} duration={dur_str}"
                         )
             except OSError as exc:
                 return f"ERROR: could not read audit trail: {exc}"
@@ -353,10 +349,4 @@ def register_assessment_state_tools(mcp: Any, *, ctx: ToolContext) -> None:
         else:
             return f"BLOCKED: unknown action {action!r} (use complete|fail|cancel|reset)."
         planner.save_plan(plan)
-        return (
-            f"TASK_UPDATED:\n"
-            f"TARGET: {target_ip}\n"
-            f"STEP: {step_index}\n"
-            f"ACTION: {act}\n"
-            f"{result}"
-        )
+        return f"TASK_UPDATED:\nTARGET: {target_ip}\nSTEP: {step_index}\nACTION: {act}\n{result}"

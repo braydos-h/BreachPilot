@@ -9,6 +9,7 @@ no real Shodan/GitHub API calls. The tests cover:
   - Prompt-injection hardening (``_clean`` caps strings at 200 chars)
   - Network errors degrade to ``{"error": ...}`` (never raise)
 """
+
 from __future__ import annotations
 
 # ── shodan_recon ─────────────────────────────────────────────────────────────
@@ -60,7 +61,13 @@ def test_shodan_host_parses_banner():
         "vulns": ["CVE-2020-1234"],
         "data": [
             {"port": 53, "transport": "udp", "product": "Google DNS", "version": "", "cpe": []},
-            {"port": 443, "transport": "tcp", "product": "nginx", "version": "1.18", "cpe": ["cpe:/a:nginx:nginx:1.18"]},
+            {
+                "port": 443,
+                "transport": "tcp",
+                "product": "nginx",
+                "version": "1.18",
+                "cpe": ["cpe:/a:nginx:nginx:1.18"],
+            },
         ],
     }
     res = shodan_host("8.8.8.8", "KEY", fetch_fn=lambda url: fake_payload)
@@ -74,8 +81,10 @@ def test_shodan_host_parses_banner():
 
 def test_shodan_host_network_error_returns_error_dict():
     import urllib.error
+
     def boom(url):
         raise urllib.error.HTTPError(url, 403, "forbidden", {}, b'{"error":"forbidden"}')
+
     res = shodan_host("8.8.8.8", "KEY", fetch_fn=boom)
     assert "error" in res
     assert "403" in res["error"]
@@ -84,7 +93,14 @@ def test_shodan_host_network_error_returns_error_dict():
 def test_shodan_search_parses_matches():
     fake_payload = {
         "matches": [
-            {"ip_str": "1.2.3.4", "port": 80, "product": "apache", "version": "2.4", "hostnames": [], "vulns": ["CVE-X"]},
+            {
+                "ip_str": "1.2.3.4",
+                "port": 80,
+                "product": "apache",
+                "version": "2.4",
+                "hostnames": [],
+                "vulns": ["CVE-X"],
+            },
         ],
         "total": 1,
     }
@@ -97,7 +113,9 @@ def test_shodan_search_parses_matches():
 def test_shodan_search_prompt_injection_cap():
     """A >200-char product string is capped by _clean."""
     fake_payload = {
-        "matches": [{"ip_str": "1.2.3.4", "port": 80, "product": "X" * 500, "version": "", "hostnames": [], "vulns": []}],
+        "matches": [
+            {"ip_str": "1.2.3.4", "port": 80, "product": "X" * 500, "version": "", "hostnames": [], "vulns": []}
+        ],
         "total": 1,
     }
     res = shodan_search("q", "KEY", fetch_fn=lambda url: fake_payload)
@@ -117,6 +135,7 @@ def test_shodan_clean_strips_control_chars():
 def test_shodan_plugin_registers_factory():
     """register() contributes an MCP tool factory + a config section."""
     from tools.plugins import PluginRegistry
+
     p = ShodanReconPlugin()
     reg = PluginRegistry()
     p.register(reg)
@@ -131,10 +150,12 @@ def test_shodan_mcp_tool_blocks_without_key(monkeypatch):
     class _FakeMcp:
         def __init__(self):
             self.tools = {}
+
         def tool(self):
             def deco(fn):
                 self.tools[fn.__name__] = fn
                 return fn
+
             return deco
 
     class _FakeCtx:
@@ -186,10 +207,21 @@ def test_run_dorks_invalid_org_rejected(monkeypatch):
 
 def test_run_dorks_runs_all_dorks(monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN", "ghtest")
+
     def fake_fetch(url, method, headers):
-        return {"items": [
-            {"repository": {"full_name": "acme/widgets"}, "path": "config/env", "name": "env", "html_url": "https://github.com/acme/widgets/blob/main/config/env", "score": 1.0},
-        ], "total_count": 1}
+        return {
+            "items": [
+                {
+                    "repository": {"full_name": "acme/widgets"},
+                    "path": "config/env",
+                    "name": "env",
+                    "html_url": "https://github.com/acme/widgets/blob/main/config/env",
+                    "score": 1.0,
+                },
+            ],
+            "total_count": 1,
+        }
+
     res = run_dorks("acme", "ghtest", fetch_fn=fake_fetch)
     assert res["org"] == "acme"
     assert len(res["results"]) == len(_DEFAULT_DORKS)
@@ -202,12 +234,15 @@ def test_run_dorks_one_dork_failure_doesnt_abort(monkeypatch):
     """A 403 on one dork degrades that one to an error, the rest still run."""
     monkeypatch.setenv("GITHUB_TOKEN", "ghtest")
     call_count = {"n": 0}
+
     def fake_fetch(url, method, headers):
         call_count["n"] += 1
         if call_count["n"] == 1:
             import urllib.error
+
             raise urllib.error.HTTPError(url, 403, "rate limit", {}, b'{"message":"rate limit"}')
         return {"items": [], "total_count": 0}
+
     res = run_dorks("acme", "ghtest", fetch_fn=fake_fetch)
     assert "error" in res["results"][0]
     assert "matches" in res["results"][1]  # second dork still ran
@@ -216,16 +251,22 @@ def test_run_dorks_one_dork_failure_doesnt_abort(monkeypatch):
 def test_run_dorks_prompt_injection_cap(monkeypatch):
     """A >200-char repo name is capped by _clean."""
     monkeypatch.setenv("GITHUB_TOKEN", "ghtest")
+
     def fake_fetch(url, method, headers):
-        return {"items": [
-            {"repository": {"full_name": "X" * 500}, "path": "p", "name": "n", "html_url": "u", "score": 1.0},
-        ], "total_count": 1}
+        return {
+            "items": [
+                {"repository": {"full_name": "X" * 500}, "path": "p", "name": "n", "html_url": "u", "score": 1.0},
+            ],
+            "total_count": 1,
+        }
+
     res = run_dorks("acme", "ghtest", fetch_fn=fake_fetch)
     assert len(res["results"][0]["matches"][0]["repo"]) <= 200
 
 
 def test_github_dorks_plugin_registers_factory():
     from tools.plugins import PluginRegistry
+
     p = GithubDorksPlugin()
     reg = PluginRegistry()
     p.register(reg)
@@ -240,10 +281,12 @@ def test_github_dorks_mcp_tool_blocks_without_token(monkeypatch):
     class _FakeMcp:
         def __init__(self):
             self.tools = {}
+
         def tool(self):
             def deco(fn):
                 self.tools[fn.__name__] = fn
                 return fn
+
             return deco
 
     class _FakeCtx:

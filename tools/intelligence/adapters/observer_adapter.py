@@ -33,9 +33,7 @@ class ObserverAdapter:
         ``polarity`` and ``confidence`` keys outcome_judge reads
         (outcome_judge.py:797-800).
         """
-        values = list(dict.fromkeys(
-            observation.facts + observation.new_technologies + observation.new_endpoints
-        ))
+        values = list(dict.fromkeys(observation.facts + observation.new_technologies + observation.new_endpoints))
         entries = [
             EvidenceObservation(
                 evidence_ref=f"obs:{observation.target}:{i}",
@@ -62,19 +60,23 @@ class ObserverAdapter:
         """Emit endpoint/technology -> target graph_updates entries (pure dicts)."""
         updates: list[dict[str, Any]] = []
         for endpoint in observation.new_endpoints:
-            updates.append({
-                "node": node_map.get(endpoint, endpoint),
-                "type": "endpoint",
-                "edge_to": observation.target,
-                "relation": "exposes",
-            })
+            updates.append(
+                {
+                    "node": node_map.get(endpoint, endpoint),
+                    "type": "endpoint",
+                    "edge_to": observation.target,
+                    "relation": "exposes",
+                }
+            )
         for tech in observation.new_technologies:
-            updates.append({
-                "node": node_map.get(tech, tech),
-                "type": "technology",
-                "edge_to": observation.target,
-                "relation": "runs",
-            })
+            updates.append(
+                {
+                    "node": node_map.get(tech, tech),
+                    "type": "technology",
+                    "edge_to": observation.target,
+                    "relation": "runs",
+                }
+            )
         return updates
 
     def infer_confidence(self, observation: Observation) -> float:

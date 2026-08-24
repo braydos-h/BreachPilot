@@ -67,11 +67,13 @@ def _create_report_ready_finding(reporter):
                 85,
                 "report_ready",
                 json.dumps(["E-00001", "E-00002"]),
-                json.dumps([
-                    "1. Login as user_A",
-                    "2. Request GET /api/users/42",
-                    "3. Observe response contains user_B's profile data",
-                ]),
+                json.dumps(
+                    [
+                        "1. Login as user_A",
+                        "2. Request GET /api/users/42",
+                        "3. Observe response contains user_B's profile data",
+                    ]
+                ),
                 json.dumps([]),
             ),
         )

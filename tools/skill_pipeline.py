@@ -23,7 +23,7 @@ def _skills_config(config: dict[str, Any] | None) -> dict[str, Any]:
     from tools.config_manager import CONFIG_SCHEMA
 
     base = dict(CONFIG_SCHEMA.get("skills", {}) or {})
-    overlay = ((config or {}).get("skills", {}) or {})
+    overlay = (config or {}).get("skills", {}) or {}
     if isinstance(overlay, dict):
         base.update(overlay)
     return base
@@ -113,9 +113,7 @@ def compact_skill_hints(selection: SkillSelection, *, max_chars: int = 1200) -> 
     ]
     for activation in selection.activations:
         tags = ", ".join(activation.matched_tags[:5]) or "no matched tags"
-        lines.append(
-            f"- {activation.name} | {activation.risk_level} | tags: {tags} | {activation.reason}"
-        )
+        lines.append(f"- {activation.name} | {activation.risk_level} | tags: {tags} | {activation.reason}")
     text = "\n".join(lines)
     if len(text) <= max_chars:
         return text
@@ -156,11 +154,7 @@ def _phase_activations(selection: SkillSelection, phase: str) -> tuple:
     wanted = phase_tags(phase)
     if wanted is None:
         return selection.activations
-    return tuple(
-        activation
-        for activation in selection.activations
-        if set(activation.matched_tags) & wanted
-    )
+    return tuple(activation for activation in selection.activations if set(activation.matched_tags) & wanted)
 
 
 def phase_skill_hints(selection: SkillSelection, phase: str) -> str:
@@ -205,9 +199,7 @@ def build_skill_selection_for_swarm(context: dict[str, Any]) -> SkillSelection:
     if not skills_cfg.get("swarm_inject", True):
         return SkillSelection()
     mission = context.get("mission", {}) or {}
-    goal = str(
-        mission.get("objective") or mission.get("goal") or ""
-    )
+    goal = str(mission.get("objective") or mission.get("goal") or "")
     mode = str(context.get("skill_mode") or mission.get("mode") or "recon").strip() or "recon"
     # Use the swarm's shared ExperienceStore when present (same DB the agents
     # write outcomes into); otherwise the process-wide skill store; otherwise

@@ -63,14 +63,18 @@ def test_mcp_tools_use_require_allowlist():
     class _FakeCtx:
         def __init__(self):
             from functools import wraps
+
             def _require(target_param="target_ip", **kw):
                 def deco(fn):
                     @wraps(fn)
                     async def wrapper(*a, **k):
                         return await fn(*a, **k)
+
                     wrapper.__wrapped_require_allowlist__ = True
                     return wrapper
+
                 return deco
+
             self.require_allowlist = _require
             self.audit_tool = lambda fn: fn
             self.config = None
@@ -80,6 +84,7 @@ def test_mcp_tools_use_require_allowlist():
             def deco(fn):
                 captured.append(fn)
                 return fn
+
             return deco
 
     class _FakeRegistry:
@@ -100,14 +105,18 @@ def test_caldera_list_abilities_missing_url_error():
     class _FakeCtx:
         def __init__(self):
             from functools import wraps
+
             def _require(*a, **k):
                 def deco(fn):
                     @wraps(fn)
                     def wrapper(*args, **kw):
                         return fn(*args, **kw)
+
                     wrapper.__wrapped_require_allowlist__ = True
                     return wrapper
+
                 return deco
+
             self.require_allowlist = _require
             self.audit_tool = lambda fn: fn
             self.config = {}  # no caldera block
@@ -117,6 +126,7 @@ def test_caldera_list_abilities_missing_url_error():
             def deco(fn):
                 tool_outputs.append(fn)
                 return fn
+
             return deco
 
     class _FakeRegistry:

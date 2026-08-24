@@ -6,6 +6,7 @@ per-tool flag must both be true, else BLOCKED: ... disabled before the
 allowlist). Commands run as argv lists (no shell) via _run_with_pgrp_timeout.
 No live network: subprocess.run and shutil.which are monkeypatched.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -84,6 +85,7 @@ def _capture_run():
 
 # ── config-off gate ──────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_asrep_roast_disabled_when_master_off(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path, ad_kerberos={"enabled": False, "asrep_roast": True})
@@ -100,6 +102,7 @@ async def test_asrep_roast_disabled_when_per_tool_off(tmp_path: Path) -> None:
 
 # ── asrep_roast ───────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_asrep_roast_missing_domain(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path)
@@ -110,9 +113,7 @@ async def test_asrep_roast_missing_domain(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_asrep_roast_missing_secret_without_usersfile(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "asrep_roast", {"target_ip": "10.0.0.1", "domain": "corp", "username": "u"}
-    ))
+    text = _text(await mcp.call_tool("asrep_roast", {"target_ip": "10.0.0.1", "domain": "corp", "username": "u"}))
     assert "BLOCKED" in text and "password or ntlm_hash" in text
 
 
@@ -120,10 +121,12 @@ async def test_asrep_roast_missing_secret_without_usersfile(tmp_path: Path) -> N
 async def test_asrep_roast_offlist_dc_blocked(tmp_path: Path) -> None:
     """A DC other than the runtime target must be allowlist-gated."""
     mcp = _make_server(tmp_path, require_allowlist=True, allowed_targets=["10.0.0.1"])
-    text = _text(await mcp.call_tool(
-        "asrep_roast",
-        {"target_ip": "10.0.0.1", "domain": "corp", "username": "u", "password": "p", "dc_ip": "10.0.0.99"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "asrep_roast",
+            {"target_ip": "10.0.0.1", "domain": "corp", "username": "u", "password": "p", "dc_ip": "10.0.0.99"},
+        )
+    )
     assert "10.0.0.99" in text and "not in the explicit allowlist" in text
 
 
@@ -132,10 +135,12 @@ async def test_asrep_roast_valid_argv(monkeypatch, tmp_path: Path) -> None:
     run, cap = _capture_run()
     monkeypatch.setattr(subprocess, "run", run)
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "asrep_roast",
-        {"target_ip": "10.0.0.1", "domain": "corp", "username": "u", "password": "p"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "asrep_roast",
+            {"target_ip": "10.0.0.1", "domain": "corp", "username": "u", "password": "p"},
+        )
+    )
     assert "ASREP_ROAST_RESULT: completed" in text
     argv = cap["argv"]
     assert argv[0] == "impacket-GetNPUsers"
@@ -148,12 +153,13 @@ async def test_asrep_roast_valid_argv(monkeypatch, tmp_path: Path) -> None:
 
 # ── pass_the_hash ────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_pass_the_hash_invalid_hash(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "pass_the_hash", {"target_ip": "10.0.0.1", "username": "admin", "ntlm_hash": "zzz"}
-    ))
+    text = _text(
+        await mcp.call_tool("pass_the_hash", {"target_ip": "10.0.0.1", "username": "admin", "ntlm_hash": "zzz"})
+    )
     assert "BLOCKED" in text and "32 hex chars" in text
 
 
@@ -164,10 +170,17 @@ async def test_pass_the_hash_wmiexec_fallback_argv(monkeypatch, tmp_path: Path) 
     monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr("shutil.which", lambda name: None)
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "pass_the_hash",
-        {"target_ip": "10.0.0.1", "username": "admin", "ntlm_hash": "31d6cfe0d16ae931b73c59d7e0c089c0", "command": "whoami"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "pass_the_hash",
+            {
+                "target_ip": "10.0.0.1",
+                "username": "admin",
+                "ntlm_hash": "31d6cfe0d16ae931b73c59d7e0c089c0",
+                "command": "whoami",
+            },
+        )
+    )
     assert "PASS_THE_HASH_RESULT: completed" in text
     argv = cap["argv"]
     assert argv[0] == "impacket-wmiexec"
@@ -186,10 +199,17 @@ async def test_pass_the_hash_nxc_argv(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/nxc" if name == "nxc" else None)
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "pass_the_hash",
-        {"target_ip": "10.0.0.1", "username": "admin", "ntlm_hash": "31d6cfe0d16ae931b73c59d7e0c089c0", "command": "whoami"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "pass_the_hash",
+            {
+                "target_ip": "10.0.0.1",
+                "username": "admin",
+                "ntlm_hash": "31d6cfe0d16ae931b73c59d7e0c089c0",
+                "command": "whoami",
+            },
+        )
+    )
     assert "PASS_THE_HASH_RESULT: completed" in text
     argv = cap["argv"]
     assert argv[0] == "/usr/bin/nxc"
@@ -199,6 +219,7 @@ async def test_pass_the_hash_nxc_argv(monkeypatch, tmp_path: Path) -> None:
 
 
 # ── smb_signing_check (detection-only, default ON) ──────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_smb_signing_check_disabled_when_master_off(tmp_path: Path) -> None:
@@ -223,6 +244,7 @@ async def test_smb_signing_check_nmap_fallback_argv(monkeypatch, tmp_path: Path)
 
 # ── responder_relay (targets from allowlist only) ────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_responder_relay_targets_built_from_allowlist(monkeypatch, tmp_path: Path) -> None:
     """The relay target file must contain ONLY allowlisted hosts + the runtime target."""
@@ -230,9 +252,7 @@ async def test_responder_relay_targets_built_from_allowlist(monkeypatch, tmp_pat
     monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr("shutil.which", lambda name: None)
     mcp = _make_server(tmp_path, require_allowlist=True, allowed_targets=["10.0.0.1", "10.0.0.2"])
-    text = _text(await mcp.call_tool(
-        "responder_relay", {"target_ip": "10.0.0.1", "iface": "eth0"}
-    ))
+    text = _text(await mcp.call_tool("responder_relay", {"target_ip": "10.0.0.1", "iface": "eth0"}))
     assert "RESPONDER_RELAY_RESULT: completed" in text
     argv = cap["argv"]
     assert argv[0] == "ntlmrelayx.py"
@@ -247,23 +267,33 @@ async def test_responder_relay_targets_built_from_allowlist(monkeypatch, tmp_pat
 
 # ── golden_ticket ────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_golden_ticket_missing_sid(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "golden_ticket",
-        {"target_ip": "10.0.0.1", "domain": "corp", "username": "admin", "krbtgt_hash": "31d6cfe0d16ae931b73c59d7e0c089c0"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "golden_ticket",
+            {
+                "target_ip": "10.0.0.1",
+                "domain": "corp",
+                "username": "admin",
+                "krbtgt_hash": "31d6cfe0d16ae931b73c59d7e0c089c0",
+            },
+        )
+    )
     assert "BLOCKED" in text and "sid" in text.lower()
 
 
 @pytest.mark.asyncio
 async def test_golden_ticket_invalid_krbtgt_hash(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "golden_ticket",
-        {"target_ip": "10.0.0.1", "domain": "corp", "username": "admin", "krbtgt_hash": "zz", "sid": "S-1-5-21-1"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "golden_ticket",
+            {"target_ip": "10.0.0.1", "domain": "corp", "username": "admin", "krbtgt_hash": "zz", "sid": "S-1-5-21-1"},
+        )
+    )
     assert "BLOCKED" in text and "32 hex chars" in text
 
 
@@ -273,11 +303,19 @@ async def test_golden_ticket_valid_argv(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr("shutil.which", lambda name: None)
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "golden_ticket",
-        {"target_ip": "10.0.0.1", "domain": "corp", "username": "Administrator",
-         "krbtgt_hash": "31d6cfe0d16ae931b73c59d7e0c089c0", "sid": "S-1-5-21-1-2-3", "duration": "10d"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "golden_ticket",
+            {
+                "target_ip": "10.0.0.1",
+                "domain": "corp",
+                "username": "Administrator",
+                "krbtgt_hash": "31d6cfe0d16ae931b73c59d7e0c089c0",
+                "sid": "S-1-5-21-1-2-3",
+                "duration": "10d",
+            },
+        )
+    )
     assert "GOLDEN_TICKET_RESULT: completed" in text
     argv = cap["argv"]
     assert argv[0] == "impacket-ticketer"
@@ -291,16 +329,19 @@ async def test_golden_ticket_valid_argv(monkeypatch, tmp_path: Path) -> None:
 
 # ── bloodhound_collect ───────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_bloodhound_valid_argv(monkeypatch, tmp_path: Path) -> None:
     run, cap = _capture_run()
     monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr("shutil.which", lambda name: None)
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "bloodhound_collect",
-        {"target_ip": "10.0.0.1", "domain": "corp", "username": "u", "password": "p"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "bloodhound_collect",
+            {"target_ip": "10.0.0.1", "domain": "corp", "username": "u", "password": "p"},
+        )
+    )
     assert "BLOODHOUND_COLLECT_RESULT: completed" in text
     argv = cap["argv"]
     assert argv[0] == "bloodhound-python"
@@ -315,14 +356,17 @@ async def test_bloodhound_valid_argv(monkeypatch, tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_bloodhound_offlist_dc_blocked(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path, require_allowlist=True, allowed_targets=["10.0.0.1"])
-    text = _text(await mcp.call_tool(
-        "bloodhound_collect",
-        {"target_ip": "10.0.0.1", "domain": "corp", "username": "u", "password": "p", "dc_ip": "10.0.0.50"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "bloodhound_collect",
+            {"target_ip": "10.0.0.1", "domain": "corp", "username": "u", "password": "p", "dc_ip": "10.0.0.50"},
+        )
+    )
     assert "10.0.0.50" in text and "not in the explicit allowlist" in text
 
 
 # ── adcs_enum ────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_adcs_enum_valid_argv(monkeypatch, tmp_path: Path) -> None:
@@ -330,10 +374,12 @@ async def test_adcs_enum_valid_argv(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr("shutil.which", lambda name: None)
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "adcs_enum",
-        {"target_ip": "10.0.0.1", "domain": "corp", "username": "u", "password": "p"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "adcs_enum",
+            {"target_ip": "10.0.0.1", "domain": "corp", "username": "u", "password": "p"},
+        )
+    )
     assert "ADCS_ENUM_RESULT: completed" in text
     argv = cap["argv"]
     assert argv[0] == "certipy"
@@ -346,7 +392,9 @@ async def test_adcs_enum_valid_argv(monkeypatch, tmp_path: Path) -> None:
 
 # ── registration ─────────────────────────────────────────────────────────────
 
+
 def test_ad_modules_registered() -> None:
     from tools.attack_modules import registry
+
     for name in ("ADCSEnum", "BloodHoundCollect", "ResponderRelay", "GoldenTicket", "SMBSigningCheck"):
         assert registry.get_module(name) is not None, f"{name} not registered"

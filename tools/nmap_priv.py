@@ -67,9 +67,7 @@ def _downgrade_unprivileged_args(args: list[str]) -> tuple[list[str], str]:
     return out, note
 
 
-def apply_nmap_privilege(
-    argv: list[str], *, sudo: bool, priv_fallback: bool
-) -> tuple[list[str], str]:
+def apply_nmap_privilege(argv: list[str], *, sudo: bool, priv_fallback: bool) -> tuple[list[str], str]:
     """Apply sudo-prefix + unprivileged downgrade to a full nmap argv.
 
     ``argv[0]`` is the nmap binary (e.g. ``nmap`` or a configured path); the

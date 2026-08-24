@@ -36,13 +36,7 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
         mgr = _get_session_mgr()
         result = mgr.start_tmux_session(name, command, cwd=workspace)
         if result["success"]:
-            return (
-                f"SESSION_STARTED: {name}\n"
-                f"TYPE: tmux\n"
-                f"COMMAND: {command}\n"
-                f"PID: {result.get('pid')}\n"
-                f"STATUS: running"
-            )
+            return f"SESSION_STARTED: {name}\nTYPE: tmux\nCOMMAND: {command}\nPID: {result.get('pid')}\nSTATUS: running"
         return f"SESSION_FAILED: {result.get('error', 'unknown error')}"
 
     @mcp.tool()
@@ -68,11 +62,7 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
         mgr = _get_session_mgr()
         result = mgr.read_session_output(name, lines=lines)
         if result["success"]:
-            return (
-                f"SESSION_OUTPUT: {name}\n"
-                f"LINES: {lines}\n"
-                f"OUTPUT:\n{result.get('output', '')}"
-            )
+            return f"SESSION_OUTPUT: {name}\nLINES: {lines}\nOUTPUT:\n{result.get('output', '')}"
         return f"READ_FAILED: {result.get('error', 'unknown error')}"
 
     @mcp.tool()
@@ -81,11 +71,7 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Kill a named persistent session (tmux, background job, or listener)."""
         mgr = _get_session_mgr()
         result = mgr.kill_session(name)
-        return (
-            f"SESSION_KILLED: {name}\n"
-            f"SUCCESS: {result['success']}\n"
-            f"MESSAGE: {result.get('message', '')}"
-        )
+        return f"SESSION_KILLED: {name}\nSUCCESS: {result['success']}\nMESSAGE: {result.get('message', '')}"
 
     @mcp.tool()
     @audit_tool
@@ -127,22 +113,28 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Stop a named background job."""
         mgr = _get_session_mgr()
         result = mgr.stop_background_job(name)
-        return (
-            f"JOB_STOPPED: {name}\n"
-            f"SUCCESS: {result['success']}\n"
-            f"MESSAGE: {result.get('message', '')}"
-        )
+        return f"JOB_STOPPED: {name}\nSUCCESS: {result['success']}\nMESSAGE: {result.get('message', '')}"
 
     @mcp.tool()
     @audit_tool
-    def start_listener(name: str, port: int, listener_type: str = "netcat", protocol: str = "tcp", directory: str = "", upstream_host: str = "", upstream_port: int = 0) -> str:
+    def start_listener(
+        name: str,
+        port: int,
+        listener_type: str = "netcat",
+        protocol: str = "tcp",
+        directory: str = "",
+        upstream_host: str = "",
+        upstream_port: int = 0,
+    ) -> str:
         """Start a named network listener. Types: netcat (nc/ncat), socat, http (python http.server), tls (openssl/socat TLS), dns (dnscat2), https-beacon (socat TLS HTTP), socks_pivot (chisel/ligolo-ng/socat TCP forward). socks_pivot forwards to upstream_host:upstream_port which MUST be in allowed_targets (pivot lock)."""
         # Phase 3 config-off guard for the new C2 listener types. The legacy
         # netcat/socat/http types stay ungated (pre-existing behavior).
         _NEW_LISTENER_TYPES = {"tls", "dns", "https-beacon", "socks_pivot"}
         if listener_type in _NEW_LISTENER_TYPES:
             listeners_cfg = ((config or {}).get("exploit", {}) or {}).get("listeners", {}) or {}
-            key = {"tls": "tls", "dns": "dns", "https-beacon": "https_beacon", "socks_pivot": "socks_pivot"}[listener_type]
+            key = {"tls": "tls", "dns": "dns", "https-beacon": "https_beacon", "socks_pivot": "socks_pivot"}[
+                listener_type
+            ]
             if not listeners_cfg.get(key, False):
                 return f"BLOCKED: exploit.listeners.{key} is disabled. Listener: {listener_type}"
             # socks_pivot upstream must be allowlist-gated (the allowlist is the
@@ -183,11 +175,7 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Stop a named network listener."""
         mgr = _get_session_mgr()
         result = mgr.stop_listener(name)
-        return (
-            f"LISTENER_STOPPED: {name}\n"
-            f"SUCCESS: {result['success']}\n"
-            f"MESSAGE: {result.get('message', '')}"
-        )
+        return f"LISTENER_STOPPED: {name}\nSUCCESS: {result['success']}\nMESSAGE: {result.get('message', '')}"
 
     @mcp.tool()
     @audit_tool
@@ -232,11 +220,4 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Kill a process by tracked name or raw PID. Use to stop runaway processes, kill old listeners, or clean up after exploitation."""
         mgr = _get_session_mgr()
         result = mgr.kill_process(name_or_pid)
-        return (
-            f"KILL_RESULT: {name_or_pid}\n"
-            f"SUCCESS: {result['success']}\n"
-            f"MESSAGE: {result.get('message', '')}"
-        )
-
-
-
+        return f"KILL_RESULT: {name_or_pid}\nSUCCESS: {result['success']}\nMESSAGE: {result.get('message', '')}"

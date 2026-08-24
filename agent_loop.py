@@ -118,10 +118,7 @@ class AgentLoop:
                 self._db.ensure_schema(conn)
             self._mission = self._mission_ctrl.load_mission(mission_id)
             if self._mission is None:
-                raise ValueError(
-                    f"Cannot resume: no mission with id {mission_id!r} in "
-                    f"{db_path}."
-                )
+                raise ValueError(f"Cannot resume: no mission with id {mission_id!r} in {db_path}.")
             self._mission_id = self._mission.mission_id
         else:
             self._mission = self._mission_ctrl.create_from_config(mission_config)
@@ -149,9 +146,7 @@ class AgentLoop:
         )
 
         # ── Evidence ──
-        self._evidence = EvidenceStore(
-            self._db, self._mission_id, workspace_root
-        )
+        self._evidence = EvidenceStore(self._db, self._mission_id, workspace_root)
 
         # ── Tool Router ──
         self._tool_router = ToolRouter(
@@ -205,16 +200,10 @@ class AgentLoop:
         if not isinstance(judgment_cfg, dict):
             raise ValueError("outcome_judgment must be a mapping")
         self._outcome_judge = OutcomeJudge(
-            max_inconclusive_attempts=judgment_cfg.get(
-                "max_inconclusive_attempts", 3
-            ),
-            confirmation_threshold=judgment_cfg.get(
-                "confirmation_threshold", 0.75
-            ),
+            max_inconclusive_attempts=judgment_cfg.get("max_inconclusive_attempts", 3),
+            confirmation_threshold=judgment_cfg.get("confirmation_threshold", 0.75),
             refutation_threshold=judgment_cfg.get("refutation_threshold", 0.75),
-            min_evidence_references=judgment_cfg.get(
-                "min_evidence_references", 1
-            ),
+            min_evidence_references=judgment_cfg.get("min_evidence_references", 1),
         )
         # Tier 1.3: on resume, re-queue any tasks left 'running' by a crashed
         # prior run back to 'pending' so they're re-attempted (not silently
@@ -224,9 +213,7 @@ class AgentLoop:
             reset = self._queue.reset_stale_running()
             if reset and self._console_ui is not None:
                 try:
-                    self._console_ui.info(
-                        f"[RESUME] Re-queued {reset} stale 'running' task(s)."
-                    )
+                    self._console_ui.info(f"[RESUME] Re-queued {reset} stale 'running' task(s).")
                 except Exception:
                     pass
 
@@ -291,10 +278,13 @@ class AgentLoop:
             try:
                 loaded_bb = self._swarm.load_state(self._swarm_state_path)
                 if loaded_bb:
-                    self._emit_event("resume", {
-                        "component": "swarm_blackboard",
-                        "state_path": str(self._swarm_state_path),
-                    })
+                    self._emit_event(
+                        "resume",
+                        {
+                            "component": "swarm_blackboard",
+                            "state_path": str(self._swarm_state_path),
+                        },
+                    )
             except Exception:
                 # Never let a bad state file wedge the resumed loop.
                 pass
@@ -323,9 +313,7 @@ class AgentLoop:
         self.use_swarm: bool = bool(mission_config.get("use_swarm", self._use_swarm))
         self.critic_enabled: bool = bool(mission_config.get("critic_enabled", True))
         self.reflection_enabled: bool = bool(mission_config.get("reflection_enabled", True))
-        self.adaptive_exploits_enabled: bool = bool(
-            mission_config.get("adaptive_exploits_enabled", False)
-        )
+        self.adaptive_exploits_enabled: bool = bool(mission_config.get("adaptive_exploits_enabled", False))
 
         # ── Web dashboard event callback ──
         self._event_callback: Callable[[str, dict[str, Any]], None] | None = None
@@ -409,13 +397,9 @@ class AgentLoop:
             elif event_type == "critic_decision":
                 decision = data.get("decision", "approve")
                 if decision == "deny":
-                    ui.blocked(
-                        f"Critic DENIED {data.get('task_id', '')}: {data.get('reasoning', '')[:120]}"
-                    )
+                    ui.blocked(f"Critic DENIED {data.get('task_id', '')}: {data.get('reasoning', '')[:120]}")
                 elif decision == "modify":
-                    ui.info(
-                        f"Critic modified {data.get('task_id', '')}: {data.get('reasoning', '')[:120]}"
-                    )
+                    ui.info(f"Critic modified {data.get('task_id', '')}: {data.get('reasoning', '')[:120]}")
                 else:
                     ui.info(f"Critic approved {data.get('task_id', '')}")
             elif event_type == "reflection_output":
@@ -477,13 +461,13 @@ class AgentLoop:
             "cycles": 0,
         }
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("  RESEARCH AGENT LOOP STARTING")
         print(f"  Mission: {self._mission.program_name}")
         print(f"  Risk Profile: {self._mission.risk_profile}")
         print(f"  Scope: {len(self._mission.allowed_assets)} allow, {len(self._mission.disallowed_assets)} deny rules")
         print(f"  Workspace: {self._workspace_root}")
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         while self._running and self._cycles < max_cycles:
             self._cycles += 1
@@ -501,40 +485,31 @@ class AgentLoop:
             if task is None:
                 print(f"\n[Cycle {self._cycles}] No pending tasks. Planning new ones...")
 
-                target_summary = self._memory.summarize_target(
-                    self._mission.program_name or ""
-                )
+                target_summary = self._memory.summarize_target(self._mission.program_name or "")
                 graph_summary = self._graph.summarize_graph()
                 hypothesis_states = self._hypotheses.list_all()
-                hypotheses = [
-                    state.to_dict()
-                    for state in hypothesis_states
-                    if not state.is_terminal
-                ]
+                hypotheses = [state.to_dict() for state in hypothesis_states if not state.is_terminal]
 
                 # Tier 1.1: cross-mission recall — append lessons + prior-mission
                 # memory relevant to the current planning context so the planner
                 # leans on past engagements. No-op (empty string) when semantic
                 # memory is off or Ollama is down; never raises.
                 hyp_text = " ".join(
-                    (
-                        h.get("statement", h.get("hypothesis", ""))
-                        if isinstance(h, dict)
-                        else str(h)
-                    )
+                    (h.get("statement", h.get("hypothesis", "")) if isinstance(h, dict) else str(h))
                     for h in (hypotheses or [])
                 )
-                recall_ctx = " ".join(
-                    s for s in (target_summary, graph_summary, hyp_text) if s
-                )
+                recall_ctx = " ".join(s for s in (target_summary, graph_summary, hyp_text) if s)
                 recall = self._cross_mission_recall(recall_ctx)
                 if recall:
                     target_summary = f"{target_summary}\n{recall}"
 
-                self._emit_event("ai_thinking", {
-                    "agent": "Planner",
-                    "text": f"Planning new tasks. Target summary: {target_summary[:200]}",
-                })
+                self._emit_event(
+                    "ai_thinking",
+                    {
+                        "agent": "Planner",
+                        "text": f"Planning new tasks. Target summary: {target_summary[:200]}",
+                    },
+                )
 
                 plan_tasks = self._planner.plan(
                     mission=self._mission.to_dict(),
@@ -561,14 +536,17 @@ class AgentLoop:
                         continue
                     stats["tasks_created"] += 1
                     created_this_plan += 1
-                    self._emit_event("task_created", {
-                        "task_id": tid,
-                        "phase": pt.get("phase", "recon"),
-                        "target": pt.get("target", ""),
-                        "objective": pt.get("objective", ""),
-                        "risk_level": pt.get("risk_level", "low"),
-                        "priority": pt.get("priority", 0),
-                    })
+                    self._emit_event(
+                        "task_created",
+                        {
+                            "task_id": tid,
+                            "phase": pt.get("phase", "recon"),
+                            "target": pt.get("target", ""),
+                            "objective": pt.get("objective", ""),
+                            "risk_level": pt.get("risk_level", "low"),
+                            "priority": pt.get("priority", 0),
+                        },
+                    )
 
                 # Dedup
                 removed = self._queue.deduplicate()
@@ -581,17 +559,13 @@ class AgentLoop:
                         print("  No new tasks to create. Research phase complete.")
                         self._emit_event("ai_thinking", {"agent": "Planner", "text": "Research phase complete."})
                         break
-                    print(
-                        f"  No materially different task is justified; "
-                        f"phase minima remain unmet: {reason}."
-                    )
+                    print(f"  No materially different task is justified; phase minima remain unmet: {reason}.")
                     self._emit_event(
                         "ai_thinking",
                         {
                             "agent": "Planner",
                             "text": (
-                                "Stopped planning because every proposed check "
-                                f"was duplicate or terminal. {reason}"
+                                f"Stopped planning because every proposed check was duplicate or terminal. {reason}"
                             ),
                         },
                     )
@@ -612,42 +586,54 @@ class AgentLoop:
                 enforce_rate_limit=True,
             )
 
-            self._emit_event("scope_check", {
-                "task_id": task.get("task_id", ""),
-                "target": task.get("target", ""),
-                "allowed": scope_result.allowed,
-                "reason": scope_result.reason,
-                "matched_rule": scope_result.matched_scope_rule,
-            })
+            self._emit_event(
+                "scope_check",
+                {
+                    "task_id": task.get("task_id", ""),
+                    "target": task.get("target", ""),
+                    "allowed": scope_result.allowed,
+                    "reason": scope_result.reason,
+                    "matched_rule": scope_result.matched_scope_rule,
+                },
+            )
 
             if not scope_result.allowed:
                 self._queue.block_task(task["task_id"], scope_result.reason)
                 stats["tasks_blocked"] += 1
                 print(f"  [BLOCKED] Task {task['task_id']}: {scope_result.reason}")
-                self._emit_event("task_blocked", {
-                    "task_id": task["task_id"],
-                    "reason": scope_result.reason,
-                    "target": task.get("target", ""),
-                })
+                self._emit_event(
+                    "task_blocked",
+                    {
+                        "task_id": task["task_id"],
+                        "reason": scope_result.reason,
+                        "target": task.get("target", ""),
+                    },
+                )
                 continue
 
             if scope_result.requires_human_approval:
                 self._queue.update_task_status(task["task_id"], "needs_approval")
                 print(f"  [NEEDS APPROVAL] Task {task['task_id']} requires human confirmation.")
-                self._emit_event("human_approval_needed", {
-                    "task_id": task["task_id"],
-                    "target": task.get("target", ""),
-                    "objective": task.get("objective", ""),
-                })
+                self._emit_event(
+                    "human_approval_needed",
+                    {
+                        "task_id": task["task_id"],
+                        "target": task.get("target", ""),
+                        "objective": task.get("objective", ""),
+                    },
+                )
                 continue
 
             # ── 3. Execute (swarm-driven by default) ──
             print(f"\n[Cycle {self._cycles}] Executing: {task.get('objective', task['task_id'])[:100]}")
-            self._emit_event("task_started", {
-                "task_id": task.get("task_id", ""),
-                "target": task.get("target", ""),
-                "objective": task.get("objective", ""),
-            })
+            self._emit_event(
+                "task_started",
+                {
+                    "task_id": task.get("task_id", ""),
+                    "target": task.get("target", ""),
+                    "objective": task.get("objective", ""),
+                },
+            )
 
             if self._use_swarm:
                 swarm_result = self._swarm.route(task)
@@ -660,18 +646,17 @@ class AgentLoop:
                     target=task.get("target", ""),
                     scope_gate_passed=(swarm_result.status != AgentStatus.BLOCKED),
                     risk_gate_passed=(swarm_result.status != AgentStatus.BLOCKED),
-                    raw_output=(
-                        json.dumps(swarm_result.output)
-                        if swarm_result.output
-                        else swarm_result.error
-                    ),
+                    raw_output=(json.dumps(swarm_result.output) if swarm_result.output else swarm_result.error),
                 )
                 # Emit swarm agent thinking
                 if swarm_result.output:
-                    self._emit_event("ai_thinking", {
-                        "agent": swarm_result.agent_type or "SwarmAgent",
-                        "text": json.dumps(swarm_result.output)[:500],
-                    })
+                    self._emit_event(
+                        "ai_thinking",
+                        {
+                            "agent": swarm_result.agent_type or "SwarmAgent",
+                            "text": json.dumps(swarm_result.output)[:500],
+                        },
+                    )
                 # Merge swarm-derived new tasks into queue
                 for nt in swarm_result.new_tasks:
                     try:
@@ -687,12 +672,15 @@ class AgentLoop:
                         )
                         continue
                     stats["tasks_created"] += 1
-                    self._emit_event("task_created", {
-                        "task_id": tid,
-                        "phase": nt.get("phase", "recon"),
-                        "target": nt.get("target", ""),
-                        "objective": nt.get("objective", ""),
-                    })
+                    self._emit_event(
+                        "task_created",
+                        {
+                            "task_id": tid,
+                            "phase": nt.get("phase", "recon"),
+                            "target": nt.get("target", ""),
+                            "objective": nt.get("objective", ""),
+                        },
+                    )
                 # Merge swarm memory updates
                 for mu in swarm_result.memory_updates:
                     self._memory.remember(
@@ -701,10 +689,13 @@ class AgentLoop:
                         mu.get("memory_type", "working"),
                         tags=mu.get("tags", []),
                     )
-                    self._emit_event("memory_update", {
-                        "target": mu.get("target", ""),
-                        "content": mu.get("content", "")[:200],
-                    })
+                    self._emit_event(
+                        "memory_update",
+                        {
+                            "target": mu.get("target", ""),
+                            "content": mu.get("content", "")[:200],
+                        },
+                    )
                 # Merge swarm graph updates
                 for gu in swarm_result.graph_updates:
                     node_type = gu.get("node_type", "asset")
@@ -724,71 +715,82 @@ class AgentLoop:
                         confidence=f.get("confidence", 0.5),
                     )
                     stats["findings_created"] += 1
-                    self._emit_event("finding_created", {
-                        "finding_id": fid,
-                        "title": f.get("title", ""),
-                        "affected_asset": f.get("affected_asset", ""),
-                        "vuln_class": f.get("vuln_class", ""),
-                        "confidence": f.get("confidence", 0.5),
-                    })
+                    self._emit_event(
+                        "finding_created",
+                        {
+                            "finding_id": fid,
+                            "title": f.get("title", ""),
+                            "affected_asset": f.get("affected_asset", ""),
+                            "vuln_class": f.get("vuln_class", ""),
+                            "confidence": f.get("confidence", 0.5),
+                        },
+                    )
             else:
                 exec_result = self._executor.execute(task)
 
             if not exec_result.scope_gate_passed:
                 self._queue.block_task(task["task_id"], exec_result.error)
                 stats["tasks_blocked"] += 1
-                self._emit_event("task_blocked", {
-                    "task_id": task["task_id"],
-                    "reason": exec_result.error,
-                })
+                self._emit_event(
+                    "task_blocked",
+                    {
+                        "task_id": task["task_id"],
+                        "reason": exec_result.error,
+                    },
+                )
                 continue
 
             # ── 4. Observe ──
             observation = self._observer.observe(
                 task=task,
-                raw_output=(
-                    exec_result.raw_output
-                    or exec_result.output_summary
-                    or exec_result.error
-                ),
+                raw_output=(exec_result.raw_output or exec_result.output_summary or exec_result.error),
                 tool_name=exec_result.tool_name,
                 evidence_refs=exec_result.evidence_refs,
             )
             stats["observations"] += 1
 
             # Emit observation data
-            self._emit_event("observation", {
-                "task_id": task.get("task_id", ""),
-                "target": observation.target,
-                "tool": observation.tool_name,
-                "facts": observation.facts[:10],
-                "technologies": observation.new_technologies[:10],
-                "endpoints": observation.new_endpoints[:10],
-                "signals": observation.interesting_signals[:5],
-                "confidence": observation.confidence,
-                "usefulness": observation.usefulness,
-            })
+            self._emit_event(
+                "observation",
+                {
+                    "task_id": task.get("task_id", ""),
+                    "target": observation.target,
+                    "tool": observation.tool_name,
+                    "facts": observation.facts[:10],
+                    "technologies": observation.new_technologies[:10],
+                    "endpoints": observation.new_endpoints[:10],
+                    "signals": observation.interesting_signals[:5],
+                    "confidence": observation.confidence,
+                    "usefulness": observation.usefulness,
+                },
+            )
 
             # Emit service detection events
             for tech in observation.new_technologies[:10]:
                 if tech and not tech.startswith("OS:"):
-                    self._emit_event("service_detected", {
-                        "service": tech,
-                        "target": observation.target,
-                    })
+                    self._emit_event(
+                        "service_detected",
+                        {
+                            "service": tech,
+                            "target": observation.target,
+                        },
+                    )
 
             # Emit possible attacks based on detected services
             for tech in observation.new_technologies[:10]:
                 service_name = tech.split()[0].lower().rstrip(":") if tech else ""
                 attacks = _SERVICE_ATTACK_MAP.get(service_name, [])
                 for atk in attacks[:3]:
-                    self._emit_event("possible_attack", {
-                        "service": service_name,
-                        "module": atk.get("module", ""),
-                        "risk": atk.get("risk", ""),
-                        "priority": atk.get("priority", 0),
-                        "tools": atk.get("tools", []),
-                    })
+                    self._emit_event(
+                        "possible_attack",
+                        {
+                            "service": service_name,
+                            "module": atk.get("module", ""),
+                            "risk": atk.get("risk", ""),
+                            "priority": atk.get("priority", 0),
+                            "tools": atk.get("tools", []),
+                        },
+                    )
 
             self._save_observation(observation)
             self._update_memory_from_observation(observation)
@@ -803,9 +805,7 @@ class AgentLoop:
                 exec_result.evidence_refs,
                 prior_hypothesis=prior_hypothesis,
             )
-            assessment, hypothesis_state = self._hypotheses.persist_assessment(
-                task, assessment
-            )
+            assessment, hypothesis_state = self._hypotheses.persist_assessment(task, assessment)
             self._emit_event(
                 "outcome_judgment",
                 {
@@ -871,9 +871,7 @@ class AgentLoop:
                         failed_task=task,
                         error=result_summary,
                         attempt=assessment.attempt_count,
-                        hypothesis_state=(
-                            hypothesis_state.to_dict() if hypothesis_state else None
-                        ),
+                        hypothesis_state=(hypothesis_state.to_dict() if hypothesis_state else None),
                     )
                     if retry_task:
                         try:
@@ -905,40 +903,43 @@ class AgentLoop:
             stats["evidence_saved"] += len(exec_result.evidence_refs)
 
             # Append to battle log for reflection
-            self._battle_log.append({
-                "task_id": task.get("task_id", ""),
-                "tool": exec_result.tool_name,
-                "target": task.get("target", ""),
-                "success": exec_result.success,
-                "partial_success": exec_result.success and len(exec_result.output_summary) < 50,
-                "summary": exec_result.output_summary[:200],
-                "error": exec_result.error,
-                "hypothesis_status": assessment.hypothesis_status.value,
-                "evidential_outcome": assessment.evidential_outcome,
-                "evidence_refs": assessment.evidence_refs,
-            })
+            self._battle_log.append(
+                {
+                    "task_id": task.get("task_id", ""),
+                    "tool": exec_result.tool_name,
+                    "target": task.get("target", ""),
+                    "success": exec_result.success,
+                    "partial_success": exec_result.success and len(exec_result.output_summary) < 50,
+                    "summary": exec_result.output_summary[:200],
+                    "error": exec_result.error,
+                    "hypothesis_status": assessment.hypothesis_status.value,
+                    "evidential_outcome": assessment.evidential_outcome,
+                    "evidence_refs": assessment.evidence_refs,
+                }
+            )
             # Bound the in-memory battle log (see _max_battle_log note above).
             if len(self._battle_log) > self._max_battle_log:
                 del self._battle_log[: len(self._battle_log) - self._max_battle_log]
 
             # Trigger reflection every N actions when swarm is enabled
-            if (
-                exec_result.success
-                and self._use_swarm
-                and stats["tasks_completed"] % self._reflection_interval == 0
-            ):
+            if exec_result.success and self._use_swarm and stats["tasks_completed"] % self._reflection_interval == 0:
                 print(f"\n[Cycle {self._cycles}] Running reflection...")
                 self._emit_event("ai_thinking", {"agent": "Reflection", "text": "Running reflection..."})
                 reflection_result = self._swarm.reflect(
-                    battle_log=self._battle_log[-self._reflection_interval:],
+                    battle_log=self._battle_log[-self._reflection_interval :],
                     session_state={"target_ip": task.get("target", "")},
                 )
                 if reflection_result.output:
                     print(f"  Reflection: {reflection_result.output.get('recommended_strategy_shift', '')}")
-                    self._emit_event("ai_reflection", {
-                        "recommended_strategy_shift": reflection_result.output.get("recommended_strategy_shift", ""),
-                        "output": json.dumps(reflection_result.output)[:500],
-                    })
+                    self._emit_event(
+                        "ai_reflection",
+                        {
+                            "recommended_strategy_shift": reflection_result.output.get(
+                                "recommended_strategy_shift", ""
+                            ),
+                            "output": json.dumps(reflection_result.output)[:500],
+                        },
+                    )
                     # Store reflection in memory (episodic — memories table)
                     self._memory.remember(
                         task.get("target", ""),
@@ -962,13 +963,16 @@ class AgentLoop:
                     evidence_refs=exec_result.evidence_refs,
                 )
                 stats["findings_created"] += 1
-                self._emit_event("finding_created", {
-                    "finding_id": fid,
-                    "title": pf.get("title", ""),
-                    "affected_asset": pf.get("target", task.get("target", "")),
-                    "vuln_class": pf.get("type", ""),
-                    "confidence": pf.get("confidence", observation.confidence),
-                })
+                self._emit_event(
+                    "finding_created",
+                    {
+                        "finding_id": fid,
+                        "title": pf.get("title", ""),
+                        "affected_asset": pf.get("target", task.get("target", "")),
+                        "vuln_class": pf.get("type", ""),
+                        "confidence": pf.get("confidence", observation.confidence),
+                    },
+                )
 
             # ── 7. Check open candidates for auto-validation ──
             candidates = self._verifier.list_needs_validation()
@@ -984,14 +988,15 @@ class AgentLoop:
                 if val_result.get("valid"):
                     self._verifier.mark_report_ready(cand["finding_id"])
                     stats["findings_report_ready"] += 1
-                    self._emit_event("finding_validated", {
-                        "finding_id": cand["finding_id"],
-                        "title": cand.get("title", ""),
-                    })
-                elif val_result.get("missing"):
-                    self._verifier.mark_needs_validation(
-                        cand["finding_id"], val_result["missing"]
+                    self._emit_event(
+                        "finding_validated",
+                        {
+                            "finding_id": cand["finding_id"],
+                            "title": cand.get("title", ""),
+                        },
                     )
+                elif val_result.get("missing"):
+                    self._verifier.mark_needs_validation(cand["finding_id"], val_result["missing"])
 
             # ── 8. Reprioritize queue ──
             self._queue.reprioritize()
@@ -999,18 +1004,23 @@ class AgentLoop:
             # Stats summary every 5 cycles
             if self._cycles % 5 == 0:
                 print(f"\n--- Progress at cycle {self._cycles} ---")
-                print(f"  Tasks: {stats['tasks_completed']} done, {stats['tasks_blocked']} blocked, {stats['tasks_failed']} failed")
+                print(
+                    f"  Tasks: {stats['tasks_completed']} done, {stats['tasks_blocked']} blocked, {stats['tasks_failed']} failed"
+                )
                 print(f"  Findings: {stats['findings_created']} created, {stats['findings_report_ready']} report-ready")
                 print(f"  Budgets: {self._risk_ctrl.budgets()}")
-                self._emit_event("stats_update", {
-                    "cycles": self._cycles,
-                    "tasks_completed": stats["tasks_completed"],
-                    "tasks_blocked": stats["tasks_blocked"],
-                    "tasks_failed": stats["tasks_failed"],
-                    "findings_created": stats["findings_created"],
-                    "findings_report_ready": stats["findings_report_ready"],
-                    "budgets": self._risk_ctrl.budgets(),
-                })
+                self._emit_event(
+                    "stats_update",
+                    {
+                        "cycles": self._cycles,
+                        "tasks_completed": stats["tasks_completed"],
+                        "tasks_blocked": stats["tasks_blocked"],
+                        "tasks_failed": stats["tasks_failed"],
+                        "findings_created": stats["findings_created"],
+                        "findings_report_ready": stats["findings_report_ready"],
+                        "budgets": self._risk_ctrl.budgets(),
+                    },
+                )
 
         stats["cycles"] = self._cycles
 
@@ -1045,13 +1055,17 @@ class AgentLoop:
 
         self._mission_ctrl.update_status(self._mission_id, "completed")
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("  RESEARCH LOOP COMPLETE")
         print(f"  Cycles: {self._cycles}")
-        print(f"  Tasks: {stats['tasks_completed']} complete, {stats['tasks_blocked']} blocked, {stats['tasks_failed']} failed")
-        print(f"  Findings: {stats['findings_created']} created, {stats['findings_report_ready']} report-ready, {stats['findings_rejected']} rejected")
+        print(
+            f"  Tasks: {stats['tasks_completed']} complete, {stats['tasks_blocked']} blocked, {stats['tasks_failed']} failed"
+        )
+        print(
+            f"  Findings: {stats['findings_created']} created, {stats['findings_report_ready']} report-ready, {stats['findings_rejected']} rejected"
+        )
         print(f"  Evidence: {stats['evidence_saved']} items")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         return stats
 
@@ -1064,10 +1078,16 @@ class AgentLoop:
             return False, f"Need >=2 recon actions (have {self._phase_counts['recon']})"
         min_svc = max(1, self._services_detected)
         if self._phase_counts["service_enumeration"] < min_svc:
-            return False, f"Need >={min_svc} service enumeration actions (have {self._phase_counts['service_enumeration']})"
+            return (
+                False,
+                f"Need >={min_svc} service enumeration actions (have {self._phase_counts['service_enumeration']})",
+            )
         min_vuln = max(1, self._versions_identified)
         if self._phase_counts["vulnerability_research"] < min_vuln:
-            return False, f"Need >={min_vuln} vulnerability research actions (have {self._phase_counts['vulnerability_research']})"
+            return (
+                False,
+                f"Need >={min_vuln} vulnerability research actions (have {self._phase_counts['vulnerability_research']})",
+            )
         if self._phase_counts["reporting"] < 1:
             return False, "Need >=1 reporting action"
         return True, "Phase minima satisfied."
@@ -1099,12 +1119,12 @@ class AgentLoop:
         5. Never stops after a single successful action
         6. Records full attack timeline
         """
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("  AUTONOMOUS ATTACK CAMPAIGN STARTING")
         print(f"  Targets: {targets}")
         print(f"  Risk Profile: {self._mission.risk_profile}")
         print(f"  Max Cycles: {self._max_cycles}")
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
         # Initialize autonomous orchestrator
         recon_config = ReconConfig(
@@ -1196,12 +1216,12 @@ class AgentLoop:
         except Exception as exc:
             print(f"[Enhanced report error]: {exc}")
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("  AUTONOMOUS CAMPAIGN COMPLETE")
         print(f"  Duration: {stats['duration']:.1f}s")
         print(f"  Tasks: {stats['total_tasks']}")
         print(f"  Successful Exploits: {stats['successful_exploits']}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         return stats
 
@@ -1289,13 +1309,14 @@ class AgentLoop:
                 except (DuplicateInvestigationError, ClosedHypothesisError):
                     pass
 
-        return {"targets": targets, "results": [r.to_dict() if hasattr(r, 'to_dict') else str(r) for r in results]}
+        return {"targets": targets, "results": [r.to_dict() if hasattr(r, "to_dict") else str(r) for r in results]}
 
     # ── Internal helpers ───────────────────────────────────────────────
 
     def _save_observation(self, obs) -> None:
         with self._db.connection(write=True) as conn:
             from db import _new_id, _now_iso
+
             obs_id = _new_id("OBS")
             conn.execute(
                 """INSERT INTO observations(
@@ -1352,7 +1373,9 @@ class AgentLoop:
         bits: list[str] = []
         try:
             lessons = self._semantic_memory.find_similar_lessons(
-                text=context_text, outcome="success", top_k=top_k,
+                text=context_text,
+                outcome="success",
+                top_k=top_k,
             )
             if lessons:
                 joined = "; ".join(
@@ -1371,9 +1394,7 @@ class AgentLoop:
                 limit=top_k,
             )
             if mems:
-                joined = "; ".join(
-                    (m.get("fact") or "")[:120] for m in mems if m.get("fact")
-                )
+                joined = "; ".join((m.get("fact") or "")[:120] for m in mems if m.get("fact"))
                 if joined:
                     bits.append(f"PRIOR MISSION MEMORY: {joined}")
         except Exception as exc:
@@ -1458,8 +1479,10 @@ class AgentLoop:
             summary = ""
             if self._model_client is not None:
                 summary = self._semantic_memory.summarize_episodes(
-                    "episodic", self._mission_id,
-                    client=self._model_client, model=self._model_name,
+                    "episodic",
+                    self._mission_id,
+                    client=self._model_client,
+                    model=self._model_name,
                 )
                 # summarize_episodes returns a fallback message when there are
                 # no episodic memories (or the client vanished mid-call) — treat
@@ -1468,10 +1491,7 @@ class AgentLoop:
                     summary = ""
             if not summary and self._battle_log:
                 wins = sum(1 for b in self._battle_log if b.get("success"))
-                summary = (
-                    f"Campaign over {self._cycles} cycles: "
-                    f"{wins}/{len(self._battle_log)} tasks succeeded."
-                )
+                summary = f"Campaign over {self._cycles} cycles: {wins}/{len(self._battle_log)} tasks succeeded."
             if not summary:
                 return
             target = self._mission.program_name or self._mission_id

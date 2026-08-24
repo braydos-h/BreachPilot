@@ -30,7 +30,15 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
     @mcp.tool()
     @require_allowlist()
-    def cred_store_add(target_ip: str, username: str, password: str = "", credential_type: str = "password", source_host: str = "", target_host: str = "", notes: str = "") -> str:
+    def cred_store_add(
+        target_ip: str,
+        username: str,
+        password: str = "",
+        credential_type: str = "password",
+        source_host: str = "",
+        target_host: str = "",
+        notes: str = "",
+    ) -> str:
         """Store a harvested or known credential for a target in the encrypted credential vault. The secret (password/hash/token/key) is Fernet-encrypted at rest under exploit_workspace/credentials/<target_ip>/credentials.jsonl and is never written to the audit log in cleartext. Records are added UNCONFIRMED (confirmed=False); use cred_store_confirm only after validating the credential by successfully reusing it against the target. credential_type: password | hash | token | key."""
         if not target_ip or not target_ip.strip():
             return "BLOCKED: target_ip is required."
@@ -121,18 +129,24 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
         recs = store.all_credentials()
         enc = "ENABLED" if store.encryption_enabled else "DISABLED (plaintext fallback -- install cryptography)"
         if not recs:
-            return (f"CRED_STORE_LIST: no credentials stored for target {target_ip}\n"
-                    f"ENCRYPTION_AT_REST: {enc}\nSTORE: {store.store_path}")
+            return (
+                f"CRED_STORE_LIST: no credentials stored for target {target_ip}\n"
+                f"ENCRYPTION_AT_REST: {enc}\nSTORE: {store.store_path}"
+            )
         lines = [f"CRED_STORE_LIST: {len(recs)} credential(s) for {target_ip}", ""]
         for r in recs:
-            lines.append(f"  {r.target_host}: {r.username}/{r.credential_type} confirmed={r.confirmed} (source: {r.source_action})")
+            lines.append(
+                f"  {r.target_host}: {r.username}/{r.credential_type} confirmed={r.confirmed} (source: {r.source_action})"
+            )
         lines.append("")
         lines.append(f"ENCRYPTION_AT_REST: {enc}")
         return "\n".join(lines)
 
     @mcp.tool()
     @require_allowlist()
-    def cred_store_confirm(target_ip: str, username: str, target_host: str = "", credential_type: str = "", validated: bool = False) -> str:
+    def cred_store_confirm(
+        target_ip: str, username: str, target_host: str = "", credential_type: str = "", validated: bool = False
+    ) -> str:
         """Mark a stored credential confirmed=True. Use ONLY after validating the credential by successfully reusing it against the target (e.g. it authenticated via lateral_exec/dump_credentials). Pass validated=True to assert that reuse succeeded -- a bare confirm is refused and flips nothing, so an unvalidated credential is never promoted. The confirmed flag is then HMAC-signed at rest so it cannot be forged on disk. Harvested credentials are never auto-confirmed; this is the deliberate post-reuse signal that the credential is known-good."""
         if not target_ip or not target_ip.strip():
             return "BLOCKED: target_ip is required."
@@ -161,13 +175,21 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
         suffix = f" type={ctype}" if ctype else ""
         if ok:
             return f"CRED_STORE_CONFIRM: confirmed=True for username={username.strip()} target_host={th}{suffix}"
-        return (f"CRED_STORE_CONFIRM: no unconfirmed matching credential found for "
-                f"username={username.strip()} target_host={th}{suffix}")
-
+        return (
+            f"CRED_STORE_CONFIRM: no unconfirmed matching credential found for "
+            f"username={username.strip()} target_host={th}{suffix}"
+        )
 
     @mcp.tool()
     @require_allowlist()
-    def lateral_exec(target_ip: str, method: str = "psexec", username: str = "", password: str = "", ntlm_hash: str = "", command: str = "") -> str:
+    def lateral_exec(
+        target_ip: str,
+        method: str = "psexec",
+        username: str = "",
+        password: str = "",
+        ntlm_hash: str = "",
+        command: str = "",
+    ) -> str:
         """Execute a command on a remote Windows host via impacket lateral-movement tools. Methods: wmiexec, smbexec, psexec, atexec. Provide either a plaintext password or an NTLM hash (format LM:NT or just NT). Use after obtaining credentials to move laterally across a Windows network."""
         if not target_ip or not target_ip.strip():
             return "BLOCKED: target_ip is required."
@@ -240,7 +262,16 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
     @mcp.tool()
     @require_allowlist()
-    def dump_credentials(target_ip: str, method: str = "sam", username: str = "", password: str = "", ntlm_hash: str = "", domain: str = "", output_file: str = "", target_user: str = "") -> str:
+    def dump_credentials(
+        target_ip: str,
+        method: str = "sam",
+        username: str = "",
+        password: str = "",
+        ntlm_hash: str = "",
+        domain: str = "",
+        output_file: str = "",
+        target_user: str = "",
+    ) -> str:
         """Dump credentials from a target using secretsdump, mimikatz, or local SAM/LSASS extraction. Methods: secretsdump (remote via impacket), sam_local (local registry hives), mimikatz (if binary available), lsass (procdump + mimikatz), dcsync (impacket-secretsdump over DRSUAPI against a domain controller -- requires an account with DS-Replication-Get-Changes privileges; target_ip must be the DC; optional target_user dumps a single account). Use after gaining admin access to harvest hashes for offline cracking or pass-the-hash."""
         if not target_ip or not target_ip.strip():
             return "BLOCKED: target_ip is required."
@@ -439,7 +470,9 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
     @mcp.tool()
     @require_allowlist()
-    def kerberoast(target_ip: str, domain: str = "", username: str = "", password: str = "", ntlm_hash: str = "", dc_ip: str = "") -> str:
+    def kerberoast(
+        target_ip: str, domain: str = "", username: str = "", password: str = "", ntlm_hash: str = "", dc_ip: str = ""
+    ) -> str:
         """Perform Kerberoasting against a Windows domain to extract TGS service tickets for offline hash cracking. Uses impacket GetUserSPNs.py. Provide domain, credentials (password or NTLM hash), and optionally the DC IP. Returns the path to the captured tickets file and the recommended hashcat command."""
         if not target_ip or not target_ip.strip():
             return "BLOCKED: target_ip is required."
@@ -518,6 +551,3 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
             f"CRACK_COMMAND: hashcat -m 13100 -a 0 {tickets_file} rockyou.txt\n"
             f"OUTPUT:\n{output}"
         )
-
-
-

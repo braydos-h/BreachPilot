@@ -20,6 +20,7 @@ Safety invariants asserted:
 - ``max_consultations`` budget is the single source of truth; budget 0 → None.
 - target IP lock is unchanged after a consult (policy._locked_ip preserved).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -146,8 +147,7 @@ class _RecordingPolicy(ExploitPolicy):
             permission=ExploitPermission.FULL_ACCESS,
             target_ip=target_ip,
             workspace_root=tmp_path,
-            target_context={"multi_model_enabled": True,
-                             "peer_consult_on_failure_threshold": 3},
+            target_context={"multi_model_enabled": True, "peer_consult_on_failure_threshold": 3},
         )
         super().__init__(settings, tmp_path)
         self._locked_ip = target_ip
@@ -155,10 +155,16 @@ class _RecordingPolicy(ExploitPolicy):
         self.audit_calls: list[dict[str, Any]] = []
 
     async def record(self, *, action, command, approved, status, detail="", **kwargs):  # noqa: ANN001, ANN101
-        self.audit_calls.append({
-            "action": action, "command": command, "approved": approved,
-            "status": status, "detail": detail, **kwargs,
-        })
+        self.audit_calls.append(
+            {
+                "action": action,
+                "command": command,
+                "approved": approved,
+                "status": status,
+                "detail": detail,
+                **kwargs,
+            }
+        )
 
 
 def _peer_config(active_alias: str = "glm") -> dict[str, Any]:
@@ -194,8 +200,10 @@ def _reset_consultation_budget(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_consult_peers_returns_advisory_and_writes_audit(tmp_path):
-    peers = {"kimi": _FakePeer("kimi", "try a different payload encoder"),
-             "deepseek": _FakePeer("deepseek", "check the service version first")}
+    peers = {
+        "kimi": _FakePeer("kimi", "try a different payload encoder"),
+        "deepseek": _FakePeer("deepseek", "check the service version first"),
+    }
     router = _FakeRouter(peers)
     policy = _RecordingPolicy(tmp_path, "10.0.0.50")
 
@@ -203,12 +211,17 @@ async def test_consult_peers_returns_advisory_and_writes_audit(tmp_path):
     # a live Ollama). The lazy import inside _consult_peers_inline reads the
     # registry module fresh each call, so patch the module attribute.
     from tools.mcp_tools import registry as reg_mod
+
     orig = reg_mod._get_model_router
     reg_mod._get_model_router = lambda config: router
     try:
         result = await _consult_peers_inline(
-            _peer_config(), "why do my exploits keep failing?", "exit_code=1",
-            policy=policy, target_ip="10.0.0.50", action_count=6,
+            _peer_config(),
+            "why do my exploits keep failing?",
+            "exit_code=1",
+            policy=policy,
+            target_ip="10.0.0.50",
+            action_count=6,
         )
     finally:
         reg_mod._get_model_router = orig
@@ -239,12 +252,17 @@ async def test_consult_peers_budget_zero_returns_none(tmp_path):
     policy = _RecordingPolicy(tmp_path, "10.0.0.50")
 
     from tools.mcp_tools import registry as reg_mod
+
     orig = reg_mod._get_model_router
     reg_mod._get_model_router = lambda config: router
     try:
         result = await _consult_peers_inline(
-            _peer_config(), "question", "ctx",
-            policy=policy, target_ip="10.0.0.50", action_count=6,
+            _peer_config(),
+            "question",
+            "ctx",
+            policy=policy,
+            target_ip="10.0.0.50",
+            action_count=6,
         )
     finally:
         reg_mod._get_model_router = orig
@@ -266,12 +284,17 @@ async def test_consult_peers_disabled_when_multi_model_off(tmp_path):
     policy = _RecordingPolicy(tmp_path, "10.0.0.50")
 
     from tools.mcp_tools import registry as reg_mod
+
     orig = reg_mod._get_model_router
     reg_mod._get_model_router = lambda config: router
     try:
         result = await _consult_peers_inline(
-            config, "question", "ctx",
-            policy=policy, target_ip="10.0.0.50", action_count=6,
+            config,
+            "question",
+            "ctx",
+            policy=policy,
+            target_ip="10.0.0.50",
+            action_count=6,
         )
     finally:
         reg_mod._get_model_router = orig
@@ -285,8 +308,12 @@ async def test_consult_peers_disabled_when_multi_model_off(tmp_path):
 async def test_consult_peers_no_config_returns_none(tmp_path):
     policy = _RecordingPolicy(tmp_path, "10.0.0.50")
     result = await _consult_peers_inline(
-        None, "question", "ctx",
-        policy=policy, target_ip="10.0.0.50", action_count=6,
+        None,
+        "question",
+        "ctx",
+        policy=policy,
+        target_ip="10.0.0.50",
+        action_count=6,
     )
     assert result is None
     assert policy.audit_calls == []
@@ -306,12 +333,17 @@ async def test_consult_peers_base_exception_group_caught_not_crashed(tmp_path):
     policy = _RecordingPolicy(tmp_path, "10.0.0.50")
 
     from tools.mcp_tools import registry as reg_mod
+
     orig = reg_mod._get_model_router
     reg_mod._get_model_router = lambda config: router
     try:
         result = await _consult_peers_inline(
-            _peer_config(), "question", "ctx",
-            policy=policy, target_ip="10.0.0.50", action_count=6,
+            _peer_config(),
+            "question",
+            "ctx",
+            policy=policy,
+            target_ip="10.0.0.50",
+            action_count=6,
         )
     finally:
         reg_mod._get_model_router = orig
@@ -335,12 +367,17 @@ async def test_consult_peers_all_fail_returns_none(tmp_path):
     policy = _RecordingPolicy(tmp_path, "10.0.0.50")
 
     from tools.mcp_tools import registry as reg_mod
+
     orig = reg_mod._get_model_router
     reg_mod._get_model_router = lambda config: router
     try:
         result = await _consult_peers_inline(
-            _peer_config(), "question", "ctx",
-            policy=policy, target_ip="10.0.0.50", action_count=6,
+            _peer_config(),
+            "question",
+            "ctx",
+            policy=policy,
+            target_ip="10.0.0.50",
+            action_count=6,
         )
     finally:
         reg_mod._get_model_router = orig
@@ -360,12 +397,17 @@ async def test_consult_peers_preserves_target_lock(tmp_path):
     policy = _RecordingPolicy(tmp_path, "10.0.0.50")
 
     from tools.mcp_tools import registry as reg_mod
+
     orig = reg_mod._get_model_router
     reg_mod._get_model_router = lambda config: router
     try:
         result = await _consult_peers_inline(
-            _peer_config(), "question", "ctx",
-            policy=policy, target_ip="10.0.0.50", action_count=6,
+            _peer_config(),
+            "question",
+            "ctx",
+            policy=policy,
+            target_ip="10.0.0.50",
+            action_count=6,
         )
     finally:
         reg_mod._get_model_router = orig
@@ -385,18 +427,22 @@ async def test_consult_peers_respects_remaining_budget_cap(tmp_path):
     """If only 1 consultation remains in the budget, only 1 peer is consulted
     (even if 2 are available) — the shared cap is the single source of truth."""
     _set_consultation_count(9)  # 10 max → 1 remaining
-    peers = {"kimi": _FakePeer("kimi", "kimi answer"),
-             "deepseek": _FakePeer("deepseek", "deepseek answer")}
+    peers = {"kimi": _FakePeer("kimi", "kimi answer"), "deepseek": _FakePeer("deepseek", "deepseek answer")}
     router = _FakeRouter(peers)
     policy = _RecordingPolicy(tmp_path, "10.0.0.50")
 
     from tools.mcp_tools import registry as reg_mod
+
     orig = reg_mod._get_model_router
     reg_mod._get_model_router = lambda config: router
     try:
         result = await _consult_peers_inline(
-            _peer_config(), "question", "ctx",
-            policy=policy, target_ip="10.0.0.50", action_count=6,
+            _peer_config(),
+            "question",
+            "ctx",
+            policy=policy,
+            target_ip="10.0.0.50",
+            action_count=6,
         )
     finally:
         reg_mod._get_model_router = orig

@@ -80,6 +80,7 @@ def _text(result) -> str:
 
 # ─── Registration / gating ───────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_peer_review_outcome_registered_when_multi_model_enabled(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("AI_NMAP_MULTI_MODEL_ENABLED", raising=False)
@@ -99,6 +100,7 @@ async def test_peer_review_outcome_absent_when_multi_model_disabled(tmp_path, mo
 
 
 # ─── Arg validation ──────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_peer_review_outcome_blocks_empty_verdict(tmp_path, monkeypatch) -> None:
@@ -120,15 +122,18 @@ async def test_peer_review_outcome_blocks_empty_evidence(tmp_path, monkeypatch) 
 async def test_peer_review_outcome_disabled_when_peer_review_false(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("AI_NMAP_MULTI_MODEL_ENABLED", raising=False)
     mcp = _server(tmp_path, _config(peer_review=False))
-    text = _text(await mcp.call_tool(
-        "peer_review_outcome",
-        {"verdict": "compromised", "evidence": "shell returned"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "peer_review_outcome",
+            {"verdict": "compromised", "evidence": "shell returned"},
+        )
+    )
     assert "DISABLED" in text
     assert "peer_review" in text
 
 
 # ─── Grader selection ────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_peer_review_outcome_excludes_planner_alias(tmp_path, monkeypatch) -> None:
@@ -139,15 +144,17 @@ async def test_peer_review_outcome_excludes_planner_alias(tmp_path, monkeypatch)
     monkeypatch.delenv("AI_NMAP_MULTI_MODEL_ENABLED", raising=False)
 
     mcp = _server(tmp_path, _config())
-    text = _text(await mcp.call_tool(
-        "peer_review_outcome",
-        {
-            "verdict": "compromised",
-            "evidence": "whoami returned root",
-            "planner_alias": "glm",
-            "preferred_grader_aliases": "kimi,deepseek,glm",
-        },
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "peer_review_outcome",
+            {
+                "verdict": "compromised",
+                "evidence": "whoami returned root",
+                "planner_alias": "glm",
+                "preferred_grader_aliases": "kimi,deepseek,glm",
+            },
+        )
+    )
     # glm was the planner; it must NOT appear as a grader.
     assert "PLANNER_ALIAS: glm" in text
     assert "GRADERS: kimi, deepseek" in text
@@ -164,15 +171,18 @@ async def test_peer_review_outcome_no_graders_available(tmp_path, monkeypatch) -
     monkeypatch.delenv("AI_NMAP_MULTI_MODEL_ENABLED", raising=False)
 
     mcp = _server(tmp_path, _config(consult_aliases=["glm"]))
-    text = _text(await mcp.call_tool(
-        "peer_review_outcome",
-        {"verdict": "compromised", "evidence": "x", "planner_alias": "glm"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "peer_review_outcome",
+            {"verdict": "compromised", "evidence": "x", "planner_alias": "glm"},
+        )
+    )
     assert "UNAVAILABLE" in text
     assert "no grader" in text.lower()
 
 
 # ─── Disagreement detection ──────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_peer_review_outcome_flags_disagreement(tmp_path, monkeypatch) -> None:
@@ -188,10 +198,12 @@ async def test_peer_review_outcome_flags_disagreement(tmp_path, monkeypatch) -> 
     monkeypatch.delenv("AI_NMAP_MULTI_MODEL_ENABLED", raising=False)
 
     mcp = _server(tmp_path, _config(consult_aliases=["kimi", "deepseek"]))
-    text = _text(await mcp.call_tool(
-        "peer_review_outcome",
-        {"verdict": "compromised", "evidence": "weak signal", "planner_alias": "glm"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "peer_review_outcome",
+            {"verdict": "compromised", "evidence": "weak signal", "planner_alias": "glm"},
+        )
+    )
     assert "DISAGREEMENT: yes" in text
     assert "AUTHORITY: deterministic OutcomeJudge" in text
 
@@ -210,14 +222,17 @@ async def test_peer_review_outcome_no_disagreement_when_all_agree(tmp_path, monk
     monkeypatch.delenv("AI_NMAP_MULTI_MODEL_ENABLED", raising=False)
 
     mcp = _server(tmp_path, _config(consult_aliases=["kimi", "deepseek"]))
-    text = _text(await mcp.call_tool(
-        "peer_review_outcome",
-        {"verdict": "compromised", "evidence": "whoami returned root", "planner_alias": "glm"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "peer_review_outcome",
+            {"verdict": "compromised", "evidence": "whoami returned root", "planner_alias": "glm"},
+        )
+    )
     assert "DISAGREEMENT: no" in text
 
 
 # ─── Router failure degrades gracefully ───────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_peer_review_outcome_unavailable_when_router_none(tmp_path, monkeypatch) -> None:
@@ -228,10 +243,12 @@ async def test_peer_review_outcome_unavailable_when_router_none(tmp_path, monkey
     monkeypatch.delenv("AI_NMAP_MULTI_MODEL_ENABLED", raising=False)
 
     mcp = _server(tmp_path, _config())
-    text = _text(await mcp.call_tool(
-        "peer_review_outcome",
-        {"verdict": "compromised", "evidence": "x"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "peer_review_outcome",
+            {"verdict": "compromised", "evidence": "x"},
+        )
+    )
     assert "UNAVAILABLE" in text
     assert "router" in text.lower()
 
@@ -254,15 +271,19 @@ async def test_peer_review_outcome_shares_consultation_budget(tmp_path, monkeypa
     cfg["multi_model"]["max_consultations"] = 1
     mcp = _server(tmp_path, cfg)
 
-    first = _text(await mcp.call_tool(
-        "peer_review_outcome",
-        {"verdict": "compromised", "evidence": "whoami returned root", "planner_alias": "glm"},
-    ))
+    first = _text(
+        await mcp.call_tool(
+            "peer_review_outcome",
+            {"verdict": "compromised", "evidence": "whoami returned root", "planner_alias": "glm"},
+        )
+    )
     assert "COMPLETED" in first
     assert "REMAINING_BUDGET: 0" in first
 
-    second = _text(await mcp.call_tool(
-        "peer_review_outcome",
-        {"verdict": "compromised", "evidence": "more evidence", "planner_alias": "glm"},
-    ))
+    second = _text(
+        await mcp.call_tool(
+            "peer_review_outcome",
+            {"verdict": "compromised", "evidence": "more evidence", "planner_alias": "glm"},
+        )
+    )
     assert "BUDGET_EXHAUSTED" in second

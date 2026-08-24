@@ -156,10 +156,7 @@ class ApiPersistence:
                 # Apply incremental migrations for DBs created at an older
                 # schema version. Each migration is gated on its column/idx
                 # not already existing so re-runs are safe.
-                applied = {
-                    row["version"]
-                    for row in conn.execute("SELECT version FROM _migrations").fetchall()
-                }
+                applied = {row["version"] for row in conn.execute("SELECT version FROM _migrations").fetchall()}
                 if 2 not in applied and "title" not in {
                     r["name"] for r in conn.execute("PRAGMA table_info(runs)").fetchall()
                 }:
@@ -195,7 +192,9 @@ class ApiPersistence:
                     "(id, created_at, updated_at, state, request_json, preview_json, resumed_from) "
                     "VALUES (?, ?, ?, 'draft', ?, ?, ?)",
                     (
-                        run_id, _now_iso(), _now_iso(),
+                        run_id,
+                        _now_iso(),
+                        _now_iso(),
                         json.dumps(request, default=str),
                         json.dumps(preview, default=str),
                         str(request.get("resume_source", "")),
@@ -205,24 +204,31 @@ class ApiPersistence:
             finally:
                 conn.close()
 
-    def update_run_state(self, run_id: str, state: str, *, error: str = "", result: dict[str, Any] | None = None) -> None:
+    def update_run_state(
+        self, run_id: str, state: str, *, error: str = "", result: dict[str, Any] | None = None
+    ) -> None:
         with self._lock:
             conn = self._connect()
             try:
                 if result is not None:
                     conn.execute(
-                    "UPDATE runs SET state=?, updated_at=?, error=?, result_json=?, "
-                    "cancelled_at=CASE WHEN ?='cancelled' THEN ? ELSE cancelled_at END WHERE id=?",
-                    (
-                        state, _now_iso(), error, json.dumps(result, default=str),
-                        state, _now_iso(), run_id,
-                    ),
+                        "UPDATE runs SET state=?, updated_at=?, error=?, result_json=?, "
+                        "cancelled_at=CASE WHEN ?='cancelled' THEN ? ELSE cancelled_at END WHERE id=?",
+                        (
+                            state,
+                            _now_iso(),
+                            error,
+                            json.dumps(result, default=str),
+                            state,
+                            _now_iso(),
+                            run_id,
+                        ),
                     )
                 else:
                     conn.execute(
-                    "UPDATE runs SET state=?, updated_at=?, error=?, "
-                    "cancelled_at=CASE WHEN ?='cancelled' THEN ? ELSE cancelled_at END WHERE id=?",
-                    (state, _now_iso(), error, state, _now_iso(), run_id),
+                        "UPDATE runs SET state=?, updated_at=?, error=?, "
+                        "cancelled_at=CASE WHEN ?='cancelled' THEN ? ELSE cancelled_at END WHERE id=?",
+                        (state, _now_iso(), error, state, _now_iso(), run_id),
                     )
                 conn.commit()
             finally:
@@ -323,7 +329,8 @@ class ApiPersistence:
             conn = self._connect()
             try:
                 row = conn.execute(
-                    f"SELECT COUNT(*) AS n FROM runs {where_sql}", params,
+                    f"SELECT COUNT(*) AS n FROM runs {where_sql}",
+                    params,
                 ).fetchone()
                 return int(row["n"]) if row else 0
             finally:
@@ -374,8 +381,11 @@ class ApiPersistence:
                     "INSERT INTO decisions (id, run_id, kind, prompt_text, required_text, options_json, status, created_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)",
                     (
-                        did, decision.get("run_id", ""), decision.get("kind", ""),
-                        decision.get("prompt_text", ""), decision.get("required_text", ""),
+                        did,
+                        decision.get("run_id", ""),
+                        decision.get("kind", ""),
+                        decision.get("prompt_text", ""),
+                        decision.get("required_text", ""),
                         json.dumps(decision.get("options", []), default=str),
                         _now_iso(),
                     ),
@@ -486,8 +496,7 @@ class ApiPersistence:
             conn = self._connect()
             try:
                 conn.execute(
-                    "INSERT INTO users (id, username, password_hash, password_salt, created_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
+                    "INSERT INTO users (id, username, password_hash, password_salt, created_at) VALUES (?, ?, ?, ?, ?)",
                     (uid, username, password_hash, password_salt, _now_iso()),
                 )
                 conn.commit()
@@ -501,9 +510,7 @@ class ApiPersistence:
         with self._lock:
             conn = self._connect()
             try:
-                row = conn.execute(
-                    "SELECT * FROM users WHERE username=?", (username,)
-                ).fetchone()
+                row = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
                 return dict(row) if row else None
             finally:
                 conn.close()
@@ -533,7 +540,8 @@ class ApiPersistence:
             conn = self._connect()
             try:
                 conn.execute(
-                    "UPDATE users SET last_login=? WHERE id=?", (_now_iso(), user_id),
+                    "UPDATE users SET last_login=? WHERE id=?",
+                    (_now_iso(), user_id),
                 )
                 conn.commit()
             finally:
@@ -542,7 +550,12 @@ class ApiPersistence:
     # ── Annotations (D4: operator comments on findings) ───────────────────
 
     def add_annotation(
-        self, run_id: str, user_id: str, username: str, body: str, finding_ref: str = "",
+        self,
+        run_id: str,
+        user_id: str,
+        username: str,
+        body: str,
+        finding_ref: str = "",
     ) -> str:
         """Attach an operator comment to a run. Returns the annotation id."""
         aid = _new_id("ann")

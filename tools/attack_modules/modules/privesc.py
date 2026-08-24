@@ -59,6 +59,7 @@ except Exception as e:
 print(json.dumps(results))
 """
 
+
 class WindowsPrivescCheck(AttackModule):
     name = "WindowsPrivescCheck"
     description = "Enumerate Windows privilege escalation vectors"
@@ -144,6 +145,7 @@ else:
     print("VULN_NOT_CONFIRMED: no obvious Windows privesc vectors")
 """
 
+
 class SUIDEnumeration(AttackModule):
     name = "SUIDEnumeration"
     description = "Find SUID/SGID binaries for privilege escalation"
@@ -174,6 +176,7 @@ class SUIDEnumeration(AttackModule):
             ],
             suggested_command="find / -perm -4000 -o -perm -2000 -type f 2>/dev/null | xargs ls -la",
         )
+
 
 class KernelExploitCheck(AttackModule):
     name = "KernelExploitCheck"
@@ -265,6 +268,7 @@ if __name__ == "__main__":
     else:
         print("VULN_NOT_CONFIRMED: no kernel LPE candidates")
 """
+
 
 class ContainerBreakout(AttackModule):
     name = "ContainerBreakout"
@@ -925,4 +929,3 @@ print(json.dumps(out, indent=2))
 # ---------------------------------------------------------------------------
 # Network Service Modules
 # ---------------------------------------------------------------------------
-

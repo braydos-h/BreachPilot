@@ -131,9 +131,7 @@ def save_api_keys(path: Path, keys: dict[str, str]) -> list[str]:
             raw = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError, TypeError) as exc:
             raise ValueError(f"Refusing to overwrite unreadable API key store: {path}") from exc
-        if not isinstance(raw, dict) or (
-            "api_keys" in raw and not isinstance(raw["api_keys"], dict)
-        ):
+        if not isinstance(raw, dict) or ("api_keys" in raw and not isinstance(raw["api_keys"], dict)):
             raise ValueError(f"Refusing to overwrite invalid API key store: {path}")
     existing = load_api_key_file(path)
     existing.update(cleaned)
@@ -146,8 +144,12 @@ def save_api_keys(path: Path, keys: dict[str, str]) -> list[str]:
     temp_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
-            "w", encoding="utf-8", dir=path.parent,
-            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+            "w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
         ) as temp:
             json.dump(payload, temp, indent=2, sort_keys=True)
             temp.write("\n")

@@ -149,7 +149,9 @@ def _build_runtime_skill_selection(
         known_cves=_assessment_cves(assessment),
         context_text=service_context,
         experience_store=get_shared_skill_store(config),
-        skill_embedder=get_shared_skill_embedder(config) if bool(_skills_config(config).get("semantic_matching", True)) else None,
+        skill_embedder=get_shared_skill_embedder(config)
+        if bool(_skills_config(config).get("semantic_matching", True))
+        else None,
         is_domain=is_domain,
     )
 

@@ -168,7 +168,9 @@ def test_log_validation_writes_jsonl(tmp_path):
 
 def test_safe_loader_unparseable_falls_back_and_logs():
     schema = PlannerProposalSchema()
-    loader = SafeSchemaLoader(schema, lambda: PlannerProposal(hypothesis_id="d", statement="default", target=""), "PlannerProposal")
+    loader = SafeSchemaLoader(
+        schema, lambda: PlannerProposal(hypothesis_id="d", statement="default", target=""), "PlannerProposal"
+    )
     before = len(dump_telemetry())
     obj, result = loader.load("this is prose without any json")
     assert result.valid is False

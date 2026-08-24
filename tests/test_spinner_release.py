@@ -86,7 +86,4 @@ def test_release_stops_recurring_elapsed_redraw(monkeypatch, capsys) -> None:
         time.sleep(0.35)
         _delta = capsys.readouterr().err.count("TESTSPIN")
 
-    assert _delta <= 1, (
-        f"redraw thread kept ticking after release_active_spinner: "
-        f"{_delta} new 'TESTSPIN' lines"
-    )
+    assert _delta <= 1, f"redraw thread kept ticking after release_active_spinner: {_delta} new 'TESTSPIN' lines"

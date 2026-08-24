@@ -208,9 +208,7 @@ class LateralMovement(AttackModule):
                 if entry.get("username") and (entry.get("password") or entry.get("ntlm_hash")):
                     return entry
             elif isinstance(entry, str):
-                parts = dict(
-                    kv.split("=", 1) for kv in entry.split() if "=" in kv
-                )
+                parts = dict(kv.split("=", 1) for kv in entry.split() if "=" in kv)
                 if parts.get("username") and (parts.get("password") or parts.get("ntlm_hash")):
                     return parts
         return None
@@ -280,6 +278,7 @@ class LocalExploitSuggester(AttackModule):
     sessions in MetasploitBridge) can call ``msf_run_recipe('local_exploit_suggester',
     session_id=<id>)`` directly.
     """
+
     name = "LocalExploitSuggester"
     description = "Suggest MSF local_exploit_suggester against an obtained session to enumerate local privesc exploits (advisory -- does not fabricate a session id)"
     target_services: list[str] = []

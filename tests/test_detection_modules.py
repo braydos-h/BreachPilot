@@ -49,6 +49,7 @@ ALL_CLASSES = [DetectionCoverageProbe, LogSourceEnum, OPSECPostureReport]
 # Class attributes
 # ---------------------------------------------------------------------------
 
+
 def test_detection_coverage_probe_class_attrs():
     m = DetectionCoverageProbe()
     assert m.name == "detection_coverage_probe"
@@ -79,6 +80,7 @@ def test_opsec_posture_report_class_attrs():
 # DetectionCoverageProbe.run
 # ---------------------------------------------------------------------------
 
+
 def test_detection_coverage_probe_run_info():
     res = DetectionCoverageProbe().run(_ctx())
     assert res["status"] == "info"
@@ -106,6 +108,7 @@ def test_detection_coverage_probe_applicability_baseline():
 # ---------------------------------------------------------------------------
 # LogSourceEnum.run
 # ---------------------------------------------------------------------------
+
 
 def test_log_source_enum_linux():
     res = LogSourceEnum().run(_ctx(os_family="linux"))
@@ -161,6 +164,7 @@ def test_log_source_enum_applicability_service_gated():
 # OPSECPostureReport.run
 # ---------------------------------------------------------------------------
 
+
 def test_opsec_posture_report_with_profile_and_records():
     profile = {
         "ua_rotation": False,
@@ -210,6 +214,7 @@ def test_opsec_posture_report_applicability_baseline():
 # ---------------------------------------------------------------------------
 # Cross-cutting: no module flips access_achieved signals
 # ---------------------------------------------------------------------------
+
 
 def test_all_modules_status_info():
     for cls in ALL_CLASSES:

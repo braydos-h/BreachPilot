@@ -29,6 +29,7 @@ an internal address.
 Run ``python -m tools.threat_intel`` for a self-check that exercises the
 cache round-trip + KEV degrade-without-network without any real HTTP calls.
 """
+
 from __future__ import annotations
 
 import json
@@ -85,9 +86,14 @@ class ThreatIntelSettings:
     enabled: bool = True
     cache_dir: str = "exploit_workspace/.threat_intel"
     cache_ttl_seconds: int = 86400
-    sources: dict[str, bool] = field(default_factory=lambda: {
-        "osv": True, "ghsa": True, "kev": True, "exploitdb_rss": False,
-    })
+    sources: dict[str, bool] = field(
+        default_factory=lambda: {
+            "osv": True,
+            "ghsa": True,
+            "kev": True,
+            "exploitdb_rss": False,
+        }
+    )
     max_results: int = 20
     github_token_env: str = "GITHUB_TOKEN"
     timeout_seconds: int = 30
@@ -138,6 +144,7 @@ def _validate_query(query: str) -> str:
 
 # ── HTTP helper (injectable for tests) ───────────────────────────────────────
 
+
 def _http_json(
     url: str,
     *,
@@ -168,6 +175,7 @@ def _http_json(
 
 # ── Cache ────────────────────────────────────────────────────────────────────
 
+
 def _cache_key(query: str, source: str) -> Path:
     safe = re.sub(r"[^A-Za-z0-9._-]", "_", query)
     return Path(f"{source}_{safe}.json")
@@ -193,6 +201,7 @@ def _cache_put(cache_dir: Path, query: str, source: str, data: Any) -> None:
 
 
 # ── Sources ──────────────────────────────────────────────────────────────────
+
 
 def search_osv(
     query: str,
@@ -224,14 +233,16 @@ def search_osv(
         return {"error": f"osv fetch failed: {exc}"}
     vulns = []
     for v in (payload or {}).get("vulns", []) or []:
-        vulns.append({
-            "id": v.get("id", ""),
-            "summary": v.get("summary", ""),
-            "severity": (v.get("severity") or [{}])[0].get("score", "") if v.get("severity") else "",
-            "aliases": v.get("aliases", []),
-            "published": v.get("published", ""),
-            "references": [r.get("url", "") for r in v.get("references", []) if r.get("url")],
-        })
+        vulns.append(
+            {
+                "id": v.get("id", ""),
+                "summary": v.get("summary", ""),
+                "severity": (v.get("severity") or [{}])[0].get("score", "") if v.get("severity") else "",
+                "aliases": v.get("aliases", []),
+                "published": v.get("published", ""),
+                "references": [r.get("url", "") for r in v.get("references", []) if r.get("url")],
+            }
+        )
         if len(vulns) >= settings.max_results:
             break
     out = {"vulns": _clean(vulns)}
@@ -263,15 +274,17 @@ def search_ghsa(
     is_cve = bool(_CVE_RE.match(query))
     if is_cve:
         gql_query = (
-            "query { securityAdvisories(first: 20, identifier: { type: CVE, value: \""
-            + query + "\" }) { nodes { ghsaId summary severity publishedAt references { url } } } }"
+            'query { securityAdvisories(first: 20, identifier: { type: CVE, value: "'
+            + query
+            + '" }) { nodes { ghsaId summary severity publishedAt references { url } } } }'
         )
     else:
         # ponytail: GraphQL string escaping -- package names are validated to
         # [A-Za-z0-9._/+-] by _validate_query so no quote-injection risk.
         gql_query = (
-            "query { securityVulnerabilities(first: 20, package: { type: NPM, name: \""
-            + query + "\" }) { nodes { advisory { ghsaId summary severity publishedAt references { url } } } } }"
+            'query { securityVulnerabilities(first: 20, package: { type: NPM, name: "'
+            + query
+            + '" }) { nodes { advisory { ghsaId summary severity publishedAt references { url } } } } }'
         )
     try:
         payload = _http_json(
@@ -294,13 +307,15 @@ def search_ghsa(
         sv_nodes = ((payload or {}).get("data") or {}).get("securityVulnerabilities", {}).get("nodes", [])
         nodes = [n.get("advisory", {}) for n in sv_nodes if n.get("advisory")]
     for a in nodes:
-        advisories.append({
-            "ghsa_id": a.get("ghsaId", ""),
-            "summary": a.get("summary", ""),
-            "severity": a.get("severity", ""),
-            "published": a.get("publishedAt", ""),
-            "references": [r.get("url", "") for r in a.get("references", []) if r.get("url")],
-        })
+        advisories.append(
+            {
+                "ghsa_id": a.get("ghsaId", ""),
+                "summary": a.get("summary", ""),
+                "severity": a.get("severity", ""),
+                "published": a.get("publishedAt", ""),
+                "references": [r.get("url", "") for r in a.get("references", []) if r.get("url")],
+            }
+        )
         if len(advisories) >= settings.max_results:
             break
     out = {"advisories": _clean(advisories)}
@@ -326,6 +341,7 @@ def search_kev(
 
 
 # ── Client ───────────────────────────────────────────────────────────────────
+
 
 class ThreatIntelClient:
     """OSV + GHSA + KEV client with JSON cache + injectable fetch.
@@ -393,6 +409,7 @@ class ThreatIntelClient:
 
 # ── Convenience entry point ──────────────────────────────────────────────────
 
+
 def search_threat_intel(
     query: str,
     sources: str = "osv,ghsa,kev",
@@ -414,6 +431,7 @@ def search_threat_intel(
 
 # ── Self-check (no real HTTP) ────────────────────────────────────────────────
 
+
 def _demo() -> None:
     """Exercise cache round-trip + KEV degrade-without-network. No real HTTP."""
     import tempfile
@@ -421,19 +439,36 @@ def _demo() -> None:
     def fake_osv(url, method, body_str, headers):
         body = json.loads(body_str) if body_str else {}
         if "package" in body and body["package"].get("name") == "requests":
-            return {"vulns": [
-                {"id": "PYSEC-2018-96", "summary": "requests RCE (fake)",
-                 "references": [{"url": "https://example.com/pysec"}]},
-            ]}
+            return {
+                "vulns": [
+                    {
+                        "id": "PYSEC-2018-96",
+                        "summary": "requests RCE (fake)",
+                        "references": [{"url": "https://example.com/pysec"}],
+                    },
+                ]
+            }
         return {"vulns": []}
 
     def fake_ghsa(url, method, body_str, headers):
         if "Bearer" not in headers.get("Authorization", ""):
             raise urllib.error.URLError("no auth")
-        return {"data": {"securityVulnerabilities": {"nodes": [
-            {"advisory": {"ghsaId": "GHSA-1", "summary": "fake ghsa",
-                          "severity": "HIGH", "references": []}},
-        ]}}}
+        return {
+            "data": {
+                "securityVulnerabilities": {
+                    "nodes": [
+                        {
+                            "advisory": {
+                                "ghsaId": "GHSA-1",
+                                "summary": "fake ghsa",
+                                "severity": "HIGH",
+                                "references": [],
+                            }
+                        },
+                    ]
+                }
+            }
+        }
 
     with tempfile.TemporaryDirectory() as tmp:
         cfg = {
@@ -448,9 +483,11 @@ def _demo() -> None:
         }
         os.environ["GITHUB_TOKEN"] = "fake-token"
         try:
-            res = search_threat_intel("requests", config=cfg, fetch_fn=lambda u, m, b, h: (
-                fake_osv(u, m, b, h) if "osv.dev" in u else fake_ghsa(u, m, b, h)
-            ))
+            res = search_threat_intel(
+                "requests",
+                config=cfg,
+                fetch_fn=lambda u, m, b, h: fake_osv(u, m, b, h) if "osv.dev" in u else fake_ghsa(u, m, b, h),
+            )
         finally:
             os.environ.pop("GITHUB_TOKEN", None)
         assert res["query"] == "requests"
@@ -463,8 +500,10 @@ def _demo() -> None:
         assert res2["sources"]["osv"]["vulns"][0]["id"] == "PYSEC-2018-96"
         # Prompt-injection cap: a >200-char summary would be truncated.
         long_summary = "X" * 500
+
         def fake_long(url, method, body_str, headers):
             return {"vulns": [{"id": "L", "summary": long_summary}]}
+
         res3 = search_threat_intel("longpkg", config=cfg, fetch_fn=fake_long)
         assert len(res3["sources"]["osv"]["vulns"][0]["summary"]) <= 200
         print("threat_intel demo OK")

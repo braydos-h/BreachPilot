@@ -138,15 +138,13 @@ import requests
 import json
 import time
 
+
 class AuthenticationProvider:
     def __init__(self):
         self.token = None
         self.token_expiry = 0
         self.auth_url = "https://target-api.example.com/api/v1/auth/login"
-        self.credentials = {
-            "email": "fuzzer@test.com",
-            "password": "FuzzerPass123!"
-        }
+        self.credentials = {"email": "fuzzer@test.com", "password": "FuzzerPass123!"}
 
     def get_token(self):
         """Get or refresh authentication token."""
@@ -167,6 +165,7 @@ class AuthenticationProvider:
         """Return the authentication header for RESTler."""
         token = self.get_token()
         return f"Authorization: Bearer {token}"
+
 
 # Export the token refresh command for RESTler
 auth = AuthenticationProvider()
@@ -223,8 +222,8 @@ print(f"  Client errors (4xx): {summary.get('num_invalid', 0)}")
 print(f"  Server errors (5xx): {summary.get('num_server_error', 0)}")
 
 # Identify uncovered endpoints
-covered = summary.get('covered_endpoints', [])
-total = summary.get('total_endpoints', [])
+covered = summary.get("covered_endpoints", [])
+total = summary.get("total_endpoints", [])
 uncovered = set(total) - set(covered)
 if uncovered:
     print(f"\nUncovered endpoints ({len(uncovered)}):")

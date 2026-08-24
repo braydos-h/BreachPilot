@@ -74,11 +74,18 @@ def test_kill_session_marks_session_dead_in_state(bridge: MetasploitBridge) -> N
     from tools.metasploit_bridge import MsfSessionInfo
 
     bridge._console.execute = lambda command, wait_seconds=2.0, read_lines=100: {
-        "success": True, "command": command, "output": "",
+        "success": True,
+        "command": command,
+        "output": "",
     }
     bridge._sessions[7] = MsfSessionInfo(
-        session_id=7, session_type="meterpreter", target_ip="10.0.0.7",
-        target_port=0, local_ip="", local_port=0, platform="win64",
+        session_id=7,
+        session_type="meterpreter",
+        target_ip="10.0.0.7",
+        target_port=0,
+        local_ip="",
+        local_port=0,
+        platform="win64",
     )
 
     bridge.kill_session(7)
@@ -159,8 +166,10 @@ def test_msfvenom_preserves_quoted_value_with_spaces(tmp_path: Path) -> None:
         captured["cmd_parts"] = list(cmd_parts)
         return MagicMock(returncode=0, stdout="", stderr="")
 
-    with patch("tools.metasploit_bridge.shutil.which", return_value="/usr/bin/msfvenom"), \
-         patch("tools.metasploit_bridge.subprocess.run", side_effect=fake_run):
+    with (
+        patch("tools.metasploit_bridge.shutil.which", return_value="/usr/bin/msfvenom"),
+        patch("tools.metasploit_bridge.subprocess.run", side_effect=fake_run),
+    ):
         result = gen.generate(
             payload_type="meterpreter/reverse_tcp",
             lhost="10.0.0.1",

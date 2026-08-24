@@ -7,6 +7,7 @@ The bridge methods are exercised with a real ``MetasploitBridge`` whose
 tmux). The MCP tools are exercised via ``create_mcp_server`` + ``call_tool``
 with ``get_msf_bridge`` patched to return a fake. No live network.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -22,9 +23,18 @@ from tools.metasploit_bridge import (
 
 # ── catalog ──────────────────────────────────────────────────────────────────
 
+
 def test_recipes_present() -> None:
-    for n in ("smb_version", "bluekeep", "psexec", "cred_gather_win",
-              "local_exploit_suggester", "hashdump", "getsystem", "handler"):
+    for n in (
+        "smb_version",
+        "bluekeep",
+        "psexec",
+        "cred_gather_win",
+        "local_exploit_suggester",
+        "hashdump",
+        "getsystem",
+        "handler",
+    ):
         assert n in MSF_RECIPES
         r = MSF_RECIPES[n]
         assert "module" in r and "kind" in r and "description" in r
@@ -48,6 +58,7 @@ def test_get_msf_recipe_unknown() -> None:
 
 # ── bridge run_recipe dispatch (fake bridge) ─────────────────────────────────
 
+
 def _bridge(tmp_path: Path) -> MetasploitBridge:
     return MetasploitBridge(tmp_path)
 
@@ -62,9 +73,11 @@ def test_run_recipe_unknown_returns_error(tmp_path: Path) -> None:
 def test_run_recipe_auxiliary_routes_to_run_auxiliary(monkeypatch, tmp_path: Path) -> None:
     b = _bridge(tmp_path)
     captured: dict[str, Any] = {}
+
     def fake_aux(module, target_ip, options=None, wait_seconds=15.0):
         captured.update(module=module, target_ip=target_ip, options=options)
         return {"success": True, "module": module, "target_ip": target_ip, "output": "ok"}
+
     monkeypatch.setattr(b, "run_auxiliary", fake_aux)
     res = b.run_recipe("smb_version", "10.0.0.1")
     assert res["success"] is True
@@ -83,9 +96,11 @@ def test_run_recipe_post_requires_session(monkeypatch, tmp_path: Path) -> None:
 def test_run_recipe_post_routes_to_run_post_module(monkeypatch, tmp_path: Path) -> None:
     b = _bridge(tmp_path)
     captured: dict[str, Any] = {}
+
     def fake_post(module, session_id, options=None):
         captured.update(module=module, session_id=session_id, options=options)
         return {"success": True, "module": module, "session_id": session_id, "output": "ok"}
+
     monkeypatch.setattr(b, "run_post_module", fake_post)
     res = b.run_recipe("local_exploit_suggester", session_id=2)
     assert res["success"] is True
@@ -96,9 +111,11 @@ def test_run_recipe_post_routes_to_run_post_module(monkeypatch, tmp_path: Path) 
 def test_run_recipe_exploit_routes_to_run_exploit(monkeypatch, tmp_path: Path) -> None:
     b = _bridge(tmp_path)
     captured: dict[str, Any] = {}
+
     def fake_exp(module, target_ip, options=None, payload="", wait_seconds=30.0):
         captured.update(module=module, target_ip=target_ip, payload=payload, options=options)
         return {"success": True, "status": "completed", "output": "ok"}
+
     monkeypatch.setattr(b, "run_exploit", fake_exp)
     res = b.run_recipe("bluekeep", "10.0.0.1")
     assert res["success"] is True
@@ -109,9 +126,11 @@ def test_run_recipe_exploit_routes_to_run_exploit(monkeypatch, tmp_path: Path) -
 def test_run_recipe_options_override_preset(monkeypatch, tmp_path: Path) -> None:
     b = _bridge(tmp_path)
     captured: dict[str, Any] = {}
+
     def fake_aux(module, target_ip, options=None, wait_seconds=15.0):
         captured["options"] = options
         return {"success": True, "output": ""}
+
     monkeypatch.setattr(b, "run_auxiliary", fake_aux)
     b.run_recipe("smb_version", "10.0.0.1", options={"threads": "20"})
     assert captured["options"] == {"threads": "20"}
@@ -119,12 +138,15 @@ def test_run_recipe_options_override_preset(monkeypatch, tmp_path: Path) -> None
 
 # ── handler orchestration ────────────────────────────────────────────────────
 
+
 def test_start_handler_builds_resource_script(monkeypatch, tmp_path: Path) -> None:
     b = _bridge(tmp_path)
     captured: dict[str, Any] = {}
+
     def fake_rc(script_content):
         captured["script"] = script_content
         return {"success": True, "output": "handler started"}
+
     monkeypatch.setattr(b, "run_resource_script", fake_rc)
     res = b.start_handler("10.0.0.5", 4444, "windows/meterpreter/reverse_tcp")
     assert res["success"] is True
@@ -140,7 +162,9 @@ def test_start_handler_builds_resource_script(monkeypatch, tmp_path: Path) -> No
 def test_start_handler_options_extra_set(monkeypatch, tmp_path: Path) -> None:
     b = _bridge(tmp_path)
     captured: dict[str, Any] = {}
-    monkeypatch.setattr(b, "run_resource_script", lambda s: captured.__setitem__("script", s) or {"success": True, "output": ""})
+    monkeypatch.setattr(
+        b, "run_resource_script", lambda s: captured.__setitem__("script", s) or {"success": True, "output": ""}
+    )
     b.start_handler("10.0.0.5", 4444, "windows/meterpreter/reverse_tcp", {"SessionCommunicationTimeout": "300"})
     assert "set SessionCommunicationTimeout 300" in captured["script"]
 
@@ -148,9 +172,11 @@ def test_start_handler_options_extra_set(monkeypatch, tmp_path: Path) -> None:
 def test_stop_handler_calls_jobs_kill(monkeypatch, tmp_path: Path) -> None:
     b = _bridge(tmp_path)
     captured: dict[str, Any] = {}
+
     def fake_cmd(command, wait_seconds=2.0, read_lines=100):
         captured["command"] = command
         return {"success": True, "output": "stopping"}
+
     monkeypatch.setattr(b, "console_command", fake_cmd)
     res = b.stop_handler()
     assert res["success"] is True
@@ -160,9 +186,11 @@ def test_stop_handler_calls_jobs_kill(monkeypatch, tmp_path: Path) -> None:
 def test_run_recipe_handler_routes_to_start_handler(monkeypatch, tmp_path: Path) -> None:
     b = _bridge(tmp_path)
     captured: dict[str, Any] = {}
+
     def fake_handler(lhost, lport, payload, options=None):
         captured.update(lhost=lhost, lport=lport, payload=payload)
         return {"success": True, "output": ""}
+
     monkeypatch.setattr(b, "start_handler", fake_handler)
     res = b.run_recipe("handler", target_ip="10.0.0.5")
     assert res["success"] is True
@@ -172,8 +200,10 @@ def test_run_recipe_handler_routes_to_start_handler(monkeypatch, tmp_path: Path)
 
 # ── MCP tools ────────────────────────────────────────────────────────────────
 
-def _make_server(tmp_path: Path, *, require_allowlist: bool = False,
-                 allowed: list[str] | None = None, recipes_enabled: bool = True):
+
+def _make_server(
+    tmp_path: Path, *, require_allowlist: bool = False, allowed: list[str] | None = None, recipes_enabled: bool = True
+):
     from mcp_exploit_server import create_mcp_server
     from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
@@ -212,19 +242,24 @@ def _text(result) -> str:
 
 class _FakeBridge:
     """Minimal stand-in for MetasploitBridge for the MCP tools."""
+
     def __init__(self) -> None:
         self.recipe_calls: list[dict[str, Any]] = []
         self.handler_calls: list[dict[str, Any]] = []
         self.stop_calls = 0
+
     def run_recipe(self, name, target_ip="", session_id=0, options=None):
         self.recipe_calls.append({"name": name, "target_ip": target_ip, "session_id": session_id, "options": options})
         return {"success": True, "output": f"ran {name}"}
+
     def start_handler(self, lhost, lport, payload, options=None):
         self.handler_calls.append({"lhost": lhost, "lport": lport, "payload": payload})
         return {"success": True, "output": "handler up"}
+
     def stop_handler(self):
         self.stop_calls += 1
         return {"success": True, "output": "stopped"}
+
     def run_post_module(self, module, session_id, options=None):
         return {"success": True, "module": module, "session_id": session_id, "output": "post ok"}
 
@@ -272,8 +307,11 @@ async def test_msf_start_handler_dispatches(monkeypatch, tmp_path: Path) -> None
     fake = _FakeBridge()
     monkeypatch.setattr("tools.mcp_tools.metasploit.get_metasploit_bridge", lambda ws: fake)
     mcp = _make_server(tmp_path, require_allowlist=True, allowed=["10.0.0.1"])
-    text = _text(await mcp.call_tool("msf_start_handler", {"lhost": "10.0.0.1", "lport": 4444,
-                                                          "payload": "windows/meterpreter/reverse_tcp"}))
+    text = _text(
+        await mcp.call_tool(
+            "msf_start_handler", {"lhost": "10.0.0.1", "lport": 4444, "payload": "windows/meterpreter/reverse_tcp"}
+        )
+    )
     assert "MSF_HANDLER_STARTED" in text
     assert fake.handler_calls and fake.handler_calls[0]["lhost"] == "10.0.0.1"
 
@@ -309,7 +347,9 @@ async def test_msf_post_wrappers_require_session(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_msf_post_portfwd_offlist_remote_blocked(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path, require_allowlist=True, allowed=["10.0.0.1"])
-    text = _text(await mcp.call_tool("msf_post_portfwd", {"session_id": 1, "remote_host": "10.0.0.99", "remote_port": 445}))
+    text = _text(
+        await mcp.call_tool("msf_post_portfwd", {"session_id": 1, "remote_host": "10.0.0.99", "remote_port": 445})
+    )
     assert "BLOCKED" in text and "10.0.0.99" in text
 
 
@@ -325,7 +365,11 @@ async def test_msf_post_portfwd_dispatches(monkeypatch, tmp_path: Path) -> None:
     fake = _FakeBridge()
     monkeypatch.setattr("tools.mcp_tools.metasploit.get_metasploit_bridge", lambda ws: fake)
     mcp = _make_server(tmp_path, require_allowlist=True, allowed=["10.0.0.1"])
-    text = _text(await mcp.call_tool("msf_post_portfwd", {"session_id": 1, "remote_host": "10.0.0.1", "remote_port": 445, "local_port": 8445}))
+    text = _text(
+        await mcp.call_tool(
+            "msf_post_portfwd", {"session_id": 1, "remote_host": "10.0.0.1", "remote_port": 445, "local_port": 8445}
+        )
+    )
     assert "MSF_POST_RESULT" in text
     # The post module runner received the portfwd module + options.
     assert fake.handler_calls == []  # sanity: not routed to handler

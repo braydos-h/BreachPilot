@@ -41,10 +41,7 @@ def _opsec_advisory_block(sanitized_command: str, config: Any) -> str:
         reasons = ", ".join(noise["reasons"][:3]) or "none"
         alt_line = alt if alt else "no rewrite available"
         if mgr.profile.min_gap_seconds > 0 or mgr.profile.jitter_seconds > 0:
-            pacing = (
-                f"min_gap={mgr.profile.min_gap_seconds}s "
-                f"jitter={mgr.profile.jitter_seconds}s active"
-            )
+            pacing = f"min_gap={mgr.profile.min_gap_seconds}s jitter={mgr.profile.jitter_seconds}s active"
         else:
             pacing = "off (no min_gap/jitter configured)"
         return (
@@ -117,6 +114,7 @@ def _require_sudo_or_pivot(tool_name: str, payload: str) -> str | None:
     """
     try:
         from tools.env_probe import _can_passwordless_sudo
+
         if _can_passwordless_sudo():
             return None
     except Exception:
@@ -146,9 +144,22 @@ def _check_env_default_tools() -> list[str]:
     from tools.env_probe import ENV_TOOLS
 
     _CHECK_ENV_EXTRAS = [
-        "masscan", "rustscan", "feroxbuster", "nuclei", "metasploit-framework",
-        "ldapsearch", "aircrack-ng", "wireshark", "tcpdump", "wget",
-        "ruby", "gem", "npm", "go", "cargo", "snap",
+        "masscan",
+        "rustscan",
+        "feroxbuster",
+        "nuclei",
+        "metasploit-framework",
+        "ldapsearch",
+        "aircrack-ng",
+        "wireshark",
+        "tcpdump",
+        "wget",
+        "ruby",
+        "gem",
+        "npm",
+        "go",
+        "cargo",
+        "snap",
     ]
     seen: set[str] = set()
     out: list[str] = []
@@ -264,7 +275,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
             wrapper.write_text(
                 f"@echo off\r\n"
                 f"title AI Exploit Terminal\r\n"
-                f"cd /d \"{attempt_dir}\"\r\n"
+                f'cd /d "{attempt_dir}"\r\n'
                 f"{sanitized_command} >> terminal.log 2>&1\r\n"
                 f"echo EXIT_CODE: %ERRORLEVEL% >> terminal.log\r\n",
                 encoding="ascii",
@@ -273,7 +284,8 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
             proc = subprocess.Popen(
                 ["cmd.exe", "/c", str(wrapper)],
                 cwd=str(attempt_dir),
-                creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+                creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
             )
         else:
             # Native Linux/macOS, or Windows with Git Bash: run via the shell
@@ -287,10 +299,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 _shell_bin = shutil.which(_shell) or _shell
             wrapper = attempt_dir / "run_exploit.sh"
             wrapper.write_text(
-                f"#!{_shell_bin}\n"
-                f"cd \"{attempt_dir}\"\n"
-                f"{sanitized_command} 2>&1\n"
-                f"echo EXIT_CODE: $?\n",
+                f'#!{_shell_bin}\ncd "{attempt_dir}"\n{sanitized_command} 2>&1\necho EXIT_CODE: $?\n',
                 encoding="utf-8",
             )
             wrapper.chmod(0o755)
@@ -375,14 +384,15 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
             f"OUTPUT:\n{output_tail}"
         )
 
-
     @mcp.tool()
     @audit_tool
     def apt_install(packages: str) -> str:
         """Install Kali Linux packages via apt. Provide a space-separated list of package names (e.g., 'nmap hydra gobuster'). Runs 'sudo apt install -y <packages>'. Use this to install missing tools before exploitation."""
         if not packages or not packages.strip():
             return "BLOCKED: no packages specified."
-        pkg_list = [p.strip() for p in packages.split() if p.strip() and re.fullmatch(r"[a-zA-Z0-9_.+-]{1,60}", p.strip())]
+        pkg_list = [
+            p.strip() for p in packages.split() if p.strip() and re.fullmatch(r"[a-zA-Z0-9_.+-]{1,60}", p.strip())
+        ]
         if not pkg_list:
             return "BLOCKED: invalid package names."
         # Gap 3: short-circuit before spawning sudo on a sudo-less box (would
@@ -394,7 +404,9 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
         try:
             proc = subprocess.run(
                 ["bash", "-c", cmd],
-                capture_output=True, text=True, timeout=300,
+                capture_output=True,
+                text=True,
+                timeout=300,
             )
             output = (proc.stdout + "\n" + proc.stderr)[-4000:]
             status = "completed" if proc.returncode == 0 else "failed"
@@ -411,7 +423,9 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if not repo_url or not repo_url.strip():
             return "BLOCKED: repo_url is required."
         url = repo_url.strip()
-        if not re.fullmatch(r"https?://[a-zA-Z0-9._/\-:@]+\.git", url) and not re.fullmatch(r"https?://github\.com/[a-zA-Z0-9._\-/]+", url):
+        if not re.fullmatch(r"https?://[a-zA-Z0-9._/\-:@]+\.git", url) and not re.fullmatch(
+            r"https?://github\.com/[a-zA-Z0-9._\-/]+", url
+        ):
             return "BLOCKED: invalid repo URL. Must be a GitHub/GitLab HTTPS URL."
         # H3: validate target_dir -- a crafted name like ``../evil`` or one
         # containing shell metacharacters could traverse out of the workspace
@@ -434,6 +448,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if url.lower().startswith(("http://", "https://")):
             try:
                 from tools.exploit_search import url_exists as _url_exists_check
+
                 _ok, _reason = _url_exists_check(url, timeout=8)
             except Exception:
                 _ok, _reason = True, None  # import/probe failure -> don't block
@@ -471,14 +486,18 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Install Python packages via pip. Provide a space-separated list of package names (e.g., 'impacket pwntools requests'). Runs 'pip install <packages>'. Use for Python exploit dependencies."""
         if not packages or not packages.strip():
             return "BLOCKED: no packages specified."
-        pkg_list = [p.strip() for p in packages.split() if p.strip() and re.fullmatch(r"[a-zA-Z0-9_.\-]{1,60}", p.strip())]
+        pkg_list = [
+            p.strip() for p in packages.split() if p.strip() and re.fullmatch(r"[a-zA-Z0-9_.\-]{1,60}", p.strip())
+        ]
         if not pkg_list:
             return "BLOCKED: invalid package names."
         cmd = f"pip install {' '.join(pkg_list)} 2>&1"
         try:
             proc = subprocess.run(
                 ["bash", "-c", cmd],
-                capture_output=True, text=True, timeout=120,
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
             output = (proc.stdout + "\n" + proc.stderr)[-3000:]
             status = "completed" if proc.returncode == 0 else "failed"
@@ -503,9 +522,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
         # unioned in via EXPLOIT_TARGET).
         _lock_reason = _target_lock_block(command, config)
         if _lock_reason:
-            return (
-                f"ROOT_CMD_RESULT: blocked (target lock: {_lock_reason})"
-            )
+            return f"ROOT_CMD_RESULT: blocked (target lock: {_lock_reason})"
         # Gap 3: short-circuit before spawning sudo on a sudo-less box. The
         # target-IP lock above has already run (and would have blocked an
         # off-target command), so the pivot only fires for in-scope commands
@@ -560,7 +577,9 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 try:
                     proc = subprocess.run(
                         [tool, "--version"],
-                        capture_output=True, text=True, timeout=10,
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
                     )
                     if proc.returncode == 0 and proc.stdout:
                         version = proc.stdout.strip().split("\n")[0][:100]
@@ -568,7 +587,9 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         # Some tools use -version or -V
                         proc2 = subprocess.run(
                             [tool, "-version"],
-                            capture_output=True, text=True, timeout=10,
+                            capture_output=True,
+                            text=True,
+                            timeout=10,
                         )
                         if proc2.returncode == 0 and proc2.stdout:
                             version = proc2.stdout.strip().split("\n")[0][:100]
@@ -680,7 +701,9 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
         try:
             proc = subprocess.run(
                 ["bash", "-c", cmd],
-                capture_output=True, text=True, timeout=timeout,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
             )
             output = (proc.stdout + "\n" + proc.stderr)[-4000:]
             status = "completed" if proc.returncode == 0 else "failed"
@@ -741,14 +764,12 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
         try:
             proc = subprocess.run(
                 ["curl", "-fsSL", "-o", str(download_path), url],
-                capture_output=True, text=True, timeout=120,
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
             if proc.returncode != 0:
-                return (
-                    f"DOWNLOAD_RESULT: failed\n"
-                    f"URL: {url}\n"
-                    f"ERROR: curl failed: {proc.stderr[-1000:]}"
-                )
+                return f"DOWNLOAD_RESULT: failed\nURL: {url}\nERROR: curl failed: {proc.stderr[-1000:]}"
         except Exception as exc:
             return f"DOWNLOAD_RESULT: error - {exc}"
 
@@ -806,7 +827,9 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 try:
                     list_proc = subprocess.run(
                         ["ls", "-la", str(extract_dir)],
-                        capture_output=True, text=True, timeout=10,
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
                     )
                     listing = list_proc.stdout[:2000]
                 except Exception:
@@ -859,7 +882,9 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
         try:
             proc = subprocess.run(
                 ["bash", "-c", "sudo apt update 2>&1"],
-                capture_output=True, text=True, timeout=300,
+                capture_output=True,
+                text=True,
+                timeout=300,
             )
             update_output = (proc.stdout + "\n" + proc.stderr)[-2000:]
             update_status = "completed" if proc.returncode == 0 else "failed"
@@ -867,15 +892,14 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return f"UPDATE_RESULT: error during apt update - {exc}"
 
         if not upgrade:
-            return (
-                f"UPDATE_RESULT: {update_status} (apt update only)\n"
-                f"OUTPUT:\n{update_output}"
-            )
+            return f"UPDATE_RESULT: {update_status} (apt update only)\nOUTPUT:\n{update_output}"
 
         try:
             proc = subprocess.run(
                 ["bash", "-c", "sudo apt upgrade -y 2>&1"],
-                capture_output=True, text=True, timeout=600,
+                capture_output=True,
+                text=True,
+                timeout=600,
             )
             upgrade_output = (proc.stdout + "\n" + proc.stderr)[-4000:]
             upgrade_status = "completed" if proc.returncode == 0 else "failed"
@@ -890,6 +914,3 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 f"UPDATE_OUTPUT:\n{update_output}\n"
                 f"UPGRADE_ERROR: {exc}"
             )
-
-
-

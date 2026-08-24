@@ -206,12 +206,14 @@ class SessionManager:
         self._state.total_actions += 1
         if success:
             self._state.successful_exploits += 1
-        self._state.context_history.append({
-            "timestamp": time.time(),
-            "action": action,
-            "result": result[:1000],
-            "success": success,
-        })
+        self._state.context_history.append(
+            {
+                "timestamp": time.time(),
+                "action": action,
+                "result": result[:1000],
+                "success": success,
+            }
+        )
         if len(self._state.context_history) > 100:
             self._state.context_history = self._state.context_history[-100:]
         self._mark_dirty()
@@ -225,23 +227,27 @@ class SessionManager:
     def record_loot(self, loot_type: str, data: dict[str, Any]) -> None:
         if self._state is None:
             return
-        self._state.loot.append({
-            "timestamp": time.time(),
-            "type": loot_type,
-            "data": data,
-        })
+        self._state.loot.append(
+            {
+                "timestamp": time.time(),
+                "type": loot_type,
+                "data": data,
+            }
+        )
         self._mark_dirty()
 
     def record_credentials(self, host: str, username: str, password: str, source: str) -> None:
         if self._state is None:
             return
-        self._state.credentials.append({
-            "timestamp": time.time(),
-            "host": host,
-            "username": username,
-            "password": password,
-            "source": source,
-        })
+        self._state.credentials.append(
+            {
+                "timestamp": time.time(),
+                "host": host,
+                "username": username,
+                "password": password,
+                "source": source,
+            }
+        )
         self._mark_dirty()
 
     def mark_compromised(self, host: str) -> None:
@@ -287,14 +293,19 @@ class SessionManager:
             return list(self._state.messages)
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Resuming active exploitation session.\n{self.get_context_summary()}\nContinue from where you left off."},
+            {
+                "role": "user",
+                "content": f"Resuming active exploitation session.\n{self.get_context_summary()}\nContinue from where you left off.",
+            },
         ]
         # Add recent context as condensed tool results
         if self._state:
             for entry in self._state.context_history[-20:]:
-                messages.append({
-                    "role": "tool",
-                    "tool_name": entry["action"],
-                    "content": f"[{ 'SUCCESS' if entry['success'] else 'FAILED'}] {entry['result'][:300]}",
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_name": entry["action"],
+                        "content": f"[{'SUCCESS' if entry['success'] else 'FAILED'}] {entry['result'][:300]}",
+                    }
+                )
         return messages

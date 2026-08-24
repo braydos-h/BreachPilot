@@ -18,6 +18,7 @@ tasks, plus the capability-metadata handoff:
 Plain-dict blackboard, dummy agents, no live targets — mirrors the existing
 ``test_swarm*.py`` patterns.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
@@ -44,12 +45,13 @@ def _fake_recon_result() -> HostReconResult:
         os_family="linux",
         os_accuracy=95,
         services=[
-            ServiceInfo(port=22, protocol="tcp", service="ssh", version="OpenSSH 8.9p1",
-                        banner="SSH-2.0-OpenSSH_8.9p1"),
-            ServiceInfo(port=445, protocol="tcp", service="microsoft-ds", version="Samba",
-                        banner=""),
-            ServiceInfo(port=80, protocol="tcp", service="http", version="Apache/2.4.52",
-                        banner="Apache/2.4.52 (Ubuntu)"),
+            ServiceInfo(
+                port=22, protocol="tcp", service="ssh", version="OpenSSH 8.9p1", banner="SSH-2.0-OpenSSH_8.9p1"
+            ),
+            ServiceInfo(port=445, protocol="tcp", service="microsoft-ds", version="Samba", banner=""),
+            ServiceInfo(
+                port=80, protocol="tcp", service="http", version="Apache/2.4.52", banner="Apache/2.4.52 (Ubuntu)"
+            ),
         ],
         open_ports=[22, 80, 445],
         scan_tool="nmap",
@@ -108,28 +110,34 @@ def test_vuln_agent_exploit_tasks_carry_analysis_dep_and_prerequisite() -> None:
     # and exploit_search to return populated results.
     agent = VulnAgent()
     target = "10.0.0.50"
-    task = {"task_id": "V-1", "target": target, "services": [
-        {"service": "microsoft-ds", "version": "Samba 3", "port": 445},
-    ]}
+    task = {
+        "task_id": "V-1",
+        "target": target,
+        "services": [
+            {"service": "microsoft-ds", "version": "Samba 3", "port": 445},
+        ],
+    }
     blackboard: dict = {}
     context = {"config": {}, "blackboard": blackboard}
 
     # Stub NVD + ExploitSearch so the service reaches confidence>=0.7.
-    with patch.object(agent, "_llm_analyze", return_value=None), \
-         patch(
-             "tools.swarm.agents.vuln_agent.NVDClient",
-         ) as nvd_cls, \
-         patch(
-             "tools.swarm.agents.vuln_agent.ExploitSearch",
-         ) as es_cls, \
-         patch(
-             "tools.swarm.agents.vuln_agent.find_modules",
-             return_value=[(0.9, _FakeModule("SMBRelay", requires=["credentials"]))],
-         ) as _fm, \
-         patch(
-             "tools.swarm.agents.vuln_agent.get_module",
-             return_value=_FakeModule("SMBRelay", requires=["credentials"]),
-         ):
+    with (
+        patch.object(agent, "_llm_analyze", return_value=None),
+        patch(
+            "tools.swarm.agents.vuln_agent.NVDClient",
+        ) as nvd_cls,
+        patch(
+            "tools.swarm.agents.vuln_agent.ExploitSearch",
+        ) as es_cls,
+        patch(
+            "tools.swarm.agents.vuln_agent.find_modules",
+            return_value=[(0.9, _FakeModule("SMBRelay", requires=["credentials"]))],
+        ) as _fm,
+        patch(
+            "tools.swarm.agents.vuln_agent.get_module",
+            return_value=_FakeModule("SMBRelay", requires=["credentials"]),
+        ),
+    ):
         nvd_cls.return_value.search_sync.return_value = [
             {"id": "CVE-2020-1472", "cvss": 10.0},
         ]
@@ -157,9 +165,7 @@ def test_vuln_agent_exploit_tasks_carry_analysis_dep_and_prerequisite() -> None:
     assert hyps, "expected at least one hypothesis"
     for h in hyps:
         assert "prerequisite" in h, f"hypothesis missing prerequisite: {h!r}"
-        assert h["prerequisite"] == ["credentials"], (
-            f"prerequisite not derived from matched module.requires: {h!r}"
-        )
+        assert h["prerequisite"] == ["credentials"], f"prerequisite not derived from matched module.requires: {h!r}"
 
     # Blackboard hypotheses also carry the prerequisite field.
     bb_hyps = blackboard.get("vulnerability_hypotheses", [])
@@ -170,22 +176,28 @@ def test_vuln_agent_prerequisite_empty_when_module_has_no_requires() -> None:
     """A matched module with no ``requires`` yields an empty prerequisite list,
     not a missing key."""
     agent = VulnAgent()
-    task = {"task_id": "V-2", "target": "10.0.0.99", "services": [
-        {"service": "ssh", "version": "OpenSSH 8.9", "port": 22},
-    ]}
+    task = {
+        "task_id": "V-2",
+        "target": "10.0.0.99",
+        "services": [
+            {"service": "ssh", "version": "OpenSSH 8.9", "port": 22},
+        ],
+    }
     context = {"config": {}, "blackboard": {}}
 
-    with patch.object(agent, "_llm_analyze", return_value=None), \
-         patch("tools.swarm.agents.vuln_agent.NVDClient") as nvd_cls, \
-         patch("tools.swarm.agents.vuln_agent.ExploitSearch") as es_cls, \
-         patch(
-             "tools.swarm.agents.vuln_agent.find_modules",
-             return_value=[(0.8, _FakeModule("SSHBrute", requires=[]))],
-         ), \
-         patch(
-             "tools.swarm.agents.vuln_agent.get_module",
-             return_value=_FakeModule("SSHBrute", requires=[]),
-         ):
+    with (
+        patch.object(agent, "_llm_analyze", return_value=None),
+        patch("tools.swarm.agents.vuln_agent.NVDClient") as nvd_cls,
+        patch("tools.swarm.agents.vuln_agent.ExploitSearch") as es_cls,
+        patch(
+            "tools.swarm.agents.vuln_agent.find_modules",
+            return_value=[(0.8, _FakeModule("SSHBrute", requires=[]))],
+        ),
+        patch(
+            "tools.swarm.agents.vuln_agent.get_module",
+            return_value=_FakeModule("SSHBrute", requires=[]),
+        ),
+    ):
         nvd_cls.return_value.search_sync.return_value = [
             {"id": "CVE-2024-6387", "cvss": 8.1},
         ]
@@ -204,16 +216,22 @@ def test_vuln_agent_prerequisite_empty_when_no_module_matched() -> None:
     """No matched module -> prerequisite is an empty list (not an error, not
     a missing key)."""
     agent = VulnAgent()
-    task = {"task_id": "V-3", "target": "10.0.0.98", "services": [
-        {"service": "ssh", "version": "OpenSSH 8.9", "port": 22},
-    ]}
+    task = {
+        "task_id": "V-3",
+        "target": "10.0.0.98",
+        "services": [
+            {"service": "ssh", "version": "OpenSSH 8.9", "port": 22},
+        ],
+    }
     context = {"config": {}, "blackboard": {}}
 
-    with patch.object(agent, "_llm_analyze", return_value=None), \
-         patch("tools.swarm.agents.vuln_agent.NVDClient") as nvd_cls, \
-         patch("tools.swarm.agents.vuln_agent.ExploitSearch") as es_cls, \
-         patch("tools.swarm.agents.vuln_agent.find_modules", return_value=[]), \
-         patch("tools.swarm.agents.vuln_agent.get_module", return_value=None):
+    with (
+        patch.object(agent, "_llm_analyze", return_value=None),
+        patch("tools.swarm.agents.vuln_agent.NVDClient") as nvd_cls,
+        patch("tools.swarm.agents.vuln_agent.ExploitSearch") as es_cls,
+        patch("tools.swarm.agents.vuln_agent.find_modules", return_value=[]),
+        patch("tools.swarm.agents.vuln_agent.get_module", return_value=None),
+    ):
         nvd_cls.return_value.search_sync.return_value = [
             {"id": "CVE-2024-6387", "cvss": 8.1},
         ]
@@ -233,8 +251,14 @@ def test_failure_class_to_reflection_label_mapping_covers_core_classes() -> None
     """The mapping covers the failure classes most likely to be surfaced by
     module results, and every value is one of the prompt's nine labels."""
     prompt_labels = {
-        "TOOL_MISMATCH", "PROTOCOL_ERROR", "FIREWALL_BLOCK", "PATCHED",
-        "WRONG_VERSION", "AUTH_REQUIRED", "NETWORK_ISSUE", "TOOL_MISSING",
+        "TOOL_MISMATCH",
+        "PROTOCOL_ERROR",
+        "FIREWALL_BLOCK",
+        "PATCHED",
+        "WRONG_VERSION",
+        "AUTH_REQUIRED",
+        "NETWORK_ISSUE",
+        "TOOL_MISSING",
         "RATE_LIMITED",
     }
     # Core classes that should have a mapping.
@@ -286,8 +310,12 @@ def test_reflection_agent_run_with_known_failure_class_does_not_break() -> None:
     task = {
         "task_id": "REF-1",
         "battle_log": [
-            {"success": False, "tool": "smb_relay", "error": "logon failure",
-             "failure_class": FailureClass.AUTH_FAILED},
+            {
+                "success": False,
+                "tool": "smb_relay",
+                "error": "logon failure",
+                "failure_class": FailureClass.AUTH_FAILED,
+            },
             {"success": True, "tool": "nmap"},
         ],
         "session_state": {"target_ip": "10.0.0.5"},

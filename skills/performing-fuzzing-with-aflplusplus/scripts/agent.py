@@ -9,8 +9,7 @@ import subprocess
 from datetime import datetime
 
 
-def instrument_target(source_path, output_path, compiler="afl-clang-fast",
-                      sanitizer=None):
+def instrument_target(source_path, output_path, compiler="afl-clang-fast", sanitizer=None):
     """Compile target with AFL++ instrumentation."""
     cmd = [compiler, "-o", output_path, source_path]
     if sanitizer == "asan":
@@ -30,8 +29,7 @@ def instrument_target(source_path, output_path, compiler="afl-clang-fast",
 
 def minimize_corpus(afl_cmin_path, target_binary, input_dir, output_dir):
     """Minimize seed corpus using afl-cmin."""
-    cmd = [afl_cmin_path or "afl-cmin", "-i", input_dir, "-o", output_dir,
-           "--", target_binary]
+    cmd = [afl_cmin_path or "afl-cmin", "-i", input_dir, "-o", output_dir, "--", target_binary]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     before = len(os.listdir(input_dir)) if os.path.isdir(input_dir) else 0
     after = len(os.listdir(output_dir)) if os.path.isdir(output_dir) else 0
@@ -98,19 +96,20 @@ def triage_crashes(output_dir):
         for part in sig_parts:
             if part.startswith("sig:"):
                 signal = part.split(":")[1]
-        crashes.append({
-            "filename": filename,
-            "size_bytes": size,
-            "signal": signal,
-            "path": filepath,
-        })
+        crashes.append(
+            {
+                "filename": filename,
+                "size_bytes": size,
+                "signal": signal,
+                "path": filepath,
+            }
+        )
     return {"crashes": crashes, "total": len(crashes)}
 
 
 def minimize_crash(afl_tmin_path, target_binary, crash_file, output_file):
     """Minimize a crash test case with afl-tmin."""
-    cmd = [afl_tmin_path or "afl-tmin", "-i", crash_file, "-o", output_file,
-           "--", target_binary]
+    cmd = [afl_tmin_path or "afl-tmin", "-i", crash_file, "-o", output_file, "--", target_binary]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     orig_size = os.path.getsize(crash_file) if os.path.exists(crash_file) else 0
     min_size = os.path.getsize(output_file) if os.path.exists(output_file) else 0
@@ -131,10 +130,10 @@ def run_whatsup(output_dir):
 
 def run_audit(args):
     """Execute AFL++ fuzzing campaign audit."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("  AFL++ FUZZING CAMPAIGN AUDIT")
     print(f"  Generated: {datetime.utcnow().isoformat()} UTC")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     report = {}
 
@@ -157,8 +156,7 @@ def run_audit(args):
             print(f"  {c['filename']} ({c['size_bytes']}B) signal={c['signal']}")
 
     if args.instrument_src and args.instrument_out:
-        inst = instrument_target(args.instrument_src, args.instrument_out,
-                                  sanitizer=args.sanitizer)
+        inst = instrument_target(args.instrument_src, args.instrument_out, sanitizer=args.sanitizer)
         report["instrumentation"] = inst
         print("\n--- INSTRUMENTATION ---")
         print(f"  {'SUCCESS' if inst['success'] else 'FAILED'}: {inst['source']}")
@@ -171,8 +169,7 @@ def main():
     parser.add_argument("--output-dir", help="AFL++ output directory to analyze")
     parser.add_argument("--instrument-src", help="Source file to instrument")
     parser.add_argument("--instrument-out", help="Output path for instrumented binary")
-    parser.add_argument("--sanitizer", choices=["asan", "ubsan"],
-                        help="Address or undefined behavior sanitizer")
+    parser.add_argument("--sanitizer", choices=["asan", "ubsan"], help="Address or undefined behavior sanitizer")
     parser.add_argument("--output", help="Save report to JSON file")
     args = parser.parse_args()
 

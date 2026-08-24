@@ -115,20 +115,22 @@ class SwarmOrchestrator:
         # bucket, the legacy flat-dict view); only write sites are migrated to
         # the atomic methods so parallel dispatch in route_parallel no longer
         # races on the get-then-set list appends the old plain dict allowed.
-        self._blackboard: Blackboard = Blackboard({
-            "recon_complete": False,
-            "vuln_research_complete": False,
-            "access_achieved": False,
-            "discovered_services": [],
-            "vulnerability_hypotheses": [],
-            "compromised_hosts": [],
-            "credentials_found": [],
-            "pivot_targets": [],
-            "loot": [],
-            "failed_modules": [],
-            "attack_surface_score": 0,
-            "strategy_shift": "",
-        })
+        self._blackboard: Blackboard = Blackboard(
+            {
+                "recon_complete": False,
+                "vuln_research_complete": False,
+                "access_achieved": False,
+                "discovered_services": [],
+                "vulnerability_hypotheses": [],
+                "compromised_hosts": [],
+                "credentials_found": [],
+                "pivot_targets": [],
+                "loot": [],
+                "failed_modules": [],
+                "attack_surface_score": 0,
+                "strategy_shift": "",
+            }
+        )
 
         # Inject blackboard into context so all agents can access it. Agents
         # read it as a dict (bb["k"] / bb.get) and write via the atomic API
@@ -222,16 +224,18 @@ class SwarmOrchestrator:
 
         # ── Update battle log with richer context ──
         with self._lock:
-            self._battle_log.append({
-                "task_id": task_id,
-                "tool": task.get("tool", task.get("phase", "")),
-                "target": target,
-                "success": result.status == AgentStatus.COMPLETE,
-                "summary": str(result.output)[:500],
-                "error": result.error,
-                "findings": result.findings,
-                "new_tasks": result.new_tasks,
-            })
+            self._battle_log.append(
+                {
+                    "task_id": task_id,
+                    "tool": task.get("tool", task.get("phase", "")),
+                    "target": target,
+                    "success": result.status == AgentStatus.COMPLETE,
+                    "summary": str(result.output)[:500],
+                    "error": result.error,
+                    "findings": result.findings,
+                    "new_tasks": result.new_tasks,
+                }
+            )
             self._trim_history()
 
         # ── Blackboard milestone events ──
@@ -374,12 +378,14 @@ class SwarmOrchestrator:
         # Any task that didn't produce a result (shouldn't happen) falls back
         # to a failed placeholder so the caller gets exactly len(tasks) items.
         while len(ordered) < len(tasks):
-            ordered.append(AgentResult(
-                agent_type="unknown",
-                status=AgentStatus.FAILED,
-                task_id="",
-                error="route_parallel: no result produced for task",
-            ))
+            ordered.append(
+                AgentResult(
+                    agent_type="unknown",
+                    status=AgentStatus.FAILED,
+                    task_id="",
+                    error="route_parallel: no result produced for task",
+                )
+            )
         return ordered
 
     def reflect(self, battle_log: list[dict[str, Any]], session_state: dict[str, Any]) -> AgentResult:
@@ -631,11 +637,18 @@ class SwarmOrchestrator:
     # WHAT the action touches, so they are off the table. The allowlist lock is
     # untouched by this allowlist: it is enforced separately at the MCP tool
     # layer regardless of what the critic proposes.
-    _NEGOTIABLE_KEYS: frozenset[str] = frozenset({
-        "risk_level", "require_mutation", "alternative_tool",
-        "rate_limit_seconds", "delay_seconds", "timeout_seconds",
-        "max_retries", "mutation_strategy",
-    })
+    _NEGOTIABLE_KEYS: frozenset[str] = frozenset(
+        {
+            "risk_level",
+            "require_mutation",
+            "alternative_tool",
+            "rate_limit_seconds",
+            "delay_seconds",
+            "timeout_seconds",
+            "max_retries",
+            "mutation_strategy",
+        }
+    )
 
     def _negotiate(
         self,
@@ -727,7 +740,13 @@ class SwarmOrchestrator:
 
             self._emit(
                 "critic_decision",
-                {"task_id": task_id, "target": target, "decision": decision, "reasoning": reasoning, "round": round_idx},
+                {
+                    "task_id": task_id,
+                    "target": target,
+                    "decision": decision,
+                    "reasoning": reasoning,
+                    "round": round_idx,
+                },
             )
 
             if decision == "deny":
@@ -796,9 +815,7 @@ class SwarmOrchestrator:
     def _modifications_hash(modifications: dict[str, Any]) -> str:
         """Stable hash of a modifications dict for deadlock detection."""
         try:
-            return hashlib.sha256(
-                json.dumps(modifications, sort_keys=True, default=str).encode("utf-8")
-            ).hexdigest()
+            return hashlib.sha256(json.dumps(modifications, sort_keys=True, default=str).encode("utf-8")).hexdigest()
         except (TypeError, ValueError):
             return ""
 
@@ -821,13 +838,15 @@ class SwarmOrchestrator:
             )
             agent._set_status(AgentStatus.BLOCKED)
             self._results.append(blocked_result)
-            self._battle_log.append({
-                "task_id": task_id,
-                "tool": task.get("tool", task.get("phase", "")),
-                "target": target,
-                "success": False,
-                "error": f"Critic blocked: {reasoning}",
-            })
+            self._battle_log.append(
+                {
+                    "task_id": task_id,
+                    "tool": task.get("tool", task.get("phase", "")),
+                    "target": target,
+                    "success": False,
+                    "error": f"Critic blocked: {reasoning}",
+                }
+            )
             self._trim_history()
         self._emit(
             "agent_blocked",

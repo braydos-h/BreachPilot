@@ -104,7 +104,7 @@ def extract_output(result: Any) -> str:
             return ""
     idx = result.find(_OUTPUT_MARKER)
     if idx >= 0:
-        return result[idx + len(_OUTPUT_MARKER):]
+        return result[idx + len(_OUTPUT_MARKER) :]
     return result
 
 
@@ -198,9 +198,7 @@ def _verify_sync(tool_executor: ToolExecutor, target_ip: str) -> dict[str, Any]:
 
     # 2. Confirm the canary token echoed back (proves real write+read).
     if token not in raw_output:
-        evidence.append(
-            f"canary token '{token}' not echoed back -- write/read did not land on target"
-        )
+        evidence.append(f"canary token '{token}' not echoed back -- write/read did not land on target")
         return {
             "verified": False,
             "evidence": evidence,

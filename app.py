@@ -89,8 +89,10 @@ def create_app(
 
     # Run manager.
     run_manager = RunManager(
-        persistence, event_registry,
-        config=config, config_path=config_path,
+        persistence,
+        event_registry,
+        config=config,
+        config_path=config_path,
         callables=callables,
     )
 
@@ -110,9 +112,7 @@ def create_app(
 
     # CORS: only loopback + configured origins.
     configured_origins = api_cfg.get("allowed_origins", [])
-    if not isinstance(configured_origins, list) or not all(
-        isinstance(origin, str) for origin in configured_origins
-    ):
+    if not isinstance(configured_origins, list) or not all(isinstance(origin, str) for origin in configured_origins):
         raise ValueError("api.allowed_origins must be a list of loopback origins.")
     allowed_origins = list(dict.fromkeys(configured_origins))
     if any(not is_loopback_origin(origin, allowed_origins) for origin in allowed_origins):
@@ -220,8 +220,7 @@ def create_app(
                 # remove the webui-only routes in-place, then restore them.
                 original_routes = list(app.router.routes)
                 app.router.routes[:] = [
-                    r for r in original_routes
-                    if getattr(r, "name", None) not in _webui_route_names
+                    r for r in original_routes if getattr(r, "name", None) not in _webui_route_names
                 ]
                 try:
                     return _original_openapi()

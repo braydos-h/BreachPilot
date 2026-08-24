@@ -40,9 +40,7 @@ class EvidenceUpdateRule:
     contradiction, scaled by weight and independence."""
 
     @staticmethod
-    def update_confidence(
-        current: float, obs: EvidenceObservation, state: HypothesisState
-    ) -> float:
+    def update_confidence(current: float, obs: EvidenceObservation, state: HypothesisState) -> float:
         """Return the updated confidence for one observation."""
         if obs.polarity is EvidencePolarity.NEUTRAL or obs.weight <= 0.0:
             return current
@@ -100,9 +98,7 @@ class ConfidenceCalculator:
             return self._bayesian_beta(current, obs, state)
         return rule.apply(current, obs.weight, obs.polarity)
 
-    def _bayesian_beta(
-        self, current: float, obs: EvidenceObservation, state: HypothesisState
-    ) -> float:
+    def _bayesian_beta(self, current: float, obs: EvidenceObservation, state: HypothesisState) -> float:
         """Approximate Beta-posterior mean update.
 
         Pseudo-count K scales with the independent observation count seen so

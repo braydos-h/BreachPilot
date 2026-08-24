@@ -18,6 +18,7 @@ from tools.attack_modules.modules.auth_creds import (
 
 # --------------------------------------------------------------------------- helpers
 
+
 def _ctx(services, target_ip="10.0.0.50", cves=None):
     return ModuleContext(
         target_ip=target_ip,
@@ -39,6 +40,7 @@ _HTTP = [{"service": "http", "port": "80/tcp", "version": ""}]
 
 
 # --------------------------------------------------------------------------- class attrs
+
 
 class TestClassAttrs:
     def test_asreproast_attrs(self):
@@ -82,6 +84,7 @@ class TestClassAttrs:
 
 # --------------------------------------------------------------------------- run() contracts
 
+
 class TestRunContract:
     def test_asreproast_run(self):
         ctx = _ctx(_KERB, target_ip="10.0.0.50")
@@ -122,6 +125,7 @@ class TestRunContract:
 
 # --------------------------------------------------------------------------- applicability
 
+
 class TestApplicability:
     def test_asreproast_matches_kerberos(self):
         assert ASREPRoast().applicability(_ctx(_KERB)) > 0
@@ -146,6 +150,7 @@ class TestApplicability:
 
 
 # --------------------------------------------------------------------------- script generation
+
 
 class TestScriptGeneration:
     def test_adldapenum_generate_python_script_contains_target(self):

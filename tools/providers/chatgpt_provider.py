@@ -61,6 +61,7 @@ _POLL_INTERVAL = 0.5
 # Config helpers
 # ---------------------------------------------------------------------------
 
+
 def _chatgpt_defaults() -> dict[str, Any]:
     return {
         "enabled": False,
@@ -108,6 +109,7 @@ def _v1_url(cfg: Mapping[str, Any]) -> str:
 # Bool only — we NEVER open or read the file contents.
 # ---------------------------------------------------------------------------
 
+
 def _auth_file_candidates(cfg: Mapping[str, Any]) -> list[str]:
     explicit = str(cfg.get("oauth_file") or "").strip()
     if explicit:
@@ -150,9 +152,21 @@ class ChatGptProxyClient:
             "model": kwargs.get("model"),
             "messages": kwargs.get("messages") or [],
         }
-        for key in ("tools", "tool_choice", "temperature", "top_p", "max_tokens",
-                    "max_completion_tokens", "stream", "n", "stop", "presence_penalty",
-                    "frequency_penalty", "seed", "user"):
+        for key in (
+            "tools",
+            "tool_choice",
+            "temperature",
+            "top_p",
+            "max_tokens",
+            "max_completion_tokens",
+            "stream",
+            "n",
+            "stop",
+            "presence_penalty",
+            "frequency_penalty",
+            "seed",
+            "user",
+        ):
             if key in kwargs and kwargs[key] is not None:
                 payload[key] = kwargs[key]
         # tools=False/None already stripped upstream; only forward real lists.
@@ -228,7 +242,7 @@ class ChatGptProxyClient:
                     if not line.startswith("data:"):
                         # SSE comment / keepalive (`: ...`) — ignore.
                         continue
-                    body = line[len("data:"):].strip()
+                    body = line[len("data:") :].strip()
                     if body == "[DONE]":
                         break
                     try:
@@ -249,11 +263,14 @@ class ChatGptProxyClient:
                         content = ""
                     for tc in delta.get("tool_calls") or []:
                         idx = tc.get("index", 0)
-                        slot = tool_accum.setdefault(idx, {
-                            "id": tc.get("id", ""),
-                            "type": tc.get("type", "function"),
-                            "function": {"name": "", "arguments": ""},
-                        })
+                        slot = tool_accum.setdefault(
+                            idx,
+                            {
+                                "id": tc.get("id", ""),
+                                "type": tc.get("type", "function"),
+                                "function": {"name": "", "arguments": ""},
+                            },
+                        )
                         fn = tc.get("function") or {}
                         if fn.get("name"):
                             slot["function"]["name"] = slot["function"]["name"] + fn["name"]
@@ -282,6 +299,7 @@ class ChatGptProxyClient:
 # ---------------------------------------------------------------------------
 # ChatGptProxyManager — proxy / login / discovery lifecycle (singleton)
 # ---------------------------------------------------------------------------
+
 
 class ChatGptProxyManager:
     """Thread-safe singleton owning the openai-oauth proxy lifecycle."""

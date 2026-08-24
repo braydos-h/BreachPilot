@@ -30,32 +30,48 @@ from db import DatabaseManager
 
 # ── Default forbidden actions (hard-blocked, always enforced) ───────────────
 
-_HARD_FORBIDDEN_ACTIONS = frozenset({
-    "denial_of_service",
-    "destructive_exploit",
-    "social_engineering",
-    "physical_attack",
-    "malware",
-    "credential_theft",
-})
+_HARD_FORBIDDEN_ACTIONS = frozenset(
+    {
+        "denial_of_service",
+        "destructive_exploit",
+        "social_engineering",
+        "physical_attack",
+        "malware",
+        "credential_theft",
+    }
+)
 
 # ── Third-party detection patterns ─────────────────────────────────────────
 
-_THIRD_PARTY_DOMAINS = frozenset({
-    "akamai", "cloudflare", "fastly", "azure", "aws", "cloudfront",
-    "googleapis", "google-analytics", "facebook", "twitter", "linkedin",
-    "cdn", "assets", "static", "img", "media",
-})
+_THIRD_PARTY_DOMAINS = frozenset(
+    {
+        "akamai",
+        "cloudflare",
+        "fastly",
+        "azure",
+        "aws",
+        "cloudfront",
+        "googleapis",
+        "google-analytics",
+        "facebook",
+        "twitter",
+        "linkedin",
+        "cdn",
+        "assets",
+        "static",
+        "img",
+        "media",
+    }
+)
 
 _THIRD_PARTY_PATTERN = re.compile(
-    r"^(https?://)?(?:[a-zA-Z0-9-]+\.)*(?:"
-    + "|".join(re.escape(d) for d in _THIRD_PARTY_DOMAINS)
-    + r")\.\w+",
+    r"^(https?://)?(?:[a-zA-Z0-9-]+\.)*(?:" + "|".join(re.escape(d) for d in _THIRD_PARTY_DOMAINS) + r")\.\w+",
     re.IGNORECASE,
 )
 
 
 # ── Result type ────────────────────────────────────────────────────────────
+
 
 @dataclass
 class ScopeCheckResult:
@@ -72,6 +88,7 @@ class ScopeCheckResult:
 
 # ── Rate limiter ───────────────────────────────────────────────────────────
 
+
 @dataclass
 class _RateBucket:
     # Sliding-window timestamps of accepted requests in the last 1.0s.
@@ -84,6 +101,7 @@ class _RateBucket:
 
 
 # ── Scope Gate class ───────────────────────────────────────────────────────
+
 
 class ScopeGate:
     """Enforces authorization scope for all agent actions.
@@ -123,10 +141,7 @@ class ScopeGate:
         # built-in 2.0 default. The Mission default is honored by callers
         # (e.g. agent_loop.py) passing ``default_rps=self._mission.default_rate_limit_rps``.
         rps = rate_limits.get("default_requests_per_second") if rate_limits else None
-        self._default_rps = float(
-            rps if rps is not None
-            else (default_rps if default_rps is not None else 2.0)
-        )
+        self._default_rps = float(rps if rps is not None else (default_rps if default_rps is not None else 2.0))
         self._risk_profile = risk_profile
 
         # Build internal rules from arguments
@@ -215,11 +230,21 @@ class ScopeGate:
         # destructive_exploit, social_engineering, ...) are already exact-matched
         # against ``self._forbidden_action_strs`` above, so retaining their
         # substrings here is belt-and-braces defense, not the primary gate.
-        _HARD_FORBIDDEN_SUBSTRINGS = frozenset({
-            "denial_of_service", "destructive_exploit", "social_engineering",
-            "physical_attack", "malware", "credential_theft",
-            "brute_force", "dos", "overload", "crash", "saturate",
-        })
+        _HARD_FORBIDDEN_SUBSTRINGS = frozenset(
+            {
+                "denial_of_service",
+                "destructive_exploit",
+                "social_engineering",
+                "physical_attack",
+                "malware",
+                "credential_theft",
+                "brute_force",
+                "dos",
+                "overload",
+                "crash",
+                "saturate",
+            }
+        )
         lower_action = action_type.lower()
         for hard in _HARD_FORBIDDEN_SUBSTRINGS:
             if hard in lower_action:
@@ -262,10 +287,7 @@ class ScopeGate:
         if not matched_allow:
             return ScopeCheckResult(
                 allowed=False,
-                reason=(
-                    f"Asset '{asset_clean}' is not in the authorized scope. "
-                    f"No allow rule matches this asset."
-                ),
+                reason=(f"Asset '{asset_clean}' is not in the authorized scope. No allow rule matches this asset."),
                 risk_level=risk_level,
             )
 
@@ -342,6 +364,7 @@ class ScopeGate:
 
 
 # ── Rule matching engine ───────────────────────────────────────────────────
+
 
 def _rule_matches(rule: dict[str, Any], asset: str) -> bool:
     """Test whether a scope rule matches an asset string."""
@@ -465,7 +488,7 @@ def _clean_asset(asset: str) -> str:
     # Strip protocol
     for proto in ("https://", "http://"):
         if s.lower().startswith(proto):
-            s = s[len(proto):]
+            s = s[len(proto) :]
             break
     # CIDR subnet literal (e.g. "10.0.0.0/16") — preserve the prefix.
     # Stripping the "/16" collapses the asset to its base IP, which then
@@ -492,7 +515,7 @@ def _clean_asset(asset: str) -> str:
         pass
     # Bracketed IPv6 literal: [2001:db8::1] or [2001:db8::1]:443
     if s.startswith("[") and "]" in s:
-        host = s[1:s.index("]")]
+        host = s[1 : s.index("]")]
         # Strip any trailing ":port" after the closing bracket.
         return host
     # Strip trailing :port — but only for single-colon (IPv4 / host:port)

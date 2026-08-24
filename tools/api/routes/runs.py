@@ -61,15 +61,28 @@ def _run_dir(run_id: str) -> Path:
     return candidate
 
 
-_ARTIFACT_WHITELIST = frozenset({
-    "session_summary.md", "run.json", "recon_assessment.json", "fast_recon.json",
-    "goal_suggestions.json", "activity.jsonl", "exploit_audit.jsonl",
-    "events.jsonl", "session_error.log", "recon_first_error.log",
-})
+_ARTIFACT_WHITELIST = frozenset(
+    {
+        "session_summary.md",
+        "run.json",
+        "recon_assessment.json",
+        "fast_recon.json",
+        "goal_suggestions.json",
+        "activity.jsonl",
+        "exploit_audit.jsonl",
+        "events.jsonl",
+        "session_error.log",
+        "recon_first_error.log",
+    }
+)
 
-_LOG_WHITELIST = frozenset({
-    "mcp_exploit_server.log", "session_error.log", "recon_first_error.log",
-})
+_LOG_WHITELIST = frozenset(
+    {
+        "mcp_exploit_server.log",
+        "session_error.log",
+        "recon_first_error.log",
+    }
+)
 
 _CONTENT_TYPES = {
     ".md": "text/markdown; charset=utf-8",
@@ -125,6 +138,7 @@ def _safe_workspace_path(ws_root: Path, rel_path: str) -> Path:
 
 # ── Request models ──────────────────────────────────────────────────────────
 
+
 class RunCreateRequest(BaseModel):
     target: str = Field(..., description="Target IP or domain")
     mode: str = Field("attack", pattern="^(recon|attack|fast)$")
@@ -155,8 +169,9 @@ class DecisionAnswerRequest(BaseModel):
 
 class TitleRequest(BaseModel):
     """Body for POST /runs/{id}/title — manual retitle or regen trigger."""
+
     title: str | None = None  # explicit title; if None + regen=true, AI-generate
-    regen: bool = False        # force AI regeneration even if a title exists
+    regen: bool = False  # force AI regeneration even if a title exists
 
 
 class ToolCallRequest(BaseModel):
@@ -165,20 +180,32 @@ class ToolCallRequest(BaseModel):
 
 # ── Routes ──────────────────────────────────────────────────────────────────
 
+
 @router.post("/runs", status_code=201)
 async def create_run(body: RunCreateRequest, auth: str = Depends(_require_auth)) -> dict[str, Any]:
     """Create a run (preview + start_confirm decision). Does not execute yet."""
     request = RunRequest(
-        target=body.target, mode=body.mode, goal_name=body.goal,
-        custom_goal=body.custom_goal, recon_first=body.recon_first,
-        model_alias=body.model or "", swarm=body.swarm,
-        parallel_swarm=body.parallel_swarm, critic=body.critic,
-        reflection=body.reflection, adaptive_exploits=body.adaptive_exploits,
-        long_session=body.long_session, multi_model_consult=body.multi_model_consult,
-        observer_mode=body.observer_mode, ultrathink=body.ultrathink,
-        skills_mode=body.skills, skills_include=body.skills_include,
-        skills_exclude=body.skills_exclude, resume_source=body.resume,
-        kind=RunKind(body.kind), yes=body.yes,
+        target=body.target,
+        mode=body.mode,
+        goal_name=body.goal,
+        custom_goal=body.custom_goal,
+        recon_first=body.recon_first,
+        model_alias=body.model or "",
+        swarm=body.swarm,
+        parallel_swarm=body.parallel_swarm,
+        critic=body.critic,
+        reflection=body.reflection,
+        adaptive_exploits=body.adaptive_exploits,
+        long_session=body.long_session,
+        multi_model_consult=body.multi_model_consult,
+        observer_mode=body.observer_mode,
+        ultrathink=body.ultrathink,
+        skills_mode=body.skills,
+        skills_include=body.skills_include,
+        skills_exclude=body.skills_exclude,
+        resume_source=body.resume,
+        kind=RunKind(body.kind),
+        yes=body.yes,
     )
     run_id, preview, decision = await _rm().create_run(request)
     result: dict[str, Any] = {
@@ -219,17 +246,19 @@ async def list_runs(
     for r in runs:
         req = r.get("request_json", {}) or {}
         prev = r.get("preview_json", {}) or {}
-        out.append({
-            "id": r["id"],
-            "state": r["state"],
-            "created_at": r["created_at"],
-            "target": req.get("target", ""),
-            "mode": req.get("mode", ""),
-            "goal_name": req.get("goal_name", ""),
-            "target_ip": prev.get("target_ip", ""),
-            "model_alias": prev.get("model_alias", ""),
-            "title": r.get("title", "") or "",
-        })
+        out.append(
+            {
+                "id": r["id"],
+                "state": r["state"],
+                "created_at": r["created_at"],
+                "target": req.get("target", ""),
+                "mode": req.get("mode", ""),
+                "goal_name": req.get("goal_name", ""),
+                "target_ip": prev.get("target_ip", ""),
+                "model_alias": prev.get("model_alias", ""),
+                "title": r.get("title", "") or "",
+            }
+        )
     return {"runs": out, "sort": sort, "total": total}
 
 
@@ -252,7 +281,9 @@ async def get_run(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, 
         "title": run.get("title", "") or "",
         "cancelled_at": run.get("cancelled_at", ""),
         "resumed_from": run.get("resumed_from", ""),
-        "decisions": [{"id": d["id"], "kind": d["kind"], "status": d["status"], "answer": d["answer"]} for d in decisions],
+        "decisions": [
+            {"id": d["id"], "kind": d["kind"], "status": d["status"], "answer": d["answer"]} for d in decisions
+        ],
     }
 
 
@@ -270,11 +301,7 @@ async def resume_run(run_id: str, auth: str = Depends(_require_auth)) -> dict[st
     if original is None:
         raise HTTPException(status_code=404, detail="Original run not found")
     req_data = original.get("request_json", {})
-    request_fields = {
-        key: value
-        for key, value in req_data.items()
-        if key in RunRequest.__dataclass_fields__
-    }
+    request_fields = {key: value for key, value in req_data.items() if key in RunRequest.__dataclass_fields__}
     request_fields.update(
         resume_source=run_id,
         kind=RunKind(req_data.get("kind", "agent")),
@@ -282,12 +309,18 @@ async def resume_run(run_id: str, auth: str = Depends(_require_auth)) -> dict[st
     )
     request = RunRequest(**request_fields)
     new_id, preview, decision = await _rm().create_run(request)
-    return {"run_id": new_id, "resumed_from": run_id, "preview": {"run_id": preview.run_id, "target_ip": preview.target_ip}}
+    return {
+        "run_id": new_id,
+        "resumed_from": run_id,
+        "preview": {"run_id": preview.run_id, "target_ip": preview.target_ip},
+    }
 
 
 @router.post("/runs/{run_id}/title")
 async def set_run_title(
-    run_id: str, body: TitleRequest, auth: str = Depends(_require_auth),
+    run_id: str,
+    body: TitleRequest,
+    auth: str = Depends(_require_auth),
 ) -> dict[str, Any]:
     """Set or AI-regenerate a run's title.
 
@@ -306,6 +339,7 @@ async def set_run_title(
     new_title = (body.title or "").strip()[:200]
     if not new_title and body.regen:
         from tools.api.session_titler import generate_session_title_sync
+
         cfg = _rm().config
         host = str((cfg.get("ollama") or {}).get("host") or "https://api.ollama.com")
         new_title = await asyncio.to_thread(
@@ -329,12 +363,15 @@ async def get_tools(run_id: str, auth: str = Depends(_require_auth)) -> dict[str
 
 
 @router.post("/runs/{run_id}/tools/{tool_name}/calls")
-async def call_tool(run_id: str, tool_name: str, body: ToolCallRequest, auth: str = Depends(_require_auth)) -> dict[str, Any]:
+async def call_tool(
+    run_id: str, tool_name: str, body: ToolCallRequest, auth: str = Depends(_require_auth)
+) -> dict[str, Any]:
     """Policy-gated REST bridge for manual WebUI tool calls."""
     return await _rm().call_tool(run_id, tool_name, body.arguments)
 
 
 # ── Artifacts (B2-B3) ───────────────────────────────────────────────────────
+
 
 @router.get("/runs/{run_id}/artifacts")
 async def list_artifacts(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -351,11 +388,13 @@ async def list_artifacts(run_id: str, auth: str = Depends(_require_auth)) -> dic
     if enhanced.exists() and enhanced.is_dir():
         for child in sorted(enhanced.iterdir()):
             if child.is_file():
-                artifacts.append({
-                    "name": f"enhanced/{child.name}",
-                    "bytes": child.stat().st_size,
-                    "exists": True,
-                })
+                artifacts.append(
+                    {
+                        "name": f"enhanced/{child.name}",
+                        "bytes": child.stat().st_size,
+                        "exists": True,
+                    }
+                )
     return {"artifacts": artifacts}
 
 
@@ -383,10 +422,12 @@ async def get_artifact(run_id: str, name: str, auth: str = Depends(_require_auth
         raise HTTPException(status_code=404, detail="Artifact not found")
     content_type = _CONTENT_TYPES.get(path.suffix.lower(), "application/octet-stream")
     from fastapi import Response
+
     return Response(content=path.read_bytes(), media_type=content_type)
 
 
 # ── Workspace file browser (C10) ─────────────────────────────────────────────
+
 
 @router.get("/runs/{run_id}/workspace")
 async def list_workspace(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -414,10 +455,12 @@ async def get_workspace_file(run_id: str, path: str, auth: str = Depends(_requir
         raise HTTPException(status_code=404, detail="File not found")
     content_type = _CONTENT_TYPES.get(target.suffix.lower(), "application/octet-stream")
     from fastapi import Response
+
     return Response(content=target.read_bytes(), media_type=content_type)
 
 
 # ── Audit trail (C6) ────────────────────────────────────────────────────────
+
 
 @router.get("/runs/{run_id}/audit")
 async def get_audit(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -443,6 +486,7 @@ async def get_audit(run_id: str, auth: str = Depends(_require_auth)) -> dict[str
     if audit_path.exists():
         try:
             from tools.exploit_agent.policy import verify_audit_chain
+
             chain_valid, chain_reason = verify_audit_chain(audit_path)
         except Exception as exc:
             chain_valid, chain_reason = False, f"verification error: {exc}"
@@ -450,6 +494,7 @@ async def get_audit(run_id: str, auth: str = Depends(_require_auth)) -> dict[str
 
 
 # ── Swarm + campaign state (C7-C8) ──────────────────────────────────────────
+
 
 def _read_state_json(run_id: str, filename: str, *, subdir: str = "") -> dict[str, Any]:
     """Read a JSON state file under reports/<run_id>/swarm_workspace/[subdir/]."""
@@ -514,6 +559,7 @@ async def get_campaign_state(run_id: str, auth: str = Depends(_require_auth)) ->
 
 # ── Log tailing (C9) ────────────────────────────────────────────────────────
 
+
 @router.get("/runs/{run_id}/logs/{name}")
 async def get_log(
     run_id: str,
@@ -562,6 +608,7 @@ async def get_log(
 
 # ── Credentials + loot (C3-C5) ──────────────────────────────────────────────
 
+
 def _exploit_workspace(run_id: str) -> Path:
     return _run_dir(run_id) / "exploit_workspace"
 
@@ -601,6 +648,7 @@ async def list_credentials(run_id: str, auth: str = Depends(_require_auth)) -> d
         return {"credentials": []}
     try:
         from tools.credential_store import CredentialStore
+
         out: list[dict[str, Any]] = []
         idx = 0
         for store_path in stores:
@@ -618,7 +666,9 @@ async def list_credentials(run_id: str, auth: str = Depends(_require_auth)) -> d
 
 @router.post("/runs/{run_id}/credentials/{index}/reveal")
 async def reveal_credential(
-    run_id: str, index: int, auth: str = Depends(_require_auth),
+    run_id: str,
+    index: int,
+    auth: str = Depends(_require_auth),
 ) -> dict[str, Any]:
     """Reveal one credential's plaintext password. Audited."""
     if _ps().get_run(run_id) is None:
@@ -629,6 +679,7 @@ async def reveal_credential(
         raise HTTPException(status_code=404, detail="No credentials for this run")
     try:
         from tools.credential_store import CredentialStore
+
         records: list[Any] = []
         store_paths: list[Path] = []
         for store_path in stores:
@@ -660,7 +711,9 @@ async def reveal_credential(
 
 @router.post("/runs/{run_id}/credentials/{index}/confirm")
 async def confirm_credential(
-    run_id: str, index: int, auth: str = Depends(_require_auth),
+    run_id: str,
+    index: int,
+    auth: str = Depends(_require_auth),
 ) -> dict[str, Any]:
     """Mark a harvested credential ``confirmed`` after validated reuse. Audited.
 
@@ -676,6 +729,7 @@ async def confirm_credential(
         raise HTTPException(status_code=404, detail="No credentials for this run")
     try:
         from tools.credential_store import CredentialStore
+
         records: list[Any] = []
         store_paths: list[Path] = []
         for store_path in stores:
@@ -690,8 +744,10 @@ async def confirm_credential(
     rec = records[index]
     store = CredentialStore(store_paths[index].parent)
     changed = store.confirm_credential(
-        username=rec.username, target_host=rec.target_host,
-        credential_type=rec.credential_type, validated=True,
+        username=rec.username,
+        target_host=rec.target_host,
+        credential_type=rec.credential_type,
+        validated=True,
     )
     access_entry = {
         "run_id": run_id,
@@ -726,6 +782,7 @@ async def list_loot(run_id: str, auth: str = Depends(_require_auth)) -> dict[str
         if loot_path.exists():
             try:
                 from tools.credential_store import LootStore
+
                 store = LootStore(cand)
                 return {"loot": [item.to_json() for item in store._items]}
             except Exception as exc:
@@ -734,6 +791,7 @@ async def list_loot(run_id: str, auth: str = Depends(_require_auth)) -> dict[str
 
 
 # ── DELETE run history (D1) ─────────────────────────────────────────────────
+
 
 @router.delete("/runs/{run_id}")
 async def delete_run(
@@ -753,6 +811,7 @@ async def delete_run(
         run_dir = _run_dir(run_id)
         if run_dir.exists():
             import shutil
+
             shutil.rmtree(run_dir, ignore_errors=True)
             purged = True
     _ps().delete_run(run_id)

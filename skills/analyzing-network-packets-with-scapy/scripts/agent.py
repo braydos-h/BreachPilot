@@ -87,14 +87,16 @@ def detect_syn_flood(records, threshold=100):
         ack_count = synack_counts.get(ip, 0)
         ratio = ack_count / count if count > 0 else 1.0
         if count >= threshold and ratio < 0.3:
-            alerts.append({
-                "detection": "SYN Flood",
-                "target_ip": ip,
-                "syn_count": count,
-                "synack_count": ack_count,
-                "synack_ratio": round(ratio, 4),
-                "severity": "critical",
-            })
+            alerts.append(
+                {
+                    "detection": "SYN Flood",
+                    "target_ip": ip,
+                    "syn_count": count,
+                    "synack_count": ack_count,
+                    "synack_ratio": round(ratio, 4),
+                    "severity": "critical",
+                }
+            )
     return alerts
 
 
@@ -116,14 +118,16 @@ def detect_dns_tunneling(records, length_threshold=50, entropy_threshold=3.5):
             continue
         subdomain = query.split(".")[0] if "." in query else query
         if len(subdomain) >= length_threshold or calculate_entropy(subdomain) >= entropy_threshold:
-            alerts.append({
-                "detection": "DNS Tunneling Indicator",
-                "query": query,
-                "subdomain_length": len(subdomain),
-                "entropy": round(calculate_entropy(subdomain), 4),
-                "src_ip": r["src_ip"],
-                "severity": "high",
-            })
+            alerts.append(
+                {
+                    "detection": "DNS Tunneling Indicator",
+                    "query": query,
+                    "subdomain_length": len(subdomain),
+                    "entropy": round(calculate_entropy(subdomain), 4),
+                    "src_ip": r["src_ip"],
+                    "severity": "high",
+                }
+            )
     return alerts
 
 
@@ -136,13 +140,15 @@ def detect_port_scan(records, threshold=20):
     alerts = []
     for ip, ports in src_ports.items():
         if len(ports) >= threshold:
-            alerts.append({
-                "detection": "Port Scan",
-                "source_ip": ip,
-                "unique_ports_probed": len(ports),
-                "sample_ports": sorted(list(ports))[:20],
-                "severity": "high",
-            })
+            alerts.append(
+                {
+                    "detection": "Port Scan",
+                    "source_ip": ip,
+                    "unique_ports_probed": len(ports),
+                    "sample_ports": sorted(list(ports))[:20],
+                    "severity": "high",
+                }
+            )
     return alerts
 
 

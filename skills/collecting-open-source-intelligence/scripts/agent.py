@@ -20,17 +20,19 @@ def search_shodan(api_key, query, max_results=100):
     results = api.search(query, limit=max_results)
     hosts = []
     for match in results["matches"]:
-        hosts.append({
-            "ip": match["ip_str"],
-            "port": match["port"],
-            "org": match.get("org", ""),
-            "os": match.get("os", ""),
-            "hostnames": match.get("hostnames", []),
-            "product": match.get("product", ""),
-            "version": match.get("version", ""),
-            "country": match.get("location", {}).get("country_name", ""),
-            "ssl_subject": match.get("ssl", {}).get("cert", {}).get("subject", {}),
-        })
+        hosts.append(
+            {
+                "ip": match["ip_str"],
+                "port": match["port"],
+                "org": match.get("org", ""),
+                "os": match.get("os", ""),
+                "hostnames": match.get("hostnames", []),
+                "product": match.get("product", ""),
+                "version": match.get("version", ""),
+                "country": match.get("location", {}).get("country_name", ""),
+                "ssl_subject": match.get("ssl", {}).get("cert", {}).get("subject", {}),
+            }
+        )
     logger.info("Shodan returned %d results for query: %s", len(hosts), query)
     return hosts
 
@@ -81,10 +83,7 @@ def whois_lookup(domain):
             "domain": domain,
             "status": data.get("status", []),
             "nameservers": [ns.get("ldhName", "") for ns in data.get("nameservers", [])],
-            "events": [
-                {"action": e["eventAction"], "date": e["eventDate"]}
-                for e in data.get("events", [])
-            ],
+            "events": [{"action": e["eventAction"], "date": e["eventDate"]} for e in data.get("events", [])],
         }
     return {"domain": domain, "error": resp.status_code}
 
@@ -116,11 +115,13 @@ def search_github_exposure(query, github_token=None):
         items = resp.json().get("items", [])
         results = []
         for item in items:
-            results.append({
-                "repo": item["repository"]["full_name"],
-                "path": item["path"],
-                "url": item["html_url"],
-            })
+            results.append(
+                {
+                    "repo": item["repository"]["full_name"],
+                    "path": item["path"],
+                    "url": item["html_url"],
+                }
+            )
         logger.info("GitHub search found %d results for: %s", len(results), query)
         return results
     return []
@@ -167,13 +168,9 @@ def main():
 
     github_results = []
     if args.github_token:
-        github_results = search_github_exposure(
-            f'"{args.domain}" password OR secret OR api_key', args.github_token
-        )
+        github_results = search_github_exposure(f'"{args.domain}" password OR secret OR api_key', args.github_token)
 
-    report = generate_osint_report(
-        args.domain, subdomains, shodan_results, whois_data, github_results
-    )
+    report = generate_osint_report(args.domain, subdomains, shodan_results, whois_data, github_results)
     with open(args.output, "w") as f:
         json.dump(report, f, indent=2)
     logger.info("OSINT report saved to %s", args.output)

@@ -16,6 +16,7 @@ Each test mocks subprocess / network (no live tools) and asserts a malicious
 payload is either rejected with a ``BLOCKED`` result or passed as a literal
 argv element (no shell string, no injected token executed).
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -46,9 +47,7 @@ def _make_server(
             "allowed_targets": allowed_targets or [],
         }
     }
-    return create_mcp_server(
-        search, nvd, WebResearcher(WebResearcherSettings()), tmp_path, config
-    )
+    return create_mcp_server(search, nvd, WebResearcher(WebResearcherSettings()), tmp_path, config)
 
 
 def _text(result) -> str:
@@ -111,8 +110,7 @@ def _patch_pgrp(monkeypatch, returncode=0, out=b"ok\n", err=b""):
 
     captured: list[Any] = []
 
-    def _fake(args, timeout, stdout=None, stderr=None, cwd=None, env=None,
-              input_text=None, **popen_kwargs):
+    def _fake(args, timeout, stdout=None, stderr=None, cwd=None, env=None, input_text=None, **popen_kwargs):
         captured.append(list(args))
         out_s = out.decode() if isinstance(out, bytes) else out
         err_s = err.decode() if isinstance(err, bytes) else err
@@ -128,10 +126,12 @@ def _patch_pgrp(monkeypatch, returncode=0, out=b"ok\n", err=b""):
 @pytest.mark.asyncio
 async def test_run_msf_module_rejects_shell_metachar_module(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "run_msf_module",
-        {"module": "exploit/foo; rm -rf /", "target_ip": "10.0.0.1"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "run_msf_module",
+            {"module": "exploit/foo; rm -rf /", "target_ip": "10.0.0.1"},
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "module path must match" in text
 
@@ -139,10 +139,12 @@ async def test_run_msf_module_rejects_shell_metachar_module(tmp_path: Path) -> N
 @pytest.mark.asyncio
 async def test_run_msf_module_rejects_invalid_target_ip(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "run_msf_module",
-        {"module": "exploit/multi/http/log4shell", "target_ip": "10.0.0.1; whoami"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "run_msf_module",
+            {"module": "exploit/multi/http/log4shell", "target_ip": "10.0.0.1; whoami"},
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "valid IP address or domain" in text
 
@@ -150,11 +152,12 @@ async def test_run_msf_module_rejects_invalid_target_ip(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_run_msf_module_rejects_opts_without_equals(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "run_msf_module",
-        {"module": "exploit/multi/http/x", "target_ip": "10.0.0.1",
-         "options": "RHOSTS"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "run_msf_module",
+            {"module": "exploit/multi/http/x", "target_ip": "10.0.0.1", "options": "RHOSTS"},
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "key=value" in text
 
@@ -162,11 +165,12 @@ async def test_run_msf_module_rejects_opts_without_equals(tmp_path: Path) -> Non
 @pytest.mark.asyncio
 async def test_run_msf_module_rejects_metachar_option_value(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "run_msf_module",
-        {"module": "exploit/multi/http/x", "target_ip": "10.0.0.1",
-         "options": "RHOSTS=10.0.0.1;id"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "run_msf_module",
+            {"module": "exploit/multi/http/x", "target_ip": "10.0.0.1", "options": "RHOSTS=10.0.0.1;id"},
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "forbidden characters" in text
 
@@ -183,11 +187,16 @@ async def test_run_msf_module_uses_argv_list_no_shell(monkeypatch, tmp_path: Pat
 
     monkeypatch.setattr(subprocess, "Popen", _CapturingPopen)
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "run_msf_module",
-        {"module": "exploit/multi/http/log4shell_header_injection",
-         "target_ip": "10.0.0.1", "options": "RHOSTS=10.0.0.1 LPORT=443"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "run_msf_module",
+            {
+                "module": "exploit/multi/http/log4shell_header_injection",
+                "target_ip": "10.0.0.1",
+                "options": "RHOSTS=10.0.0.1 LPORT=443",
+            },
+        )
+    )
     assert "MSF_RESULT:" in text
     # The Popen argv must be a list with msfconsole and a resource file, never
     # a shell string.
@@ -208,11 +217,18 @@ async def test_run_msf_module_uses_argv_list_no_shell(monkeypatch, tmp_path: Pat
 async def test_lateral_exec_uses_argv_list_password_literal(monkeypatch, tmp_path: Path) -> None:
     captured = _patch_pgrp(monkeypatch)
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "lateral_exec",
-        {"target_ip": "10.0.0.1", "method": "psexec", "username": "admin",
-         "password": "p'; rm -rf /; echo", "command": "whoami"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "lateral_exec",
+            {
+                "target_ip": "10.0.0.1",
+                "method": "psexec",
+                "username": "admin",
+                "password": "p'; rm -rf /; echo",
+                "command": "whoami",
+            },
+        )
+    )
     assert "LATERAL_EXEC_RESULT:" in text
     argv = captured[0]
     assert isinstance(argv, list)
@@ -220,18 +236,18 @@ async def test_lateral_exec_uses_argv_list_password_literal(monkeypatch, tmp_pat
     # The malicious password must be a single literal argv element, not split
     # by a shell into separate tokens.
     assert "p'; rm -rf /; echo" in argv
-    assert not any(v == "-c" and i + 1 < len(argv) and "bash" in argv[i - 1]
-                   for i, v in enumerate(argv))
+    assert not any(v == "-c" and i + 1 < len(argv) and "bash" in argv[i - 1] for i, v in enumerate(argv))
 
 
 @pytest.mark.asyncio
 async def test_lateral_exec_rejects_invalid_target_ip(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "lateral_exec",
-        {"target_ip": "10.0.0.1$(id)", "method": "psexec", "username": "a",
-         "password": "p"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "lateral_exec",
+            {"target_ip": "10.0.0.1$(id)", "method": "psexec", "username": "a", "password": "p"},
+        )
+    )
     assert text.startswith("BLOCKED:") or "Invalid target (IP or domain)" in text
 
 
@@ -239,11 +255,12 @@ async def test_lateral_exec_rejects_invalid_target_ip(tmp_path: Path) -> None:
 async def test_dump_credentials_secretsdump_argv_list(monkeypatch, tmp_path: Path) -> None:
     captured = _patch_pgrp(monkeypatch)
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "dump_credentials",
-        {"target_ip": "10.0.0.1", "method": "secretsdump", "username": "admin",
-         "password": "secret'$(id)"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "dump_credentials",
+            {"target_ip": "10.0.0.1", "method": "secretsdump", "username": "admin", "password": "secret'$(id)"},
+        )
+    )
     assert "CRED_DUMP_RESULT:" in text
     argv = captured[0]
     assert argv[0] == "impacket-secretsdump"
@@ -256,11 +273,12 @@ async def test_dump_credentials_secretsdump_argv_list(monkeypatch, tmp_path: Pat
 async def test_kerberoast_argv_list(monkeypatch, tmp_path: Path) -> None:
     captured = _patch_pgrp(monkeypatch)
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "kerberoast",
-        {"target_ip": "10.0.0.1", "domain": "corp", "username": "svc",
-         "password": "p`whoami`"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "kerberoast",
+            {"target_ip": "10.0.0.1", "domain": "corp", "username": "svc", "password": "p`whoami`"},
+        )
+    )
     assert "KERBEROAST_RESULT:" in text
     argv = captured[0]
     assert argv[0] == "impacket-GetUserSPNs.py"
@@ -274,12 +292,20 @@ async def test_kerberoast_argv_list(monkeypatch, tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_generate_payload_rejects_metachar_options(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "generate_payload",
-        {"payload_type": "reverse_tcp", "lhost": "10.0.0.1", "lport": 4444,
-         "format": "raw", "platform": "linux", "arch": "x64",
-         "options": "CMD='net user; rm -rf /'"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "generate_payload",
+            {
+                "payload_type": "reverse_tcp",
+                "lhost": "10.0.0.1",
+                "lport": 4444,
+                "format": "raw",
+                "platform": "linux",
+                "arch": "x64",
+                "options": "CMD='net user; rm -rf /'",
+            },
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "forbidden shell metacharacters" in text
 
@@ -288,12 +314,20 @@ async def test_generate_payload_rejects_metachar_options(tmp_path: Path) -> None
 async def test_generate_payload_uses_argv_list(monkeypatch, tmp_path: Path) -> None:
     captured = _patch_pgrp(monkeypatch)
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "generate_payload",
-        {"payload_type": "reverse_tcp", "lhost": "10.0.0.1", "lport": 4444,
-         "format": "raw", "platform": "linux", "arch": "x64",
-         "options": "CMD='net user x'"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "generate_payload",
+            {
+                "payload_type": "reverse_tcp",
+                "lhost": "10.0.0.1",
+                "lport": 4444,
+                "format": "raw",
+                "platform": "linux",
+                "arch": "x64",
+                "options": "CMD='net user x'",
+            },
+        )
+    )
     assert "PAYLOAD_RESULT:" in text
     argv = captured[0]
     assert argv[0] == "msfvenom"
@@ -309,10 +343,12 @@ async def test_generate_payload_uses_argv_list(monkeypatch, tmp_path: Path) -> N
 @pytest.mark.asyncio
 async def test_git_clone_rejects_traversal_target_dir(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "git_clone",
-        {"repo_url": "https://github.com/user/repo.git", "target_dir": "../evil"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "git_clone",
+            {"repo_url": "https://github.com/user/repo.git", "target_dir": "../evil"},
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "target_dir must match" in text
 
@@ -321,10 +357,12 @@ async def test_git_clone_rejects_traversal_target_dir(tmp_path: Path) -> None:
 async def test_git_clone_uses_argv_list(monkeypatch, tmp_path: Path) -> None:
     captured = _patch_pgrp(monkeypatch)
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "git_clone",
-        {"repo_url": "https://github.com/user/repo.git", "target_dir": "repo"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "git_clone",
+            {"repo_url": "https://github.com/user/repo.git", "target_dir": "repo"},
+        )
+    )
     assert "GIT_CLONE_RESULT:" in text
     argv = captured[0]
     assert argv[:3] == ["git", "clone", "--"]
@@ -339,9 +377,7 @@ async def test_git_clone_uses_argv_list(monkeypatch, tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_run_exploit_terminal_blocks_ipv6_not_in_allowlist(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path, require_allowlist=True, allowed_targets=["10.0.0.5"])
-    text = _text(await mcp.call_tool(
-        "run_exploit_terminal", {"command": "curl http://[::1]"}
-    ))
+    text = _text(await mcp.call_tool("run_exploit_terminal", {"command": "curl http://[::1]"}))
     assert "TERMINAL_RESULT: blocked" in text
     assert "not in the explicit allowlist" in text
 
@@ -349,9 +385,7 @@ async def test_run_exploit_terminal_blocks_ipv6_not_in_allowlist(tmp_path: Path)
 @pytest.mark.asyncio
 async def test_run_exploit_terminal_blocks_hostname_not_in_allowlist(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path, require_allowlist=True, allowed_targets=["10.0.0.5"])
-    text = _text(await mcp.call_tool(
-        "run_exploit_terminal", {"command": "nmap -sV evil.example.com"}
-    ))
+    text = _text(await mcp.call_tool("run_exploit_terminal", {"command": "nmap -sV evil.example.com"}))
     assert "TERMINAL_RESULT: blocked" in text
     assert "not in the explicit allowlist" in text
 
@@ -360,9 +394,7 @@ async def test_run_exploit_terminal_blocks_hostname_not_in_allowlist(tmp_path: P
 async def test_run_exploit_terminal_allows_allowlisted_target(tmp_path: Path) -> None:
     """A target in the allowlist is not blocked by the egress gate."""
     mcp = _make_server(tmp_path, require_allowlist=True, allowed_targets=["10.0.0.5"])
-    text = _text(await mcp.call_tool(
-        "run_exploit_terminal", {"command": "nmap -sV 10.0.0.5"}
-    ))
+    text = _text(await mcp.call_tool("run_exploit_terminal", {"command": "nmap -sV 10.0.0.5"}))
     # Not blocked by the allowlist (it may still fail on subprocess, but it must
     # not be a preflight allowlist block).
     assert "not in the explicit allowlist" not in text
@@ -386,9 +418,7 @@ async def test_run_as_root_allows_destructive_in_lab(monkeypatch, tmp_path: Path
     # returns False). This test exercises the run path, so force sudo available.
     monkeypatch.setattr("tools.env_probe._can_passwordless_sudo", lambda: True)
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "run_as_root", {"command": "rm -rf /tmp"}
-    ))
+    text = _text(await mcp.call_tool("run_as_root", {"command": "rm -rf /tmp"}))
     assert text.startswith("ROOT_CMD_RESULT: completed")
     # The command ran via bash -c "sudo rm -rf /tmp 2>&1" -- no preflight block.
     argv = captured[0]
@@ -402,9 +432,7 @@ async def test_run_as_root_blocks_non_target_ip(tmp_path: Path) -> None:
     allowlist of [10.0.0.5], a command targeting a different IP (10.0.0.99) is
     refused by the tool-layer allowlist. No pivot to other hosts."""
     mcp = _make_server(tmp_path, require_allowlist=True, allowed_targets=["10.0.0.5"])
-    text = _text(await mcp.call_tool(
-        "run_as_root", {"command": "nmap 10.0.0.99"}
-    ))
+    text = _text(await mcp.call_tool("run_as_root", {"command": "nmap 10.0.0.99"}))
     assert "ROOT_CMD_RESULT: blocked" in text
     assert "not in the explicit allowlist" in text or "target lock" in text.lower()
 
@@ -417,15 +445,17 @@ async def test_kerberoast_blocks_non_target_dc_ip(tmp_path: Path) -> None:
     kerberoast pivots to an off-target DC. The block fires before any impacket
     run, so no subprocess mock is needed."""
     mcp = _make_server(tmp_path, require_allowlist=True, allowed_targets=["10.0.0.5"])
-    text = _text(await mcp.call_tool(
-        "kerberoast",
-        {
-            "target_ip": "10.0.0.5",
-            "domain": "lab",
-            "password": "p",
-            "dc_ip": "10.0.0.99",
-        },
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "kerberoast",
+            {
+                "target_ip": "10.0.0.5",
+                "domain": "lab",
+                "password": "p",
+                "dc_ip": "10.0.0.99",
+            },
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "not in the explicit allowlist" in text
     assert "DC_IP: 10.0.0.99" in text
@@ -439,23 +469,21 @@ async def test_run_python_file_blocks_off_target_script_body(tmp_path: Path) -> 
     otherwise run_python_file is a trivial bypass of the no-pivoting lock.
     The block fires before the script runs, so no subprocess mock is needed."""
     mcp = _make_server(tmp_path, require_allowlist=True, allowed_targets=["10.0.0.5"])
-    written = _text(await mcp.call_tool(
-        "write_python_file",
-        {"filename": "pivot.py", "code": 'import os\nos.system("nc 10.0.0.99 4444")'},
-    ))
+    written = _text(
+        await mcp.call_tool(
+            "write_python_file",
+            {"filename": "pivot.py", "code": 'import os\nos.system("nc 10.0.0.99 4444")'},
+        )
+    )
     assert "PYTHON_FILE_WRITTEN" in written
-    text = _text(await mcp.call_tool(
-        "run_python_file", {"target_ip": "10.0.0.5", "filename": "pivot.py"}
-    ))
+    text = _text(await mcp.call_tool("run_python_file", {"target_ip": "10.0.0.5", "filename": "pivot.py"}))
     assert text.startswith("BLOCKED:")
     assert "not in the explicit allowlist" in text
     assert "run_python_file" in text
 
 
 @pytest.mark.asyncio
-async def test_run_python_file_passes_target_both_positional_and_flag(
-    monkeypatch, tmp_path: Path
-) -> None:
+async def test_run_python_file_passes_target_both_positional_and_flag(monkeypatch, tmp_path: Path) -> None:
     """run_python_file passes the target IP as BOTH a bare positional (sys.argv[1])
     AND --target <ip>, so a script reading sys.argv[1] (the attack-module template
     / orchestrator convention) and a script using argparse --target both receive
@@ -473,14 +501,14 @@ async def test_run_python_file_passes_target_both_positional_and_flag(
     monkeypatch.setattr(subprocess, "Popen", _CapturingPopen)
     mcp = _make_server(tmp_path)
 
-    written = _text(await mcp.call_tool(
-        "write_python_file",
-        {"filename": "argcheck.py", "code": "import sys\nprint(sys.argv[1:])\n"},
-    ))
+    written = _text(
+        await mcp.call_tool(
+            "write_python_file",
+            {"filename": "argcheck.py", "code": "import sys\nprint(sys.argv[1:])\n"},
+        )
+    )
     assert "PYTHON_FILE_WRITTEN" in written
-    text = _text(await mcp.call_tool(
-        "run_python_file", {"target_ip": "10.0.0.5", "filename": "argcheck.py"}
-    ))
+    text = _text(await mcp.call_tool("run_python_file", {"target_ip": "10.0.0.5", "filename": "argcheck.py"}))
     assert "PYTHON_RUN_RESULT" in text
 
     if wsmod._platform_system() == "Windows":
@@ -514,10 +542,12 @@ async def test_msfconsole_command_blocks_portfwd_to_non_target(tmp_path: Path) -
     host not in the allowlist -- an existing-session pivot to another host. The
     block fires before the msf bridge is touched, so no bridge mock is needed."""
     mcp = _make_server(tmp_path, require_allowlist=True, allowed_targets=["10.0.0.5"])
-    text = _text(await mcp.call_tool(
-        "msfconsole_command",
-        {"command": "portfwd add -l 8080 -p 80 -r 10.0.0.99"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "msfconsole_command",
+            {"command": "portfwd add -l 8080 -p 80 -r 10.0.0.99"},
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "not in the explicit allowlist" in text
     assert "msfconsole_command" in text
@@ -534,9 +564,7 @@ async def test_run_as_root_uses_argv_no_shell(monkeypatch, tmp_path: Path) -> No
     # is exercised here; the argv-list behavior is what this test asserts.
     monkeypatch.setattr("tools.env_probe._can_passwordless_sudo", lambda: True)
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "run_as_root", {"command": "whoami"}
-    ))
+    text = _text(await mcp.call_tool("run_as_root", {"command": "whoami"}))
     assert "ROOT_CMD_RESULT:" in text
     argv = captured[0]
     assert isinstance(argv, list)
@@ -562,10 +590,12 @@ async def test_download_and_install_neutralizes_traversal_target_name(monkeypatc
 
     monkeypatch.setattr(subprocess, "run", _ok_curl)
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "download_and_install",
-        {"url": "https://example.com/tool.deb", "target_name": "../evil.deb"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "download_and_install",
+            {"url": "https://example.com/tool.deb", "target_name": "../evil.deb"},
+        )
+    )
     assert "INSTALL_RESULT:" in text
     # The deb install argv must reference a path inside the workspace attempt
     # dir (the basename 'evil.deb'), never a '..' traversal.
@@ -580,10 +610,12 @@ async def test_download_and_install_neutralizes_traversal_target_name(monkeypatc
 @pytest.mark.asyncio
 async def test_download_and_install_rejects_metachar_target_name(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "download_and_install",
-        {"url": "https://example.com/tool.deb", "target_name": "x;id.deb"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "download_and_install",
+            {"url": "https://example.com/tool.deb", "target_name": "x;id.deb"},
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "target_name must match" in text
 
@@ -597,10 +629,12 @@ async def test_download_and_install_deb_uses_argv_list(monkeypatch, tmp_path: Pa
 
     monkeypatch.setattr(subprocess, "run", _ok_curl)
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "download_and_install",
-        {"url": "https://example.com/tool.deb", "target_name": "tool.deb"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "download_and_install",
+            {"url": "https://example.com/tool.deb", "target_name": "tool.deb"},
+        )
+    )
     assert "INSTALL_RESULT:" in text
     # First captured argv should be the dpkg install (no shell).
     assert captured, "_run_with_pgrp_timeout was not invoked"
@@ -615,10 +649,12 @@ async def test_download_and_install_deb_uses_argv_list(monkeypatch, tmp_path: Pa
 @pytest.mark.asyncio
 async def test_run_python_file_rejects_invalid_target_ip(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "run_python_file",
-        {"target_ip": "10.0.0.1; rm -rf /", "filename": "x.py"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "run_python_file",
+            {"target_ip": "10.0.0.1; rm -rf /", "filename": "x.py"},
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "valid IP address or domain" in text
 
@@ -652,9 +688,7 @@ async def test_run_python_file_psquotes_window_title(monkeypatch, tmp_path: Path
     monkeypatch.setattr(Path, "write_text", _spy_write_text)
 
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "run_python_file", {"target_ip": "10.0.0.1", "filename": "x.py"}
-    ))
+    text = _text(await mcp.call_tool("run_python_file", {"target_ip": "10.0.0.1", "filename": "x.py"}))
     assert "PYTHON_RUN_RESULT:" in text
     ps1 = written.get("ps1", "")
     # The WindowTitle line must use ps_quote (single-quoted literal), so a
@@ -671,10 +705,12 @@ async def test_run_python_file_psquotes_window_title(monkeypatch, tmp_path: Path
 @pytest.mark.asyncio
 async def test_cve_to_exploit_synth_rejects_invalid_target_ip(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "cve_to_exploit_synth",
-        {"target_ip": "10.0.0.1`id`", "cve_id": "CVE-2021-44228"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "cve_to_exploit_synth",
+            {"target_ip": "10.0.0.1`id`", "cve_id": "CVE-2021-44228"},
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "valid IP address or domain" in text
 
@@ -682,11 +718,12 @@ async def test_cve_to_exploit_synth_rejects_invalid_target_ip(tmp_path: Path) ->
 @pytest.mark.asyncio
 async def test_cve_to_exploit_synth_rejects_newline_in_version(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "cve_to_exploit_synth",
-        {"target_ip": "10.0.0.1", "cve_id": "CVE-2021-44228",
-         "service_name": "http", "version": "1.0\n# injected"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "cve_to_exploit_synth",
+            {"target_ip": "10.0.0.1", "cve_id": "CVE-2021-44228", "service_name": "http", "version": "1.0\n# injected"},
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "forbidden characters" in text
 
@@ -694,11 +731,12 @@ async def test_cve_to_exploit_synth_rejects_newline_in_version(tmp_path: Path) -
 @pytest.mark.asyncio
 async def test_cve_to_exploit_synth_rejects_quote_in_service_name(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "cve_to_exploit_synth",
-        {"target_ip": "10.0.0.1", "cve_id": "CVE-2021-44228",
-         "service_name": "http'; rm -rf /", "version": ""},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "cve_to_exploit_synth",
+            {"target_ip": "10.0.0.1", "cve_id": "CVE-2021-44228", "service_name": "http'; rm -rf /", "version": ""},
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "forbidden characters" in text
 
@@ -716,10 +754,11 @@ async def test_cve_to_exploit_synth_valid_run(tmp_path: Path, monkeypatch) -> No
 
     monkeypatch.setattr(NVDClient, "search_sync", lambda self, q: [])
     monkeypatch.setattr(ExploitSearch, "search_web_exploit", lambda self, q: "no results")
-    text = _text(await mcp.call_tool(
-        "cve_to_exploit_synth",
-        {"target_ip": "10.0.0.1", "cve_id": "CVE-2021-44228",
-         "service_name": "http", "version": "2.14.1"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "cve_to_exploit_synth",
+            {"target_ip": "10.0.0.1", "cve_id": "CVE-2021-44228", "service_name": "http", "version": "2.14.1"},
+        )
+    )
     assert "CVE_TO_EXPLOIT_SYNTH:" in text
     assert "CVE-2021-44228" in text

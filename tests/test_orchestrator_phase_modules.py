@@ -8,6 +8,7 @@ returned ``None`` and every privesc/lateral/validation task FAILED. These
 tests prove the four modules are registered, instantiable, and return the
 expected shape, and that ``get_module`` resolves them (the regression).
 """
+
 from __future__ import annotations
 
 import pytest
@@ -39,7 +40,8 @@ def _ctx(target_ip: str = "10.0.0.50", services=None) -> ModuleContext:
     return ModuleContext(
         target_ip=target_ip,
         target_os="windows",
-        services=services or [{"service": "microsoft-ds", "port": "445/tcp"}, {"service": "ms-wbt-server", "port": "3389/tcp"}],
+        services=services
+        or [{"service": "microsoft-ds", "port": "445/tcp"}, {"service": "ms-wbt-server", "port": "3389/tcp"}],
     )
 
 
@@ -98,6 +100,7 @@ def test_phase_only_modules_not_auto_selected() -> None:
     assert "LateralMovement" not in names
     assert "ValidateFinding" not in names
 
+
 # ── Phase 3: LocalExploitSuggester advisory module + orchestrator wiring ──────
 
 from tools.attack_modules.modules.orchestrator_phases import LocalExploitSuggester
@@ -127,6 +130,7 @@ def test_local_exploit_suggester_not_auto_selected() -> None:
 
 def _orchestrator(mission_config, tmp_path):
     from tools.autonomous_orchestrator import AutonomousOrchestrator
+
     return AutonomousOrchestrator(mission_config, tmp_path)
 
 
@@ -163,9 +167,7 @@ async def test_privesc_phase_appends_les_when_access_achieved(tmp_path, monkeypa
         task.status = __import__("tools.autonomous_orchestrator", fromlist=["TaskStatus"]).TaskStatus.COMPLETED
         return {"success": True}
 
-    monkeypatch.setattr(
-        "tools.autonomous_orchestrator.AttackModuleExecutor.execute", fake_execute
-    )
+    monkeypatch.setattr("tools.autonomous_orchestrator.AttackModuleExecutor.execute", fake_execute)
 
     # Access NOT achieved -> no LES task.
     state.access_achieved = False
@@ -191,10 +193,12 @@ async def test_privesc_phase_no_les_when_flag_off(tmp_path, monkeypatch) -> None
     state.recon_result = None
 
     executed: list[str] = []
+
     async def fake_execute(self, task, state):
         executed.append(task.module_name)
         task.status = TaskStatus.COMPLETED
         return {"success": True}
+
     monkeypatch.setattr("tools.autonomous_orchestrator.AttackModuleExecutor.execute", fake_execute)
 
     await o._phase_privilege_escalation(state)

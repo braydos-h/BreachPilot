@@ -22,6 +22,7 @@ from typing import Any
 try:
     import questionary
     from questionary import Choice, Style
+
     _HAS_QUESTIONARY = True
 except ImportError:
     _HAS_QUESTIONARY = False
@@ -31,24 +32,28 @@ except ImportError:
 
 # ── Styling ────────────────────────────────────────────────────────────────
 
+
 def _get_style() -> Style | None:
     if not _HAS_QUESTIONARY or Style is None:
         return None
-    return Style([
-        ("qmark", "fg:cyan bold"),
-        ("question", "fg:white bold"),
-        ("answer", "fg:green bold"),
-        ("pointer", "fg:cyan bold"),
-        ("highlighted", "fg:cyan bold"),
-        ("selected", "fg:green bold"),
-        ("separator", "fg:gray"),
-        ("instruction", "fg:gray italic"),
-        ("text", ""),
-        ("disabled", "fg:gray italic"),
-    ])
+    return Style(
+        [
+            ("qmark", "fg:cyan bold"),
+            ("question", "fg:white bold"),
+            ("answer", "fg:green bold"),
+            ("pointer", "fg:cyan bold"),
+            ("highlighted", "fg:cyan bold"),
+            ("selected", "fg:green bold"),
+            ("separator", "fg:gray"),
+            ("instruction", "fg:gray italic"),
+            ("text", ""),
+            ("disabled", "fg:gray italic"),
+        ]
+    )
 
 
 # ── Main Menu ──────────────────────────────────────────────────────────────
+
 
 def _fallback_main_menu() -> str | None:
     """Simple numbered menu fallback when questionary is unavailable."""
@@ -77,6 +82,7 @@ def _fallback_main_menu() -> str | None:
 
 
 # ── Sub-menus ──────────────────────────────────────────────────────────────
+
 
 def _manage_missions() -> None:
     """Mission management submenu — list, create, delete missions."""
@@ -135,8 +141,7 @@ def _list_missions(db: Any) -> list[dict[str, Any]]:
     with db.connection() as conn:
         db.ensure_schema(conn)
         cur = conn.execute(
-            "SELECT id, program_name, risk_profile, status, created_at "
-            "FROM missions ORDER BY created_at DESC"
+            "SELECT id, program_name, risk_profile, status, created_at FROM missions ORDER BY created_at DESC"
         )
         return [dict(r) for r in cur.fetchall()]
 
@@ -208,8 +213,13 @@ def _create_mission_interactive(ctrl: Any) -> None:
         "allowed_assets": allowed,
         "disallowed_assets": [],
         "forbidden_actions": [
-            "denial_of_service", "destructive_exploit", "credential_theft",
-            "social_engineering", "physical_attack", "persistence", "malware",
+            "denial_of_service",
+            "destructive_exploit",
+            "credential_theft",
+            "social_engineering",
+            "physical_attack",
+            "persistence",
+            "malware",
             "uncontrolled_fuzzing",
         ],
         "testing_modes": ["recon", "analysis", "report"],
@@ -235,9 +245,9 @@ def _mission_detail(db: Any, ctrl: Any, mission_id: str) -> None:
             return
         data = dict(row)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  Mission: {data.get('program_name', '?')}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  ID:           {data.get('id', '?')}")
     print(f"  Status:       {data.get('status', '?')}")
     print(f"  Risk Profile: {data.get('risk_profile', '?')}")
@@ -309,9 +319,9 @@ def _preview_report(session_dir: Path) -> None:
     summary_path = session_dir / "session_summary.md"
     activity_path = session_dir / "activity.jsonl"
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  Report: {session_dir.name}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     if summary_path.exists():
         content = summary_path.read_text(encoding="utf-8")
@@ -336,6 +346,7 @@ def _edit_settings() -> None:
         _create_default_config(config_path)
 
     import yaml
+
     config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
 
     if not _HAS_QUESTIONARY:
@@ -355,6 +366,7 @@ def _edit_settings() -> None:
     # AI provider selection (ollama | chatgpt). Defaults to ollama so an
     # absent key (the common case) is unchanged.
     from tools.config_manager import get_ai_provider, get_chatgpt_config
+
     current_provider = get_ai_provider(config)
     provider = questionary.select(
         "AI provider (chat/generate):",
@@ -370,6 +382,7 @@ def _edit_settings() -> None:
     if provider == "chatgpt":
         # Auth status (bool only — never read token contents) + sign-in flow.
         from tools.providers.chatgpt_provider import ChatGptProxyManager
+
         manager = ChatGptProxyManager.get()
         if not manager.is_authenticated(chatgpt_cfg):
             print("\n  ChatGPT: not signed in yet.")
@@ -414,6 +427,7 @@ def _edit_settings() -> None:
 
         try:
             from tools.model_router import format_model_choice
+
             _info_lookup = config.get("models", {}).get("info", {}) or {}
         except Exception:
             format_model_choice = None
@@ -507,6 +521,7 @@ def _edit_settings() -> None:
 def _create_default_config(path: Path) -> None:
     """Create a default config.yaml."""
     import yaml
+
     default = {
         "ollama": {"host": "http://localhost:11434", "model": "glm-5.2:cloud"},
         "models": {

@@ -63,9 +63,6 @@ def test_empty_input_still_returns_empty():
 
 
 def test_os_verdict_carries_into_quick_scan_records():
-    sample = (
-        "TARGET: 10.0.0.5\nOS_VERDICT: LINUX\n"
-        "  Port 22/tcp OPEN (ssh) - SSH-2.0-OpenSSH_8.5p1\n"
-    )
+    sample = "TARGET: 10.0.0.5\nOS_VERDICT: LINUX\n  Port 22/tcp OPEN (ssh) - SSH-2.0-OpenSSH_8.5p1\n"
     records = parse_service_banners(sample)
     assert records[0]["os_guess"] == "LINUX"

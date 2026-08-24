@@ -59,10 +59,12 @@ class SemanticMemoryManager:
             import urllib.error
             import urllib.request
 
-            payload = json.dumps({
-                "model": self._embedding_model,
-                "prompt": text,
-            }).encode("utf-8")
+            payload = json.dumps(
+                {
+                    "model": self._embedding_model,
+                    "prompt": text,
+                }
+            ).encode("utf-8")
 
             req = urllib.request.Request(
                 f"{self._ollama_host}/api/embeddings",
@@ -188,7 +190,7 @@ class SemanticMemoryManager:
 
         # Tier 1.1: skip zero-length embeddings. ``record_outcome`` (ExperienceStore)
         # writes lessons rows with embedding_json='[]' to track Bayesian outcomes;
-        #those rows have no vector and would tie at cosine 0.0, polluting recall.
+        # those rows have no vector and would tie at cosine 0.0, polluting recall.
         # The same guard on the embeddings table is defensive (store_embedding only
         # ever writes a real vector or skips, but never trust that across flows).
         # ponytail: LIMIT avoids loading the entire embeddings table into memory
@@ -229,13 +231,15 @@ class SemanticMemoryManager:
                         exc,
                     )
                     continue
-                candidates.append({
-                    "id": row_id,
-                    "mission_id": row["mission_id"],
-                    "source_table": row["source_table"],
-                    "source_id": row["source_id"],
-                    "similarity": float(sim),
-                })
+                candidates.append(
+                    {
+                        "id": row_id,
+                        "mission_id": row["mission_id"],
+                        "source_table": row["source_table"],
+                        "source_id": row["source_id"],
+                        "similarity": float(sim),
+                    }
+                )
 
         candidates.sort(key=lambda x: x["similarity"], reverse=True)
         return candidates[:top_k]
@@ -304,21 +308,23 @@ class SemanticMemoryManager:
                         exc,
                     )
                     continue
-                candidates.append({
-                    "id": row_id,
-                    "pattern_hash": row["pattern_hash"],
-                    "target_signature": row["target_signature"],
-                    "action_type": row["action_type"],
-                    "outcome": row["outcome"],
-                    "confidence": row["confidence"],
-                    "similarity": float(sim),
-                    "metadata": metadata,
-                    # The lesson text (the "why" explanation). The audit flagged
-                    # this was embedded for similarity but never returned, so the
-                    # model never saw the lesson. Now persisted in the text column
-                    # (migration v5) and selected here.
-                    "text": str(row["text"] or "") if "text" in row.keys() else "",
-                })
+                candidates.append(
+                    {
+                        "id": row_id,
+                        "pattern_hash": row["pattern_hash"],
+                        "target_signature": row["target_signature"],
+                        "action_type": row["action_type"],
+                        "outcome": row["outcome"],
+                        "confidence": row["confidence"],
+                        "similarity": float(sim),
+                        "metadata": metadata,
+                        # The lesson text (the "why" explanation). The audit flagged
+                        # this was embedded for similarity but never returned, so the
+                        # model never saw the lesson. Now persisted in the text column
+                        # (migration v5) and selected here.
+                        "text": str(row["text"] or "") if "text" in row.keys() else "",
+                    }
+                )
 
         candidates.sort(key=lambda x: x["similarity"], reverse=True)
         return candidates[:top_k]
@@ -360,10 +366,10 @@ class SemanticMemoryManager:
             + trunc_marker
             + "\n\nReturn a JSON object only (no markdown fences):\n"
             "{\n"
-            "  \"lessons\": [{\"pattern\": \"...\", \"worked_or_failed\": \"worked|failed\", \"why\": \"...\"}],\n"
-            "  \"contradictions\": [\"observation pairs that conflict\"]\n"
+            '  "lessons": [{"pattern": "...", "worked_or_failed": "worked|failed", "why": "..."}],\n'
+            '  "contradictions": ["observation pairs that conflict"]\n'
             "}\n"
-            "If no reusable pattern emerges, return {\"lessons\": [], \"contradictions\": []}."
+            'If no reusable pattern emerges, return {"lessons": [], "contradictions": []}.'
         )
         messages = [
             {"role": "system", "content": "You are a security research summarizer. Return only valid JSON."},

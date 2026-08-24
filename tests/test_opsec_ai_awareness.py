@@ -16,6 +16,7 @@ the OPSEC system instead of having it applied invisibly:
 Plain pytest, no fixtures. Hermetic: subprocess is stubbed, EXPLOIT_TARGET is
 monkeypatched, OpsecManager I/O is injectable.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -27,8 +28,7 @@ import pytest
 # ── Harness helpers ─────────────────────────────────────────────────────────
 
 
-def _make_server(tmp_path: Path, *, opsec: dict[str, Any] | None = None,
-                 require_allowlist: bool = False) -> Any:
+def _make_server(tmp_path: Path, *, opsec: dict[str, Any] | None = None, require_allowlist: bool = False) -> Any:
     from mcp_exploit_server import create_mcp_server
     from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
@@ -118,11 +118,14 @@ class TestOpsecBriefing:
         from tools.exploit_agent.prompt import build_exploit_system_prompt
 
         with_block = build_exploit_system_prompt(
-            attacker_os="Linux", target_ip="8.8.8.8",
+            attacker_os="Linux",
+            target_ip="8.8.8.8",
             opsec_context="OPSEC POSTURE: advisory",
         )
         without_block = build_exploit_system_prompt(
-            attacker_os="Linux", target_ip="8.8.8.8", opsec_context="",
+            attacker_os="Linux",
+            target_ip="8.8.8.8",
+            opsec_context="",
         )
         assert "OPSEC POSTURE" in with_block
         assert "OPSEC POSTURE" not in without_block
@@ -144,9 +147,7 @@ class TestOpsecBriefing:
 
 class TestTerminalAdvisory:
     @pytest.mark.asyncio
-    async def test_public_noisy_command_gets_advisory_and_executes(
-        self, monkeypatch, tmp_path: Path
-    ) -> None:
+    async def test_public_noisy_command_gets_advisory_and_executes(self, monkeypatch, tmp_path: Path) -> None:
         import tools.mcp_tools.terminal as term
 
         monkeypatch.setattr(term, "_platform_system", lambda: "Linux")
@@ -154,9 +155,7 @@ class TestTerminalAdvisory:
         monkeypatch.setenv("EXPLOIT_TARGET", "8.8.8.8")
 
         mcp = _make_server(tmp_path, opsec={"enabled": True})
-        text = _text(await mcp.call_tool(
-            "run_exploit_terminal", {"command": "nmap -T5 -sV 8.8.8.8"}
-        ))
+        text = _text(await mcp.call_tool("run_exploit_terminal", {"command": "nmap -T5 -sV 8.8.8.8"}))
         # The command executed (advisory never gates).
         assert "TERMINAL_RESULT: completed" in text
         # And the AI got live OPSEC feedback.
@@ -166,9 +165,7 @@ class TestTerminalAdvisory:
         assert "-T2" in text
 
     @pytest.mark.asyncio
-    async def test_quiet_command_advisory_score_zero(
-        self, monkeypatch, tmp_path: Path
-    ) -> None:
+    async def test_quiet_command_advisory_score_zero(self, monkeypatch, tmp_path: Path) -> None:
         import tools.mcp_tools.terminal as term
 
         monkeypatch.setattr(term, "_platform_system", lambda: "Linux")
@@ -176,17 +173,13 @@ class TestTerminalAdvisory:
         monkeypatch.setenv("EXPLOIT_TARGET", "8.8.8.8")
 
         mcp = _make_server(tmp_path, opsec={"enabled": True})
-        text = _text(await mcp.call_tool(
-            "run_exploit_terminal", {"command": "ls -la"}
-        ))
+        text = _text(await mcp.call_tool("run_exploit_terminal", {"command": "ls -la"}))
         assert "OPSEC_ADVISORY:" in text
         assert "Noise score: 0" in text
         assert "no rewrite available" in text
 
     @pytest.mark.asyncio
-    async def test_quiet_command_pattern_match_still_executes(
-        self, monkeypatch, tmp_path: Path
-    ) -> None:
+    async def test_quiet_command_pattern_match_still_executes(self, monkeypatch, tmp_path: Path) -> None:
         """REGRESSION: a command matching a quiet_command_patterns substring
         STILL executes. is_quiet_blocked / noise_budget must NOT be re-gated
         onto the attack path -- the advisory is informational only."""
@@ -194,42 +187,43 @@ class TestTerminalAdvisory:
 
         # Sanity: the dormant gate would block this if it were wired.
         from tools.opsec import OpsecManager, OpsecProfile
-        blocking = OpsecManager(OpsecProfile(
-            enabled=True, quiet_command_patterns=("nmap",)
-        ))
+
+        blocking = OpsecManager(OpsecProfile(enabled=True, quiet_command_patterns=("nmap",)))
         assert blocking.is_quiet_blocked("nmap -T5 -sV 8.8.8.8") is True
 
         monkeypatch.setattr(term, "_platform_system", lambda: "Linux")
         monkeypatch.setattr(subprocess, "Popen", _Popen)
         monkeypatch.setenv("EXPLOIT_TARGET", "8.8.8.8")
 
-        mcp = _make_server(tmp_path, opsec={
-            "enabled": True, "quiet_command_patterns": ["nmap"],
-        })
-        text = _text(await mcp.call_tool(
-            "run_exploit_terminal", {"command": "nmap -T5 -sV 8.8.8.8"}
-        ))
+        mcp = _make_server(
+            tmp_path,
+            opsec={
+                "enabled": True,
+                "quiet_command_patterns": ["nmap"],
+            },
+        )
+        text = _text(await mcp.call_tool("run_exploit_terminal", {"command": "nmap -T5 -sV 8.8.8.8"}))
         # Command executed (NOT blocked) despite matching the quiet pattern.
         assert "TERMINAL_RESULT: completed" in text
         assert "BLOCKED_REASON" not in text
         assert "not in the explicit allowlist" not in text
 
     @pytest.mark.asyncio
-    async def test_local_target_no_advisory(
-        self, monkeypatch, tmp_path: Path
-    ) -> None:
+    async def test_local_target_no_advisory(self, monkeypatch, tmp_path: Path) -> None:
         import tools.mcp_tools.terminal as term
 
         monkeypatch.setattr(term, "_platform_system", lambda: "Linux")
         monkeypatch.setattr(subprocess, "Popen", _Popen)
         monkeypatch.setenv("EXPLOIT_TARGET", "127.0.0.1")
 
-        mcp = _make_server(tmp_path, opsec={
-            "enabled": True, "local_targets_off": True,
-        })
-        text = _text(await mcp.call_tool(
-            "run_exploit_terminal", {"command": "nmap -T5 -sV 127.0.0.1"}
-        ))
+        mcp = _make_server(
+            tmp_path,
+            opsec={
+                "enabled": True,
+                "local_targets_off": True,
+            },
+        )
+        text = _text(await mcp.call_tool("run_exploit_terminal", {"command": "nmap -T5 -sV 127.0.0.1"}))
         assert "TERMINAL_RESULT: completed" in text
         # Local target -> OPSEC OFF -> no advisory block.
         assert "OPSEC_ADVISORY:" not in text

@@ -47,6 +47,7 @@ _SAMPLE_PLAN = {
 
 # ─── _target_mismatch ─────────────────────────────────────────────────────
 
+
 def test_target_mismatch_returns_none_when_match() -> None:
     plan = {"target_ip": "10.0.0.50"}
     recon = {"target_ip": "10.0.0.50"}
@@ -66,6 +67,7 @@ def test_target_mismatch_returns_none_when_empty() -> None:
 
 
 # ─── _rule_based_score ────────────────────────────────────────────────────
+
 
 def test_rule_based_score_empty_plan() -> None:
     result = _rule_based_score({"target_ip": "10.0.0.50", "steps": []}, _SAMPLE_RECON)
@@ -108,6 +110,7 @@ def test_rule_based_score_proposes_branches_for_uncovered_ports() -> None:
 
 # ─── simulate (rule fallback when no model) ──────────────────────────────
 
+
 def test_simulate_uses_rules_when_no_model_client() -> None:
     result = simulate(_SAMPLE_PLAN, _SAMPLE_RECON)
     assert isinstance(result, SimulationResult)
@@ -124,6 +127,7 @@ def test_simulate_flags_target_mismatch_in_critique() -> None:
 
 # ─── simulate with mock LLM ──────────────────────────────────────────────
 
+
 class _FakeClient:
     def __init__(self, content: str) -> None:
         self.content = content
@@ -133,14 +137,21 @@ class _FakeClient:
 
 
 def test_simulate_uses_llm_when_model_client_provided() -> None:
-    llm_json = json.dumps({
-        "confidence": 0.82,
-        "critique": "Plan looks solid; add an enumeration step for port 22.",
-        "branches": [
-            {"phase": "enumerate", "tool": "quick_scan", "reason": "port 22 open",
-             "target_ip": "10.0.0.50", "arguments": {"ports": "22"}},
-        ],
-    })
+    llm_json = json.dumps(
+        {
+            "confidence": 0.82,
+            "critique": "Plan looks solid; add an enumeration step for port 22.",
+            "branches": [
+                {
+                    "phase": "enumerate",
+                    "tool": "quick_scan",
+                    "reason": "port 22 open",
+                    "target_ip": "10.0.0.50",
+                    "arguments": {"ports": "22"},
+                },
+            ],
+        }
+    )
     client = _FakeClient(llm_json)
     result = simulate(_SAMPLE_PLAN, _SAMPLE_RECON, model_client=client, model_alias="glm")
     assert result.source == "llm"
@@ -153,6 +164,7 @@ def test_simulate_falls_back_to_rules_when_llm_raises() -> None:
     class _BoomClient:
         def chat(self, *_a, **_k):
             raise RuntimeError("ollama down")
+
     result = simulate(_SAMPLE_PLAN, _SAMPLE_RECON, model_client=_BoomClient(), model_alias="glm")
     assert result.source == "rules"
 
@@ -172,13 +184,14 @@ def test_simulate_clamps_out_of_range_confidence() -> None:
 
 # ─── _parse_json_block ───────────────────────────────────────────────────
 
+
 def test_parse_json_block_handles_fenced_json() -> None:
-    text = "```json\n{\"a\": 1}\n```"
+    text = '```json\n{"a": 1}\n```'
     assert _parse_json_block(text) == {"a": 1}
 
 
 def test_parse_json_block_handles_prose_around_json() -> None:
-    text = "Here is the plan:\n{\"a\": 1}\nThat's it."
+    text = 'Here is the plan:\n{"a": 1}\nThat\'s it.'
     assert _parse_json_block(text) == {"a": 1}
 
 
@@ -187,6 +200,7 @@ def test_parse_json_block_returns_none_on_garbage() -> None:
 
 
 # ─── render_simulation_result ────────────────────────────────────────────
+
 
 def test_render_simulation_result_has_required_fields() -> None:
     r = SimulationResult(
@@ -205,6 +219,7 @@ def test_render_simulation_result_has_required_fields() -> None:
 
 
 # ─── MCP registration (opt-in) ───────────────────────────────────────────
+
 
 def _server(tmp_path: Path, config: dict):
     from mcp_exploit_server import create_mcp_server
@@ -247,12 +262,16 @@ async def test_replay_simulate_rejects_empty_args(tmp_path: Path) -> None:
 async def test_replay_simulate_runs_rule_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Force no model client so the LLM path is skipped and rules run.
     import tools.mcp_tools.replay_simulator as _rs
+
     monkeypatch.setattr(_rs, "_get_model_client", lambda _c: (None, ""))
     mcp = _server(tmp_path, {"replay_simulator": {"enabled": True}})
-    result = await mcp.call_tool("replay_simulate", {
-        "plan_json": json.dumps(_SAMPLE_PLAN),
-        "recon_json": json.dumps(_SAMPLE_RECON),
-    })
+    result = await mcp.call_tool(
+        "replay_simulate",
+        {
+            "plan_json": json.dumps(_SAMPLE_PLAN),
+            "recon_json": json.dumps(_SAMPLE_RECON),
+        },
+    )
     text = result.content[0].text if hasattr(result, "content") else str(result)
     assert "REPLAY_SIMULATION_RESULT:" in text
     assert "SOURCE: rules" in text

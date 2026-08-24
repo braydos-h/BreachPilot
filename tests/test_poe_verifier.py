@@ -163,13 +163,10 @@ def test_sync_verify_user_privilege():
     fx.responses = [
         (
             "echo ",
-            (
-                "OUTPUT:\n{token}\n---ID---\n"
-                "uid=1000(bob) gid=1000(bob) groups=1000(bob)\n"
-                "bob\nhost\n"
-            ),
+            ("OUTPUT:\n{token}\n---ID---\nuid=1000(bob) gid=1000(bob) groups=1000(bob)\nbob\nhost\n"),
         )
     ]
+
     # The default fake substitutes {token} literally; patch it to echo the
     # real token by overriding __call__ behavior through a subclass.
     class UserFake(FakeExecutor):
@@ -177,13 +174,7 @@ def test_sync_verify_user_privilege():
             self.calls.append((name, args))
             cmd = args.get("command", "")
             token = cmd.split("echo '", 1)[1].split("'", 1)[0] if "echo '" in cmd else ""
-            return (
-                "OUTPUT:\n"
-                f"{token}\n"
-                "---ID---\n"
-                "uid=1000(bob) gid=1000(bob) groups=1000(bob)\n"
-                "bob\nhost\n"
-            )
+            return f"OUTPUT:\n{token}\n---ID---\nuid=1000(bob) gid=1000(bob) groups=1000(bob)\nbob\nhost\n"
 
     out = verify_compromise_sync(UserFake(), "10.0.0.5")
     assert out["verified"] is True
@@ -246,6 +237,7 @@ async def test_async_verify_timeout():
         def __call__(self, name, args):
             # Block long enough to trip the asyncio.wait_for guard.
             import time as _t
+
             _t.sleep(5)
             return "OUTPUT:\n"
 

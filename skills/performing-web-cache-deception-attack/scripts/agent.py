@@ -15,11 +15,9 @@ from datetime import datetime
 
 import requests
 
-CACHE_EXTENSIONS = [".css", ".js", ".png", ".jpg", ".gif", ".ico",
-                    ".svg", ".woff", ".woff2", ".pdf", ".txt"]
+CACHE_EXTENSIONS = [".css", ".js", ".png", ".jpg", ".gif", ".ico", ".svg", ".woff", ".woff2", ".pdf", ".txt"]
 
-CACHE_HEADERS = ["X-Cache", "X-Cache-Status", "CF-Cache-Status",
-                 "Age", "X-Varnish", "X-Proxy-Cache", "X-CDN-Cache"]
+CACHE_HEADERS = ["X-Cache", "X-Cache-Status", "CF-Cache-Status", "Age", "X-Varnish", "X-Proxy-Cache", "X-CDN-Cache"]
 
 
 class WebCacheDeceptionAgent:
@@ -58,8 +56,7 @@ class WebCacheDeceptionAgent:
             try:
                 resp = self.session.get(test_url, timeout=10, allow_redirects=False)
                 cache_info = self.check_cache_headers(resp)
-                cached = any(v.lower() in ("hit", "true", "1")
-                             for v in cache_info.values() if isinstance(v, str))
+                cached = any(v.lower() in ("hit", "true", "1") for v in cache_info.values() if isinstance(v, str))
                 content_match = abs(len(resp.text) - baseline_len) < 100
 
                 if content_match and resp.status_code == 200:
@@ -67,21 +64,26 @@ class WebCacheDeceptionAgent:
                     served_to_unauth = abs(len(unauth.text) - baseline_len) < 100
 
                     if served_to_unauth:
-                        self.findings.append({
-                            "type": "Web Cache Deception",
-                            "severity": "Critical",
-                            "url": test_url,
-                            "extension": ext,
-                            "cached_pii": baseline_has_pii,
-                        })
+                        self.findings.append(
+                            {
+                                "type": "Web Cache Deception",
+                                "severity": "Critical",
+                                "url": test_url,
+                                "extension": ext,
+                                "cached_pii": baseline_has_pii,
+                            }
+                        )
 
-                results.append({
-                    "extension": ext, "url": test_url,
-                    "status": resp.status_code,
-                    "content_match": content_match,
-                    "cache_headers": cache_info,
-                    "cached": cached,
-                })
+                results.append(
+                    {
+                        "extension": ext,
+                        "url": test_url,
+                        "status": resp.status_code,
+                        "content_match": content_match,
+                        "cache_headers": cache_info,
+                        "cached": cached,
+                    }
+                )
             except requests.RequestException:
                 continue
         return results
@@ -96,19 +98,21 @@ class WebCacheDeceptionAgent:
                 try:
                     resp = self.session.get(test_url, timeout=10)
                     cache_info = self.check_cache_headers(resp)
-                    results.append({
-                        "delimiter": delim, "extension": ext,
-                        "status": resp.status_code,
-                        "cache_headers": cache_info,
-                    })
+                    results.append(
+                        {
+                            "delimiter": delim,
+                            "extension": ext,
+                            "status": resp.status_code,
+                            "cache_headers": cache_info,
+                        }
+                    )
                 except requests.RequestException:
                     continue
         return results
 
     def _check_pii(self, text):
         """Check if response contains PII indicators."""
-        pii_indicators = ["email", "username", "name", "address", "phone",
-                          "ssn", "credit", "account", "@"]
+        pii_indicators = ["email", "username", "name", "address", "phone", "ssn", "credit", "account", "@"]
         return any(indicator in text.lower() for indicator in pii_indicators)
 
     def generate_report(self):

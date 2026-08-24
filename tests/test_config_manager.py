@@ -14,6 +14,7 @@ def test_config_validator_import():
         CONFIG_SCHEMA,
         KNOWN_TOP_KEYS,
     )
+
     assert CONFIG_SCHEMA is not None
     assert "ollama" in CONFIG_SCHEMA
     assert "models" in CONFIG_SCHEMA
@@ -43,6 +44,7 @@ def test_config_validator_import():
 def test_validation_result_defaults():
     """ConfigValidationResult should start with no errors."""
     from tools.config_manager import ConfigValidationResult
+
     result = ConfigValidationResult()
     assert result.is_valid
     assert not result.has_warnings
@@ -54,6 +56,7 @@ def test_validation_result_defaults():
 def test_validation_result_with_errors():
     """ConfigValidationResult should detect errors."""
     from tools.config_manager import ConfigValidationResult
+
     result = ConfigValidationResult()
     result.errors.append("Something is wrong")
     assert not result.is_valid
@@ -62,6 +65,7 @@ def test_validation_result_with_errors():
 def test_validation_result_with_warnings():
     """ConfigValidationResult should detect warnings."""
     from tools.config_manager import ConfigValidationResult
+
     result = ConfigValidationResult()
     result.warnings.append("Be careful")
     assert result.has_warnings
@@ -71,25 +75,26 @@ def test_validate_valid_config():
     """A valid config should pass validation."""
     from tools.config_manager import ConfigValidator
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".yaml", delete=False, encoding="utf-8"
-    ) as f:
-        yaml.safe_dump({
-            "ollama": {"host": "http://localhost:11434"},
-            "models": {
-                "registry": {"kimi": "kimi-k2.6:cloud"},
-                "default_alias": "kimi",
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False, encoding="utf-8") as f:
+        yaml.safe_dump(
+            {
+                "ollama": {"host": "http://localhost:11434"},
+                "models": {
+                    "registry": {"kimi": "kimi-k2.6:cloud"},
+                    "default_alias": "kimi",
+                },
+                "mcp": {"default_transport": "stdio", "http_port": 8001},
+                "exploit": {"enabled": True},
+                "multi_model": {
+                    "enabled": False,
+                    "consult_aliases": ["kimi", "deepseek"],
+                    "max_consultations": 3,
+                    "max_question_chars": 1000,
+                    "max_answer_chars": 2000,
+                },
             },
-            "mcp": {"default_transport": "stdio", "http_port": 8001},
-            "exploit": {"enabled": True},
-            "multi_model": {
-                "enabled": False,
-                "consult_aliases": ["kimi", "deepseek"],
-                "max_consultations": 3,
-                "max_question_chars": 1000,
-                "max_answer_chars": 2000,
-            },
-        }, f)
+            f,
+        )
         temp_path = f.name
 
     try:
@@ -114,16 +119,17 @@ def test_validate_unknown_keys():
     """Unknown top-level keys should be flagged."""
     from tools.config_manager import ConfigValidator
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".yaml", delete=False, encoding="utf-8"
-    ) as f:
-        yaml.safe_dump({
-            "ollama": {"host": "http://localhost:11434"},
-            "models": {"registry": {"kimi": "kimi-k2.6:cloud"}},
-            "mcp": {"default_transport": "stdio"},
-            "exploit": {"enabled": True},
-            "unknown_section": {"foo": "bar"},
-        }, f)
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False, encoding="utf-8") as f:
+        yaml.safe_dump(
+            {
+                "ollama": {"host": "http://localhost:11434"},
+                "models": {"registry": {"kimi": "kimi-k2.6:cloud"}},
+                "mcp": {"default_transport": "stdio"},
+                "exploit": {"enabled": True},
+                "unknown_section": {"foo": "bar"},
+            },
+            f,
+        )
         temp_path = f.name
 
     try:
@@ -138,12 +144,13 @@ def test_apply_defaults_fills_missing():
     """apply_defaults should fill missing sections."""
     from tools.config_manager import ConfigValidator
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".yaml", delete=False, encoding="utf-8"
-    ) as f:
-        yaml.safe_dump({
-            "ollama": {"host": "http://custom:11434"},
-        }, f)
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False, encoding="utf-8") as f:
+        yaml.safe_dump(
+            {
+                "ollama": {"host": "http://custom:11434"},
+            },
+            f,
+        )
         temp_path = f.name
 
     try:
@@ -173,20 +180,21 @@ def test_convenience_accessors():
     """Convenience accessors should return correct values."""
     from tools.config_manager import ConfigValidator
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".yaml", delete=False, encoding="utf-8"
-    ) as f:
-        yaml.safe_dump({
-            "ollama": {"host": "http://ollama:11434"},
-            "models": {
-                "registry": {"kimi": "kimi-model", "deepseek": "ds-model"},
-                "default_alias": "deepseek",
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False, encoding="utf-8") as f:
+        yaml.safe_dump(
+            {
+                "ollama": {"host": "http://ollama:11434"},
+                "models": {
+                    "registry": {"kimi": "kimi-model", "deepseek": "ds-model"},
+                    "default_alias": "deepseek",
+                },
+                "mcp": {"default_transport": "http", "http_port": 9000},
+                "exploit": {"enabled": True, "max_rounds": 100},
+                "stealth": {"rotate_ua": True},
+                "multi_model": {"enabled": True, "max_consultations": 2},
             },
-            "mcp": {"default_transport": "http", "http_port": 9000},
-            "exploit": {"enabled": True, "max_rounds": 100},
-            "stealth": {"rotate_ua": True},
-            "multi_model": {"enabled": True, "max_consultations": 2},
-        }, f)
+            f,
+        )
         temp_path = f.name
 
     try:
@@ -209,23 +217,24 @@ def test_runtime_sections_are_not_unknown_keys():
     """Checked-in runtime sections should validate without unknown-key noise."""
     from tools.config_manager import ConfigValidator
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".yaml", delete=False, encoding="utf-8"
-    ) as f:
-        yaml.safe_dump({
-            "ollama": {"host": "http://localhost:11434"},
-            "models": {"registry": {"glm": "glm-5.2:cloud"}, "default_alias": "glm"},
-            "mcp": {"default_transport": "stdio"},
-            "exploit": {"enabled": True},
-            "stealth": {"rotate_ua": False},
-            "cve_lookup": {"enabled": True},
-            "research": {"enabled": True},
-            "swarm": {"enabled": True},
-            "reasoning": {"chain_of_thought": True},
-            "memory": {"semantic_enabled": True},
-            "adaptive_exploits": {"enabled": True},
-            "multi_model": {"enabled": False},
-        }, f)
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False, encoding="utf-8") as f:
+        yaml.safe_dump(
+            {
+                "ollama": {"host": "http://localhost:11434"},
+                "models": {"registry": {"glm": "glm-5.2:cloud"}, "default_alias": "glm"},
+                "mcp": {"default_transport": "stdio"},
+                "exploit": {"enabled": True},
+                "stealth": {"rotate_ua": False},
+                "cve_lookup": {"enabled": True},
+                "research": {"enabled": True},
+                "swarm": {"enabled": True},
+                "reasoning": {"chain_of_thought": True},
+                "memory": {"semantic_enabled": True},
+                "adaptive_exploits": {"enabled": True},
+                "multi_model": {"enabled": False},
+            },
+            f,
+        )
         temp_path = f.name
 
     try:
@@ -241,19 +250,20 @@ def test_load_validated_config_does_not_log_unknown_for_runtime_sections(caplog)
     """Attack startup calls load_validated_config repeatedly; runtime keys must stay quiet."""
     from tools.config_manager import load_validated_config
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".yaml", delete=False, encoding="utf-8"
-    ) as f:
-        yaml.safe_dump({
-            "ollama": {"host": "http://localhost:11434"},
-            "models": {"registry": {"glm": "glm-5.2:cloud"}, "default_alias": "glm"},
-            "mcp": {"default_transport": "stdio"},
-            "exploit": {"enabled": True},
-            "research": {"enabled": True},
-            "swarm": {"enabled": True},
-            "memory": {"semantic_enabled": True},
-            "adaptive_exploits": {"enabled": True},
-        }, f)
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False, encoding="utf-8") as f:
+        yaml.safe_dump(
+            {
+                "ollama": {"host": "http://localhost:11434"},
+                "models": {"registry": {"glm": "glm-5.2:cloud"}, "default_alias": "glm"},
+                "mcp": {"default_transport": "stdio"},
+                "exploit": {"enabled": True},
+                "research": {"enabled": True},
+                "swarm": {"enabled": True},
+                "memory": {"semantic_enabled": True},
+                "adaptive_exploits": {"enabled": True},
+            },
+            f,
+        )
         temp_path = f.name
 
     try:
@@ -269,20 +279,21 @@ def test_validate_multi_model_warnings():
     """Invalid multi_model values should warn without breaking other config."""
     from tools.config_manager import ConfigValidator
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".yaml", delete=False, encoding="utf-8"
-    ) as f:
-        yaml.safe_dump({
-            "ollama": {"host": "http://localhost:11434"},
-            "models": {"registry": {"kimi": "kimi-model"}, "default_alias": "kimi"},
-            "mcp": {"default_transport": "stdio"},
-            "exploit": {"enabled": True},
-            "multi_model": {
-                "enabled": "yes",
-                "consult_aliases": "kimi",
-                "max_consultations": 0,
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False, encoding="utf-8") as f:
+        yaml.safe_dump(
+            {
+                "ollama": {"host": "http://localhost:11434"},
+                "models": {"registry": {"kimi": "kimi-model"}, "default_alias": "kimi"},
+                "mcp": {"default_transport": "stdio"},
+                "exploit": {"enabled": True},
+                "multi_model": {
+                    "enabled": "yes",
+                    "consult_aliases": "kimi",
+                    "max_consultations": 0,
+                },
             },
-        }, f)
+            f,
+        )
         temp_path = f.name
 
     try:
@@ -302,23 +313,26 @@ def test_validate_skills_warnings(tmp_path: Path):
     from tools.config_manager import ConfigValidator
 
     config_path = tmp_path / "config.yaml"
-    yaml.safe_dump({
-        "ollama": {"host": "http://localhost:11434"},
-        "models": {"registry": {"glm": "glm-5.2:cloud"}, "default_alias": "glm"},
-        "mcp": {"default_transport": "stdio"},
-        "exploit": {"enabled": True},
-        "skills": {
-            "enabled": "yes",
-            "inject_startup_context": "yes",
-            "roots": "skills",
-            "max_active_skills": 0,
-            "min_contextual_skills": 0,
-            "default_skill_weight": "high",
-            "context_skill_weight": 0,
-            "semantic_min_similarity": 2,
-            "diversity_penalty": -1,
+    yaml.safe_dump(
+        {
+            "ollama": {"host": "http://localhost:11434"},
+            "models": {"registry": {"glm": "glm-5.2:cloud"}, "default_alias": "glm"},
+            "mcp": {"default_transport": "stdio"},
+            "exploit": {"enabled": True},
+            "skills": {
+                "enabled": "yes",
+                "inject_startup_context": "yes",
+                "roots": "skills",
+                "max_active_skills": 0,
+                "min_contextual_skills": 0,
+                "default_skill_weight": "high",
+                "context_skill_weight": 0,
+                "semantic_min_similarity": 2,
+                "diversity_penalty": -1,
+            },
         },
-    }, config_path.open("w", encoding="utf-8"))
+        config_path.open("w", encoding="utf-8"),
+    )
 
     validator = ConfigValidator(config_path)
     _, result = validator.load_and_validate()
@@ -340,9 +354,7 @@ def test_save_config():
     """Saving config should write valid YAML."""
     from tools.config_manager import ConfigValidator
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".yaml", delete=False, encoding="utf-8"
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False, encoding="utf-8") as f:
         yaml.safe_dump({"ollama": {"host": "http://localhost:11434"}}, f)
         temp_path = f.name
 
@@ -418,9 +430,7 @@ def test_agent_block_schema_and_defaults():
     assert agent["max_actions"] == 0
     assert agent["generated_code_repair_attempts"] == 3
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".yaml", delete=False, encoding="utf-8"
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False, encoding="utf-8") as f:
         yaml.safe_dump({"ollama": {"host": "http://localhost:11434"}}, f)
         temp_path = f.name
     try:
@@ -439,13 +449,16 @@ def test_agent_block_disabled_validates_without_error(tmp_path: Path):
     from tools.config_manager import ConfigValidator
 
     path = tmp_path / "agent-config.yaml"
-    yaml.safe_dump({
-        "ollama": {"host": "http://localhost:11434"},
-        "models": {"registry": {"glm": "glm-5.2:cloud"}, "default_alias": "glm"},
-        "mcp": {"default_transport": "stdio"},
-        "exploit": {"enabled": True},
-        "agent": {"decision_log_enabled": False},
-    }, path.open("w", encoding="utf-8"))
+    yaml.safe_dump(
+        {
+            "ollama": {"host": "http://localhost:11434"},
+            "models": {"registry": {"glm": "glm-5.2:cloud"}, "default_alias": "glm"},
+            "mcp": {"default_transport": "stdio"},
+            "exploit": {"enabled": True},
+            "agent": {"decision_log_enabled": False},
+        },
+        path.open("w", encoding="utf-8"),
+    )
 
     validator = ConfigValidator(path)
     _, result = validator.load_and_validate()
@@ -458,18 +471,21 @@ def test_agent_block_invalid_values_warn_not_error(tmp_path: Path):
     from tools.config_manager import ConfigValidator
 
     path = tmp_path / "bad-agent.yaml"
-    yaml.safe_dump({
-        "ollama": {"host": "http://localhost:11434"},
-        "models": {"registry": {"glm": "glm-5.2:cloud"}, "default_alias": "glm"},
-        "mcp": {"default_transport": "stdio"},
-        "exploit": {"enabled": True},
-        "agent": {
-            "task_graph_enabled": "yes",
-            "max_retries_per_task": -1,
-            "max_actions": "many",
-            "generated_code_repair_attempts": True,
+    yaml.safe_dump(
+        {
+            "ollama": {"host": "http://localhost:11434"},
+            "models": {"registry": {"glm": "glm-5.2:cloud"}, "default_alias": "glm"},
+            "mcp": {"default_transport": "stdio"},
+            "exploit": {"enabled": True},
+            "agent": {
+                "task_graph_enabled": "yes",
+                "max_retries_per_task": -1,
+                "max_actions": "many",
+                "generated_code_repair_attempts": True,
+            },
         },
-    }, path.open("w", encoding="utf-8"))
+        path.open("w", encoding="utf-8"),
+    )
 
     validator = ConfigValidator(path)
     _, result = validator.load_and_validate()
@@ -486,26 +502,30 @@ def test_models_roles_schema_and_validation(tmp_path: Path):
     """models.roles block defaults empty strings and warns on bad aliases."""
     # Schema advertises all six roles, each defaulting to empty string.
     from tools.config_manager import CONFIG_SCHEMA, ConfigValidator
+
     roles = CONFIG_SCHEMA["models"]["roles"]
     for role in ("planner", "executor", "interpreter", "code_generator", "critic", "summarizer"):
         assert roles[role] == ""
 
     path = tmp_path / "roles-config.yaml"
-    yaml.safe_dump({
-        "ollama": {"host": "http://localhost:11434"},
-        "models": {
-            "registry": {"glm": "glm-5.2:cloud"},
-            "default_alias": "glm",
-            "roles": {
-                "planner": "glm",
-                "executor": "",
-                "critic": "no_such_alias",
-                "summarizer": 5,
+    yaml.safe_dump(
+        {
+            "ollama": {"host": "http://localhost:11434"},
+            "models": {
+                "registry": {"glm": "glm-5.2:cloud"},
+                "default_alias": "glm",
+                "roles": {
+                    "planner": "glm",
+                    "executor": "",
+                    "critic": "no_such_alias",
+                    "summarizer": 5,
+                },
             },
+            "mcp": {"default_transport": "stdio"},
+            "exploit": {"enabled": True},
         },
-        "mcp": {"default_transport": "stdio"},
-        "exploit": {"enabled": True},
-    }, path.open("w", encoding="utf-8"))
+        path.open("w", encoding="utf-8"),
+    )
 
     validator = ConfigValidator(path)
     _, result = validator.load_and_validate()
@@ -518,6 +538,7 @@ def test_models_roles_schema_and_validation(tmp_path: Path):
     assert "models.roles.critic" in joined
     # non-string: warn
     assert "models.roles.summarizer" in joined
+
 
 def test_config_yaml_keys_subset_of_schema():
     """Phase 5 drift guard: every top-level key in config.yaml must be in CONFIG_SCHEMA.
@@ -545,5 +566,6 @@ def test_config_yaml_keys_subset_of_schema():
     except Exception:
         plugin_keys = set()
     extra = cfg_keys - schema_keys - plugin_keys
-    assert not extra, f"config.yaml has keys not in CONFIG_SCHEMA: {sorted(extra)} (add them to CONFIG_SCHEMA or PLUGIN_REGISTRY.config_sections)"
-
+    assert not extra, (
+        f"config.yaml has keys not in CONFIG_SCHEMA: {sorted(extra)} (add them to CONFIG_SCHEMA or PLUGIN_REGISTRY.config_sections)"
+    )

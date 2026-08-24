@@ -24,6 +24,7 @@ execute returned strings; (4) the agent's system prompt carries the
 Pure stdlib (urllib) -- reuses the same GitHub Search API path as
 ``tools/exploit_search.py:cve_to_poc``.
 """
+
 from __future__ import annotations
 
 import json
@@ -120,13 +121,15 @@ def _gh_search(
             return {"error": f"github fetch failed: {exc}"}
     matches = []
     for item in (payload.get("items") or [])[:per_page]:
-        matches.append({
-            "repo": (item.get("repository") or {}).get("full_name", ""),
-            "path": item.get("path", ""),
-            "name": item.get("name", ""),
-            "html_url": item.get("html_url", ""),
-            "score": item.get("score", 0),
-        })
+        matches.append(
+            {
+                "repo": (item.get("repository") or {}).get("full_name", ""),
+                "path": item.get("path", ""),
+                "name": item.get("name", ""),
+                "html_url": item.get("html_url", ""),
+                "score": item.get("score", 0),
+            }
+        )
     return {"matches": matches, "total_count": payload.get("total_count", 0)}
 
 
@@ -160,17 +163,21 @@ def run_dorks(
             # One dork failing (e.g. rate-limit) shouldn't abort the rest.
             results.append({"dork": query, "error": res["error"]})
             continue
-        results.append({
-            "dork": query,
-            "matches": res["matches"],
-            "total_count": res["total_count"],
-        })
+        results.append(
+            {
+                "dork": query,
+                "matches": res["matches"],
+                "total_count": res["total_count"],
+            }
+        )
         total_hits += len(res["matches"])
-    return _clean({
-        "org": org_clean,
-        "results": results,
-        "summary": {"total_dorks": len(dork_list), "total_hits": total_hits},
-    })
+    return _clean(
+        {
+            "org": org_clean,
+            "results": results,
+            "summary": {"total_dorks": len(dork_list), "total_hits": total_hits},
+        }
+    )
 
 
 class GithubDorksPlugin(Plugin):
@@ -185,12 +192,16 @@ class GithubDorksPlugin(Plugin):
     def _load_manifest() -> PluginManifest:
         text = _MANIFEST_PATH.read_text(encoding="utf-8")
         from tools.plugins import _parse_manifest_yaml  # type: ignore
+
         return PluginManifest.from_dict(_parse_manifest_yaml(text))
 
     def register(self, registry: PluginRegistry) -> None:
-        registry.register_config_section("github_dorks", {
-            "enabled": {"type": "bool", "default": False},
-        })
+        registry.register_config_section(
+            "github_dorks",
+            {
+                "enabled": {"type": "bool", "default": False},
+            },
+        )
         registry.register_mcp_tools(_register_github_dorks_tools)
 
 

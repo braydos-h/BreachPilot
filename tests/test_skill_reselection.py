@@ -14,9 +14,7 @@ def _write_skill(root: Path, name: str, tags: list[str]) -> None:
         "---\n"
         f"name: {name}\n"
         f"description: {name} description.\n"
-        "tags:\n"
-        + "".join(f"- {tag}\n" for tag in tags)
-        + "---\n"
+        "tags:\n" + "".join(f"- {tag}\n" for tag in tags) + "---\n"
         "# Skill\n\n## When to Use\nAuthorized use only.\n\n## Workflow\nFollow the methodology.",
         encoding="utf-8",
     )
@@ -111,9 +109,14 @@ def test_reselect_respects_max_per_run(tmp_path: Path):
     # First re-selection: new service -> fires.
     state.feed_services(["https 443 graphql api"])
     _maybe_reselect_skills(
-        policy=policy, state=state, action_count=5, new_cves=[],
-        registry=registry, skills_cfg=_skills_cfg(reselect_max_per_run=1),
-        messages=messages, recent_tool="nmap_scan",
+        policy=policy,
+        state=state,
+        action_count=5,
+        new_cves=[],
+        registry=registry,
+        skills_cfg=_skills_cfg(reselect_max_per_run=1),
+        messages=messages,
+        recent_tool="nmap_scan",
     )
     first_count = state.reselect_count
     assert first_count == 1
@@ -122,9 +125,14 @@ def test_reselect_respects_max_per_run(tmp_path: Path):
     state.feed_services(["ssh 22"])
     before = _active_names(target_ctx)
     _maybe_reselect_skills(
-        policy=policy, state=state, action_count=20, new_cves=[],
-        registry=registry, skills_cfg=_skills_cfg(reselect_max_per_run=1),
-        messages=messages, recent_tool="nmap_scan",
+        policy=policy,
+        state=state,
+        action_count=20,
+        new_cves=[],
+        registry=registry,
+        skills_cfg=_skills_cfg(reselect_max_per_run=1),
+        messages=messages,
+        recent_tool="nmap_scan",
     )
     assert state.reselect_count == 1
     assert _active_names(target_ctx) == before
@@ -145,8 +153,14 @@ def test_reselect_respects_min_interval(tmp_path: Path):
     # First re-selection: the sentinel last_reselect_action lets it fire.
     state.feed_services(["https 443 graphql api"])
     _maybe_reselect_skills(
-        policy=policy, state=state, action_count=5, new_cves=[],
-        registry=registry, skills_cfg=cfg, messages=messages, recent_tool="nmap_scan",
+        policy=policy,
+        state=state,
+        action_count=5,
+        new_cves=[],
+        registry=registry,
+        skills_cfg=cfg,
+        messages=messages,
+        recent_tool="nmap_scan",
     )
     assert state.reselect_count == 1
     assert state.last_reselect_action == 5
@@ -156,8 +170,14 @@ def test_reselect_respects_min_interval(tmp_path: Path):
     state.feed_services(["ssh 22"])
     before = _active_names(target_ctx)
     _maybe_reselect_skills(
-        policy=policy, state=state, action_count=6, new_cves=[],
-        registry=registry, skills_cfg=cfg, messages=messages, recent_tool="nmap_scan",
+        policy=policy,
+        state=state,
+        action_count=6,
+        new_cves=[],
+        registry=registry,
+        skills_cfg=cfg,
+        messages=messages,
+        recent_tool="nmap_scan",
     )
     assert state.reselect_count == 1
     assert _active_names(target_ctx) == before
@@ -176,9 +196,14 @@ def test_reselect_keeps_default_enabled_sticky(tmp_path: Path):
     state.feed_services(["https 443 graphql api"])
 
     _maybe_reselect_skills(
-        policy=policy, state=state, action_count=5, new_cves=[],
-        registry=registry, skills_cfg=_skills_cfg(),
-        messages=messages, recent_tool="nmap_scan",
+        policy=policy,
+        state=state,
+        action_count=5,
+        new_cves=[],
+        registry=registry,
+        skills_cfg=_skills_cfg(),
+        messages=messages,
+        recent_tool="nmap_scan",
     )
 
     # The configured default survives re-selection even though the new
@@ -203,9 +228,14 @@ def test_reselect_does_not_touch_permission_or_scope(tmp_path: Path):
     before_ws = policy.workspace
 
     _maybe_reselect_skills(
-        policy=policy, state=state, action_count=5, new_cves=[],
-        registry=registry, skills_cfg=_skills_cfg(),
-        messages=messages, recent_tool="nmap_scan",
+        policy=policy,
+        state=state,
+        action_count=5,
+        new_cves=[],
+        registry=registry,
+        skills_cfg=_skills_cfg(),
+        messages=messages,
+        recent_tool="nmap_scan",
     )
 
     assert policy.permission == before_perm
@@ -228,9 +258,14 @@ def test_reselect_identical_set_is_noop(tmp_path: Path):
     state.feed_services(["https 443 graphql api"])
 
     _maybe_reselect_skills(
-        policy=policy, state=state, action_count=5, new_cves=[],
-        registry=registry, skills_cfg=_skills_cfg(),
-        messages=messages, recent_tool="nmap_scan",
+        policy=policy,
+        state=state,
+        action_count=5,
+        new_cves=[],
+        registry=registry,
+        skills_cfg=_skills_cfg(),
+        messages=messages,
+        recent_tool="nmap_scan",
     )
 
     assert state.reselect_count == 0
@@ -250,9 +285,14 @@ def test_reselect_disabled_is_noop(tmp_path: Path):
     state.feed_services(["https 443 graphql api"])
 
     _maybe_reselect_skills(
-        policy=policy, state=state, action_count=5, new_cves=[],
-        registry=registry, skills_cfg=_skills_cfg(reselect_mid_run=False),
-        messages=messages, recent_tool="nmap_scan",
+        policy=policy,
+        state=state,
+        action_count=5,
+        new_cves=[],
+        registry=registry,
+        skills_cfg=_skills_cfg(reselect_mid_run=False),
+        messages=messages,
+        recent_tool="nmap_scan",
     )
 
     assert state.reselect_count == 0
@@ -267,14 +307,16 @@ def test_select_runtime_skills_active_names_bonus_and_sticky_defaults(tmp_path: 
     # context strongly favors a different skill and max_active is tight.
     selection = select_runtime_skills(
         registry,
-        config={"skills": {
-            "enabled": True,
-            "default_enabled": ["nmap-recon-skill"],
-            "max_active_skills": 1,
-            "min_contextual_skills": 1,
-            "default_skill_weight": 5,
-            "context_skill_weight": 50,
-        }},
+        config={
+            "skills": {
+                "enabled": True,
+                "default_enabled": ["nmap-recon-skill"],
+                "max_active_skills": 1,
+                "min_contextual_skills": 1,
+                "default_skill_weight": 5,
+                "context_skill_weight": 50,
+            }
+        },
         goal_name="api",
         goal_description="Test API security",
         mode="recon",

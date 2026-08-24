@@ -111,6 +111,7 @@ _SERVICE_ATTACK_MAP: dict[str, list[dict[str, Any]]] = {
     ],
 }
 
+
 class PlannerAgent:
     """Creates structured task candidates from mission + memory + target graph context."""
 
@@ -138,9 +139,14 @@ class PlannerAgent:
             return None
 
         permanent_errors = [
-            "out of scope", "permission denied", "not authorized",
-            "blocked by scope", "target unreachable", "connection refused",
-            "tool not found", "not installed",
+            "out of scope",
+            "permission denied",
+            "not authorized",
+            "blocked by scope",
+            "target unreachable",
+            "connection refused",
+            "tool not found",
+            "not installed",
         ]
         if any(pe in error.lower() for pe in permanent_errors):
             return None
@@ -149,16 +155,12 @@ class PlannerAgent:
         new_task["task_id"] = f"{failed_task.get('task_id', 'T-000')}-R{attempt}"
         new_task["status"] = "pending"
         new_task["priority"] = max(10, failed_task.get("priority", 50) - 5)
-        allowed_tools = [
-            str(tool) for tool in failed_task.get("allowed_tools", []) if str(tool).strip()
-        ]
+        allowed_tools = [str(tool) for tool in failed_task.get("allowed_tools", []) if str(tool).strip()]
         if len(allowed_tools) > 1:
             # Rotate to a genuinely different check rather than rewording the
             # same objective and calling it a retry.
             new_task["allowed_tools"] = allowed_tools[1:] + allowed_tools[:1]
-            new_task["investigation_method"] = (
-                f"alternative-tool:{new_task['allowed_tools'][0]}"
-            )
+            new_task["investigation_method"] = f"alternative-tool:{new_task['allowed_tools'][0]}"
         elif "timeout" in error.lower():
             old_args = failed_task.get("tool_args", {})
             new_args = dict(old_args) if isinstance(old_args, dict) else {}
@@ -222,73 +224,79 @@ class PlannerAgent:
         # ── 1. Scope Confirmation tasks ──
         if not phase_filter or phase_filter == "scope_confirmation":
             if existing_task_count == 0:
-                tasks.append(self._create_task(
-                    phase="recon",
-                    target=primary_target,
-                    asset_type="asset",
-                    objective="Confirm and validate mission scope configuration.",
-                    hypothesis="Scope rules are correctly configured and cover all authorized assets.",
-                    allowed_tools=["check_scope", "list_scope"],
-                    risk_level="low",
-                    priority=90,
-                    success_criteria=["Scope confirmed with no errors or warnings."],
-                    stop_conditions=["Critical scope misconfiguration detected."],
-                ))
+                tasks.append(
+                    self._create_task(
+                        phase="recon",
+                        target=primary_target,
+                        asset_type="asset",
+                        objective="Confirm and validate mission scope configuration.",
+                        hypothesis="Scope rules are correctly configured and cover all authorized assets.",
+                        allowed_tools=["check_scope", "list_scope"],
+                        risk_level="low",
+                        priority=90,
+                        success_criteria=["Scope confirmed with no errors or warnings."],
+                        stop_conditions=["Critical scope misconfiguration detected."],
+                    )
+                )
 
         # ── 2. Asset Discovery tasks ──
         if not phase_filter or phase_filter == "asset_discovery":
             for asset in mission.get("allowed_assets", [])[:5]:
                 if asset.strip():
-                    tasks.append(self._create_task(
-                        phase="recon",
-                        target=asset,
-                        asset_type="asset",
-                        objective=f"Discover and verify the asset: {asset}",
-                        hypothesis=f"The asset '{asset}' is reachable and may expose services.",
-                        allowed_tools=["check_os", "ping", "nmap_basic"],
-                        risk_level="low",
-                        priority=80,
-                        success_criteria=[f"Asset '{asset}' confirmed reachable."],
-                        stop_conditions=["Asset unreachable after 3 attempts."],
-                    ))
+                    tasks.append(
+                        self._create_task(
+                            phase="recon",
+                            target=asset,
+                            asset_type="asset",
+                            objective=f"Discover and verify the asset: {asset}",
+                            hypothesis=f"The asset '{asset}' is reachable and may expose services.",
+                            allowed_tools=["check_os", "ping", "nmap_basic"],
+                            risk_level="low",
+                            priority=80,
+                            success_criteria=[f"Asset '{asset}' confirmed reachable."],
+                            stop_conditions=["Asset unreachable after 3 attempts."],
+                        )
+                    )
 
         # ── 3. Service Identification tasks ──
         if not phase_filter or phase_filter == "service_identification":
             for asset in mission.get("allowed_assets", [])[:3]:
-                tasks.append(self._create_task(
-                    phase="analysis",
-                    target=asset,
-                    asset_type="host",
-                    objective=f"Identify all services and versions running on {asset}.",
-                    hypothesis=f"{asset} exposes network services that can be identified and versioned.",
-                    allowed_tools=["nmap_service_scan", "http_probe", "check_os"],
-                    risk_level="low",
-                    priority=70,
-                    success_criteria=[f"At least one service identified with version on {asset}."],
-                    stop_conditions=["No ports respond after basic scan."],
-                ))
+                tasks.append(
+                    self._create_task(
+                        phase="analysis",
+                        target=asset,
+                        asset_type="host",
+                        objective=f"Identify all services and versions running on {asset}.",
+                        hypothesis=f"{asset} exposes network services that can be identified and versioned.",
+                        allowed_tools=["nmap_service_scan", "http_probe", "check_os"],
+                        risk_level="low",
+                        priority=70,
+                        success_criteria=[f"At least one service identified with version on {asset}."],
+                        stop_conditions=["No ports respond after basic scan."],
+                    )
+                )
 
         # ── 4. Web/API Mapping tasks ──
         if not phase_filter or phase_filter == "web_api_mapping":
             for asset in mission.get("allowed_assets", [])[:3]:
-                tasks.append(self._create_task(
-                    phase="recon",
-                    target=asset,
-                    asset_type="web_app",
-                    objective=f"Map web application surface on {asset}.",
-                    hypothesis=f"{asset} hosts web applications with discoverable endpoints.",
-                    allowed_tools=["http_probe", "dir_enum", "web_vuln_scan"],
-                    risk_level="low",
-                    priority=65,
-                    success_criteria=["Web response received; endpoints and technologies noted."],
-                    stop_conditions=["No HTTP/HTTPS response on common ports."],
-                ))
+                tasks.append(
+                    self._create_task(
+                        phase="recon",
+                        target=asset,
+                        asset_type="web_app",
+                        objective=f"Map web application surface on {asset}.",
+                        hypothesis=f"{asset} hosts web applications with discoverable endpoints.",
+                        allowed_tools=["http_probe", "dir_enum", "web_vuln_scan"],
+                        risk_level="low",
+                        priority=65,
+                        success_criteria=["Web response received; endpoints and technologies noted."],
+                        stop_conditions=["No HTTP/HTTPS response on common ports."],
+                    )
+                )
 
         # ── 5. Investigate open hypotheses ──
         for i, hypothesis_state in enumerate(hypotheses[:3]):
-            statement = str(
-                hypothesis_state.get("statement", hypothesis_state.get("hypothesis", ""))
-            ).strip()
+            statement = str(hypothesis_state.get("statement", hypothesis_state.get("hypothesis", ""))).strip()
             if not statement:
                 continue
             target = str(hypothesis_state.get("target", "")).strip() or primary_target
@@ -302,20 +310,12 @@ class PlannerAgent:
                 for item in hypothesis_state.get("check_history", [])
                 if isinstance(item, dict)
             )
-            history = [
-                item
-                for item in hypothesis_state.get("check_history", [])
-                if isinstance(item, dict)
-            ]
+            history = [item for item in hypothesis_state.get("check_history", []) if isinstance(item, dict)]
             template = history[-1] if history else {}
             success_criteria = list(
-                template.get("success_criteria", [])
-                or ["Hypothesis confirmed or refuted with evidence."]
+                template.get("success_criteria", []) or ["Hypothesis confirmed or refuted with evidence."]
             )
-            stop_conditions = list(
-                template.get("stop_conditions", [])
-                or ["No actionable information after research."]
-            )
+            stop_conditions = list(template.get("stop_conditions", []) or ["No actionable information after research."])
             task: dict[str, Any] | None = None
             for tool in candidate_checks:
                 candidate = self._create_task(
@@ -335,9 +335,7 @@ class PlannerAgent:
                 candidate["hypothesis_id"] = hypothesis_state.get("hypothesis_id", "")
                 candidate["hypothesis_confidence"] = hypothesis_state.get("confidence", 0.5)
                 candidate["hypothesis_attempt_count"] = hypothesis_state.get("attempt_count", 0)
-                candidate["expected_information_value"] = hypothesis_state.get(
-                    "expected_information_value", 0.5
-                )
+                candidate["expected_information_value"] = hypothesis_state.get("expected_information_value", 0.5)
                 candidate["estimated_cost"] = hypothesis_state.get(
                     "estimated_cost", template.get("estimated_cost", 0.1)
                 )
@@ -371,9 +369,7 @@ class PlannerAgent:
             status = str(state.get("status", "open"))
             prior_fingerprints = set(state.get("check_fingerprints", []))
             prior_fingerprints.update(
-                item.get("fingerprint", "")
-                for item in state.get("check_history", [])
-                if isinstance(item, dict)
+                item.get("fingerprint", "") for item in state.get("check_history", []) if isinstance(item, dict)
             )
             identity = (key, fingerprint)
             if status in {terminal.value for terminal in TERMINAL_HYPOTHESIS_STATUSES}:

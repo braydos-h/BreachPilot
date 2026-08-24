@@ -94,8 +94,9 @@ def test_recon_first_emits_recon_assessment_event(tmp_path):
 
     types = [t for t, _ in sink.events]
     assert "recon_assessment" in types, f"recon_assessment event missing; got {types}"
-    assert types.index("recon_assessment") < types.index("goal_suggestions"), \
+    assert types.index("recon_assessment") < types.index("goal_suggestions"), (
         "recon_assessment must fire before goal_suggestions"
+    )
 
     recon_payload = next(p for t, p in sink.events if t == "recon_assessment")
     assert recon_payload["assessment"] == assessment.to_dict()

@@ -40,6 +40,7 @@ from tools.attack_modules import (
 
 # ── Fixtures ───────────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def ctx_http() -> ModuleContext:
     return ModuleContext(
@@ -86,6 +87,7 @@ def ctx_multi() -> ModuleContext:
 
 # ── Registry Tests ─────────────────────────────────────────────────────────
 
+
 class TestModuleRegistry:
     def test_list_modules_returns_all(self) -> None:
         modules = list_modules()
@@ -111,6 +113,7 @@ class TestModuleRegistry:
 
 
 # ── Applicability Tests ────────────────────────────────────────────────────
+
 
 class TestApplicability:
     def test_log4j_high_score_with_http(self, ctx_http: ModuleContext) -> None:
@@ -148,6 +151,7 @@ class TestApplicability:
 
 
 # ── Module Execution Tests ─────────────────────────────────────────────────
+
 
 class TestModuleExecution:
     def test_log4j_rce_run(self, ctx_http: ModuleContext) -> None:
@@ -236,6 +240,7 @@ class TestModuleExecution:
 
 # ── CVE Mapping Tests ──────────────────────────────────────────────────────
 
+
 class TestCVEMapping:
     def test_openssh_cve_check_maps_cves(self, ctx_ssh: ModuleContext) -> None:
         mod = OpenSSHCVECheck()
@@ -266,6 +271,7 @@ class TestCVEMapping:
 
 # ── Script Generation Tests ────────────────────────────────────────────────
 
+
 class TestScriptGeneration:
     def test_scripts_contain_target_ip(self, ctx_multi: ModuleContext) -> None:
         for mod in list_modules():
@@ -276,6 +282,7 @@ class TestScriptGeneration:
 
     def test_scripts_are_valid_python(self, ctx_multi: ModuleContext) -> None:
         import ast
+
         for mod in list_modules():
             if hasattr(mod, "generate_python_script"):
                 script = mod.generate_python_script(ctx_multi)
@@ -287,6 +294,7 @@ class TestScriptGeneration:
 
 
 # ── Edge Cases ─────────────────────────────────────────────────────────────
+
 
 class TestEdgeCases:
     def test_empty_context(self) -> None:
@@ -322,6 +330,7 @@ class TestEdgeCases:
 
 # ── Regression: PHP gadget brace bug (M28) ─────────────────────────────────
 
+
 class TestPhpGadgetBraces:
     """M28: the generated DeserializeAttack script embeds a nested f-string for
     generate_php_gadget. The outer f-string must render an *inner* f-string that
@@ -336,6 +345,7 @@ class TestPhpGadgetBraces:
         script and exec it in an isolated namespace (avoids the module-level
         network/probe code at the bottom of the generated script)."""
         import ast
+
         tree = ast.parse(script)
         for node in tree.body:
             if isinstance(node, ast.FunctionDef) and node.name == "generate_php_gadget":
@@ -374,6 +384,7 @@ class TestPhpGadgetBraces:
 
 # ── Regression: ContainerBreakout guarded cgroup read (M29) ─────────────────
 
+
 class TestContainerBreakoutCgroupGuard:
     def test_cgroup_open_is_guarded(self, ctx_ssh: ModuleContext) -> None:
         # M29: the generated script must not call open("/proc/1/cgroup")
@@ -391,9 +402,11 @@ class TestContainerBreakoutCgroupGuard:
 # Lives in test_attack_modules.py because that is the sole owned test file;
 # the fixtures under test are in tools/persistent_session_manager.py.
 
+
 class TestPersistentSessionStopFallback:
     def _manager_with_recorded_session(self, tmp_path, session_type, name="sess"):
         from tools.persistent_session_manager import PersistentSessionManager, SessionInfo
+
         mgr = PersistentSessionManager(tmp_path)
         info = SessionInfo(
             name=name,

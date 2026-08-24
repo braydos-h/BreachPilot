@@ -5,6 +5,7 @@
 Covers: the helper's hash-type mapping, registration, auto mode resolution,
 the happy path with ``--show`` parsing, and the not-installed friendly message.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -20,7 +21,10 @@ from tools.mcp_tools.attack_modules import _identify_hash_modes
 
 def test_identify_ntlm_32hex():
     ids = _identify_hash_modes("b7e4b90b1d8f4a9c3d2e1f0a5b6c7d8e")
-    assert ("NTLM", "1000", )[:2] in [(n, m) for n, m, _ in ids]
+    assert (
+        "NTLM",
+        "1000",
+    )[:2] in [(n, m) for n, m, _ in ids]
     assert any(n == "NTLM" and m == "1000" for n, m, _ in ids)
 
 
@@ -103,8 +107,7 @@ def _patch_pgrp_seq(monkeypatch, returns):
 
     seq = list(returns)
 
-    def _fake(args, timeout, stdout=None, stderr=None, cwd=None, env=None,
-              input_text=None, **popen_kwargs):
+    def _fake(args, timeout, stdout=None, stderr=None, cwd=None, env=None, input_text=None, **popen_kwargs):
         if not seq:
             return 0, "", ""
         return seq.pop(0)
@@ -126,17 +129,18 @@ async def test_run_hash_crack_auto_resolves_ntlm_mode(tmp_path: Path, monkeypatc
     captured: list[Any] = []
     import mcp_exploit_server as mes
 
-    def _fake(args, timeout, stdout=None, stderr=None, cwd=None, env=None,
-              input_text=None, **popen_kwargs):
+    def _fake(args, timeout, stdout=None, stderr=None, cwd=None, env=None, input_text=None, **popen_kwargs):
         captured.append(list(args))
         return 0, "", ""
 
     monkeypatch.setattr(mes, "_run_with_pgrp_timeout", _fake)
 
-    text = _text(await mcp.call_tool(
-        "run_hash_crack",
-        {"hash_value": "b7e4b90b1d8f4a9c3d2e1f0a5b6c7d8e", "tool": "hashcat"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "run_hash_crack",
+            {"hash_value": "b7e4b90b1d8f4a9c3d2e1f0a5b6c7d8e", "tool": "hashcat"},
+        )
+    )
     assert "CRACK_RESULT:" in text
     # The crack argv auto-resolved the NTLM mode (hashcat -m 1000).
     assert captured, "_run_with_pgrp_timeout was not invoked"
@@ -151,15 +155,20 @@ async def test_run_hash_crack_parses_show_output(tmp_path: Path, monkeypatch) ->
     mcp = _make_server(tmp_path)
     monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
     hash_val = "b7e4b90b1d8f4a9c3d2e1f0a5b6c7d8e"
-    _patch_pgrp_seq(monkeypatch, [
-        (0, "Session... completed", ""),
-        (0, f"{hash_val}:password123\n", ""),
-    ])
+    _patch_pgrp_seq(
+        monkeypatch,
+        [
+            (0, "Session... completed", ""),
+            (0, f"{hash_val}:password123\n", ""),
+        ],
+    )
 
-    text = _text(await mcp.call_tool(
-        "run_hash_crack",
-        {"hash_value": hash_val, "tool": "hashcat"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "run_hash_crack",
+            {"hash_value": hash_val, "tool": "hashcat"},
+        )
+    )
     assert "CRACKED: 1" in text
     assert "password123" in text
 
@@ -168,10 +177,12 @@ async def test_run_hash_crack_parses_show_output(tmp_path: Path, monkeypatch) ->
 async def test_run_hash_crack_blocks_unidentifiable_hash(tmp_path: Path, monkeypatch) -> None:
     mcp = _make_server(tmp_path)
     monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
-    text = _text(await mcp.call_tool(
-        "run_hash_crack",
-        {"hash_value": "zzz-not-a-real-hash", "tool": "hashcat"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "run_hash_crack",
+            {"hash_value": "zzz-not-a-real-hash", "tool": "hashcat"},
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "identify" in text
 
@@ -179,10 +190,12 @@ async def test_run_hash_crack_blocks_unidentifiable_hash(tmp_path: Path, monkeyp
 @pytest.mark.asyncio
 async def test_run_hash_crack_rejects_unsupported_tool(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "run_hash_crack",
-        {"hash_value": "b7e4b90b1d8f4a9c3d2e1f0a5b6c7d8e", "tool": "oclhashcat"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "run_hash_crack",
+            {"hash_value": "b7e4b90b1d8f4a9c3d2e1f0a5b6c7d8e", "tool": "oclhashcat"},
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "unsupported tool" in text
 
@@ -191,10 +204,12 @@ async def test_run_hash_crack_rejects_unsupported_tool(tmp_path: Path) -> None:
 async def test_run_hash_crack_not_installed(tmp_path: Path, monkeypatch) -> None:
     mcp = _make_server(tmp_path)
     monkeypatch.setattr(shutil, "which", lambda name: None)
-    text = _text(await mcp.call_tool(
-        "run_hash_crack",
-        {"hash_value": "b7e4b90b1d8f4a9c3d2e1f0a5b6c7d8e", "tool": "hashcat"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "run_hash_crack",
+            {"hash_value": "b7e4b90b1d8f4a9c3d2e1f0a5b6c7d8e", "tool": "hashcat"},
+        )
+    )
     assert text.startswith("CRACKER_NOT_INSTALLED:")
 
 
@@ -202,13 +217,18 @@ async def test_run_hash_crack_not_installed(tmp_path: Path, monkeypatch) -> None
 async def test_run_hash_crack_john_parses_show(tmp_path: Path, monkeypatch) -> None:
     mcp = _make_server(tmp_path)
     monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
-    _patch_pgrp_seq(monkeypatch, [
-        (0, "Loaded 1 password hash", ""),
-        (0, "admin:letmein!\n2g 0:00:00:00 DONE\n", ""),
-    ])
-    text = _text(await mcp.call_tool(
-        "run_hash_crack",
-        {"hash_value": "admin:$2a$10$abcdef", "tool": "john", "hash_mode": "3200"},
-    ))
+    _patch_pgrp_seq(
+        monkeypatch,
+        [
+            (0, "Loaded 1 password hash", ""),
+            (0, "admin:letmein!\n2g 0:00:00:00 DONE\n", ""),
+        ],
+    )
+    text = _text(
+        await mcp.call_tool(
+            "run_hash_crack",
+            {"hash_value": "admin:$2a$10$abcdef", "tool": "john", "hash_mode": "3200"},
+        )
+    )
     assert "CRACKED: 1" in text
     assert "letmein!" in text

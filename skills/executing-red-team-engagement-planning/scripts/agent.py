@@ -9,11 +9,20 @@ import json
 from datetime import datetime, timezone
 
 MITRE_TACTICS = [
-    "Reconnaissance", "Resource Development", "Initial Access",
-    "Execution", "Persistence", "Privilege Escalation",
-    "Defense Evasion", "Credential Access", "Discovery",
-    "Lateral Movement", "Collection", "Command and Control",
-    "Exfiltration", "Impact",
+    "Reconnaissance",
+    "Resource Development",
+    "Initial Access",
+    "Execution",
+    "Persistence",
+    "Privilege Escalation",
+    "Defense Evasion",
+    "Credential Access",
+    "Discovery",
+    "Lateral Movement",
+    "Collection",
+    "Command and Control",
+    "Exfiltration",
+    "Impact",
 ]
 
 ATTACK_SCENARIOS = {
@@ -103,25 +112,28 @@ def generate_attack_tree(scenario):
         "attack_paths": [],
     }
     for i, technique in enumerate(scenario["techniques"]):
-        tree["attack_paths"].append({
-            "step": i + 1,
-            "technique": technique,
-            "tactic": scenario["tactics"][min(i, len(scenario["tactics"]) - 1)],
-            "tools": scenario["tools"],
-            "success_criteria": f"Successfully execute {technique}",
-        })
+        tree["attack_paths"].append(
+            {
+                "step": i + 1,
+                "technique": technique,
+                "tactic": scenario["tactics"][min(i, len(scenario["tactics"]) - 1)],
+                "tools": scenario["tools"],
+                "success_criteria": f"Successfully execute {technique}",
+            }
+        )
     return tree
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Generate red team engagement plans"
-    )
+    parser = argparse.ArgumentParser(description="Generate red team engagement plans")
     parser.add_argument("--client", required=True, help="Client organization name")
-    parser.add_argument("--scenarios", nargs="+",
-                        choices=list(ATTACK_SCENARIOS.keys()),
-                        default=["phishing", "assumed_breach"],
-                        help="Attack scenarios to include")
+    parser.add_argument(
+        "--scenarios",
+        nargs="+",
+        choices=list(ATTACK_SCENARIOS.keys()),
+        default=["phishing", "assumed_breach"],
+        help="Attack scenarios to include",
+    )
     parser.add_argument("--duration", type=int, default=4, help="Duration in weeks")
     parser.add_argument("--team-size", type=int, default=4, help="Red team size")
     parser.add_argument("--output", "-o", help="Output JSON plan path")

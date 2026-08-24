@@ -30,8 +30,7 @@ class BOLATestAgent:
         if not requests:
             return None
         try:
-            return requests.request(method, f"{self.base_url}{path}",
-                                    headers=headers, json=data, timeout=timeout)
+            return requests.request(method, f"{self.base_url}{path}", headers=headers, json=data, timeout=timeout)
         except requests.RequestException:
             return None
 
@@ -67,24 +66,24 @@ class BOLATestAgent:
                 "vulnerable": vulnerable,
             }
             if vulnerable:
-                self.findings.append({
-                    "severity": "high",
-                    "type": "BOLA Read",
-                    "detail": f"GET {resource_path}/{oid} returns other user's data",
-                    "owasp": "API1:2023",
-                })
+                self.findings.append(
+                    {
+                        "severity": "high",
+                        "type": "BOLA Read",
+                        "detail": f"GET {resource_path}/{oid} returns other user's data",
+                        "owasp": "API1:2023",
+                    }
+                )
             results.append(result)
         return results
 
-    def test_horizontal_write(self, attacker_token, victim_object_ids,
-                               resource_path="/orders", payload=None):
+    def test_horizontal_write(self, attacker_token, victim_object_ids, resource_path="/orders", payload=None):
         """Test if attacker can modify victim's objects."""
         headers = {"Authorization": f"Bearer {attacker_token}", "Content-Type": "application/json"}
         test_payload = payload or {"status": "cancelled"}
         results = []
         for oid in victim_object_ids:
-            resp = self._req("PATCH", f"{resource_path}/{oid}",
-                             headers=headers, data=test_payload)
+            resp = self._req("PATCH", f"{resource_path}/{oid}", headers=headers, data=test_payload)
             vulnerable = resp and resp.status_code in (200, 204)
             result = {
                 "test": f"Modify {resource_path}/{oid}",
@@ -93,34 +92,38 @@ class BOLATestAgent:
                 "vulnerable": vulnerable,
             }
             if vulnerable:
-                self.findings.append({
-                    "severity": "critical",
-                    "type": "BOLA Write",
-                    "detail": f"PATCH {resource_path}/{oid} modifies other user's data",
-                    "owasp": "API1:2023",
-                })
+                self.findings.append(
+                    {
+                        "severity": "critical",
+                        "type": "BOLA Write",
+                        "detail": f"PATCH {resource_path}/{oid} modifies other user's data",
+                        "owasp": "API1:2023",
+                    }
+                )
             results.append(result)
         return results
 
-    def test_horizontal_delete(self, attacker_token, victim_object_id,
-                                resource_path="/orders"):
+    def test_horizontal_delete(self, attacker_token, victim_object_id, resource_path="/orders"):
         """Test if attacker can delete victim's object."""
         headers = {"Authorization": f"Bearer {attacker_token}", "Content-Type": "application/json"}
         resp = self._req("DELETE", f"{resource_path}/{victim_object_id}", headers=headers)
         vulnerable = resp and resp.status_code in (200, 204)
         if vulnerable:
-            self.findings.append({
-                "severity": "critical",
-                "type": "BOLA Delete",
-                "detail": f"DELETE {resource_path}/{victim_object_id} destroys other user's data",
-                "owasp": "API1:2023",
-            })
-        return {"test": f"Delete {resource_path}/{victim_object_id}",
-                "status": resp.status_code if resp else "error",
-                "vulnerable": vulnerable}
+            self.findings.append(
+                {
+                    "severity": "critical",
+                    "type": "BOLA Delete",
+                    "detail": f"DELETE {resource_path}/{victim_object_id} destroys other user's data",
+                    "owasp": "API1:2023",
+                }
+            )
+        return {
+            "test": f"Delete {resource_path}/{victim_object_id}",
+            "status": resp.status_code if resp else "error",
+            "vulnerable": vulnerable,
+        }
 
-    def test_id_enumeration(self, attacker_token, known_id, resource_path="/orders",
-                             range_offset=5):
+    def test_id_enumeration(self, attacker_token, known_id, resource_path="/orders", range_offset=5):
         """Test sequential ID enumeration."""
         headers = {"Authorization": f"Bearer {attacker_token}", "Content-Type": "application/json"}
         accessible = []
@@ -132,29 +135,31 @@ class BOLATestAgent:
             if resp and resp.status_code == 200:
                 accessible.append(test_id)
         if accessible:
-            self.findings.append({
-                "severity": "high",
-                "type": "ID Enumeration",
-                "detail": f"Sequential IDs accessible: {accessible[:5]}",
-            })
+            self.findings.append(
+                {
+                    "severity": "high",
+                    "type": "ID Enumeration",
+                    "detail": f"Sequential IDs accessible: {accessible[:5]}",
+                }
+            )
         return accessible
 
-    def test_method_bypass(self, attacker_token, victim_object_id,
-                            resource_path="/users"):
+    def test_method_bypass(self, attacker_token, victim_object_id, resource_path="/users"):
         """Test if different HTTP methods bypass authorization."""
         headers = {"Authorization": f"Bearer {attacker_token}", "Content-Type": "application/json"}
         results = []
         for method in ["GET", "PUT", "PATCH", "DELETE", "HEAD"]:
             data = {"name": "test"} if method in ("PUT", "PATCH") else None
-            resp = self._req(method, f"{resource_path}/{victim_object_id}",
-                             headers=headers, data=data)
+            resp = self._req(method, f"{resource_path}/{victim_object_id}", headers=headers, data=data)
             if resp and resp.status_code not in (401, 403, 404, 405):
                 results.append({"method": method, "status": resp.status_code})
-                self.findings.append({
-                    "severity": "high",
-                    "type": "Method Bypass",
-                    "detail": f"{method} {resource_path}/{victim_object_id} -> {resp.status_code}",
-                })
+                self.findings.append(
+                    {
+                        "severity": "high",
+                        "type": "Method Bypass",
+                        "detail": f"{method} {resource_path}/{victim_object_id} -> {resp.status_code}",
+                    }
+                )
         return results
 
     def generate_report(self, attacker_token=None, victim_ids=None):

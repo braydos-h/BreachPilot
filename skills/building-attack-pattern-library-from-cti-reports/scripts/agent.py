@@ -96,7 +96,9 @@ def generate_report(processed_reports, library):
         "library": library,
         "report_details": processed_reports,
     }
-    print(f"PATTERN LIBRARY: {library['total_unique_techniques']} techniques from {library['total_reports_processed']} reports")
+    print(
+        f"PATTERN LIBRARY: {library['total_unique_techniques']} techniques from {library['total_reports_processed']} reports"
+    )
     return report
 
 

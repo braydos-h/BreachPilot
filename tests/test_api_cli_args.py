@@ -8,6 +8,7 @@ import pytest
 def test_demon_flag_alias(monkeypatch):
     """Both --demon and --daemon should set args.daemon = True."""
     from main import parse_args
+
     args = parse_args(["--demon"])
     assert args.daemon is True
     args2 = parse_args(["--daemon"])
@@ -17,6 +18,7 @@ def test_demon_flag_alias(monkeypatch):
 def test_demon_default_host_port():
     """--api-host / --api-port default to None (filled from config at runtime)."""
     from main import parse_args
+
     args = parse_args(["--demon"])
     assert args.api_host is None
     assert args.api_port is None
@@ -36,7 +38,9 @@ def test_demon_reuses_running_api_daemon(monkeypatch):
     monkeypatch.setattr(main, "ui", _Ui())
     monkeypatch.setattr(main, "load_config", lambda _: {"api": {"host": "127.0.0.1", "port": 8765}})
     monkeypatch.setattr(main, "_api_daemon_ready", lambda host, port: True)
-    monkeypatch.setattr(main, "create_app", lambda *args, **kwargs: pytest.fail("must not create a second daemon"), raising=False)
+    monkeypatch.setattr(
+        main, "create_app", lambda *args, **kwargs: pytest.fail("must not create a second daemon"), raising=False
+    )
 
     assert main._run_daemon(main.parse_args(["--daemon"])) == 0
     assert main.ui.messages == ["WebUI API daemon is already running on http://127.0.0.1:8765"]
@@ -75,6 +79,7 @@ def test_daemon_bounds_graceful_shutdown(monkeypatch):
 def test_demon_mutually_exclusive_with_target():
     """--demon + --target should return exit code 2 (conflict)."""
     from main import main
+
     code = main(["--demon", "--target", "10.0.0.50"])
     assert code == 2
 
@@ -82,6 +87,7 @@ def test_demon_mutually_exclusive_with_target():
 def test_demon_mutually_exclusive_with_doctor():
     """--demon + --doctor should return exit code 2."""
     from main import main
+
     code = main(["--demon", "--doctor"])
     assert code == 2
 
@@ -89,6 +95,7 @@ def test_demon_mutually_exclusive_with_doctor():
 def test_demon_mutually_exclusive_with_menu():
     """--demon + --menu should return exit code 2."""
     from main import main
+
     code = main(["--demon", "--menu"])
     assert code == 2
 
@@ -96,6 +103,7 @@ def test_demon_mutually_exclusive_with_menu():
 def test_no_daemon_flag_preserves_existing_behavior():
     """Without --demon, args.daemon is False."""
     from main import parse_args
+
     args = parse_args(["--target", "10.0.0.50", "--mode", "recon"])
     assert args.daemon is False
 
@@ -106,12 +114,14 @@ def test_no_daemon_flag_preserves_existing_behavior():
 def test_web_flag_sets_args_web():
     """--web sets args.web = True."""
     from main import parse_args
+
     args = parse_args(["--web"])
     assert args.web is True
 
 
 def test_web_default_is_false():
     from main import parse_args
+
     args = parse_args(["--demon"])
     assert args.web is False
 
@@ -119,18 +129,21 @@ def test_web_default_is_false():
 def test_web_mutually_exclusive_with_target():
     """--web + --target returns exit code 2."""
     from main import main
+
     code = main(["--web", "--target", "10.0.0.50"])
     assert code == 2
 
 
 def test_web_mutually_exclusive_with_doctor():
     from main import main
+
     code = main(["--web", "--doctor"])
     assert code == 2
 
 
 def test_web_mutually_exclusive_with_menu():
     from main import main
+
     code = main(["--web", "--menu"])
     assert code == 2
 
@@ -152,6 +165,7 @@ def test_web_setup_api_keys_does_not_bypass_gate(monkeypatch):
 
     monkeypatch.setattr(_config_cli, "bootstrap_api_keys", lambda *a, **kw: _Result())
     from main import main
+
     code = main(["--web", "--setup-api-keys", "--no-api-key-prompt"])
     assert code == 2
 
@@ -166,12 +180,15 @@ def test_ensure_webui_build_returns_zero_when_dist_exists(monkeypatch, tmp_path)
     dist_index = webui_dir / "dist" / "index.html"
     if not dist_index.exists():
         pytest.skip("webui/dist not built — cannot test the exists-fast-path here.")
+
     # A dummy UI object that records calls.
     class _Ui:
         def __init__(self):
             self.calls = []
+
         def status(self, msg):
             self.calls.append(("status", msg))
+
         def error(self, msg):
             self.calls.append(("error", msg))
 
@@ -201,8 +218,10 @@ def test_ensure_webui_build_errors_when_npm_missing(monkeypatch, tmp_path):
     class _Ui:
         def __init__(self):
             self.errors = []
+
         def status(self, msg):
             pass
+
         def error(self, msg):
             self.errors.append(msg)
 

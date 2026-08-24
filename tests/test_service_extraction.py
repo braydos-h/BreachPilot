@@ -85,9 +85,11 @@ def test_terminal_event_sink_noop():
 
 def test_terminal_approval_provider_allow():
     calls = []
+
     def fake_prompt(text):
         calls.append(text)
         return "ALLOW 10.0.0.50"
+
     provider = TerminalApprovalProvider(fake_prompt)
     result = asyncio.run(provider.approve("test_action", "ls", "detail", "10.0.0.50"))
     assert result is True
@@ -96,6 +98,7 @@ def test_terminal_approval_provider_allow():
 def test_terminal_approval_provider_deny():
     def fake_prompt(text):
         return "no"
+
     provider = TerminalApprovalProvider(fake_prompt)
     result = asyncio.run(provider.approve("test_action", "ls", "detail", "10.0.0.50"))
     assert result is False
@@ -109,6 +112,7 @@ def test_prepare_resolves_target_ip(tmp_path):
 
     from tools.run_service import AssessmentService
     from tools.run_service.service import Callables
+
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         "ollama:\n  host: http://localhost:11434\n"
@@ -117,10 +121,13 @@ def test_prepare_resolves_target_ip(tmp_path):
         "api:\n  host: 127.0.0.1\n  port: 8765\n",
         encoding="utf-8",
     )
+
     class _FakeRouter:
         _clients = {"glm": MagicMock()}
+
         def get_client(self, name):
             return self._clients[name]
+
     callables = Callables(build_router=lambda *a, **kw: _FakeRouter())
     service = AssessmentService(callables=callables)
     req = RunRequest(target="10.0.0.50", mode="attack", goal_name="recon_only", config_path=config_path)
@@ -136,16 +143,19 @@ def test_prepare_rejects_invalid_target(tmp_path):
 
     from tools.run_service import AssessmentService
     from tools.run_service.service import Callables
+
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "ollama:\n  host: http://localhost:11434\n"
-        "models:\n  default_alias: glm\n  registry:\n    glm: glm-5.2:cloud\n",
+        "ollama:\n  host: http://localhost:11434\nmodels:\n  default_alias: glm\n  registry:\n    glm: glm-5.2:cloud\n",
         encoding="utf-8",
     )
+
     class _FakeRouter:
         _clients = {"glm": MagicMock()}
+
         def get_client(self, name):
             return self._clients[name]
+
     callables = Callables(build_router=lambda *a, **kw: _FakeRouter())
     service = AssessmentService(callables=callables)
     req = RunRequest(target="not-a-valid-target!!!", mode="attack", config_path=config_path)
@@ -158,6 +168,7 @@ def test_prepare_recon_mode_not_destructive(tmp_path):
 
     from tools.run_service import AssessmentService
     from tools.run_service.service import Callables
+
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         "ollama:\n  host: http://localhost:11434\n"
@@ -166,10 +177,13 @@ def test_prepare_recon_mode_not_destructive(tmp_path):
         "api:\n  host: 127.0.0.1\n  port: 8765\n",
         encoding="utf-8",
     )
+
     class _FakeRouter:
         _clients = {"glm": MagicMock()}
+
         def get_client(self, name):
             return self._clients[name]
+
     callables = Callables(build_router=lambda *a, **kw: _FakeRouter())
     service = AssessmentService(callables=callables)
     req = RunRequest(target="10.0.0.50", mode="recon", config_path=config_path)
@@ -184,6 +198,7 @@ def test_prepare_recon_mode_not_destructive(tmp_path):
 # AttackUi.ask_goal_from_suggestions reads sg.compatible as an attribute.
 # The provider must rehydrate dicts to SuggestedGoal before delegating.
 
+
 def test_decision_provider_goal_select_accepts_dict_options(monkeypatch):
     from tools.attack_ui import AttackUi
     from tools.run_service.models import Decision, DecisionKind
@@ -197,19 +212,33 @@ def test_decision_provider_goal_select_accepts_dict_options(monkeypatch):
 
     provider = TerminalDecisionProvider(ui)
     decision = Decision(
-        id="", run_id="", kind=DecisionKind.GOAL_SELECT,
+        id="",
+        run_id="",
+        kind=DecisionKind.GOAL_SELECT,
         prompt_text="Select a goal:",
         options=[
-            {"name": "backdoor", "description": "get a shell",
-             "exploit_likelihood": "Likely", "success_rating": 80,
-             "rationale": "ssh open", "compatible": True,
-             "blocked_reason": "", "risk_requirement": "high",
-             "is_ai_generated": False},
-            {"name": "blocked_goal", "description": "blocked",
-             "exploit_likelihood": "Blocked", "success_rating": 0,
-             "rationale": "", "compatible": False,
-             "blocked_reason": "risk", "risk_requirement": "high",
-             "is_ai_generated": False},
+            {
+                "name": "backdoor",
+                "description": "get a shell",
+                "exploit_likelihood": "Likely",
+                "success_rating": 80,
+                "rationale": "ssh open",
+                "compatible": True,
+                "blocked_reason": "",
+                "risk_requirement": "high",
+                "is_ai_generated": False,
+            },
+            {
+                "name": "blocked_goal",
+                "description": "blocked",
+                "exploit_likelihood": "Blocked",
+                "success_rating": 0,
+                "rationale": "",
+                "compatible": False,
+                "blocked_reason": "risk",
+                "risk_requirement": "high",
+                "is_ai_generated": False,
+            },
         ],
     )
     answer = asyncio.run(provider.request(decision))
@@ -228,14 +257,22 @@ def test_decision_provider_goal_select_custom(monkeypatch):
 
     provider = TerminalDecisionProvider(ui)
     decision = Decision(
-        id="", run_id="", kind=DecisionKind.GOAL_SELECT,
+        id="",
+        run_id="",
+        kind=DecisionKind.GOAL_SELECT,
         prompt_text="Select a goal:",
         options=[
-            {"name": "recon_only", "description": "recon",
-             "exploit_likelihood": "Likely", "success_rating": 50,
-             "rationale": "", "compatible": True,
-             "blocked_reason": "", "risk_requirement": "safe",
-             "is_ai_generated": False},
+            {
+                "name": "recon_only",
+                "description": "recon",
+                "exploit_likelihood": "Likely",
+                "success_rating": 50,
+                "rationale": "",
+                "compatible": True,
+                "blocked_reason": "",
+                "risk_requirement": "safe",
+                "is_ai_generated": False,
+            },
         ],
     )
     answer = asyncio.run(provider.request(decision))

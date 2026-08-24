@@ -40,16 +40,20 @@ def scan_ports(scanner, hosts, ports="1-1024", timing="T4"):
             for port in ports_list:
                 port_info = scanner[host][proto][port]
                 if port_info["state"] == "open":
-                    results[host].append({
-                        "port": port,
-                        "protocol": proto,
-                        "state": port_info["state"],
-                        "service": port_info.get("name", "unknown"),
-                        "version": port_info.get("version", ""),
-                        "product": port_info.get("product", ""),
-                    })
-                    print(f"  [+] {host}:{port}/{proto} - {port_info.get('name', '?')} "
-                          f"{port_info.get('product', '')} {port_info.get('version', '')}")
+                    results[host].append(
+                        {
+                            "port": port,
+                            "protocol": proto,
+                            "state": port_info["state"],
+                            "service": port_info.get("name", "unknown"),
+                            "version": port_info.get("version", ""),
+                            "product": port_info.get("product", ""),
+                        }
+                    )
+                    print(
+                        f"  [+] {host}:{port}/{proto} - {port_info.get('name', '?')} "
+                        f"{port_info.get('product', '')} {port_info.get('version', '')}"
+                    )
     return results
 
 
@@ -66,11 +70,16 @@ def service_version_scan(scanner, host, open_ports):
         for proto in scanner[host].all_protocols():
             for port in sorted(scanner[host][proto].keys()):
                 svc = scanner[host][proto][port]
-                info["services"].append({
-                    "port": port, "protocol": proto, "service": svc.get("name", ""),
-                    "product": svc.get("product", ""), "version": svc.get("version", ""),
-                    "extrainfo": svc.get("extrainfo", ""),
-                })
+                info["services"].append(
+                    {
+                        "port": port,
+                        "protocol": proto,
+                        "service": svc.get("name", ""),
+                        "product": svc.get("product", ""),
+                        "version": svc.get("version", ""),
+                        "extrainfo": svc.get("extrainfo", ""),
+                    }
+                )
     return info
 
 

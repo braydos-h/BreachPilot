@@ -11,7 +11,8 @@ from tools.recon_assessment_cli import _cve_query_from_banner, run_recon_assessm
 
 def test_openssh_banner_uses_server_not_protocol_version() -> None:
     assert _cve_query_from_banner("SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13") == (
-        "OpenSSH", "9.6p1",
+        "OpenSSH",
+        "9.6p1",
     )
 
 
@@ -40,7 +41,9 @@ async def test_no_banner_skips_generic_ssh_cve_lookup(tmp_path) -> None:
     session = _Session("QUICK_SCAN_RESULTS: 10.0.0.50\nPort 22/tcp OPEN (ssh) - (no banner)")
 
     assessment = await run_recon_assessment(
-        session=session, target_ip="10.0.0.50", reports_dir=tmp_path,
+        session=session,
+        target_ip="10.0.0.50",
+        reports_dir=tmp_path,
     )
 
     assert not any(name == "search_cve_intel" for name, _ in session.calls)
@@ -49,10 +52,7 @@ async def test_no_banner_skips_generic_ssh_cve_lookup(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_openssh_lookup_uses_product_and_version(tmp_path) -> None:
-    session = _Session(
-        "QUICK_SCAN_RESULTS: 10.0.0.50\n"
-        "Port 22/tcp OPEN (ssh) - SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13"
-    )
+    session = _Session("QUICK_SCAN_RESULTS: 10.0.0.50\nPort 22/tcp OPEN (ssh) - SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13")
 
     await run_recon_assessment(session=session, target_ip="10.0.0.50", reports_dir=tmp_path)
 

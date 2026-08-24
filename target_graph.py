@@ -22,18 +22,47 @@ from db import DatabaseManager, _new_id, _now_iso
 
 # ── Valid node and edge types ──────────────────────────────────────────────
 
-NODE_TYPES = frozenset({
-    "program", "asset", "host", "domain", "ip", "service", "web_app",
-    "api", "endpoint", "parameter", "identity", "role", "session",
-    "object", "permission_boundary", "technology", "evidence", "finding",
-})
+NODE_TYPES = frozenset(
+    {
+        "program",
+        "asset",
+        "host",
+        "domain",
+        "ip",
+        "service",
+        "web_app",
+        "api",
+        "endpoint",
+        "parameter",
+        "identity",
+        "role",
+        "session",
+        "object",
+        "permission_boundary",
+        "technology",
+        "evidence",
+        "finding",
+    }
+)
 
-EDGE_TYPES = frozenset({
-    "owns", "exposes", "resolves_to", "serves", "requires_auth",
-    "accepts_parameter", "returns_object", "belongs_to_user",
-    "accessible_by", "tested_by", "produced_evidence", "indicates",
-    "blocked_by_scope", "related_to",
-})
+EDGE_TYPES = frozenset(
+    {
+        "owns",
+        "exposes",
+        "resolves_to",
+        "serves",
+        "requires_auth",
+        "accepts_parameter",
+        "returns_object",
+        "belongs_to_user",
+        "accessible_by",
+        "tested_by",
+        "produced_evidence",
+        "indicates",
+        "blocked_by_scope",
+        "related_to",
+    }
+)
 
 
 class TargetGraph:
@@ -53,9 +82,7 @@ class TargetGraph:
         node_id: str = "",
     ) -> str:
         if node_type not in NODE_TYPES:
-            raise ValueError(
-                f"Invalid node type '{node_type}'. Valid types: {sorted(NODE_TYPES)}."
-            )
+            raise ValueError(f"Invalid node type '{node_type}'. Valid types: {sorted(NODE_TYPES)}.")
         nid = node_id or _new_id("GN")
         with self._db.connection(write=True) as conn:
             conn.execute(
@@ -74,18 +101,18 @@ class TargetGraph:
         edge_id: str = "",
     ) -> str:
         if relation not in EDGE_TYPES:
-            raise ValueError(
-                f"Invalid edge relation '{relation}'. Valid relations: {sorted(EDGE_TYPES)}."
-            )
+            raise ValueError(f"Invalid edge relation '{relation}'. Valid relations: {sorted(EDGE_TYPES)}.")
         eid = edge_id or _new_id("GE")
         with self._db.connection(write=True) as conn:
             for node_id in (from_node, to_node):
-                if conn.execute(
-                    "SELECT 1 FROM graph_nodes WHERE id=? AND mission_id=?", (node_id, self._mission_id)
-                ).fetchone() is None:
+                if (
+                    conn.execute(
+                        "SELECT 1 FROM graph_nodes WHERE id=? AND mission_id=?", (node_id, self._mission_id)
+                    ).fetchone()
+                    is None
+                ):
                     raise ValueError(
-                        "add_edge endpoints must be existing node ids; "
-                        "use add_edge_by_value for value-based wiring"
+                        "add_edge endpoints must be existing node ids; use add_edge_by_value for value-based wiring"
                     )
             conn.execute(
                 """INSERT INTO graph_edges(id, mission_id, from_node_id, to_node_id, relation, metadata_json, created_at)

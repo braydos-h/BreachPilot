@@ -88,9 +88,7 @@ def test_evidence_backed_upgrade_allowed(tmp_path):
     store = AttackGraphStore(tmp_path / "g.db")
     store.upsert_node(make_node(NodeType.FINDING, "find-1", confidence=0.3))
     engine = GraphMergeEngine(store)
-    proposal = make_node(
-        NodeType.FINDING, "find-1", confidence=0.95, evidence_refs=("ev:scanner:1:abc:2026",)
-    )
+    proposal = make_node(NodeType.FINDING, "find-1", confidence=0.95, evidence_refs=("ev:scanner:1:abc:2026",))
     conflicts = engine.apply(GraphUpdate(node_updates=[proposal]))
     assert conflicts == []
     got = store.get_node_by_value(NodeType.FINDING, "find-1")
@@ -103,12 +101,8 @@ def test_stale_edge_overwrite_keeps_max_last_seen(tmp_path):
     b = make_node(NodeType.HOST, "b.com")
     store.upsert_node(a)
     store.upsert_node(b)
-    store.upsert_edge(
-        make_edge("e1", a.node_id, b.node_id, last_seen="2026-08-20T10:00:00", confidence=0.7)
-    )
-    store.upsert_edge(
-        make_edge("e2", a.node_id, b.node_id, last_seen="2026-08-19T10:00:00", confidence=0.9)
-    )
+    store.upsert_edge(make_edge("e1", a.node_id, b.node_id, last_seen="2026-08-20T10:00:00", confidence=0.7))
+    store.upsert_edge(make_edge("e2", a.node_id, b.node_id, last_seen="2026-08-19T10:00:00", confidence=0.9))
     edges = store.query_edges()
     assert len(edges) == 1
     assert edges[0].last_seen == "2026-08-20T10:00:00"

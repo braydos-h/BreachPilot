@@ -363,11 +363,11 @@ CONFIG_SCHEMA: dict[str, Any] = {
     # OFF / 0 so default behavior is unchanged -- the new attack-path
     # capabilities must be explicitly enabled per the CLAUDE.md opt-in rule.
     "autonomous": {
-        "persistence_phase": False,     # Phase 2.2: run PERSISTENCE phase after access achieved
-        "checkpoint_every": 0,          # Phase 2.3: save attack_states.json every N completed targets (0 = off)
-        "adaptive_replan": False,       # Phase 2.4: per-target multi-round replan + vuln-chaining
-        "max_cycles": 100,              # round cap when adaptive_replan is on
-        "max_pivot_depth": 0,           # already consumed by the orchestrator (single-IP lock default)
+        "persistence_phase": False,  # Phase 2.2: run PERSISTENCE phase after access achieved
+        "checkpoint_every": 0,  # Phase 2.3: save attack_states.json every N completed targets (0 = off)
+        "adaptive_replan": False,  # Phase 2.4: per-target multi-round replan + vuln-chaining
+        "max_cycles": 100,  # round cap when adaptive_replan is on
+        "max_pivot_depth": 0,  # already consumed by the orchestrator (single-IP lock default)
     },
     # D1: cross-mission semantic-memory consumer for the autonomous
     # orchestrator. When true, the orchestrator builds a
@@ -385,8 +385,8 @@ CONFIG_SCHEMA: dict[str, Any] = {
     # ``scan_host`` path is unchanged regardless of these settings. IPv6 stays
     # PASSIVE-ONLY (AAAA lookup) -- the target-IP allowlist lock is untouched.
     "recon": {
-        "extended_enumerators": True,   # enable TLS/SMTP/DB/spider/OSINT additive enumerators
-        "udp_top_ports": 100,           # nmap -sU --top-ports N for run_udp_recon / recon_udp
+        "extended_enumerators": True,  # enable TLS/SMTP/DB/spider/OSINT additive enumerators
+        "udp_top_ports": 100,  # nmap -sU --top-ports N for run_udp_recon / recon_udp
         # Optional Shodan API key for passive OSINT. Empty = Shodan disabled
         # (run_osint returns {"enabled": False, ...}). Falls back to the
         # SHODAN_API_KEY env var at ReconConfig.from_config time.
@@ -414,14 +414,14 @@ CONFIG_SCHEMA: dict[str, Any] = {
     # (max jitter + min-gap + UA rotation + quiet-command denylist).
     "opsec": {
         "enabled": False,
-        "ua_rotation": False,           # rotate User-Agent across HTTP egress
-        "doh": False,                   # resolve via DNS-over-HTTPS (cloudflare/google)
-        "doh_provider": "cloudflare",   # "cloudflare" | "google"
-        "min_gap_seconds": 0.0,         # base pacing gap between actions
-        "jitter_seconds": 0.0,          # +/- random jitter on the gap
-        "rate_per_minute": 0,           # 0 = no token-bucket cap
-        "quiet_command_patterns": [],   # substrings to refuse when enabled (e.g. ["masscan", "nuclei"])
-        "noise_budget": 0,              # max noisy commands allowed (0 = unlimited)
+        "ua_rotation": False,  # rotate User-Agent across HTTP egress
+        "doh": False,  # resolve via DNS-over-HTTPS (cloudflare/google)
+        "doh_provider": "cloudflare",  # "cloudflare" | "google"
+        "min_gap_seconds": 0.0,  # base pacing gap between actions
+        "jitter_seconds": 0.0,  # +/- random jitter on the gap
+        "rate_per_minute": 0,  # 0 = no token-bucket cap
+        "quiet_command_patterns": [],  # substrings to refuse when enabled (e.g. ["masscan", "nuclei"])
+        "noise_budget": 0,  # max noisy commands allowed (0 = unlimited)
         # Target-aware OPSEC: when the target IP is private/local (RFC1918,
         # loopback, link-local, reserved, ULA, or any local_cidrs entry) the
         # effective profile is forced OFF -- the operator owns the box and the
@@ -430,18 +430,18 @@ CONFIG_SCHEMA: dict[str, Any] = {
         # retains full attack autonomy (public_autonomy). Default true so the
         # local-off/public-on behavior is the out-of-the-box rule.
         "local_targets_off": True,
-        "local_cidrs": [],              # extra CIDRs/IPs treated as local (e.g. ["10.99.0.0/16"])
-        "public_autonomy": True,        # for public targets the AI chooses its own attacks (documentary)
+        "local_cidrs": [],  # extra CIDRs/IPs treated as local (e.g. ["10.99.0.0/16"])
+        "public_autonomy": True,  # for public targets the AI chooses its own attacks (documentary)
     },
     # Eval/benchmark harness config. The --eval CLI flag still works when
     # ``enabled`` is false, but this block gates the defaults used by the
     # eval runner (output location, round budget, report formats).
     "eval": {
-        "enabled": True,              # eval/benchmark harness enable (the --eval flag still works when false, but the config gates defaults)
+        "enabled": True,  # eval/benchmark harness enable (the --eval flag still works when false, but the config gates defaults)
         "output_dir": "reports/eval",  # where reports/eval/<run_id>/ trees are written
-        "max_rounds": 30,             # attack_max_rounds for an eval run
-        "write_markdown": True,       # emit eval_report.md alongside the JSON
-        "write_html": True,           # emit eval_report.html alongside the JSON
+        "max_rounds": 30,  # attack_max_rounds for an eval run
+        "write_markdown": True,  # emit eval_report.md alongside the JSON
+        "write_html": True,  # emit eval_report.html alongside the JSON
     },
     # Long-session mode (opt-in). Absent/false = current behavior; the keys here
     # are the defaults applied when --long-session is passed or enabled: true.
@@ -745,6 +745,7 @@ class ConfigValidator:
         plugin_sections: set[str] = set()
         try:
             from tools.plugins import PLUGIN_REGISTRY
+
             plugin_sections = set(PLUGIN_REGISTRY.config_sections.keys())
         except Exception:  # noqa: BLE001 -- plugins import must not break validation
             plugin_sections = set()
@@ -756,9 +757,7 @@ class ConfigValidator:
         # Validate required sections exist
         for section in ("ollama", "models", "mcp", "exploit"):
             if section not in self._config:
-                result.warnings.append(
-                    f"Missing section '{section}'. Defaults will be used."
-                )
+                result.warnings.append(f"Missing section '{section}'. Defaults will be used.")
 
         # Validate ollama section
         if "ollama" in self._config:
@@ -780,9 +779,7 @@ class ConfigValidator:
                     result.warnings.append("models.default_alias is missing. Default: glm")
                 provider = models.get("provider")
                 if provider is not None and str(provider).lower() not in {"ollama", "chatgpt"}:
-                    result.warnings.append(
-                        "models.provider should be one of: ollama, chatgpt."
-                    )
+                    result.warnings.append("models.provider should be one of: ollama, chatgpt.")
                 # Model-role routing: each value should be a string alias (or
                 # empty = use default_alias). A non-string / non-alias value
                 # is ambiguous only when it doesn't resolve — warn, never
@@ -805,9 +802,7 @@ class ConfigValidator:
                             if stripped == "":
                                 continue
                             if isinstance(registry, dict) and stripped not in registry:
-                                result.warnings.append(
-                                    f"models.roles.{role} {stripped!r} is not in models.registry."
-                                )
+                                result.warnings.append(f"models.roles.{role} {stripped!r} is not in models.registry.")
 
         # Validate chatgpt provider block (opt-in; warn-only on absence).
         if "chatgpt" in self._config:
@@ -822,17 +817,19 @@ class ConfigValidator:
                     val = chatgpt.get(bkey)
                     if val is not None and not isinstance(val, bool):
                         result.warnings.append(f"chatgpt.{bkey} must be a boolean.")
-                for nkey in ("request_timeout_seconds", "context_window",
-                             "login_timeout_seconds", "start_timeout_seconds",
-                             "discover_cache_seconds"):
+                for nkey in (
+                    "request_timeout_seconds",
+                    "context_window",
+                    "login_timeout_seconds",
+                    "start_timeout_seconds",
+                    "discover_cache_seconds",
+                ):
                     val = chatgpt.get(nkey)
                     if val is not None and (not isinstance(val, (int, float)) or val < 0):
                         result.warnings.append(f"chatgpt.{nkey} must be a non-negative number.")
                 runtime = chatgpt.get("runtime")
                 if runtime is not None and str(runtime).lower() not in {"auto", "bun", "node"}:
-                    result.warnings.append(
-                        "chatgpt.runtime should be one of: auto, bun, node."
-                    )
+                    result.warnings.append("chatgpt.runtime should be one of: auto, bun, node.")
                 models_list = chatgpt.get("models")
                 if models_list is not None and not isinstance(models_list, list):
                     result.warnings.append("chatgpt.models must be a list.")
@@ -845,9 +842,7 @@ class ConfigValidator:
             else:
                 transport = mcp.get("default_transport", "")
                 if transport not in ("stdio", "http", ""):
-                    result.warnings.append(
-                        f"mcp.default_transport '{transport}' is invalid. Use 'stdio' or 'http'."
-                    )
+                    result.warnings.append(f"mcp.default_transport '{transport}' is invalid. Use 'stdio' or 'http'.")
                 port = mcp.get("http_port")
                 if port is not None and (not isinstance(port, int) or port < 1 or port > 65535):
                     result.warnings.append(f"mcp.http_port {port} is invalid. Use 1-65535.")
@@ -866,20 +861,14 @@ class ConfigValidator:
             else:
                 ft = cve.get("circuit_failure_threshold")
                 if ft is not None and (not isinstance(ft, int) or ft < 1):
-                    result.warnings.append(
-                        "cve_lookup.circuit_failure_threshold must be a positive integer."
-                    )
+                    result.warnings.append("cve_lookup.circuit_failure_threshold must be a positive integer.")
                 rt = cve.get("circuit_recovery_timeout")
                 if rt is not None and (not isinstance(rt, (int, float)) or rt <= 0):
-                    result.warnings.append(
-                        "cve_lookup.circuit_recovery_timeout must be a positive number."
-                    )
+                    result.warnings.append("cve_lookup.circuit_recovery_timeout must be a positive number.")
                 # Tier 1.8: shared NVD rate budget (per minute); 0 disables.
                 spm = cve.get("search_rate_limit_per_minute")
                 if spm is not None and (not isinstance(spm, (int, float)) or spm < 0):
-                    result.warnings.append(
-                        "cve_lookup.search_rate_limit_per_minute must be a non-negative number."
-                    )
+                    result.warnings.append("cve_lookup.search_rate_limit_per_minute must be a non-negative number.")
 
         # Validate research provider config
         if "research" in self._config:
@@ -889,15 +878,17 @@ class ConfigValidator:
             else:
                 provider = research.get("provider")
                 if provider is not None and str(provider).lower() not in {"ollama", "serpapi", "stdlib"}:
-                    result.warnings.append(
-                        "research.provider should be one of: ollama, serpapi, stdlib."
-                    )
+                    result.warnings.append("research.provider should be one of: ollama, serpapi, stdlib.")
                 fallback = research.get("fallback_provider")
                 if fallback is not None and str(fallback).lower() not in {"ollama", "serpapi", "stdlib", ""}:
-                    result.warnings.append(
-                        "research.fallback_provider should be one of: ollama, serpapi, stdlib."
-                    )
-                for key in ("timeout_seconds", "max_results", "max_fetch_depth", "max_content_chars", "cache_max_entries"):
+                    result.warnings.append("research.fallback_provider should be one of: ollama, serpapi, stdlib.")
+                for key in (
+                    "timeout_seconds",
+                    "max_results",
+                    "max_fetch_depth",
+                    "max_content_chars",
+                    "cache_max_entries",
+                ):
                     value = research.get(key)
                     if value is not None and (not isinstance(value, int) or value < 1):
                         result.warnings.append(f"research.{key} must be a positive integer.")
@@ -921,9 +912,7 @@ class ConfigValidator:
                     for key in ("enabled", "automatic", "save_advisories"):
                         value = assistant.get(key)
                         if value is not None and not isinstance(value, bool):
-                            result.warnings.append(
-                                f"research.assistant.{key} must be a boolean."
-                            )
+                            result.warnings.append(f"research.assistant.{key} must be a boolean.")
                     for key in (
                         "failure_trigger",
                         "max_auto_consultations",
@@ -933,22 +922,14 @@ class ConfigValidator:
                     ):
                         value = assistant.get(key)
                         if value is not None and (not isinstance(value, int) or value < 1):
-                            result.warnings.append(
-                                f"research.assistant.{key} must be a positive integer."
-                            )
+                            result.warnings.append(f"research.assistant.{key} must be a positive integer.")
                     timeout = assistant.get("timeout_seconds")
-                    if timeout is not None and (
-                        not isinstance(timeout, (int, float)) or timeout <= 0
-                    ):
-                        result.warnings.append(
-                            "research.assistant.timeout_seconds must be a positive number."
-                        )
+                    if timeout is not None and (not isinstance(timeout, (int, float)) or timeout <= 0):
+                        result.warnings.append("research.assistant.timeout_seconds must be a positive number.")
                     alias = str(assistant.get("model_alias") or "").strip()
                     registry = (self._config.get("models", {}) or {}).get("registry", {})
                     if alias and isinstance(registry, dict) and alias not in registry:
-                        result.warnings.append(
-                            f"research.assistant.model_alias {alias!r} is not in models.registry."
-                        )
+                        result.warnings.append(f"research.assistant.model_alias {alias!r} is not in models.registry.")
 
         # Validate memory section (Tier 1.1: ExperienceStore soundness gates)
         if "memory" in self._config:
@@ -958,23 +939,18 @@ class ConfigValidator:
             else:
                 ms = memory.get("experience_min_samples")
                 if ms is not None and (not isinstance(ms, int) or ms < 1):
-                    result.warnings.append(
-                        "memory.experience_min_samples must be a positive integer."
-                    )
+                    result.warnings.append("memory.experience_min_samples must be a positive integer.")
                 td = memory.get("experience_time_decay_days")
                 if td is not None and not isinstance(td, (int, float)):
                     result.warnings.append(
-                        "memory.experience_time_decay_days must be a number "
-                        "(set <= 0 to disable decay)."
+                        "memory.experience_time_decay_days must be a number (set <= 0 to disable decay)."
                     )
                 ame = memory.get("attack_memory_enabled")
                 if ame is not None and not isinstance(ame, bool):
                     result.warnings.append("memory.attack_memory_enabled must be a boolean.")
                 amc = memory.get("attack_memory_max_context_chars")
                 if amc is not None and (not isinstance(amc, int) or amc < 1000):
-                    result.warnings.append(
-                        "memory.attack_memory_max_context_chars must be an integer >= 1000."
-                    )
+                    result.warnings.append("memory.attack_memory_max_context_chars must be an integer >= 1000.")
 
         # Validate deterministic evidence-grounded outcome judgment.
         if "outcome_judgment" in self._config:
@@ -984,32 +960,20 @@ class ConfigValidator:
             else:
                 max_attempts = judgment.get("max_inconclusive_attempts")
                 if max_attempts is not None and (
-                    not isinstance(max_attempts, int)
-                    or isinstance(max_attempts, bool)
-                    or max_attempts < 2
+                    not isinstance(max_attempts, int) or isinstance(max_attempts, bool) or max_attempts < 2
                 ):
-                    result.warnings.append(
-                        "outcome_judgment.max_inconclusive_attempts must be an integer >= 2."
-                    )
+                    result.warnings.append("outcome_judgment.max_inconclusive_attempts must be an integer >= 2.")
                 for key in ("confirmation_threshold", "refutation_threshold"):
                     value = judgment.get(key)
                     if value is not None and (
-                        isinstance(value, bool)
-                        or not isinstance(value, (int, float))
-                        or not 0.5 <= value <= 1.0
+                        isinstance(value, bool) or not isinstance(value, (int, float)) or not 0.5 <= value <= 1.0
                     ):
-                        result.warnings.append(
-                            f"outcome_judgment.{key} must be between 0.5 and 1.0."
-                        )
+                        result.warnings.append(f"outcome_judgment.{key} must be between 0.5 and 1.0.")
                 min_refs = judgment.get("min_evidence_references")
                 if min_refs is not None and (
-                    not isinstance(min_refs, int)
-                    or isinstance(min_refs, bool)
-                    or min_refs < 1
+                    not isinstance(min_refs, int) or isinstance(min_refs, bool) or min_refs < 1
                 ):
-                    result.warnings.append(
-                        "outcome_judgment.min_evidence_references must be a positive integer."
-                    )
+                    result.warnings.append("outcome_judgment.min_evidence_references must be a positive integer.")
                 flow_a = judgment.get("flow_a")
                 if flow_a is not None and not isinstance(flow_a, bool):
                     result.warnings.append("outcome_judgment.flow_a must be a boolean.")
@@ -1024,12 +988,8 @@ class ConfigValidator:
                 if ut is not None and not isinstance(ut, bool):
                     result.warnings.append("reasoning.ultrathink must be a boolean.")
                 ut_interval = reasoning.get("ultrathink_reflection_interval")
-                if ut_interval is not None and (
-                    not isinstance(ut_interval, int) or ut_interval < 1
-                ):
-                    result.warnings.append(
-                        "reasoning.ultrathink_reflection_interval must be a positive integer."
-                    )
+                if ut_interval is not None and (not isinstance(ut_interval, int) or ut_interval < 1):
+                    result.warnings.append("reasoning.ultrathink_reflection_interval must be a positive integer.")
                 llm_reflect = reasoning.get("llm_reflection")
                 if llm_reflect is not None and not isinstance(llm_reflect, bool):
                     result.warnings.append("reasoning.llm_reflection must be a boolean.")
@@ -1040,9 +1000,7 @@ class ConfigValidator:
                             "reasoning.peer_consult_on_failure_threshold must be an integer (0 disables)."
                         )
                     elif peer_threshold < 0:
-                        result.warnings.append(
-                            "reasoning.peer_consult_on_failure_threshold must be >= 0."
-                        )
+                        result.warnings.append("reasoning.peer_consult_on_failure_threshold must be >= 0.")
 
         # Validate multi-model peer consultation section
         if "multi_model" in self._config:
@@ -1115,14 +1073,11 @@ class ConfigValidator:
                     or not isinstance(sem_threshold, (int, float))
                     or not 0 <= sem_threshold <= 1
                 ):
-                    result.warnings.append(
-                        "skills.semantic_min_similarity must be a number between 0 and 1."
-                    )
+                    result.warnings.append("skills.semantic_min_similarity must be a number between 0 and 1.")
                 for key in ("roots", "default_enabled", "include_tags", "exclude_names"):
                     value = skills.get(key)
                     if value is not None and (
-                        not isinstance(value, list)
-                        or not all(isinstance(item, str) and item.strip() for item in value)
+                        not isinstance(value, list) or not all(isinstance(item, str) and item.strip() for item in value)
                     ):
                         result.warnings.append(f"skills.{key} must be a list of non-empty strings.")
                 for key in (
@@ -1169,12 +1124,8 @@ class ConfigValidator:
                         result.warnings.append(f"agent.{bkey} must be a boolean.")
                 for ikey in ("max_retries_per_task", "max_actions", "generated_code_repair_attempts"):
                     val = agent.get(ikey)
-                    if val is not None and (
-                        not isinstance(val, int) or isinstance(val, bool) or val < 0
-                    ):
-                        result.warnings.append(
-                            f"agent.{ikey} must be a non-negative integer (0 = legacy default)."
-                        )
+                    if val is not None and (not isinstance(val, int) or isinstance(val, bool) or val < 0):
+                        result.warnings.append(f"agent.{ikey} must be a non-negative integer (0 = legacy default).")
 
         # Validate eval/benchmark harness section
         if "eval" in self._config:
@@ -1220,15 +1171,11 @@ class ConfigValidator:
                 if token_file is not None and (not isinstance(token_file, str) or not token_file.strip()):
                     result.errors.append("api.token_file must be a non-empty string.")
                 allowed_origins = ap.get("allowed_origins", [])
-                if not isinstance(allowed_origins, list) or not all(
-                    isinstance(o, str) for o in allowed_origins
-                ):
+                if not isinstance(allowed_origins, list) or not all(isinstance(o, str) for o in allowed_origins):
                     result.errors.append("api.allowed_origins must be a list of strings.")
                 for key in ("event_buffer_size", "shutdown_timeout_seconds"):
                     value = ap.get(key)
-                    if value is not None and (
-                        not isinstance(value, int) or isinstance(value, bool) or value < 0
-                    ):
+                    if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 0):
                         result.errors.append(f"api.{key} must be a non-negative integer.")
                 serve_webui = ap.get("serve_webui")
                 if serve_webui is not None and not isinstance(serve_webui, bool):
@@ -1247,11 +1194,13 @@ class ConfigValidator:
     def _build_defaults(self) -> dict[str, Any]:
         """Build a complete config with all defaults."""
         import copy
+
         return copy.deepcopy(CONFIG_SCHEMA)
 
     def apply_defaults(self) -> dict[str, Any]:
         """Fill missing keys with defaults. Returns the merged config."""
         import copy
+
         defaults = copy.deepcopy(CONFIG_SCHEMA)
 
         def _deep_merge(base: dict, overlay: dict) -> dict:
@@ -1369,6 +1318,7 @@ def get_chatgpt_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
     manager. Never returns None.
     """
     import copy
+
     base = copy.deepcopy(CONFIG_SCHEMA.get("chatgpt", {}))
     cfg = config or {}
     overlay = cfg.get("chatgpt") if isinstance(cfg, dict) else None

@@ -6,6 +6,7 @@ live network is touched. They write into ``result.extended`` and never raise
 out of the enumerator. The dispatch in ``SecondaryEnumerator.enumerate_host``
 only appends a coroutine when its flag is True.
 """
+
 from __future__ import annotations
 
 import json
@@ -31,10 +32,18 @@ def _result(ip: str = "10.0.0.50", hostname: str = "host.example.com") -> HostRe
 
 # ── flags gate dispatch ──────────────────────────────────────────────────────
 
+
 def test_extended_flags_default_off_in_recon_config() -> None:
     cfg = ReconConfig()
-    for f in ("subdomain_enum", "vhost_discovery", "waf_fingerprint", "asn_whois",
-              "cloud_metadata_probe", "snmp_enum", "dns_zone_transfer"):
+    for f in (
+        "subdomain_enum",
+        "vhost_discovery",
+        "waf_fingerprint",
+        "asn_whois",
+        "cloud_metadata_probe",
+        "snmp_enum",
+        "dns_zone_transfer",
+    ):
         assert getattr(cfg, f) is False
 
 
@@ -56,14 +65,17 @@ def test_extended_field_roundtrips() -> None:
 
 # ── subdomain_enum ────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_subdomain_enum_parses_crtsh() -> None:
     def fake_fetch(url, **kw):
-        body = json.dumps([
-            {"name_value": "a.example.com\nb.example.com"},
-            {"name_value": "*.c.example.com"},
-            {"name_value": "other.com"},
-        ])
+        body = json.dumps(
+            [
+                {"name_value": "a.example.com\nb.example.com"},
+                {"name_value": "*.c.example.com"},
+                {"name_value": "other.com"},
+            ]
+        )
         return 200, {"content-type": "json"}, body
 
     enum = SecondaryEnumerator(ReconConfig(subdomain_enum=True))
@@ -87,12 +99,14 @@ async def test_subdomain_enum_no_domain_skips() -> None:
 async def test_subdomain_enum_failure_is_swallowed() -> None:
     def boom(url, **kw):
         raise RuntimeError("net down")
+
     enum = SecondaryEnumerator(ReconConfig(subdomain_enum=True))
     r = await enum._enumerate_subdomains(_result(), [], fetch_fn=boom)
     assert any("subdomain_enum failed" in w for w in r.warnings)
 
 
 # ── vhost_discovery ───────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_vhost_discovery_detects_diverging_response() -> None:
@@ -116,10 +130,12 @@ async def test_vhost_discovery_detects_diverging_response() -> None:
 
 # ── waf_fingerprint ──────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_waf_fingerprint_detects_cloudflare() -> None:
     def fake_fetch(url, **kw):
         return 200, {"server": "cloudflare", "cf-ray": "abc123", "content-type": "text/html"}, "<html>"
+
     base = _result()
     enum = SecondaryEnumerator(ReconConfig(waf_fingerprint=True))
     r = await enum._enumerate_waf(base, base.services, fetch_fn=fake_fetch)
@@ -129,14 +145,17 @@ async def test_waf_fingerprint_detects_cloudflare() -> None:
 
 # ── asn_whois (RDAP) ──────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_asn_whois_parses_rdap() -> None:
     def fake_fetch(url, **kw):
-        body = json.dumps({
-            "name": "EXAMPLE-CORP",
-            "cidr0_cidrs": [{"v4prefix": "10.0.0.0", "length": 24}],
-            "entities": [{"vcardArray": ["vcard", [["fn", {}, "text", "Example Org"]]]}],
-        })
+        body = json.dumps(
+            {
+                "name": "EXAMPLE-CORP",
+                "cidr0_cidrs": [{"v4prefix": "10.0.0.0", "length": 24}],
+                "entities": [{"vcardArray": ["vcard", [["fn", {}, "text", "Example Org"]]]}],
+            }
+        )
         return 200, {}, body
 
     enum = SecondaryEnumerator(ReconConfig(asn_whois=True))
@@ -151,12 +170,14 @@ async def test_asn_whois_parses_rdap() -> None:
 async def test_asn_whois_failure_is_swallowed() -> None:
     def boom(url, **kw):
         raise RuntimeError("rdap down")
+
     enum = SecondaryEnumerator(ReconConfig(asn_whois=True))
     r = await enum._enumerate_asn_whois(_result(), [], fetch_fn=boom)
     assert any("asn_whois failed" in w for w in r.warnings)
 
 
 # ── cloud_metadata_probe ─────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_cloud_metadata_probe_records_imdsv1() -> None:
@@ -166,6 +187,7 @@ async def test_cloud_metadata_probe_records_imdsv1() -> None:
         if "meta-data" in url:
             return 200, {}, "instance-id\nami-id"
         return 0, {}, ""
+
     enum = SecondaryEnumerator(ReconConfig(cloud_metadata_probe=True))
     r = await enum._enumerate_cloud_metadata(_result(), [], fetch_fn=fake_fetch)
     info = r.extended["cloud_metadata"]
@@ -177,6 +199,7 @@ async def test_cloud_metadata_probe_records_imdsv1() -> None:
 async def test_cloud_metadata_probe_unreachable() -> None:
     def fake_fetch(url, **kw):
         return 0, {}, ""
+
     enum = SecondaryEnumerator(ReconConfig(cloud_metadata_probe=True))
     r = await enum._enumerate_cloud_metadata(_result(), [], fetch_fn=fake_fetch)
     info = r.extended["cloud_metadata"]
@@ -186,14 +209,17 @@ async def test_cloud_metadata_probe_unreachable() -> None:
 
 # ── snmp_enum ─────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_snmp_enum_parses_sysdescr() -> None:
     def fake_run(argv, **kw):
         return subprocess.CompletedProcess(
-            args=argv, returncode=0,
+            args=argv,
+            returncode=0,
             stdout="SNMPv2-MIB::sysDescr.0 = STRING: Linux 5.15.0-25-generic #25-Ubuntu",
             stderr="",
         )
+
     enum = SecondaryEnumerator(ReconConfig(snmp_enum=True))
     r = await enum._enumerate_snmp(_result(), [], run_fn=fake_run)
     info = r.extended["snmp"]
@@ -207,6 +233,7 @@ async def test_snmp_enum_parses_sysdescr() -> None:
 async def test_snmp_enum_failure_swallowed() -> None:
     def boom(argv, **kw):
         raise RuntimeError("snmp down")
+
     enum = SecondaryEnumerator(ReconConfig(snmp_enum=True))
     r = await enum._enumerate_snmp(_result(), [], run_fn=boom)
     assert any("snmp_enum failed" in w for w in r.warnings)
@@ -214,17 +241,20 @@ async def test_snmp_enum_failure_swallowed() -> None:
 
 # ── dns_zone_transfer ────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_dns_zone_transfer_parses_records() -> None:
     def fake_run(argv, **kw):
         return subprocess.CompletedProcess(
-            args=argv, returncode=0,
+            args=argv,
+            returncode=0,
             stdout="; <<>> DiG 9.18 <<>> axfr @10.0.0.50 example.com\n"
-                   "example.com.\t3600\tIN\tSOA\tns1.example.com. hostmaster.example.com. 1 2 3 4 5\n"
-                   "www.example.com.\t3600\tIN\tA\t10.0.0.50\n"
-                   "; Transfer complete.",
+            "example.com.\t3600\tIN\tSOA\tns1.example.com. hostmaster.example.com. 1 2 3 4 5\n"
+            "www.example.com.\t3600\tIN\tA\t10.0.0.50\n"
+            "; Transfer complete.",
             stderr="",
         )
+
     enum = SecondaryEnumerator(ReconConfig(dns_zone_transfer=True))
     r = await enum._enumerate_dns_zone_transfer(_result(), [], run_fn=fake_run)
     info = r.extended["dns_zone"]
@@ -236,6 +266,7 @@ async def test_dns_zone_transfer_parses_records() -> None:
 async def test_dns_zone_transfer_refused_is_safe() -> None:
     def fake_run(argv, **kw):
         return subprocess.CompletedProcess(args=argv, returncode=1, stdout="; Transfer failed.", stderr="")
+
     enum = SecondaryEnumerator(ReconConfig(dns_zone_transfer=True))
     r = await enum._enumerate_dns_zone_transfer(_result(), [], run_fn=fake_run)
     info = r.extended["dns_zone"]
@@ -244,6 +275,7 @@ async def test_dns_zone_transfer_refused_is_safe() -> None:
 
 
 # ── dispatch: flags actually gate ─────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_enumerate_host_runs_extended_when_flagged(monkeypatch) -> None:

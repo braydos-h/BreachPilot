@@ -59,12 +59,27 @@ def _config(*, enabled: bool = True, allowed: list[str] | None = None, **kw: Any
 def test_benign_record_ignored_anomaly_flagged(tmp_path: Path):
     """One benign 127.0.0.1 record + one 10.0.0.99 record (not in allowlist).
     The witness flags the anomaly and ignores the benign one."""
-    audit = _write_audit(tmp_path / "audit.jsonl", [
-        {"timestamp": "2026-01-01T00:00:00Z", "tool_name": "run_exploit_terminal",
-         "target_ip": "127.0.0.1", "status": "ok", "command": "nmap -sV 127.0.0.1", "args": {}},
-        {"timestamp": "2026-01-01T00:00:01Z", "tool_name": "run_exploit_terminal",
-         "target_ip": "10.0.0.99", "status": "ok", "command": "nmap -sV 10.0.0.99", "args": {}},
-    ])
+    audit = _write_audit(
+        tmp_path / "audit.jsonl",
+        [
+            {
+                "timestamp": "2026-01-01T00:00:00Z",
+                "tool_name": "run_exploit_terminal",
+                "target_ip": "127.0.0.1",
+                "status": "ok",
+                "command": "nmap -sV 127.0.0.1",
+                "args": {},
+            },
+            {
+                "timestamp": "2026-01-01T00:00:01Z",
+                "tool_name": "run_exploit_terminal",
+                "target_ip": "10.0.0.99",
+                "status": "ok",
+                "command": "nmap -sV 10.0.0.99",
+                "args": {},
+            },
+        ],
+    )
     flags_seen: list[dict[str, Any]] = []
     agent = WitnessAgent(
         _config(allowed=["127.0.0.1"]),
@@ -86,9 +101,12 @@ def test_benign_record_ignored_anomaly_flagged(tmp_path: Path):
 
 def test_witness_writes_flags_to_log(tmp_path: Path):
     """Flags are appended to the witness log JSONL."""
-    audit = _write_audit(tmp_path / "audit.jsonl", [
-        {"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.99", "status": "ok", "args": {}},
-    ])
+    audit = _write_audit(
+        tmp_path / "audit.jsonl",
+        [
+            {"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.99", "status": "ok", "args": {}},
+        ],
+    )
     log_path = tmp_path / "witness.jsonl"
     agent = WitnessAgent(
         _config(allowed=["127.0.0.1"], log_path=str(log_path)),
@@ -109,9 +127,12 @@ def test_witness_does_not_block_or_modify_run(tmp_path: Path):
     watching continues regardless of what the witness flags. We verify this
     by asserting the witness exposes NO blocking API — only ``scan_once``
     (returns flags), ``stop``, and ``seen_count``."""
-    audit = _write_audit(tmp_path / "audit.jsonl", [
-        {"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.99", "status": "ok", "args": {}},
-    ])
+    audit = _write_audit(
+        tmp_path / "audit.jsonl",
+        [
+            {"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.99", "status": "ok", "args": {}},
+        ],
+    )
     agent = WitnessAgent(_config(allowed=["127.0.0.1"]), audit_paths=[audit])
     flags = agent.scan_once()
     # The return is advisory flags — there is no "blocked" boolean, no
@@ -128,9 +149,12 @@ def test_witness_does_not_block_or_modify_run(tmp_path: Path):
 
 def test_witness_disabled_returns_no_flags(tmp_path: Path):
     """``witness.enabled: false`` -> scan_once is a no-op."""
-    audit = _write_audit(tmp_path / "audit.jsonl", [
-        {"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.99", "status": "ok", "args": {}},
-    ])
+    audit = _write_audit(
+        tmp_path / "audit.jsonl",
+        [
+            {"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.99", "status": "ok", "args": {}},
+        ],
+    )
     agent = WitnessAgent(_config(enabled=False, allowed=["127.0.0.1"]), audit_paths=[audit])
     assert agent.scan_once() == []
 
@@ -164,8 +188,7 @@ def test_witness_rate_cap_throttles_flapping_detector(tmp_path: Path):
     ``max_flags_per_signal_per_minute`` flags per 60s."""
     # 20 records, all 10.0.0.99 (all would fire allowlist_breach).
     records = [
-        {"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.99", "status": "ok", "args": {}}
-        for _ in range(20)
+        {"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.99", "status": "ok", "args": {}} for _ in range(20)
     ]
     audit = _write_audit(tmp_path / "audit.jsonl", records)
     agent = WitnessAgent(
@@ -181,16 +204,22 @@ def test_witness_sees_only_new_records_per_poll(tmp_path: Path):
     """The witness tracks byte offsets so a second poll only reads records
     appended after the first poll."""
     path = tmp_path / "audit.jsonl"
-    _write_audit(path, [
-        {"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.99", "status": "ok", "args": {}},
-    ])
+    _write_audit(
+        path,
+        [
+            {"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.99", "status": "ok", "args": {}},
+        ],
+    )
     agent = WitnessAgent(_config(allowed=["127.0.0.1"]), audit_paths=[path])
     first = agent.scan_once()
     assert len(first) == 1
     assert agent.seen_count == 1
     # Append a second anomalous record.
     with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps({"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.88", "status": "ok", "args": {}}) + "\n")
+        f.write(
+            json.dumps({"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.88", "status": "ok", "args": {}})
+            + "\n"
+        )
     second = agent.scan_once()
     assert len(second) == 1
     assert second[0].record.get("target_ip") == "10.0.0.88"
@@ -296,9 +325,11 @@ def test_witness_config_defaults_when_missing():
 
 
 def test_witness_config_from_config_block():
-    cfg = WitnessConfig.from_config({
-        "witness": {"enabled": True, "poll_interval_seconds": 2.0, "log_path": "/tmp/w.jsonl"},
-    })
+    cfg = WitnessConfig.from_config(
+        {
+            "witness": {"enabled": True, "poll_interval_seconds": 2.0, "log_path": "/tmp/w.jsonl"},
+        }
+    )
     assert cfg.enabled is True
     assert cfg.poll_interval_seconds == 2.0
     assert cfg.log_path == "/tmp/w.jsonl"

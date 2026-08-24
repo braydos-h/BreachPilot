@@ -24,10 +24,15 @@ def test_vertical_escalation(base_url, user_token, admin_endpoints):
             try:
                 resp = requests.request(method, url, headers=headers, timeout=10, verify=False)
                 if resp.status_code in (200, 201, 204):
-                    findings.append({
-                        "type": "VERTICAL_ESCALATION", "method": method,
-                        "url": url, "status": resp.status_code, "severity": "CRITICAL",
-                    })
+                    findings.append(
+                        {
+                            "type": "VERTICAL_ESCALATION",
+                            "method": method,
+                            "url": url,
+                            "status": resp.status_code,
+                            "severity": "CRITICAL",
+                        }
+                    )
                     print(f"  [!] VULNERABLE: {method} {endpoint} -> {resp.status_code}")
             except requests.RequestException:
                 continue
@@ -46,11 +51,16 @@ def test_horizontal_escalation(base_url, user_token, resource_templates, other_u
             try:
                 resp = requests.get(url, headers=headers, timeout=10, verify=False)
                 if resp.status_code == 200 and len(resp.text) > 50:
-                    findings.append({
-                        "type": "HORIZONTAL_ESCALATION", "url": url,
-                        "user_id": uid, "status": resp.status_code,
-                        "body_length": len(resp.text), "severity": "CRITICAL",
-                    })
+                    findings.append(
+                        {
+                            "type": "HORIZONTAL_ESCALATION",
+                            "url": url,
+                            "user_id": uid,
+                            "status": resp.status_code,
+                            "body_length": len(resp.text),
+                            "severity": "CRITICAL",
+                        }
+                    )
                     print(f"  [!] IDOR: GET {url} -> {resp.status_code} ({len(resp.text)} bytes)")
             except requests.RequestException:
                 continue
@@ -71,11 +81,16 @@ def test_method_override(base_url, user_token, endpoint):
             try:
                 resp = requests.post(url, headers=test_headers, timeout=10, verify=False)
                 if resp.status_code in (200, 201, 204):
-                    findings.append({
-                        "type": "METHOD_OVERRIDE_BYPASS", "url": url,
-                        "override_header": oh, "method": method,
-                        "status": resp.status_code, "severity": "HIGH",
-                    })
+                    findings.append(
+                        {
+                            "type": "METHOD_OVERRIDE_BYPASS",
+                            "url": url,
+                            "override_header": oh,
+                            "method": method,
+                            "status": resp.status_code,
+                            "severity": "HIGH",
+                        }
+                    )
                     print(f"  [!] {oh}: {method} -> {resp.status_code}")
             except requests.RequestException:
                 continue
@@ -91,10 +106,14 @@ def test_unauthenticated_access(base_url, protected_endpoints):
         try:
             resp = requests.get(url, timeout=10, verify=False)
             if resp.status_code == 200 and len(resp.text) > 50:
-                findings.append({
-                    "type": "UNAUTHENTICATED_ACCESS", "url": url,
-                    "status": resp.status_code, "severity": "CRITICAL",
-                })
+                findings.append(
+                    {
+                        "type": "UNAUTHENTICATED_ACCESS",
+                        "url": url,
+                        "status": resp.status_code,
+                        "severity": "CRITICAL",
+                    }
+                )
                 print(f"  [!] OPEN: GET {endpoint} -> {resp.status_code}")
         except requests.RequestException:
             continue
@@ -109,8 +128,11 @@ def test_mass_assignment(base_url, user_token, profile_endpoint):
     url = urljoin(base_url, profile_endpoint)
     headers = {"Authorization": f"Bearer {user_token}", "Content-Type": "application/json"}
     payloads = [
-        {"role": "admin"}, {"is_admin": True}, {"permissions": ["admin", "superuser"]},
-        {"user_type": "administrator"}, {"access_level": 99},
+        {"role": "admin"},
+        {"is_admin": True},
+        {"permissions": ["admin", "superuser"]},
+        {"user_type": "administrator"},
+        {"access_level": 99},
     ]
     for payload in payloads:
         try:
@@ -119,10 +141,15 @@ def test_mass_assignment(base_url, user_token, profile_endpoint):
                 field = list(payload.keys())[0]
                 resp_text = resp.text.lower()
                 if str(payload[field]).lower() in resp_text:
-                    findings.append({
-                        "type": "MASS_ASSIGNMENT", "url": url,
-                        "field": field, "value": payload[field], "severity": "CRITICAL",
-                    })
+                    findings.append(
+                        {
+                            "type": "MASS_ASSIGNMENT",
+                            "url": url,
+                            "field": field,
+                            "value": payload[field],
+                            "severity": "CRITICAL",
+                        }
+                    )
                     print(f"  [!] VULNERABLE: {field}={payload[field]} accepted")
         except requests.RequestException:
             continue
@@ -139,10 +166,14 @@ def test_tenant_isolation(base_url, tenant_a_token, tenant_b_resources):
         try:
             resp = requests.get(url, headers=headers, timeout=10, verify=False)
             if resp.status_code == 200 and len(resp.text) > 50:
-                findings.append({
-                    "type": "TENANT_ISOLATION_BREACH", "url": url,
-                    "status": resp.status_code, "severity": "CRITICAL",
-                })
+                findings.append(
+                    {
+                        "type": "TENANT_ISOLATION_BREACH",
+                        "url": url,
+                        "status": resp.status_code,
+                        "severity": "CRITICAL",
+                    }
+                )
                 print(f"  [!] CROSS-TENANT: {url} -> {resp.status_code}")
         except requests.RequestException:
             continue
@@ -172,10 +203,12 @@ def main():
     parser = argparse.ArgumentParser(description="Broken Access Control Testing Agent")
     parser.add_argument("base_url", help="Base URL of the target")
     parser.add_argument("--user-token", help="Regular user's Bearer token")
-    parser.add_argument("--admin-endpoints", nargs="+",
-                        default=["/admin/dashboard", "/admin/users", "/api/admin/settings"])
-    parser.add_argument("--resource-templates", nargs="+",
-                        default=["/api/users/{id}/profile", "/api/users/{id}/orders"])
+    parser.add_argument(
+        "--admin-endpoints", nargs="+", default=["/admin/dashboard", "/admin/users", "/api/admin/settings"]
+    )
+    parser.add_argument(
+        "--resource-templates", nargs="+", default=["/api/users/{id}/profile", "/api/users/{id}/orders"]
+    )
     parser.add_argument("--other-ids", nargs="+", default=["2", "3", "100", "101"])
     parser.add_argument("-o", "--output", default="access_control_report.json")
     args = parser.parse_args()
@@ -185,8 +218,9 @@ def main():
     findings.extend(test_unauthenticated_access(args.base_url, args.admin_endpoints))
     if args.user_token:
         findings.extend(test_vertical_escalation(args.base_url, args.user_token, args.admin_endpoints))
-        findings.extend(test_horizontal_escalation(args.base_url, args.user_token,
-                                                    args.resource_templates, args.other_ids))
+        findings.extend(
+            test_horizontal_escalation(args.base_url, args.user_token, args.resource_templates, args.other_ids)
+        )
         findings.extend(test_method_override(args.base_url, args.user_token, args.admin_endpoints[0]))
         findings.extend(test_mass_assignment(args.base_url, args.user_token, "/api/users/me"))
     generate_report(findings, args.output)

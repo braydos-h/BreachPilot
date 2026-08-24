@@ -39,6 +39,7 @@ pip install requests
 import requests
 import re
 
+
 def get_csp(url):
     resp = requests.get(url, timeout=10)
     csp = resp.headers.get("Content-Security-Policy", "")
@@ -50,6 +51,7 @@ def get_csp(url):
         "has_csp": bool(csp),
         "directives": parse_csp(csp) if csp else {},
     }
+
 
 def parse_csp(csp_string):
     directives = {}
@@ -74,56 +76,70 @@ BYPASS_PATTERNS = {
 }
 
 JSONP_ENDPOINTS = [
-    "accounts.google.com", "ajax.googleapis.com",
-    "cdn.jsdelivr.net", "cdnjs.cloudflare.com",
-    "*.githubusercontent.com", "raw.githubusercontent.com",
+    "accounts.google.com",
+    "ajax.googleapis.com",
+    "cdn.jsdelivr.net",
+    "cdnjs.cloudflare.com",
+    "*.githubusercontent.com",
+    "raw.githubusercontent.com",
 ]
+
 
 def analyze_csp(directives):
     findings = []
 
     # Check for missing critical directives
     if "default-src" not in directives and "script-src" not in directives:
-        findings.append({
-            "directive": "script-src",
-            "issue": "No script-src or default-src — scripts unrestricted",
-            "severity": "critical",
-        })
+        findings.append(
+            {
+                "directive": "script-src",
+                "issue": "No script-src or default-src — scripts unrestricted",
+                "severity": "critical",
+            }
+        )
 
     if "object-src" not in directives:
-        findings.append({
-            "directive": "object-src",
-            "issue": "Missing object-src — plugin-based XSS possible",
-            "severity": "high",
-        })
+        findings.append(
+            {
+                "directive": "object-src",
+                "issue": "Missing object-src — plugin-based XSS possible",
+                "severity": "high",
+            }
+        )
 
     if "base-uri" not in directives:
-        findings.append({
-            "directive": "base-uri",
-            "issue": "Missing base-uri — base tag injection possible",
-            "severity": "medium",
-        })
+        findings.append(
+            {
+                "directive": "base-uri",
+                "issue": "Missing base-uri — base tag injection possible",
+                "severity": "medium",
+            }
+        )
 
     # Check each directive for bypass patterns
     for directive, values in directives.items():
         for value in values:
             if value in BYPASS_PATTERNS:
-                findings.append({
-                    "directive": directive,
-                    "value": value,
-                    "issue": BYPASS_PATTERNS[value],
-                    "severity": "high" if value in ("'unsafe-inline'", "'unsafe-eval'", "*") else "medium",
-                })
+                findings.append(
+                    {
+                        "directive": directive,
+                        "value": value,
+                        "issue": BYPASS_PATTERNS[value],
+                        "severity": "high" if value in ("'unsafe-inline'", "'unsafe-eval'", "*") else "medium",
+                    }
+                )
 
             # Check for JSONP-hosting CDNs
             for jsonp_host in JSONP_ENDPOINTS:
                 if jsonp_host in value or value.endswith(jsonp_host):
-                    findings.append({
-                        "directive": directive,
-                        "value": value,
-                        "issue": f"Allows {jsonp_host} — JSONP/script gadget bypass possible",
-                        "severity": "high",
-                    })
+                    findings.append(
+                        {
+                            "directive": directive,
+                            "value": value,
+                            "issue": f"Allows {jsonp_host} — JSONP/script gadget bypass possible",
+                            "severity": "high",
+                        }
+                    )
 
     return findings
 ```
@@ -141,17 +157,21 @@ def check_nonce_hash(directives, html_content):
         # Check if nonce is reused (static)
         nonce_value = nonces[0].strip("'").replace("nonce-", "")
         if len(nonce_value) < 16:
-            findings.append({
-                "issue": "Nonce is too short — may be predictable",
-                "severity": "medium",
-            })
+            findings.append(
+                {
+                    "issue": "Nonce is too short — may be predictable",
+                    "severity": "medium",
+                }
+            )
 
     if not nonces and not hashes and "'strict-dynamic'" not in script_src:
         if "'unsafe-inline'" not in script_src:
-            findings.append({
-                "issue": "No nonce, hash, or strict-dynamic — consider adding",
-                "severity": "info",
-            })
+            findings.append(
+                {
+                    "issue": "No nonce, hash, or strict-dynamic — consider adding",
+                    "severity": "info",
+                }
+            )
 
     return {"nonces": len(nonces), "hashes": len(hashes), "findings": findings}
 ```
@@ -164,28 +184,36 @@ def suggest_bypasses(directives):
     script_src = directives.get("script-src", directives.get("default-src", []))
 
     if "'unsafe-inline'" in script_src:
-        bypasses.append({
-            "technique": "Inline script injection",
-            "payload": "<script>alert(document.domain)</script>",
-        })
+        bypasses.append(
+            {
+                "technique": "Inline script injection",
+                "payload": "<script>alert(document.domain)</script>",
+            }
+        )
 
     if "'unsafe-eval'" in script_src:
-        bypasses.append({
-            "technique": "eval() injection",
-            "payload": "<img src=x onerror=\"eval(atob('YWxlcnQoMSk='))\">",
-        })
+        bypasses.append(
+            {
+                "technique": "eval() injection",
+                "payload": "<img src=x onerror=\"eval(atob('YWxlcnQoMSk='))\">",
+            }
+        )
 
     if any("googleapis.com" in v for v in script_src):
-        bypasses.append({
-            "technique": "Google JSONP callback",
-            "payload": "<script src='https://accounts.google.com/o/oauth2/revoke?callback=alert(1)'></script>",
-        })
+        bypasses.append(
+            {
+                "technique": "Google JSONP callback",
+                "payload": "<script src='https://accounts.google.com/o/oauth2/revoke?callback=alert(1)'></script>",
+            }
+        )
 
     if "data:" in script_src:
-        bypasses.append({
-            "technique": "Data URI script",
-            "payload": "<script src='data:text/javascript,alert(1)'></script>",
-        })
+        bypasses.append(
+            {
+                "technique": "Data URI script",
+                "payload": "<script src='data:text/javascript,alert(1)'></script>",
+            }
+        )
 
     return bypasses
 ```

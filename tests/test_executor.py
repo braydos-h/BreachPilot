@@ -35,8 +35,7 @@ def test_execution_result_defaults():
 class FakeRouter:
     """Mimics ToolRouter.route — returns a configurable RoutedToolResult."""
 
-    def __init__(self, *, allowed=True, output="ok", output_summary="s",
-                 evidence_refs=None, blocked_reason=""):
+    def __init__(self, *, allowed=True, output="ok", output_summary="s", evidence_refs=None, blocked_reason=""):
         self._allowed = allowed
         self._output = output
         self._summary = output_summary
@@ -44,13 +43,18 @@ class FakeRouter:
         self._blocked = blocked_reason
         self.calls = []
 
-    def route(self, *, task_id, tool_name, tool_args, target, risk_level,
-              action_type, hypothesis):
-        self.calls.append({
-            "task_id": task_id, "tool_name": tool_name, "tool_args": tool_args,
-            "target": target, "risk_level": risk_level, "action_type": action_type,
-            "hypothesis": hypothesis,
-        })
+    def route(self, *, task_id, tool_name, tool_args, target, risk_level, action_type, hypothesis):
+        self.calls.append(
+            {
+                "task_id": task_id,
+                "tool_name": tool_name,
+                "tool_args": tool_args,
+                "target": target,
+                "risk_level": risk_level,
+                "action_type": action_type,
+                "hypothesis": hypothesis,
+            }
+        )
         return RoutedToolResult(
             allowed=self._allowed,
             output=self._output,
@@ -65,9 +69,13 @@ class FakeRouter:
 
 def _task(**kw):
     base = {
-        "task_id": "T-1", "target": "10.0.0.5", "phase": "recon",
-        "objective": "Scan the target host", "hypothesis": "vulns exist",
-        "allowed_tools": ["nmap_basic"], "risk_level": "low",
+        "task_id": "T-1",
+        "target": "10.0.0.5",
+        "phase": "recon",
+        "objective": "Scan the target host",
+        "hypothesis": "vulns exist",
+        "allowed_tools": ["nmap_basic"],
+        "risk_level": "low",
     }
     base.update(kw)
     return base
@@ -179,8 +187,7 @@ def test_execute_passes_correct_args_to_router():
 
 
 def test_build_args_explicit_args_passthrough():
-    args = ExecutorAgent._build_args("any_tool", "10.0.0.5",
-                                      {"tool_args": {"custom": "val"}})
+    args = ExecutorAgent._build_args("any_tool", "10.0.0.5", {"tool_args": {"custom": "val"}})
     assert args == {"custom": "val"}
 
 
@@ -211,8 +218,7 @@ def test_build_args_http_preserves_explicit_port():
 
 
 def test_build_args_cve_uses_objective_as_query():
-    args = ExecutorAgent._build_args("search_cve", "10.0.0.5",
-                                     {"objective": "Identify CVEs in nginx"})
+    args = ExecutorAgent._build_args("search_cve", "10.0.0.5", {"objective": "Identify CVEs in nginx"})
     # "Identify " is stripped, query comes from the cleaned objective
     assert args["query"] == "CVEs in nginx"
 
@@ -251,8 +257,7 @@ def test_build_args_terminal_sets_command():
 
 
 def test_build_args_python_file_sets_target_and_optional_filename_code():
-    args = ExecutorAgent._build_args("run_python_file", "10.0.0.5",
-                                      {"filename": "x.py", "code": "print(1)"})
+    args = ExecutorAgent._build_args("run_python_file", "10.0.0.5", {"filename": "x.py", "code": "print(1)"})
     assert args["target_ip"] == "10.0.0.5"
     assert args["filename"] == "x.py"
     assert args["code"] == "print(1)"

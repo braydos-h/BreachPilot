@@ -140,12 +140,14 @@ import requests
 
 NVD_API = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 
+
 def search_cves_by_cpe(cpe_name, api_key=None):
     params = {"cpeName": cpe_name, "resultsPerPage": 50}
     headers = {"apiKey": api_key} if api_key else {}
     resp = requests.get(NVD_API, params=params, headers=headers, timeout=30)
     resp.raise_for_status()
     return resp.json().get("vulnerabilities", [])
+
 
 def search_cves_by_keyword(keyword, version=None, api_key=None):
     params = {"keywordSearch": keyword, "resultsPerPage": 50}
@@ -163,6 +165,7 @@ Construct a directed graph of dependencies to trace vulnerability propagation:
 
 ```python
 import networkx as nx
+
 
 def build_dependency_graph(sbom):
     G = nx.DiGraph()

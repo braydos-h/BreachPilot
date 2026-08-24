@@ -21,8 +21,10 @@ def _make_client(tmp_path, monkeypatch, token="test-token"):
         encoding="utf-8",
     )
     from db import reset_default
+
     reset_default()
     from app import create_app
+
     return TestClient(create_app(config_path=config_path))
 
 
@@ -32,6 +34,7 @@ def _auth(token="test-token"):
 
 def _seed_lesson():
     from db import get_default_db
+
     db = get_default_db()
     with db.connection(write=True) as conn:
         conn.execute(
@@ -43,10 +46,7 @@ def _seed_lesson():
 
 
 def _seed_attack_memory(tmp_path):
-    db_path = (
-        tmp_path / "reports" / "run-1" / "exploit_workspace"
-        / "10.0.0.5" / "attempt-1" / "attack_memory.db"
-    )
+    db_path = tmp_path / "reports" / "run-1" / "exploit_workspace" / "10.0.0.5" / "attempt-1" / "attack_memory.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     conn.execute(

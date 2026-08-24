@@ -27,6 +27,7 @@ a module's runnable artifact is dispatched, the real output is classified via
    before), and does NOT run when access is absent.
 6. ``_phase_lateral_movement`` runs when ``pivot_targets`` is populated.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -317,6 +318,7 @@ async def test_cred_dump_populates_credentials(tmp_path: Path) -> None:
     """A module whose dispatch output shows a credential dump must populate
     ``credentials_found`` WITHOUT setting ``access_achieved`` (a cred dump is
     not a shell)."""
+
     def _exec(cmd: str, ctx: dict[str, Any]) -> str:
         return "dumping hashes ... SAM dumped ; ntlm hashes: admin:8846F7EAEE8FB117"
 
@@ -340,6 +342,7 @@ async def test_dispatch_failure_marks_module_failed(tmp_path: Path) -> None:
     """A script-generated module whose dispatch output carries an explicit
     failure marker ('exploit failed', 'no session created') must be marked
     FAILED so the retry loop can re-attempt it -- NOT silently succeeded."""
+
     def _exec(cmd: str, ctx: dict[str, Any]) -> str:
         return "exploit failed: no session created"
 
@@ -421,6 +424,7 @@ async def test_phase_privilege_escalation_runs_after_access(tmp_path: Path) -> N
     ``_phase_privilege_escalation`` runs. With privilege_level already at root,
     the gate would skip privesc -- so we set privilege_level='user' post-shell
     to assert the phase fires."""
+
     def _exec(cmd: str, ctx: dict[str, Any]) -> str:
         return "meterpreter session 1 opened"  # no uid=0 -> privilege_level stays ""
 
@@ -470,6 +474,7 @@ async def test_phase_privilege_escalation_skipped_without_access(tmp_path: Path)
     """When access_achieved stays False (info-stub module only), the privesc
     call-site gate must skip ``_phase_privilege_escalation`` -- the pre-Phase-2
     behavior was to always skip; Phase 2 must not regress that."""
+
     def _exec(cmd: str, ctx: dict[str, Any]) -> str:
         return "meterpreter session 1"
 
@@ -544,8 +549,7 @@ async def test_phase_lateral_movement_runs_with_pivot_targets(tmp_path: Path) ->
     state = orch.get_state("10.0.0.5")
     # A lateral-movement task targeting the pivot must have been created.
     lateral_tasks = [
-        t for t in orch._tasks.values()
-        if t.phase == AttackPhase.LATERAL_MOVEMENT and t.target == "10.0.0.99"
+        t for t in orch._tasks.values() if t.phase == AttackPhase.LATERAL_MOVEMENT and t.target == "10.0.0.99"
     ]
     assert lateral_tasks, "lateral phase must create a pivot task when pivot_targets is set"
     assert "phase_start" in _timeline_types(state)

@@ -25,9 +25,7 @@ from tools.intelligence.graph.types import (
 
 # Node types whose value is case-folded so "EXAMPLE.COM" and "example.com"
 # collide into the same node. IP/host/domain-ish names are case-insensitive.
-_CASE_FOLD_TYPES = frozenset(
-    {NodeType.IP, NodeType.HOST, NodeType.DOMAIN, NodeType.ASSET, NodeType.ENDPOINT}
-)
+_CASE_FOLD_TYPES = frozenset({NodeType.IP, NodeType.HOST, NodeType.DOMAIN, NodeType.ASSET, NodeType.ENDPOINT})
 
 _SCHEMA_VERSION = "1"
 
@@ -217,10 +215,10 @@ class AttackGraphStore:
 
             node_id = row["node_id"]
             merged_props = {**json.loads(row["properties"]), **node.properties}
-            merged_refs = _merge_refs(node.evidence_refs, tuple(row["evidence_refs"].split("|")) if row["evidence_refs"] else ())
-            is_contradiction = int(
-                row["status"] == NodeStatus.CONFIRMED.value and node.status == NodeStatus.REFUTED
+            merged_refs = _merge_refs(
+                node.evidence_refs, tuple(row["evidence_refs"].split("|")) if row["evidence_refs"] else ()
             )
+            is_contradiction = int(row["status"] == NodeStatus.CONFIRMED.value and node.status == NodeStatus.REFUTED)
             self._conn.execute(
                 "UPDATE agv2_nodes SET node_type=?, value=?, scope=?, properties=?, "
                 "confidence=?, status=?, first_seen=?, last_seen=?, evidence_refs=?, "
@@ -247,9 +245,7 @@ class AttackGraphStore:
     def get_node(self, node_id: str) -> GraphNode | None:
         """Fetch a node by id, or None."""
         with self._lock:
-            row = self._conn.execute(
-                "SELECT * FROM agv2_nodes WHERE node_id=?", (node_id,)
-            ).fetchone()
+            row = self._conn.execute("SELECT * FROM agv2_nodes WHERE node_id=?", (node_id,)).fetchone()
             return self._node_from_row(row) if row else None
 
     def get_node_by_value(self, node_type: NodeType, value: str, scope: str = "") -> GraphNode | None:
@@ -273,15 +269,12 @@ class AttackGraphStore:
         """
         with self._lock:
             for node_id in (edge.source_node_id, edge.target_node_id):
-                exists = self._conn.execute(
-                    "SELECT 1 FROM agv2_nodes WHERE node_id=?", (node_id,)
-                ).fetchone()
+                exists = self._conn.execute("SELECT 1 FROM agv2_nodes WHERE node_id=?", (node_id,)).fetchone()
                 if exists is None:
                     raise ValueError(f"edge references missing node: {node_id}")
 
             row = self._conn.execute(
-                "SELECT * FROM agv2_edges WHERE source_node_id=? AND target_node_id=? "
-                "AND edge_type=? AND scope=?",
+                "SELECT * FROM agv2_edges WHERE source_node_id=? AND target_node_id=? AND edge_type=? AND scope=?",
                 (edge.source_node_id, edge.target_node_id, edge.edge_type.value, edge.scope),
             ).fetchone()
             if row is None:
@@ -293,7 +286,9 @@ class AttackGraphStore:
                 return edge.edge_id
 
             merged_props = {**json.loads(row["properties"]), **edge.properties}
-            merged_refs = _merge_refs(edge.evidence_refs, tuple(row["evidence_refs"].split("|")) if row["evidence_refs"] else ())
+            merged_refs = _merge_refs(
+                edge.evidence_refs, tuple(row["evidence_refs"].split("|")) if row["evidence_refs"] else ()
+            )
             self._conn.execute(
                 "UPDATE agv2_edges SET properties=?, confidence=?, source=?, "
                 "first_seen=?, last_seen=?, evidence_refs=?, observation_count=?, "
@@ -463,10 +458,7 @@ class AttackGraphStore:
                     return []
             node_sql = "SELECT * FROM agv2_nodes" + (" WHERE scope=?" if scope else "")
             node_params: list[Any] = [scope] if scope else []
-            nodes = {
-                r["node_id"]: self._node_from_row(r)
-                for r in self._conn.execute(node_sql, node_params).fetchall()
-            }
+            nodes = {r["node_id"]: self._node_from_row(r) for r in self._conn.execute(node_sql, node_params).fetchall()}
             edge_sql = "SELECT * FROM agv2_edges" + (" WHERE scope=?" if scope else "")
             edge_params: list[Any] = [scope] if scope else []
             edges = [self._edge_from_row(r) for r in self._conn.execute(edge_sql, edge_params).fetchall()]
@@ -504,12 +496,8 @@ class AttackGraphStore:
     def summary(self) -> dict[str, Any]:
         """Counts of nodes by type, edges by type, and totals."""
         with self._lock:
-            nodes = self._conn.execute(
-                "SELECT node_type, COUNT(*) AS c FROM agv2_nodes GROUP BY node_type"
-            ).fetchall()
-            edges = self._conn.execute(
-                "SELECT edge_type, COUNT(*) AS c FROM agv2_edges GROUP BY edge_type"
-            ).fetchall()
+            nodes = self._conn.execute("SELECT node_type, COUNT(*) AS c FROM agv2_nodes GROUP BY node_type").fetchall()
+            edges = self._conn.execute("SELECT edge_type, COUNT(*) AS c FROM agv2_edges GROUP BY edge_type").fetchall()
             total_nodes = sum(r["c"] for r in nodes)
             total_edges = sum(r["c"] for r in edges)
             return {

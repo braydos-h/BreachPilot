@@ -172,8 +172,10 @@ def run_ctf(args: Any) -> int:
     print("=" * 60)
     print("  NetAttackAI — CTF autopilot (`--ctf`)")
     print(f"  Target: {target_ip}")
-    print(f"  Goal: flag_path={goal.flag_path or '(heuristic)'} "
-          f"root_shell={goal.root_shell} port={goal.port} marker={goal.marker or '(none)'}")
+    print(
+        f"  Goal: flag_path={goal.flag_path or '(heuristic)'} "
+        f"root_shell={goal.root_shell} port={goal.port} marker={goal.marker or '(none)'}"
+    )
     print("=" * 60)
 
     # Reuse the standard attack flow — target-locked via the normal allowlist.
@@ -197,6 +199,7 @@ def run_ctf(args: Any) -> int:
     # Goal-completion check from the eval report.
     # The eval harness writes reports/eval/<run_id>/eval_report.json.
     import json
+
     eval_dir = Path("reports/eval")
     report_files = sorted(eval_dir.glob("*/eval_report.json"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not report_files:

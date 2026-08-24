@@ -66,9 +66,13 @@ def test_null_origin_rejected():
 
 def test_non_loopback_origin_rejected():
     assert is_loopback_origin("http://10.0.0.1:8080", []) is False
-    assert is_loopback_origin(
-        "https://evil.example", ["https://evil.example"],
-    ) is False
+    assert (
+        is_loopback_origin(
+            "https://evil.example",
+            ["https://evil.example"],
+        )
+        is False
+    )
 
 
 def test_explicit_allowed_origin():
@@ -83,6 +87,7 @@ def _make_client(tmp_path, monkeypatch):
     monkeypatch.setenv("NETATTACKAI_API_TOKEN", "test-bearer-token")
     monkeypatch.chdir(tmp_path)
     from app import create_app
+
     app = create_app(config_path=tmp_path / "config.yaml")
     return TestClient(app)
 
@@ -128,6 +133,7 @@ def test_config_redacts_secrets(tmp_path, monkeypatch):
     monkeypatch.setenv("NETATTACKAI_API_TOKEN", "test-token")
     monkeypatch.chdir(tmp_path)
     from app import create_app
+
     app = create_app(config_path=config_path)
     client = TestClient(app)
     resp = client.get("/api/v1/config", headers={"Authorization": "Bearer test-token"})

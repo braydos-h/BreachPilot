@@ -20,29 +20,15 @@ SAMPLE_NVD_RESPONSE = {
             "cve": {
                 "id": "CVE-2021-44228",
                 "descriptions": [
-                    {"lang": "en", "value": "Apache Log4j2 JNDI features do not protect against attacker controlled LDAP and other JNDI related endpoints."}
-                ],
-                "metrics": {
-                    "cvssMetricV31": [
-                        {
-                            "cvssData": {
-                                "baseScore": 10.0,
-                                "baseSeverity": "CRITICAL"
-                            }
-                        }
-                    ]
-                },
-                "weaknesses": [
                     {
-                        "description": [
-                            {"lang": "en", "value": "CWE-502"}
-                        ]
+                        "lang": "en",
+                        "value": "Apache Log4j2 JNDI features do not protect against attacker controlled LDAP and other JNDI related endpoints.",
                     }
                 ],
+                "metrics": {"cvssMetricV31": [{"cvssData": {"baseScore": 10.0, "baseSeverity": "CRITICAL"}}]},
+                "weaknesses": [{"description": [{"lang": "en", "value": "CWE-502"}]}],
                 "published": "2021-12-10T00:00:00.000",
-                "references": [
-                    {"url": "https://nvd.nist.gov/vuln/detail/CVE-2021-44228"}
-                ]
+                "references": [{"url": "https://nvd.nist.gov/vuln/detail/CVE-2021-44228"}],
             }
         }
     ]
@@ -108,14 +94,19 @@ async def test_circuit_opens_after_threshold_failures_then_short_circuits():
     returns [] WITHOUT calling NVD (graceful degradation, no hammering)."""
     # threshold=3, no rate-limit sleep, fresh queries each call (different key)
     # so the cache never serves a hit and the fetch path runs every time.
-    client = NVDClient(CVESearchSettings(
-        circuit_failure_threshold=3, rate_limit_seconds=0.0,
-    ))
+    client = NVDClient(
+        CVESearchSettings(
+            circuit_failure_threshold=3,
+            rate_limit_seconds=0.0,
+        )
+    )
     call_count = 0
+
     def boom(query):
         nonlocal call_count
         call_count += 1
         raise RuntimeError("NVD HTTP 503: down")
+
     with patch.object(client, "_fetch_sync", side_effect=boom):
         # First 3 failing calls: breaker CLOSED, fetch attempted, raises.
         for i in range(3):
@@ -140,19 +131,24 @@ async def test_circuit_success_resets_failure_count():
     boom(1)->ok(1)->boom2(2) >= threshold -> OPEN. The closed/open outcome
     therefore differs between a working and a broken reset, so the assertion
     actually guards the reset invariant."""
-    client = NVDClient(CVESearchSettings(
-        circuit_failure_threshold=2, rate_limit_seconds=0.0,
-    ))
+    client = NVDClient(
+        CVESearchSettings(
+            circuit_failure_threshold=2,
+            rate_limit_seconds=0.0,
+        )
+    )
     calls = []
+
     def fetch(query):
         calls.append(query)
         if query.startswith("boom"):
             raise RuntimeError("down")
         return []
+
     with patch.object(client, "_fetch_sync", side_effect=fetch):
         with pytest.raises(RuntimeError):
             await client.search("boom")
-        await client.search("ok")        # success -> record_success resets count to 0
+        await client.search("ok")  # success -> record_success resets count to 0
         with pytest.raises(RuntimeError):
             await client.search("boom2")  # failure count back to 1 (< threshold 2)
         # Breaker must still be CLOSED: the success reset prevented two
@@ -168,9 +164,12 @@ async def test_circuit_success_resets_failure_count():
 async def test_circuit_does_not_cache_empty_degradation():
     """When the breaker is OPEN, the [] short-circuit must NOT be cached --
     otherwise a recovered NVD would keep serving stale empties."""
-    client = NVDClient(CVESearchSettings(
-        circuit_failure_threshold=1, rate_limit_seconds=0.0,
-    ))
+    client = NVDClient(
+        CVESearchSettings(
+            circuit_failure_threshold=1,
+            rate_limit_seconds=0.0,
+        )
+    )
     with patch.object(client, "_fetch_sync", side_effect=RuntimeError("down")):
         with pytest.raises(RuntimeError):
             await client.search("q")  # 1 failure trips threshold=1 -> OPEN
@@ -181,9 +180,12 @@ async def test_circuit_does_not_cache_empty_degradation():
 
 def test_search_sync_circuit_opens_sync_path():
     """The synchronous wrapper gets the same breaker protection."""
-    client = NVDClient(CVESearchSettings(
-        circuit_failure_threshold=2, rate_limit_seconds=0.0,
-    ))
+    client = NVDClient(
+        CVESearchSettings(
+            circuit_failure_threshold=2,
+            rate_limit_seconds=0.0,
+        )
+    )
     with patch.object(client, "_fetch_sync", side_effect=RuntimeError("down")):
         for i in range(2):
             with pytest.raises(RuntimeError):
@@ -197,9 +199,12 @@ async def test_4xx_is_soft_miss_does_not_open_breaker():
     lookup on a still-healthy NVD would otherwise be blocked. 5xx still opens
     it. (Plan P3: the log showed NVD 404s raising to the AI and counting toward
     breaker trips.)"""
-    client = NVDClient(CVESearchSettings(
-        circuit_failure_threshold=2, rate_limit_seconds=0.0,
-    ))
+    client = NVDClient(
+        CVESearchSettings(
+            circuit_failure_threshold=2,
+            rate_limit_seconds=0.0,
+        )
+    )
     calls = []
 
     def fetch(query):
@@ -224,9 +229,12 @@ async def test_4xx_is_soft_miss_does_not_open_breaker():
 @pytest.mark.asyncio
 async def test_5xx_still_opens_breaker():
     """A 5xx NVDHTTPError is a hard failure and still opens the breaker."""
-    client = NVDClient(CVESearchSettings(
-        circuit_failure_threshold=2, rate_limit_seconds=0.0,
-    ))
+    client = NVDClient(
+        CVESearchSettings(
+            circuit_failure_threshold=2,
+            rate_limit_seconds=0.0,
+        )
+    )
 
     def fetch(query):
         raise NVDHTTPError(503, "NVD HTTP 503: down")
@@ -258,8 +266,10 @@ async def test_search_cve_intel_degrades_gracefully_on_nvd_error(tmp_path):
 
     nvd = NVDClient(CVESearchSettings(rate_limit_seconds=0.0))
     mcp = create_mcp_server(
-        ExploitSearch(ExploitSearchSettings()), nvd,
-        WebResearcher(WebResearcherSettings()), tmp_path,
+        ExploitSearch(ExploitSearchSettings()),
+        nvd,
+        WebResearcher(WebResearcherSettings()),
+        tmp_path,
         {"exploit": {"require_explicit_allowlist": False}},
     )
     with patch.object(nvd, "search_sync", side_effect=NVDHTTPError(404, "NVD HTTP 404: nf")):
@@ -275,10 +285,12 @@ def test_build_cve_search_threads_breaker_config_through():
     left the operator-facing knobs silently inert)."""
     from tools.mcp_shared import build_cve_search
 
-    config = {"cve_lookup": {
-        "circuit_failure_threshold": 2,
-        "circuit_recovery_timeout": 30.0,
-    }}
+    config = {
+        "cve_lookup": {
+            "circuit_failure_threshold": 2,
+            "circuit_recovery_timeout": 30.0,
+        }
+    }
     client = build_cve_search(config)
     assert client._breaker.failure_threshold == 2
     assert client._breaker.recovery_timeout == 30.0
@@ -316,9 +328,11 @@ def test_nvd_client_with_limiter_uses_it_not_per_instance(monkeypatch):
 
     acquired: list[str] = []
     real_acquire_sync = client._rate_limiter.acquire_sync
+
     def spy_acquire_sync(key, cost=1.0):
         acquired.append(key)
         return real_acquire_sync(key, cost)
+
     monkeypatch.setattr(client._rate_limiter, "acquire_sync", spy_acquire_sync)
 
     # Cache-miss path: _fetch_sync is stubbed to raise so we only exercise the

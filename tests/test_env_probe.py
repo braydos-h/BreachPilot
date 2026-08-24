@@ -25,8 +25,10 @@ def test_missing_without_sudo_flags_python_fallback():
     def fake_which(t):
         return "/usr/bin/" + t if t in {"nmap", "curl", "python3", "git"} else None
 
-    with patch("tools.env_probe.shutil.which", side_effect=fake_which), \
-            patch("tools.env_probe._can_passwordless_sudo", return_value=False):
+    with (
+        patch("tools.env_probe.shutil.which", side_effect=fake_which),
+        patch("tools.env_probe._can_passwordless_sudo", return_value=False),
+    ):
         probe = preflight_env_probe()
 
     assert "hydra" in probe["missing"]
@@ -50,8 +52,10 @@ def test_missing_with_sudo_flags_apt_install():
     def fake_which(t):
         return None if t == "gobuster" else "/usr/bin/" + t
 
-    with patch("tools.env_probe.shutil.which", side_effect=fake_which), \
-            patch("tools.env_probe._can_passwordless_sudo", return_value=True):
+    with (
+        patch("tools.env_probe.shutil.which", side_effect=fake_which),
+        patch("tools.env_probe._can_passwordless_sudo", return_value=True),
+    ):
         probe = preflight_env_probe()
 
     assert probe["recommendations"]["gobuster"] == "install_via_apt"
@@ -73,9 +77,7 @@ def test_prompt_carries_env_context_block():
         "  Missing:   hydra\n"
         "  PIVOT NOW (no sudo, apt_install will fail): hydra\n"
     )
-    prompt = build_exploit_system_prompt(
-        attacker_os="Linux", target_ip="10.0.0.5", env_context=env
-    )
+    prompt = build_exploit_system_prompt(attacker_os="Linux", target_ip="10.0.0.5", env_context=env)
     assert "PRE-FLIGHT ENVIRONMENT" in prompt
     assert "PIVOT NOW" in prompt
     # Must appear after the ATTACKER ENVIRONMENT header.

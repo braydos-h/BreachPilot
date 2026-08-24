@@ -45,6 +45,7 @@ INTROSPECTION_QUERY = """
 }
 """
 
+
 def run_introspection(url, headers=None):
     """Execute full introspection query and extract schema details."""
     resp = requests.post(
@@ -62,7 +63,7 @@ def run_introspection(url, headers=None):
     sensitive_fields = []
 
     for t in types:
-        for field in (t.get("fields") or []):
+        for field in t.get("fields") or []:
             if t["name"] == schema.get("queryType", {}).get("name"):
                 queries.append(field["name"])
             if t["name"] == schema.get("mutationType", {}).get("name"):
@@ -99,11 +100,13 @@ def test_depth_limit(url, max_depth=15, headers=None):
             )
             status = resp.status_code
             has_errors = "errors" in resp.json()
-            results.append({
-                "depth": depth,
-                "status": status,
-                "blocked": has_errors and status != 200,
-            })
+            results.append(
+                {
+                    "depth": depth,
+                    "status": status,
+                    "blocked": has_errors and status != 200,
+                }
+            )
             if has_errors:
                 return {
                     "max_allowed_depth": depth - 1,
@@ -133,9 +136,9 @@ def test_depth_limit(url, max_depth=15, headers=None):
 def test_batch_query(url, headers=None):
     """Test if the endpoint allows batched queries (alias-based brute force)."""
     batch = [
-        {"query": '{ alias0: __typename }'},
-        {"query": '{ alias1: __typename }'},
-        {"query": '{ alias2: __typename }'},
+        {"query": "{ alias0: __typename }"},
+        {"query": "{ alias1: __typename }"},
+        {"query": "{ alias2: __typename }"},
     ]
     resp = requests.post(url, json=batch, headers=headers or {}, timeout=10)
     return {
@@ -148,9 +151,20 @@ def test_batch_query(url, headers=None):
 
 ```python
 SENSITIVE_PATTERNS = [
-    "password", "token", "secret", "credential", "ssn",
-    "credit_card", "api_key", "apikey", "private_key",
-    "auth", "session", "otp", "pin", "cvv",
+    "password",
+    "token",
+    "secret",
+    "credential",
+    "ssn",
+    "credit_card",
+    "api_key",
+    "apikey",
+    "private_key",
+    "auth",
+    "session",
+    "otp",
+    "pin",
+    "cvv",
 ]
 ```
 

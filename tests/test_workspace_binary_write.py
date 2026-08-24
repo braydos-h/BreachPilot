@@ -7,6 +7,7 @@ non-UTF-8 bytes was silently corrupted (libcrypto "no start line"). ``binary=Tru
 base64-decodes the payload and writes raw bytes; the default text path is
 byte-identical to the old behavior for Python source.
 """
+
 from __future__ import annotations
 
 import base64
@@ -27,11 +28,8 @@ def _make_server(tmp_path: Path):
 
     search = ExploitSearch(ExploitSearchSettings())
     nvd = NVDClient(CVESearchSettings())
-    config: dict[str, Any] = {"exploit": {"require_explicit_allowlist": False,
-                                          "allowed_targets": []}}
-    return create_mcp_server(
-        search, nvd, WebResearcher(WebResearcherSettings()), tmp_path, config
-    )
+    config: dict[str, Any] = {"exploit": {"require_explicit_allowlist": False, "allowed_targets": []}}
+    return create_mcp_server(search, nvd, WebResearcher(WebResearcherSettings()), tmp_path, config)
 
 
 def _text(result) -> str:
@@ -57,10 +55,12 @@ async def test_write_python_file_text_mode_unchanged(tmp_path: Path) -> None:
     """Default path: Python source written as UTF-8 text, byte-identical to old."""
     mcp = _make_server(tmp_path)
     code = "import os\nprint('ok')\n"
-    text = _text(await mcp.call_tool(
-        "write_python_file",
-        {"filename": "exploit.py", "code": code},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "write_python_file",
+            {"filename": "exploit.py", "code": code},
+        )
+    )
     assert "PYTHON_FILE_WRITTEN" in text
     assert "MODE: text" in text
     assert f"SHA256: {hashlib.sha256(code.encode('utf-8')).hexdigest()}" in text
@@ -79,10 +79,12 @@ async def test_write_python_file_binary_mode_writes_bytes(tmp_path: Path) -> Non
     # A private key body with a non-UTF-8 byte (0xff) that write_text would mangle.
     raw = b"-----BEGIN OPENSSH PRIVATE KEY-----\n\xff\xfe non-utf8\n-----END-----\n"
     payload_b64 = base64.b64encode(raw).decode("ascii")
-    text = _text(await mcp.call_tool(
-        "write_python_file",
-        {"filename": "id_ed25519", "code": payload_b64, "binary": True},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "write_python_file",
+            {"filename": "id_ed25519", "code": payload_b64, "binary": True},
+        )
+    )
     assert "PYTHON_FILE_WRITTEN" in text
     assert "MODE: binary" in text
     assert f"SHA256: {hashlib.sha256(raw).hexdigest()}" in text
@@ -98,10 +100,12 @@ async def test_write_python_file_binary_mode_writes_bytes(tmp_path: Path) -> Non
 async def test_write_python_file_binary_rejects_invalid_base64(tmp_path: Path) -> None:
     """A non-base64 payload under binary=True fails loudly, not silently."""
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "write_python_file",
-        {"filename": "bad.bin", "code": "not!!base64!!", "binary": True},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "write_python_file",
+            {"filename": "bad.bin", "code": "not!!base64!!", "binary": True},
+        )
+    )
     assert text.startswith("BLOCKED:")
     assert "valid base64" in text
 
@@ -112,10 +116,11 @@ async def test_write_python_file_binary_absolute_path(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path)
     target = tmp_path / "nested" / "key.pem"
     raw = b"\x00\x01\x02PEM\x80\x81"
-    text = _text(await mcp.call_tool(
-        "write_python_file",
-        {"filename": str(target), "code": base64.b64encode(raw).decode(),
-         "binary": True},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "write_python_file",
+            {"filename": str(target), "code": base64.b64encode(raw).decode(), "binary": True},
+        )
+    )
     assert "MODE: binary" in text
     assert target.read_bytes() == raw

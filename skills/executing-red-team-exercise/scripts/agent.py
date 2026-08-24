@@ -12,7 +12,9 @@ from typing import List
 try:
     import requests
 except ImportError:
-    import sys; sys.exit("requests is required: pip install requests")
+    import sys
+
+    sys.exit("requests is required: pip install requests")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -45,6 +47,7 @@ class RedTeamOperation:
 def load_attack_techniques(cache_file: str = "attack_enterprise.json") -> dict:
     """Load MITRE ATT&CK Enterprise techniques from local cache or upstream."""
     import os
+
     if os.path.exists(cache_file):
         with open(cache_file) as f:
             return json.load(f)
@@ -88,27 +91,29 @@ def get_actor_techniques(attack_data: dict, actor_name: str) -> List[dict]:
     return techniques
 
 
-def build_operation_plan(actor_name: str, target: str, objectives: List[str],
-                         attack_data: dict) -> RedTeamOperation:
+def build_operation_plan(actor_name: str, target: str, objectives: List[str], attack_data: dict) -> RedTeamOperation:
     """Create a red team operation plan based on emulated threat actor TTPs."""
     techniques = get_actor_techniques(attack_data, actor_name)
     executions = [
         TechniqueExecution(
-            technique_id=t["id"], technique_name=t["name"],
-            tactic=t["tactic"], status="planned",
+            technique_id=t["id"],
+            technique_name=t["name"],
+            tactic=t["tactic"],
+            status="planned",
         )
         for t in techniques
     ]
     return RedTeamOperation(
         operation_name=f"{actor_name} Emulation - {target}",
-        target_org=target, emulated_actor=actor_name,
+        target_org=target,
+        emulated_actor=actor_name,
         start_date=datetime.utcnow().isoformat(),
-        objectives=objectives, techniques=executions,
+        objectives=objectives,
+        techniques=executions,
     )
 
 
-def log_technique_execution(op: RedTeamOperation, technique_id: str,
-                             detected: bool = False, notes: str = "") -> None:
+def log_technique_execution(op: RedTeamOperation, technique_id: str, detected: bool = False, notes: str = "") -> None:
     """Mark a technique as executed and record detection status."""
     for tech in op.techniques:
         if tech.technique_id == technique_id:
@@ -136,13 +141,10 @@ def generate_detection_gap_report(op: RedTeamOperation) -> dict:
         "techniques_executed": len(executed),
         "techniques_detected": len(detected),
         "techniques_missed": len(missed),
-        "detection_rate": f"{len(detected)/len(executed)*100:.1f}%" if executed else "N/A",
+        "detection_rate": f"{len(detected) / len(executed) * 100:.1f}%" if executed else "N/A",
         "detected_list": [asdict(t) for t in detected],
         "missed_list": [asdict(t) for t in missed],
-        "recommendations": [
-            f"Improve detection for {t.technique_id} ({t.technique_name})"
-            for t in missed
-        ],
+        "recommendations": [f"Improve detection for {t.technique_id} ({t.technique_name})" for t in missed],
     }
 
 

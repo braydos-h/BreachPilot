@@ -50,10 +50,7 @@ def _ctx_get(ctx: ModuleContext, key: str, default: Any = None) -> Any:
 
 class DetectionCoverageProbe(AttackModule):
     name = "detection_coverage_probe"
-    description = (
-        "Plan canary actions to test the authorized target detection coverage "
-        "(read-only planning)."
-    )
+    description = "Plan canary actions to test the authorized target detection coverage (read-only planning)."
     target_services: list[str] = []
     target_ports: list[int] = []
     required_cves: list[str] = []
@@ -77,10 +74,11 @@ class DetectionCoverageProbe(AttackModule):
         return self._info_result(
             ctx,
             note=(
-                "Operator deploys these canaries against the authorized target "
-                "and correlates with their SIEM/IDS/FIM."
+                "Operator deploys these canaries against the authorized target and correlates with their SIEM/IDS/FIM."
             ),
-            evidence=[f"Planned {len(plan)} canaries across categories: {', '.join(c.get('category', '?') for c in plan)}"],
+            evidence=[
+                f"Planned {len(plan)} canaries across categories: {', '.join(c.get('category', '?') for c in plan)}"
+            ],
             references=[
                 "https://attack.mitre.org/techniques/T1078/",
                 "https://attack.mitre.org/techniques/T1105/",
@@ -116,33 +114,37 @@ class LogSourceEnum(AttackModule):
 
         if os_family == "windows":
             log_sources = [
-                {"channel": "Security", "path": "EventLog:Security",
-                 "note": "Login/logon events (4624/4625), privilege use"},
-                {"channel": "System", "path": "EventLog:System",
-                 "note": "Service/driver events, system errors"},
-                {"channel": "Microsoft-Windows-Sysmon/Operational",
-                 "path": "EventLog:Microsoft-Windows-Sysmon/Operational",
-                 "note": "Process/network/file creation events (if Sysmon deployed)"},
-                {"channel": "Application", "path": "EventLog:Application",
-                 "note": "Application-level audit events"},
-                {"channel": "Windows PowerShell", "path": "EventLog:Windows PowerShell",
-                 "note": "PowerShell script block logging (4104) and execution (4103)"},
-                {"channel": "TerminalServices-Gateway/Operational",
-                 "path": "EventLog:TerminalServices-Gateway/Operational",
-                 "note": "RDP session events"},
+                {
+                    "channel": "Security",
+                    "path": "EventLog:Security",
+                    "note": "Login/logon events (4624/4625), privilege use",
+                },
+                {"channel": "System", "path": "EventLog:System", "note": "Service/driver events, system errors"},
+                {
+                    "channel": "Microsoft-Windows-Sysmon/Operational",
+                    "path": "EventLog:Microsoft-Windows-Sysmon/Operational",
+                    "note": "Process/network/file creation events (if Sysmon deployed)",
+                },
+                {"channel": "Application", "path": "EventLog:Application", "note": "Application-level audit events"},
+                {
+                    "channel": "Windows PowerShell",
+                    "path": "EventLog:Windows PowerShell",
+                    "note": "PowerShell script block logging (4104) and execution (4103)",
+                },
+                {
+                    "channel": "TerminalServices-Gateway/Operational",
+                    "path": "EventLog:TerminalServices-Gateway/Operational",
+                    "note": "RDP session events",
+                },
             ]
         else:
             log_sources = [
-                {"path": "/var/log/auth.log",
-                 "note": "SSH auth, su/sudo, privilege escalation attempts"},
+                {"path": "/var/log/auth.log", "note": "SSH auth, su/sudo, privilege escalation attempts"},
                 {"path": "/var/log/syslog", "note": "General system events"},
-                {"path": "/var/log/audit/audit.log",
-                 "note": "auditd syscall/SELinux events (if auditd deployed)"},
+                {"path": "/var/log/audit/audit.log", "note": "auditd syscall/SELinux events (if auditd deployed)"},
                 {"path": "journald", "note": "systemd-journald binary journal"},
-                {"path": "/var/log/messages",
-                 "note": "Legacy syslog destination (RHEL-family)"},
-                {"path": "/var/log/secure",
-                 "note": "Legacy auth log (RHEL-family)"},
+                {"path": "/var/log/messages", "note": "Legacy syslog destination (RHEL-family)"},
+                {"path": "/var/log/secure", "note": "Legacy auth log (RHEL-family)"},
             ]
 
         return self._info_result(
@@ -164,9 +166,7 @@ class LogSourceEnum(AttackModule):
 
 class OPSECPostureReport(AttackModule):
     name = "opsec_posture_report"
-    description = (
-        "Report the active OPSEC posture + audit footprint summary (read-only)."
-    )
+    description = "Report the active OPSEC posture + audit footprint summary (read-only)."
     target_services: list[str] = []
     target_ports: list[int] = []
     required_cves: list[str] = []

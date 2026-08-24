@@ -24,18 +24,20 @@ try:
     import questionary
     from questionary import Choice, Style
 
-    _CUSTOM_STYLE = Style([
-        ("qmark", "fg:cyan bold"),
-        ("question", "fg:white bold"),
-        ("answer", "fg:green bold"),
-        ("pointer", "fg:cyan bold"),
-        ("highlighted", "fg:cyan bold"),
-        ("selected", "fg:green bold"),
-        ("separator", "fg:gray"),
-        ("instruction", "fg:gray italic"),
-        ("text", ""),
-        ("disabled", "fg:gray italic"),
-    ])
+    _CUSTOM_STYLE = Style(
+        [
+            ("qmark", "fg:cyan bold"),
+            ("question", "fg:white bold"),
+            ("answer", "fg:green bold"),
+            ("pointer", "fg:cyan bold"),
+            ("highlighted", "fg:cyan bold"),
+            ("selected", "fg:green bold"),
+            ("separator", "fg:gray"),
+            ("instruction", "fg:gray italic"),
+            ("text", ""),
+            ("disabled", "fg:gray italic"),
+        ]
+    )
     _HAS_QUESTIONARY = True
 except Exception:
     _HAS_QUESTIONARY = False
@@ -108,13 +110,10 @@ class _SpinnerState:
 
 def _sanitize(text: str) -> str:
     """Strip ANSI escapes and non-printable control characters."""
-    ansi_escape = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
+    ansi_escape = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
     text = ansi_escape.sub("", text)
     return "".join(
-        ch for ch in text
-        if ch == "\n" or ch == "\r" or ch == "\t"
-        or (32 <= ord(ch) <= 126)
-        or (ord(ch) >= 160)
+        ch for ch in text if ch == "\n" or ch == "\r" or ch == "\t" or (32 <= ord(ch) <= 126) or (ord(ch) >= 160)
     )
 
 
@@ -293,6 +292,7 @@ class AttackUi:
 
     def tool(self, name: str, arguments: dict[str, Any]) -> None:
         import json
+
         payload = json.dumps(arguments, sort_keys=True)
         print(f"{self._c('blue')}[TOOL]{self._c('reset')} {self._c('gray')}{name}{self._c('reset')} {payload}")
 
@@ -364,17 +364,11 @@ class AttackUi:
 
     def phase_change(self, new_phase: str) -> None:
         """Print a banner when the agent transitions to a new phase."""
-        print(
-            f"{self._c('blue')}[PHASE]{self._c('reset')} "
-            f"entering {self._c('bold')}{new_phase}{self._c('reset')}"
-        )
+        print(f"{self._c('blue')}[PHASE]{self._c('reset')} entering {self._c('bold')}{new_phase}{self._c('reset')}")
 
     def thinking_indicator(self, round_num: int) -> None:
         """Print a 'thinking' line while the model is generating its response."""
-        print(
-            f"{self._c('gray')}[THINKING] round {round_num} — "
-            f"waiting for model…{self._c('reset')}"
-        )
+        print(f"{self._c('gray')}[THINKING] round {round_num} — waiting for model…{self._c('reset')}")
 
     def action_status(
         self,
@@ -421,24 +415,16 @@ class AttackUi:
 
     def cred_dump(self, *, action_num: int) -> None:
         """Print a yellow [CRED DUMP] line when credentials are harvested."""
-        print(
-            f"{self._c('yellow')}[CRED DUMP]#{action_num}{self._c('reset')}"
-            f" credentials harvested"
-        )
+        print(f"{self._c('yellow')}[CRED DUMP]#{action_num}{self._c('reset')} credentials harvested")
 
     def partial_outcome(self, *, action_num: int, reason: str = "") -> None:
         """Print a gray [PARTIAL] line for a limited / incomplete outcome."""
         suffix = f" — {_sanitize(reason)}" if reason else ""
-        print(
-            f"{self._c('gray')}[PARTIAL]#{action_num}{self._c('reset')}{suffix}"
-        )
+        print(f"{self._c('gray')}[PARTIAL]#{action_num}{self._c('reset')}{suffix}")
 
     def exploit_failure_run(self, *, count: int) -> None:
         """Print a yellow warning when consecutive exploit failures stack up."""
-        print(
-            f"{self._c('yellow')}[FAILURES]{self._c('reset')} "
-            f"{count} consecutive exploit failure(s)"
-        )
+        print(f"{self._c('yellow')}[FAILURES]{self._c('reset')} {count} consecutive exploit failure(s)")
 
     def result_outcome(
         self,
@@ -464,9 +450,7 @@ class AttackUi:
             tag = "FAIL"
             color = "red"
         ec = "" if exit_code is None else f" exit={exit_code}"
-        print(
-            f"{self._c(color)}[{tag}]#{action_num}{self._c('reset')}{ec}"
-        )
+        print(f"{self._c(color)}[{tag}]#{action_num}{self._c('reset')}{ec}")
 
     @contextlib.contextmanager
     def spinner(
@@ -682,14 +666,9 @@ class AttackUi:
                         #   (e.g. "... 5s") so a glyph would be visual noise.
                         if format_message is None:
                             frame = next(frames)
-                            stream.write(
-                                f"\r\x1b[K{self._c('yellow')}[STATUS]{self._c('reset')} "
-                                f"{label} {frame}"
-                            )
+                            stream.write(f"\r\x1b[K{self._c('yellow')}[STATUS]{self._c('reset')} {label} {frame}")
                         else:
-                            stream.write(
-                                f"\r\x1b[K{self._c('yellow')}[STATUS]{self._c('reset')} {label}"
-                            )
+                            stream.write(f"\r\x1b[K{self._c('yellow')}[STATUS]{self._c('reset')} {label}")
                         stream.flush()
                 except (OSError, ValueError):
                     # stderr closed (pipe) or codec error; bail silently
@@ -819,6 +798,7 @@ class AttackUi:
         # domain is NOT resolved here -- the caller (main.py) resolves it so
         # it can carry both the domain and the resolved IP. Syntax-only gate.
         from tools.validation_utils import validate_target
+
         while True:
             try:
                 val = input("  > ").strip()
@@ -826,14 +806,18 @@ class AttackUi:
                     val = default
                 if validate_target(val):
                     return val
-                print(f"  {self._c('red')}Invalid target. Enter an IPv4/IPv6 address or a domain name.{self._c('reset')}")
+                print(
+                    f"  {self._c('red')}Invalid target. Enter an IPv4/IPv6 address or a domain name.{self._c('reset')}"
+                )
             except EOFError:
                 return default
 
     def ask_mode(self) -> str:
         print(f"\n{self._c('bold')}Select mode:{self._c('reset')}")
         print(f"  {self._c('blue')}1.{self._c('reset')} Recon  - Safer default; gather intelligence only")
-        print(f"  {self._c('blue')}2.{self._c('reset')} Attack - Full exploitation path; requires explicit authorization")
+        print(
+            f"  {self._c('blue')}2.{self._c('reset')} Attack - Full exploitation path; requires explicit authorization"
+        )
         print(f"  {self._c('blue')}3.{self._c('reset')} Fast   - Parallel recon preset then AI takeover (fast)")
         while True:
             try:
@@ -926,7 +910,11 @@ class AttackUi:
                     return val
         except (EOFError, KeyboardInterrupt):
             pass
-        return (default.value if hasattr(default, "value") else default) if default is not None else (choices[0].value if hasattr(choices[0], "value") else choices[0])
+        return (
+            (default.value if hasattr(default, "value") else default)
+            if default is not None
+            else (choices[0].value if hasattr(choices[0], "value") else choices[0])
+        )
 
     async def _qcheckbox(
         self,
@@ -1019,11 +1007,7 @@ class AttackUi:
             else:
                 for alias in aliases:
                     client = clients.get(alias)
-                    model_id = (
-                        getattr(client, "model_id", "")
-                        or getattr(client, "name", "")
-                        or registry.get(alias, "")
-                    )
+                    model_id = getattr(client, "model_id", "") or getattr(client, "name", "") or registry.get(alias, "")
                     if model_id:
                         registry[alias] = str(model_id)
             if default and default not in aliases:
@@ -1049,7 +1033,9 @@ class AttackUi:
             Choice("stdio (default, single process)", value="stdio", checked=(default == "stdio")),
             Choice("http  (localhost MCP server)", value="http", checked=(default == "http")),
         ]
-        return await self._qselect("Select MCP transport:", choices, default=choices[0] if default == "stdio" else choices[1])
+        return await self._qselect(
+            "Select MCP transport:", choices, default=choices[0] if default == "stdio" else choices[1]
+        )
 
     async def ask_http_port(self, default: str = "8001") -> int:
         val = await self._qtext(
@@ -1108,20 +1094,26 @@ class AttackUi:
 
     def display_recon_assessment(self, assessment: Any) -> None:
         """Display the structured recon assessment results."""
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"  {self._c('header')}RECONNAISSANCE ASSESSMENT{self._c('reset')}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"  Target:        {assessment.target_ip}")
-        print(f"  OS Verdict:    {self._c('green') if assessment.os_verdict != 'UNKNOWN' else self._c('yellow')}{assessment.os_verdict}{self._c('reset')}")
+        print(
+            f"  OS Verdict:    {self._c('green') if assessment.os_verdict != 'UNKNOWN' else self._c('yellow')}{assessment.os_verdict}{self._c('reset')}"
+        )
         if assessment.os_hints:
             for hint in assessment.os_hints[:3]:
                 print(f"    -> {hint}")
-        print(f"  Open Ports:    {len(assessment.open_ports)} ({', '.join(str(p) for p in assessment.open_ports) if assessment.open_ports else 'none'})")
+        print(
+            f"  Open Ports:    {len(assessment.open_ports)} ({', '.join(str(p) for p in assessment.open_ports) if assessment.open_ports else 'none'})"
+        )
         print(f"  Services:      {len(assessment.services)}")
         for svc in assessment.services[:10]:
             risk = svc.get("risk_score", 0)
             risk_color = "red" if risk >= 80 else ("yellow" if risk >= 60 else "green")
-            print(f"    - {svc.get('service','?')} on port {svc.get('port','?')}/{svc.get('protocol','tcp')} [{self._c(risk_color)}risk:{risk}{self._c('reset')}]")
+            print(
+                f"    - {svc.get('service', '?')} on port {svc.get('port', '?')}/{svc.get('protocol', 'tcp')} [{self._c(risk_color)}risk:{risk}{self._c('reset')}]"
+            )
             banner = svc.get("banner", "")
             if banner:
                 print(f"      banner: {banner[:100]}")
@@ -1129,9 +1121,11 @@ class AttackUi:
         for cve_group in assessment.cve_findings[:5]:
             results = cve_group.get("results", "")
             cve_count = results.count("CVE-") if isinstance(results, str) else 0
-            print(f"    - {cve_group.get('service','?')} {cve_group.get('version','')}: {cve_count} CVE(s)")
-        print(f"  Attack Surface: {self._c('red') if assessment.overall_risk_score >= 70 else self._c('yellow')}{assessment.overall_risk_score}/100{self._c('reset')}")
-        print(f"{'='*60}")
+            print(f"    - {cve_group.get('service', '?')} {cve_group.get('version', '')}: {cve_count} CVE(s)")
+        print(
+            f"  Attack Surface: {self._c('red') if assessment.overall_risk_score >= 70 else self._c('yellow')}{assessment.overall_risk_score}/100{self._c('reset')}"
+        )
+        print(f"{'=' * 60}")
 
     def display_goal_suggestions(self, suggestions: list[Any]) -> None:
         """Display ranked goal suggestions with exploit ratings.
@@ -1145,14 +1139,14 @@ class AttackUi:
 
         # Header
         print(f"  {'Goal':<30} {'Likelihood':<16} {'Rating':<8} {'Risk':<8}")
-        print(f"  {'-'*30} {'-'*16} {'-'*8} {'-'*8}")
+        print(f"  {'-' * 30} {'-' * 16} {'-' * 8} {'-' * 8}")
 
         compatible = [sg for sg in suggestions if sg.compatible]
         blocked = [sg for sg in suggestions if not sg.compatible]
 
         for sg in compatible:
             rating_color = "green" if sg.success_rating >= 80 else ("yellow" if sg.success_rating >= 55 else "red")
-            ai_marker = "AI:" if getattr(sg, 'is_ai_generated', False) else ""
+            ai_marker = "AI:" if getattr(sg, "is_ai_generated", False) else ""
             name = f"{ai_marker}{sg.name}" if ai_marker else sg.name
             print(
                 f"  * {name:<28} "
@@ -1166,7 +1160,9 @@ class AttackUi:
         if blocked:
             print(f"\n  {self._c('gray')}BLOCKED (raise risk profile to unlock):{self._c('reset')}")
             for sg in blocked:
-                print(f"  {self._c('gray')}{sg.name:<30} {'BLOCKED':<16} {'-':<8} {sg.risk_requirement:<8}{self._c('reset')}")
+                print(
+                    f"  {self._c('gray')}{sg.name:<30} {'BLOCKED':<16} {'-':<8} {sg.risk_requirement:<8}{self._c('reset')}"
+                )
 
         print()
 
@@ -1183,7 +1179,7 @@ class AttackUi:
         while True:
             for i, sg in enumerate(compatible, 1):
                 rating_color = "green" if sg.success_rating >= 80 else ("yellow" if sg.success_rating >= 55 else "red")
-                ai_marker = "AI: " if getattr(sg, 'is_ai_generated', False) else ""
+                ai_marker = "AI: " if getattr(sg, "is_ai_generated", False) else ""
                 print(
                     f"  {self._c('blue')}{i}.{self._c('reset')} "
                     f"{ai_marker}{sg.name} "
@@ -1232,10 +1228,7 @@ class AttackUi:
             ("debug", "Debug logging (--debug)"),
             ("yes", "Auto-confirm all prompts (--yes)"),
         ]
-        choices = [
-            Choice(title=label, value=key, checked=bool(getattr(args, key, False)))
-            for key, label in flags
-        ]
+        choices = [Choice(title=label, value=key, checked=bool(getattr(args, key, False))) for key, label in flags]
         selected = await self._qcheckbox("Power-ups (space to toggle):", choices)
         selected_set = set(selected)
         for key, _label in flags:

@@ -138,6 +138,7 @@ class _Vault:
         self._keyfile = workspace / ".vault_key"
         try:
             from cryptography.fernet import Fernet  # type: ignore
+
             self._Fernet = Fernet
         except ImportError:
             self._warn_plaintext_fallback(
@@ -308,7 +309,8 @@ class CredentialStore:
                     "Downgrading untrusted confirmed=True credential for "
                     "%s@%s (no valid HMAC -- hand-edited, foreign workspace, or "
                     "plaintext-fallback write); re-confirm after a validated reuse.",
-                    rec.username, rec.target_host,
+                    rec.username,
+                    rec.target_host,
                 )
                 rec.confirmed = False
             self._records.append(rec)
@@ -344,13 +346,16 @@ class CredentialStore:
                 "add() received confirmed=True for %s@%s -- forcing False "
                 "(harvested credentials are never confirmed; use "
                 "confirm_credential(validated=True) after a validated reuse).",
-                record.username, record.target_host,
+                record.username,
+                record.target_host,
             )
             record.confirmed = False
         for existing in self._records:
-            if (existing.username == record.username and
-                existing.target_host == record.target_host and
-                existing.credential_type == record.credential_type):
+            if (
+                existing.username == record.username
+                and existing.target_host == record.target_host
+                and existing.credential_type == record.credential_type
+            ):
                 return
         self._records.append(record)
         with self._store_path.open("a", encoding="utf-8") as handle:
@@ -360,8 +365,12 @@ class CredentialStore:
             handle.write(json.dumps(payload, default=str) + "\n")
 
     def confirm_credential(
-        self, *, username: str, target_host: str,
-        credential_type: str | None = None, validated: bool = False,
+        self,
+        *,
+        username: str,
+        target_host: str,
+        credential_type: str | None = None,
+        validated: bool = False,
     ) -> bool:
         """Mark a harvested credential ``confirmed=True`` after a validated reuse.
 
@@ -378,7 +387,8 @@ class CredentialStore:
             _LOG.warning(
                 "confirm_credential refused for %s@%s: validated=False (caller did "
                 "not assert the credential was reused successfully).",
-                username, target_host,
+                username,
+                target_host,
             )
             return False
         changed = False
@@ -461,14 +471,16 @@ class LootStore:
                 continue
             try:
                 data = json.loads(line)
-                self._items.append(LootItem(
-                    timestamp=data.get("timestamp", time.time()),
-                    source_host=str(data.get("source_host", "")),
-                    loot_type=str(data.get("loot_type", "")),
-                    description=str(data.get("description", "")),
-                    content=str(data.get("content", "")),
-                    path=str(data.get("path", "")),
-                ))
+                self._items.append(
+                    LootItem(
+                        timestamp=data.get("timestamp", time.time()),
+                        source_host=str(data.get("source_host", "")),
+                        loot_type=str(data.get("loot_type", "")),
+                        description=str(data.get("description", "")),
+                        content=str(data.get("content", "")),
+                        path=str(data.get("path", "")),
+                    )
+                )
             except (json.JSONDecodeError, TypeError):
                 continue
 

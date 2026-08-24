@@ -199,9 +199,7 @@ def test_agent_loop_reads_nested_max_parallel_agents():
     mock_executor = MagicMock(return_value="ok")
     loop = AgentLoop(config, Path("test_workspace_swarm_nested"), mock_executor)
     assert loop._swarm is not None
-    assert loop._swarm._max_parallel == 5, (
-        "nested swarm.max_parallel_agents not honored (pre-1.8 read the wrong key)"
-    )
+    assert loop._swarm._max_parallel == 5, "nested swarm.max_parallel_agents not honored (pre-1.8 read the wrong key)"
 
 
 def test_agent_loop_nested_key_takes_precedence_over_legacy_top_level():
@@ -276,23 +274,33 @@ def _phase_selection():
 
     def _act(name, tags):
         return SkillActivation(
-            name=name, reason="r", source="test", matched_tags=tuple(tags),
-            risk_level="advisory", score=1, signals=(),
+            name=name,
+            reason="r",
+            source="test",
+            matched_tags=tuple(tags),
+            risk_level="advisory",
+            score=1,
+            signals=(),
         )
 
-    return SkillSelection(activations=(
-        _act("recon-skill", ["reconnaissance", "nmap", "network-security"]),
-        _act("vuln-skill", ["cve", "vulnerability-scanning", "vulnerability-triage"]),
-        _act("exploit-skill", ["exploit", "web", "api"]),
-    ))
+    return SkillSelection(
+        activations=(
+            _act("recon-skill", ["reconnaissance", "nmap", "network-security"]),
+            _act("vuln-skill", ["cve", "vulnerability-scanning", "vulnerability-triage"]),
+            _act("exploit-skill", ["exploit", "web", "api"]),
+        )
+    )
 
 
 def test_vuln_agent_llm_prompt_carries_vuln_hints_only():
     agent = VulnAgent()
     client = _CapturingClient()
     agent._llm_analyze(
-        client, "10.0.0.5",
-        [{"service": "http", "confidence": 0.5}], [], [],
+        client,
+        "10.0.0.5",
+        [{"service": "http", "confidence": 0.5}],
+        [],
+        [],
         skill_selection=_phase_selection(),
     )
     assert "vuln-skill" in client.last_prompt
@@ -303,9 +311,11 @@ def test_vuln_agent_llm_prompt_carries_vuln_hints_only():
 
 def test_vuln_agent_parses_ollama_response_object():
     expected = {"recommended_exploit_path": [{"step": 1, "tool": "nuclei"}]}
-    client = SimpleNamespace(chat=lambda **_: SimpleNamespace(
-        message=SimpleNamespace(content='{"recommended_exploit_path": [{"step": 1, "tool": "nuclei"}]}')
-    ))
+    client = SimpleNamespace(
+        chat=lambda **_: SimpleNamespace(
+            message=SimpleNamespace(content='{"recommended_exploit_path": [{"step": 1, "tool": "nuclei"}]}')
+        )
+    )
 
     assert VulnAgent()._llm_analyze(client, "10.0.0.5", [], [], []) == expected
 
@@ -314,8 +324,10 @@ def test_critic_agent_llm_prompt_carries_full_set():
     agent = CriticAgent()
     client = _CapturingClient()
     agent._llm_review(
-        client, {"phase": "exploit", "target": "10.0.0.5", "risk_level": "low"},
-        {"risk_profile": "standard_authorized"}, {},
+        client,
+        {"phase": "exploit", "target": "10.0.0.5", "risk_level": "low"},
+        {"risk_profile": "standard_authorized"},
+        {},
         skill_selection=_phase_selection(),
     )
     # Critic reviews the full active set.
@@ -326,11 +338,13 @@ def test_critic_agent_llm_prompt_carries_full_set():
 
 def test_critic_agent_parses_ollama_response_object():
     expected = {"decision": "deny", "reasoning": "duplicate action", "modifications": {}}
-    client = SimpleNamespace(chat=lambda **_: SimpleNamespace(
-        message=SimpleNamespace(
-            content='{"decision": "deny", "reasoning": "duplicate action", "modifications": {}}'
+    client = SimpleNamespace(
+        chat=lambda **_: SimpleNamespace(
+            message=SimpleNamespace(
+                content='{"decision": "deny", "reasoning": "duplicate action", "modifications": {}}'
+            )
         )
-    ))
+    )
 
     assert CriticAgent()._llm_review(client, {}, {}, {}) == expected
 
@@ -339,7 +353,10 @@ def test_reflection_agent_llm_prompt_carries_full_set():
     agent = ReflectionAgent()
     client = _CapturingClient()
     agent._llm_reflect(
-        client, [], {"target_ip": "10.0.0.5"}, {},
+        client,
+        [],
+        {"target_ip": "10.0.0.5"},
+        {},
         skill_selection=_phase_selection(),
     )
     assert "recon-skill" in client.last_prompt
@@ -349,17 +366,15 @@ def test_reflection_agent_llm_prompt_carries_full_set():
 
 def test_reflection_agent_parses_ollama_response_object():
     expected = {"why": "tool mismatch", "confidence": 0.8}
-    client = SimpleNamespace(chat=lambda **_: SimpleNamespace(
-        message=SimpleNamespace(content='{"why": "tool mismatch", "confidence": 0.8}')
-    ))
+    client = SimpleNamespace(
+        chat=lambda **_: SimpleNamespace(message=SimpleNamespace(content='{"why": "tool mismatch", "confidence": 0.8}'))
+    )
 
     assert ReflectionAgent()._llm_reflect(client, [], {}, {}) == expected
 
 
 def test_reflection_agent_ignores_empty_response_without_parse_warning(capsys):
-    client = SimpleNamespace(chat=lambda **_: SimpleNamespace(
-        message=SimpleNamespace(content="")
-    ))
+    client = SimpleNamespace(chat=lambda **_: SimpleNamespace(message=SimpleNamespace(content="")))
 
     assert ReflectionAgent()._llm_reflect(client, [], {}, {}) is None
     assert "LLM reflection failed" not in capsys.readouterr().out
@@ -371,7 +386,11 @@ def test_agent_llm_prompt_no_hints_when_selection_empty():
     from tools.skill_selector import SkillSelection
 
     agent._llm_analyze(
-        client, "10.0.0.5", [{"service": "http", "confidence": 0.5}], [], [],
+        client,
+        "10.0.0.5",
+        [{"service": "http", "confidence": 0.5}],
+        [],
+        [],
         skill_selection=SkillSelection(),
     )
     assert "RUNTIME SKILL HINTS" not in client.last_prompt

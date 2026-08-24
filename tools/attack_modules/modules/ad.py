@@ -18,7 +18,9 @@ from tools.attack_modules.base import AttackModule, ModuleContext
 
 class ADCSEnum(AttackModule):
     name = "ADCSEnum"
-    description = "Enumerate Active Directory Certificate Services (AD CS) templates to find ESC1-8 privesc paths (certipy)"
+    description = (
+        "Enumerate Active Directory Certificate Services (AD CS) templates to find ESC1-8 privesc paths (certipy)"
+    )
     target_services = ["ldap", "msrpc", "microsoft-ds"]
     target_ports = [389, 3268, 445]
     required_cves: list[str] = []
@@ -41,8 +43,7 @@ class ADCSEnum(AttackModule):
                 "https://specterops.io/wp-content/uploads/sites/3/2022/06/Certified_Pre-Owned.pdf",
             ],
             suggested_command=(
-                f"certipy find -u user@DOMAIN -p password -dc-ip {ctx.target_ip} "
-                f"-target {ctx.target_ip} -vulnerable"
+                f"certipy find -u user@DOMAIN -p password -dc-ip {ctx.target_ip} -target {ctx.target_ip} -vulnerable"
             ),
             workflow=[
                 "1. Obtain domain credentials (recovered via ASREPRoast / Kerberoasting / a credential dump on the owned target).",
@@ -55,7 +56,9 @@ class ADCSEnum(AttackModule):
 
 class BloodHoundCollect(AttackModule):
     name = "BloodHoundCollect"
-    description = "Collect BloodHound graph data (users/groups/sessions/ACLs) for attack-path analysis (bloodhound-python)"
+    description = (
+        "Collect BloodHound graph data (users/groups/sessions/ACLs) for attack-path analysis (bloodhound-python)"
+    )
     target_services = ["ldap", "kerberos", "microsoft-ds"]
     target_ports = [389, 445, 88]
     required_cves: list[str] = []
@@ -77,10 +80,7 @@ class BloodHoundCollect(AttackModule):
                 "https://github.com/dirkjanm/BloodHound.py",
                 "https://github.com/BloodHoundAD/BloodHound",
             ],
-            suggested_command=(
-                f"bloodhound-python -u user -p pass -d DOMAIN -dc {ctx.target_ip} "
-                f"-c All --zip"
-            ),
+            suggested_command=(f"bloodhound-python -u user -p pass -d DOMAIN -dc {ctx.target_ip} -c All --zip"),
             workflow=[
                 "1. Obtain any domain credential (even a low-priv domain user suffices for collection).",
                 f"2. Call bloodhound_collect(target_ip='{ctx.target_ip}', domain=<d>, username=<u>, password=<p>) to gather the graph dataset.",
@@ -181,6 +181,7 @@ class GoldenTicket(AttackModule):
 class SMBSigningCheck(AttackModule):
     """DETECTION ONLY — never exploits. Checks SMB signing posture to decide
     whether relay (ResponderRelay) is viable against the target."""
+
     name = "SMBSigningCheck"
     description = "DETECTION ONLY: check whether the target requires SMB signing (relay feasibility)"
     target_services = ["microsoft-ds", "smb", "netbios-ssn"]

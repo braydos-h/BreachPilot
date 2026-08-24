@@ -10,6 +10,7 @@ from tools.recon_osint import (
 
 # --- passive_ipv6_lookup ---------------------------------------------------
 
+
 def test_passive_ipv6_lookup_returns_list():
     def fake(host):
         assert host == "example.com"
@@ -31,6 +32,7 @@ def test_passive_ipv6_lookup_empty_host_returns_empty():
 
 # --- reverse_dns -----------------------------------------------------------
 
+
 def test_reverse_dns_returns_hostname():
     def fake(ip):
         assert ip == "1.2.3.4"
@@ -47,6 +49,7 @@ def test_reverse_dns_resolver_raises_returns_empty():
 
 
 # --- crtsh_cert_transparency -----------------------------------------------
+
 
 def test_crtsh_parses_json_list():
     payload = '[{"id":1,"name":"*.example.com"},{"id":2,"name":"example.com"}]'
@@ -88,6 +91,7 @@ def test_crtsh_bad_json_returns_error():
 
 # --- shodan_lookup ---------------------------------------------------------
 
+
 def test_shodan_no_api_key_disabled():
     res = shodan_lookup("1.2.3.4", "")
     assert res == {"enabled": False, "note": "no Shodan API key configured"}
@@ -116,6 +120,7 @@ def test_shodan_fetch_raises_returns_error():
 
 
 # --- run_osint -------------------------------------------------------------
+
 
 def test_run_osint_aggregates_with_fakes():
     def resolver_fn(host):

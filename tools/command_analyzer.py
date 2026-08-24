@@ -60,6 +60,7 @@ Legitimate ``full_access`` pentesting is preserved: commands *against the
 locked target* (nmap/curl/ssh to the target IP), ``subprocess`` use against the
 target, and reverse shells to an allowlisted operator callback IP all pass.
 """
+
 from __future__ import annotations
 
 import ast
@@ -78,24 +79,47 @@ from tools.validation_utils import extract_ips_from_command, is_target_in_allowl
 # false-positive risk on real recon/exploit commands).
 _DESTRUCTIVE_RE = re.compile(r"(?<![\w-])(?:rm|rmdir)(?![\w-])", re.IGNORECASE)
 
-_DESTRUCTIVE_SUBSTRINGS = frozenset({
-    "dd if=", "dd if ",
-    # dd output device prefixes -- only /dev/sd was blocked before; NVMe/virtio/
-    # Xen/loop/mmc/device-mapper/md all wipe disks and were absent.
-    "of=/dev/sd", "of=/dev/nvme", "of=/dev/vd", "of=/dev/xvd",
-    "of=/dev/loop", "of=/dev/mmcblk", "of=/dev/dm-", "of=/dev/md",
-    "mkfs", "fdisk", "parted", "shred", "wipe",
-    "truncate -s", "truncate --size",          # long-form --size was missing
-    "-delete",                                  # find / -delete (was missing)
-    "--remove-files", "remove-files",           # tar --remove-files (no "rm" bigram)
-    "unlink ",
-    # DB-level destruction -- only DROP/DELETE were present; TRUNCATE/FLUSHALL/
-    # dropDatabase (camelCase, no space) were absent. Lowercased here.
-    "drop table", "drop database", "delete from",
-    "truncate table", "flushall", "flushdb", "dropdatabase", "dropcollection",
-    "shutdown", "reboot", "poweroff",
-    ":(){ :|:& };:",
-})
+_DESTRUCTIVE_SUBSTRINGS = frozenset(
+    {
+        "dd if=",
+        "dd if ",
+        # dd output device prefixes -- only /dev/sd was blocked before; NVMe/virtio/
+        # Xen/loop/mmc/device-mapper/md all wipe disks and were absent.
+        "of=/dev/sd",
+        "of=/dev/nvme",
+        "of=/dev/vd",
+        "of=/dev/xvd",
+        "of=/dev/loop",
+        "of=/dev/mmcblk",
+        "of=/dev/dm-",
+        "of=/dev/md",
+        "mkfs",
+        "fdisk",
+        "parted",
+        "shred",
+        "wipe",
+        "truncate -s",
+        "truncate --size",  # long-form --size was missing
+        "-delete",  # find / -delete (was missing)
+        "--remove-files",
+        "remove-files",  # tar --remove-files (no "rm" bigram)
+        "unlink ",
+        # DB-level destruction -- only DROP/DELETE were present; TRUNCATE/FLUSHALL/
+        # dropDatabase (camelCase, no space) were absent. Lowercased here.
+        "drop table",
+        "drop database",
+        "delete from",
+        "truncate table",
+        "flushall",
+        "flushdb",
+        "dropdatabase",
+        "dropcollection",
+        "shutdown",
+        "reboot",
+        "poweroff",
+        ":(){ :|:& };:",
+    }
+)
 
 # Destructive writes that need positional awareness a bare substring cannot
 # express. ``> /dev/null`` and ``2>/dev/null`` (output suppression) are
@@ -109,9 +133,9 @@ _SYSTEM_CRITICAL_DIRS = "etc|var|boot|usr|bin|sbin|lib|lib64|proc|sys"
 _BLOCK_DEVICES = r"dev/(?:sd|nvme|vd|xvd|loop|mmcblk|dm-|md)[\w]*"
 _SYSTEM_WRITE_RE = re.compile(
     r"(?:"
-    r">+\s*"                                          # `>` / `>>` redirect
-    r"|\btee\b(?:\s+-\S+)*\s+"                        # tee [flags] <path>
-    r"|\b(?:cp|mv|install)\b(?:\s+-\S+)*\s+\S+\s+"    # cp/mv/install <src> <dest>
+    r">+\s*"  # `>` / `>>` redirect
+    r"|\btee\b(?:\s+-\S+)*\s+"  # tee [flags] <path>
+    r"|\b(?:cp|mv|install)\b(?:\s+-\S+)*\s+\S+\s+"  # cp/mv/install <src> <dest>
     r")"
     rf"/(?:{_BLOCK_DEVICES}|{_SYSTEM_CRITICAL_DIRS})(?![\w-])",
     re.IGNORECASE,
@@ -138,36 +162,69 @@ _DESTRUCTIVE_RES = (_SYSTEM_WRITE_RE, _MV_DEVNULL_RE, _CP_FROM_DEVNULL_RE)
 # ── Reverse-shell / C2 egress fingerprints ──────────────────────────────────
 #
 # Conservative: these almost never appear in a legitimate vulnerability-
-#verification command. A reverse shell to an *allowlisted* endpoint (operator
+# verification command. A reverse shell to an *allowlisted* endpoint (operator
 # callback) is permitted by the callback-endpoint rule; these patterns are
 # blocked only when the callback endpoint is not allowlisted (the
 # domain/hostname-egress case), so legit callbacks to the operator's box are
 # unaffected. ``bind_*`` / listen patterns are separated out below: a bind
 # shell is never exempted (third-party exposure).
-REVERSE_SHELL_PATTERNS = frozenset({
-    "/dev/tcp/", "/dev/udp/",
-    "bash -i", "bash >&", "0>&1", "0<&1",
-    "nc -e", "ncat -e", "nc -c", "mkfifo",
-    "socat ", "socat tcp", "socat ssl", "openssl s_client",
-    "powershell -e", "powershell -enc", "powershell -nop",
-    "iex(", "iex (", "downloadstring(", "invoke-expression",
-    "reverse_tcp", "bind_tcp", "msfvenom", "msfconsole",
-    "py -c", "python -c", "python3 -c",
-    # remote-forward C2 tunneling -- SSH -R has no benign lowercase form (scp -r
-    # is a different tool), so "ssh -r" is a clean C2 indicator.
-    "ssh -r",
-    # gawk's /inet/<proto>/<lport>/<rhost> coprocess is the awk reverse-shell
-    # primitive; bare "awk" is NOT added (it processes loot legitimately).
-    "/inet/",
-    "ruby -rsocket",
-})
+REVERSE_SHELL_PATTERNS = frozenset(
+    {
+        "/dev/tcp/",
+        "/dev/udp/",
+        "bash -i",
+        "bash >&",
+        "0>&1",
+        "0<&1",
+        "nc -e",
+        "ncat -e",
+        "nc -c",
+        "mkfifo",
+        "socat ",
+        "socat tcp",
+        "socat ssl",
+        "openssl s_client",
+        "powershell -e",
+        "powershell -enc",
+        "powershell -nop",
+        "iex(",
+        "iex (",
+        "downloadstring(",
+        "invoke-expression",
+        "reverse_tcp",
+        "bind_tcp",
+        "msfvenom",
+        "msfconsole",
+        "py -c",
+        "python -c",
+        "python3 -c",
+        # remote-forward C2 tunneling -- SSH -R has no benign lowercase form (scp -r
+        # is a different tool), so "ssh -r" is a clean C2 indicator.
+        "ssh -r",
+        # gawk's /inet/<proto>/<lport>/<rhost> coprocess is the awk reverse-shell
+        # primitive; bare "awk" is NOT added (it processes loot legitimately).
+        "/inet/",
+        "ruby -rsocket",
+    }
+)
 
 # Patterns that LISTEN (bind), not call back. A bind shell hands shell access to
 # anyone who reaches the target's port -- a backdoor on the authorized target
 # reachable by unauthorized third parties. Never exempted in full_access.
-_BIND_SHELL_INDICATORS = ("bind_tcp", "bind_", "shell_bind", " bind",
-                          "nc -l", "ncat -l", "-lvnp", "-lnp",
-                          "tcp-listen", "fork-listen", "socket.bind", ".bind(")
+_BIND_SHELL_INDICATORS = (
+    "bind_tcp",
+    "bind_",
+    "shell_bind",
+    " bind",
+    "nc -l",
+    "ncat -l",
+    "-lvnp",
+    "-lnp",
+    "tcp-listen",
+    "fork-listen",
+    "socket.bind",
+    ".bind(",
+)
 
 
 # ── Egress endpoint extraction ───────────────────────────────────────────────
@@ -218,28 +275,48 @@ _NETVERB_HOST_RE = re.compile(
 # in the AST and the source-text-concat evasion does not work. We catch only
 # Python primitives that delete files or execute dynamic code, which a string
 # ``rm`` scan would miss.
-_PYTHON_DESTRUCTIVE_CALLS = frozenset({
-    ("os", "remove"), ("os", "unlink"), ("os", "rmdir"), ("os", "removedirs"),
-    ("shutil", "rmtree"), ("shutil", "move"),
-    # pathlib equivalents -- the AST walker collapses the receiver to "" when it
-    # is a Call (Path(...).unlink()), so ("", "unlink")/("", "rmdir") catch it
-    # regardless of how the receiver is spelled. ".remove()" is NOT added bare
-    # (it would false-fire on list.remove / set.remove); pathlib has no .remove.
-    ("pathlib", "unlink"), ("pathlib", "rmdir"), ("pathlib", "remove"),
-    ("", "unlink"), ("", "rmdir"),
-    ("", "eval"), ("", "exec"), ("", "compile"),
-})
+_PYTHON_DESTRUCTIVE_CALLS = frozenset(
+    {
+        ("os", "remove"),
+        ("os", "unlink"),
+        ("os", "rmdir"),
+        ("os", "removedirs"),
+        ("shutil", "rmtree"),
+        ("shutil", "move"),
+        # pathlib equivalents -- the AST walker collapses the receiver to "" when it
+        # is a Call (Path(...).unlink()), so ("", "unlink")/("", "rmdir") catch it
+        # regardless of how the receiver is spelled. ".remove()" is NOT added bare
+        # (it would false-fire on list.remove / set.remove); pathlib has no .remove.
+        ("pathlib", "unlink"),
+        ("pathlib", "rmdir"),
+        ("pathlib", "remove"),
+        ("", "unlink"),
+        ("", "rmdir"),
+        ("", "eval"),
+        ("", "exec"),
+        ("", "compile"),
+    }
+)
 
 # Calls that shell out -- their string args are scanned for destructive tokens.
 # ``("","name")`` entries catch bare ``system(...)`` / ``popen(...)`` calls.
-_SHELL_OUT_CALLS = frozenset({
-    ("os", "system"), ("os", "popen"),
-    ("subprocess", "run"), ("subprocess", "call"), ("subprocess", "check_call"),
-    ("subprocess", "check_output"), ("subprocess", "getoutput"),
-    ("subprocess", "getstatusoutput"), ("subprocess", "Popen"),
-    ("commands", "getoutput"), ("commands", "getstatusoutput"),
-    ("", "system"), ("", "popen"),
-})
+_SHELL_OUT_CALLS = frozenset(
+    {
+        ("os", "system"),
+        ("os", "popen"),
+        ("subprocess", "run"),
+        ("subprocess", "call"),
+        ("subprocess", "check_call"),
+        ("subprocess", "check_output"),
+        ("subprocess", "getoutput"),
+        ("subprocess", "getstatusoutput"),
+        ("subprocess", "Popen"),
+        ("commands", "getoutput"),
+        ("commands", "getstatusoutput"),
+        ("", "system"),
+        ("", "popen"),
+    }
+)
 
 
 @dataclass
@@ -373,8 +450,14 @@ def _extract_destinations(command: str) -> list[str]:
     """
     dests: list[str] = []
     for rx in (
-        _URL_AUTHORITY_RE, _DEV_TCP_HOST_RE, _LHOST_RE, _RHOST_RE,
-        _PY_CONNECT_RE, _PY_HTTPCONN_RE, _PEERADDR_RE, _NETVERB_HOST_RE,
+        _URL_AUTHORITY_RE,
+        _DEV_TCP_HOST_RE,
+        _LHOST_RE,
+        _RHOST_RE,
+        _PY_CONNECT_RE,
+        _PY_HTTPCONN_RE,
+        _PEERADDR_RE,
+        _NETVERB_HOST_RE,
     ):
         for m in rx.finditer(command):
             dests.append(m.group(1))
@@ -452,9 +535,7 @@ def _scan_shell_out_args(node: ast.Call, reasons: list[str]) -> None:
         for sep in (" ", ""):
             hit, token = _has_destructive(sep.join(strs).lower())
             if hit:
-                reasons.append(
-                    f"destructive shell command embedded in subprocess/os.system call: {token!r}"
-                )
+                reasons.append(f"destructive shell command embedded in subprocess/os.system call: {token!r}")
                 return
 
 
@@ -553,9 +634,7 @@ def analyze_command(
             )
         else:
             callback_dests = _extract_destinations(command)
-            callback_allowlisted = any(
-                _endpoint_allowlisted(d, locked_ip, allowed_targets) for d in callback_dests
-            )
+            callback_allowlisted = any(_endpoint_allowlisted(d, locked_ip, allowed_targets) for d in callback_dests)
             if not callback_allowlisted:
                 result.reasons.append(
                     "reverse-shell/C2 pattern with no allowlisted callback endpoint "
@@ -643,11 +722,7 @@ def analysis_payload(action: str, args: dict | None) -> str:
             primary = f"{action}({', '.join(f'{k}={v!r}' for k, v in args.items())})"
 
     if infer_language(action) != "python":
-        ip_bits = [
-            f"{k}={args[k]}"
-            for k in _IP_ARG_NAMES
-            if isinstance(args.get(k), str) and args[k].strip()
-        ]
+        ip_bits = [f"{k}={args[k]}" for k in _IP_ARG_NAMES if isinstance(args.get(k), str) and args[k].strip()]
         if ip_bits:
             primary = f"{primary} " + " ".join(ip_bits) if primary else " ".join(ip_bits)
     return primary

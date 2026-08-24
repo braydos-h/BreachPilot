@@ -153,7 +153,10 @@ class CriticAgent(Agent):
             # ── Layer 5: LLM deep review ──
             if model_client and output["decision"] == "approve":
                 llm_review = self._llm_review(
-                    model_client, proposed_action, mission, blackboard,
+                    model_client,
+                    proposed_action,
+                    mission,
+                    blackboard,
                     skill_selection=context.get("skill_selection"),
                 )
                 if llm_review:
@@ -188,7 +191,11 @@ class CriticAgent(Agent):
         )
 
     def _llm_review(
-        self, client: Any, action: dict[str, Any], mission: dict[str, Any], blackboard: dict[str, Any],
+        self,
+        client: Any,
+        action: dict[str, Any],
+        mission: dict[str, Any],
+        blackboard: dict[str, Any],
         skill_selection: Any = None,
     ) -> dict[str, Any] | None:
         """Use LLM for deeper strategic reasoning about the proposed action.
@@ -210,9 +217,9 @@ class CriticAgent(Agent):
             prompt = f"""You are a security operations critic reviewing a proposed penetration testing action that already passed deterministic scope, risk-budget, forbidden-action, risk-profile, and repeat-failure gates. Your job is the STRATEGIC layer: proportionality and soundness.
 
 MISSION:
-- Program: {mission.get('program_name', 'Unknown')}
-- Risk Profile: {mission.get('risk_profile', 'unknown')}
-- Objective: {mission.get('objective', 'Find vulnerabilities')}
+- Program: {mission.get("program_name", "Unknown")}
+- Risk Profile: {mission.get("risk_profile", "unknown")}
+- Objective: {mission.get("objective", "Find vulnerabilities")}
 
 SCOPE (already enforced -- for context only):
 - Allowed assets: {json.dumps(allowed_assets)}
@@ -220,16 +227,16 @@ SCOPE (already enforced -- for context only):
 - Command budget: {max_commands} (executed so far: {executed})
 
 BLACKBOARD STATE:
-- Access achieved: {blackboard.get('access_achieved', False)}
-- Attack surface score: {blackboard.get('attack_surface_score', 'N/A')}
-- Prior failures: {json.dumps(blackboard.get('failed_modules', []))}
+- Access achieved: {blackboard.get("access_achieved", False)}
+- Attack surface score: {blackboard.get("attack_surface_score", "N/A")}
+- Prior failures: {json.dumps(blackboard.get("failed_modules", []))}
 
 PROPOSED ACTION:
-- Phase: {action.get('phase', 'unknown')}
-- Tool: {action.get('tool', 'unknown')}
-- Target: {action.get('target', 'target not specified')}
-- Risk Level: {action.get('risk_level', 'low')}
-- Hypothesis: {action.get('hypothesis', 'none')}
+- Phase: {action.get("phase", "unknown")}
+- Tool: {action.get("tool", "unknown")}
+- Target: {action.get("target", "target not specified")}
+- Risk Level: {action.get("risk_level", "low")}
+- Hypothesis: {action.get("hypothesis", "none")}
 
 Evaluate: Is this action safe, proportional, and strategically sound given the current state?
 Return JSON only (no markdown fences):
@@ -270,14 +277,26 @@ Return JSON only (no markdown fences):
                 text = text.split("```")[1].split("```")[0]
             parsed = json.loads(text)
             if not isinstance(parsed, dict):
-                return {"decision": "modify", "reasoning": "LLM review returned non-object; requiring manual confirmation.", "modifications": {}}
+                return {
+                    "decision": "modify",
+                    "reasoning": "LLM review returned non-object; requiring manual confirmation.",
+                    "modifications": {},
+                }
             # Validate the decision enum so unknown values fail safe.
             decision = str(parsed.get("decision", "")).lower().strip()
             if decision not in ("approve", "deny", "modify"):
-                return {"decision": "modify", "reasoning": f"LLM returned unknown decision '{decision}'; requiring manual confirmation.", "modifications": {}}
+                return {
+                    "decision": "modify",
+                    "reasoning": f"LLM returned unknown decision '{decision}'; requiring manual confirmation.",
+                    "modifications": {},
+                }
             parsed["decision"] = decision
             return parsed
         except Exception:
             # Fail safe: a broken critic must NOT silently approve. Return a
             # modify verdict so the caller knows human confirmation is needed.
-            return {"decision": "modify", "reasoning": "LLM review failed to parse; requiring manual confirmation before proceeding.", "modifications": {}}
+            return {
+                "decision": "modify",
+                "reasoning": "LLM review failed to parse; requiring manual confirmation before proceeding.",
+                "modifications": {},
+            }

@@ -33,14 +33,9 @@ def run_subfinder(domain: str, output_dir: str, use_all_sources: bool = False) -
 def validate_with_httpx(subdomains: list, output_dir: str) -> list:
     """Validate discovered subdomains using httpx."""
     input_data = "\n".join(subdomains)
-    cmd = [
-        "httpx", "-silent", "-status-code", "-title",
-        "-tech-detect", "-json", "-no-color"
-    ]
+    cmd = ["httpx", "-silent", "-status-code", "-title", "-tech-detect", "-json", "-no-color"]
 
-    result = subprocess.run(
-        cmd, input=input_data, capture_output=True, text=True, timeout=600
-    )
+    result = subprocess.run(cmd, input=input_data, capture_output=True, text=True, timeout=600)
 
     live_hosts = []
     for line in result.stdout.strip().split("\n"):
@@ -62,28 +57,32 @@ def validate_with_httpx(subdomains: list, output_dir: str) -> list:
 def detect_takeover_candidates(subdomains: list) -> list:
     """Identify subdomains with CNAME records pointing to potentially claimable services."""
     takeover_services = [
-        "amazonaws.com", "azurewebsites.net", "cloudfront.net",
-        "herokuapp.com", "github.io", "gitlab.io", "pantheon.io",
-        "shopify.com", "surge.sh", "fastly.net", "ghost.io",
-        "myshopify.com", "zendesk.com", "readme.io", "bitbucket.io"
+        "amazonaws.com",
+        "azurewebsites.net",
+        "cloudfront.net",
+        "herokuapp.com",
+        "github.io",
+        "gitlab.io",
+        "pantheon.io",
+        "shopify.com",
+        "surge.sh",
+        "fastly.net",
+        "ghost.io",
+        "myshopify.com",
+        "zendesk.com",
+        "readme.io",
+        "bitbucket.io",
     ]
 
     candidates = []
     for subdomain in subdomains:
         try:
-            result = subprocess.run(
-                ["dig", "+short", "CNAME", subdomain],
-                capture_output=True, text=True, timeout=10
-            )
+            result = subprocess.run(["dig", "+short", "CNAME", subdomain], capture_output=True, text=True, timeout=10)
             cname = result.stdout.strip()
             if cname:
                 for service in takeover_services:
                     if service in cname:
-                        candidates.append({
-                            "subdomain": subdomain,
-                            "cname": cname,
-                            "service": service
-                        })
+                        candidates.append({"subdomain": subdomain, "cname": cname, "service": service})
                         break
         except (subprocess.TimeoutExpired, FileNotFoundError):
             continue
@@ -91,8 +90,7 @@ def detect_takeover_candidates(subdomains: list) -> list:
     return candidates
 
 
-def generate_report(domain: str, subdomains: list, live_hosts: list,
-                    takeover_candidates: list, output_dir: str) -> str:
+def generate_report(domain: str, subdomains: list, live_hosts: list, takeover_candidates: list, output_dir: str) -> str:
     """Generate a markdown report of enumeration results."""
     report_path = os.path.join(output_dir, f"{domain}_report.md")
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

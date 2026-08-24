@@ -79,9 +79,9 @@ class Scenario:
 
     scenario_id: str
     target_ip: str
-    goal_name: str                 # e.g. "initial_access", "backdoor"
+    goal_name: str  # e.g. "initial_access", "backdoor"
     description: str = ""
-    target_snapshot_id: str = ""   # identifies the target image for reset
+    target_snapshot_id: str = ""  # identifies the target image for reset
     expected_duration_seconds: float = 300.0
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -91,10 +91,10 @@ class TrialResult:
     """One trial's outcome."""
 
     scenario_id: str
-    condition: str                  # "baseline" | "treatment"
+    condition: str  # "baseline" | "treatment"
     trial_index: int
-    verified_success: bool         # oracle-confirmed
-    agent_claimed_success: bool     # the agent's own verdict (for contrast)
+    verified_success: bool  # oracle-confirmed
+    agent_claimed_success: bool  # the agent's own verdict (for contrast)
     total_actions: int
     duration_seconds: float
     time_to_first_verified_success: float | None = None
@@ -117,11 +117,11 @@ class BenchmarkReport:
 
     conditions: list[str]
     trials: list[TrialResult]
-    verified_success_rate: dict[str, float]       # condition -> rate
-    risk_ratio: float | None                       # treatment / baseline
-    risk_ratio_ci_low: float | None                # bootstrap 95% lower
-    risk_ratio_ci_high: float | None               # bootstrap 95% upper
-    false_positive_rate: dict[str, float]          # agent-claimed but not verified
+    verified_success_rate: dict[str, float]  # condition -> rate
+    risk_ratio: float | None  # treatment / baseline
+    risk_ratio_ci_low: float | None  # bootstrap 95% lower
+    risk_ratio_ci_high: float | None  # bootstrap 95% upper
+    false_positive_rate: dict[str, float]  # agent-claimed but not verified
     actions_per_verified_success: dict[str, float]
     time_to_first_verified_success: dict[str, float | None]
     # D5: throughput + cost efficiency. ``findings_per_hour`` is
@@ -197,9 +197,7 @@ DEFAULT_TREATMENT_CONFIG: dict[str, Any] = {
 
 
 def _config_hash(config: dict[str, Any]) -> str:
-    return hashlib.sha256(
-        json.dumps(config, sort_keys=True, default=str).encode()
-    ).hexdigest()[:16]
+    return hashlib.sha256(json.dumps(config, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
 def _merge_config(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -268,11 +266,15 @@ async def _run_one_trial(
             ollama_host = merged.get("ollama", {}).get("host", "https://api.ollama.com")
             registry = merged.get("models", {}).get("registry")
             from tools.config_manager import get_ai_provider, get_chatgpt_config
+
             provider = get_ai_provider(merged)
             if provider == "chatgpt":
                 router = build_router(
-                    registry, host=ollama_host, provider="chatgpt",
-                    chatgpt_config=get_chatgpt_config(merged), config=merged,
+                    registry,
+                    host=ollama_host,
+                    provider="chatgpt",
+                    chatgpt_config=get_chatgpt_config(merged),
+                    config=merged,
                 )
             else:
                 router = build_router(registry, host=ollama_host)
@@ -282,14 +284,26 @@ async def _run_one_trial(
             except KeyError:
                 if provider == "chatgpt":
                     from tools.model_router import build_model_client_for_provider
-                    router.register(model_alias, build_model_client_for_provider(
-                        merged, model_alias, request_timeout_seconds=None,
-                    ))
+
+                    router.register(
+                        model_alias,
+                        build_model_client_for_provider(
+                            merged,
+                            model_alias,
+                            request_timeout_seconds=None,
+                        ),
+                    )
                 else:
                     from tools.model_router import _build_model_client
-                    router.register(model_alias, _build_model_client(
-                        model_alias, host=ollama_host, request_timeout_seconds=None,
-                    ))
+
+                    router.register(
+                        model_alias,
+                        _build_model_client(
+                            model_alias,
+                            host=ollama_host,
+                            request_timeout_seconds=None,
+                        ),
+                    )
                 model_client = router.get_client(model_alias)
 
             agent_result = await run_exploit_session(
@@ -404,20 +418,15 @@ async def run_benchmark(cfg: BenchmarkConfig) -> BenchmarkReport:
         if n == 0:
             continue
         verified = [t for t in cond_trials if t.verified_success]
-        claimed_not_verified = [
-            t for t in cond_trials
-            if t.agent_claimed_success and not t.verified_success
-        ]
+        claimed_not_verified = [t for t in cond_trials if t.agent_claimed_success and not t.verified_success]
         verified_rate[cond] = len(verified) / n
         false_pos_rate[cond] = len(claimed_not_verified) / n
         success_actions = [t.total_actions for t in verified]
-        actions_per_success[cond] = (
-            statistics.mean(success_actions) if success_actions else 0.0
-        )
-        first_times = [t.time_to_first_verified_success for t in verified if t.time_to_first_verified_success is not None]
-        time_to_first[cond] = (
-            statistics.mean(first_times) if first_times else None
-        )
+        actions_per_success[cond] = statistics.mean(success_actions) if success_actions else 0.0
+        first_times = [
+            t.time_to_first_verified_success for t in verified if t.time_to_first_verified_success is not None
+        ]
+        time_to_first[cond] = statistics.mean(first_times) if first_times else None
         # D5: findings/hour = verified_successes / total_wall_hours.
         # ponytail: rounded trial durations can collapse to 0.0 for sub-ms
         # mock runs; guard the division so we don't get ZeroDivisionError.
@@ -447,6 +456,7 @@ async def run_benchmark(cfg: BenchmarkConfig) -> BenchmarkReport:
             rr = treat_rate / base_rate
             # Paired bootstrap: resample scenarios with replacement.
             import random
+
             rng = random.Random(42)
             rr_samples: list[float] = []
             scenario_ids = [s.scenario_id for s in cfg.scenarios]

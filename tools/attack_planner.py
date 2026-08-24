@@ -58,10 +58,17 @@ class AttackPlan:
     target_os: str | None = None
     target_cves: list[str] = field(default_factory=list)
     service_context: str = ""
-    phases: list[AttackPhase] = field(default_factory=lambda: [
-        AttackPhase.RECON, AttackPhase.ENUMERATE, AttackPhase.EXPLOIT,
-        AttackPhase.ESCALATE, AttackPhase.LOOT, AttackPhase.PIVOT, AttackPhase.DONE,
-    ])
+    phases: list[AttackPhase] = field(
+        default_factory=lambda: [
+            AttackPhase.RECON,
+            AttackPhase.ENUMERATE,
+            AttackPhase.EXPLOIT,
+            AttackPhase.ESCALATE,
+            AttackPhase.LOOT,
+            AttackPhase.PIVOT,
+            AttackPhase.DONE,
+        ]
+    )
     steps: list[AttackStep] = field(default_factory=list)
     current_phase_index: int = 0
     created_at: float = field(default_factory=time.time)
@@ -125,9 +132,7 @@ class AttackPlan:
         ready = [
             (i, s)
             for i, s in enumerate(self.steps)
-            if s.status in self._OPEN_STATUSES
-            and not s.completed
-            and all(self._dep_satisfied(d) for d in s.depends_on)
+            if s.status in self._OPEN_STATUSES and not s.completed and all(self._dep_satisfied(d) for d in s.depends_on)
         ]
         ready.sort(key=lambda t: (-t[1].priority, t[0]))
         return ready
@@ -295,7 +300,7 @@ def build_planning_prompt(
 
 TARGET: {target_ip}
 TARGET OS: {target_os or "Unknown"}
-KNOWN CVEs: {', '.join(known_cves) if known_cves else "None"}
+KNOWN CVEs: {", ".join(known_cves) if known_cves else "None"}
 SERVICE CONTEXT: {service_context}
 ATTACKER OS: {attacker_os}
 
@@ -385,14 +390,16 @@ def parse_plan_json(text: str) -> list[AttackStep]:
     for item in data:
         if not isinstance(item, dict):
             continue
-        steps.append(AttackStep(
-            phase=item.get("phase", ""),
-            tool=item.get("tool", ""),
-            reason=item.get("reason", ""),
-            target_ip=item.get("target_ip", ""),
-            arguments=item.get("arguments", {}),
-            depends_on=item.get("depends_on", []),
-        ))
+        steps.append(
+            AttackStep(
+                phase=item.get("phase", ""),
+                tool=item.get("tool", ""),
+                reason=item.get("reason", ""),
+                target_ip=item.get("target_ip", ""),
+                arguments=item.get("arguments", {}),
+                depends_on=item.get("depends_on", []),
+            )
+        )
     return steps
 
 
@@ -484,5 +491,7 @@ class AttackPlanner:
         lines = ["ACTIVE PLANS:"]
         for ip, plan in self._plans.items():
             status = "DONE" if plan.is_complete() else plan.current_phase.value.upper()
-            lines.append(f"  {ip}: {status} ({len(plan.steps)} steps, {sum(1 for s in plan.steps if s.completed and s.success)} success)")
+            lines.append(
+                f"  {ip}: {status} ({len(plan.steps)} steps, {sum(1 for s in plan.steps if s.completed and s.success)} success)"
+            )
         return "\n".join(lines)

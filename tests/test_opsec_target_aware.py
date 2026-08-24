@@ -12,6 +12,7 @@ Covers:
   local IPs, on for public IPs, AI chooses attacks for public" -- bites at the
   per-action chokepoint.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -166,7 +167,14 @@ def test_resolve_for_target_missing_target_returns_self() -> None:
 
 
 def test_from_config_reads_target_aware_keys() -> None:
-    cfg = {"opsec": {"enabled": True, "local_targets_off": False, "local_cidrs": ["10.99.0.0/16"], "public_autonomy": False}}
+    cfg = {
+        "opsec": {
+            "enabled": True,
+            "local_targets_off": False,
+            "local_cidrs": ["10.99.0.0/16"],
+            "public_autonomy": False,
+        }
+    }
     p = OpsecProfile.from_config(cfg)
     assert p.local_targets_off is False
     assert p.local_cidrs == ("10.99.0.0/16",)

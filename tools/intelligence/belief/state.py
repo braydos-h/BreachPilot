@@ -152,9 +152,7 @@ class BeliefState:
         )
         return self.register_evidence(hypothesis_id, obs)
 
-    def next_discriminating_check(
-        self, hypothesis_id: str, available_checks: list[str]
-    ) -> str | None:
+    def next_discriminating_check(self, hypothesis_id: str, available_checks: list[str]) -> str | None:
         """Pick the best un-attempted check from the candidates.
 
         Candidate checks are listed in freshness order (newest first); a check
@@ -176,9 +174,7 @@ class BeliefState:
         """Serialisable plain-dict copy of this belief state."""
         return {
             "mission_id": self.mission_id,
-            "hypotheses": {
-                hid: _state_to_dict(s) for hid, s in self.hypotheses.items()
-            },
+            "hypotheses": {hid: _state_to_dict(s) for hid, s in self.hypotheses.items()},
         }
 
     @classmethod
@@ -186,9 +182,7 @@ class BeliefState:
         """Reconstruct a belief state from a snapshot dictionary."""
         return cls(
             mission_id=snapshot_dict["mission_id"],
-            hypotheses={
-                hid: _state_from_dict(hid, hd) for hid, hd in snapshot_dict["hypotheses"].items()
-            },
+            hypotheses={hid: _state_from_dict(hid, hd) for hid, hd in snapshot_dict["hypotheses"].items()},
         )
 
     def top_unresolved(self, limit: int = 5) -> list[HypothesisState]:
@@ -226,9 +220,7 @@ def _now_iso() -> str:
 def _apply_evidence(state: HypothesisState, obs: EvidenceObservation) -> None:
     """Record an observation into the right polarity list (deduped)."""
     target_list = (
-        state.supporting_evidence
-        if obs.polarity is EvidencePolarity.SUPPORTING
-        else state.contradicting_evidence
+        state.supporting_evidence if obs.polarity is EvidencePolarity.SUPPORTING else state.contradicting_evidence
     )
     if any(e.evidence_ref == obs.evidence_ref for e in target_list):
         return
@@ -267,9 +259,7 @@ def _state_from_dict(hypothesis_id: str, data: dict[str, Any]) -> HypothesisStat
         entity=data.get("entity", ""),
         current_confidence=data.get("current_confidence", 0.5),
         supporting_evidence=[_obs_from_dict(o) for o in data.get("supporting_evidence", [])],
-        contradicting_evidence=[
-            _obs_from_dict(o) for o in data.get("contradicting_evidence", [])
-        ],
+        contradicting_evidence=[_obs_from_dict(o) for o in data.get("contradicting_evidence", [])],
         independent_observation_count=data.get("independent_observation_count", 0),
         check_fingerprints_attempted=set(data.get("check_fingerprints_attempted", [])),
         candidate_checks=list(data.get("candidate_checks", [])),

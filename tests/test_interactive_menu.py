@@ -19,6 +19,7 @@ def test_menu_module_imports():
         _view_reports,
         run_interactive_menu,
     )
+
     assert BANNER is not None
     assert callable(run_interactive_menu)
     assert callable(_show_banner)
@@ -31,6 +32,7 @@ def test_menu_module_imports():
 def test_banner_contains_app_name():
     """Banner should contain the app name."""
     from tools.interactive_menu import BANNER
+
     assert "NetAttackAI" in BANNER
     assert "AI Bug Bounty" in BANNER
     assert "Research Agent" in BANNER
@@ -41,6 +43,7 @@ def test_help_text():
     import io
 
     from tools.interactive_menu import _show_help
+
     old_stdout = sys.stdout
     sys.stdout = io.StringIO()
     try:
@@ -92,6 +95,7 @@ def test_fallback_main_menu_exit():
     """Fallback menu should handle 'exit' choice."""
     with patch("builtins.input", return_value="7"):
         from tools.interactive_menu import _fallback_main_menu
+
         result = _fallback_main_menu()
         assert result == "exit"
 
@@ -100,6 +104,7 @@ def test_fallback_main_menu_new_session():
     """Fallback menu should handle 'new session' choice."""
     with patch("builtins.input", return_value="2"):
         from tools.interactive_menu import _fallback_main_menu
+
         result = _fallback_main_menu()
         assert result == "new_session"
 
@@ -108,6 +113,7 @@ def test_fallback_main_menu_eof():
     """Fallback menu should handle EOF gracefully."""
     with patch("builtins.input", side_effect=EOFError):
         from tools.interactive_menu import _fallback_main_menu
+
         result = _fallback_main_menu()
         assert result == "exit"
 
@@ -144,6 +150,7 @@ def test_run_interactive_menu_exits_on_exit():
     with patch("tools.interactive_menu._show_banner"):
         with patch("tools.interactive_menu._main_menu", return_value="exit"):
             from tools.interactive_menu import run_interactive_menu
+
             result = run_interactive_menu()
             assert result == 0
 
@@ -153,5 +160,6 @@ def test_run_interactive_menu_exits_on_none():
     with patch("tools.interactive_menu._show_banner"):
         with patch("tools.interactive_menu._main_menu", return_value=None):
             from tools.interactive_menu import run_interactive_menu
+
             result = run_interactive_menu()
             assert result == 0

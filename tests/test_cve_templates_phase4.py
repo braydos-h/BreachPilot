@@ -1,4 +1,5 @@
 """Phase 4: verify the new CVE-family templates dispatch correctly."""
+
 from pathlib import Path
 
 import pytest
@@ -13,9 +14,7 @@ def _make_server(tmp_path: Path):
     search = ExploitSearch(ExploitSearchSettings())
     nvd = NVDClient(CVESearchSettings())
     config = {"exploit": {"require_explicit_allowlist": False, "allowed_targets": []}}
-    return create_mcp_server(
-        search, nvd, WebResearcher(WebResearcherSettings()), tmp_path, config
-    )
+    return create_mcp_server(search, nvd, WebResearcher(WebResearcherSettings()), tmp_path, config)
 
 
 def _text(result) -> str:

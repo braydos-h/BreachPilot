@@ -4,11 +4,12 @@
 
 ```python
 from pycrtsh import Crtsh
+
 c = Crtsh()
 
 # Search certificates by domain
-certs = c.search("example.com")      # exact match
-certs = c.search("%.example.com")    # wildcard subdomains
+certs = c.search("example.com")  # exact match
+certs = c.search("%.example.com")  # wildcard subdomains
 
 # Get certificate details by ID
 details = c.get(cert_id, type="id")
@@ -33,10 +34,12 @@ records = resp.json()
 ```python
 import certstream
 
+
 def callback(message, context):
     if message["message_type"] == "certificate_update":
         all_domains = message["data"]["leaf_cert"]["all_domains"]
         print(all_domains)
+
 
 certstream.listen_for_events(callback, url="wss://certstream.calidog.io/")
 ```

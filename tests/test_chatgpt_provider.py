@@ -199,9 +199,7 @@ def test_chatgpt_discovery_from_models_endpoint():
     manager = cg.ChatGptProxyManager.get()
     # Proxy already up (health ok) so no spawn.
     _FAKE_HTTPX.set("GET", "/health", lambda url: _FakeResponse({"ok": True}))
-    _FAKE_HTTPX.set("GET", "/models", lambda url: _FakeResponse({
-        "data": [{"id": "gpt-5.2"}, {"id": "gpt-5.2-mini"}]
-    }))
+    _FAKE_HTTPX.set("GET", "/models", lambda url: _FakeResponse({"data": [{"id": "gpt-5.2"}, {"id": "gpt-5.2-mini"}]}))
     models = manager.discover_models("http://127.0.0.1:10531/v1", cfg)
     assert models == ["gpt-5.2", "gpt-5.2-mini"]
 
@@ -224,7 +222,9 @@ def test_build_chatgpt_router_falls_back_to_default_model(monkeypatch):
     monkeypatch.setattr(manager, "is_authenticated", lambda c: True)
     monkeypatch.setattr(manager, "_health_ok", lambda c: True)
     monkeypatch.setattr(manager, "discover_models", lambda *a, **k: [])
-    router = build_router(None, provider="chatgpt", chatgpt_config=cfg, config={"models": {"provider": "chatgpt"}, "chatgpt": cfg})
+    router = build_router(
+        None, provider="chatgpt", chatgpt_config=cfg, config={"models": {"provider": "chatgpt"}, "chatgpt": cfg}
+    )
     client = router.get_client("gpt-5.2")
     assert client.model_id == "gpt-5.2"
 
@@ -239,7 +239,13 @@ def _set_nonstream(payload: dict[str, Any]):
 
 
 def test_nonstream_content_null_becomes_empty():
-    _set_nonstream({"model": "gpt-5.2", "choices": [{"message": {"role": "assistant", "content": None}}], "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}})
+    _set_nonstream(
+        {
+            "model": "gpt-5.2",
+            "choices": [{"message": {"role": "assistant", "content": None}}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+        }
+    )
     client = cg.ChatGptProxyClient("http://127.0.0.1:10531/v1")
     resp = client.chat(model="gpt-5.2", messages=[{"role": "user", "content": "hi"}])
     assert resp["message"]["content"] == ""
@@ -248,16 +254,34 @@ def test_nonstream_content_null_becomes_empty():
 
 
 def test_nonstream_tool_calls_passed_through_with_json_string_args():
-    _set_nonstream({"model": "gpt-5.2", "choices": [{"message": {
-        "role": "assistant", "content": "",
-        "tool_calls": [{"id": "t1", "type": "function", "function": {"name": "run_exploit_terminal", "arguments": '{"command": "id"}'}}],
-    }}], "usage": {}})
+    _set_nonstream(
+        {
+            "model": "gpt-5.2",
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "t1",
+                                "type": "function",
+                                "function": {"name": "run_exploit_terminal", "arguments": '{"command": "id"}'},
+                            }
+                        ],
+                    }
+                }
+            ],
+            "usage": {},
+        }
+    )
     client = cg.ChatGptProxyClient("http://127.0.0.1:10531/v1")
     resp = client.chat(model="gpt-5.2", messages=[], tools=[{"type": "function", "function": {"name": "x"}}])
     tc = resp["message"]["tool_calls"][0]
     # arguments stays a JSON string; _normalize_tool_call parses it downstream.
     assert tc["function"]["arguments"] == '{"command": "id"}'
     from tools.exploit_agent.tool_calls import _normalize_tool_call
+
     norm = _normalize_tool_call(tc)
     assert norm["function"]["name"] == "run_exploit_terminal"
     assert norm["function"]["arguments"] == {"command": "id"}
@@ -265,13 +289,21 @@ def test_nonstream_tool_calls_passed_through_with_json_string_args():
 
 def test_normalize_tool_call_malformed_json_args_become_empty_dict():
     from tools.exploit_agent.tool_calls import _normalize_tool_call
+
     norm = _normalize_tool_call({"function": {"name": "x", "arguments": "{not json"}})
     assert norm["function"]["arguments"] == {}
 
 
 def test_nonstream_drops_ollama_only_options():
     seen: list[dict[str, Any]] = []
-    _FAKE_HTTPX.set("POST", "/chat/completions", lambda url, body: (seen.append(body), _FakeResponse({"model": "gpt-5.2", "choices": [{"message": {"content": "ok"}}]}))[1])
+    _FAKE_HTTPX.set(
+        "POST",
+        "/chat/completions",
+        lambda url, body: (
+            seen.append(body),
+            _FakeResponse({"model": "gpt-5.2", "choices": [{"message": {"content": "ok"}}]}),
+        )[1],
+    )
     client = cg.ChatGptProxyClient("http://127.0.0.1:10531/v1")
     client.chat(model="gpt-5.2", messages=[], options={"num_ctx": 976000}, keep_alive="5m", format="json")
     payload = seen[0]
@@ -302,9 +334,23 @@ def test_stream_text_plus_final_usage_chunk():
 
 def test_stream_tool_call_fragment_assembly():
     chunks = [
-        {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "t1", "type": "function", "function": {"name": "run_", "arguments": ""}}]}}]},
-        {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "exploit", "arguments": "{\"cmd\":"}}]}}]},
-        {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": "\"id\"}"}}]}}]},
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {"index": 0, "id": "t1", "type": "function", "function": {"name": "run_", "arguments": ""}}
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "choices": [
+                {"delta": {"tool_calls": [{"index": 0, "function": {"name": "exploit", "arguments": '{"cmd":'}}]}}
+            ]
+        },
+        {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": '"id"}'}}]}}]},
         {"choices": [], "usage": {"total_tokens": 9}},
     ]
     _FAKE_HTTPX.set("STREAM", "/chat/completions", lambda url, body: _FakeStreamResponse(_json_response_lines(chunks)))
@@ -318,7 +364,7 @@ def test_stream_tool_call_fragment_assembly():
 
 
 def test_stream_stops_on_done_and_ignores_keepalive():
-    lines = [": keepalive", "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}", "data: [DONE]"]
+    lines = [": keepalive", 'data: {"choices":[{"delta":{"content":"x"}}]}', "data: [DONE]"]
     _FAKE_HTTPX.set("STREAM", "/chat/completions", lambda url, body: _FakeStreamResponse(lines))
     client = cg.ChatGptProxyClient("http://127.0.0.1:10531/v1")
     out = list(client.chat(model="gpt-5.2", messages=[], stream=True))
@@ -563,17 +609,32 @@ def test_telemetry_records_provider_field(tmp_path, monkeypatch):
 
     monkeypatch.setenv("RESEARCH_WORKSPACE", str(tmp_path))
     rec = mt.build_usage_record(
-        alias="gpt-5.2", model_id="gpt-5.2", response={"usage": {"total_tokens": 7}},
-        messages=[], stream=False, started_at="s", ended_at="e", wall_duration_seconds=1.0,
-        context_window_tokens=128000, source="test", provider="chatgpt",
+        alias="gpt-5.2",
+        model_id="gpt-5.2",
+        response={"usage": {"total_tokens": 7}},
+        messages=[],
+        stream=False,
+        started_at="s",
+        ended_at="e",
+        wall_duration_seconds=1.0,
+        context_window_tokens=128000,
+        source="test",
+        provider="chatgpt",
     )
     assert rec["provider"] == "chatgpt"
     assert rec["total_tokens"] == 7
     # ollama default
     rec2 = mt.build_usage_record(
-        alias="glm", model_id="glm-5.2:cloud", response={"usage": {}}, messages=[],
-        stream=False, started_at="s", ended_at="e", wall_duration_seconds=1.0,
-        context_window_tokens=976000, source="test",
+        alias="glm",
+        model_id="glm-5.2:cloud",
+        response={"usage": {}},
+        messages=[],
+        stream=False,
+        started_at="s",
+        ended_at="e",
+        wall_duration_seconds=1.0,
+        context_window_tokens=976000,
+        source="test",
     )
     assert rec2["provider"] == "ollama"
     # read_usage_records filters by alias and includes provider
@@ -594,6 +655,7 @@ def test_chatgpt_model_client_threads_provider(monkeypatch):
 
     monkeypatch.setattr(mt, "record_model_usage", _fake_record)
     import tools.model_router as mr
+
     monkeypatch.setattr(mr, "record_model_usage", _fake_record)
     _set_nonstream({"model": "gpt-5.2", "choices": [{"message": {"content": "hi"}}], "usage": {"total_tokens": 3}})
     raw = cg.ChatGptProxyClient("http://127.0.0.1:10531/v1")
@@ -620,7 +682,9 @@ def test_session_titler_chatgpt_drops_options_and_returns_title(monkeypatch):
     monkeypatch.setattr(mr, "build_model_client_for_provider", lambda *a, **k: mc)
     config = {"models": {"provider": "chatgpt"}, "chatgpt": {"default_model": "gpt-5.2"}}
     title = st.generate_session_title_sync(
-        {"target_ip": "10.0.0.50", "mode": "recon"}, {"target": "10.0.0.50"}, config=config,
+        {"target_ip": "10.0.0.50", "mode": "recon"},
+        {"target": "10.0.0.50"},
+        config=config,
     )
     assert title == "Recon scan of 10.0.0.50"
 
@@ -671,7 +735,8 @@ def test_build_model_client_for_provider_ollama(monkeypatch):
 
     monkeypatch.setattr(mr, "OllamaClient", _Ollama)
     client = build_model_client_for_provider(
-        {"ollama": {"host": "https://api.ollama.com"}, "models": {"provider": "ollama"}}, "glm",
+        {"ollama": {"host": "https://api.ollama.com"}, "models": {"provider": "ollama"}},
+        "glm",
     )
     assert client.model_id == "glm"
     assert client.chat(messages=[])["message"]["content"] == "o"
@@ -683,7 +748,8 @@ def test_build_model_client_for_provider_chatgpt(monkeypatch):
     monkeypatch.setattr(manager, "is_authenticated", lambda c: True)
     monkeypatch.setattr(manager, "_health_ok", lambda c: True)
     client = build_model_client_for_provider(
-        {"models": {"provider": "chatgpt"}, "chatgpt": {"default_model": "gpt-5.2"}}, "gpt-5.2",
+        {"models": {"provider": "chatgpt"}, "chatgpt": {"default_model": "gpt-5.2"}},
+        "gpt-5.2",
     )
     assert client.model_id == "gpt-5.2"
     assert client.chat(messages=[])["message"]["content"] == "g"

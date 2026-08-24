@@ -130,32 +130,41 @@ class VulnAgent(Agent):
         try:
             # ── Initialize search clients ──
             cve_cfg = config.get("cve_lookup", {})
-            cve_client = NVDClient(CVESearchSettings(
-                enabled=bool(cve_cfg.get("enabled", True)),
-                timeout_seconds=int(cve_cfg.get("timeout_seconds", 30)),
-                max_results=int(cve_cfg.get("max_results", 5)),
-                rate_limit_seconds=float(cve_cfg.get("rate_limit_seconds", 6.0)),
-                circuit_failure_threshold=int(cve_cfg.get("circuit_failure_threshold", 5)),
-                circuit_recovery_timeout=float(cve_cfg.get("circuit_recovery_timeout", 60.0)),
-                epss_enabled=bool(cve_cfg.get("epss_enabled", False)),
-                kev_enabled=bool(cve_cfg.get("kev_enabled", False)),
-                kev_cache_ttl_seconds=int(cve_cfg.get("kev_cache_ttl_seconds", 86400)),
-                kev_cache_path=str(cve_cfg.get("kev_cache_path", "")),
-            ))
+            cve_client = NVDClient(
+                CVESearchSettings(
+                    enabled=bool(cve_cfg.get("enabled", True)),
+                    timeout_seconds=int(cve_cfg.get("timeout_seconds", 30)),
+                    max_results=int(cve_cfg.get("max_results", 5)),
+                    rate_limit_seconds=float(cve_cfg.get("rate_limit_seconds", 6.0)),
+                    circuit_failure_threshold=int(cve_cfg.get("circuit_failure_threshold", 5)),
+                    circuit_recovery_timeout=float(cve_cfg.get("circuit_recovery_timeout", 60.0)),
+                    epss_enabled=bool(cve_cfg.get("epss_enabled", False)),
+                    kev_enabled=bool(cve_cfg.get("kev_enabled", False)),
+                    kev_cache_ttl_seconds=int(cve_cfg.get("kev_cache_ttl_seconds", 86400)),
+                    kev_cache_path=str(cve_cfg.get("kev_cache_path", "")),
+                )
+            )
 
             exploit_cfg = config.get("exploit", {})
             search_cfg = config.get("search", {})
             research_cfg = config.get("research", {}) or {}
             serpapi_cfg = research_cfg.get("serpapi", {}) or {}
-            exploit_search = ExploitSearch(ExploitSearchSettings(
-                enabled=bool(exploit_cfg.get("enabled", False)),
-                searchsploit_path=str(exploit_cfg.get("searchsploit_path", "searchsploit")),
-                web_endpoint=str(serpapi_cfg.get("endpoint", search_cfg.get("endpoint", "https://serpapi.com/search.json"))),
-                web_engine=str(serpapi_cfg.get("engine", search_cfg.get("engine", "duckduckgo"))),
-                web_api_key_env=str(serpapi_cfg.get("api_key_env", search_cfg.get("api_key_env", "SERPAPI_API_KEY"))),
-                web_timeout_seconds=int(research_cfg.get("timeout_seconds", search_cfg.get("timeout_seconds", 20))),
-                web_max_results=int(research_cfg.get("max_results", search_cfg.get("max_results", 5))),
-            ), researcher=build_researcher(config))
+            exploit_search = ExploitSearch(
+                ExploitSearchSettings(
+                    enabled=bool(exploit_cfg.get("enabled", False)),
+                    searchsploit_path=str(exploit_cfg.get("searchsploit_path", "searchsploit")),
+                    web_endpoint=str(
+                        serpapi_cfg.get("endpoint", search_cfg.get("endpoint", "https://serpapi.com/search.json"))
+                    ),
+                    web_engine=str(serpapi_cfg.get("engine", search_cfg.get("engine", "duckduckgo"))),
+                    web_api_key_env=str(
+                        serpapi_cfg.get("api_key_env", search_cfg.get("api_key_env", "SERPAPI_API_KEY"))
+                    ),
+                    web_timeout_seconds=int(research_cfg.get("timeout_seconds", search_cfg.get("timeout_seconds", 20))),
+                    web_max_results=int(research_cfg.get("max_results", search_cfg.get("max_results", 5))),
+                ),
+                researcher=build_researcher(config),
+            )
 
             # ── Build module context for matching ──
             os_hint = blackboard.get("target_os", {}).get("name", "")
@@ -216,7 +225,9 @@ class VulnAgent(Agent):
                 try:
                     web_results = exploit_search.search_web_exploit(f"{name} {version} exploit PoC")
                     svc_exploits.extend(web_results or [])
-                    all_exploits.append({"service": name, "version": version, "port": port, "results": web_results, "source": "web"})
+                    all_exploits.append(
+                        {"service": name, "version": version, "port": port, "results": web_results, "source": "web"}
+                    )
                 except Exception:
                     pass
 
@@ -227,12 +238,17 @@ class VulnAgent(Agent):
                 # Confidence scoring (per-service, see ponytail note above)
                 has_exploit = any("exploit" in str(e).lower() or "poc" in str(e).lower() for e in svc_exploits)
                 has_critical_cve = any(
-                    "critical" in str(c).lower() or "9." in str(c) or "high" in str(c).lower()
-                    for c in cve_results
+                    "critical" in str(c).lower() or "9." in str(c) or "high" in str(c).lower() for c in cve_results
                 )
-                confidence = 0.9 if (has_exploit and has_critical_cve) else \
-                             0.7 if has_exploit else \
-                             0.5 if has_critical_cve else 0.3
+                confidence = (
+                    0.9
+                    if (has_exploit and has_critical_cve)
+                    else 0.7
+                    if has_exploit
+                    else 0.5
+                    if has_critical_cve
+                    else 0.3
+                )
 
                 # Derive missing prerequisites from the top matched module's
                 # declared ``requires`` (capability metadata). Empty when the
@@ -263,20 +279,22 @@ class VulnAgent(Agent):
                 # milestone gating so exploit tasks wait for THIS host's vuln
                 # research to complete before running.
                 if confidence >= 0.7:
-                    new_tasks.append({
-                        "phase": "exploit",
-                        "target": target,
-                        "asset_type": "service",
-                        "objective": f"Exploit {name} {version} on {target}:{port}",
-                        "hypothesis": f"{name} {version} is likely exploitable (confidence={confidence:.0%}).",
-                        "allowed_tools": ["python", "msfconsole", "hydra"],
-                        "risk_level": "high" if confidence >= 0.9 else "medium",
-                        "priority": int(confidence * 100),
-                        "service_context": json.dumps(svc),
-                        "known_cves": [c.get("id", "") for c in (cves if isinstance(cves, list) else [])],
-                        "matched_modules": [m[1] for m in top_modules],
-                        "depends_on": [target, "analysis"],
-                    })
+                    new_tasks.append(
+                        {
+                            "phase": "exploit",
+                            "target": target,
+                            "asset_type": "service",
+                            "objective": f"Exploit {name} {version} on {target}:{port}",
+                            "hypothesis": f"{name} {version} is likely exploitable (confidence={confidence:.0%}).",
+                            "allowed_tools": ["python", "msfconsole", "hydra"],
+                            "risk_level": "high" if confidence >= 0.9 else "medium",
+                            "priority": int(confidence * 100),
+                            "service_context": json.dumps(svc),
+                            "known_cves": [c.get("id", "") for c in (cves if isinstance(cves, list) else [])],
+                            "matched_modules": [m[1] for m in top_modules],
+                            "depends_on": [target, "analysis"],
+                        }
+                    )
 
             output["cves"] = all_cves
             output["exploits"] = all_exploits
@@ -284,7 +302,11 @@ class VulnAgent(Agent):
             # ── LLM-driven exploit path recommendation ──
             if model_client and output["hypotheses"]:
                 llm_analysis = self._llm_analyze(
-                    model_client, target, output["hypotheses"], all_cves, all_exploits,
+                    model_client,
+                    target,
+                    output["hypotheses"],
+                    all_cves,
+                    all_exploits,
                     skill_selection=context.get("skill_selection"),
                     os_hint=os_hint,
                 )
@@ -303,22 +325,33 @@ class VulnAgent(Agent):
             bb_set(blackboard, "vuln_research_complete", True)
             bb_set(blackboard, "vulnerability_hypotheses", output["hypotheses"])
             bb_set(blackboard, "recommended_exploit_path", output["recommended_exploit_path"])
-            bb_set(blackboard, "matched_attack_modules", [
-                {"service": h["service"], "modules": h["matched_modules"]}
-                for h in output["hypotheses"] if h.get("matched_modules")
-            ])
+            bb_set(
+                blackboard,
+                "matched_attack_modules",
+                [
+                    {"service": h["service"], "modules": h["matched_modules"]}
+                    for h in output["hypotheses"]
+                    if h.get("matched_modules")
+                ],
+            )
 
             # Memory updates
-            memory_updates.append({
-                "target": target,
-                "memory_type": "vuln_research",
-                "content": json.dumps({
-                    "hypotheses_count": len(output["hypotheses"]),
-                    "high_confidence": len([h for h in output["hypotheses"] if h["confidence"] >= 0.7]),
-                    "top_recommendation": output["recommended_exploit_path"][:1] if output["recommended_exploit_path"] else None,
-                }),
-                "tags": ["vuln", "cve", "exploit", "hypothesis"],
-            })
+            memory_updates.append(
+                {
+                    "target": target,
+                    "memory_type": "vuln_research",
+                    "content": json.dumps(
+                        {
+                            "hypotheses_count": len(output["hypotheses"]),
+                            "high_confidence": len([h for h in output["hypotheses"] if h["confidence"] >= 0.7]),
+                            "top_recommendation": output["recommended_exploit_path"][:1]
+                            if output["recommended_exploit_path"]
+                            else None,
+                        }
+                    ),
+                    "tags": ["vuln", "cve", "exploit", "hypothesis"],
+                }
+            )
 
             self._set_status(AgentStatus.COMPLETE)
         except Exception as exc:
@@ -360,7 +393,7 @@ class VulnAgent(Agent):
             # ranking 5 hypotheses against only 3 CVE/exploit blocks.
             prompt = f"""You are a senior vulnerability researcher analyzing scan results for target {target}.
 
-TARGET OS (detected): {os_hint or 'unknown'}
+TARGET OS (detected): {os_hint or "unknown"}
 
 SERVICE HYPOTHESES (from automated scanning):
 {json.dumps(hypotheses[:5], indent=2)}

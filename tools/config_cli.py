@@ -39,6 +39,7 @@ def add_target_to_allowlist(path: Path, target_ip: str) -> bool:
         normalized_target = str(ipaddress.ip_address(target))
     except ValueError:
         from tools.validation_utils import is_fqdn
+
         if not is_fqdn(target):
             raise ValueError(f"Invalid target (not an IP or domain): {target!r}")
         normalized_target = target.lower()
@@ -50,9 +51,7 @@ def add_target_to_allowlist(path: Path, target_ip: str) -> bool:
         raise ValueError("config exploit section must be a YAML mapping.")
 
     allowed_targets = exploit.setdefault("allowed_targets", [])
-    if not isinstance(allowed_targets, list) or not all(
-        isinstance(item, str) for item in allowed_targets
-    ):
+    if not isinstance(allowed_targets, list) or not all(isinstance(item, str) for item in allowed_targets):
         raise ValueError("config exploit.allowed_targets must be a list of strings.")
 
     normalized_existing: set[str] = set()
@@ -95,11 +94,9 @@ def _add_allowed_target_to_yaml(source: str, allowed_targets: list[str]) -> str 
     if exploit_match is None:
         return None
 
-    next_section = re.search(r"(?m)^[^\s#][^:\r\n]*:\s", source[exploit_match.end():])
-    section_end = (
-        exploit_match.end() + next_section.start() if next_section is not None else len(source)
-    )
-    section = source[exploit_match.end():section_end]
+    next_section = re.search(r"(?m)^[^\s#][^:\r\n]*:\s", source[exploit_match.end() :])
+    section_end = exploit_match.end() + next_section.start() if next_section is not None else len(source)
+    section = source[exploit_match.end() : section_end]
     allowlist_match = re.search(
         r"(?m)^(?P<indent>[ \t]+)allowed_targets:\s*(?P<value>[^\r\n]*)(?P<newline>\r?\n|$)",
         section,
@@ -117,18 +114,15 @@ def _add_allowed_target_to_yaml(source: str, allowed_targets: list[str]) -> str 
     value = allowlist_match.group("value")
     value_without_comment = value.split("#", 1)[0].strip()
     if value_without_comment.startswith("["):
-        comment = value[len(value.split("#", 1)[0]):].strip()
+        comment = value[len(value.split("#", 1)[0]) :].strip()
         header = f"{indent}allowed_targets:" + (f" {comment}" if comment else "")
         replacement = (
-            header
-            + allowlist_match.group("newline")
-            + _format_allowed_targets(allowed_targets, indent)
-            + "\n"
+            header + allowlist_match.group("newline") + _format_allowed_targets(allowed_targets, indent) + "\n"
         )
         return (
-            source[:exploit_match.end() + allowlist_match.start()]
+            source[: exploit_match.end() + allowlist_match.start()]
             + replacement
-            + source[exploit_match.end() + allowlist_match.end():]
+            + source[exploit_match.end() + allowlist_match.end() :]
         )
 
     # Block-style lists are already comment-preserving; append after their
@@ -183,4 +177,3 @@ def bootstrap_startup_api_keys(args: argparse.Namespace, *, prompt: bool = False
             + ", ".join(result.missing)
             + ". MCP research tools that require provider APIs will stay disabled."
         )
-

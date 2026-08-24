@@ -23,6 +23,7 @@ Pure stdlib (urllib) -- no new dependency. The Shodan Python SDK is not
 used because the REST API is a single GET and urllib is already the
 codebase's HTTP path (cve_lookup, exploit_search, threat_intel).
 """
+
 from __future__ import annotations
 
 import json
@@ -111,7 +112,9 @@ def shodan_host(
         "hostnames": payload.get("hostnames", []),
         "org": payload.get("org", ""),
         "os": payload.get("os", ""),
-        "vulns": list((payload.get("vulns") or []).keys()) if isinstance(payload.get("vulns"), dict) else (payload.get("vulns") or []),
+        "vulns": list((payload.get("vulns") or []).keys())
+        if isinstance(payload.get("vulns"), dict)
+        else (payload.get("vulns") or []),
         "services": [
             {
                 "port": s.get("port"),
@@ -162,14 +165,18 @@ def shodan_search(
         return {"error": f"shodan fetch failed: {exc}"}
     matches = []
     for m in (payload.get("matches") or [])[:max_results]:
-        matches.append({
-            "ip": m.get("ip_str", ""),
-            "port": m.get("port"),
-            "product": m.get("product", ""),
-            "version": m.get("version", ""),
-            "hostnames": m.get("hostnames", []),
-            "vulns": list(m.get("vulns", {}).keys()) if isinstance(m.get("vulns"), dict) else (m.get("vulns") or []),
-        })
+        matches.append(
+            {
+                "ip": m.get("ip_str", ""),
+                "port": m.get("port"),
+                "product": m.get("product", ""),
+                "version": m.get("version", ""),
+                "hostnames": m.get("hostnames", []),
+                "vulns": list(m.get("vulns", {}).keys())
+                if isinstance(m.get("vulns"), dict)
+                else (m.get("vulns") or []),
+            }
+        )
     return _clean({"matches": matches, "total": payload.get("total", 0)})
 
 
@@ -185,6 +192,7 @@ class ShodanReconPlugin(Plugin):
     def _load_manifest() -> PluginManifest:
         text = _MANIFEST_PATH.read_text(encoding="utf-8")
         from tools.plugins import _parse_manifest_yaml  # type: ignore
+
         return PluginManifest.from_dict(_parse_manifest_yaml(text))
 
     def register(self, registry: PluginRegistry) -> None:
@@ -192,9 +200,12 @@ class ShodanReconPlugin(Plugin):
         # a plugin-contributed key. The actual key lives under ``recon`` in
         # config.yaml (already a known top-level key), so this is belt-and-
         # suspenders -- it lets a future plugin-scoped key be added cleanly.
-        registry.register_config_section("shodan_recon", {
-            "enabled": {"type": "bool", "default": False},
-        })
+        registry.register_config_section(
+            "shodan_recon",
+            {
+                "enabled": {"type": "bool", "default": False},
+            },
+        )
         registry.register_mcp_tools(_register_shodan_tools)
 
 

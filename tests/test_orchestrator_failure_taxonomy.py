@@ -13,6 +13,7 @@ These tests pin three additive behaviors in ``tools/autonomous_orchestrator``:
 Modules are mocked; no live targets. The orchestrator/executor are built with
 minimal args (every collaborator defaults off) like the existing suite.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -119,6 +120,7 @@ def test_prereq_missing_schedules_producer_task(tmp_path: Path, monkeypatch) -> 
     orch._tasks[task.task_id] = task
 
     import asyncio
+
     asyncio.run(orch._execute_task_batch([task], state))
 
     # The recovery task was registered with the provenance tag.
@@ -156,6 +158,7 @@ def test_prereq_not_scheduled_for_non_missing_failure(tmp_path: Path, monkeypatc
         max_retries=0,  # avoid retry loop
     )
     import asyncio
+
     asyncio.run(orch._execute_task_batch([task], state))
 
     assert called == [], "find_producers must not be consulted for a timeout failure"
@@ -190,6 +193,7 @@ def test_prereq_scheduling_is_bounded(tmp_path: Path, monkeypatch) -> None:
         max_retries=0,
     )
     import asyncio
+
     asyncio.run(orch._execute_task_batch([task], state))
 
     assert not any(t.created_from == "recovery:prerequisite" for t in orch._tasks.values())
@@ -246,6 +250,7 @@ def test_execute_threads_access_state_into_context(tmp_path: Path, monkeypatch) 
 
     # get_module is the established patch seam (orch_mod.get_module).
     import tools.autonomous_orchestrator as orch_mod
+
     monkeypatch.setattr(orch_mod, "get_module", lambda name: _CapturingModule())
 
     state = AttackState(target="10.0.0.50")
@@ -263,6 +268,7 @@ def test_execute_threads_access_state_into_context(tmp_path: Path, monkeypatch) 
         parameters={"port": 22},
     )
     import asyncio
+
     asyncio.run(executor.execute(task, state))
 
     assert captured["access_achieved"] is True

@@ -22,9 +22,7 @@ SAMPLE_NVD_RESPONSE = {
         {
             "cve": {
                 "id": "CVE-2021-44228",
-                "descriptions": [
-                    {"lang": "en", "value": "Apache Log4j2 JNDI feature exploit."}
-                ],
+                "descriptions": [{"lang": "en", "value": "Apache Log4j2 JNDI feature exploit."}],
                 "metrics": {
                     "cvssMetricV31": [
                         {
@@ -35,9 +33,7 @@ SAMPLE_NVD_RESPONSE = {
                         }
                     ]
                 },
-                "weaknesses": [
-                    {"description": [{"lang": "en", "value": "CWE-502"}]}
-                ],
+                "weaknesses": [{"description": [{"lang": "en", "value": "CWE-502"}]}],
                 "references": [{"url": "https://example.com/ref"}],
             }
         }
@@ -51,6 +47,7 @@ class _FakeResponse:
 
     def read(self) -> bytes:
         import json
+
         return json.dumps(self._payload).encode("utf-8")
 
 

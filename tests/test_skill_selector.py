@@ -10,9 +10,7 @@ def _write_skill(root: Path, name: str, tags: list[str]) -> None:
         "---\n"
         f"name: {name}\n"
         f"description: {name} description.\n"
-        "tags:\n"
-        + "".join(f"- {tag}\n" for tag in tags)
-        + "---\n"
+        "tags:\n" + "".join(f"- {tag}\n" for tag in tags) + "---\n"
         "# Skill\n\n## When to Use\nAuthorized use only.\n\n## Workflow\nFollow the methodology.",
         encoding="utf-8",
     )

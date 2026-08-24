@@ -49,12 +49,14 @@ class NetworkForensicsAgent:
             if count >= limit:
                 break
             try:
-                queries.append({
-                    "timestamp": str(pkt.sniff_time),
-                    "src_ip": pkt.ip.src,
-                    "query": pkt.dns.qry_name,
-                    "type": pkt.dns.qry_type,
-                })
+                queries.append(
+                    {
+                        "timestamp": str(pkt.sniff_time),
+                        "src_ip": pkt.ip.src,
+                        "query": pkt.dns.qry_name,
+                        "type": pkt.dns.qry_type,
+                    }
+                )
                 count += 1
             except AttributeError:
                 continue
@@ -69,12 +71,14 @@ class NetworkForensicsAgent:
             domain = q.get("query", "")
             subdomain = domain.split(".")[0] if "." in domain else domain
             if len(subdomain) >= min_length:
-                suspicious.append({
-                    "query": domain,
-                    "subdomain_length": len(subdomain),
-                    "src_ip": q["src_ip"],
-                    "timestamp": q["timestamp"],
-                })
+                suspicious.append(
+                    {
+                        "query": domain,
+                        "subdomain_length": len(subdomain),
+                        "src_ip": q["src_ip"],
+                        "timestamp": q["timestamp"],
+                    }
+                )
         return suspicious
 
     def extract_http_requests(self, limit=5000):
@@ -104,22 +108,21 @@ class NetworkForensicsAgent:
 
     def extract_tls_sni(self, limit=5000):
         """Extract TLS Server Name Indication values."""
-        cap = pyshark.FileCapture(
-            self.pcap_path,
-            display_filter="tls.handshake.extensions_server_name"
-        )
+        cap = pyshark.FileCapture(self.pcap_path, display_filter="tls.handshake.extensions_server_name")
         sni_list = []
         count = 0
         for pkt in cap:
             if count >= limit:
                 break
             try:
-                sni_list.append({
-                    "timestamp": str(pkt.sniff_time),
-                    "src_ip": pkt.ip.src,
-                    "dst_ip": pkt.ip.dst,
-                    "sni": pkt.tls.handshake_extensions_server_name,
-                })
+                sni_list.append(
+                    {
+                        "timestamp": str(pkt.sniff_time),
+                        "src_ip": pkt.ip.src,
+                        "dst_ip": pkt.ip.dst,
+                        "sni": pkt.tls.handshake_extensions_server_name,
+                    }
+                )
                 count += 1
             except AttributeError:
                 continue
@@ -142,10 +145,7 @@ class NetworkForensicsAgent:
 
     def detect_beaconing(self, target_ip, tolerance=5):
         """Detect beaconing patterns to a specific IP."""
-        cap = pyshark.FileCapture(
-            self.pcap_path,
-            display_filter=f"ip.dst=={target_ip} and tcp.flags.syn==1"
-        )
+        cap = pyshark.FileCapture(self.pcap_path, display_filter=f"ip.dst=={target_ip} and tcp.flags.syn==1")
         timestamps = []
         for pkt in cap:
             try:
@@ -157,7 +157,7 @@ class NetworkForensicsAgent:
         if len(timestamps) < 3:
             return {"beaconing": False, "connections": len(timestamps)}
 
-        intervals = [timestamps[i+1] - timestamps[i] for i in range(len(timestamps)-1)]
+        intervals = [timestamps[i + 1] - timestamps[i] for i in range(len(timestamps) - 1)]
         avg_interval = sum(intervals) / len(intervals)
         consistent = sum(1 for i in intervals if abs(i - avg_interval) < tolerance)
 
@@ -186,10 +186,7 @@ class NetworkForensicsAgent:
                 continue
         cap.close()
 
-        return {
-            port: {"count": data["count"], "sources": list(data["sources"])}
-            for port, data in findings.items()
-        }
+        return {port: {"count": data["count"], "sources": list(data["sources"])} for port, data in findings.items()}
 
     def generate_report(self, target_ip=None):
         """Generate comprehensive network forensics report."""

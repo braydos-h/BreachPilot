@@ -120,6 +120,7 @@ import asyncio
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+
 async def main():
     params = StdioServerParameters(command="node", args=["./suspect-mcp-server.js"])
     async with stdio_client(params) as (read, write):
@@ -129,6 +130,7 @@ async def main():
             for t in tools.tools:
                 print(f"{t.name}: {len(t.description or '')} chars")
                 print((t.description or "")[:400])
+
 
 asyncio.run(main())
 ```
@@ -143,9 +145,12 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 SSRF_TARGETS = [
-    "http://169.254.169.254/latest/meta-data/",   # AWS IMDS
-    "http://127.0.0.1:22/", "http://localhost:6379/", "file:///etc/passwd",
+    "http://169.254.169.254/latest/meta-data/",  # AWS IMDS
+    "http://127.0.0.1:22/",
+    "http://localhost:6379/",
+    "file:///etc/passwd",
 ]
+
 
 async def main():
     params = StdioServerParameters(command="node", args=["./suspect-mcp-server.js"])
@@ -156,6 +161,7 @@ async def main():
                 res = await s.call_tool("fetch_url", {"url": url})
                 body = str(res.content)[:200]
                 print(f"[SSRF?] {url} -> {body}")
+
 
 asyncio.run(main())
 ```

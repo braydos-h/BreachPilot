@@ -56,14 +56,8 @@ class FakeMcpSession:
     def __init__(
         self,
         *,
-        check_os_text: str = (
-            "OS_CHECK_RESULTS:\nTARGET: 10.0.0.50\nOS_VERDICT: LINUX\n"
-            "HINTS: TTL=64; open ports 22"
-        ),
-        quick_scan_text: str = (
-            "QUICK_SCAN_RESULTS: 10.0.0.50\n"
-            "Port 22/tcp OPEN (ssh) - OpenSSH_8.5p1"
-        ),
+        check_os_text: str = ("OS_CHECK_RESULTS:\nTARGET: 10.0.0.50\nOS_VERDICT: LINUX\nHINTS: TTL=64; open ports 22"),
+        quick_scan_text: str = ("QUICK_SCAN_RESULTS: 10.0.0.50\nPort 22/tcp OPEN (ssh) - OpenSSH_8.5p1"),
         cve_text: str = "No notable CVEs.",
         raise_on: set[str] | None = None,
     ) -> None:
@@ -105,7 +99,7 @@ def _make_args(tmp_path: Path, *, recon_first: bool = True) -> Namespace:
         mcp_transport="stdio",
         http_port=None,
         reports_dir=tmp_path / "reports",
-        plain=True,         # force spinner into the non-TTY branch
+        plain=True,  # force spinner into the non-TTY branch
         stealth=False,
         rotate_ua=False,
         doh=False,
@@ -125,7 +119,7 @@ def _make_args(tmp_path: Path, *, recon_first: bool = True) -> Namespace:
         json=False,
         quiet=False,
         debug=False,
-        yes=True,           # skip the ready-to-begin gate
+        yes=True,  # skip the ready-to-begin gate
     )
 
 
@@ -147,6 +141,7 @@ class TestDuplicateInitializeRegression:
         import contextlib as _cl
 
         from main import open_exploit_mcp_session  # noqa: F401  (import smoke)
+
         session = MagicMock()
         session.initialize = AsyncMock(return_value=None)
 
@@ -159,6 +154,7 @@ class TestDuplicateInitializeRegression:
         # Patch the symbol in main's namespace to our minimal stand-in.
         # This is what the rest of async_main uses.
         import main as main_mod
+
         monkeypatch.setattr(main_mod, "open_exploit_mcp_session", _open)
 
         async def _run():
@@ -180,8 +176,7 @@ class TestDuplicateInitializeRegression:
 
         asyncio.run(_run())
         assert session.initialize.await_count == 1, (
-            f"expected session.initialize() called once, "
-            f"got {session.initialize.await_count}"
+            f"expected session.initialize() called once, got {session.initialize.await_count}"
         )
 
     def test_recon_first_branch_does_not_reinitialize(self, monkeypatch, tmp_path):
@@ -230,26 +225,32 @@ class TestDuplicateInitializeRegression:
 
         # Stub the interactive prompts
         monkeypatch.setattr(
-            main_mod.ui, "ask_goal_from_suggestions",
+            main_mod.ui,
+            "ask_goal_from_suggestions",
             lambda _sug: ("recon_only", ""),
             raising=False,
         )
         monkeypatch.setattr(
-            main_mod.ui, "ask_advanced_settings",
+            main_mod.ui,
+            "ask_advanced_settings",
             AsyncMock(return_value=None),
             raising=False,
         )
         # Also stub the run_exploit_session to return a minimal result and avoid
         # needing a real model client / MCP session for the post-recon phase.
         monkeypatch.setattr(
-            main_mod, "run_exploit_session",
-            AsyncMock(return_value={
-                "total_actions": 0,
-                "workspace": "x",
-                "audit_path": "y",
-            }),
+            main_mod,
+            "run_exploit_session",
+            AsyncMock(
+                return_value={
+                    "total_actions": 0,
+                    "workspace": "x",
+                    "audit_path": "y",
+                }
+            ),
             raising=False,
         )
+
         # The model router isn't used by the recon-first block; stub it
         # so async_main can build its router and pick a model client
         # without contacting Ollama.
@@ -274,8 +275,7 @@ class TestDuplicateInitializeRegression:
         result = asyncio.run(_drive())
         # After the fix, the session was initialized exactly once.
         assert fake.initialize.await_count == 1, (
-            f"recon-first branch double-initialized the session: "
-            f"initialize.await_count = {fake.initialize.await_count}"
+            f"recon-first branch double-initialized the session: initialize.await_count = {fake.initialize.await_count}"
         )
         # And the context manager was opened exactly once.
         assert sum(open_calls) == 1
@@ -330,24 +330,30 @@ class TestReconFirstExceptionResilience:
         monkeypatch.setattr(ge_mod, "GoalEngine", _GE)
         monkeypatch.setattr(main_mod, "GoalEngine", _GE)
         monkeypatch.setattr(
-            main_mod.ui, "ask_goal_from_suggestions",
+            main_mod.ui,
+            "ask_goal_from_suggestions",
             lambda _sug: ("recon_only", ""),
             raising=False,
         )
         monkeypatch.setattr(
-            main_mod.ui, "ask_advanced_settings",
+            main_mod.ui,
+            "ask_advanced_settings",
             AsyncMock(return_value=None),
             raising=False,
         )
         monkeypatch.setattr(
-            main_mod, "run_exploit_session",
-            AsyncMock(return_value={
-                "total_actions": 0,
-                "workspace": "x",
-                "audit_path": "y",
-            }),
+            main_mod,
+            "run_exploit_session",
+            AsyncMock(
+                return_value={
+                    "total_actions": 0,
+                    "workspace": "x",
+                    "audit_path": "y",
+                }
+            ),
             raising=False,
         )
+
         def _stub_router(*_a, **_kw):
             class _R:
                 _clients = {"deepseek": object()}
@@ -356,6 +362,7 @@ class TestReconFirstExceptionResilience:
                     return MagicMock()
 
             return _R()
+
         monkeypatch.setattr(main_mod, "build_router", _stub_router)
 
         args = _make_args(tmp_path, recon_first=True)
@@ -420,24 +427,30 @@ class TestReconFirstExceptionResilience:
         monkeypatch.setattr(ge_mod, "GoalEngine", _GE)
         monkeypatch.setattr(main_mod, "GoalEngine", _GE)
         monkeypatch.setattr(
-            main_mod.ui, "ask_goal_from_suggestions",
+            main_mod.ui,
+            "ask_goal_from_suggestions",
             lambda _sug: ("recon_only", ""),
             raising=False,
         )
         monkeypatch.setattr(
-            main_mod.ui, "ask_advanced_settings",
+            main_mod.ui,
+            "ask_advanced_settings",
             AsyncMock(return_value=None),
             raising=False,
         )
         monkeypatch.setattr(
-            main_mod, "run_exploit_session",
-            AsyncMock(return_value={
-                "total_actions": 0,
-                "workspace": "x",
-                "audit_path": "y",
-            }),
+            main_mod,
+            "run_exploit_session",
+            AsyncMock(
+                return_value={
+                    "total_actions": 0,
+                    "workspace": "x",
+                    "audit_path": "y",
+                }
+            ),
             raising=False,
         )
+
         def _stub_router(*_a, **_kw):
             class _R:
                 _clients = {"deepseek": object()}
@@ -446,6 +459,7 @@ class TestReconFirstExceptionResilience:
                     return MagicMock()
 
             return _R()
+
         monkeypatch.setattr(main_mod, "build_router", _stub_router)
 
         args = _make_args(tmp_path, recon_first=True)
@@ -495,24 +509,30 @@ class TestReconFirstExceptionResilience:
         monkeypatch.setattr(ge_mod, "GoalEngine", _GE)
         monkeypatch.setattr(main_mod, "GoalEngine", _GE)
         monkeypatch.setattr(
-            main_mod.ui, "ask_goal_from_suggestions",
+            main_mod.ui,
+            "ask_goal_from_suggestions",
             lambda _sug: ("recon_only", ""),
             raising=False,
         )
         monkeypatch.setattr(
-            main_mod.ui, "ask_advanced_settings",
+            main_mod.ui,
+            "ask_advanced_settings",
             AsyncMock(return_value=None),
             raising=False,
         )
         monkeypatch.setattr(
-            main_mod, "run_exploit_session",
-            AsyncMock(return_value={
-                "total_actions": 0,
-                "workspace": "x",
-                "audit_path": "y",
-            }),
+            main_mod,
+            "run_exploit_session",
+            AsyncMock(
+                return_value={
+                    "total_actions": 0,
+                    "workspace": "x",
+                    "audit_path": "y",
+                }
+            ),
             raising=False,
         )
+
         def _stub_router(*_a, **_kw):
             class _R:
                 _clients = {"deepseek": object()}
@@ -521,6 +541,7 @@ class TestReconFirstExceptionResilience:
                     return MagicMock()
 
             return _R()
+
         monkeypatch.setattr(main_mod, "build_router", _stub_router)
 
         args = _make_args(tmp_path, recon_first=True)
@@ -538,13 +559,12 @@ class TestBootingLogHygiene:
     """The ``Booting MCP server (stdio)...`` message must NOT be printed
     more than once per ``open_exploit_mcp_session`` call."""
 
-    def test_booting_message_printed_exactly_once_on_success(
-        self, monkeypatch, capsys, tmp_path
-    ):
+    def test_booting_message_printed_exactly_once_on_success(self, monkeypatch, capsys, tmp_path):
         """Drive ``open_exploit_mcp_session`` and confirm
         ``Booting MCP server`` appears exactly once on the success path.
         """
         import contextlib as _cl
+
         session = MagicMock()
         session.initialize = AsyncMock(return_value=None)
 
@@ -571,13 +591,10 @@ class TestBootingLogHygiene:
         combined = captured.out + captured.err
         booting_count = combined.count("Booting MCP server")
         assert booting_count == 1, (
-            f"expected exactly 1 'Booting MCP server' log, got {booting_count}\n"
-            f"output: {combined!r}"
+            f"expected exactly 1 'Booting MCP server' log, got {booting_count}\noutput: {combined!r}"
         )
 
-    def test_no_booting_message_when_recon_first_falls_back(
-        self, monkeypatch, capsys, tmp_path
-    ):
+    def test_no_booting_message_when_recon_first_falls_back(self, monkeypatch, capsys, tmp_path):
         """If the recon-first fallback path is taken (the patched
         ``open_exploit_mcp_session`` raises on entry), no
         ``Booting MCP server`` line should appear at all — because the real
@@ -597,10 +614,15 @@ class TestBootingLogHygiene:
 
         class _GE:
             def suggest_goals(self, _a, _p):
-                return [SuggestedGoal(
-                    name="recon_only", description="x",
-                    exploit_likelihood="Unlikely", success_rating=10, rationale="r"
-                )]
+                return [
+                    SuggestedGoal(
+                        name="recon_only",
+                        description="x",
+                        exploit_likelihood="Unlikely",
+                        success_rating=10,
+                        rationale="r",
+                    )
+                ]
 
             def get(self, name, description=None, risk_profile=None):
                 return AttackGoal(name=name, description=description or "x")
@@ -608,22 +630,30 @@ class TestBootingLogHygiene:
         monkeypatch.setattr(ge_mod, "GoalEngine", _GE)
         monkeypatch.setattr(main_mod, "GoalEngine", _GE)
         monkeypatch.setattr(
-            main_mod.ui, "ask_goal_from_suggestions",
+            main_mod.ui,
+            "ask_goal_from_suggestions",
             lambda _sug: ("recon_only", ""),
             raising=False,
         )
         monkeypatch.setattr(
-            main_mod.ui, "ask_advanced_settings",
+            main_mod.ui,
+            "ask_advanced_settings",
             AsyncMock(return_value=None),
             raising=False,
         )
         monkeypatch.setattr(
-            main_mod, "run_exploit_session",
-            AsyncMock(return_value={
-                "total_actions": 0, "workspace": "x", "audit_path": "y",
-            }),
+            main_mod,
+            "run_exploit_session",
+            AsyncMock(
+                return_value={
+                    "total_actions": 0,
+                    "workspace": "x",
+                    "audit_path": "y",
+                }
+            ),
             raising=False,
         )
+
         def _stub_router(*_a, **_kw):
             class _R:
                 _clients = {"deepseek": object()}
@@ -632,6 +662,7 @@ class TestBootingLogHygiene:
                     return MagicMock()
 
             return _R()
+
         monkeypatch.setattr(main_mod, "build_router", _stub_router)
 
         args = _make_args(tmp_path, recon_first=True)
@@ -642,9 +673,7 @@ class TestBootingLogHygiene:
         combined = captured.out + captured.err
         # The real context manager was never entered, so its
         # ``Booting MCP server`` spinner was never printed.
-        assert "Booting MCP server" not in combined, (
-            f"unexpected 'Booting MCP server' in output: {combined!r}"
-        )
+        assert "Booting MCP server" not in combined, f"unexpected 'Booting MCP server' in output: {combined!r}"
 
 
 # ── 4. End-to-end regression: no "Session aborted." cascade ───────────────
@@ -678,10 +707,15 @@ class TestNoSessionAbortedRegression:
 
         class _GE:
             def suggest_goals(self, _a, _p):
-                return [SuggestedGoal(
-                    name="recon_only", description="Happy path",
-                    exploit_likelihood="Likely", success_rating=80, rationale="r"
-                )]
+                return [
+                    SuggestedGoal(
+                        name="recon_only",
+                        description="Happy path",
+                        exploit_likelihood="Likely",
+                        success_rating=80,
+                        rationale="r",
+                    )
+                ]
 
             def get(self, name, description=None, risk_profile=None):
                 return AttackGoal(name=name, description=description or "x")
@@ -689,22 +723,30 @@ class TestNoSessionAbortedRegression:
         monkeypatch.setattr(ge_mod, "GoalEngine", _GE)
         monkeypatch.setattr(main_mod, "GoalEngine", _GE)
         monkeypatch.setattr(
-            main_mod.ui, "ask_goal_from_suggestions",
+            main_mod.ui,
+            "ask_goal_from_suggestions",
             lambda _sug: ("recon_only", ""),
             raising=False,
         )
         monkeypatch.setattr(
-            main_mod.ui, "ask_advanced_settings",
+            main_mod.ui,
+            "ask_advanced_settings",
             AsyncMock(return_value=None),
             raising=False,
         )
         monkeypatch.setattr(
-            main_mod, "run_exploit_session",
-            AsyncMock(return_value={
-                "total_actions": 0, "workspace": "x", "audit_path": "y",
-            }),
+            main_mod,
+            "run_exploit_session",
+            AsyncMock(
+                return_value={
+                    "total_actions": 0,
+                    "workspace": "x",
+                    "audit_path": "y",
+                }
+            ),
             raising=False,
         )
+
         def _stub_router(*_a, **_kw):
             class _R:
                 _clients = {"deepseek": object()}
@@ -713,6 +755,7 @@ class TestNoSessionAbortedRegression:
                     return MagicMock()
 
             return _R()
+
         monkeypatch.setattr(main_mod, "build_router", _stub_router)
 
         args = _make_args(tmp_path, recon_first=True)
@@ -722,17 +765,13 @@ class TestNoSessionAbortedRegression:
         captured = capsys.readouterr()
         combined = captured.out + captured.err
         assert result == 0, f"expected clean exit 0, got {result}"
-        assert "Session aborted." not in combined, (
-            f"regression: 'Session aborted.' appeared in output: {combined!r}"
-        )
+        assert "Session aborted." not in combined, f"regression: 'Session aborted.' appeared in output: {combined!r}"
         # Recon-first should open the MCP context exactly once.
         assert sum(open_calls) == 1
         # The session was initialized exactly once (no double init).
         assert fake.initialize.await_count == 1
 
-    def test_full_recon_first_with_check_os_crash_does_not_abort(
-        self, monkeypatch, tmp_path, capsys
-    ):
+    def test_full_recon_first_with_check_os_crash_does_not_abort(self, monkeypatch, tmp_path, capsys):
         """When ``check_os`` raises, the recon-first flow continues to goal
         selection and exits cleanly — ``Session aborted.`` is never printed.
         The inner ``run_recon_assessment`` exception handler substitutes
@@ -754,10 +793,15 @@ class TestNoSessionAbortedRegression:
 
         class _GE:
             def suggest_goals(self, _a, _p):
-                return [SuggestedGoal(
-                    name="recon_only", description="fallback",
-                    exploit_likelihood="Possible", success_rating=30, rationale="r"
-                )]
+                return [
+                    SuggestedGoal(
+                        name="recon_only",
+                        description="fallback",
+                        exploit_likelihood="Possible",
+                        success_rating=30,
+                        rationale="r",
+                    )
+                ]
 
             def get(self, name, description=None, risk_profile=None):
                 return AttackGoal(name=name, description=description or "x")
@@ -765,22 +809,30 @@ class TestNoSessionAbortedRegression:
         monkeypatch.setattr(ge_mod, "GoalEngine", _GE)
         monkeypatch.setattr(main_mod, "GoalEngine", _GE)
         monkeypatch.setattr(
-            main_mod.ui, "ask_goal_from_suggestions",
+            main_mod.ui,
+            "ask_goal_from_suggestions",
             lambda _sug: ("recon_only", ""),
             raising=False,
         )
         monkeypatch.setattr(
-            main_mod.ui, "ask_advanced_settings",
+            main_mod.ui,
+            "ask_advanced_settings",
             AsyncMock(return_value=None),
             raising=False,
         )
         monkeypatch.setattr(
-            main_mod, "run_exploit_session",
-            AsyncMock(return_value={
-                "total_actions": 0, "workspace": "x", "audit_path": "y",
-            }),
+            main_mod,
+            "run_exploit_session",
+            AsyncMock(
+                return_value={
+                    "total_actions": 0,
+                    "workspace": "x",
+                    "audit_path": "y",
+                }
+            ),
             raising=False,
         )
+
         def _stub_router(*_a, **_kw):
             class _R:
                 _clients = {"deepseek": object()}
@@ -789,6 +841,7 @@ class TestNoSessionAbortedRegression:
                     return MagicMock()
 
             return _R()
+
         monkeypatch.setattr(main_mod, "build_router", _stub_router)
 
         args = _make_args(tmp_path, recon_first=True)
@@ -803,8 +856,7 @@ class TestNoSessionAbortedRegression:
         # even on a check_os crash, with an UNKNOWN os_verdict.
         assessment_files = list((tmp_path / "reports").rglob("recon_assessment.json"))
         assert assessment_files, (
-            f"expected recon_assessment.json to be written; "
-            f"contents: {list((tmp_path / 'reports').rglob('*'))}"
+            f"expected recon_assessment.json to be written; contents: {list((tmp_path / 'reports').rglob('*'))}"
         )
         assessment_data = json.loads(assessment_files[0].read_text(encoding="utf-8"))
         assert assessment_data.get("os_verdict") == "UNKNOWN", (
@@ -838,12 +890,18 @@ class TestAssessmentDefinedForNonReconFirst:
                     return MagicMock()
 
             return _R()
+
         monkeypatch.setattr(main_mod, "build_router", _stub_router)
         monkeypatch.setattr(
-            main_mod, "run_exploit_session",
-            AsyncMock(return_value={
-                "total_actions": 0, "workspace": "x", "audit_path": "y",
-            }),
+            main_mod,
+            "run_exploit_session",
+            AsyncMock(
+                return_value={
+                    "total_actions": 0,
+                    "workspace": "x",
+                    "audit_path": "y",
+                }
+            ),
             raising=False,
         )
         from tools.goal_engine import AttackGoal
@@ -858,7 +916,8 @@ class TestAssessmentDefinedForNonReconFirst:
         monkeypatch.setattr(ge_mod, "GoalEngine", _GE)
         monkeypatch.setattr(main_mod, "GoalEngine", _GE)
         monkeypatch.setattr(
-            main_mod.ui, "ask_advanced_settings",
+            main_mod.ui,
+            "ask_advanced_settings",
             AsyncMock(return_value=None),
             raising=False,
         )
@@ -905,6 +964,7 @@ class TestSpinnerSoftFail:
 
     def _build_ui(self) -> Any:
         from tools.attack_ui import AttackUi
+
         # ``plain=True`` forces the non-TTY branch (simpler to drive in tests
         # — no thread, no cursor moves, just three print() calls).
         return AttackUi(plain=True)
@@ -966,17 +1026,13 @@ class TestOpenExploitMcpSessionSoftFail:
             if _kwargs.get("soft_fail"):
                 # Simulate the soft-fail contract: catch and yield None.
                 try:
-                    raise BaseExceptionGroup(
-                        "stdio dead", [ConnectionError("epipe on boot")]
-                    )
+                    raise BaseExceptionGroup("stdio dead", [ConnectionError("epipe on boot")])
                 except BaseExceptionGroup:
                     yield None
                     return
             else:
                 # Hard fail: re-raise.
-                raise BaseExceptionGroup(
-                    "stdio dead", [ConnectionError("epipe on boot")]
-                )
+                raise BaseExceptionGroup("stdio dead", [ConnectionError("epipe on boot")])
 
         # We don't need to drive this through main; just verify the
         # contract of the fake so the test is robust to refactors of the
@@ -1037,9 +1093,7 @@ class TestReconFirstInteractiveCascadeGone:
     the real MCP SDK's stdio_client (which is a function-local import).
     """
 
-    def test_recon_first_with_init_failure_emits_no_error_lines(
-        self, monkeypatch, tmp_path, capsys
-    ) -> None:
+    def test_recon_first_with_init_failure_emits_no_error_lines(self, monkeypatch, tmp_path, capsys) -> None:
         """The full async_main recon-first flow against a dead MCP server
         should produce NO `[ERROR]` lines and exactly one `[WARN] Booting
         MCP server` line, then proceed to goal suggestion."""
@@ -1055,66 +1109,76 @@ class TestReconFirstInteractiveCascadeGone:
             # and yield None; otherwise re-raise.
             if _kwargs.get("soft_fail"):
                 try:
-                    raise BaseExceptionGroup(
-                        "mcp dead", [ConnectionError("epipe")]
-                    )
+                    raise BaseExceptionGroup("mcp dead", [ConnectionError("epipe")])
                 except BaseExceptionGroup as exc:
                     from tools.attack_ui import AttackUi
-                    AttackUi(plain=True).warning(
-                        f"MCP stdio session failed: {exc}"
-                    )
+
+                    AttackUi(plain=True).warning(f"MCP stdio session failed: {exc}")
                     yield None
                     return
             else:
-                raise BaseExceptionGroup(
-                    "mcp dead", [ConnectionError("epipe")]
-                )
+                raise BaseExceptionGroup("mcp dead", [ConnectionError("epipe")])
 
         monkeypatch.setattr(main_mod, "open_exploit_mcp_session", _open_session_crashes)
 
         # 2) Stub router + goal engine.
         class _StubRouter:
-            def __init__(self, *a, **kw): self._clients = {"deepseek": object()}
-            def get_client(self, name): return object()
+            def __init__(self, *a, **kw):
+                self._clients = {"deepseek": object()}
+
+            def get_client(self, name):
+                return object()
+
         monkeypatch.setattr(main_mod, "build_router", lambda *a, **kw: _StubRouter())
         import tools.goal_engine as ge_mod
         from tools.goal_engine import AttackGoal
         from tools.goal_suggester import SuggestedGoal
+
         class _GE:
-            def __init__(self): pass
+            def __init__(self):
+                pass
+
             def suggest_goals(self, assessment, risk):
                 return [
                     SuggestedGoal(
-                        name="recon_only", description="recon",
-                        exploit_likelihood="Unlikely", success_rating=30,
+                        name="recon_only",
+                        description="recon",
+                        exploit_likelihood="Unlikely",
+                        success_rating=30,
                         rationale="fallback",
                     )
                 ]
+
             def get(self, name, custom_text="", risk_profile=""):
                 return AttackGoal(name=name, description=custom_text or name)
+
         monkeypatch.setattr(ge_mod, "GoalEngine", _GE)
         monkeypatch.setattr(main_mod, "GoalEngine", _GE)
 
         # 3) Stub the post-recon session so we never get past the recon block.
         async def _no_session(*a, **kw):
             return {"records": [], "messages": [], "target_ip": "10.0.0.50"}
+
         monkeypatch.setattr(main_mod, "run_exploit_session", AsyncMock(side_effect=_no_session))
 
         # 4) Skip the interactive goal-suggestion prompt; the test is
         # about what happens BEFORE that prompt (the cascade lines).
         monkeypatch.setattr(
-            main_mod.ui, "ask_goal_from_suggestions",
+            main_mod.ui,
+            "ask_goal_from_suggestions",
             lambda _sug: ("recon_only", ""),
             raising=False,
         )
         # Skip the advanced-settings and confirm-gate prompts.
         monkeypatch.setattr(
-            main_mod.ui, "ask_advanced_settings",
+            main_mod.ui,
+            "ask_advanced_settings",
             AsyncMock(return_value=None),
             raising=False,
         )
         monkeypatch.setattr(
-            main_mod.ui, "ask_confirm",
+            main_mod.ui,
+            "ask_confirm",
             AsyncMock(return_value=True),
             raising=False,
         )
@@ -1129,18 +1193,12 @@ class TestReconFirstInteractiveCascadeGone:
         combined = captured.out + captured.err
 
         # ── The critical assertion: NO [ERROR] lines. ──
-        assert "[ERROR]" not in combined, (
-            f"cascade regression: [ERROR] line appeared in output:\n{combined}"
-        )
+        assert "[ERROR]" not in combined, f"cascade regression: [ERROR] line appeared in output:\n{combined}"
 
         # ── The fallback was announced. ──
-        assert "MCP recon unavailable" in combined, (
-            f"expected the fallback ui.info line, got:\n{combined}"
-        )
+        assert "MCP recon unavailable" in combined, f"expected the fallback ui.info line, got:\n{combined}"
 
-    def test_recon_first_with_tool_failure_emits_no_error_lines(
-        self, monkeypatch, tmp_path, capfd
-    ) -> None:
+    def test_recon_first_with_tool_failure_emits_no_error_lines(self, monkeypatch, tmp_path, capfd) -> None:
         """MCP boots OK, but check_os raises McpError mid-call. No [ERROR] lines."""
         import contextlib
 
@@ -1149,17 +1207,19 @@ class TestReconFirstInteractiveCascadeGone:
         # 1) Fake open_exploit_mcp_session: boots OK, yields a session whose
         # call_tool raises. The recon-first block catches the per-tool error.
         class _FakeSession:
-            async def initialize(self): return None
+            async def initialize(self):
+                return None
+
             async def call_tool(self, name, args):
                 from mcp.shared.exceptions import McpError
                 from mcp.types import ErrorData
+
                 if name == "check_os":
                     raise McpError(ErrorData(message="connection lost", code=-1))
                 # quick_scan succeeds
-                return MagicMock(content=[MagicMock(text=(
-                    "QUICK_SCAN_RESULTS: 10.0.0.50\n"
-                    "Port 22/tcp OPEN (ssh) - OpenSSH_8.5p1"
-                ))])
+                return MagicMock(
+                    content=[MagicMock(text=("QUICK_SCAN_RESULTS: 10.0.0.50\nPort 22/tcp OPEN (ssh) - OpenSSH_8.5p1"))]
+                )
 
         @contextlib.asynccontextmanager
         async def _open_session_works(**_kwargs):
@@ -1169,45 +1229,60 @@ class TestReconFirstInteractiveCascadeGone:
 
         # 2) Stubs (router, goal engine, exploit session).
         class _StubRouter:
-            def __init__(self, *a, **kw): self._clients = {"deepseek": object()}
-            def get_client(self, name): return object()
+            def __init__(self, *a, **kw):
+                self._clients = {"deepseek": object()}
+
+            def get_client(self, name):
+                return object()
+
         monkeypatch.setattr(main_mod, "build_router", lambda *a, **kw: _StubRouter())
         import tools.goal_engine as ge_mod
         from tools.goal_engine import AttackGoal
         from tools.goal_suggester import SuggestedGoal
+
         class _GE:
-            def __init__(self): pass
+            def __init__(self):
+                pass
+
             def suggest_goals(self, assessment, risk):
                 return [
                     SuggestedGoal(
-                        name="recon_only", description="recon",
-                        exploit_likelihood="Unlikely", success_rating=30,
+                        name="recon_only",
+                        description="recon",
+                        exploit_likelihood="Unlikely",
+                        success_rating=30,
                         rationale="fallback",
                     )
                 ]
+
             def get(self, name, custom_text="", risk_profile=""):
                 return AttackGoal(name=name, description=custom_text or name)
+
         monkeypatch.setattr(ge_mod, "GoalEngine", _GE)
         monkeypatch.setattr(main_mod, "GoalEngine", _GE)
 
         async def _no_session(*a, **kw):
             return {"records": [], "messages": [], "target_ip": "10.0.0.50"}
+
         monkeypatch.setattr(main_mod, "run_exploit_session", AsyncMock(side_effect=_no_session))
 
         # 3) Skip the interactive prompts (the assertion is about the
         # recon output, not about user-input handling).
         monkeypatch.setattr(
-            main_mod.ui, "ask_goal_from_suggestions",
+            main_mod.ui,
+            "ask_goal_from_suggestions",
             lambda _sug: ("recon_only", ""),
             raising=False,
         )
         monkeypatch.setattr(
-            main_mod.ui, "ask_advanced_settings",
+            main_mod.ui,
+            "ask_advanced_settings",
             AsyncMock(return_value=None),
             raising=False,
         )
         monkeypatch.setattr(
-            main_mod.ui, "ask_confirm",
+            main_mod.ui,
+            "ask_confirm",
             AsyncMock(return_value=True),
             raising=False,
         )
@@ -1245,17 +1320,13 @@ class TestReconFirstInteractiveCascadeGone:
 
         # No [ERROR] lines (via the order-proof spy; the captured stream is a
         # secondary check that may miss diverted prints).
-        assert not error_calls, (
-            f"cascade regression: ui.error was called:\n{error_calls}"
-        )
+        assert not error_calls, f"cascade regression: ui.error was called:\n{error_calls}"
         # The inner Probing OS spinner exits cleanly because the exception
         # was caught and the fallback string was substituted.
         assert any("Probing OS" in m for m in success_calls), (
             f"expected a ui.success('...Probing OS...') call, got: {success_calls}"
         )
-        assert "OS_VERDICT: UNKNOWN" in combined or any(
-            "UNKNOWN" in m for m in success_calls
-        )
+        assert "OS_VERDICT: UNKNOWN" in combined or any("UNKNOWN" in m for m in success_calls)
 
 
 # ── 4. Elapsed-time heartbeat in ui.spinner ───────────────────────────────
@@ -1349,8 +1420,7 @@ class TestSpinnerHeartbeat:
         # with a 50 ms heartbeat interval (allowing for Windows
         # sleep granularity).
         assert len(calls) >= 2, (
-            f"format_message should be called repeatedly during a "
-            f"long body, got {len(calls)} call(s): {calls}"
+            f"format_message should be called repeatedly during a long body, got {len(calls)} call(s): {calls}"
         )
         # The tail line is the static message, not the formatted one,
         # so a downstream log scraper matching the original message
@@ -1361,19 +1431,17 @@ class TestSpinnerHeartbeat:
         # ``[SUCCESS] Booting MCP server (stdio)...`` would miss the
         # escape between them.
         import re
+
         plain = re.sub(r"\x1b\[[0-9;]*m", "", rendered)
         assert "[SUCCESS] Booting MCP server (stdio)..." in plain, (
             f"tail line should use static message, got (ANSI-stripped): {plain!r}"
         )
         # And the tail line does NOT carry a stale "… 0.0s" suffix.
         assert "[SUCCESS] Booting MCP server (stdio)... 0.0s" not in plain, (
-            f"tail line should not include stale formatter output, "
-            f"got (ANSI-stripped): {plain!r}"
+            f"tail line should not include stale formatter output, got (ANSI-stripped): {plain!r}"
         )
 
-    def test_spinner_format_message_called_at_least_twice_for_long_body(
-        self, monkeypatch
-    ) -> None:
+    def test_spinner_format_message_called_at_least_twice_for_long_body(self, monkeypatch) -> None:
         """A 1-second body with a 0.2s heartbeat must drive at least 4
         callback invocations, so the seconds counter actually ticks
         (and the user sees multiple updates) rather than a single
@@ -1397,10 +1465,7 @@ class TestSpinnerHeartbeat:
         # granularity and the spinner thread's own scheduling latency
         # can shrink a 5-tick ideal cadence. The point is: it ticks,
         # it doesn't sit at 1.
-        assert len(calls) >= 3, (
-            f"expected ≥3 formatter invocations in a 1s body, "
-            f"got {len(calls)}: {calls}"
-        )
+        assert len(calls) >= 3, f"expected ≥3 formatter invocations in a 1s body, got {len(calls)}: {calls}"
 
     def test_spinner_without_format_message_unchanged(self, monkeypatch) -> None:
         """Regression guard: when ``format_message`` is not supplied,
@@ -1419,6 +1484,7 @@ class TestSpinnerHeartbeat:
         # Strip ANSI escapes — the animated branch embeds colour
         # codes between the tag and the label.
         import re
+
         rendered = re.sub(r"\x1b\[[0-9;]*m", "", fake_err.getvalue())
         # Static message present in the initial write.
         assert "[STATUS] Static label" in rendered
@@ -1429,9 +1495,7 @@ class TestSpinnerHeartbeat:
         assert "(0s)" not in rendered
         assert "(0.0s)" not in rendered
 
-    def test_spinner_format_message_exception_does_not_crash_spinner(
-        self, monkeypatch
-    ) -> None:
+    def test_spinner_format_message_exception_does_not_crash_spinner(self, monkeypatch) -> None:
         """A buggy ``format_message`` callback (e.g. one that raises) must
         not kill the spinner thread. The spinner should fall back to the
         static message and the body must still complete normally.
@@ -1460,10 +1524,10 @@ class TestSpinnerHeartbeat:
         # or similar) — only that the spinner survived and produced a
         # tail line. Strip ANSI codes for the substring check.
         import re
+
         rendered = re.sub(r"\x1b\[[0-9;]*m", "", fake_err.getvalue())
         assert "[SUCCESS] Static fallback" in rendered, (
-            f"spinner should have completed normally despite buggy "
-            f"formatter, got: {rendered!r}"
+            f"spinner should have completed normally despite buggy formatter, got: {rendered!r}"
         )
 
 
@@ -1487,16 +1551,15 @@ class TestMcpBootTimeout:
         uses this value as the cap, so a typo / missing export would
         surface here."""
         import main as main_mod
+
         assert hasattr(main_mod, "MCP_BOOT_TIMEOUT_SECONDS"), (
-            "open_exploit_mcp_session should be able to import "
-            "MCP_BOOT_TIMEOUT_SECONDS from main; missing."
+            "open_exploit_mcp_session should be able to import MCP_BOOT_TIMEOUT_SECONDS from main; missing."
         )
         assert isinstance(main_mod.MCP_BOOT_TIMEOUT_SECONDS, float)
         # Default is 30 s. Any sane boot completes in < 15 s, so 30 s
         # is the lower bound at which we still want to detect a hang.
         assert 15.0 <= main_mod.MCP_BOOT_TIMEOUT_SECONDS <= 120.0, (
-            f"MCP_BOOT_TIMEOUT_SECONDS out of range: "
-            f"{main_mod.MCP_BOOT_TIMEOUT_SECONDS}"
+            f"MCP_BOOT_TIMEOUT_SECONDS out of range: {main_mod.MCP_BOOT_TIMEOUT_SECONDS}"
         )
 
     def test_mcp_boot_timeout_soft_fails(self, monkeypatch, capsys, tmp_path) -> None:
@@ -1563,33 +1626,21 @@ class TestMcpBootTimeout:
         elapsed = time.monotonic() - start
 
         # The soft-fail contract: yielded None (no exception).
-        assert session is None, (
-            f"soft_fail=True should yield None on boot timeout, got {session!r}"
-        )
+        assert session is None, f"soft_fail=True should yield None on boot timeout, got {session!r}"
         # The timeout fired in roughly the configured window — not in
         # the full 60 s the fake initialize() would have slept.
-        assert elapsed < 5.0, (
-            f"boot timeout did not fire in time: elapsed={elapsed:.2f}s"
-        )
+        assert elapsed < 5.0, f"boot timeout did not fire in time: elapsed={elapsed:.2f}s"
         # And the user saw a [WARN] line so they know what happened.
         captured = capsys.readouterr()
         combined = captured.out + captured.err
-        assert "[WARN]" in combined, (
-            f"expected [WARN] line on soft-fail boot timeout, got: {combined!r}"
-        )
-        assert "timed out" in combined.lower(), (
-            f"expected 'timed out' message in [WARN] line, got: {combined!r}"
-        )
+        assert "[WARN]" in combined, f"expected [WARN] line on soft-fail boot timeout, got: {combined!r}"
+        assert "timed out" in combined.lower(), f"expected 'timed out' message in [WARN] line, got: {combined!r}"
         # And critically: no [ERROR] — the whole point of soft_fail is
         # to avoid the alarming red cascade that made the user think
         # the whole session was about to abort.
-        assert "[ERROR]" not in combined, (
-            f"soft-fail boot timeout must not print [ERROR], got: {combined!r}"
-        )
+        assert "[ERROR]" not in combined, f"soft-fail boot timeout must not print [ERROR], got: {combined!r}"
 
-    def test_mcp_boot_timeout_hard_fail_raises(
-        self, monkeypatch, capsys, tmp_path
-    ) -> None:
+    def test_mcp_boot_timeout_hard_fail_raises(self, monkeypatch, capsys, tmp_path) -> None:
         """A fake session whose ``initialize()`` never returns must
         raise ``RuntimeError`` from ``open_exploit_mcp_session`` when
         ``soft_fail=False`` (the default for the post-recon attack
@@ -1653,9 +1704,7 @@ class TestReconFirstBootStuckShowsProgress:
     "Booting MCP server" and "Probing OS" spinners in main.py.
     """
 
-    def test_slow_boot_progress_visible_then_soft_fail(
-        self, monkeypatch, capsys, tmp_path
-    ) -> None:
+    def test_slow_boot_progress_visible_then_soft_fail(self, monkeypatch, capsys, tmp_path) -> None:
         """A boot that takes ~1 second must produce at least one
         mid-flight label update (e.g. ``"Booting MCP server (stdio)... 0.5s"``)
         so the user sees progress. After the timeout fires, the
@@ -1719,18 +1768,14 @@ class TestReconFirstBootStuckShowsProgress:
                 return session
 
         session = asyncio.run(_drive())
-        assert session is None, (
-            f"soft_fail=True boot timeout should yield None, got {session!r}"
-        )
+        assert session is None, f"soft_fail=True boot timeout should yield None, got {session!r}"
 
         captured = capsys.readouterr()
         combined = captured.out + captured.err
 
         # The static message must still be in the output (the user
         # typed a target; they need to see what's happening).
-        assert "Booting MCP server (stdio)..." in combined, (
-            f"expected the boot spinner label, got: {combined!r}"
-        )
+        assert "Booting MCP server (stdio)..." in combined, f"expected the boot spinner label, got: {combined!r}"
         # Exactly one *spinner outcome* line. The ``boot_step`` checklist
         # also prints ``[BOOT]``/``[FAILED] Booting MCP server (stdio)``
         # (no trailing ``...``) by design — those are the grep-able
@@ -1751,13 +1796,9 @@ class TestReconFirstBootStuckShowsProgress:
             f"expected an elapsed-time marker in the boot spinner output, got: {combined!r}"
         )
         # Soft-fail contract: no [ERROR] anywhere.
-        assert "[ERROR]" not in combined, (
-            f"soft-fail boot timeout must not print [ERROR], got: {combined!r}"
-        )
+        assert "[ERROR]" not in combined, f"soft-fail boot timeout must not print [ERROR], got: {combined!r}"
         # And a [WARN] explaining the timeout did fire.
-        assert "[WARN]" in combined, (
-            f"expected [WARN] line for boot timeout, got: {combined!r}"
-        )
+        assert "[WARN]" in combined, f"expected [WARN] line for boot timeout, got: {combined!r}"
 
 
 # ── HTTP transport soft-fail regression ──────────────────────────────────────
@@ -1771,8 +1812,7 @@ class TestHttpMcpReadiness:
 
         log_path = tmp_path / "mcp_exploit_server.log"
         log_path.write_text(
-            "Traceback (most recent call last):\n"
-            "ModuleNotFoundError: No module named 'uvicorn'\n",
+            "Traceback (most recent call last):\nModuleNotFoundError: No module named 'uvicorn'\n",
             encoding="utf-8",
         )
 
@@ -1846,17 +1886,27 @@ class TestHttpTransportSoftFail:
     ``[WARN]`` line, and never print ``[ERROR]``.
     """
 
-    def _patch_http(self, monkeypatch, *, start_returns=None, start_raises=None,
-                    streamable_factory=None, client_session_factory=None):
+    def _patch_http(
+        self,
+        monkeypatch,
+        *,
+        start_returns=None,
+        start_raises=None,
+        streamable_factory=None,
+        client_session_factory=None,
+    ):
         import tools.mcp_session as ms
 
         if start_raises is not None:
+
             def _start(*_a, **_k):
                 raise start_raises
+
             monkeypatch.setattr(ms, "start_exploit_http_server", _start)
         elif start_returns is not None:
             monkeypatch.setattr(
-                ms, "start_exploit_http_server",
+                ms,
+                "start_exploit_http_server",
                 lambda *_a, **_k: start_returns,
             )
 
@@ -1865,14 +1915,17 @@ class TestHttpTransportSoftFail:
         # in test_mcp_http_lifecycle.py.
         async def _no_wait(*_a, **_k):
             return None
+
         monkeypatch.setattr(ms, "wait_for_mcp_http_ready", _no_wait)
 
         if streamable_factory is not None:
             import mcp.client.streamable_http as sh
+
             monkeypatch.setattr(sh, "streamable_http_client", streamable_factory)
 
         if client_session_factory is not None:
             import mcp
+
             monkeypatch.setattr(mcp, "ClientSession", client_session_factory)
 
     def _drive(self, ms, tmp_path):
@@ -1887,6 +1940,7 @@ class TestHttpTransportSoftFail:
                 fallback_to_stdio=False,
             ) as session:
                 return session
+
         return _run
 
     def test_start_server_port_in_use_soft_fails(self, monkeypatch, capsys, tmp_path):
@@ -1895,21 +1949,15 @@ class TestHttpTransportSoftFail:
 
         self._patch_http(
             monkeypatch,
-            start_raises=RuntimeError(
-                "Exploit MCP HTTP port 8001 is already in use."
-            ),
+            start_raises=RuntimeError("Exploit MCP HTTP port 8001 is already in use."),
         )
 
         session = asyncio.run(self._drive(ms, tmp_path)())
-        assert session is None, (
-            f"port-in-use soft_fail should yield None, got {session!r}"
-        )
+        assert session is None, f"port-in-use soft_fail should yield None, got {session!r}"
         captured = capsys.readouterr()
         combined = captured.out + captured.err
         assert "[WARN]" in combined, f"expected [WARN], got: {combined!r}"
-        assert "[ERROR]" not in combined, (
-            f"soft_fail must not print [ERROR], got: {combined!r}"
-        )
+        assert "[ERROR]" not in combined, f"soft_fail must not print [ERROR], got: {combined!r}"
         assert "8001" in combined
 
     def test_start_server_popen_oserror_soft_fails(self, monkeypatch, capsys, tmp_path):
@@ -1923,9 +1971,7 @@ class TestHttpTransportSoftFail:
         captured = capsys.readouterr()
         combined = captured.out + captured.err
         assert "[WARN]" in combined, f"expected [WARN], got: {combined!r}"
-        assert "[ERROR]" not in combined, (
-            f"soft_fail must not print [ERROR], got: {combined!r}"
-        )
+        assert "[ERROR]" not in combined, f"soft_fail must not print [ERROR], got: {combined!r}"
 
     def test_streamable_http_entry_group_soft_fails(self, monkeypatch, capsys, tmp_path):
         """Bug 2: a ``BaseExceptionGroup`` raised on ``streamable_http_client``
@@ -1937,9 +1983,7 @@ class TestHttpTransportSoftFail:
         @contextlib.asynccontextmanager
         async def _boom_transport(_url):
             # Raise on entry, before yielding streams.
-            raise BaseExceptionGroup(
-                "http transport died", [ConnectionError("connection reset")]
-            )
+            raise BaseExceptionGroup("http transport died", [ConnectionError("connection reset")])
             yield  # pragma: no cover - unreachable
 
         self._patch_http(
@@ -1949,15 +1993,11 @@ class TestHttpTransportSoftFail:
         )
 
         session = asyncio.run(self._drive(ms, tmp_path)())
-        assert session is None, (
-            f"transport-entry group soft_fail should yield None, got {session!r}"
-        )
+        assert session is None, f"transport-entry group soft_fail should yield None, got {session!r}"
         captured = capsys.readouterr()
         combined = captured.out + captured.err
         assert "[WARN]" in combined, f"expected [WARN], got: {combined!r}"
-        assert "[ERROR]" not in combined, (
-            f"soft_fail must not print [ERROR], got: {combined!r}"
-        )
+        assert "[ERROR]" not in combined, f"soft_fail must not print [ERROR], got: {combined!r}"
 
     def test_init_handshake_group_soft_fails(self, monkeypatch, capsys, tmp_path):
         """Bug 3: a ``BaseExceptionGroup`` from ``ClientSession.initialize()``
@@ -1972,9 +2012,7 @@ class TestHttpTransportSoftFail:
 
         class DyingSession:
             async def initialize(self):
-                raise BaseExceptionGroup(
-                    "init died", [RuntimeError("server crash mid-handshake")]
-                )
+                raise BaseExceptionGroup("init died", [RuntimeError("server crash mid-handshake")])
 
             async def __aenter__(self):
                 return self
@@ -1990,19 +2028,13 @@ class TestHttpTransportSoftFail:
         )
 
         session = asyncio.run(self._drive(ms, tmp_path)())
-        assert session is None, (
-            f"init-handshake group soft_fail should yield None, got {session!r}"
-        )
+        assert session is None, f"init-handshake group soft_fail should yield None, got {session!r}"
         captured = capsys.readouterr()
         combined = captured.out + captured.err
         assert "[WARN]" in combined, f"expected [WARN], got: {combined!r}"
-        assert "[ERROR]" not in combined, (
-            f"soft_fail must not print [ERROR], got: {combined!r}"
-        )
+        assert "[ERROR]" not in combined, f"soft_fail must not print [ERROR], got: {combined!r}"
 
-    def test_start_server_port_in_use_hard_fails_without_soft_fail(
-        self, monkeypatch, tmp_path
-    ):
+    def test_start_server_port_in_use_hard_fails_without_soft_fail(self, monkeypatch, tmp_path):
         """Without ``soft_fail``, the port-in-use ``RuntimeError`` must still
         propagate (soft-fail is opt-in, not a silent swallow)."""
 
@@ -2010,9 +2042,7 @@ class TestHttpTransportSoftFail:
 
         self._patch_http(
             monkeypatch,
-            start_raises=RuntimeError(
-                "Exploit MCP HTTP port 8001 is already in use."
-            ),
+            start_raises=RuntimeError("Exploit MCP HTTP port 8001 is already in use."),
         )
 
         async def _run():

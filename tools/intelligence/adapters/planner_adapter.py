@@ -89,8 +89,7 @@ class PlannerAdapter:
             "graph_summary": graph_summary,
             "memory_summary": memory_summary,
             "open_hypotheses": [
-                dict(h) if isinstance(h, dict) else getattr(h, "to_dict", lambda: h)()
-                for h in open_hypotheses
+                dict(h) if isinstance(h, dict) else getattr(h, "to_dict", lambda: h)() for h in open_hypotheses
             ],
         }
 

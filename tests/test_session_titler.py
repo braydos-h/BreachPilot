@@ -100,9 +100,7 @@ def test_generate_sync_swallows_client_error(monkeypatch):
 
 def test_generate_sync_extracts_content_from_response(monkeypatch):
     fake_client = MagicMock()
-    fake_client.chat.return_value = {
-        "message": {"content": "Recon scan of 10.0.0.50"}
-    }
+    fake_client.chat.return_value = {"message": {"content": "Recon scan of 10.0.0.50"}}
     monkeypatch.setattr(
         "tools.api.session_titler.OllamaClient",
         lambda *a, **kw: fake_client,
@@ -187,6 +185,7 @@ def test_list_runs_sort_by_title(tmp_path):
 
 def test_list_runs_sort_by_created(tmp_path):
     import time
+
     p = ApiPersistence(tmp_path / "reports")
     p.create_run(run_id="r-old", request={}, preview={})
     time.sleep(0.01)
@@ -225,6 +224,7 @@ def _make_client(tmp_path, monkeypatch, token="test-token"):
 
     class _FakeRouter:
         _clients = {"glm": MagicMock()}
+
         def get_client(self, name):
             return self._clients[name]
 
@@ -233,6 +233,7 @@ def _make_client(tmp_path, monkeypatch, token="test-token"):
         run_session=lambda **kw: {"total_actions": 0, "workspace": str(tmp_path), "audit_path": ""},
     )
     from app import create_app
+
     app = create_app(config_path=config_path, callables=callables)
     return TestClient(app)
 
@@ -243,9 +244,15 @@ def _auth(token="test-token"):
 
 def test_set_title_explicit(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
-    created = client.post("/api/v1/runs", json={
-        "target": "10.0.0.50", "mode": "attack", "goal": "recon_only",
-    }, headers=_auth()).json()
+    created = client.post(
+        "/api/v1/runs",
+        json={
+            "target": "10.0.0.50",
+            "mode": "attack",
+            "goal": "recon_only",
+        },
+        headers=_auth(),
+    ).json()
     resp = client.post(
         f"/api/v1/runs/{created['run_id']}/title",
         json={"title": "Manual title"},
@@ -261,9 +268,15 @@ def test_set_title_explicit(tmp_path, monkeypatch):
 
 def test_set_title_regen_uses_titler(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
-    created = client.post("/api/v1/runs", json={
-        "target": "10.0.0.50", "mode": "attack", "goal": "recon_only",
-    }, headers=_auth()).json()
+    created = client.post(
+        "/api/v1/runs",
+        json={
+            "target": "10.0.0.50",
+            "mode": "attack",
+            "goal": "recon_only",
+        },
+        headers=_auth(),
+    ).json()
     with patch(
         "tools.api.session_titler.generate_session_title_sync",
         return_value="AI-generated title",
@@ -280,9 +293,15 @@ def test_set_title_regen_uses_titler(tmp_path, monkeypatch):
 
 def test_set_title_regen_falls_back_to_current_when_titler_empty(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
-    created = client.post("/api/v1/runs", json={
-        "target": "10.0.0.50", "mode": "attack", "goal": "recon_only",
-    }, headers=_auth()).json()
+    created = client.post(
+        "/api/v1/runs",
+        json={
+            "target": "10.0.0.50",
+            "mode": "attack",
+            "goal": "recon_only",
+        },
+        headers=_auth(),
+    ).json()
     # Set an explicit title first.
     client.post(
         f"/api/v1/runs/{created['run_id']}/title",
@@ -316,9 +335,15 @@ def test_set_title_404_for_unknown_run(tmp_path, monkeypatch):
 
 def test_list_runs_includes_title(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
-    created = client.post("/api/v1/runs", json={
-        "target": "10.0.0.50", "mode": "attack", "goal": "recon_only",
-    }, headers=_auth()).json()
+    created = client.post(
+        "/api/v1/runs",
+        json={
+            "target": "10.0.0.50",
+            "mode": "attack",
+            "goal": "recon_only",
+        },
+        headers=_auth(),
+    ).json()
     client.post(
         f"/api/v1/runs/{created['run_id']}/title",
         json={"title": "My Recon Session"},

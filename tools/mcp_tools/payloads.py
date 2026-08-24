@@ -52,7 +52,21 @@ def register_payload_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if pt not in allowed_payloads:
             return f"BLOCKED: unsupported payload_type '{pt}'. Allowed: {', '.join(allowed_payloads)}"
 
-        allowed_formats = {"exe", "elf", "raw", "python", "csharp", "dll", "ps1", "vba", "jsp", "war", "asp", "aspx", "macho"}
+        allowed_formats = {
+            "exe",
+            "elf",
+            "raw",
+            "python",
+            "csharp",
+            "dll",
+            "ps1",
+            "vba",
+            "jsp",
+            "war",
+            "asp",
+            "aspx",
+            "macho",
+        }
         if fmt not in allowed_formats:
             return f"BLOCKED: unsupported format '{fmt}'. Allowed: {', '.join(allowed_formats)}"
 
@@ -65,20 +79,29 @@ def register_payload_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return f"BLOCKED: unsupported arch '{ar}'. Allowed: {', '.join(allowed_archs)}"
 
         attempt_dir, attempt_id = _attempt_dir(workspace)
-        out_file = attempt_dir / f"payload_{pt}_{plat}_{ar}.{fmt.replace('python', 'py').replace('csharp', 'cs').replace('powershell', 'ps1')}"
+        out_file = (
+            attempt_dir
+            / f"payload_{pt}_{plat}_{ar}.{fmt.replace('python', 'py').replace('csharp', 'cs').replace('powershell', 'ps1')}"
+        )
 
         # H2: parse options with shlex and reject the whole call if options
         # contains any shell metacharacter (a value could otherwise inject into
         # the previous ``bash -c`` string). Build the msfvenom argv as a list so
         # every option is a literal argument (no shell).
         msf_argv = [
-            "msfvenom", "-p", f"{plat}/{ar}/{pt}",
-            f"LHOST={lhost}", f"LPORT={lport}", "-f", fmt,
+            "msfvenom",
+            "-p",
+            f"{plat}/{ar}/{pt}",
+            f"LHOST={lhost}",
+            f"LPORT={lport}",
+            "-f",
+            fmt,
         ]
         if options.strip():
             if re.search(r"[;|&$`()]|<|>|\n", options):
                 return "BLOCKED: options contains forbidden shell metacharacters."
             import shlex as _shlex
+
             try:
                 parsed_opts = _shlex.split(options)
             except ValueError:
@@ -120,6 +143,3 @@ def register_payload_tools(mcp: Any, *, ctx: ToolContext) -> None:
             f"DURATION: {elapsed:.1f}s\n"
             f"OUTPUT:\n{output}"
         )
-
-
-

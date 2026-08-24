@@ -24,6 +24,7 @@ def register_runtime_skill_tools(mcp: Any, *, ctx: ToolContext) -> None:
         return get_registry({"skills": skills_cfg}, base_dir=Path.cwd())
 
     if _runtime_skills_enabled(config):
+
         @mcp.tool()
         @audit_tool
         def list_runtime_skills(include_maybe: bool = False, limit: int = 50) -> str:
@@ -113,7 +114,3 @@ def register_runtime_skill_tools(mcp: Any, *, ctx: ToolContext) -> None:
             if skill.metadata.mitre_attack:
                 lines.append("MITRE ATT&CK: " + ", ".join(skill.metadata.mitre_attack))
             return "\n".join(lines)
-
-
-
-

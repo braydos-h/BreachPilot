@@ -8,11 +8,14 @@
 resp = requests.get(url, headers={"Origin": "https://evil.com"})
 
 # Test preflight
-resp = requests.options(url, headers={
-    "Origin": "https://evil.com",
-    "Access-Control-Request-Method": "PUT",
-    "Access-Control-Request-Headers": "Authorization"
-})
+resp = requests.options(
+    url,
+    headers={
+        "Origin": "https://evil.com",
+        "Access-Control-Request-Method": "PUT",
+        "Access-Control-Request-Headers": "Authorization",
+    },
+)
 ```
 
 ## CORS Response Headers

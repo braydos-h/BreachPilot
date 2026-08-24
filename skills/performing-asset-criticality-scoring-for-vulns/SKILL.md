@@ -106,10 +106,7 @@ class AssetCriticalityScorer:
 
     def score_asset(self, asset):
         """Calculate criticality score for an asset."""
-        weighted_score = sum(
-            asset.get(factor, 3) * weight
-            for factor, weight in self.WEIGHTS.items()
-        )
+        weighted_score = sum(asset.get(factor, 3) * weight for factor, weight in self.WEIGHTS.items())
         score = round(weighted_score, 2)
 
         for threshold, tier, label, sla_mod in self.TIER_THRESHOLDS:

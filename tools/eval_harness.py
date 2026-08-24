@@ -57,6 +57,7 @@ __all__ = [
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _now_iso() -> str:
     """Current UTC timestamp in ISO-8601 form (used for ``EvalMetrics.timestamp``)."""
     return datetime.now(timezone.utc).isoformat()
@@ -104,6 +105,7 @@ def _record_is_failure(record: Any) -> bool:
 # EvalMetrics
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class EvalMetrics:
     """Structured metrics derived from one eval run's final-result dict."""
@@ -132,6 +134,7 @@ class EvalMetrics:
 # ---------------------------------------------------------------------------
 # Metric computation
 # ---------------------------------------------------------------------------
+
 
 def compute_metrics(
     final_result: dict[str, Any] | None,
@@ -214,6 +217,7 @@ def compute_metrics(
 # Report rendering
 # ---------------------------------------------------------------------------
 
+
 def render_report(metrics: EvalMetrics) -> dict[str, Any]:
     """Return a JSON-serializable dict view of ``metrics``."""
     return metrics.to_dict()
@@ -277,9 +281,7 @@ def render_html(metrics: EvalMetrics) -> str:
         ("Records", str(metrics.records_count)),
         ("Duration (s)", duration_str),
     ]
-    body_rows = "\n".join(
-        f"      <tr><th>{label}</th><td>{value}</td></tr>" for label, value in rows
-    )
+    body_rows = "\n".join(f"      <tr><th>{label}</th><td>{value}</td></tr>" for label, value in rows)
     evidence_html = ""
     if metrics.evidence_refs:
         evidence_html = (
@@ -291,10 +293,7 @@ def render_html(metrics: EvalMetrics) -> str:
     if metrics.outcome_summary:
         # Avoid a raw ``</pre>`` injection from a crafted summary.
         safe = metrics.outcome_summary.replace("<", "&lt;").replace(">", "&gt;")
-        outcome_html = (
-            "    <h2>Outcome Summary</h2>\n"
-            f"    <pre>{safe}</pre>\n"
-        )
+        outcome_html = f"    <h2>Outcome Summary</h2>\n    <pre>{safe}</pre>\n"
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -321,7 +320,7 @@ def render_html(metrics: EvalMetrics) -> str:
     </tbody>
   </table>
   <h2>References</h2>
-  <p>Audit path: <code>{metrics.audit_path or 'n/a'}</code></p>
+  <p>Audit path: <code>{metrics.audit_path or "n/a"}</code></p>
 {evidence_html}{outcome_html}</body>
 </html>
 """
@@ -330,6 +329,7 @@ def render_html(metrics: EvalMetrics) -> str:
 # ---------------------------------------------------------------------------
 # Report writing
 # ---------------------------------------------------------------------------
+
 
 def write_eval_report(
     metrics: EvalMetrics,
@@ -364,6 +364,7 @@ def write_eval_report(
 # ---------------------------------------------------------------------------
 # CLI entry
 # ---------------------------------------------------------------------------
+
 
 async def run_eval(args: Any) -> int:
     """``--eval`` CLI entry. Returns 0 on success, 1 on error, 2 if no target."""
@@ -400,13 +401,17 @@ async def run_eval(args: Any) -> int:
 
     # Build the model client exactly as main.py does (provider-aware).
     from tools.config_manager import get_ai_provider, get_chatgpt_config
+
     ollama_host = config.get("ollama", {}).get("host", "https://api.ollama.com")
     registry = config.get("models", {}).get("registry")
     provider = get_ai_provider(config)
     if provider == "chatgpt":
         router = build_router(
-            registry, host=ollama_host, provider="chatgpt",
-            chatgpt_config=get_chatgpt_config(config), config=config,
+            registry,
+            host=ollama_host,
+            provider="chatgpt",
+            chatgpt_config=get_chatgpt_config(config),
+            config=config,
         )
     else:
         router = build_router(registry, host=ollama_host)
@@ -416,14 +421,26 @@ async def run_eval(args: Any) -> int:
     except KeyError:
         if provider == "chatgpt":
             from tools.model_router import build_model_client_for_provider
-            router.register(model_alias, build_model_client_for_provider(
-                config, model_alias, request_timeout_seconds=None,
-            ))
+
+            router.register(
+                model_alias,
+                build_model_client_for_provider(
+                    config,
+                    model_alias,
+                    request_timeout_seconds=None,
+                ),
+            )
         else:
             from tools.model_router import _build_model_client
-            router.register(model_alias, _build_model_client(
-                model_alias, host=ollama_host, request_timeout_seconds=None,
-            ))
+
+            router.register(
+                model_alias,
+                _build_model_client(
+                    model_alias,
+                    host=ollama_host,
+                    request_timeout_seconds=None,
+                ),
+            )
         model_client = router.get_client(model_alias)
 
     exploit_port = int(config.get("mcp", {}).get("http_port", 8001))
@@ -480,8 +497,10 @@ async def run_eval(args: Any) -> int:
         metrics.verdict = "error"
         metrics.outcome_summary = "MCP exploit server unavailable; eval aborted before session start."
         out_dir = write_eval_report(
-            metrics, reports_root=output_dir,
-            write_markdown=write_markdown, write_html=write_html,
+            metrics,
+            reports_root=output_dir,
+            write_markdown=write_markdown,
+            write_html=write_html,
         )
         print(f"  [i] verdict=error  out={out_dir}")
         return 1
@@ -535,8 +554,10 @@ async def run_eval(args: Any) -> int:
         duration_seconds=round(duration, 3),
     )
     out_dir = write_eval_report(
-        metrics, reports_root=output_dir,
-        write_markdown=write_markdown, write_html=write_html,
+        metrics,
+        reports_root=output_dir,
+        write_markdown=write_markdown,
+        write_html=write_html,
     )
 
     print(f"  [i] verdict={metrics.verdict}  success_rate={metrics.success_rate:.1%}  out={out_dir}")
@@ -598,7 +619,8 @@ def load_target_oracle(oracle_path: Path | str) -> dict[str, Any]:
 
 
 def score_against_oracle(
-    findings: list[dict[str, Any]], oracle: dict[str, Any],
+    findings: list[dict[str, Any]],
+    oracle: dict[str, Any],
 ) -> EvalSuiteResult:
     """Score a list of findings against a target oracle.
 
@@ -619,8 +641,11 @@ def score_against_oracle(
         expected_creds.append((str(c.get("user", "")).lower(), str(c.get("password", "")).lower()))
 
     expected_total = (
-        len(expected_services) + len(expected_cves) + len(expected_vulns)
-        + len(expected_misconfig) + len(expected_creds)
+        len(expected_services)
+        + len(expected_cves)
+        + len(expected_vulns)
+        + len(expected_misconfig)
+        + len(expected_creds)
     )
 
     tp = 0
@@ -648,7 +673,12 @@ def score_against_oracle(
         # only if its value matches any expected token (lenient — avoids
         # penalizing the agent for omitting the ``type`` field).
         if not kind and value:
-            if value in expected_services or value.upper() in expected_cves or value in expected_vulns or value in expected_misconfig:
+            if (
+                value in expected_services
+                or value.upper() in expected_cves
+                or value in expected_vulns
+                or value in expected_misconfig
+            ):
                 matched = True
         if matched:
             tp += 1
@@ -689,6 +719,7 @@ def docker_suite_up(compose_path: Path | str = _SUITE_COMPOSE) -> int:
     whether to proceed (the eval can score against already-running targets).
     """
     import subprocess
+
     path = Path(compose_path)
     if not path.exists():
         print(f"[!] Compose file not found: {path}")
@@ -696,7 +727,9 @@ def docker_suite_up(compose_path: Path | str = _SUITE_COMPOSE) -> int:
     try:
         proc = subprocess.run(
             ["docker", "compose", "-f", str(path), "up", "-d"],
-            capture_output=True, text=True, timeout=180,
+            capture_output=True,
+            text=True,
+            timeout=180,
         )
         if proc.returncode != 0:
             print(f"[!] docker compose up failed: {proc.stderr[:300]}")
@@ -709,13 +742,16 @@ def docker_suite_up(compose_path: Path | str = _SUITE_COMPOSE) -> int:
 def docker_suite_down(compose_path: Path | str = _SUITE_COMPOSE) -> int:
     """``docker compose down`` for the target suite. Returns the subprocess rc."""
     import subprocess
+
     path = Path(compose_path)
     if not path.exists():
         return 1
     try:
         proc = subprocess.run(
             ["docker", "compose", "-f", str(path), "down"],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         return proc.returncode
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
@@ -803,7 +839,14 @@ async def run_eval_suite(
                         findings.append({"type": "misconfiguration", "value": str(m).lower()})
                 for c in (oracle.get("expected_findings", {}) or {}).get("weak_credentials", []) or []:
                     if str(c.get("user", "")).lower() in haystack or str(c.get("password", "")).lower() in haystack:
-                        findings.append({"type": "credential", "value": str(c.get("user", "")), "user": c.get("user", ""), "password": c.get("password", "")})
+                        findings.append(
+                            {
+                                "type": "credential",
+                                "value": str(c.get("user", "")),
+                                "user": c.get("user", ""),
+                                "password": c.get("password", ""),
+                            }
+                        )
             except (json.JSONDecodeError, OSError):
                 pass
 
@@ -815,8 +858,10 @@ async def run_eval_suite(
         all_expected += suite_result.expected_total
         if suite_result.success:
             any_success += 1
-        print(f"  tp={suite_result.true_positives} fp={suite_result.false_positives} "
-              f"success={suite_result.success} precision={suite_result.precision:.2f}")
+        print(
+            f"  tp={suite_result.true_positives} fp={suite_result.false_positives} "
+            f"success={suite_result.success} precision={suite_result.precision:.2f}"
+        )
 
     if compose_down:
         docker_suite_down()
@@ -837,8 +882,10 @@ async def run_eval_suite(
         json.dumps({"targets": results, "aggregate": aggregate}, indent=2, default=str),
         encoding="utf-8",
     )
-    print(f"\n=== Suite aggregate: precision={aggregate['overall_precision']} "
-          f"recall={aggregate['overall_recall']} succeeded={any_success}/{len(results)} ===")
+    print(
+        f"\n=== Suite aggregate: precision={aggregate['overall_precision']} "
+        f"recall={aggregate['overall_recall']} succeeded={any_success}/{len(results)} ==="
+    )
     return {"targets": results, "aggregate": aggregate}
 
 

@@ -158,15 +158,31 @@ def test_all_group_b_modules_annotate_capability_metadata() -> None:
 def test_privesc_modules_require_foothold() -> None:
     """Post-foothold privesc enumeration/exploitation gates on a foothold and
     points at elevated privileges."""
-    for cls in (LinuxPrivescCheck, WindowsPrivescCheck, SUIDEnumeration,
-                KernelExploitCheck, ContainerBreakout, CloudPrivesc, K8sPrivesc,
-                IMDSExploit, DockerSockEscape, S3BucketTakeover):
+    for cls in (
+        LinuxPrivescCheck,
+        WindowsPrivescCheck,
+        SUIDEnumeration,
+        KernelExploitCheck,
+        ContainerBreakout,
+        CloudPrivesc,
+        K8sPrivesc,
+        IMDSExploit,
+        DockerSockEscape,
+        S3BucketTakeover,
+    ):
         assert "foothold" in cls.requires, f"{cls.__name__} should require foothold"
     for cls in (IMDSExploit, DockerSockEscape, S3BucketTakeover):
         assert cls.read_only is False, f"{cls.__name__} is active exploitation"
         assert cls.phase_hint == "escalate"
-    for cls in (LinuxPrivescCheck, WindowsPrivescCheck, SUIDEnumeration,
-                KernelExploitCheck, ContainerBreakout, CloudPrivesc, K8sPrivesc):
+    for cls in (
+        LinuxPrivescCheck,
+        WindowsPrivescCheck,
+        SUIDEnumeration,
+        KernelExploitCheck,
+        ContainerBreakout,
+        CloudPrivesc,
+        K8sPrivesc,
+    ):
         assert cls.read_only is True, f"{cls.__name__} is check-only"
 
 
@@ -214,8 +230,7 @@ def test_orchestrator_phase_modules_require_foothold() -> None:
 
 
 def test_supply_chain_modules_read_only_recon() -> None:
-    for cls in (ExposedVCS, CICDMisconfig, DependencyConfusion,
-                ArtifactExposure, SupplyChainRecon):
+    for cls in (ExposedVCS, CICDMisconfig, DependencyConfusion, ArtifactExposure, SupplyChainRecon):
         assert cls.read_only is True
         assert cls.phase_hint == "recon"
 
@@ -240,8 +255,7 @@ def test_to_json_unchanged_shape() -> None:
     """to_json() must stay byte-identical (the test-pinned 5-key contract) -- the
     new capability attrs must NOT leak into to_json()."""
     j = EternalBlue().to_json()
-    assert set(j.keys()) == {"name", "description", "target_services",
-                             "target_ports", "required_cves"}
+    assert set(j.keys()) == {"name", "description", "target_services", "target_ports", "required_cves"}
 
 
 def test_capability_record_carries_new_attrs() -> None:

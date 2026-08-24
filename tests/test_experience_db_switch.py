@@ -40,6 +40,4 @@ def test_attack_modules_uses_default_db_no_workspace_literal():
     assert 'workspace / "experience.db"' not in text, (
         "regression: per-workspace experience.db literal re-introduced in attack_modules.py"
     )
-    assert "get_default_db()" in text, (
-        "regression: get_default_db() call missing from attack_modules.py"
-    )
+    assert "get_default_db()" in text, "regression: get_default_db() call missing from attack_modules.py"

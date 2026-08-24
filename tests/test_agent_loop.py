@@ -33,6 +33,7 @@ from tools.recon_pipeline import HostReconResult, ServiceInfo
 
 # ── Fixtures ───────────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def mission_config() -> dict:
     return {
@@ -82,6 +83,7 @@ def mock_risk_controller() -> MagicMock:
 
 # ── AttackState Tests ────────────────────────────────────────────────────────
 
+
 class TestAttackState:
     def test_initial_state(self) -> None:
         state = AttackState(target="10.0.0.50")
@@ -93,11 +95,14 @@ class TestAttackState:
 
     def test_record_success(self) -> None:
         state = AttackState(target="10.0.0.50")
-        state.record_success("TestModule", {
-            "shell_type": "reverse",
-            "privilege_level": "user",
-            "credentials": [{"user": "admin", "pass": "password"}],
-        })
+        state.record_success(
+            "TestModule",
+            {
+                "shell_type": "reverse",
+                "privilege_level": "user",
+                "credentials": [{"user": "admin", "pass": "password"}],
+            },
+        )
         assert state.access_achieved is True
         assert state.shell_type == "reverse"
         assert state.privilege_level == "user"
@@ -161,6 +166,7 @@ class TestAttackState:
 
 # ── AttackTask Tests ─────────────────────────────────────────────────────────
 
+
 class TestAttackTask:
     def test_task_creation(self) -> None:
         task = AttackTask(
@@ -186,6 +192,7 @@ class TestAttackTask:
 
 
 # ── RetryEngine Tests ──────────────────────────────────────────────────────────
+
 
 class TestRetryEngine:
     def test_should_retry_transient_error(self) -> None:
@@ -222,6 +229,7 @@ class TestRetryEngine:
 
 # ── AttackModuleExecutor Tests ───────────────────────────────────────────────
 
+
 class TestAttackModuleExecutor:
     @pytest.mark.asyncio
     async def test_execute_module_not_found(self, mock_scope_gate: MagicMock) -> None:
@@ -239,9 +247,7 @@ class TestAttackModuleExecutor:
 
     @pytest.mark.asyncio
     async def test_execute_scope_blocked(self, mock_scope_gate: MagicMock) -> None:
-        mock_scope_gate.check_scope.return_value = MagicMock(
-            allowed=False, reason="Out of scope"
-        )
+        mock_scope_gate.check_scope.return_value = MagicMock(allowed=False, reason="Out of scope")
         executor = AttackModuleExecutor(mock_scope_gate)
         task = AttackTask(
             task_id="ATK-00001",
@@ -255,7 +261,9 @@ class TestAttackModuleExecutor:
         assert result["blocked"] is True
 
     @pytest.mark.asyncio
-    async def test_execute_risk_budget_exhausted(self, mock_scope_gate: MagicMock, mock_risk_controller: MagicMock) -> None:
+    async def test_execute_risk_budget_exhausted(
+        self, mock_scope_gate: MagicMock, mock_risk_controller: MagicMock
+    ) -> None:
         mock_risk_controller.can_proceed.return_value = False
         executor = AttackModuleExecutor(mock_scope_gate, mock_risk_controller)
         task = AttackTask(
@@ -302,6 +310,7 @@ class TestAttackModuleExecutor:
 
 # ── AutonomousOrchestrator Tests ─────────────────────────────────────────────
 
+
 class TestAutonomousOrchestrator:
     def test_initialization(self, mission_config: dict, workspace: Path) -> None:
         orchestrator = AutonomousOrchestrator(
@@ -331,7 +340,9 @@ class TestAutonomousOrchestrator:
         assert id1.startswith("ATK-")
 
     @pytest.mark.asyncio
-    async def test_phase_reconnaissance(self, mission_config: dict, workspace: Path, sample_recon_result: HostReconResult) -> None:
+    async def test_phase_reconnaissance(
+        self, mission_config: dict, workspace: Path, sample_recon_result: HostReconResult
+    ) -> None:
         with patch("tools.recon_pipeline.ReconPipeline.recon_host", new_callable=AsyncMock) as mock_recon:
             mock_recon.return_value = sample_recon_result
 
@@ -347,7 +358,9 @@ class TestAutonomousOrchestrator:
             assert len(state.timeline) > 0
 
     @pytest.mark.asyncio
-    async def test_phase_exploitation(self, mission_config: dict, workspace: Path, sample_recon_result: HostReconResult) -> None:
+    async def test_phase_exploitation(
+        self, mission_config: dict, workspace: Path, sample_recon_result: HostReconResult
+    ) -> None:
         with patch("tools.autonomous_orchestrator.AttackModuleExecutor.execute", new_callable=AsyncMock) as mock_exec:
             mock_exec.return_value = {"success": True, "result": {"status": "exploited"}}
 
@@ -450,7 +463,9 @@ class TestAutonomousOrchestrator:
 
             assert mock_exec.called
 
-    def test_create_service_specific_tasks(self, mission_config: dict, workspace: Path, sample_recon_result: HostReconResult) -> None:
+    def test_create_service_specific_tasks(
+        self, mission_config: dict, workspace: Path, sample_recon_result: HostReconResult
+    ) -> None:
         orchestrator = AutonomousOrchestrator(
             mission_config=mission_config,
             workspace_root=workspace,
@@ -484,11 +499,15 @@ class TestAutonomousOrchestrator:
         assert "10.0.0.50" in data["states"]
 
     @pytest.mark.asyncio
-    async def test_full_campaign(self, mission_config: dict, workspace: Path, sample_recon_result: HostReconResult) -> None:
+    async def test_full_campaign(
+        self, mission_config: dict, workspace: Path, sample_recon_result: HostReconResult
+    ) -> None:
         with patch("tools.recon_pipeline.ReconPipeline.recon_host", new_callable=AsyncMock) as mock_recon:
             mock_recon.return_value = sample_recon_result
 
-            with patch("tools.autonomous_orchestrator.AttackModuleExecutor.execute", new_callable=AsyncMock) as mock_exec:
+            with patch(
+                "tools.autonomous_orchestrator.AttackModuleExecutor.execute", new_callable=AsyncMock
+            ) as mock_exec:
                 mock_exec.return_value = {"success": True, "result": {"status": "exploited", "shell_type": "reverse"}}
 
                 orchestrator = AutonomousOrchestrator(
@@ -549,8 +568,10 @@ class TestSwarmUnification:
             critic_agent=CriticAgent(),
         )
         task = AttackTask(
-            task_id="ATK-00001", phase=AttackPhase.EXPLOITATION,
-            module_name="APIFuzzer", target="10.0.0.50",
+            task_id="ATK-00001",
+            phase=AttackPhase.EXPLOITATION,
+            module_name="APIFuzzer",
+            target="10.0.0.50",
         )
         state = AttackState(target="10.0.0.50")
         with patch("tools.autonomous_orchestrator.get_module") as mock_get:
@@ -572,8 +593,10 @@ class TestSwarmUnification:
             critic_agent=CriticAgent(),
         )
         task = AttackTask(
-            task_id="ATK-00001", phase=AttackPhase.EXPLOITATION,
-            module_name="APIFuzzer", target="10.0.0.50",
+            task_id="ATK-00001",
+            phase=AttackPhase.EXPLOITATION,
+            module_name="APIFuzzer",
+            target="10.0.0.50",
             aggression=AggressionLevel.MAXIMUM,
         )
         state = AttackState(target="10.0.0.50")
@@ -594,8 +617,10 @@ class TestSwarmUnification:
             critic_agent=CriticAgent(),
         )
         task = AttackTask(
-            task_id="ATK-00001", phase=AttackPhase.EXPLOITATION,
-            module_name="APIFuzzer", target="10.0.0.50",
+            task_id="ATK-00001",
+            phase=AttackPhase.EXPLOITATION,
+            module_name="APIFuzzer",
+            target="10.0.0.50",
         )
         state = AttackState(target="10.0.0.50")
         await executor.execute(task, state)
@@ -608,8 +633,11 @@ class TestSwarmUnification:
         blackboard = {"failed_modules": []}
         executor = AttackModuleExecutor(_allowing_scope_gate(), blackboard=blackboard)
         task = AttackTask(
-            task_id="ATK-00001", phase=AttackPhase.EXPLOITATION,
-            module_name="APIFuzzer", target="10.0.0.50", parameters={"timeout": 1},
+            task_id="ATK-00001",
+            phase=AttackPhase.EXPLOITATION,
+            module_name="APIFuzzer",
+            target="10.0.0.50",
+            parameters={"timeout": 1},
         )
         state = AttackState(target="10.0.0.50")
         with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()):
@@ -630,15 +658,20 @@ class TestSwarmUnification:
             critic_agent=CriticAgent(),
         )
         first = AttackTask(
-            task_id="ATK-1", phase=AttackPhase.EXPLOITATION,
-            module_name="APIFuzzer", target="10.0.0.50", parameters={"timeout": 1},
+            task_id="ATK-1",
+            phase=AttackPhase.EXPLOITATION,
+            module_name="APIFuzzer",
+            target="10.0.0.50",
+            parameters={"timeout": 1},
         )
         with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()):
             await executor.execute(first, AttackState(target="10.0.0.50"))
         assert blackboard["failed_modules"] == ["APIFuzzer"]
         second = AttackTask(
-            task_id="ATK-2", phase=AttackPhase.EXPLOITATION,
-            module_name="APIFuzzer", target="10.0.0.50",
+            task_id="ATK-2",
+            phase=AttackPhase.EXPLOITATION,
+            module_name="APIFuzzer",
+            target="10.0.0.50",
         )
         await executor.execute(second, AttackState(target="10.0.0.50"))
         assert second.parameters.get("critic_require_mutation") is True
@@ -648,8 +681,10 @@ class TestSwarmUnification:
         blackboard = {"failed_modules": ["APIFuzzer"], "successful_modules": []}
         executor = AttackModuleExecutor(_allowing_scope_gate(), blackboard=blackboard)
         task = AttackTask(
-            task_id="ATK-00001", phase=AttackPhase.EXPLOITATION,
-            module_name="APIFuzzer", target="10.0.0.50",
+            task_id="ATK-00001",
+            phase=AttackPhase.EXPLOITATION,
+            module_name="APIFuzzer",
+            target="10.0.0.50",
         )
         state = AttackState(target="10.0.0.50")
         await executor.execute(task, state)
@@ -660,11 +695,15 @@ class TestSwarmUnification:
     async def test_reflection_publishes_to_blackboard_after_success(self) -> None:
         blackboard: dict = {}
         executor = AttackModuleExecutor(
-            _allowing_scope_gate(), blackboard=blackboard, reflection_agent=ReflectionAgent(),
+            _allowing_scope_gate(),
+            blackboard=blackboard,
+            reflection_agent=ReflectionAgent(),
         )
         task = AttackTask(
-            task_id="ATK-00001", phase=AttackPhase.EXPLOITATION,
-            module_name="APIFuzzer", target="10.0.0.50",
+            task_id="ATK-00001",
+            phase=AttackPhase.EXPLOITATION,
+            module_name="APIFuzzer",
+            target="10.0.0.50",
         )
         state = AttackState(target="10.0.0.50")
         await executor.execute(task, state)
@@ -678,13 +717,15 @@ class TestSwarmUnification:
         # No blackboard / critic / reflection wired -> exactly the old behavior.
         executor = AttackModuleExecutor(_allowing_scope_gate())
         task = AttackTask(
-            task_id="ATK-00001", phase=AttackPhase.EXPLOITATION,
-            module_name="APIFuzzer", target="10.0.0.50",
+            task_id="ATK-00001",
+            phase=AttackPhase.EXPLOITATION,
+            module_name="APIFuzzer",
+            target="10.0.0.50",
         )
         state = AttackState(target="10.0.0.50")
         result = await executor.execute(task, state)
         assert result["success"] is True
-        assert "critic" not in result            # no critic decision attached
+        assert "critic" not in result  # no critic decision attached
         assert task.parameters.get("critic_require_mutation") is None
         assert task.parameters.get("critic_risk_downgrade") is None
 
@@ -700,7 +741,7 @@ class TestSwarmUnification:
             critic_agent=critic,
             reflection_agent=reflection,
         )
-        assert orchestrator._executor._blackboard is blackboard    # live ref
+        assert orchestrator._executor._blackboard is blackboard  # live ref
         assert orchestrator._executor._critic is critic
         assert orchestrator._executor._reflection is reflection
         assert orchestrator._executor._model_client is not None

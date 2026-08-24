@@ -8,6 +8,7 @@ The bridge's ``dispatch(name, args)`` is sync (matches ``AgentLoop``'s
 from a worker thread (``asyncio.to_thread``) so the main loop can service the
 scheduled coroutines -- the same arrangement the swarm's recon loop uses.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -44,9 +45,7 @@ async def test_dispatch_approves_and_calls_tool(tmp_path):
     session.call_tool = AsyncMock(return_value=_mcp_result("hello-world"))
 
     bridge.attach(session, [{"name": "run_exploit_terminal"}], policy, loop=asyncio.get_running_loop())
-    text = await asyncio.to_thread(
-        bridge.dispatch, "run_exploit_terminal", {"command": "echo hi"}
-    )
+    text = await asyncio.to_thread(bridge.dispatch, "run_exploit_terminal", {"command": "echo hi"})
     assert text == "hello-world"
     policy.approve_action.assert_awaited_once()
     # call_tool received the tool name + arguments verbatim.
@@ -63,9 +62,7 @@ async def test_dispatch_denies_does_not_call_tool(tmp_path):
     session.call_tool = AsyncMock(return_value=_mcp_result("should-not-happen"))
 
     bridge.attach(session, [], policy, loop=asyncio.get_running_loop())
-    text = await asyncio.to_thread(
-        bridge.dispatch, "run_exploit_terminal", {"command": "rm -rf /"}
-    )
+    text = await asyncio.to_thread(bridge.dispatch, "run_exploit_terminal", {"command": "rm -rf /"})
     assert text.startswith("BLOCKED: ExploitPolicy denied run_exploit_terminal")
     session.call_tool.assert_not_awaited()
     assert bridge.dispatched == 0
@@ -80,9 +77,7 @@ async def test_dispatch_call_tool_error_returns_tool_execution_error(tmp_path):
     session.call_tool = AsyncMock(side_effect=RuntimeError("connection reset"))
 
     bridge.attach(session, [], policy, loop=asyncio.get_running_loop())
-    text = await asyncio.to_thread(
-        bridge.dispatch, "run_exploit_terminal", {"command": "echo"}
-    )
+    text = await asyncio.to_thread(bridge.dispatch, "run_exploit_terminal", {"command": "echo"})
     assert text.startswith("TOOL_EXECUTION_ERROR:")
     assert "connection reset" in text
     # A failed call_tool must not count as a dispatched tool call.
@@ -98,9 +93,7 @@ async def test_dispatch_approve_error_returns_tool_execution_error(tmp_path):
     session.call_tool = AsyncMock(return_value=_mcp_result("x"))
 
     bridge.attach(session, [], policy, loop=asyncio.get_running_loop())
-    text = await asyncio.to_thread(
-        bridge.dispatch, "run_exploit_terminal", {"command": "echo"}
-    )
+    text = await asyncio.to_thread(bridge.dispatch, "run_exploit_terminal", {"command": "echo"})
     assert text.startswith("TOOL_EXECUTION_ERROR:")
     assert "policy approve failed" in text
     session.call_tool.assert_not_awaited()
@@ -132,7 +125,5 @@ async def test_extract_text_handles_empty_content():
     out = SwarmMcpBridge._extract_text(SimpleNamespace(content=[]))
     assert out  # non-empty fallback
     # A result with mixed blocks -> text blocks joined.
-    out2 = SwarmMcpBridge._extract_text(
-        SimpleNamespace(content=[SimpleNamespace(text="a"), SimpleNamespace(text="b")])
-    )
+    out2 = SwarmMcpBridge._extract_text(SimpleNamespace(content=[SimpleNamespace(text="a"), SimpleNamespace(text="b")]))
     assert out2 == "a\nb"

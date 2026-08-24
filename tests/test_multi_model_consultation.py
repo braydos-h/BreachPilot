@@ -104,17 +104,21 @@ async def test_consult_peer_models_excludes_active_model_and_honors_budget(tmp_p
 
     mcp = _server(tmp_path, _config(enabled=True, max_consultations=1))
 
-    first = _text(await mcp.call_tool(
-        "consult_peer_models",
-        {
-            "question": "Review this exploit strategy",
-            "preferred_aliases": "deepseek,kimi",
-        },
-    ))
-    second = _text(await mcp.call_tool(
-        "consult_peer_models",
-        {"question": "Try again", "preferred_aliases": "kimi"},
-    ))
+    first = _text(
+        await mcp.call_tool(
+            "consult_peer_models",
+            {
+                "question": "Review this exploit strategy",
+                "preferred_aliases": "deepseek,kimi",
+            },
+        )
+    )
+    second = _text(
+        await mcp.call_tool(
+            "consult_peer_models",
+            {"question": "Try again", "preferred_aliases": "kimi"},
+        )
+    )
 
     assert "CONSULTED: kimi" in first
     assert "deepseek" in first
@@ -133,10 +137,12 @@ async def test_consult_peer_models_truncates_answers(tmp_path, monkeypatch) -> N
 
     mcp = _server(tmp_path, _config(enabled=True, consult_aliases=["kimi"], max_answer_chars=5))
 
-    text = _text(await mcp.call_tool(
-        "consult_peer_models",
-        {"question": "Need a second opinion", "preferred_aliases": "kimi"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "consult_peer_models",
+            {"question": "Need a second opinion", "preferred_aliases": "kimi"},
+        )
+    )
 
     assert "[kimi]" in text
     assert "abcde\n[truncated]" in text

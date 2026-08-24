@@ -62,10 +62,7 @@ def _error_response(
 def sanitize(obj: Any) -> Any:
     """Recursively redact values whose keys match secret patterns."""
     if isinstance(obj, dict):
-        return {
-            k: ("[REDACTED]" if _SECRET_KEY_PATTERNS.search(k) and v else sanitize(v))
-            for k, v in obj.items()
-        }
+        return {k: ("[REDACTED]" if _SECRET_KEY_PATTERNS.search(k) and v else sanitize(v)) for k, v in obj.items()}
     if isinstance(obj, list):
         return [sanitize(i) for i in obj]
     return obj
@@ -77,15 +74,16 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(HTTPException)
     async def _http_exc_handler(request: Request, exc: HTTPException) -> JSONResponse:
         rid = getattr(request.state, "request_id", "")
-        return _error_response(
-            "http_error", str(exc.detail), exc.status_code, rid
-        )
+        return _error_response("http_error", str(exc.detail), exc.status_code, rid)
 
     @app.exception_handler(RequestValidationError)
     async def _validation_exc_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
         rid = getattr(request.state, "request_id", "")
         return _error_response(
-            "validation_error", "Request validation failed", 422, rid,
+            "validation_error",
+            "Request validation failed",
+            422,
+            rid,
             details={"errors": exc.errors()},
         )
 

@@ -43,9 +43,7 @@ def test_dedup_remember_stores_once(mem):
 
 
 def test_remember_graded_stores_passed_confidence(mem):
-    mid = MemoryAdapter().remember_graded(
-        mem, "10.0.0.5", "nginx detected", confidence=0.4, source="test"
-    )
+    mid = MemoryAdapter().remember_graded(mem, "10.0.0.5", "nginx detected", confidence=0.4, source="test")
     match = [m for m in mem.retrieve(target="10.0.0.5") if m["id"] == mid]
     assert match and match[0]["confidence"] == 0.4
     assert match[0]["metadata"].get("source") == "test"

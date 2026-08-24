@@ -43,12 +43,8 @@ def _task(tool: str = "check_a") -> dict:
         "objective": "Determine whether port 443 is open.",
         "hypothesis": "Port 443 is open on example.test.",
         "allowed_tools": [tool],
-        "success_criteria": [
-            {"field": "facts", "operator": "contains", "value": "Port 443/tcp open"}
-        ],
-        "stop_conditions": [
-            {"field": "facts", "operator": "contains", "value": "Host unreachable"}
-        ],
+        "success_criteria": [{"field": "facts", "operator": "contains", "value": "Port 443/tcp open"}],
+        "stop_conditions": [{"field": "facts", "operator": "contains", "value": "Host unreachable"}],
     }
 
 
@@ -380,9 +376,7 @@ def test_version_three_database_migrates_without_inferred_success(tmp_path):
     with db.connection(write=True) as migrated:
         db.ensure_schema(migrated)
         assert migrated.execute("SELECT MAX(version) FROM _migrations").fetchone()[0] == _SCHEMA_VERSION
-        task_columns = {
-            row["name"] for row in migrated.execute("PRAGMA table_info(tasks)").fetchall()
-        }
+        task_columns = {row["name"] for row in migrated.execute("PRAGMA table_info(tasks)").fetchall()}
         assert {"hypothesis_id", "check_fingerprint"} <= task_columns
         hypothesis = migrated.execute("SELECT * FROM hypotheses").fetchone()
         assert hypothesis is not None

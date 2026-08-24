@@ -50,8 +50,7 @@ def test_record_outcome_without_suffix_unchanged(exp_db):
     store.record_outcome("ssh:8.2:linux", "SSHBruteForce:generate", "success")
     with exp_db.connection() as conn:
         row = conn.execute(
-            "SELECT action_type, pattern_hash FROM lessons "
-            "WHERE target_signature = ? AND outcome = 'success'",
+            "SELECT action_type, pattern_hash FROM lessons WHERE target_signature = ? AND outcome = 'success'",
             ("ssh:8.2:linux",),
         ).fetchone()
     assert row["action_type"] == "SSHBruteForce:generate"
@@ -63,9 +62,7 @@ def test_record_outcome_empty_suffix_unchanged(exp_db):
     store = ExperienceStore(exp_db, min_samples=1)
     store.record_outcome("t", "act", "success", action_suffix="")
     with exp_db.connection() as conn:
-        row = conn.execute(
-            "SELECT action_type FROM lessons WHERE target_signature = 't'"
-        ).fetchone()
+        row = conn.execute("SELECT action_type FROM lessons WHERE target_signature = 't'").fetchone()
     assert row["action_type"] == "act"
 
 
@@ -76,9 +73,7 @@ def test_record_outcome_with_suffix_appends_to_action_type(exp_db):
     store = ExperienceStore(exp_db, min_samples=1)
     store.record_outcome("t", "act", "success", action_suffix="shell")
     with exp_db.connection() as conn:
-        row = conn.execute(
-            "SELECT action_type, pattern_hash FROM lessons WHERE target_signature = 't'"
-        ).fetchone()
+        row = conn.execute("SELECT action_type, pattern_hash FROM lessons WHERE target_signature = 't'").fetchone()
     assert row["action_type"] == "act:shell"
     assert row["pattern_hash"] == "t:act:shell"
 

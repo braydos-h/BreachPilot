@@ -27,10 +27,28 @@ from typing import Any
 # concern (binary-path overrides for the recon pipeline), not a presence
 # registry, and are intentionally not unified here.
 ENV_TOOLS: list[str] = [
-    "nmap", "searchsploit", "hydra", "sqlmap", "msfconsole", "gobuster",
-    "nikto", "enum4linux", "smbclient", "impacket-secretsdump",
-    "crackmapexec", "hashcat", "john", "gcc", "pip", "python3", "python", "py",
-    "curl", "git", "nc", "netcat",
+    "nmap",
+    "searchsploit",
+    "hydra",
+    "sqlmap",
+    "msfconsole",
+    "gobuster",
+    "nikto",
+    "enum4linux",
+    "smbclient",
+    "impacket-secretsdump",
+    "crackmapexec",
+    "hashcat",
+    "john",
+    "gcc",
+    "pip",
+    "python3",
+    "python",
+    "py",
+    "curl",
+    "git",
+    "nc",
+    "netcat",
 ]
 # Backward-compat alias so existing patch sites that reference ``_ENV_TOOLS``
 # keep working (it is the same list object).
@@ -41,8 +59,16 @@ _ENV_TOOLS = ENV_TOOLS
 # "write_python_fallback" so the agent pivots immediately instead of trying to
 # install it.
 _PYTHON_FALLBACK: set[str] = {
-    "searchsploit", "hydra", "sqlmap", "gobuster", "nikto", "enum4linux",
-    "smbclient", "crackmapexec", "hashcat", "john",
+    "searchsploit",
+    "hydra",
+    "sqlmap",
+    "gobuster",
+    "nikto",
+    "enum4linux",
+    "smbclient",
+    "crackmapexec",
+    "hashcat",
+    "john",
 }
 
 # Tools installable via pip (best-effort; used only when pip is available).
@@ -122,17 +148,14 @@ def render_env_context(probe: dict[str, Any]) -> str:
         "PRE-FLIGHT ENVIRONMENT (probed at startup — do NOT re-discover by failing):",
         f"  Installed: {', '.join(probe.get('installed') or []) or '(none)'}",
         f"  Missing:   {', '.join(missing)}",
-        f"  passwordless_sudo: {probe.get('passwordless_sudo')}  "
-        f"pip_available: {probe.get('pip_available')}",
+        f"  passwordless_sudo: {probe.get('passwordless_sudo')}  pip_available: {probe.get('pip_available')}",
     ]
     if apt_fb:
         lines.append(f"  Installable via apt (sudo ok): {', '.join(apt_fb)}")
     if pip_fb:
         lines.append(f"  Installable via pip: {', '.join(pip_fb)}")
     if py_fb:
-        lines.append(
-            f"  PIVOT NOW (no sudo, apt_install will fail): {', '.join(py_fb)}"
-        )
+        lines.append(f"  PIVOT NOW (no sudo, apt_install will fail): {', '.join(py_fb)}")
         lines.append(
             "  For these tools DO NOT call apt_install/install_package — they will"
             " fail. Instead write a workspace-contained Python implementation via"

@@ -45,6 +45,7 @@ def register_peer_model_tools(mcp: Any, *, ctx: ToolContext) -> None:
     require_allowlist = ctx.require_allowlist
 
     if _multi_model_enabled(config):
+
         @mcp.tool()
         @audit_tool
         def consult_peer_models(question: str, context: str = "", preferred_aliases: str = "") -> str:
@@ -66,18 +67,16 @@ def register_peer_model_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 return "PEER_MODEL_CONSULTATION: UNAVAILABLE\nREASON: model router could not be initialized."
 
             available = _resolve_consult_aliases(config)
-            preferred = [
-                alias.strip()
-                for alias in re.split(r"[,\s]+", preferred_aliases or "")
-                if alias.strip()
-            ]
+            preferred = [alias.strip() for alias in re.split(r"[,\s]+", preferred_aliases or "") if alias.strip()]
             selected = [alias for alias in available if not preferred or alias in preferred]
             skipped: list[str] = []
             if preferred:
                 skipped.extend(alias for alias in preferred if alias not in available)
 
             if not selected:
-                active = os.environ.get("AI_NMAP_ACTIVE_MODEL_ALIAS") or (config or {}).get("models", {}).get("default_alias", "glm")
+                active = os.environ.get("AI_NMAP_ACTIVE_MODEL_ALIAS") or (config or {}).get("models", {}).get(
+                    "default_alias", "glm"
+                )
                 return (
                     "PEER_MODEL_CONSULTATION: UNAVAILABLE\n"
                     f"ACTIVE_MODEL: {active}\n"
@@ -115,10 +114,7 @@ def register_peer_model_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 },
                 {
                     "role": "user",
-                    "content": (
-                        f"Question:\n{q}\n\n"
-                        f"Context:\n{ctx_text if ctx_text else '(none provided)'}"
-                    ),
+                    "content": (f"Question:\n{q}\n\nContext:\n{ctx_text if ctx_text else '(none provided)'}"),
                 },
             ]
 
@@ -162,8 +158,7 @@ def register_peer_model_tools(mcp: Any, *, ctx: ToolContext) -> None:
             oj_cfg = (config or {}).get("outcome_judgment", {}) or {}
             if not bool(oj_cfg.get("peer_review", False)):
                 return (
-                    "PEER_REVIEW_OUTCOME: DISABLED\n"
-                    "REASON: set outcome_judgment.peer_review: true in config to enable."
+                    "PEER_REVIEW_OUTCOME: DISABLED\nREASON: set outcome_judgment.peer_review: true in config to enable."
                 )
 
             mm = (config or {}).get("multi_model", {}) or {}
@@ -180,11 +175,7 @@ def register_peer_model_tools(mcp: Any, *, ctx: ToolContext) -> None:
             if planner and planner not in available:
                 # Planner not in the consult set anyway -- nothing to exclude.
                 pass
-            preferred = [
-                a.strip()
-                for a in re.split(r"[,\s]+", preferred_grader_aliases or "")
-                if a.strip()
-            ]
+            preferred = [a.strip() for a in re.split(r"[,\s]+", preferred_grader_aliases or "") if a.strip()]
             if preferred:
                 graders = [a for a in graders if a in preferred] or graders
             if not graders:
@@ -230,10 +221,7 @@ def register_peer_model_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 },
                 {
                     "role": "user",
-                    "content": (
-                        f"VERDICT:\n{v}\n\n"
-                        f"EVIDENCE:\n{e}"
-                    ),
+                    "content": (f"VERDICT:\n{v}\n\nEVIDENCE:\n{e}"),
                 },
             ]
 
@@ -265,6 +253,3 @@ def register_peer_model_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 "AUTHORITY: deterministic OutcomeJudge (this review is advisory)\n\n"
                 + ("\n\n".join(sections) if sections else "No peer responses were returned.")
             )
-
-
-

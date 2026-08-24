@@ -11,6 +11,7 @@ previously ``NameError``'d return the intended ``BLOCKED`` messages, and valid
 calls execute end-to-end (subprocess mocked). The allowlist gate (shared
 ``require_allowlist`` decorator) is also exercised for one tool.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -39,9 +40,7 @@ def _make_server(
             "allowed_targets": allowed_targets or [],
         }
     }
-    return create_mcp_server(
-        search, nvd, WebResearcher(WebResearcherSettings()), tmp_path, config
-    )
+    return create_mcp_server(search, nvd, WebResearcher(WebResearcherSettings()), tmp_path, config)
 
 
 def _text(result) -> str:
@@ -71,6 +70,7 @@ def _ok_run(*args, **kwargs):
 
 # ── lateral_exec ────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_lateral_exec_guard_missing_method(tmp_path: Path) -> None:
     """Regression: body referenced `method` (absent from old signature) -> NameError."""
@@ -82,28 +82,28 @@ async def test_lateral_exec_guard_missing_method(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_lateral_exec_guard_unsupported_method(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path, require_allowlist=False)
-    text = _text(await mcp.call_tool(
-        "lateral_exec", {"target_ip": "10.0.0.1", "method": "foo", "username": "admin"}
-    ))
+    text = _text(await mcp.call_tool("lateral_exec", {"target_ip": "10.0.0.1", "method": "foo", "username": "admin"}))
     assert "BLOCKED" in text and "unsupported method 'foo'" in text
 
 
 @pytest.mark.asyncio
 async def test_lateral_exec_guard_missing_secret(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path, require_allowlist=False)
-    text = _text(await mcp.call_tool(
-        "lateral_exec", {"target_ip": "10.0.0.1", "method": "psexec", "username": "admin"}
-    ))
+    text = _text(
+        await mcp.call_tool("lateral_exec", {"target_ip": "10.0.0.1", "method": "psexec", "username": "admin"})
+    )
     assert "BLOCKED" in text and "either password or ntlm_hash must be provided" in text
 
 
 @pytest.mark.asyncio
 async def test_lateral_exec_guard_invalid_hash(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path, require_allowlist=False)
-    text = _text(await mcp.call_tool(
-        "lateral_exec",
-        {"target_ip": "10.0.0.1", "method": "psexec", "username": "admin", "ntlm_hash": "zzz"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "lateral_exec",
+            {"target_ip": "10.0.0.1", "method": "psexec", "username": "admin", "ntlm_hash": "zzz"},
+        )
+    )
     assert "BLOCKED" in text and "ntlm_hash must be 32 hex chars" in text
 
 
@@ -111,16 +111,18 @@ async def test_lateral_exec_guard_invalid_hash(tmp_path: Path) -> None:
 async def test_lateral_exec_valid_run(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(subprocess, "run", _ok_run)
     mcp = _make_server(tmp_path, require_allowlist=False)
-    text = _text(await mcp.call_tool(
-        "lateral_exec",
-        {
-            "target_ip": "10.0.0.1",
-            "method": "psexec",
-            "username": "admin",
-            "password": "pass",
-            "command": "whoami",
-        },
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "lateral_exec",
+            {
+                "target_ip": "10.0.0.1",
+                "method": "psexec",
+                "username": "admin",
+                "password": "pass",
+                "command": "whoami",
+            },
+        )
+    )
     assert "LATERAL_EXEC_RESULT: completed" in text
     assert "METHOD: psexec" in text
 
@@ -128,20 +130,23 @@ async def test_lateral_exec_valid_run(monkeypatch, tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_lateral_exec_blocked_by_allowlist(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path, require_allowlist=True, allowed_targets=["192.168.1.50"])
-    text = _text(await mcp.call_tool(
-        "lateral_exec",
-        {
-            "target_ip": "10.0.0.99",
-            "method": "psexec",
-            "username": "admin",
-            "password": "pass",
-            "command": "whoami",
-        },
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "lateral_exec",
+            {
+                "target_ip": "10.0.0.99",
+                "method": "psexec",
+                "username": "admin",
+                "password": "pass",
+                "command": "whoami",
+            },
+        )
+    )
     assert "not in the explicit allowlist" in text
 
 
 # ── dump_credentials ───────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_dump_credentials_guard_missing_method(tmp_path: Path) -> None:
@@ -161,18 +166,18 @@ async def test_dump_credentials_guard_unsupported_method(tmp_path: Path) -> None
 @pytest.mark.asyncio
 async def test_dump_credentials_secretsdump_missing_username(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path, require_allowlist=False)
-    text = _text(await mcp.call_tool(
-        "dump_credentials", {"target_ip": "10.0.0.1", "method": "secretsdump", "password": "pass"}
-    ))
+    text = _text(
+        await mcp.call_tool("dump_credentials", {"target_ip": "10.0.0.1", "method": "secretsdump", "password": "pass"})
+    )
     assert "BLOCKED" in text and "username is required for secretsdump" in text
 
 
 @pytest.mark.asyncio
 async def test_dump_credentials_secretsdump_missing_secret(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path, require_allowlist=False)
-    text = _text(await mcp.call_tool(
-        "dump_credentials", {"target_ip": "10.0.0.1", "method": "secretsdump", "username": "admin"}
-    ))
+    text = _text(
+        await mcp.call_tool("dump_credentials", {"target_ip": "10.0.0.1", "method": "secretsdump", "username": "admin"})
+    )
     assert "BLOCKED" in text and "either password or ntlm_hash must be provided for secretsdump" in text
 
 
@@ -187,21 +192,22 @@ async def test_dump_credentials_sam_local_valid(monkeypatch, tmp_path: Path) -> 
 
 # ── dump_credentials: dcsync (DCSync via DRSUAPI) ──────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_dump_credentials_dcsync_missing_username(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path, require_allowlist=False)
-    text = _text(await mcp.call_tool(
-        "dump_credentials", {"target_ip": "10.0.0.1", "method": "dcsync", "password": "pass"}
-    ))
+    text = _text(
+        await mcp.call_tool("dump_credentials", {"target_ip": "10.0.0.1", "method": "dcsync", "password": "pass"})
+    )
     assert "BLOCKED" in text and "username is required for dcsync" in text
 
 
 @pytest.mark.asyncio
 async def test_dump_credentials_dcsync_missing_secret(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path, require_allowlist=False)
-    text = _text(await mcp.call_tool(
-        "dump_credentials", {"target_ip": "10.0.0.1", "method": "dcsync", "username": "admin"}
-    ))
+    text = _text(
+        await mcp.call_tool("dump_credentials", {"target_ip": "10.0.0.1", "method": "dcsync", "username": "admin"})
+    )
     assert "BLOCKED" in text and "either password or ntlm_hash must be provided for dcsync" in text
 
 
@@ -217,17 +223,19 @@ async def test_dump_credentials_dcsync_valid_run(monkeypatch, tmp_path: Path) ->
 
     monkeypatch.setattr(subprocess, "run", _run)
     mcp = _make_server(tmp_path, require_allowlist=False)
-    text = _text(await mcp.call_tool(
-        "dump_credentials",
-        {
-            "target_ip": "10.0.0.1",
-            "method": "dcsync",
-            "username": "admin",
-            "password": "pass",
-            "domain": "corp",
-            "target_user": "krbtgt",
-        },
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "dump_credentials",
+            {
+                "target_ip": "10.0.0.1",
+                "method": "dcsync",
+                "username": "admin",
+                "password": "pass",
+                "domain": "corp",
+                "target_user": "krbtgt",
+            },
+        )
+    )
     assert "CRED_DUMP_RESULT: completed" in text
     assert "METHOD: dcsync" in text
     argv = captured["argv"]
@@ -251,15 +259,17 @@ async def test_dump_credentials_dcsync_with_ntlm_hash(monkeypatch, tmp_path: Pat
 
     monkeypatch.setattr(subprocess, "run", _run)
     mcp = _make_server(tmp_path, require_allowlist=False)
-    text = _text(await mcp.call_tool(
-        "dump_credentials",
-        {
-            "target_ip": "10.0.0.1",
-            "method": "dcsync",
-            "username": "admin",
-            "ntlm_hash": "aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0",
-        },
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "dump_credentials",
+            {
+                "target_ip": "10.0.0.1",
+                "method": "dcsync",
+                "username": "admin",
+                "ntlm_hash": "aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0",
+            },
+        )
+    )
     assert "CRED_DUMP_RESULT: completed" in text
     argv = captured["argv"]
     assert "-hashes" in argv
@@ -269,6 +279,7 @@ async def test_dump_credentials_dcsync_with_ntlm_hash(monkeypatch, tmp_path: Pat
 
 
 # ── kerberoast ──────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_kerberoast_guard_missing_domain(tmp_path: Path) -> None:
@@ -288,10 +299,12 @@ async def test_kerberoast_guard_missing_secret(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_kerberoast_guard_invalid_dc_ip(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path, require_allowlist=False)
-    text = _text(await mcp.call_tool(
-        "kerberoast",
-        {"target_ip": "10.0.0.1", "domain": "corp", "password": "p", "dc_ip": "not-an-ip"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "kerberoast",
+            {"target_ip": "10.0.0.1", "domain": "corp", "password": "p", "dc_ip": "not-an-ip"},
+        )
+    )
     assert "ERROR: Invalid" in text and "dc_ip" in text
 
 
@@ -299,9 +312,11 @@ async def test_kerberoast_guard_invalid_dc_ip(tmp_path: Path) -> None:
 async def test_kerberoast_valid_run(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(subprocess, "run", _ok_run)
     mcp = _make_server(tmp_path, require_allowlist=False)
-    text = _text(await mcp.call_tool(
-        "kerberoast",
-        {"target_ip": "10.0.0.1", "domain": "corp", "username": "svc", "password": "pass"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "kerberoast",
+            {"target_ip": "10.0.0.1", "domain": "corp", "username": "svc", "password": "pass"},
+        )
+    )
     assert "KERBEROAST_RESULT: completed" in text
     assert "DOMAIN: corp" in text

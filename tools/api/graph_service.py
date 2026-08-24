@@ -136,7 +136,9 @@ class AttackGraphService:
 
         nodes, truncated = _query_nodes(store, scope, types, status_list, search.strip(), limit)
         ids = {n.node_id for n in nodes}
-        edges = [e for e in store.query_edges(scope=scope, limit=2000) if e.source_node_id in ids and e.target_node_id in ids]
+        edges = [
+            e for e in store.query_edges(scope=scope, limit=2000) if e.source_node_id in ids and e.target_node_id in ids
+        ]
         total = store.summary()["total_nodes"]
 
         return {
@@ -168,7 +170,12 @@ class AttackGraphService:
             top_id = max(degree, key=lambda k: degree[k])
             top_node = next((n for n in nodes if n.node_id == top_id), None)
             if top_node is not None:
-                highest = {"node_id": top_id, "value": top_node.value, "node_type": top_node.node_type.value, "degree": degree[top_id]}
+                highest = {
+                    "node_id": top_id,
+                    "value": top_node.value,
+                    "node_type": top_node.node_type.value,
+                    "degree": degree[top_id],
+                }
 
         return {
             "run_id": str(run.get("id") or ""),
@@ -217,17 +224,11 @@ class AttackGraphService:
         node = store.get_node(node_id)
         if node is None or node.scope != store.scope:
             return None
-        edges = [
-            e for e in store.to_graph_edges()
-            if e.source_node_id == node_id or e.target_node_id == node_id
-        ][:100]
-        neighbor_ids = {
-            e.target_node_id if e.source_node_id == node_id else e.source_node_id for e in edges
-        }
-        neighbors = [
-            n.to_dict() for n in store.to_graph_nodes()
-            if n.node_id in neighbor_ids and n.node_id != node_id
-        ][:100]
+        edges = [e for e in store.to_graph_edges() if e.source_node_id == node_id or e.target_node_id == node_id][:100]
+        neighbor_ids = {e.target_node_id if e.source_node_id == node_id else e.source_node_id for e in edges}
+        neighbors = [n.to_dict() for n in store.to_graph_nodes() if n.node_id in neighbor_ids and n.node_id != node_id][
+            :100
+        ]
         return {
             "node": node.to_dict(),
             "edges": [e.to_dict() for e in edges],

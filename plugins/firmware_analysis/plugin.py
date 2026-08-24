@@ -52,7 +52,9 @@ def unpack_firmware_local(firmware_path: str, output_dir: str = "") -> str:
     try:
         proc = subprocess.run(
             ["binwalk", "-e", "-C", str(out), str(fw)],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         if proc.returncode != 0:
             return f"ERROR: binwalk failed: {proc.stderr[:500]}"
@@ -84,6 +86,7 @@ class FirmwareAnalysisPlugin(Plugin):
     def _load_manifest() -> PluginManifest:
         text = _MANIFEST_PATH.read_text(encoding="utf-8")
         from tools.plugins import _parse_manifest_yaml  # type: ignore
+
         return PluginManifest.from_dict(_parse_manifest_yaml(text))
 
     def register(self, registry: PluginRegistry) -> None:

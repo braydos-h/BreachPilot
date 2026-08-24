@@ -187,9 +187,7 @@ class WitnessContext:
 
     def prune_failures(self, now: float, window: float) -> None:
         for tgt in list(self.failures_per_target):
-            self.failures_per_target[tgt] = [
-                t for t in self.failures_per_target[tgt] if now - t <= window
-            ]
+            self.failures_per_target[tgt] = [t for t in self.failures_per_target[tgt] if now - t <= window]
             if not self.failures_per_target[tgt]:
                 del self.failures_per_target[tgt]
 
@@ -257,8 +255,7 @@ def _det_permission_escalation(record: dict[str, Any], ctx: WitnessContext) -> W
                 signal="permission_escalation",
                 severity="high",
                 message=(
-                    f"Permission escalated from {ctx.highest_permission} to "
-                    f"{perm} mid-run without an operator action."
+                    f"Permission escalated from {ctx.highest_permission} to {perm} mid-run without an operator action."
                 ),
                 record=record,
             )
@@ -308,10 +305,7 @@ def _det_dos_drift(record: dict[str, Any], ctx: WitnessContext) -> WitnessFlag |
         return WitnessFlag(
             signal="dos_drift",
             severity="medium",
-            message=(
-                f"{len(recent)} failures on target {target} within 60s — "
-                f"possible denial-of-service drift."
-            ),
+            message=(f"{len(recent)} failures on target {target} within 60s — possible denial-of-service drift."),
             record=record,
         )
     return None

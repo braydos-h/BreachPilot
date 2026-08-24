@@ -49,15 +49,21 @@ class TestRiskControllerBasic:
         assert result.risk_level == "low"
 
     def test_medium_risk_action_allowed_in_standard(self, standard_ctrl: RiskController) -> None:
-        result = standard_ctrl.assess_action("test", "hydra", "hydra -l admin -P pass.txt ssh://10.0.0.1", "10.0.0.1", "medium")
+        result = standard_ctrl.assess_action(
+            "test", "hydra", "hydra -l admin -P pass.txt ssh://10.0.0.1", "10.0.0.1", "medium"
+        )
         assert result.allowed is True
 
     def test_high_risk_requires_approval_in_standard(self, standard_ctrl: RiskController) -> None:
-        result = standard_ctrl.assess_action("exploit", "msfconsole", "use exploit/multi/http/log4shell", "10.0.0.1", "high")
+        result = standard_ctrl.assess_action(
+            "exploit", "msfconsole", "use exploit/multi/http/log4shell", "10.0.0.1", "high"
+        )
         assert result.requires_human_approval is True
 
     def test_high_risk_no_approval_in_high_profile(self, high_ctrl: RiskController) -> None:
-        result = high_ctrl.assess_action("exploit", "msfconsole", "use exploit/multi/http/log4shell", "10.0.0.1", "high")
+        result = high_ctrl.assess_action(
+            "exploit", "msfconsole", "use exploit/multi/http/log4shell", "10.0.0.1", "high"
+        )
         assert result.requires_human_approval is False
 
 
@@ -85,7 +91,9 @@ class TestDangerousToolDetection:
         assert result.risk_level == "high"
 
     def test_meterpreter_detected(self, standard_ctrl: RiskController) -> None:
-        result = standard_ctrl.assess_action("exploit", "msfconsole", "payload/windows/meterpreter/reverse_tcp", "10.0.0.1", "high")
+        result = standard_ctrl.assess_action(
+            "exploit", "msfconsole", "payload/windows/meterpreter/reverse_tcp", "10.0.0.1", "high"
+        )
         assert result.risk_level == "high"
 
     def test_nmap_not_dangerous(self, standard_ctrl: RiskController) -> None:
@@ -146,7 +154,9 @@ class TestMitigationSuggestions:
     """Risk mitigation suggestions."""
 
     def test_high_risk_gets_mitigation(self, standard_ctrl: RiskController) -> None:
-        result = standard_ctrl.assess_action("exploit", "hydra", "hydra -l admin -P rockyou.txt ssh://10.0.0.1", "10.0.0.1", "high")
+        result = standard_ctrl.assess_action(
+            "exploit", "hydra", "hydra -l admin -P rockyou.txt ssh://10.0.0.1", "10.0.0.1", "high"
+        )
         assert len(result.mitigation_suggestions) > 0
 
     def test_low_risk_no_mitigation_needed(self, standard_ctrl: RiskController) -> None:
@@ -169,33 +179,35 @@ class TestDestructiveKeywordBlocking:
     of these would have FAILED against the pre-fix implementation.
     """
 
-    @pytest.mark.parametrize("kw,command", [
-        ("rm -rf", "rm -rf /var/www"),
-        ("rm ", "rm /tmp/secret"),
-        ("dd if", "dd if=/dev/zero of=/dev/sda bs=1M"),
-        ("shred", "shred -u /etc/passwd"),
-        ("wipe", "wipe /dev/sda"),
-        ("mkfs", "mkfs.ext4 /dev/sda1"),
-        ("fdisk", "fdisk /dev/sda"),
-        ("parted", "parted /dev/sda rm 1"),
-        ("chmod 777", "chmod 777 /etc/shadow"),
-        ("chown", "chown root:root /etc/passwd"),
-        ("kill -9", "kill -9 1337"),
-        ("pkill", "pkill -f sshd"),
-        ("unlink", "unlink /tmp/file"),
-        ("truncate", "truncate -s 0 /var/log/app.log"),
-        ("drop", "drop database prod"),
-        ("delete", "DELETE FROM users"),
-        ("format", "format C: /fs:ntfs"),
-        ("overwrite", "overwrite /etc/crontab"),
-    ])
+    @pytest.mark.parametrize(
+        "kw,command",
+        [
+            ("rm -rf", "rm -rf /var/www"),
+            ("rm ", "rm /tmp/secret"),
+            ("dd if", "dd if=/dev/zero of=/dev/sda bs=1M"),
+            ("shred", "shred -u /etc/passwd"),
+            ("wipe", "wipe /dev/sda"),
+            ("mkfs", "mkfs.ext4 /dev/sda1"),
+            ("fdisk", "fdisk /dev/sda"),
+            ("parted", "parted /dev/sda rm 1"),
+            ("chmod 777", "chmod 777 /etc/shadow"),
+            ("chown", "chown root:root /etc/passwd"),
+            ("kill -9", "kill -9 1337"),
+            ("pkill", "pkill -f sshd"),
+            ("unlink", "unlink /tmp/file"),
+            ("truncate", "truncate -s 0 /var/log/app.log"),
+            ("drop", "drop database prod"),
+            ("delete", "DELETE FROM users"),
+            ("format", "format C: /fs:ntfs"),
+            ("overwrite", "overwrite /etc/crontab"),
+        ],
+    )
     def test_destructive_keyword_blocked_under_high_profile(
         self, high_ctrl: RiskController, kw: str, command: str
     ) -> None:
         result = high_ctrl.assess_action("exploit", "bash", command, "10.0.0.1", "high")
         assert result.allowed is False, (
-            f"destructive keyword '{kw}' was NOT blocked (got allowed={result.allowed}, "
-            f"reason={result.reason!r})"
+            f"destructive keyword '{kw}' was NOT blocked (got allowed={result.allowed}, reason={result.reason!r})"
         )
         assert result.risk_level == "high"
         assert any("destructive" in w.lower() for w in result.warnings)
@@ -205,9 +217,7 @@ class TestDestructiveKeywordBlocking:
         would otherwise permit the tool -- destructive detection runs first."""
         # 'mimikatz' is a DANGEROUS_TOOL_PATTERN that high_ctrl allows; but the
         # command also contains 'drop', which must hard-block before tool gating.
-        result = high_ctrl.assess_action(
-            "exploit", "mimikatz", "mimikatz && drop database prod", "10.0.0.1", "high"
-        )
+        result = high_ctrl.assess_action("exploit", "mimikatz", "mimikatz && drop database prod", "10.0.0.1", "high")
         assert result.allowed is False
         assert "destructive" in result.reason.lower()
 
@@ -230,28 +240,20 @@ class TestActionTypePermissionGates:
         assert "exploitation" in result.reason.lower() or "not permitted" in result.reason.lower()
 
     def test_test_exploit_action_type_denied(self, low_risk_ctrl: RiskController) -> None:
-        result = low_risk_ctrl.assess_action(
-            "test_exploit", "python", "python check.py", "10.0.0.1", "medium"
-        )
+        result = low_risk_ctrl.assess_action("test_exploit", "python", "python check.py", "10.0.0.1", "medium")
         assert result.allowed is False
 
     def test_exploit_action_type_allowed_when_enabled(self, high_ctrl: RiskController) -> None:
-        result = high_ctrl.assess_action(
-            "exploit", "python", "python check.py --target 10.0.0.1", "10.0.0.1", "medium"
-        )
+        result = high_ctrl.assess_action("exploit", "python", "python check.py --target 10.0.0.1", "10.0.0.1", "medium")
         assert result.allowed is True
 
     def test_pivot_action_type_denied_when_disallowed(self, standard_ctrl: RiskController) -> None:
-        result = standard_ctrl.assess_action(
-            "pivot", "ssh", "ssh user@internal-host", "10.0.0.1", "high"
-        )
+        result = standard_ctrl.assess_action("pivot", "ssh", "ssh user@internal-host", "10.0.0.1", "high")
         assert result.allowed is False
         assert "pivoting" in result.reason.lower() or "not permitted" in result.reason.lower()
 
     def test_lateral_action_type_denied_when_disallowed(self, standard_ctrl: RiskController) -> None:
-        result = standard_ctrl.assess_action(
-            "lateral_movement", "impacket", "smbexec target", "10.0.0.1", "high"
-        )
+        result = standard_ctrl.assess_action("lateral_movement", "impacket", "smbexec target", "10.0.0.1", "high")
         assert result.allowed is False
 
     def test_credential_testing_denied_by_default(self) -> None:
@@ -261,9 +263,7 @@ class TestActionTypePermissionGates:
             allow_pivoting=False,
             allow_credential_testing=False,
         )
-        result = ctrl.assess_action(
-            "credential_test", "hydra", "hydra -L users.txt", "10.0.0.1", "high"
-        )
+        result = ctrl.assess_action("credential_test", "hydra", "hydra -L users.txt", "10.0.0.1", "high")
         assert result.allowed is False
         assert "credential" in result.reason.lower() or "not permitted" in result.reason.lower()
 
@@ -276,9 +276,7 @@ class TestActionTypePermissionGates:
         )
         # action_type gate should not fire; the command is benign enough to
         # pass destructive detection.
-        result = ctrl.assess_action(
-            "credential_test", "curl", "curl http://10.0.0.1/", "10.0.0.1", "medium"
-        )
+        result = ctrl.assess_action("credential_test", "curl", "curl http://10.0.0.1/", "10.0.0.1", "medium")
         assert result.allowed is True
 
 
@@ -315,30 +313,27 @@ class TestTaskBudgetGate:
 class TestDestructiveKeywordNormalization:
     """M32: whitespace/shell-separator normalization + word-boundary matching."""
 
-    @pytest.mark.parametrize("command", [
-        "rm\t-rf /var/www",   # tab-separated
-        "rm;-rf /var/www",    # shell-semicolon separator
-        "rm  -rf /var/www",   # multiple spaces
-        "rm -rf /var/www",    # canonical form
-    ])
-    def test_destructive_rm_caught_after_normalization(
-        self, high_ctrl: RiskController, command: str
-    ) -> None:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "rm\t-rf /var/www",  # tab-separated
+            "rm;-rf /var/www",  # shell-semicolon separator
+            "rm  -rf /var/www",  # multiple spaces
+            "rm -rf /var/www",  # canonical form
+        ],
+    )
+    def test_destructive_rm_caught_after_normalization(self, high_ctrl: RiskController, command: str) -> None:
         result = high_ctrl.assess_action("exploit", "bash", command, "10.0.0.1", "high")
         assert result.allowed is False
         assert result.risk_level == "high"
         assert any("destructive" in w.lower() for w in result.warnings)
 
     def test_dd_of_caught_after_normalization(self, high_ctrl: RiskController) -> None:
-        result = high_ctrl.assess_action(
-            "exploit", "bash", "dd\tif=/dev/zero\tof=/dev/sda", "10.0.0.1", "high"
-        )
+        result = high_ctrl.assess_action("exploit", "bash", "dd\tif=/dev/zero\tof=/dev/sda", "10.0.0.1", "high")
         assert result.allowed is False
 
     def test_word_boundary_prevents_false_positive(self, high_ctrl: RiskController) -> None:
         # 'warm' contains 'rm' but should NOT trigger the rm destructive gate
         # thanks to word boundaries; 'format' in 'formatter' likewise.
-        result = high_ctrl.assess_action(
-            "recon", "bash", "warm the formatter cache", "10.0.0.1", "low"
-        )
+        result = high_ctrl.assess_action("recon", "bash", "warm the formatter cache", "10.0.0.1", "low")
         assert result.allowed is True

@@ -40,9 +40,7 @@ class ExperienceStore:
     ) -> None:
         self._db = db
         self._min_samples = max(1, int(min_samples))
-        self._time_decay_days = (
-            float(time_decay_days) if time_decay_days and time_decay_days > 0 else 0.0
-        )
+        self._time_decay_days = float(time_decay_days) if time_decay_days and time_decay_days > 0 else 0.0
 
     def _decay_weight(self, created_at: str) -> float:
         """Exponential decay weight in [0, 1] for a row's ``created_at``.
@@ -264,9 +262,7 @@ class ExperienceStore:
             )
             for row in cur.fetchall():
                 action = row["action_type"]
-                bucket = agg.setdefault(
-                    action, {"success": 0.0, "failure": 0.0, "partial": 0.0, "n": 0.0}
-                )
+                bucket = agg.setdefault(action, {"success": 0.0, "failure": 0.0, "partial": 0.0, "n": 0.0})
                 bucket["n"] += 1
                 w = self._decay_weight(row["created_at"])
                 outcome = row["outcome"]

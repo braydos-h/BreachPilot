@@ -195,19 +195,20 @@ class RunManager:
             return await self._create_run_locked(request)
 
     async def _create_run_locked(
-        self, request: RunRequest,
+        self,
+        request: RunRequest,
     ) -> tuple[str, RunPreview, Decision | None]:
         if len(self._active) >= self.max_concurrent_runs:
             raise APIError(
                 "conflict",
-                f"{self.max_concurrent_runs} run(s) already active. Cancel one first "
-                f"(api.max_concurrent_runs).",
+                f"{self.max_concurrent_runs} run(s) already active. Cancel one first (api.max_concurrent_runs).",
                 status_code=409,
             )
 
         request.config_path = self._config_path
         request.reports_dir = self._persistence.reports_dir
         from tools.run_service import AssessmentService
+
         service = AssessmentService(config=self._config, callables=self._callables)
         preview = await service.prepare(request)
 
@@ -229,7 +230,8 @@ class RunManager:
         # Per-run allowlist snapshot — Run A's target never appears in Run B's
         # allowlist even when N runs are live concurrently.
         handle.allowlist = _snapshot_allowlist(
-            handle.config_snapshot, preview.original_target or preview.target_ip,
+            handle.config_snapshot,
+            preview.original_target or preview.target_ip,
         )
         handle.event_broker = event_broker
         handle.decision_broker = DecisionBroker(preview.run_id, self._persistence)
@@ -242,30 +244,39 @@ class RunManager:
             event_broker.close()
             self._active.pop(preview.run_id, None)
             self._persistence.update_run_state(
-                preview.run_id, RunState.FAILED.value,
+                preview.run_id,
+                RunState.FAILED.value,
                 error="Run setup failed.",
             )
             raise
 
     async def _setup_handle_locked(
-        self, handle: RunHandle, request: RunRequest, preview: RunPreview,
+        self,
+        handle: RunHandle,
+        request: RunRequest,
+        preview: RunPreview,
     ) -> tuple[str, RunPreview, Decision | None]:
         decision = None
         if not request.yes:
             self._persistence.update_run_state(preview.run_id, RunState.AWAITING_CONFIRMATION.value)
             await handle.event_broker.emit("state", {"state": RunState.AWAITING_CONFIRMATION.value})
             decision = Decision(
-                id="", run_id=preview.run_id, kind=DecisionKind.START_CONFIRM,
+                id="",
+                run_id=preview.run_id,
+                kind=DecisionKind.START_CONFIRM,
                 prompt_text="Proceed?" if not preview.destructive else "DESTRUCTIVE mode — confirm to proceed.",
                 required_text=preview.required_confirmation_text,
             )
             did = await handle.decision_broker.create(decision)
-            await handle.event_broker.emit("approval", {
-                "decision_id": did,
-                "kind": "start_confirm",
-                "prompt_text": decision.prompt_text,
-                "required_text": decision.required_text,
-            })
+            await handle.event_broker.emit(
+                "approval",
+                {
+                    "decision_id": did,
+                    "kind": "start_confirm",
+                    "prompt_text": decision.prompt_text,
+                    "required_text": decision.required_text,
+                },
+            )
         else:
             self._persistence.update_run_state(preview.run_id, RunState.QUEUED.value)
             await handle.event_broker.emit("state", {"state": RunState.QUEUED.value})
@@ -293,30 +304,39 @@ class RunManager:
     async def _execute_run(self, handle: RunHandle) -> None:
         """Run ``AssessmentService.execute`` in the background."""
         from tools.run_service import AssessmentService
+
         # Use the frozen config snapshot captured at prepare() time so the
         # confirmed preview (permission/destructive/budgets) stays accurate.
         service = AssessmentService(config=handle.config_snapshot, callables=self._callables)
 
         decision_provider = ApiDecisionProvider(
-            handle.run_id, handle.decision_broker, handle.event_broker.emit,
+            handle.run_id,
+            handle.decision_broker,
+            handle.event_broker.emit,
         )
         event_sink = ApiEventSink(handle.run_id, handle.event_broker)
         approval_provider = ApiApprovalProvider(
-            handle.run_id, decision_provider, handle.preview.target_ip,
+            handle.run_id,
+            decision_provider,
+            handle.preview.target_ip,
         )
 
         try:
             self._persistence.update_run_state(handle.run_id, RunState.RUNNING.value)
             await handle.event_broker.emit("state", {"state": RunState.RUNNING.value})
             result = await service.execute(
-                handle.request, handle.preview,
+                handle.request,
+                handle.preview,
                 decision_provider=decision_provider,
                 event_sink=event_sink,
                 cancellation=handle.cancellation,
                 config=handle.config_snapshot,
                 approval_provider=approval_provider,
                 session_attach=lambda session, schemas, policy: self.set_mcp_session(
-                    handle.run_id, session, schemas, policy,
+                    handle.run_id,
+                    session,
+                    schemas,
+                    policy,
                 ),
             )
             # Operator cancelled at a mid-run checkpoint -> cancelled state
@@ -332,7 +352,9 @@ class RunManager:
                 state = RunState.COMPLETED.value
             result_dict = _result_to_dict(result)
             self._persistence.update_run_state(
-                handle.run_id, state, error=result.error,
+                handle.run_id,
+                state,
+                error=result.error,
                 result=result_dict,
             )
             await handle.event_broker.emit("state", {"state": state, "result": result_dict})
@@ -359,7 +381,9 @@ class RunManager:
                     self._active.pop(handle.run_id, None)
 
     async def _maybe_title_run(
-        self, handle: "RunHandle", result_dict: dict[str, Any],
+        self,
+        handle: "RunHandle",
+        result_dict: dict[str, Any],
     ) -> None:
         """Ask gemma4:31b-cloud for a session title; persist on success.
 
@@ -373,21 +397,24 @@ class RunManager:
             existing = self._persistence.get_run(handle.run_id) or {}
             if existing.get("title"):
                 return
-            host = str(
-                (self._config.get("ollama") or {}).get("host")
-                or "https://api.ollama.com"
-            )
+            host = str((self._config.get("ollama") or {}).get("host") or "https://api.ollama.com")
             request_dict = _request_to_dict(handle.request) if handle.request else {}
             title = await generate_session_title(
-                result_dict, request_dict, host=host, config=self._config,
+                result_dict,
+                request_dict,
+                host=host,
+                config=self._config,
             )
             if title:
                 self._persistence.update_run_title(handle.run_id, title)
                 await handle.event_broker.emit("title", {"title": title})
         except Exception as exc:  # best-effort — never propagate
             import logging as _logging
+
             _logging.getLogger(__name__).debug(
-                "session title persistence failed for %s: %s", handle.run_id, exc,
+                "session title persistence failed for %s: %s",
+                handle.run_id,
+                exc,
             )
 
     async def cancel_run(self, run_id: str) -> None:
@@ -417,9 +444,7 @@ class RunManager:
                 return
             task.cancel()
 
-        timeout = max(0.0, float(
-            self._config.get("api", {}).get("shutdown_timeout_seconds", 15)
-        ))
+        timeout = max(0.0, float(self._config.get("api", {}).get("shutdown_timeout_seconds", 15)))
         _, pending = await asyncio.wait({task}, timeout=timeout)
         if pending:
             raise APIError("cancel_timeout", "Run cancellation timed out.", status_code=504)
@@ -440,13 +465,15 @@ class RunManager:
         ok = handle.decision_broker.resolve(decision_id, answer)
         if not ok:
             raise APIError("decision_not_found", "Decision not found or already answered.", status_code=404)
-        await handle.event_broker.emit("approval", {
-            "decision_id": decision_id, "status": "answered", "answer": answer,
-        })
-        if not any(
-            row["status"] == "pending"
-            for row in self._persistence.list_decisions(run_id)
-        ):
+        await handle.event_broker.emit(
+            "approval",
+            {
+                "decision_id": decision_id,
+                "status": "answered",
+                "answer": answer,
+            },
+        )
+        if not any(row["status"] == "pending" for row in self._persistence.list_decisions(run_id)):
             self._persistence.update_run_state(run_id, RunState.RUNNING.value)
             await handle.event_broker.emit("state", {"state": RunState.RUNNING.value})
         return {"decision_id": decision_id, "status": "answered"}
@@ -463,10 +490,7 @@ class RunManager:
             raise APIError("no_session", "MCP session is not open.", status_code=409)
         if handle.exploit_policy is None:
             raise APIError("no_policy", "Exploit policy is not available.", status_code=409)
-        if not any(
-            (schema.get("function") or {}).get("name") == tool_name
-            for schema in handle.tool_schemas
-        ):
+        if not any((schema.get("function") or {}).get("name") == tool_name for schema in handle.tool_schemas):
             raise APIError("tool_not_found", "Unknown MCP tool.", status_code=404)
         async with handle.tool_lock:
             approved = await handle.exploit_policy.approve_action(
@@ -494,7 +518,11 @@ class RunManager:
         return handle.tool_schemas
 
     def set_mcp_session(
-        self, run_id: str, session: Any, schemas: list[dict[str, Any]], policy: Any,
+        self,
+        run_id: str,
+        session: Any,
+        schemas: list[dict[str, Any]],
+        policy: Any,
     ) -> None:
         """Called by the service when the MCP session opens."""
         handle = self._active.get(run_id)
@@ -523,6 +551,7 @@ class RunManager:
 
 def _extract_text(result: Any) -> str:
     """Pull textual content from an MCP call_tool result."""
+
     def _get(obj: Any, key: str, default: Any = None) -> Any:
         if isinstance(obj, dict):
             return obj.get(key, default)
@@ -539,13 +568,21 @@ def _extract_text(result: Any) -> str:
 
 def _request_to_dict(req: RunRequest) -> dict[str, Any]:
     return {
-        "target": req.target, "mode": req.mode, "goal_name": req.goal_name,
-        "custom_goal": req.custom_goal, "recon_first": req.recon_first,
-        "model_alias": req.model_alias, "swarm": req.swarm,
-        "parallel_swarm": req.parallel_swarm, "critic": req.critic,
-        "reflection": req.reflection, "adaptive_exploits": req.adaptive_exploits,
-        "long_session": req.long_session, "multi_model_consult": req.multi_model_consult,
-        "observer_mode": req.observer_mode, "ultrathink": req.ultrathink,
+        "target": req.target,
+        "mode": req.mode,
+        "goal_name": req.goal_name,
+        "custom_goal": req.custom_goal,
+        "recon_first": req.recon_first,
+        "model_alias": req.model_alias,
+        "swarm": req.swarm,
+        "parallel_swarm": req.parallel_swarm,
+        "critic": req.critic,
+        "reflection": req.reflection,
+        "adaptive_exploits": req.adaptive_exploits,
+        "long_session": req.long_session,
+        "multi_model_consult": req.multi_model_consult,
+        "observer_mode": req.observer_mode,
+        "ultrathink": req.ultrathink,
         "skills_mode": req.skills_mode,
         "skills_include": req.skills_include,
         "skills_exclude": req.skills_exclude,
@@ -560,29 +597,51 @@ def _request_to_dict(req: RunRequest) -> dict[str, Any]:
 
 def _preview_to_dict(p: RunPreview) -> dict[str, Any]:
     return {
-        "run_id": p.run_id, "target_ip": p.target_ip, "original_target": p.original_target,
-        "resolved_ip": p.resolved_ip, "resolved_domain": p.resolved_domain,
-        "mode": p.mode, "goal_name": p.goal_name, "goal_description": p.goal_description,
-        "model_alias": p.model_alias, "model_label": p.model_label,
-        "transport_summary": p.transport_summary, "permission": p.permission,
-        "attack_mode": p.attack_mode, "swarm": p.swarm, "parallel_swarm": p.parallel_swarm,
-        "multi_model": p.multi_model, "destructive": p.destructive,
+        "run_id": p.run_id,
+        "target_ip": p.target_ip,
+        "original_target": p.original_target,
+        "resolved_ip": p.resolved_ip,
+        "resolved_domain": p.resolved_domain,
+        "mode": p.mode,
+        "goal_name": p.goal_name,
+        "goal_description": p.goal_description,
+        "model_alias": p.model_alias,
+        "model_label": p.model_label,
+        "transport_summary": p.transport_summary,
+        "permission": p.permission,
+        "attack_mode": p.attack_mode,
+        "swarm": p.swarm,
+        "parallel_swarm": p.parallel_swarm,
+        "multi_model": p.multi_model,
+        "destructive": p.destructive,
         "required_confirmation_text": p.required_confirmation_text,
-        "budgets": p.budgets, "skill_activations": p.skill_activations,
-        "skill_errors": p.skill_errors, "resumed_from": p.resumed_from,
+        "budgets": p.budgets,
+        "skill_activations": p.skill_activations,
+        "skill_errors": p.skill_errors,
+        "resumed_from": p.resumed_from,
     }
 
 
 def _result_to_dict(r: RunResult) -> dict[str, Any]:
     return {
-        "run_id": r.run_id, "target_ip": r.target_ip, "mode": r.mode,
-        "goal_name": r.goal_name, "goal_description": r.goal_description,
-        "total_actions": r.total_actions, "workspace": r.workspace,
-        "audit_path": r.audit_path, "records": r.records, "messages": r.messages,
-        "error": r.error, "swarm_result": r.swarm_result,
-        "active_skills": r.active_skills, "outcome_summary": r.outcome_summary,
-        "telemetry": r.telemetry, "safety_review": r.safety_review,
-        "reports_dir": r.reports_dir, "summary_path": r.summary_path,
+        "run_id": r.run_id,
+        "target_ip": r.target_ip,
+        "mode": r.mode,
+        "goal_name": r.goal_name,
+        "goal_description": r.goal_description,
+        "total_actions": r.total_actions,
+        "workspace": r.workspace,
+        "audit_path": r.audit_path,
+        "records": r.records,
+        "messages": r.messages,
+        "error": r.error,
+        "swarm_result": r.swarm_result,
+        "active_skills": r.active_skills,
+        "outcome_summary": r.outcome_summary,
+        "telemetry": r.telemetry,
+        "safety_review": r.safety_review,
+        "reports_dir": r.reports_dir,
+        "summary_path": r.summary_path,
         "run_json_path": r.run_json_path,
         "cancelled": r.cancelled,
         "objective_transitions": r.objective_transitions,

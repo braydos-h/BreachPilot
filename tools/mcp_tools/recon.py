@@ -41,7 +41,9 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
         try:
             proc = subprocess.run(
                 ping_cmd + [target_ip],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             match = ttl_re.search(proc.stdout)
             if match:
@@ -101,8 +103,19 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
         # --- Banner text heuristics ---
         windows_banner_keywords = ["windows", "win32", "microsoft", "iis", "winrm"]
         linux_banner_keywords = [
-            "ubuntu", "debian", "centos", "red hat", "rhel", "fedora",
-            "suse", "alpine", "linux", "apache", "nginx/", "openssh", "ssh-2.0-openssh",
+            "ubuntu",
+            "debian",
+            "centos",
+            "red hat",
+            "rhel",
+            "fedora",
+            "suse",
+            "alpine",
+            "linux",
+            "apache",
+            "nginx/",
+            "openssh",
+            "ssh-2.0-openssh",
         ]
 
         for port, text in banner_texts.items():
@@ -318,12 +331,10 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
                             cert = tls_sock.getpeercert()
                             if cert:
                                 ssl_info["issuer"] = ", ".join(
-                                    f"{k}={v}" for item in cert.get("issuer", [])
-                                    for k, v in item if k == "commonName"
+                                    f"{k}={v}" for item in cert.get("issuer", []) for k, v in item if k == "commonName"
                                 )
                                 ssl_info["subject"] = ", ".join(
-                                    f"{k}={v}" for item in cert.get("subject", [])
-                                    for k, v in item if k == "commonName"
+                                    f"{k}={v}" for item in cert.get("subject", []) for k, v in item if k == "commonName"
                                 )
                                 san = cert.get("subjectAltName", [])
                                 ssl_info["san"] = [s[1] for s in san if s[0] == "DNS"]
@@ -403,9 +414,6 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
         except Exception as exc:
             return f"ERROR: Fingerprint failed Ã¢â‚¬â€ {exc}"
 
-
-
-
     # ======================================================================
     # 1b. Reconnaissance & Intelligence (Phase 3 Round 2: UDP / OSINT / diff)
     # ======================================================================
@@ -447,10 +455,7 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 "UDP_SERVICES:",
             ]
             for svc in udp_services:
-                lines.append(
-                    f"  {svc.port}/udp - {svc.service}"
-                    f"{' (' + svc.banner[:60] + '...)' if svc.banner else ''}"
-                )
+                lines.append(f"  {svc.port}/udp - {svc.service}{' (' + svc.banner[:60] + '...)' if svc.banner else ''}")
             if result.warnings:
                 lines.append(f"\nWARNINGS: {'; '.join(result.warnings[:5])}")
             if result.errors:

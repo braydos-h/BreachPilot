@@ -5,6 +5,7 @@ persistence + run dir with a synthetic audit trail + enhanced report, then
 asserts the route returns DAG JSON with the right node/edge shape. Verifies
 the route is default-off (404 when api.graph_route=false).
 """
+
 from __future__ import annotations
 
 import json
@@ -51,7 +52,9 @@ def test_build_graph_temporal_enables_edge_between_consecutive_tools():
     ]
     g = graph_routes.build_graph(records, [])
     enables_edges = [e for e in g["edges"] if e["relation"] == "enables"]
-    assert any(e["source"] == "tool:run_exploit_terminal" and e["target"] == "tool:dump_credentials" for e in enables_edges)
+    assert any(
+        e["source"] == "tool:run_exploit_terminal" and e["target"] == "tool:dump_credentials" for e in enables_edges
+    )
 
 
 def test_build_graph_skips_empty_tool_name():
@@ -70,10 +73,13 @@ def test_build_graph_handles_comma_joined_targets():
 
 def test_build_graph_chain_entries_become_step_nodes():
     chains = [
-        {"chain_id": "CHAIN-1", "entries": [
-            {"module": "recon", "result": "success"},
-            {"module": "exploit", "result": "success"},
-        ]},
+        {
+            "chain_id": "CHAIN-1",
+            "entries": [
+                {"module": "recon", "result": "success"},
+                {"module": "exploit", "result": "success"},
+            ],
+        },
     ]
     g = graph_routes.build_graph([], chains)
     step_nodes = [n for n in g["nodes"] if n["type"] == "step"]
@@ -108,9 +114,11 @@ def test_build_graph_node_shape():
 
 class _FakePersistence:
     """Minimal persistence stub: reports_dir + get_run()."""
+
     def __init__(self, reports_dir: Path, runs: dict[str, dict[str, Any]]):
         self.reports_dir = reports_dir
         self._runs = runs
+
     def get_run(self, run_id: str):
         return self._runs.get(run_id)
 
@@ -124,9 +132,11 @@ def _make_app(reports_dir: Path, runs: dict[str, dict[str, Any]], graph_enabled:
         persistence=_FakePersistence(reports_dir, runs),
         config={"api": {"graph_route": graph_enabled}},
     )
+
     # Monkeypatch _require_auth to bypass bearer token.
     async def _bypass_auth(request):
         return "test"
+
     graph_routes._require_auth = _bypass_auth  # type: ignore[assignment]
     app.include_router(graph_routes.router)
     return app
@@ -160,10 +170,13 @@ def test_graph_route_enabled_returns_dag(tmp_path):
     reports = tmp_path / "reports"
     reports.mkdir()
     run_dir = reports / "run-1"
-    _write_audit(run_dir, [
-        {"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.5", "status": "completed"},
-        {"tool_name": "dump_credentials", "target_ip": "10.0.0.5", "status": "completed"},
-    ])
+    _write_audit(
+        run_dir,
+        [
+            {"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.5", "status": "completed"},
+            {"tool_name": "dump_credentials", "target_ip": "10.0.0.5", "status": "completed"},
+        ],
+    )
     app = _make_app(reports, {"run-1": {"run_id": "run-1"}}, graph_enabled=True)
     client = TestClient(app)
     resp = client.get("/api/v1/runs/run-1/graph")
@@ -210,11 +223,16 @@ def test_graph_route_reads_enhanced_chains(tmp_path):
     _write_audit(run_dir, [])
     enhanced_dir = run_dir / "enhanced"
     enhanced_dir.mkdir(parents=True, exist_ok=True)
-    (enhanced_dir / "enhanced_report.json").write_text(json.dumps({
-        "exploitation_chains": [
-            {"chain_id": "CHAIN-1", "entries": [{"module": "recon", "result": "success"}]},
-        ],
-    }), encoding="utf-8")
+    (enhanced_dir / "enhanced_report.json").write_text(
+        json.dumps(
+            {
+                "exploitation_chains": [
+                    {"chain_id": "CHAIN-1", "entries": [{"module": "recon", "result": "success"}]},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
     app = _make_app(reports, {"run-1": {"run_id": "run-1"}}, graph_enabled=True)
     client = TestClient(app)
     resp = client.get("/api/v1/runs/run-1/graph")

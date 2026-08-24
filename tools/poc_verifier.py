@@ -145,21 +145,35 @@ def docker_check(
     try:
         src.write_text(code, encoding="utf-8")
         argv: list[str] = [
-            "docker", "run", "--rm",
-            "--network", str(network),
-            "--memory", str(memory),
-            "--cpus", "1",
-            "--cap-drop", "ALL",
-            "--security-opt", "no-new-privileges",
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            str(network),
+            "--memory",
+            str(memory),
+            "--cpus",
+            "1",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
         ]
         if read_only:
             argv.append("--read-only")
-        argv.extend([
-            "--tmpfs", "/tmp:rw,size=8m",
-            "-v", f"{src}:/poc.py:ro",
-            str(image),
-            "python", "-m", "py_compile", "/poc.py",
-        ])
+        argv.extend(
+            [
+                "--tmpfs",
+                "/tmp:rw,size=8m",
+                "-v",
+                f"{src}:/poc.py:ro",
+                str(image),
+                "python",
+                "-m",
+                "py_compile",
+                "/poc.py",
+            ]
+        )
         try:
             proc = subprocess.run(
                 argv,
@@ -239,10 +253,7 @@ def verify_poc(
 
 def render_verify_result(result: VerifyResult) -> str:
     """Render a ``VerifyResult`` as the MCP tool's text return."""
-    dock_text = (
-        "skipped" if result.docker_ok is None
-        else ("ok" if result.docker_ok else "FAILED")
-    )
+    dock_text = "skipped" if result.docker_ok is None else ("ok" if result.docker_ok else "FAILED")
     return (
         f"VERIFY_POC_RESULT:\n"
         f"CODE_SHA256: {result.code_sha256}\n"
@@ -268,6 +279,7 @@ def poc_verification_config(config: dict[str, Any] | None) -> dict[str, Any]:
 
 
 # ─── Self-check ──────────────────────────────────────────────────────────
+
 
 def _demo() -> int:
     """Runnable via ``python -m tools.poc_verifier``. Verifies two sample PoCs."""

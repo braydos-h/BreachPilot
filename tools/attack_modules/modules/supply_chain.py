@@ -17,7 +17,9 @@ class ExposedVCS(AttackModule):
     """
 
     name = "ExposedVCS"
-    description = "Detect exposed VCS metadata (.git/.svn/.hg/.bzr) on the target web root and leak .git/config (read-only)"
+    description = (
+        "Detect exposed VCS metadata (.git/.svn/.hg/.bzr) on the target web root and leak .git/config (read-only)"
+    )
     target_services = ["http", "https"]
     target_ports = [80, 443, 8080, 8443, 3000]
     required_cves: list[str] = []

@@ -44,8 +44,13 @@ def _check_python() -> dict[str, Any]:
 
 def _check_imports() -> dict[str, Any]:
     required = [
-        "yaml", "ollama", "mcp", "uvicorn", "websockets",
-        "questionary", "pytest",
+        "yaml",
+        "ollama",
+        "mcp",
+        "uvicorn",
+        "websockets",
+        "questionary",
+        "pytest",
     ]
     missing: list[str] = []
     for mod in required:
@@ -71,10 +76,7 @@ def _check_nmap(config: dict[str, Any] | None = None) -> dict[str, Any]:
     configured = str(nmap_cfg.get("path", "nmap")) or "nmap"
     path = shutil.which(configured)
     if not path:
-        hint = (
-            "install nmap (apt install nmap / brew install nmap) or set "
-            "nmap.path in config.yaml to its full path"
-        )
+        hint = "install nmap (apt install nmap / brew install nmap) or set nmap.path in config.yaml to its full path"
         return {"name": "nmap_binary", "ok": False, "error": f"nmap '{configured}' not on PATH", "hint": hint}
     return {"name": "nmap_binary", "ok": True, "path": path}
 
@@ -98,11 +100,15 @@ def _check_linux_privilege() -> dict[str, Any]:
         return {"name": "linux_privilege", "ok": True, "value": f"root (euid={euid})"}
     if sudo_on:
         return {
-            "name": "linux_privilege", "ok": True, "value": f"euid={euid} (sudo enabled)",
+            "name": "linux_privilege",
+            "ok": True,
+            "value": f"euid={euid} (sudo enabled)",
             "note": "nmap.sudo=true: -O/-sS run via sudo -n (needs passwordless sudo)",
         }
     return {
-        "name": "linux_privilege", "ok": True, "value": f"euid={euid} (non-root)",
+        "name": "linux_privilege",
+        "ok": True,
+        "value": f"euid={euid} (non-root)",
         "note": "nmap -O/-sS need root. The server auto-downgrades them when unprivileged; set nmap.sudo: true or rerun as root to enable OS/SYN scans.",
     }
 
@@ -227,15 +233,15 @@ def _ping_cloud_model(host: str, spec: str, timeout: float = 45.0) -> bool:
     → False.
     """
     url = f"{host.rstrip('/')}/api/generate"
-    body = json.dumps({
-        "model": spec,
-        "prompt": "ok",
-        "stream": False,
-        "options": {"num_predict": 1},
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        url, data=body, headers={"Content-Type": "application/json"}, method="POST"
-    )
+    body = json.dumps(
+        {
+            "model": spec,
+            "prompt": "ok",
+            "stream": False,
+            "options": {"num_predict": 1},
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
     api_key = (os.environ.get("OLLAMA_API_KEY", "") or "").strip()
     if api_key:
         req.add_header("Authorization", f"Bearer {api_key}")
@@ -261,6 +267,7 @@ def _check_chatgpt(config: dict[str, Any] | None = None) -> dict[str, Any]:
     import shutil as _shutil
 
     from tools.config_manager import get_chatgpt_config
+
     cfg = get_chatgpt_config(config)
     host = str(cfg.get("host") or "127.0.0.1")
     port = int(cfg.get("port") or 10531)
@@ -318,7 +325,9 @@ def _check_chatgpt(config: dict[str, Any] | None = None) -> dict[str, Any]:
     elif not models_ok:
         hint = f"Proxy up but /v1/models returned no models at {root}/v1/models."
     if not entry.exists():
-        hint = (hint + " " if hint else "") + "openai-oauth source not found — clone EvanZhouDev/openai-oauth into oauth/ and run `bun install`."
+        hint = (
+            hint + " " if hint else ""
+        ) + "openai-oauth source not found — clone EvanZhouDev/openai-oauth into oauth/ and run `bun install`."
     return {"name": "chatgpt_provider", "ok": ok, "subchecks": sub, "hint": hint, "runtime": runtime, "models": models}
 
 
@@ -338,6 +347,7 @@ def _check_config(path: Path) -> dict[str, Any]:
         return {"name": "config_valid", "ok": False, "path": str(path), "error": "missing"}
     try:
         from tools.config_manager import ConfigValidator
+
         # ConfigValidator takes a *path*, not a dict -- passing a dict makes
         # ``Path(data)`` raise TypeError, which the old code swallowed via a
         # bare ``except`` and degraded to ``ok = isinstance(data, dict)``,
@@ -370,8 +380,7 @@ def _check_port(host: str, port: int) -> dict[str, Any]:
                 f"`lsof -i :{port}` (Linux/macOS); stop it or set mcp.http_port "
                 f"in config.yaml to a free port."
             )
-            return {"name": f"port_{port}_free", "ok": False, "host": host, "port": port,
-                    "in_use": True, "hint": hint}
+            return {"name": f"port_{port}_free", "ok": False, "host": host, "port": port, "in_use": True, "hint": hint}
         except OSError:
             return {"name": f"port_{port}_free", "ok": True, "host": host, "port": port}
 
@@ -423,6 +432,7 @@ def run_doctor(config_path: Path) -> int:
     # ChatGPT provider check — only when selected, so the default (ollama)
     # doctor output is unchanged. Counts toward failures when provider=chatgpt.
     from tools.config_manager import get_ai_provider
+
     if get_ai_provider(config) == "chatgpt":
         checks.append(_check_chatgpt(config))
 
@@ -474,9 +484,11 @@ def run_doctor(config_path: Path) -> int:
                 cloud_missing = [s for s in missing if _is_cloud_spec(s)]
                 local_missing = [s for s in missing if not _is_cloud_spec(s)]
                 for spec in cloud_missing:
-                    print(f"        -> cloud model not reachable: run it to register & verify: ollama run {spec}"
-                          f" (cloud models aren't local weights — `ollama pull` only registers a pointer"
-                          f" and isn't a real test; `ollama run` hits the cloud backend)")
+                    print(
+                        f"        -> cloud model not reachable: run it to register & verify: ollama run {spec}"
+                        f" (cloud models aren't local weights — `ollama pull` only registers a pointer"
+                        f" and isn't a real test; `ollama run` hits the cloud backend)"
+                    )
                 for spec in local_missing:
                     print(f"        -> pull missing local model: ollama pull {spec}")
         if name == "ollama_reachable" and not c.get("ok"):
@@ -508,6 +520,7 @@ def run_doctor(config_path: Path) -> int:
 
 if __name__ == "__main__":
     import argparse as _ap
+
     _p = _ap.ArgumentParser()
     _p.add_argument("--config", type=Path, default=Path("config.yaml"))
     raise SystemExit(run_doctor(_p.parse_args().config))

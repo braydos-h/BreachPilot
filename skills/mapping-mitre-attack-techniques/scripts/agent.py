@@ -36,13 +36,15 @@ def get_all_techniques(attack_data: MitreAttackData) -> list[dict]:
             if phase.get("kill_chain_name") == "mitre-attack":
                 tactics.append(phase.get("phase_name", ""))
 
-        result.append({
-            "id": tech_id,
-            "name": tech.name,
-            "tactics": tactics,
-            "platforms": platforms,
-            "is_subtechnique": tech.get("x_mitre_is_subtechnique", False),
-        })
+        result.append(
+            {
+                "id": tech_id,
+                "name": tech.name,
+                "tactics": tactics,
+                "platforms": platforms,
+                "is_subtechnique": tech.get("x_mitre_is_subtechnique", False),
+            }
+        )
 
     return sorted(result, key=lambda x: x["id"])
 
@@ -122,12 +124,14 @@ def generate_navigator_layer(techniques: list[dict], detected_ids: set, layer_na
     for tech in techniques:
         score = 1 if tech["id"] in detected_ids else 0
         color = "#31a354" if score == 1 else ""
-        tech_entries.append({
-            "techniqueID": tech["id"],
-            "score": score,
-            "color": color,
-            "enabled": True,
-        })
+        tech_entries.append(
+            {
+                "techniqueID": tech["id"],
+                "score": score,
+                "color": color,
+                "enabled": True,
+            }
+        )
 
     return {
         "name": layer_name,

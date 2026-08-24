@@ -178,7 +178,9 @@ def test_install_rejects_front_matter_name_mismatch(tmp_path, monkeypatch):
 def test_remove_skill_deletes_dir(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
     # Install first.
-    client.post("/api/v1/skills", json={"name": "removable-skill", "markdown": _skill_md("removable-skill")}, headers=_auth())
+    client.post(
+        "/api/v1/skills", json={"name": "removable-skill", "markdown": _skill_md("removable-skill")}, headers=_auth()
+    )
     target = tmp_path / "skills" / "removable-skill"
     assert target.is_dir()
     resp = client.delete("/api/v1/skills/removable-skill", headers=_auth())

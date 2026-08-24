@@ -66,6 +66,7 @@ python scripts/agent.py --flow-file captured_flows.json --output netflow_report.
 ### Parse NetFlow v9 Packet
 ```python
 import netflow
+
 data, _ = netflow.parse_packet(raw_bytes, templates={})
 for flow in data.flows:
     print(flow.IPV4_SRC_ADDR, flow.IPV4_DST_ADDR, flow.IN_BYTES)

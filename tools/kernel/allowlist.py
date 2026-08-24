@@ -98,9 +98,7 @@ def _extract_msf_rhosts(text: str) -> list[str]:
     return out
 
 
-def check_targets_allowlist(
-    targets: list[str], config: dict[str, Any] | None
-) -> tuple[bool, str]:
+def check_targets_allowlist(targets: list[str], config: dict[str, Any] | None) -> tuple[bool, str]:
     """Return (allowed, reason) for a list of hosts (verbatim move)."""
     exploit_cfg = (config or {}).get("exploit", {})
     if not exploit_cfg.get("require_explicit_allowlist", False):

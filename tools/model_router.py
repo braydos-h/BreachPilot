@@ -156,6 +156,7 @@ def model_choice_items(
 @dataclass
 class ModelClient:
     """Thin wrapper around a raw model callable."""
+
     name: str
     chat: Callable[..., Any]
     stream: Callable[..., Any]
@@ -199,10 +200,7 @@ class ModelRouter:
         for client in self._clients.values():
             if client.model_id == alias or client.name == alias:
                 return client
-        raise KeyError(
-            f"Model alias '{alias}' not registered. "
-            f"Available: {list(self._clients)!r}"
-        )
+        raise KeyError(f"Model alias '{alias}' not registered. Available: {list(self._clients)!r}")
 
     def get_client_for_role(
         self,
@@ -473,10 +471,15 @@ def build_router(
     registry = registry or DEFAULT_MODEL_REGISTRY
     router = ModelRouter()
     for alias, model_name in registry.items():
-        router.register(str(alias), _build_model_client(
-            str(model_name), host=host, alias=str(alias),
-            request_timeout_seconds=request_timeout_seconds,
-        ))
+        router.register(
+            str(alias),
+            _build_model_client(
+                str(model_name),
+                host=host,
+                alias=str(alias),
+                request_timeout_seconds=request_timeout_seconds,
+            ),
+        )
     return router
 
 
@@ -558,9 +561,7 @@ def build_model_client_for_provider(
         manager = ChatGptProxyManager.get()
         running = manager.ensure_running(chatgpt_config)
         if not running.get("ok"):
-            raise RuntimeError(
-                f"ChatGPT provider unavailable: {running.get('reason') or 'unavailable'}."
-            )
+            raise RuntimeError(f"ChatGPT provider unavailable: {running.get('reason') or 'unavailable'}.")
         timeout = request_timeout_seconds
         if timeout is None and chatgpt_config.get("request_timeout_seconds") is not None:
             try:

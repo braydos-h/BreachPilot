@@ -37,14 +37,13 @@ def _config(allowed_assets: list[str] | None = None) -> dict:
         "disallowed_assets": [],
         "forbidden_actions": ["denial_of_service"],
         "testing_modes": ["recon", "analysis", "test", "exploit"],
-        "use_swarm": False,           # avoid needing a model client
+        "use_swarm": False,  # avoid needing a model client
         "critic_enabled": False,
         "reflection_enabled": False,
     }
 
 
-def _new_loop(workspace: Path, *, mission_id: str | None = None,
-               allowed_assets: list[str] | None = None) -> AgentLoop:
+def _new_loop(workspace: Path, *, mission_id: str | None = None, allowed_assets: list[str] | None = None) -> AgentLoop:
     return AgentLoop(
         _config(allowed_assets=allowed_assets),
         workspace,
@@ -100,9 +99,7 @@ def test_resume_uses_db_scope_not_config(tmp_path):
 
     # Resume with a DIFFERENT allowed_assets in config -- must be ignored.
     loop2 = _new_loop(ws, mission_id=mid, allowed_assets=["10.0.0.99"])
-    assert loop2._mission.allowed_assets == ["10.0.0.50"], (
-        "resume used config scope instead of the saved DB scope"
-    )
+    assert loop2._mission.allowed_assets == ["10.0.0.50"], "resume used config scope instead of the saved DB scope"
     # ScopeGate is constructed from the loaded mission, so its allow rules
     # reflect the DB assets ("10.0.0.50"), NOT the passed config ("10.0.0.99").
     allow_patterns = {r["pattern"] for r in loop2._scope_gate._allow_rules}
@@ -120,12 +117,33 @@ def test_reset_stale_running_requeues_inflight_tasks(tmp_path):
     loop = _new_loop(ws)
     q = loop._queue
 
-    q.create_task({"task_id": "T-RUN-1", "phase": "recon", "target": "10.0.0.50",
-                   "objective": "in-flight when crash", "status": "running"})
-    q.create_task({"task_id": "T-PEND-1", "phase": "recon", "target": "10.0.0.50",
-                   "objective": "never started", "status": "pending"})
-    q.create_task({"task_id": "T-DONE-1", "phase": "recon", "target": "10.0.0.50",
-                   "objective": "already done", "status": "complete"})
+    q.create_task(
+        {
+            "task_id": "T-RUN-1",
+            "phase": "recon",
+            "target": "10.0.0.50",
+            "objective": "in-flight when crash",
+            "status": "running",
+        }
+    )
+    q.create_task(
+        {
+            "task_id": "T-PEND-1",
+            "phase": "recon",
+            "target": "10.0.0.50",
+            "objective": "never started",
+            "status": "pending",
+        }
+    )
+    q.create_task(
+        {
+            "task_id": "T-DONE-1",
+            "phase": "recon",
+            "target": "10.0.0.50",
+            "objective": "already done",
+            "status": "complete",
+        }
+    )
 
     n = q.reset_stale_running()
     assert n == 1
@@ -146,14 +164,26 @@ def test_resume_requeues_stale_running_tasks_end_to_end(tmp_path):
     loop1 = _new_loop(ws)
     mid = loop1._mission_id
     loop1._queue.create_task(
-        {"task_id": "T-CRASH", "phase": "recon", "target": "10.0.0.50",
-         "objective": "crashed mid-flight", "status": "running"})
+        {
+            "task_id": "T-CRASH",
+            "phase": "recon",
+            "target": "10.0.0.50",
+            "objective": "crashed mid-flight",
+            "status": "running",
+        }
+    )
     loop1._queue.create_task(
-        {"task_id": "T-WAIT", "phase": "recon", "target": "10.0.0.50",
-         "objective": "still queued", "status": "pending"})
+        {"task_id": "T-WAIT", "phase": "recon", "target": "10.0.0.50", "objective": "still queued", "status": "pending"}
+    )
     loop1._queue.create_task(
-        {"task_id": "T-FINI", "phase": "recon", "target": "10.0.0.50",
-         "objective": "done before crash", "status": "complete"})
+        {
+            "task_id": "T-FINI",
+            "phase": "recon",
+            "target": "10.0.0.50",
+            "objective": "done before crash",
+            "status": "complete",
+        }
+    )
     # Drop loop1 (simulate process exit).
 
     loop2 = _new_loop(ws, mission_id=mid)
@@ -181,9 +211,19 @@ def test_resume_carries_over_findings_and_evidence(tmp_path):
             """INSERT INTO findings(id, mission_id, title, vuln_class,
                affected_asset, summary, impact, confidence, status, created_at, updated_at)
                VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
-            ("F-1", mid, "test finding", "exploitation", "10.0.0.50",
-             "summary", "high", 0.9, "validated", "2026-06-18T00:00:00Z",
-             "2026-06-18T00:00:00Z"),
+            (
+                "F-1",
+                mid,
+                "test finding",
+                "exploitation",
+                "10.0.0.50",
+                "summary",
+                "high",
+                0.9,
+                "validated",
+                "2026-06-18T00:00:00Z",
+                "2026-06-18T00:00:00Z",
+            ),
         )
 
     loop2 = _new_loop(ws, mission_id=mid)

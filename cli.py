@@ -45,6 +45,7 @@ def _workspace_root() -> Path:
 
 def _load_db():
     from db import DatabaseManager
+
     return DatabaseManager(_workspace_root() / "research.db")
 
 
@@ -61,10 +62,7 @@ def _load_mission(db: Any, mission_id: str | None = None) -> dict[str, Any] | No
         if mission_id:
             cur = conn.execute("SELECT * FROM missions WHERE id=?", (mission_id,))
         else:
-            cur = conn.execute(
-                "SELECT * FROM missions WHERE status='active' "
-                "ORDER BY created_at DESC LIMIT 1"
-            )
+            cur = conn.execute("SELECT * FROM missions WHERE status='active' ORDER BY created_at DESC LIMIT 1")
         row = cur.fetchone()
         if not row:
             return None
@@ -91,6 +89,7 @@ def _require_mission(args: argparse.Namespace) -> tuple[Any, dict[str, Any] | No
 
 def _get_mission_ctrl(db: Any) -> Any:
     from mission import MissionController
+
     return MissionController(db, _workspace_root())
 
 
@@ -117,9 +116,9 @@ def cmd_init_mission(args: argparse.Namespace) -> int:
         print(f"ERROR: {exc}")
         return 1
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("  MISSION CREATED")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  ID:              {mission.mission_id}")
     print(f"  Program:         {mission.program_name}")
     print(f"  Risk Profile:    {mission.risk_profile}")
@@ -128,7 +127,7 @@ def cmd_init_mission(args: argparse.Namespace) -> int:
     print(f"  Forbidden:       {len(mission.forbidden_actions)} actions")
     print(f"  Testing Modes:   {', '.join(mission.testing_modes)}")
     print(f"  Workspace:       {ws}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     print(f"Mission stored. Database at: {ws / 'research.db'}")
     return 0
@@ -153,6 +152,7 @@ def cmd_add_scope(args: argparse.Namespace) -> int:
         rule_type = "deny"
 
     from mission import _classify_asset
+
     target_type = _classify_asset(pattern)
 
     with db.connection(write=True) as conn:
@@ -170,9 +170,11 @@ def cmd_list_scope(args: argparse.Namespace) -> int:
     mid = mission["id"]
     from mission import Mission
     from scope_gate import ScopeGate
+
     m = Mission.from_dict(mission)
     gate = ScopeGate(
-        db, mid,
+        db,
+        mid,
         allowed_assets=m.allowed_assets,
         disallowed_assets=m.disallowed_assets,
         forbidden_actions=m.forbidden_actions,
@@ -209,6 +211,7 @@ def cmd_next_task(args: argparse.Namespace) -> int:
 
     mid = mission["id"]
     from task_queue import TaskQueue
+
     queue = TaskQueue(db, mid)
     task = queue.get_next_task()
 
@@ -235,6 +238,7 @@ def cmd_list_tasks(args: argparse.Namespace) -> int:
 
     mid = mission["id"]
     from task_queue import TaskQueue
+
     queue = TaskQueue(db, mid)
 
     open_tasks = queue.list_open_tasks()
@@ -257,7 +261,7 @@ def cmd_list_tasks(args: argparse.Namespace) -> int:
     if blocked_tasks:
         print("\n--- Blocked ---")
         for t in blocked_tasks[:5]:
-            print(f"  {t['task_id']}: {t.get('block_reason','?')[:100]}")
+            print(f"  {t['task_id']}: {t.get('block_reason', '?')[:100]}")
     return 0
 
 
@@ -268,9 +272,11 @@ def cmd_run_task(args: argparse.Namespace) -> int:
 
     mid = mission_data["id"]
     from mission import Mission
+
     mission = Mission.from_dict(mission_data)
 
     from task_queue import TaskQueue
+
     queue = TaskQueue(db, mid)
 
     task_id = args.task_id
@@ -291,8 +297,10 @@ def cmd_run_task(args: argparse.Namespace) -> int:
 
     # Scope check via ScopeGate
     from scope_gate import ScopeGate
+
     gate = ScopeGate(
-        db, mid,
+        db,
+        mid,
         allowed_assets=mission.allowed_assets,
         disallowed_assets=mission.disallowed_assets,
         forbidden_actions=mission.forbidden_actions,
@@ -300,9 +308,9 @@ def cmd_run_task(args: argparse.Namespace) -> int:
     )
     gate.load_from_db()
 
-    scope = gate.check_scope(task["target"], task["phase"],
-                              task["allowed_tools"][0] if task["allowed_tools"] else "",
-                              task["risk_level"])
+    scope = gate.check_scope(
+        task["target"], task["phase"], task["allowed_tools"][0] if task["allowed_tools"] else "", task["risk_level"]
+    )
     if not scope.allowed:
         print(f"\n  BLOCKED: {scope.reason}")
         queue.block_task(task["task_id"], scope.reason)
@@ -311,6 +319,7 @@ def cmd_run_task(args: argparse.Namespace) -> int:
     print(f"  Scope:    PASSED ({scope.matched_scope_rule})")
 
     from risk_controller import RiskController
+
     risk_ctrl = RiskController(
         risk_profile=mission.risk_profile,
         max_commands=mission.max_commands_per_session,
@@ -318,11 +327,13 @@ def cmd_run_task(args: argparse.Namespace) -> int:
         allow_exploitation=mission.allows_exploitation,
         allow_pivoting=mission.allows_pivoting,
     )
-    risk = risk_ctrl.assess_action(task["phase"],
-                                    task["allowed_tools"][0] if task["allowed_tools"] else "unknown",
-                                    json.dumps(task)[:300],
-                                    task["target"],
-                                    task["risk_level"])
+    risk = risk_ctrl.assess_action(
+        task["phase"],
+        task["allowed_tools"][0] if task["allowed_tools"] else "unknown",
+        json.dumps(task)[:300],
+        task["target"],
+        task["risk_level"],
+    )
     if not risk.allowed:
         print(f"\n  BLOCKED: {risk.reason}")
         queue.block_task(task["task_id"], risk.reason)
@@ -341,9 +352,11 @@ def cmd_run_task(args: argparse.Namespace) -> int:
         return 1
 
     from evidence import EvidenceStore
+
     evidence = EvidenceStore(db, mid, _workspace_root())
 
     from tool_router import ToolRouter
+
     tool_router = ToolRouter(
         scope_gate=gate,
         risk_controller=risk_ctrl,
@@ -354,6 +367,7 @@ def cmd_run_task(args: argparse.Namespace) -> int:
     )
 
     from executor import ExecutorAgent
+
     executor = ExecutorAgent(tool_router)
     result = executor.execute(task)
 
@@ -367,9 +381,11 @@ def cmd_run_task(args: argparse.Namespace) -> int:
         print(f"\n  ✗ Task failed: {result.error}")
 
     from observer import ObserverAgent
+
     obs = ObserverAgent()
     observation = obs.observe(task, result.output_summary, result.tool_name, evidence_refs=result.evidence_refs)
     from summarizer import summarize_observation
+
     print(f"\n  Observation: {summarize_observation(observation.to_dict())}")
 
     return 0
@@ -383,6 +399,7 @@ def cmd_summarize_target(args: argparse.Namespace) -> int:
     mid = mission["id"]
 
     from memory import MemoryManager
+
     mem = MemoryManager(db, mid)
 
     name = args.target or mission.get("program_name", "")
@@ -390,6 +407,7 @@ def cmd_summarize_target(args: argparse.Namespace) -> int:
     print(summary)
 
     from target_graph import TargetGraph
+
     graph = TargetGraph(db, mid)
     print()
     print(graph.summarize_graph())
@@ -404,6 +422,7 @@ def cmd_list_findings(args: argparse.Namespace) -> int:
 
     mid = mission["id"]
     from finding_verifier import FindingVerifier
+
     verifier = FindingVerifier(db, mid)
 
     all_findings = verifier.list_all()
@@ -414,8 +433,14 @@ def cmd_list_findings(args: argparse.Namespace) -> int:
 
     print(f"\n=== FINDINGS ({len(all_findings)} total) ===\n")
     for f in all_findings:
-        status_icon = {"candidate": "○", "needs_validation": "?", "validated": "✓",
-                        "report_ready": "★", "rejected": "✗", "duplicate_suspected": "≃"}.get(f["status"], "?")
+        status_icon = {
+            "candidate": "○",
+            "needs_validation": "?",
+            "validated": "✓",
+            "report_ready": "★",
+            "rejected": "✗",
+            "duplicate_suspected": "≃",
+        }.get(f["status"], "?")
         print(f"  {status_icon} [{f['finding_id']}] [{f['status']}] {f['title'][:80]}")
 
     return 0
@@ -435,9 +460,9 @@ def cmd_validate_finding(args: argparse.Namespace) -> int:
 
     verifier = FindingVerifier(db, mid)
     m = Mission.from_dict(mission)
-    gate = ScopeGate(db, mid, allowed_assets=m.allowed_assets,
-                      disallowed_assets=m.disallowed_assets,
-                      risk_profile=m.risk_profile)
+    gate = ScopeGate(
+        db, mid, allowed_assets=m.allowed_assets, disallowed_assets=m.disallowed_assets, risk_profile=m.risk_profile
+    )
     gate.load_from_db()
     ev = EvidenceStore(db, mid, _workspace_root())
 
@@ -483,10 +508,10 @@ def cmd_status(args: argparse.Namespace) -> int:
     findings = verifier.list_all()
 
     print("\n=== Agent Status ===")
-    print(f"  Mission:    {mission.get('program_name','')} ({mid})")
-    print(f"  Risk:       {mission.get('risk_profile','')}")
-    print(f"  Status:     {mission.get('status','')}")
-    print(f"  Created:    {mission.get('created_at','')}")
+    print(f"  Mission:    {mission.get('program_name', '')} ({mid})")
+    print(f"  Risk:       {mission.get('risk_profile', '')}")
+    print(f"  Status:     {mission.get('status', '')}")
+    print(f"  Created:    {mission.get('created_at', '')}")
     print()
     print("  Tasks:")
     for st, cnt in sorted(counts.items()):
@@ -512,9 +537,10 @@ def build_parser() -> argparse.ArgumentParser:
     # M-001`), which is the natural reading order.
     mid_parser = argparse.ArgumentParser(add_help=False)
     mid_parser.add_argument(
-        "--mission-id", default=None,
+        "--mission-id",
+        default=None,
         help="Operate on this specific mission id (resume/reattach) instead of "
-             "the latest active one. The mission may be 'active' or 'paused'.",
+        "the latest active one. The mission may be 'active' or 'paused'.",
     )
 
     # init-mission
@@ -590,6 +616,7 @@ def main(argv: list[str] | None = None) -> int:
         return 130
     except Exception as exc:
         import traceback
+
         print(f"\nUNEXPECTED ERROR: {exc}")
         traceback.print_exc()
         return 1

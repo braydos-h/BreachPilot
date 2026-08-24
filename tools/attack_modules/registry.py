@@ -53,6 +53,7 @@ def _discover_attack_modules() -> None:
 # Populate on import — single source, no manual list.
 _discover_attack_modules()
 
+
 def _plugin_extra_module_classes() -> list[type]:
     """Return plugin-registered AttackModule subclasses, if any.
 
@@ -61,6 +62,7 @@ def _plugin_extra_module_classes() -> list[type]:
     """
     try:
         from tools.plugins import PLUGIN_REGISTRY
+
         return list(PLUGIN_REGISTRY.extra_module_classes)
     except Exception:  # noqa: BLE001 -- best-effort plugin consult
         return []
@@ -98,9 +100,7 @@ def list_modules() -> list[AttackModule]:
     return modules
 
 
-def find_modules(
-    ctx: ModuleContext, experience_store: Any | None = None
-) -> list[tuple[float, AttackModule]]:
+def find_modules(ctx: ModuleContext, experience_store: Any | None = None) -> list[tuple[float, AttackModule]]:
     """Return modules sorted by a composite of static applicability and
     (when an experience store is provided) Bayesian confidence.
 
@@ -194,9 +194,7 @@ def _module_target_signature(mod: AttackModule, ctx: ModuleContext) -> str | Non
     return f"{primary}:{version or ''}:{os_hint}"
 
 
-def _module_experience_confidence(
-    mod: AttackModule, ctx: ModuleContext, experience_store: Any | None
-) -> float:
+def _module_experience_confidence(mod: AttackModule, ctx: ModuleContext, experience_store: Any | None) -> float:
     """Return the module's mean Bayesian confidence across all mutation
     strategies tried against its target signature, or 0.5 (neutral) when
     there is no store, no signature, no recorded data, or the store raises."""
@@ -214,11 +212,7 @@ def _module_experience_confidence(
     # action_type is recorded as "<module_name>:<mutation_strategy>"; aggregate
     # all strategies for this module so the ranking reflects "has this module
     # historically worked against this signature", strategy-agnostic.
-    module_confs = [
-        conf
-        for action, conf in confs.items()
-        if action == mod.name or action.startswith(mod.name + ":")
-    ]
+    module_confs = [conf for action, conf in confs.items() if action == mod.name or action.startswith(mod.name + ":")]
     if not module_confs:
         return 0.5
     return sum(module_confs) / len(module_confs)

@@ -27,6 +27,7 @@ stale map (version the map file).
 Self-check: ``python -m tools.mitre_export`` runs ``demo()`` which maps a
 synthetic audit list and asserts technique IDs/scores without writing files.
 """
+
 from __future__ import annotations
 
 import json
@@ -42,21 +43,21 @@ log = logging.getLogger("tools.mitre_export")
 # Overridable by tools/mitre_technique_map.json. Keys are MCP tool names as
 # they appear in exploit_audit.jsonl ``tool_name`` fields.
 _DEFAULT_MAP: dict[str, str] = {
-    "run_exploit_terminal": "T1059",       # Command and Scripting Interpreter
-    "write_python_file": "T1059.006",      # Python
+    "run_exploit_terminal": "T1059",  # Command and Scripting Interpreter
+    "write_python_file": "T1059.006",  # Python
     "run_python_file": "T1059.006",
-    "run_msf_module": "T1210",             # Exploitation of Remote Services
-    "msf_generate_payload": "T1027",       # Obfuscated Files or Information
+    "run_msf_module": "T1210",  # Exploitation of Remote Services
+    "msf_generate_payload": "T1027",  # Obfuscated Files or Information
     "generate_payload": "T1027",
-    "lateral_exec": "T1021",               # Remote Services
-    "dump_credentials": "T1003",           # OS Credential Dumping
-    "kerberoast": "T1558.003",             # Kerberoasting
-    "run_hash_crack": "T1110.002",         # Password Cracking
-    "run_web_scan": "T1595",               # Active Scanning
-    "password_spray": "T1110.003",         # Password Spraying
-    "asrep_roast": "T1558.004",            # AS-REP Roasting
-    "golden_ticket": "T1558.001",          # Golden Ticket
-    "pass_the_hash": "T1550.002",          # Pass the Hash
+    "lateral_exec": "T1021",  # Remote Services
+    "dump_credentials": "T1003",  # OS Credential Dumping
+    "kerberoast": "T1558.003",  # Kerberoasting
+    "run_hash_crack": "T1110.002",  # Password Cracking
+    "run_web_scan": "T1595",  # Active Scanning
+    "password_spray": "T1110.003",  # Password Spraying
+    "asrep_roast": "T1558.004",  # AS-REP Roasting
+    "golden_ticket": "T1558.001",  # Golden Ticket
+    "pass_the_hash": "T1550.002",  # Pass the Hash
 }
 
 _MAX_COMMENT_CHARS = 200
@@ -149,6 +150,7 @@ def _collect_skill_techniques(include_skills: bool) -> dict[str, list[str]]:
         return {}
     try:
         from tools.skill_registry import load_skill_registry
+
         reg = load_skill_registry()
     except Exception:  # noqa: BLE001 -- skill load failure never breaks export
         return {}
@@ -220,13 +222,15 @@ def build_navigator_layer(
             break
         # Navigator 4.5: techniqueID, score, comment. Showable determines
         # visibility; we set it true so the technique is highlighted.
-        techniques.append({
-            "techniqueID": tid,
-            "score": count,
-            "comment": "; ".join(comments[tid][:5])[:_MAX_COMMENT_CHARS],
-            "showID": True,
-            "showName": True,
-        })
+        techniques.append(
+            {
+                "techniqueID": tid,
+                "score": count,
+                "comment": "; ".join(comments[tid][:5])[:_MAX_COMMENT_CHARS],
+                "showID": True,
+                "showName": True,
+            }
+        )
 
     return {
         "name": layer_name,
@@ -293,8 +297,10 @@ def export_attack_navigator(
     technique_map = load_technique_map(technique_map_path)
     records = _read_audit_records(audit, target_ip)
     layer = build_navigator_layer(
-        records, technique_map,
-        target_ip=target_ip, include_skills=include_skills,
+        records,
+        technique_map,
+        target_ip=target_ip,
+        include_skills=include_skills,
         layer_name=f"NetAttackAI {target_ip or 'run'}",
     )
 
@@ -350,8 +356,10 @@ def demo() -> dict[str, Any]:
         {"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.99", "status": "completed"},  # wrong target
     ]
     layer = build_navigator_layer(
-        synthetic, _DEFAULT_MAP,
-        target_ip="10.0.0.5", include_skills=False,  # skills off so the demo is deterministic
+        synthetic,
+        _DEFAULT_MAP,
+        target_ip="10.0.0.5",
+        include_skills=False,  # skills off so the demo is deterministic
         layer_name="demo",
     )
     by_id = {t["techniqueID"]: t["score"] for t in layer["techniques"]}
@@ -368,8 +376,10 @@ def demo() -> dict[str, Any]:
     assert layer["versions"]["layer"] == "4.5"
     assert layer["domain"] == "enterprise-attack"
     assert isinstance(layer["techniques"], list)
-    print(f"demo OK: {len(layer['techniques'])} techniques mapped "
-          f"({', '.join(sorted(by_id))}) from {len(synthetic)} synthetic records")
+    print(
+        f"demo OK: {len(layer['techniques'])} techniques mapped "
+        f"({', '.join(sorted(by_id))}) from {len(synthetic)} synthetic records"
+    )
     return layer
 
 

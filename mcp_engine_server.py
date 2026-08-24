@@ -37,10 +37,7 @@ from typing import Any
 try:
     from mcp.server.fastmcp import FastMCP
 except ImportError as exc:  # pragma: no cover - import guard
-    raise RuntimeError(
-        "The MCP Python SDK is not installed. Run: "
-        "python -m pip install -r requirements.txt"
-    ) from exc
+    raise RuntimeError("The MCP Python SDK is not installed. Run: python -m pip install -r requirements.txt") from exc
 
 from tools.api.persistence import ApiPersistence
 from tools.cve_lookup import format_cve_results
@@ -194,9 +191,7 @@ def create_mcp_server(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Engine MCP server — advisory surface for foreign AI assistants."
-    )
+    parser = argparse.ArgumentParser(description="Engine MCP server — advisory surface for foreign AI assistants.")
     parser.add_argument("--transport", choices=("stdio", "http"), default="stdio")
     parser.add_argument("--config", type=Path, default=Path("config.yaml"))
     parser.add_argument("--host", default="127.0.0.1")

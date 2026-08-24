@@ -34,6 +34,7 @@ def _ssh_only_ctx() -> ModuleContext:
 
 # --- SSRFProbe -------------------------------------------------------------
 
+
 def test_ssrf_probe_class_attrs():
     m = SSRFProbe()
     assert m.name == "SSRFProbe"
@@ -71,6 +72,7 @@ def test_ssrf_probe_applicability_http_vs_ssh():
 
 # --- XXEProbe --------------------------------------------------------------
 
+
 def test_xxe_probe_class_attrs():
     m = XXEProbe()
     assert m.name == "XXEProbe"
@@ -103,6 +105,7 @@ def test_xxe_probe_applicability_http_vs_ssh():
 
 
 # --- LFITraversal ----------------------------------------------------------
+
 
 def test_lfi_traversal_class_attrs():
     m = LFITraversal()

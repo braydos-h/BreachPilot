@@ -211,11 +211,7 @@ async def test_oversized_tool_output_keeps_source_urls_when_compacted(
 
     advisory = await assistant.consult("Find a matching local exploit.")
 
-    tool_message = next(
-        message
-        for message in client.calls[1]["messages"]
-        if message.get("role") == "tool"
-    )
+    tool_message = next(message for message in client.calls[1]["messages"] if message.get("role") == "tool")
     assert len(tool_message["content"]) <= 12_000
     assert "SOURCE URLS RETAINED" in tool_message["content"]
     assert source_url in tool_message["content"]
@@ -308,10 +304,7 @@ async def test_malformed_output_degrades_and_persists_jsonl(tmp_path: Path) -> N
     assert advisory["status"] == "partial"
     assert any("not valid JSON" in warning for warning in advisory["warnings"])
     records = [
-        json.loads(line)
-        for line in (tmp_path / "research_advisories.jsonl").read_text(
-            encoding="utf-8"
-        ).splitlines()
+        json.loads(line) for line in (tmp_path / "research_advisories.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     assert records[0]["question"] == "Research something obscure."
 
@@ -423,8 +416,7 @@ async def test_explicit_loop_consultation_never_reaches_mcp(tmp_path: Path) -> N
         }
     )
     fake_assistant.format_for_main.return_value = (
-        f"{RESEARCH_ADVISORY_MARKER}\nSummary: Check the vendor backport.\n"
-        "Sources:\n- https://vendor.example/advisory"
+        f"{RESEARCH_ADVISORY_MARKER}\nSummary: Check the vendor backport.\nSources:\n- https://vendor.example/advisory"
     )
     fake_assistant.compact_ui_hint.return_value = "Check the vendor backport."
     fake_assistant.stats.return_value = {
@@ -452,10 +444,7 @@ async def test_explicit_loop_consultation_never_reaches_mcp(tmp_path: Path) -> N
 
     session.call_tool.assert_not_awaited()
     fake_assistant.consult.assert_awaited_once()
-    assert any(
-        message.get("tool_name") == CONSULT_RESEARCH_ASSISTANT
-        for message in result["messages"]
-    )
+    assert any(message.get("tool_name") == CONSULT_RESEARCH_ASSISTANT for message in result["messages"])
     assert result["research_assistant"]["consultations"] == 1
 
 
@@ -486,36 +475,27 @@ async def test_loop_automatically_consults_for_new_service_and_cve(
             _response(content="Finished."),
         ]
     )
-    session = _FakeSession(
-        "80/tcp open http Apache httpd 2.4.49 CVE-2021-41773"
-    )
+    session = _FakeSession("80/tcp open http Apache httpd 2.4.49 CVE-2021-41773")
     fake_assistant = MagicMock()
     fake_assistant.consult = AsyncMock(
         return_value={
             "status": "ok",
             "summary": "Validate the exact Apache patch level.",
             "confidence": "high",
-            "source_urls": [
-                "https://nvd.nist.gov/vuln/detail/CVE-2021-41773"
-            ],
+            "source_urls": ["https://nvd.nist.gov/vuln/detail/CVE-2021-41773"],
         }
     )
     fake_assistant.format_for_main.return_value = (
-        f"{RESEARCH_ADVISORY_MARKER}\n"
-        "Summary: Validate the exact Apache patch level."
+        f"{RESEARCH_ADVISORY_MARKER}\nSummary: Validate the exact Apache patch level."
     )
-    fake_assistant.compact_ui_hint.return_value = (
-        "Validate the exact Apache patch level."
-    )
+    fake_assistant.compact_ui_hint.return_value = "Validate the exact Apache patch level."
     fake_assistant.note_exploit_outcome.return_value = False
     fake_assistant.stats.return_value = {
         "enabled": True,
         "consultations": 1,
         "automatic_consultations": 1,
         "failed_consultations": 0,
-        "sources_used": [
-            "https://nvd.nist.gov/vuln/detail/CVE-2021-41773"
-        ],
+        "sources_used": ["https://nvd.nist.gov/vuln/detail/CVE-2021-41773"],
         "artifact_path": str(tmp_path / "research_advisories.jsonl"),
     }
     banners = [

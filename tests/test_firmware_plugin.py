@@ -58,10 +58,12 @@ def test_unpack_calls_binwalk_when_available(tmp_path, monkeypatch):
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / "squashfs-root").mkdir(exist_ok=True)
         (out_dir / "squashfs-root" / "bin").write_bytes(b"\x00")
+
         class _Proc:
             returncode = 0
             stdout = "DECIMAL       HEX         DESCRIPTION\n0             0x0         SquashFS"
             stderr = ""
+
         return _Proc()
 
     monkeypatch.setattr("plugins.firmware_analysis.plugin.subprocess.run", _fake_run)
@@ -86,16 +88,21 @@ def test_mcp_tool_is_audit_tool():
             def _audit(fn):
                 fn.__wrapped_audit_tool__ = True
                 return fn
+
             self.audit_tool = _audit
             from functools import wraps
+
             def _require(*a, **k):
                 def deco(fn):
                     @wraps(fn)
                     async def wrapper(*args, **kw):
                         return await fn(*args, **kw)
+
                     wrapper.__wrapped_require_allowlist__ = True
                     return wrapper
+
                 return deco
+
             self.require_allowlist = _require
 
     class _FakeMcp:
@@ -103,6 +110,7 @@ def test_mcp_tool_is_audit_tool():
             def deco(fn):
                 captured.append(fn)
                 return fn
+
             return deco
 
     class _FakeRegistry:

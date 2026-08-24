@@ -154,6 +154,7 @@ def _get_model_router_impl(config: dict[str, Any] | None) -> Any | None:
         try:
             from tools.config_manager import get_ai_provider, get_chatgpt_config
             from tools.model_router import build_router
+
             registry = (config or {}).get("models", {}).get("registry", {})
             host = (config or {}).get("ollama", {}).get("host", "http://localhost:11434")
             provider = get_ai_provider(config)
@@ -203,7 +204,9 @@ def _resolve_consult_aliases(config: dict[str, Any] | None) -> list[str]:
     """
     cfg = config or {}
     mm = cfg.get("multi_model", {}) or {}
-    requested = [str(a) for a in (mm.get("consult_aliases") or ["kimi", "deepseek", "deepseek_flash", "glm", "minimax"])]
+    requested = [
+        str(a) for a in (mm.get("consult_aliases") or ["kimi", "deepseek", "deepseek_flash", "glm", "minimax"])
+    ]
     registry = cfg.get("models", {}).get("registry", {}) or {}
     active = os.environ.get("AI_NMAP_ACTIVE_MODEL_ALIAS") or cfg.get("models", {}).get("default_alias", "glm")
     available = set(registry.keys())
@@ -262,7 +265,7 @@ def _truncate_text(value: str, max_chars: int) -> str:
 
 def _skills_config(config: dict[str, Any] | None) -> dict[str, Any]:
     base = dict(CONFIG_SCHEMA.get("skills", {}) or {})
-    overlay = ((config or {}).get("skills", {}) or {})
+    overlay = (config or {}).get("skills", {}) or {}
     if isinstance(overlay, dict):
         base.update(overlay)
     return base
@@ -384,7 +387,9 @@ def _validate_mcp_tool_decorators() -> list[str]:
                 if "audit_tool" in low or "require_allowlist" in low:
                     has_audit = True
             if has_mcp_tool and not has_audit:
-                errors.append(f"{py.name}:{node.lineno} {node.name} has @mcp.tool but lacks @audit_tool/@require_allowlist")
+                errors.append(
+                    f"{py.name}:{node.lineno} {node.name} has @mcp.tool but lacks @audit_tool/@require_allowlist"
+                )
     return errors
 
 
@@ -405,11 +410,11 @@ def collect_tools() -> list[Any]:
     return registrars
 
 
-
 # -- Kernel re-exports (Phase 3) --
 # read_workspace now lives in tools.kernel.workspace; re-export for backwards compat
 # (from tools.mcp_tools.registry import read_workspace still works).
 # See tools/kernel/workspace.py
+
 
 def ps_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"

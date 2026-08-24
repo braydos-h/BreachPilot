@@ -175,11 +175,7 @@ def _register_mobile_tools(mcp: Any, ctx: Any) -> None:
 
         if not findings:
             return f"MOBILE_INSPECT_RESULT: no findings in {candidate}"
-        return (
-            f"MOBILE_INSPECT_RESULT: {len(findings)} finding(s)\n"
-            f"PATH: {candidate}\n"
-            + "\n".join(findings[:100])
-        )
+        return f"MOBILE_INSPECT_RESULT: {len(findings)} finding(s)\nPATH: {candidate}\n" + "\n".join(findings[:100])
 
     # --- Device-touching tools (allowlist-gated) -----------------------------
 
@@ -214,12 +210,7 @@ def _register_mobile_tools(mcp: Any, ctx: Any) -> None:
         out, rc, err = _run_tool(frida_bin, argv, timeout=60)
         if rc is None or rc != 0:
             return f"MOBILE_FRIDA_ATTACH_ERROR: {err or out}"
-        return (
-            f"MOBILE_FRIDA_ATTACH_RESULT: success\n"
-            f"DEVICE: {target_ip}\n"
-            f"APP: {app_id}\n"
-            f"OUTPUT: {out[:4000]}"
-        )
+        return f"MOBILE_FRIDA_ATTACH_RESULT: success\nDEVICE: {target_ip}\nAPP: {app_id}\nOUTPUT: {out[:4000]}"
 
     @mcp.tool()
     @require_allowlist(target_param="target_ip", audit=True)
@@ -238,11 +229,7 @@ def _register_mobile_tools(mcp: Any, ctx: Any) -> None:
         out, rc, err = _run_tool(ps_bin, argv, timeout=30)
         if rc is None or rc != 0:
             return f"MOBILE_FRIDA_LIST_APPS_ERROR: {err or out}"
-        return (
-            f"MOBILE_FRIDA_LIST_APPS_RESULT: success\n"
-            f"DEVICE: {target_ip}\n"
-            f"APPS:\n{out[:4000]}"
-        )
+        return f"MOBILE_FRIDA_LIST_APPS_RESULT: success\nDEVICE: {target_ip}\nAPPS:\n{out[:4000]}"
 
 
 def create_plugin() -> Plugin:

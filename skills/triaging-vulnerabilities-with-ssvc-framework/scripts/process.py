@@ -291,9 +291,7 @@ def main():
         default="generic",
         help="Input format",
     )
-    parser.add_argument(
-        "--output-format", choices=["json", "csv"], default="json", help="Output format"
-    )
+    parser.add_argument("--output-format", choices=["json", "csv"], default="json", help="Output format")
     parser.add_argument("--nvd-api-key", help="NVD API key for higher rate limits")
     parser.add_argument(
         "--mission-prevalence",
@@ -327,9 +325,7 @@ def main():
     epss_scores = fetch_epss_scores(cve_ids)
 
     print("[*] Running SSVC triage...")
-    results = run_triage(
-        vulns, kev_set, epss_scores, args.mission_prevalence, args.public_wellbeing
-    )
+    results = run_triage(vulns, kev_set, epss_scores, args.mission_prevalence, args.public_wellbeing)
 
     print(f"[*] Generating report: {args.output}")
     summary = generate_report(results, args.output, args.output_format)

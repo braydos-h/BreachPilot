@@ -329,7 +329,7 @@ def read_usage_records(
             continue
         records.append({key: item.get(key) for key in PUBLIC_USAGE_FIELDS if key in item})
 
-    return records[start:start + capped]
+    return records[start : start + capped]
 
 
 def _sum_int(records: Iterable[Mapping[str, Any]], field: str) -> int:

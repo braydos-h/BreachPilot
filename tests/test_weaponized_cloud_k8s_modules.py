@@ -15,6 +15,7 @@ from tools.attack_modules.modules.synthesis import WeaponizedExploit
 # WeaponizedExploit
 # ---------------------------------------------------------------------------
 
+
 def _http_ctx() -> ModuleContext:
     return ModuleContext(
         target_ip="10.0.0.50",
@@ -70,6 +71,7 @@ def test_weaponized_exploit_applicability_no_match():
 # CloudPrivesc
 # ---------------------------------------------------------------------------
 
+
 def _docker_ctx() -> ModuleContext:
     return ModuleContext(
         target_ip="10.0.0.60",
@@ -107,6 +109,7 @@ def test_cloud_privesc_applicability_ssh_only_is_zero():
 # ---------------------------------------------------------------------------
 # K8sPrivesc
 # ---------------------------------------------------------------------------
+
 
 def _k8s_ctx() -> ModuleContext:
     return ModuleContext(

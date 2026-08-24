@@ -84,9 +84,7 @@ class RunLog:
             self._handle = self._path.open("a", encoding="utf-8", errors="replace")
         except OSError as exc:
             self._handle = None
-            logging.getLogger(__name__).warning(
-                "run.log unavailable (%s): %s", self._path, exc
-            )
+            logging.getLogger(__name__).warning("run.log unavailable (%s): %s", self._path, exc)
             return
         # Let every module's NOTSET-level logger propagate DEBUG+ records to
         # the single run.log handler; the root logger has no other handlers,
@@ -101,8 +99,7 @@ class RunLog:
         sys.stdout = _Tee(self._stdout, self._handle)
         sys.stderr = _Tee(self._stderr, self._handle)
         self._handle.write(
-            f"\n===== run started {datetime.now(timezone.utc).isoformat()} "
-            f"argv={sys.argv!r} log={self._path} =====\n"
+            f"\n===== run started {datetime.now(timezone.utc).isoformat()} argv={sys.argv!r} log={self._path} =====\n"
         )
         self._handle.flush()
 

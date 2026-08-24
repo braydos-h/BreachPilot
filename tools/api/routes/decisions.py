@@ -40,6 +40,7 @@ class DecisionAnswer(BaseModel):
 
 class DecisionOut(BaseModel):
     """Typed decision shape for OpenAPI codegen."""
+
     id: str
     run_id: str
     kind: str
@@ -63,6 +64,7 @@ async def list_decisions(run_id: str, auth: str = Depends(_require_auth)) -> dic
 async def get_decision(run_id: str, decision_id: str, auth: str = Depends(_require_auth)) -> DecisionOut:
     """Get a single decision by id (full row: prompt_text, required_text, options)."""
     from tools.api.persistence import ApiPersistence
+
     # Reach the persistence layer through the run manager's owned reference.
     persistence: ApiPersistence | None = getattr(_rm(), "_persistence", None)
     if persistence is None:
@@ -87,6 +89,8 @@ async def get_decision(run_id: str, decision_id: str, auth: str = Depends(_requi
 
 
 @router.post("/runs/{run_id}/decisions/{decision_id}", response_model=None)
-async def answer_decision(run_id: str, decision_id: str, body: DecisionAnswer, auth: str = Depends(_require_auth)) -> dict:
+async def answer_decision(
+    run_id: str, decision_id: str, body: DecisionAnswer, auth: str = Depends(_require_auth)
+) -> dict:
     """Answer a pending decision (start_confirm, goal_select, or tool_approval)."""
     return await _rm().answer_decision(run_id, decision_id, body.answer)

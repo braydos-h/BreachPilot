@@ -73,15 +73,16 @@ import json
 from datetime import datetime
 from enum import Enum
 
+
 class Priority(Enum):
     CRITICAL = 1
     HIGH = 2
     MEDIUM = 3
     LOW = 4
 
+
 class IntelligenceRequirement:
-    def __init__(self, requirement_id, question, priority, stakeholder,
-                 intelligence_level, collection_sources=None):
+    def __init__(self, requirement_id, question, priority, stakeholder, intelligence_level, collection_sources=None):
         self.id = requirement_id
         self.question = question
         self.priority = priority
@@ -105,6 +106,7 @@ class IntelligenceRequirement:
             "last_answered": self.last_answered,
         }
 
+
 class RequirementsManager:
     def __init__(self):
         self.requirements = []
@@ -127,28 +129,49 @@ class RequirementsManager:
             json.dump(data, f, indent=2)
         print(f"[+] Exported {len(data)} requirements to {output_file}")
 
+
 # Define organizational PIRs
 mgr = RequirementsManager()
-mgr.add_requirement(IntelligenceRequirement(
-    "PIR-001", "Which threat actors are actively targeting our sector?",
-    Priority.CRITICAL, "CISO", "strategic",
-    ["MITRE ATT&CK", "ISAC feeds", "Vendor reports"],
-))
-mgr.add_requirement(IntelligenceRequirement(
-    "PIR-002", "What vulnerabilities are being actively exploited in the wild?",
-    Priority.CRITICAL, "Vulnerability Management", "operational",
-    ["CISA KEV", "Exploit-DB", "VulnCheck", "Shodan"],
-))
-mgr.add_requirement(IntelligenceRequirement(
-    "PIR-003", "Are any organization credentials or data exposed on dark web?",
-    Priority.HIGH, "SOC Manager", "tactical",
-    ["Dark web monitoring", "Paste site monitoring", "Breach databases"],
-))
-mgr.add_requirement(IntelligenceRequirement(
-    "PIR-004", "What are the emerging attack techniques against cloud infrastructure?",
-    Priority.HIGH, "Cloud Security", "operational",
-    ["ATT&CK Cloud matrix", "Vendor advisories", "ISAC bulletins"],
-))
+mgr.add_requirement(
+    IntelligenceRequirement(
+        "PIR-001",
+        "Which threat actors are actively targeting our sector?",
+        Priority.CRITICAL,
+        "CISO",
+        "strategic",
+        ["MITRE ATT&CK", "ISAC feeds", "Vendor reports"],
+    )
+)
+mgr.add_requirement(
+    IntelligenceRequirement(
+        "PIR-002",
+        "What vulnerabilities are being actively exploited in the wild?",
+        Priority.CRITICAL,
+        "Vulnerability Management",
+        "operational",
+        ["CISA KEV", "Exploit-DB", "VulnCheck", "Shodan"],
+    )
+)
+mgr.add_requirement(
+    IntelligenceRequirement(
+        "PIR-003",
+        "Are any organization credentials or data exposed on dark web?",
+        Priority.HIGH,
+        "SOC Manager",
+        "tactical",
+        ["Dark web monitoring", "Paste site monitoring", "Breach databases"],
+    )
+)
+mgr.add_requirement(
+    IntelligenceRequirement(
+        "PIR-004",
+        "What are the emerging attack techniques against cloud infrastructure?",
+        Priority.HIGH,
+        "Cloud Security",
+        "operational",
+        ["ATT&CK Cloud matrix", "Vendor advisories", "ISAC bulletins"],
+    )
+)
 mgr.export_requirements()
 ```
 
@@ -157,6 +180,7 @@ mgr.export_requirements()
 ```python
 import requests
 from datetime import datetime, timedelta
+
 
 class CollectionPipeline:
     def __init__(self, config):
@@ -170,13 +194,15 @@ class CollectionPipeline:
         if resp.status_code == 200:
             data = resp.json()
             vulns = data.get("vulnerabilities", [])
-            self.collected_data.append({
-                "source": "CISA KEV",
-                "type": "vulnerability",
-                "count": len(vulns),
-                "collected_at": datetime.now().isoformat(),
-                "data": vulns,
-            })
+            self.collected_data.append(
+                {
+                    "source": "CISA KEV",
+                    "type": "vulnerability",
+                    "count": len(vulns),
+                    "collected_at": datetime.now().isoformat(),
+                    "data": vulns,
+                }
+            )
             print(f"[+] CISA KEV: {len(vulns)} known exploited vulnerabilities")
             return vulns
         return []
@@ -189,12 +215,14 @@ class CollectionPipeline:
         resp = requests.get(url, headers=headers, timeout=30)
         if resp.status_code == 200:
             pulses = resp.json().get("results", [])
-            self.collected_data.append({
-                "source": "AlienVault OTX",
-                "type": "threat_intelligence",
-                "count": len(pulses),
-                "collected_at": datetime.now().isoformat(),
-            })
+            self.collected_data.append(
+                {
+                    "source": "AlienVault OTX",
+                    "type": "threat_intelligence",
+                    "count": len(pulses),
+                    "collected_at": datetime.now().isoformat(),
+                }
+            )
             print(f"[+] OTX: {len(pulses)} pulses in last {days} days")
             return pulses
         return []
@@ -205,12 +233,14 @@ class CollectionPipeline:
         resp = requests.post(url, data={"query": "get_recent", "selector": "time"}, timeout=30)
         if resp.status_code == 200:
             data = resp.json().get("data", [])
-            self.collected_data.append({
-                "source": "MalwareBazaar",
-                "type": "malware_samples",
-                "count": len(data),
-                "collected_at": datetime.now().isoformat(),
-            })
+            self.collected_data.append(
+                {
+                    "source": "MalwareBazaar",
+                    "type": "malware_samples",
+                    "count": len(data),
+                    "collected_at": datetime.now().isoformat(),
+                }
+            )
             print(f"[+] MalwareBazaar: {len(data)} recent samples")
             return data
         return []
@@ -219,12 +249,10 @@ class CollectionPipeline:
         summary = {
             "total_sources": len(self.collected_data),
             "total_items": sum(d.get("count", 0) for d in self.collected_data),
-            "sources": [
-                {"name": d["source"], "type": d["type"], "count": d["count"]}
-                for d in self.collected_data
-            ],
+            "sources": [{"name": d["source"], "type": d["type"], "count": d["count"]} for d in self.collected_data],
         }
         return summary
+
 
 pipeline = CollectionPipeline({})
 pipeline.collect_cisa_kev()
@@ -257,8 +285,7 @@ class IntelligenceProcessor:
                     duplicates += 1
 
         self.processed_items.extend(processed)
-        print(f"[+] Processed {len(processed)} items from {source_name} "
-              f"({duplicates} duplicates removed)")
+        print(f"[+] Processed {len(processed)} items from {source_name} ({duplicates} duplicates removed)")
         return processed
 
     def _normalize(self, item, source):
@@ -276,8 +303,10 @@ class IntelligenceProcessor:
 
     def _compute_hash(self, item):
         import hashlib
+
         key = f"{item['type']}:{item['value']}:{item['source']}"
         return hashlib.sha256(key.encode()).hexdigest()
+
 
 processor = IntelligenceProcessor()
 ```
@@ -318,7 +347,8 @@ class IntelligenceAnalyzer:
             "highlights": [],
             "active_requirements_status": [
                 {"id": r.id, "question": r.question[:80], "status": r.status}
-                for r in self.requirements if r.status == "active"
+                for r in self.requirements
+                if r.status == "active"
             ],
         }
         return brief
@@ -368,6 +398,7 @@ class IntelligenceDisseminator:
                 metrics["distribution_by_channel"][channel] = 0
             metrics["distribution_by_channel"][channel] += 1
         return metrics
+
 
 disseminator = IntelligenceDisseminator()
 ```

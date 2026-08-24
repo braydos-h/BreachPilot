@@ -52,11 +52,18 @@ def test_hallucinated_url_is_filtered_to_no_verified_poc(monkeypatch):
 
     # GitHub Search API returns one item whose html_url then 404s on existence
     # check (simulating a fabricated/hallucinated repo that does not exist).
-    gh_payload = json.dumps({
-        "items": [{"html_url": "https://github.com/zverok/openssh-regreSSHion-exploit",
-                   "full_name": "zverok/openssh-regreSSHion-exploit",
-                   "stargazers_count": 0, "description": "fake"}]
-    }).encode()
+    gh_payload = json.dumps(
+        {
+            "items": [
+                {
+                    "html_url": "https://github.com/zverok/openssh-regreSSHion-exploit",
+                    "full_name": "zverok/openssh-regreSSHion-exploit",
+                    "stargazers_count": 0,
+                    "description": "fake",
+                }
+            ]
+        }
+    ).encode()
 
     def fake_urlopen(req, timeout=None):
         url = req.full_url if hasattr(req, "full_url") else str(req)
@@ -81,11 +88,18 @@ def test_hallucinated_url_is_filtered_to_no_verified_poc(monkeypatch):
 def test_verified_github_repo_returned(monkeypatch):
     """A real (200) GitHub repo URL is returned in CVE_TO_POC_RESULTS."""
     s = _make_search()
-    gh_payload = json.dumps({
-        "items": [{"html_url": "https://github.com/zverok/openssh-regreSSHion-real",
-                   "full_name": "zverok/openssh-regreSSHion-real",
-                   "stargazers_count": 42, "description": "real PoC"}]
-    }).encode()
+    gh_payload = json.dumps(
+        {
+            "items": [
+                {
+                    "html_url": "https://github.com/zverok/openssh-regreSSHion-real",
+                    "full_name": "zverok/openssh-regreSSHion-real",
+                    "stargazers_count": 42,
+                    "description": "real PoC",
+                }
+            ]
+        }
+    ).encode()
 
     def fake_urlopen(req, timeout=None):
         return _FakeResp(gh_payload, 200)  # both search and existence check 200

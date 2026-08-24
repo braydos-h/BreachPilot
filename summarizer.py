@@ -76,7 +76,7 @@ def _summarize_nmap(output: str, max_chars: int) -> str:
 def _summarize_search(output: str, max_chars: int) -> str:
     # Strip raw JSON/HTML tags
     clean = re.sub(r"<[^>]+>", "", output)
-    entries = [l.strip() for l in clean.split("\n") if l.strip() and not l.startswith(("http", "www"))]
+    entries = [line.strip() for line in clean.split("\n") if line.strip() and not line.startswith(("http", "www"))]
     result = "\n".join(entries[:30])
     return _cap(result, max_chars)
 
@@ -108,7 +108,9 @@ def _summarize_msf(output: str, max_chars: int) -> str:
     lines: list[str] = []
     for line in output.split("\n"):
         stripped = line.strip()
-        if any(kw in stripped.lower() for kw in ("[*]", "[+]", "[-]", "vulnerable", "exploit", "session", "meterpreter")):
+        if any(
+            kw in stripped.lower() for kw in ("[*]", "[+]", "[-]", "vulnerable", "exploit", "session", "meterpreter")
+        ):
             lines.append(stripped[:200])
     if not lines:
         lines.append(output.strip()[:max_chars])
@@ -139,21 +141,21 @@ def _summarize_terminal(output: str, max_chars: int) -> str:
     command = cmd_m.group(1).strip()[:100] if cmd_m else "unknown"
 
     # Get tail of output (last 5 meaningful lines)
-    tail_lines = [l.strip() for l in clean.split("\n") if l.strip() and "===" not in l][-5:]
+    tail_lines = [line.strip() for line in clean.split("\n") if line.strip() and "===" not in line][-5:]
 
     parts = [
         f"Command: {command}",
         f"Exit: {exit_code}",
         "Output tail:",
     ]
-    parts.extend(f"  {l[:150]}" for l in tail_lines)
+    parts.extend(f"  {line[:150]}" for line in tail_lines)
     return _cap("\n".join(parts), max_chars)
 
 
 def _summarize_generic(output: str, max_chars: int) -> str:
     """Generic fallback summarizer."""
     clean = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", output)
-    lines = [l.strip() for l in clean.split("\n") if l.strip()][:40]
+    lines = [line.strip() for line in clean.split("\n") if line.strip()][:40]
     result = "\n".join(lines)
     return _cap(result, max_chars)
 

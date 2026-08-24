@@ -21,8 +21,10 @@ import pytest
 # restores the 4 target env vars around every test in this file.
 @pytest.fixture(autouse=True)
 def _restore_target_env():
-    _snap = {k: os.environ.get(k) for k in
-             ("EXPLOIT_TARGET", "EXPLOIT_TARGET_IP", "EXPLOIT_TARGET_DOMAIN", "EXPLOIT_DISCOVERED_TARGETS")}
+    _snap = {
+        k: os.environ.get(k)
+        for k in ("EXPLOIT_TARGET", "EXPLOIT_TARGET_IP", "EXPLOIT_TARGET_DOMAIN", "EXPLOIT_DISCOVERED_TARGETS")
+    }
     yield
     for _k, _v in _snap.items():
         if _v is None:
@@ -40,6 +42,7 @@ def _clear_env(monkeypatch):
 def test_allowed_target_list_config_only(monkeypatch):
     _clear_env(monkeypatch)
     from tools.mcp_shared import _allowed_target_list
+
     config = {"exploit": {"allowed_targets": ["10.0.0.5", "127.0.0.1"]}}
     assert _allowed_target_list(config) == ["10.0.0.5", "127.0.0.1"]
 
@@ -48,6 +51,7 @@ def test_allowed_target_list_unions_exploit_target(monkeypatch):
     _clear_env(monkeypatch)
     monkeypatch.setenv("EXPLOIT_TARGET", "10.0.0.50")
     from tools.mcp_shared import _allowed_target_list
+
     config = {"exploit": {"allowed_targets": ["127.0.0.1"]}}
     result = _allowed_target_list(config)
     assert "127.0.0.1" in result
@@ -60,6 +64,7 @@ def test_allowed_target_list_unions_domain_env_vars(monkeypatch):
     monkeypatch.setenv("EXPLOIT_TARGET_IP", "93.184.216.34")
     monkeypatch.setenv("EXPLOIT_TARGET_DOMAIN", "example.com")
     from tools.mcp_shared import _allowed_target_list
+
     config = {"exploit": {"allowed_targets": ["127.0.0.1"]}}
     result = _allowed_target_list(config)
     assert "example.com" in result
@@ -71,6 +76,7 @@ def test_allowed_target_list_unions_discovered_targets(monkeypatch):
     _clear_env(monkeypatch)
     monkeypatch.setenv("EXPLOIT_DISCOVERED_TARGETS", "sub1.example.com,sub2.example.com,1.2.3.4")
     from tools.mcp_shared import _allowed_target_list
+
     config = {"exploit": {"allowed_targets": []}}
     result = _allowed_target_list(config)
     assert "sub1.example.com" in result
@@ -83,6 +89,7 @@ def test_allowed_target_list_deduplicates(monkeypatch):
     monkeypatch.setenv("EXPLOIT_TARGET", "example.com")
     monkeypatch.setenv("EXPLOIT_TARGET_DOMAIN", "example.com")
     from tools.mcp_shared import _allowed_target_list
+
     config = {"exploit": {"allowed_targets": ["example.com"]}}
     result = _allowed_target_list(config)
     # example.com should appear exactly once despite being in 3 sources
@@ -92,6 +99,7 @@ def test_allowed_target_list_deduplicates(monkeypatch):
 def test_add_discovered_target_adds_host(monkeypatch):
     _clear_env(monkeypatch)
     from tools.mcp_shared import _allowed_target_list, add_discovered_target
+
     add_discovered_target("new.example.com", "5.6.7.8")
     result = _allowed_target_list({"exploit": {"allowed_targets": []}})
     assert "new.example.com" in result
@@ -101,6 +109,7 @@ def test_add_discovered_target_adds_host(monkeypatch):
 def test_add_discovered_target_deduplicates(monkeypatch):
     _clear_env(monkeypatch)
     from tools.mcp_shared import _allowed_target_list, add_discovered_target
+
     add_discovered_target("sub.example.com", "1.2.3.4")
     add_discovered_target("sub.example.com", "1.2.3.4")  # duplicate
     result = _allowed_target_list({"exploit": {"allowed_targets": []}})
@@ -112,6 +121,7 @@ def test_add_discovered_target_appends_to_existing(monkeypatch):
     _clear_env(monkeypatch)
     monkeypatch.setenv("EXPLOIT_DISCOVERED_TARGETS", "existing.example.com")
     from tools.mcp_shared import _allowed_target_list, add_discovered_target
+
     add_discovered_target("new.example.com", "9.10.11.12")
     result = _allowed_target_list({"exploit": {"allowed_targets": []}})
     assert "existing.example.com" in result
@@ -121,6 +131,7 @@ def test_add_discovered_target_appends_to_existing(monkeypatch):
 
 def test_is_target_in_allowlist_matches_domain():
     from tools.validation_utils import is_target_in_allowlist
+
     assert is_target_in_allowlist("example.com", ["example.com"]) is True
     assert is_target_in_allowlist("sub.example.com", ["*.example.com"]) is True
     assert is_target_in_allowlist("other.com", ["*.example.com"]) is False
@@ -129,5 +140,6 @@ def test_is_target_in_allowlist_matches_domain():
 
 def test_is_target_in_allowlist_matches_resolved_ip():
     from tools.validation_utils import is_target_in_allowlist
+
     assert is_target_in_allowlist("93.184.216.34", ["93.184.216.34"]) is True
     assert is_target_in_allowlist("93.184.216.34", ["example.com"]) is False

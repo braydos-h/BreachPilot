@@ -3,19 +3,20 @@
 ## Python netflow Library
 ```python
 import netflow
+
 # Parse a raw NetFlow packet
 packet, templates = netflow.parse_packet(raw_bytes, templates={})
 # templates must persist between calls for v9/IPFIX
 for flow in packet.flows:
     flow.IPV4_SRC_ADDR  # Source IP
     flow.IPV4_DST_ADDR  # Destination IP
-    flow.L4_SRC_PORT    # Source port
-    flow.L4_DST_PORT    # Destination port
-    flow.PROTOCOL       # IP protocol (6=TCP, 17=UDP)
-    flow.IN_BYTES       # Bytes transferred
-    flow.IN_PKTS        # Packet count
-    flow.TCP_FLAGS      # TCP flags bitmask
-    flow.FIRST_SWITCHED # Flow start time
+    flow.L4_SRC_PORT  # Source port
+    flow.L4_DST_PORT  # Destination port
+    flow.PROTOCOL  # IP protocol (6=TCP, 17=UDP)
+    flow.IN_BYTES  # Bytes transferred
+    flow.IN_PKTS  # Packet count
+    flow.TCP_FLAGS  # TCP flags bitmask
+    flow.FIRST_SWITCHED  # Flow start time
     flow.LAST_SWITCHED  # Flow end time
 ```
 

@@ -115,17 +115,41 @@ _RECOVERY: dict[FailureClass, tuple[RecoveryAction, str]] = {
 # Kept conservative: patterns map onto signals the codebase already emits
 # (BLOCKED:/ERROR: markers, canonical stdout markers, common tool stderr).
 _RULES: tuple[tuple[str, FailureClass], ...] = (
-    (r"not in the (explicit )?allowlist|blocked by scope|out of scope|not authorized|^blocked\b|BLOCKED:", FailureClass.SCOPE_BLOCKED),
+    (
+        r"not in the (explicit )?allowlist|blocked by scope|out of scope|not authorized|^blocked\b|BLOCKED:",
+        FailureClass.SCOPE_BLOCKED,
+    ),
     (r"vuln_not_confirmed|not vulnerable|patched version", FailureClass.FALSE_POSITIVE),
     (r"insufficient evidence|inconclusive|cannot determine", FailureClass.INSUFFICIENT_EVIDENCE),
-    (r"connection refused|no route to host|host is down|target unreachable|unreachable host|network is unreachable", FailureClass.TARGET_UNREACHABLE),
+    (
+        r"connection refused|no route to host|host is down|target unreachable|unreachable host|network is unreachable",
+        FailureClass.TARGET_UNREACHABLE,
+    ),
     (r"timed? ?out|timeout|deadline exceeded|readtimeout", FailureClass.TIMEOUT),
-    (r"permission denied|access denied|authentication failed|login failed|invalid credentials|status_logon_failure|auth.*fail", FailureClass.AUTH_FAILED),
-    (r"requires? (a |an )?(credential|foothold|session|admin|root|privilege)|missing (credential|prerequisite)|no (valid )?credentials|no active session|foothold required", FailureClass.PREREQUISITE_MISSING),
-    (r"command not found|not installed|no such file or directory.*(bin|sbin|usr)|executable not found|tool.*not available|unavailable_tool", FailureClass.TOOL_UNAVAILABLE),
-    (r"syntaxerror|indentationerror|nameerror|typeerror|attributeerror|traceback \(most recent call last\)|compile error|malformed (code|script|json)", FailureClass.MALFORMED_CODE),
-    (r"invalid (argument|parameter)|unexpected keyword|schema|recoverable_error|unknown_tool", FailureClass.SCHEMA_ERROR),
-    (r"remoteprotocolerror|connecterror|connection reset|connection aborted|server disconnected|broken pipe", FailureClass.TRANSPORT_ERROR),
+    (
+        r"permission denied|access denied|authentication failed|login failed|invalid credentials|status_logon_failure|auth.*fail",
+        FailureClass.AUTH_FAILED,
+    ),
+    (
+        r"requires? (a |an )?(credential|foothold|session|admin|root|privilege)|missing (credential|prerequisite)|no (valid )?credentials|no active session|foothold required",
+        FailureClass.PREREQUISITE_MISSING,
+    ),
+    (
+        r"command not found|not installed|no such file or directory.*(bin|sbin|usr)|executable not found|tool.*not available|unavailable_tool",
+        FailureClass.TOOL_UNAVAILABLE,
+    ),
+    (
+        r"syntaxerror|indentationerror|nameerror|typeerror|attributeerror|traceback \(most recent call last\)|compile error|malformed (code|script|json)",
+        FailureClass.MALFORMED_CODE,
+    ),
+    (
+        r"invalid (argument|parameter)|unexpected keyword|schema|recoverable_error|unknown_tool",
+        FailureClass.SCHEMA_ERROR,
+    ),
+    (
+        r"remoteprotocolerror|connecterror|connection reset|connection aborted|server disconnected|broken pipe",
+        FailureClass.TRANSPORT_ERROR,
+    ),
     (r"unsupported (target|os|service|protocol)|does not apply|not applicable", FailureClass.UNSUPPORTED_TARGET),
 )
 

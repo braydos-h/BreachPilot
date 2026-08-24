@@ -18,6 +18,7 @@ from tools.poc_verifier import (
 
 # ─── syntax_check ─────────────────────────────────────────────────────────
 
+
 def test_syntax_check_accepts_valid_code() -> None:
     result = syntax_check("def ok():\n    return 1\n")
     assert result.syntax_ok is True
@@ -44,6 +45,7 @@ def test_syntax_check_does_not_execute_code() -> None:
 
 # ─── code_sha256 ──────────────────────────────────────────────────────────
 
+
 def test_code_sha256_is_16_hex_chars() -> None:
     sha = code_sha256("def ok():\n    return 1\n")
     assert len(sha) == 16
@@ -56,6 +58,7 @@ def test_code_sha256_changes_with_code() -> None:
 
 # ─── docker_check (monkeypatched -- no real Docker in CI) ─────────────────
 
+
 def test_docker_check_returns_none_when_docker_absent(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("tools.poc_verifier._docker_available", lambda: False)
     ok, err = docker_check("def ok():\n    return 1\n")
@@ -67,6 +70,7 @@ def test_docker_check_runs_when_available(monkeypatch: pytest.MonkeyPatch) -> No
     class _Proc:
         returncode = 0
         stderr = ""
+
     monkeypatch.setattr("tools.poc_verifier._docker_available", lambda: True)
     monkeypatch.setattr(
         "tools.poc_verifier.subprocess.run",
@@ -80,6 +84,7 @@ def test_docker_check_fails_on_nonzero_exit(monkeypatch: pytest.MonkeyPatch) -> 
     class _Proc:
         returncode = 1
         stderr = "SyntaxError: invalid"
+
     monkeypatch.setattr("tools.poc_verifier._docker_available", lambda: True)
     monkeypatch.setattr(
         "tools.poc_verifier.subprocess.run",
@@ -91,6 +96,7 @@ def test_docker_check_fails_on_nonzero_exit(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 # ─── verify_poc (integration of syntax + docker) ─────────────────────────
+
 
 def test_verify_poc_syntax_only_when_docker_disabled() -> None:
     result = verify_poc("def ok():\n    return 1\n", use_docker=False)
@@ -115,10 +121,9 @@ def test_verify_poc_degrades_to_syntax_only_when_no_docker(monkeypatch: pytest.M
 
 # ─── render_verify_result ────────────────────────────────────────────────
 
+
 def test_render_verify_result_has_required_fields() -> None:
-    r = VerifyResult(
-        syntax_ok=True, docker_ok=None, stderr="", code_sha256="abc123", image="python:3.11-slim"
-    )
+    r = VerifyResult(syntax_ok=True, docker_ok=None, stderr="", code_sha256="abc123", image="python:3.11-slim")
     text = render_verify_result(r)
     assert "VERIFY_POC_RESULT:" in text
     assert "CODE_SHA256: abc123" in text
@@ -127,6 +132,7 @@ def test_render_verify_result_has_required_fields() -> None:
 
 
 # ─── poc_verification_config ─────────────────────────────────────────────
+
 
 def test_poc_verification_config_defaults_when_absent() -> None:
     cfg = poc_verification_config(None)
@@ -140,9 +146,7 @@ def test_poc_verification_config_defaults_when_absent() -> None:
 
 
 def test_poc_verification_config_overlays_user_values() -> None:
-    cfg = poc_verification_config({
-        "poc_verification": {"enabled": True, "docker_memory": "512m", "max_retries": 5}
-    })
+    cfg = poc_verification_config({"poc_verification": {"enabled": True, "docker_memory": "512m", "max_retries": 5}})
     assert cfg["enabled"] is True
     assert cfg["docker_memory"] == "512m"
     assert cfg["max_retries"] == 5
@@ -151,6 +155,7 @@ def test_poc_verification_config_overlays_user_values() -> None:
 
 
 # ─── MCP registration (tool is registered + callable) ────────────────────
+
 
 def _server(tmp_path: Path, config: dict):
     from mcp_exploit_server import create_mcp_server
@@ -202,11 +207,13 @@ async def test_verify_poc_tool_syntax_error(tmp_path: Path) -> None:
 
 # ─── cve_to_exploit_synth wiring ──────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_cve_to_exploit_synth_inlines_syntax_check_when_enabled(tmp_path: Path) -> None:
     mcp = _server(tmp_path, {"poc_verification": {"enabled": True}})
     # The target IP must be in the allowlist for the @require_allowlist gate.
     import os
+
     os.environ["EXPLOIT_TARGET"] = "10.0.0.50"
     try:
         result = await mcp.call_tool(

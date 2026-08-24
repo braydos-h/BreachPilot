@@ -83,8 +83,8 @@ if well_known.status_code == 200:
     print(f"  Supported grants: {config.get('grant_types_supported')}")
     print(f"  Supported scopes: {config.get('scopes_supported')}")
     print(f"  PKCE methods: {config.get('code_challenge_methods_supported')}")
-    auth_endpoint = config['authorization_endpoint']
-    token_endpoint = config['token_endpoint']
+    auth_endpoint = config["authorization_endpoint"]
+    token_endpoint = config["token_endpoint"]
 else:
     # Try common paths
     for path in ["/authorize", "/oauth/authorize", "/oauth2/authorize", "/auth"]:
@@ -101,25 +101,25 @@ else:
 # Test redirect_uri validation strictness
 REDIRECT_BYPASS_PAYLOADS = [
     # Open redirect variations
-    REDIRECT_URI,                                          # Legitimate
-    "https://evil.com",                                    # Different domain
-    "https://app.example.com.evil.com/callback",          # Subdomain of attacker
-    "https://app.example.com@evil.com/callback",          # URL authority confusion
-    f"{REDIRECT_URI}/../../../evil.com",                  # Path traversal
-    f"{REDIRECT_URI}?next=https://evil.com",              # Parameter injection
-    f"{REDIRECT_URI}#https://evil.com",                   # Fragment injection
-    f"{REDIRECT_URI}%23evil.com",                         # Encoded fragment
-    "https://app.example.com/callback/../../evil",        # Relative path
-    "https://APP.EXAMPLE.COM/callback",                   # Case variation
-    "https://app.example.com/Callback",                   # Path case variation
-    "https://app.example.com/callback/",                  # Trailing slash
-    "https://app.example.com/callback?",                  # Trailing question mark
-    "http://app.example.com/callback",                    # HTTP downgrade
-    "https://app.example.com:443/callback",               # Explicit port
-    "https://app.example.com:8443/callback",              # Different port
-    f"{REDIRECT_URI}/.evil.com",                          # Dot segment
-    "https://app.example.com/callbackevil",               # Path prefix match
-    "javascript://app.example.com/callback%0aalert(1)",   # JavaScript protocol
+    REDIRECT_URI,  # Legitimate
+    "https://evil.com",  # Different domain
+    "https://app.example.com.evil.com/callback",  # Subdomain of attacker
+    "https://app.example.com@evil.com/callback",  # URL authority confusion
+    f"{REDIRECT_URI}/../../../evil.com",  # Path traversal
+    f"{REDIRECT_URI}?next=https://evil.com",  # Parameter injection
+    f"{REDIRECT_URI}#https://evil.com",  # Fragment injection
+    f"{REDIRECT_URI}%23evil.com",  # Encoded fragment
+    "https://app.example.com/callback/../../evil",  # Relative path
+    "https://APP.EXAMPLE.COM/callback",  # Case variation
+    "https://app.example.com/Callback",  # Path case variation
+    "https://app.example.com/callback/",  # Trailing slash
+    "https://app.example.com/callback?",  # Trailing question mark
+    "http://app.example.com/callback",  # HTTP downgrade
+    "https://app.example.com:443/callback",  # Explicit port
+    "https://app.example.com:8443/callback",  # Different port
+    f"{REDIRECT_URI}/.evil.com",  # Dot segment
+    "https://app.example.com/callbackevil",  # Path prefix match
+    "javascript://app.example.com/callback%0aalert(1)",  # JavaScript protocol
 ]
 
 print("=== Redirect URI Validation Testing ===\n")
@@ -172,10 +172,9 @@ for i in range(3):
     resp = requests.get(auth_endpoint, params=params, allow_redirects=False)
     if resp.status_code == 302:
         location = resp.headers.get("Location", "")
-        returned_state = urllib.parse.parse_qs(
-            urllib.parse.urlparse(location).query).get("state", [None])[0]
+        returned_state = urllib.parse.parse_qs(urllib.parse.urlparse(location).query).get("state", [None])[0]
         if returned_state == state_value:
-            print(f"[INFO] Same state accepted on attempt {i+1} (check client-side validation)")
+            print(f"[INFO] Same state accepted on attempt {i + 1} (check client-side validation)")
 
 # Test 3: Token exchange without state validation (client-side check)
 # Intercept the callback and try exchanging the code without state
@@ -189,9 +188,7 @@ print("\nNote: State validation is a client-side check. Verify the callback hand
 
 # Generate PKCE values
 code_verifier = secrets.token_urlsafe(64)[:128]
-code_challenge = base64.urlsafe_b64encode(
-    hashlib.sha256(code_verifier.encode()).digest()
-).decode().rstrip('=')
+code_challenge = base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest()).decode().rstrip("=")
 
 # Test 1: Authorization request without PKCE
 params_no_pkce = {
@@ -207,24 +204,30 @@ if resp.status_code == 302 and "code=" in resp.headers.get("Location", ""):
 
 # Test 2: Token exchange without code_verifier
 auth_code = "captured_auth_code"  # From intercept
-token_resp = requests.post(token_endpoint, data={
-    "grant_type": "authorization_code",
-    "code": auth_code,
-    "redirect_uri": REDIRECT_URI,
-    "client_id": CLIENT_ID,
-    # No code_verifier
-})
+token_resp = requests.post(
+    token_endpoint,
+    data={
+        "grant_type": "authorization_code",
+        "code": auth_code,
+        "redirect_uri": REDIRECT_URI,
+        "client_id": CLIENT_ID,
+        # No code_verifier
+    },
+)
 if token_resp.status_code == 200:
     print("[PKCE] Token issued without code_verifier - PKCE not enforced")
 
 # Test 3: Token exchange with wrong code_verifier
-token_resp = requests.post(token_endpoint, data={
-    "grant_type": "authorization_code",
-    "code": auth_code,
-    "redirect_uri": REDIRECT_URI,
-    "client_id": CLIENT_ID,
-    "code_verifier": "wrong_verifier_value_that_does_not_match",
-})
+token_resp = requests.post(
+    token_endpoint,
+    data={
+        "grant_type": "authorization_code",
+        "code": auth_code,
+        "redirect_uri": REDIRECT_URI,
+        "client_id": CLIENT_ID,
+        "code_verifier": "wrong_verifier_value_that_does_not_match",
+    },
+)
 if token_resp.status_code == 200:
     print("[PKCE] Token issued with wrong code_verifier - PKCE validation broken")
 
@@ -268,19 +271,21 @@ for scope in elevated_scopes:
 # Test 2: Token reuse across clients
 # Use a token from client A on client B's API
 token_a = "access_token_from_client_a"
-resp = requests.get("https://other-service.example.com/api/resource",
-    headers={"Authorization": f"Bearer {token_a}"})
+resp = requests.get("https://other-service.example.com/api/resource", headers={"Authorization": f"Bearer {token_a}"})
 if resp.status_code == 200:
     print("[TOKEN] Token from client A accepted by different service (audience not validated)")
 
 # Test 3: Refresh token theft and reuse
 refresh_token = "captured_refresh_token"
 # Try using refresh token with different client_id
-token_resp = requests.post(token_endpoint, data={
-    "grant_type": "refresh_token",
-    "refresh_token": refresh_token,
-    "client_id": "different-client-id",
-})
+token_resp = requests.post(
+    token_endpoint,
+    data={
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id": "different-client-id",
+    },
+)
 if token_resp.status_code == 200:
     print("[TOKEN] Refresh token accepted for different client - not bound to client")
 ```
@@ -313,14 +318,17 @@ print("  - Check if the authorization code is single-use (replay test)")
 # Authorization code replay test
 auth_code_to_replay = "captured_auth_code"
 for attempt in range(3):
-    token_resp = requests.post(token_endpoint, data={
-        "grant_type": "authorization_code",
-        "code": auth_code_to_replay,
-        "redirect_uri": REDIRECT_URI,
-        "client_id": CLIENT_ID,
-        "client_secret": "client_secret_value",
-    })
-    print(f"  Code replay attempt {attempt+1}: {token_resp.status_code}")
+    token_resp = requests.post(
+        token_endpoint,
+        data={
+            "grant_type": "authorization_code",
+            "code": auth_code_to_replay,
+            "redirect_uri": REDIRECT_URI,
+            "client_id": CLIENT_ID,
+            "client_secret": "client_secret_value",
+        },
+    )
+    print(f"  Code replay attempt {attempt + 1}: {token_resp.status_code}")
     if attempt > 0 and token_resp.status_code == 200:
         print("  [VULNERABLE] Authorization code is not single-use")
 ```

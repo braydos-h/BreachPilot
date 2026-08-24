@@ -33,18 +33,22 @@ def _scenario(sid: str, target: str = "10.0.0.5") -> Scenario:
 
 def _mock_oracle(verdicts: dict[str, bool]):
     """Oracle that returns a fixed verdict per scenario_id."""
+
     def _oracle(target_ip: str, scenario: Scenario) -> bool:
         return verdicts.get(scenario.scenario_id, False)
+
     return _oracle
 
 
 def _mock_run_session(verdicts: dict[str, dict[str, bool]]):
     """Mock run_session. ``verdicts[condition][scenario_id]`` -> does the
     agent CLAIM success (agent_claimed_success)."""
+
     async def _run(**kwargs):
         # The agent's outcome_summary always claims compromise (high false-positive
         # rate on baseline) -- the oracle is the sole source of verified_success.
         return {"total_actions": 10, "outcome_summary": "compromises: 1"}
+
     return _run
 
 
@@ -78,6 +82,7 @@ async def test_benchmark_oracle_determines_verified_success(tmp_path):
 async def test_benchmark_computes_risk_ratio(tmp_path):
     """When treatment outperforms baseline, RR > 1."""
     scenarios = [_scenario(f"s{i}") for i in range(4)]
+
     # Oracle: treatment succeeds on all; baseline on none.
     class _SplitOracle:
         def __call__(self, target_ip: str, scenario: Scenario) -> bool:
@@ -198,6 +203,7 @@ def test_default_condition_configs_differ():
 
 # ── D5: throughput + token-cost fields ───────────────────────────────────────
 
+
 def _mock_run_session_with_tokens(tokens: int, cost: float, duration: float = 1.0):
     """Mock run_session that returns token spend + cost + sleeps for ``duration``
     so the harness's wall-clock measurement is non-zero (Windows monotonic has
@@ -214,6 +220,7 @@ def _mock_run_session_with_tokens(tokens: int, cost: float, duration: float = 1.
             "token_cost": cost,
             "duration_seconds": duration,
         }
+
     return _run
 
 

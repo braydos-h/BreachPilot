@@ -11,6 +11,7 @@ Covers:
    vault holds ciphertext, the audit log never holds the cleartext secret, and
    ``confirmed`` only flips via the deliberate confirm call.
 """
+
 from __future__ import annotations
 
 import json
@@ -28,8 +29,13 @@ _CLEARTEXT = "super-secret-password-42!"
 _NTLM = "aad3b435b51404eeaad3b435b51404ee"
 
 
-def _rec(username: str = "admin", password: str = _CLEARTEXT, ctype: str = "password",
-         target_host: str = "10.0.0.50", confirmed: bool = False) -> CredentialRecord:
+def _rec(
+    username: str = "admin",
+    password: str = _CLEARTEXT,
+    ctype: str = "password",
+    target_host: str = "10.0.0.50",
+    confirmed: bool = False,
+) -> CredentialRecord:
     return CredentialRecord(
         timestamp=time.time(),
         source_host="10.0.0.50",
@@ -75,8 +81,8 @@ def test_vault_plaintext_fallback_when_cryptography_missing(monkeypatch, tmp_pat
     try:
         v = _Vault(tmp_path)
         assert v.enabled is False
-        assert v.encrypt(_CLEARTEXT) == _CLEARTEXT   # passthrough
-        assert v.decrypt("anything") == "anything"   # passthrough
+        assert v.encrypt(_CLEARTEXT) == _CLEARTEXT  # passthrough
+        assert v.decrypt("anything") == "anything"  # passthrough
     finally:
         if real is None:
             sys.modules.pop("cryptography.fernet", None)
@@ -131,13 +137,20 @@ def test_store_legacy_plaintext_file_still_loads(monkeypatch, tmp_path):
     """A pre-encryption plaintext file must still load (fail-open decrypt)."""
     monkeypatch.setenv("AI_NMAP_VAULT_KEY", Fernet.generate_key().decode())
     (tmp_path / "credentials.jsonl").write_text(
-        json.dumps({
-            "timestamp": time.time(), "source_host": "10.0.0.50",
-            "target_host": "10.0.0.50", "username": "legacy",
-            "password": _CLEARTEXT,  # plaintext, not a Fernet token
-            "credential_type": "password", "source_action": "legacy",
-            "confirmed": False, "notes": "",
-        }) + "\n",
+        json.dumps(
+            {
+                "timestamp": time.time(),
+                "source_host": "10.0.0.50",
+                "target_host": "10.0.0.50",
+                "username": "legacy",
+                "password": _CLEARTEXT,  # plaintext, not a Fernet token
+                "credential_type": "password",
+                "source_action": "legacy",
+                "confirmed": False,
+                "notes": "",
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
     store = CredentialStore(tmp_path)
@@ -174,7 +187,10 @@ def test_confirm_credential_filtered_by_type(monkeypatch, tmp_path):
     store.add(_rec(username="svc", password=_CLEARTEXT, ctype="password"))
     store.add(_rec(username="svc", password=_NTLM, ctype="hash"))
     # confirm only the hash, not the password
-    assert store.confirm_credential(username="svc", target_host="10.0.0.50", credential_type="hash", validated=True) is True
+    assert (
+        store.confirm_credential(username="svc", target_host="10.0.0.50", credential_type="hash", validated=True)
+        is True
+    )
     pw, h = sorted(store.all_credentials(), key=lambda r: r.credential_type)
     assert pw.credential_type == "hash" and pw.confirmed is True
     assert h.credential_type == "password" and h.confirmed is False
@@ -210,12 +226,14 @@ def _make_server(tmp_path: Path, *, require_allowlist: bool = False):
     from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
     from tools.web_researcher import WebResearcher, WebResearcherSettings
-    config: dict[str, Any] = {
-        "exploit": {"require_explicit_allowlist": require_allowlist, "allowed_targets": []}
-    }
+
+    config: dict[str, Any] = {"exploit": {"require_explicit_allowlist": require_allowlist, "allowed_targets": []}}
     return create_mcp_server(
-        ExploitSearch(ExploitSearchSettings()), NVDClient(CVESearchSettings()),
-        WebResearcher(WebResearcherSettings()), tmp_path, config,
+        ExploitSearch(ExploitSearchSettings()),
+        NVDClient(CVESearchSettings()),
+        WebResearcher(WebResearcherSettings()),
+        tmp_path,
+        config,
     )
 
 
@@ -230,10 +248,17 @@ def _text(result) -> str:
 async def test_mcp_cred_store_add_encrypts_and_audits_redacted(monkeypatch, tmp_path):
     monkeypatch.delenv("AI_NMAP_VAULT_KEY", raising=False)
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool("cred_store_add", {
-        "target_ip": "10.0.0.50", "username": "admin", "password": _CLEARTEXT,
-        "credential_type": "password",
-    }))
+    text = _text(
+        await mcp.call_tool(
+            "cred_store_add",
+            {
+                "target_ip": "10.0.0.50",
+                "username": "admin",
+                "password": _CLEARTEXT,
+                "credential_type": "password",
+            },
+        )
+    )
     assert "CRED_STORE_ADD: stored" in text
     assert "ENCRYPTION_AT_REST: ENABLED" in text
 
@@ -253,36 +278,41 @@ async def test_mcp_cred_store_add_encrypts_and_audits_redacted(monkeypatch, tmp_
 async def test_mcp_cred_store_add_rejects_bad_inputs(tmp_path):
     mcp = _make_server(tmp_path)
     # bad target_ip -> ERROR (invalid target)
-    assert "Invalid" in _text(await mcp.call_tool("cred_store_add", {
-        "target_ip": "999.0.0.50", "username": "u", "password": "p"}))
+    assert "Invalid" in _text(
+        await mcp.call_tool("cred_store_add", {"target_ip": "999.0.0.50", "username": "u", "password": "p"})
+    )
     # missing username
-    assert "BLOCKED" in _text(await mcp.call_tool("cred_store_add", {
-        "target_ip": "10.0.0.50", "username": "", "password": "p"}))
+    assert "BLOCKED" in _text(
+        await mcp.call_tool("cred_store_add", {"target_ip": "10.0.0.50", "username": "", "password": "p"})
+    )
     # missing secret
-    assert "BLOCKED" in _text(await mcp.call_tool("cred_store_add", {
-        "target_ip": "10.0.0.50", "username": "u", "password": ""}))
+    assert "BLOCKED" in _text(
+        await mcp.call_tool("cred_store_add", {"target_ip": "10.0.0.50", "username": "u", "password": ""})
+    )
     # bad type
-    assert "BLOCKED" in _text(await mcp.call_tool("cred_store_add", {
-        "target_ip": "10.0.0.50", "username": "u", "password": "p", "credential_type": "raw"}))
+    assert "BLOCKED" in _text(
+        await mcp.call_tool(
+            "cred_store_add", {"target_ip": "10.0.0.50", "username": "u", "password": "p", "credential_type": "raw"}
+        )
+    )
 
 
 @pytest.mark.asyncio
 async def test_mcp_cred_store_get_masks_then_reveals(monkeypatch, tmp_path):
     monkeypatch.delenv("AI_NMAP_VAULT_KEY", raising=False)
     mcp = _make_server(tmp_path)
-    await mcp.call_tool("cred_store_add", {
-        "target_ip": "10.0.0.50", "username": "admin", "password": _CLEARTEXT})
+    await mcp.call_tool("cred_store_add", {"target_ip": "10.0.0.50", "username": "admin", "password": _CLEARTEXT})
 
     # default get masks the secret
-    masked = _text(await mcp.call_tool("cred_store_get", {
-        "target_ip": "10.0.0.50", "username": "admin"}))
+    masked = _text(await mcp.call_tool("cred_store_get", {"target_ip": "10.0.0.50", "username": "admin"}))
     assert "admin" in masked
     assert _CLEARTEXT not in masked
     assert "masked" in masked.lower()
 
     # include_secret reveals it
-    revealed = _text(await mcp.call_tool("cred_store_get", {
-        "target_ip": "10.0.0.50", "username": "admin", "include_secret": True}))
+    revealed = _text(
+        await mcp.call_tool("cred_store_get", {"target_ip": "10.0.0.50", "username": "admin", "include_secret": True})
+    )
     assert _CLEARTEXT in revealed
 
 
@@ -290,8 +320,7 @@ async def test_mcp_cred_store_get_masks_then_reveals(monkeypatch, tmp_path):
 async def test_mcp_cred_store_list_safe_no_cleartext(monkeypatch, tmp_path):
     monkeypatch.delenv("AI_NMAP_VAULT_KEY", raising=False)
     mcp = _make_server(tmp_path)
-    await mcp.call_tool("cred_store_add", {
-        "target_ip": "10.0.0.50", "username": "admin", "password": _CLEARTEXT})
+    await mcp.call_tool("cred_store_add", {"target_ip": "10.0.0.50", "username": "admin", "password": _CLEARTEXT})
     listed = _text(await mcp.call_tool("cred_store_list", {"target_ip": "10.0.0.50"}))
     assert "admin" in listed
     assert "confirmed=False" in listed
@@ -302,25 +331,25 @@ async def test_mcp_cred_store_list_safe_no_cleartext(monkeypatch, tmp_path):
 async def test_mcp_cred_store_confirm_flips_confirmed(monkeypatch, tmp_path):
     monkeypatch.delenv("AI_NMAP_VAULT_KEY", raising=False)
     mcp = _make_server(tmp_path)
-    await mcp.call_tool("cred_store_add", {
-        "target_ip": "10.0.0.50", "username": "admin", "password": _CLEARTEXT})
+    await mcp.call_tool("cred_store_add", {"target_ip": "10.0.0.50", "username": "admin", "password": _CLEARTEXT})
     # before: unconfirmed
     assert "confirmed=False" in _text(await mcp.call_tool("cred_store_list", {"target_ip": "10.0.0.50"}))
     # confirm without validated=True is refused (the gate) -- flips nothing
-    refused = _text(await mcp.call_tool("cred_store_confirm", {
-        "target_ip": "10.0.0.50", "username": "admin"}))
+    refused = _text(await mcp.call_tool("cred_store_confirm", {"target_ip": "10.0.0.50", "username": "admin"}))
     assert "validation required" in refused.lower()
     assert "confirmed=False" in _text(await mcp.call_tool("cred_store_list", {"target_ip": "10.0.0.50"}))
     # confirm with validated=True flips it
-    conf = _text(await mcp.call_tool("cred_store_confirm", {
-        "target_ip": "10.0.0.50", "username": "admin", "validated": True}))
+    conf = _text(
+        await mcp.call_tool("cred_store_confirm", {"target_ip": "10.0.0.50", "username": "admin", "validated": True})
+    )
     assert "confirmed=True" in conf
     # after: confirmed
     listed = _text(await mcp.call_tool("cred_store_list", {"target_ip": "10.0.0.50"}))
     assert "confirmed=True" in listed
     # confirm of a non-existent cred (validated) -> not found
-    miss = _text(await mcp.call_tool("cred_store_confirm", {
-        "target_ip": "10.0.0.50", "username": "ghost", "validated": True}))
+    miss = _text(
+        await mcp.call_tool("cred_store_confirm", {"target_ip": "10.0.0.50", "username": "ghost", "validated": True})
+    )
     assert "no unconfirmed matching" in miss
 
 
@@ -328,10 +357,10 @@ async def test_mcp_cred_store_confirm_flips_confirmed(monkeypatch, tmp_path):
 async def test_mcp_cred_store_add_duplicate_not_readded(monkeypatch, tmp_path):
     monkeypatch.delenv("AI_NMAP_VAULT_KEY", raising=False)
     mcp = _make_server(tmp_path)
-    await mcp.call_tool("cred_store_add", {
-        "target_ip": "10.0.0.50", "username": "admin", "password": _CLEARTEXT})
-    second = _text(await mcp.call_tool("cred_store_add", {
-        "target_ip": "10.0.0.50", "username": "admin", "password": _CLEARTEXT}))
+    await mcp.call_tool("cred_store_add", {"target_ip": "10.0.0.50", "username": "admin", "password": _CLEARTEXT})
+    second = _text(
+        await mcp.call_tool("cred_store_add", {"target_ip": "10.0.0.50", "username": "admin", "password": _CLEARTEXT})
+    )
     assert "duplicate" in second.lower()
     listed = _text(await mcp.call_tool("cred_store_list", {"target_ip": "10.0.0.50"}))
     assert listed.count("admin/password") == 1
@@ -459,8 +488,7 @@ async def test_read_workspace_file_reads_vault_keyfile_lab(monkeypatch, tmp_path
     denylist was removed). The operator box is a throwaway lab VM."""
     monkeypatch.delenv("AI_NMAP_VAULT_KEY", raising=False)
     mcp = _make_server(tmp_path)
-    await mcp.call_tool("cred_store_add", {
-        "target_ip": "10.0.0.50", "username": "admin", "password": _CLEARTEXT})
+    await mcp.call_tool("cred_store_add", {"target_ip": "10.0.0.50", "username": "admin", "password": _CLEARTEXT})
     keyfile = tmp_path / "credentials" / "10.0.0.50" / ".vault_key"
     assert keyfile.exists()
     out = _text(await mcp.call_tool("read_workspace_file", {"filename": "credentials/10.0.0.50/.vault_key"}))
@@ -476,8 +504,7 @@ async def test_read_workspace_file_reads_credentials_store_lab(monkeypatch, tmp_
     present in the returned ciphertext."""
     monkeypatch.delenv("AI_NMAP_VAULT_KEY", raising=False)
     mcp = _make_server(tmp_path)
-    await mcp.call_tool("cred_store_add", {
-        "target_ip": "10.0.0.50", "username": "admin", "password": _CLEARTEXT})
+    await mcp.call_tool("cred_store_add", {"target_ip": "10.0.0.50", "username": "admin", "password": _CLEARTEXT})
     assert (tmp_path / "credentials" / "10.0.0.50" / "credentials.jsonl").exists()
     out = _text(await mcp.call_tool("read_workspace_file", {"filename": "credentials/10.0.0.50/credentials.jsonl"}))
     assert "BLOCKED" not in out  # no longer refused
@@ -491,8 +518,7 @@ async def test_list_workspace_shows_credentials_subtree_lab(monkeypatch, tmp_pat
     shows it (operator-box filesystem is unrestricted)."""
     monkeypatch.delenv("AI_NMAP_VAULT_KEY", raising=False)
     mcp = _make_server(tmp_path)
-    await mcp.call_tool("cred_store_add", {
-        "target_ip": "10.0.0.50", "username": "admin", "password": _CLEARTEXT})
+    await mcp.call_tool("cred_store_add", {"target_ip": "10.0.0.50", "username": "admin", "password": _CLEARTEXT})
     listed = _text(await mcp.call_tool("list_workspace", {}))
     assert "credentials" in listed.lower()  # subtree is shown
     assert ".vault_key" in listed
@@ -526,7 +552,9 @@ async def test_read_workspace_file_still_reads_normal_files(monkeypatch, tmp_pat
 
 
 def test_add_forces_confirmed_false_even_when_caller_supplies_true(
-    monkeypatch, tmp_path, caplog,
+    monkeypatch,
+    tmp_path,
+    caplog,
 ):
     """Bypass 1 (validated-gate forge): ``add`` must not persist a caller-supplied
     ``confirmed=True``. Without this, a harvest path (or a hand-built record) could
@@ -535,6 +563,7 @@ def test_add_forces_confirmed_false_even_when_caller_supplies_true(
     reusing a credential at full access. The *only* path to confirmed=True stays
     ``confirm_credential``; ``add`` is the harvester and must yield unconfirmed."""
     import logging
+
     monkeypatch.delenv("AI_NMAP_VAULT_KEY", raising=False)
     store = CredentialStore(tmp_path)
     rec = _rec(username="admin", target_host="10.0.0.50", confirmed=True)
@@ -567,15 +596,22 @@ async def test_cred_store_add_notes_secret_redacted_in_audit(monkeypatch, tmp_pa
     monkeypatch.delenv("AI_NMAP_VAULT_KEY", raising=False)
     mcp = _make_server(tmp_path)
     secret = "plaintext-is-hunter2-from-notes"
-    text = _text(await mcp.call_tool("cred_store_add", {
-        "target_ip": "10.0.0.50", "username": "admin", "password": _CLEARTEXT,
-        "credential_type": "password",
-        "notes": f"reused from ssh login; {secret}",
-    }))
+    text = _text(
+        await mcp.call_tool(
+            "cred_store_add",
+            {
+                "target_ip": "10.0.0.50",
+                "username": "admin",
+                "password": _CLEARTEXT,
+                "credential_type": "password",
+                "notes": f"reused from ssh login; {secret}",
+            },
+        )
+    )
     assert "CRED_STORE_ADD: stored" in text
     audit = (tmp_path / "exploit_audit.jsonl").read_text(encoding="utf-8")
-    assert secret not in audit            # the notes-embedded secret never reaches disk
-    assert _CLEARTEXT not in audit        # the password arg is also redacted
+    assert secret not in audit  # the notes-embedded secret never reaches disk
+    assert _CLEARTEXT not in audit  # the password arg is also redacted
     # the notes field is masked wholesale (not shape-matched); password too
     records = _read_audit(tmp_path)
     add_recs = [r for r in records if r.get("tool_name") == "cred_store_add"]
@@ -589,10 +625,10 @@ async def test_read_workspace_file_reads_hardlink_to_vault_lab(monkeypatch, tmp_
     """LAB BUILD: a benign-named hard link to the vault/keyfile is readable (the
     hardlink-to-sensitive inode check was removed; operator-box FS unrestricted)."""
     import os
+
     monkeypatch.delenv("AI_NMAP_VAULT_KEY", raising=False)
     mcp = _make_server(tmp_path)
-    await mcp.call_tool("cred_store_add", {
-        "target_ip": "10.0.0.50", "username": "admin", "password": _CLEARTEXT})
+    await mcp.call_tool("cred_store_add", {"target_ip": "10.0.0.50", "username": "admin", "password": _CLEARTEXT})
     cred_file = tmp_path / "credentials" / "10.0.0.50" / "credentials.jsonl"
     keyfile = tmp_path / "credentials" / "10.0.0.50" / ".vault_key"
     assert cred_file.exists() and keyfile.exists()
@@ -623,10 +659,10 @@ async def test_list_workspace_shows_credentials_via_link_alias_lab(monkeypatch, 
     subtree is enumerated -- but it IS shown (the lab build does not hide it)."""
     import os
     import subprocess
+
     monkeypatch.delenv("AI_NMAP_VAULT_KEY", raising=False)
     mcp = _make_server(tmp_path)
-    await mcp.call_tool("cred_store_add", {
-        "target_ip": "10.0.0.50", "username": "admin", "password": _CLEARTEXT})
+    await mcp.call_tool("cred_store_add", {"target_ip": "10.0.0.50", "username": "admin", "password": _CLEARTEXT})
     cred_dir = tmp_path / "credentials"
     alias = tmp_path / "data"
     # try a real symlink first (POSIX always; Windows needs dev-mode/privilege)
@@ -641,9 +677,10 @@ async def test_list_workspace_shows_credentials_via_link_alias_lab(monkeypatch, 
         try:
             r = subprocess.run(
                 ["cmd", "/c", "mklink", "/J", str(alias), str(cred_dir)],
-                capture_output=True, timeout=10,
+                capture_output=True,
+                timeout=10,
             )
-            created = (r.returncode == 0)
+            created = r.returncode == 0
         except Exception:
             created = False
     if not created:

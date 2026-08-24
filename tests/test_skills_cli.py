@@ -91,10 +91,15 @@ def test_apply_skills_none_is_noop():
 
 
 def test_apply_skills_combined_overrides():
-    cfg = apply_skills_cli_overrides(_config(), _args(
-        skills="on", skills_include=["beta"], skills_exclude=["gamma"],
-        no_skills_reselect=True,
-    ))
+    cfg = apply_skills_cli_overrides(
+        _config(),
+        _args(
+            skills="on",
+            skills_include=["beta"],
+            skills_exclude=["gamma"],
+            no_skills_reselect=True,
+        ),
+    )
     s = cfg["skills"]
     assert s["enabled"] is True
     assert s["inject_startup_context"] is True
@@ -120,14 +125,20 @@ def test_parse_args_skills_flags_recognized():
     """The argparse parser accepts every new skills flag without error."""
     from main import parse_args
 
-    ns = parse_args([
-        "--skills", "on",
-        "--skills-include", "alpha",
-        "--skills-include", "beta",
-        "--skills-exclude", "gamma",
-        "--no-skills-reselect",
-        "--skills-list",
-    ])
+    ns = parse_args(
+        [
+            "--skills",
+            "on",
+            "--skills-include",
+            "alpha",
+            "--skills-include",
+            "beta",
+            "--skills-exclude",
+            "gamma",
+            "--no-skills-reselect",
+            "--skills-list",
+        ]
+    )
     assert ns.skills == "on"
     assert ns.skills_include == ["alpha", "beta"]
     assert ns.skills_exclude == ["gamma"]

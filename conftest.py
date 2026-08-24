@@ -19,6 +19,7 @@ Two concerns live here:
    ollama-unreachable tests non-deterministically. Snapshot+restore around every
    test is the standard fix for process-global env written outside monkeypatch.
 """
+
 import os
 import traceback
 

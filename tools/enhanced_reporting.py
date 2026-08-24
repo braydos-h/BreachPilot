@@ -29,9 +29,11 @@ logger = get_logger()
 
 # ── CVSS 3.1 Scoring ───────────────────────────────────────────────────────
 
+
 @dataclass
 class CVSSScore:
     """CVSS 3.1 score components."""
+
     base_score: float = 0.0
     temporal_score: float | None = None
     environmental_score: float | None = None
@@ -82,9 +84,11 @@ def calculate_cvss(
     cia_weights = {"N": 0.0, "L": 0.22, "H": 0.56}
 
     # Calculate ISS (Impact Sub-Score)
-    iss = 1 - ((1 - cia_weights.get(confidentiality, 0)) *
-               (1 - cia_weights.get(integrity, 0)) *
-               (1 - cia_weights.get(availability, 0)))
+    iss = 1 - (
+        (1 - cia_weights.get(confidentiality, 0))
+        * (1 - cia_weights.get(integrity, 0))
+        * (1 - cia_weights.get(availability, 0))
+    )
 
     # Calculate Impact
     if scope == "U":
@@ -93,8 +97,18 @@ def calculate_cvss(
         impact = 7.52 * (iss - 0.029) - 3.25 * (iss - 0.02) ** 15
 
     # Calculate Exploitability
-    pr_weight = pr_weights_scope_changed.get(privileges_required, 0.85) if scope == "C" else pr_weights.get(privileges_required, 0.85)
-    exploitability = 8.22 * av_weights.get(attack_vector, 0.85) * ac_weights.get(attack_complexity, 0.77) * pr_weight * ui_weights.get(user_interaction, 0.85)
+    pr_weight = (
+        pr_weights_scope_changed.get(privileges_required, 0.85)
+        if scope == "C"
+        else pr_weights.get(privileges_required, 0.85)
+    )
+    exploitability = (
+        8.22
+        * av_weights.get(attack_vector, 0.85)
+        * ac_weights.get(attack_complexity, 0.77)
+        * pr_weight
+        * ui_weights.get(user_interaction, 0.85)
+    )
 
     # Calculate Base Score
     if impact <= 0:
@@ -129,6 +143,7 @@ def calculate_cvss(
 
 
 # ── Report data structures ─────────────────────────────────────────────────
+
 
 @dataclass
 class AttackTimelineEntry:
@@ -234,6 +249,7 @@ class TechnicalFinding:
 
 # ── Enhanced Report Generator ────────────────────────────────────────────────
 
+
 class EnhancedReportGenerator:
     """Professional red-team style report generator."""
 
@@ -324,13 +340,13 @@ class EnhancedReportGenerator:
             for s in states.values()
         )
         privilege_escalations = sum(
-            1 for s in states.values()
-            if s.get("privilege_level") in ("root", "system", "admin")
+            1 for s in states.values() if s.get("privilege_level") in ("root", "system", "admin")
         )
         credentials_found = sum(len(s.get("credentials_found", [])) for s in states.values())
 
         critical_count = sum(
-            1 for s in states.values()
+            1
+            for s in states.values()
             for e in s.get("successful_exploits", [])
             if any(c in e for c in ["RCE", "CVE-2024-6387", "EternalBlue", "BlueKeep"])
         )
@@ -351,14 +367,18 @@ class EnhancedReportGenerator:
             f"- **Total Exploit Attempts**: {total_attempts}",
             f"- **Privilege Escalations Achieved**: {privilege_escalations}",
             f"- **Credentials Discovered**: {credentials_found}",
-            f"- **Success Rate**: {(successful_exploits / total_attempts * 100):.1f}%" if total_attempts > 0 else "- **Success Rate**: N/A",
+            f"- **Success Rate**: {(successful_exploits / total_attempts * 100):.1f}%"
+            if total_attempts > 0
+            else "- **Success Rate**: N/A",
             "",
             "## Risk Assessment",
             "",
         ]
 
         if critical_count > 0:
-            lines.append("🔴 **CRITICAL**: Immediate action required. Multiple critical vulnerabilities were successfully exploited.")
+            lines.append(
+                "🔴 **CRITICAL**: Immediate action required. Multiple critical vulnerabilities were successfully exploited."
+            )
         elif successful_exploits > 0:
             lines.append("🟠 **HIGH**: Significant security weaknesses identified and exploited.")
         elif total_attempts > 0:
@@ -366,11 +386,13 @@ class EnhancedReportGenerator:
         else:
             lines.append("🟢 **LOW**: No successful exploits achieved during the assessment.")
 
-        lines.extend([
-            "",
-            "## Attack Surface Summary",
-            "",
-        ])
+        lines.extend(
+            [
+                "",
+                "## Attack Surface Summary",
+                "",
+            ]
+        )
 
         for target, state in states.items():
             recon = state.get("recon_result", {})
@@ -433,7 +455,9 @@ class EnhancedReportGenerator:
             event_type = event.get("event_type", "")
             module = event.get("metadata", {}).get("module", "")
             description = event.get("description", "")[:60]
-            result = "✅" if "success" in event_type else "❌" if "fail" in event_type or "error" in event_type else "⏳"
+            result = (
+                "✅" if "success" in event_type else "❌" if "fail" in event_type or "error" in event_type else "⏳"
+            )
             lines.append(f"| {time_str} | {target} | {event_type} | {module} | {description} | {result} |")
 
         return "\n".join(lines)
@@ -618,15 +642,17 @@ class EnhancedReportGenerator:
         timeline: list[AttackTimelineEntry] = []
         for target, state in states.items():
             for event in state.get("timeline", []):
-                timeline.append(AttackTimelineEntry(
-                    timestamp=event.get("timestamp", ""),
-                    event_type=event.get("event_type", ""),
-                    description=event.get("description", ""),
-                    target=target,
-                    module=event.get("metadata", {}).get("module", ""),
-                    result="success" if "success" in event.get("event_type", "") else "failure",
-                    metadata=event.get("metadata", {}),
-                ))
+                timeline.append(
+                    AttackTimelineEntry(
+                        timestamp=event.get("timestamp", ""),
+                        event_type=event.get("event_type", ""),
+                        description=event.get("description", ""),
+                        target=target,
+                        module=event.get("metadata", {}).get("module", ""),
+                        result="success" if "success" in event.get("event_type", "") else "failure",
+                        metadata=event.get("metadata", {}),
+                    )
+                )
 
         # Build exploitation chains (timestamps back-filled from audit records /
         # timeline events when available).
@@ -637,18 +663,22 @@ class EnhancedReportGenerator:
                 chain_entries = []
                 for exploit in exploits:
                     ts = self._chain_entry_timestamp(exploit, target, state)
-                    chain_entries.append({
-                        "module": exploit,
-                        "timestamp": ts,
-                        "result": "success",
-                    })
-                chains.append(ExploitationChain(
-                    chain_id=f"CHAIN-{target.replace('.', '-')}",
-                    target=target,
-                    entries=chain_entries,
-                    successful=True,
-                    final_privilege=state.get("privilege_level", "none"),
-                ))
+                    chain_entries.append(
+                        {
+                            "module": exploit,
+                            "timestamp": ts,
+                            "result": "success",
+                        }
+                    )
+                chains.append(
+                    ExploitationChain(
+                        chain_id=f"CHAIN-{target.replace('.', '-')}",
+                        target=target,
+                        entries=chain_entries,
+                        successful=True,
+                        final_privilege=state.get("privilege_level", "none"),
+                    )
+                )
 
         # Build failure analysis
         failures: list[FailureAnalysis] = []
@@ -665,13 +695,15 @@ class EnhancedReportGenerator:
                 et = self._categorize_error(error)
                 error_types[et] = error_types.get(et, 0) + 1
             primary = max(error_types, key=error_types.get) if error_types else "Unknown"
-            failures.append(FailureAnalysis(
-                operation=module,
-                failure_count=len(errors),
-                primary_error=primary,
-                error_breakdown=error_types,
-                mitigation_suggestion=self._suggest_mitigation(primary),
-            ))
+            failures.append(
+                FailureAnalysis(
+                    operation=module,
+                    failure_count=len(errors),
+                    primary_error=primary,
+                    error_breakdown=error_types,
+                    mitigation_suggestion=self._suggest_mitigation(primary),
+                )
+            )
 
         # Build technical findings
         findings: list[TechnicalFinding] = []
@@ -687,21 +719,25 @@ class EnhancedReportGenerator:
                 summary = f"Successfully exploited {exploit}"
                 if verdict is not None:
                     summary = f"{summary} (hypothesis {verdict})"
-                findings.append(TechnicalFinding(
-                    finding_id=f"F-{target.replace('.', '-')}-{exploit}",
-                    title=f"{exploit} on {target}",
-                    affected_asset=target,
-                    vuln_class=self._classify_vulnerability(exploit),
-                    severity=cvss.severity,
-                    cvss=cvss,
-                    confidence=confidence,
-                    summary=summary,
-                    reproduction_steps=repro,
-                    evidence_refs=refs,
-                    exploitation_result="Shell access achieved" if state.get("access_achieved") else "Exploit verified",
-                    privilege_level_gained=state.get("privilege_level", ""),
-                    remediation=self._get_remediation(exploit),
-                ))
+                findings.append(
+                    TechnicalFinding(
+                        finding_id=f"F-{target.replace('.', '-')}-{exploit}",
+                        title=f"{exploit} on {target}",
+                        affected_asset=target,
+                        vuln_class=self._classify_vulnerability(exploit),
+                        severity=cvss.severity,
+                        cvss=cvss,
+                        confidence=confidence,
+                        summary=summary,
+                        reproduction_steps=repro,
+                        evidence_refs=refs,
+                        exploitation_result="Shell access achieved"
+                        if state.get("access_achieved")
+                        else "Exploit verified",
+                        privilege_level_gained=state.get("privilege_level", ""),
+                        remediation=self._get_remediation(exploit),
+                    )
+                )
 
         # T1.13: rank findings by CVSS base score (desc) so both render paths
         # (_generate_findings_md / _generate_findings_html, which iterate this
@@ -716,7 +752,9 @@ class EnhancedReportGenerator:
                 "generator_version": "2.0",
                 "total_targets": len(states),
                 "total_exploits": sum(len(s.get("successful_exploits", [])) for s in states.values()),
-                "total_failures": sum(sum(len(v) for v in s.get("failed_attempts", {}).values()) for s in states.values()),
+                "total_failures": sum(
+                    sum(len(v) for v in s.get("failed_attempts", {}).values()) for s in states.values()
+                ),
             },
             "executive_summary": self.generate_executive_summary(campaign_result),
             "attack_timeline": [t.to_dict() for t in timeline],
@@ -737,12 +775,15 @@ class EnhancedReportGenerator:
         for rec in state.get("exploit_records", []) or state.get("audit_records", []):
             if not isinstance(rec, dict):
                 continue
-            hay = " ".join(str(v) for v in (
-                rec.get("action", ""),
-                rec.get("tool_name", ""),
-                (rec.get("full_args", {}) or {}).get("command", ""),
-                (rec.get("args", {}) or {}).get("command", ""),
-            )).lower()
+            hay = " ".join(
+                str(v)
+                for v in (
+                    rec.get("action", ""),
+                    rec.get("tool_name", ""),
+                    (rec.get("full_args", {}) or {}).get("command", ""),
+                    (rec.get("args", {}) or {}).get("command", ""),
+                )
+            ).lower()
             if exploit_lower and exploit_lower in hay:
                 ts = rec.get("timestamp") or rec.get("created_at", "")
                 if ts:
@@ -1020,9 +1061,7 @@ class EnhancedReportGenerator:
                     sections.append(f"<li><code>{_esc(ref)}</code></li>")
                 sections.append("</ul>")
             if finding.get("remediation"):
-                sections.append(
-                    f"<p><strong>Remediation:</strong> {_esc(finding.get('remediation', ''))}</p>"
-                )
+                sections.append(f"<p><strong>Remediation:</strong> {_esc(finding.get('remediation', ''))}</p>")
             sections.append("</article>")
         sections.append("</section>")
         return "".join(sections)
@@ -1043,9 +1082,7 @@ class EnhancedReportGenerator:
                     sections.append(f"<li>{_esc(etype)}: {_esc(count)}</li>")
                 sections.append("</ul>")
             if failure.get("mitigation_suggestion"):
-                sections.append(
-                    f"<p><strong>Mitigation:</strong> {_esc(failure.get('mitigation_suggestion', ''))}</p>"
-                )
+                sections.append(f"<p><strong>Mitigation:</strong> {_esc(failure.get('mitigation_suggestion', ''))}</p>")
             sections.append("</article>")
         sections.append("</section>")
         return "".join(sections)
@@ -1061,7 +1098,9 @@ class EnhancedReportGenerator:
         for entry in timeline:
             ts = entry.get("timestamp", "").split("T")[1].split(".")[0] if "T" in entry.get("timestamp", "") else ""
             result = "✅" if entry.get("result") == "success" else "❌"
-            lines.append(f"| {ts} | {entry.get('target', '')} | {entry.get('event_type', '')} | {entry.get('module', '')} | {result} |")
+            lines.append(
+                f"| {ts} | {entry.get('target', '')} | {entry.get('event_type', '')} | {entry.get('module', '')} | {result} |"
+            )
         return "\n".join(lines)
 
     def _generate_chains_md(self, chains: list[dict]) -> str:
@@ -1077,7 +1116,7 @@ class EnhancedReportGenerator:
             lines.append(f"- **Final Privilege**: {chain['final_privilege']}")
             lines.append("")
             lines.append("### Chain Steps")
-            for i, entry in enumerate(chain['entries'], 1):
+            for i, entry in enumerate(chain["entries"], 1):
                 lines.append(f"{i}. {entry['module']} ({entry['result']})")
             lines.append("")
         return "\n".join(lines)

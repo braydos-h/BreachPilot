@@ -61,9 +61,7 @@ class MemoryAdapter:
             # ponytail: MemoryManager has no update API, so the confidence of an
             # existing row is left untouched; add an update when one exists.
             return existing["id"]
-        return self.remember_graded(
-            memory_manager, target, fact, memory_type=memory_type, confidence=confidence
-        )
+        return self.remember_graded(memory_manager, target, fact, memory_type=memory_type, confidence=confidence)
 
     @staticmethod
     def confidence_rank(retrieved: list[dict[str, Any]]) -> list[dict[str, Any]]:

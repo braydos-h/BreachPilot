@@ -1,4 +1,5 @@
 """Focused regression tests for the local HTTP MCP process lifecycle."""
+
 from __future__ import annotations
 
 import asyncio
@@ -101,10 +102,13 @@ def test_mcp_readiness_reports_early_child_exit_with_redacted_log(
     assert "must-not-leak" not in message
 
 
-@pytest.mark.parametrize(("token", "authorization"), [
-    ("", None),
-    ("local-token", "Bearer local-token"),
-])
+@pytest.mark.parametrize(
+    ("token", "authorization"),
+    [
+        ("", None),
+        ("local-token", "Bearer local-token"),
+    ],
+)
 def test_streamable_client_bypasses_proxy(monkeypatch, token, authorization) -> None:
     seen = {}
 
@@ -173,9 +177,7 @@ def test_http_startup_failure_falls_back_to_stdio(monkeypatch, tmp_path: Path) -
     assert calls == [("http", True), ("stdio", False)]
 
 
-def test_recon_soft_fail_yields_none_when_http_and_stdio_both_fail(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_recon_soft_fail_yields_none_when_http_and_stdio_both_fail(monkeypatch, tmp_path: Path) -> None:
     @contextlib.asynccontextmanager
     async def _open_once(**_kwargs):
         yield None
@@ -196,9 +198,7 @@ def test_recon_soft_fail_yields_none_when_http_and_stdio_both_fail(
     assert asyncio.run(_run()) is None
 
 
-def test_attack_hard_fail_reports_http_and_stdio_startup_errors(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_attack_hard_fail_reports_http_and_stdio_startup_errors(monkeypatch, tmp_path: Path) -> None:
     @contextlib.asynccontextmanager
     async def _open_once(**kwargs):
         if kwargs["transport"] == "http":
@@ -228,9 +228,7 @@ def test_attack_hard_fail_reports_http_and_stdio_startup_errors(
     assert "stdio init failed" in message
 
 
-def test_http_session_failure_after_yield_does_not_retry_over_stdio(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_http_session_failure_after_yield_does_not_retry_over_stdio(monkeypatch, tmp_path: Path) -> None:
     calls: list[str] = []
 
     @contextlib.asynccontextmanager
@@ -256,9 +254,7 @@ def test_http_session_failure_after_yield_does_not_retry_over_stdio(
 
 
 @pytest.mark.skipif(not hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"), reason="Windows only")
-def test_http_server_starts_in_a_new_windows_process_group(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_http_server_starts_in_a_new_windows_process_group(monkeypatch, tmp_path: Path) -> None:
     popen_kwargs = {}
     log_handle = MagicMock()
 

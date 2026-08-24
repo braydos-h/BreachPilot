@@ -87,7 +87,9 @@ def test_provenance_chain_root_to_leaf_order():
         root_evidence_id="root",
         entries=[
             ProvenanceEntry("root", EvidenceSource.SCANNER, "nmap", "scan", "t0", "h0"),
-            ProvenanceEntry("leaf", EvidenceSource.AGENT_OBSERVATION, "agent", "analyze", "t1", "h1", parent_evidence_id="root"),
+            ProvenanceEntry(
+                "leaf", EvidenceSource.AGENT_OBSERVATION, "agent", "analyze", "t1", "h1", parent_evidence_id="root"
+            ),
         ],
     )
     assert [e.evidence_id for e in chain.walk()] == ["root", "leaf"]
@@ -98,8 +100,19 @@ def test_confidence_at_multiplies_hops():
         root_evidence_id="root",
         entries=[
             ProvenanceEntry("root", EvidenceSource.SCANNER, "nmap", "scan", "t0", "h0", confidence=0.9),
-            ProvenanceEntry("mid", EvidenceSource.AGENT_OBSERVATION, "agent", "analyze", "t1", "h1", parent_evidence_id="root", confidence=0.8),
-            ProvenanceEntry("leaf", EvidenceSource.NOTE, "agent", "conclude", "t2", "h2", parent_evidence_id="mid", confidence=0.7),
+            ProvenanceEntry(
+                "mid",
+                EvidenceSource.AGENT_OBSERVATION,
+                "agent",
+                "analyze",
+                "t1",
+                "h1",
+                parent_evidence_id="root",
+                confidence=0.8,
+            ),
+            ProvenanceEntry(
+                "leaf", EvidenceSource.NOTE, "agent", "conclude", "t2", "h2", parent_evidence_id="mid", confidence=0.7
+            ),
         ],
     )
     assert chain.confidence_at("leaf") == pytest.approx(0.9 * 0.8 * 0.7)
@@ -110,7 +123,9 @@ def test_lineage_root_to_id():
         root_evidence_id="root",
         entries=[
             ProvenanceEntry("root", EvidenceSource.SCANNER, "nmap", "scan", "t0", "h0"),
-            ProvenanceEntry("mid", EvidenceSource.AGENT_OBSERVATION, "agent", "analyze", "t1", "h1", parent_evidence_id="root"),
+            ProvenanceEntry(
+                "mid", EvidenceSource.AGENT_OBSERVATION, "agent", "analyze", "t1", "h1", parent_evidence_id="root"
+            ),
             ProvenanceEntry("leaf", EvidenceSource.NOTE, "agent", "conclude", "t2", "h2", parent_evidence_id="mid"),
         ],
     )
@@ -153,7 +168,9 @@ def test_chain_round_trip():
         root_evidence_id="root",
         entries=[
             ProvenanceEntry("root", EvidenceSource.SCANNER, "nmap", "scan", "t0", "h0", confidence=0.9),
-            ProvenanceEntry("leaf", EvidenceSource.NOTE, "agent", "conclude", "t1", "h1", parent_evidence_id="root", confidence=0.5),
+            ProvenanceEntry(
+                "leaf", EvidenceSource.NOTE, "agent", "conclude", "t1", "h1", parent_evidence_id="root", confidence=0.5
+            ),
         ],
     )
     restored = ProvenanceChain.from_dict(chain.to_dict())

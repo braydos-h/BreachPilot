@@ -23,6 +23,7 @@ def _make_client(tmp_path, monkeypatch, token="test-token"):
 
     class _FakeRouter:
         _clients = {"glm": MagicMock()}
+
         def get_client(self, name):
             return self._clients[name]
 
@@ -37,6 +38,7 @@ def _make_client(tmp_path, monkeypatch, token="test-token"):
         run_session=_fake_run_session,
     )
     from app import create_app
+
     app = create_app(config_path=config_path, callables=callables)
     return TestClient(app)
 
@@ -48,9 +50,15 @@ def _auth_headers(token="test-token"):
 def test_reset_wipes_runs_and_workspaces(tmp_path, monkeypatch):
     """Reset deletes run history rows and the reports/exploit/research/swarm dirs."""
     client = _make_client(tmp_path, monkeypatch)
-    created = client.post("/api/v1/runs", json={
-        "target": "10.0.0.50", "mode": "attack", "goal": "recon_only",
-    }, headers=_auth_headers()).json()
+    created = client.post(
+        "/api/v1/runs",
+        json={
+            "target": "10.0.0.50",
+            "mode": "attack",
+            "goal": "recon_only",
+        },
+        headers=_auth_headers(),
+    ).json()
     run_id = created["run_id"]
     client.post(f"/api/v1/runs/{run_id}/cancel", headers=_auth_headers())
     (tmp_path / "reports" / run_id).mkdir(parents=True, exist_ok=True)
@@ -60,6 +68,7 @@ def test_reset_wipes_runs_and_workspaces(tmp_path, monkeypatch):
     (tmp_path / "swarm_workspace").mkdir(exist_ok=True)
     # Seed research.db with a mission row so the reset has data to clear.
     import sqlite3
+
     conn = sqlite3.connect(str(tmp_path / "research_workspace" / "research.db"))
     try:
         conn.execute("CREATE TABLE missions (id TEXT PRIMARY KEY)")
@@ -84,6 +93,7 @@ def test_reset_wipes_runs_and_workspaces(tmp_path, monkeypatch):
     # holds it open — but all mission data is gone.
     assert not any(p.name.startswith("M-") for p in rw.iterdir())
     import sqlite3
+
     conn = sqlite3.connect(str(rw / "research.db"))
     try:
         n = conn.execute("SELECT COUNT(*) FROM missions").fetchone()[0]
@@ -98,9 +108,15 @@ def test_reset_wipes_runs_and_workspaces(tmp_path, monkeypatch):
 def test_reset_refuses_while_run_active(tmp_path, monkeypatch):
     """An active (awaiting_confirmation) run blocks the reset with 409."""
     client = _make_client(tmp_path, monkeypatch)
-    client.post("/api/v1/runs", json={
-        "target": "10.0.0.50", "mode": "attack", "goal": "recon_only",
-    }, headers=_auth_headers())
+    client.post(
+        "/api/v1/runs",
+        json={
+            "target": "10.0.0.50",
+            "mode": "attack",
+            "goal": "recon_only",
+        },
+        headers=_auth_headers(),
+    )
     resp = client.post("/api/v1/system/reset", headers=_auth_headers())
     assert resp.status_code == 409
     assert "active" in resp.json()["error"]["message"]

@@ -179,7 +179,8 @@ def test_rate_limit_resets_after_window(tmp_path):
         db.ensure_schema(conn)
     mid = _new_id("M")
     gate = ScopeGate(
-        db, mid,
+        db,
+        mid,
         allowed_assets=["example.com"],
         rate_limits={"default_requests_per_second": 10},
     )
@@ -368,12 +369,14 @@ def test_clean_asset_ipv6_url_with_path_and_port():
 def test_clean_asset_bare_ipv6_round_trips_through_ipaddress():
     """The cleaned result must be a valid IPv6 address (not a truncated form)."""
     import ipaddress
+
     cleaned = _clean_asset("2001:db8::1")
     assert str(ipaddress.ip_address(cleaned)) == cleaned
 
 
 def test_clean_asset_bracketed_ipv6_round_trips_through_ipaddress():
     import ipaddress
+
     cleaned = _clean_asset("[2001:db8::1]:443")
     assert str(ipaddress.ip_address(cleaned)) == cleaned
 

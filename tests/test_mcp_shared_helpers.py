@@ -6,6 +6,7 @@ Covers:
 - ``_check_allowlist`` CIDR / wildcard routing through
   ``validation_utils.is_target_in_allowlist`` (Shared #2 / M1).
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -119,7 +120,11 @@ def test_run_with_pgrp_timeout_text_mode_decodes(monkeypatch):
     proc = _FakeProc(returncode=0, out=b"hello", err=b"oops")
     _patch_popen(monkeypatch, proc)
     rc, out, err = _run_with_pgrp_timeout(
-        ["echo", "hi"], 10, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        ["echo", "hi"],
+        10,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
     )
     assert rc == 0
     assert out == "hello"
@@ -130,7 +135,11 @@ def test_run_with_pgrp_timeout_input_text_encoded(monkeypatch):
     proc = _FakeProc(returncode=0, out=b"", err=b"")
     cap_proc = _patch_popen(monkeypatch, proc)
     _run_with_pgrp_timeout(
-        ["grep", "x"], 10, stdout=subprocess.PIPE, stderr=subprocess.PIPE, input_text="needle\n",
+        ["grep", "x"],
+        10,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        input_text="needle\n",
     )
     # communicate received bytes
     assert proc.communicate_calls[0][0] == b"needle\n"

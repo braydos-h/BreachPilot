@@ -17,6 +17,7 @@ def _make_client(tmp_path, monkeypatch, token="test-token"):
         encoding="utf-8",
     )
     from app import create_app
+
     return TestClient(create_app(config_path=config_path))
 
 

@@ -27,6 +27,7 @@ print the canonical marker, so handler logic is tested independently of the real
 module implementations in tools/attack_modules/modules/persistence.py (those are
 covered by test_persistence_modules.py).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -120,8 +121,10 @@ def _recon_linux_http() -> HostReconResult:
     return HostReconResult(
         target_ip="10.0.0.5",
         os_family="linux",
-        services=[ServiceInfo(port=80, protocol="tcp", service="http"),
-                  ServiceInfo(port=22, protocol="tcp", service="ssh")],
+        services=[
+            ServiceInfo(port=80, protocol="tcp", service="http"),
+            ServiceInfo(port=22, protocol="tcp", service="ssh"),
+        ],
         open_ports=[80, 22],
     )
 
@@ -171,16 +174,16 @@ async def test_persistence_records_methods_on_access(tmp_path: Path, monkeypatch
     """With persistence_phase on + access achieved, _phase_persistence dispatches
     each OS/web module and records the confirmed method per the dispatch marker."""
     monkeypatch.setattr(orch_mod, "get_module", _fake_persist_get_module)
-    orch = _orch(tmp_path, mission_config={"persistence_phase": True, "max_cycles": 5},
-                 tool_executor=_persist_exec)
+    orch = _orch(tmp_path, mission_config={"persistence_phase": True, "max_cycles": 5}, tool_executor=_persist_exec)
     state = orch.get_state("10.0.0.5")
     state.access_achieved = True
     state.recon_result = _recon_linux_http()  # linux + http -> Linux + WebShell
 
     await orch._phase_persistence(state)
 
-    assert state.persistence_established == ["cron", "webshell"], \
+    assert state.persistence_established == ["cron", "webshell"], (
         "linux+http must install cron (Linux) then webshell (WebShell)"
+    )
     assert "persistence_established" in _timeline_types(state)
 
 
@@ -255,8 +258,7 @@ async def test_persistence_off_by_default_in_attack_target(tmp_path: Path, monke
 async def test_persistence_on_runs_in_attack_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """persistence_phase ON + access achieved -> _attack_target runs persistence."""
     monkeypatch.setattr(orch_mod, "get_module", _fake_persist_get_module)
-    orch = _orch(tmp_path, mission_config={"persistence_phase": True, "max_cycles": 5},
-                 tool_executor=_persist_exec)
+    orch = _orch(tmp_path, mission_config={"persistence_phase": True, "max_cycles": 5}, tool_executor=_persist_exec)
 
     async def _fake_recon(state: AttackState) -> None:
         state.recon_result = _recon_linux_http()
@@ -322,6 +324,7 @@ async def test_checkpoint_every_n_writes_state_file(tmp_path: Path) -> None:
     # targets that had run by then; target 3 runs after and 3 is not a multiple
     # of 2, so no further checkpoint rewrites the file.
     import json
+
     data = json.loads(state_path.read_text(encoding="utf-8"))
     assert "states" in data and len(data["states"]) == 2
 
@@ -353,8 +356,9 @@ async def test_crash_bounded_campaign_continues(tmp_path: Path) -> None:
     result = await orch.run_autonomous_campaign(["10.0.0.5", "10.0.0.6", "10.0.0.7"])
 
     assert result["results"]["10.0.0.5"]["status"] == "complete"
-    assert result["results"]["10.0.0.6"]["status"] == "crashed", \
+    assert result["results"]["10.0.0.6"]["status"] == "crashed", (
         "the crashing target must be recorded as crashed, not abort the run"
+    )
     assert result["results"]["10.0.0.7"]["status"] == "complete"
 
 
@@ -476,9 +480,14 @@ def test_opt_in_flags_default_off(tmp_path: Path) -> None:
 
 def test_opt_in_flags_wired_from_mission_config(tmp_path: Path) -> None:
     """mission_config keys flow through to the orchestrator flags."""
-    orch = _orch(tmp_path, mission_config={
-        "persistence_phase": True, "checkpoint_every": 3, "adaptive_replan": True,
-    })
+    orch = _orch(
+        tmp_path,
+        mission_config={
+            "persistence_phase": True,
+            "checkpoint_every": 3,
+            "adaptive_replan": True,
+        },
+    )
     assert orch._persistence_enabled is True
     assert orch._checkpoint_every == 3
     assert orch._adaptive_replan is True

@@ -47,13 +47,7 @@ def _build_prompt(result: Mapping[str, Any], request: Mapping[str, Any]) -> str:
     skill_names = ", ".join(s.get("name", "") for s in skills[:4] if isinstance(s, Mapping))
     skill_block = f"\nSkills used: {skill_names}" if skill_names else ""
 
-    body = (
-        f"Target: {target}\n"
-        f"Mode: {mode}\n"
-        f"Goal: {goal}\n"
-        f"Actions executed: {actions}\n"
-        f"Outcome: {outcome}\n"
-    )
+    body = f"Target: {target}\nMode: {mode}\nGoal: {goal}\nActions executed: {actions}\nOutcome: {outcome}\n"
     if error:
         body += f"Error: {error}\n"
     body += skill_block
@@ -76,7 +70,7 @@ def _clean_title(raw: str) -> str:
     # Drop common prefix artifacts.
     for prefix in ("Title:", "title:", "TITLE:", "Session title:"):
         if title.startswith(prefix):
-            title = title[len(prefix):].strip()
+            title = title[len(prefix) :].strip()
     # Strip markdown bold/quote/italics markers from both ends.
     title = title.strip("\"'`*_")
     # Take the first line only — model may elaborate after a newline.
@@ -103,9 +97,7 @@ def _chatgpt_title(config: Mapping[str, Any], prompt: str) -> str:
 
         chatgpt_cfg = get_chatgpt_config(config)
         model_id = str(chatgpt_cfg.get("default_model") or "gpt-5.2")
-        client = build_model_client_for_provider(
-            config, model_id, request_timeout_seconds=_REQUEST_TIMEOUT_S
-        )
+        client = build_model_client_for_provider(config, model_id, request_timeout_seconds=_REQUEST_TIMEOUT_S)
         response = client.chat(
             model=model_id,
             messages=[{"role": "user", "content": prompt}],
@@ -150,9 +142,7 @@ async def generate_session_title(
     provider, titles go through the local openai-oauth proxy; otherwise the
     Ollama ``gemma4:31b-cloud`` path runs unchanged.
     """
-    return await asyncio.to_thread(
-        generate_session_title_sync, result, request, host=host, model=model, config=config
-    )
+    return await asyncio.to_thread(generate_session_title_sync, result, request, host=host, model=model, config=config)
 
 
 def generate_session_title_sync(

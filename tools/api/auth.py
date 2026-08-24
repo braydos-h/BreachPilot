@@ -39,8 +39,7 @@ def assert_api_loopback(host: str) -> None:
     """Refuse any non-loopback bind. v1 has no public-bind override."""
     if host not in _LOOPBACK_HOSTS:
         raise ValueError(
-            f"API host must be loopback (127.0.0.1/localhost/::1); got {host!r}. "
-            f"Public binds are not supported in v1."
+            f"API host must be loopback (127.0.0.1/localhost/::1); got {host!r}. Public binds are not supported in v1."
         )
 
 
@@ -127,7 +126,9 @@ def is_loopback_origin(origin: str, allowed_origins: list[str]) -> bool:
 
 
 async def authenticate_websocket(
-    ws: WebSocket, token: str, allowed_origins: list[str],
+    ws: WebSocket,
+    token: str,
+    allowed_origins: list[str],
 ) -> dict[str, Any] | None:
     """Validate WebSocket origin + auth message. Returns the message on success.
 
@@ -146,9 +147,7 @@ async def authenticate_websocket(
     except Exception:
         await ws.close(code=4401, reason="Auth message required")
         return None
-    if not isinstance(first, dict) or not hmac.compare_digest(
-        str(first.get("auth", "")), token
-    ):
+    if not isinstance(first, dict) or not hmac.compare_digest(str(first.get("auth", "")), token):
         await ws.close(code=4401, reason="Invalid auth token")
         return None
     after = first.get("after", 0)

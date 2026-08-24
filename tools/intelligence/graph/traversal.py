@@ -156,7 +156,9 @@ class GraphTraversal:
 
     # -- subgraphs ----------------------------------------------------------------
 
-    def subgraph(self, node_ids: list[str], max_distance: int = 1) -> tuple[list[GraphNode], list[GraphEdge], list[BoundaryEdge]]:
+    def subgraph(
+        self, node_ids: list[str], max_distance: int = 1
+    ) -> tuple[list[GraphNode], list[GraphEdge], list[BoundaryEdge]]:
         """Induced subgraph plus boundary edges around ``node_ids``.
 
         Returns ``(nodes, internal_edges, boundary_edges)`` where boundary

@@ -25,8 +25,7 @@ def _write_skill(root: Path, name: str, tags: list[str], desc: str = "") -> None
         "---\n"
         f"name: {name}\n"
         f"description: {desc or name}\n"
-        "tags:\n" + "".join(f"- {t}\n" for t in tags)
-        + "---\n# Skill\n\n## Workflow\nAuthorized use only.",
+        "tags:\n" + "".join(f"- {t}\n" for t in tags) + "---\n# Skill\n\n## Workflow\nAuthorized use only.",
         encoding="utf-8",
     )
 
@@ -112,11 +111,13 @@ def test_shared_embedder_honors_skills_semantic_model(monkeypatch):
     monkeypatch.setattr(db, "get_default_db", lambda: object())
     monkeypatch.setattr(semantic_memory, "SemanticMemoryManager", _CapturingManager)
 
-    embedder = get_shared_skill_embedder({
-        "memory": {"semantic_enabled": True, "embedding_model": "memory-default"},
-        "skills": {"semantic_model": "skill-specific-model"},
-        "ollama": {"host": "http://embedder.test:11434"},
-    })
+    embedder = get_shared_skill_embedder(
+        {
+            "memory": {"semantic_enabled": True, "embedding_model": "memory-default"},
+            "skills": {"semantic_model": "skill-specific-model"},
+            "ollama": {"host": "http://embedder.test:11434"},
+        }
+    )
 
     assert embedder.available()
     assert captured == {
@@ -139,11 +140,13 @@ def test_semantic_rank_orders_by_cosine(tmp_path: Path):
 
 def test_semantic_rank_filters_weak_similarity(tmp_path: Path):
     registry = _registry(tmp_path)
-    sm = _FakeSM({
-        "query": [1.0, 0.0],
-        "alpha": [0.2, 0.979795897],
-        "beta": [0.0, 1.0],
-    })
+    sm = _FakeSM(
+        {
+            "query": [1.0, 0.0],
+            "alpha": [0.2, 0.979795897],
+            "beta": [0.0, 1.0],
+        }
+    )
     emb = SkillEmbedder(sm)
 
     ranked = semantic_rank(
@@ -192,16 +195,18 @@ def test_selector_semantic_path_adds_signal(tmp_path: Path):
     embedder = SkillEmbedder(sm)
     sel = select_runtime_skills(
         registry,
-        config={"skills": {
-            "enabled": True,
-            "default_enabled": [],
-            "max_active_skills": 6,
-            "min_contextual_skills": 0,
-            "default_skill_weight": 5,
-            "context_skill_weight": 10,
-            "semantic_matching": True,
-            "semantic_skill_weight": 16,
-        }},
+        config={
+            "skills": {
+                "enabled": True,
+                "default_enabled": [],
+                "max_active_skills": 6,
+                "min_contextual_skills": 0,
+                "default_skill_weight": 5,
+                "context_skill_weight": 10,
+                "semantic_matching": True,
+                "semantic_skill_weight": 16,
+            }
+        },
         goal_name="alpha",
         goal_description="alpha recon",
         mode="recon",
@@ -217,16 +222,18 @@ def test_selector_semantic_path_gated_by_config(tmp_path: Path):
     embedder = SkillEmbedder(sm)
     sel = select_runtime_skills(
         registry,
-        config={"skills": {
-            "enabled": True,
-            "default_enabled": [],
-            "max_active_skills": 6,
-            "min_contextual_skills": 0,
-            "default_skill_weight": 5,
-            "context_skill_weight": 10,
-            "semantic_matching": False,  # off -> no semantic term
-            "semantic_skill_weight": 16,
-        }},
+        config={
+            "skills": {
+                "enabled": True,
+                "default_enabled": [],
+                "max_active_skills": 6,
+                "min_contextual_skills": 0,
+                "default_skill_weight": 5,
+                "context_skill_weight": 10,
+                "semantic_matching": False,  # off -> no semantic term
+                "semantic_skill_weight": 16,
+            }
+        },
         goal_name="alpha",
         goal_description="alpha recon",
         mode="recon",
@@ -242,16 +249,18 @@ def test_semantic_off_falls_back_to_tags(tmp_path: Path):
     registry = _registry(tmp_path)
     sel = select_runtime_skills(
         registry,
-        config={"skills": {
-            "enabled": True,
-            "default_enabled": [],
-            "max_active_skills": 6,
-            "min_contextual_skills": 1,
-            "default_skill_weight": 5,
-            "context_skill_weight": 10,
-            "semantic_matching": True,  # on, but no embedder -> fallback
-            "semantic_skill_weight": 16,
-        }},
+        config={
+            "skills": {
+                "enabled": True,
+                "default_enabled": [],
+                "max_active_skills": 6,
+                "min_contextual_skills": 1,
+                "default_skill_weight": 5,
+                "context_skill_weight": 10,
+                "semantic_matching": True,  # on, but no embedder -> fallback
+                "semantic_skill_weight": 16,
+            }
+        },
         goal_name="recon",
         goal_description="recon",
         mode="recon",
@@ -270,16 +279,18 @@ def test_semantic_fallback_when_ollama_unreachable(tmp_path: Path, capsys):
     embedder = SkillEmbedder(_BrokenSM())
     sel = select_runtime_skills(
         registry,
-        config={"skills": {
-            "enabled": True,
-            "default_enabled": [],
-            "max_active_skills": 6,
-            "min_contextual_skills": 1,
-            "default_skill_weight": 5,
-            "context_skill_weight": 10,
-            "semantic_matching": True,
-            "semantic_skill_weight": 16,
-        }},
+        config={
+            "skills": {
+                "enabled": True,
+                "default_enabled": [],
+                "max_active_skills": 6,
+                "min_contextual_skills": 1,
+                "default_skill_weight": 5,
+                "context_skill_weight": 10,
+                "semantic_matching": True,
+                "semantic_skill_weight": 16,
+            }
+        },
         goal_name="recon",
         goal_description="recon",
         mode="recon",

@@ -22,12 +22,12 @@ Main scanner class wrapping the Nmap command-line tool.
 
 #### Scanner Result Access
 ```python
-scanner[host].state()              # Host state: 'up' or 'down'
-scanner[host].all_protocols()      # ['tcp', 'udp']
-scanner[host][proto].keys()        # List of port numbers
-scanner[host][proto][port]         # Port info dict with keys: state, name, product, version
-scanner[host].hostnames()          # [{'name': 'hostname', 'type': 'PTR'}]
-scanner[host]['osmatch']           # OS detection results
+scanner[host].state()  # Host state: 'up' or 'down'
+scanner[host].all_protocols()  # ['tcp', 'udp']
+scanner[host][proto].keys()  # List of port numbers
+scanner[host][proto][port]  # Port info dict with keys: state, name, product, version
+scanner[host].hostnames()  # [{'name': 'hostname', 'type': 'PTR'}]
+scanner[host]["osmatch"]  # OS detection results
 ```
 
 ### Common Nmap Arguments
@@ -46,9 +46,9 @@ scanner[host]['osmatch']           # OS detection results
 
 ### Output Parsing
 ```python
-scanner.csv()           # CSV-formatted scan results
-scanner.scaninfo()      # Scan metadata (type, services scanned)
-scanner.scanstats()     # Timing and host statistics
+scanner.csv()  # CSV-formatted scan results
+scanner.scaninfo()  # Scan metadata (type, services scanned)
+scanner.scanstats()  # Timing and host statistics
 ```
 
 ## References

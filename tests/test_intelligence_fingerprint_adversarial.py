@@ -48,7 +48,9 @@ def test_a_ten_spelling_variants_dedup_to_one_fingerprint():
 def test_b_refuted_retry_without_evidence_not_promoted():
     tracker = AttemptTracker()
     attempt = _ssh_brute("10.0.0.1")
-    key = tracker.record(attempt, AttemptStatus.REFUTED, detail="hypothesis contradicted", evidence_snapshot={"version_known": "2.0"})
+    key = tracker.record(
+        attempt, AttemptStatus.REFUTED, detail="hypothesis contradicted", evidence_snapshot={"version_known": "2.0"}
+    )
     is_rep, reason, detail = tracker.is_repetition(key, {"version_known": "2.0"})
     assert is_rep is True
     assert reason is RetryJustification.NONE
@@ -58,7 +60,9 @@ def test_b_refuted_retry_without_evidence_not_promoted():
 def test_c_refuted_retry_with_new_version_is_justified():
     tracker = AttemptTracker()
     attempt = _ssh_brute("10.0.0.1")
-    key = tracker.record(attempt, AttemptStatus.REFUTED, detail="hypothesis contradicted", evidence_snapshot={"version_known": "2.0"})
+    key = tracker.record(
+        attempt, AttemptStatus.REFUTED, detail="hypothesis contradicted", evidence_snapshot={"version_known": "2.0"}
+    )
     is_rep, reason, _detail = tracker.is_repetition(key, {"version_known": "2.1"})
     assert is_rep is True
     assert reason is RetryJustification.NEW_VERSION_EVIDENCE
@@ -67,7 +71,9 @@ def test_c_refuted_retry_with_new_version_is_justified():
 def test_d_blocked_is_not_terminal():
     tracker = AttemptTracker()
     attempt = _ssh_brute("10.0.0.1")
-    key = tracker.record(attempt, AttemptStatus.BLOCKED, detail="scope gate", evidence_snapshot={"version_known": "2.0"})
+    key = tracker.record(
+        attempt, AttemptStatus.BLOCKED, detail="scope gate", evidence_snapshot={"version_known": "2.0"}
+    )
     is_rep, reason, _detail = tracker.is_repetition(key, {"version_known": "2.0"})
     assert is_rep is False
     assert reason is RetryJustification.NONE

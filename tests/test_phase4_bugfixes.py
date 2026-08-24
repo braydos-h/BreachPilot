@@ -42,14 +42,19 @@ from risk_controller import RiskController
 @pytest.fixture(autouse=True)
 def _restore_target_env():
     import os as _os
-    _snap = {k: _os.environ.get(k) for k in
-             ("EXPLOIT_TARGET", "EXPLOIT_TARGET_IP", "EXPLOIT_TARGET_DOMAIN", "EXPLOIT_DISCOVERED_TARGETS")}
+
+    _snap = {
+        k: _os.environ.get(k)
+        for k in ("EXPLOIT_TARGET", "EXPLOIT_TARGET_IP", "EXPLOIT_TARGET_DOMAIN", "EXPLOIT_DISCOVERED_TARGETS")
+    }
     yield
     for _k, _v in _snap.items():
         if _v is None:
             _os.environ.pop(_k, None)
         else:
             _os.environ[_k] = _v
+
+
 from scope_gate import ScopeGate
 from tools.command_analyzer import analysis_payload, analyze_command
 from tools.mcp_shared import _attempt_dir
@@ -81,10 +86,10 @@ def test_cidr_overbroad_subnet_is_blocked(tmp_path: Path) -> None:
 
 def test_cidr_exact_and_bare_ip_matching(tmp_path: Path) -> None:
     gate = _gate(tmp_path, ["10.0.0.0/24"])
-    assert gate.is_asset_in_scope("10.0.0.0/24") is True   # exact
-    assert gate.is_asset_in_scope("10.0.0.5") is True      # bare IP in range
-    assert gate.is_asset_in_scope("10.0.0.5/32") is True   # /32 host in range
-    assert gate.is_asset_in_scope("10.0.1.5") is False     # bare IP outside
+    assert gate.is_asset_in_scope("10.0.0.0/24") is True  # exact
+    assert gate.is_asset_in_scope("10.0.0.5") is True  # bare IP in range
+    assert gate.is_asset_in_scope("10.0.0.5/32") is True  # /32 host in range
+    assert gate.is_asset_in_scope("10.0.1.5") is False  # bare IP outside
     assert gate.is_asset_in_scope("10.0.1.0/24") is False  # adjacent subnet
 
 
@@ -172,6 +177,7 @@ async def test_execute_task_batch_no_deadlock_with_many_retryable(tmp_path: Path
     # Instant backoff so the 2**retry_count sleeps don't slow the test.
     async def _nosleep(*_a: Any, **_k: Any) -> None:
         return None
+
     orig_sleep = asyncio.sleep
     asyncio.sleep = _nosleep  # type: ignore[assignment]
     try:
@@ -228,27 +234,34 @@ async def test_orchestrator_domain_campaign_runs_subdomain_expansion(tmp_path: P
                 open_ports = [80]
                 os_family = "linux"
                 services = []
+
                 def to_dict(self):
                     return {"open_ports": [80], "os_family": "linux", "services": []}
+
             return _R()
+
     orch._recon = _FakeRecon()  # type: ignore[attr-defined]
 
     # Stub the executor so no attack modules run (we only care about recon).
     class _NoopExecutor:
         async def execute(self, task, state):
             return {"success": False, "blocked": False, "error": "noop"}
+
     orch._executor = _NoopExecutor()  # type: ignore[attr-defined]
 
     # Mock crt.sh urlopen to return two subdomains.
-    fake_crt = _json.dumps([
-        {"name_value": "www.example.com"},
-        {"name_value": "api.example.com"},
-    ]).encode()
+    fake_crt = _json.dumps(
+        [
+            {"name_value": "www.example.com"},
+            {"name_value": "api.example.com"},
+        ]
+    ).encode()
     fake_resp = MagicMock()
     fake_resp.read.return_value = fake_crt
     fake_resp.__enter__ = lambda self: self
     fake_resp.__exit__ = lambda self, *a: None
     import urllib.request as _urlreq
+
     monkeypatch.setattr(_urlreq, "urlopen", lambda *a, **k: fake_resp)
 
     # Mock resolve_target_to_ip for the discovered subdomains.
@@ -274,9 +287,7 @@ async def test_orchestrator_domain_campaign_runs_subdomain_expansion(tmp_path: P
     assert state.original_target == "example.com"
     assert state.resolved_ip == "93.184.216.34"
     # The expansion branch should have found 2 subdomains.
-    assert len(state.discovered_subdomains) == 2, (
-        f"expected 2 discovered subdomains, got {state.discovered_subdomains}"
-    )
+    assert len(state.discovered_subdomains) == 2, f"expected 2 discovered subdomains, got {state.discovered_subdomains}"
     subs = {s["subdomain"] for s in state.discovered_subdomains}
     assert "www.example.com" in subs
     assert "api.example.com" in subs
@@ -285,6 +296,7 @@ async def test_orchestrator_domain_campaign_runs_subdomain_expansion(tmp_path: P
 def test_attack_state_to_dict_serializes_domain_fields():
     """to_dict must persist original_target, resolved_ip, discovered_subdomains."""
     from tools.autonomous_orchestrator import AttackState
+
     state = AttackState(target="93.184.216.34")
     state.original_target = "example.com"
     state.resolved_ip = "93.184.216.34"
@@ -302,6 +314,7 @@ def test_attack_state_to_dict_serializes_domain_fields():
 def test_attack_state_from_dict_restores_domain_fields():
     """from_dict must restore the 3 domain fields so resume keeps them."""
     from tools.autonomous_orchestrator import AttackState
+
     data = {
         "target": "93.184.216.34",
         "current_phase": "reconnaissance",
@@ -320,6 +333,7 @@ def test_attack_state_from_dict_restores_domain_fields():
 def test_attack_state_to_dict_from_dict_roundtrip_domain_fields():
     """Round-trip to_dict → from_dict preserves all 3 domain fields."""
     from tools.autonomous_orchestrator import AttackState
+
     state = AttackState(target="10.0.0.5")
     state.original_target = "test.com"
     state.resolved_ip = "10.0.0.5"
@@ -334,6 +348,7 @@ def test_attack_state_to_dict_from_dict_roundtrip_domain_fields():
 def test_get_state_threads_domain_context_on_first_creation(tmp_path: Path):
     """get_state must populate original_target/resolved_ip from the orchestrator."""
     from tools.autonomous_orchestrator import AutonomousOrchestrator
+
     orch = AutonomousOrchestrator(
         mission_config={"max_cycles": 1},
         workspace_root=tmp_path,
@@ -388,9 +403,7 @@ async def test_pivot_depth_two_recurses_one_hop(tmp_path: Path) -> None:
     one hop, proving the depth=0 test above is meaningful (not a broken stub)."""
     from tools.autonomous_orchestrator import AttackState, AutonomousOrchestrator
 
-    orch = AutonomousOrchestrator(
-        mission_config={"max_pivot_depth": 2}, workspace_root=tmp_path
-    )
+    orch = AutonomousOrchestrator(mission_config={"max_pivot_depth": 2}, workspace_root=tmp_path)
     assert orch._max_pivot_depth == 2  # type: ignore[attr-defined]
     orch._executor = _PivotStubExecutor()  # type: ignore[attr-defined]
 
@@ -519,9 +532,7 @@ def _make_server(tmp_path: Path, *, require_allowlist: bool = False):
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
     from tools.web_researcher import WebResearcher, WebResearcherSettings
 
-    config: dict[str, Any] = {
-        "exploit": {"require_explicit_allowlist": require_allowlist, "allowed_targets": []}
-    }
+    config: dict[str, Any] = {"exploit": {"require_explicit_allowlist": require_allowlist, "allowed_targets": []}}
     return create_mcp_server(
         ExploitSearch(ExploitSearchSettings()),
         NVDClient(CVESearchSettings()),
@@ -555,16 +566,18 @@ async def test_lateral_exec_accepts_lm_nt_hash(monkeypatch, tmp_path: Path) -> N
     """Bug #13: a valid LM:NT (64-hex with colon) hash was rejected before."""
     monkeypatch.setattr("tools.mcp_tools.credentials._run_with_pgrp_timeout", _stub_run_ok)
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "lateral_exec",
-        {
-            "target_ip": "10.0.0.1",
-            "method": "psexec",
-            "username": "admin",
-            "ntlm_hash": "aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0",
-            "command": "whoami",
-        },
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "lateral_exec",
+            {
+                "target_ip": "10.0.0.1",
+                "method": "psexec",
+                "username": "admin",
+                "ntlm_hash": "aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0",
+                "command": "whoami",
+            },
+        )
+    )
     assert "ntlm_hash must be 32 hex chars" not in text
     assert "LATERAL_EXEC_RESULT: completed" in text
 
@@ -573,26 +586,30 @@ async def test_lateral_exec_accepts_lm_nt_hash(monkeypatch, tmp_path: Path) -> N
 async def test_lateral_exec_accepts_nt_only_hash(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr("tools.mcp_tools.credentials._run_with_pgrp_timeout", _stub_run_ok)
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "lateral_exec",
-        {
-            "target_ip": "10.0.0.1",
-            "method": "psexec",
-            "username": "admin",
-            "ntlm_hash": "31d6cfe0d16ae931b73c59d7e0c089c0",
-            "command": "whoami",
-        },
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "lateral_exec",
+            {
+                "target_ip": "10.0.0.1",
+                "method": "psexec",
+                "username": "admin",
+                "ntlm_hash": "31d6cfe0d16ae931b73c59d7e0c089c0",
+                "command": "whoami",
+            },
+        )
+    )
     assert "ntlm_hash must be 32 hex chars" not in text
 
 
 @pytest.mark.asyncio
 async def test_lateral_exec_rejects_junk_hash(tmp_path: Path) -> None:
     mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool(
-        "lateral_exec",
-        {"target_ip": "10.0.0.1", "method": "psexec", "username": "admin", "ntlm_hash": "zzz"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "lateral_exec",
+            {"target_ip": "10.0.0.1", "method": "psexec", "username": "admin", "ntlm_hash": "zzz"},
+        )
+    )
     assert "BLOCKED" in text and "ntlm_hash must be 32 hex chars" in text
 
 

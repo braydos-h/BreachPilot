@@ -80,22 +80,41 @@ import re
 import json
 from collections import defaultdict
 
+
 class CTIReportParser:
     """Parse CTI reports to extract adversary behaviors."""
 
     BEHAVIOR_INDICATORS = [
-        "used", "executed", "deployed", "leveraged", "exploited",
-        "established", "created", "modified", "downloaded", "uploaded",
-        "exfiltrated", "injected", "enumerated", "spawned", "dropped",
-        "persisted", "escalated", "moved laterally", "collected",
-        "encrypted", "compressed", "encoded", "obfuscated",
+        "used",
+        "executed",
+        "deployed",
+        "leveraged",
+        "exploited",
+        "established",
+        "created",
+        "modified",
+        "downloaded",
+        "uploaded",
+        "exfiltrated",
+        "injected",
+        "enumerated",
+        "spawned",
+        "dropped",
+        "persisted",
+        "escalated",
+        "moved laterally",
+        "collected",
+        "encrypted",
+        "compressed",
+        "encoded",
+        "obfuscated",
     ]
 
     TOOL_PATTERNS = [
-        r'\b(Cobalt Strike|Mimikatz|PsExec|BloodHound|Rubeus|Impacket)\b',
-        r'\b(PowerShell|cmd\.exe|WMI|WMIC|certutil|bitsadmin)\b',
-        r'\b(Metasploit|Empire|Covenant|Sliver|Brute Ratel)\b',
-        r'\b(Lazagne|SharpHound|ADFind|Sharphound|Invoke-Obfuscation)\b',
+        r"\b(Cobalt Strike|Mimikatz|PsExec|BloodHound|Rubeus|Impacket)\b",
+        r"\b(PowerShell|cmd\.exe|WMI|WMIC|certutil|bitsadmin)\b",
+        r"\b(Metasploit|Empire|Covenant|Sliver|Brute Ratel)\b",
+        r"\b(Lazagne|SharpHound|ADFind|Sharphound|Invoke-Obfuscation)\b",
     ]
 
     TECHNIQUE_KEYWORDS = {
@@ -123,7 +142,7 @@ class CTIReportParser:
 
     def parse_report(self, text, report_metadata=None):
         """Parse a CTI report and extract behaviors."""
-        sentences = re.split(r'[.!?]\s+', text)
+        sentences = re.split(r"[.!?]\s+", text)
         behaviors = []
 
         for sentence in sentences:
@@ -160,6 +179,7 @@ class CTIReportParser:
                 matches.append({"keyword": keyword, "technique_id": tech_id})
         return matches
 
+
 parser = CTIReportParser()
 sample_report = """
 The threat actor used spearphishing attachments with macro-enabled documents to
@@ -177,6 +197,7 @@ behaviors = parser.parse_report(sample_report)
 
 ```python
 from attackcti import attack_client
+
 
 class ATTACKMapper:
     def __init__(self):
@@ -211,17 +232,20 @@ class ATTACKMapper:
                 tech_id = hint["technique_id"]
                 if tech_id in self.techniques:
                     tech_info = self.techniques[tech_id]
-                    mapped.append({
-                        "technique_id": tech_id,
-                        "technique_name": tech_info["name"],
-                        "tactics": tech_info["tactics"],
-                        "source_sentence": behavior["sentence"],
-                        "tools_observed": behavior["tools"],
-                        "keyword_matched": hint["keyword"],
-                        "data_sources": tech_info["data_sources"],
-                    })
+                    mapped.append(
+                        {
+                            "technique_id": tech_id,
+                            "technique_name": tech_info["name"],
+                            "tactics": tech_info["tactics"],
+                            "source_sentence": behavior["sentence"],
+                            "tools_observed": behavior["tools"],
+                            "keyword_matched": hint["keyword"],
+                            "data_sources": tech_info["data_sources"],
+                        }
+                    )
         print(f"[+] Mapped {len(mapped)} behaviors to ATT&CK techniques")
         return mapped
+
 
 mapper = ATTACKMapper()
 mapped_behaviors = mapper.map_behaviors(behaviors)
@@ -233,6 +257,7 @@ mapped_behaviors = mapper.map_behaviors(behaviors)
 from stix2 import AttackPattern, Relationship, Bundle, TLP_GREEN
 from datetime import datetime
 
+
 class AttackPatternLibrary:
     def __init__(self):
         self.patterns = []
@@ -243,17 +268,22 @@ class AttackPatternLibrary:
         pattern = AttackPattern(
             name=mapping["technique_name"],
             description=f"Observed: {mapping['source_sentence']}\n\n"
-                        f"Tools: {', '.join(mapping['tools_observed']) or 'None identified'}\n"
-                        f"Source: {report_source}",
-            external_references=[{
-                "source_name": "mitre-attack",
-                "external_id": mapping["technique_id"],
-                "url": f"https://attack.mitre.org/techniques/{mapping['technique_id'].replace('.', '/')}/",
-            }],
-            kill_chain_phases=[{
-                "kill_chain_name": "mitre-attack",
-                "phase_name": tactic,
-            } for tactic in mapping["tactics"]],
+            f"Tools: {', '.join(mapping['tools_observed']) or 'None identified'}\n"
+            f"Source: {report_source}",
+            external_references=[
+                {
+                    "source_name": "mitre-attack",
+                    "external_id": mapping["technique_id"],
+                    "url": f"https://attack.mitre.org/techniques/{mapping['technique_id'].replace('.', '/')}/",
+                }
+            ],
+            kill_chain_phases=[
+                {
+                    "kill_chain_name": "mitre-attack",
+                    "phase_name": tactic,
+                }
+                for tactic in mapping["tactics"]
+            ],
             object_marking_refs=[TLP_GREEN],
         )
         self.patterns.append(pattern)
@@ -290,7 +320,7 @@ class AttackPatternLibrary:
                     f"https://attack.mitre.org/techniques/{mapping['technique_id'].replace('.', '/')}/",
                 ],
                 "tags": [
-                    f"attack.{mapping['tactics'][0]}" if mapping['tactics'] else "attack.unknown",
+                    f"attack.{mapping['tactics'][0]}" if mapping["tactics"] else "attack.unknown",
                     f"attack.{mapping['technique_id'].lower()}",
                 ],
                 "data_sources": mapping.get("data_sources", []),
@@ -303,6 +333,7 @@ class AttackPatternLibrary:
             json.dump(templates, f, indent=2)
         print(f"[+] Generated {len(templates)} detection templates")
         return templates
+
 
 library = AttackPatternLibrary()
 bundle = library.build_library(mapped_behaviors, "Sample CTI Report")

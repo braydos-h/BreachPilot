@@ -39,6 +39,7 @@ def _get_playwright(config: dict[str, Any] | None) -> Any | None:
         return None
     try:
         from playwright.sync_api import sync_playwright  # type: ignore
+
         return sync_playwright
     except ImportError:
         log.warning("browser_attack: 'playwright' python package not installed; tools will refuse")
@@ -236,10 +237,7 @@ def _register_browser_tools(mcp: Any, ctx: Any) -> None:
         """
         if not _XSS_CALLBACKS:
             return "BROWSER_XSS_CALLBACKS: none recorded"
-        return (
-            "BROWSER_XSS_CALLBACKS:\n" +
-            json.dumps(list(_XSS_CALLBACKS.values()), indent=2, default=str)
-        )
+        return "BROWSER_XSS_CALLBACKS:\n" + json.dumps(list(_XSS_CALLBACKS.values()), indent=2, default=str)
 
     @mcp.tool()
     @require_allowlist(target_param="target_ip", audit=True)

@@ -57,6 +57,7 @@ def _create_mission(isolated_workspace, program: str, asset: str) -> str:
     cfg_path.write_text(_mission_yaml(program, asset), encoding="utf-8")
 
     import yaml
+
     config = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     db = cli._load_db()
     ctrl = MissionController(db, isolated_workspace)
@@ -134,9 +135,15 @@ def test_next_task_mission_id_targets_named_not_latest(isolated_workspace):
     # Put a task ONLY in the older mission.
     db = cli._load_db()
     from task_queue import TaskQueue
+
     TaskQueue(db, older_mid).create_task(
-        {"task_id": "T-OLDER-1", "phase": "recon", "target": "10.0.0.50",
-         "objective": "older mission task", "status": "pending"}
+        {
+            "task_id": "T-OLDER-1",
+            "phase": "recon",
+            "target": "10.0.0.50",
+            "objective": "older mission task",
+            "status": "pending",
+        }
     )
 
     # Run the CLI command against the older mission id.

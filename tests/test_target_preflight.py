@@ -17,6 +17,7 @@ campaign is byte-identical to before. These tests pin the opt-in behavior:
 
 All network I/O is mocked — no live Nmap, no live sockets.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

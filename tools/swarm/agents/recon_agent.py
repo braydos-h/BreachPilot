@@ -36,6 +36,7 @@ def _run_coro(coro: "Any") -> Any:
     except RuntimeError:
         return asyncio.run(coro)
     import concurrent.futures
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
         return ex.submit(asyncio.run, coro).result()
 
@@ -64,11 +65,29 @@ _TECH_SIGNATURES: dict[str, list[str]] = {
 }
 
 _SERVICE_RISK_SCORES: dict[str, int] = {
-    "ssh": 70, "smb": 90, "microsoft-ds": 90, "rdp": 85, "ms-wbt-server": 85,
-    "http": 60, "https": 60, "ftp": 65, "telnet": 95, "redis": 80,
-    "elasticsearch": 75, "mongodb": 80, "mysql": 70, "postgresql": 70,
-    "ldap": 75, "ldaps": 75, "docker": 85, "kubernetes": 85,
-    "winrm": 80, "vnc": 70, "smtp": 50, "dns": 40, "snmp": 65,
+    "ssh": 70,
+    "smb": 90,
+    "microsoft-ds": 90,
+    "rdp": 85,
+    "ms-wbt-server": 85,
+    "http": 60,
+    "https": 60,
+    "ftp": 65,
+    "telnet": 95,
+    "redis": 80,
+    "elasticsearch": 75,
+    "mongodb": 80,
+    "mysql": 70,
+    "postgresql": 70,
+    "ldap": 75,
+    "ldaps": 75,
+    "docker": 85,
+    "kubernetes": 85,
+    "winrm": 80,
+    "vnc": 70,
+    "smtp": 50,
+    "dns": 40,
+    "snmp": 65,
     "unknown": 50,
 }
 
@@ -236,7 +255,9 @@ class ReconAgent(Agent):
 
             # ── Stage 3: Attack surface scoring ──
             if enriched_services:
-                output["attack_surface_score"] = sum(s["risk_score"] for s in enriched_services) // len(enriched_services)
+                output["attack_surface_score"] = sum(s["risk_score"] for s in enriched_services) // len(
+                    enriched_services
+                )
             else:
                 output["attack_surface_score"] = 0
 
@@ -249,33 +270,37 @@ class ReconAgent(Agent):
             # milestone gating so analysis tasks wait for THIS host's recon to
             # finish (the mechanism was wired but no producer set depends_on).
             for svc in high_risk_services:
-                new_tasks.append({
-                    "phase": "analysis",
-                    "target": target,
-                    "asset_type": "service",
-                    "objective": f"Research CVEs and exploits for {svc['service']} {svc['version']} on port {svc['port']}",
-                    "hypothesis": f"{svc['service']} {svc['version']} on port {svc['port']} may have known vulnerabilities (risk={svc['risk_score']}).",
-                    "allowed_tools": ["cve_lookup", "searchsploit", "search_web_exploit"],
-                    "risk_level": "low",
-                    "priority": svc["risk_score"],
-                    "service_context": json.dumps(svc),
-                    "depends_on": [target, "recon"],
-                })
+                new_tasks.append(
+                    {
+                        "phase": "analysis",
+                        "target": target,
+                        "asset_type": "service",
+                        "objective": f"Research CVEs and exploits for {svc['service']} {svc['version']} on port {svc['port']}",
+                        "hypothesis": f"{svc['service']} {svc['version']} on port {svc['port']} may have known vulnerabilities (risk={svc['risk_score']}).",
+                        "allowed_tools": ["cve_lookup", "searchsploit", "search_web_exploit"],
+                        "risk_level": "low",
+                        "priority": svc["risk_score"],
+                        "service_context": json.dumps(svc),
+                        "depends_on": [target, "recon"],
+                    }
+                )
 
             # Web-specific tasks
             for svc in web_services:
-                new_tasks.append({
-                    "phase": "analysis",
-                    "target": target,
-                    "asset_type": "web",
-                    "objective": f"Deep web enumeration on {target}:{svc['port']} — discover endpoints, APIs, auth mechanisms",
-                    "hypothesis": f"Web service on port {svc['port']} may expose admin panels, APIs, or vulnerable endpoints.",
-                    "allowed_tools": ["curl", "python", "nuclei"],
-                    "risk_level": "low",
-                    "priority": 75,
-                    "service_context": json.dumps(svc),
-                    "depends_on": [target, "recon"],
-                })
+                new_tasks.append(
+                    {
+                        "phase": "analysis",
+                        "target": target,
+                        "asset_type": "web",
+                        "objective": f"Deep web enumeration on {target}:{svc['port']} — discover endpoints, APIs, auth mechanisms",
+                        "hypothesis": f"Web service on port {svc['port']} may expose admin panels, APIs, or vulnerable endpoints.",
+                        "allowed_tools": ["curl", "python", "nuclei"],
+                        "risk_level": "low",
+                        "priority": 75,
+                        "service_context": json.dumps(svc),
+                        "depends_on": [target, "recon"],
+                    }
+                )
 
             # ── Stage 5: Determine recommended next phases ──
             phases = []
@@ -305,32 +330,38 @@ class ReconAgent(Agent):
             bb_set(blackboard, "technologies", output["technologies"])
 
             # Memory updates
-            memory_updates.append({
-                "target": target,
-                "memory_type": "recon",
-                "content": json.dumps({
-                    "services_count": len(enriched_services),
-                    "high_risk_count": len(high_risk_services),
-                    "attack_surface_score": output["attack_surface_score"],
-                    "os": output["os_guess"],
-                    "technologies": [t.get("name") for t in output["technologies"]],
-                }),
-                "tags": ["recon", "services", "os", "tech"],
-            })
+            memory_updates.append(
+                {
+                    "target": target,
+                    "memory_type": "recon",
+                    "content": json.dumps(
+                        {
+                            "services_count": len(enriched_services),
+                            "high_risk_count": len(high_risk_services),
+                            "attack_surface_score": output["attack_surface_score"],
+                            "os": output["os_guess"],
+                            "technologies": [t.get("name") for t in output["technologies"]],
+                        }
+                    ),
+                    "tags": ["recon", "services", "os", "tech"],
+                }
+            )
 
             # Graph updates
-            graph_updates.append({
-                "node_type": "host",
-                "value": target,
-                "metadata": {
-                    "os": output["os_guess"],
-                    "attack_surface_score": output["attack_surface_score"],
-                },
-                "edges": [
-                    {"relation": "exposes", "to": f"{target}:{s['port']}/{s['service']}", "risk": s["risk_score"]}
-                    for s in enriched_services
-                ],
-            })
+            graph_updates.append(
+                {
+                    "node_type": "host",
+                    "value": target,
+                    "metadata": {
+                        "os": output["os_guess"],
+                        "attack_surface_score": output["attack_surface_score"],
+                    },
+                    "edges": [
+                        {"relation": "exposes", "to": f"{target}:{s['port']}/{s['service']}", "risk": s["risk_score"]}
+                        for s in enriched_services
+                    ],
+                }
+            )
 
             self._set_status(AgentStatus.COMPLETE)
         except Exception as exc:
@@ -363,22 +394,36 @@ class ReconAgent(Agent):
         for tech_name, signatures in _TECH_SIGNATURES.items():
             for sig in signatures:
                 if sig.lower() in low:
-                    detected.append({
-                        "name": tech_name,
-                        "category": ReconAgent._categorize_tech(tech_name),
-                        "confidence": 0.8 if sig in banner else 0.6,
-                    })
+                    detected.append(
+                        {
+                            "name": tech_name,
+                            "category": ReconAgent._categorize_tech(tech_name),
+                            "confidence": 0.8 if sig in banner else 0.6,
+                        }
+                    )
                     break
         return detected
 
     @staticmethod
     def _categorize_tech(name: str) -> str:
         cats = {
-            "Apache": "web_server", "Nginx": "web_server", "IIS": "web_server",
-            "Tomcat": "app_server", "Node.js": "runtime", "Django": "framework",
-            "Flask": "framework", "PHP": "language", "ASP.NET": "framework",
-            "WordPress": "cms", "Drupal": "cms", "Joomla": "cms",
-            "Laravel": "framework", "Spring": "framework",
-            "Cloudflare": "cdn", "AWS": "cloud", "GCP": "cloud", "Azure": "cloud",
+            "Apache": "web_server",
+            "Nginx": "web_server",
+            "IIS": "web_server",
+            "Tomcat": "app_server",
+            "Node.js": "runtime",
+            "Django": "framework",
+            "Flask": "framework",
+            "PHP": "language",
+            "ASP.NET": "framework",
+            "WordPress": "cms",
+            "Drupal": "cms",
+            "Joomla": "cms",
+            "Laravel": "framework",
+            "Spring": "framework",
+            "Cloudflare": "cdn",
+            "AWS": "cloud",
+            "GCP": "cloud",
+            "Azure": "cloud",
         }
         return cats.get(name, "unknown")

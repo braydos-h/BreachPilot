@@ -129,9 +129,7 @@ class Attempt:
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def mask_secrets(
-    data: dict, secret_keys: tuple[str, ...] = ("password", "pass", "secret", "token", "key")
-) -> dict:
+def mask_secrets(data: dict, secret_keys: tuple[str, ...] = ("password", "pass", "secret", "token", "key")) -> dict:
     """Return a copy with secret values replaced by ``"<redacted>"``.
 
     Non-secret fields are preserved: only values under the given

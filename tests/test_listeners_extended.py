@@ -8,6 +8,7 @@ gates them (default OFF) and allowlist-gates the ``socks_pivot`` upstream (the
 allowlist is the pivot lock). No live network: ``shutil.which`` and
 ``subprocess.Popen`` are monkeypatched.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -19,6 +20,7 @@ import pytest
 from tools.persistent_session_manager import ListenerHelper, PersistentSessionManager
 
 # ── ListenerHelper: clean-fail when the binary is absent ─────────────────────
+
 
 def test_start_dns_clean_fail_without_binary(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr("tools.persistent_session_manager.shutil.which", lambda b: None)
@@ -51,10 +53,13 @@ def test_start_socks_pivot_clean_fail_without_tools(monkeypatch, tmp_path: Path)
 
 # ── TLS cert generation ─────────────────────────────────────────────────────
 
+
 def test_tls_cert_generated_via_openssl(monkeypatch, tmp_path: Path) -> None:
     calls: list[list[str]] = []
+
     def fake_which(b):
         return "/usr/bin/openssl" if b == "openssl" else None
+
     def fake_run(argv, **kw):
         calls.append(list(argv))
         # The argv contains -keyout <path> and -out <path>; create both.
@@ -63,6 +68,7 @@ def test_tls_cert_generated_via_openssl(monkeypatch, tmp_path: Path) -> None:
         Path(out).write_text("CERT", encoding="utf-8")
         Path(keyout).write_text("KEY", encoding="utf-8")
         return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
+
     monkeypatch.setattr("tools.persistent_session_manager.shutil.which", fake_which)
     monkeypatch.setattr("tools.persistent_session_manager.subprocess.run", fake_run)
     lh = ListenerHelper(tmp_path)
@@ -87,30 +93,35 @@ def test_tls_cert_reused_if_present(monkeypatch, tmp_path: Path) -> None:
 
 # ── start_tls / start_https_beacon / start_socks_pivot success paths ─────────
 
+
 class _FakeProc:
     def __init__(self) -> None:
         self.pid = 4242
         self._poll = None
+
     def poll(self):
         return self._poll
 
 
-def _patch_listener_helper(monkeypatch, *, which_map: dict[str, str] | None = None,
-                           cert_ok: bool = True):
+def _patch_listener_helper(monkeypatch, *, which_map: dict[str, str] | None = None, cert_ok: bool = True):
     which_map = which_map or {}
     monkeypatch.setattr("tools.persistent_session_manager.shutil.which", lambda b: which_map.get(b))
     fake_proc = _FakeProc()
+
     def fake_popen(argv, **kw):
         fake_proc._argv = list(argv)
         return fake_proc
+
     monkeypatch.setattr("tools.persistent_session_manager.subprocess.Popen", fake_popen)
     if cert_ok:
+
         def fake_cert(self, port):
             p = self.workspace / f"tls_listener_{port}.crt"
             k = self.workspace / f"tls_listener_{port}.key"
             p.write_text("CERT", encoding="utf-8")
             k.write_text("KEY", encoding="utf-8")
             return p, k
+
         monkeypatch.setattr(ListenerHelper, "_tls_cert", fake_cert)
     return fake_proc
 
@@ -165,6 +176,7 @@ def test_start_socks_pivot_socat_no_upstream_fails(monkeypatch, tmp_path: Path) 
 
 # ── PersistentSessionManager.start_listener routing ─────────────────────────
 
+
 def test_psm_start_listener_routes_tls(monkeypatch, tmp_path: Path) -> None:
     _patch_listener_helper(monkeypatch, which_map={"openssl": "/usr/bin/openssl"})
     mgr = PersistentSessionManager(tmp_path)
@@ -184,8 +196,14 @@ def test_psm_start_listener_unknown_type(monkeypatch, tmp_path: Path) -> None:
 
 # ── MCP start_listener: config-off guard + allowlist gate ────────────────────
 
-def _make_server(tmp_path: Path, *, require_allowlist: bool = False, allowed: list[str] | None = None,
-                 listeners: dict[str, bool] | None = None):
+
+def _make_server(
+    tmp_path: Path,
+    *,
+    require_allowlist: bool = False,
+    allowed: list[str] | None = None,
+    listeners: dict[str, bool] | None = None,
+):
     from mcp_exploit_server import create_mcp_server
     from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
@@ -230,12 +248,24 @@ async def test_start_listener_dns_config_off(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_start_listener_socks_pivot_offlist_upstream_blocked(tmp_path: Path) -> None:
-    mcp = _make_server(tmp_path, require_allowlist=True, allowed=["10.0.0.1"],
-                       listeners={"tls": False, "dns": False, "https_beacon": False, "socks_pivot": True})
-    text = _text(await mcp.call_tool("start_listener", {
-        "name": "p", "port": 1080, "listener_type": "socks_pivot",
-        "upstream_host": "10.0.0.99", "upstream_port": 445,
-    }))
+    mcp = _make_server(
+        tmp_path,
+        require_allowlist=True,
+        allowed=["10.0.0.1"],
+        listeners={"tls": False, "dns": False, "https_beacon": False, "socks_pivot": True},
+    )
+    text = _text(
+        await mcp.call_tool(
+            "start_listener",
+            {
+                "name": "p",
+                "port": 1080,
+                "listener_type": "socks_pivot",
+                "upstream_host": "10.0.0.99",
+                "upstream_port": 445,
+            },
+        )
+    )
     assert "BLOCKED" in text and "10.0.0.99" in text
 
 

@@ -106,8 +106,10 @@ def create_user(req: CreateUserRequest, auth: str = Depends(_require_auth)) -> U
     uid = persistence.create_user(req.username, password_hash, password_salt)
     user = persistence.get_user(uid)
     return UserResponse(
-        id=user["id"], username=user["username"],
-        created_at=user["created_at"], last_login=user.get("last_login", ""),
+        id=user["id"],
+        username=user["username"],
+        created_at=user["created_at"],
+        last_login=user.get("last_login", ""),
     )
 
 
@@ -122,8 +124,10 @@ def login(req: LoginRequest, auth: str = Depends(_require_auth)) -> UserResponse
         raise HTTPException(status_code=401, detail="invalid username or password")
     persistence.touch_user_login(user["id"])
     return UserResponse(
-        id=user["id"], username=user["username"],
-        created_at=user["created_at"], last_login=user.get("last_login", ""),
+        id=user["id"],
+        username=user["username"],
+        created_at=user["created_at"],
+        last_login=user.get("last_login", ""),
     )
 
 
@@ -133,8 +137,10 @@ def list_users(auth: str = Depends(_require_auth)) -> list[UserResponse]:
     persistence = _persistence()
     return [
         UserResponse(
-            id=u["id"], username=u["username"],
-            created_at=u["created_at"], last_login=u.get("last_login", ""),
+            id=u["id"],
+            username=u["username"],
+            created_at=u["created_at"],
+            last_login=u.get("last_login", ""),
         )
         for u in persistence.list_users()
     ]
@@ -142,7 +148,9 @@ def list_users(auth: str = Depends(_require_auth)) -> list[UserResponse]:
 
 @router.post("/runs/{run_id}/annotations", response_model=AnnotationResponse, status_code=201)
 def add_annotation(
-    run_id: str, req: AnnotationRequest, auth: str = Depends(_require_auth),
+    run_id: str,
+    req: AnnotationRequest,
+    auth: str = Depends(_require_auth),
 ) -> AnnotationResponse:
     """Attach an operator comment to a run's finding."""
     persistence = _persistence()
@@ -152,9 +160,11 @@ def add_annotation(
     if user is None:
         raise HTTPException(status_code=404, detail="user not found")
     aid = persistence.add_annotation(
-        run_id=run_id, user_id=req.user_id,
+        run_id=run_id,
+        user_id=req.user_id,
         username=req.username or user["username"],
-        body=req.body, finding_ref=req.finding_ref,
+        body=req.body,
+        finding_ref=req.finding_ref,
     )
     anns = persistence.list_annotations(run_id)
     ann = next((a for a in anns if a["id"] == aid), None)

@@ -28,9 +28,16 @@ _RISK_PROFILES = {
         "allows_pivoting": False,
         "allows_credential_testing": False,
         "forbidden_by_default": [
-            "denial_of_service", "destructive_exploit", "credential_theft",
-            "social_engineering", "physical_attack", "persistence", "malware",
-            "uncontrolled_fuzzing", "data_exfiltration", "pivoting",
+            "denial_of_service",
+            "destructive_exploit",
+            "credential_theft",
+            "social_engineering",
+            "physical_attack",
+            "persistence",
+            "malware",
+            "uncontrolled_fuzzing",
+            "data_exfiltration",
+            "pivoting",
         ],
         "testing_modes": ["recon", "analysis"],
         "description": "Safe reconnaissance and analysis only. No exploitation.",
@@ -44,9 +51,15 @@ _RISK_PROFILES = {
         "allows_pivoting": False,
         "allows_credential_testing": True,
         "forbidden_by_default": [
-            "denial_of_service", "destructive_exploit", "credential_theft",
-            "social_engineering", "physical_attack", "persistence", "malware",
-            "uncontrolled_fuzzing", "data_exfiltration",
+            "denial_of_service",
+            "destructive_exploit",
+            "credential_theft",
+            "social_engineering",
+            "physical_attack",
+            "persistence",
+            "malware",
+            "uncontrolled_fuzzing",
+            "data_exfiltration",
         ],
         "testing_modes": ["recon", "analysis", "test", "validate"],
         "description": "Standard authorized bug bounty testing with guardrails.",
@@ -60,7 +73,9 @@ _RISK_PROFILES = {
         "allows_pivoting": True,
         "allows_credential_testing": True,
         "forbidden_by_default": [
-            "denial_of_service", "physical_attack", "social_engineering",
+            "denial_of_service",
+            "physical_attack",
+            "social_engineering",
             "uncontrolled_fuzzing",
         ],
         "testing_modes": ["recon", "analysis", "test", "validate", "exploit", "report"],
@@ -70,18 +85,28 @@ _RISK_PROFILES = {
 
 # ── Default mission template ───────────────────────────────────────────────
 
-DEFAULT_OBJECTIVE = (
-    "Find valid, in-scope, non-destructive, reproducible vulnerabilities with evidence."
-)
+DEFAULT_OBJECTIVE = "Find valid, in-scope, non-destructive, reproducible vulnerabilities with evidence."
 
-_MISSION_KEYS = frozenset({
-    "id", "program_name", "target_assets", "allowed_assets", "disallowed_assets",
-    "forbidden_actions", "rate_limits", "objective", "risk_profile",
-    "testing_modes", "accounts", "notes",
-})
+_MISSION_KEYS = frozenset(
+    {
+        "id",
+        "program_name",
+        "target_assets",
+        "allowed_assets",
+        "disallowed_assets",
+        "forbidden_actions",
+        "rate_limits",
+        "objective",
+        "risk_profile",
+        "testing_modes",
+        "accounts",
+        "notes",
+    }
+)
 
 
 # ── Mission data class ─────────────────────────────────────────────────────
+
 
 @dataclass
 class Mission:
@@ -109,9 +134,7 @@ class Mission:
     _profile_config: dict[str, Any] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
-        self._profile_config = _RISK_PROFILES.get(
-            self.risk_profile, _RISK_PROFILES["low_noise_non_destructive"]
-        )
+        self._profile_config = _RISK_PROFILES.get(self.risk_profile, _RISK_PROFILES["low_noise_non_destructive"])
         if not self.mission_id:
             self.mission_id = _new_id("M")
         if not self.testing_modes:
@@ -120,8 +143,7 @@ class Mission:
         # than replacing them (H18). The empty-list case still fills defaults via
         # the union with the profile's forbidden_by_default set.
         self.forbidden_actions = sorted(
-            set(self.forbidden_actions)
-            | set(self._profile_config.get("forbidden_by_default", []))
+            set(self.forbidden_actions) | set(self._profile_config.get("forbidden_by_default", []))
         )
 
     # ── Properties ──
@@ -199,21 +221,15 @@ class Mission:
         if not self.program_name.strip():
             errors.append("program_name is required.")
         if self.risk_profile not in _RISK_PROFILES:
-            errors.append(
-                f"Unknown risk_profile '{self.risk_profile}'. "
-                f"Valid: {list(_RISK_PROFILES)}."
-            )
+            errors.append(f"Unknown risk_profile '{self.risk_profile}'. Valid: {list(_RISK_PROFILES)}.")
 
         if not self.target_assets and not self.allowed_assets:
-            errors.append(
-                "At least one of target_assets or allowed_assets must be specified."
-            )
+            errors.append("At least one of target_assets or allowed_assets must be specified.")
 
         for asset in self.allowed_assets:
             if not _validate_asset_string(asset):
                 msg = (
-                    f"Invalid scope entry '{asset}': must be a domain, wildcard domain "
-                    f"('*.example.com'), IP, or CIDR."
+                    f"Invalid scope entry '{asset}': must be a domain, wildcard domain ('*.example.com'), IP, or CIDR."
                 )
                 errors.append(msg)
 
@@ -290,6 +306,7 @@ def _validate_asset_string(value: str) -> bool:
 
 # ── Mission controller ─────────────────────────────────────────────────────
 
+
 class MissionController:
     """Creates, validates, and persists missions. Initializes workspace, DB schema, evidence dir."""
 
@@ -299,11 +316,7 @@ class MissionController:
         workspace_root: Path | None = None,
     ) -> None:
         self._db = db
-        self._workspace_root = (
-            workspace_root.resolve()
-            if workspace_root
-            else Path.cwd() / "research_workspace"
-        )
+        self._workspace_root = workspace_root.resolve() if workspace_root else Path.cwd() / "research_workspace"
         self._active_mission_id: str | None = None
 
     # ------------------------------------------------------------------
@@ -352,18 +365,30 @@ class MissionController:
             for asset in mission.allowed_assets:
                 target_type = _classify_asset(asset)
                 self._db.add_scope_rule(
-                    conn, mission.mission_id, "allow", target_type, asset,
+                    conn,
+                    mission.mission_id,
+                    "allow",
+                    target_type,
+                    asset,
                 )
             for asset in mission.disallowed_assets:
                 target_type = _classify_asset(asset)
                 self._db.add_scope_rule(
-                    conn, mission.mission_id, "deny", target_type, asset,
+                    conn,
+                    mission.mission_id,
+                    "deny",
+                    target_type,
+                    asset,
                 )
 
             # Insert forbidden action rules
             for action in mission.forbidden_actions:
                 self._db.add_scope_rule(
-                    conn, mission.mission_id, "deny", "action", action,
+                    conn,
+                    mission.mission_id,
+                    "deny",
+                    "action",
+                    action,
                     notes="Forbidden action type",
                 )
 
@@ -432,6 +457,7 @@ class MissionController:
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
+
 
 def _normalize_config(config: dict[str, Any]) -> dict[str, Any]:
     """Accept either the detailed mission schema or config.yaml-style keys."""

@@ -91,6 +91,7 @@ def _make_multi_operator_client(tmp_path, monkeypatch, token="test-token"):
         encoding="utf-8",
     )
     from app import create_app
+
     return TestClient(create_app(config_path=config_path))
 
 
@@ -106,6 +107,7 @@ def _make_legacy_client(tmp_path, monkeypatch, token="test-token"):
         encoding="utf-8",
     )
     from app import create_app
+
     return TestClient(create_app(config_path=config_path))
 
 
@@ -174,6 +176,7 @@ def test_annotation_attach_and_list(tmp_path, monkeypatch):
     # Use the persistence layer directly to insert a run row without the full
     # AssessmentService prepare() path (which needs Ollama).
     from tools.api.persistence import ApiPersistence
+
     persistence = ApiPersistence(tmp_path / "reports")
     persistence.create_run(run_id="run-test1", request={"target": "10.0.0.50"}, preview={})
     # Attach an annotation.
@@ -200,6 +203,7 @@ def test_annotation_delete(tmp_path, monkeypatch):
     user_resp = client.post("/api/v1/users", json={"username": "grace", "password": "p"}, headers=_auth())
     user_id = user_resp.json()["id"]
     from tools.api.persistence import ApiPersistence
+
     persistence = ApiPersistence(tmp_path / "reports")
     persistence.create_run(run_id="run-test2", request={"target": "10.0.0.50"}, preview={})
     ann_resp = client.post(

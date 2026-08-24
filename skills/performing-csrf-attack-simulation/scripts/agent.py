@@ -68,10 +68,12 @@ def analyze_csrf_protections(url: str, session: requests.Session = None) -> dict
         elif "samesite=lax" in cookie_header.lower():
             samesite = "lax"
 
-        result["samesite_cookies"].append({
-            "name": cookie_name,
-            "samesite": samesite,
-        })
+        result["samesite_cookies"].append(
+            {
+                "name": cookie_name,
+                "samesite": samesite,
+            }
+        )
 
         if samesite in ("strict", "lax"):
             result["protections"].append(f"SameSite={samesite} cookie: {cookie_name}")
@@ -90,9 +92,7 @@ def find_state_changing_forms(url: str, session: requests.Session = None) -> lis
         session = requests.Session()
 
     resp = session.get(url, timeout=15)
-    form_pattern = re.compile(
-        r'<form[^>]*>(.*?)</form>', re.DOTALL | re.IGNORECASE
-    )
+    form_pattern = re.compile(r"<form[^>]*>(.*?)</form>", re.DOTALL | re.IGNORECASE)
     action_pattern = re.compile(r'action=["\']([^"\']*)', re.IGNORECASE)
     method_pattern = re.compile(r'method=["\']([^"\']*)', re.IGNORECASE)
     input_pattern = re.compile(
@@ -113,10 +113,7 @@ def find_state_changing_forms(url: str, session: requests.Session = None) -> lis
                 "action": action.group(1) if action else url,
                 "method": method_val,
                 "inputs": [{"name": i[0], "type": i[1] or "text"} for i in inputs],
-                "has_csrf_token": any(
-                    "csrf" in i[0].lower() or "token" in i[0].lower()
-                    for i in inputs
-                ),
+                "has_csrf_token": any("csrf" in i[0].lower() or "token" in i[0].lower() for i in inputs),
             }
             forms.append(form_data)
 
@@ -125,15 +122,16 @@ def find_state_changing_forms(url: str, session: requests.Session = None) -> lis
 
 def generate_csrf_poc(target_url: str, method: str, params: dict, auto_submit: bool = True) -> str:
     """Generate CSRF proof-of-concept HTML page."""
-    input_fields = "\n".join(
-        f'    <input type="hidden" name="{k}" value="{v}" />'
-        for k, v in params.items()
-    )
+    input_fields = "\n".join(f'    <input type="hidden" name="{k}" value="{v}" />' for k, v in params.items())
 
-    auto_js = """
+    auto_js = (
+        """
     <script>
         document.getElementById('csrf-form').submit();
-    </script>""" if auto_submit else ""
+    </script>"""
+        if auto_submit
+        else ""
+    )
 
     parsed = urlparse(target_url)
     return f"""<!DOCTYPE html>
@@ -160,32 +158,39 @@ def test_csrf_token_validation(url: str, session: requests.Session) -> dict:
     resp = session.get(url, timeout=15)
     token_match = re.search(
         r'name=["\']csrf[_-]?token["\'][^>]*value=["\']([^"\']+)',
-        resp.text, re.IGNORECASE,
+        resp.text,
+        re.IGNORECASE,
     )
 
     if token_match:
         original_token = token_match.group(1)
 
         test_resp = session.post(url, data={"csrf_token": ""}, timeout=15)
-        bypass_results.append({
-            "test": "Empty token",
-            "status": test_resp.status_code,
-            "bypassed": test_resp.status_code < 400,
-        })
+        bypass_results.append(
+            {
+                "test": "Empty token",
+                "status": test_resp.status_code,
+                "bypassed": test_resp.status_code < 400,
+            }
+        )
 
         test_resp = session.post(url, data={}, timeout=15)
-        bypass_results.append({
-            "test": "Missing token parameter",
-            "status": test_resp.status_code,
-            "bypassed": test_resp.status_code < 400,
-        })
+        bypass_results.append(
+            {
+                "test": "Missing token parameter",
+                "status": test_resp.status_code,
+                "bypassed": test_resp.status_code < 400,
+            }
+        )
 
         test_resp = session.post(url, data={"csrf_token": "invalid_token_value"}, timeout=15)
-        bypass_results.append({
-            "test": "Invalid token value",
-            "status": test_resp.status_code,
-            "bypassed": test_resp.status_code < 400,
-        })
+        bypass_results.append(
+            {
+                "test": "Invalid token value",
+                "status": test_resp.status_code,
+                "bypassed": test_resp.status_code < 400,
+            }
+        )
 
     return {"url": url, "bypass_tests": bypass_results}
 

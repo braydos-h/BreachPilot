@@ -15,6 +15,7 @@ Covers three fixes:
    flags (``-O``/``-sS``/...) and replace SYN with ``-sT`` so a non-root Linux
    user gets a working connect-scan instead of a permission error.
 """
+
 from __future__ import annotations
 
 import os
@@ -81,6 +82,7 @@ except Exception:  # pragma: no cover
 
 try:
     import mcp_server  # noqa: F401
+
     _MCP_IMPORTABLE = True
 except Exception:
     _MCP_IMPORTABLE = False
@@ -117,6 +119,7 @@ if pytest_present and _MCP_IMPORTABLE:
         assert args == ["-sn", "10.0.0.5"]
         assert note == ""
 else:  # pragma: no cover - exercised only on hosts without the MCP SDK
+
     def test_mcp_nmap_helpers_skipped_without_sdk():
         # Keep the file importable/collectible even where the MCP SDK isn't
         # installed (e.g. a CI box without `requirements.txt` installed).

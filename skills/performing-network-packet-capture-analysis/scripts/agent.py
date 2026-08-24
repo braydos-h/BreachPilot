@@ -8,6 +8,7 @@ from collections import Counter
 
 try:
     from scapy.all import DNS, DNSQR, IP, TCP, UDP, rdpcap
+
     HAS_SCAPY = True
 except ImportError:
     HAS_SCAPY = False
@@ -41,7 +42,8 @@ def analyze_pcap_scapy(pcap_file):
             else:
                 protocols[pkt[IP].proto] += 1
     return {
-        "pcap_file": pcap_file, "total_packets": total,
+        "pcap_file": pcap_file,
+        "total_packets": total,
         "protocols": dict(protocols),
         "top_src_ips": dict(src_ips.most_common(10)),
         "top_dst_ips": dict(dst_ips.most_common(10)),
@@ -53,22 +55,43 @@ def analyze_pcap_scapy(pcap_file):
 
 def extract_http_requests(pcap_file):
     """Extract HTTP requests from PCAP using tshark."""
-    cmd = ["tshark", "-r", pcap_file, "-Y", "http.request",
-           "-T", "fields", "-e", "ip.src", "-e", "ip.dst",
-           "-e", "http.request.method", "-e", "http.host",
-           "-e", "http.request.uri", "-e", "http.user_agent"]
+    cmd = [
+        "tshark",
+        "-r",
+        pcap_file,
+        "-Y",
+        "http.request",
+        "-T",
+        "fields",
+        "-e",
+        "ip.src",
+        "-e",
+        "ip.dst",
+        "-e",
+        "http.request.method",
+        "-e",
+        "http.host",
+        "-e",
+        "http.request.uri",
+        "-e",
+        "http.user_agent",
+    ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         requests_list = []
         for line in result.stdout.strip().splitlines():
             parts = line.split("\t")
             if len(parts) >= 4:
-                requests_list.append({
-                    "src": parts[0], "dst": parts[1],
-                    "method": parts[2], "host": parts[3],
-                    "uri": parts[4] if len(parts) > 4 else "",
-                    "user_agent": parts[5][:200] if len(parts) > 5 else "",
-                })
+                requests_list.append(
+                    {
+                        "src": parts[0],
+                        "dst": parts[1],
+                        "method": parts[2],
+                        "host": parts[3],
+                        "uri": parts[4] if len(parts) > 4 else "",
+                        "user_agent": parts[5][:200] if len(parts) > 5 else "",
+                    }
+                )
         return {"pcap_file": pcap_file, "http_requests": len(requests_list), "requests": requests_list[:50]}
     except FileNotFoundError:
         return {"error": "tshark not found — install Wireshark"}
@@ -93,8 +116,9 @@ def detect_suspicious_traffic(pcap_file):
             if pkt[TCP].flags == 0x02:
                 syn_counts[pkt[IP].dst] += 1
             if pkt[TCP].dport in high_ports or pkt[TCP].sport in high_ports:
-                unusual_ports.append({"src": pkt[IP].src, "dst": pkt[IP].dst,
-                                      "port": pkt[TCP].dport, "sport": pkt[TCP].sport})
+                unusual_ports.append(
+                    {"src": pkt[IP].src, "dst": pkt[IP].dst, "port": pkt[TCP].dport, "sport": pkt[TCP].sport}
+                )
         if DNS in pkt and pkt.haslayer(DNSQR):
             query = pkt[DNSQR].qname.decode("utf-8", errors="replace")
             if len(query) > 60:

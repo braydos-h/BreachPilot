@@ -18,15 +18,17 @@ from typing import Any
 from db import DatabaseManager, _new_id, _now_iso
 from outcome_judge import HypothesisRepository
 
-VALID_TASK_PHASES = frozenset({
-    "recon",
-    "analysis",
-    "test",
-    "validate",
-    "exploit",
-    "post_exploit",
-    "report",
-})
+VALID_TASK_PHASES = frozenset(
+    {
+        "recon",
+        "analysis",
+        "test",
+        "validate",
+        "exploit",
+        "post_exploit",
+        "report",
+    }
+)
 
 _TASK_PHASE_ALIASES = {
     "validation": "validate",
@@ -194,8 +196,7 @@ class TaskQueue:
         """
         with self._db.connection(write=True) as conn:
             cur = conn.execute(
-                "UPDATE tasks SET status='pending', updated_at=? "
-                "WHERE mission_id=? AND status='running'",
+                "UPDATE tasks SET status='pending', updated_at=? WHERE mission_id=? AND status='running'",
                 (_now_iso(), self._mission_id),
             )
             return cur.rowcount

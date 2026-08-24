@@ -119,11 +119,7 @@ async def test_invalid_tool_feedback_lists_actual_available_tools(tmp_path) -> N
         target_ip="10.0.0.1",
     )
 
-    user_feedback = "\n".join(
-        msg.get("content", "")
-        for msg in result["messages"]
-        if msg.get("role") == "user"
-    )
+    user_feedback = "\n".join(msg.get("content", "") for msg in result["messages"] if msg.get("role") == "user")
     assert "Valid tools are: check_os, quick_scan." in user_feedback
 
 
@@ -169,11 +165,7 @@ async def test_read_only_block_allows_proposal_finish_without_phase_loop(tmp_pat
         target_ip="10.0.0.1",
     )
 
-    tool_feedback = "\n".join(
-        msg.get("content", "")
-        for msg in result["messages"]
-        if msg.get("role") == "tool"
-    )
+    tool_feedback = "\n".join(msg.get("content", "") for msg in result["messages"] if msg.get("role") == "tool")
     assert "read_only mode" in tool_feedback
     assert "user denied" not in tool_feedback
     assert client.chat.call_count == 2
@@ -229,11 +221,7 @@ async def test_repeated_blocked_tool_results_stop_with_summary(tmp_path) -> None
 
     assert session.call_tool.call_count == 3
     assert stream.await_count == 1
-    user_feedback = "\n".join(
-        msg.get("content", "")
-        for msg in result["messages"]
-        if msg.get("role") == "user"
-    )
+    user_feedback = "\n".join(msg.get("content", "") for msg in result["messages"] if msg.get("role") == "user")
     assert "Repeated blocked or unavailable tool outcomes" in user_feedback
 
 

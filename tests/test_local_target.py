@@ -50,9 +50,11 @@ def test_local_interface_ip_is_local():
     from tools.validation_utils import is_local_target
 
     fake = "192.168.123.234"
-    with patch("socket.gethostname", return_value="thisbox"), \
-            patch("socket.gethostbyname", return_value=fake), \
-            patch("socket.getaddrinfo", return_value=[]):
+    with (
+        patch("socket.gethostname", return_value="thisbox"),
+        patch("socket.gethostbyname", return_value=fake),
+        patch("socket.getaddrinfo", return_value=[]),
+    ):
         assert is_local_target(fake) is True
 
 

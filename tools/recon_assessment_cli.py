@@ -14,9 +14,19 @@ from tools.goal_suggester import ReconAssessment, build_assessment_from_mcp_resu
 ui = AttackUi(plain=False)
 
 
-_GENERIC_SERVICE_NAMES = frozenset({
-    "dns", "ftp", "http", "https", "imap", "pop3", "smtp", "ssh", "telnet",
-})
+_GENERIC_SERVICE_NAMES = frozenset(
+    {
+        "dns",
+        "ftp",
+        "http",
+        "https",
+        "imap",
+        "pop3",
+        "smtp",
+        "ssh",
+        "telnet",
+    }
+)
 
 
 def _cve_query_from_banner(banner: str) -> tuple[str, str] | None:
@@ -76,9 +86,7 @@ async def run_recon_assessment(
             # listed explicitly or the spinner exits with a confusing [ERROR] line
             # and the user sees no underlying cause.
             ui.warning(f"OS detection failed: {exc}")
-            os_result = (
-                f"OS_CHECK_RESULTS:\nTARGET: {target_ip}\nOS_VERDICT: UNKNOWN\nHINTS: Error: {exc}"
-            )
+            os_result = f"OS_CHECK_RESULTS:\nTARGET: {target_ip}\nOS_VERDICT: UNKNOWN\nHINTS: Error: {exc}"
             if _is_exception_group(exc):
                 _log_nested_exceptions(exc)
 
@@ -87,10 +95,13 @@ async def run_recon_assessment(
     # ── Step 2: Quick port scan ──
     with ui.spinner("Scanning top 24 ports...", soft_fail=True):
         try:
-            scan_raw = await session.call_tool("quick_scan", {
-                "target_ip": target_ip,
-                "ports": "21,22,23,25,53,80,110,111,135,139,143,443,445,993,995,1723,3306,3389,5900,8080,8443,9000,27017,6379",
-            })
+            scan_raw = await session.call_tool(
+                "quick_scan",
+                {
+                    "target_ip": target_ip,
+                    "ports": "21,22,23,25,53,80,110,111,135,139,143,443,445,993,995,1723,3306,3389,5900,8080,8443,9000,27017,6379",
+                },
+            )
             scan_result = _extract_tool_text(scan_raw)
         except _EXC_GROUP_CATCH as exc:
             ui.warning(f"Port scan failed: {exc}")
@@ -124,23 +135,22 @@ async def run_recon_assessment(
             qv = _cve_query_from_banner(b)
             if qv is not None:
                 queryable.append((port, proto, service, qv))
-        ui.info(
-            f"Looking up CVEs for {len(queryable)} of {len(open_ports)} "
-            f"discovered service(s)..."
-        )
+        ui.info(f"Looking up CVEs for {len(queryable)} of {len(open_ports)} discovered service(s)...")
         for port, proto, service, (product, version) in queryable:
             query = f"{product} {version}"
             with ui.spinner(f"Looking up CVEs for {product} {version} on port {port}..."):
                 try:
                     cve_raw = await session.call_tool("search_cve_intel", {"query": query})
                     cve_text = _extract_tool_text(cve_raw)
-                    cve_results.append({
-                        "service": service,
-                        "product": product,
-                        "version": version,
-                        "port": port,
-                        "results": cve_text[:2000],
-                    })
+                    cve_results.append(
+                        {
+                            "service": service,
+                            "product": product,
+                            "version": version,
+                            "port": port,
+                            "results": cve_text[:2000],
+                        }
+                    )
                     ui.result(f"CVEs for {product} {version}", cve_text[:600])
                 except _EXC_GROUP_CATCH as exc:
                     ui.warning(f"CVE lookup skipped for {service}: {exc}")
@@ -157,9 +167,7 @@ async def run_recon_assessment(
 
     # ── Persist to reports dir ──
     assessment_path = reports_dir / "recon_assessment.json"
-    assessment_path.write_text(
-        json.dumps(assessment.to_dict(), indent=2), encoding="utf-8"
-    )
+    assessment_path.write_text(json.dumps(assessment.to_dict(), indent=2), encoding="utf-8")
     ui.info(f"Recon assessment saved to: {assessment_path}")
 
     return assessment

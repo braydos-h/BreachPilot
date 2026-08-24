@@ -68,6 +68,7 @@ async def test_adaptive_rounds_stop_when_no_novel_candidates_remain(tmp_path):
         # failed so the next round's skip_failed would drop it.
         if call_count["n"] == 1:
             from tools.autonomous_orchestrator import AttackPhase, AttackTask
+
             t = AttackTask(
                 task_id="ATK-1",
                 phase=AttackPhase.EXPLOITATION,

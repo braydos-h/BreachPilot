@@ -33,7 +33,9 @@ class _StubMCP:
     _tool_manager: Any = None
 
 
-def _build_ctx(tmp_path: Path, *, require_allowlist_flag: bool = True, allowed: tuple[str, ...] = ("10.0.0.50",)) -> Any:
+def _build_ctx(
+    tmp_path: Path, *, require_allowlist_flag: bool = True, allowed: tuple[str, ...] = ("10.0.0.50",)
+) -> Any:
     from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
     from tools.mcp_shared import make_audit_tool, make_require_allowlist
@@ -67,6 +69,7 @@ def _register(tmp_path: Path, **ctx_kwargs: Any) -> tuple[_StubMCP, Any]:
 
 
 # ---------------------------------------------------------------- get_assessment_state
+
 
 def test_get_assessment_state_returns_block(tmp_path: Path) -> None:
     mcp, _ = _register(tmp_path)
@@ -111,6 +114,7 @@ def test_get_assessment_state_reflects_hypotheses_and_plan(tmp_path: Path) -> No
 
 # ---------------------------------------------------------------- query_capabilities
 
+
 def test_query_capabilities_modules_lists_capability_records(tmp_path: Path) -> None:
     mcp, _ = _register(tmp_path)
     out = mcp.tools["query_capabilities"](scope="modules")
@@ -133,10 +137,14 @@ def test_query_capabilities_modules_service_filter(tmp_path: Path) -> None:
 
 def test_query_capabilities_tools_lists_registered_names(tmp_path: Path) -> None:
     mcp, _ = _register(tmp_path)
+
     # populate the sync introspection path the tool uses
     class _TM:
-        _tools = {"foo": type("T", (), {"name": "foo", "description": ""})(),
-                  "bar": type("T", (), {"name": "bar", "description": ""})()}
+        _tools = {
+            "foo": type("T", (), {"name": "foo", "description": ""})(),
+            "bar": type("T", (), {"name": "bar", "description": ""})(),
+        }
+
     mcp._tool_manager = _TM()
     out = mcp.tools["query_capabilities"](scope="tools")
     assert out.startswith("CAPABILITIES: scope=tools")
@@ -152,6 +160,7 @@ def test_query_capabilities_bad_scope(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------- get_capability_details
+
 
 def test_get_capability_details_module_found(tmp_path: Path) -> None:
     mcp, _ = _register(tmp_path)
@@ -169,6 +178,7 @@ def test_get_capability_details_module_not_found(tmp_path: Path) -> None:
 
 # ---------------------------------------------------------------- get_evidence
 
+
 def test_get_evidence_empty_when_no_audit(tmp_path: Path) -> None:
     mcp, _ = _register(tmp_path)
     out = mcp.tools["get_evidence"](target_ip="10.0.0.50")
@@ -181,16 +191,29 @@ def test_get_evidence_returns_compact_refs_no_secrets(tmp_path: Path) -> None:
     audit = ctx.workspace / "exploit_audit.jsonl"
     audit.parent.mkdir(parents=True, exist_ok=True)
     rows = [
-        {"target_ip": "10.0.0.50", "tool_name": "run_exploit_terminal",
-         "attempt_id": "att-1", "status": "completed", "duration_s": 12.5,
-         "args": {"command": "SECRET_PASSWORD hunter2 nmap 10.0.0.50"}},
-        {"target_ip": "10.0.0.50", "tool_name": "run_msf_module",
-         "attempt_id": "att-2", "status": "blocked", "duration_s": 1.0,
-         "args": {"command": "set RHOSTS 10.0.0.50"}},
-        {"target_ip": "10.0.0.99", "tool_name": "run_exploit_terminal",
-         "attempt_id": "att-3", "status": "completed"},
-        {"target_ip": "10.0.0.50", "tool_name": "check_os",
-         "attempt_id": "att-4", "status": "started"},  # started must be skipped
+        {
+            "target_ip": "10.0.0.50",
+            "tool_name": "run_exploit_terminal",
+            "attempt_id": "att-1",
+            "status": "completed",
+            "duration_s": 12.5,
+            "args": {"command": "SECRET_PASSWORD hunter2 nmap 10.0.0.50"},
+        },
+        {
+            "target_ip": "10.0.0.50",
+            "tool_name": "run_msf_module",
+            "attempt_id": "att-2",
+            "status": "blocked",
+            "duration_s": 1.0,
+            "args": {"command": "set RHOSTS 10.0.0.50"},
+        },
+        {"target_ip": "10.0.0.99", "tool_name": "run_exploit_terminal", "attempt_id": "att-3", "status": "completed"},
+        {
+            "target_ip": "10.0.0.50",
+            "tool_name": "check_os",
+            "attempt_id": "att-4",
+            "status": "started",
+        },  # started must be skipped
     ]
     with audit.open("w", encoding="utf-8") as fh:
         for r in rows:
@@ -214,10 +237,16 @@ def test_get_evidence_tool_filter(tmp_path: Path) -> None:
     audit = ctx.workspace / "exploit_audit.jsonl"
     audit.parent.mkdir(parents=True, exist_ok=True)
     with audit.open("w", encoding="utf-8") as fh:
-        fh.write(json.dumps({"target_ip": "10.0.0.50", "tool_name": "check_os",
-                              "attempt_id": "a1", "status": "completed"}) + "\n")
-        fh.write(json.dumps({"target_ip": "10.0.0.50", "tool_name": "run_msf_module",
-                              "attempt_id": "a2", "status": "completed"}) + "\n")
+        fh.write(
+            json.dumps({"target_ip": "10.0.0.50", "tool_name": "check_os", "attempt_id": "a1", "status": "completed"})
+            + "\n"
+        )
+        fh.write(
+            json.dumps(
+                {"target_ip": "10.0.0.50", "tool_name": "run_msf_module", "attempt_id": "a2", "status": "completed"}
+            )
+            + "\n"
+        )
     out = mcp.tools["get_evidence"](target_ip="10.0.0.50", tool="check_os")
     assert "COUNT: 1" in out
     assert "a1" in out and "a2" not in out
@@ -230,6 +259,7 @@ def test_get_evidence_blocked_when_target_not_allowed(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------- record_hypothesis
+
 
 def test_record_hypothesis_persists_and_returns_id(tmp_path: Path) -> None:
     mcp, ctx = _register(tmp_path)
@@ -246,6 +276,7 @@ def test_record_hypothesis_persists_and_returns_id(tmp_path: Path) -> None:
 
     # the file on disk must carry it
     from tools.assessment_state import AssessmentStateStore
+
     state = AssessmentStateStore(ctx.workspace).load("10.0.0.50")
     assert len(state.hypotheses) == 1
     assert state.hypotheses[0].statement == "SMB null session is enabled"
@@ -274,6 +305,7 @@ def test_record_hypothesis_ids_increment(tmp_path: Path) -> None:
 
 # ---------------------------------------------------------------- update_task
 
+
 def _seed_plan(workspace: Path, target: str = "10.0.0.50") -> None:
     from tools.attack_planner import AttackPlanner, AttackStep
 
@@ -296,8 +328,11 @@ def test_update_task_complete(tmp_path: Path) -> None:
     mcp, ctx = _register(tmp_path)
     _seed_plan(ctx.workspace)
     out = mcp.tools["update_task"](
-        target_ip="10.0.0.50", step_index=0, action="complete",
-        success=True, summary="OS is Linux 5.x",
+        target_ip="10.0.0.50",
+        step_index=0,
+        action="complete",
+        success=True,
+        summary="OS is Linux 5.x",
     )
     assert out.startswith("TASK_UPDATED:")
     assert "ACTION: complete" in out
@@ -315,8 +350,11 @@ def test_update_task_fail_then_reset(tmp_path: Path) -> None:
     mcp, ctx = _register(tmp_path)
     _seed_plan(ctx.workspace)
     out = mcp.tools["update_task"](
-        target_ip="10.0.0.50", step_index=1, action="fail",
-        failure_class="prerequisite_missing", reason="no creds",
+        target_ip="10.0.0.50",
+        step_index=1,
+        action="fail",
+        failure_class="prerequisite_missing",
+        reason="no creds",
     )
     assert "ACTION: fail" in out
     plan = AttackPlanner(ctx.workspace).load_plan("10.0.0.50")
@@ -337,7 +375,10 @@ def test_update_task_cancel(tmp_path: Path) -> None:
     mcp, ctx = _register(tmp_path)
     _seed_plan(ctx.workspace)
     out = mcp.tools["update_task"](
-        target_ip="10.0.0.50", step_index=1, action="cancel", reason="hypothesis refuted",
+        target_ip="10.0.0.50",
+        step_index=1,
+        action="cancel",
+        reason="hypothesis refuted",
     )
     assert "ACTION: cancel" in out
     plan = AttackPlanner(ctx.workspace).load_plan("10.0.0.50")
@@ -367,6 +408,7 @@ def test_update_task_blocked_when_target_not_allowed(tmp_path: Path) -> None:
 
 # ---------------------------------------------------------------- signatures preserved
 
+
 def test_tool_signatures_preserved() -> None:
     """The @require_allowlist / @audit_tool wrappers must keep the original
     parameter names so FastMCP schema introspection still sees ``target_ip``."""
@@ -383,6 +425,7 @@ def test_tool_signatures_preserved() -> None:
 
 
 # ---------------------------------------------------------------- registration smoke
+
 
 @pytest.mark.asyncio
 async def test_tools_registered_in_full_server(tmp_path: Path) -> None:

@@ -18,10 +18,7 @@ for api_root in server.api_roots:
 ```python
 from taxii2client.v21 import Collection, as_pages
 
-collection = Collection(
-    "https://cti.example.com/taxii2/collections/abc123/",
-    user="u", password="p"
-)
+collection = Collection("https://cti.example.com/taxii2/collections/abc123/", user="u", password="p")
 for bundle in as_pages(collection.get_objects, per_request=100):
     for obj in bundle.get("objects", []):
         if obj["type"] == "indicator":
@@ -54,6 +51,7 @@ indicator = Indicator(
 
 ```python
 from stix2 import Bundle
+
 bundle = Bundle(objects=[indicator])
 print(bundle.serialize(pretty=True))
 ```
@@ -62,6 +60,7 @@ print(bundle.serialize(pretty=True))
 
 ```python
 from stix2 import MemoryStore, Filter
+
 store = MemoryStore(stix_data=bundle)
 results = store.query([Filter("type", "=", "indicator")])
 ```

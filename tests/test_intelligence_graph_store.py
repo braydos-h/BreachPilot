@@ -150,13 +150,9 @@ def test_persistence_across_store_instances(tmp_path):
 
 def test_merge_engine_status_downgrade_without_evidence_conflicts(tmp_path):
     store = AttackGraphStore(tmp_path / "g.db")
-    store.upsert_node(
-        make_node(NodeType.HYPOTHESIS, "hyp-1", status=NodeStatus.CONFIRMED, confidence=0.9)
-    )
+    store.upsert_node(make_node(NodeType.HYPOTHESIS, "hyp-1", status=NodeStatus.CONFIRMED, confidence=0.9))
     engine = GraphMergeEngine(store)
-    proposal = make_node(
-        NodeType.HYPOTHESIS, "hyp-1", status=NodeStatus.REFUTED, confidence=0.9
-    )
+    proposal = make_node(NodeType.HYPOTHESIS, "hyp-1", status=NodeStatus.REFUTED, confidence=0.9)
     conflicts = engine.apply(GraphUpdate(node_updates=[proposal]))
     assert len(conflicts) == 1
     assert conflicts[0].reason == "downgrade without evidence"

@@ -17,18 +17,49 @@ from tools.intelligence.graph import (
 )
 
 ALL_NODE_TYPES = [
-    "ASSET", "HOST", "DOMAIN", "IP", "SERVICE", "PORT", "ENDPOINT",
-    "APPLICATION", "TECHNOLOGY", "VERSION", "IDENTITY", "ROLE",
-    "CREDENTIAL_REFERENCE", "TRUST_BOUNDARY", "NETWORK_SEGMENT",
-    "VULNERABILITY_CANDIDATE", "FINDING", "HYPOTHESIS", "EVIDENCE",
-    "CAPABILITY", "SECURITY_CONTROL", "OBSERVATION",
+    "ASSET",
+    "HOST",
+    "DOMAIN",
+    "IP",
+    "SERVICE",
+    "PORT",
+    "ENDPOINT",
+    "APPLICATION",
+    "TECHNOLOGY",
+    "VERSION",
+    "IDENTITY",
+    "ROLE",
+    "CREDENTIAL_REFERENCE",
+    "TRUST_BOUNDARY",
+    "NETWORK_SEGMENT",
+    "VULNERABILITY_CANDIDATE",
+    "FINDING",
+    "HYPOTHESIS",
+    "EVIDENCE",
+    "CAPABILITY",
+    "SECURITY_CONTROL",
+    "OBSERVATION",
 ]
 
 ALL_EDGE_TYPES = [
-    "RESOLVES_TO", "HOSTS", "EXPOSES", "RUNS", "DEPENDS_ON",
-    "REACHABLE_FROM", "AUTHENTICATES_TO", "HAS_ROLE", "TRUSTS",
-    "RELATED_TO", "SUPPORTED_BY", "CONTRADICTED_BY", "DERIVED_FROM",
-    "AFFECTED_BY", "PROTECTED_BY", "CONNECTED_TO", "SAME_AS", "OBSERVED_ON",
+    "RESOLVES_TO",
+    "HOSTS",
+    "EXPOSES",
+    "RUNS",
+    "DEPENDS_ON",
+    "REACHABLE_FROM",
+    "AUTHENTICATES_TO",
+    "HAS_ROLE",
+    "TRUSTS",
+    "RELATED_TO",
+    "SUPPORTED_BY",
+    "CONTRADICTED_BY",
+    "DERIVED_FROM",
+    "AFFECTED_BY",
+    "PROTECTED_BY",
+    "CONNECTED_TO",
+    "SAME_AS",
+    "OBSERVED_ON",
 ]
 
 ALL_NODE_STATUSES = ["UNKNOWN", "SUSPECTED", "LIKELY", "CONFIRMED", "REFUTED", "EXHAUSTED"]
@@ -263,14 +294,20 @@ def test_paths_max_length_and_max_paths_bounds():
     assert trav.paths("a", "d", max_length=1) == []
     chain_nodes = [GraphNode(node_id=f"n{i}", node_type=NodeType.HOST, value="x", scope="s") for i in range(8)]
     chain_edges = [
-        GraphEdge(edge_id=f"e{i}", source_node_id=f"n{i}", target_node_id=f"n{i+1}",
-                  edge_type=EdgeType.CONNECTED_TO, scope="s")
+        GraphEdge(
+            edge_id=f"e{i}",
+            source_node_id=f"n{i}",
+            target_node_id=f"n{i + 1}",
+            edge_type=EdgeType.CONNECTED_TO,
+            scope="s",
+        )
         for i in range(7)
     ]
     hub = GraphNode(node_id="hub", node_type=NodeType.HOST, value="x", scope="s")
     hub_edges = [
-        GraphEdge(edge_id=f"h{i}", source_node_id=f"n{i}", target_node_id="hub",
-                  edge_type=EdgeType.CONNECTED_TO, scope="s")
+        GraphEdge(
+            edge_id=f"h{i}", source_node_id=f"n{i}", target_node_id="hub", edge_type=EdgeType.CONNECTED_TO, scope="s"
+        )
         for i in range(7)
     ]
     fork = GraphTraversal(chain_nodes + [hub], chain_edges + hub_edges)
@@ -291,8 +328,13 @@ def test_path_exists():
 def test_paths_deduplicate_nodes_within_a_path():
     cycle_nodes = [GraphNode(node_id=f"n{i}", node_type=NodeType.HOST, value="x", scope="s") for i in range(4)]
     cycle_edges = [
-        GraphEdge(edge_id=f"e{i}", source_node_id=f"n{i}", target_node_id=f"n{(i + 1) % 4}",
-                  edge_type=EdgeType.CONNECTED_TO, scope="s")
+        GraphEdge(
+            edge_id=f"e{i}",
+            source_node_id=f"n{i}",
+            target_node_id=f"n{(i + 1) % 4}",
+            edge_type=EdgeType.CONNECTED_TO,
+            scope="s",
+        )
         for i in range(4)
     ]
     trav = GraphTraversal(cycle_nodes, cycle_edges)

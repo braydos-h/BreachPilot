@@ -52,9 +52,8 @@ pip install dnstwist
 ### CLI via subprocess
 ```python
 import subprocess, json
-result = subprocess.run(
-    ["dnstwist", "-r", "-f", "json", "example.com"],
-    capture_output=True, text=True)
+
+result = subprocess.run(["dnstwist", "-r", "-f", "json", "example.com"], capture_output=True, text=True)
 domains = json.loads(result.stdout)
 for d in domains:
     if d.get("dns_a"):
@@ -64,6 +63,7 @@ for d in domains:
 ## WHOIS Lookup
 ```python
 import whois
+
 w = whois.whois("suspicious-domain.com")
 print(w.creation_date, w.registrar)
 ```

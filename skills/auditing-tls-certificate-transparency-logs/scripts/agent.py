@@ -37,6 +37,7 @@ RETRY_BACKOFF = 2
 # Database layer
 # ---------------------------------------------------------------------------
 
+
 def init_database(db_path: str) -> sqlite3.Connection:
     """Initialize SQLite database for certificate tracking."""
     conn = sqlite3.connect(db_path)
@@ -101,6 +102,7 @@ def init_database(db_path: str) -> sqlite3.Connection:
 # crt.sh API interaction
 # ---------------------------------------------------------------------------
 
+
 def query_crtsh(domain: str, exclude_expired: bool = True, timeout: int = DEFAULT_TIMEOUT) -> list[dict]:
     """Query crt.sh JSON API for certificates matching domain pattern.
 
@@ -163,6 +165,7 @@ def get_certificate_detail(crtsh_id: int, timeout: int = DEFAULT_TIMEOUT) -> dic
 # Certificate processing
 # ---------------------------------------------------------------------------
 
+
 def extract_subdomains_from_names(name_value: str) -> list[str]:
     """Extract individual subdomain entries from a crt.sh name_value field.
 
@@ -209,9 +212,19 @@ def store_certificates(conn: sqlite3.Connection, certs: list[dict], monitored_do
                 issuer_ca_id, not_before, not_after, serial_number,
                 entry_timestamp, is_precert)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (crtsh_id, monitored_domain, common_name, name_value,
-             issuer_name, issuer_ca_id, not_before, not_after, serial,
-             entry_ts, is_precert),
+            (
+                crtsh_id,
+                monitored_domain,
+                common_name,
+                name_value,
+                issuer_name,
+                issuer_ca_id,
+                not_before,
+                not_after,
+                serial,
+                entry_ts,
+                is_precert,
+            ),
         )
         new_certs.append(cert)
     conn.commit()
@@ -249,6 +262,7 @@ def discover_subdomains(conn: sqlite3.Connection, certs: list[dict], parent_doma
 # DNS resolution
 # ---------------------------------------------------------------------------
 
+
 def resolve_subdomain(subdomain: str, timeout: float = 5.0) -> dict:
     """Resolve a subdomain to IP addresses and CNAME targets."""
     result = {"subdomain": subdomain, "resolved": False, "ips": [], "cname": None}
@@ -258,6 +272,7 @@ def resolve_subdomain(subdomain: str, timeout: float = 5.0) -> dict:
         # Check CNAME first
         try:
             import dns.resolver
+
             answers = dns.resolver.resolve(subdomain, "CNAME")
             for rdata in answers:
                 result["cname"] = str(rdata.target).rstrip(".")
@@ -312,6 +327,7 @@ def resolve_all_subdomains(conn: sqlite3.Connection, parent_domain: str) -> list
 # Alerting engine
 # ---------------------------------------------------------------------------
 
+
 def check_unauthorized_ca(conn: sqlite3.Connection, new_certs: list[dict]) -> list[dict]:
     """Check if any new certificates were issued by unauthorized CAs."""
     cursor = conn.cursor()
@@ -330,27 +346,29 @@ def check_unauthorized_ca(conn: sqlite3.Connection, new_certs: list[dict]) -> li
                 "alert_type": "unauthorized_ca",
                 "severity": "critical",
                 "domain": cert.get("common_name", ""),
-                "details": json.dumps({
-                    "issuer": cert.get("issuer_name", ""),
-                    "issuer_ca_id": ca_id,
-                    "common_name": cert.get("common_name", ""),
-                    "name_value": cert.get("name_value", ""),
-                    "not_before": cert.get("not_before", ""),
-                    "not_after": cert.get("not_after", ""),
-                    "crtsh_id": cert.get("id"),
-                }),
+                "details": json.dumps(
+                    {
+                        "issuer": cert.get("issuer_name", ""),
+                        "issuer_ca_id": ca_id,
+                        "common_name": cert.get("common_name", ""),
+                        "name_value": cert.get("name_value", ""),
+                        "not_before": cert.get("not_before", ""),
+                        "not_after": cert.get("not_after", ""),
+                        "crtsh_id": cert.get("id"),
+                    }
+                ),
                 "certificate_id": cert.get("id"),
             }
             cursor.execute(
                 """INSERT INTO alerts (alert_type, severity, domain, details, certificate_id)
                    VALUES (?, ?, ?, ?, ?)""",
-                (alert["alert_type"], alert["severity"], alert["domain"],
-                 alert["details"], alert["certificate_id"]),
+                (alert["alert_type"], alert["severity"], alert["domain"], alert["details"], alert["certificate_id"]),
             )
             alerts.append(alert)
             logger.warning(
                 "ALERT: Unauthorized CA '%s' issued cert for %s",
-                cert.get("issuer_name"), cert.get("common_name"),
+                cert.get("issuer_name"),
+                cert.get("common_name"),
             )
     conn.commit()
     return alerts
@@ -365,11 +383,13 @@ def check_new_subdomain_alerts(conn: sqlite3.Connection, new_subdomains: list[st
             "alert_type": "new_subdomain",
             "severity": "medium",
             "domain": sub,
-            "details": json.dumps({
-                "subdomain": sub,
-                "parent_domain": parent_domain,
-                "discovered_via": "certificate_transparency",
-            }),
+            "details": json.dumps(
+                {
+                    "subdomain": sub,
+                    "parent_domain": parent_domain,
+                    "discovered_via": "certificate_transparency",
+                }
+            ),
         }
         cursor.execute(
             """INSERT INTO alerts (alert_type, severity, domain, details)
@@ -394,20 +414,21 @@ def check_wildcard_certs(conn: sqlite3.Connection, new_certs: list[dict]) -> lis
                 "alert_type": "wildcard_certificate",
                 "severity": "high",
                 "domain": cn,
-                "details": json.dumps({
-                    "common_name": cn,
-                    "issuer": cert.get("issuer_name", ""),
-                    "not_before": cert.get("not_before", ""),
-                    "not_after": cert.get("not_after", ""),
-                    "crtsh_id": cert.get("id"),
-                }),
+                "details": json.dumps(
+                    {
+                        "common_name": cn,
+                        "issuer": cert.get("issuer_name", ""),
+                        "not_before": cert.get("not_before", ""),
+                        "not_after": cert.get("not_after", ""),
+                        "crtsh_id": cert.get("id"),
+                    }
+                ),
                 "certificate_id": cert.get("id"),
             }
             cursor.execute(
                 """INSERT INTO alerts (alert_type, severity, domain, details, certificate_id)
                    VALUES (?, ?, ?, ?, ?)""",
-                (alert["alert_type"], alert["severity"], alert["domain"],
-                 alert["details"], alert["certificate_id"]),
+                (alert["alert_type"], alert["severity"], alert["domain"], alert["details"], alert["certificate_id"]),
             )
             alerts.append(alert)
             logger.warning("ALERT: Wildcard certificate issued for %s", cn)
@@ -433,26 +454,34 @@ def check_short_lived_certs(conn: sqlite3.Connection, new_certs: list[dict], thr
                     "alert_type": "short_lived_certificate",
                     "severity": "high",
                     "domain": cert.get("common_name", ""),
-                    "details": json.dumps({
-                        "common_name": cert.get("common_name", ""),
-                        "validity_hours": round(validity_hours, 2),
-                        "not_before": not_before,
-                        "not_after": not_after,
-                        "issuer": cert.get("issuer_name", ""),
-                        "crtsh_id": cert.get("id"),
-                    }),
+                    "details": json.dumps(
+                        {
+                            "common_name": cert.get("common_name", ""),
+                            "validity_hours": round(validity_hours, 2),
+                            "not_before": not_before,
+                            "not_after": not_after,
+                            "issuer": cert.get("issuer_name", ""),
+                            "crtsh_id": cert.get("id"),
+                        }
+                    ),
                     "certificate_id": cert.get("id"),
                 }
                 cursor.execute(
                     """INSERT INTO alerts (alert_type, severity, domain, details, certificate_id)
                        VALUES (?, ?, ?, ?, ?)""",
-                    (alert["alert_type"], alert["severity"], alert["domain"],
-                     alert["details"], alert["certificate_id"]),
+                    (
+                        alert["alert_type"],
+                        alert["severity"],
+                        alert["domain"],
+                        alert["details"],
+                        alert["certificate_id"],
+                    ),
                 )
                 alerts.append(alert)
                 logger.warning(
                     "ALERT: Short-lived cert (%dh) for %s",
-                    int(validity_hours), cert.get("common_name"),
+                    int(validity_hours),
+                    cert.get("common_name"),
                 )
         except (ValueError, TypeError):
             continue
@@ -481,13 +510,15 @@ def check_expiring_certs(conn: sqlite3.Connection, domain: str, days_warning: li
                 "alert_type": "certificate_expiring",
                 "severity": "medium" if days > 7 else "high",
                 "domain": cn,
-                "details": json.dumps({
-                    "common_name": cn,
-                    "not_after": not_after,
-                    "days_until_expiry": days,
-                    "issuer": issuer,
-                    "crtsh_id": crtsh_id,
-                }),
+                "details": json.dumps(
+                    {
+                        "common_name": cn,
+                        "not_after": not_after,
+                        "days_until_expiry": days,
+                        "issuer": issuer,
+                        "crtsh_id": crtsh_id,
+                    }
+                ),
                 "certificate_id": crtsh_id,
             }
             alerts.append(alert)
@@ -497,6 +528,7 @@ def check_expiring_certs(conn: sqlite3.Connection, domain: str, days_warning: li
 # ---------------------------------------------------------------------------
 # Typosquat detection
 # ---------------------------------------------------------------------------
+
 
 def generate_typosquat_candidates(domain: str) -> list[str]:
     """Generate domain permutations for typosquat detection.
@@ -513,7 +545,7 @@ def generate_typosquat_candidates(domain: str) -> list[str]:
 
     # Omission: remove one character at a time
     for i in range(len(label)):
-        c = label[:i] + label[i + 1:]
+        c = label[:i] + label[i + 1 :]
         if c:
             candidates.add(f"{c}.{suffix}")
 
@@ -525,16 +557,36 @@ def generate_typosquat_candidates(domain: str) -> list[str]:
 
     # Replacement: replace each char with adjacent keyboard keys
     keyboard_neighbors = {
-        "q": "wa", "w": "qeas", "e": "wrds", "r": "etdf", "t": "ryfg",
-        "y": "tugh", "u": "yijh", "i": "uokj", "o": "iplk", "p": "ol",
-        "a": "qwsz", "s": "wedxza", "d": "erfcxs", "f": "rtgvcd",
-        "g": "tyhbvf", "h": "yujnbg", "j": "uikmnh", "k": "ioljm",
-        "l": "opk", "z": "asx", "x": "zsdc", "c": "xdfv", "v": "cfgb",
-        "b": "vghn", "n": "bhjm", "m": "njk",
+        "q": "wa",
+        "w": "qeas",
+        "e": "wrds",
+        "r": "etdf",
+        "t": "ryfg",
+        "y": "tugh",
+        "u": "yijh",
+        "i": "uokj",
+        "o": "iplk",
+        "p": "ol",
+        "a": "qwsz",
+        "s": "wedxza",
+        "d": "erfcxs",
+        "f": "rtgvcd",
+        "g": "tyhbvf",
+        "h": "yujnbg",
+        "j": "uikmnh",
+        "k": "ioljm",
+        "l": "opk",
+        "z": "asx",
+        "x": "zsdc",
+        "c": "xdfv",
+        "v": "cfgb",
+        "b": "vghn",
+        "n": "bhjm",
+        "m": "njk",
     }
     for i, ch in enumerate(label):
         for neighbor in keyboard_neighbors.get(ch.lower(), ""):
-            c = label[:i] + neighbor + label[i + 1:]
+            c = label[:i] + neighbor + label[i + 1 :]
             candidates.add(f"{c}.{suffix}")
 
     # Bitsquatting: flip each bit of each character
@@ -542,7 +594,7 @@ def generate_typosquat_candidates(domain: str) -> list[str]:
         for bit in range(8):
             flipped = chr(ord(ch) ^ (1 << bit))
             if flipped.isalnum():
-                c = label[:i] + flipped + label[i + 1:]
+                c = label[:i] + flipped + label[i + 1 :]
                 candidates.add(f"{c}.{suffix}")
 
     candidates.discard(domain)
@@ -557,18 +609,22 @@ def scan_typosquats(domain: str, timeout: int = DEFAULT_TIMEOUT) -> list[dict]:
     for candidate in candidates:
         certs = query_crtsh(candidate, exclude_expired=True, timeout=timeout)
         if certs:
-            found.append({
-                "typosquat_domain": candidate,
-                "original_domain": domain,
-                "certificate_count": len(certs),
-                "issuers": list({c.get("issuer_name", "") for c in certs}),
-                "earliest_cert": min(
-                    (c.get("not_before", "") for c in certs if c.get("not_before")),
-                    default="",
-                ),
-            })
+            found.append(
+                {
+                    "typosquat_domain": candidate,
+                    "original_domain": domain,
+                    "certificate_count": len(certs),
+                    "issuers": list({c.get("issuer_name", "") for c in certs}),
+                    "earliest_cert": min(
+                        (c.get("not_before", "") for c in certs if c.get("not_before")),
+                        default="",
+                    ),
+                }
+            )
             logger.warning(
-                "Typosquat found: %s has %d certificates", candidate, len(certs),
+                "Typosquat found: %s has %d certificates",
+                candidate,
+                len(certs),
             )
         # Rate-limit to avoid hammering crt.sh
         time.sleep(1)
@@ -578,6 +634,7 @@ def scan_typosquats(domain: str, timeout: int = DEFAULT_TIMEOUT) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Notification delivery
 # ---------------------------------------------------------------------------
+
 
 def send_email_alert(
     alerts: list[dict],
@@ -621,8 +678,8 @@ def send_email_alert(
         }.get(alert["severity"], "#6c757d")
         html_body += f'<div style="border-left:4px solid {severity_color};padding:10px;margin:10px 0;">'
         html_body += f'<strong style="color:{severity_color};">[{alert["severity"].upper()}]</strong> '
-        html_body += f'{alert["alert_type"]}<br/>'
-        html_body += f'Domain: {alert.get("domain", "N/A")}<br/>'
+        html_body += f"{alert['alert_type']}<br/>"
+        html_body += f"Domain: {alert.get('domain', 'N/A')}<br/>"
         details = json.loads(alert.get("details", "{}"))
         for k, v in details.items():
             html_body += f"<small>{k}: {v}</small><br/>"
@@ -686,6 +743,7 @@ def send_webhook_alert(alerts: list[dict], webhook_url: str, timeout: int = DEFA
 # Reporting
 # ---------------------------------------------------------------------------
 
+
 def generate_report(conn: sqlite3.Connection, domain: str, output_path: str = None) -> dict:
     """Generate a comprehensive CT monitoring report."""
     cursor = conn.cursor()
@@ -734,8 +792,11 @@ def generate_report(conn: sqlite3.Connection, domain: str, output_path: str = No
     )
     recent_alerts = [
         {
-            "type": r[0], "severity": r[1], "domain": r[2],
-            "details": json.loads(r[3]) if r[3] else {}, "created_at": r[4],
+            "type": r[0],
+            "severity": r[1],
+            "domain": r[2],
+            "details": json.loads(r[3]) if r[3] else {},
+            "created_at": r[4],
         }
         for r in cursor.fetchall()
     ]
@@ -748,9 +809,11 @@ def generate_report(conn: sqlite3.Connection, domain: str, output_path: str = No
     )
     subdomain_list = [
         {
-            "subdomain": r[0], "dns_resolved": bool(r[1]),
+            "subdomain": r[0],
+            "dns_resolved": bool(r[1]),
             "ips": r[2].split(",") if r[2] else [],
-            "cname": r[3], "first_seen": r[4],
+            "cname": r[3],
+            "first_seen": r[4],
         }
         for r in cursor.fetchall()
     ]
@@ -782,6 +845,7 @@ def generate_report(conn: sqlite3.Connection, domain: str, output_path: str = No
 # Authorized CA management
 # ---------------------------------------------------------------------------
 
+
 def add_authorized_ca(conn: sqlite3.Connection, ca_name: str, ca_id: int = None):
     """Add a CA to the authorized issuers list."""
     conn.execute(
@@ -809,6 +873,7 @@ def auto_populate_authorized_cas(conn: sqlite3.Connection, domain: str):
 # ---------------------------------------------------------------------------
 # Main monitoring loop
 # ---------------------------------------------------------------------------
+
 
 def run_monitor_cycle(
     conn: sqlite3.Connection,
@@ -908,7 +973,9 @@ Examples:
         """,
     )
     parser.add_argument(
-        "--domains", nargs="+", required=True,
+        "--domains",
+        nargs="+",
+        required=True,
         help="Domain(s) to monitor (e.g., example.com bank.example.com)",
     )
     parser.add_argument("--db", default="ct_monitor.db", help="SQLite database path (default: ct_monitor.db)")
@@ -916,13 +983,17 @@ Examples:
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="HTTP request timeout in seconds")
     parser.add_argument("--continuous", action="store_true", help="Run continuous monitoring loop")
     parser.add_argument("--interval", type=int, default=900, help="Monitoring interval in seconds (default: 900)")
-    parser.add_argument("--resolve-dns", action="store_true", default=True, help="Resolve discovered subdomains via DNS")
+    parser.add_argument(
+        "--resolve-dns", action="store_true", default=True, help="Resolve discovered subdomains via DNS"
+    )
     parser.add_argument("--no-resolve-dns", action="store_false", dest="resolve_dns", help="Disable DNS resolution")
     parser.add_argument("--typosquats", action="store_true", help="Enable typosquat domain scanning (slow)")
     parser.add_argument("--webhook", help="Webhook URL for alert notifications (Slack, Teams)")
     parser.add_argument("--auto-baseline", action="store_true", help="Auto-populate authorized CAs from current certs")
     parser.add_argument(
-        "--add-ca", nargs=2, metavar=("CA_NAME", "CA_ID"),
+        "--add-ca",
+        nargs=2,
+        metavar=("CA_NAME", "CA_ID"),
         help="Manually add an authorized CA (name and crt.sh CA ID)",
     )
     parser.add_argument("--smtp-host", help="SMTP server for email alerts")
@@ -968,12 +1039,14 @@ Examples:
     if args.continuous:
         logger.info(
             "Starting continuous monitoring for %s (interval: %ds)",
-            ", ".join(args.domains), args.interval,
+            ", ".join(args.domains),
+            args.interval,
         )
         try:
             while True:
                 cycle = run_monitor_cycle(
-                    conn, args.domains,
+                    conn,
+                    args.domains,
                     resolve_dns=args.resolve_dns,
                     check_typosquats=args.typosquats,
                     webhook_url=args.webhook,
@@ -983,8 +1056,10 @@ Examples:
                 if cycle["alerts"] and args.smtp_host and args.email_to:
                     send_email_alert(
                         cycle["alerts"],
-                        args.smtp_host, args.smtp_port,
-                        args.smtp_user, args.smtp_pass,
+                        args.smtp_host,
+                        args.smtp_port,
+                        args.smtp_user,
+                        args.smtp_pass,
                         args.email_from or args.smtp_user,
                         args.email_to,
                     )
@@ -997,7 +1072,8 @@ Examples:
             logger.info("Monitoring stopped by user")
     else:
         cycle = run_monitor_cycle(
-            conn, args.domains,
+            conn,
+            args.domains,
             resolve_dns=args.resolve_dns,
             check_typosquats=args.typosquats,
             webhook_url=args.webhook,
@@ -1006,8 +1082,10 @@ Examples:
         if cycle["alerts"] and args.smtp_host and args.email_to:
             send_email_alert(
                 cycle["alerts"],
-                args.smtp_host, args.smtp_port,
-                args.smtp_user, args.smtp_pass,
+                args.smtp_host,
+                args.smtp_port,
+                args.smtp_user,
+                args.smtp_pass,
                 args.email_from or args.smtp_user,
                 args.email_to,
             )

@@ -19,6 +19,7 @@ Design constraints (matched to the rest of the codebase):
 * Detection / scoring helpers are read-only / planning only and never
   execute anything.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -193,8 +194,7 @@ class OpsecManager:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (X11; Ubuntu; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (X11; Ubuntu; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 "
         "(KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
         "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 "
@@ -379,7 +379,7 @@ class OpsecManager:
         for needle, replacement in self._LOW_NOISE_REWRITES:
             idx = lowered.find(needle)
             if idx >= 0:
-                return command[:idx] + replacement + command[idx + len(needle):]
+                return command[:idx] + replacement + command[idx + len(needle) :]
         return None
 
     # -- DNS-over-HTTPS ----------------------------------------------------

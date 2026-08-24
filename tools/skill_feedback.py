@@ -126,9 +126,7 @@ def get_shared_skill_store(config: dict[str, Any] | None) -> Any | None:
             mem_cfg = (config or {}).get("memory", {}) or {}
             min_samples = int(mem_cfg.get("experience_min_samples", 3))
             decay = float(mem_cfg.get("experience_time_decay_days", 90.0))
-            _shared_store = ExperienceStore(
-                get_default_db(), min_samples=min_samples, time_decay_days=decay
-            )
+            _shared_store = ExperienceStore(get_default_db(), min_samples=min_samples, time_decay_days=decay)
         except Exception:
             _shared_store = None
         return _shared_store

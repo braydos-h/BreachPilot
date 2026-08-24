@@ -61,6 +61,7 @@ def _auth_headers(token="test-token"):
 
 # ── OpenAPI fix ───────────────────────────────────────────────────────────────
 
+
 def test_openapi_json_returns_200(tmp_path, monkeypatch):
     """``/openapi.json`` must return 200 with a usable schema, not 500.
 
@@ -103,14 +104,19 @@ def test_openapi_json_200_with_serve_webui(tmp_path, monkeypatch):
 
 # ── Goal persistence ─────────────────────────────────────────────────────────
 
+
 def test_create_run_persists_preset_goal(tmp_path, monkeypatch):
     """``goal`` in the create-run request is reflected in preview.goal_name."""
     client = _make_client(tmp_path, monkeypatch)
-    resp = client.post("/api/v1/runs", json={
-        "target": "10.0.0.50",
-        "mode": "attack",
-        "goal": "recon_only",
-    }, headers=_auth_headers())
+    resp = client.post(
+        "/api/v1/runs",
+        json={
+            "target": "10.0.0.50",
+            "mode": "attack",
+            "goal": "recon_only",
+        },
+        headers=_auth_headers(),
+    )
     assert resp.status_code == 201
     data = resp.json()
     assert data["state"] == "awaiting_confirmation"
@@ -120,11 +126,15 @@ def test_create_run_persists_preset_goal(tmp_path, monkeypatch):
 def test_create_run_persists_custom_goal(tmp_path, monkeypatch):
     """``custom_goal`` is accepted and persisted on the run record."""
     client = _make_client(tmp_path, monkeypatch)
-    resp = client.post("/api/v1/runs", json={
-        "target": "10.0.0.50",
-        "mode": "attack",
-        "custom_goal": "Demonstrate RCE via the exposed Jenkins console",
-    }, headers=_auth_headers())
+    resp = client.post(
+        "/api/v1/runs",
+        json={
+            "target": "10.0.0.50",
+            "mode": "attack",
+            "custom_goal": "Demonstrate RCE via the exposed Jenkins console",
+        },
+        headers=_auth_headers(),
+    )
     assert resp.status_code == 201
     run_id = resp.json()["run_id"]
     # Verify persistence on the GET /runs/{id} record.
@@ -139,11 +149,15 @@ def test_create_run_state_is_awaiting_confirmation(tmp_path, monkeypatch):
     wizard must advance to). This is the contract the wizard transition relies on.
     """
     client = _make_client(tmp_path, monkeypatch)
-    resp = client.post("/api/v1/runs", json={
-        "target": "127.0.0.1",
-        "mode": "attack",
-        "goal": "recon_only",
-    }, headers=_auth_headers())
+    resp = client.post(
+        "/api/v1/runs",
+        json={
+            "target": "127.0.0.1",
+            "mode": "attack",
+            "goal": "recon_only",
+        },
+        headers=_auth_headers(),
+    )
     assert resp.status_code == 201
     data = resp.json()
     assert data["state"] == "awaiting_confirmation"
@@ -151,6 +165,7 @@ def test_create_run_state_is_awaiting_confirmation(tmp_path, monkeypatch):
 
 
 # ── Invalid IPv4 rejection (backend mirror of browser check) ─────────────────
+
 
 def test_backend_rejects_invalid_ipv4_999(tmp_path, monkeypatch):
     """The backend's strict IPv4 validator rejects 999.999.999.999.

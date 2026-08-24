@@ -429,11 +429,27 @@ _VULN_CLASS_IMPORTS: dict[str, str] = {
 # every service (Redis on 80 is nonsense). Used only as a fallback default in
 # the prompt; the actual script must still accept --port.
 _SERVICE_DEFAULT_PORTS: dict[str, int] = {
-    "http": 80, "https": 443, "ssh": 22, "smb": 445, "rdp": 3389,
-    "redis": 6379, "mysql": 3306, "postgresql": 5432, "mssql": 1433,
-    "mongodb": 27017, "ftp": 21, "telnet": 23, "smtp": 25, "dns": 53,
-    "ldap": 389, "winrm": 5985, "docker": 2375, "elasticsearch": 9200,
-    "vnc": 5900, "snmp": 161, "ntp": 123,
+    "http": 80,
+    "https": 443,
+    "ssh": 22,
+    "smb": 445,
+    "rdp": 3389,
+    "redis": 6379,
+    "mysql": 3306,
+    "postgresql": 5432,
+    "mssql": 1433,
+    "mongodb": 27017,
+    "ftp": 21,
+    "telnet": 23,
+    "smtp": 25,
+    "dns": 53,
+    "ldap": 389,
+    "winrm": 5985,
+    "docker": 2375,
+    "elasticsearch": 9200,
+    "vnc": 5900,
+    "snmp": 161,
+    "ntp": 123,
 }
 
 
@@ -492,7 +508,9 @@ class PayloadCrafter:
             cve_ids: Known CVE IDs for targeted exploit generation
             vuln_class: Vulnerability class (command_injection, sql_injection, etc.)
         """
-        generation_id = f"gen-{int(time.time())}-{hashlib.sha256(f'{target_ip}:{module_name}'.encode()).hexdigest()[:8]}"
+        generation_id = (
+            f"gen-{int(time.time())}-{hashlib.sha256(f'{target_ip}:{module_name}'.encode()).hexdigest()[:8]}"
+        )
 
         # Query experience store for similar successes
         exp_hints = ""
@@ -512,13 +530,8 @@ class PayloadCrafter:
         # fewer hints; it must never block generation.
         if self._semantic is not None:
             try:
-                ctx_text = (
-                    f"{service_name}:{version}:{os_hint} {module_name} "
-                    f"{vuln_class} {' '.join(cve_ids or [])}"
-                )
-                similar = self._semantic.find_similar_lessons(
-                    text=ctx_text, outcome="success", top_k=3
-                )
+                ctx_text = f"{service_name}:{version}:{os_hint} {module_name} {vuln_class} {' '.join(cve_ids or [])}"
+                similar = self._semantic.find_similar_lessons(text=ctx_text, outcome="success", top_k=3)
                 if similar:
                     lessons_block = "; ".join(
                         f"{s.get('action_type', '?')} on {s.get('target_signature', '?')} "
@@ -572,7 +585,9 @@ class PayloadCrafter:
 
         When LLM is available, uses intelligent mutation instead of string replacement.
         """
-        generation_id = f"mut-{int(time.time())}-{hashlib.sha256(previous_payload.generation_id.encode()).hexdigest()[:8]}"
+        generation_id = (
+            f"mut-{int(time.time())}-{hashlib.sha256(previous_payload.generation_id.encode()).hexdigest()[:8]}"
+        )
 
         mutated = self._apply_mutation(
             previous_payload.script,
@@ -614,8 +629,15 @@ class PayloadCrafter:
         # If an LLM client is available, use it to craft a targeted exploit
         if self._client is not None and self._model:
             return self._llm_generate_script(
-                target_ip, service_name, version, os_hint, module_name,
-                failure_output, exp_hints, cve_ids, vuln_class,
+                target_ip,
+                service_name,
+                version,
+                os_hint,
+                module_name,
+                failure_output,
+                exp_hints,
+                cve_ids,
+                vuln_class,
             )
 
         # Fallback: service-specific template
@@ -670,7 +692,7 @@ TARGET CONTEXT:
 - Version: {version}
 - OS: {os_hint}
 - Attack Module: {module_name}
-- Vulnerability Class: {vuln_class or 'unknown'}
+- Vulnerability Class: {vuln_class or "unknown"}
 {cve_context}
 {retry_context}
 {exp_hints}
@@ -681,7 +703,7 @@ REQUIREMENTS:
 2. Use ONLY standard library: {imports}
 3. Argument contract: accept the target as ``sys.argv[1]`` (bare positional) AND ``--target <ip>``
    via ``argparse.parse_known_args()`` (so the bare positional is tolerated). Accept ``--port <port>``
-   with default {default_port} (the standard port for {service_name or 'this service'}). Do NOT hardcode
+   with default {default_port} (the standard port for {service_name or "this service"}). Do NOT hardcode
    port 80 for non-HTTP services.
 4. Success/failure markers (print EXACTLY one of these, on its own line):
    - On success: ``COMPROMISE: <short description> target=<target_ip>`` (e.g. ``COMPROMISE: command_injection_confirmed target=10.0.0.5``)
@@ -720,7 +742,9 @@ REQUIREMENTS:
             # Fallback to service template on LLM failure
             svc_key = service_name.lower()
             template = _SERVICE_TEMPLATES.get(svc_key, _SERVICE_TEMPLATES["default"])
-            return f"# LLM generation failed: {exc}\n# Using service-specific template\n" + template.format(target_ip=target_ip)
+            return f"# LLM generation failed: {exc}\n# Using service-specific template\n" + template.format(
+                target_ip=target_ip
+            )
 
     # ── Internal: Mutation logic ──────────────────────────────────────
 
@@ -773,17 +797,21 @@ REQUIREMENTS:
         """Use LLM to intelligently mutate a failing exploit script."""
         meta = metadata or {}
         fail_trunc = failure_output[:800]
-        fail_marker = "\n[truncated] - only the first 800 chars of the failure were shown." if len(failure_output) > 800 else ""
+        fail_marker = (
+            "\n[truncated] - only the first 800 chars of the failure were shown." if len(failure_output) > 800 else ""
+        )
         script_trunc = script[:3000]
-        script_marker = "\n[truncated] - only the first 3000 chars of the script were shown." if len(script) > 3000 else ""
+        script_marker = (
+            "\n[truncated] - only the first 3000 chars of the script were shown." if len(script) > 3000 else ""
+        )
         prompt = f"""You are an exploit developer. The following Python exploit script FAILED.
 
 FAILURE OUTPUT:
 {fail_trunc}{fail_marker}
 
 MUTATION STRATEGY: {strategy}
-TARGET: {meta.get('target_ip', 'unknown')}
-SERVICE: {meta.get('service_name', 'unknown')}
+TARGET: {meta.get("target_ip", "unknown")}
+SERVICE: {meta.get("service_name", "unknown")}
 
 CURRENT SCRIPT:
 ```python
@@ -798,9 +826,9 @@ Common fixes:
 - context_aware: adapt to OS/service version specifics from failure output
 
 CONSTRAINTS on the fixed script:
-1. It MUST only ever connect to the target IP ({meta.get('target_ip', 'the assigned target')}). Do NOT connect to any other host.
+1. It MUST only ever connect to the target IP ({meta.get("target_ip", "the assigned target")}). Do NOT connect to any other host.
 2. It MUST print one canonical marker on its own line:
-   - On success: ``COMPROMISE: <short description> target={meta.get('target_ip', '<target>')}``
+   - On success: ``COMPROMISE: <short description> target={meta.get("target_ip", "<target>")}``
    - On failure: ``VULN_NOT_CONFIRMED: <one-line reason>``
    Do NOT use [+] EXPLOIT SUCCESS or [-] EXPLOIT FAILED -- use the canonical markers only.
 3. Keep the argument contract: ``sys.argv[1]`` bare positional AND ``--target <ip>`` via ``argparse.parse_known_args()``, plus ``--port <port>``.
@@ -809,7 +837,10 @@ Return ONLY the complete fixed Python script. NO markdown fences, NO explanation
 """
         try:
             messages = [
-                {"role": "system", "content": "You fix broken exploit scripts. Return ONLY raw Python code. The fixed script must print a COMPROMISE: or VULN_NOT_CONFIRMED: marker on its own line."},
+                {
+                    "role": "system",
+                    "content": "You fix broken exploit scripts. Return ONLY raw Python code. The fixed script must print a COMPROMISE: or VULN_NOT_CONFIRMED: marker on its own line.",
+                },
                 {"role": "user", "content": prompt},
             ]
             response = self._client.chat(self._model, messages=messages, stream=False)

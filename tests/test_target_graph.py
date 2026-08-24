@@ -293,8 +293,12 @@ def test_summarize_graph_mission_id(graph):
 
 def test_row_to_node_complete():
     row = {
-        "id": "GN-1", "mission_id": "M-1", "type": "host",
-        "value": "10.0.0.5", "metadata_json": '{"k": "v"}', "created_at": "2024-01-01",
+        "id": "GN-1",
+        "mission_id": "M-1",
+        "type": "host",
+        "value": "10.0.0.5",
+        "metadata_json": '{"k": "v"}',
+        "created_at": "2024-01-01",
     }
     node = _row_to_node(row)
     assert node["id"] == "GN-1"
@@ -309,9 +313,13 @@ def test_row_to_node_missing_fields():
 
 def test_row_to_edge_complete():
     row = {
-        "id": "GE-1", "mission_id": "M-1", "from_node_id": "GN-1",
-        "to_node_id": "GN-2", "relation": "exposes",
-        "metadata_json": '{"k": "v"}', "created_at": "2024-01-01",
+        "id": "GE-1",
+        "mission_id": "M-1",
+        "from_node_id": "GN-1",
+        "to_node_id": "GN-2",
+        "relation": "exposes",
+        "metadata_json": '{"k": "v"}',
+        "created_at": "2024-01-01",
     }
     edge = _row_to_edge(row)
     assert edge["id"] == "GE-1"

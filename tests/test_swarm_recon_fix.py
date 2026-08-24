@@ -10,6 +10,7 @@ So the swarm's recon phase never ran. This test mocks the real
 ``ReconPipeline.recon_host`` and asserts ``ReconAgent.run`` completes and
 emits the expected enriched output / blackboard updates.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
@@ -27,9 +28,17 @@ def _fake_result() -> HostReconResult:
         os_family="linux",
         os_accuracy=95,
         services=[
-            ServiceInfo(port=22, protocol="tcp", service="ssh", version="OpenSSH 8.9p1", banner="SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.1"),
+            ServiceInfo(
+                port=22,
+                protocol="tcp",
+                service="ssh",
+                version="OpenSSH 8.9p1",
+                banner="SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.1",
+            ),
             ServiceInfo(port=445, protocol="tcp", service="microsoft-ds", version="Samba", banner=""),
-            ServiceInfo(port=80, protocol="tcp", service="http", version="Apache/2.4.52", banner="Apache/2.4.52 (Ubuntu)"),
+            ServiceInfo(
+                port=80, protocol="tcp", service="http", version="Apache/2.4.52", banner="Apache/2.4.52 (Ubuntu)"
+            ),
         ],
         open_ports=[22, 80, 445],
         scan_tool="nmap",

@@ -104,17 +104,21 @@ import json
 import csv
 from datetime import datetime
 
+
 def run_dnstwist_scan(domain, output_file=None):
     """Run dnstwist scan against a target domain."""
     cmd = [
         "dnstwist",
-        "--registered",     # Only show registered domains
-        "--format", "json", # Output in JSON
-        "--nameservers", "8.8.8.8,1.1.1.1",
-        "--threads", "50",
-        "--mxcheck",        # Check MX records
-        "--ssdeep",         # Fuzzy hash comparison
-        "--geoip",          # GeoIP lookup
+        "--registered",  # Only show registered domains
+        "--format",
+        "json",  # Output in JSON
+        "--nameservers",
+        "8.8.8.8,1.1.1.1",
+        "--threads",
+        "50",
+        "--mxcheck",  # Check MX records
+        "--ssdeep",  # Fuzzy hash comparison
+        "--geoip",  # GeoIP lookup
         domain,
     ]
 
@@ -135,6 +139,7 @@ def run_dnstwist_scan(domain, output_file=None):
     else:
         print(f"[-] dnstwist error: {result.stderr}")
         return []
+
 
 results = run_dnstwist_scan("example.com", "typosquat_results.json")
 ```
@@ -219,10 +224,11 @@ def analyze_results(results, legitimate_ips=None):
         print(f"\n--- High Risk Domains ---")
         for entry in high_risk[:10]:
             print(f"  {entry['domain']} (score: {entry['risk_score']})")
-            for factor in entry['risk_factors']:
+            for factor in entry["risk_factors"]:
                 print(f"    - {factor}")
 
     return {"high": high_risk, "medium": medium_risk, "low": low_risk}
+
 
 analysis = analyze_results(results, legitimate_ips={"93.184.216.34"})
 ```
@@ -232,6 +238,7 @@ analysis = analyze_results(results, legitimate_ips={"93.184.216.34"})
 ```python
 import time
 import hashlib
+
 
 class TyposquatMonitor:
     def __init__(self, domains, known_domains_file="known_typosquats.json"):
@@ -273,17 +280,20 @@ class TyposquatMonitor:
         analysis = analyze_results(findings)
         alerts = []
         for entry in analysis["high"]:
-            alerts.append({
-                "severity": "HIGH",
-                "domain": entry["domain"],
-                "target": entry.get("monitored_domain", ""),
-                "risk_score": entry["risk_score"],
-                "risk_factors": entry["risk_factors"],
-                "dns_a": entry.get("dns_a", []),
-                "dns_mx": entry.get("dns_mx", []),
-                "timestamp": datetime.now().isoformat(),
-            })
+            alerts.append(
+                {
+                    "severity": "HIGH",
+                    "domain": entry["domain"],
+                    "target": entry.get("monitored_domain", ""),
+                    "risk_score": entry["risk_score"],
+                    "risk_factors": entry["risk_factors"],
+                    "dns_a": entry.get("dns_a", []),
+                    "dns_mx": entry.get("dns_mx", []),
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
         return alerts
+
 
 monitor = TyposquatMonitor(["mycompany.com", "mycompany.org"])
 new_findings = monitor.scan_all_domains()
@@ -309,6 +319,7 @@ def export_blocklist(analysis, output_file="blocklist.txt"):
     print(f"[+] Blocklist saved: {len(domains)} domains -> {output_file}")
     return domains
 
+
 def generate_takedown_report(high_risk_domains):
     """Generate takedown request report."""
     report = f"""# Domain Takedown Request
@@ -321,17 +332,18 @@ Generated: {datetime.now().isoformat()}
 """
     for entry in high_risk_domains:
         report += f"""
-### {entry['domain']}
-- **Permutation Type**: {entry.get('fuzzer', 'unknown')}
-- **IP Address**: {', '.join(entry.get('dns_a', ['N/A']))}
-- **MX Records**: {', '.join(entry.get('dns_mx', ['N/A']))}
-- **Risk Score**: {entry.get('risk_score', 0)}
-- **Risk Factors**: {'; '.join(entry.get('risk_factors', []))}
-- **Web Similarity**: {entry.get('ssdeep_score', 'N/A')}%
+### {entry["domain"]}
+- **Permutation Type**: {entry.get("fuzzer", "unknown")}
+- **IP Address**: {", ".join(entry.get("dns_a", ["N/A"]))}
+- **MX Records**: {", ".join(entry.get("dns_mx", ["N/A"]))}
+- **Risk Score**: {entry.get("risk_score", 0)}
+- **Risk Factors**: {"; ".join(entry.get("risk_factors", []))}
+- **Web Similarity**: {entry.get("ssdeep_score", "N/A")}%
 """
     with open("takedown_report.md", "w") as f:
         f.write(report)
     print("[+] Takedown report generated: takedown_report.md")
+
 
 export_blocklist(analysis)
 generate_takedown_report(analysis["high"])

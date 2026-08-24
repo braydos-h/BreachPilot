@@ -21,8 +21,7 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
     audit_tool = ctx.audit_tool
     require_allowlist = ctx.require_allowlist
 
-    _SCANNERS = {"nikto", "nuclei", "sqlmap", "gobuster", "feroxbuster",
-                 "whatweb", "wpscan", "dirb", "dirbuster"}
+    _SCANNERS = {"nikto", "nuclei", "sqlmap", "gobuster", "feroxbuster", "whatweb", "wpscan", "dirb", "dirbuster"}
 
     # Default wordlist for directory-content scanners (Kali standard location).
     _DEFAULT_WORDLIST = "/usr/share/wordlists/dirb/common.txt"
@@ -77,6 +76,7 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
             if re.search(r"[;|&$`()]|<|>|\n", opts):
                 return "BLOCKED: options contains forbidden shell metacharacters."
             import shlex as _shlex
+
             try:
                 extra_argv = _shlex.split(opts)
             except ValueError:

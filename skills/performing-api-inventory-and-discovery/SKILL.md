@@ -63,16 +63,14 @@ import re
 import json
 from collections import defaultdict
 
+
 # Parse HAR file from browser developer tools or proxy
 def analyze_har_for_apis(har_file_path):
     """Extract API endpoints from HTTP Archive (HAR) file."""
     with open(har_file_path) as f:
         har = json.load(f)
 
-    api_endpoints = defaultdict(lambda: {
-        "methods": set(), "content_types": set(),
-        "auth_types": set(), "count": 0
-    })
+    api_endpoints = defaultdict(lambda: {"methods": set(), "content_types": set(), "auth_types": set(), "count": 0})
 
     for entry in har["log"]["entries"]:
         url = entry["request"]["url"]
@@ -80,17 +78,21 @@ def analyze_har_for_apis(har_file_path):
 
         # Identify API patterns
         api_patterns = [
-            r'/api/', r'/v\d+/', r'/graphql', r'/rest/',
-            r'/ws/', r'/rpc/', r'/grpc', r'/json',
+            r"/api/",
+            r"/v\d+/",
+            r"/graphql",
+            r"/rest/",
+            r"/ws/",
+            r"/rpc/",
+            r"/grpc",
+            r"/json",
         ]
 
         if any(re.search(p, url) for p in api_patterns):
             # Normalize the URL (remove query params and IDs)
-            normalized = re.sub(r'\?.*$', '', url)
-            normalized = re.sub(r'/\d+(/|$)', '/{id}\\1', normalized)
-            normalized = re.sub(
-                r'/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
-                '/{uuid}', normalized)
+            normalized = re.sub(r"\?.*$", "", url)
+            normalized = re.sub(r"/\d+(/|$)", "/{id}\\1", normalized)
+            normalized = re.sub(r"/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", "/{uuid}", normalized)
 
             ep = api_endpoints[normalized]
             ep["methods"].add(method)
@@ -109,8 +111,8 @@ def analyze_har_for_apis(har_file_path):
 
             # Detect content type
             content_type = next(
-                (h["value"] for h in entry["request"]["headers"]
-                 if h["name"].lower() == "content-type"), None)
+                (h["value"] for h in entry["request"]["headers"] if h["name"].lower() == "content-type"), None
+            )
             if content_type:
                 ep["content_types"].add(content_type.split(";")[0])
 
@@ -153,26 +155,53 @@ done
 import requests
 import concurrent.futures
 
+
 def discover_api_endpoints(base_domains):
     """Actively probe for API endpoints across discovered domains."""
 
     # Common API paths to test
     API_PATHS = [
-        "/api", "/api/v1", "/api/v2", "/api/v3",
-        "/graphql", "/gql", "/query",
-        "/rest", "/json", "/rpc",
-        "/swagger.json", "/swagger/v1/swagger.json",
-        "/openapi.json", "/openapi.yaml", "/api-docs",
-        "/docs", "/redoc", "/explorer",
+        "/api",
+        "/api/v1",
+        "/api/v2",
+        "/api/v3",
+        "/graphql",
+        "/gql",
+        "/query",
+        "/rest",
+        "/json",
+        "/rpc",
+        "/swagger.json",
+        "/swagger/v1/swagger.json",
+        "/openapi.json",
+        "/openapi.yaml",
+        "/api-docs",
+        "/docs",
+        "/redoc",
+        "/explorer",
         "/.well-known/openid-configuration",
-        "/health", "/healthz", "/ready",
-        "/status", "/info", "/version",
-        "/metrics", "/prometheus",
-        "/actuator", "/actuator/health", "/actuator/info",
-        "/admin", "/admin/api", "/internal",
-        "/debug", "/debug/vars", "/debug/pprof",
-        "/ws", "/websocket", "/socket.io",
-        "/grpc", "/twirp",
+        "/health",
+        "/healthz",
+        "/ready",
+        "/status",
+        "/info",
+        "/version",
+        "/metrics",
+        "/prometheus",
+        "/actuator",
+        "/actuator/health",
+        "/actuator/info",
+        "/admin",
+        "/admin/api",
+        "/internal",
+        "/debug",
+        "/debug/vars",
+        "/debug/pprof",
+        "/ws",
+        "/websocket",
+        "/socket.io",
+        "/grpc",
+        "/twirp",
     ]
 
     discovered = []
@@ -181,8 +210,9 @@ def discover_api_endpoints(base_domains):
         for scheme in ["https", "http"]:
             url = f"{scheme}://{domain}{path}"
             try:
-                resp = requests.get(url, timeout=5, allow_redirects=False,
-                                  verify=False)  # TLS verification disabled for discovery; enable in production
+                resp = requests.get(
+                    url, timeout=5, allow_redirects=False, verify=False
+                )  # TLS verification disabled for discovery; enable in production
                 if resp.status_code not in (404, 502, 503):
                     return {
                         "url": url,
@@ -217,17 +247,13 @@ def discover_api_endpoints(base_domains):
 import re
 import requests
 
+
 def extract_apis_from_javascript(js_urls):
     """Extract API endpoints from JavaScript source files."""
-    api_pattern = re.compile(
-        r'''(?:['"`])((?:/api/|/v[0-9]+/|/graphql|/rest/)[^'"`\s<>{}]+)(?:['"`])''',
-        re.IGNORECASE
-    )
-    url_pattern = re.compile(
-        r'''(?:['"`])(https?://[a-zA-Z0-9._-]+(?:\.[a-zA-Z]{2,})+(?:/[^'"`\s<>{}]*)?)(?:['"`])'''
-    )
+    api_pattern = re.compile(r"""(?:['"`])((?:/api/|/v[0-9]+/|/graphql|/rest/)[^'"`\s<>{}]+)(?:['"`])""", re.IGNORECASE)
+    url_pattern = re.compile(r"""(?:['"`])(https?://[a-zA-Z0-9._-]+(?:\.[a-zA-Z]{2,})+(?:/[^'"`\s<>{}]*)?)(?:['"`])""")
     fetch_pattern = re.compile(
-        r'''(?:fetch|axios|ajax|XMLHttpRequest|\.get|\.post|\.put|\.delete|\.patch)\s*\(\s*(?:['"`])([^'"`]+)'''
+        r"""(?:fetch|axios|ajax|XMLHttpRequest|\.get|\.post|\.put|\.delete|\.patch)\s*\(\s*(?:['"`])([^'"`]+)"""
     )
 
     all_endpoints = set()
@@ -259,6 +285,7 @@ def extract_apis_from_javascript(js_urls):
 
     return all_endpoints
 
+
 # Find JavaScript files from the target domain
 def find_js_files(domain):
     """Discover JavaScript files from a web application."""
@@ -280,46 +307,51 @@ def find_js_files(domain):
 ```python
 import boto3
 
+
 def inventory_aws_apis():
     """Inventory all APIs in AWS API Gateway."""
-    apigw = boto3.client('apigateway')
-    apigwv2 = boto3.client('apigatewayv2')
+    apigw = boto3.client("apigateway")
+    apigwv2 = boto3.client("apigatewayv2")
 
     apis = []
 
     # REST APIs (API Gateway v1)
     rest_apis = apigw.get_rest_apis()
-    for api in rest_apis['items']:
-        resources = apigw.get_resources(restApiId=api['id'])
-        stages = apigw.get_stages(restApiId=api['id'])
+    for api in rest_apis["items"]:
+        resources = apigw.get_resources(restApiId=api["id"])
+        stages = apigw.get_stages(restApiId=api["id"])
 
-        for stage in stages['item']:
-            for resource in resources['items']:
-                for method in resource.get('resourceMethods', {}).keys():
-                    apis.append({
-                        "type": "REST",
-                        "name": api['name'],
-                        "stage": stage['stageName'],
-                        "path": resource['path'],
-                        "method": method,
-                        "url": f"https://{api['id']}.execute-api.{boto3.session.Session().region_name}.amazonaws.com/{stage['stageName']}{resource['path']}",
-                        "created": str(api.get('createdDate', '')),
-                    })
+        for stage in stages["item"]:
+            for resource in resources["items"]:
+                for method in resource.get("resourceMethods", {}).keys():
+                    apis.append(
+                        {
+                            "type": "REST",
+                            "name": api["name"],
+                            "stage": stage["stageName"],
+                            "path": resource["path"],
+                            "method": method,
+                            "url": f"https://{api['id']}.execute-api.{boto3.session.Session().region_name}.amazonaws.com/{stage['stageName']}{resource['path']}",
+                            "created": str(api.get("createdDate", "")),
+                        }
+                    )
 
     # HTTP APIs (API Gateway v2)
     http_apis = apigwv2.get_apis()
-    for api in http_apis['Items']:
-        routes = apigwv2.get_routes(ApiId=api['ApiId'])
-        stages = apigwv2.get_stages(ApiId=api['ApiId'])
+    for api in http_apis["Items"]:
+        routes = apigwv2.get_routes(ApiId=api["ApiId"])
+        stages = apigwv2.get_stages(ApiId=api["ApiId"])
 
-        for route in routes['Items']:
-            apis.append({
-                "type": "HTTP",
-                "name": api['Name'],
-                "route": route['RouteKey'],
-                "api_id": api['ApiId'],
-                "protocol": api['ProtocolType'],
-            })
+        for route in routes["Items"]:
+            apis.append(
+                {
+                    "type": "HTTP",
+                    "name": api["Name"],
+                    "route": route["RouteKey"],
+                    "api_id": api["ApiId"],
+                    "protocol": api["ProtocolType"],
+                }
+            )
 
     print(f"\nAWS API Inventory ({len(apis)} endpoints):")
     for api in apis:
@@ -336,9 +368,9 @@ def detect_shadow_and_zombie_apis(discovered_endpoints, documented_endpoints):
 
     # Normalize endpoints for comparison
     def normalize(ep):
-        ep = re.sub(r'/v\d+/', '/vX/', ep)
-        ep = re.sub(r'/\d+', '/{id}', ep)
-        return ep.lower().rstrip('/')
+        ep = re.sub(r"/v\d+/", "/vX/", ep)
+        ep = re.sub(r"/\d+", "/{id}", ep)
+        return ep.lower().rstrip("/")
 
     documented_normalized = {normalize(ep) for ep in documented_endpoints}
 
@@ -350,7 +382,7 @@ def detect_shadow_and_zombie_apis(discovered_endpoints, documented_endpoints):
 
         if normalized not in documented_normalized:
             # Check if it is an old version of a documented API
-            if re.search(r'/v[0-9]+/', ep["url"]):
+            if re.search(r"/v[0-9]+/", ep["url"]):
                 zombie_apis.append(ep)
             else:
                 shadow_apis.append(ep)

@@ -281,7 +281,7 @@ def generate_roe_document(
 
     roe = f"""
 # RULES OF ENGAGEMENT
-## {eng_type['name']}
+## {eng_type["name"]}
 
 ### CONFIDENTIAL - {org_name}
 
@@ -289,15 +289,15 @@ def generate_roe_document(
 
 ## 1. EXECUTIVE SUMMARY
 
-This document defines the Rules of Engagement for the {eng_type['name']} to be
+This document defines the Rules of Engagement for the {eng_type["name"]} to be
 conducted against {org_name}. This engagement will simulate realistic adversary
 behavior to test the organization's detection and response capabilities.
 
-**Engagement Type:** {eng_type['name']}
-**Description:** {eng_type['description']}
+**Engagement Type:** {eng_type["name"]}
+**Description:** {eng_type["description"]}
 **Duration:** {duration_days} days
-**Start Date:** {start.strftime('%Y-%m-%d')}
-**End Date:** {end.strftime('%Y-%m-%d')}
+**Start Date:** {start.strftime("%Y-%m-%d")}
+**End Date:** {end.strftime("%Y-%m-%d")}
 **Document Version:** 1.0
 **Classification:** CONFIDENTIAL
 
@@ -347,7 +347,7 @@ behavior to test the organization's detection and response capabilities.
 | Executive Leadership | [TO BE DEFINED] | Unless specifically authorized |
 
 ### 3.3 Authorized Attack Vectors
-{chr(10).join(f'- {v}' for v in eng_type['vectors'])}
+{chr(10).join(f"- {v}" for v in eng_type["vectors"])}
 
 ---
 
@@ -476,7 +476,7 @@ If a real security incident is detected during the engagement:
 
 ### 9.1 Authorization Statement
 I, [SPONSOR NAME], [TITLE], hereby authorize [RED TEAM COMPANY] to conduct
-a {eng_type['name']} against {org_name} as described in this
+a {eng_type["name"]} against {org_name} as described in this
 Rules of Engagement document.
 
 **Authorized Signature:** _________________________
@@ -503,23 +503,17 @@ information for verification.
 
 ---
 
-*Document generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*
-*Engagement ID: RT-{org_name.replace(' ', '').upper()[:6]}-{start.strftime('%Y%m%d')}*
+*Document generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}*
+*Engagement ID: RT-{org_name.replace(" ", "").upper()[:6]}-{start.strftime("%Y%m%d")}*
 """
     return roe
 
 
-def generate_attack_plan(
-    threat_actor: str, engagement_type: str, duration_days: int
-) -> str:
+def generate_attack_plan(threat_actor: str, engagement_type: str, duration_days: int) -> str:
     """Generate a phased attack plan based on threat actor profile."""
     if threat_actor not in THREAT_ACTOR_PROFILES:
-        console.print(
-            f"[red][-] Unknown threat actor: {threat_actor}[/red]"
-        )
-        console.print(
-            f"[yellow]Available: {', '.join(THREAT_ACTOR_PROFILES.keys())}[/yellow]"
-        )
+        console.print(f"[red][-] Unknown threat actor: {threat_actor}[/red]")
+        console.print(f"[yellow]Available: {', '.join(THREAT_ACTOR_PROFILES.keys())}[/yellow]")
         return ""
 
     profile = THREAT_ACTOR_PROFILES[threat_actor]
@@ -527,11 +521,11 @@ def generate_attack_plan(
 
     plan = f"""
 # ATTACK PLAN
-## Adversary Emulation: {threat_actor} ({', '.join(profile['aliases'])})
+## Adversary Emulation: {threat_actor} ({", ".join(profile["aliases"])})
 
-### Engagement Type: {eng_type['name']}
+### Engagement Type: {eng_type["name"]}
 ### Duration: {duration_days} days
-### Target Sectors: {', '.join(profile['targets'])}
+### Target Sectors: {", ".join(profile["targets"])}
 
 ---
 
@@ -717,9 +711,7 @@ def display_threat_actor_table():
     table.add_column("Techniques", style="green")
 
     for actor, profile in THREAT_ACTOR_PROFILES.items():
-        total_techniques = sum(
-            len(techs) for techs in profile["techniques"].values()
-        )
+        total_techniques = sum(len(techs) for techs in profile["techniques"].values())
         table.add_row(
             actor,
             ", ".join(profile["aliases"]),
@@ -795,9 +787,7 @@ def export_attack_navigator_layer(threat_actor: str, output_path: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Red Team Engagement Planning Automation Tool"
-    )
+    parser = argparse.ArgumentParser(description="Red Team Engagement Planning Automation Tool")
     parser.add_argument("--org", required=True, help="Target organization name")
     parser.add_argument(
         "--type",
@@ -805,27 +795,15 @@ def main():
         default="full-scope",
         help="Engagement type",
     )
-    parser.add_argument(
-        "--duration", type=int, default=20, help="Engagement duration in days"
-    )
+    parser.add_argument("--duration", type=int, default=20, help="Engagement duration in days")
     parser.add_argument("--start-date", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--threat-actor", help="Threat actor to emulate")
     parser.add_argument("--output", default="./engagement_plan", help="Output directory")
-    parser.add_argument(
-        "--generate-attack-plan", action="store_true", help="Generate attack plan"
-    )
-    parser.add_argument(
-        "--generate-roe", action="store_true", help="Generate ROE document"
-    )
-    parser.add_argument(
-        "--generate-all", action="store_true", help="Generate all documents"
-    )
-    parser.add_argument(
-        "--list-actors", action="store_true", help="List available threat actors"
-    )
-    parser.add_argument(
-        "--list-types", action="store_true", help="List engagement types"
-    )
+    parser.add_argument("--generate-attack-plan", action="store_true", help="Generate attack plan")
+    parser.add_argument("--generate-roe", action="store_true", help="Generate ROE document")
+    parser.add_argument("--generate-all", action="store_true", help="Generate all documents")
+    parser.add_argument("--list-actors", action="store_true", help="List available threat actors")
+    parser.add_argument("--list-types", action="store_true", help="List engagement types")
     parser.add_argument(
         "--export-navigator",
         action="store_true",
@@ -858,9 +836,7 @@ def main():
 
     if args.generate_roe or args.generate_all:
         console.print("[yellow][*] Generating Rules of Engagement...[/yellow]")
-        roe = generate_roe_document(
-            args.org, args.type, args.duration, args.start_date, args.threat_actor
-        )
+        roe = generate_roe_document(args.org, args.type, args.duration, args.start_date, args.threat_actor)
         roe_path = output_dir / "rules_of_engagement.md"
         with open(roe_path, "w") as f:
             f.write(roe)
@@ -869,17 +845,13 @@ def main():
     if args.generate_attack_plan or args.generate_all:
         if args.threat_actor:
             console.print("[yellow][*] Generating Attack Plan...[/yellow]")
-            plan = generate_attack_plan(
-                args.threat_actor, args.type, args.duration
-            )
+            plan = generate_attack_plan(args.threat_actor, args.type, args.duration)
             plan_path = output_dir / "attack_plan.md"
             with open(plan_path, "w") as f:
                 f.write(plan)
             console.print(f"[green][+] Attack plan saved to: {plan_path}[/green]")
         else:
-            console.print(
-                "[red][-] --threat-actor required for attack plan generation[/red]"
-            )
+            console.print("[red][-] --threat-actor required for attack plan generation[/red]")
 
     if args.generate_all:
         console.print("[yellow][*] Generating Deconfliction Matrix...[/yellow]")

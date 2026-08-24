@@ -70,6 +70,7 @@ def _url_host(url: str) -> str:
     """Return just the ``host`` of a URL for safe logging (no path/token)."""
     try:
         from urllib.parse import urlparse
+
         return urlparse(url).hostname or "(invalid url)"
     except Exception:
         return "(invalid url)"
@@ -129,6 +130,7 @@ def _build_subscriber(config_loader: Callable[[], dict[str, Any]]) -> Callable[[
         max_retries = int(cfg.get("max_retries", 3))
         backoff = float(cfg.get("backoff_seconds", 2.0))
         import time as _time
+
         last_status = ""
         for attempt in range(max_retries):
             ok, status = _post_webhook(url, payload, timeout)
@@ -136,10 +138,13 @@ def _build_subscriber(config_loader: Callable[[], dict[str, Any]]) -> Callable[[
                 return
             last_status = status
             if attempt + 1 < max_retries:
-                _time.sleep(backoff * (2 ** attempt))
+                _time.sleep(backoff * (2**attempt))
         log.warning(
             "webhook_notify: dropped event %s for %s after %d attempts: %s",
-            event_type, _url_host(url), max_retries, last_status,
+            event_type,
+            _url_host(url),
+            max_retries,
+            last_status,
         )
 
     return subscriber
@@ -159,9 +164,11 @@ class WebhookNotifyPlugin(Plugin):
     @staticmethod
     def _load_manifest() -> PluginManifest:
         from pathlib import Path
+
         manifest_path = Path(__file__).resolve().parent / "plugin.yaml"
         text = manifest_path.read_text(encoding="utf-8")
         from tools.plugins import _parse_manifest_yaml  # type: ignore
+
         return PluginManifest.from_dict(_parse_manifest_yaml(text))
 
     def register(self, registry: PluginRegistry) -> None:
@@ -173,6 +180,7 @@ def _default_config_loader() -> dict[str, Any]:
     from pathlib import Path
 
     from tools.config_cli import load_config
+
     return load_config(Path("config.yaml"))
 
 

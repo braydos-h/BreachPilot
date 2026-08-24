@@ -42,9 +42,7 @@ def test_add_domain_deduplicates_case_insensitive(tmp_path: Path):
     from tools.config_cli import add_target_to_allowlist
 
     config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "exploit:\n  allowed_targets:\n    - example.com\n", encoding="utf-8"
-    )
+    config_path.write_text("exploit:\n  allowed_targets:\n    - example.com\n", encoding="utf-8")
 
     # Same domain in different case should be a duplicate.
     assert add_target_to_allowlist(config_path, "EXAMPLE.COM") is False
@@ -57,9 +55,7 @@ def test_add_domain_alongside_existing_ip(tmp_path: Path):
     from tools.config_cli import add_target_to_allowlist
 
     config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "exploit:\n  allowed_targets:\n    - 10.0.0.5\n", encoding="utf-8"
-    )
+    config_path.write_text("exploit:\n  allowed_targets:\n    - 10.0.0.5\n", encoding="utf-8")
 
     assert add_target_to_allowlist(config_path, "example.com") is True
 
@@ -76,6 +72,7 @@ def test_add_garbage_target_still_rejected(tmp_path: Path):
 
     # "not-an-ip" is neither a valid IP nor a valid FQDN.
     import pytest
+
     with pytest.raises(ValueError):
         add_target_to_allowlist(config_path, "not-an-ip")
 
@@ -85,9 +82,7 @@ def test_add_ip_still_normalizes(tmp_path: Path):
     from tools.config_cli import add_target_to_allowlist
 
     config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "exploit:\n  allowed_targets:\n    - 2001:db8::1\n", encoding="utf-8"
-    )
+    config_path.write_text("exploit:\n  allowed_targets:\n    - 2001:db8::1\n", encoding="utf-8")
 
     # Equivalent IPv6 spelling should be detected as a duplicate.
     assert add_target_to_allowlist(config_path, "2001:0db8:0:0:0:0:0:1") is False

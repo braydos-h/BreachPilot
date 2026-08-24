@@ -3,6 +3,7 @@
 ## neo4j Python Driver
 ```python
 from neo4j import GraphDatabase
+
 driver = GraphDatabase.driver(uri, auth=(user, password))
 driver.verify_connectivity()
 with driver.session() as session:

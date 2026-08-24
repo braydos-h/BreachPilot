@@ -30,9 +30,7 @@ def test_get_default_db_ensures_schema(tmp_path, monkeypatch):
         gdb = get_default_db()
         with gdb.connection() as conn:
             # The lessons table must exist.
-            row = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='lessons'"
-            ).fetchone()
+            row = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='lessons'").fetchone()
             assert row is not None
             assert row["name"] == "lessons"
             # The text column must exist (DDL on fresh create).

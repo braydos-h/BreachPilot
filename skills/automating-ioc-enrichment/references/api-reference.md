@@ -6,6 +6,7 @@
 
 ```python
 import requests
+
 resp = requests.get(
     "https://www.virustotal.com/api/v3/ip_addresses/1.2.3.4",
     headers={"x-apikey": VT_KEY},
@@ -49,6 +50,7 @@ print("Reports:", data["totalReports"])
 
 ```python
 import shodan
+
 api = shodan.Shodan(SHODAN_KEY)
 info = api.host("1.2.3.4")
 print("Ports:", info.get("ports"))
@@ -59,6 +61,7 @@ print("Vulns:", info.get("vulns"))
 
 ```python
 from stix2 import Indicator, Bundle
+
 indicator = Indicator(
     pattern="[ipv4-addr:value = '1.2.3.4']",
     pattern_type="stix",

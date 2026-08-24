@@ -36,19 +36,23 @@ def _plan() -> AttackPlan:
         service_context="22/tcp ssh OpenSSH; 80/tcp http nginx",
         attack_mode=True,
     )
-    done = plan.add_step(AttackStep(
-        phase="recon",
-        tool="run_nmap",
-        reason="Identify exposed services",
-        target_ip="10.0.0.5",
-    ))
+    done = plan.add_step(
+        AttackStep(
+            phase="recon",
+            tool="run_nmap",
+            reason="Identify exposed services",
+            target_ip="10.0.0.5",
+        )
+    )
     plan.mark_step_done(done, True, "Open ports: 22/tcp ssh, 80/tcp http")
-    plan.add_step(AttackStep(
-        phase="enumerate",
-        tool="http_probe",
-        reason="Fingerprint web service",
-        target_ip="10.0.0.5",
-    ))
+    plan.add_step(
+        AttackStep(
+            phase="enumerate",
+            tool="http_probe",
+            reason="Fingerprint web service",
+            target_ip="10.0.0.5",
+        )
+    )
     return plan
 
 
@@ -156,14 +160,13 @@ def test_repeated_compaction_replaces_prior_summary_and_preserves_failure_refere
         output_max_chars=1000,
     )
     second = _build_compacted_messages(
-        messages=first + [
+        messages=first
+        + [
             {
                 "role": "tool",
                 "tool_name": "run_exploit_terminal",
                 "content": (
-                    "ERROR: exploit failed\n"
-                    "Evidence saved to C:\\work\\evidence\\attempt-1.txt\n"
-                    "EXIT_CODE: 1\n"
+                    "ERROR: exploit failed\nEvidence saved to C:\\work\\evidence\\attempt-1.txt\nEXIT_CODE: 1\n"
                 ),
             }
         ],

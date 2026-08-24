@@ -132,8 +132,27 @@ class ExecutorAgent:
         if result.allowed and result.output:
             # Check if output contains key terms from the objective
             obj_keywords = set(task.get("objective", "").lower().split()) - {
-                "the", "a", "an", "is", "are", "was", "were", "on", "at", "to", "for",
-                "of", "in", "and", "or", "not", "be", "has", "have", "that", "this",
+                "the",
+                "a",
+                "an",
+                "is",
+                "are",
+                "was",
+                "were",
+                "on",
+                "at",
+                "to",
+                "for",
+                "of",
+                "in",
+                "and",
+                "or",
+                "not",
+                "be",
+                "has",
+                "have",
+                "that",
+                "this",
             }
             output_lower = result.output.lower()
             # If any meaningful keyword is found, observation is partially matched

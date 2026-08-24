@@ -15,6 +15,7 @@ that file in cleartext. These tests pin the contract:
    empty explicit allowlist, still logs its (redacted) args -- proving the real
    tool path can't leak credentials even when the call is denied.
 """
+
 from __future__ import annotations
 
 import json
@@ -36,8 +37,9 @@ from tools.mcp_shared import (
 
 
 def test_redact_password_and_ntlm_hash():
-    out = _redact_args({"target_ip": "10.0.0.50", "username": "admin",
-                        "password": "S3cr3t!", "ntlm_hash": "aad3b435:31d6..."})
+    out = _redact_args(
+        {"target_ip": "10.0.0.50", "username": "admin", "password": "S3cr3t!", "ntlm_hash": "aad3b435:31d6..."}
+    )
     assert out["password"] == _REDACTED
     assert out["ntlm_hash"] == _REDACTED
     # non-secret context preserved for forensics
@@ -46,8 +48,9 @@ def test_redact_password_and_ntlm_hash():
 
 
 def test_redact_token_apikey_credential_private_key():
-    out = _redact_args({"api_key": "AKIA...", "token": "Bearer xyz",
-                        "credentials": "creds-blob", "private_key": "-----BEGIN"})
+    out = _redact_args(
+        {"api_key": "AKIA...", "token": "Bearer xyz", "credentials": "creds-blob", "private_key": "-----BEGIN"}
+    )
     assert out["api_key"] == _REDACTED
     assert out["token"] == _REDACTED
     assert out["credentials"] == _REDACTED
@@ -55,8 +58,7 @@ def test_redact_token_apikey_credential_private_key():
 
 
 def test_redact_is_case_insensitive():
-    out = _redact_args({"Password": "p", "NTLM_HASH": "h", "ApiKey": "k",
-                        "Ntlm": "n", "HASH": "x"})
+    out = _redact_args({"Password": "p", "NTLM_HASH": "h", "ApiKey": "k", "Ntlm": "n", "HASH": "x"})
     assert out["Password"] == _REDACTED
     assert out["NTLM_HASH"] == _REDACTED
     assert out["ApiKey"] == _REDACTED
@@ -65,9 +67,16 @@ def test_redact_is_case_insensitive():
 
 
 def test_preserves_benign_args_intact():
-    args = {"target_ip": "10.0.0.50", "command": "nmap -sV 10.0.0.50",
-            "domain": "CORP", "dc_ip": "10.0.0.50", "method": "psexec",
-            "filename": "loot.py", "port": 445, "options": {"LHOST": "1.2.3.4"}}
+    args = {
+        "target_ip": "10.0.0.50",
+        "command": "nmap -sV 10.0.0.50",
+        "domain": "CORP",
+        "dc_ip": "10.0.0.50",
+        "method": "psexec",
+        "filename": "loot.py",
+        "port": 445,
+        "options": {"LHOST": "1.2.3.4"},
+    }
     out = _redact_args(args)
     for k in args:
         assert out[k] == args[k], k
@@ -76,8 +85,7 @@ def test_preserves_benign_args_intact():
 def test_nested_dict_options_masks_secret_key():
     # run_msf_module / generate_payload take an options dict that may carry
     # PASSWORD/PASS keys -- the one-level walk must mask those, keep the rest.
-    out = _redact_args({"options": {"LHOST": "10.0.0.50", "LPORT": 4444,
-                                     "PASSWORD": "hunter2", "pass": "x"}})
+    out = _redact_args({"options": {"LHOST": "10.0.0.50", "LPORT": 4444, "PASSWORD": "hunter2", "pass": "x"}})
     opts = out["options"]
     assert opts["LHOST"] == "10.0.0.50"
     assert opts["LPORT"] == 4444
@@ -125,13 +133,12 @@ async def test_require_allowlist_redacts_secret_on_async_started(tmp_path: Path)
     async def cred_tool(target_ip: str, password: str, ntlm_hash: str, command: str) -> str:
         return "ok"
 
-    await cred_tool(target_ip="10.0.0.50", password="cleartext-secret",
-                    ntlm_hash="aad3:31d6", command="whoami")
+    await cred_tool(target_ip="10.0.0.50", password="cleartext-secret", ntlm_hash="aad3:31d6", command="whoami")
     records = _read_audit(workspace)
     started = [r for r in records if r["status"] == "started"]
     completed = [r for r in records if r["status"] == "completed"]
     assert started and completed
-    for rec in (started + completed):
+    for rec in started + completed:
         assert rec["args"]["password"] == _REDACTED
         assert rec["args"]["ntlm_hash"] == _REDACTED
         assert rec["args"]["target_ip"] == "10.0.0.50"
@@ -257,12 +264,14 @@ def _make_server(tmp_path: Path, *, require_allowlist: bool = True):
     from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
     from tools.web_researcher import WebResearcher, WebResearcherSettings
-    config: dict[str, Any] = {
-        "exploit": {"require_explicit_allowlist": require_allowlist, "allowed_targets": []}
-    }
+
+    config: dict[str, Any] = {"exploit": {"require_explicit_allowlist": require_allowlist, "allowed_targets": []}}
     return create_mcp_server(
-        ExploitSearch(ExploitSearchSettings()), NVDClient(CVESearchSettings()),
-        WebResearcher(WebResearcherSettings()), tmp_path, config,
+        ExploitSearch(ExploitSearchSettings()),
+        NVDClient(CVESearchSettings()),
+        WebResearcher(WebResearcherSettings()),
+        tmp_path,
+        config,
     )
 
 
@@ -270,15 +279,20 @@ def _make_server(tmp_path: Path, *, require_allowlist: bool = True):
 async def test_real_dump_credentials_cleartext_never_reaches_audit(tmp_path: Path):
     """The real cred-harvest tool, denied at preflight, must still log redacted args."""
     mcp = _make_server(tmp_path)  # require_explicit_allowlist=True, empty allowlist -> blocked
-    result = await mcp.call_tool("dump_credentials", {
-        "target_ip": "10.0.0.50",
-        "method": "sam",
-        "username": "admin",
-        "password": "REAL-NTLM-SECRET-123",
-        "ntlm_hash": "aad3b435b51404eeaad3b435b51404ee",
-        "domain": "CORP",
-    })
-    text = "".join(getattr(c, "text", str(c)) for c in (result[0].content if hasattr(result[0], "content") else result[0]))
+    result = await mcp.call_tool(
+        "dump_credentials",
+        {
+            "target_ip": "10.0.0.50",
+            "method": "sam",
+            "username": "admin",
+            "password": "REAL-NTLM-SECRET-123",
+            "ntlm_hash": "aad3b435b51404eeaad3b435b51404ee",
+            "domain": "CORP",
+        },
+    )
+    text = "".join(
+        getattr(c, "text", str(c)) for c in (result[0].content if hasattr(result[0], "content") else result[0])
+    )
     assert "BLOCKED" in text  # denied preflight (no binary runs)
 
     audit_text = (tmp_path / "exploit_audit.jsonl").read_text(encoding="utf-8")
@@ -381,22 +395,25 @@ def test_mask_python_code_hardcoded_password():
     # code field carrying a hardcoded secret assignment
     out = _masked("s3cret", 'password = "s3cret"\nprint("hi")')
     assert "s3cret" not in out
-    assert 'password = "***REDACTED***"' == out.splitlines()[0] or 'password = ***REDACTED***' in out
+    assert 'password = "***REDACTED***"' == out.splitlines()[0] or "password = ***REDACTED***" in out
 
 
 # ── 4b. False-positive guards (benign commands must NOT be altered) ──────────
 
 
-@pytest.mark.parametrize("cmd", [
-    "nmap -sV 10.0.0.50",                  # benign recon, no creds
-    "ssh -p 2222 user@10.0.0.50",          # -p is a port, not a password
-    "nc -lvnp 4444",                       # -lvnp, no -p flag
-    "cp -p loot.txt /tmp/",                # -p preserve, not a password
-    "nmap -p 80,443 10.0.0.50",            # -p ports
-    "the password is secret here",         # prose, no key=value
-    "SMBPass=",                            # key with no value -- not masked
-    "export DB_PASSWORD_FILE=/etc/passwd",  # *_FILE suffix, value is a path
-])
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "nmap -sV 10.0.0.50",  # benign recon, no creds
+        "ssh -p 2222 user@10.0.0.50",  # -p is a port, not a password
+        "nc -lvnp 4444",  # -lvnp, no -p flag
+        "cp -p loot.txt /tmp/",  # -p preserve, not a password
+        "nmap -p 80,443 10.0.0.50",  # -p ports
+        "the password is secret here",  # prose, no key=value
+        "SMBPass=",  # key with no value -- not masked
+        "export DB_PASSWORD_FILE=/etc/passwd",  # *_FILE suffix, value is a path
+    ],
+)
 def test_mask_does_not_alter_benign(cmd):
     assert _mask_secret_content(cmd) == cmd, f"benign command altered: {cmd!r}"
 
@@ -445,10 +462,15 @@ async def test_audit_log_masks_free_text_command_field(tmp_path: Path):
     # The standalone ``command`` param of _audit_log (used by some direct call
     # sites) must also be content-masked, not written raw.
     from tools.mcp_shared import _audit_log
+
     audit = tmp_path / "exploit_audit.jsonl"
     _audit_log(
-        audit, target_ip="10.0.0.50", tool_name="x", approved=True,
-        status="completed", command="curl -u admin:s3cret http://10.0.0.50/",
+        audit,
+        target_ip="10.0.0.50",
+        tool_name="x",
+        approved=True,
+        status="completed",
+        command="curl -u admin:s3cret http://10.0.0.50/",
     )
     text = audit.read_text(encoding="utf-8")
     assert "s3cret" not in text
@@ -465,27 +487,30 @@ async def test_run_as_root_no_longer_double_logs_raw_command(tmp_path: Path):
     from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
     from tools.web_researcher import WebResearcher, WebResearcherSettings
-    config: dict[str, Any] = {
-        "exploit": {"require_explicit_allowlist": False, "allowed_targets": []}
-    }
+
+    config: dict[str, Any] = {"exploit": {"require_explicit_allowlist": False, "allowed_targets": []}}
     mcp = create_mcp_server(
-        ExploitSearch(ExploitSearchSettings()), NVDClient(CVESearchSettings()),
-        WebResearcher(WebResearcherSettings()), tmp_path, config,
+        ExploitSearch(ExploitSearchSettings()),
+        NVDClient(CVESearchSettings()),
+        WebResearcher(WebResearcherSettings()),
+        tmp_path,
+        config,
     )
     # Monkeypatch subprocess.run so nothing actually executes (bash/sudo are
     # not invoked); we only care that the audit trail never holds the raw inline
     # secret and that the manual "running" double-log is gone.
     import unittest.mock as _mock
+
     with _mock.patch("mcp_exploit_server.subprocess.run") as _r:
         _r.return_value = _mock.MagicMock(stdout="", stderr="", returncode=0)
         await mcp.call_tool("run_as_root", {"command": 'echo "-H Authorization: Bearer s3cret123"'})
     audit_text = (tmp_path / "exploit_audit.jsonl").read_text(encoding="utf-8")
-    assert "s3cret123" not in audit_text   # raw inline secret never logged
+    assert "s3cret123" not in audit_text  # raw inline secret never logged
     assert _REDACTED in audit_text
     records = _read_audit(tmp_path)
     rr = [r for r in records if r["tool_name"] == "run_as_root"]
     statuses = {r["status"] for r in rr}
-    assert "running" not in statuses       # the manual double-log is removed
+    assert "running" not in statuses  # the manual double-log is removed
     # M9: run_as_root returns a "ROOT_CMD_RESULT: ..." string on success, which
     # make_audit_tool now treats as a blocked marker, so the completion record is
     # written as status="blocked" / approved=False (the call did not raise and the

@@ -34,11 +34,7 @@ class BeliefStore:
 
     def find_by_statement(self, statement: str) -> list[BeliefState]:
         """Return belief states containing a hypothesis whose statement matches."""
-        return [
-            bs
-            for bs in self._beliefs.values()
-            if any(h.statement == statement for h in bs.hypotheses.values())
-        ]
+        return [bs for bs in self._beliefs.values() if any(h.statement == statement for h in bs.hypotheses.values())]
 
     def __len__(self) -> int:
         """Number of belief states held."""

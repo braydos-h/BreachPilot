@@ -280,6 +280,7 @@ def test_mixed_reads_and_writes_do_not_deadlock():
         t.start()
     # Let them run briefly.
     import time as _t
+
     _t.sleep(0.3)
     stop.set()
     for t in threads:

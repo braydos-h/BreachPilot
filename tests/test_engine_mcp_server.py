@@ -41,9 +41,7 @@ def _write_skill(root: Path, name: str, description: str, tags: list[str]) -> No
         "---\n"
         f"name: {name}\n"
         f"description: {description}\n"
-        "tags:\n"
-        + "".join(f"- {tag}\n" for tag in tags)
-        + "---\n"
+        "tags:\n" + "".join(f"- {tag}\n" for tag in tags) + "---\n"
         "# Skill\n\n## When to Use\nAuthorized testing only.\n\n## Workflow\nStay in scope.",
         encoding="utf-8",
     )
@@ -68,9 +66,7 @@ async def test_engine_server_registers_five_advisory_tools(tmp_path: Path):
     mcp = _server(tmp_path, skill_root)
 
     names = {tool.name for tool in await mcp.list_tools()}
-    assert {
-        "search_skills", "get_skill", "cve_lookup", "list_runs", "get_run"
-    } <= names
+    assert {"search_skills", "get_skill", "cve_lookup", "list_runs", "get_run"} <= names
     # No offensive/terminal tools leak into the engine server.
     assert "run_exploit_terminal" not in names
     assert "run_msf_module" not in names

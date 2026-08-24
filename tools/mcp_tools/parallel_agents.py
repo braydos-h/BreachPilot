@@ -162,6 +162,7 @@ class _SubagentManager:
                     tmp = result_path.with_suffix(".tmp")
                     tmp.write_text(json.dumps(result_dict, indent=2, default=str), encoding="utf-8")
                     import os as _os
+
                     _os.replace(tmp, result_path)
                 except Exception:  # noqa: BLE001 — best-effort persist
                     pass
@@ -219,11 +220,14 @@ class _SubagentManager:
             }
 
         async with self._lock:
-            return self._results.get(subagent_id, {
-                "subagent_id": subagent_id,
-                "status": "unknown",
-                "error": "sub-agent finished but no result was recorded",
-            })
+            return self._results.get(
+                subagent_id,
+                {
+                    "subagent_id": subagent_id,
+                    "status": "unknown",
+                    "error": "sub-agent finished but no result was recorded",
+                },
+            )
 
     def list_live(self) -> list[dict[str, Any]]:
         """Return a snapshot of all sub-agents and their current status."""

@@ -156,8 +156,12 @@ def check_javascript_frame_busting(url: str) -> dict:
 
     body = resp.text.lower()
     frame_busting_patterns = [
-        "top.location", "self.location", "window.top",
-        "parent.frames", "top !== self", "top != self",
+        "top.location",
+        "self.location",
+        "window.top",
+        "parent.frames",
+        "top !== self",
+        "top != self",
         "window.self !== window.top",
     ]
 
@@ -209,9 +213,17 @@ if __name__ == "__main__":
         sys.exit(1)
 
     target_url = sys.argv[1]
-    extra_paths = sys.argv[2:] if len(sys.argv) > 2 else [
-        "/", "/login", "/settings", "/account", "/admin",
-    ]
+    extra_paths = (
+        sys.argv[2:]
+        if len(sys.argv) > 2
+        else [
+            "/",
+            "/login",
+            "/settings",
+            "/account",
+            "/admin",
+        ]
+    )
 
     print(f"[*] Testing {target_url} for clickjacking vulnerabilities...")
     results = check_multiple_endpoints(target_url, extra_paths)

@@ -254,7 +254,9 @@ async def test_mcp_research_tool_names_still_work(monkeypatch: pytest.MonkeyPatc
     )
 
     search_text = _mcp_text(await server.call_tool("search_web_exploit", {"query": "CVE-2024-12345"}))
-    fetch_text = _mcp_text(await server.call_tool("fetch_webpage", {"url": "https://nvd.nist.gov/vuln/detail/CVE-2024-12345"}))
+    fetch_text = _mcp_text(
+        await server.call_tool("fetch_webpage", {"url": "https://nvd.nist.gov/vuln/detail/CVE-2024-12345"})
+    )
     deep_payload = json.loads(_mcp_text(await server.call_tool("deep_research", {"query": "CVE-2024-12345"})))
 
     assert "WEB_SEARCH_RESULTS" in search_text

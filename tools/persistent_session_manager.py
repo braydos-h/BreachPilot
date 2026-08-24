@@ -50,8 +50,7 @@ def _validate_name(name: str) -> str:
     """
     if not isinstance(name, str) or not _VALID_NAME_RE.fullmatch(name):
         raise ValueError(
-            f"invalid session name {name!r}: must match [A-Za-z0-9._-]{{1,64}} "
-            "and contain no path separators or '..'"
+            f"invalid session name {name!r}: must match [A-Za-z0-9._-]{{1,64}} and contain no path separators or '..'"
         )
     # Belt-and-suspenders: '..' already excluded by the charset, but be explicit.
     if ".." in name:
@@ -72,6 +71,7 @@ def _is_inside_workspace(path: Path, workspace: Path) -> bool:
 # ---------------------------------------------------------------------------
 # Data models
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class SessionInfo:
@@ -104,6 +104,7 @@ class SessionInfo:
 # ---------------------------------------------------------------------------
 # Tmux helper
 # ---------------------------------------------------------------------------
+
 
 class TmuxHelper:
     """Low-level tmux interaction."""
@@ -175,11 +176,13 @@ class TmuxHelper:
         for line in result.stdout.strip().split("\n"):
             if "|" in line:
                 parts = line.split("|")
-                sessions.append({
-                    "name": parts[0],
-                    "created": parts[1] if len(parts) > 1 else "",
-                    "attached": parts[2] if len(parts) > 2 else "0",
-                })
+                sessions.append(
+                    {
+                        "name": parts[0],
+                        "created": parts[1] if len(parts) > 1 else "",
+                        "attached": parts[2] if len(parts) > 2 else "0",
+                    }
+                )
         return sessions
 
     def get_pid(self, name: str) -> int | None:
@@ -198,6 +201,7 @@ class TmuxHelper:
 # ---------------------------------------------------------------------------
 # Background job helper
 # ---------------------------------------------------------------------------
+
 
 class BackgroundJobHelper:
     """Manage nohup background jobs with log capture."""
@@ -283,18 +287,21 @@ class BackgroundJobHelper:
         result = []
         with self._lock:
             for name, proc in list(self._jobs.items()):
-                result.append({
-                    "name": name,
-                    "pid": proc.pid,
-                    "running": proc.poll() is None,
-                    "log": str(self.workspace / f"job_{name}.log"),
-                })
+                result.append(
+                    {
+                        "name": name,
+                        "pid": proc.pid,
+                        "running": proc.poll() is None,
+                        "log": str(self.workspace / f"job_{name}.log"),
+                    }
+                )
         return result
 
 
 # ---------------------------------------------------------------------------
 # Listener helper
 # ---------------------------------------------------------------------------
+
 
 class ListenerHelper:
     """Manage network listeners (nc, socat, python http.server)."""
@@ -407,10 +414,25 @@ class ListenerHelper:
             return None
         try:
             proc = subprocess.run(
-                [openssl, "req", "-x509", "-newkey", "rsa:2048", "-nodes",
-                 "-keyout", str(key), "-out", str(cert), "-days", "365",
-                 "-subj", "/CN=localhost"],
-                capture_output=True, text=True, timeout=15,
+                [
+                    openssl,
+                    "req",
+                    "-x509",
+                    "-newkey",
+                    "rsa:2048",
+                    "-nodes",
+                    "-keyout",
+                    str(key),
+                    "-out",
+                    str(cert),
+                    "-days",
+                    "365",
+                    "-subj",
+                    "/CN=localhost",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
             if proc.returncode != 0 or not cert.exists() or not key.exists():
                 return None
@@ -431,14 +453,28 @@ class ListenerHelper:
         log_path = self.workspace / f"listener_{name}.log"
         with open(log_path, "w", encoding="utf-8") as log_f:
             if shutil.which("openssl"):
-                argv = ["openssl", "s_server", "-accept", str(port), "-cert", str(cert), "-key", str(ck[1]), "-naccept", "1"]
+                argv = [
+                    "openssl",
+                    "s_server",
+                    "-accept",
+                    str(port),
+                    "-cert",
+                    str(cert),
+                    "-key",
+                    str(ck[1]),
+                    "-naccept",
+                    "1",
+                ]
             elif shutil.which("socat"):
                 argv = ["socat", f"OPENSSL-LISTEN:{port},cert={cert},key={ck[1]},fork", "STDIO"]
             else:
                 return False, None
             proc = subprocess.Popen(
-                argv, stdout=log_f, stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL, start_new_session=True,
+                argv,
+                stdout=log_f,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
             )
         with self._lock:
             self._listeners[name] = proc
@@ -457,8 +493,10 @@ class ListenerHelper:
         with open(log_path, "w", encoding="utf-8") as log_f:
             proc = subprocess.Popen(
                 ["dnscat2", "--listen", str(port)],
-                stdout=log_f, stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL, start_new_session=True,
+                stdout=log_f,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
             )
         with self._lock:
             self._listeners[name] = proc
@@ -481,15 +519,19 @@ class ListenerHelper:
         with open(log_path, "w", encoding="utf-8") as log_f:
             proc = subprocess.Popen(
                 ["socat", f"OPENSSL-LISTEN:{port},cert={cert},key={key},fork", "SYSTEM:cat"],
-                stdout=log_f, stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL, start_new_session=True,
+                stdout=log_f,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
             )
         with self._lock:
             self._listeners[name] = proc
         time.sleep(0.2)
         return proc.poll() is None, proc.pid
 
-    def start_socks_pivot(self, name: str, port: int, upstream_host: str = "", upstream_port: int = 0) -> tuple[bool, int | None]:
+    def start_socks_pivot(
+        self, name: str, port: int, upstream_host: str = "", upstream_port: int = 0
+    ) -> tuple[bool, int | None]:
         """Start a SOCKS/pivot listener (chisel/ligolo-ng if present, else
         socat TCP-LISTEN:<port>,fork TCP:<upstream>). The caller MUST allowlist-
         gate ``upstream_host`` (the allowlist is the pivot lock)."""
@@ -510,8 +552,11 @@ class ListenerHelper:
             return False, None
         with open(log_path, "w", encoding="utf-8") as log_f:
             proc = subprocess.Popen(
-                argv, stdout=log_f, stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL, start_new_session=True,
+                argv,
+                stdout=log_f,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
             )
         with self._lock:
             self._listeners[name] = proc
@@ -562,18 +607,21 @@ class ListenerHelper:
         result = []
         with self._lock:
             for name, proc in list(self._listeners.items()):
-                result.append({
-                    "name": name,
-                    "pid": proc.pid,
-                    "running": proc.poll() is None,
-                    "log": str(self.workspace / f"listener_{name}.log"),
-                })
+                result.append(
+                    {
+                        "name": name,
+                        "pid": proc.pid,
+                        "running": proc.poll() is None,
+                        "log": str(self.workspace / f"listener_{name}.log"),
+                    }
+                )
         return result
 
 
 # ---------------------------------------------------------------------------
 # Process tracker
 # ---------------------------------------------------------------------------
+
 
 class ProcessTracker:
     """Track and manage system processes relevant to the engagement."""
@@ -651,7 +699,9 @@ class ProcessTracker:
         try:
             result = subprocess.run(
                 ["ps", "aux"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             lines = result.stdout.splitlines()
             if pattern:
@@ -660,13 +710,15 @@ class ProcessTracker:
             for line in lines[1:]:  # Skip header
                 parts = line.split(None, 10)
                 if len(parts) >= 11:
-                    processes.append({
-                        "user": parts[0],
-                        "pid": parts[1],
-                        "cpu": parts[2],
-                        "mem": parts[3],
-                        "command": parts[10],
-                    })
+                    processes.append(
+                        {
+                            "user": parts[0],
+                            "pid": parts[1],
+                            "cpu": parts[2],
+                            "mem": parts[3],
+                            "command": parts[10],
+                        }
+                    )
             return processes
         except Exception as exc:
             return [{"error": str(exc)}]
@@ -675,6 +727,7 @@ class ProcessTracker:
 # ---------------------------------------------------------------------------
 # Main PersistentSessionManager
 # ---------------------------------------------------------------------------
+
 
 class PersistentSessionManager:
     """Unified manager for all persistent session types on Kali Linux."""
@@ -720,16 +773,14 @@ class PersistentSessionManager:
                 "Persistent session state at %s is corrupt (%s); starting with "
                 "no tracked sessions. The file will be overwritten on the next "
                 "state save.",
-                self._state_path, exc,
+                self._state_path,
+                exc,
             )
 
     def _save_state(self) -> None:
         data = {
             "saved_at": datetime.now(timezone.utc).isoformat(),
-            "sessions": {
-                name: info.to_dict()
-                for name, info in self._sessions.items()
-            },
+            "sessions": {name: info.to_dict() for name, info in self._sessions.items()},
         }
         # Atomic write (temp + os.replace, same directory => same filesystem):
         # a plain write_text truncates first, so a crash mid-write would leave
@@ -905,7 +956,16 @@ class PersistentSessionManager:
 
     # ── Listeners ──
 
-    def start_listener(self, name: str, port: int, listener_type: str = "netcat", protocol: str = "tcp", directory: str = "", upstream_host: str = "", upstream_port: int = 0) -> dict[str, Any]:
+    def start_listener(
+        self,
+        name: str,
+        port: int,
+        listener_type: str = "netcat",
+        protocol: str = "tcp",
+        directory: str = "",
+        upstream_host: str = "",
+        upstream_port: int = 0,
+    ) -> dict[str, Any]:
         """Start a network listener."""
         try:
             _validate_name(name)
@@ -937,7 +997,10 @@ class PersistentSessionManager:
         elif listener_type == "socks_pivot":
             success, pid = self._listeners.start_socks_pivot(name, port, upstream_host, upstream_port)
         else:
-            return {"success": False, "error": f"Unknown listener_type: {listener_type}. Use: netcat, socat, http, tls, dns, https-beacon, socks_pivot"}
+            return {
+                "success": False,
+                "error": f"Unknown listener_type: {listener_type}. Use: netcat, socat, http, tls, dns, https-beacon, socks_pivot",
+            }
 
         if not success:
             return {"success": False, "error": f"Failed to start {listener_type} listener on port {port}."}
@@ -1008,7 +1071,11 @@ class PersistentSessionManager:
         if isinstance(name_or_pid, int) or name_or_pid.isdigit():
             pid = int(name_or_pid)
             success = self._processes.kill_pid(pid)
-            return {"success": success, "pid": pid, "message": "Process killed." if success else "Failed to kill process."}
+            return {
+                "success": success,
+                "pid": pid,
+                "message": "Process killed." if success else "Failed to kill process.",
+            }
 
         success = self._processes.kill(name_or_pid)
         if success:
@@ -1030,18 +1097,20 @@ class PersistentSessionManager:
                 running = False
                 if info.pid:
                     running = ProcessTracker._is_running(info.pid)
-                result.append({
-                    "name": name,
-                    "type": info.session_type,
-                    "command": info.command,
-                    "pid": info.pid,
-                    "running": running,
-                    "status": "running" if running else "stopped",
-                    "created": datetime.fromtimestamp(info.created_at, tz=timezone.utc).isoformat(),
-                    "last_accessed": datetime.fromtimestamp(info.last_accessed, tz=timezone.utc).isoformat(),
-                    "log": str(info.log_file) if info.log_file else None,
-                    "metadata": info.metadata,
-                })
+                result.append(
+                    {
+                        "name": name,
+                        "type": info.session_type,
+                        "command": info.command,
+                        "pid": info.pid,
+                        "running": running,
+                        "status": "running" if running else "stopped",
+                        "created": datetime.fromtimestamp(info.created_at, tz=timezone.utc).isoformat(),
+                        "last_accessed": datetime.fromtimestamp(info.last_accessed, tz=timezone.utc).isoformat(),
+                        "log": str(info.log_file) if info.log_file else None,
+                        "metadata": info.metadata,
+                    }
+                )
         return result
 
     def get_session(self, name: str) -> dict[str, Any] | None:

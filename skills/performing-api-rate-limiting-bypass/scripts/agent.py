@@ -38,8 +38,7 @@ def detect_rate_limit_headers(url, auth_header=None):
         rate_headers = {}
         for key in resp.headers:
             lower = key.lower()
-            if any(rl in lower for rl in ["ratelimit", "rate-limit", "x-rate",
-                                           "retry-after", "x-ratelimit"]):
+            if any(rl in lower for rl in ["ratelimit", "rate-limit", "x-rate", "retry-after", "x-ratelimit"]):
                 rate_headers[key] = resp.headers[key]
         return {
             "url": url,
@@ -67,11 +66,13 @@ def test_header_bypass(url, auth_header=None, request_count=30):
         except Exception:
             pass
     else:
-        findings.append({
-            "test": "baseline",
-            "issue": f"No rate limit hit after {request_count} requests",
-            "severity": "HIGH",
-        })
+        findings.append(
+            {
+                "test": "baseline",
+                "issue": f"No rate limit hit after {request_count} requests",
+                "severity": "HIGH",
+            }
+        )
         return findings
 
     for bypass in BYPASS_HEADERS:
@@ -89,12 +90,14 @@ def test_header_bypass(url, auth_header=None, request_count=30):
                 pass
 
         if success_count > 5:
-            findings.append({
-                "test": "header_bypass",
-                "header": header_name,
-                "issue": f"Rate limit bypassed using {header_name} header ({success_count}/10 successful)",
-                "severity": "HIGH",
-            })
+            findings.append(
+                {
+                    "test": "header_bypass",
+                    "header": header_name,
+                    "issue": f"Rate limit bypassed using {header_name} header ({success_count}/10 successful)",
+                    "severity": "HIGH",
+                }
+            )
     return findings
 
 
@@ -118,19 +121,22 @@ def test_method_bypass(url, auth_header=None):
     not_limited = [m for m, s in method_results.items() if isinstance(s, int) and s != 429]
 
     if rate_limited and not_limited:
-        findings.append({
-            "test": "method_bypass",
-            "rate_limited": rate_limited,
-            "not_limited": not_limited,
-            "issue": f"Rate limit not applied to methods: {', '.join(not_limited)}",
-            "severity": "MEDIUM",
-        })
+        findings.append(
+            {
+                "test": "method_bypass",
+                "rate_limited": rate_limited,
+                "not_limited": not_limited,
+                "issue": f"Rate limit not applied to methods: {', '.join(not_limited)}",
+                "severity": "MEDIUM",
+            }
+        )
     return findings
 
 
 def test_path_bypass(url, auth_header=None):
     """Test rate limit bypass via URL path manipulation."""
     from urllib.parse import urlparse
+
     parsed = urlparse(url)
     path = parsed.path
 
@@ -156,14 +162,16 @@ def test_path_bypass(url, auth_header=None):
         try:
             resp = requests.get(test_url, headers=headers, timeout=5, allow_redirects=False)
             if resp.status_code not in (429, 404, 301, 302):
-                findings.append({
-                    "test": "path_bypass",
-                    "original": path,
-                    "variant": variant,
-                    "status": resp.status_code,
-                    "issue": f"Path variation '{variant}' bypasses rate limit (status {resp.status_code})",
-                    "severity": "MEDIUM",
-                })
+                findings.append(
+                    {
+                        "test": "path_bypass",
+                        "original": path,
+                        "variant": variant,
+                        "status": resp.status_code,
+                        "issue": f"Path variation '{variant}' bypasses rate limit (status {resp.status_code})",
+                        "severity": "MEDIUM",
+                    }
+                )
         except Exception:
             pass
     return findings
@@ -172,6 +180,7 @@ def test_path_bypass(url, auth_header=None):
 def test_encoding_bypass(url, auth_header=None):
     """Test rate limit bypass via parameter encoding variations."""
     from urllib.parse import parse_qs, urlparse
+
     parsed = urlparse(url)
     params = parse_qs(parsed.query)
     findings = []
@@ -183,12 +192,14 @@ def test_encoding_bypass(url, auth_header=None):
     try:
         resp = requests.get(null_byte_url, headers=headers, timeout=5)
         if resp.status_code != 429:
-            findings.append({
-                "test": "null_byte_bypass",
-                "status": resp.status_code,
-                "issue": "Null byte appended bypasses rate limit",
-                "severity": "HIGH",
-            })
+            findings.append(
+                {
+                    "test": "null_byte_bypass",
+                    "status": resp.status_code,
+                    "issue": "Null byte appended bypasses rate limit",
+                    "severity": "HIGH",
+                }
+            )
     except Exception:
         pass
 
@@ -197,10 +208,10 @@ def test_encoding_bypass(url, auth_header=None):
 
 def run_audit(args):
     """Execute API rate limiting bypass audit."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("  API RATE LIMITING BYPASS TESTING")
     print(f"  Generated: {datetime.utcnow().isoformat()} UTC")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     report = {}
     all_findings = []
@@ -208,7 +219,7 @@ def run_audit(args):
     detection = detect_rate_limit_headers(args.url, args.auth)
     report["rate_limit_detection"] = detection
     print("--- RATE LIMIT DETECTION ---")
-    print(f"  URL: {detection.get('url','')}")
+    print(f"  URL: {detection.get('url', '')}")
     print(f"  Has Rate Limiting: {detection.get('has_rate_limiting', False)}")
     for k, v in detection.get("rate_limit_headers", {}).items():
         print(f"  {k}: {v}")
@@ -243,8 +254,7 @@ def main():
     parser = argparse.ArgumentParser(description="API Rate Limiting Bypass Tester")
     parser.add_argument("--url", required=True, help="Target API endpoint URL")
     parser.add_argument("--auth", help="Authorization header value")
-    parser.add_argument("--request-count", type=int, default=30,
-                        help="Requests for baseline detection (default: 30)")
+    parser.add_argument("--request-count", type=int, default=30, help="Requests for baseline detection (default: 30)")
     parser.add_argument("--test-headers", action="store_true", help="Test header-based bypasses")
     parser.add_argument("--test-methods", action="store_true", help="Test HTTP method bypasses")
     parser.add_argument("--test-paths", action="store_true", help="Test URL path bypasses")

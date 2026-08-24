@@ -31,6 +31,7 @@ def recon_config() -> ReconConfig:
 
 # ── UDP scan ───────────────────────────────────────────────────────────────
 
+
 class TestUdpRecon:
     @pytest.mark.asyncio
     async def test_recon_udp_populates_udp_ports(self, recon_config: ReconConfig) -> None:
@@ -88,6 +89,7 @@ class TestUdpRecon:
 
 # ── TLS enumeration ────────────────────────────────────────────────────────
 
+
 class TestTlsEnumeration:
     @pytest.mark.asyncio
     async def test_enumerate_tls_populates_ssl_info(self, recon_config: ReconConfig) -> None:
@@ -127,6 +129,7 @@ class TestTlsEnumeration:
 
 # ── SMTP enumeration ───────────────────────────────────────────────────────
 
+
 class TestSmtpEnumeration:
     @pytest.mark.asyncio
     async def test_enumerate_smtp_populates_smtp_info(self, recon_config: ReconConfig) -> None:
@@ -160,6 +163,7 @@ class TestSmtpEnumeration:
 
 # ── DB enumeration ─────────────────────────────────────────────────────────
 
+
 class TestDbEnumeration:
     @pytest.mark.asyncio
     async def test_enumerate_db_detects_mysql(self, recon_config: ReconConfig) -> None:
@@ -187,6 +191,7 @@ class TestDbEnumeration:
 
 
 # ── HostReconResult / ServiceInfo new-field round-trip ─────────────────────
+
 
 class TestNewFieldsRoundTrip:
     def test_service_info_round_trips_smtp_db_info(self) -> None:

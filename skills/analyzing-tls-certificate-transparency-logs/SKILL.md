@@ -106,6 +106,7 @@ Key analysis steps:
 
 ```python
 from pycrtsh import Crtsh
+
 c = Crtsh()
 certs = c.search("%.example.com")
 for cert in certs:

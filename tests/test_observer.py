@@ -25,12 +25,28 @@ def test_observation_to_dict_roundtrip_keys():
     obs.facts.append("port 22 open")
     d = obs.to_dict()
     expected_keys = {
-        "task_id", "target", "tool_name", "input_summary", "output_summary",
-        "facts", "new_assets", "new_endpoints", "new_parameters",
-        "new_technologies", "new_identities", "new_objects",
-        "interesting_signals", "possible_findings", "dead_ends",
-        "recommended_followup_tasks", "memory_updates", "graph_updates",
-        "evidence_refs", "hypothesis_evidence", "confidence", "usefulness",
+        "task_id",
+        "target",
+        "tool_name",
+        "input_summary",
+        "output_summary",
+        "facts",
+        "new_assets",
+        "new_endpoints",
+        "new_parameters",
+        "new_technologies",
+        "new_identities",
+        "new_objects",
+        "interesting_signals",
+        "possible_findings",
+        "dead_ends",
+        "recommended_followup_tasks",
+        "memory_updates",
+        "graph_updates",
+        "evidence_refs",
+        "hypothesis_evidence",
+        "confidence",
+        "usefulness",
     }
     assert set(d.keys()) == expected_keys
     assert d["task_id"] == "T-1"
@@ -60,8 +76,11 @@ def test_compact_output_strips_whitespace():
 
 def _task(**kw):
     base = {
-        "task_id": "T-1", "target": "10.0.0.5", "phase": "recon",
-        "objective": "Scan target", "hypothesis": "Services exposed",
+        "task_id": "T-1",
+        "target": "10.0.0.5",
+        "phase": "recon",
+        "objective": "Scan target",
+        "hypothesis": "Services exposed",
     }
     base.update(kw)
     return base
@@ -236,9 +255,7 @@ def test_score_usefulness_empty_is_zero():
 
 def test_score_usefulness_caps_at_100():
     agent = ObserverAgent()
-    raw = "\n".join(
-        f"22/tcp open ssh service{i} OS details: Linux" for i in range(200)
-    )
+    raw = "\n".join(f"22/tcp open ssh service{i} OS details: Linux" for i in range(200))
     obs = agent.observe(_task(), raw, tool_name="nmap")
     assert obs.usefulness == 100
 
@@ -246,8 +263,11 @@ def test_score_usefulness_caps_at_100():
 def test_score_usefulness_weighting():
     # facts=1, endpoints=1 (x2), tech=1 (x2), signal=1 (x3), finding=1 (x5)
     obs = Observation(
-        facts=["f"], new_endpoints=["e"], new_technologies=["t"],
-        interesting_signals=["s"], possible_findings=[{"x": 1}],
+        facts=["f"],
+        new_endpoints=["e"],
+        new_technologies=["t"],
+        interesting_signals=["s"],
+        possible_findings=[{"x": 1}],
     )
     score = ObserverAgent._score_usefulness(obs)
     assert score == 1 + 2 + 2 + 3 + 5

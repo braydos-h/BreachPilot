@@ -45,6 +45,7 @@ class _SleepReconAgent(Agent):
         task["_test_end"] = time.monotonic()
         # Per-target namespaced write (Phase 1 API via bb_compat).
         from tools.swarm.bb_compat import bb_set
+
         bb_set(bb, "discovered_services", [{"service": "ssh", "target": target}], target=target)
         bb_set(bb, "recon_complete", True, target=target)
         return AgentResult(
@@ -102,6 +103,7 @@ async def test_depends_on_waits_for_milestone():
             time.sleep(0.3)
             bb = context.get("blackboard", {})
             from tools.swarm.bb_compat import bb_set
+
             bb_set(bb, "recon_complete", True, target=t)
             return AgentResult(
                 agent_type=self.agent_type,
@@ -128,7 +130,9 @@ async def test_depends_on_waits_for_milestone():
     tasks = [
         {"task_id": "R-1", "phase": "recon", "target": "10.0.0.5"},
         {
-            "task_id": "V-1", "phase": "analysis", "target": "10.0.0.5",
+            "task_id": "V-1",
+            "phase": "analysis",
+            "target": "10.0.0.5",
             "depends_on": ["10.0.0.5", "recon"],
         },
     ]
@@ -159,10 +163,7 @@ async def test_parallel_recon_runs_concurrently_not_sequentially():
         critic_enabled=False,
         max_parallel=3,
     )
-    tasks = [
-        {"task_id": f"R-{ip}", "phase": "recon", "target": ip}
-        for ip in ("10.0.0.5", "10.0.0.6", "10.0.0.7")
-    ]
+    tasks = [{"task_id": f"R-{ip}", "phase": "recon", "target": ip} for ip in ("10.0.0.5", "10.0.0.6", "10.0.0.7")]
     start = time.monotonic()
     results = await orch.route_parallel(tasks)
     elapsed = time.monotonic() - start
@@ -213,12 +214,15 @@ async def test_exploit_tasks_run_sequentially_by_default():
     (deferred to the sequential path), NOT in parallel. We verify by giving
     two exploit tasks each a 0.4s sleep and asserting total >= 0.7s (roughly
     2× one task, i.e. sequential)."""
+
     class _SleepExploit(Agent):
         DELAY = 0.4
+
         def run(self, task, context):
             time.sleep(self.DELAY)
             bb = context.get("blackboard", {})
             from tools.swarm.bb_compat import bb_set
+
             bb_set(bb, "access_achieved", True)
             return AgentResult(
                 agent_type=self.agent_type,
@@ -250,8 +254,10 @@ async def test_exploit_tasks_run_sequentially_by_default():
 async def test_force_parallel_overrides_recon_first_policy():
     """A task with ``force_parallel: True`` bypasses the recon-first filter
     and runs in the parallel batch even if its phase is exploit."""
+
     class _SleepExploit(Agent):
         DELAY = 0.3
+
         def run(self, task, context):
             time.sleep(self.DELAY)
             return AgentResult(
@@ -287,6 +293,7 @@ async def test_route_parallel_preserves_input_order():
     """Results come back in the same order as the input tasks, regardless of
     completion order (so a caller batching [recon-A, recon-B, recon-C] can
     index results by position)."""
+
     class _VariableSleep(Agent):
         def run(self, task, context):
             # Second task sleeps longer so it finishes last; results must

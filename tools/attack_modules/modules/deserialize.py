@@ -168,4 +168,3 @@ for ep in endpoints:
 
 print("\\n[!] For full exploitation, use ysoserial (Java) or phpggc (PHP) to generate proper gadget chains.")
 '''
-

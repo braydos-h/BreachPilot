@@ -20,11 +20,29 @@ from typing import Any
 # ── Service risk scores (mirrors ReconAgent._SERVICE_RISK_SCORES) ──────────
 
 _SERVICE_RISK_SCORES: dict[str, int] = {
-    "ssh": 70, "smb": 90, "microsoft-ds": 90, "rdp": 85, "ms-wbt-server": 85,
-    "http": 60, "https": 60, "ftp": 65, "telnet": 95, "redis": 80,
-    "elasticsearch": 75, "mongodb": 80, "mysql": 70, "postgresql": 70,
-    "ldap": 75, "ldaps": 75, "docker": 85, "kubernetes": 85,
-    "winrm": 80, "vnc": 70, "smtp": 50, "dns": 40, "snmp": 65,
+    "ssh": 70,
+    "smb": 90,
+    "microsoft-ds": 90,
+    "rdp": 85,
+    "ms-wbt-server": 85,
+    "http": 60,
+    "https": 60,
+    "ftp": 65,
+    "telnet": 95,
+    "redis": 80,
+    "elasticsearch": 75,
+    "mongodb": 80,
+    "mysql": 70,
+    "postgresql": 70,
+    "ldap": 75,
+    "ldaps": 75,
+    "docker": 85,
+    "kubernetes": 85,
+    "winrm": 80,
+    "vnc": 70,
+    "smtp": 50,
+    "dns": 40,
+    "snmp": 65,
     "unknown": 50,
 }
 
@@ -36,28 +54,69 @@ _GOAL_SERVICE_AFFINITY: dict[str, list[str]] = {
     "identify_vulnerabilities": [],  # always relevant
     "service_mapping": [],  # always relevant
     "recon_and_document": [],  # always relevant
-    "initial_access": ["ssh", "smb", "microsoft-ds", "rdp", "ms-wbt-server",
-                       "http", "https", "ftp", "telnet", "redis", "winrm",
-                       "mysql", "postgresql", "mongodb", "elasticsearch"],
-    "verify_cves": ["ssh", "smb", "microsoft-ds", "rdp", "ms-wbt-server",
-                    "http", "https", "ftp", "ldap", "ldaps", "docker"],
-    "backdoor": ["ssh", "smb", "microsoft-ds", "rdp", "ms-wbt-server",
-                 "http", "https", "winrm"],
-    "privilege_escalation": ["ssh", "smb", "microsoft-ds", "rdp", "ms-wbt-server",
-                             "docker", "kubernetes", "winrm"],
-    "full_compromise": ["ssh", "smb", "microsoft-ds", "rdp", "ms-wbt-server",
-                        "http", "https", "winrm", "docker"],
-    "credential_dumping": ["ssh", "smb", "microsoft-ds", "rdp", "ms-wbt-server",
-                           "winrm", "ldap", "ldaps", "mysql", "postgresql"],
-    "pivot_and_discovery": ["ssh", "smb", "microsoft-ds", "rdp", "ms-wbt-server",
-                            "winrm"],
-    "lateral_movement": ["ssh", "smb", "microsoft-ds", "rdp", "ms-wbt-server",
-                         "winrm"],
-    "data_exfiltration": ["ssh", "smb", "microsoft-ds", "http", "https",
-                          "ftp", "mysql", "postgresql", "elasticsearch"],
-    "whatever_it_takes": ["ssh", "smb", "microsoft-ds", "rdp", "ms-wbt-server",
-                          "http", "https", "ftp", "telnet", "redis", "winrm",
-                          "docker", "kubernetes"],
+    "initial_access": [
+        "ssh",
+        "smb",
+        "microsoft-ds",
+        "rdp",
+        "ms-wbt-server",
+        "http",
+        "https",
+        "ftp",
+        "telnet",
+        "redis",
+        "winrm",
+        "mysql",
+        "postgresql",
+        "mongodb",
+        "elasticsearch",
+    ],
+    "verify_cves": [
+        "ssh",
+        "smb",
+        "microsoft-ds",
+        "rdp",
+        "ms-wbt-server",
+        "http",
+        "https",
+        "ftp",
+        "ldap",
+        "ldaps",
+        "docker",
+    ],
+    "backdoor": ["ssh", "smb", "microsoft-ds", "rdp", "ms-wbt-server", "http", "https", "winrm"],
+    "privilege_escalation": ["ssh", "smb", "microsoft-ds", "rdp", "ms-wbt-server", "docker", "kubernetes", "winrm"],
+    "full_compromise": ["ssh", "smb", "microsoft-ds", "rdp", "ms-wbt-server", "http", "https", "winrm", "docker"],
+    "credential_dumping": [
+        "ssh",
+        "smb",
+        "microsoft-ds",
+        "rdp",
+        "ms-wbt-server",
+        "winrm",
+        "ldap",
+        "ldaps",
+        "mysql",
+        "postgresql",
+    ],
+    "pivot_and_discovery": ["ssh", "smb", "microsoft-ds", "rdp", "ms-wbt-server", "winrm"],
+    "lateral_movement": ["ssh", "smb", "microsoft-ds", "rdp", "ms-wbt-server", "winrm"],
+    "data_exfiltration": ["ssh", "smb", "microsoft-ds", "http", "https", "ftp", "mysql", "postgresql", "elasticsearch"],
+    "whatever_it_takes": [
+        "ssh",
+        "smb",
+        "microsoft-ds",
+        "rdp",
+        "ms-wbt-server",
+        "http",
+        "https",
+        "ftp",
+        "telnet",
+        "redis",
+        "winrm",
+        "docker",
+        "kubernetes",
+    ],
 }
 
 # ── Goal risk requirements (mirrors goal_engine.py) ────────────────────────
@@ -90,18 +149,20 @@ _RISK_PROFILE_LEVEL: dict[str, str] = {
 
 # ── Data classes ───────────────────────────────────────────────────────────
 
+
 @dataclass
 class ReconAssessment:
     """Structured recon results used as input to goal suggestion."""
+
     target_ip: str
-    os_verdict: str = "UNKNOWN"          # WINDOWS, LINUX, MIXED, UNKNOWN
+    os_verdict: str = "UNKNOWN"  # WINDOWS, LINUX, MIXED, UNKNOWN
     os_hints: list[str] = field(default_factory=list)
     open_ports: list[int] = field(default_factory=list)
     services: list[dict[str, Any]] = field(default_factory=list)
     cve_findings: list[dict[str, Any]] = field(default_factory=list)
     raw_scan_output: str = ""
     raw_os_output: str = ""
-    overall_risk_score: int = 0          # 0-100 aggregate attack surface score
+    overall_risk_score: int = 0  # 0-100 aggregate attack surface score
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -132,15 +193,16 @@ class ReconAssessment:
 @dataclass
 class SuggestedGoal:
     """A goal with its exploit rating and rationale."""
+
     name: str
     description: str
-    exploit_likelihood: str          # Very Likely, Likely, Possible, Unlikely, Blocked
-    success_rating: int              # 0-100
-    rationale: str                   # Human-readable explanation
+    exploit_likelihood: str  # Very Likely, Likely, Possible, Unlikely, Blocked
+    success_rating: int  # 0-100
+    rationale: str  # Human-readable explanation
     compatible: bool = True
     blocked_reason: str = ""
     risk_requirement: str = "safe"
-    is_ai_generated: bool = False    # True if this goal was auto-generated from recon
+    is_ai_generated: bool = False  # True if this goal was auto-generated from recon
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -157,6 +219,7 @@ class SuggestedGoal:
 
 
 # ── Goal Suggester ─────────────────────────────────────────────────────────
+
 
 class GoalSuggester:
     """Scores preset goals against recon findings and returns ranked suggestions."""
@@ -193,35 +256,37 @@ class GoalSuggester:
 
             # ── Risk compatibility check ──
             if goal_order > profile_order:
-                suggestions.append(SuggestedGoal(
-                    name=goal_name,
-                    description=goal_descriptions.get(goal_name, ""),
-                    exploit_likelihood="Blocked",
-                    success_rating=0,
-                    rationale=f"Requires '{goal_risk}' authorization. Current profile: '{risk_profile}'.",
-                    compatible=False,
-                    blocked_reason=(
-                        f"Goal '{goal_name}' requires at least '{goal_risk}' authorization. "
-                        f"Current risk profile is '{risk_profile}'."
-                    ),
-                    risk_requirement=goal_risk,
-                ))
+                suggestions.append(
+                    SuggestedGoal(
+                        name=goal_name,
+                        description=goal_descriptions.get(goal_name, ""),
+                        exploit_likelihood="Blocked",
+                        success_rating=0,
+                        rationale=f"Requires '{goal_risk}' authorization. Current profile: '{risk_profile}'.",
+                        compatible=False,
+                        blocked_reason=(
+                            f"Goal '{goal_name}' requires at least '{goal_risk}' authorization. "
+                            f"Current risk profile is '{risk_profile}'."
+                        ),
+                        risk_requirement=goal_risk,
+                    )
+                )
                 continue
 
             # ── Score the goal ──
-            rating, likelihood, rationale = self._score_goal(
-                goal_name, assessment
-            )
+            rating, likelihood, rationale = self._score_goal(goal_name, assessment)
 
-            suggestions.append(SuggestedGoal(
-                name=goal_name,
-                description=goal_descriptions.get(goal_name, ""),
-                exploit_likelihood=likelihood,
-                success_rating=rating,
-                rationale=rationale,
-                compatible=True,
-                risk_requirement=goal_risk,
-            ))
+            suggestions.append(
+                SuggestedGoal(
+                    name=goal_name,
+                    description=goal_descriptions.get(goal_name, ""),
+                    exploit_likelihood=likelihood,
+                    success_rating=rating,
+                    rationale=rationale,
+                    compatible=True,
+                    risk_requirement=goal_risk,
+                )
+            )
 
         # Sort: compatible first by rating desc, then blocked at bottom
         suggestions.sort(key=lambda g: (g.compatible, g.success_rating), reverse=True)
@@ -236,9 +301,7 @@ class GoalSuggester:
         suggestions.sort(key=lambda g: (g.compatible, g.success_rating), reverse=True)
         return suggestions
 
-    def _generate_ai_custom_goals(
-        self, assessment: ReconAssessment, risk_profile: str
-    ) -> list[SuggestedGoal]:
+    def _generate_ai_custom_goals(self, assessment: ReconAssessment, risk_profile: str) -> list[SuggestedGoal]:
         """Create service-specific custom goals based on recon findings."""
         ai_goals: list[SuggestedGoal] = []
         services = assessment.services
@@ -469,32 +532,35 @@ class GoalSuggester:
 
             rating = min(100, base_rating + cve_boost + os_boost)
             likelihood = (
-                "Very Likely" if rating >= 80
-                else "Likely" if rating >= 55
-                else "Possible" if rating >= 30
+                "Very Likely"
+                if rating >= 80
+                else "Likely"
+                if rating >= 55
+                else "Possible"
+                if rating >= 30
                 else "Unlikely"
             )
 
-            ai_goals.append(SuggestedGoal(
-                name=goal_name,
-                description=description,
-                exploit_likelihood=likelihood,
-                success_rating=rating,
-                rationale=f"AI-generated goal based on discovered {svc_name.upper()} service. "
-                          f"Port: {s.get('port', '?')}, Version: {s.get('version', 'unknown')}. "
-                          f"Tailored to exploit this specific service using the most effective tools.",
-                compatible=True,
-                risk_requirement=risk_req,
-                is_ai_generated=True,
-            ))
+            ai_goals.append(
+                SuggestedGoal(
+                    name=goal_name,
+                    description=description,
+                    exploit_likelihood=likelihood,
+                    success_rating=rating,
+                    rationale=f"AI-generated goal based on discovered {svc_name.upper()} service. "
+                    f"Port: {s.get('port', '?')}, Version: {s.get('version', 'unknown')}. "
+                    f"Tailored to exploit this specific service using the most effective tools.",
+                    compatible=True,
+                    risk_requirement=risk_req,
+                    is_ai_generated=True,
+                )
+            )
 
         # Sort by rating descending
         ai_goals.sort(key=lambda g: g.success_rating, reverse=True)
         return ai_goals
 
-    def _score_goal(
-        self, goal_name: str, assessment: ReconAssessment
-    ) -> tuple[int, str, str]:
+    def _score_goal(self, goal_name: str, assessment: ReconAssessment) -> tuple[int, str, str]:
         """Score a single goal against recon findings.
 
         Returns: (success_rating 0-100, exploit_likelihood, rationale)
@@ -510,7 +576,11 @@ class GoalSuggester:
             if not services and not open_ports:
                 return (30, "Unlikely", "No services or open ports discovered. Recon may be blocked.")
             if len(services) >= 3:
-                return (90, "Very Likely", f"Strong recon position: {len(services)} services, {len(open_ports)} open ports discovered.")
+                return (
+                    90,
+                    "Very Likely",
+                    f"Strong recon position: {len(services)} services, {len(open_ports)} open ports discovered.",
+                )
             if services:
                 return (75, "Likely", f"Recon complete: {len(services)} service(s) on {len(open_ports)} open port(s).")
             return (50, "Possible", "Limited recon data. Target may be firewalled or down.")
@@ -521,21 +591,21 @@ class GoalSuggester:
 
         # ── Compute service-driven score ──
         affinity_services = _GOAL_SERVICE_AFFINITY.get(goal_name, [])
-        matching_services = [
-            s for s in services
-            if s.get("service", s.get("name", "")).lower() in affinity_services
-        ]
+        matching_services = [s for s in services if s.get("service", s.get("name", "")).lower() in affinity_services]
 
         if not matching_services and affinity_services:
-            return (10, "Unlikely",
-                    f"No services matching this goal found. "
-                    f"Goal targets: {', '.join(affinity_services[:5])}. "
-                    f"Found: {', '.join(s.get('service', s.get('name', '?')) for s in services[:5])}.")
+            return (
+                10,
+                "Unlikely",
+                f"No services matching this goal found. "
+                f"Goal targets: {', '.join(affinity_services[:5])}. "
+                f"Found: {', '.join(s.get('service', s.get('name', '?')) for s in services[:5])}.",
+            )
 
         # ── Base score from service risk ──
         max_service_risk = 0
         total_risk = 0
-        for s in (matching_services or services):
+        for s in matching_services or services:
             svc_name = s.get("service", s.get("name", "unknown")).lower()
             risk = _SERVICE_RISK_SCORES.get(svc_name, 50)
             total_risk += risk
@@ -625,6 +695,7 @@ class GoalSuggester:
 
 # ── Recon assessment builder ───────────────────────────────────────────────
 
+
 def build_assessment_from_mcp_results(
     target_ip: str,
     os_result: str,
@@ -675,25 +746,25 @@ def build_assessment_from_mcp_results(
                 banner = ""
 
             open_ports.append(port)
-            services.append({
-                "port": port,
-                "protocol": protocol,
-                "service": service,
-                "version": "",
-                "banner": banner,
-                "risk_score": _SERVICE_RISK_SCORES.get(service.lower(), 50),
-            })
+            services.append(
+                {
+                    "port": port,
+                    "protocol": protocol,
+                    "service": service,
+                    "version": "",
+                    "banner": banner,
+                    "risk_score": _SERVICE_RISK_SCORES.get(service.lower(), 50),
+                }
+            )
 
     # ── Compute overall risk score ──
     if services:
-        overall_risk = sum(
-            _SERVICE_RISK_SCORES.get(s.get("service", "unknown").lower(), 50)
-            for s in services
-        ) // len(services)
+        overall_risk = sum(_SERVICE_RISK_SCORES.get(s.get("service", "unknown").lower(), 50) for s in services) // len(
+            services
+        )
         # Boost for multiple high-risk services
         high_risk_count = sum(
-            1 for s in services
-            if _SERVICE_RISK_SCORES.get(s.get("service", "unknown").lower(), 50) >= 80
+            1 for s in services if _SERVICE_RISK_SCORES.get(s.get("service", "unknown").lower(), 50) >= 80
         )
         overall_risk = min(100, overall_risk + high_risk_count * 5)
     else:

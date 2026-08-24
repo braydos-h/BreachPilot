@@ -84,17 +84,12 @@ def test_bare_confidence_claim_is_not_evidence():
     h = bs.get(hid)
     h.current_confidence = 0.99
     assert compute_status(h.current_confidence, evidence_count=0) == HypothesisStatus.UNKNOWN
-    assert (
-        compute_status(h.current_confidence, evidence_count=1, supporting_count=0)
-        != HypothesisStatus.CONFIRMED
-    )
+    assert compute_status(h.current_confidence, evidence_count=1, supporting_count=0) != HypothesisStatus.CONFIRMED
     updater = DeterministicUpdater(rule=ConfidenceUpdate.BAYESIAN_BETA)
     assert updater.apply(h, []) == 0.99  # no observations: the updater moves nothing
     updater.apply(h, [obs("n1", EvidencePolarity.NEUTRAL, 1.0)])
     assert h.current_confidence == 0.99  # neutral evidence moves nothing either
-    assert compute_status(
-        h.current_confidence, len(h.supporting_evidence), 0, 0
-    ) != HypothesisStatus.CONFIRMED
+    assert compute_status(h.current_confidence, len(h.supporting_evidence), 0, 0) != HypothesisStatus.CONFIRMED
 
 
 def test_duplicate_evidence_refs_count_once():

@@ -123,9 +123,9 @@ layer = {
     "techniques": [
         {"techniqueID": "T1059.001", "score": 100, "comment": "Splunk rule: PS_Encoded_Command"},
         {"techniqueID": "T1071.001", "score": 50, "comment": "Logged only, no alert"},
-        {"techniqueID": "T1055", "score": 0, "comment": "No coverage — blind spot"}
+        {"techniqueID": "T1055", "score": 0, "comment": "No coverage — blind spot"},
     ],
-    "gradient": {"colors": ["#ff6666", "#ffe766", "#8ec843"], "minValue": 0, "maxValue": 100}
+    "gradient": {"colors": ["#ff6666", "#ffe766", "#8ec843"], "minValue": 0, "maxValue": 100},
 }
 with open("coverage_layer.json", "w") as f:
     json.dump(layer, f)

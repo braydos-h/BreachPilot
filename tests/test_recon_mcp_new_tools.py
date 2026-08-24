@@ -72,9 +72,7 @@ async def test_diff_recon_runs_reports_added_port(tmp_path: Path) -> None:
     old_path.write_text(json.dumps(old), encoding="utf-8")
     new_path.write_text(json.dumps(new), encoding="utf-8")
 
-    result = await mcp.call_tool(
-        "diff_recon_runs", {"old_path": str(old_path), "new_path": str(new_path)}
-    )
+    result = await mcp.call_tool("diff_recon_runs", {"old_path": str(old_path), "new_path": str(new_path)})
     text = _to_text(result)
     assert "RECON_DIFF" in text
     # 443 is the added port.
@@ -134,9 +132,7 @@ async def test_run_udp_recon_returns_summary(tmp_path: Path) -> None:
 
     with pytest.MonkeyPatch().context() as mp:
         mp.setattr("tools.recon_pipeline.ReconPipeline.recon_udp", fake_recon_udp)
-        result = await mcp.call_tool(
-            "run_udp_recon", {"target_ip": "10.0.0.50", "top_ports": 100}
-        )
+        result = await mcp.call_tool("run_udp_recon", {"target_ip": "10.0.0.50", "top_ports": 100})
     text = _to_text(result)
     assert "UDP_PORTS" in text
     assert "53" in text

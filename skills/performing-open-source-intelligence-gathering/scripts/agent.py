@@ -15,6 +15,7 @@ except ImportError:
 
 try:
     import dns.resolver
+
     HAS_DNS = True
 except ImportError:
     HAS_DNS = False
@@ -24,9 +25,11 @@ def whois_lookup(domain):
     """Perform WHOIS lookup for domain registration info."""
     try:
         import whois
+
         w = whois.whois(domain)
         return {
-            "domain": domain, "registrar": w.registrar,
+            "domain": domain,
+            "registrar": w.registrar,
             "creation_date": str(w.creation_date),
             "expiration_date": str(w.expiration_date),
             "name_servers": w.name_servers if isinstance(w.name_servers, list) else [w.name_servers],
@@ -50,8 +53,23 @@ def dns_enumeration(domain):
             records[rtype] = [str(r) for r in answers]
         except Exception:
             pass
-    subs = ["www", "mail", "ftp", "vpn", "api", "dev", "staging", "admin",
-            "portal", "test", "owa", "remote", "webmail", "autodiscover", "sip"]
+    subs = [
+        "www",
+        "mail",
+        "ftp",
+        "vpn",
+        "api",
+        "dev",
+        "staging",
+        "admin",
+        "portal",
+        "test",
+        "owa",
+        "remote",
+        "webmail",
+        "autodiscover",
+        "sip",
+    ]
     found = []
     for sub in subs:
         try:
@@ -104,15 +122,23 @@ def technology_fingerprint(url):
         if "drupal" in resp.text.lower():
             technologies.append({"category": "CMS", "value": "Drupal"})
         security_headers = {}
-        for h in ["Strict-Transport-Security", "Content-Security-Policy", "X-Frame-Options",
-                   "X-Content-Type-Options", "X-XSS-Protection", "Referrer-Policy"]:
+        for h in [
+            "Strict-Transport-Security",
+            "Content-Security-Policy",
+            "X-Frame-Options",
+            "X-Content-Type-Options",
+            "X-XSS-Protection",
+            "Referrer-Policy",
+        ]:
             security_headers[h] = headers.get(h, "MISSING")
         return {
-            "url": url, "status": resp.status_code,
+            "url": url,
+            "status": resp.status_code,
             "technologies": technologies,
             "security_headers": security_headers,
-            "cookies": [{"name": c.name, "secure": c.secure, "httponly": "HttpOnly" in str(c._rest)}
-                        for c in resp.cookies][:10],
+            "cookies": [
+                {"name": c.name, "secure": c.secure, "httponly": "HttpOnly" in str(c._rest)} for c in resp.cookies
+            ][:10],
         }
     except Exception as e:
         return {"url": url, "error": str(e)}

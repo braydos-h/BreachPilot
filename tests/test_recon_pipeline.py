@@ -31,6 +31,7 @@ from tools.recon_pipeline import (
 
 # ── Fixtures ───────────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def recon_config() -> ReconConfig:
     return ReconConfig(
@@ -96,6 +97,7 @@ def sample_masscan_output() -> str:
 
 # ── Tool Availability Tests ──────────────────────────────────────────────────
 
+
 class TestToolAvailability:
     def test_check_available_tool(self) -> None:
         with patch("shutil.which", return_value="/usr/bin/nmap"):
@@ -114,6 +116,7 @@ class TestToolAvailability:
 
 
 # ── Command Execution Tests ──────────────────────────────────────────────────
+
 
 class TestRunCommand:
     @pytest.mark.asyncio
@@ -192,8 +195,10 @@ class TestRunCommand:
         """0xC0000005 (nmap crash on Windows) is deterministic, not transient.
         run_command must return immediately without sleeping/retrying -- the
         log showed it retried 2x with 5s/7.5s sleeps before falling through."""
-        with patch("asyncio.create_subprocess_exec") as mock_exec, \
-                patch("asyncio.sleep", new=AsyncMock()) as mock_sleep:
+        with (
+            patch("asyncio.create_subprocess_exec") as mock_exec,
+            patch("asyncio.sleep", new=AsyncMock()) as mock_sleep,
+        ):
             mock_proc = AsyncMock()
             mock_proc.returncode = 3221225477  # 0xC0000005
             mock_proc.communicate.return_value = (b"", b"access violation")
@@ -216,8 +221,10 @@ class TestRunCommand:
     async def test_command_not_found_exit_not_retried(self) -> None:
         """Exit 127 / 9009 (command not found) is deterministic -- no retry."""
         for code in (127, 9009):
-            with patch("asyncio.create_subprocess_exec") as mock_exec, \
-                    patch("asyncio.sleep", new=AsyncMock()) as mock_sleep:
+            with (
+                patch("asyncio.create_subprocess_exec") as mock_exec,
+                patch("asyncio.sleep", new=AsyncMock()) as mock_sleep,
+            ):
                 mock_proc = AsyncMock()
                 mock_proc.returncode = code
                 mock_proc.communicate.return_value = (b"", b"not found")
@@ -235,6 +242,7 @@ class TestRunCommand:
 
 
 # ── Nmap XML Parsing Tests ─────────────────────────────────────────────────
+
 
 class TestNmapParsing:
     def test_parse_nmap_xml(self, sample_nmap_xml: str) -> None:
@@ -281,6 +289,7 @@ class TestNmapParsing:
 
 # ── RustScan Parsing Tests ─────────────────────────────────────────────────
 
+
 class TestRustScanParsing:
     def test_extract_ports(self, sample_rustscan_output: str) -> None:
         scanner = PrimaryReconScanner(ReconConfig())
@@ -301,6 +310,7 @@ class TestRustScanParsing:
 
 # ── Masscan Parsing Tests ──────────────────────────────────────────────────
 
+
 class TestMasscanParsing:
     def test_extract_ports_json(self, sample_masscan_output: str) -> None:
         scanner = PrimaryReconScanner(ReconConfig())
@@ -320,6 +330,7 @@ class TestMasscanParsing:
 
 
 # ── HostReconResult Tests ──────────────────────────────────────────────────
+
 
 class TestHostReconResult:
     def test_get_services_by_name(self) -> None:
@@ -377,6 +388,7 @@ class TestHostReconResult:
 
 # ── Secondary Enumeration Tests ────────────────────────────────────────────
 
+
 class TestSecondaryEnumeration:
     @pytest.mark.asyncio
     async def test_enumerate_http(self, recon_config: ReconConfig) -> None:
@@ -421,6 +433,7 @@ class TestSecondaryEnumeration:
 
 # ── Pipeline Integration Tests ───────────────────────────────────────────────
 
+
 class TestReconPipeline:
     @pytest.mark.asyncio
     async def test_recon_host(self, recon_config: ReconConfig, sample_nmap_xml: str) -> None:
@@ -444,9 +457,11 @@ class TestReconPipeline:
         async def _no_open_ports(_target: str, _ports):
             return []
 
-        with patch("tools.recon_pipeline.ToolAvailability.check", return_value=True), \
-             patch("tools.recon_pipeline.run_command") as mock_run, \
-             patch("tools.socket_scan.socket_scan", side_effect=_no_open_ports):
+        with (
+            patch("tools.recon_pipeline.ToolAvailability.check", return_value=True),
+            patch("tools.recon_pipeline.run_command") as mock_run,
+            patch("tools.socket_scan.socket_scan", side_effect=_no_open_ports),
+        ):
             mock_run.return_value = (True, "", "", 1.0)
 
             pipeline = ReconPipeline(recon_config)
@@ -495,6 +510,7 @@ class TestReconPipeline:
 
 # ── Config Tests ─────────────────────────────────────────────────────────────
 
+
 class TestReconConfig:
     def test_default_config(self) -> None:
         config = ReconConfig()
@@ -515,6 +531,7 @@ class TestReconConfig:
 
 
 # ── Regression Tests (H7/H10/M12-M15) ───────────────────────────────────────
+
 
 class TestRegressions:
     """Regression coverage for bugs fixed in the lazy-canyon fix pass."""
@@ -564,9 +581,15 @@ class TestRegressions:
             return result
 
         for name in (
-            "_enumerate_http", "_enumerate_ssh", "_enumerate_smb",
-            "_enumerate_ldap", "_enumerate_ftp", "_enumerate_redis",
-            "_enumerate_elasticsearch", "_enumerate_docker_k8s", "_enumerate_rdp",
+            "_enumerate_http",
+            "_enumerate_ssh",
+            "_enumerate_smb",
+            "_enumerate_ldap",
+            "_enumerate_ftp",
+            "_enumerate_redis",
+            "_enumerate_elasticsearch",
+            "_enumerate_docker_k8s",
+            "_enumerate_rdp",
         ):
             setattr(enumerator, name, fake_enum)
 
@@ -598,7 +621,9 @@ class TestRegressions:
 
             with patch("tools.recon_pipeline._kill_process", new=AsyncMock()) as mock_kill:
                 success, _stdout, stderr, _elapsed = await run_command(
-                    ["sleep", "100"], timeout=1, max_retries=0,
+                    ["sleep", "100"],
+                    timeout=1,
+                    max_retries=0,
                 )
                 assert success is False
                 assert "Timeout" in stderr
@@ -620,7 +645,9 @@ class TestRegressions:
 
             with patch("tools.recon_pipeline._kill_process", new=AsyncMock()) as mock_kill:
                 success, _stdout, stderr, _elapsed = await run_command(
-                    ["sleep", "100"], timeout=10, max_retries=0,
+                    ["sleep", "100"],
+                    timeout=10,
+                    max_retries=0,
                 )
                 assert success is False
                 assert "boom" in stderr
@@ -637,8 +664,7 @@ class TestRegressions:
         mock_killpg = MagicMock()
         fake_os_posix = SimpleNamespace(killpg=mock_killpg, getpgid=lambda pid: 1234)
         fake_signal = SimpleNamespace(SIGKILL=9)
-        with patch("tools.recon_pipeline.os", fake_os_posix), \
-             patch("tools.recon_pipeline.signal", fake_signal):
+        with patch("tools.recon_pipeline.os", fake_os_posix), patch("tools.recon_pipeline.signal", fake_signal):
             mock_proc = MagicMock()
             mock_proc.pid = 99
             mock_proc.wait = AsyncMock()
@@ -729,9 +755,7 @@ class TestRegressions:
             with patch("asyncio.create_subprocess_exec") as mock_exec:
                 mock_proc = AsyncMock()
                 mock_proc.returncode = 0
-                mock_proc.communicate = AsyncMock(
-                    return_value=(b"redis_version:7.0.0\r\n", b"")
-                )
+                mock_proc.communicate = AsyncMock(return_value=(b"redis_version:7.0.0\r\n", b""))
                 mock_exec.return_value = mock_proc
 
                 enumerator = SecondaryEnumerator(ReconConfig())

@@ -11,6 +11,7 @@ from datetime import datetime
 
 try:
     import pyshark
+
     HAS_PYSHARK = True
 except ImportError:
     HAS_PYSHARK = False
@@ -19,34 +20,33 @@ except ImportError:
 def get_protocol_stats(pcap_path):
     """Extract protocol hierarchy statistics using tshark."""
     result = subprocess.run(
-        ["tshark", "-r", pcap_path, "-q", "-z", "io,phs"],
-        capture_output=True, text=True, timeout=120
+        ["tshark", "-r", pcap_path, "-q", "-z", "io,phs"], capture_output=True, text=True, timeout=120
     )
     protocols = {}
     for line in result.stdout.splitlines():
         match = re.match(r"\s+([\w.]+)\s+frames:(\d+)\s+bytes:(\d+)", line)
         if match:
-            protocols[match.group(1)] = {
-                "frames": int(match.group(2)), "bytes": int(match.group(3))
-            }
+            protocols[match.group(1)] = {"frames": int(match.group(2)), "bytes": int(match.group(3))}
     return protocols
 
 
 def get_conversations(pcap_path):
     """Extract IP conversations using tshark."""
     result = subprocess.run(
-        ["tshark", "-r", pcap_path, "-q", "-z", "conv,ip"],
-        capture_output=True, text=True, timeout=120
+        ["tshark", "-r", pcap_path, "-q", "-z", "conv,ip"], capture_output=True, text=True, timeout=120
     )
     conversations = []
     for line in result.stdout.splitlines():
         parts = line.split()
         if len(parts) >= 10 and "<->" in line:
             idx = parts.index("<->")
-            conversations.append({
-                "src": parts[idx - 1], "dst": parts[idx + 1],
-                "frames_total": parts[idx + 2] if len(parts) > idx + 2 else "0",
-            })
+            conversations.append(
+                {
+                    "src": parts[idx - 1],
+                    "dst": parts[idx + 1],
+                    "frames_total": parts[idx + 2] if len(parts) > idx + 2 else "0",
+                }
+            )
     return conversations
 
 
@@ -54,7 +54,9 @@ def get_top_talkers(pcap_path, top_n=20):
     """Identify top source and destination IPs by packet count."""
     result = subprocess.run(
         ["tshark", "-r", pcap_path, "-T", "fields", "-e", "ip.src", "-e", "ip.dst"],
-        capture_output=True, text=True, timeout=120
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     src_counts = Counter()
     dst_counts = Counter()
@@ -72,19 +74,36 @@ def get_top_talkers(pcap_path, top_n=20):
 def extract_dns_queries(pcap_path):
     """Extract DNS queries from the capture."""
     result = subprocess.run(
-        ["tshark", "-r", pcap_path, "-Y", "dns.qry.name", "-T", "fields",
-         "-e", "dns.qry.name", "-e", "dns.qry.type", "-e", "ip.dst"],
-        capture_output=True, text=True, timeout=120
+        [
+            "tshark",
+            "-r",
+            pcap_path,
+            "-Y",
+            "dns.qry.name",
+            "-T",
+            "fields",
+            "-e",
+            "dns.qry.name",
+            "-e",
+            "dns.qry.type",
+            "-e",
+            "ip.dst",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     queries = []
     for line in result.stdout.splitlines():
         parts = line.split("\t")
         if parts and parts[0]:
-            queries.append({
-                "query": parts[0],
-                "type": parts[1] if len(parts) > 1 else "",
-                "resolver": parts[2] if len(parts) > 2 else "",
-            })
+            queries.append(
+                {
+                    "query": parts[0],
+                    "type": parts[1] if len(parts) > 1 else "",
+                    "resolver": parts[2] if len(parts) > 2 else "",
+                }
+            )
     return queries
 
 
@@ -98,12 +117,15 @@ def detect_dns_tunneling(dns_queries, entropy_threshold=3.5, length_threshold=40
             continue
         entropy = _calculate_entropy(subdomain)
         if entropy > entropy_threshold or len(subdomain) > length_threshold:
-            suspicious.append({
-                "query": domain, "subdomain_length": len(subdomain),
-                "entropy": round(entropy, 3),
-                "severity": "high" if entropy > 4.0 else "medium",
-                "indicator": "Possible DNS tunneling",
-            })
+            suspicious.append(
+                {
+                    "query": domain,
+                    "subdomain_length": len(subdomain),
+                    "entropy": round(entropy, 3),
+                    "severity": "high" if entropy > 4.0 else "medium",
+                    "indicator": "Possible DNS tunneling",
+                }
+            )
     return suspicious
 
 
@@ -119,29 +141,61 @@ def _calculate_entropy(text):
 def extract_http_urls(pcap_path):
     """Extract HTTP request URIs from the capture."""
     result = subprocess.run(
-        ["tshark", "-r", pcap_path, "-Y", "http.request", "-T", "fields",
-         "-e", "http.host", "-e", "http.request.uri", "-e", "ip.dst"],
-        capture_output=True, text=True, timeout=120
+        [
+            "tshark",
+            "-r",
+            pcap_path,
+            "-Y",
+            "http.request",
+            "-T",
+            "fields",
+            "-e",
+            "http.host",
+            "-e",
+            "http.request.uri",
+            "-e",
+            "ip.dst",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     urls = []
     for line in result.stdout.splitlines():
         parts = line.split("\t")
         if len(parts) >= 2 and parts[0]:
-            urls.append({
-                "host": parts[0],
-                "uri": parts[1] if len(parts) > 1 else "/",
-                "dst_ip": parts[2] if len(parts) > 2 else "",
-                "full_url": f"http://{parts[0]}{parts[1] if len(parts) > 1 else '/'}",
-            })
+            urls.append(
+                {
+                    "host": parts[0],
+                    "uri": parts[1] if len(parts) > 1 else "/",
+                    "dst_ip": parts[2] if len(parts) > 2 else "",
+                    "full_url": f"http://{parts[0]}{parts[1] if len(parts) > 1 else '/'}",
+                }
+            )
     return urls
 
 
 def detect_port_scan(pcap_path, threshold=20):
     """Detect port scanning patterns (single source hitting many ports)."""
     result = subprocess.run(
-        ["tshark", "-r", pcap_path, "-Y", "tcp.flags.syn==1 && tcp.flags.ack==0",
-         "-T", "fields", "-e", "ip.src", "-e", "ip.dst", "-e", "tcp.dstport"],
-        capture_output=True, text=True, timeout=120
+        [
+            "tshark",
+            "-r",
+            pcap_path,
+            "-Y",
+            "tcp.flags.syn==1 && tcp.flags.ack==0",
+            "-T",
+            "fields",
+            "-e",
+            "ip.src",
+            "-e",
+            "ip.dst",
+            "-e",
+            "tcp.dstport",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     src_dst_ports = defaultdict(set)
     for line in result.stdout.splitlines():
@@ -153,11 +207,15 @@ def detect_port_scan(pcap_path, threshold=20):
     for pair, ports in src_dst_ports.items():
         if len(ports) >= threshold:
             src, dst = pair.split("->")
-            scans.append({
-                "source": src, "target": dst,
-                "unique_ports": len(ports), "severity": "high",
-                "indicator": f"Port scan: {len(ports)} unique ports probed",
-            })
+            scans.append(
+                {
+                    "source": src,
+                    "target": dst,
+                    "unique_ports": len(ports),
+                    "severity": "high",
+                    "indicator": f"Port scan: {len(ports)} unique ports probed",
+                }
+            )
     return scans
 
 
@@ -165,7 +223,9 @@ def extract_unique_ips(pcap_path):
     """Extract all unique external IPs from the capture."""
     result = subprocess.run(
         ["tshark", "-r", pcap_path, "-T", "fields", "-e", "ip.src", "-e", "ip.dst"],
-        capture_output=True, text=True, timeout=120
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     ips = set()
     for line in result.stdout.splitlines():
@@ -176,8 +236,7 @@ def extract_unique_ips(pcap_path):
     return sorted(ips)
 
 
-def generate_report(pcap_path, protocols, top_talkers, dns_queries, dns_tunneling,
-                    urls, port_scans, external_ips):
+def generate_report(pcap_path, protocols, top_talkers, dns_queries, dns_tunneling, urls, port_scans, external_ips):
     """Generate network traffic analysis report."""
     return {
         "report_time": datetime.utcnow().isoformat(),
@@ -215,8 +274,9 @@ def main():
     port_scans = detect_port_scan(args.pcap, args.scan_threshold)
     external_ips = extract_unique_ips(args.pcap)
 
-    report = generate_report(args.pcap, protocols, top_talkers, dns_queries,
-                            dns_tunneling, urls, port_scans, external_ips)
+    report = generate_report(
+        args.pcap, protocols, top_talkers, dns_queries, dns_tunneling, urls, port_scans, external_ips
+    )
     with open(args.output, "w") as f:
         json.dump(report, f, indent=2, default=str)
     print(f"[+] Protocols: {len(protocols)} | DNS queries: {len(dns_queries)} | URLs: {len(urls)}")

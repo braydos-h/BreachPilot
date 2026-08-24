@@ -20,15 +20,17 @@ from typing import Any
 from db import DatabaseManager, _new_id, _now_iso
 from tools.semantic_memory import SemanticMemoryManager
 
-VALID_MEMORY_TYPES = frozenset({
-    "working",
-    "episodic",
-    "semantic",
-    "target",
-    "hypothesis",
-    "dead_end",
-    "finding_note",
-})
+VALID_MEMORY_TYPES = frozenset(
+    {
+        "working",
+        "episodic",
+        "semantic",
+        "target",
+        "hypothesis",
+        "dead_end",
+        "finding_note",
+    }
+)
 
 _MEMORY_TYPE_ALIASES = {
     "recon": "target",
@@ -223,7 +225,7 @@ class MemoryManager:
             "Recent memories:",
         ]
         for m in memories[:10]:
-            lines.append(f"  [{m.get('memory_type','?')}] {m.get('fact','')[:120]}")
+            lines.append(f"  [{m.get('memory_type', '?')}] {m.get('fact', '')[:120]}")
 
         return "\n".join(lines)
 

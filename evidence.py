@@ -182,8 +182,7 @@ class EvidenceStore:
         with self._db.connection() as conn:
             if evidence_type:
                 cur = conn.execute(
-                    "SELECT * FROM evidence WHERE mission_id=? AND type=? "
-                    "ORDER BY created_at DESC LIMIT ?",
+                    "SELECT * FROM evidence WHERE mission_id=? AND type=? ORDER BY created_at DESC LIMIT ?",
                     (self._mission_id, evidence_type, limit),
                 )
             else:

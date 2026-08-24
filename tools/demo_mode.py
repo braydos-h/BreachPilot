@@ -54,9 +54,10 @@ def _start_dvwa_docker() -> bool:
         return True
     try:
         proc = subprocess.run(
-            ["docker", "run", "-d", "-p", f"{_DVWA_HOST_PORT}:80",
-             "--name", "netattackai-demo", _DVWA_IMAGE],
-            capture_output=True, text=True, timeout=120,
+            ["docker", "run", "-d", "-p", f"{_DVWA_HOST_PORT}:80", "--name", "netattackai-demo", _DVWA_IMAGE],
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         if proc.returncode != 0:
             print(f"  [!] docker run failed: {proc.stderr[:200]}")
@@ -81,12 +82,14 @@ def _start_synthetic_server() -> HTTPServer:
 
     class _Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
-            body = json.dumps({
-                "service": "demo-httpd",
-                "version": "1.0-demo",
-                "headers_seen": dict(self.headers),
-                "note": "Synthetic demo service. Safe by design.",
-            }).encode("utf-8")
+            body = json.dumps(
+                {
+                    "service": "demo-httpd",
+                    "version": "1.0-demo",
+                    "headers_seen": dict(self.headers),
+                    "note": "Synthetic demo service. Safe by design.",
+                }
+            ).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -107,7 +110,9 @@ def _teardown_dvwa() -> None:
     try:
         subprocess.run(
             ["docker", "rm", "-f", "netattackai-demo"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
@@ -145,6 +150,7 @@ def run_demo(args: Any) -> int:
     try:
         # Reconstruct an args namespace for async_main with the local target
         from pathlib import Path
+
         new_args = type(args)(
             target="127.0.0.1",
             mode="recon",
@@ -161,14 +167,22 @@ def run_demo(args: Any) -> int:
             rotate_ua=False,
             doh=False,
             menu=False,
-            web=False, web_host="127.0.0.1", web_port=8080,
-            swarm=False, critic=False, reflection=False,
+            web=False,
+            web_host="127.0.0.1",
+            web_port=8080,
+            swarm=False,
+            critic=False,
+            reflection=False,
             adaptive_exploits=False,
             observer_mode="hybrid",
             recon_first=None,
             no_recon_first=False,
-            doctor=False, demo=False, resume="",
-            json=False, quiet=True, debug=False,
+            doctor=False,
+            demo=False,
+            resume="",
+            json=False,
+            quiet=True,
+            debug=False,
         )
         # Build a minimal namespace shim — easiest is to call the
         # underlying async flow directly. We just print the demo banner

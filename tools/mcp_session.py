@@ -88,6 +88,7 @@ async def _elapsed_ticker(
 # MCP Exploit Session
 # ---------------------------------------------------------------------------
 
+
 def _filter_env_for_log(env: dict[str, str]) -> dict[str, str]:
     """Return env dict with secrets masked for safe logging."""
     safe: dict[str, str] = {}
@@ -105,9 +106,8 @@ def _sensitive_env_values(env: dict[str, str]) -> tuple[str, ...]:
     values = []
     for key, value in env.items():
         lower = key.lower()
-        if (
-            len(value) >= 4
-            and any(part in lower for part in ("key", "secret", "token", "password", "passwd", "api", "auth"))
+        if len(value) >= 4 and any(
+            part in lower for part in ("key", "secret", "token", "password", "passwd", "api", "auth")
         ):
             values.append(value)
     return tuple(values)
@@ -191,8 +191,7 @@ async def open_exploit_mcp_session(
             raise
         http_detail = _concise_startup_error(http_startup_errors[-1])
         raise RuntimeError(
-            f"MCP HTTP startup failed ({http_detail}); stdio fallback also failed "
-            f"({_concise_startup_error(exc)})."
+            f"MCP HTTP startup failed ({http_detail}); stdio fallback also failed ({_concise_startup_error(exc)})."
         ) from exc
 
 
@@ -299,9 +298,12 @@ async def _open_exploit_mcp_session_once(
             command=sys.executable,
             args=[
                 str(server_path),
-                "--transport", "stdio",
-                "--config", str(config_path.resolve()),
-                "--workspace", str(workspace.resolve()),
+                "--transport",
+                "stdio",
+                "--config",
+                str(config_path.resolve()),
+                "--workspace",
+                str(workspace.resolve()),
             ],
             env=env,
         )
@@ -352,10 +354,7 @@ async def _open_exploit_mcp_session_once(
                                 stdio_yielded = True
                                 yield None
                                 return
-                            raise RuntimeError(
-                                f"MCP server boot timed out after "
-                                f"{MCP_BOOT_TIMEOUT_SECONDS:.0f}s"
-                            )
+                            raise RuntimeError(f"MCP server boot timed out after {MCP_BOOT_TIMEOUT_SECONDS:.0f}s")
                         # The boot spinner's ``with`` block encloses ``yield session``
                         # below, so without this the redraw thread would keep printing
                         # ``[STATUS] Booting MCP server (stdio)... X.Xs`` for the
@@ -553,10 +552,7 @@ async def _open_exploit_mcp_session_once(
                             f"{_server_log_tail(http_log_path, secret_values=http_log_secrets)}"
                         )
                         if _is_exception_group(exc):
-                            ui.error(
-                                "Detected ExceptionGroup / BaseExceptionGroup. "
-                                "Unpacking nested exceptions:"
-                            )
+                            ui.error("Detected ExceptionGroup / BaseExceptionGroup. Unpacking nested exceptions:")
                             _log_nested_exceptions(exc)
                         raise
                     http_initialized = True
@@ -589,11 +585,7 @@ async def _open_exploit_mcp_session_once(
         failure_is_soft = soft_fail if http_initialized else startup_soft_fail
         if not http_initialized:
             startup_errors.append(exc)
-        startup_log_tail = (
-            ""
-            if http_initialized
-            else _server_log_tail(http_log_path, secret_values=http_log_secrets)
-        )
+        startup_log_tail = "" if http_initialized else _server_log_tail(http_log_path, secret_values=http_log_secrets)
         if failure_is_soft:
             ui.warning(f"MCP HTTP session failed: {exc}{startup_log_tail}")
             if _is_exception_group(exc):
@@ -603,10 +595,7 @@ async def _open_exploit_mcp_session_once(
             return
         ui.error(f"MCP HTTP session failed: {exc}{startup_log_tail}")
         if _is_exception_group(exc):
-            ui.error(
-                "Detected ExceptionGroup / BaseExceptionGroup. "
-                "Unpacking nested exceptions:"
-            )
+            ui.error("Detected ExceptionGroup / BaseExceptionGroup. Unpacking nested exceptions:")
             _log_nested_exceptions(exc)
         raise
     finally:
@@ -629,9 +618,7 @@ def start_exploit_http_server(
     env: dict[str, str],
 ) -> tuple[subprocess.Popen[str], Any]:
     if port_is_open("127.0.0.1", port):
-        raise RuntimeError(
-            f"Exploit MCP HTTP port {port} is already in use. Stop the process using it."
-        )
+        raise RuntimeError(f"Exploit MCP HTTP port {port} is already in use. Stop the process using it.")
 
     workspace.mkdir(parents=True, exist_ok=True)
     log_path = workspace / "mcp_exploit_server.log"
@@ -650,11 +637,16 @@ def start_exploit_http_server(
             [
                 sys.executable,
                 str(server_path),
-                "--transport", "http",
-                "--host", "127.0.0.1",
-                "--port", str(port),
-                "--config", str(config_path.resolve()),
-                "--workspace", str(workspace.resolve()),
+                "--transport",
+                "http",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+                "--config",
+                str(config_path.resolve()),
+                "--workspace",
+                str(workspace.resolve()),
             ],
             cwd=str(server_path.parent),
             env=env,
@@ -914,6 +906,7 @@ def port_is_open(host: str, port: int) -> bool:
 # ---------------------------------------------------------------------------
 # Tool schemas
 # ---------------------------------------------------------------------------
+
 
 def get_field(obj: Any, name: str, default: Any = None) -> Any:
     if isinstance(obj, dict):

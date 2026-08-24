@@ -183,11 +183,13 @@ class PCAPForensicAnalyzer:
         queries = []
         for pkt in self.packets:
             if DNS in pkt and pkt[DNS].qr == 0 and DNSQR in pkt:
-                queries.append({
-                    "query": pkt[DNSQR].qname.decode(errors="replace").rstrip("."),
-                    "type": pkt[DNSQR].qtype,
-                    "src": pkt[IP].src if IP in pkt else "unknown"
-                })
+                queries.append(
+                    {
+                        "query": pkt[DNSQR].qname.decode(errors="replace").rstrip("."),
+                        "type": pkt[DNSQR].qtype,
+                        "src": pkt[IP].src if IP in pkt else "unknown",
+                    }
+                )
         return queries
 
     def detect_beaconing(self, threshold_seconds: float = 5.0) -> list:
@@ -202,17 +204,21 @@ class PCAPForensicAnalyzer:
         for key, times in ip_timestamps.items():
             if len(times) < 5:
                 continue
-            deltas = [times[i+1] - times[i] for i in range(len(times)-1)]
+            deltas = [times[i + 1] - times[i] for i in range(len(times) - 1)]
             if deltas:
                 avg_delta = sum(deltas) / len(deltas)
                 variance = sum((d - avg_delta) ** 2 for d in deltas) / len(deltas)
                 if variance < threshold_seconds and avg_delta > 1:
-                    beacons.append({
-                        "src": key[0], "dst": key[1], "port": key[2],
-                        "avg_interval": round(avg_delta, 2),
-                        "variance": round(variance, 4),
-                        "connection_count": len(times)
-                    })
+                    beacons.append(
+                        {
+                            "src": key[0],
+                            "dst": key[1],
+                            "port": key[2],
+                            "avg_interval": round(avg_delta, 2),
+                            "variance": round(variance, 4),
+                            "connection_count": len(times),
+                        }
+                    )
         return sorted(beacons, key=lambda x: x["variance"])
 
     def get_protocol_distribution(self) -> dict:
@@ -234,7 +240,7 @@ class PCAPForensicAnalyzer:
             "conversations": self.get_conversations()[:50],
             "dns_queries": self.extract_dns_queries()[:200],
             "potential_beacons": self.detect_beaconing(),
-            "protocol_distribution": self.get_protocol_distribution()
+            "protocol_distribution": self.get_protocol_distribution(),
         }
 
         report_path = os.path.join(self.output_dir, "pcap_forensic_report.json")

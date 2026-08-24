@@ -151,7 +151,9 @@ def build_graph(records: list[dict[str, Any]], chains: list[dict[str, Any]]) -> 
             module = str(entry.get("module") or entry.get("tool") or f"step-{i}")
             step_id = f"step:{chain_id}:{i}:{module}"
             add_node(
-                step_id, "step", module,
+                step_id,
+                "step",
+                module,
                 chain_id=chain_id,
                 result=str(entry.get("result") or ""),
             )

@@ -8,6 +8,7 @@ added to ``api_key_store.configured_api_key_env_names`` so
 ``bootstrap_api_keys`` loads it from ``secr.json`` into env. It stays OPTIONAL
 -- cve_to_poc falls through to searchsploit/NVD on rate-limit.
 """
+
 from __future__ import annotations
 
 import json
@@ -96,10 +97,15 @@ def test_load_api_keys_into_env_loads_top_level_ollama(tmp_path: Path, monkeypat
     from tools.api_key_store import configured_api_key_env_names, load_api_keys_into_env
 
     store = tmp_path / "secr.json"
-    store.write_text(json.dumps({
-        "version": 1,
-        "api_keys": {"OLLAMA_API_KEY": "sk-ollama-cloud"},
-    }), encoding="utf-8")
+    store.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "api_keys": {"OLLAMA_API_KEY": "sk-ollama-cloud"},
+            }
+        ),
+        encoding="utf-8",
+    )
 
     monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
 
@@ -114,10 +120,15 @@ def test_load_api_keys_into_env_top_level_only(tmp_path: Path, monkeypatch):
     from tools.api_key_store import configured_api_key_env_names, load_api_keys_into_env
 
     store = tmp_path / "secr.json"
-    store.write_text(json.dumps({
-        "version": 1,
-        "api_keys": {"OLLAMA_API_KEY": "sk-cloud-only"},
-    }), encoding="utf-8")
+    store.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "api_keys": {"OLLAMA_API_KEY": "sk-cloud-only"},
+            }
+        ),
+        encoding="utf-8",
+    )
 
     monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
 
@@ -151,10 +162,15 @@ def test_load_api_keys_into_env_loads_github(tmp_path: Path, monkeypatch):
     from tools.api_key_store import configured_api_key_env_names, load_api_keys_into_env
 
     store = tmp_path / "secr.json"
-    store.write_text(json.dumps({
-        "version": 1,
-        "api_keys": {"GITHUB_TOKEN": "ghp_secret123", "NVD_API_KEY": "nvd-key"},
-    }), encoding="utf-8")
+    store.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "api_keys": {"GITHUB_TOKEN": "ghp_secret123", "NVD_API_KEY": "nvd-key"},
+            }
+        ),
+        encoding="utf-8",
+    )
 
     # Start clean so the load actually sets the value.
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
@@ -188,21 +204,31 @@ def _patch_net(monkeypatch, captured: dict[str, Any]):
     import tools.exploit_search as es
 
     class _Resp:
-        def __init__(self, code=200): self._c = code
-        def getcode(self): return self._c
-        def read(self): return b'{"items": []}'
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
+        def __init__(self, code=200):
+            self._c = code
+
+        def getcode(self):
+            return self._c
+
+        def read(self):
+            return b'{"items": []}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
 
     def _fake_urlopen(req, timeout=None):
         captured["headers"] = dict(req.header_items())
         captured["url"] = req.full_url
         return _Resp(200)
+
     monkeypatch.setattr(es.urllib.request, "urlopen", _fake_urlopen)
 
     def _fake_run(args, **kwargs):
-        return subprocess.CompletedProcess(args=args, returncode=0,
-                                            stdout="{}", stderr="")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="{}", stderr="")
+
     monkeypatch.setattr(es.subprocess, "run", _fake_run)
 
 

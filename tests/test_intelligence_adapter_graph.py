@@ -31,9 +31,7 @@ def graph(tmp_path):
 
 def _edge_count(db, mid):
     with db.connection() as conn:
-        return conn.execute(
-            "SELECT COUNT(*) FROM graph_edges WHERE mission_id=?", (mid,)
-        ).fetchone()[0]
+        return conn.execute("SELECT COUNT(*) FROM graph_edges WHERE mission_id=?", (mid,)).fetchone()[0]
 
 
 def test_add_edge_by_value_auto_creates_both_nodes_and_links_them(graph):

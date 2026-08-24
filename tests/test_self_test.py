@@ -18,13 +18,17 @@ class FakeMcpSession:
     def __init__(self, *, raise_on: set[str] | None = None) -> None:
         self._raise_on = raise_on or set()
         self.initialize = AsyncMock(return_value=None)
-        self.list_tools = AsyncMock(return_value=MagicMock(tools=[
-            type("Tool", (), {"name": "check_os"})(),
-            type("Tool", (), {"name": "quick_scan"})(),
-            type("Tool", (), {"name": "search_cve_intel"})(),
-            type("Tool", (), {"name": "list_workspace"})(),
-            type("Tool", (), {"name": "write_python_file"})(),
-        ]))
+        self.list_tools = AsyncMock(
+            return_value=MagicMock(
+                tools=[
+                    type("Tool", (), {"name": "check_os"})(),
+                    type("Tool", (), {"name": "quick_scan"})(),
+                    type("Tool", (), {"name": "search_cve_intel"})(),
+                    type("Tool", (), {"name": "list_workspace"})(),
+                    type("Tool", (), {"name": "write_python_file"})(),
+                ]
+            )
+        )
         self.call_tool = AsyncMock(side_effect=self._dispatch)
         self.call_tool_calls: list[tuple[str, dict[str, Any]]] = []
 
@@ -50,30 +54,38 @@ def _make_args(**overrides: Any) -> Namespace:
 
 def _fake_open_session(session: FakeMcpSession):
     """Return an async context manager that yields the fake session."""
+
     class _Ctx:
         async def __aenter__(self):
             return session
+
         async def __aexit__(self, exc_type, exc, tb):
             return False
+
     return lambda *_a, **_k: _Ctx()
 
 
 @pytest.fixture
 def patch_env_checks():
     """Patch doctor checks so self_test environment validation always passes."""
-    with patch("tools.self_test.load_validated_config", return_value={
-        "ollama": {"host": "http://localhost:11434"},
-        "models": {"registry": {"kimi": "kimi-k2.6:cloud"}},
-        "mcp": {"http_port": 8001},
-    }), \
-        patch("tools.self_test._check_python", return_value={"name": "python_version", "ok": True}), \
-        patch("tools.self_test._check_imports", return_value={"name": "python_imports", "ok": True}), \
-        patch("tools.self_test._check_nmap", return_value={"name": "nmap_binary", "ok": True}), \
-        patch("tools.self_test._check_workspace", return_value={"name": "workspace_writable", "ok": True}), \
-        patch("tools.self_test._check_config", return_value={"name": "config_valid", "ok": True}), \
-        patch("tools.self_test._check_ollama", return_value={"name": "ollama_reachable", "ok": True}), \
-        patch("tools.self_test._check_models", return_value={"name": "model_registry", "ok": True}), \
-        patch("tools.self_test._check_port", return_value={"name": "port_free", "ok": True}):
+    with (
+        patch(
+            "tools.self_test.load_validated_config",
+            return_value={
+                "ollama": {"host": "http://localhost:11434"},
+                "models": {"registry": {"kimi": "kimi-k2.6:cloud"}},
+                "mcp": {"http_port": 8001},
+            },
+        ),
+        patch("tools.self_test._check_python", return_value={"name": "python_version", "ok": True}),
+        patch("tools.self_test._check_imports", return_value={"name": "python_imports", "ok": True}),
+        patch("tools.self_test._check_nmap", return_value={"name": "nmap_binary", "ok": True}),
+        patch("tools.self_test._check_workspace", return_value={"name": "workspace_writable", "ok": True}),
+        patch("tools.self_test._check_config", return_value={"name": "config_valid", "ok": True}),
+        patch("tools.self_test._check_ollama", return_value={"name": "ollama_reachable", "ok": True}),
+        patch("tools.self_test._check_models", return_value={"name": "model_registry", "ok": True}),
+        patch("tools.self_test._check_port", return_value={"name": "port_free", "ok": True}),
+    ):
         yield
 
 

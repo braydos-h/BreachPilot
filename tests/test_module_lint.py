@@ -65,6 +65,4 @@ def test_script_generated_modules_have_script() -> None:
             continue
         if not (result.get("script") or result.get("suggested_command")):
             offenders.append(mod.name)
-    assert not offenders, (
-        f"script_generated modules with no script/suggested_command: {offenders}"
-    )
+    assert not offenders, f"script_generated modules with no script/suggested_command: {offenders}"

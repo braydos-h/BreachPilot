@@ -86,9 +86,7 @@ def test_orchestrator_threads_experience_store_into_find_modules(tmp_path, monke
         captured["store"] = experience_store
         return []
 
-    monkeypatch.setattr(
-        "tools.autonomous_orchestrator.find_modules", _spy_find_modules
-    )
+    monkeypatch.setattr("tools.autonomous_orchestrator.find_modules", _spy_find_modules)
     orch = _orchestrator(tmp_path, experience_store=_SpyStore())
     state = _state_with_versioned_ssh()
 
@@ -120,33 +118,36 @@ def test_dedupe_drops_duplicate_service_task(tmp_path, monkeypatch):
     def _fake_find(ctx, experience_store=None):
         return [(80, fake_mod)]
 
-    monkeypatch.setattr(
-        "tools.autonomous_orchestrator.find_modules", _fake_find
-    )
+    monkeypatch.setattr("tools.autonomous_orchestrator.find_modules", _fake_find)
     # Make _create_service_specific_tasks return a matching SSHBruteForce task
     # on port 22/tcp -- it should be dropped as a duplicate.
     orch = _orchestrator(tmp_path)
     state = _state_with_versioned_ssh()
 
     def _service_tasks(state):
-        return [AttackTask(
-            task_id="DUP-1",
-            phase=AttackPhase.EXPLOITATION,
-            module_name="SSHBruteForce",
-            target=state.target,
-            parameters={"port": "22/tcp", "version": "8.5p1"},
-            priority=75,
-        )]
+        return [
+            AttackTask(
+                task_id="DUP-1",
+                phase=AttackPhase.EXPLOITATION,
+                module_name="SSHBruteForce",
+                target=state.target,
+                parameters={"port": "22/tcp", "version": "8.5p1"},
+                priority=75,
+            )
+        ]
 
     monkeypatch.setattr(orch, "_create_service_specific_tasks", _service_tasks)
 
     # Spy on _execute_task_batch to capture the deduped task list.
     captured_tasks: list = []
+
     async def _capture_batch(tasks, state):
         captured_tasks.extend(tasks)
+
     monkeypatch.setattr(orch, "_execute_task_batch", _capture_batch)
 
     import asyncio
+
     asyncio.run(orch._phase_exploitation(state, skip_failed=False))
 
     # The ranked SSHBruteForce task is present, the duplicate service task is dropped.

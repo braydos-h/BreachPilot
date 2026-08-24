@@ -6,16 +6,14 @@
 from ldap3 import Server, Connection, ALL, NTLM, SUBTREE
 
 server = Server("192.168.1.10", get_info=ALL, use_ssl=False)
-conn = Connection(server, user="DOMAIN\\user", password="pass",
-                  authentication=NTLM, auto_bind=True)
+conn = Connection(server, user="DOMAIN\\user", password="pass", authentication=NTLM, auto_bind=True)
 
 # Search with nTSecurityDescriptor
 conn.search(
     "DC=corp,DC=example,DC=com",
     "(objectClass=group)",
     search_scope=SUBTREE,
-    attributes=["distinguishedName", "sAMAccountName",
-                "objectClass", "nTSecurityDescriptor"],
+    attributes=["distinguishedName", "sAMAccountName", "objectClass", "nTSecurityDescriptor"],
 )
 ```
 

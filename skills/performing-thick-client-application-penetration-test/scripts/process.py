@@ -20,8 +20,8 @@ SENSITIVE_PATTERNS = {
     "api_key": re.compile(r'(?i)(api[_-]?key|apikey)\s*[=:]\s*["\']?([^\s"\']+)'),
     "connection_string": re.compile(r'(?i)(connection[_-]?string|jdbc:)\s*[=:]\s*["\']?([^\s"\']+)'),
     "secret": re.compile(r'(?i)(secret|token)\s*[=:]\s*["\']?([^\s"\']+)'),
-    "url_with_creds": re.compile(r'https?://[^:]+:[^@]+@[\w.]+'),
-    "hardcoded_ip": re.compile(r'\b(?:10|172\.(?:1[6-9]|2\d|3[01])|192\.168)\.\d{1,3}\.\d{1,3}\b'),
+    "url_with_creds": re.compile(r"https?://[^:]+:[^@]+@[\w.]+"),
+    "hardcoded_ip": re.compile(r"\b(?:10|172\.(?:1[6-9]|2\d|3[01])|192\.168)\.\d{1,3}\.\d{1,3}\b"),
 }
 
 
@@ -54,11 +54,13 @@ def scan_for_secrets(strings: list[str]) -> list[dict]:
         for name, pattern in SENSITIVE_PATTERNS.items():
             match = pattern.search(s)
             if match:
-                findings.append({
-                    "type": name,
-                    "match": s[:200],
-                    "severity": "High" if name in ("password", "connection_string", "secret") else "Medium"
-                })
+                findings.append(
+                    {
+                        "type": name,
+                        "match": s[:200],
+                        "severity": "High" if name in ("password", "connection_string", "secret") else "Medium",
+                    }
+                )
                 break
     return findings
 
@@ -79,12 +81,9 @@ def scan_config_files(app_dir: str) -> list[dict]:
                     for name, pattern in SENSITIVE_PATTERNS.items():
                         matches = pattern.findall(content)
                         for match in matches:
-                            findings.append({
-                                "file": filepath,
-                                "type": name,
-                                "match": str(match)[:200],
-                                "severity": "High"
-                            })
+                            findings.append(
+                                {"file": filepath, "type": name, "match": str(match)[:200], "severity": "High"}
+                            )
                 except (PermissionError, OSError):
                     continue
     return findings
@@ -97,20 +96,22 @@ def analyze_dlls(app_dir: str) -> list[dict]:
         for filename in files:
             if filename.lower().endswith(".dll"):
                 filepath = os.path.join(root, filename)
-                dlls.append({
-                    "name": filename,
-                    "path": filepath,
-                    "writable": os.access(filepath, os.W_OK),
-                    "size": os.path.getsize(filepath)
-                })
+                dlls.append(
+                    {
+                        "name": filename,
+                        "path": filepath,
+                        "writable": os.access(filepath, os.W_OK),
+                        "size": os.path.getsize(filepath),
+                    }
+                )
 
     writable = [d for d in dlls if d["writable"]]
     return dlls, writable
 
 
-def generate_report(app_dir: str, string_findings: list[dict],
-                     config_findings: list[dict], dll_info: tuple,
-                     output_dir: Path) -> str:
+def generate_report(
+    app_dir: str, string_findings: list[dict], config_findings: list[dict], dll_info: tuple, output_dir: Path
+) -> str:
     """Generate thick client analysis report."""
     report_file = output_dir / "thick_client_report.md"
     timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")

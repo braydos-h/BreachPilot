@@ -79,6 +79,7 @@ def test_iserror_true_is_operational_failure():
     class _FakeResult:
         is_error = True
         content = []
+
     r = normalize_action_result(
         tool_name="run_exploit_terminal",
         result_text="some output",
@@ -197,9 +198,7 @@ def test_canonical_compromise_marker_is_compromise():
 
 def test_compromise_marker_must_be_at_line_start():
     """Prose like 'the compromise of the system was...' must NOT trigger."""
-    r = classify_exploit_outcome(
-        "Analysis: the compromise of the system was due to a misconfiguration."
-    )
+    r = classify_exploit_outcome("Analysis: the compromise of the system was due to a misconfiguration.")
     assert r["outcome"] != ExploitOutcome.COMPROMISE
 
 

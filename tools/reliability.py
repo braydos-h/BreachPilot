@@ -51,6 +51,7 @@ P = ParamSpec("P")
 # Retry decorator
 # ---------------------------------------------------------------------------
 
+
 def with_retry(
     *,
     max_retries: int = 3,
@@ -77,10 +78,12 @@ def with_retry(
         on_exhausted: Callback called when all retries are exhausted
         jitter: Add random jitter to backoff to prevent thundering herd
     """
+
     def decorator(func: Callable[P, T]) -> Callable[P, T]:
         is_async = inspect.iscoroutinefunction(func)
 
         if is_async:
+
             @functools.wraps(func)
             async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
                 last_exception: BaseException | None = None
@@ -91,13 +94,13 @@ def with_retry(
                         last_exception = exc
                         if attempt >= max_retries:
                             break
-                        delay = min(backoff * (2 ** attempt), max_backoff)
+                        delay = min(backoff * (2**attempt), max_backoff)
                         if jitter:
                             import random
+
                             delay = delay * (0.5 + random.random())
                         logger.warning(
-                            f"Retry {attempt + 1}/{max_retries} for {func.__name__} "
-                            f"after {delay:.1f}s: {exc}"
+                            f"Retry {attempt + 1}/{max_retries} for {func.__name__} after {delay:.1f}s: {exc}"
                         )
                         if on_retry:
                             on_retry(exc, attempt + 1)
@@ -109,6 +112,7 @@ def with_retry(
 
             return async_wrapper
         else:
+
             @functools.wraps(func)
             def sync_wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
                 last_exception: BaseException | None = None
@@ -119,13 +123,13 @@ def with_retry(
                         last_exception = exc
                         if attempt >= max_retries:
                             break
-                        delay = min(backoff * (2 ** attempt), max_backoff)
+                        delay = min(backoff * (2**attempt), max_backoff)
                         if jitter:
                             import random
+
                             delay = delay * (0.5 + random.random())
                         logger.warning(
-                            f"Retry {attempt + 1}/{max_retries} for {func.__name__} "
-                            f"after {delay:.1f}s: {exc}"
+                            f"Retry {attempt + 1}/{max_retries} for {func.__name__} after {delay:.1f}s: {exc}"
                         )
                         if on_retry:
                             on_retry(exc, attempt + 1)
@@ -143,6 +147,7 @@ def with_retry(
 # ---------------------------------------------------------------------------
 # Timeout wrapper
 # ---------------------------------------------------------------------------
+
 
 async def with_timeout(
     coro: Coroutine[Any, Any, T],
@@ -219,9 +224,11 @@ def with_timeout_sync(
 # Tool fallback chain
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ToolResult:
     """Result from a tool execution attempt."""
+
     success: bool
     tool_name: str
     stdout: str = ""
@@ -323,6 +330,7 @@ class ToolFallback:
     def _check_tools(self) -> None:
         """Check which tools are available on the system."""
         import shutil
+
         for tool in self._tools:
             self._available_tools[tool] = shutil.which(tool) is not None
             if self._available_tools[tool]:
@@ -489,9 +497,10 @@ class ToolFallback:
 # Circuit breaker
 # ---------------------------------------------------------------------------
 
+
 class CircuitState(Enum):
-    CLOSED = "closed"      # Normal operation
-    OPEN = "open"          # Failing, reject fast
+    CLOSED = "closed"  # Normal operation
+    OPEN = "open"  # Failing, reject fast
     HALF_OPEN = "half_open"  # Testing if recovered
 
 
@@ -575,9 +584,7 @@ class CircuitBreaker:
             logger.warning(f"Circuit breaker {self.name} OPEN (half-open failure)")
         elif self._failure_count >= self.failure_threshold:
             self._state = CircuitState.OPEN
-            logger.warning(
-                f"Circuit breaker {self.name} OPEN after {self._failure_count} failures"
-            )
+            logger.warning(f"Circuit breaker {self.name} OPEN after {self._failure_count} failures")
 
     def get_state(self) -> str:
         """Get current circuit state as string."""
@@ -587,6 +594,7 @@ class CircuitBreaker:
 # ---------------------------------------------------------------------------
 # Async-safe execution pool
 # ---------------------------------------------------------------------------
+
 
 class AsyncExecutionPool:
     """Pool for executing async tasks with concurrency control and cancellation."""
@@ -621,6 +629,7 @@ class AsyncExecutionPool:
         return_exceptions: bool = True,
     ) -> list[T | Exception]:
         """Execute multiple coroutines with concurrency control."""
+
         async def run_with_limit(coro: Coroutine[Any, Any, T]) -> T | Exception:
             try:
                 return await self.execute(coro, timeout=timeout)
@@ -652,6 +661,7 @@ class AsyncExecutionPool:
 # ---------------------------------------------------------------------------
 # Shared rate limiter (token bucket, keyed, loop-agnostic)
 # ---------------------------------------------------------------------------
+
 
 class RateLimiter:
     """Async + sync token-bucket rate limiter, keyed by string key.
@@ -756,9 +766,11 @@ class RateLimiter:
 # Structured error logging
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ErrorRecord:
     """Structured error record for analysis and reporting."""
+
     timestamp: str
     component: str
     operation: str
@@ -824,10 +836,7 @@ class ErrorTracker:
         if len(self._records) > self._max_records:
             self._records.pop(0)
 
-        logger.error(
-            f"[{component}] {operation} failed: {error_type}: {error}. "
-            f"Recovery: {recovery_action}"
-        )
+        logger.error(f"[{component}] {operation} failed: {error_type}: {error}. Recovery: {recovery_action}")
 
     def get_error_summary(self) -> dict[str, Any]:
         """Get summary of recorded errors."""
@@ -839,9 +848,7 @@ class ErrorTracker:
                 key=lambda x: x[1],
                 reverse=True,
             )[:10],
-            "recent_failures": [
-                r.to_dict() for r in self._records[-10:]
-            ],
+            "recent_failures": [r.to_dict() for r in self._records[-10:]],
         }
 
     def get_failure_reasoning(self, operation: str) -> str:
@@ -876,6 +883,7 @@ class ErrorTracker:
 # ---------------------------------------------------------------------------
 # Graceful degradation helpers
 # ---------------------------------------------------------------------------
+
 
 class GracefulDegradation:
     """Helpers for graceful degradation when tools/services fail."""
@@ -924,6 +932,7 @@ class GracefulDegradation:
 # Convenience functions
 # ---------------------------------------------------------------------------
 
+
 async def safe_execute(
     coro_factory: Callable[[], Coroutine[Any, Any, T]],
     *,
@@ -955,9 +964,7 @@ async def safe_execute(
             # Tier 1.2: catch BaseExceptionGroup too — a wrapped MCP stdio call
             # can raise one on subprocess death, and bare `except Exception`
             # would let it propagate and crash the caller.
-            logger.warning(
-                f"safe_execute failed (attempt {attempt + 1}/{max_retries + 1}): {exc}"
-            )
+            logger.warning(f"safe_execute failed (attempt {attempt + 1}/{max_retries + 1}): {exc}")
             if error_tracker:
                 error_tracker.record(
                     component=component,
@@ -967,7 +974,7 @@ async def safe_execute(
                     success=False,
                 )
             if attempt < max_retries:
-                await asyncio.sleep(2 ** attempt)
+                await asyncio.sleep(2**attempt)
 
     logger.error(f"safe_execute exhausted all retries for {operation}")
     return fallback_value

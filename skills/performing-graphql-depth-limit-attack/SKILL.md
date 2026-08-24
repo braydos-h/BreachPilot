@@ -208,15 +208,16 @@ import json
 import sys
 from typing import Optional
 
+
 class GraphQLDepthTester:
     def __init__(self, endpoint: str, headers: Optional[dict] = None):
         self.endpoint = endpoint
         self.headers = headers or {"Content-Type": "application/json"}
         self.results = []
 
-    def generate_nested_query(self, depth: int, field_a: str = "posts",
-                               field_b: str = "author",
-                               leaf_field: str = "name") -> str:
+    def generate_nested_query(
+        self, depth: int, field_a: str = "posts", field_b: str = "author", leaf_field: str = "name"
+    ) -> str:
         """Generate a recursively nested GraphQL query to a specified depth."""
         query = "{ users { "
         for i in range(depth):
@@ -241,12 +242,7 @@ class GraphQLDepthTester:
         payload = json.dumps({"query": query})
         start_time = time.time()
         try:
-            response = requests.post(
-                self.endpoint,
-                data=payload,
-                headers=self.headers,
-                timeout=timeout
-            )
+            response = requests.post(self.endpoint, data=payload, headers=self.headers, timeout=timeout)
             elapsed = time.time() - start_time
             return {
                 "status_code": response.status_code,
@@ -254,7 +250,7 @@ class GraphQLDepthTester:
                 "response_size": len(response.content),
                 "has_errors": "errors" in response.json() if response.status_code == 200 else True,
                 "error_message": self._extract_error(response),
-                "success": response.status_code == 200 and "errors" not in response.json()
+                "success": response.status_code == 200 and "errors" not in response.json(),
             }
         except requests.exceptions.Timeout:
             elapsed = time.time() - start_time
@@ -264,7 +260,7 @@ class GraphQLDepthTester:
                 "response_size": 0,
                 "has_errors": True,
                 "error_message": "Request timed out",
-                "success": False
+                "success": False,
             }
         except requests.exceptions.ConnectionError:
             return {
@@ -273,7 +269,7 @@ class GraphQLDepthTester:
                 "response_size": 0,
                 "has_errors": True,
                 "error_message": "Connection refused - possible DoS",
-                "success": False
+                "success": False,
             }
 
     def _extract_error(self, response) -> str:
@@ -298,8 +294,10 @@ class GraphQLDepthTester:
             self.results.append(result)
 
             status = "OK" if result["success"] else "BLOCKED"
-            print(f"{depth:<8}{result['status_code']:<10}{result['response_time']:<12}"
-                  f"{result['response_size']:<12}{status}")
+            print(
+                f"{depth:<8}{result['status_code']:<10}{result['response_time']:<12}"
+                f"{result['response_size']:<12}{status}"
+            )
 
             if result["error_message"] and "depth" in result["error_message"].lower():
                 print(f"\n[+] Depth limit detected at depth {depth}")
@@ -325,8 +323,10 @@ class GraphQLDepthTester:
             query = self.generate_alias_query(count, inner)
             result = self.send_query(query)
             status = "OK" if result["success"] else "BLOCKED"
-            print(f"  Aliases: {count:<6} Status: {result['status_code']:<6} "
-                  f"Time: {result['response_time']:<8}s  {status}")
+            print(
+                f"  Aliases: {count:<6} Status: {result['status_code']:<6} "
+                f"Time: {result['response_time']:<8}s  {status}"
+            )
 
     def generate_report(self) -> dict:
         """Generate a summary report of all tests."""
@@ -341,8 +341,7 @@ class GraphQLDepthTester:
             "blocked_queries": len(blocked),
             "max_successful_depth": max_successful_depth,
             "depth_limit_enforced": len(blocked) > 0,
-            "vulnerability": "HIGH" if max_successful_depth > 10 else
-                           "MEDIUM" if max_successful_depth > 5 else "LOW"
+            "vulnerability": "HIGH" if max_successful_depth > 10 else "MEDIUM" if max_successful_depth > 5 else "LOW",
         }
 
 
@@ -353,9 +352,9 @@ if __name__ == "__main__":
     tester.test_alias_amplification()
 
     report = tester.generate_report()
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print(f"REPORT SUMMARY")
-    print(f"{'='*50}")
+    print(f"{'=' * 50}")
     for key, value in report.items():
         print(f"  {key}: {value}")
 ```
@@ -402,7 +401,7 @@ GRAPHQL_CONFIG = {
     "max_aliases": 10,
     "query_timeout_seconds": 10,
     "max_batch_size": 5,
-    "rate_limit_per_minute": 100
+    "rate_limit_per_minute": 100,
 }
 ```
 

@@ -136,7 +136,9 @@ def parse_tls_info(raw: str) -> dict:
                 "issuer": str(issuer).strip() if issuer else "",
                 "subject": str(subject).strip() if subject else "",
                 "san": san,
-                "valid_from": str(obj.get("valid_from") or obj.get("notBefore") or obj.get("not_valid_before") or "").strip(),
+                "valid_from": str(
+                    obj.get("valid_from") or obj.get("notBefore") or obj.get("not_valid_before") or ""
+                ).strip(),
                 "valid_to": str(obj.get("valid_to") or obj.get("notAfter") or obj.get("not_valid_after") or "").strip(),
                 "protocol": str(obj.get("protocol") or "").strip(),
                 "cipher": str(obj.get("cipher") or "").strip(),
@@ -378,13 +380,15 @@ def _parse_grepable_ports(ports_str: str) -> list[dict]:
         # open|filtered is the common UDP "interesting" state — keep it.
         if protocol != "udp":
             continue
-        results.append({
-            "port": port,
-            "protocol": "udp",
-            "service": service,
-            "state": state,
-            "banner": banner,
-        })
+        results.append(
+            {
+                "port": port,
+                "protocol": "udp",
+                "service": service,
+                "state": state,
+                "banner": banner,
+            }
+        )
     return results
 
 
@@ -416,13 +420,15 @@ def _parse_xml_udp(raw: str) -> list[dict]:
         # Skip closed / filtered-uninteresting.
         if state in ("closed", "filtered"):
             continue
-        results.append({
-            "port": port_id,
-            "protocol": "udp",
-            "service": service,
-            "state": state,
-            "banner": banner,
-        })
+        results.append(
+            {
+                "port": port_id,
+                "protocol": "udp",
+                "service": service,
+                "state": state,
+                "banner": banner,
+            }
+        )
     return results
 
 

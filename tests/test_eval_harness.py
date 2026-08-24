@@ -21,8 +21,7 @@ import pytest
 # ── compute_metrics ─────────────────────────────────────────────────────────
 
 
-def _fr(*, outcome_summary="", total_actions=0, records=None, audit_path="",
-        evidence=None, evidence_refs=None):
+def _fr(*, outcome_summary="", total_actions=0, records=None, audit_path="", evidence=None, evidence_refs=None):
     """Build a minimal final-result dict shaped like run_exploit_agent's."""
     d: dict = {
         "outcome_summary": outcome_summary,
@@ -196,8 +195,7 @@ def test_render_report_json_serializable():
 def test_render_markdown_contains_verdict_and_target():
     from tools.eval_harness import compute_metrics, render_markdown
 
-    m = compute_metrics(_fr(outcome_summary="compromises: 1", total_actions=2),
-                        run_id="r1", target="10.0.0.99")
+    m = compute_metrics(_fr(outcome_summary="compromises: 1", total_actions=2), run_id="r1", target="10.0.0.99")
     md = render_markdown(m)
     assert "10.0.0.99" in md
     assert m.verdict in md
@@ -242,7 +240,10 @@ def test_write_eval_report_respects_flags(tmp_path):
 
     m = compute_metrics(_fr(total_actions=1), run_id="flags", target="t")
     out_dir = write_eval_report(
-        m, reports_root=tmp_path / "eval", write_markdown=False, write_html=False,
+        m,
+        reports_root=tmp_path / "eval",
+        write_markdown=False,
+        write_html=False,
     )
     assert (out_dir / "eval_report.json").is_file()
     assert not (out_dir / "eval_report.md").exists()
@@ -319,7 +320,8 @@ async def test_run_eval_writes_report_with_mocked_session(tmp_path, monkeypatch)
     fake_session.initialize = AsyncMock()
     fake_session.list_tools = AsyncMock()
     monkeypatch.setattr(
-        mod, "open_exploit_mcp_session",
+        mod,
+        "open_exploit_mcp_session",
         lambda **kwargs: _FakeAsyncCtx(fake_session),
     )
 
@@ -337,10 +339,14 @@ async def test_run_eval_writes_report_with_mocked_session(tmp_path, monkeypatch)
     monkeypatch.setattr(mod, "run_exploit_session", fake_session_call)
 
     # Redirect eval output into tmp_path by mutating the config's output_dir.
-    monkeypatch.setattr(mod, "load_validated_config", lambda _path: {
-        **_fake_config(),
-        "eval": {**_fake_config()["eval"], "output_dir": str(tmp_path / "eval")},
-    })
+    monkeypatch.setattr(
+        mod,
+        "load_validated_config",
+        lambda _path: {
+            **_fake_config(),
+            "eval": {**_fake_config()["eval"], "output_dir": str(tmp_path / "eval")},
+        },
+    )
 
     args = SimpleNamespace(target="10.0.0.5", config=tmp_path / "config.yaml")
     rc = await mod.run_eval(args)
@@ -371,17 +377,22 @@ async def test_run_eval_writes_report_with_mocked_session(tmp_path, monkeypatch)
 async def test_run_eval_degrades_when_mcp_unavailable(tmp_path, monkeypatch):
     import tools.eval_harness as mod
 
-    monkeypatch.setattr(mod, "load_validated_config", lambda _path: {
-        **_fake_config(),
-        "eval": {**_fake_config()["eval"], "output_dir": str(tmp_path / "eval")},
-    })
+    monkeypatch.setattr(
+        mod,
+        "load_validated_config",
+        lambda _path: {
+            **_fake_config(),
+            "eval": {**_fake_config()["eval"], "output_dir": str(tmp_path / "eval")},
+        },
+    )
     fake_router = MagicMock()
     fake_router.get_client.return_value = MagicMock()
     monkeypatch.setattr(mod, "build_router", lambda *a, **k: fake_router)
 
     # MCP probe yields None (soft_fail) -> degrade to error report.
     monkeypatch.setattr(
-        mod, "open_exploit_mcp_session",
+        mod,
+        "open_exploit_mcp_session",
         lambda **kwargs: _FakeAsyncCtx(None),
     )
     # run_exploit_session must NOT be called when the probe failed.

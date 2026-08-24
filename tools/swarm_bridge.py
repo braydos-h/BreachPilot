@@ -72,10 +72,7 @@ class SwarmMcpBridge:
             close = getattr(coro, "close", None)
             if close is not None:
                 close()
-            raise RuntimeError(
-                "SwarmMcpBridge.dispatch cannot run on its MCP event loop; "
-                "call it from a worker thread"
-            )
+            raise RuntimeError("SwarmMcpBridge.dispatch cannot run on its MCP event loop; call it from a worker thread")
         future = asyncio.run_coroutine_threadsafe(coro, loop)
         return future.result(timeout=timeout)
 
@@ -125,6 +122,7 @@ class SwarmMcpBridge:
             )
         try:
             from tools.command_analyzer import analysis_payload
+
             command = analysis_payload(name, args)
         except Exception:
             command = json.dumps(args, default=str)[:200]

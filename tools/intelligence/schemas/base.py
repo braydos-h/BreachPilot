@@ -106,9 +106,7 @@ class BaseSchema(ABC):
                 return self.coerce(repaired), repaired_result
             except Exception as exc:  # noqa: BLE001
                 return None, ValidationResult(valid=False, errors=[str(exc)], repaired=True)
-        return None, ValidationResult(
-            valid=False, errors=list(result.errors) + repaired_result.errors, repaired=True
-        )
+        return None, ValidationResult(valid=False, errors=list(result.errors) + repaired_result.errors, repaired=True)
 
     @staticmethod
     def _str_list(value: Any) -> list[str]:

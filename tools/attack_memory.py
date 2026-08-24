@@ -207,10 +207,7 @@ class AttackMemoryStore:
         return True
 
     def list_items(self, category: str | None = None, limit: int = 200) -> list[AttackMemoryItem]:
-        sql = (
-            "SELECT * FROM attack_memory_items "
-            "WHERE session_id=? AND target_ip=?"
-        )
+        sql = "SELECT * FROM attack_memory_items WHERE session_id=? AND target_ip=?"
         params: list[Any] = [self.session_id, self.target_ip]
         if category:
             sql += " AND category=?"
@@ -314,7 +311,9 @@ def _extract_facts(
         records.append(("findings", "signal", finding, {"source": "finding_regex"}))
 
     if not success or _looks_like_failure(text):
-        records.append(("failures", source_tool or "tool", _summarize_for_memory(source_tool, text), {"source": "failure"}))
+        records.append(
+            ("failures", source_tool or "tool", _summarize_for_memory(source_tool, text), {"source": "failure"})
+        )
 
     return records
 
@@ -411,9 +410,7 @@ def _extract_references(text: str) -> list[str]:
         lower = stripped.lower()
         if any(marker in lower for marker in ("evidence", "saved to", "written to", "artifact", "path:", "file:")):
             refs.append(_one_line(stripped, 260))
-    path_pattern = re.compile(
-        r"(?:[A-Za-z]:\\[^\s\"']+|(?:\.{0,2}[/\\])?[A-Za-z0-9_.-]+(?:[/\\][A-Za-z0-9_. -]+)+)"
-    )
+    path_pattern = re.compile(r"(?:[A-Za-z]:\\[^\s\"']+|(?:\.{0,2}[/\\])?[A-Za-z0-9_.-]+(?:[/\\][A-Za-z0-9_. -]+)+)")
     for match in path_pattern.finditer(text):
         refs.append(match.group(0).rstrip(".,;)"))
     return _dedupe_values(refs)

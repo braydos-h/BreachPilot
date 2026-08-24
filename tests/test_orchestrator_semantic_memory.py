@@ -29,16 +29,17 @@ class FakeSemantic:
     def __init__(self) -> None:
         self.lessons: list[dict[str, Any]] = []
 
-    def store_lesson(self, *, target_signature, action_type, outcome, text,
-                     confidence=0.5, metadata=None) -> str:
-        self.lessons.append({
-            "target_signature": target_signature,
-            "action_type": action_type,
-            "outcome": outcome,
-            "text": text,
-            "confidence": confidence,
-            "metadata": metadata,
-        })
+    def store_lesson(self, *, target_signature, action_type, outcome, text, confidence=0.5, metadata=None) -> str:
+        self.lessons.append(
+            {
+                "target_signature": target_signature,
+                "action_type": action_type,
+                "outcome": outcome,
+                "text": text,
+                "confidence": confidence,
+                "metadata": metadata,
+            }
+        )
         return f"LSN-{len(self.lessons)}"
 
 
@@ -55,6 +56,7 @@ def _mission_config(tmp_path: Path) -> dict[str, Any]:
 
 
 # ── Orchestrator wiring ────────────────────────────────────────────────────
+
 
 def test_orchestrator_accepts_semantic_memory_kwarg(tmp_path: Path) -> None:
     """The orchestrator exposes a semantic_memory kwarg and threads it to the executor."""
@@ -96,6 +98,7 @@ def test_orchestrator_builds_manager_when_flag_set(tmp_path, monkeypatch) -> Non
     # Patch the lazy imports inside __init__ via sys.modules.
     import sys
     import types
+
     fake_sem_mod = types.ModuleType("tools.semantic_memory")
     fake_sem_mod.SemanticMemoryManager = _FakeManager
     monkeypatch.setitem(sys.modules, "tools.semantic_memory", fake_sem_mod)
@@ -111,6 +114,7 @@ def test_orchestrator_builds_manager_when_flag_set(tmp_path, monkeypatch) -> Non
 
 
 # ── _record_lesson_on_success unit ─────────────────────────────────────────
+
 
 def test_record_lesson_on_success_called_on_confirmed_win(tmp_path: Path) -> None:
     """A confirmed module success fires store_lesson with a distinct action_type.

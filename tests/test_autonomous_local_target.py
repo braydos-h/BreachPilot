@@ -9,6 +9,7 @@ local targets and adds a lateral-movement guard. The scope gate is preserved
 (privesc still routes through ``AttackModuleExecutor.execute`` ->
 ``scope_gate.check_scope``).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -76,8 +77,10 @@ async def test_attack_target_local_short_circuits_recon(tmp_path: Path) -> None:
 
     async def _fake_recon(state):
         recon_called["v"] = True
+
     async def _fake_privesc(state):
         privesc_called["v"] = True
+
     async def _fake_validation(state):
         validation_called["v"] = True
 
@@ -109,6 +112,7 @@ async def test_attack_target_remote_runs_recon(tmp_path: Path) -> None:
     async def _fake_recon(state):
         recon_called["v"] = True
         # No open ports -> _attack_target returns "no_attack_surface" before privesc.
+
     async def _fake_privesc(state):
         privesc_called["v"] = True
 
@@ -132,6 +136,7 @@ async def test_attack_target_local_without_tool_executor(tmp_path: Path) -> None
 
     async def _fake_privesc(state):
         privesc_called["v"] = True
+
     async def _fake_validation(state):
         pass
 
@@ -155,9 +160,11 @@ async def test_lateral_movement_skipped_for_local(tmp_path: Path) -> None:
     state = AttackState(target="127.0.0.1", pivot_targets=["10.0.0.99"])
 
     recursed: list[str] = []
+
     async def _fake_attack(target, *, _depth=0):
         recursed.append(target)
         return {"status": "complete", "state": {}}
+
     orch._attack_target = _fake_attack  # type: ignore[assignment]
 
     await orch._phase_lateral_movement(state, _depth=0)  # type: ignore[arg-type]
@@ -187,10 +194,7 @@ async def test_lateral_movement_proceeds_for_remote(tmp_path: Path) -> None:
     # The local guard must not have fired.
     assert "lateral_skip_local" not in _timeline_types(state)
     # A lateral-movement task targeting the pivot was created and attempted.
-    lateral_tasks = [
-        t for t in orch._tasks.values()
-        if t.phase.value == "lateral" and t.target == "10.0.0.99"
-    ]
+    lateral_tasks = [t for t in orch._tasks.values() if t.phase.value == "lateral" and t.target == "10.0.0.99"]
     assert lateral_tasks, "remote lateral movement must create a pivot task"
 
 

@@ -151,11 +151,13 @@ def test_negotiation_runs_n_rounds_then_approves():
     ``negotiation_rounds=3`` the loop runs 3 rounds (round 0 = initial
     modify, rounds 1-2 = re-reviews) and the third review approves."""
     # Script: round0 modify, round1 modify, round2 approve.
-    critic_cls = _scripted_critic_class([
-        ("modify", {"risk_level": "medium"}),
-        ("modify", {"risk_level": "low"}),
-        ("approve", {}),
-    ])
+    critic_cls = _scripted_critic_class(
+        [
+            ("modify", {"risk_level": "medium"}),
+            ("modify", {"risk_level": "low"}),
+            ("approve", {}),
+        ]
+    )
     orch, worker, critic_holder = _make_orch(critic_cls, negotiation_rounds=3)
     result = orch.route({"task_id": "T-1", "phase": "test", "target": "10.0.0.5", "risk_level": "high"})
     assert result.status == AgentStatus.COMPLETE
@@ -172,11 +174,13 @@ def test_negotiation_rounds_zero_is_legacy_one_shot():
     """``negotiation_rounds: 0`` reproduces the legacy one-shot behavior:
     the critic's first ``modify`` is applied once, NO re-review, the task
     runs immediately. The critic is called exactly once."""
-    critic_cls = _scripted_critic_class([
-        ("modify", {"risk_level": "medium"}),
-        ("modify", {"risk_level": "low"}),  # would be round 1 if loop ran
-        ("approve", {}),
-    ])
+    critic_cls = _scripted_critic_class(
+        [
+            ("modify", {"risk_level": "medium"}),
+            ("modify", {"risk_level": "low"}),  # would be round 1 if loop ran
+            ("approve", {}),
+        ]
+    )
     orch, worker, critic_holder = _make_orch(critic_cls, negotiation_rounds=0)
     result = orch.route({"task_id": "T-1", "phase": "test", "target": "10.0.0.5", "risk_level": "high"})
     assert result.status == AgentStatus.COMPLETE
@@ -192,11 +196,13 @@ def test_negotiation_exhausted_falls_back_to_last_task():
     modifications were applied in the last accepted round. The critic is
     called ``rounds + 1`` times (round 0 + N re-reviews), all ``modify``."""
     # Script: all modify, same safe key, different values so no deadlock.
-    critic_cls = _scripted_critic_class([
-        ("modify", {"risk_level": "medium"}),
-        ("modify", {"max_retries": 3}),
-        ("modify", {"rate_limit_seconds": 2}),
-    ])
+    critic_cls = _scripted_critic_class(
+        [
+            ("modify", {"risk_level": "medium"}),
+            ("modify", {"max_retries": 3}),
+            ("modify", {"rate_limit_seconds": 2}),
+        ]
+    )
     orch, worker, critic_holder = _make_orch(critic_cls, negotiation_rounds=2)
     result = orch.route({"task_id": "T-1", "phase": "test", "target": "10.0.0.5", "risk_level": "high"})
     assert result.status == AgentStatus.COMPLETE
@@ -214,11 +220,13 @@ def test_negotiation_deadlock_breaks_loop():
     (repeated) modification does NOT re-apply (it would be a no-op anyway,
     but the loop stops before applying it)."""
     same_mods = {"risk_level": "medium"}
-    critic_cls = _scripted_critic_class([
-        ("modify", same_mods),
-        ("modify", same_mods),  # identical -> deadlock
-        ("approve", {}),  # never reached
-    ])
+    critic_cls = _scripted_critic_class(
+        [
+            ("modify", same_mods),
+            ("modify", same_mods),  # identical -> deadlock
+            ("approve", {}),  # never reached
+        ]
+    )
     orch, worker, critic_holder = _make_orch(critic_cls, negotiation_rounds=3)
     result = orch.route({"task_id": "T-1", "phase": "test", "target": "10.0.0.5", "risk_level": "high"})
     assert result.status == AgentStatus.COMPLETE
@@ -232,10 +240,12 @@ def test_negotiation_deadlock_breaks_loop():
 
 def test_negotiation_deny_blocks_regardless_of_rounds():
     """A ``deny`` at any round blocks the task. The worker never runs."""
-    critic_cls = _scripted_critic_class([
-        ("modify", {"risk_level": "medium"}),
-        ("deny", {}),
-    ])
+    critic_cls = _scripted_critic_class(
+        [
+            ("modify", {"risk_level": "medium"}),
+            ("deny", {}),
+        ]
+    )
     orch, worker, critic_holder = _make_orch(critic_cls, negotiation_rounds=3)
     result = orch.route({"task_id": "T-1", "phase": "test", "target": "10.0.0.5", "risk_level": "high"})
     assert result.status == AgentStatus.BLOCKED
@@ -260,9 +270,11 @@ def test_negotiation_scope_expansion_rejected():
     ``phase``, ``allowed_tools``, ``scope``, ``asset_type``) is rejected:
     the out-of-scope keys are dropped. If the WHOLE modification is
     out-of-scope, the loop stops and the original task runs unchanged."""
-    critic_cls = _scripted_critic_class([
-        ("modify", {"target": "10.0.0.99"}),  # scope expansion -> all rejected
-    ])
+    critic_cls = _scripted_critic_class(
+        [
+            ("modify", {"target": "10.0.0.99"}),  # scope expansion -> all rejected
+        ]
+    )
     orch, worker, critic_holder = _make_orch(critic_cls, negotiation_rounds=3)
     # Original target is 10.0.0.5; critic tries to redirect to 10.0.0.99.
     result = orch.route({"task_id": "T-1", "phase": "test", "target": "10.0.0.5", "risk_level": "high"})
@@ -275,10 +287,12 @@ def test_negotiation_mixed_modification_keeps_safe_keys():
     """A modification with BOTH safe and out-of-scope keys keeps the safe
     keys and drops the out-of-scope ones. The loop continues (not all
     rejected)."""
-    critic_cls = _scripted_critic_class([
-        ("modify", {"risk_level": "low", "target": "10.0.0.99"}),  # mixed
-        ("approve", {}),
-    ])
+    critic_cls = _scripted_critic_class(
+        [
+            ("modify", {"risk_level": "low", "target": "10.0.0.99"}),  # mixed
+            ("approve", {}),
+        ]
+    )
     orch, worker, critic_holder = _make_orch(critic_cls, negotiation_rounds=3)
     result = orch.route({"task_id": "T-1", "phase": "test", "target": "10.0.0.5", "risk_level": "high"})
     assert result.status == AgentStatus.COMPLETE
@@ -290,9 +304,11 @@ def test_negotiation_mixed_modification_keeps_safe_keys():
 def test_negotiation_phase_change_rejected():
     """A critic trying to change the phase (e.g. recon -> exploit) is a
     scope expansion and is rejected."""
-    critic_cls = _scripted_critic_class([
-        ("modify", {"phase": "exploit"}),
-    ])
+    critic_cls = _scripted_critic_class(
+        [
+            ("modify", {"phase": "exploit"}),
+        ]
+    )
     orch, worker, critic_holder = _make_orch(critic_cls, negotiation_rounds=3)
     result = orch.route({"task_id": "T-1", "phase": "test", "target": "10.0.0.5"})
     assert result.status == AgentStatus.COMPLETE

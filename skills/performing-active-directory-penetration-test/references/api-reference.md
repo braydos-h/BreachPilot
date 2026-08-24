@@ -5,6 +5,7 @@
 ### Connection
 ```python
 from ldap3 import Server, Connection, ALL, SUBTREE
+
 server = Server("ldaps://dc.example.com", get_info=ALL, use_ssl=True)
 conn = Connection(server, user="DOMAIN\\user", password="pass", auto_bind=True)
 ```

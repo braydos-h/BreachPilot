@@ -5,7 +5,6 @@ Tests are written to PASS (see Windows pytest 9.0.3 PosixPath INTERNALERROR
 note in the task brief — a failing test crashes pytest before naming itself).
 """
 
-
 from tools.recon_enrichers import (
     http_spider,
     parse_db_banner,
@@ -69,15 +68,17 @@ def test_parse_tls_info_garbage_never_raises():
 
 
 def test_parse_tls_info_dict_input():
-    info = parse_tls_info({
-        "issuer": {"commonName": "Test CA"},
-        "subject": {"commonName": "host.test"},
-        "san": ["a.test", "b.test"],
-        "notBefore": "2024-01-01",
-        "notAfter": "2025-01-01",
-        "protocol": "TLSv1.3",
-        "cipher": "TLS_AES_128_GCM",
-    })
+    info = parse_tls_info(
+        {
+            "issuer": {"commonName": "Test CA"},
+            "subject": {"commonName": "host.test"},
+            "san": ["a.test", "b.test"],
+            "notBefore": "2024-01-01",
+            "notAfter": "2025-01-01",
+            "protocol": "TLSv1.3",
+            "cipher": "TLS_AES_128_GCM",
+        }
+    )
     assert info["issuer"] == "Test CA"
     assert info["subject"] == "host.test"
     assert "a.test" in info["san"] and "b.test" in info["san"]
@@ -113,11 +114,7 @@ def test_parse_smtp_banner_postfix_starttls_auth():
 
 
 def test_parse_smtp_banner_no_starttls():
-    banner = (
-        "220 relay.test Microsoft ESMTP MAIL Service\r\n"
-        "250-AUTH NTLM\r\n"
-        "250 OK\r\n"
-    )
+    banner = "220 relay.test Microsoft ESMTP MAIL Service\r\n250-AUTH NTLM\r\n250 OK\r\n"
     info = parse_smtp_banner(banner)
     assert info["supports_starttls"] is False
     assert "NTLM" in info["auth_methods"]
@@ -133,6 +130,7 @@ def test_parse_smtp_banner_empty():
 # ---------------------------------------------------------------------------
 # parse_db_banner
 # ---------------------------------------------------------------------------
+
 
 def test_parse_db_banner_mysql():
     banner = "5.7.40-log MySQL Community Server (GPL)"
@@ -231,14 +229,17 @@ def test_parse_udp_nmap_garbage_never_raises():
 # http_spider
 # ---------------------------------------------------------------------------
 
+
 def _fake_fetch_factory(pages: dict):
     """Build a fetch_fn that returns canned (status, body) by path."""
+
     def fetch(url):
         # url is the full URL; match by path suffix
         for path, body in pages.items():
             if url.endswith(path):
                 return (200, body)
         return (404, "")
+
     return fetch
 
 
@@ -281,6 +282,7 @@ def test_http_spider_forms_counted():
 def test_http_spider_fetch_exception_skipped_no_raise():
     def bad_fetch(url):
         raise RuntimeError("boom")
+
     # Must NOT raise even when every fetch raises.
     result = http_spider("10.0.0.5", 80, fetch_fn=bad_fetch, max_pages=5)
     assert result["target_ip"] == "10.0.0.5"
@@ -291,8 +293,7 @@ def test_http_spider_fetch_exception_skipped_no_raise():
 
 def test_http_spider_required_keys():
     result = http_spider("10.0.0.5", 80, fetch_fn=lambda u: (200, ""), max_pages=1)
-    for key in ("target_ip", "port", "urls_visited", "links", "forms",
-                "status_codes", "technologies"):
+    for key in ("target_ip", "port", "urls_visited", "links", "forms", "status_codes", "technologies"):
         assert key in result
 
 

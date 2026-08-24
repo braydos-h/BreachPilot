@@ -73,16 +73,42 @@ async def capabilities(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     return {
         "api_version": "v1",
         "features": [
-            "runs", "decisions", "events", "websocket", "tool_gateway", "config", "secrets",
-            "goals", "config_schema", "artifacts", "audit", "swarm_state", "campaign_state",
-            "logs", "credentials", "loot", "live_models", "skill_detail", "run_delete",
-            "sse", "single_decision", "diagnostics_output",
+            "runs",
+            "decisions",
+            "events",
+            "websocket",
+            "tool_gateway",
+            "config",
+            "secrets",
+            "goals",
+            "config_schema",
+            "artifacts",
+            "audit",
+            "swarm_state",
+            "campaign_state",
+            "logs",
+            "credentials",
+            "loot",
+            "live_models",
+            "skill_detail",
+            "run_delete",
+            "sse",
+            "single_decision",
+            "diagnostics_output",
             # ── commit fc0af19 ── advisory/local MCP tool families + new surfaces.
             # Each name keys a WebUI panel off capabilities.features so a disabled
             # backend feature renders an empty state, not a 404 loop.
-            "graph_route", "poc_verification", "replay_simulator", "peer_review",
-            "mitre", "threat_intel", "ticketing", "witness", "negotiation_rounds",
-            "ics_write", "ctf",
+            "graph_route",
+            "poc_verification",
+            "replay_simulator",
+            "peer_review",
+            "mitre",
+            "threat_intel",
+            "ticketing",
+            "witness",
+            "negotiation_rounds",
+            "ics_write",
+            "ctf",
         ],
         "constraints": {
             "max_concurrent_runs": int(api_cfg.get("max_concurrent_runs", 1) or 1),
@@ -92,8 +118,17 @@ async def capabilities(auth: str = Depends(_require_auth)) -> dict[str, Any]:
         "run_options": {
             "modes": ["recon", "attack", "fast"],
             "kinds": ["agent"],
-            "flags": ["swarm", "parallel_swarm", "critic", "reflection", "adaptive_exploits",
-                       "long_session", "multi_model_consult", "ultrathink", "recon_first"],
+            "flags": [
+                "swarm",
+                "parallel_swarm",
+                "critic",
+                "reflection",
+                "adaptive_exploits",
+                "long_session",
+                "multi_model_consult",
+                "ultrathink",
+                "recon_first",
+            ],
         },
     }
 
@@ -116,8 +151,7 @@ def _write_config(merged: dict[str, Any]) -> dict[str, Any]:
 
     origins = (merged.get("api", {}) or {}).get("allowed_origins", [])
     if isinstance(origins, list) and any(
-        isinstance(origin, str) and not is_loopback_origin(origin, origins)
-        for origin in origins
+        isinstance(origin, str) and not is_loopback_origin(origin, origins) for origin in origins
     ):
         raise APIError(
             "config_invalid",
@@ -128,15 +162,17 @@ def _write_config(merged: dict[str, Any]) -> dict[str, Any]:
     validator._config = merged
     result = validator.validate()
     if not result.is_valid:
-        raise APIError("config_invalid", "Config validation failed", status_code=400,
-                       details={"errors": result.errors})
+        raise APIError("config_invalid", "Config validation failed", status_code=400, details={"errors": result.errors})
     import os
     from uuid import uuid4
 
     import yaml
+
     tmp = _CONFIG_PATH.with_name(f".{_CONFIG_PATH.name}.{uuid4().hex}.tmp")
     try:
-        tmp.write_text(yaml.safe_dump(merged, default_flow_style=False, sort_keys=False, allow_unicode=True), encoding="utf-8")
+        tmp.write_text(
+            yaml.safe_dump(merged, default_flow_style=False, sort_keys=False, allow_unicode=True), encoding="utf-8"
+        )
         os.replace(tmp, _CONFIG_PATH)
     finally:
         if tmp.exists():
@@ -160,6 +196,7 @@ async def patch_config(
     body = await request.json()
     if not isinstance(body, dict):
         from tools.api.errors import APIError
+
         raise APIError("invalid_body", "Expected a JSON object.", status_code=400)
     merged = _apply_config_patch(body)
     return {"status": "ok", "config": sanitize(merged)}
@@ -175,12 +212,14 @@ async def get_secrets(auth: str = Depends(_require_auth)) -> dict[str, Any]:
         configured_api_key_env_names,
         load_api_key_file,
     )
+
     names = configured_api_key_env_names(_CONFIG)
     path = Path(os.environ.get("NETATTACKAI_API_KEY_FILE", DEFAULT_API_KEY_FILE))
     loaded = load_api_key_file(path)
     status = {}
     for name in names:
         import os as _os
+
         status[name] = "configured" if (name in loaded or _os.environ.get(name)) else "missing"
     return {"keys": status}
 
@@ -192,6 +231,7 @@ async def put_secrets(
 ) -> dict[str, Any]:
     """Write-only secret storage (values never returned)."""
     from tools.api.errors import APIError
+
     body = await request.json()
     if not isinstance(body, dict) or not isinstance(body.get("secrets"), dict):
         raise APIError("invalid_body", "Expected {secrets: {name: value}}", status_code=400)
@@ -202,12 +242,10 @@ async def put_secrets(
         configured_api_key_env_names,
         save_api_keys,
     )
+
     secrets = body["secrets"]
     allowed = set(configured_api_key_env_names(_CONFIG))
-    if any(
-        name not in allowed or not isinstance(value, str) or not value.strip()
-        for name, value in secrets.items()
-    ):
+    if any(name not in allowed or not isinstance(value, str) or not value.strip() for name, value in secrets.items()):
         raise APIError(
             "invalid_secrets",
             "Secret names must be configured provider environment variables and values must be non-empty strings.",
@@ -258,8 +296,7 @@ async def add_model(request: Request, auth: str = Depends(_require_auth)) -> dic
     if len(alias) > 64 or len(model) > 256:
         raise APIError("invalid_body", "alias or model too long.", status_code=400)
     merged = _apply_config_patch({"models": {"registry": {alias: model}}})
-    return {"status": "ok", "alias": alias, "model": model,
-            "registry": merged.get("models", {}).get("registry", {})}
+    return {"status": "ok", "alias": alias, "model": model, "registry": merged.get("models", {}).get("registry", {})}
 
 
 @router.delete("/models/{alias}")
@@ -322,6 +359,7 @@ async def get_system_info(auth: str = Depends(_require_auth)) -> dict[str, Any]:
 
     def _public_ip() -> str:
         import urllib.request
+
         try:
             with urllib.request.urlopen("https://api.ipify.org", timeout=3.0) as resp:
                 return resp.read().decode("utf-8").strip()
@@ -385,20 +423,22 @@ def _read_attack_memory_db(db_path: Path) -> list[dict[str, Any]]:
     except Exception:
         return items
     for row in rows:
-        items.append({
-            "id": row["id"],
-            "session_id": row["session_id"],
-            "target_ip": row["target_ip"],
-            "category": row["category"],
-            "item_key": row["item_key"],
-            "item_value": row["item_value"],
-            "source_tool": row["source_tool"],
-            "success": bool(row["success"]),
-            "metadata": _safe_json(row["metadata_json"]),
-            "first_seen_at": row["first_seen_at"],
-            "last_seen_at": row["last_seen_at"],
-            "seen_count": int(row["seen_count"]),
-        })
+        items.append(
+            {
+                "id": row["id"],
+                "session_id": row["session_id"],
+                "target_ip": row["target_ip"],
+                "category": row["category"],
+                "item_key": row["item_key"],
+                "item_value": row["item_value"],
+                "source_tool": row["source_tool"],
+                "success": bool(row["success"]),
+                "metadata": _safe_json(row["metadata_json"]),
+                "first_seen_at": row["first_seen_at"],
+                "last_seen_at": row["last_seen_at"],
+                "seen_count": int(row["seen_count"]),
+            }
+        )
     return items
 
 
@@ -421,15 +461,17 @@ def _load_memory_sync(config_path: Path, config: dict[str, Any]) -> dict[str, An
                 "FROM lessons WHERE embedding_json = '[]' ORDER BY created_at DESC LIMIT 100"
             )
             for row in cur.fetchall():
-                lessons.append({
-                    "id": row["id"],
-                    "target_signature": row["target_signature"],
-                    "action_type": row["action_type"],
-                    "outcome": row["outcome"],
-                    "confidence": row["confidence"],
-                    "created_at": row["created_at"],
-                    "metadata": _safe_json(row["metadata_json"]),
-                })
+                lessons.append(
+                    {
+                        "id": row["id"],
+                        "target_signature": row["target_signature"],
+                        "action_type": row["action_type"],
+                        "outcome": row["outcome"],
+                        "confidence": row["confidence"],
+                        "created_at": row["created_at"],
+                        "metadata": _safe_json(row["metadata_json"]),
+                    }
+                )
             cur = conn.execute(
                 "SELECT action_type, COUNT(*) AS n, "
                 "SUM(CASE WHEN outcome='success' THEN 1 ELSE 0 END) AS successes, "
@@ -440,20 +482,25 @@ def _load_memory_sync(config_path: Path, config: dict[str, Any]) -> dict[str, An
                 "GROUP BY action_type ORDER BY last_seen DESC"
             )
             for row in cur.fetchall():
-                n = int(row["n"]); s = int(row["successes"]); f = int(row["failures"]); p = int(row["partials"])
+                n = int(row["n"])
+                s = int(row["successes"])
+                f = int(row["failures"])
+                p = int(row["partials"])
                 # Beta(1,1) posterior mean. ponytail: no time decay here — the
                 # viewer shows raw counts; add decay if it ever misleads.
                 alpha = 1.0 + s + p
                 beta = 1.0 + f + p
-                confidence.append({
-                    "action_type": row["action_type"],
-                    "observations": n,
-                    "successes": s,
-                    "failures": f,
-                    "partials": p,
-                    "confidence": round(alpha / (alpha + beta), 4),
-                    "last_seen": row["last_seen"],
-                })
+                confidence.append(
+                    {
+                        "action_type": row["action_type"],
+                        "observations": n,
+                        "successes": s,
+                        "failures": f,
+                        "partials": p,
+                        "confidence": round(alpha / (alpha + beta), 4),
+                        "last_seen": row["last_seen"],
+                    }
+                )
     except Exception:
         lessons, confidence = [], []
 
@@ -502,8 +549,11 @@ async def reset_system(request: Request, auth: str = Depends(_require_auth)) -> 
     # live ApiPersistence instance, so clear its rows first and keep the file.
     runs_deleted = _RUN_MANAGER._persistence.reset_all()
     removed: list[str] = []
-    for target in [reports_dir, (reports_dir.parent / "exploit_workspace").resolve(),
-                   (reports_dir.parent / "swarm_workspace").resolve()]:
+    for target in [
+        reports_dir,
+        (reports_dir.parent / "exploit_workspace").resolve(),
+        (reports_dir.parent / "swarm_workspace").resolve(),
+    ]:
         if target.exists():
             shutil.rmtree(target, ignore_errors=True)
             removed.append(str(target))
@@ -521,10 +571,12 @@ async def reset_system(request: Request, auth: str = Depends(_require_auth)) -> 
     if research_dir.exists():
         try:
             import sqlite3
+
             conn = sqlite3.connect(str(research_dir / "research.db"))
             try:
                 tables = [
-                    r[0] for r in conn.execute(
+                    r[0]
+                    for r in conn.execute(
                         "SELECT name FROM sqlite_master WHERE type='table' "
                         "AND name NOT LIKE 'sqlite_%' AND name != '_migrations'"
                     )
@@ -561,6 +613,7 @@ async def list_plugins(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     """List discovered plugins."""
     try:
         from tools.plugins import list_discovered_plugins
+
         return {"plugins": list_discovered_plugins()}
     except Exception:
         return {"plugins": []}
@@ -571,6 +624,7 @@ async def list_skills(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     """List runtime skills catalog."""
     try:
         from tools.skill_registry_cache import get_registry
+
         reg = get_registry(_CONFIG)
         skills = [
             {"name": s.name, "description": s.metadata.description, "tags": list(s.metadata.tags or [])}
@@ -586,6 +640,7 @@ async def search_skills(q: str = "", auth: str = Depends(_require_auth)) -> dict
     """Search runtime skills by query."""
     try:
         from tools.skill_registry_cache import get_registry
+
         reg = get_registry(_CONFIG)
         results = reg.search(q) if q else reg.list_skills()
         return {"results": [{"name": s.name, "description": s.metadata.description} for s in results[:20]]}
@@ -599,6 +654,7 @@ def _run_doctor_sync(config_path: Path) -> tuple[int, str]:
     import io
 
     from tools.doctor import run_doctor as _run
+
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         code = _run(config_path)
@@ -619,6 +675,7 @@ async def run_self_test(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     import io
 
     from tools.self_test import run_self_test as _run
+
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         code = await _run(None)
@@ -626,6 +683,7 @@ async def run_self_test(auth: str = Depends(_require_auth)) -> dict[str, Any]:
 
 
 # ── Attack modules catalog ──────────────────────────────────────────────────
+
 
 @router.get("/attack/modules")
 async def list_attack_modules(auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -635,19 +693,22 @@ async def list_attack_modules(auth: str = Depends(_require_auth)) -> dict[str, A
     out: list[dict[str, Any]] = []
     for mod in list_modules():
         family = mod.__class__.__module__.split(".")[-1]
-        out.append({
-            "name": mod.name,
-            "description": mod.description,
-            "family": family,
-            "target_services": list(mod.target_services),
-            "target_ports": list(mod.target_ports),
-            "required_cves": list(mod.required_cves),
-            "destructive_ics": bool(getattr(mod, "destructive_ics", False)),
-        })
+        out.append(
+            {
+                "name": mod.name,
+                "description": mod.description,
+                "family": family,
+                "target_services": list(mod.target_services),
+                "target_ports": list(mod.target_ports),
+                "required_cves": list(mod.required_cves),
+                "destructive_ics": bool(getattr(mod, "destructive_ics", False)),
+            }
+        )
     return {"modules": out}
 
 
 # ── Goals (B4) ──────────────────────────────────────────────────────────────
+
 
 @router.get("/goals")
 async def list_goals(auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -660,28 +721,34 @@ async def list_goals(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     "Unavailable" state; it never bypasses the backend goal gates.
     """
     from tools.goal_engine import GoalEngine
+
     engine = GoalEngine()
     out: list[dict[str, Any]] = []
     for name, goal in engine.presets.items():
-        out.append({
-            "name": name,
-            "description": goal.description,
-            "risk": goal.risk_requirement,
-            "compatible": engine.is_compatible(name, "standard_authorized"),
-        })
+        out.append(
+            {
+                "name": name,
+                "description": goal.description,
+                "risk": goal.risk_requirement,
+                "compatible": engine.is_compatible(name, "standard_authorized"),
+            }
+        )
     return {"goals": out}
 
 
 # ── Config schema (B5) ──────────────────────────────────────────────────────
 
+
 @router.get("/config/schema")
 async def get_config_schema(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     """Return the full default config schema (CONFIG_SCHEMA) for typed form rendering."""
     from tools.config_manager import CONFIG_SCHEMA
+
     return {"schema": CONFIG_SCHEMA}
 
 
 # ── Live Ollama models (C1) ─────────────────────────────────────────────────
+
 
 @router.get("/models/live")
 async def list_live_models(auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -721,6 +788,7 @@ async def list_live_models(auth: str = Depends(_require_auth)) -> dict[str, Any]
                 else f"ChatGPT proxy unavailable: {reason}"
             )
             from fastapi import Response
+
             return Response(
                 content=json.dumps({"models": fallback, "source": "registry", "error": msg}),
                 status_code=503,
@@ -730,6 +798,7 @@ async def list_live_models(auth: str = Depends(_require_auth)) -> dict[str, Any]
         try:
             import httpx
             from fastapi import Response
+
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.get(f"{str(base_url).rstrip('/')}/models")
                 resp.raise_for_status()
@@ -739,8 +808,11 @@ async def list_live_models(auth: str = Depends(_require_auth)) -> dict[str, Any]
         except Exception as exc:
             fallback = list(chatgpt_cfg.get("models") or []) or [chatgpt_cfg.get("default_model", "gpt-5.2")]
             from fastapi import Response
+
             return Response(
-                content=json.dumps({"models": fallback, "source": "registry", "error": f"ChatGPT proxy unreachable: {exc}"}),
+                content=json.dumps(
+                    {"models": fallback, "source": "registry", "error": f"ChatGPT proxy unreachable: {exc}"}
+                ),
                 status_code=503,
                 media_type="application/json",
             )
@@ -750,6 +822,7 @@ async def list_live_models(auth: str = Depends(_require_auth)) -> dict[str, Any]
     try:
         import httpx
         from fastapi import Response
+
         headers = {}
         api_key = (os.environ.get("OLLAMA_API_KEY", "") or "").strip()
         if api_key:
@@ -762,13 +835,16 @@ async def list_live_models(auth: str = Depends(_require_auth)) -> dict[str, Any]
             return {"models": models, "source": "ollama"}
     except Exception as exc:
         return Response(
-            content=json.dumps({"models": list(registry.values()), "source": "registry", "error": f"Ollama unreachable: {exc}"}),
+            content=json.dumps(
+                {"models": list(registry.values()), "source": "registry", "error": f"Ollama unreachable: {exc}"}
+            ),
             status_code=503,
             media_type="application/json",
         )
 
 
 # ── AI providers (ChatGPT / openai-oauth) ────────────────────────────────────
+
 
 def _chatgpt_status_sync(chatgpt_cfg: dict[str, Any]) -> tuple[bool, bool]:
     """Read ChatGPT auth + proxy health off-thread (health check does HTTP)."""
@@ -842,11 +918,13 @@ async def chatgpt_proxy_stop(auth: str = Depends(_require_auth)) -> dict[str, An
 
 # ── Skill detail (C2) ──────────────────────────────────────────────────────
 
+
 @router.get("/skills/{name}")
 async def get_skill(name: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
     """Return a single runtime skill's sanitized body + sections + references."""
     try:
         from tools.skill_registry_cache import get_registry
+
         reg = get_registry(_CONFIG)
         skill = reg.get(name)
         if skill is None:
@@ -936,6 +1014,7 @@ def _plugin_skill_dirs() -> set[str]:
     """Return the set of plugin-contributed skill dir paths (read-only, never writable)."""
     try:
         from tools.plugins import PLUGIN_REGISTRY
+
         return {str(p) for p in PLUGIN_REGISTRY.skill_dirs}
     except Exception:
         return set()

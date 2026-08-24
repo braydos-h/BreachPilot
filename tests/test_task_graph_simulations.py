@@ -70,12 +70,14 @@ def test_linear_chain_unlocks_in_order():
 # Scenario 2: parallel fan-out -- all dependents ready together, priority orders
 # ──────────────────────────────────────────────────────────────────────────
 def test_parallel_fanout_priority_ordering():
-    plan = _plan([
-        _step("root"),
-        _step("low", depends_on=[0], priority=10),
-        _step("high", depends_on=[0], priority=90),
-        _step("mid", depends_on=[0], priority=50),
-    ])
+    plan = _plan(
+        [
+            _step("root"),
+            _step("low", depends_on=[0], priority=10),
+            _step("high", depends_on=[0], priority=90),
+            _step("mid", depends_on=[0], priority=50),
+        ]
+    )
     assert [i for i, _ in plan.ready_steps()] == [0]
     plan.mark_step_done(0, True, "root ok")
 
@@ -112,10 +114,12 @@ def test_retryable_failure_reset_and_retry():
 # Scenario 4: permanent failure (scope_blocked) -> no retry -> cancel + block downstream
 # ──────────────────────────────────────────────────────────────────────────
 def test_permanent_failure_cancels_and_blocks_downstream():
-    plan = _plan([
-        _step("scan_oob"),
-        _step("pivot", depends_on=[0]),
-    ])
+    plan = _plan(
+        [
+            _step("scan_oob"),
+            _step("pivot", depends_on=[0]),
+        ]
+    )
     fc = classify_failure("BLOCKED: target 10.0.0.99 not in the explicit allowlist")
     assert fc is FailureClass.SCOPE_BLOCKED
     assert is_permanent(fc) and not is_retryable(fc)
@@ -197,22 +201,25 @@ def test_blocked_steps_report_dead_dependency():
 # ──────────────────────────────────────────────────────────────────────────
 # Scenario 7: failure-classification matrix (deterministic taxonomy)
 # ──────────────────────────────────────────────────────────────────────────
-@pytest.mark.parametrize("text,expected", [
-    ("BLOCKED: 10.0.0.99 not in allowlist", FailureClass.SCOPE_BLOCKED),
-    ("VULN_NOT_CONFIRMED: patched version detected", FailureClass.FALSE_POSITIVE),
-    ("insufficient evidence to confirm", FailureClass.INSUFFICIENT_EVIDENCE),
-    ("connection refused: no route to host", FailureClass.TARGET_UNREACHABLE),
-    ("readtimeout after 30s", FailureClass.TIMEOUT),
-    ("STATUS_LOGON_FAILURE invalid credentials", FailureClass.AUTH_FAILED),
-    ("requires a foothold to run; no active session", FailureClass.PREREQUISITE_MISSING),
-    ("sqlmap: command not found / not installed", FailureClass.TOOL_UNAVAILABLE),
-    ("Traceback (most recent call last): SyntaxError", FailureClass.MALFORMED_CODE),
-    ("invalid argument: unexpected keyword 'foo'", FailureClass.SCHEMA_ERROR),
-    ("RemoteProtocolError: server disconnected", FailureClass.TRANSPORT_ERROR),
-    ("unsupported target: does not apply", FailureClass.UNSUPPORTED_TARGET),
-    ("", FailureClass.UNKNOWN),
-    ("some weird unrecognized thingamajig", FailureClass.UNEXPECTED_OUTPUT),
-])
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("BLOCKED: 10.0.0.99 not in allowlist", FailureClass.SCOPE_BLOCKED),
+        ("VULN_NOT_CONFIRMED: patched version detected", FailureClass.FALSE_POSITIVE),
+        ("insufficient evidence to confirm", FailureClass.INSUFFICIENT_EVIDENCE),
+        ("connection refused: no route to host", FailureClass.TARGET_UNREACHABLE),
+        ("readtimeout after 30s", FailureClass.TIMEOUT),
+        ("STATUS_LOGON_FAILURE invalid credentials", FailureClass.AUTH_FAILED),
+        ("requires a foothold to run; no active session", FailureClass.PREREQUISITE_MISSING),
+        ("sqlmap: command not found / not installed", FailureClass.TOOL_UNAVAILABLE),
+        ("Traceback (most recent call last): SyntaxError", FailureClass.MALFORMED_CODE),
+        ("invalid argument: unexpected keyword 'foo'", FailureClass.SCHEMA_ERROR),
+        ("RemoteProtocolError: server disconnected", FailureClass.TRANSPORT_ERROR),
+        ("unsupported target: does not apply", FailureClass.UNSUPPORTED_TARGET),
+        ("", FailureClass.UNKNOWN),
+        ("some weird unrecognized thingamajig", FailureClass.UNEXPECTED_OUTPUT),
+    ],
+)
 def test_classification_matrix(text, expected):
     assert classify_failure(text) is expected
 
@@ -235,8 +242,9 @@ def test_hypothesis_lifecycle(tmp_path):
     store = AssessmentStateStore(tmp_path)
     state = store.load("10.0.0.50")
     state.goal = "backdoor"
-    h = state.add_hypothesis("Log4j RCE exposed on port 8080", confidence=0.7,
-                            expected_evidence=["shell"], created_from="planner")
+    h = state.add_hypothesis(
+        "Log4j RCE exposed on port 8080", confidence=0.7, expected_evidence=["shell"], created_from="planner"
+    )
 
     # A step is tied to the hypothesis.
     plan = _plan([_step("log4j", phase="exploit", hypothesis=h.id)])
@@ -265,11 +273,13 @@ def test_hypothesis_lifecycle(tmp_path):
 # Scenario 9: graph_summary + aggregate_state compact snapshot
 # ──────────────────────────────────────────────────────────────────────────
 def test_graph_summary_and_aggregate_state(tmp_path):
-    plan = _plan([
-        _step("a"),
-        _step("b", depends_on=[0], priority=80),
-        _step("c", depends_on=[1]),
-    ])
+    plan = _plan(
+        [
+            _step("a"),
+            _step("b", depends_on=[0], priority=80),
+            _step("c", depends_on=[1]),
+        ]
+    )
     plan.mark_step_done(0, True, "a ok")
     plan.fail_step(1, FailureClass.TIMEOUT.value, "timeout")
 
@@ -280,13 +290,21 @@ def test_graph_summary_and_aggregate_state(tmp_path):
 
     # Persist plan where aggregate_state expects it.
     from tools.attack_planner import AttackPlanner
+
     planner = AttackPlanner(tmp_path)
     planner.save_plan(plan)
 
     # Seed an audit trail record for the target (compact refs, not secrets).
     (tmp_path / "exploit_audit.jsonl").write_text(
-        json.dumps({"target_ip": "10.0.0.50", "tool_name": "run_exploit_terminal",
-                     "status": "completed", "attempt_id": "att-1"}) + "\n",
+        json.dumps(
+            {
+                "target_ip": "10.0.0.50",
+                "tool_name": "run_exploit_terminal",
+                "status": "completed",
+                "attempt_id": "att-1",
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
 

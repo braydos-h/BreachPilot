@@ -21,14 +21,14 @@ wrpcap("output.pcap", packets)
 from scapy.all import IP, TCP, UDP, DNS, DNSQR, ICMP
 
 pkt = packets[0]
-pkt.haslayer(IP)        # Check if layer exists
-pkt[IP].src             # Source IP
-pkt[IP].dst             # Destination IP
-pkt[TCP].sport          # Source port
-pkt[TCP].dport          # Destination port
-pkt[TCP].flags          # TCP flags: S, SA, A, FA, R, PA
-pkt[DNS].qd.qname       # DNS query name
-pkt[ICMP].type          # ICMP type (8=echo request, 0=echo reply)
+pkt.haslayer(IP)  # Check if layer exists
+pkt[IP].src  # Source IP
+pkt[IP].dst  # Destination IP
+pkt[TCP].sport  # Source port
+pkt[TCP].dport  # Destination port
+pkt[TCP].flags  # TCP flags: S, SA, A, FA, R, PA
+pkt[DNS].qd.qname  # DNS query name
+pkt[ICMP].type  # ICMP type (8=echo request, 0=echo reply)
 ```
 
 ### Packet Crafting

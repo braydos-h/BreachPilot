@@ -13,6 +13,7 @@ Reflections never feed the Bayesian ``ExperienceStore`` — only a semantic
 lesson with a DISTINCT ``action_type='reflection:exploit_loop'`` is written,
 best-effort. The default-off config preserves the heuristic-only behavior.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -36,6 +37,7 @@ from tools.exploit_agent import (
 )
 
 # ── _parse_reasoning_block ──────────────────────────────────────────────
+
 
 def test_parse_reasoning_block_extracts_content():
     content = "Before.\n[REASONING]Testing hypothesis: SSH brute force.[/REASONING]\nAfter."
@@ -102,6 +104,7 @@ def test_parse_reasoning_block_falls_back_to_thinking_field():
 
 # ── _build_reasoning_advisory_message ───────────────────────────────────
 
+
 def test_build_advisory_empty_recent_returns_none():
     assert _build_reasoning_advisory_message([]) is None
 
@@ -132,6 +135,7 @@ def test_build_advisory_enumerates_entries():
 
 # ── _refresh_reasoning_advisory_message ─────────────────────────────────
 
+
 def _system_messages(extra=None):
     msgs = [{"role": "system", "content": "system prompt"}]
     if extra:
@@ -140,18 +144,22 @@ def _system_messages(extra=None):
 
 
 def test_refresh_ultrathink_off_strips_stale_advisory():
-    msgs = _system_messages([
-        {"role": "user", "content": f"{REASONING_ADVISORY_MARKER}\nstale advisory"},
-        {"role": "assistant", "content": "hi"},
-    ])
+    msgs = _system_messages(
+        [
+            {"role": "user", "content": f"{REASONING_ADVISORY_MARKER}\nstale advisory"},
+            {"role": "assistant", "content": "hi"},
+        ]
+    )
     out = _refresh_reasoning_advisory_message(msgs, ["fresh"], ultrathink=False)
     assert not any(_is_reasoning_advisory_message(m) for m in out)
 
 
 def test_refresh_no_recent_strips_stale_advisory():
-    msgs = _system_messages([
-        {"role": "user", "content": f"{REASONING_ADVISORY_MARKER}\nstale advisory"},
-    ])
+    msgs = _system_messages(
+        [
+            {"role": "user", "content": f"{REASONING_ADVISORY_MARKER}\nstale advisory"},
+        ]
+    )
     out = _refresh_reasoning_advisory_message(msgs, [], ultrathink=True)
     assert not any(_is_reasoning_advisory_message(m) for m in out)
 
@@ -167,10 +175,12 @@ def test_refresh_inserts_single_advisory_after_system():
 
 
 def test_refresh_replaces_prior_advisory_only_one_in_flight():
-    msgs = _system_messages([
-        {"role": "user", "content": f"{REASONING_ADVISORY_MARKER}\nold"},
-        {"role": "assistant", "content": "hi"},
-    ])
+    msgs = _system_messages(
+        [
+            {"role": "user", "content": f"{REASONING_ADVISORY_MARKER}\nold"},
+            {"role": "assistant", "content": "hi"},
+        ]
+    )
     out = _refresh_reasoning_advisory_message(msgs, ["new"], ultrathink=True)
     advisories = [m for m in out if _is_reasoning_advisory_message(m)]
     assert len(advisories) == 1
@@ -296,12 +306,17 @@ async def test_llm_reflect_parses_valid_json_and_overrides_base():
     client = _FakeOllamaClient(_VALID_REFLECTION_JSON)
     mem = _RecordingSemanticMemory()
     plan = AttackPlan(target_ip="10.0.0.50")
-    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan",
-                                         "content": "open ports 22,21"})
+    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22,21"})
 
     result = await _llm_reflect_inline(
-        client, "glm-5.2:cloud", msgs, plan, 4,
-        semantic_memory=mem, policy=policy, target_ip="10.0.0.50",
+        client,
+        "glm-5.2:cloud",
+        msgs,
+        plan,
+        4,
+        semantic_memory=mem,
+        policy=policy,
+        target_ip="10.0.0.50",
     )
 
     assert client.chat_calls == 1
@@ -323,18 +338,22 @@ async def test_llm_reflect_fallback_on_malformed_json():
     client = _FakeOllamaClient("not valid json {missing braces")
     mem = _RecordingSemanticMemory()
     plan = AttackPlan(target_ip="10.0.0.50")
-    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan",
-                                         "content": "all good here"})
+    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan", "content": "all good here"})
 
     result = await _llm_reflect_inline(
-        client, "glm-5.2:cloud", msgs, plan, 4,
-        semantic_memory=mem, policy=policy, target_ip="10.0.0.50",
+        client,
+        "glm-5.2:cloud",
+        msgs,
+        plan,
+        4,
+        semantic_memory=mem,
+        policy=policy,
+        target_ip="10.0.0.50",
     )
 
     # Fallback returns the heuristic _generate_reflection shape.
     assert isinstance(result, dict)
-    assert set(result.keys()) >= {"what_worked", "what_failed", "why",
-                                   "new_hypothesis", "recommended_strategy_shift"}
+    assert set(result.keys()) >= {"what_worked", "what_failed", "why", "new_hypothesis", "recommended_strategy_shift"}
     # No semantic lesson written on fallback (no strategy_shift from the LLM).
     assert mem.lessons == []
 
@@ -345,12 +364,17 @@ async def test_llm_reflect_fallback_on_empty_response():
     client = _FakeOllamaClient("   ")
     mem = _RecordingSemanticMemory()
     plan = AttackPlan(target_ip="10.0.0.50")
-    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan",
-                                         "content": "open ports 22"})
+    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"})
 
     result = await _llm_reflect_inline(
-        client, "glm-5.2:cloud", msgs, plan, 4,
-        semantic_memory=mem, policy=policy, target_ip="10.0.0.50",
+        client,
+        "glm-5.2:cloud",
+        msgs,
+        plan,
+        4,
+        semantic_memory=mem,
+        policy=policy,
+        target_ip="10.0.0.50",
     )
 
     assert isinstance(result, dict)
@@ -371,13 +395,18 @@ async def test_llm_reflect_fallback_on_base_exception_group():
     )
     mem = _RecordingSemanticMemory()
     plan = AttackPlan(target_ip="10.0.0.50")
-    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan",
-                                         "content": "open ports 22"})
+    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"})
 
     # Must NOT raise — the ExceptionGroup is caught inside _call_ollama_with_retry.
     result = await _llm_reflect_inline(
-        client, "glm-5.2:cloud", msgs, plan, 4,
-        semantic_memory=mem, policy=policy, target_ip="10.0.0.50",
+        client,
+        "glm-5.2:cloud",
+        msgs,
+        plan,
+        4,
+        semantic_memory=mem,
+        policy=policy,
+        target_ip="10.0.0.50",
     )
 
     assert isinstance(result, dict)
@@ -390,12 +419,17 @@ async def test_llm_reflect_never_feeds_bayesian_experience_store():
     client = _FakeOllamaClient(_VALID_REFLECTION_JSON)
     mem = _RecordingSemanticMemory()
     plan = AttackPlan(target_ip="10.0.0.50")
-    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan",
-                                         "content": "open ports 22,21"})
+    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22,21"})
 
     await _llm_reflect_inline(
-        client, "glm-5.2:cloud", msgs, plan, 4,
-        semantic_memory=mem, policy=policy, target_ip="10.0.0.50",
+        client,
+        "glm-5.2:cloud",
+        msgs,
+        plan,
+        4,
+        semantic_memory=mem,
+        policy=policy,
+        target_ip="10.0.0.50",
     )
 
     # The Bayesian store was never touched via the reflection path.
@@ -410,12 +444,17 @@ async def test_llm_reflect_default_false_preserves_heuristic_behavior():
     client = _FakeOllamaClient(_VALID_REFLECTION_JSON)
     mem = _RecordingSemanticMemory()
     plan = AttackPlan(target_ip="10.0.0.50")
-    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan",
-                                         "content": "open ports 22"})
+    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"})
 
     result = await _llm_reflect_inline(
-        client, "glm-5.2:cloud", msgs, plan, 4,
-        semantic_memory=mem, policy=policy, target_ip="10.0.0.50",
+        client,
+        "glm-5.2:cloud",
+        msgs,
+        plan,
+        4,
+        semantic_memory=mem,
+        policy=policy,
+        target_ip="10.0.0.50",
     )
 
     # No model call, no semantic lesson — heuristic fallback only.
@@ -431,12 +470,17 @@ async def test_llm_reflect_none_client_returns_base():
     no AttributeError leaked."""
     policy = _make_policy(Path("."), llm_reflection=True)
     plan = AttackPlan(target_ip="10.0.0.50")
-    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan",
-                                         "content": "open ports 22"})
+    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"})
 
     result = await _llm_reflect_inline(
-        None, "glm-5.2:cloud", msgs, plan, 4,
-        semantic_memory=None, policy=policy, target_ip="10.0.0.50",
+        None,
+        "glm-5.2:cloud",
+        msgs,
+        plan,
+        4,
+        semantic_memory=None,
+        policy=policy,
+        target_ip="10.0.0.50",
     )
     assert isinstance(result, dict)
 
@@ -461,20 +505,32 @@ async def test_llm_reflect_strips_instruction_injection_from_fields():
     client = _FakeOllamaClient(injected)
     mem = _RecordingSemanticMemory()
     plan = AttackPlan(target_ip="10.0.0.50")
-    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan",
-                                         "content": "open ports 22"})
+    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"})
 
     result = await _llm_reflect_inline(
-        client, "glm-5.2:cloud", msgs, plan, 4,
-        semantic_memory=mem, policy=policy, target_ip="10.0.0.50",
+        client,
+        "glm-5.2:cloud",
+        msgs,
+        plan,
+        4,
+        semantic_memory=mem,
+        policy=policy,
+        target_ip="10.0.0.50",
     )
 
     def _redacted_blocks(s: str) -> int:
         return s.count("[redacted]")
 
     # Every injection shape was scrubbed somewhere in the field set.
-    joined = " ".join(result.get("what_worked", [])) + " " + result["why"] + " " + \
-        result["new_hypothesis"] + " " + result["recommended_strategy_shift"]
+    joined = (
+        " ".join(result.get("what_worked", []))
+        + " "
+        + result["why"]
+        + " "
+        + result["new_hypothesis"]
+        + " "
+        + result["recommended_strategy_shift"]
+    )
     assert "retarget" not in joined.lower()
     assert "pivot to 10.0.0.99" not in joined
     assert "ignore prior" not in joined.lower()
@@ -503,12 +559,17 @@ async def test_llm_reflect_clamps_confidence_and_caps_field_lengths():
     client = _FakeOllamaClient(injected)
     mem = _RecordingSemanticMemory()
     plan = AttackPlan(target_ip="10.0.0.50")
-    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan",
-                                         "content": "open ports 22"})
+    msgs = _messages_with_tool_results({"role": "tool", "tool_name": "nmap_scan", "content": "open ports 22"})
 
     result = await _llm_reflect_inline(
-        client, "glm-5.2:cloud", msgs, plan, 4,
-        semantic_memory=mem, policy=policy, target_ip="10.0.0.50",
+        client,
+        "glm-5.2:cloud",
+        msgs,
+        plan,
+        4,
+        semantic_memory=mem,
+        policy=policy,
+        target_ip="10.0.0.50",
     )
 
     assert 0.0 <= result["confidence"] <= 1.0

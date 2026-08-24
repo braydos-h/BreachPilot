@@ -61,10 +61,7 @@ def test_add_target_to_allowlist_appends_to_block_style_list(tmp_path):
 
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "exploit:\n"
-        "  allowed_targets:\n"
-        "    - 10.0.0.50\n"
-        "  require_explicit_allowlist: true\n",
+        "exploit:\n  allowed_targets:\n    - 10.0.0.50\n  require_explicit_allowlist: true\n",
         encoding="utf-8",
     )
 

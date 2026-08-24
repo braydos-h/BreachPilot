@@ -38,10 +38,40 @@ def check_sudo_permissions():
         output = result.stdout + result.stderr
         escalation_vectors = []
         dangerous_binaries = [
-            "vim", "vi", "nano", "less", "more", "man", "find", "nmap", "python",
-            "python3", "perl", "ruby", "lua", "awk", "bash", "sh", "env", "cp",
-            "mv", "tar", "zip", "wget", "curl", "ftp", "nc", "ncat", "docker",
-            "lxc", "mount", "strace", "ltrace", "gdb", "journalctl", "systemctl",
+            "vim",
+            "vi",
+            "nano",
+            "less",
+            "more",
+            "man",
+            "find",
+            "nmap",
+            "python",
+            "python3",
+            "perl",
+            "ruby",
+            "lua",
+            "awk",
+            "bash",
+            "sh",
+            "env",
+            "cp",
+            "mv",
+            "tar",
+            "zip",
+            "wget",
+            "curl",
+            "ftp",
+            "nc",
+            "ncat",
+            "docker",
+            "lxc",
+            "mount",
+            "strace",
+            "ltrace",
+            "gdb",
+            "journalctl",
+            "systemctl",
         ]
         for binary in dangerous_binaries:
             if binary in output and "NOPASSWD" in output:
@@ -66,9 +96,29 @@ def find_suid_binaries():
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         binaries = []
         gtfobins_suid = [
-            "nmap", "vim", "find", "bash", "more", "less", "nano", "cp", "mv",
-            "python", "python3", "perl", "ruby", "awk", "env", "tar", "zip",
-            "docker", "strace", "ltrace", "gdb", "pkexec", "mount",
+            "nmap",
+            "vim",
+            "find",
+            "bash",
+            "more",
+            "less",
+            "nano",
+            "cp",
+            "mv",
+            "python",
+            "python3",
+            "perl",
+            "ruby",
+            "awk",
+            "env",
+            "tar",
+            "zip",
+            "docker",
+            "strace",
+            "ltrace",
+            "gdb",
+            "pkexec",
+            "mount",
         ]
         for line in result.stdout.strip().splitlines():
             parts = line.split()
@@ -76,11 +126,15 @@ def find_suid_binaries():
                 path = parts[-1]
                 name = Path(path).name
                 exploitable = name in gtfobins_suid
-                binaries.append({
-                    "path": path, "permissions": parts[0],
-                    "owner": parts[2], "group": parts[3],
-                    "exploitable": exploitable,
-                })
+                binaries.append(
+                    {
+                        "path": path,
+                        "permissions": parts[0],
+                        "owner": parts[2],
+                        "group": parts[3],
+                        "exploitable": exploitable,
+                    }
+                )
         exploitable = [b for b in binaries if b["exploitable"]]
         return {
             "total_suid": len(binaries),
@@ -94,8 +148,15 @@ def find_suid_binaries():
 
 def check_writable_files():
     """Find world-writable files and directories of interest."""
-    interesting_paths = ["/etc/passwd", "/etc/shadow", "/etc/sudoers", "/etc/crontab",
-                         "/etc/cron.d", "/etc/systemd/system", "/root"]
+    interesting_paths = [
+        "/etc/passwd",
+        "/etc/shadow",
+        "/etc/sudoers",
+        "/etc/crontab",
+        "/etc/cron.d",
+        "/etc/systemd/system",
+        "/root",
+    ]
     findings = []
     for path in interesting_paths:
         p = Path(path)
@@ -103,12 +164,28 @@ def check_writable_files():
             writable = os.access(str(p), os.W_OK)
             if writable:
                 findings.append({"path": path, "writable": True, "severity": "CRITICAL"})
-    cmd = ["find", "/", "-writable", "-type", "f", "-not", "-path", "'/proc/*'",
-           "-not", "-path", "'/sys/*'", "-not", "-path", "'/dev/*'"]
+    cmd = [
+        "find",
+        "/",
+        "-writable",
+        "-type",
+        "f",
+        "-not",
+        "-path",
+        "'/proc/*'",
+        "-not",
+        "-path",
+        "'/sys/*'",
+        "-not",
+        "-path",
+        "'/dev/*'",
+    ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
         writable_files = result.stdout.strip().splitlines()[:50]
-        sensitive = [f for f in writable_files if any(p in f for p in ["/etc/", "/root/", "cron", ".service", "/bin/", "/sbin/"])]
+        sensitive = [
+            f for f in writable_files if any(p in f for p in ["/etc/", "/root/", "cron", ".service", "/bin/", "/sbin/"])
+        ]
         findings.extend([{"path": f, "writable": True, "severity": "HIGH"} for f in sensitive[:10]])
     except Exception:
         pass
@@ -129,7 +206,9 @@ def check_cron_jobs():
                     if writable_script:
                         script = writable_script.group(1)
                         if Path(script).exists() and os.access(script, os.W_OK):
-                            findings.append({"cron_file": str(p), "script": script, "writable": True, "severity": "CRITICAL"})
+                            findings.append(
+                                {"cron_file": str(p), "script": script, "writable": True, "severity": "CRITICAL"}
+                            )
         elif p.is_dir():
             for f in p.iterdir():
                 if f.is_file():
@@ -153,7 +232,9 @@ def check_capabilities():
             if len(parts) == 2:
                 binary = parts[0].strip()
                 cap = parts[1].strip()
-                dangerous = any(c in cap for c in ["cap_setuid", "cap_setgid", "cap_sys_admin", "cap_dac_override", "cap_net_raw"])
+                dangerous = any(
+                    c in cap for c in ["cap_setuid", "cap_setgid", "cap_sys_admin", "cap_dac_override", "cap_net_raw"]
+                )
                 caps.append({"binary": binary, "capabilities": cap, "dangerous": dangerous})
         return {"capabilities": caps, "dangerous_caps": [c for c in caps if c["dangerous"]]}
     except Exception as e:

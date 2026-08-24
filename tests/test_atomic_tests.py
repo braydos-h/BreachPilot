@@ -130,6 +130,7 @@ def test_plugin_manifest_has_capabilities():
 def test_generate_atomic_tests_no_execution(tmp_path):
     """The plugin's MCP tool generates YAML text only — no subprocess, no network."""
     from plugins.atomic_red_team.plugin import generate_atomic_yaml as _gen
+
     yaml = _gen(["sqli", "weak_credentials"])
     # The output is pure YAML text — no command, no subprocess call, no target.
     assert isinstance(yaml, str)

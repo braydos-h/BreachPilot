@@ -16,18 +16,21 @@ from datetime import datetime
 
 try:
     import requests
+
     HAS_REQUESTS = True
 except ImportError:
     HAS_REQUESTS = False
 
 try:
     import networkx as nx
+
     HAS_NETWORKX = True
 except ImportError:
     HAS_NETWORKX = False
 
 try:
     from packaging.version import InvalidVersion, Version
+
     HAS_PACKAGING = True
 except ImportError:
     HAS_PACKAGING = False
@@ -35,7 +38,7 @@ except ImportError:
 # NVD API 2.0 configuration
 NVD_CVE_API = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 NVD_CPE_API = "https://services.nvd.nist.gov/rest/json/cpes/2.0"
-NVD_RATE_LIMIT_NO_KEY = 6.0   # seconds between requests without API key
+NVD_RATE_LIMIT_NO_KEY = 6.0  # seconds between requests without API key
 NVD_RATE_LIMIT_WITH_KEY = 0.6  # seconds between requests with API key
 NVD_RESULTS_PER_PAGE = 50
 
@@ -51,8 +54,7 @@ SEVERITY_THRESHOLDS = {
 class SBOMComponent:
     """Represents a single software component extracted from an SBOM."""
 
-    def __init__(self, name, version, purl=None, cpe=None, component_type="library",
-                 licenses=None, supplier=None):
+    def __init__(self, name, version, purl=None, cpe=None, component_type="library", licenses=None, supplier=None):
         self.name = name
         self.version = version
         self.purl = purl
@@ -85,9 +87,7 @@ def detect_sbom_format(sbom_data):
             return "cyclonedx"
         if "spdxVersion" in sbom_data:
             return "spdx"
-        if "components" in sbom_data and any(
-            "purl" in c for c in sbom_data.get("components", [])
-        ):
+        if "components" in sbom_data and any("purl" in c for c in sbom_data.get("components", [])):
             return "cyclonedx"
         if "packages" in sbom_data:
             return "spdx"
@@ -222,8 +222,7 @@ def parse_sbom(sbom_path):
         return parse_spdx(sbom_data), fmt
     else:
         raise ValueError(
-            f"Unrecognized SBOM format. Expected CycloneDX or SPDX JSON. "
-            f"Keys found: {list(sbom_data.keys())[:10]}"
+            f"Unrecognized SBOM format. Expected CycloneDX or SPDX JSON. Keys found: {list(sbom_data.keys())[:10]}"
         )
 
 
@@ -297,8 +296,7 @@ def extract_cve_info(vuln_entry):
 
     # Determine severity
     severity = "LOW"
-    for level, threshold in sorted(SEVERITY_THRESHOLDS.items(),
-                                    key=lambda x: x[1], reverse=True):
+    for level, threshold in sorted(SEVERITY_THRESHOLDS.items(), key=lambda x: x[1], reverse=True):
         if cvss_score >= threshold:
             severity = level
             break
@@ -337,7 +335,7 @@ def correlate_cves(components, api_key=None, skip_nvd=False):
         return components
 
     for idx, comp in enumerate(components):
-        print(f"  [{idx+1}/{total}] {comp.name}@{comp.version}...", end="", flush=True)
+        print(f"  [{idx + 1}/{total}] {comp.name}@{comp.version}...", end="", flush=True)
 
         vulns = []
         # Try CPE-based search first (most precise)
@@ -392,9 +390,14 @@ def build_dependency_graph(components, dependencies):
     comp_lookup = {}
     for comp in components:
         ref = comp.purl or f"{comp.name}@{comp.version}"
-        G.add_node(ref, name=comp.name, version=comp.version,
-                   max_cvss=comp.max_cvss, risk_level=comp.risk_level,
-                   cve_count=len(comp.cves))
+        G.add_node(
+            ref,
+            name=comp.name,
+            version=comp.version,
+            max_cvss=comp.max_cvss,
+            risk_level=comp.risk_level,
+            cve_count=len(comp.cves),
+        )
         comp_lookup[ref] = comp
 
     # Add edges from dependency relationships
@@ -423,8 +426,7 @@ def analyze_dependency_graph(G):
     # Find most depended-on components (highest in-degree)
     in_degrees = sorted(G.in_degree(), key=lambda x: x[1], reverse=True)
     analysis["most_depended_on"] = [
-        {"ref": node, "dependents": deg, **G.nodes[node]}
-        for node, deg in in_degrees[:10] if deg > 0
+        {"ref": node, "dependents": deg, **G.nodes[node]} for node, deg in in_degrees[:10] if deg > 0
     ]
 
     # Find root nodes (no incoming edges - likely the application itself)
@@ -449,12 +451,14 @@ def analyze_dependency_graph(G):
     for node, deg in in_degrees:
         node_data = G.nodes.get(node, {})
         if node_data.get("max_cvss", 0) >= SEVERITY_THRESHOLDS["HIGH"] and deg > 0:
-            high_risk_hubs.append({
-                "ref": node,
-                "dependents": deg,
-                "max_cvss": node_data.get("max_cvss", 0),
-                "risk_level": node_data.get("risk_level", "UNKNOWN"),
-            })
+            high_risk_hubs.append(
+                {
+                    "ref": node,
+                    "dependents": deg,
+                    "max_cvss": node_data.get("max_cvss", 0),
+                    "risk_level": node_data.get("risk_level", "UNKNOWN"),
+                }
+            )
     analysis["high_risk_hubs"] = high_risk_hubs
 
     # Betweenness centrality for bottleneck identification
@@ -471,12 +475,25 @@ def analyze_dependency_graph(G):
 def check_license_compliance(components):
     """Check for potentially problematic licenses in SBOM components."""
     copyleft_licenses = {
-        "GPL-2.0", "GPL-2.0-only", "GPL-2.0-or-later",
-        "GPL-3.0", "GPL-3.0-only", "GPL-3.0-or-later",
-        "AGPL-3.0", "AGPL-3.0-only", "AGPL-3.0-or-later",
-        "LGPL-2.1", "LGPL-2.1-only", "LGPL-2.1-or-later",
-        "LGPL-3.0", "LGPL-3.0-only", "LGPL-3.0-or-later",
-        "MPL-2.0", "EUPL-1.2", "CPAL-1.0", "OSL-3.0",
+        "GPL-2.0",
+        "GPL-2.0-only",
+        "GPL-2.0-or-later",
+        "GPL-3.0",
+        "GPL-3.0-only",
+        "GPL-3.0-or-later",
+        "AGPL-3.0",
+        "AGPL-3.0-only",
+        "AGPL-3.0-or-later",
+        "LGPL-2.1",
+        "LGPL-2.1-only",
+        "LGPL-2.1-or-later",
+        "LGPL-3.0",
+        "LGPL-3.0-only",
+        "LGPL-3.0-or-later",
+        "MPL-2.0",
+        "EUPL-1.2",
+        "CPAL-1.0",
+        "OSL-3.0",
     }
 
     findings = {
@@ -487,24 +504,23 @@ def check_license_compliance(components):
 
     for comp in components:
         if not comp.licenses or comp.licenses == ["NOASSERTION"]:
-            findings["unknown_license_components"].append(
-                {"name": comp.name, "version": comp.version}
-            )
+            findings["unknown_license_components"].append({"name": comp.name, "version": comp.version})
         for lic in comp.licenses:
             findings["license_distribution"][lic] += 1
             if lic in copyleft_licenses:
-                findings["copyleft_components"].append({
-                    "name": comp.name,
-                    "version": comp.version,
-                    "license": lic,
-                })
+                findings["copyleft_components"].append(
+                    {
+                        "name": comp.name,
+                        "version": comp.version,
+                        "license": lic,
+                    }
+                )
 
     findings["license_distribution"] = dict(findings["license_distribution"])
     return findings
 
 
-def generate_report(components, dependencies, graph_analysis, license_info,
-                    sbom_path, sbom_format, output_path=None):
+def generate_report(components, dependencies, graph_analysis, license_info, sbom_path, sbom_format, output_path=None):
     """Generate a comprehensive vulnerability analysis report."""
     # Aggregate statistics
     vuln_components = [c for c in components if c.cves]
@@ -534,16 +550,13 @@ def generate_report(components, dependencies, graph_analysis, license_info,
     report_lines.append("-" * 40)
     for level in ["CRITICAL", "HIGH", "MEDIUM", "LOW"]:
         counts = severity_counts.get(level, {"components": 0, "cves": 0})
-        report_lines.append(
-            f"  {level:10s}: {counts['components']:3d} components / {counts['cves']:3d} CVEs"
-        )
+        report_lines.append(f"  {level:10s}: {counts['components']:3d} components / {counts['cves']:3d} CVEs")
     report_lines.append(f"  {'TOTAL':10s}: {len(vuln_components):3d} components / {total_cves:3d} CVEs")
     report_lines.append("")
 
     # Critical and high findings detail
     critical_high = sorted(
-        [c for c in components if c.risk_level in ("CRITICAL", "HIGH")],
-        key=lambda c: c.max_cvss, reverse=True
+        [c for c in components if c.risk_level in ("CRITICAL", "HIGH")], key=lambda c: c.max_cvss, reverse=True
     )
 
     if critical_high:
@@ -553,9 +566,7 @@ def generate_report(components, dependencies, graph_analysis, license_info,
             report_lines.append(f"\n  {i}. {comp.name}@{comp.version} [{comp.risk_level}]")
             for cve in sorted(comp.cves, key=lambda c: c["cvss_score"], reverse=True)[:5]:
                 kev_flag = " [CISA KEV]" if cve.get("is_kev") else ""
-                report_lines.append(
-                    f"     {cve['cve_id']} (CVSS {cve['cvss_score']:.1f}){kev_flag}"
-                )
+                report_lines.append(f"     {cve['cve_id']} (CVSS {cve['cvss_score']:.1f}){kev_flag}")
                 if cve["description"]:
                     desc_short = cve["description"][:120]
                     report_lines.append(f"       {desc_short}...")
@@ -638,8 +649,7 @@ def analyze_sbom(sbom_path, api_key=None, output_path=None, skip_nvd=False):
 
     # Generate report
     result = generate_report(
-        components, dependencies, graph_analysis, license_info,
-        sbom_path, sbom_format, output_path
+        components, dependencies, graph_analysis, license_info, sbom_path, sbom_format, output_path
     )
 
     return result
@@ -664,15 +674,17 @@ def compare_sboms(sbom_path_old, sbom_path_new, api_key=None):
     version_changes = []
     for name in old_names & new_names:
         if old_versions[name] != new_versions[name]:
-            version_changes.append({
-                "name": name,
-                "old_version": old_versions[name],
-                "new_version": new_versions[name],
-            })
+            version_changes.append(
+                {
+                    "name": name,
+                    "old_version": old_versions[name],
+                    "new_version": new_versions[name],
+                }
+            )
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("SBOM DIFF REPORT")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"Old: {sbom_path_old} ({len(comps_old)} components)")
     print(f"New: {sbom_path_new} ({len(comps_new)} components)")
     print(f"\nAdded:   {len(added)} components")
@@ -685,14 +697,11 @@ def compare_sboms(sbom_path_old, sbom_path_new, api_key=None):
     for vc in version_changes:
         print(f"  ~ {vc['name']}: {vc['old_version']} -> {vc['new_version']}")
 
-    return {"added": sorted(added), "removed": sorted(removed),
-            "version_changes": version_changes}
+    return {"added": sorted(added), "removed": sorted(removed), "version_changes": version_changes}
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="SBOM Supply Chain Vulnerability Analysis Agent"
-    )
+    parser = argparse.ArgumentParser(description="SBOM Supply Chain Vulnerability Analysis Agent")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # Analyze SBOM
@@ -700,8 +709,7 @@ def main():
     analyze_parser.add_argument("sbom_path", help="Path to SBOM file (CycloneDX or SPDX JSON)")
     analyze_parser.add_argument("--api-key", help="NVD API key for higher rate limits")
     analyze_parser.add_argument("--output", "-o", help="Save full report to JSON file")
-    analyze_parser.add_argument("--skip-nvd", action="store_true",
-                                help="Skip NVD API queries (offline mode)")
+    analyze_parser.add_argument("--skip-nvd", action="store_true", help="Skip NVD API queries (offline mode)")
 
     # Compare two SBOMs
     diff_parser = subparsers.add_parser("diff", help="Compare two SBOMs for changes")
@@ -722,12 +730,10 @@ def main():
 
     if args.command == "analyze":
         if not HAS_REQUESTS:
-            print("[ERROR] requests library required. Install: pip install requests",
-                  file=sys.stderr)
+            print("[ERROR] requests library required. Install: pip install requests", file=sys.stderr)
             sys.exit(1)
         api_key = args.api_key or os.environ.get("NVD_API_KEY")
-        analyze_sbom(args.sbom_path, api_key=api_key, output_path=args.output,
-                     skip_nvd=args.skip_nvd)
+        analyze_sbom(args.sbom_path, api_key=api_key, output_path=args.output, skip_nvd=args.skip_nvd)
 
     elif args.command == "diff":
         compare_sboms(args.old_sbom, args.new_sbom, api_key=args.api_key)
@@ -736,11 +742,9 @@ def main():
         (components, dependencies), fmt = parse_sbom(args.sbom_path)
         print(f"\n  Total components: {len(components)}")
         for comp in components:
-            print(f"    {comp.name}@{comp.version} [{comp.component_type}] "
-                  f"licenses={comp.licenses}")
+            print(f"    {comp.name}@{comp.version} [{comp.component_type}] licenses={comp.licenses}")
         if args.output:
-            data = {"format": fmt, "component_count": len(components),
-                    "components": [c.to_dict() for c in components]}
+            data = {"format": fmt, "component_count": len(components), "components": [c.to_dict() for c in components]}
             with open(args.output, "w") as f:
                 json.dump(data, f, indent=2)
             print(f"\n[OK] Component list saved to {args.output}")
@@ -749,8 +753,7 @@ def main():
         (components, _), _ = parse_sbom(args.sbom_path)
         info = check_license_compliance(components)
         print("\nLicense Distribution:")
-        for lic, count in sorted(info["license_distribution"].items(),
-                                  key=lambda x: x[1], reverse=True):
+        for lic, count in sorted(info["license_distribution"].items(), key=lambda x: x[1], reverse=True):
             print(f"  {lic}: {count}")
         if info["copyleft_components"]:
             print(f"\nCopyleft Components ({len(info['copyleft_components'])}):")

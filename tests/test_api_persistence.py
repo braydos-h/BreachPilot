@@ -64,10 +64,15 @@ def test_recover_interrupted(persistence):
     """On startup, live runs are marked interrupted; pending decisions expired."""
     persistence.create_run(run_id="r-live", request={}, preview={})
     persistence.update_run_state("r-live", "running")
-    persistence.create_decision({
-        "id": "", "run_id": "r-live", "kind": "tool_approval",
-        "prompt_text": "allow?", "required_text": "ALLOW 10.0.0.50",
-    })
+    persistence.create_decision(
+        {
+            "id": "",
+            "run_id": "r-live",
+            "kind": "tool_approval",
+            "prompt_text": "allow?",
+            "required_text": "ALLOW 10.0.0.50",
+        }
+    )
     persistence.recover_interrupted()
     run = persistence.get_run("r-live")
     assert run["state"] == "interrupted"
@@ -82,10 +87,15 @@ def test_recover_awaiting_confirmation(persistence):
 
 def test_create_and_answer_decision(persistence):
     persistence.create_run(run_id="r-dec", request={}, preview={})
-    did = persistence.create_decision({
-        "id": "", "run_id": "r-dec", "kind": "start_confirm",
-        "prompt_text": "proceed?", "required_text": "ALLOW 10.0.0.50",
-    })
+    did = persistence.create_decision(
+        {
+            "id": "",
+            "run_id": "r-dec",
+            "kind": "start_confirm",
+            "prompt_text": "proceed?",
+            "required_text": "ALLOW 10.0.0.50",
+        }
+    )
     assert did.startswith("dec-")
     decisions = persistence.list_decisions("r-dec")
     assert len(decisions) == 1
@@ -116,7 +126,9 @@ def test_decision_waiter_cancellation_propagates(persistence):
     async def _run():
         broker = DecisionBroker("r-cancel", persistence)
         decision = Decision(
-            id="", run_id="r-cancel", kind=DecisionKind.GOAL_SELECT,
+            id="",
+            run_id="r-cancel",
+            kind=DecisionKind.GOAL_SELECT,
             prompt_text="Choose",
         )
         await broker.create(decision)
@@ -128,4 +140,5 @@ def test_decision_waiter_cancellation_propagates(persistence):
             await waiter
 
     import asyncio
+
     asyncio.run(_run())
