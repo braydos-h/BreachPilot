@@ -342,6 +342,69 @@ def _discover_tool_registrars() -> list[Any]:
     return list(_TOOL_REGISTRARS)
 
 
+def _validate_mcp_tool_decorators() -> list[str]:
+    """Static check: every ``@mcp.tool`` in ``tools/mcp_tools/*.py`` must have audit allowlist.
+
+    Parses each ``tools/mcp_tools/<family>.py`` file with ``ast`` and verifies
+    that every function/method decorated with ``mcp.tool`` also has
+    ``@audit_tool`` or ``@require_allowlist`` (including ``ctx.audit_tool``,
+    ``ctx.require_allowlist``, ``make_audit_tool`` variants). Returns a list of
+    error messages (empty = all good). Used by ``collect_tools()`` to fail CI.
+    """
+    import ast
+    import pathlib
+
+    errors: list[str] = []
+    pkg_dir = pathlib.Path(__file__).parent
+    for py in pkg_dir.glob("*.py"):
+        if py.name == "registry.py" or py.name == "__init__.py":
+            continue
+        try:
+            tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+        except Exception as exc:
+            errors.append(f"{py.name}: failed to parse: {exc}")
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            decos = getattr(node, "decorator_list", [])
+            if not decos:
+                continue
+            # need to detect @mcp.tool() among decorators
+            has_mcp_tool = False
+            has_audit = False
+            for d in decos:
+                try:
+                    src = ast.unparse(d)
+                except Exception:
+                    src = ""
+                low = src.lower()
+                if "mcp.tool" in low or ".tool(" in low:
+                    has_mcp_tool = True
+                if "audit_tool" in low or "require_allowlist" in low:
+                    has_audit = True
+            if has_mcp_tool and not has_audit:
+                errors.append(f"{py.name}:{node.lineno} {node.name} has @mcp.tool but lacks @audit_tool/@require_allowlist")
+    return errors
+
+
+def collect_tools() -> list[Any]:
+    """Single-source MCP tool collection with decorator validation (Phase 3).
+
+    Discovers every ``register_*_tools`` in ``tools.mcp_tools.*`` (like
+    ``_discover_tool_registrars``) and validates that every ``@mcp.tool``
+    inside those modules carries ``@audit_tool`` or ``@require_allowlist``.
+    Raises ``RuntimeError`` listing offenders so CI fails if a tool lacks the
+    audit/allowlist gate. ``mcp_exploit_server.py`` should call this instead of
+    a manual list.
+    """
+    registrars = _discover_tool_registrars()
+    errs = _validate_mcp_tool_decorators()
+    if errs:
+        raise RuntimeError("MCP tool decorator check failed:\n" + "\n".join(errs))
+    return registrars
+
+
 
 # -- Kernel re-exports (Phase 3) --
 # read_workspace now lives in tools.kernel.workspace; re-export for backwards compat
