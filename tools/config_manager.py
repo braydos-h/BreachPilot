@@ -6,6 +6,7 @@ Provides:
 - Warning about unknown keys
 - Save updated config back to disk
 """
+# NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
 
 from __future__ import annotations
 

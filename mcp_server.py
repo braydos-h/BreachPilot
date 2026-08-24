@@ -16,6 +16,7 @@ architecture diagram but did not exist. It mirrors the structure of
 All tools require the caller to provide an asset that has been
 approved in the mission scope. Out-of-scope requests are rejected.
 """
+# NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
 
 from __future__ import annotations
 

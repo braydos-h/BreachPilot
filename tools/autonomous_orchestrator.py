@@ -16,6 +16,7 @@ Usage::
     orchestrator = AutonomousOrchestrator(mission_config, workspace, tool_executor)
     await orchestrator.run_autonomous_campaign()
 """
+# NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
 
 from __future__ import annotations
 

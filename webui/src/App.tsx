@@ -1,3 +1,4 @@
+// NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
 import { lazy, Suspense } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";

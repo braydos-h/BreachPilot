@@ -18,6 +18,7 @@ Replaces shallow banner grabs with a comprehensive reconnaissance engine:
 
 All operations are async-safe with retries, timeouts, and graceful degradation.
 """
+# NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
 
 from __future__ import annotations
 

@@ -8,6 +8,7 @@ on startup and cleans up the active run on shutdown.
 The app stays thin — orchestration lives in ``tools/api/`` services so this
 file does not become a second copy of ``main.py``.
 """
+# NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
 
 from __future__ import annotations
 

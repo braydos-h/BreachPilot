@@ -1,3 +1,4 @@
+# NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
 ollama:
   host: https://api.ollama.com
   model: glm-5.2:cloud
