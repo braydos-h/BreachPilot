@@ -13,11 +13,11 @@ The real split (moving class bodies) lands in the next sub-PR to keep this
 diff <400 lines. See ``docs/phase2-audit/architecture-debt.md`` §12.
 """
 
-from tools.recon_pipeline import (  # noqa: F401 -- re-export for shim
+from tools.recon.pipeline import ReconPipeline  # noqa: F401 -- new location (Phase 4b)
+from tools.recon_pipeline import (  # noqa: F401 -- re-export for shim (other classes still in original)
     HostReconResult,
     PrimaryReconScanner,
     ReconConfig,
-    ReconPipeline,
     SecondaryEnumerator,
     ServiceInfo,
     ToolAvailability,

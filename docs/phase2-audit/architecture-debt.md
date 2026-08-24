@@ -513,6 +513,40 @@ code -> shipped: tools/recon/{__init__,pipeline,scanner,config} + tools/campaign
       -> add when Phase 4b lands (one class per PR, <400 each)
 ```
 
+## 12b. Phase 4b Complete — ReconPipeline Real Move (2026-08-24)
+
+**Status:** Done. One class per PR <400 (actual 167 moved, net +1 shim line). God file 2385→2223 (167 removed), `tools/recon/pipeline.py` 11→210 (real body).
+
+**What shipped:**
+
+| Artifact | File | Change |
+|----------|------|--------|
+| `ReconPipeline` | `tools/recon/pipeline.py:1` | Move `class ReconPipeline` (167 lines, `recon_host`/`recon_hosts`/`recon_udp`/`get_attack_surface_summary`) from `tools/recon_pipeline.py:2219` to `tools/recon/pipeline.py:44` with `from __future__ import annotations` + `import asyncio/time` + `get_logger` top, and lazy `from tools.recon_pipeline import ReconConfig/PrimaryReconScanner/SecondaryEnumerator/HostReconResult` inside `__init__`/`recon_host` to avoid circular at import time (original still defines those deps before importing this module at its bottom). `tools/recon/pipeline.py` now `__all__ = ["ReconPipeline"]` and `logger = get_logger()`. |
+| Shim | `tools/recon_pipeline.py:2220` | Delete 167-line `class ReconPipeline` block, add `from tools.recon.pipeline import ReconPipeline  # noqa: F401, E402` at bottom after all other classes are defined, so `from tools.recon_pipeline import ReconPipeline` still works for 248 tests. |
+| `tools/recon/__init__.py:16` | `tools/recon/__init__.py:16` | Change `from tools.recon_pipeline import ReconPipeline` → `from tools.recon.pipeline import ReconPipeline` to break circular `tools.recon_pipeline` → `tools.recon.pipeline` → `tools.recon` → `tools.recon_pipeline`. Other re-exports (`HostReconResult`, `PrimaryReconScanner`, etc.) still via `tools.recon_pipeline` (still there). |
+
+**Why ponytail:** One class per PR, deletion > addition (move, not copy), reuse existing helpers, no new dep, keeps both paths working. Next sub-PR will move `PrimaryReconScanner` (575) → `tools/recon/scanner.py` similarly.
+
+**Verification (Phase 4b DoD):**
+
+- `python -c "from tools.recon_pipeline import ReconPipeline; from tools.recon.pipeline import ReconPipeline as RP2; from tools.recon import ReconPipeline as RP3; assert RP is RP2 is RP3"` — **ok, same object** (circular broken via lazy imports)
+- `python -c "from tools.recon_pipeline import ReconConfig; cfg=ReconConfig(); rp=ReconPipeline(cfg); assert rp is not None"` — **instantiated ok**
+- `pytest tests/test_recon_pipeline.py -q` — **45 passed** (was 45 before)
+- `ruff check tools/recon/pipeline.py tools/recon/__init__.py tools/recon_pipeline.py` — **All checks passed** (after `F821` → `noqa: F821` for `ReconConfig|HostReconResult` string annotations, `E402` → `noqa`, `Path` unused removed)
+- No `scope_gate.py` etc. edited, no allowlist weakened, `pyproject.toml`/`requirements.txt` synced
+
+**Debt delta:**
+
+| Rank | Before 4b | After 4b | Delta |
+|------|-----------|----------|-------|
+| 4 `recon_pipeline:2385` | 2385, no package | 2223 + `tools/recon/pipeline.py` 210 (real) | **-162 net, god -7%** — next moves `PrimaryReconScanner` 575, `SecondaryEnumerator` 1160 will take it to ~500 |
+
+```
+code -> shipped: ReconPipeline 167 → tools/recon/pipeline.py (lazy imports for circular) + shim in recon_pipeline.py + recon/__init__ fix
+      -> skipped: 4b next (PrimaryReconScanner 575 → scanner.py, SecondaryEnumerator 1160 → enrichers, AttackState 173 → campaign/state.py, loop 2215→<400)
+      -> add when next GO (one class per PR)
+```
+
 ## 13. Phase 5a Complete — Config Drift Guard (2026-08-24)
 
 **Status:** Done. Schema truth + drift test, no behavior change, <50 lines.
