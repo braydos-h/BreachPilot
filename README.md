@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)
 ![Status](https://img.shields.io/badge/status-beta-6f42c1?style=flat-square)
-![License](https://img.shields.io/badge/license-GPL--3.0--only-blue?style=flat-square)
+![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)
 ![Models](https://img.shields.io/badge/LLM-Ollama%20Cloud-22c55e?style=flat-square)
 ![MCP](https://img.shields.io/badge/MCP-1.27%2B-f97316?style=flat-square)
 ![WebUI](https://img.shields.io/badge/WebUI-React%20%2B%20Vite-06b6d4?style=flat-square)
@@ -510,5 +510,5 @@ Engineering docs in [`docs/`](docs/):
 
 NetAttackAI, Copyright (c) 2026 NetAttackAI contributors.
 
-Licensed under the **GNU General Public License v3.0 only**. See
+Licensed under the **Apache License 2.0**. See
 [`LICENSE`](LICENSE) for the full text.
