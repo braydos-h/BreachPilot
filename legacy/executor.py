@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from tool_router import ToolRouter
+from legacy.tool_router import ToolRouter
 
 
 @dataclass

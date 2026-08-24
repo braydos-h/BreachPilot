@@ -88,7 +88,7 @@ def _require_mission(args: argparse.Namespace) -> tuple[Any, dict[str, Any] | No
 
 
 def _get_mission_ctrl(db: Any) -> Any:
-    from mission import MissionController
+    from legacy.mission import MissionController
 
     return MissionController(db, _workspace_root())
 
@@ -151,7 +151,7 @@ def cmd_add_scope(args: argparse.Namespace) -> int:
         pattern = args.deny
         rule_type = "deny"
 
-    from mission import _classify_asset
+    from legacy.mission import _classify_asset
 
     target_type = _classify_asset(pattern)
 
@@ -168,7 +168,7 @@ def cmd_list_scope(args: argparse.Namespace) -> int:
         return 1
 
     mid = mission["id"]
-    from mission import Mission
+    from legacy.mission import Mission
     from scope_gate import ScopeGate
 
     m = Mission.from_dict(mission)
@@ -210,7 +210,7 @@ def cmd_next_task(args: argparse.Namespace) -> int:
         return 1
 
     mid = mission["id"]
-    from task_queue import TaskQueue
+    from legacy.task_queue import TaskQueue
 
     queue = TaskQueue(db, mid)
     task = queue.get_next_task()
@@ -237,7 +237,7 @@ def cmd_list_tasks(args: argparse.Namespace) -> int:
         return 1
 
     mid = mission["id"]
-    from task_queue import TaskQueue
+    from legacy.task_queue import TaskQueue
 
     queue = TaskQueue(db, mid)
 
@@ -271,11 +271,11 @@ def cmd_run_task(args: argparse.Namespace) -> int:
         return 1
 
     mid = mission_data["id"]
-    from mission import Mission
+    from legacy.mission import Mission
 
     mission = Mission.from_dict(mission_data)
 
-    from task_queue import TaskQueue
+    from legacy.task_queue import TaskQueue
 
     queue = TaskQueue(db, mid)
 
@@ -318,7 +318,7 @@ def cmd_run_task(args: argparse.Namespace) -> int:
 
     print(f"  Scope:    PASSED ({scope.matched_scope_rule})")
 
-    from risk_controller import RiskController
+    from legacy.risk_controller import RiskController
 
     risk_ctrl = RiskController(
         risk_profile=mission.risk_profile,
@@ -351,11 +351,11 @@ def cmd_run_task(args: argparse.Namespace) -> int:
         print(f"\n  [NEEDS APPROVAL] Task {task['task_id']} requires human confirmation.")
         return 1
 
-    from evidence import EvidenceStore
+    from legacy.evidence import EvidenceStore
 
     evidence = EvidenceStore(db, mid, _workspace_root())
 
-    from tool_router import ToolRouter
+    from legacy.tool_router import ToolRouter
 
     tool_router = ToolRouter(
         scope_gate=gate,
@@ -366,7 +366,7 @@ def cmd_run_task(args: argparse.Namespace) -> int:
         mission_id=mid,
     )
 
-    from executor import ExecutorAgent
+    from legacy.executor import ExecutorAgent
 
     executor = ExecutorAgent(tool_router)
     result = executor.execute(task)
@@ -380,7 +380,7 @@ def cmd_run_task(args: argparse.Namespace) -> int:
         queue.update_task_status(task["task_id"], "failed", result.error)
         print(f"\n  ✗ Task failed: {result.error}")
 
-    from observer import ObserverAgent
+    from legacy.observer import ObserverAgent
 
     obs = ObserverAgent()
     observation = obs.observe(task, result.output_summary, result.tool_name, evidence_refs=result.evidence_refs)
@@ -398,7 +398,7 @@ def cmd_summarize_target(args: argparse.Namespace) -> int:
 
     mid = mission["id"]
 
-    from memory import MemoryManager
+    from legacy.memory import MemoryManager
 
     mem = MemoryManager(db, mid)
 
@@ -421,7 +421,7 @@ def cmd_list_findings(args: argparse.Namespace) -> int:
         return 1
 
     mid = mission["id"]
-    from finding_verifier import FindingVerifier
+    from legacy.finding_verifier import FindingVerifier
 
     verifier = FindingVerifier(db, mid)
 
@@ -453,9 +453,9 @@ def cmd_validate_finding(args: argparse.Namespace) -> int:
 
     mid = mission["id"]
 
-    from evidence import EvidenceStore
-    from finding_verifier import FindingVerifier
-    from mission import Mission
+    from legacy.evidence import EvidenceStore
+    from legacy.finding_verifier import FindingVerifier
+    from legacy.mission import Mission
     from scope_gate import ScopeGate
 
     verifier = FindingVerifier(db, mid)
@@ -477,7 +477,7 @@ def cmd_generate_report(args: argparse.Namespace) -> int:
         return 1
 
     mid = mission["id"]
-    from report_generator import ReportGenerator
+    from legacy.report_generator import ReportGenerator
 
     reporter = ReportGenerator(db, mid, _workspace_root())
 
@@ -499,8 +499,8 @@ def cmd_status(args: argparse.Namespace) -> int:
 
     mid = mission["id"]
 
-    from finding_verifier import FindingVerifier
-    from task_queue import TaskQueue
+    from legacy.finding_verifier import FindingVerifier
+    from legacy.task_queue import TaskQueue
 
     queue = TaskQueue(db, mid)
     verifier = FindingVerifier(db, mid)

@@ -346,7 +346,7 @@ class ReportGenerator:
             )
             row = cur.fetchone()
             if row:
-                from finding_verifier import _row_to_finding
+                from legacy.finding_verifier import _row_to_finding
 
                 return _row_to_finding(dict(row))
         return None
@@ -357,7 +357,7 @@ class ReportGenerator:
                 "SELECT * FROM findings WHERE mission_id=? AND status=? ORDER BY impact_score DESC",
                 (self._mission_id, status),
             )
-            from finding_verifier import _row_to_finding
+            from legacy.finding_verifier import _row_to_finding
 
             return [_row_to_finding(dict(row)) for row in cur.fetchall()]
 

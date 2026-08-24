@@ -25,12 +25,17 @@ from pathlib import Path
 from typing import Any, Callable
 
 from db import DatabaseManager
-from evidence import EvidenceStore
-from executor import ExecutionResult, ExecutorAgent
-from finding_verifier import FindingVerifier
-from memory import MemoryManager
-from mission import Mission, MissionController
-from observer import ObserverAgent
+from legacy.evidence import EvidenceStore
+from legacy.executor import ExecutionResult, ExecutorAgent
+from legacy.finding_verifier import FindingVerifier
+from legacy.memory import MemoryManager
+from legacy.mission import Mission, MissionController
+from legacy.observer import ObserverAgent
+from legacy.planner import _SERVICE_ATTACK_MAP, PlannerAgent
+from legacy.report_generator import ReportGenerator
+from legacy.risk_controller import RiskController
+from legacy.task_queue import TaskQueue
+from legacy.tool_router import ToolRouter
 from outcome_judge import (
     ClosedHypothesisError,
     DuplicateInvestigationError,
@@ -39,13 +44,8 @@ from outcome_judge import (
     OutcomeAssessment,
     OutcomeJudge,
 )
-from planner import _SERVICE_ATTACK_MAP, PlannerAgent
-from report_generator import ReportGenerator
-from risk_controller import RiskController
 from scope_gate import ScopeGate
 from target_graph import TargetGraph
-from task_queue import TaskQueue
-from tool_router import ToolRouter
 from tools.autonomous_orchestrator import AutonomousOrchestrator
 from tools.enhanced_reporting import EnhancedReportGenerator
 from tools.experience_store import ExperienceStore

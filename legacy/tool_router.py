@@ -19,8 +19,8 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from db import DatabaseManager
-from evidence import EvidenceStore
-from risk_controller import RiskController
+from legacy.evidence import EvidenceStore
+from legacy.risk_controller import RiskController
 from scope_gate import ScopeGate
 from summarizer import summarize_tool_output
 

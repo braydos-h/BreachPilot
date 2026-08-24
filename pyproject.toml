@@ -79,7 +79,7 @@ py-modules = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["tools*"]
+include = ["tools*", "legacy*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
