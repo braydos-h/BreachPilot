@@ -277,6 +277,69 @@ def _ensure_workspace_dirs(workspace: Path) -> None:
         (workspace / sub).mkdir(parents=True, exist_ok=True)
 
 
+# Ponytail: single-source registry for MCP tool families.
+# Each ``tools/mcp_tools/<family>.py`` defines ``register_<family>_tools(mcp, ctx)``.
+# The old 2-place wiring (decorator + manual list in mcp_exploit_server.py) is
+# collapsed to 1: ``mcp_exploit_server._discover_tool_registrars()`` walks the
+# ``tools.mcp_tools`` package at import time and collects every
+# ``register_*_tools`` callable. Adding a new family now requires only one file
+# edit — create ``tools/mcp_tools/foo.py`` with ``register_foo_tools``; no edit
+# to ``mcp_exploit_server.py`` or ``registry.py``.
+_TOOL_REGISTRARS: list[Any] = []  # populated by _discover_tool_registrars on first use
+
+
+def register_tool_family(fn: Any) -> Any:
+    """Decorator for explicit registration (alternative to auto-discovery).
+
+    Usage::
+
+        @register_tool_family
+        def register_foo_tools(mcp, ctx): ...
+
+    The decorator appends ``fn`` to ``_TOOL_REGISTRARS`` and returns it
+    unchanged. ``mcp_exploit_server.create_mcp_server`` also auto-discovers
+    ``register_*_tools`` via package walk, so this decorator is optional —
+    the single source is the function name, not the list.
+    """
+    if fn not in _TOOL_REGISTRARS:
+        _TOOL_REGISTRARS.append(fn)
+    return fn
+
+
+def _discover_tool_registrars() -> list[Any]:
+    """Auto-discover ``register_*_tools`` callables in ``tools.mcp_tools``.
+
+    Walks ``tools.mcp_tools`` submodules, imports each, and collects callables
+    named ``register_*_tools``. Result is cached in ``_TOOL_REGISTRARS`` after
+    first call. Explicit ``@register_tool_family`` entries are merged in.
+    """
+    import importlib
+    import pkgutil
+
+    # Return cached if already populated via decorator or prior discovery
+    if _TOOL_REGISTRARS:
+        return list(_TOOL_REGISTRARS)
+    try:
+        import tools.mcp_tools as _pkg
+    except ImportError:
+        return []
+    for _, modname, ispkg in pkgutil.iter_modules(_pkg.__path__):
+        if ispkg:
+            continue
+        if modname == "registry":
+            continue
+        try:
+            mod = importlib.import_module(f"tools.mcp_tools.{modname}")
+        except Exception:
+            continue
+        for attr in dir(mod):
+            if attr.startswith("register_") and attr.endswith("_tools"):
+                fn = getattr(mod, attr, None)
+                if callable(fn) and fn not in _TOOL_REGISTRARS:
+                    _TOOL_REGISTRARS.append(fn)
+    return list(_TOOL_REGISTRARS)
+
+
 
 def read_workspace(workspace: Path, filename: str) -> str:
     """Read any file on the operator box by path.
@@ -497,4 +560,8 @@ __all__ = [
     "_platform_system",
     "_run_with_pgrp_timeout",
     "_extract_scanner_targets",
+    # ponytail: Phase 2 collapsed registration — single source via _discover_tool_registrars
+    "_TOOL_REGISTRARS",
+    "register_tool_family",
+    "_discover_tool_registrars",
 ]
