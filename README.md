@@ -388,13 +388,17 @@ required, nothing touches the network):
   suite (`python -m pytest tests/ -v`).
 - **Coverage** on Python 3.12: terminal report + `coverage.xml` artifact.
 - **Ruff** on the currently passing scope (safety core + intelligence +
-  providers): `app.py`, `scope_gate.py`, `tools/safety_reviewer.py`,
-  `tools/validation_utils.py`, `tools/intelligence`, `tools/providers`.
+  providers + kernel): `app.py`, `scope_gate.py`, `tools/safety_reviewer.py`,
+  `tools/validation_utils.py`, `tools/mcp_shared.py`, `tools/model_router.py`,
+  `tools/config_manager.py`, `tools/mcp_tools/registry.py`, `tools/kernel`,
+  `tools/intelligence`, `tools/providers`.
   Repository-wide `ruff check .` still reports ~1800 pre-existing violations
   (mostly import sorting) that are out of scope here.
 - **mypy** on the currently passing typed core (`--follow-imports=skip`):
   `summarizer.py`, `planner.py`, `observer.py`, `target_graph.py`,
-  `outcome_judge.py`, `db.py`, `mcp_exploit_server.py`, `tools/mcp_shared.py`.
+  `outcome_judge.py`, `db.py`, `mcp_exploit_server.py`, `tools/mcp_shared.py`,
+  `tools/validation_utils.py`, `tools/model_router.py`, `tools/config_manager.py`,
+  `tools/mcp_tools/registry.py`, `tools/kernel/allowlist.py`.
   The rest of the codebase is not yet type-clean.
 - **Package build**: `python -m build` + `python -m twine check dist/*`.
 - **WebUI**: `npm ci`, `npm run build` (tsc + vite), `npm run test` (vitest).
@@ -408,8 +412,8 @@ Before opening a PR, run the same checks locally:
 ```bash
 python -m pip install -e ".[dev]"
 python -m pytest tests/ -v
-ruff check app.py scope_gate.py tools/safety_reviewer.py tools/validation_utils.py tools/intelligence tools/providers
-mypy --follow-imports=skip summarizer.py planner.py observer.py target_graph.py outcome_judge.py db.py mcp_exploit_server.py tools/mcp_shared.py
+ruff check app.py scope_gate.py tools/safety_reviewer.py tools/validation_utils.py tools/mcp_shared.py tools/model_router.py tools/config_manager.py tools/mcp_tools/registry.py tools/kernel tools/intelligence tools/providers
+mypy --follow-imports=skip summarizer.py planner.py observer.py target_graph.py outcome_judge.py db.py mcp_exploit_server.py tools/mcp_shared.py tools/validation_utils.py tools/model_router.py tools/config_manager.py tools/mcp_tools/registry.py tools/kernel/allowlist.py
 cd webui && npm ci && npm run build && npm run test
 ```
 
