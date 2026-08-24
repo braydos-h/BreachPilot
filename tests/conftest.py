@@ -5,10 +5,12 @@ These three fixtures cover the most duplicated mocks (grep "Mock(spec=" shows
 instead of hand-rolling Mocks. Existing tests are migrated incrementally — the
 fixtures are opt-in, never breaking.
 """
+
 from __future__ import annotations
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, Mock
+
+import pytest
 
 
 @pytest.fixture

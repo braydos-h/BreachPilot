@@ -7,6 +7,7 @@ capabilities, and kernel version checks.
 """
 
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -30,7 +31,10 @@ class PrivescAssessmentAgent:
             needs_shell = any(op in clean_cmd for op in ("|", ";", "&&", "||"))
             result = subprocess.run(
                 clean_cmd if needs_shell else shlex.split(clean_cmd),
-                shell=needs_shell, capture_output=True, text=True, timeout=timeout
+                shell=needs_shell,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
             )
             return result.stdout.strip()
         except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
@@ -54,10 +58,33 @@ class PrivescAssessmentAgent:
         findings = []
 
         gtfobins_dangerous = [
-            "vim", "vi", "nano", "less", "more", "find", "nmap", "python",
-            "python3", "perl", "ruby", "awk", "gawk", "env", "ftp",
-            "man", "mount", "strace", "ltrace", "zip", "tar",
-            "bash", "sh", "dash", "ash", "zsh", "tclsh",
+            "vim",
+            "vi",
+            "nano",
+            "less",
+            "more",
+            "find",
+            "nmap",
+            "python",
+            "python3",
+            "perl",
+            "ruby",
+            "awk",
+            "gawk",
+            "env",
+            "ftp",
+            "man",
+            "mount",
+            "strace",
+            "ltrace",
+            "zip",
+            "tar",
+            "bash",
+            "sh",
+            "dash",
+            "ash",
+            "zsh",
+            "tclsh",
         ]
 
         if "NOPASSWD" in sudo_l:
@@ -83,9 +110,23 @@ class PrivescAssessmentAgent:
         binaries = suid_output.splitlines()
 
         gtfobins_suid = [
-            "nmap", "vim", "find", "bash", "more", "less", "nano",
-            "cp", "mv", "python", "perl", "ruby", "env",
-            "pkexec", "at", "strace", "taskset",
+            "nmap",
+            "vim",
+            "find",
+            "bash",
+            "more",
+            "less",
+            "nano",
+            "cp",
+            "mv",
+            "python",
+            "perl",
+            "ruby",
+            "env",
+            "pkexec",
+            "at",
+            "strace",
+            "taskset",
         ]
 
         findings = []
@@ -110,8 +151,7 @@ class PrivescAssessmentAgent:
         """Find binaries with elevated Linux capabilities."""
         cap_output = self._run("getcap -r / 2>/dev/null")
         findings = []
-        dangerous_caps = ["cap_setuid", "cap_dac_override", "cap_sys_admin",
-                         "cap_sys_ptrace", "cap_net_raw"]
+        dangerous_caps = ["cap_setuid", "cap_dac_override", "cap_sys_admin", "cap_sys_ptrace", "cap_net_raw"]
 
         for line in cap_output.splitlines():
             for cap in dangerous_caps:
@@ -132,8 +172,12 @@ class PrivescAssessmentAgent:
         """Check for writable cron jobs or scripts."""
         findings = []
         cron_paths = [
-            "/etc/crontab", "/etc/cron.d", "/etc/cron.daily",
-            "/etc/cron.hourly", "/etc/cron.weekly", "/etc/cron.monthly",
+            "/etc/crontab",
+            "/etc/cron.d",
+            "/etc/cron.daily",
+            "/etc/cron.hourly",
+            "/etc/cron.weekly",
+            "/etc/cron.monthly",
             "/var/spool/cron/crontabs",
         ]
 
@@ -172,7 +216,6 @@ class PrivescAssessmentAgent:
     def check_writable_passwd(self):
         """Check if /etc/passwd or /etc/shadow is writable."""
         findings = []
-        import os
         for path in ["/etc/passwd", "/etc/shadow"]:
             if os.path.exists(path) and os.access(path, os.W_OK):
                 finding = {
@@ -205,13 +248,15 @@ class PrivescAssessmentAgent:
             return exploits
 
         for min_ver, max_ver, cve, name in known_vulns:
-            exploits.append({
-                "cve": cve,
-                "name": name,
-                "affected_range": f"{min_ver} - {max_ver}",
-                "kernel": kernel,
-                "note": "Verify applicability before testing",
-            })
+            exploits.append(
+                {
+                    "cve": cve,
+                    "name": name,
+                    "affected_range": f"{min_ver} - {max_ver}",
+                    "kernel": kernel,
+                    "note": "Verify applicability before testing",
+                }
+            )
         return exploits
 
     def generate_report(self):

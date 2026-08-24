@@ -28,7 +28,7 @@ import pytest
 # ── 1. adapter unit tests ───────────────────────────────────────────────────
 
 
-def _real_judge() -> "OutcomeJudge":  # type: ignore[name-defined]
+def _real_judge() -> "OutcomeJudge":  # noqa: F821 type: ignore[name-defined]
     from outcome_judge import OutcomeJudge
 
     return OutcomeJudge(
@@ -124,9 +124,7 @@ async def test_judge_outcome_compromise_confirmed():
     from outcome_judge import HypothesisStatus
     from tools.exploit_agent.outcome_adapter import build_observation, judge_outcome
 
-    adapter = build_observation(
-        "meterpreter session 1 opened", _record(), "exploit target", "10.0.0.50"
-    )
+    adapter = build_observation("meterpreter session 1 opened", _record(), "exploit target", "10.0.0.50")
     status, conf = await judge_outcome(adapter, _real_judge(), "task-1")
     assert status is HypothesisStatus.CONFIRMED
     assert conf >= 0.75
@@ -152,9 +150,7 @@ async def test_judge_outcome_partial_inconclusive():
     from outcome_judge import HypothesisStatus
     from tools.exploit_agent.outcome_adapter import build_observation, judge_outcome
 
-    adapter = build_observation(
-        "access is denied", _record(), "exploit target", "10.0.0.50"
-    )
+    adapter = build_observation("access is denied", _record(), "exploit target", "10.0.0.50")
     status, _ = await judge_outcome(adapter, _real_judge(), "task-3")
     assert status in {HypothesisStatus.INCONCLUSIVE, HypothesisStatus.OPEN}
 
@@ -354,9 +350,7 @@ def _tool_call_msg(name="run_exploit_terminal", args=None):
     return {
         "message": {
             "content": "running exploit",
-            "tool_calls": [
-                {"function": {"name": name, "arguments": args or {"command": "exploit"}}}
-            ],
+            "tool_calls": [{"function": {"name": name, "arguments": args or {"command": "exploit"}}}],
         }
     }
 
@@ -411,9 +405,7 @@ async def test_loop_flow_a_compromise_records_compromise(tmp_path, monkeypatch):
     # The audit record for the exploit action should be 'completed' (success
     # overridden to True by the CONFIRMED verdict).
     completed = [r for r in policy._records if r.action == "run_exploit_terminal" and r.status == "completed"]
-    assert completed, (
-        f"expected a completed audit row, got {[r.status for r in policy._records]}"
-    )
+    assert completed, f"expected a completed audit row, got {[r.status for r in policy._records]}"
 
 
 @pytest.mark.asyncio
@@ -509,9 +501,7 @@ async def test_loop_flow_a_refuted_records_exploit_failure(tmp_path, monkeypatch
 
     # REFUTED -> success=False -> audit status 'executed' (not 'completed').
     executed = [r for r in policy._records if r.action == "run_exploit_terminal" and r.status == "executed"]
-    assert executed, (
-        f"expected an executed audit row, got {[r.status for r in policy._records]}"
-    )
+    assert executed, f"expected an executed audit row, got {[r.status for r in policy._records]}"
 
 
 @pytest.mark.asyncio
@@ -639,9 +629,7 @@ def test_config_validator_flags_non_bool_flow_a():
 
     validator = ConfigValidator.__new__(ConfigValidator)
     validator._config = {"outcome_judgment": {"flow_a": "yes"}}
-    result = __import__(
-        "tools.config_manager", fromlist=["ConfigValidationResult"]
-    ).ConfigValidationResult()
+    result = __import__("tools.config_manager", fromlist=["ConfigValidationResult"]).ConfigValidationResult()
     # Mimic validate()'s section guard + our new field check.
     judgment = validator._config["outcome_judgment"]
     flow_a = judgment.get("flow_a")

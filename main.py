@@ -5,6 +5,7 @@ Usage:
     python main.py --target 10.0.0.50 --mode attack --goal backdoor
     python main.py --target 10.0.0.50 --mode recon --goal initial_access
 """
+
 # NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
 from __future__ import annotations
 
@@ -58,14 +59,20 @@ def bootstrap_startup_api_keys(args: argparse.Namespace, *, prompt: bool = False
     _config_cli.bootstrap_startup_api_keys(args, prompt=prompt)
 
 
+from tools.cli_exploit_settings import (
+    _compute_swarm_timeout as _compute_swarm_timeout,  # noqa: F401 - re-export for tests/back-compat
+)
+from tools.cli_exploit_settings import (
+    build_cli_exploit_settings as build_cli_exploit_settings,  # noqa: F401 - re-export for tests/back-compat
+)
+from tools.resume_state import _load_resume_state as _load_resume_state  # noqa: F401 - re-export for tests/back-compat
+from tools.skills_cli import (
+    _apply_runtime_skill_selection as _apply_runtime_skill_selection,  # noqa: F401 - re-export for tests/back-compat
+)
 from tools.skills_cli import (
     apply_skills_cli_overrides,
     print_skills_catalog,
 )
-from tools.skills_cli import _apply_runtime_skill_selection as _apply_runtime_skill_selection  # noqa: F401 - re-export for tests/back-compat
-from tools.cli_exploit_settings import build_cli_exploit_settings as build_cli_exploit_settings  # noqa: F401 - re-export for tests/back-compat
-from tools.cli_exploit_settings import _compute_swarm_timeout as _compute_swarm_timeout  # noqa: F401 - re-export for tests/back-compat
-from tools.resume_state import _load_resume_state as _load_resume_state  # noqa: F401 - re-export for tests/back-compat
 
 
 def _log_nested_exceptions(exc: BaseException, *, prefix: str = "") -> None:
@@ -196,12 +203,6 @@ async def run_exploit_session(
     )
 
 
-
-
-
-
-
-
 # ---------------------------------------------------------------------------
 # Safety review phase for recon mode
 # ---------------------------------------------------------------------------
@@ -249,6 +250,7 @@ def _read_swarm_snapshot(swarm_workspace: Path) -> str:
     ``tools/swarm/orchestrator.py:_persist_state``.
     """
     import json as _json
+
     path = swarm_workspace / "swarm_state.json"
     try:
         if not path.exists():
@@ -279,6 +281,7 @@ def _run_telemetry(start_lines: int) -> dict[str, Any] | None:
     records or the log can't be read.
     """
     import json as _json
+
     try:
         path = usage_log_path(workspace_root_from_sources())
         if not path.exists():
@@ -334,12 +337,10 @@ def _extract_tool_text(raw: Any) -> str:
     return _recon_assessment_cli._extract_tool_text(raw)
 
 
-
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="main.py",
-        description="NetAttackAI — autonomous penetration testing AI. "
-                    "Run with no arguments for the interactive menu.",
+        description="NetAttackAI — autonomous penetration testing AI. Run with no arguments for the interactive menu.",
         epilog=(
             "examples:\n"
             "  python main.py                                          interactive menu\n"
@@ -357,21 +358,44 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
     core = parser.add_argument_group("targeting")
     core.add_argument("--target", default="", help="Target IP address or domain to attack or recon")
-    core.add_argument("--mode", choices=("recon", "attack", "fast"), default="", help="recon = gather intel, attack = full exploitation, fast = parallel recon preset then attack")
-    core.add_argument("--goal", default="", help="Preset goal name (e.g. backdoor, initial_access, privilege_escalation)")
+    core.add_argument(
+        "--mode",
+        choices=("recon", "attack", "fast"),
+        default="",
+        help="recon = gather intel, attack = full exploitation, fast = parallel recon preset then attack",
+    )
+    core.add_argument(
+        "--goal", default="", help="Preset goal name (e.g. backdoor, initial_access, privilege_escalation)"
+    )
     core.add_argument("--custom-goal", default="", help="Custom goal description")
     core.add_argument("--config", type=Path, default=Path("config.yaml"), help="Config file (default: config.yaml)")
-    core.add_argument("--model", default=None, help="Override default model alias (glm/kimi/deepseek/deepseek_flash/minimax)")
-    core.add_argument("--model-strategy", choices=("default", "round-robin", "random", "specific"), default="default",
-                      help="How to pick model across targets")
-    core.add_argument("--mcp-transport", choices=("stdio", "http"), default=None,
-                      help="MCP transport (ignored on the run path: always forced to http so the target-IP lock reaches the server)")
+    core.add_argument(
+        "--model", default=None, help="Override default model alias (glm/kimi/deepseek/deepseek_flash/minimax)"
+    )
+    core.add_argument(
+        "--model-strategy",
+        choices=("default", "round-robin", "random", "specific"),
+        default="default",
+        help="How to pick model across targets",
+    )
+    core.add_argument(
+        "--mcp-transport",
+        choices=("stdio", "http"),
+        default=None,
+        help="MCP transport (ignored on the run path: always forced to http so the target-IP lock reaches the server)",
+    )
     core.add_argument("--http-port", type=int, default=None, help="MCP HTTP port")
-    core.add_argument("--reports-dir", type=Path, default=Path("reports"), help="Where run artifacts are written (default: reports/)")
+    core.add_argument(
+        "--reports-dir", type=Path, default=Path("reports"), help="Where run artifacts are written (default: reports/)"
+    )
 
     keys = parser.add_argument_group("api keys")
-    keys.add_argument("--setup-api-keys", action="store_true", help="Prompt for provider API keys and save them to secr.json")
-    keys.add_argument("--api-key-file", type=Path, default=DEFAULT_API_KEY_FILE, help="Local JSON file for saved provider API keys")
+    keys.add_argument(
+        "--setup-api-keys", action="store_true", help="Prompt for provider API keys and save them to secr.json"
+    )
+    keys.add_argument(
+        "--api-key-file", type=Path, default=DEFAULT_API_KEY_FILE, help="Local JSON file for saved provider API keys"
+    )
     keys.add_argument("--no-api-key-prompt", action="store_true", help="Skip the interactive startup API-key prompt")
 
     out = parser.add_argument_group("output")
@@ -384,85 +408,158 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     swarm = parser.add_argument_group("swarm & reasoning")
     swarm.add_argument("--swarm", action="store_true", help="Enable multi-agent swarm mode")
     swarm.add_argument(
-        "--parallel-swarm", action="store_true",
+        "--parallel-swarm",
+        action="store_true",
         help="Enable parallel sub-agents (route_parallel + spawn_subagent MCP tool). "
-             "Off by default; flips swarm.parallel_enabled to true. Recon-first: "
-             "recon + vuln-research parallelize; exploit/post_exploit stay sequential "
-             "unless swarm.exploit_parallel is also true.",
+        "Off by default; flips swarm.parallel_enabled to true. Recon-first: "
+        "recon + vuln-research parallelize; exploit/post_exploit stay sequential "
+        "unless swarm.exploit_parallel is also true.",
     )
     swarm.add_argument("--critic", action="store_true", help="Enable critic agent pre-approval (requires --swarm)")
     swarm.add_argument("--reflection", action="store_true", help="Enable reflection agent (requires --swarm)")
-    swarm.add_argument("--adaptive-exploits", action="store_true", help="Enable adaptive exploit generation with mutation")
-    swarm.add_argument("--long-session", dest="long_session", action="store_true",
-                       help="Raise context window (num_ctx), LLM call timeout, round/command/duration budgets, "
-                            "and the swarm cap for a multi-hour attack run; checkpoints compacted messages for crash-safe resume")
-    swarm.add_argument("--multi-model-consult", dest="multi_model_consult", action="store_true", default=None,
-                       help="Allow the agent to ask configured peer models for advisory help")
-    swarm.add_argument("--no-multi-model-consult", dest="multi_model_consult", action="store_false",
-                       help="Disable peer-model consultation for this run")
-    swarm.add_argument("--observer-mode", choices=("heuristic", "llm", "hybrid"), default="hybrid", help="Observer mode for fact extraction")
-    swarm.add_argument("--recon-first", action="store_true", default=None,
-                       help="Force recon-first mode: scan target, suggest rated goals, then ask for goal selection")
-    swarm.add_argument("--no-recon-first", action="store_false", dest="recon_first",
-                       help="Skip recon-first mode; go directly to goal selection")
-    swarm.add_argument("--ultrathink", action="store_true",
-                       help="Enable deep reasoning mode: verbose chain-of-thought and frequent reflection")
+    swarm.add_argument(
+        "--adaptive-exploits", action="store_true", help="Enable adaptive exploit generation with mutation"
+    )
+    swarm.add_argument(
+        "--long-session",
+        dest="long_session",
+        action="store_true",
+        help="Raise context window (num_ctx), LLM call timeout, round/command/duration budgets, "
+        "and the swarm cap for a multi-hour attack run; checkpoints compacted messages for crash-safe resume",
+    )
+    swarm.add_argument(
+        "--multi-model-consult",
+        dest="multi_model_consult",
+        action="store_true",
+        default=None,
+        help="Allow the agent to ask configured peer models for advisory help",
+    )
+    swarm.add_argument(
+        "--no-multi-model-consult",
+        dest="multi_model_consult",
+        action="store_false",
+        help="Disable peer-model consultation for this run",
+    )
+    swarm.add_argument(
+        "--observer-mode",
+        choices=("heuristic", "llm", "hybrid"),
+        default="hybrid",
+        help="Observer mode for fact extraction",
+    )
+    swarm.add_argument(
+        "--recon-first",
+        action="store_true",
+        default=None,
+        help="Force recon-first mode: scan target, suggest rated goals, then ask for goal selection",
+    )
+    swarm.add_argument(
+        "--no-recon-first",
+        action="store_false",
+        dest="recon_first",
+        help="Skip recon-first mode; go directly to goal selection",
+    )
+    swarm.add_argument(
+        "--ultrathink",
+        action="store_true",
+        help="Enable deep reasoning mode: verbose chain-of-thought and frequent reflection",
+    )
 
     ops = parser.add_argument_group("operational")
-    ops.add_argument("--doctor", action="store_true",
-                     help="Run a self-check (Python, nmap, Ollama, config) and exit")
-    ops.add_argument("--demo", action="store_true",
-                     help="Run against a local sandbox target (DVWA-style)")
-    ops.add_argument("--resume", type=str, default="",
-                     help="Resume a prior run by run_id or session_id")
-    ops.add_argument("--yes", action="store_true",
-                     help="Skip the ready-to-begin confirmation gate (use with caution)")
-    ops.add_argument("--self-test", action="store_true",
-                     help="Run a safe localhost smoke test against 127.0.0.1 and exit")
-    ops.add_argument("--eval", action="store_true",
-                     help="Run the eval/benchmark harness against --target and write reports/eval/<run_id>/")
+    ops.add_argument("--doctor", action="store_true", help="Run a self-check (Python, nmap, Ollama, config) and exit")
+    ops.add_argument("--demo", action="store_true", help="Run against a local sandbox target (DVWA-style)")
+    ops.add_argument("--resume", type=str, default="", help="Resume a prior run by run_id or session_id")
+    ops.add_argument("--yes", action="store_true", help="Skip the ready-to-begin confirmation gate (use with caution)")
+    ops.add_argument(
+        "--self-test", action="store_true", help="Run a safe localhost smoke test against 127.0.0.1 and exit"
+    )
+    ops.add_argument(
+        "--eval",
+        action="store_true",
+        help="Run the eval/benchmark harness against --target and write reports/eval/<run_id>/",
+    )
 
     ctf = parser.add_argument_group("ctf autopilot")
-    ctf.add_argument("--ctf", action="store_true",
-                     help="CTF autopilot: run against --target and stop when the goal is heuristically met "
-                          "(flag marker / uid=0 / port-marker). Target-locked via the normal allowlist.")
-    ctf.add_argument("--ctf-flag-path", dest="ctf_flag_path", default="",
-                     help="CTF goal: flag file path on the target (e.g. /root/flag.txt)")
-    ctf.add_argument("--ctf-root-shell", dest="ctf_root_shell", action="store_true", default=True,
-                     help="CTF goal: treat uid=0 in any output as goal-met (default True)")
-    ctf.add_argument("--ctf-port", dest="ctf_port", type=int, default=0,
-                     help="CTF goal: port to probe for the known-string marker")
-    ctf.add_argument("--ctf-marker", dest="ctf_marker", default="",
-                     help="CTF goal: known-string marker expected from --ctf-port")
+    ctf.add_argument(
+        "--ctf",
+        action="store_true",
+        help="CTF autopilot: run against --target and stop when the goal is heuristically met "
+        "(flag marker / uid=0 / port-marker). Target-locked via the normal allowlist.",
+    )
+    ctf.add_argument(
+        "--ctf-flag-path",
+        dest="ctf_flag_path",
+        default="",
+        help="CTF goal: flag file path on the target (e.g. /root/flag.txt)",
+    )
+    ctf.add_argument(
+        "--ctf-root-shell",
+        dest="ctf_root_shell",
+        action="store_true",
+        default=True,
+        help="CTF goal: treat uid=0 in any output as goal-met (default True)",
+    )
+    ctf.add_argument(
+        "--ctf-port", dest="ctf_port", type=int, default=0, help="CTF goal: port to probe for the known-string marker"
+    )
+    ctf.add_argument(
+        "--ctf-marker", dest="ctf_marker", default="", help="CTF goal: known-string marker expected from --ctf-port"
+    )
 
     skills = parser.add_argument_group("runtime skills")
-    skills.add_argument("--skills", choices=("on", "off", "hints", "lookup"), default=None,
-                        help="Override runtime-skills behavior for this run: on=startup context injected, "
-                             "hints=hints only (default), lookup=MCP tools only, off=skills disabled")
-    skills.add_argument("--skills-list", action="store_true",
-                        help="Print the runtime-skill catalog and exit (read-only)")
-    skills.add_argument("--skills-include", action="append", default=None, metavar="NAME",
-                        help="Force-include a skill by name for this run (sticky across re-selection). Repeatable.")
-    skills.add_argument("--skills-exclude", action="append", default=None, metavar="NAME",
-                        help="Exclude a skill by name for this run. Repeatable.")
-    skills.add_argument("--no-skills-reselect", action="store_true",
-                        help="Disable mid-run skill re-selection for this run")
+    skills.add_argument(
+        "--skills",
+        choices=("on", "off", "hints", "lookup"),
+        default=None,
+        help="Override runtime-skills behavior for this run: on=startup context injected, "
+        "hints=hints only (default), lookup=MCP tools only, off=skills disabled",
+    )
+    skills.add_argument(
+        "--skills-list", action="store_true", help="Print the runtime-skill catalog and exit (read-only)"
+    )
+    skills.add_argument(
+        "--skills-include",
+        action="append",
+        default=None,
+        metavar="NAME",
+        help="Force-include a skill by name for this run (sticky across re-selection). Repeatable.",
+    )
+    skills.add_argument(
+        "--skills-exclude",
+        action="append",
+        default=None,
+        metavar="NAME",
+        help="Exclude a skill by name for this run. Repeatable.",
+    )
+    skills.add_argument(
+        "--no-skills-reselect", action="store_true", help="Disable mid-run skill re-selection for this run"
+    )
 
     plugins = parser.add_argument_group("plugins")
-    plugins.add_argument("--list-plugins", dest="list_plugins", action="store_true",
-                         help="Print discovered plugins (name/version/capabilities/loaded) and exit")
+    plugins.add_argument(
+        "--list-plugins",
+        dest="list_plugins",
+        action="store_true",
+        help="Print discovered plugins (name/version/capabilities/loaded) and exit",
+    )
 
     webui = parser.add_argument_group("webui")
-    webui.add_argument("--demon", "--daemon", dest="daemon", action="store_true",
-                       help="Start the local WebUI API server instead of the terminal menu")
-    webui.add_argument("--web", dest="web", action="store_true",
-                       help="Build the WebUI if needed, serve it from the daemon at /, and open a browser")
+    webui.add_argument(
+        "--demon",
+        "--daemon",
+        dest="daemon",
+        action="store_true",
+        help="Start the local WebUI API server instead of the terminal menu",
+    )
+    webui.add_argument(
+        "--web",
+        dest="web",
+        action="store_true",
+        help="Build the WebUI if needed, serve it from the daemon at /, and open a browser",
+    )
     webui.add_argument("--api-host", default=None, help="API daemon bind host (loopback only; default 127.0.0.1)")
     webui.add_argument("--api-port", type=int, default=None, help="API daemon port (default 8765)")
     parsed = parser.parse_args(argv)
     return parsed
-
-
 
 
 def _ensure_webui_build(ui: Any) -> int:
@@ -478,8 +575,7 @@ def _ensure_webui_build(ui: Any) -> int:
         ui.error(f"  cd {webui_dir} && npm install && npm run build")
         return 1
     ui.status("Building the WebUI (first run only)...")
-    for step in (("install", [npm_cmd, "install", "--no-audit", "--no-fund"]),
-                 ("build", [npm_cmd, "run", "build"])):
+    for step in (("install", [npm_cmd, "install", "--no-audit", "--no-fund"]), ("build", [npm_cmd, "run", "build"])):
         label, argv = step
         ui.status(f"  npm {label}...")
         try:
@@ -517,8 +613,7 @@ def _install_bun(ui: Any) -> bool:
     npm_cmd = shutil.which("npm.cmd") or shutil.which("npm")
     if npm_cmd:
         try:
-            result = subprocess.run([npm_cmd, "install", "-g", "bun"],
-                                     capture_output=True, text=True, timeout=180)
+            result = subprocess.run([npm_cmd, "install", "-g", "bun"], capture_output=True, text=True, timeout=180)
             if result.returncode == 0 and shutil.which("bun"):
                 ui.status("bun installed via npm.")
                 return True
@@ -526,13 +621,9 @@ def _install_bun(ui: Any) -> bool:
         except (subprocess.TimeoutExpired, OSError) as exc:
             ui.error(f"npm install -g bun failed: {exc}")
     if os.name == "nt":
-        ps_cmd = (
-            "powershell -NoProfile -ExecutionPolicy Bypass -Command "
-            "\"irm bun.sh/install.ps1 | iex\""
-        )
+        ps_cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -Command "irm bun.sh/install.ps1 | iex"'
         try:
-            result = subprocess.run(ps_cmd, shell=True, capture_output=True,
-                                     text=True, timeout=180)
+            result = subprocess.run(ps_cmd, shell=True, capture_output=True, text=True, timeout=180)
             if result.returncode == 0 and shutil.which("bun"):
                 ui.status("bun installed via bun.sh/install.ps1.")
                 return True
@@ -541,8 +632,9 @@ def _install_bun(ui: Any) -> bool:
             ui.error(f"bun.sh/install.ps1 failed: {exc}")
     else:
         try:
-            result = subprocess.run(["bash", "-c", "curl -fsSL https://bun.sh/install | bash"],
-                                     capture_output=True, text=True, timeout=180)
+            result = subprocess.run(
+                ["bash", "-c", "curl -fsSL https://bun.sh/install | bash"], capture_output=True, text=True, timeout=180
+            )
             if result.returncode == 0 and shutil.which("bun"):
                 ui.status("bun installed via bun.sh.")
                 return True
@@ -609,9 +701,12 @@ def _ensure_chatgpt_runtime(args: argparse.Namespace) -> int:
             )
             return 1
         try:
-            result = subprocess.run([git_cmd, "clone", "--depth", "1",
-                                     "https://github.com/EvanZhouDev/openai-oauth.git",
-                                     str(repo)], capture_output=True, text=True, timeout=180)
+            result = subprocess.run(
+                [git_cmd, "clone", "--depth", "1", "https://github.com/EvanZhouDev/openai-oauth.git", str(repo)],
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
         except (subprocess.TimeoutExpired, OSError) as exc:
             ui.error(f"git clone openai-oauth failed: {exc}")
             return 1
@@ -632,9 +727,15 @@ def _ensure_chatgpt_runtime(args: argparse.Namespace) -> int:
             return 1
         ui.status("Running `bun install` in oauth/ (one-time setup)...")
         try:
-            result = subprocess.run([bun_cmd, "install"], cwd=str(repo),
-                                    capture_output=True, text=True, encoding="utf-8",
-                                    errors="replace", timeout=300)
+            result = subprocess.run(
+                [bun_cmd, "install"],
+                cwd=str(repo),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=300,
+            )
         except (subprocess.TimeoutExpired, OSError) as exc:
             ui.error(f"bun install failed: {exc}")
             return 1
@@ -661,9 +762,15 @@ def _ensure_chatgpt_runtime(args: argparse.Namespace) -> int:
             return 1
         ui.status("Running `bun run build --force` in oauth/ (one-time setup, builds workspace dist/)...")
         try:
-            result = subprocess.run([bun_cmd, "run", "build", "--force"], cwd=str(repo),
-                                    capture_output=True, text=True, encoding="utf-8",
-                                    errors="replace", timeout=600)
+            result = subprocess.run(
+                [bun_cmd, "run", "build", "--force"],
+                cwd=str(repo),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=600,
+            )
         except (subprocess.TimeoutExpired, OSError) as exc:
             ui.error(f"bun run build failed: {exc}")
             return 1
@@ -677,6 +784,7 @@ def _ensure_chatgpt_runtime(args: argparse.Namespace) -> int:
 def _open_browser_when_ready(host: str, port: int, ui: Any) -> None:
     """Poll the health endpoint, then open the browser. Daemon thread."""
     import urllib.request
+
     base = f"http://{host}:{port}/" if host != "::1" else f"http://[::1]:{port}/"
     health_url = f"{base}api/v1/health"
     deadline = time.monotonic() + 30.0
@@ -718,7 +826,9 @@ def _run_daemon(args: argparse.Namespace) -> int:
     shutdown_timeout = int(api_cfg.get("shutdown_timeout_seconds", 15))
     # v1: loopback-only. Refuse any non-loopback bind (no public override).
     if host not in ("127.0.0.1", "localhost", "::1"):
-        ui.error(f"--api-host must be loopback (127.0.0.1/localhost/::1); got {host!r}. Public binds are not supported in v1.")
+        ui.error(
+            f"--api-host must be loopback (127.0.0.1/localhost/::1); got {host!r}. Public binds are not supported in v1."
+        )
         return 2
     status_host = f"[{host}]" if host == "::1" else host
     web_mode = getattr(args, "web", False)
@@ -754,6 +864,7 @@ def _run_daemon(args: argparse.Namespace) -> int:
     # ponytail: print the bearer token here (create_app re-reads the same file;
     # one extra read beats threading the token back through the factory).
     from tools.api.auth import load_or_create_token
+
     token = load_or_create_token(
         api_cfg.get("token_file", ".webui_secret_key"),
         env_override=os.environ.get("NETATTACKAI_API_TOKEN", ""),
@@ -793,8 +904,6 @@ def _run_daemon(args: argparse.Namespace) -> int:
     return 0
 
 
-
-
 async def async_main(args: argparse.Namespace) -> int:
     """CLI adapter over ``AssessmentService``.
 
@@ -830,6 +939,7 @@ async def async_main(args: argparse.Namespace) -> int:
     # Load plugins before the MCP exploit server is created.
     try:
         from tools.plugins import load_plugins
+
         load_plugins(config)
     except Exception as exc:  # noqa: BLE001 -- plugin load must not block boot
         ui.info(f"Plugin load skipped: {type(exc).__name__}: {exc}")
@@ -848,7 +958,9 @@ async def async_main(args: argparse.Namespace) -> int:
     if interactive_session:
         try:
             args = await ui.ask_advanced_settings(None, args)
-            ui.plain = bool(getattr(args, "plain", False) or getattr(args, "quiet", False) or getattr(args, "json", False))
+            ui.plain = bool(
+                getattr(args, "plain", False) or getattr(args, "quiet", False) or getattr(args, "json", False)
+            )
         except (EOFError, KeyboardInterrupt):
             ui.error("Aborted.")
             return 1
@@ -917,6 +1029,7 @@ async def async_main(args: argparse.Namespace) -> int:
     if interactive_session:
         try:
             from tools import config_cli as _config_cli
+
             added = _config_cli.add_target_to_allowlist(config_path, preview.original_target)
             if added:
                 ui.status(f"Saved {preview.original_target} to {config_path} exploit.allowed_targets.")
@@ -953,7 +1066,9 @@ async def async_main(args: argparse.Namespace) -> int:
     ui.status(f"  Transport:   {preview.transport_summary}")
     ui.status(f"  Reports:     {preview.reports_dir}")
     if preview.destructive:
-        ui.status(f"  {ui._c('red')}[!] DESTRUCTIVE: permission=full_access, attack_mode={preview.attack_mode}{ui._c('reset')}")
+        ui.status(
+            f"  {ui._c('red')}[!] DESTRUCTIVE: permission=full_access, attack_mode={preview.attack_mode}{ui._c('reset')}"
+        )
     ui.status(f"  Permission:  {preview.permission}")
     ui.status(f"  Attack mode: {preview.attack_mode}")
     ui.status(f"  Swarm:       {preview.swarm}")
@@ -979,8 +1094,11 @@ async def async_main(args: argparse.Namespace) -> int:
     if not getattr(args, "yes", False):
         decision_provider = TerminalDecisionProvider(ui)
         from tools.run_service.models import Decision, DecisionKind
+
         confirm_decision = Decision(
-            id="", run_id=preview.run_id, kind=DecisionKind.START_CONFIRM,
+            id="",
+            run_id=preview.run_id,
+            kind=DecisionKind.START_CONFIRM,
             prompt_text="Proceed? [Y/n]",
             required_text=preview.required_confirmation_text,
         )
@@ -999,7 +1117,8 @@ async def async_main(args: argparse.Namespace) -> int:
     event_sink = TerminalEventSink()
     try:
         result = await service.execute(
-            request, preview,
+            request,
+            preview,
             decision_provider=TerminalDecisionProvider(ui),
             event_sink=event_sink,
             cancellation=cancellation,
@@ -1049,7 +1168,9 @@ def main(argv: list[str] | None = None) -> int:
         interactive_startup = bool(args.menu)
         bootstrap_startup_api_keys(
             args,
-            prompt=interactive_startup and not args.doctor and not getattr(args, "self_test", False)
+            prompt=interactive_startup
+            and not args.doctor
+            and not getattr(args, "self_test", False)
             and not getattr(args, "eval", False),
         )
         setup_only = bool(args.setup_api_keys) and not any(
@@ -1075,8 +1196,9 @@ def main(argv: list[str] | None = None) -> int:
         # proxy. Surfaces the fix (install/clone/install-deps) up front instead
         # of letting the proxy's own RuntimeError fire mid-run. Skipped for
         # --doctor/--self-test/--eval, which intentionally probe a partial state.
-        if not any(getattr(args, flag, False) for flag in
-                    ("doctor", "self_test", "eval", "skills_list", "list_plugins")):
+        if not any(
+            getattr(args, flag, False) for flag in ("doctor", "self_test", "eval", "skills_list", "list_plugins")
+        ):
             rc = _ensure_chatgpt_runtime(args)
             if rc != 0:
                 return rc
@@ -1090,13 +1212,26 @@ def main(argv: list[str] | None = None) -> int:
             for flag in ("target", "mode", "goal", "custom_goal"):
                 if getattr(args, flag, "").strip():
                     _conflicting.append(f"--{flag.replace('_', '-')}")
-            for flag in ("menu", "doctor", "demo", "eval", "self_test", "skills_list", "list_plugins", "setup_api_keys"):
+            for flag in (
+                "menu",
+                "doctor",
+                "demo",
+                "eval",
+                "self_test",
+                "skills_list",
+                "list_plugins",
+                "setup_api_keys",
+            ):
                 if getattr(args, flag, False):
                     _conflicting.append(f"--{flag.replace('_', '-')}")
             if _conflicting:
                 ui.error(
-                    ("--demon/--daemon/--web cannot be combined with: " if getattr(args, "web", False)
-                     else "--demon/--daemon cannot be combined with: ") + ", ".join(_conflicting)
+                    (
+                        "--demon/--daemon/--web cannot be combined with: "
+                        if getattr(args, "web", False)
+                        else "--demon/--daemon cannot be combined with: "
+                    )
+                    + ", ".join(_conflicting)
                 )
                 return 2
             return _run_daemon(args)
@@ -1104,26 +1239,31 @@ def main(argv: list[str] | None = None) -> int:
         # --doctor: run a self-check and exit. No exploit session starts.
         if args.doctor:
             from tools.doctor import run_doctor
+
             return run_doctor(args.config)
 
         # --self-test: run a safe localhost smoke test and exit.
         if getattr(args, "self_test", False):
             from tools.self_test import run_self_test
+
             return asyncio.run(run_self_test(args))
 
         # --eval: run the eval/benchmark harness against --target and exit.
         if getattr(args, "eval", False):
             from tools.eval_harness import run_eval
+
             return asyncio.run(run_eval(args))
 
         # --ctf: CTF autopilot with goal-completion detection.
         if getattr(args, "ctf", False):
             from tools.ctf_mode import run_ctf
+
             return run_ctf(args)
 
         # --demo: run against a local sandbox target (DVWA-style).
         if args.demo:
             from tools.demo_mode import run_demo
+
             return run_demo(args)
 
         # --skills-list: print the read-only runtime-skill catalog and exit.
@@ -1134,9 +1274,11 @@ def main(argv: list[str] | None = None) -> int:
         # --list-plugins: print discovered plugins and exit.
         if getattr(args, "list_plugins", False):
             from tools.plugins import list_discovered_plugins
+
             config = load_config(args.config)
             try:
                 from tools.plugins import load_plugins
+
                 load_plugins(config, entry_point_loader=lambda group: [])
             except Exception:  # noqa: BLE001 -- listing must not crash boot
                 pass
@@ -1154,6 +1296,7 @@ def main(argv: list[str] | None = None) -> int:
         # --menu flag: explicitly force the terminal interactive menu.
         if args.menu:
             from tools.interactive_menu import run_interactive_menu
+
             return run_interactive_menu()
 
         # No arguments: launch the WebUI daemon (default interface). --menu

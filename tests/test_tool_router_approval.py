@@ -17,6 +17,7 @@ from tool_router import ToolRouter
 # (which pull in Ollama and other heavy deps) by supplying minimal doubles that
 # implement only the surface the router touches.
 
+
 @dataclass
 class _ScopeResult:
     allowed: bool = True
@@ -82,13 +83,13 @@ class _StubDB:
         self.audit_entries: list[tuple[str, str, str, str]] = []
 
     class _Conn:
-        def __enter__(self) -> "_Conn":
+        def __enter__(self) -> "_Conn":  # noqa: F821
             return self
 
         def __exit__(self, *exc: Any) -> None:
             pass
 
-    def connection(self, *, write: bool = False) -> "_Conn":
+    def connection(self, *, write: bool = False) -> "_Conn":  # noqa: F821
         return _StubDB._Conn()
 
     def log_audit(
@@ -105,6 +106,7 @@ class _StubDB:
 
 
 # ── Fixtures ───────────────────────────────────────────────────────────────
+
 
 def _build_router(
     *,
@@ -134,6 +136,7 @@ def _build_router(
 
 # ── C2: missing-handler block ─────────────────────────────────────────────
 
+
 class TestHumanApprovalMissingHandler:
     """C2 — high-risk action with no approval handler must block, not execute."""
 
@@ -159,10 +162,7 @@ class TestHumanApprovalMissingHandler:
         # Must NOT have reached the tool executor
         assert executor_calls == []
         # Must be logged as a human_missing block
-        assert any(
-            "human_missing" in entry[2] and entry[1] == "tool_blocked"
-            for entry in db.audit_entries
-        )
+        assert any("human_missing" in entry[2] and entry[1] == "tool_blocked" for entry in db.audit_entries)
 
     def test_risk_requires_human_blocks_when_no_handler(self) -> None:
         executor_calls: list[str] = []
@@ -206,6 +206,7 @@ class TestHumanApprovalMissingHandler:
 
 
 # ── Regression: handler present is still called ───────────────────────────
+
 
 class TestHumanApprovalHandlerPresent:
     """Regression — when a handler IS present, it is consulted."""
@@ -265,7 +266,4 @@ class TestHumanApprovalHandlerPresent:
         # Denied path must NOT reach executor
         assert executor_calls == []
         # Denied path logged as human_denied
-        assert any(
-            "human_denied" in entry[2] and entry[1] == "tool_blocked"
-            for entry in db.audit_entries
-        )
+        assert any("human_denied" in entry[2] and entry[1] == "tool_blocked" for entry in db.audit_entries)

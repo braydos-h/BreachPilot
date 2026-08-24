@@ -28,16 +28,17 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from tools.cve_lookup import NVDClient
+    from tools.web_researcher import WebResearcher
 
 # Tools used by this server
 try:
     from mcp.server.fastmcp import FastMCP
 except ImportError as exc:  # pragma: no cover - import guard
-    raise RuntimeError(
-        "The MCP Python SDK is not installed. Run: "
-        "python -m pip install -r requirements.txt"
-    ) from exc
+    raise RuntimeError("The MCP Python SDK is not installed. Run: python -m pip install -r requirements.txt") from exc
 
 from tools.api_key_store import (
     DEFAULT_API_KEY_FILE,
@@ -173,8 +174,7 @@ async def _run_nmap(args: list[str], timeout: int = 300) -> dict[str, Any]:
             "ok": False,
             "stdout": "",
             "stderr": (
-                f"nmap binary '{path_hint}' not found. Install nmap or set "
-                f"nmap.path in config.yaml to its full path."
+                f"nmap binary '{path_hint}' not found. Install nmap or set nmap.path in config.yaml to its full path."
             ),
             "exit_code": -1,
             "duration_s": round(time.time() - start, 2),
@@ -210,9 +210,7 @@ def create_mcp_server(
     """
     config = config or {}
     research_cfg = config.get("research", {}) or {}
-    allowlist = _normalize_allowlist(
-        allow or research_cfg.get("allowed_assets", [])
-    )
+    allowlist = _normalize_allowlist(allow or research_cfg.get("allowed_assets", []))
 
     default_timeout = int(research_cfg.get("nmap_timeout_seconds", 300))
 
@@ -339,9 +337,7 @@ def create_mcp_server(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Defensive MCP server for the NetAttackAI agent."
-    )
+    parser = argparse.ArgumentParser(description="Defensive MCP server for the NetAttackAI agent.")
     parser.add_argument("--transport", choices=("stdio", "http"), default="stdio")
     parser.add_argument("--config", type=Path, default=Path("config.yaml"))
     parser.add_argument("--host", default="127.0.0.1")
