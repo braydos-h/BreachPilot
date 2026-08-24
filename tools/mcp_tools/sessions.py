@@ -62,6 +62,7 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
         return f"SEND_FAILED: {result.get('error', 'unknown error')}"
 
     @mcp.tool()
+    @audit_tool
     def read_session_output(name: str, lines: int = 100) -> str:
         """Read the last N lines from a named tmux session. Use this to see the output after sending commands via send_to_session."""
         mgr = _get_session_mgr()
@@ -75,6 +76,7 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
         return f"READ_FAILED: {result.get('error', 'unknown error')}"
 
     @mcp.tool()
+    @audit_tool
     def kill_session(name: str) -> str:
         """Kill a named persistent session (tmux, background job, or listener)."""
         mgr = _get_session_mgr()
@@ -107,6 +109,7 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
         return f"JOB_FAILED: {result.get('error', 'unknown error')}"
 
     @mcp.tool()
+    @audit_tool
     def read_job_output(name: str, lines: int = 100) -> str:
         """Read the last N lines from a background job's log file."""
         mgr = _get_session_mgr()
@@ -119,6 +122,7 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
         )
 
     @mcp.tool()
+    @audit_tool
     def stop_background_job(name: str) -> str:
         """Stop a named background job."""
         mgr = _get_session_mgr()
@@ -161,6 +165,7 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
         return f"LISTENER_FAILED: {result.get('error', 'unknown error')}"
 
     @mcp.tool()
+    @audit_tool
     def read_listener_output(name: str, lines: int = 100) -> str:
         """Read the last N lines from a listener's log file."""
         mgr = _get_session_mgr()
@@ -173,6 +178,7 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
         )
 
     @mcp.tool()
+    @audit_tool
     def stop_listener(name: str) -> str:
         """Stop a named network listener."""
         mgr = _get_session_mgr()
@@ -184,6 +190,7 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
         )
 
     @mcp.tool()
+    @audit_tool
     def list_sessions() -> str:
         """List all persistent sessions (tmux, background jobs, listeners) with their status, PIDs, and types."""
         mgr = _get_session_mgr()
@@ -202,6 +209,7 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
         return "\n".join(lines)
 
     @mcp.tool()
+    @audit_tool
     def list_processes(pattern: str = "") -> str:
         """List system processes. Optionally filter by a pattern string. Use to find running tools, check if a listener is active, or locate a specific process."""
         mgr = _get_session_mgr()

@@ -534,6 +534,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return f"ROOT_CMD_RESULT: error - {exc}"
 
     @mcp.tool()
+    @audit_tool
     def check_environment(tools: str = "") -> str:
         """Check which security testing tools are installed and available on the system.
         Provide a space-separated list of tool names (e.g., 'nmap metasploit-framework hydra gobuster'),
@@ -607,6 +608,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
         return "\n".join(result_lines)
 
     @mcp.tool()
+    @audit_tool
     def preflight_env_check() -> str:
         """Probe installed pentest tools, sudo/pip installability, and the
         recommended fallback (install_via_apt / install_via_pip / write_python_fallback)

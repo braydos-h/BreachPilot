@@ -214,6 +214,7 @@ def register_workspace_tools(mcp: Any, *, ctx: ToolContext) -> None:
         return read_workspace(workspace, filename)
 
     @mcp.tool()
+    @audit_tool
     def list_workspace() -> str:
         """List all files in the exploit workspace directory (LAB BUILD: nothing is hidden)."""
         workspace.mkdir(parents=True, exist_ok=True)
