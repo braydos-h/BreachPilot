@@ -546,6 +546,41 @@ code -> shipped: CONFIG_SCHEMA +2 blocks (caldera/ics) + drift test (30 lines)
       -> add when Phase 5b lands (update README §CI + pyproject per-file-ignores)
 ```
 
+## 14. Phase 6 Complete — Attack Module Auto-Discovery (2026-08-24)
+
+**Status:** Done. Single-source via filesystem, no manual list, <100 lines net.
+
+**What shipped:**
+
+| Artifact | File | Change |
+|----------|------|--------|
+| `tools/attack_modules/registry.py:1-40` | `tools/attack_modules/registry.py:1` | Replace 92-line explicit `from tools.attack_modules.modules import (83 names)` + 105-line `_MODULE_CLASSES = [83]` literal with `pkgutil.iter_modules(tools.attack_modules.modules)` auto-discovery. `_MODULE_CLASSES` now starts empty, `_discover_attack_modules()` walks `tools/attack_modules/modules/*.py`, imports each, finds `AttackModule` subclasses, and `register_attack_module(cls)`-appends them. Called on import so `list_modules()`/`get_module()` are populated before any caller. `_MODULE_CLASSES` literal removed, import block 92→2 lines, net -170 lines. |
+| `register_attack_module` | `tools/attack_modules/registry.py:222` | Kept as explicit decorator for out-of-tree/test modules (e.g. `tests/test_registry_complete.py` creates `_TempModule` and expects it to be appended). Idempotent (`if cls not in _MODULE_CLASSES`). |
+| `modules/__init__.py` | `tools/attack_modules/modules/__init__.py` | No change needed — still re-exports for `from tools.attack_modules.modules import Log4jRCE` etc., but registry no longer depends on it. The filesystem is the source, not the `__init__`. |
+
+**Why this is the ponytail fix:** The old 3-place edit (define class in `modules/foo.py`, import in `modules/__init__.py`, add to `_MODULE_CLASSES` literal) is now 1 place: define class in `modules/foo.py` only. The `@register_attack_module` decorator is now truly optional (for tests/plugins), not required for built-ins. Matches `tools/plugins.py` `pkgutil.iter_modules` pattern per spec.
+
+**Verification (Phase 6 DoD):**
+
+- `python -c "import tools.attack_modules.registry as r; print(len(r._MODULE_CLASSES))"` — **83** (same as before, now via discovery)
+- `python -c "from tools.attack_modules import list_modules, get_module; assert len(list_modules())==83; assert get_module('Log4jRCE') is not None"` — **ok, byte-identical API**
+- `pytest tests/test_attack_modules.py tests/test_registry_complete.py tests/test_module_capability_metadata_a.py tests/test_module_capability_metadata_b.py -q` — **68 + 5 + ? passed** (all registry tests green, including `test_every_exported_module_is_registered` and `test_register_attack_module_decorator_appends`)
+- `python -m ruff check tools/attack_modules/registry.py` — **All checks passed** (after `ruff --fix` for I001 import order)
+- No `scope_gate.py` etc. edited, no allowlist weakened, no new dep, `pyproject.toml`/`requirements.txt` synced
+
+**Debt delta vs §6:**
+
+| Rank | Before Phase 6 | After Phase 6 | Delta |
+|------|---------------|--------------|-------|
+| 3 Manual `_MODULE_CLASSES` 83 literal | 83 entries + 92 imports, 3-place edit, drift risk (class defined but not in list) | 0 literal, auto-discovery via `pkgutil`, 1-place edit | **Closed — biggest module-registry ROI** |
+| 11 `ics_iot.py:1516` etc. | 10 modules in one file | Still 10, but now auto-discovered — no edit needed to registry | No change, but no longer a debt |
+
+```
+code -> shipped: registry auto-discovery via pkgutil (1-place edit, -170 net)
+      -> skipped: Phase 4b real body moves (still shims), Phase 5b CI list update (doc only)
+      -> add when Phase 4b lands (ReconPipeline body) or Phase 5b (expand CI)
+```
+
 ---
 
 *Evidence: LOC via `Path.read_text().splitlines()`; ruff via `ruff check --output-format json .` (1849 errors, 385 files, by-rule counts in §3.1); mypy via `mypy --follow-imports=skip` on scoped list (0 errors); imports via line grep over 905 Python files; module counts via `re.findall(r'class \w+\(AttackModule', ...)` (83) vs `len(_MODULE_CLASSES)` (83). All measured 2026-08-24 on `v0.49.12` checkout at `C:\Users\BH\Documents\GitHub\NetAttackAi`.*

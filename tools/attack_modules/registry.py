@@ -2,201 +2,56 @@
 
 from __future__ import annotations
 
+import importlib
+import pkgutil
 from typing import Any
 
 from tools.attack_modules.base import AttackModule, ModuleContext
-from tools.attack_modules.modules import (
-    ADCSEnum,
-    ADLDAPEnum,
-    APIFuzzer,
-    ArtifactExposure,
-    ASREPRoast,
-    BACnetEnum,
-    BasicAuthBuster,
-    BloodHoundCollect,
-    CICDMisconfig,
-    CloudPrivesc,
-    ContainerBreakout,
-    CredentialSpray,
-    CVEToExploit,
-    DCSyncAttack,
-    DependencyConfusion,
-    DeserializeAttack,
-    DetectionCoverageProbe,
-    DiffPatchAnalysis,
-    DNP3Enum,
-    DockerSockEscape,
-    DumpHashes,
-    ElasticsearchExploit,
-    EternalBlue,
-    ExposedVCS,
-    FTPAnonymous,
-    FuzzToExploit,
-    GoldenTicket,
-    GraphQLIntrospect,
-    HashCrack,
-    HMIDefaultCred,
-    IMDSExploit,
-    IoTDefaultCred,
-    JWTTamper,
-    K8sPrivesc,
-    Kerberoasting,
-    KernelExploitCheck,
-    LateralMovement,
-    LDAPAnonymous,
-    LFITraversal,
-    LinuxPersistence,
-    LinuxPrivescCheck,
-    LocalExploitSuggester,
-    Log4jRCE,
-    LogSourceEnum,
-    ModbusEnum,
-    ModbusWriteCoil,
-    ModbusWriteRegister,
-    OpenSSHCVECheck,
-    OPSECPostureReport,
-    PassTheHash,
-    PasswordSpray,
-    RaceRequest,
-    RDPBlueKeep,
-    RDPExploit,
-    RedisExploit,
-    RegreSSHion,
-    RequestSmuggling,
-    ResponderRelay,
-    S3BucketTakeover,
-    S7Enum,
-    S7PlcStart,
-    S7PlcStop,
-    ServiceMisconfiguration,
-    SMBGhost,
-    SMBNullSession,
-    SMBRelay,
-    SMBSigningCheck,
-    SQLInjection,
-    SSHBruteForce,
-    SSRFProbe,
-    SSTIProbe,
-    SUIDEnumeration,
-    SupplyChainRecon,
-    TimingOracle,
-    TokenImpersonation,
-    ValidateFinding,
-    WeaponizedExploit,
-    WebShellPersistence,
-    WebShellUpload,
-    WindowsPersistence,
-    WindowsPrivescCheck,
-    XSSScanner,
-    XXEProbe,
-)
 
-_MODULE_CLASSES: list[type[AttackModule]] = [
-    Log4jRCE,
-    SMBGhost,
-    EternalBlue,
-    BasicAuthBuster,
-    APIFuzzer,
-    RDPBlueKeep,
-    SSHBruteForce,
-    RegreSSHion,
-    OpenSSHCVECheck,
-    SMBRelay,
-    SMBNullSession,
-    WebShellUpload,
-    SQLInjection,
-    XSSScanner,
-    CredentialSpray,
-    LinuxPrivescCheck,
-    WindowsPrivescCheck,
-    SUIDEnumeration,
-    KernelExploitCheck,
-    ContainerBreakout,
-    LinuxPersistence,
-    WindowsPersistence,
-    WebShellPersistence,
-    FTPAnonymous,
-    RedisExploit,
-    ElasticsearchExploit,
-    LDAPAnonymous,
-    RDPExploit,
-    # ── NEW: Advanced Web Exploitation ──
-    JWTTamper,
-    SSTIProbe,
-    DeserializeAttack,
-    GraphQLIntrospect,
-    # ── NEW: Race Condition & Timing ──
-    RaceRequest,
-    TimingOracle,
-    RequestSmuggling,
-    # ── NEW: Credential Attack Amplifiers ──
-    PasswordSpray,
-    HashCrack,
-    PassTheHash,
-    DumpHashes,
-    # ── NEW: AI-Assisted Exploit Synthesis ──
-    CVEToExploit,
-    DiffPatchAnalysis,
-    FuzzToExploit,
-    # ── NEW: SSRF / XXE / LFI ──
-    SSRFProbe,
-    XXEProbe,
-    LFITraversal,
-    # ── NEW: Active Directory / Kerberos ──
-    ASREPRoast,
-    Kerberoasting,
-    DCSyncAttack,
-    ADLDAPEnum,
-    # ── NEW: Weaponized exploit synthesis ──
-    WeaponizedExploit,
-    # ── NEW: Cloud / Kubernetes privilege escalation ──
-    CloudPrivesc,
-    K8sPrivesc,
-    # ── NEW (D3): Cloud exploitation modules (IMDS creds, docker.sock escape, S3 takeover) ──
-    IMDSExploit,
-    DockerSockEscape,
-    S3BucketTakeover,
-    # --- Phase 6.3: ICS/SCADA/IoT enumeration (read-only) ---
-    ModbusEnum,
-    DNP3Enum,
-    S7Enum,
-    BACnetEnum,
-    HMIDefaultCred,
-    IoTDefaultCred,
-    # --- Phase 6.3+: ICS/SCADA DESTRUCTIVE writes (dual-gated by
-    # ics.allow_write + ics.destructive_ics; applicability() returns 0
-    # unless BOTH flags are armed). Registered so run_attack_module /
-    # get_module can find them by name; find_modules drops them at the
-    # applicability gate when the flags are off (the safe default). ---
-    ModbusWriteCoil,
-    ModbusWriteRegister,
-    S7PlcStop,
-    S7PlcStart,
-    # --- Phase 6.4: Supply-chain / CI-CD reconnaissance ---
-    ExposedVCS,
-    CICDMisconfig,
-    DependencyConfusion,
-    ArtifactExposure,
-    SupplyChainRecon,
-    # --- Phase 6.2: Detection-coverage / OPSEC posture (read-only) ---
-    DetectionCoverageProbe,
-    LogSourceEnum,
-    OPSECPostureReport,
-    # --- Orchestrator phase modules (back the privesc/lateral/validation phases;
-    #     previously phantom names -> get_module None -> FAILED) ---
-    TokenImpersonation,
-    ServiceMisconfiguration,
-    LateralMovement,
-    ValidateFinding,
-    LocalExploitSuggester,
-    # --- Phase 1: AD/Kerberos post-exploit recipe modules (wrap ad.py MCP tools) ---
-    ADCSEnum,
-    BloodHoundCollect,
-    ResponderRelay,
-    GoldenTicket,
-    SMBSigningCheck,
-]
+# Phase 6: auto-discovery — single source is the filesystem, not a manual list.
+# Every ``tools/attack_modules/modules/*.py`` that defines an ``AttackModule``
+# subclass is discovered via ``pkgutil.iter_modules`` and auto-registered via
+# ``register_attack_module``. Adding a new module now requires 1 file edit:
+# create ``tools/attack_modules/modules/foo.py`` with ``class Foo(AttackModule)``;
+# no edit to this file or to ``modules/__init__.py``. The ``@register_attack_module``
+# decorator remains as an explicit opt-in for out-of-tree or test modules.
+_MODULE_CLASSES: list[type[AttackModule]] = []
 
+
+def _discover_attack_modules() -> None:
+    """Populate ``_MODULE_CLASSES`` via filesystem discovery (idempotent)."""
+    try:
+        import tools.attack_modules.modules as _pkg
+    except ImportError:
+        return
+    for _, modname, ispkg in pkgutil.iter_modules(_pkg.__path__):
+        if ispkg:
+            continue
+        try:
+            mod = importlib.import_module(f"tools.attack_modules.modules.{modname}")
+        except Exception:
+            continue
+        for attr in dir(mod):
+            try:
+                obj = getattr(mod, attr)
+            except Exception:
+                continue
+            if not isinstance(obj, type):
+                continue
+            try:
+                is_sub = issubclass(obj, AttackModule)
+            except Exception:
+                continue
+            if not is_sub or obj is AttackModule:
+                continue
+            # Only top-level AttackModule subclasses whose name matches the
+            # file's PascalCase export (defense against importing helper bases).
+            if obj not in _MODULE_CLASSES:
+                _MODULE_CLASSES.append(obj)
+
+
+# Populate on import — single source, no manual list.
+_discover_attack_modules()
 
 def _plugin_extra_module_classes() -> list[type]:
     """Return plugin-registered AttackModule subclasses, if any.
