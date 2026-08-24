@@ -22,6 +22,7 @@ from tools.kernel.allowlist import (
     _allowed_target_list,
     _check_allowlist,
     _extract_msf_rhosts,
+    _extract_scanner_targets,
     add_discovered_target,
     check_targets_allowlist,
 )
@@ -39,7 +40,6 @@ from tools.kernel.audit import (
     make_audit_tool,
     make_require_allowlist,
 )
-from tools.kernel.allowlist import _extract_scanner_targets
 from tools.kernel.workspace import (
     _attempt_dir,
     _find_file,

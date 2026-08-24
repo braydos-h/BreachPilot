@@ -401,18 +401,67 @@ code -> skipped: Flow B edits, kernel extracts, registry DRY, god-file splits, l
 | 9 `persistent_session_manager duplicate` | 15-line duplicate | Wrapper → kernel | **Closed** |
 | 2,3,4,5,6,7,8,10-14 | unchanged | deferred to Phases 3-6 | — |
 
-**Remaining debt (carried to Phase 3):**
+**Remaining debt (carried to Phase 3):** *(now closed — see §11)*
 
-- Phase 3 `collect_tools()` introspection (double-registration) still manual (`mcp_exploit_server.py:152` 19× list)
-- `read_workspace:286` + `_extract_scanner_targets:376` still in `tools/mcp_tools/registry.py` (not yet moved to kernel)
-- `_run_with_pgrp_timeout` shim still split (`mcp_shared:220` impl + `registry.py:116` wrapper) — consolidate to `tools/kernel/subprocess.py` in Phase 3
-- `tools/kernel` needs `subprocess.py` + `http.py` if we move `_run_with_pgrp_timeout` + `assert_loopback_bind`
-- 32 god files >800 LOC unchanged, `import *` in 19 `mcp_tools` families still (372 I001)
+- ~~Phase 3 `collect_tools()` introspection still manual~~ → **Done §11**
+- ~~`read_workspace:286` + `_extract_scanner_targets:376` still in `registry.py`~~ → **Done §11**
+- `_run_with_pgrp_timeout` shim still split (`mcp_shared:220` impl + `registry.py:116` wrapper) — consolidate to `tools/kernel/subprocess.py` in Phase 3 (deferred, see §11)
+- `tools/kernel` needs `subprocess.py` + `http.py` if we move `_run_with_pgrp_timeout` + `assert_loopback_bind` (deferred)
+- 32 god files >800 LOC unchanged, `import *` in 19 `mcp_tools` families still (372 I001) — deferred to Phase 4
 
 ```
 code -> shipped: tools/kernel/{allowlist,audit,workspace} + mcp_shared re-exports + persistent_session_manager dedup + ADR-001 + mcp_exploit_server patch-point restore
       -> skipped: Phase 3 registry DRY (biggest ROI), Phase 4 de-god splits, Phase 5 lint/type +5/pr, Phase 6 pkgutil discovery
       -> add when Phase 3 `collect_tools()` introspection lands (single-source MCP registration)
+```
+
+## 11. Phase 3 Complete — MCP Registry DRY (2026-08-24)
+
+**Status:** Done. Biggest ROI, single-source registration. No behavior change, <400-line boundary (actual 13+2 lines net after prior kernel moves, plus 22 decorator additions already in HEAD).
+
+**What shipped (this PR + prior kernel moves already in HEAD `174c357`):**
+
+| Artifact | File:line | Change | Ladder |
+|----------|-----------|--------|--------|
+| `collect_tools()` + `_validate_mcp_tool_decorators()` | `tools/mcp_tools/registry.py:342-410` | Auto-discover every `register_*_tools` via `pkgutil.iter_modules(tools.mcp_tools)` + static AST check that every `@mcp.tool` has `@audit_tool`/`@require_allowlist`; `collect_tools()` raises `RuntimeError` listing offenders so CI fails | Stdlib `pkgutil` + `ast` (rung 3) |
+| `read_workspace` | `tools/kernel/workspace.py:109` (was `registry.py:286`) | Verbatim move, re-exported from `tools.mcp_tools.registry` and `tools.mcp_shared` for backwards compat | Reuse (rung 2) |
+| `_extract_scanner_targets` + helpers | `tools/kernel/allowlist.py:120-230` (was `registry.py:384`) | Move `_SCANNER_VERBS`, `_SCANNER_VALUE_FLAGS`, `_SHELL_SEPARATORS`, `_scanner_token_is_host`, `_is_scanner_verb_token`, `_extract_scanner_targets` verbatim | Reuse |
+| `_is_inside_workspace` | `tools/kernel/workspace.py:15` (was `mcp_shared:176` + `persistent_session_manager:61`) | Already in Phase 2, now also re-exported from `registry.py` via `from tools.kernel.workspace import read_workspace` + `from tools.kernel.allowlist import _extract_scanner_targets` | Deletion |
+| `mcp_exploit_server.py:152` | `mcp_exploit_server.py:34-55` | Replace 19× manual `register_*_tools(mcp,ctx)` list with `for registrar in collect_tools(): registrar(mcp,ctx=ctx)` + merge imports + move `logger` after imports to satisfy `E402` | Deletion (rung 1) — 19 lines → 1 |
+| Decorator fixes (22) | `tools/mcp_tools/{research,attack_modules,sessions,terminal,workspace}.py` | Add missing `@audit_tool` to `hash_crack_identify`, `list_attack_modules`, `mutate_exploit`, `get_campaign_status`, `stop_campaign`, `search_exploit_db`, `search_web_exploit`, `fetch_webpage`, `deep_research`, `search_cve_intel`, `cve_to_poc`, `read_session_output`, `kill_session`, `read_job_output`, `stop_background_job`, `read_listener_output`, `stop_listener`, `list_sessions`, `list_processes`, `check_environment`, `preflight_env_check`, `list_workspace` (all local-only, audit-only) | Minimal — 22 lines |
+| `tools/kernel/audit.py:232-382` | `tools/kernel/audit.py:232` | Add `__wrapped_audit_tool__` / `__wrapped_require_allowlist__` markers on wrappers so `collect_tools` validation can also check runtime `__wrapped__` chain (defense in depth) | Minimal |
+| `tools/mcp_shared.py:19-49` | `tools/mcp_shared.py:19` | Add `read_workspace` + `_extract_scanner_targets` to `from tools.kernel.*` imports and `__all__`; fix `I001` by merging duplicate `from tools.kernel.allowlist` import | Reuse |
+
+**Verification (Phase 3 DoD):**
+
+- `python -c "from tools.mcp_tools.registry import _validate_mcp_tool_decorators; assert _validate_mcp_tool_decorators()==[]"` — **0 errors** (was 22 before decorator fixes)
+- `python -c "from tools.mcp_tools.registry import collect_tools; len(collect_tools())==20"` — **20 registrars** (`ad`, `assessment_state`, `attack_modules`, `cracking`, `credentials`, `domain`, `metasploit`, `mitre`, `parallel_agents`, `payloads`, `peer_models`, `poc_verifier`, `recon`, `replay_simulator`, `research`, `runtime_skills`, `sessions`, `terminal`, `web_scan`, `workspace`)
+- `python -c "from mcp_exploit_server import create_mcp_server; ...; tools=await mcp.list_tools(); len==114"` — **114 tools** (was 114 before, now via `collect_tools`)
+- `python -m pytest tests/test_mcp_tool_registration.py -v` — **1 passed** (expected core tools ⊆ names)
+- `python -m pytest tests/test_mcp_shared_helpers.py tests/test_audit_redaction.py tests/test_mcp_injection_hardening.py tests/test_scanner_target_extraction.py -q` — **94 passed, 2 skipped**
+- `python -m ruff check tools/mcp_tools/registry.py tools/mcp_shared.py mcp_exploit_server.py` — **All checks passed** (was 7 E402/I001, now 0 after header reorder + `__all__`)
+- `python -m ruff check tools/kernel/` — **All checks passed** (per-file-ignores `F401`)
+- No `scope_gate.py`/`safety_reviewer.py`/`agent_loop.py` etc. edited, no allowlist weakened, no new dep, `pyproject.toml`/`requirements.txt` synced
+
+**Debt delta vs §6:**
+
+| Rank | Before Phase 3 | After Phase 3 | Delta |
+|------|---------------|--------------|-------|
+| 2 Manual 19× `register_*` list | 19 lines, double-registration gate, onboarding mistake | `collect_tools()` single source, CI fails if decorator missing | **Biggest ROI closed** |
+| 1 `import *` tax / duplicate helpers | `read_workspace` + `_extract_scanner_targets` in `registry.py`, duplicate | Moved to `tools/kernel/`, re-exported from `registry.py` + `mcp_shared.py`, `mcp_shared` -402 net already | **Closed for those 2 helpers** |
+| 10 `attack_modules.py:131` ruff F405 | 131 errors | 22 audit decorators added, but `import *` still 619 F405 overall — deferred to Phase 4 explicit imports | Partial |
+| 4,5,6,7,8,11-14 | unchanged | deferred | — |
+
+**Remaining debt (Phase 4):**
+
+- De-god `tools/recon_pipeline.py:2385` → `tools/recon/` pkg, `tools/autonomous_orchestrator.py:2720` → `tools/campaign/` pkg, `tools/exploit_agent/loop.py:2215` → <400 + `tools/kernel/parse.py`, `tools/run_service/service.py:1731` cycle break — all with shim imports for 248 tests
+- Expand `pyproject.toml:tool.ruff` +5 files/PR and `tool.mypy` +5 files/PR, add `CONFIG_SCHEMA` drift test for `caldera`/`ics`
+- Phase 6 `pkgutil.iter_modules` for `tools/attack_modules/registry.py:_MODULE_CLASSES` (already has `@register_attack_module` decorator, but literal still 83)
+
+```
+code -> shipped: collect_tools() single source + decorator validation + read_workspace/_extract_scanner_targets → kernel + 22 @audit_tool fixes + mcp_shared/mcp_exploit_server wiring
+      -> skipped: Phase 4 de-god splits, Phase 5 lint/type +5/pr, Phase 6 attack-module auto-discovery
+      -> add when Phase 4 lands (tools/recon/ + tools/campaign/ splits)
 ```
 
 ---
