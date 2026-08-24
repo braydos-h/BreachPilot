@@ -323,14 +323,14 @@ if not exist "%VENV_PY%" (
 if "%VENV_OK%"=="1" if exist "%VENV_PY%" (
     set "RUN_PY=%VENV_PY%"
     echo   Upgrading pip...
-    call "!RUN_PY!" -m pip install --upgrade pip >nul 2>&1
+    call :py_run -m pip install --upgrade pip >nul 2>&1
     if errorlevel 1 echo   [--] pip upgrade had warnings -- continuing.
     echo   Installing Python dependencies ^(requirements.txt^)...
-    call "!RUN_PY!" -m pip install -r requirements.txt
+    call :py_run -m pip install -r requirements.txt
     if errorlevel 1 (
         echo   [!!] pip install had errors -- network issue? Retrying once...
         timeout /t 3 /nobreak >nul 2>&1
-        call "!RUN_PY!" -m pip install -r requirements.txt
+        call :py_run -m pip install -r requirements.txt
         if errorlevel 1 (
             echo   [!!] pip install still failing -- check your internet.
             echo       You can re-run install.bat after fixing the network.
@@ -542,7 +542,7 @@ echo  ============================================================
 
 echo   Running: python main.py --doctor
 echo   ------------------------------------------------------------
-"%RUN_PY%" main.py --doctor
+call :py_run main.py --doctor
 set "DOCTOR_RC=%ERRORLEVEL%"
 echo   ------------------------------------------------------------
 if "%DOCTOR_RC%"=="0" (
@@ -628,11 +628,11 @@ if "%ASSUME_YES%"=="0" if "%CHECK_ONLY%"=="0" (
     if "!LAUNCH_CHOICE!"=="1" (
         echo.
         echo    Launching interactive menu...
-        "%RUN_PY%" main.py --menu
+        call :py_run main.py --menu
     ) else if "!LAUNCH_CHOICE!"=="2" (
         echo.
         echo    Launching WebUI...
-        "%RUN_PY%" main.py --web
+        call :py_run main.py --web
     ) else (
         echo.
         echo    Exit. Run START.bat or `natai` when ready.
@@ -652,6 +652,20 @@ exit /b 0
 REM ============================================================================
 REM  Subroutines
 REM ============================================================================
+
+:py_run
+REM Run python with args, handling both "py -3" (space) and quoted paths.
+REM Uses RUN_PY global. Example: call :py_run -m pip install -r requirements.txt
+if "!RUN_PY!"=="py -3" (
+    py -3 %*
+) else if "!RUN_PY!"=="py" (
+    py %*
+) else if "!RUN_PY!"=="python3" (
+    python3 %*
+) else (
+    "!RUN_PY!" %*
+)
+exit /b
 
 :check_py_version
 REM Arg %1 is the python command to test (e.g. "py -3" or "python")

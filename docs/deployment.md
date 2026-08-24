@@ -133,7 +133,7 @@ daemon after a one-line config swap.
   (README.md:170-172).
 - **Embeddings stay local by default:** `nomic-embed-text` via `embed_host`
   (config.yaml:10-14, config.yaml:348). Required for semantic memory/skills;
-  `install.bat` pulls it (install.bat:112).
+  `install.bat` pulls it when Ollama is available.
 
 There is no `.env` auto-load — keys come from process environment variables or
 `secr.json` (README.md:143-160).
@@ -143,7 +143,8 @@ There is no `.env` auto-load — keys come from process environment variables or
 `nmap` must be installed and on `PATH` (or set `nmap.path`, config.yaml:63).
 
 - **Windows:** plain nmap works; `nmap.sudo`/`priv_fallback` are no-ops.
-  Install from https://nmap.org/download.html (install.bat:54).
+  Install from https://nmap.org/download.html or `winget install Insecure.Nmap`
+  (`install.bat` offers this via winget when you approve).
 - **Linux:** `-O`/`-sS` scans need root. Either set `nmap.sudo: true` (runs
   `sudo -n`), run as root, or leave `nmap.priv_fallback: true` (default) to
   auto-downgrade those flags instead of failing when unprivileged

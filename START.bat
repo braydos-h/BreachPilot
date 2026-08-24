@@ -38,10 +38,10 @@ if not exist "%VENV_PY%" (
 )
 
 REM Check deps quickly; if main.py can't import yaml, tell user to install
-"%RUN_PY%" -c "import yaml" >nul 2>&1
+call :py_run -c "import yaml" >nul 2>&1
 if errorlevel 1 (
     echo  [!] Python dependencies not installed.
-    echo      Run install.bat first, or:  "%RUN_PY%" -m pip install -r requirements.txt
+    echo      Run install.bat first, or use:  python -m pip install -r requirements.txt
     pause
     popd
     exit /b 1
@@ -54,7 +54,22 @@ if "%~1"=="" (
     echo  (Use START.bat --menu for the terminal menu, or --help for flags)
     echo.
 )
-"%RUN_PY%" "%REPO_ROOT%\main.py" %*
+call :py_run "%REPO_ROOT%\main.py" %*
+goto :after_py
+
+:py_run
+if "%RUN_PY%"=="py -3" (
+    py -3 %*
+    exit /b
+)
+if "%RUN_PY%"=="py" (
+    py %*
+    exit /b
+)
+"%RUN_PY%" %*
+exit /b
+
+:after_py
 
 set "RC=%ERRORLEVEL%"
 if not "%RC%"=="0" (
