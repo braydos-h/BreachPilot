@@ -330,6 +330,24 @@ def _discover_tool_registrars() -> list[Any]:
         return []
     for _, modname, ispkg in pkgutil.iter_modules(_pkg.__path__):
         if ispkg:
+            # Recurse into subpackages like tools.mcp_tools.modules
+            if modname == "modules":
+                try:
+                    import tools.mcp_tools.modules as _subpkg
+                except ImportError:
+                    continue
+                for _, subname, sub_is_pkg in pkgutil.iter_modules(_subpkg.__path__):
+                    if sub_is_pkg:
+                        continue
+                    try:
+                        mod = importlib.import_module(f"tools.mcp_tools.modules.{subname}")
+                    except Exception:
+                        continue
+                    for attr in dir(mod):
+                        if attr.startswith("register_") and attr.endswith("_tools"):
+                            fn = getattr(mod, attr, None)
+                            if callable(fn) and fn not in _TOOL_REGISTRARS:
+                                _TOOL_REGISTRARS.append(fn)
             continue
         if modname == "registry":
             continue
@@ -359,7 +377,9 @@ def _validate_mcp_tool_decorators() -> list[str]:
 
     errors: list[str] = []
     pkg_dir = pathlib.Path(__file__).parent
-    for py in pkg_dir.glob("*.py"):
+    # Check both top-level and modules subpackage
+    files = list(pkg_dir.glob("*.py")) + list((pkg_dir / "modules").glob("*.py"))
+    for py in files:
         if py.name == "registry.py" or py.name == "__init__.py":
             continue
         try:

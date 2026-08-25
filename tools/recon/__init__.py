@@ -1,15 +1,27 @@
-"""Recon package — canonical location for recon pipeline."""
+"""Recon package — Phase 4 shim.
 
-from __future__ import annotations
+Phase 4 splits ``tools/recon_pipeline.py`` (2385 LOC) into ``tools/recon/``
+(``scanner.py`` / ``config.py`` / ``pipeline.py`` / ``osint.py``). This
+``__init__`` re-exports the public surface so both old and new import paths
+work during the 1-release shim window:
 
-import importlib
-from typing import TYPE_CHECKING, Any
+  from tools.recon_pipeline import ReconPipeline  # old (still works)
+  from tools.recon import ReconPipeline           # new (shim)
+  from tools.recon.pipeline import ReconPipeline  # new (shim)
 
-if TYPE_CHECKING:
-    from tools.recon.config import HostReconResult, ReconConfig, ServiceInfo, ToolAvailability
-    from tools.recon.enumerator import SecondaryEnumerator
-    from tools.recon.pipeline import ReconPipeline
-    from tools.recon.scanner import PrimaryReconScanner, _kill_process, run_command
+The real split (moving class bodies) lands in the next sub-PR to keep this
+diff <400 lines. See ``docs/phase2-audit/architecture-debt.md`` §12.
+"""
+
+from tools.recon.pipeline import ReconPipeline  # noqa: F401 -- new location (Phase 4b)
+from tools.recon_pipeline import (  # noqa: F401 -- re-export for shim (other classes still in original)
+    HostReconResult,
+    PrimaryReconScanner,
+    ReconConfig,
+    SecondaryEnumerator,
+    ServiceInfo,
+    ToolAvailability,
+)
 
 __all__ = [
     "HostReconResult",
@@ -19,27 +31,4 @@ __all__ = [
     "SecondaryEnumerator",
     "ServiceInfo",
     "ToolAvailability",
-    "_kill_process",
-    "run_command",
 ]
-
-_ATTR_MAP: dict[str, str] = {
-    "HostReconResult": "tools.recon.config",
-    "ReconConfig": "tools.recon.config",
-    "ServiceInfo": "tools.recon.config",
-    "ToolAvailability": "tools.recon.config",
-    "PrimaryReconScanner": "tools.recon.scanner",
-    "_kill_process": "tools.recon.scanner",
-    "run_command": "tools.recon.scanner",
-    "SecondaryEnumerator": "tools.recon.enumerator",
-    "ReconPipeline": "tools.recon.pipeline",
-}
-
-
-def __getattr__(name: str) -> Any:
-    if name in _ATTR_MAP:
-        mod = importlib.import_module(_ATTR_MAP[name])
-        val = getattr(mod, name)
-        globals()[name] = val
-        return val
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

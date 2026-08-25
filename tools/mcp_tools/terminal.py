@@ -14,6 +14,7 @@ from tools.command_analyzer import (
 from tools.command_analyzer import (
     _extract_destinations as _cmd_extract_destinations,
 )
+from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
 from tools.mcp_shared import _allowed_target_list, _is_inside_workspace
 from tools.mcp_tools.registry import *
 from tools.opsec import OpsecManager
@@ -50,7 +51,7 @@ def _opsec_advisory_block(sanitized_command: str, config: Any) -> str:
             f"- Suggested quieter rewrite: {alt_line}\n"
             f"- Pacing posture: {pacing}\n"
         )
-    except Exception:
+    except _EXC_GROUP_CATCH:
         return ""
 
 
@@ -117,7 +118,7 @@ def _require_sudo_or_pivot(tool_name: str, payload: str) -> str | None:
 
         if _can_passwordless_sudo():
             return None
-    except Exception:
+    except _EXC_GROUP_CATCH:
         # Could not determine sudo status -- do not block; let the existing
         # path run and surface whatever it surfaces (legacy behavior).
         return None
@@ -349,7 +350,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
             if not (is_windows and _bash_on_windows is None):
                 try:
                     out_bytes, _ = proc.communicate(timeout=5)
-                except Exception:
+                except _EXC_GROUP_CATCH:
                     out_bytes = out_bytes or b""
             exit_code = None
             status = "timed_out"
@@ -365,7 +366,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 text = out_bytes.decode("utf-8", errors="replace") if isinstance(out_bytes, bytes) else str(out_bytes)
                 log_path.write_text(header + text, encoding="utf-8", errors="replace")
                 output_tail = text[-4000:]
-            except Exception:
+            except _EXC_GROUP_CATCH:
                 pass
         elif log_path.exists():
             text = log_path.read_text(encoding="utf-8", errors="replace")
@@ -413,7 +414,8 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return f"APT_INSTALL_RESULT: {status} (exit_code={proc.returncode})\nPACKAGES: {', '.join(pkg_list)}\nOUTPUT:\n{output}"
         except subprocess.TimeoutExpired:
             return "APT_INSTALL_RESULT: timed_out\nPACKAGES: " + ", ".join(pkg_list)
-        except Exception as exc:
+        except _EXC_GROUP_CATCH as exc:
+            _log_nested_exceptions(exc)
             return f"APT_INSTALL_RESULT: error - {exc}"
 
     @mcp.tool()
@@ -450,7 +452,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 from tools.exploit_search import url_exists as _url_exists_check
 
                 _ok, _reason = _url_exists_check(url, timeout=8)
-            except Exception:
+            except _EXC_GROUP_CATCH:
                 _ok, _reason = True, None  # import/probe failure -> don't block
             if not _ok:
                 preflight_note = (
@@ -477,7 +479,8 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
             )
         except subprocess.TimeoutExpired:
             return f"{preflight_note}GIT_CLONE_RESULT: timed_out\nREPO: {url}"
-        except Exception as exc:
+        except _EXC_GROUP_CATCH as exc:
+            _log_nested_exceptions(exc)
             return f"{preflight_note}GIT_CLONE_RESULT: error - {exc}"
 
     @mcp.tool()
@@ -504,7 +507,8 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return f"PIP_INSTALL_RESULT: {status} (exit_code={proc.returncode})\nPACKAGES: {', '.join(pkg_list)}\nOUTPUT:\n{output}"
         except subprocess.TimeoutExpired:
             return "PIP_INSTALL_RESULT: timed_out\nPACKAGES: " + ", ".join(pkg_list)
-        except Exception as exc:
+        except _EXC_GROUP_CATCH as exc:
+            _log_nested_exceptions(exc)
             return f"PIP_INSTALL_RESULT: error - {exc}"
 
     @mcp.tool()
@@ -547,7 +551,8 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return f"ROOT_CMD_RESULT: {status} (exit_code={returncode})\nCOMMAND: {original_command}\nOUTPUT:\n{output}"
         except subprocess.TimeoutExpired:
             return f"ROOT_CMD_RESULT: timed_out\nCOMMAND: {original_command}"
-        except Exception as exc:
+        except _EXC_GROUP_CATCH as exc:
+            _log_nested_exceptions(exc)
             return f"ROOT_CMD_RESULT: error - {exc}"
 
     @mcp.tool()
@@ -593,7 +598,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         )
                         if proc2.returncode == 0 and proc2.stdout:
                             version = proc2.stdout.strip().split("\n")[0][:100]
-                except Exception:
+                except _EXC_GROUP_CATCH:
                     pass
                 result_lines.append(f"  [+] {tool}: {path}  ({version})")
             else:
@@ -613,7 +618,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 from tools.env_probe import _can_passwordless_sudo
 
                 _has_sudo = _can_passwordless_sudo()
-            except Exception:
+            except _EXC_GROUP_CATCH:
                 _has_sudo = True  # unknown; keep the legacy hint
             if _has_sudo:
                 result_lines.append(
@@ -640,7 +645,8 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
             from tools.env_probe import preflight_env_probe, render_env_context
 
             rendered = render_env_context(preflight_env_probe())
-        except Exception as exc:  # pragma: no cover - defensive
+        except _EXC_GROUP_CATCH as exc:  # pragma: no cover - defensive
+            _log_nested_exceptions(exc)
             return f"PREFLIGHT_ENV_CHECK_ERROR: {exc}"
         return rendered or "ENV_OK: all standard pentest tools present."
 
@@ -715,7 +721,8 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
             )
         except subprocess.TimeoutExpired:
             return f"INSTALL_RESULT: timed_out\nMANAGER: {mgr}\nPACKAGES: {', '.join(pkg_list)}"
-        except Exception as exc:
+        except _EXC_GROUP_CATCH as exc:
+            _log_nested_exceptions(exc)
             return f"INSTALL_RESULT: error - {exc}"
 
     @mcp.tool()
@@ -770,7 +777,8 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
             )
             if proc.returncode != 0:
                 return f"DOWNLOAD_RESULT: failed\nURL: {url}\nERROR: curl failed: {proc.stderr[-1000:]}"
-        except Exception as exc:
+        except _EXC_GROUP_CATCH as exc:
+            _log_nested_exceptions(exc)
             return f"DOWNLOAD_RESULT: error - {exc}"
 
         # Install based on type
@@ -802,7 +810,8 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 )
             except subprocess.TimeoutExpired:
                 return f"INSTALL_RESULT: timed_out\nTYPE: deb\nURL: {url}"
-            except Exception as exc:
+            except _EXC_GROUP_CATCH as exc:
+                _log_nested_exceptions(exc)
                 return f"INSTALL_RESULT: error - {exc}"
 
         elif itype in ("tarball", "zip"):
@@ -832,7 +841,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         timeout=10,
                     )
                     listing = list_proc.stdout[:2000]
-                except Exception:
+                except _EXC_GROUP_CATCH:
                     pass
                 return (
                     f"INSTALL_RESULT: {status} (exit_code={rc})\n"
@@ -845,7 +854,8 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 )
             except subprocess.TimeoutExpired:
                 return f"INSTALL_RESULT: timed_out\nTYPE: {itype}\nURL: {url}"
-            except Exception as exc:
+            except _EXC_GROUP_CATCH as exc:
+                _log_nested_exceptions(exc)
                 return f"INSTALL_RESULT: error - {exc}"
 
         else:  # binary
@@ -861,7 +871,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     f"PATH: {target_path}\n"
                     f"NOTE: Made executable at {target_path}"
                 )
-            except Exception:
+            except _EXC_GROUP_CATCH:
                 # Fallback: keep in workspace and make executable
                 download_path.chmod(0o755)
                 return (
@@ -888,7 +898,8 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
             )
             update_output = (proc.stdout + "\n" + proc.stderr)[-2000:]
             update_status = "completed" if proc.returncode == 0 else "failed"
-        except Exception as exc:
+        except _EXC_GROUP_CATCH as exc:
+            _log_nested_exceptions(exc)
             return f"UPDATE_RESULT: error during apt update - {exc}"
 
         if not upgrade:
@@ -908,7 +919,8 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 f"UPDATE_OUTPUT:\n{update_output}\n"
                 f"UPGRADE_OUTPUT:\n{upgrade_output}"
             )
-        except Exception as exc:
+        except _EXC_GROUP_CATCH as exc:
+            _log_nested_exceptions(exc)
             return (
                 f"UPDATE_RESULT: {update_status} (update) / error (upgrade)\n"
                 f"UPDATE_OUTPUT:\n{update_output}\n"
