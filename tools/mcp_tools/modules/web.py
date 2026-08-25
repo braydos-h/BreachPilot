@@ -454,9 +454,9 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
         unique_statuses = set(s.split(" ")[1] if " " in s else s for s in results["statuses"] if s)
         if len(unique_statuses) > 1:
-            result_lines.append(f"[!] Mixed status codes: {unique_statuses} Ã¢â‚¬â€ possible race condition!")
+            result_lines.append(f"[!] Mixed status codes: {unique_statuses} — possible race condition!")
         if results["success"] > 1:
-            result_lines.append(f"[!] {results['success']} requests succeeded Ã¢â‚¬â€ limit may be bypassed!")
+            result_lines.append(f"[!] {results['success']} requests succeeded — limit may be bypassed!")
 
         return "\n".join(result_lines)
 
@@ -577,7 +577,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
         resp = _send_raw(cl_te)
         result_lines.append(f"Response: {len(resp)} bytes")
         if abs(len(resp) - len(baseline)) > 200:
-            result_lines.append("[!] Response differs from baseline Ã¢â‚¬â€ possible CL.TE smuggling!")
+            result_lines.append("[!] Response differs from baseline — possible CL.TE smuggling!")
 
         # TE.CL test
         result_lines.append("")
@@ -709,12 +709,12 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
                     status_line = resp.split("\r\n")[0] if resp else ""
                     if "200" in status_line or "302" in status_line:
-                        result_lines.append(f"  [+] {username}:{password} Ã¢â‚¬â€ SUCCESS ({status_line[:60]})")
+                        result_lines.append(f"  [+] {username}:{password} — SUCCESS ({status_line[:60]})")
                         found.append(username)
                     else:
-                        result_lines.append(f"  [-] {username}:{password} Ã¢â‚¬â€ {status_line[:60]}")
+                        result_lines.append(f"  [-] {username}:{password} — {status_line[:60]}")
             except Exception as e:
-                result_lines.append(f"  [!] {username} Ã¢â‚¬â€ error: {e}")
+                result_lines.append(f"  [!] {username} — error: {e}")
             time.sleep(1.5)  # Delay to avoid lockout
 
         if found:

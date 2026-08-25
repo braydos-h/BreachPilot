@@ -20,8 +20,8 @@ def register_planning_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Create a structured attack plan for a target IP.
 
         Uses the model router (if available) to generate intelligent attack phases and steps.
-        The plan follows the standard kill chain: RECON Ã¢â€ â€™ ENUMERATE Ã¢â€ â€™ EXPLOIT Ã¢â€ â€™ ESCALATE Ã¢â€ â€™
-        LOOT Ã¢â€ â€™ PIVOT Ã¢â€ â€™ DONE. The plan is saved as JSON for later retrieval and adaptation.
+        The plan follows the standard kill chain: RECON → ENUMERATE → EXPLOIT → ESCALATE →
+        LOOT → PIVOT → DONE. The plan is saved as JSON for later retrieval and adaptation.
 
         Args:
             target_ip: IPv4 address of the target host.
@@ -82,14 +82,14 @@ def register_planning_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 f"PLAN_ID: {target_ip.replace('.', '_')}_plan.json",
                 f"TARGET_OS: {target_os or 'Unknown'}",
                 f"KNOWN_CVES: {', '.join(cve_list) if cve_list else 'None'}",
-                f"PHASES: {' Ã¢â€ â€™ '.join(p.value for p in plan.phases)}",
+                f"PHASES: {' → '.join(p.value for p in plan.phases)}",
                 f"CURRENT_PHASE: {plan.current_phase.value}",
                 f"TOTAL_STEPS: {len(plan.steps)}",
                 f"SAVED_TO: {plans_dir / (target_ip.replace('.', '_') + '_plan.json')}",
             ]
             return "\n".join(lines)
         except Exception as exc:
-            return f"ERROR: Plan creation failed Ã¢â‚¬â€ {exc}"
+            return f"ERROR: Plan creation failed — {exc}"
 
     @mcp.tool()
     @require_allowlist()
@@ -120,7 +120,7 @@ def register_planning_tools(mcp: Any, *, ctx: ToolContext) -> None:
             lines = [
                 f"ATTACK_PLAN: {target_ip}",
                 f"CURRENT_PHASE: {plan.current_phase.value}",
-                f"PHASES: {' Ã¢â€ â€™ '.join(p.value for p in plan.phases)}",
+                f"PHASES: {' → '.join(p.value for p in plan.phases)}",
                 f"TOTAL_STEPS: {len(plan.steps)}",
                 f"COMPLETED: {sum(1 for s in plan.steps if s.completed)}",
                 f"SUCCESSFUL: {sum(1 for s in plan.steps if s.completed and s.success)}",
@@ -131,7 +131,7 @@ def register_planning_tools(mcp: Any, *, ctx: ToolContext) -> None:
             ]
             return "\n".join(lines)
         except Exception as exc:
-            return f"ERROR: Plan retrieval failed Ã¢â‚¬â€ {exc}"
+            return f"ERROR: Plan retrieval failed — {exc}"
 
     @mcp.tool()
     @require_allowlist()
@@ -151,7 +151,7 @@ def register_planning_tools(mcp: Any, *, ctx: ToolContext) -> None:
             Updated plan summary with new phase/step information.
 
         Example:
-            replan("192.168.1.100", "Log4j probe returned no response Ã¢â‚¬â€ service may be patched")
+            replan("192.168.1.100", "Log4j probe returned no response — service may be patched")
         """
         if not validate_target_or_ip(target_ip):
             return "ERROR: Invalid target (IP or domain)."
@@ -201,8 +201,8 @@ def register_planning_tools(mcp: Any, *, ctx: ToolContext) -> None:
             ]
             return "\n".join(lines)
         except Exception as exc:
-            return f"ERROR: Replan failed Ã¢â‚¬â€ {exc}"
+            return f"ERROR: Replan failed — {exc}"
 
-    # Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+    # ───────────────────────────────────────────────────────────────────────
     # 3. Attack Modules & Pre-Packaged Exploits (tools.attack_modules)
-    # Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+    # ───────────────────────────────────────────────────────────────────────

@@ -36,13 +36,13 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Start a fully autonomous attack campaign against a target IP.
 
         Launches the AutonomousOrchestrator in a background daemon thread. The orchestrator
-        runs the full kill chain: reconnaissance Ã¢â€ â€™ enumeration Ã¢â€ â€™ exploitation Ã¢â€ â€™
-        privilege escalation Ã¢â€ â€™ lateral movement Ã¢â€ â€™ persistence. Campaign state is
+        runs the full kill chain: reconnaissance → enumeration → exploitation →
+        privilege escalation → lateral movement → persistence. Campaign state is
         periodically saved to the workspace for monitoring via get_campaign_status.
 
         Args:
             target_ip: IPv4 address of the target host.
-            goal: Campaign goal Ã¢â‚¬â€ 'initial_access', 'privilege_escalation', 'full_compromise',
+            goal: Campaign goal — 'initial_access', 'privilege_escalation', 'full_compromise',
                   or 'lateral_movement'.
             aggression_level: 'stealth', 'normal', 'aggressive', or 'maximum'.
 
@@ -217,7 +217,7 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
             ]
             return "\n".join(lines)
         except Exception as exc:
-            return f"ERROR: Campaign start failed Ã¢â‚¬â€ {exc}"
+            return f"ERROR: Campaign start failed — {exc}"
 
     @mcp.tool()
     @audit_tool
@@ -276,7 +276,7 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
             return "\n".join(lines)
         except Exception as exc:
-            return f"ERROR: Status retrieval failed Ã¢â‚¬â€ {exc}"
+            return f"ERROR: Status retrieval failed — {exc}"
 
     @mcp.tool()
     @audit_tool
@@ -385,7 +385,7 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 return (
                     f"CAMPAIGN_STEP_RESULT: recon_completed\n"
                     f"TARGET: {target_ip}\n"
-                    f"OPEN_PORTS: {len(recon_result.open_ports)} Ã¢â‚¬â€ {recon_result.open_ports}\n"
+                    f"OPEN_PORTS: {len(recon_result.open_ports)} — {recon_result.open_ports}\n"
                     f"SERVICES: {', '.join(s.service for s in recon_result.services)}\n"
                     f"NEXT_PHASE: enumeration"
                 )
@@ -445,9 +445,9 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
             return "\n".join(lines)
         except Exception as exc:
-            return f"ERROR: Campaign step failed Ã¢â‚¬â€ {exc}"
+            return f"ERROR: Campaign step failed — {exc}"
 
-    # Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+    # ───────────────────────────────────────────────────────────────────────
     @mcp.tool()
     @audit_tool
     def stop_campaign(campaign_id: str) -> str:
@@ -481,4 +481,4 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
         return f"STOPPED: Campaign '{campaign_id}' stop signal sent."
 
     # 6. Persistent Interactive Sessions (tools.persistent_session_manager)
-    # Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
+    # ───────────────────────────────────────────────────────────────────────
