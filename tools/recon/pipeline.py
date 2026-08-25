@@ -1,11 +1,8 @@
-"""Recon pipeline orchestrator — Phase 4b real implementation.
+"""Recon pipeline orchestrator — canonical implementation.
 
-Moved from ``tools.recon_pipeline.ReconPipeline`` (167 lines) to break the
-2385 LOC god file. ``tools.recon_pipeline`` now re-exports this class for the
-1-release shim window (``from tools.recon_pipeline import ReconPipeline`` still
-works). See ``docs/phase2-audit/architecture-debt.md`` §12-13.
-
-Ponytail: one class per PR <400, deletion > addition, reuse existing helpers.
+Moved from ``tools.recon_pipeline.ReconPipeline`` (2337 LOC god file) into
+``tools/recon/``. ``tools.recon_pipeline`` is now a 5-line deprecated shim.
+``ReconConfig.from_config`` is the sole config entry point.
 """
 
 from __future__ import annotations
@@ -15,6 +12,10 @@ import time
 from typing import Any
 
 from tools.logging_setup import get_logger
+from tools.recon.config import HostReconResult, ReconConfig
+from tools.recon.enumerator import SecondaryEnumerator
+from tools.recon.scanner import PrimaryReconScanner
+from tools.socket_scan import probe_reachable
 
 logger = get_logger()
 
@@ -27,18 +28,13 @@ class ReconPipeline:
         result = await pipeline.recon_host("10.0.0.50")
     """
 
-    def __init__(self, config: ReconConfig | None = None) -> None:  # noqa: F821
-        # Local imports to avoid circular at top-level (original still defines these)
-        from tools.recon_pipeline import PrimaryReconScanner, ReconConfig, SecondaryEnumerator
-
+    def __init__(self, config: ReconConfig | None = None) -> None:
         self._config = config or ReconConfig()
         self._primary = PrimaryReconScanner(self._config)
         self._secondary = SecondaryEnumerator(self._config)
 
-    async def recon_host(self, target: str) -> HostReconResult:  # noqa: F821
+    async def recon_host(self, target: str) -> HostReconResult:
         """Run full reconnaissance pipeline against a single host."""
-        from tools.recon_pipeline import HostReconResult
-
         logger.info(f"Starting full reconnaissance pipeline for {target}")
         start = time.monotonic()
 
@@ -50,8 +46,6 @@ class ReconPipeline:
         # attackable on a port the probe didn't cover, and this path can only
         # skip work, never add it.
         if self._config.preflight_probe:
-            from tools.socket_scan import probe_reachable
-
             reachable = await probe_reachable(
                 target,
                 ports=list(self._config.preflight_ports),
@@ -89,13 +83,13 @@ class ReconPipeline:
         )
         return result
 
-    async def recon_hosts(self, targets: list[str]) -> list[HostReconResult]:  # noqa: F821
+    async def recon_hosts(self, targets: list[str]) -> list[HostReconResult]:
         """Run reconnaissance against multiple hosts in parallel."""
         logger.info(f"Starting parallel reconnaissance for {len(targets)} targets")
         tasks = [self.recon_host(t) for t in targets]
         return await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def recon_udp(self, target: str, top_ports: int | None = None) -> HostReconResult:  # noqa: F821
+    async def recon_udp(self, target: str, top_ports: int | None = None) -> HostReconResult:
         """Run the additive UDP recon path against the single target.
 
         Does NOT run the TCP primary scan or the secondary enumerators — it is
@@ -107,7 +101,7 @@ class ReconPipeline:
             top_ports = self._config.udp_top_ports
         return await self._primary.recon_udp(target, top_ports=top_ports)
 
-    def get_attack_surface_summary(self, result: HostReconResult) -> dict[str, Any]:  # noqa: F821
+    def get_attack_surface_summary(self, result: HostReconResult) -> dict[str, Any]:
         """Generate a structured attack surface summary for downstream attack modules."""
         attack_surface = {
             "target_ip": result.target_ip,
