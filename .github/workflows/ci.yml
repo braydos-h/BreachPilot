@@ -1,4 +1,4 @@
-name: CI
+﻿name: CI
 
 on:
   push:
@@ -86,6 +86,8 @@ jobs:
         run: ruff check .
       - name: Ruff format
         run: ruff format --check .
+      - name: God-file budget (no new file >1000 LOC / 72kB)
+        run: python -c "import pathlib; assert all(p.stat().st_size<600*120 for p in pathlib.Path('tools').rglob('*.py') if len(p.read_text(encoding='utf-8',errors='ignore').splitlines())>1000), 'god-file budget exceeded: new file >1000 LOC must stay <72kB (600\*120) or be split'"
 
   types:
     name: Type check (mypy)
