@@ -1,15 +1,19 @@
 """Autonomous Attack Orchestrator — facade re-exporting campaign package.
 
-Thin shim preserving ``from tools.autonomous_orchestrator import X`` imports
-while the implementation lives in ``tools.campaign`` (state / executor / orchestrator / phases).
+Thin 200-line facade preserving ``from tools.autonomous_orchestrator import X`` imports
+while the implementation lives in ``tools.campaign/*``.
 """
+
 from __future__ import annotations
 
-import sys
-import types
+# Re-export executor
+from tools.campaign.executor import AttackModuleExecutor  # noqa: F401
+
+# Re-export orchestrator (lives in persistence.py via mixins)
+from tools.campaign.persistence import AutonomousOrchestrator  # noqa: F401
 
 # Re-export state
-from tools.campaign.state import (
+from tools.campaign.state import (  # noqa: F401
     AggressionLevel,
     AttackPhase,
     AttackState,
@@ -20,15 +24,6 @@ from tools.campaign.state import (
     observe_autonomous_progress,
 )
 
-# Re-export executor
-from tools.campaign.executor import AttackModuleExecutor
-
-# Re-export orchestrator
-from tools.campaign.orchestrator import AutonomousOrchestrator
-
-# Re-export attack_modules helpers for patch seams (tests patch via this module)
-from tools.attack_modules import find_modules, find_producers, get_module
-
 __all__ = [
     "AggressionLevel",
     "AttackPhase",
@@ -38,36 +33,5 @@ __all__ = [
     "AutonomousOrchestrator",
     "RetryEngine",
     "TaskStatus",
-    "find_modules",
-    "find_producers",
-    "get_module",
     "observe_autonomous_progress",
-    "_report_autonomous_progress",
 ]
-
-# Propagate monkeypatch setattr to campaign modules so tests that patch
-# tools.autonomous_orchestrator.find_modules / get_module / find_producers
-# also affect the canonical implementations in tools.campaign.*.
-
-class _ShimModule(types.ModuleType):
-    def __setattr__(self, name, value):  # noqa: D401
-        super().__setattr__(name, value)
-        for mod_name in (
-            "tools.campaign.orchestrator",
-            "tools.campaign.phases",
-            "tools.campaign.executor",
-            "tools.campaign.state",
-        ):
-            mod = sys.modules.get(mod_name)
-            if mod is not None and hasattr(mod, name):
-                try:
-                    setattr(mod, name, value)
-                except Exception:
-                    pass
-
-
-# Install custom class for this module so future setattr goes through propagation
-try:
-    sys.modules[__name__].__class__ = _ShimModule
-except Exception:
-    pass

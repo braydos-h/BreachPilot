@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from tools.mcp_tools.registry import *
 
+
 def register_hash_tools(mcp: Any, *, ctx: ToolContext) -> None:
     workspace = ctx.workspace
     config = ctx.config

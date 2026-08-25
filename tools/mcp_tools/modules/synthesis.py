@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from tools.mcp_tools.registry import *
-
 # Reuse synthesis entrypoints — single source is tools.attack_modules.modules.synthesis
 from tools.attack_modules.modules.synthesis import CVEToExploit as CVEToExploitModule
 from tools.mcp_tools.attack_modules import _identify_hash_modes
+from tools.mcp_tools.registry import *
+
 
 def register_synthesis_tools(mcp: Any, *, ctx: ToolContext) -> None:
     workspace = ctx.workspace
@@ -915,4 +915,3 @@ if __name__ == "__main__":
         )
 
         return "\n".join(result_lines)
-

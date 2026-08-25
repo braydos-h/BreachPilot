@@ -2,18 +2,27 @@
 
 from __future__ import annotations
 
-from tools.mcp_tools.registry import *
+from tools.attack_modules.modules.auth_creds import PasswordSpray as PasswordSprayModule
+from tools.attack_modules.modules.crypto_jwt import JWTTamper as JWTTamperModule
 
 # Reuse attack module entrypoints — single source is tools.attack_modules.modules.*
 from tools.attack_modules.modules.web import (
     GraphQLIntrospect as GraphQLIntrospectModule,
+)
+from tools.attack_modules.modules.web import (
     RaceRequest as RaceRequestModule,
+)
+from tools.attack_modules.modules.web import (
     RequestSmuggling as RequestSmugglingModule,
+)
+from tools.attack_modules.modules.web import (
     SSTIProbe as SSTIProbeModule,
+)
+from tools.attack_modules.modules.web import (
     TimingOracle as TimingOracleModule,
 )
-from tools.attack_modules.modules.crypto_jwt import JWTTamper as JWTTamperModule
-from tools.attack_modules.modules.auth_creds import PasswordSpray as PasswordSprayModule
+from tools.mcp_tools.registry import *
+
 
 def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
     workspace = ctx.workspace
@@ -714,4 +723,3 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
             result_lines.append("\n[-] No valid credentials found with this password.")
 
         return "\n".join(result_lines)
-

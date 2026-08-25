@@ -13,7 +13,7 @@ import re
 import shutil
 import socket
 from collections.abc import Callable, Sequence
-from typing import TypedDict
+from typing import Any, TypedDict
 
 # Strict IPv4 regex: four octets 0-255 separated by dots, anchored.
 _STRICT_IPV4_RE = re.compile(
@@ -63,7 +63,7 @@ class PreflightResult(TypedDict):
     valid: bool
     original_command: str
     sanitized_command: str
-    corrections: list[TargetCorrection]
+    corrections: list[dict[str, Any]]
     missing_tools: list[str]
     blocked_reason: str | None
 
@@ -541,7 +541,7 @@ def is_private_or_local_target(target_ip: str, extra_local_cidrs: Sequence[str] 
     return False
 
 
-def parse_service_banners(text: str) -> list[dict[str, Any]]:
+def parse_service_banners(text: str) -> list[ServiceBanner]:
     """Parse check_os / nmap style output into structured service records.
 
     Extracts:
@@ -553,7 +553,7 @@ def parse_service_banners(text: str) -> list[dict[str, Any]]:
         - version
         - os_guess
     """
-    records: list[dict[str, Any]] = []
+    records: list[ServiceBanner] = []
     host = ""
 
     # Try to extract TARGET or host from lines like "TARGET: 10.0.0.1"
@@ -649,15 +649,15 @@ def parse_service_banners(text: str) -> list[dict[str, Any]]:
     # quick_scan / socket_scan format -- merge into the same records list,
     # skipping ports the check_os/nmap regex already captured.
     for line in text.splitlines():
-        m = quick_re.match(line)
-        if not m:
+        qm = quick_re.match(line)
+        if not qm:
             continue
-        port = int(m.group(1))
-        protocol = m.group(2).lower()
+        port = int(qm.group(1))
+        protocol = qm.group(2).lower()
         if (port, protocol) in seen_ports:
             continue
-        service = m.group(3) or "unknown"
-        banner = m.group(4).strip()
+        service = qm.group(3) or "unknown"
+        banner = qm.group(4).strip()
         if banner == "(no banner)":
             banner = ""
         seen_ports.add((port, protocol))

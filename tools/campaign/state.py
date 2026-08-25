@@ -1,10 +1,5 @@
-"""Campaign state — enums, task/state dataclasses, retry engine.
+"""Campaign state — AttackState, enums, task + retry engine."""
 
-Canonical source for AttackTask / AttackState / AggressionLevel / AttackPhase /
-TaskStatus / RetryEngine and the autonomous progress ContextVar helpers.
-Moved from tools.autonomous_orchestrator (2743 LOC) to break the god file.
-See tools/campaign/__init__.py and tools/autonomous_orchestrator.py shim.
-"""
 from __future__ import annotations
 
 import time
@@ -15,24 +10,18 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Iterator
 
-from tools.attack_ui import get_ui
 from tools.logging_setup import get_logger
 from tools.recon_pipeline import HostReconResult
 
 logger = get_logger()
-ui = get_ui()
 
 _AUTONOMOUS_PROGRESS: ContextVar[Callable[[dict[str, Any]], None] | None] = ContextVar(
-    "autonomous_progress",
-    default=None,
+    "autonomous_progress", default=None
 )
 
 
 @contextmanager
-def observe_autonomous_progress(
-    callback: Callable[[dict[str, Any]], None],
-) -> Iterator[None]:
-    """Route this task's autonomous phase/action updates to ``callback``."""
+def observe_autonomous_progress(callback: Callable[[dict[str, Any]], None]) -> Iterator[None]:
     token = _AUTONOMOUS_PROGRESS.set(callback)
     try:
         yield
@@ -41,12 +30,13 @@ def observe_autonomous_progress(
 
 
 def _report_autonomous_progress(**payload: Any) -> None:
-    callback = _AUTONOMOUS_PROGRESS.get()
-    if callback is not None:
+    cb = _AUTONOMOUS_PROGRESS.get()
+    if cb is not None:
         try:
-            callback(payload)
-        except Exception:  # noqa: BLE001 -- observability must never stop a campaign
+            cb(payload)
+        except Exception:  # noqa: BLE001
             pass
+
 
 class AggressionLevel(Enum):
     STEALTH = "stealth"
@@ -73,7 +63,7 @@ class TaskStatus(Enum):
     FAILED = "failed"
     RETRYING = "retrying"
     BLOCKED = "blocked"
-    CHAINED = "chained"  # Waiting for prerequisite
+    CHAINED = "chained"
 
 
 @dataclass
@@ -94,13 +84,9 @@ class AttackTask:
     result: dict[str, Any] = field(default_factory=dict)
     error: str = ""
     evidence_refs: list[str] = field(default_factory=list)
-    chain_parent: str | None = None  # Task ID that must complete first
+    chain_parent: str | None = None
     chain_children: list[str] = field(default_factory=list)
     prerequisites: list[str] = field(default_factory=list)
-    # Capability-upgrade: provenance tag. The dynamic-composition path sets
-    # this to "recovery:prerequisite" when it schedules a producer module to
-    # satisfy a missing artifact for a failed sibling. Empty for normal
-    # planner-created tasks. Additive; serialized for resume/debugging only.
     created_from: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -129,15 +115,6 @@ class AttackTask:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AttackTask":
-        """Reconstruct an AttackTask from its serialized form (Tier 1.3 resume).
-
-        Tolerant of unknown enum strings: an unrecognized phase/aggression/
-        status falls back to the defaults rather than raising, so a state file
-        written by a newer/older version never breaks resume. ``created_at``
-        and the started/completed timestamps are preserved verbatim so retry
-        accounting and timeline ordering survive the round-trip.
-        """
-
         def _enum(enum_cls, value, default):
             try:
                 return enum_cls(value)
@@ -170,37 +147,24 @@ class AttackTask:
 
 @dataclass
 class AttackState:
-    """Persistent attack state for a target."""
-
     target: str
     current_phase: AttackPhase = AttackPhase.RECONNAISSANCE
     aggression: AggressionLevel = AggressionLevel.NORMAL
-    privilege_level: str = "none"  # none, user, admin, system, root
+    privilege_level: str = "none"
     access_achieved: bool = False
-    shell_type: str = ""  # none, reverse, bind, webshell
+    shell_type: str = ""
     successful_exploits: list[str] = field(default_factory=list)
-    failed_attempts: dict[str, list[str]] = field(default_factory=dict)  # module -> [errors]
+    failed_attempts: dict[str, list[str]] = field(default_factory=dict)
     attack_paths: list[list[str]] = field(default_factory=list)
     credentials_found: list[dict[str, str]] = field(default_factory=list)
     loot: list[str] = field(default_factory=list)
     pivot_targets: list[str] = field(default_factory=list)
     timeline: list[dict[str, Any]] = field(default_factory=list)
     recon_result: HostReconResult | None = None
-    # Phase 2.2: persistence methods confirmed installed on the target
-    # (e.g. ["cron", "schtask", "webshell"]). Populated only by the opt-in
-    # _phase_persistence handler; empty when the persistence phase is off.
     persistence_established: list[str] = field(default_factory=list)
-    # Domain targeting: the operator's original --target (domain or IP) and
-    # the resolved IP for a domain target. When original_target is a domain,
-    # the orchestrator runs subdomain expansion after recon to discover the
-    # full attack surface and auto-authorizes each discovered host.
     original_target: str = ""
     resolved_ip: str = ""
     discovered_subdomains: list[dict[str, str]] = field(default_factory=list)
-    # Phase 5: hard-target accounting. Counts adaptive rounds that produced no
-    # novel candidate modules and no access; when it crosses
-    # ``hard_target_max_rounds`` the campaign gives up on this target instead
-    # of burning the remaining ``max_cycles`` budget. Reset per target.
     hard_target_rounds: int = 0
 
     def to_dict(self) -> dict[str, Any]:
@@ -220,8 +184,6 @@ class AttackState:
             "timeline": self.timeline,
             "recon_result": self.recon_result.to_dict() if self.recon_result else None,
             "persistence_established": self.persistence_established,
-            # Domain targeting: persist so a resumed campaign still knows it
-            # was a domain run and doesn't lose the discovered-subdomain set.
             "original_target": self.original_target,
             "resolved_ip": self.resolved_ip,
             "discovered_subdomains": list(self.discovered_subdomains),
@@ -230,18 +192,6 @@ class AttackState:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AttackState":
-        """Reconstruct an AttackState from its serialized form (Tier 1.3 resume).
-
-        This is what makes a resumed autonomous campaign CONTINUE rather than
-        restart: the recovered ``current_phase``, ``successful_exploits``,
-        ``failed_attempts``, ``credentials_found``, ``access_achieved`` and
-        ``recon_result`` mean the orchestrator skips already-done recon and
-        doesn't re-fire modules that already succeeded/failed. Unknown enum
-        strings degrade to defaults (never raise). ``recon_result`` is rebuilt
-        via ``HostReconResult.from_dict`` so the prior scan's open ports live
-        on across the restart.
-        """
-
         def _enum(enum_cls, value, default):
             try:
                 return enum_cls(value)
@@ -250,7 +200,6 @@ class AttackState:
 
         recon_data = data.get("recon_result")
         recon = HostReconResult.from_dict(recon_data) if isinstance(recon_data, dict) else None
-
         return cls(
             target=str(data.get("target", "")),
             current_phase=_enum(AttackPhase, data.get("current_phase"), AttackPhase.RECONNAISSANCE),
@@ -267,8 +216,6 @@ class AttackState:
             timeline=list(data.get("timeline", []) or []),
             recon_result=recon,
             persistence_established=list(data.get("persistence_established", []) or []),
-            # Domain targeting: restore so a resumed domain campaign keeps its
-            # original_target/resolved_ip and discovered subdomains.
             original_target=str(data.get("original_target", "") or ""),
             resolved_ip=str(data.get("resolved_ip", "") or ""),
             discovered_subdomains=[
@@ -288,18 +235,16 @@ class AttackState:
         )
 
     def record_failure(self, module_name: str, error: str) -> None:
-        if module_name not in self.failed_attempts:
-            self.failed_attempts[module_name] = []
-        self.failed_attempts[module_name].append(error)
+        self.failed_attempts.setdefault(module_name, []).append(error)
 
     def record_success(self, module_name: str, result: dict[str, Any]) -> None:
+        from tools.attack_ui import get_ui
+
         self.successful_exploits.append(module_name)
         if result.get("shell_type"):
             self.shell_type = result["shell_type"]
             self.access_achieved = True
-            # Surface the foothold to the operator so a long autonomous campaign
-            # shows the breakthrough on the console, not just in the log file.
-            ui.compromise(
+            get_ui().compromise(
                 action_num=len(self.successful_exploits),
                 shell_type=result.get("shell_type", ""),
                 privilege_level=result.get("privilege_level", ""),
@@ -308,31 +253,23 @@ class AttackState:
             self.privilege_level = result["privilege_level"]
         if result.get("credentials"):
             self.credentials_found.extend(result["credentials"])
-            ui.cred_dump(action_num=len(self.successful_exploits))
+            get_ui().cred_dump(action_num=len(self.successful_exploits))
         if result.get("loot"):
             self.loot.extend(result["loot"])
         if result.get("pivot_targets"):
             self.pivot_targets.extend(result["pivot_targets"])
 
     def escalate_aggression(self) -> None:
-        """Escalate aggression level after failures."""
+        from tools.attack_ui import get_ui
+
         levels = [AggressionLevel.STEALTH, AggressionLevel.NORMAL, AggressionLevel.AGGRESSIVE, AggressionLevel.MAXIMUM]
         idx = levels.index(self.aggression)
         if idx < len(levels) - 1:
             self.aggression = levels[idx + 1]
             logger.info(f"Aggression escalated to {self.aggression.value} for {self.target}")
-            # Surface aggression escalation to the operator — it drives which
-            # modules the next round runs, so the user should see the campaign
-            # getting more aggressive in real time.
-            ui.warning(f"Aggression escalated to {self.aggression.value} — retrying failed modules")
+            get_ui().warning(f"Aggression escalated to {self.aggression.value} — retrying failed modules")
 
     def should_continue(self) -> bool:
-        """Determine if attack should continue based on state."""
-        # Continue if:
-        # 1. No access achieved yet
-        # 2. Access achieved but not at max privilege
-        # 3. There are pivot targets
-        # 4. There are unexploited services
         if not self.access_achieved:
             return True
         if self.privilege_level not in ("system", "root", "admin"):
@@ -342,14 +279,7 @@ class AttackState:
         return False
 
 
-# ---------------------------------------------------------------------------
-# Retry engine with parameter modification
-# ---------------------------------------------------------------------------
-
-
 class RetryEngine:
-    """Intelligent retry with parameter modification."""
-
     RETRY_STRATEGIES: dict[str, list[dict[str, Any]]] = {
         "SSHBruteForce": [
             {"timeout": 10, "threads": 4},
@@ -372,20 +302,14 @@ class RetryEngine:
             {"technique": "time", "level": 3, "tamper": "space2comment"},
             {"technique": "stacked", "level": 5, "tamper": "charencode"},
         ],
-        "default": [
-            {"timeout": 30},
-            {"timeout": 60, "retries": 2},
-            {"timeout": 120, "retries": 3, "aggressive": True},
-        ],
+        "default": [{"timeout": 30}, {"timeout": 60, "retries": 2}, {"timeout": 120, "retries": 3, "aggressive": True}],
     }
 
     @classmethod
     def get_retry_parameters(cls, module_name: str, attempt: int) -> dict[str, Any]:
-        """Get modified parameters for retry attempt."""
         strategies = cls.RETRY_STRATEGIES.get(module_name, cls.RETRY_STRATEGIES["default"])
         if attempt < len(strategies):
             return strategies[attempt]
-        # If we've exhausted strategies, return the last one with extra aggression
         params = dict(strategies[-1])
         params["aggressive"] = True
         params["timeout"] = params.get("timeout", 60) * 4
@@ -393,24 +317,16 @@ class RetryEngine:
 
     @classmethod
     def should_retry(cls, module_name: str, error: str, attempt: int, max_attempts: int) -> bool:
-        """Determine if a failed attempt should be retried."""
         if attempt >= max_attempts:
             return False
-
-        # First, classify via the shared failure taxonomy. Permanent
-        # classes (scope_blocked / false_positive) are never retried -- the
-        # substring blacklist below stays as the conservative fallback for
-        # anything the classifier misses or when the taxonomy import fails.
         try:
             from tools.failure_taxonomy import classify_failure, is_permanent
 
             fc = classify_failure(error)
             if is_permanent(fc):
                 return False
-        except Exception:  # noqa: BLE001 -- taxonomy import must never break retries
+        except Exception:  # noqa: BLE001
             pass
-
-        # Don't retry on permanent failures
         permanent_errors = [
             "out of scope",
             "permission denied",
@@ -422,10 +338,6 @@ class RetryEngine:
         error_lower = error.lower()
         if any(pe in error_lower for pe in permanent_errors):
             return False
-
-        # Don't retry if tool is not available
         if "not found" in error_lower or "not installed" in error_lower:
             return False
-
         return True
-
