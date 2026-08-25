@@ -1,24 +1,23 @@
-"""Campaign package — Phase 4 shim.
+"""Campaign package — canonical implementation for autonomous orchestration.
 
-Phase 4 splits ``tools/autonomous_orchestrator.py`` (2720 LOC) into
-``tools/campaign/`` (``state.py`` / ``phases.py`` / ``executor.py``). This
-``__init__`` re-exports the public surface so both paths work during the
-1-release shim window:
+Re-exports the public API so both old and new import paths work:
 
-  from tools.autonomous_orchestrator import AutonomousOrchestrator  # old
+  from tools.autonomous_orchestrator import AutonomousOrchestrator  # old (shim)
   from tools.campaign import AutonomousOrchestrator                # new
-
-The real split (moving bodies, reusing ``AssessmentService`` pattern from
-``tools/run_service/service.py``) lands in the next sub-PR. See debt doc §12.
+  from tools.campaign.orchestrator import AutonomousOrchestrator  # new direct
 """
 
-from tools.autonomous_orchestrator import (  # noqa: F401
+from tools.campaign.executor import AttackModuleExecutor  # noqa: F401
+from tools.campaign.orchestrator import AutonomousOrchestrator  # noqa: F401
+from tools.campaign.state import (  # noqa: F401
     AggressionLevel,
     AttackPhase,
     AttackState,
     AttackTask,
-    AutonomousOrchestrator,
+    RetryEngine,
     TaskStatus,
+    _report_autonomous_progress,
+    observe_autonomous_progress,
 )
 
 __all__ = [
@@ -26,6 +25,10 @@ __all__ = [
     "AttackPhase",
     "AttackState",
     "AttackTask",
+    "AttackModuleExecutor",
     "AutonomousOrchestrator",
+    "RetryEngine",
     "TaskStatus",
+    "observe_autonomous_progress",
+    "_report_autonomous_progress",
 ]

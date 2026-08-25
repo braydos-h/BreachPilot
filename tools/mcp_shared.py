@@ -11,7 +11,7 @@ import os
 import signal
 import subprocess
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 from tools.cve_lookup import CVESearchSettings, NVDClient
 from tools.exploit_search import ExploitSearch, ExploitSearchSettings
@@ -318,7 +318,6 @@ def _run_with_pgrp_timeout(
     Re-raises ``subprocess.TimeoutExpired`` on timeout so callers can catch it,
     matching the existing ``subprocess.run(..., timeout=...)`` call-site pattern.
     """
-    import subprocess
 
     text_mode = bool(
         popen_kwargs.get("text") or popen_kwargs.get("universal_newlines") or popen_kwargs.get("encoding") is not None
@@ -418,7 +417,11 @@ def _wrap_http_auth(app: Callable[..., Awaitable[None]], token: str) -> Callable
 
     expected = f"Bearer {token}".encode("utf-8")
 
-    async def auth_app(scope: Mapping[str, object], receive: Callable[[], Awaitable[Mapping[str, object]]], send: Callable[[Mapping[str, object]], Awaitable[None]]) -> None:
+    async def auth_app(
+        scope: Mapping[str, object],
+        receive: Callable[[], Awaitable[Mapping[str, object]]],
+        send: Callable[[Mapping[str, object]], Awaitable[None]],
+    ) -> None:
         if scope.get("type") != "http":
             return await app(scope, receive, send)
         raw_headers = scope.get("headers", [])

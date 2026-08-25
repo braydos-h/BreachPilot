@@ -5,6 +5,7 @@ Moved from tools.autonomous_orchestrator to break the god file.
 Phase handlers live in tools.campaign.phases and are bound after class definition
 to preserve ``self._phase_*`` call sites.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -16,10 +17,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from tools.attack_modules import ModuleContext
 from tools.attack_ui import get_ui
 from tools.logging_setup import get_logger
-from tools.recon_pipeline import HostReconResult, ReconConfig, ReconPipeline
+from tools.recon_pipeline import ReconConfig, ReconPipeline
 from tools.validation_utils import is_local_target
 
 from tools.campaign.executor import AttackModuleExecutor
@@ -650,6 +650,7 @@ class AutonomousOrchestrator:
             # shim-aware find_producers
             try:
                 import tools.autonomous_orchestrator as _ao_shim3  # type: ignore[import]
+
                 _find_producers = getattr(_ao_shim3, "find_producers", None)
             except Exception:
                 _find_producers = None
@@ -926,8 +927,10 @@ class AutonomousOrchestrator:
         self._running = False
         logger.info("Orchestrator stop signal received")
 
+
 # Bind phase handlers (preserve self._phase_* call sites without inheritance)
-from tools.campaign import phases as _phases  # noqa: E402
+import tools.campaign.phases as _phases  # noqa: E402
+
 AutonomousOrchestrator._phase_local_takeover = _phases._phase_local_takeover  # type: ignore[attr-defined]
 AutonomousOrchestrator._phase_reconnaissance = _phases._phase_reconnaissance  # type: ignore[attr-defined]
 AutonomousOrchestrator._phase_exploitation = _phases._phase_exploitation  # type: ignore[attr-defined]
