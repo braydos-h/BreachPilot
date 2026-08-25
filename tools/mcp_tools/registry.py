@@ -48,6 +48,7 @@ from tools.autonomous_orchestrator import (
 from tools.config_manager import CONFIG_SCHEMA
 from tools.credential_store import CredentialRecord, CredentialStore
 from tools.cve_lookup import NVDClient, format_cve_results
+from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
 from tools.experience_store import ExperienceStore
 from tools.exploit_mutator import ExploitMutator
 from tools.exploit_search import ExploitSearch
@@ -341,7 +342,8 @@ def _discover_tool_registrars() -> list[Any]:
                         continue
                     try:
                         mod = importlib.import_module(f"tools.mcp_tools.modules.{subname}")
-                    except Exception:
+                    except _EXC_GROUP_CATCH as exc:
+                        _log_nested_exceptions(exc)
                         continue
                     for attr in dir(mod):
                         if attr.startswith("register_") and attr.endswith("_tools"):
@@ -353,7 +355,8 @@ def _discover_tool_registrars() -> list[Any]:
             continue
         try:
             mod = importlib.import_module(f"tools.mcp_tools.{modname}")
-        except Exception:
+        except _EXC_GROUP_CATCH as exc:
+            _log_nested_exceptions(exc)
             continue
         for attr in dir(mod):
             if attr.startswith("register_") and attr.endswith("_tools"):
@@ -399,7 +402,8 @@ def _validate_mcp_tool_decorators() -> list[str]:
             for d in decos:
                 try:
                     src = ast.unparse(d)
-                except Exception:
+                except _EXC_GROUP_CATCH as exc:
+                    _log_nested_exceptions(exc)
                     src = ""
                 low = src.lower()
                 if "mcp.tool" in low or ".tool(" in low:

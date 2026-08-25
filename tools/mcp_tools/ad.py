@@ -16,6 +16,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 
+from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
 from tools.mcp_shared import _allowed_target_list
 from tools.mcp_tools.registry import *
 
@@ -86,7 +87,8 @@ def _run(argv: list[str], timeout: int) -> tuple[str, int | None, str]:
         return ("completed" if returncode == 0 else "failed"), returncode, output
     except subprocess.TimeoutExpired:
         return "timed_out", None, f"{argv[0]} timed out after {timeout}s"
-    except Exception as exc:
+    except _EXC_GROUP_CATCH as exc:
+        _log_nested_exceptions(exc)
         return "error", None, str(exc)
 
 

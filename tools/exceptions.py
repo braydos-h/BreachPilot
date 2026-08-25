@@ -11,20 +11,21 @@ from __future__ import annotations
 
 import sys
 import traceback
+from typing import TypeGuard
 
 
-def _is_exception_group(exc: BaseException) -> bool:
+def _is_exception_group(exc: BaseException) -> TypeGuard[BaseExceptionGroup]:
     """Check if an exception is an ExceptionGroup / BaseExceptionGroup (PEP 654)."""
     if isinstance(exc, BaseExceptionGroup):
         return True
-    return hasattr(exc, "exceptions") and isinstance(exc.exceptions, tuple)
+    attr = getattr(exc, "exceptions", None)
+    return isinstance(attr, tuple)
 
 
 def _log_nested_exceptions(exc: BaseException, *, prefix: str = "") -> None:
     """Recursively log every exception inside an ExceptionGroup / BaseExceptionGroup."""
     if _is_exception_group(exc):
-        group = exc  # type: ignore[union-attr]
-        for i, nested in enumerate(group.exceptions):
+        for i, nested in enumerate(exc.exceptions):
             _log_nested_exceptions(nested, prefix=f"{prefix}  [{i}] ")
     else:
         try:

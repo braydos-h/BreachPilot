@@ -30,6 +30,7 @@ import socket
 import subprocess
 import urllib.request
 
+from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
 from tools.mcp_tools.registry import *
 
 # Built-in subdomain wordlist for DNS bruteforce (reused from
@@ -563,7 +564,8 @@ def _dns_resolve_all(domain: str, *, resolver_fn=None) -> dict[str, list[str]]:
                 vals = resolver_fn(domain, rt)
                 if isinstance(vals, list):
                     result[rt] = [str(v) for v in vals if v]
-            except Exception:
+            except _EXC_GROUP_CATCH as exc:
+                _log_nested_exceptions(exc)
                 continue
     return result
 

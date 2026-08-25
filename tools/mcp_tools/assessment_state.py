@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 
+from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
 from tools.mcp_tools.registry import *
 
 
@@ -30,7 +31,8 @@ from tools.mcp_tools.registry import *
 def _registered_tool_names(mcp: Any) -> list[str]:
     try:
         tools = getattr(getattr(mcp, "_tool_manager", None), "_tools", None)
-    except Exception:  # noqa: BLE001 -- introspection is best-effort
+    except _EXC_GROUP_CATCH as exc:  # noqa: BLE001 -- introspection is best-effort
+        _log_nested_exceptions(exc)
         return []
     if not isinstance(tools, dict):
         return []
@@ -115,7 +117,8 @@ def register_assessment_state_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
         try:
             snap = aggregate_state(target_ip, workspace, config)
-        except Exception as exc:  # noqa: BLE001 -- snapshot never raises
+        except _EXC_GROUP_CATCH as exc:  # noqa: BLE001 -- snapshot never raises
+            _log_nested_exceptions(exc)
             return f"ERROR: aggregate_state failed: {exc}"
         return _format_state_block(snap)
 
@@ -172,7 +175,8 @@ def register_assessment_state_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     lines.append(f"- {skill.name} | tags={tags} | {desc}")
                 if registry.errors:
                     lines.append(f"WARNINGS: {len(registry.errors)} skill file(s) failed to load.")
-            except Exception as exc:  # noqa: BLE001 -- skills listing is best-effort
+            except _EXC_GROUP_CATCH as exc:  # noqa: BLE001 -- skills listing is best-effort
+                _log_nested_exceptions(exc)
                 lines.append(f"NOTE: skill registry unavailable: {exc}")
             return "\n".join(lines)
         return f"BLOCKED: unknown scope {scope!r} (use modules|tools|skills)."

@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import os
 import signal
-from typing import Any
+import subprocess
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, cast
 
 from tools.cve_lookup import CVESearchSettings, NVDClient
 from tools.exploit_search import ExploitSearch, ExploitSearchSettings
@@ -103,33 +105,79 @@ def _shared_nvd_limiter(per_minute: float) -> RateLimiter:
     return lim
 
 
-def build_search(config: dict[str, Any]) -> ExploitSearch:
-    """Build an ``ExploitSearch`` from the ``exploit``/``search`` config blocks."""
-    exploit_cfg = config.get("exploit", {}) or {}
-    research_cfg = config.get("research", {}) or {}
-    search_cfg = config.get("search", {}) or {}
-    serpapi_cfg = research_cfg.get("serpapi", {}) or {}
+def _cfg_int(cfg: Mapping[str, object], key: str, default: int) -> int:
+    v = cfg.get(key, default)
+    if isinstance(v, int) and not isinstance(v, bool):
+        return v
+    if isinstance(v, float):
+        return int(v)
+    if isinstance(v, str):
+        try:
+            return int(v.strip())
+        except ValueError:
+            return default
+    return default
 
-    def web_cfg(key: str, default: Any) -> Any:
+
+def _cfg_float(cfg: Mapping[str, object], key: str, default: float) -> float:
+    v = cfg.get(key, default)
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return float(v)
+    if isinstance(v, str):
+        try:
+            return float(v.strip())
+        except ValueError:
+            return default
+    return default
+
+
+def _cfg_str(cfg: Mapping[str, object], key: str, default: str) -> str:
+    v = cfg.get(key, default)
+    return str(v) if isinstance(v, (str, int, float, bytes)) else default
+
+
+def _cfg_bool(cfg: Mapping[str, object], key: str, default: bool) -> bool:
+    v = cfg.get(key, default)
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.strip().lower() in {"1", "true", "yes", "on"}
+    if isinstance(v, int):
+        return bool(v)
+    return default
+
+
+def build_search(config: Mapping[str, object]) -> ExploitSearch:
+    """Build an ``ExploitSearch`` from the ``exploit``/``search`` config blocks."""
+    exploit_cfg_raw = config.get("exploit", {})
+    exploit_cfg: Mapping[str, object] = exploit_cfg_raw if isinstance(exploit_cfg_raw, Mapping) else {}
+    research_cfg_raw = config.get("research", {})
+    research_cfg: Mapping[str, object] = research_cfg_raw if isinstance(research_cfg_raw, Mapping) else {}
+    search_cfg_raw = config.get("search", {})
+    search_cfg: Mapping[str, object] = search_cfg_raw if isinstance(search_cfg_raw, Mapping) else {}
+    serpapi_cfg_raw = research_cfg.get("serpapi", {})
+    serpapi_cfg: Mapping[str, object] = serpapi_cfg_raw if isinstance(serpapi_cfg_raw, Mapping) else {}
+
+    def web_cfg(key: str, default: object) -> object:
         return serpapi_cfg.get(key, search_cfg.get(key, default))
 
     settings = ExploitSearchSettings(
-        enabled=bool(exploit_cfg.get("enabled", False)),
-        searchsploit_path=str(exploit_cfg.get("searchsploit_path", "searchsploit")),
+        enabled=_cfg_bool(exploit_cfg, "enabled", False),
+        searchsploit_path=_cfg_str(exploit_cfg, "searchsploit_path", "searchsploit"),
         web_endpoint=str(web_cfg("endpoint", "https://serpapi.com/search.json")),
         web_engine=str(web_cfg("engine", "duckduckgo")),
         web_region=str(web_cfg("region", "us-en")),
         web_api_key_env=str(web_cfg("api_key_env", "SERPAPI_API_KEY")),
-        web_timeout_seconds=int(research_cfg.get("timeout_seconds", search_cfg.get("timeout_seconds", 20))),
-        web_max_results=int(research_cfg.get("max_results", search_cfg.get("max_results", 5))),
-        cache_ttl_seconds=float(exploit_cfg.get("cache_ttl_seconds", 3600.0)),
-        cache_max_entries=int(exploit_cfg.get("cache_max_entries", 50)),
-        max_query_chars=int(exploit_cfg.get("max_query_chars", 200)),
+        web_timeout_seconds=_cfg_int(research_cfg, "timeout_seconds", _cfg_int(search_cfg, "timeout_seconds", 20)),
+        web_max_results=_cfg_int(research_cfg, "max_results", _cfg_int(search_cfg, "max_results", 5)),
+        cache_ttl_seconds=_cfg_float(exploit_cfg, "cache_ttl_seconds", 3600.0),
+        cache_max_entries=_cfg_int(exploit_cfg, "cache_max_entries", 50),
+        max_query_chars=_cfg_int(exploit_cfg, "max_query_chars", 200),
     )
     return ExploitSearch(settings)
 
 
-def build_cve_search(config: dict[str, Any]) -> NVDClient:
+def build_cve_search(config: Mapping[str, object]) -> NVDClient:
     """Build an NVD client from the ``cve_lookup`` config block.
 
     Tier 1.8: also wires a process-wide shared ``RateLimiter`` (built from
@@ -138,49 +186,53 @@ def build_cve_search(config: dict[str, Any]) -> NVDClient:
     NVDClient hammering at its own per-instance gap. ``rate_limit_seconds``
     remains the per-instance FALLBACK used only when no shared limiter is
     passed (e.g. vuln_agent constructing NVDClient directly)."""
-    cve_cfg = config.get("cve_lookup", {}) or {}
+    cve_cfg_raw = config.get("cve_lookup", {})
+    cve_cfg: Mapping[str, object] = cve_cfg_raw if isinstance(cve_cfg_raw, Mapping) else {}
     settings = CVESearchSettings(
-        enabled=bool(cve_cfg.get("enabled", True)),
-        timeout_seconds=int(cve_cfg.get("timeout_seconds", 30)),
-        max_results=int(cve_cfg.get("max_results", 5)),
-        cache_ttl_seconds=int(cve_cfg.get("cache_ttl_seconds", 3600)),
-        cache_max_entries=int(cve_cfg.get("cache_max_entries", 100)),
-        rate_limit_seconds=float(cve_cfg.get("rate_limit_seconds", 6.0)),
-        api_key_env=str(cve_cfg.get("api_key_env", "NVD_API_KEY")),
-        circuit_failure_threshold=int(cve_cfg.get("circuit_failure_threshold", 5)),
-        circuit_recovery_timeout=float(cve_cfg.get("circuit_recovery_timeout", 60.0)),
-        epss_enabled=bool(cve_cfg.get("epss_enabled", False)),
-        kev_enabled=bool(cve_cfg.get("kev_enabled", False)),
-        kev_cache_ttl_seconds=int(cve_cfg.get("kev_cache_ttl_seconds", 86400)),
-        kev_cache_path=str(cve_cfg.get("kev_cache_path", "")),
+        enabled=_cfg_bool(cve_cfg, "enabled", True),
+        timeout_seconds=_cfg_int(cve_cfg, "timeout_seconds", 30),
+        max_results=_cfg_int(cve_cfg, "max_results", 5),
+        cache_ttl_seconds=_cfg_int(cve_cfg, "cache_ttl_seconds", 3600),
+        cache_max_entries=_cfg_int(cve_cfg, "cache_max_entries", 100),
+        rate_limit_seconds=_cfg_float(cve_cfg, "rate_limit_seconds", 6.0),
+        api_key_env=_cfg_str(cve_cfg, "api_key_env", "NVD_API_KEY"),
+        circuit_failure_threshold=_cfg_int(cve_cfg, "circuit_failure_threshold", 5),
+        circuit_recovery_timeout=_cfg_float(cve_cfg, "circuit_recovery_timeout", 60.0),
+        epss_enabled=_cfg_bool(cve_cfg, "epss_enabled", False),
+        kev_enabled=_cfg_bool(cve_cfg, "kev_enabled", False),
+        kev_cache_ttl_seconds=_cfg_int(cve_cfg, "kev_cache_ttl_seconds", 86400),
+        kev_cache_path=_cfg_str(cve_cfg, "kev_cache_path", ""),
     )
-    search_per_minute = float(cve_cfg.get("search_rate_limit_per_minute", 10))
+    search_per_minute = _cfg_float(cve_cfg, "search_rate_limit_per_minute", 10.0)
     limiter = _shared_nvd_limiter(search_per_minute) if search_per_minute > 0 else None
     return NVDClient(settings, rate_limiter=limiter)
 
 
-def build_researcher(config: dict[str, Any]) -> WebResearcher:
+def build_researcher(config: Mapping[str, object]) -> WebResearcher:
     """Build a web researcher from the ``research`` config block."""
-    research_cfg = config.get("research", {}) or {}
-    ollama_cfg = research_cfg.get("ollama", {}) or {}
-    serpapi_cfg = research_cfg.get("serpapi", {}) or {}
+    research_cfg_raw = config.get("research", {})
+    research_cfg: Mapping[str, object] = research_cfg_raw if isinstance(research_cfg_raw, Mapping) else {}
+    ollama_cfg_raw = research_cfg.get("ollama", {})
+    ollama_cfg: Mapping[str, object] = ollama_cfg_raw if isinstance(ollama_cfg_raw, Mapping) else {}
+    serpapi_cfg_raw = research_cfg.get("serpapi", {})
+    serpapi_cfg: Mapping[str, object] = serpapi_cfg_raw if isinstance(serpapi_cfg_raw, Mapping) else {}
 
     def list_cfg(key: str, default: list[str]) -> list[str]:
         value = research_cfg.get(key, default)
         return value if isinstance(value, list) else default
 
     settings = WebResearcherSettings(
-        enabled=bool(research_cfg.get("enabled", True)),
-        provider=str(research_cfg.get("provider", "ollama")),
-        fallback_provider=str(research_cfg.get("fallback_provider", "serpapi")),
-        timeout_seconds=int(research_cfg.get("timeout_seconds", 15)),
-        max_results=int(research_cfg.get("max_results", 8)),
-        max_fetch_depth=int(research_cfg.get("max_fetch_depth", 5)),
-        max_content_chars=int(research_cfg.get("max_content_chars", 12000)),
-        cache_ttl_seconds=float(research_cfg.get("cache_ttl_seconds", 1800.0)),
-        cache_max_entries=int(research_cfg.get("cache_max_entries", 250)),
-        min_source_quality=str(research_cfg.get("min_source_quality", "medium")),
-        allow_local_fetch=bool(research_cfg.get("allow_local_fetch", False)),
+        enabled=_cfg_bool(research_cfg, "enabled", True),
+        provider=_cfg_str(research_cfg, "provider", "ollama"),
+        fallback_provider=_cfg_str(research_cfg, "fallback_provider", "serpapi"),
+        timeout_seconds=_cfg_int(research_cfg, "timeout_seconds", 15),
+        max_results=_cfg_int(research_cfg, "max_results", 8),
+        max_fetch_depth=_cfg_int(research_cfg, "max_fetch_depth", 5),
+        max_content_chars=_cfg_int(research_cfg, "max_content_chars", 12000),
+        cache_ttl_seconds=_cfg_float(research_cfg, "cache_ttl_seconds", 1800.0),
+        cache_max_entries=_cfg_int(research_cfg, "cache_max_entries", 250),
+        min_source_quality=_cfg_str(research_cfg, "min_source_quality", "medium"),
+        allow_local_fetch=_cfg_bool(research_cfg, "allow_local_fetch", False),
         allowed_domains=list_cfg("allowed_domains", []),
         blocked_domains=list_cfg(
             "blocked_domains",
@@ -195,16 +247,16 @@ def build_researcher(config: dict[str, Any]) -> WebResearcher:
             ],
         ),
         ollama=OllamaResearchSettings(
-            api_key_env=str(ollama_cfg.get("api_key_env", "OLLAMA_API_KEY")),
-            max_results=int(ollama_cfg.get("max_results", research_cfg.get("max_results", 8))),
-            use_web_search=bool(ollama_cfg.get("use_web_search", True)),
-            use_web_fetch=bool(ollama_cfg.get("use_web_fetch", True)),
+            api_key_env=_cfg_str(ollama_cfg, "api_key_env", "OLLAMA_API_KEY"),
+            max_results=_cfg_int(ollama_cfg, "max_results", _cfg_int(research_cfg, "max_results", 8)),
+            use_web_search=_cfg_bool(ollama_cfg, "use_web_search", True),
+            use_web_fetch=_cfg_bool(ollama_cfg, "use_web_fetch", True),
         ),
         serpapi=SerpAPIResearchSettings(
-            api_key_env=str(serpapi_cfg.get("api_key_env", "SERPAPI_API_KEY")),
-            endpoint=str(serpapi_cfg.get("endpoint", "https://serpapi.com/search.json")),
-            engine=str(serpapi_cfg.get("engine", "duckduckgo")),
-            region=str(serpapi_cfg.get("region", "us-en")),
+            api_key_env=_cfg_str(serpapi_cfg, "api_key_env", "SERPAPI_API_KEY"),
+            endpoint=_cfg_str(serpapi_cfg, "endpoint", "https://serpapi.com/search.json"),
+            engine=_cfg_str(serpapi_cfg, "engine", "duckduckgo"),
+            region=_cfg_str(serpapi_cfg, "region", "us-en"),
         ),
     )
     return WebResearcher(settings)
@@ -233,15 +285,15 @@ def build_researcher(config: dict[str, Any]) -> WebResearcher:
 
 
 def _run_with_pgrp_timeout(
-    args,
-    timeout,
-    stdout=None,
-    stderr=None,
-    cwd=None,
-    env=None,
-    input_text=None,
-    **popen_kwargs,
-):
+    args: Sequence[str] | str,
+    timeout: float | None,
+    stdout: int | None = None,
+    stderr: int | None = None,
+    cwd: str | None = None,
+    env: Mapping[str, str] | None = None,
+    input_text: str | bytes | None = None,
+    **popen_kwargs: object,
+) -> tuple[int, str | bytes | None, str | bytes | None]:
     """Run ``args`` with a hard ``timeout``, reaping the process group on timeout.
 
     On POSIX the child is started in a new session (``start_new_session=True``)
@@ -271,14 +323,14 @@ def _run_with_pgrp_timeout(
     text_mode = bool(
         popen_kwargs.get("text") or popen_kwargs.get("universal_newlines") or popen_kwargs.get("encoding") is not None
     )
-    proc = subprocess.Popen(
+    proc = subprocess.Popen(  # type: ignore[call-overload,misc]
         args,
         start_new_session=(os.name != "nt"),
         stdout=stdout,
         stderr=stderr,
         cwd=cwd,
         env=env,
-        **popen_kwargs,
+        **popen_kwargs,  # type: ignore[arg-type]
     )
     input_bytes = None
     if input_text is not None:
@@ -295,7 +347,13 @@ def _run_with_pgrp_timeout(
                 pass
         else:
             try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                killpg = getattr(os, "killpg", None)
+                getpgid = getattr(os, "getpgid", None)
+                sigkill = getattr(signal, "SIGKILL", 9)
+                if killpg is not None and getpgid is not None:
+                    killpg(getpgid(proc.pid), sigkill)  # type: ignore[operator]
+                else:
+                    proc.kill()
             except (ProcessLookupError, PermissionError):
                 try:
                     proc.kill()
@@ -348,7 +406,7 @@ def assert_loopback_bind(host: str, allow_public_bind: bool = False) -> None:
     )
 
 
-def _wrap_http_auth(app: Any, token: str) -> Any:
+def _wrap_http_auth(app: Callable[..., Awaitable[None]], token: str) -> Callable[..., Awaitable[None]]:
     """Wrap an ASGI app to require ``Authorization: Bearer <token>``.
 
     Pure-ASGI (no Starlette import) so it works with the streamable-http app
@@ -360,10 +418,15 @@ def _wrap_http_auth(app: Any, token: str) -> Any:
 
     expected = f"Bearer {token}".encode("utf-8")
 
-    async def auth_app(scope, receive, send):
+    async def auth_app(scope: Mapping[str, object], receive: Callable[[], Awaitable[Mapping[str, object]]], send: Callable[[Mapping[str, object]], Awaitable[None]]) -> None:
         if scope.get("type") != "http":
             return await app(scope, receive, send)
-        headers = {k.lower(): v for k, v in scope.get("headers", [])}
+        raw_headers = scope.get("headers", [])
+        headers: dict[bytes, bytes] = {}
+        if isinstance(raw_headers, list):
+            for k, v in raw_headers:  # type: ignore[misc]
+                if isinstance(k, bytes) and isinstance(v, bytes):
+                    headers[k.lower()] = v
         if hmac.compare_digest(headers.get(b"authorization", b""), expected):
             return await app(scope, receive, send)
         await send(
@@ -381,7 +444,7 @@ def _wrap_http_auth(app: Any, token: str) -> Any:
     return auth_app
 
 
-def run_mcp_http_server(mcp: Any, host: str, port: int, *, allow_public_bind: bool = False) -> None:
+def run_mcp_http_server(mcp: object, host: str, port: int, *, allow_public_bind: bool = False) -> None:
     """Run a FastMCP server over streamable-http with loopback + optional auth.
 
     Centralizes the HTTP serving for both MCP servers so the loopback gate,
@@ -393,7 +456,7 @@ def run_mcp_http_server(mcp: Any, host: str, port: int, *, allow_public_bind: bo
     try:
         import uvicorn
 
-        app = mcp.streamable_http_app()
+        app = cast(Callable[[], Callable[..., Awaitable[None]]], getattr(mcp, "streamable_http_app"))()
     except ImportError as exc:
         raise RuntimeError(
             "HTTP MCP transport needs uvicorn and starlette. Run: python -m pip install -r requirements.txt"

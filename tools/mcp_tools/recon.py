@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 
+from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
 from tools.mcp_tools.registry import *
 
 
@@ -282,7 +283,8 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
             if result.errors:
                 lines.append(f"ERRORS: {'; '.join(result.errors[:5])}")
             return "\n".join(lines)
-        except Exception as exc:
+        except _EXC_GROUP_CATCH as exc:
+            _log_nested_exceptions(exc)
             return f"ERROR: Reconnaissance failed Ã¢â‚¬â€ {exc}"
 
     @mcp.tool()
@@ -461,7 +463,8 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
             if result.errors:
                 lines.append(f"ERRORS: {'; '.join(result.errors[:5])}")
             return "\n".join(lines)
-        except Exception as exc:
+        except _EXC_GROUP_CATCH as exc:
+            _log_nested_exceptions(exc)
             return f"ERROR: UDP recon failed - {exc}"
 
     @mcp.tool()
@@ -508,7 +511,8 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
             if isinstance(shodan, dict) and shodan.get("error"):
                 lines.append(f"SHODAN_ERROR: {shodan['error']}")
             return "\n".join(lines)
-        except Exception as exc:
+        except _EXC_GROUP_CATCH as exc:
+            _log_nested_exceptions(exc)
             return f"ERROR: OSINT recon failed - {exc}"
 
     @mcp.tool()

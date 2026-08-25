@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
 from tools.mcp_tools.registry import *
 
 
@@ -76,7 +77,8 @@ def register_research_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 for ref in getattr(entry, "references", []) or []:
                     if isinstance(ref, str) and ref:
                         nvd_refs.append(ref)
-        except Exception:
+        except _EXC_GROUP_CATCH as exc:
+            _log_nested_exceptions(exc)
             pass
         return search.cve_to_poc(cve_id, nvd_refs=nvd_refs)
 

@@ -12,8 +12,7 @@ import ipaddress
 import re
 import shutil
 import socket
-from collections.abc import Callable, Sequence
-from typing import Any, TypedDict
+from typing import Any, Sequence
 
 # Strict IPv4 regex: four octets 0-255 separated by dots, anchored.
 _STRICT_IPV4_RE = re.compile(
@@ -47,38 +46,6 @@ _EMBEDDED_IPV4_RE = re.compile(
     r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\."
     r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"
 )
-
-
-class TargetCorrection(TypedDict):
-    """One sanitized IP correction found in a shell command."""
-
-    original: str
-    sanitized: str
-    valid: bool
-
-
-class PreflightResult(TypedDict):
-    """Result of :func:`preflight_command_check`."""
-
-    valid: bool
-    original_command: str
-    sanitized_command: str
-    corrections: list[dict[str, Any]]
-    missing_tools: list[str]
-    blocked_reason: str | None
-
-
-class ServiceBanner(TypedDict):
-    """Structured service record from :func:`parse_service_banners`."""
-
-    host: str
-    port: int
-    protocol: str
-    service: str
-    product: str
-    version: str
-    os_guess: str
-    raw_banner: str
 
 
 def validate_ipv4(ip: str) -> bool:
@@ -170,7 +137,7 @@ def validate_target_or_ip(s: str) -> bool:
 def resolve_target_to_ip(
     host: str,
     *,
-    resolver_fn: Callable[[str], Sequence[str]] | None = None,
+    resolver_fn: Any = None,
     family: int = socket.AF_INET,
 ) -> str | None:
     """Resolve a hostname to a single primary IP string.
@@ -541,7 +508,7 @@ def is_private_or_local_target(target_ip: str, extra_local_cidrs: Sequence[str] 
     return False
 
 
-def parse_service_banners(text: str) -> list[ServiceBanner]:
+def parse_service_banners(text: str) -> list[dict[str, Any]]:
     """Parse check_os / nmap style output into structured service records.
 
     Extracts:
@@ -553,7 +520,7 @@ def parse_service_banners(text: str) -> list[ServiceBanner]:
         - version
         - os_guess
     """
-    records: list[ServiceBanner] = []
+    records: list[dict[str, Any]] = []
     host = ""
 
     # Try to extract TARGET or host from lines like "TARGET: 10.0.0.1"
@@ -649,15 +616,15 @@ def parse_service_banners(text: str) -> list[ServiceBanner]:
     # quick_scan / socket_scan format -- merge into the same records list,
     # skipping ports the check_os/nmap regex already captured.
     for line in text.splitlines():
-        qm = quick_re.match(line)
-        if not qm:
+        m = quick_re.match(line)
+        if not m:
             continue
-        port = int(qm.group(1))
-        protocol = qm.group(2).lower()
+        port = int(m.group(1))
+        protocol = m.group(2).lower()
         if (port, protocol) in seen_ports:
             continue
-        service = qm.group(3) or "unknown"
-        banner = qm.group(4).strip()
+        service = m.group(3) or "unknown"
+        banner = m.group(4).strip()
         if banner == "(no banner)":
             banner = ""
         seen_ports.add((port, protocol))
