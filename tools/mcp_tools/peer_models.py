@@ -7,6 +7,7 @@ import re
 import sys
 from typing import Any
 
+from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
 from tools.mcp_tools.registry import (
     ToolContext,
     _chat_content,
@@ -129,7 +130,9 @@ def register_peer_model_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         answer = "(empty response)"
                     consulted.append(alias)
                     sections.append(f"[{alias}]\n{answer}")
-                except Exception as exc:
+                except _EXC_GROUP_CATCH as exc:  # ponytail: peer.chat may raise BaseExceptionGroup via anyio
+                    if _is_exception_group(exc):
+                        _log_nested_exceptions(exc)
                     skipped.append(f"{alias}: {exc}")
 
             return (
@@ -240,7 +243,9 @@ def register_peer_model_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     # Track disagreement for the summary line.
                     if '"agree": false' in answer.lower() or '"agree":false' in answer.lower():
                         disagreements.append(alias)
-                except Exception as exc:
+                except _EXC_GROUP_CATCH as exc:  # ponytail: peer.chat may raise BaseExceptionGroup via anyio
+                    if _is_exception_group(exc):
+                        _log_nested_exceptions(exc)
                     sections.append(f"[{alias}]\n(skipped: {exc})")
 
             disagreement_flag = "DISAGREEMENT: yes" if disagreements else "DISAGREEMENT: no"

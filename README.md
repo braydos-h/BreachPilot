@@ -499,10 +499,7 @@ Engineering docs in [`docs/`](docs/):
 4. Do not edit Flow B safety files (`scope_gate.py`, `safety_reviewer.py`,
    Flow B's `agent_loop.py`/`tool_router.py`/`risk_controller.py`/`mission.py`/
    `db.py`): recon safety depends on them.
-5. New exploit MCP tools must be registered twice: `@audit_tool` in
-   `tools/mcp_tools/<family>.py`, then added to the tool list in
-   `mcp_exploit_server.py`. Target-touching tools require a target IP and
-   the `@require_allowlist()` gate.
+5. New exploit MCP tools: single-source registration — add `@audit_tool` (or `@require_allowlist()` for target-touching) in `tools/mcp_tools/<family>.py` only; `mcp_exploit_server.py` auto-discovers every `register_*_tools` via `tools/mcp_tools/registry.py:collect_tools()` (pkgutil + AST validation, fails CI if decorator missing). No manual list edit in `mcp_exploit_server.py`.
 6. When adding a CLI flag, MCP tool, or config key, update the relevant
    README section.
 

@@ -60,11 +60,11 @@ reachability, model registry, port conflicts) and `python main.py --self-test`
 | `EXPLOIT_TARGET_IP` | — | Resolved IP for a domain `--target` | mcp_session.py:265 | mcp_shared.py:523 |
 | `EXPLOIT_TARGET_DOMAIN` | — | Domain string for a domain `--target` | mcp_session.py:266 | mcp_shared.py:523 |
 | `EXPLOIT_DISCOVERED_TARGETS` | — | Comma-separated subdomains/IPs auto-authorized mid-run | `add_discovered_target` mcp_shared.py:537-555 | mcp_shared.py:528-533 |
-| `EXPLOIT_WORKSPACE` | `exploit_workspace` | Exploit workspace root override | set by mcp_session.py:256 | cve_lookup.py:171 (KEV cache), mcp_tools/workspace.py:139 |
+| `EXPLOIT_WORKSPACE` | `exploit_workspace` | Exploit workspace root override | set by mcp_session.py:256 | cve_lookup.py:171 (KEV cache), tools/kernel/workspace.py:139 |
 | `NETATTACKAI_API_TOKEN` | token file | WebUI daemon bearer token override (never logged) | `api.token_file` | app.py:71, tools/api/auth.py:46 |
 | `MCP_HTTP_TOKEN` | — | Optional bearer auth for MCP HTTP transport | — | mcp_shared.run_mcp_http_server, mcp_engine_server.py:27 |
 | `MCP_ALLOW_PUBLIC_BIND` | — | Second half of the two-person rule for non-loopback MCP binds | — | mcp_shared.run_mcp_http_server |
-| `AI_NMAP_ACTIVE_MODEL_ALIAS` | — | Active model alias threaded into the MCP server subprocess | set by mcp_session.py:270 | mcp_tools/registry.py:201, peer_models.py:80 |
+| `AI_NMAP_ACTIVE_MODEL_ALIAS` | — | Active model alias threaded into the MCP server subprocess | set by mcp_session.py:270 | tools/mcp_tools/registry.py:201, peer_models.py:80 |
 | `AI_NMAP_DEBUG` | — | Debug logging switch | set by main.py:590 from `--debug` | exploit_agent |
 | `RESEARCH_WORKSPACE` | `research_workspace` | Flow B research workspace | — | db.py:806, model_telemetry.py:111 |
 
@@ -84,7 +84,7 @@ reachability, model registry, port conflicts) and `python main.py --self-test`
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
 | `provider` | enum | `ollama` | Active chat/generate provider (`ollama`\|`chatgpt`); absent = `ollama` (today's behavior). Warn-only validated. | config_manager.py `get_ai_provider`, model_router.py `build_router`/`build_model_client_for_provider`, run_service/service.py, doctor.py, api/routes/system.py |
-| `registry` | map[alias→model id] | kimi/deepseek/deepseek_flash/glm/minimax | Alias → concrete cloud model mapping (Ollama path) | config_manager.py:1011, doctor.py:321, run_service/service.py:345, mcp_tools/registry.py:158-200 |
+| `registry` | map[alias→model id] | kimi/deepseek/deepseek_flash/glm/minimax | Alias → concrete cloud model mapping (Ollama path) | config_manager.py:1011, doctor.py:321, run_service/service.py:345, tools/mcp_tools/registry.py:158-200 |
 | `default_alias` | str | `glm` | Active model alias (Ollama path; ChatGPT path uses `chatgpt.default_model`) | config_manager.py:1008, run_service/service.py:349, eval_harness.py:399, agent_loop.py:253 |
 | `info.<alias>.context_window` | int | per-model | Source of truth for the adaptive context compactor | model_router.py:202-221, exploit_agent/context.py:63-104 |
 | `info.<alias>.label/description` | str | per-model | Display metadata | model_router.py:130, api routes/system.py:193-194 |
@@ -169,14 +169,14 @@ touching. CLI-runnable regardless; block supplies entrypoint defaults.
 | `attacker_os` | str | `auto` | OS-aware instructions/tools | exploit_agent/loop.py:378 |
 | `searchsploit_path` | str | `searchsploit` | Searchsploit binary | mcp_shared.py:78, doctor.py:123 |
 | `shell` | str | `bash` | Shell for `run_exploit_terminal` (cmd.exe on Windows) | cli_exploit_settings.py:146 |
-| `msfconsole_path` | str | `msfconsole` | Metasploit console binary | cli_exploit_settings.py:147, mcp_tools/metasploit.py:83 |
+| `msfconsole_path` | str | `msfconsole` | Metasploit console binary | cli_exploit_settings.py:147, tools/mcp_tools/metasploit.py:83 |
 | `web_search` | bool | `true` | Web search for exploit intel | mcp_shared.py:73-87 (via `search` block) |
 | `max_query_chars` / `cache_ttl_seconds` / `cache_max_entries` | int | `200` / `3600` / `50` | ExploitSearch cache limits | mcp_shared.py:85-87 |
 | `require_explicit_allowlist` | bool | `true` | **The target-IP lock** — when true every target-touching tool checks the allowlist | mcp_shared.py:561,635; mcp_exploit_server.py:141 |
 | `allowed_targets` | list[str] | `[127.0.0.1]` | Operator-authorized hosts (IP, domain, `*.wildcard`, CIDR); Start New Session persists here | mcp_shared.py:521, config_cli.py:30-93, exploit_agent/loop.py:267 |
 | `disallowed_assets` / `forbidden_actions` | list[str] | `[]` | Flow A scope opt-outs (matched against `_TOOL_ACTION_CATEGORY`); hard-forbidden actions are always blocked by `scope_gate._HARD_FORBIDDEN_ACTIONS` | exploit_session.py:59-60, config.yaml:112-125 |
-| `ad_kerberos.enabled` + per-tool flags | bool | `false` (all; `smb_signing_check: true`) | AD/Kerberos post-exploit suite — master + per-tool must both be true | mcp_tools/ad.py:36, tests/test_ad_mcp_tools.py |
-| `msf.recipes_enabled` / `auto_local_exploit_suggester` | bool | `false` | MSF recipe dispatch + advisory LES task | mcp_tools/metasploit.py, autonomous_orchestrator.py:1114-1115 |
+| `ad_kerberos.enabled` + per-tool flags | bool | `false` (all; `smb_signing_check: true`) | AD/Kerberos post-exploit suite — master + per-tool must both be true | tools/mcp_tools/ad.py:36, tests/test_ad_mcp_tools.py |
+| `msf.recipes_enabled` / `auto_local_exploit_suggester` | bool | `false` | MSF recipe dispatch + advisory LES task | tools/mcp_tools/metasploit.py, autonomous_orchestrator.py:1114-1115 |
 | `listeners.tls/dns/https_beacon/socks_pivot` | bool | `false` | Extended C2 listener types (legacy nc/socat/http ungated) | persistent_session_manager.py:399-524, tests/test_listeners_extended.py |
 
 ### `stealth:` (config.yaml:156-159) — legacy stealth flags
@@ -268,10 +268,10 @@ Semantic-memory consumer for the autonomous orchestrator. When true, the orchest
 | `retry_delay` | float | `5.0` | Initial retry delay (s); multiplied by 1.5 each retry | recon_pipeline.py:235,590 |
 | `timeout_seconds` | int | `300` | Per-attempt nmap command timeout (s) | recon_pipeline.py:233,588 |
 | `domain_resolution.enabled` | bool | `true` | Accept domain `--target`, resolve at boot | tools/validation_utils.resolve_target_to_ip, main.py target threading |
-| `domain_resolution.max_subdomains` | int | `500` | Cap on `enumerate_subdomains` results | mcp_tools/domain.py:361 (tool default) |
-| `domain_resolution.subdomain_sources` | list | crt_sh/dns_bruteforce/subfinder/amass | Discovery sources | mcp_tools/domain.py:360,393-448 |
-| `domain_resolution.dns_zone_transfer` | bool | `false` | AXFR attempt opt-in | mcp_tools/domain.py:587-588 |
-| `domain_resolution.whois_enabled` | bool | `true` | `domain_whois` tool | mcp_tools/domain.py |
+| `domain_resolution.max_subdomains` | int | `500` | Cap on `enumerate_subdomains` results | tools/mcp_tools/domain.py:361 (tool default) |
+| `domain_resolution.subdomain_sources` | list | crt_sh/dns_bruteforce/subfinder/amass | Discovery sources | tools/mcp_tools/domain.py:360,393-448 |
+| `domain_resolution.dns_zone_transfer` | bool | `false` | AXFR attempt opt-in | tools/mcp_tools/domain.py:587-588 |
+| `domain_resolution.whois_enabled` | bool | `true` | `domain_whois` tool | tools/mcp_tools/domain.py |
 | `subdomain_enum` / `vhost_discovery` / `waf_fingerprint` / `asn_whois` / `cloud_metadata_probe` / `snmp_enum` / `dns_zone_transfer` | bool | `false` | Extended depth enumerators (individually gated) | recon_pipeline.py:298-302,1158 |
 
 ### `opsec:` (config.yaml:283-300) — agent's own detection-evasion (opt-in, advisory)
@@ -387,8 +387,8 @@ if the LLM is unavailable, degrades to rule-based scoring. Zero target touch.
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `enabled` | bool | `true` (config.yaml) / `false` (schema) | Exposes `consult_peer_models`; CLI `--multi-model-consult`/`--no-multi-model-consult` override | main.py:607-609, mcp_tools/registry.py:223 |
-| `consult_aliases` | list[str] | all five aliases | Peer roster (intersected with registered models) | cli_exploit_settings.py:109, mcp_tools/registry.py:190-201 |
+| `enabled` | bool | `true` (config.yaml) / `false` (schema) | Exposes `consult_peer_models`; CLI `--multi-model-consult`/`--no-multi-model-consult` override | main.py:607-609, tools/mcp_tools/registry.py:223 |
+| `consult_aliases` | list[str] | all five aliases | Peer roster (intersected with registered models) | cli_exploit_settings.py:109, tools/mcp_tools/registry.py:190-201 |
 | `max_consultations` | int | `10` | Shared per-run budget (single counter) | exploit_agent/reflection.py:325, peer_models.py:55 |
 | `max_question_chars` / `max_answer_chars` | int | `4000` / `8000` | Truncation bounds | reflection.py:326-327, peer_models.py:56-57 |
 
@@ -403,7 +403,7 @@ Advisory prompt context only — never permission/scope/audit (docs/skills.md:16
 | `default_enabled` | list[str] | 6 skills (nmap, pentest, red-team, mcp-audit, agentic-ai, domains) | Always-active skills | skill_selector.py:164,321 |
 | `include_tags` / `exclude_names` | list[str] | `[]` | Tag include / name exclude filters | skill_selector.py |
 | `maybe_enabled` | bool | `false` | Include `skills/maybe/` skills | skill_selector.py:130 |
-| `allow_model_lookup` | bool | `true` | Enable read-only skill MCP tools | mcp_tools/registry.py:266 |
+| `allow_model_lookup` | bool | `true` | Enable read-only skill MCP tools | tools/mcp_tools/registry.py:266 |
 | `inject_startup_context` | bool | `false` | Eager body injection into initial prompt | skill_pipeline.py (CLI `--skills on` sets it: skills_cli.py:37-39) |
 | `max_active_skills` / `min_contextual_skills` | int | `6` / `3` | Selection bounds | skill_selector.py:124 |
 | `max_chars_per_skill` / `max_total_chars` | int | `2500` / `9000` | Prompt budget caps | skill_pipeline.py |

@@ -201,9 +201,9 @@ main-loop-bound MCP `ClientSession`:
 | `EXPLOIT_TARGET_IP` | `mcp_session.py:265` — resolved IP for a domain `--target` | `mcp_shared.py:523` |
 | `EXPLOIT_TARGET_DOMAIN` | `mcp_session.py:266` — the domain string | `mcp_shared.py:523` |
 | `EXPLOIT_DISCOVERED_TARGETS` | `mcp_shared.add_discovered_target` `mcp_shared.py:537-555` (subdomain expansion auto-authorizes) | `mcp_shared.py:528-533` |
-| `EXPLOIT_WORKSPACE` | `mcp_session.py:256` — workspace root | `cve_lookup.py:171` (KEV cache), `mcp_tools/workspace.py:139` |
-| `AI_NMAP_MULTI_MODEL_ENABLED` | `mcp_session.py:268` | `mcp_tools/registry.py:220` |
-| `AI_NMAP_ACTIVE_MODEL_ALIAS` | `mcp_session.py:270` | `mcp_tools/registry.py:201`, `mcp_tools/peer_models.py:80` |
+| `EXPLOIT_WORKSPACE` | `mcp_session.py:256` — workspace root | `cve_lookup.py:171` (KEV cache), `tools/kernel/workspace.py:139` |
+| `AI_NMAP_MULTI_MODEL_ENABLED` | `mcp_session.py:268` | `tools/mcp_tools/registry.py:220` |
+| `AI_NMAP_ACTIVE_MODEL_ALIAS` | `mcp_session.py:270` | `tools/mcp_tools/registry.py:201`, `mcp_tools/peer_models.py:80` |
 | `MCP_HTTP_TOKEN` | operator env (optional) | server: `run_mcp_http_server` `mcp_shared.py:1081`; client: `_streamable_http_transport` `mcp_session.py:706-725` |
 | `MCP_ALLOW_PUBLIC_BIND` | operator env (optional) | `assert_loopback_bind` `mcp_shared.py:1022` |
 

@@ -71,7 +71,7 @@ Set automatically from `--target`; do not set by hand unless debugging the MCP s
 | `EXPLOIT_TARGET_IP` | — | Resolved IP for domain `--target` | `mcp_session.py:265` (`resolve_target_to_ip`) | same union |
 | `EXPLOIT_TARGET_DOMAIN` | — | Original domain string | `mcp_session.py:266` | same union; also prompt domain briefing |
 | `EXPLOIT_DISCOVERED_TARGETS` | — | CSV of subdomain/IP auto-authorized mid-run | `mcp_shared.add_discovered_target` | same union |
-| `EXPLOIT_WORKSPACE` | `exploit.workspace_dir` | Workspace root override | `mcp_session.py:256` or manual export | `cve_lookup.py:171` (KEV cache), `mcp_tools/workspace.py:139` |
+| `EXPLOIT_WORKSPACE` | `exploit.workspace_dir` | Workspace root override | `mcp_session.py:256` or manual export | `cve_lookup.py:171` (KEV cache), `tools/kernel/workspace.py:139` |
 
 Allowlist check is `tools/validation_utils.is_target_in_allowlist` — supports exact IP, CIDR, domain, `*.wildcard`.
 
@@ -88,8 +88,8 @@ Allowlist check is `tools/validation_utils.is_target_in_allowlist` — supports 
 | Env var | Purpose | Set by | Consumed at |
 |---------|---------|--------|-------------|
 | `AI_NMAP_DEBUG` | Verbose nmap/exploit loop logging | `main.py:593` from `--debug` | `exploit_agent/loop.py:182`, `exploit_agent/*` |
-| `AI_NMAP_ACTIVE_MODEL_ALIAS` | Active model alias threaded into MCP server | `mcp_session.py:270` | `mcp_tools/registry.py:201`, `peer_models.py:80` |
-| `AI_NMAP_MULTI_MODEL_ENABLED` | Force multi-model enablement in MCP server | — | `mcp_tools/registry.py:220` |
+| `AI_NMAP_ACTIVE_MODEL_ALIAS` | Active model alias threaded into MCP server | `mcp_session.py:270` | `tools/mcp_tools/registry.py:201`, `peer_models.py:80` |
+| `AI_NMAP_MULTI_MODEL_ENABLED` | Force multi-model enablement in MCP server | — | `tools/mcp_tools/registry.py:220` |
 | `AI_NMAP_AUDIT_VERIFY_VERBOSE` | Verbose audit verification | — | `exploit_agent/policy.py:340` |
 | `AI_NMAP_VAULT_KEY` | Credential-store vault key (else auto-generated) | — | `credential_store.py:149` |
 | `RESEARCH_WORKSPACE` | Flow B workspace root | — | `cli.py:39`, `logging_setup.py:18` |

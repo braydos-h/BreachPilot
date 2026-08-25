@@ -1,3 +1,4 @@
+# ponytail: orphan shim — pure re-export, no consumers yet outside kernel; delete if unused after 0.50
 """Parse helpers — Phase 4 shim.
 
 ``tools/exploit_agent/loop.py`` (2215 LOC) parses tool calls inline via

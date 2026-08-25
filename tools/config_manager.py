@@ -125,6 +125,7 @@ CONFIG_SCHEMA: dict[str, Any] = {
     # search / CVE lookup / run history for foreign AI assistants. Defaults
     # for the CLI entrypoint; HTTP transport is loopback-only via
     # ``tools.mcp_shared``.
+    # ponytail: engine_mcp is CLI-driven (mcp_engine_server.py --port); schema kept for compat, not consumed via load_config
     "engine_mcp": {
         "enabled": True,
         "host": "127.0.0.1",
@@ -219,6 +220,7 @@ CONFIG_SCHEMA: dict[str, Any] = {
             "socks_pivot": False,
         },
     },
+    # ponytail: stealth is inert/UI-only legacy; canonical is opsec (tools/opsec.py). Kept for compat.
     "stealth": {
         "rotate_ua": False,
         "dns_over_https": False,

@@ -62,6 +62,7 @@ py-modules = [
     "executor",
     "finding_verifier",
     "main",
+    "mcp_engine_server",
     "mcp_exploit_server",
     "mcp_server",
     "memory",
@@ -91,7 +92,7 @@ asyncio_mode = "auto"
 # tools.skill_embeddings) and then purges it from sys.modules — numpy's C
 # extension can't re-init, so every later `import numpy` dies with
 # "cannot load module more than once per process".
-source = ["tools", "main", "cli"]
+source = ["tools", "main", "cli"]  # ponytail: cli is legacy shim re-exporting legacy.cli; coverage measures shim re-export
 omit = [
     "*/tests/*",
     "*/venv/*",
