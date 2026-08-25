@@ -18,6 +18,7 @@ _running_campaign_tasks: set = set()
 # callback in start_autonomous_campaign).
 _campaign_orchestrators: dict[str, Any] = {}
 
+
 def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
     workspace = ctx.workspace
     config = ctx.config
