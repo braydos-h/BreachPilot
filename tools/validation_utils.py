@@ -12,7 +12,8 @@ import ipaddress
 import re
 import shutil
 import socket
-from typing import Any, Sequence
+from collections.abc import Callable, Sequence
+from typing import TypedDict
 
 # Strict IPv4 regex: four octets 0-255 separated by dots, anchored.
 _STRICT_IPV4_RE = re.compile(
@@ -46,6 +47,38 @@ _EMBEDDED_IPV4_RE = re.compile(
     r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\."
     r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"
 )
+
+
+class TargetCorrection(TypedDict):
+    """One sanitized IP correction found in a shell command."""
+
+    original: str
+    sanitized: str
+    valid: bool
+
+
+class PreflightResult(TypedDict):
+    """Result of :func:`preflight_command_check`."""
+
+    valid: bool
+    original_command: str
+    sanitized_command: str
+    corrections: list[TargetCorrection]
+    missing_tools: list[str]
+    blocked_reason: str | None
+
+
+class ServiceBanner(TypedDict):
+    """Structured service record from :func:`parse_service_banners`."""
+
+    host: str
+    port: int
+    protocol: str
+    service: str
+    product: str
+    version: str
+    os_guess: str
+    raw_banner: str
 
 
 def validate_ipv4(ip: str) -> bool:
@@ -137,7 +170,7 @@ def validate_target_or_ip(s: str) -> bool:
 def resolve_target_to_ip(
     host: str,
     *,
-    resolver_fn: Any = None,
+    resolver_fn: Callable[[str], Sequence[str]] | None = None,
     family: int = socket.AF_INET,
 ) -> str | None:
     """Resolve a hostname to a single primary IP string.
