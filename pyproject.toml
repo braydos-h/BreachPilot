@@ -145,8 +145,9 @@ warn_return_any = false
 warn_unused_configs = true
 ignore_missing_imports = true
 # ponytail: `mypy --follow-imports=skip tools` passes (216 files) with these disables.
-# Without disables: 298 errors in 80 files (verified 2026-08-24). Incremental per-family
-# re-enable: remove one disable, fix family, re-measure. No `Any` in new code; use Optional/TypedDict.
+# Without disables: 211 errors in 53 files (verified 2026-08-25). Incremental per-family
+# re-enable: 3 hot files strict (tools/validation_utils.py, tools/exceptions.py,
+# tools/mcp_shared.py) now 0; remaining 211 in 53 files. No `Any` in new code; use Optional/TypedDict.
 disable_error_code = [
     "no-any-return",
     "attr-defined",

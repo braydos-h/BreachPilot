@@ -86,6 +86,22 @@ jobs:
         run: ruff check .
       - name: Ruff format
         run: ruff format --check .
+      - name: MCP bare-except guard (no hidden BaseExceptionGroup)
+        run: |
+          # Fail if any MCP-adjacent bare `except Exception` hides a BaseExceptionGroup.
+          # Anyio task groups (stdio_client / streamable_http_client / ClientSession)
+          # raise BaseExceptionGroup on subprocess death — bare `except Exception` misses it.
+          # Use `_EXC_GROUP_CATCH` + `_log_nested_exceptions` (tools/exceptions.py) instead.
+          # Non-MCP bare excepts are allowed but must be explicit: `# ponytail: bare except intentional`
+          if grep -R --include="*.py" -n "except Exception" tools/mcp_tools tools/exploit_agent tools/mcp_session.py | grep -v "_EXC_GROUP_CATCH" | grep -v "ponytail: bare except intentional" | grep -q .; then
+            echo "ERROR: bare 'except Exception' found in MCP-adjacent code without _EXC_GROUP_CATCH."
+            echo "Use 'except _EXC_GROUP_CATCH as exc:' + '_log_nested_exceptions(exc)' (see tools/exceptions.py)."
+            echo "If this is intentionally non-MCP, annotate with '# ponytail: bare except intentional'."
+            echo "--- offenders ---"
+            grep -R --include="*.py" -n "except Exception" tools/mcp_tools tools/exploit_agent tools/mcp_session.py | grep -v "_EXC_GROUP_CATCH" | grep -v "ponytail: bare except intentional" || true
+            exit 1
+          fi
+          echo "MCP bare-except guard: OK"
       - name: God-file budget (no new file >1000 LOC / 72kB)
         run: python -c "import pathlib; assert all(p.stat().st_size<600*120 for p in pathlib.Path('tools').rglob('*.py') if len(p.read_text(encoding='utf-8',errors='ignore').splitlines())>1000), 'god-file budget exceeded: new file >1000 LOC must stay <72kB (600\*120) or be split'"
 
@@ -107,6 +123,25 @@ jobs:
           python -m pip install -e ".[dev]"
       - name: Mypy check
         run: mypy --follow-imports=skip tools
+
+  types-strict:
+    name: Type check strict (hot files, zero disables)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+      - name: Install project + dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Mypy strict hot files (zero disables)
+        run: mypy --follow-imports=skip tools/validation_utils.py tools/exceptions.py tools/mcp_shared.py
 
   package:
     name: Package build
