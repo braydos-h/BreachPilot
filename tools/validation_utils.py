@@ -253,7 +253,7 @@ def extract_ips_from_command(command: str) -> list[str]:
     return found
 
 
-def sanitize_target_in_command(command: str) -> tuple[str, list[TargetCorrection]]:
+def sanitize_target_in_command(command: str) -> tuple[str, list[dict[str, Any]]]:
     """Sanitize a shell command by fixing malformed IP targets.
 
     Returns:
