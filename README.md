@@ -12,13 +12,13 @@
 
 <img width="1725" height="912" alt="NetAttackAI WebUI — Mission Control" src="https://github.com/user-attachments/assets/45b6af2f-91e2-4eaf-a4cd-1352dbd42e0c" />
 
-### **The autonomous adversary that never sleeps.**
+### Autonomous adversary platform for authorized assessments
 
-**Plan · Recon · Exploit · Prove · Report — end-to-end, against targets you own.**
+**Plan · Recon · Exploit · Verify · Report — end-to-end, against assets you own.**
 
-An AI operator that **thinks in kill-chains, not checklists**. It discovers, it reasons, it chains, it proves — and it writes the report. Powered by Ollama Cloud (976K context), MCP, and 140+ advisory skills. Lab-only, target-locked, fully audited. The most complete open-source autonomous pentest engine you'll find.
+NetAttackAI is an agentic operator that plans, discovers, reasons, chains, and verifies — then delivers a complete report. Built on Ollama Cloud (976K context), the Model Context Protocol, and 140+ advisory skills. Lab-only, target-locked, and fully audited. An open-source autonomous assessment platform designed for rigorous, operator-supervised use.
 
-[Quick Start — 60s](#quick-start--60-seconds) · [Live Demo](#the-webui--your-mission-control) · [Full Arsenal](#the-full-arsenal--what-it-actually-does) · [Safety Model](#safety) · [Docs](docs/)
+[Quick Start — 60s](#quick-start--60-seconds) · [WebUI](#the-webui--your-mission-control) · [Capabilities](#platform-capabilities) · [Safety Model](#safety) · [Docs](docs/)
 
 </div>
 
@@ -30,48 +30,48 @@ An AI operator that **thinks in kill-chains, not checklists**. It discovers, it 
 
 ---
 
-## Why NetAttackAI Hits Different
+## Why NetAttackAI
 
-Most tools scan. A few exploit. **NetAttackAI runs the whole operation** — like handing a lab target to an elite operator and watching it work.
+NetAttackAI covers the full assessment lifecycle — from reconnaissance through exploitation, verification, and reporting — under continuous operator supervision.
 
 <table>
 <tr>
 <td width="33%" valign="top">
 
-### 🧠 Thinks Like an Attacker
-Not a script kiddie checklist. Builds a **real AttackPlan DAG** with prerequisites, hypotheses, and failure recovery. Retries with new params, switches capabilities, creates prerequisites on the fly. Every decision logged to `decision_log.jsonl`.
+### Adversarial Planning
+Structured **AttackPlan DAG** with prerequisites, hypotheses, and automated failure recovery. Retries with refined parameters, switches capabilities, and composes prerequisites dynamically. Every decision is recorded in `decision_log.jsonl`.
 
 </td>
 <td width="33%" valign="top">
 
-### 🐝 Swarm Intelligence
-**6 specialist agents** on a shared blackboard — `recon`, `vuln`, `exploit`, `post_exploit`, `critic`, `reflection`. Parallel dispatch, battle logs, cross-phase negotiation. Plus a persistent **Autonomous Orchestrator** for multi-phase campaigns that don't quit.
+### Multi-Agent Orchestration
+**Six specialist agents** on a shared blackboard — `recon`, `vuln`, `exploit`, `post_exploit`, `critic`, `reflection`. Parallel dispatch, battle logs, and cross-phase negotiation, plus a persistent **Autonomous Orchestrator** for extended campaigns.
 
 </td>
 <td width="33%" valign="top">
 
-### 🎯 Prove, Don't Claim
-**Hypothesis-driven verdicts** via `OutcomeJudge`: every finding is `confirmed` / `refuted` / `exhausted`. Execution success ≠ evidential success. No hallucinations. Evidence or it didn't happen.
+### Evidence-Based Verification
+Hypothesis-driven verdicts via `OutcomeJudge`: every finding is `confirmed` / `refuted` / `exhausted`. Execution success is not conflated with evidential success. Findings require supporting evidence.
 
 </td>
 </tr>
 <tr>
 <td width="33%" valign="top">
 
-### 🌐 Domain-Native
-Feed it `example.com` — it **resolves, expands subdomains** (crt.sh + DNS bruteforce + subfinder/amass), auto-authorizes every discovered host, flags dangling-CNAME takeovers, and attacks the whole surface. Wildcard + CIDR allowlist support.
+### Domain-Aware Reconnaissance
+Provide `example.com` — the platform **resolves and expands the attack surface** (crt.sh, DNS bruteforce, subfinder/amass), auto-authorizes discovered hosts, flags dangling-CNAME takeovers, and assesses the full surface. Wildcard and CIDR allowlist support.
 
 </td>
 <td width="33%" valign="top">
 
-### 🛡️ Lab-Grade, Target-Locked
-`full_access` on the operator box, **hard-locked to your allowlist** at the MCP tool layer. Every destination extracted from every command — URL authorities, `/dev/tcp`, LHOST/RHOST, bare IPs, hostnames. Not in the allowlist = `BLOCKED`. Plus a **tamper-evident SHA256 audit chain** for every target-touching action.
+### Target-Locked Safety Model
+`full_access` on the operator host is **constrained to the allowlist** at the MCP tool layer. Every destination is extracted from every command — URL authorities, `/dev/tcp`, LHOST/RHOST, bare IPs, hostnames. Not in the allowlist = `BLOCKED`. All target-touching actions are recorded in a **tamper-evident SHA-256 audit chain**.
 
 </td>
 <td width="33%" valign="top">
 
-### 📚 140 Skills. 90 Tools. 15 Attack Families.
-From **network penetration testing** to **AD CS ESC1**, **JWT confusion**, **SSTI**, **GraphQL**, **XXE**, **AD BloodHound**, **EternalBlue**, **Zerologon**, **noPac** — the brain has seen it. Deterministic + semantic skill selection, re-selected mid-run as new services/CVEs appear.
+### Comprehensive Knowledge Base
+**140+ skills, 90+ tools, 15 attack families** — from network penetration testing and AD CS ESC1 to JWT confusion, SSTI, GraphQL, XXE, BloodHound, EternalBlue, Zerologon, and noPac. Deterministic and semantic skill selection, re-evaluated as new services and CVEs emerge.
 
 </td>
 </tr>
@@ -79,11 +79,11 @@ From **network penetration testing** to **AD CS ESC1**, **JWT confusion**, **SST
 
 ---
 
-## The Full Arsenal — What It Actually Does
+## Platform Capabilities
 
-NetAttackAI isn't a wrapper. It's a **full-spectrum autonomous assessment platform**. Here's everything crammed inside:
+NetAttackAI is a **full-spectrum autonomous assessment platform**. Core capabilities include:
 
-### 🔍 Recon That Doesn't Miss
+### Reconnaissance
 - **Fast recon pipeline** — parallel TCP discovery, service fingerprinting, OS detection, vulnerability enrichment — all concurrent, all cached.
 - **Nmap done right** — ping sweep → triage → service → vuln scans, with `priv_fallback` auto-downgrade and pre-flight reachability probes so firewalled hosts don't waste your time.
 - **Extended enumerators** — UDP top-ports, SNMP, DNS zone transfer / DNSSEC / SPF / DMARC, ASN/WHOIS, cloud metadata probe, WAF fingerprinting, vhost discovery.
