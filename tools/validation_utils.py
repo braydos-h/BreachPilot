@@ -435,16 +435,20 @@ def is_target_in_allowlist(target: str, allowed_assets: list[str]) -> bool:
         if target_clean == asset_clean:
             return True
 
-        # Wildcard domain
+        # Wildcard domain — boundary-aware: *.example.com must match
+        # foo.example.com but NOT notexample.com / badexample.com (dot-boundary).
+        # Regression: *.evil.com must not match notevil.com
         if asset_clean.startswith("*."):
-            suffix = asset_clean[1:]  # e.g. ".example.com"
-            if target_clean.endswith(suffix):
-                return True
+            parent = asset_clean[2:]  # e.g. "example.com"
+            if parent and is_fqdn(parent):
+                # explicit dot-boundary check: target must end with '.'+parent
+                if target_clean.endswith("." + parent):
+                    return True
 
         if target_addr is None:
             continue
 
-        # CIDR match
+        # CIDR match — strict=False so 10.0.0.1/24 style networks normalize
         try:
             network = ipaddress.ip_network(asset_clean, strict=False)
             if target_addr in network:

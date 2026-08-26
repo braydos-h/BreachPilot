@@ -12,9 +12,10 @@ vars can override it.
 
 ## Purpose
 
-- `config.yaml` is the checked-in operator defaults; `tools/config_manager.py::CONFIG_SCHEMA` mirrors the same defaults for when the file is missing or a key is absent (config_manager.py:22-476).
-- Every top-level key is consumed somewhere; a missing key almost always falls back to a schema default rather than failing.
+- `config.yaml` is the checked-in operator defaults; `tools/config_manager.py::CONFIG_SCHEMA` mirrors the same defaults for when the file is missing or a key is absent (config_manager.py:22-476). **The two are proven in sync** by `tests/test_config_manager.py::test_config_yaml_keys_subset_of_schema` (`assert set(yaml.safe_load(open('config.yaml')))==set(CONFIG_SCHEMA)` — CI fails on drift).
+- Every top-level key is consumed somewhere; a missing key almost always falls back to a schema default rather than failing. **Strict sections** `exploit`, `mcp`, `ollama`, `models` promote unknown nested keys (e.g. `exploit.permision` typo) from warning to **error**, so CI fails on typos (`python -m pytest tests/test_config_manager.py -k unknown`).
 - Secrets never live here — they are env vars (or `secr.json` via `--setup-api-keys`), named by `api_key_env` / `token_env` keys.
+- **Machine-readable health:** `python main.py --doctor --json` emits `{checks:[{name, ok, error}], is_valid, unknown_keys}` (see `tools/doctor.py::build_doctor_report`) for `make doctor --json | jq -e '.is_valid'`.
 
 ## Load & validation flow
 
@@ -179,13 +180,20 @@ touching. CLI-runnable regardless; block supplies entrypoint defaults.
 | `msf.recipes_enabled` / `auto_local_exploit_suggester` | bool | `false` | MSF recipe dispatch + advisory LES task | tools/mcp_tools/metasploit.py, autonomous_orchestrator.py:1114-1115 |
 | `listeners.tls/dns/https_beacon/socks_pivot` | bool | `false` | Extended C2 listener types (legacy nc/socat/http ungated) | persistent_session_manager.py:399-524, tests/test_listeners_extended.py |
 
-### `stealth:` (config.yaml:156-159) — legacy stealth flags
+### `stealth:` (config.yaml:156-159) — legacy stealth flags (INERT, use `opsec`)
+
+> **Stealth is legacy/inert.** `stealth` is kept for compat and is UI-only; it is NOT consumed by the active OPSEC engine. The canonical block is `opsec` (`tools/opsec.py`) which gates pacing, UA rotation, DoH, quiet-command hints, and target-aware `local_targets_off` logic. New config should set `opsec.*`, not `stealth.*`. The `stealth` keys are still validated but have no effect on the agent's runtime behavior (only `interactive_menu.py` reads them to seed legacy UI).
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `rotate_ua` | bool | `false` | Rotate User-Agent across HTTP egress | interactive_menu.py:387 (superseded by `opsec.ua_rotation`) |
-| `dns_over_https` | bool | `false` | Resolve via DoH | interactive_menu.py:387 (superseded by `opsec.doh`) |
-| `doh_provider` | str | `cloudflare` | `cloudflare`\|`google` | opsec.py:63,95 |
+| `rotate_ua` | bool | `false` | **LEGACY** Rotate User-Agent across HTTP egress | interactive_menu.py:387 (superseded by `opsec.ua_rotation`) |
+| `dns_over_https` | bool | `false` | **LEGACY** Resolve via DoH | interactive_menu.py:387 (superseded by `opsec.doh`) |
+| `doh_provider` | str | `cloudflare` | **LEGACY** `cloudflare`\|`google` | opsec.py:63,95 |
+
+
+### `opsec:` (config.yaml:268-285) — active OPSEC (canonical, replaces `stealth`)
+
+The `opsec` block is the **active** detection-evasion / pacing / UA-rotation / DoH / quiet-command block consumed by `tools/opsec.py`. See `opsec` section below for full key table — do not confuse with `stealth`.
 
 ### `cve_lookup:` (config.yaml:160-179) — NVD / vuln-intel
 

@@ -355,35 +355,48 @@ Full layered model: [`docs/safety-model.md`](docs/safety-model.md).
 
 ## Configuration
 
-All runtime behavior lives in **`config.yaml`**. Key sections:
+All runtime behavior lives in **`config.yaml`** — validated by `tools/config_manager.py::CONFIG_SCHEMA` (source of truth; `config.yaml` and schema are proven in sync by `tests/test_config_manager.py::test_config_yaml_keys_subset_of_schema`). Every top-level key is documented below; see `docs/config-reference.md` for per-key types, defaults, and consumers.
+
+> **Stealth vs OPSEC:** `stealth` is legacy/inert UI-only (kept for compat; `tools/opsec.py` is canonical). `opsec` is the active detection-evasion block (pacing/jitter/UA-rotation/DoH/quiet-commands, target-aware via `local_targets_off`). Do not use `stealth` for new config — use `opsec`.
 
 | Key | Purpose |
 |-----|---------|
-| `ollama` | host, model (`glm-5.2:cloud`), `embed_host` (local embeddings) |
-| `models` | `provider` (`ollama` default \| `chatgpt`), registry (kimi/deepseek/deepseek_flash/glm/minimax), `default_alias` |
+| `ollama` | host, model (`glm-5.2:cloud`), `embed_host` (local embeddings), `api_key_env` |
+| `models` | `provider` (`ollama` default \| `chatgpt`), registry (kimi/deepseek/deepseek_flash/glm/minimax), `default_alias`, `roles` per-role routing, `info` context windows |
+| `models.roles` | per-role model routing (`planner`/`executor`/`interpreter`/`code_generator`/`critic`/`summarizer`); empty string = `models.default_alias`. Consumed by `ModelRouter.get_client_for_role` |
 | `chatgpt` | opt-in ChatGPT provider: `base_url` (loopback `127.0.0.1:10531`), `auto_start`, `local_repo`, `runtime`, `default_model`, `context_window`, discovery/login/proxy timeouts |
-| `exploit` | permission, attack_mode, timeouts, `allowed_targets`, `require_explicit_allowlist`, AD/Kerberos suite, MSF recipes, listeners |
-| `opsec` | target-aware OPSEC (pacing, UA rotation, DoH, `local_targets_off`) |
-| `cve_lookup` | NVD CVE lookup: rate limit, circuit breaker, `epss_enabled`/`kev_enabled` (EPSS + CISA KEV enrichment, lab default `true`, live out of the box), `kev_cache_ttl_seconds`/`kev_cache_path`, `github.token_env` (`GITHUB_TOKEN`, shared with threat_intel + github_dorks) |
-| `threat_intel` | continuous OSV.dev + GitHub Security Advisories + CISA KEV feed ingestion (`search_threat_intel` MCP tool). Advisory-only, never touches the target. `enabled` (lab default `true`), `cache_dir`/`cache_ttl_seconds`, `sources` (osv/ghsa/kev/exploitdb_rss), `max_results`, `github_token_env`. Reuses `cve_lookup`'s KEV catalog. GHSA degrades to osv+kev when `GITHUB_TOKEN` is unset |
-| `swarm` | agents, `parallel_enabled`, `per_phase_concurrency`, `negotiation_rounds` (bounded critic↔exploit loop; 0 = legacy one-shot, 2 = lab default) |
-| `witness` | advisory audit-stream watcher (`enabled`, `log_path`, `poll_interval_seconds`, `escalate_to_event_broker`): flags anomalies mid-run (allowlist breach, PoC escape, perm escalation, prompt injection, DoS drift), never blocks; lab default ON for telemetry |
-| `models.roles` | per-role model routing (`planner`/`executor`/`interpreter`/`code_generator`/`critic`/`summarizer`); empty string = `models.default_alias`, so first-run behavior is unchanged. Consumed by `ModelRouter.get_client_for_role` |
-| `agent` | capability-upgrade toggles + budgets: `task_graph_enabled`, `capability_discovery_enabled`, `state_tools_enabled`, `planner_hints_enabled`, `decision_log_enabled`, `reflection_enabled`, `max_retries_per_task`, `max_actions` (0 = legacy exploit budgets), `generated_code_repair_attempts` — all default to today's behavior |
-| `autonomous` | persistence phase, checkpoint, `adaptive_replan`, `max_cycles` |
-| `orchestrator` | `semantic_memory` (cross-mission lesson consumer for the autonomous orchestrator; lab default `true`, matching `memory.semantic_enabled`) |
-| `recon` | extended enumerators, UDP top-ports, `shodan_api_key` (wired into the `shodan_recon` plugin: passive OSINT, advisory-only), domain resolution |
-| `skills` | selection, re-selection, feedback, semantic matching, `maybe_enabled` (gates the `skills/maybe/` opt-in pack; default `false`) |
-| `outcome_judgment` | evidence-grounded verdicts (`flow_a` wires OutcomeJudge into Flow A; `peer_review` enables cross-model outcome grading) |
-| `poc_verification` | self-healing PoC verification: `cve_to_exploit_synth` syntax-checks its PoC inline; `verify_poc` MCP tool compile-tests in isolated Docker (`--network=none --read-only --memory=256m`) |
-| `replay_simulator` | pre-commit attack-plan critique (`replay_simulate` MCP tool: LLM critiques its own plan against saved ReconAssessment, with rule-based fallback) |
-| `api` | WebUI daemon host/port/token/origins, `graph_route` (attack-path DAG), `max_concurrent_runs` (D3: N concurrent runs for wide-scope assessments; lab default 3; set 1 for legacy single-run 409), `multi_operator` (D4: user accounts + annotations; lab default true, loopback-only) |
-| `ics` | D8: `allow_write` (default **false**: read-only ICS enum). Write-side ICS modules are DESTRUCTIVE — `ModbusWriteCoil/ModbusWriteRegister/S7PlcStop/S7PlcStart` change physical process state. Dual-gated: `@require_allowlist` on `run_attack_module` AND `ics.allow_write: true` AND `ics.destructive_ics: true`. Set true only for authorized PLC testing |
-| `long_session` | multi-hour mode, request timeout, checkpoint |
-| `plugins` | out-of-tree plugin enable/disable, search paths, entry points |
-| `webhook_notify` | outbound Slack/Discord run-status notifications (url, event filter, retry/backoff) |
-| `mitre` | MITRE ATT&CK Navigator export (technique map, output dir, skill tags) |
-| `ticketing` | remediation ticket generation (Jira/GitHub, provider, base_url, token env) |
+| `mcp` | exploit MCP transport: `default_transport` (`stdio`\|`http`), `http_host`/`http_port` (loopback-only) |
+| `engine_mcp` | advisory MCP server for foreign AI assistants (skill search/CVE lookup/run history): `enabled`, `host`, `port` (read-only, no target touch) |
+| `nmap` | Linux-friendly nmap invocation: `path`, `sudo` (`sudo -n`), `priv_fallback` (auto-downgrade `-sS`/`-O`) |
+| `exploit` | attack path: `permission` (`read_only`\|`approve_only`\|`full_access` — **strict**, typo fails validation), `attack_mode`, timeouts/budgets, `allowed_targets`/`require_explicit_allowlist` (target-IP lock), AD/Kerberos suite, MSF recipes, listeners, `max_pivot_depth`, workspaces, `attacker_os` |
+| `stealth` | **LEGACY** inert/UI-only; kept for compat. Use `opsec` instead. Keys: `rotate_ua`, `dns_over_https`, `doh_provider` |
+| `opsec` | target-aware OPSEC (pacing `min_gap_seconds`/`jitter_seconds`, `ua_rotation`, `doh`/`doh_provider`, `rate_per_minute`, `quiet_command_patterns`, `noise_budget`, `local_targets_off`/`local_cidrs`/`public_autonomy`) |
+| `cve_lookup` | NVD CVE lookup: `enabled`, `max_results`, `rate_limit_seconds`, `circuit_failure_threshold`/`circuit_recovery_timeout`, `search_rate_limit_per_minute`, `epss_enabled`/`kev_enabled` (lab default `true`), `kev_cache_ttl_seconds`/`kev_cache_path`, `github.token_env` (`GITHUB_TOKEN`) |
+| `threat_intel` | continuous OSV.dev + GHSA + CISA KEV feed (`search_threat_intel`): `enabled` (lab `true`), `cache_dir`/`cache_ttl_seconds`, `sources` (osv/ghsa/kev/exploitdb_rss), `max_results`, `github_token_env` (shared `GITHUB_TOKEN`) |
+| `research` | web research: `enabled`, `provider`/`fallback_provider` (`ollama`\|`serpapi`\|`stdlib`), timeouts, caches, `ollama`/`serpapi`/`assistant` sub-blocks |
+| `swarm` | multi-agent swarm: `enabled`, `agents`, `max_parallel_agents`, `parallel_enabled`/`per_phase_concurrency`/`exploit_parallel`/`subagent_timeout_seconds`, `negotiation_rounds` (0 legacy one-shot, 2 lab) |
+| `witness` | advisory audit-stream watcher (`enabled` lab `true`/schema `false`, `log_path`, `poll_interval_seconds`, `escalate_to_event_broker`, `max_flags_per_signal_per_minute`, `dos_*`) — flags anomalies, never blocks |
+| `autonomous` | orchestrator Phase 2: `persistence_phase`, `checkpoint_every`, `adaptive_replan`, `max_cycles`, `max_pivot_depth`, plus Phase 5 preflight `dedup_targets`/`skip_non_routable`/`hard_target_max_rounds` |
+| `orchestrator` | `semantic_memory` (cross-mission lesson consumer; lab `true`, matching `memory.semantic_enabled`) |
+| `recon` | recon coverage & depth: `extended_enumerators`, `udp_top_ports`, `shodan_api_key`, `preflight_probe`/`preflight_ports`/`preflight_timeout_ms`, `max_retries`/`retry_delay`/`timeout_seconds`, `domain_resolution` (subdomain sources, AXFR, WHOIS), `subdomain_enum`/`vhost_discovery`/`waf_fingerprint`/`asn_whois`/`cloud_metadata_probe`/`snmp_enum`/`dns_zone_transfer`, `fast` (parallel recon preset) |
+| `memory` | learning stores: `semantic_enabled`, `embedding_model` (`nomic-embed-text`), `cross_mission_learning`, `attack_memory_enabled`/`attack_memory_max_context_chars`, `experience_min_samples`/`experience_time_decay_days` |
+| `reasoning` | agent reasoning: `chain_of_thought`, `reflection_every_n_actions`, `critic_enabled`, `observer_mode` (`heuristic`\|`llm`\|`hybrid`), `ultrathink`/`ultrathink_reflection_interval`, `llm_reflection`, `peer_consult_on_failure_threshold` |
+| `outcome_judgment` | evidence-grounded verdicts: `max_inconclusive_attempts`, `confirmation_threshold`/`refutation_threshold`, `min_evidence_references`, `flow_a` (Flow A judge), `peer_review` (cross-model grading) |
+| `poc_verification` | self-healing PoC verification: `enabled`, `docker_image`, `compile_timeout_seconds`, `max_retries`, `docker_network`/`docker_read_only`/`docker_memory` |
+| `replay_simulator` | pre-commit attack-plan critique (`replay_simulate`): `enabled` |
+| `adaptive_exploits` | exploit mutation: `enabled`, `max_mutations`, `mutation_strategies` |
+| `multi_model` | peer-model consultation (advisory): `enabled` (lab `true`/schema `false`), `consult_aliases`, `max_consultations`, `max_question_chars`/`max_answer_chars` |
+| `skills` | runtime skill pipeline: `enabled`, `roots`, `default_enabled`, `include_tags`/`exclude_names`, `maybe_enabled`, `allow_model_lookup`, `inject_startup_context`, budgets (`max_active_skills`/`max_chars_per_skill`/`max_total_chars`...), weights, `reselect_*`, `swarm_inject`, `feedback_*`, `semantic_*`, `diversity_penalty`, `include_metadata`/`allow_reference_listing` |
+| `plugins` | out-of-tree plugin enable/disable: `enabled`/`disabled`, `search_paths`, `entry_points` |
+| `webhook_notify` | outbound Slack/Discord run-status notifications: `enabled` (lab `true`), `url` (secret), `events`, `timeout_seconds`, `max_retries`, `backoff_seconds`, `max_payload_chars` |
+| `mitre` | MITRE ATT&CK Navigator export: `enabled` (lab `true`), `technique_map`, `navigator_output_dir`, `include_skill_tags` |
+| `ticketing` | remediation ticket generation (Jira/GitHub): `enabled` (lab `true`), `provider`, `base_url`, `token_env` (`TICKETING_TOKEN`), `project_key`, `max_retries`, `backoff_seconds` |
+| `api` | WebUI daemon: `enabled`, `host`/`port` (loopback-only), `token_file`, `allowed_origins`, `event_buffer_size`, `shutdown_timeout_seconds`, `serve_webui`, `graph_route`, `max_concurrent_runs` (D3: lab 3/schema 1), `multi_operator` (D4) |
+| `ics` | D8 ICS write-side modules: `allow_write` (default **false**: read-only ICS enum) + `destructive_ics` — **both must be true** plus `@require_allowlist` to run `ModbusWriteCoil`/`ModbusWriteRegister`/`S7PlcStop`/`S7PlcStart` (PHYSICAL-DAMAGE RISK) |
+| `long_session` | multi-hour mode: `enabled`, `request_timeout_seconds`, `swarm_session_timeout_minutes`, `attack_max_rounds`/`attack_max_commands`/`attack_max_duration_minutes`, `persist_messages` |
+| `eval` | eval/benchmark harness: `enabled`, `output_dir`, `max_rounds`, `write_markdown`/`write_html` |
+| `caldera` | Caldera adversary emulation plugin: `enabled` (lab `true`), `url`, `api_key_env` (`CALDERA_API_KEY`) |
+| `agent` | capability-upgrade toggles + budgets: `task_graph_enabled`, `capability_discovery_enabled`, `state_tools_enabled`, `planner_hints_enabled`, `decision_log_enabled`, `reflection_enabled`, `max_retries_per_task`, `max_actions` (0 = legacy exploit budgets), `generated_code_repair_attempts` |
 
 Mission scope (allowed/disallowed assets, forbidden actions, risk profiles)
 for Flow B lives in **`mission.yaml`**. Three risk profiles:

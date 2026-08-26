@@ -1240,7 +1240,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.doctor:
             from tools.doctor import run_doctor
 
-            return run_doctor(args.config)
+            return run_doctor(args.config, json_output=bool(getattr(args, "json", False)))
 
         # --self-test: run a safe localhost smoke test and exit.
         if getattr(args, "self_test", False):

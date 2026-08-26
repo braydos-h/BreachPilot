@@ -72,7 +72,7 @@ def _target_lock_block(command: str, config: Any) -> str | None:
         return None
     allowed_targets = _allowed_target_list(config)
     if not allowed_targets:
-        return None
+        return "require_explicit_allowlist is True but allowed_targets is empty — no targets authorized; add exploit.allowed_targets or set EXPLOIT_TARGET"
     _dest_tokens: list[str] = []
     for _tok in _cmd_extract_destinations(command):
         if _tok not in _dest_tokens:

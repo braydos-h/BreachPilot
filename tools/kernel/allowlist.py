@@ -53,9 +53,98 @@ def _allowed_target_list(config: dict[str, Any] | None) -> list[str]:
 
 
 def add_discovered_target(host: str, ip: str | None = None) -> None:
-    """Runtime-extend the allowlist with a discovered subdomain (verbatim move)."""
+    """Runtime-extend the allowlist with a discovered subdomain (hardened).
+
+    Allowlist-checked: the discovered host must be either directly allowlisted
+    (exact / wildcard / CIDR via is_target_in_allowlist) or a strict subdomain
+    of an already-allowed FQDN (is_subdomain_of). This prevents a compromised
+    enumerator or LLM from widening the lock to an arbitrary external asset
+    (e.g. badexample.com vs example.com via suffix collision, or evil.com via
+    EXPLOIT_DISCOVERED_TARGETS injection). If ``require_explicit_allowlist`` is
+    false the check is skipped (legacy). An empty existing allowlist denies
+    expansion (no base to authorize from). Validated targets only; malformed
+    hosts are dropped.
+    """
+    import logging
+
+    from tools.validation_utils import is_subdomain_of
+
+    logger = logging.getLogger(__name__)
+    if not host or not isinstance(host, str):
+        return
+    host = host.strip()
     if not host:
         return
+    # Basic host validation — must be an IP or FQDN
+    if not validate_target(host):
+        logger.warning("add_discovered_target denied: invalid host %r", host)
+        return
+    if ip is not None:
+        ip = ip.strip() if isinstance(ip, str) else str(ip).strip()
+        if ip and not validate_target(ip):
+            logger.warning("add_discovered_target denied: invalid ip %r for host %r", ip, host)
+            return
+        if not ip:
+            ip = None
+
+    # Load config for allowlist base (env union); best-effort — env-only if missing
+    config: dict[str, Any] | None = None
+    try:
+        from pathlib import Path as _P
+
+        from tools.kernel.config import load_config as _load
+
+        _cfg_path = _P("config.yaml")
+        if _cfg_path.exists():
+            config = _load(_cfg_path)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("add_discovered_target config load failed: %s — using env-only allowlist", e)
+        config = None
+
+    exploit_cfg = (config or {}).get("exploit", {}) if isinstance(config, dict) else {}
+    require = bool(exploit_cfg.get("require_explicit_allowlist", False))
+    if not require:
+        pass
+    else:
+        existing_allowed = _allowed_target_list(config)
+        if not existing_allowed:
+            logger.warning(
+                "add_discovered_target denied: allowlist empty, cannot authorize %r (no base to expand from)",
+                host,
+            )
+            return
+        # Direct allowlist match (exact, wildcard with dot-boundary, CIDR)
+        if is_target_in_allowlist(host, existing_allowed):
+            pass
+        else:
+            # Subdomain expansion: host must be a strict subdomain of an allowed FQDN
+            allowed_domains = [
+                a.strip().lower().lstrip("*.").rstrip(".")
+                for a in existing_allowed
+                if is_fqdn(a.strip().lower().lstrip("*."))
+            ]
+            if not allowed_domains:
+                logger.warning(
+                    "add_discovered_target denied: %r not in allowlist and no domain in allowlist to be subdomain of %r",
+                    host,
+                    existing_allowed,
+                )
+                return
+            subdomain_ok = any(is_subdomain_of(host, dom) for dom in allowed_domains if dom)
+            if not subdomain_ok:
+                logger.warning(
+                    "add_discovered_target denied: %r not in allowlist and not subdomain of %r",
+                    host,
+                    allowed_domains,
+                )
+                return
+        # If ip provided, it inherits host's authorization when host is a valid
+        # subdomain expansion; a resolved A record for an allowed subdomain does
+        # not itself need to be in a CIDR allowlist. Direct-host IPs that are not
+        # otherwise allowlisted are still added as they map to an authorized host.
+        if ip and not is_target_in_allowlist(ip, existing_allowed):
+            pass
+
     vals = [t.strip() for t in os.environ.get("EXPLOIT_DISCOVERED_TARGETS", "").split(",") if t.strip()]
     if host not in vals:
         vals.append(host)

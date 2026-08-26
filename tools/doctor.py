@@ -385,8 +385,133 @@ def _check_port(host: str, port: int) -> dict[str, Any]:
             return {"name": f"port_{port}_free", "ok": True, "host": host, "port": port}
 
 
-def run_doctor(config_path: Path) -> int:
+def _collect_doctor_checks(config_path: Path) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
+    """Collect all doctor checks and config for JSON or human output."""
     import yaml
+
+    config: dict[str, Any] = {}
+    load_error: str | None = None
+    if config_path.exists():
+        try:
+            with config_path.open("r", encoding="utf-8") as handle:
+                config = yaml.safe_load(handle) or {}
+        except Exception as exc:
+            load_error = str(exc)
+            config = {}
+    ollama_host = (config.get("ollama") or {}).get("host", "https://api.ollama.com")
+    models_cfg = config.get("models", {}).get("registry", {}) or {}
+    configured_models = list(models_cfg.values())
+    workspace = Path(config.get("research", {}).get("workspace_dir", "research_workspace"))
+    mcp_http = int((config.get("mcp") or {}).get("http_port", 8001))
+    web_port = 8080
+
+    _DOCTOR_NMAP_CFG.clear()
+    _DOCTOR_NMAP_CFG.update((config.get("nmap") or {}))
+
+    checks: list[dict[str, Any]] = [
+        _check_python(),
+        _check_imports(),
+        _check_nmap(config),
+        _check_workspace(workspace),
+        _check_config(config_path),
+        _check_ollama(ollama_host),
+        _check_models(ollama_host, configured_models),
+        _check_port("127.0.0.1", mcp_http),
+        _check_port("127.0.0.1", web_port),
+    ]
+    if os.name != "nt":
+        checks.append(_check_linux_privilege())
+        checks.append(_check_optional_tools(config))
+    from tools.config_manager import get_ai_provider
+
+    if get_ai_provider(config) == "chatgpt":
+        checks.append(_check_chatgpt(config))
+
+    # Self-heal missing cloud models: ping each via /api/generate
+    for c in checks:
+        if c.get("name") != "model_registry":
+            continue
+        missing = list(c.get("missing") or [])
+        recovered: list[str] = []
+        for spec in missing:
+            if _is_cloud_spec(spec) and _ping_cloud_model(ollama_host, spec):
+                recovered.append(spec)
+        if recovered:
+            still_missing = [s for s in missing if s not in set(recovered)]
+            c["missing"] = still_missing
+            c["ok"] = not still_missing
+            c["registered_cloud"] = recovered
+
+    info: dict[str, Any] = {"load_error": load_error}
+    return checks, config, info
+
+
+def build_doctor_report(config_path: Path) -> dict[str, Any]:
+    """Build machine-readable doctor report for --doctor --json / CI.
+
+    Returns {checks:[{name, ok, error}], is_valid, unknown_keys, errors, warnings}
+    for ``make doctor --json | jq -e '.is_valid'``.
+    """
+    checks, _config, _info = _collect_doctor_checks(config_path)
+    # Derive unknown_keys and validation errors from the config_valid check
+    unknown_keys: list[str] = []
+    config_errors: list[str] = []
+    config_warnings: list[str] = []
+    for c in checks:
+        if c.get("name") == "config_valid":
+            unknown_keys = list(c.get("unknown_keys") or [])
+            config_errors = list(c.get("errors") or [])
+            if c.get("error"):
+                config_errors.append(str(c.get("error")))
+            config_warnings = list(c.get("warnings") or [])
+            break
+    # Also honour a YAML load error as invalid
+    if _info.get("load_error"):
+        config_errors.append(_info["load_error"])
+    # Compact checks to {name, ok, error} for the spec, but keep full fields too
+    compact_checks: list[dict[str, Any]] = []
+    for c in checks:
+        err = c.get("error")
+        if err is None:
+            # Prefer missing/errors/warnings as error string when not ok
+            if not c.get("ok"):
+                err = c.get("missing") or c.get("errors") or c.get("warnings") or ""
+                if isinstance(err, list):
+                    err = "; ".join(str(x) for x in err)
+                err = str(err) if err else ""
+            else:
+                err = ""
+        compact_checks.append({"name": c.get("name", "unknown"), "ok": bool(c.get("ok")), "error": str(err) if err else ""})
+    # Exclude informational optional_tools / linux_privilege from failure count
+    optional_names = {"optional_tools", "linux_privilege"}
+    failed = sum(1 for c in checks if not c.get("ok") and c.get("name") not in optional_names)
+    # config_valid ok already reflects is_valid, but strict unknown also fails via errors
+    is_valid = failed == 0
+    return {
+        "checks": compact_checks,
+        "full_checks": checks,
+        "is_valid": is_valid,
+        "unknown_keys": unknown_keys,
+        "errors": config_errors,
+        "warnings": config_warnings,
+    }
+
+
+def run_doctor(config_path: Path, json_output: bool = False) -> int:
+    import yaml
+
+    if json_output:
+        report = build_doctor_report(config_path)
+        # Strip full_checks for lean CI output; keep checks, is_valid, unknown_keys
+        lean = {
+            "checks": report["checks"],
+            "is_valid": report["is_valid"],
+            "unknown_keys": report["unknown_keys"],
+            "errors": report["errors"],
+            "warnings": report["warnings"],
+        }
+        print(json.dumps(lean, indent=2))
+        return 0 if report["is_valid"] else 1
 
     print("=" * 60)
     print("  NetAttackAI - Self-Check (`--doctor`)")
@@ -523,4 +648,6 @@ if __name__ == "__main__":
 
     _p = _ap.ArgumentParser()
     _p.add_argument("--config", type=Path, default=Path("config.yaml"))
-    raise SystemExit(run_doctor(_p.parse_args().config))
+    _p.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+    _args = _p.parse_args()
+    raise SystemExit(run_doctor(_args.config, json_output=_args.json))
