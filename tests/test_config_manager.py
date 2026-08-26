@@ -725,4 +725,3 @@ def test_config_yaml_and_schema_in_sync_via_python_c():
     assert set(cfg.keys()) == set(CONFIG_SCHEMA.keys()), (
         f"config.yaml and CONFIG_SCHEMA top-level keys differ: extra in yaml {sorted(set(cfg.keys()) - set(CONFIG_SCHEMA.keys()))}, missing in yaml {sorted(set(CONFIG_SCHEMA.keys()) - set(cfg.keys()))}"
     )
-

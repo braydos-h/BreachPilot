@@ -762,3 +762,102 @@ async def test_cve_to_exploit_synth_valid_run(tmp_path: Path, monkeypatch) -> No
     )
     assert "CVE_TO_EXPLOIT_SYNTH:" in text
     assert "CVE-2021-44228" in text
+
+
+# ── Matrix: allowlist matcher regression (is_target_in_allowlist) ─────────────
+
+
+def test_allowlist_cidr_allows_in_range() -> None:
+    """CIDR 10.0.0.0/24 must allow 10.0.0.5 but not 10.0.1.1 (boundary)."""
+    from tools.validation_utils import is_target_in_allowlist
+
+    assert is_target_in_allowlist("10.0.0.5", ["10.0.0.0/24"]) is True
+    assert is_target_in_allowlist("10.0.0.254", ["10.0.0.0/24"]) is True
+
+
+def test_allowlist_cidr_blocks_out_of_range() -> None:
+    """CIDR 10.0.0.0/24 should block 10.0.1.1 (outside /24)."""
+    from tools.validation_utils import is_target_in_allowlist
+
+    assert is_target_in_allowlist("10.0.1.1", ["10.0.0.0/24"]) is False
+    assert is_target_in_allowlist("10.0.1.1", ["10.0.0.0/24", "192.168.1.0/24"]) is False
+
+
+def test_allowlist_cidr_strict_false_network() -> None:
+    """CIDR via ip_network(strict=False) — 10.0.0.1/24 normalizes to 10.0.0.0/24."""
+    from tools.validation_utils import is_target_in_allowlist
+
+    # 10.0.0.1/24 as an allowlist entry (operator typo) should still behave as /24
+    assert is_target_in_allowlist("10.0.0.5", ["10.0.0.1/24"]) is True
+    assert is_target_in_allowlist("10.0.1.1", ["10.0.0.1/24"]) is False
+
+
+def test_allowlist_wildcard_allows_subdomain() -> None:
+    """*.evil.com must match sub.evil.com and deep.sub.evil.com (dot-boundary)."""
+    from tools.validation_utils import is_target_in_allowlist
+
+    assert is_target_in_allowlist("sub.evil.com", ["*.evil.com"]) is True
+    assert is_target_in_allowlist("deep.sub.evil.com", ["*.evil.com"]) is True
+    assert is_target_in_allowlist("a.b.evil.com", ["*.evil.com"]) is True
+
+
+def test_allowlist_wildcard_blocks_suffix_collision() -> None:
+    """*.evil.com must NOT match notevil.com (suffix collision without dot)."""
+    from tools.validation_utils import is_target_in_allowlist
+
+    assert is_target_in_allowlist("notevil.com", ["*.evil.com"]) is False
+    assert is_target_in_allowlist("badnot_evil.com", ["*.evil.com"]) is False
+    assert is_target_in_allowlist("evil.com", ["*.evil.com"]) is False  # apex not matched by wildcard
+
+
+def test_allowlist_domain_lower_casing() -> None:
+    """Domain matching must be case-insensitive (lower-casing)."""
+    from tools.validation_utils import is_target_in_allowlist
+
+    assert is_target_in_allowlist("SUB.EVIL.COM", ["*.evil.com"]) is True
+    assert is_target_in_allowlist("Sub.Evil.Com", ["*.EVIL.COM"]) is True
+    assert is_target_in_allowlist("NOTEvil.COM", ["*.evil.com"]) is False
+
+
+@pytest.mark.asyncio
+async def test_terminal_blocks_cidr_outside_allowlist(tmp_path: Path) -> None:
+    """Terminal lock: nmap to 10.0.1.1 must be blocked when allowlist is 10.0.0.0/24."""
+    mcp = _make_server(tmp_path, require_allowlist=True, allowed_targets=["10.0.0.0/24"])
+    text = _text(await mcp.call_tool("run_exploit_terminal", {"command": "nmap -sV 10.0.1.1"}))
+    assert "TERMINAL_RESULT: blocked" in text or "not in the explicit allowlist" in text
+
+
+@pytest.mark.asyncio
+async def test_discovered_target_allowlist_checked(tmp_path: Path, monkeypatch) -> None:
+    """Discovered target expansion must be allowlist-checked.
+
+    With base allowlist example.com, adding sub.example.com succeeds but
+    badexample.com / evil.com are denied (subdomain boundary via is_subdomain_of).
+    """
+    import os
+
+    # Isolate env for this test
+    for k in ("EXPLOIT_TARGET", "EXPLOIT_TARGET_IP", "EXPLOIT_TARGET_DOMAIN", "EXPLOIT_DISCOVERED_TARGETS"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("EXPLOIT_TARGET", "example.com")
+    monkeypatch.setenv("EXPLOIT_TARGET_DOMAIN", "example.com")
+    from tools.kernel.allowlist import _allowed_target_list, add_discovered_target
+
+    # Valid subdomain should be added
+    add_discovered_target("sub.example.com", "1.2.3.4")
+    assert "sub.example.com" in _allowed_target_list({"exploit": {"allowed_targets": ["example.com"]}})
+    # Invalid suffix collision must be denied (not added)
+    add_discovered_target("badexample.com")
+    assert "badexample.com" not in os.environ.get("EXPLOIT_DISCOVERED_TARGETS", "")
+    # Unrelated domain must be denied
+    add_discovered_target("evil.com")
+    assert "evil.com" not in os.environ.get("EXPLOIT_DISCOVERED_TARGETS", "")
+    # Terminal with valid discovered subdomain should not be blocked (after valid add)
+    mcp = _make_server(tmp_path, require_allowlist=True, allowed_targets=["example.com"])
+    # Re-add via the same env (simulating that discovered env is part of union)
+    monkeypatch.setenv("EXPLOIT_DISCOVERED_TARGETS", os.environ.get("EXPLOIT_DISCOVERED_TARGETS", ""))
+    text = _text(await mcp.call_tool("run_exploit_terminal", {"command": "curl http://sub.example.com"}))
+    assert "not in the explicit allowlist" not in text
+    # But a non-subdomain evil host must still be blocked even after failed add
+    text2 = _text(await mcp.call_tool("run_exploit_terminal", {"command": "curl http://evil.com"}))
+    assert "TERMINAL_RESULT: blocked" in text2 or "not in the explicit allowlist" in text2

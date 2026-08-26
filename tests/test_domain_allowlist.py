@@ -98,6 +98,8 @@ def test_allowed_target_list_deduplicates(monkeypatch):
 
 def test_add_discovered_target_adds_host(monkeypatch):
     _clear_env(monkeypatch)
+    monkeypatch.setenv("EXPLOIT_TARGET", "example.com")
+    monkeypatch.setenv("EXPLOIT_TARGET_DOMAIN", "example.com")
     from tools.mcp_shared import _allowed_target_list, add_discovered_target
 
     add_discovered_target("new.example.com", "5.6.7.8")
@@ -108,6 +110,8 @@ def test_add_discovered_target_adds_host(monkeypatch):
 
 def test_add_discovered_target_deduplicates(monkeypatch):
     _clear_env(monkeypatch)
+    monkeypatch.setenv("EXPLOIT_TARGET", "example.com")
+    monkeypatch.setenv("EXPLOIT_TARGET_DOMAIN", "example.com")
     from tools.mcp_shared import _allowed_target_list, add_discovered_target
 
     add_discovered_target("sub.example.com", "1.2.3.4")
@@ -119,6 +123,8 @@ def test_add_discovered_target_deduplicates(monkeypatch):
 
 def test_add_discovered_target_appends_to_existing(monkeypatch):
     _clear_env(monkeypatch)
+    monkeypatch.setenv("EXPLOIT_TARGET", "example.com")
+    monkeypatch.setenv("EXPLOIT_TARGET_DOMAIN", "example.com")
     monkeypatch.setenv("EXPLOIT_DISCOVERED_TARGETS", "existing.example.com")
     from tools.mcp_shared import _allowed_target_list, add_discovered_target
 

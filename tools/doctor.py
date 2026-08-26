@@ -481,7 +481,9 @@ def build_doctor_report(config_path: Path) -> dict[str, Any]:
                 err = str(err) if err else ""
             else:
                 err = ""
-        compact_checks.append({"name": c.get("name", "unknown"), "ok": bool(c.get("ok")), "error": str(err) if err else ""})
+        compact_checks.append(
+            {"name": c.get("name", "unknown"), "ok": bool(c.get("ok")), "error": str(err) if err else ""}
+        )
     # Exclude informational optional_tools / linux_privilege from failure count
     optional_names = {"optional_tools", "linux_privilege"}
     failed = sum(1 for c in checks if not c.get("ok") and c.get("name") not in optional_names)

@@ -20,7 +20,11 @@ install-dev: venv
 	$(BIN)/python -m pip install -e ".[dev]"
 
 doctor:
-	$(BIN)/python main.py --doctor
+	$(BIN)/python main.py --doctor $(if $(filter --json,$(MAKECMDGOALS)),--json)
+
+# Support `make doctor --json` for CI machine-readable output
+--json:
+	@:
 
 self-test:
 	$(BIN)/python main.py --self-test
