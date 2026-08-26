@@ -794,3 +794,98 @@ export function useWitness(runId: string | null | undefined, enabled = true) {
     },
   });
 }
+
+// ── Connections (operator access channels) ─────────────────────────────────
+// Backed by ConnectionManager (tools/operator_connection/manager.py).
+// The manager is the single source of truth; the WebUI never parses JSON directly.
+
+export function useConnections(params?: { status?: string; target?: string }) {
+  return useQuery<ConnectionsListResponse>({
+    queryKey: params?.status || params?.target ? ["connections", params] as const : queryKeys.connections,
+    queryFn: () => {
+      const q = new URLSearchParams();
+      if (params?.status) q.set("status", params.status);
+      if (params?.target) q.set("target", params.target);
+      const suffix = q.toString() ? `?${q.toString()}` : "";
+      return apiFetch<ConnectionsListResponse>(`/connections${suffix}`);
+    },
+    ...defaultQueryOptions,
+    staleTime: 8_000,
+    refetchInterval: (query) => {
+      const data = query.state.data as ConnectionsListResponse | undefined;
+      if (!data) return 12_000;
+      const hasActive = data.connections.some((c) => c.status === "active");
+      const hasStale = data.connections.some((c) => c.status === "stale");
+      if (hasActive) return 12_000;
+      if (hasStale) return 15_000;
+      // No active/stale — slow poll for sidebar badge updates
+      return 30_000;
+    },
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function useConnection(connectionId: string | null | undefined, enabled = true) {
+  return useQuery<OperatorConnection>({
+    queryKey: queryKeys.connection(connectionId ?? ""),
+    queryFn: () => apiFetch<OperatorConnection>(`/connections/${encodeURIComponent(connectionId as string)}`),
+    ...defaultQueryOptions,
+    enabled: !!connectionId && enabled,
+    refetchInterval: (query) => {
+      const data = query.state.data as OperatorConnection | undefined;
+      if (!data) return 10_000;
+      if (data.status === "removed") return false;
+      if (data.status === "active" || data.status === "stale") return 10_000;
+      return 30_000;
+    },
+  });
+}
+
+export function useConnectionListener(connectionId: string | null | undefined, enabled = true) {
+  return useQuery<ConnectionListenerResponse>({
+    queryKey: queryKeys.connectionListener(connectionId ?? ""),
+    queryFn: () =>
+      apiFetch<ConnectionListenerResponse>(`/connections/${encodeURIComponent(connectionId as string)}/listener`),
+    ...defaultQueryOptions,
+    enabled: !!connectionId && enabled,
+    staleTime: 2_000,
+    refetchInterval: enabled ? 3_000 : false,
+    retry: (count, error) => {
+      if (error instanceof ApiError && error.isNotFound) return false;
+      return DEFAULT_RETRY(count, error);
+    },
+  });
+}
+
+export function useCheckConnection() {
+  const qc = useQueryClient();
+  return useMutation<OperatorConnection, ApiError, string>({
+    mutationFn: (connectionId) =>
+      apiFetch<OperatorConnection>(`/connections/${encodeURIComponent(connectionId)}/check`, {
+        method: "POST",
+        body: {},
+      }),
+    onSuccess: (data) => {
+      qc.setQueryData(queryKeys.connection(data.connection_id), data);
+      void qc.invalidateQueries({ queryKey: queryKeys.connections });
+      void qc.invalidateQueries({ queryKey: queryKeys.connection(data.connection_id) });
+      void qc.invalidateQueries({ queryKey: queryKeys.connectionListener(data.connection_id) });
+    },
+  });
+}
+
+export function useRemoveConnection() {
+  const qc = useQueryClient();
+  return useMutation<RemoveConnectionResponse, ApiError, string>({
+    mutationFn: (connectionId) =>
+      apiFetch<RemoveConnectionResponse>(`/connections/${encodeURIComponent(connectionId)}/remove`, {
+        method: "POST",
+        body: {},
+      }),
+    onSuccess: (data) => {
+      qc.setQueryData(queryKeys.connection(data.connection.connection_id), data.connection);
+      void qc.invalidateQueries({ queryKey: queryKeys.connections });
+      void qc.invalidateQueries({ queryKey: queryKeys.connection(data.connection.connection_id) });
+    },
+  });
+}

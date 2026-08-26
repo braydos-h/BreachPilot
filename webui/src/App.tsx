@@ -26,6 +26,7 @@ const AttackModulesPage = lazy(() => import("@/routes/AttackModulesPage").then((
 const GoalsPage = lazy(() => import("@/routes/GoalsPage").then((m) => ({ default: m.GoalsPage })));
 const StatsPage = lazy(() => import("@/routes/StatsPage").then((m) => ({ default: m.StatsPage })));
 const HelpPage = lazy(() => import("@/routes/HelpPage").then((m) => ({ default: m.HelpPage })));
+const ConnectionsPage = lazy(() => import("@/routes/ConnectionsPage").then((m) => ({ default: m.ConnectionsPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -70,6 +71,7 @@ export default function App() {
                     <Route path="/goals" element={<GoalsPage />} />
                     <Route path="/graph" element={<AttackGraphPage />} />
                     <Route path="/stats" element={<StatsPage />} />
+                    <Route path="/connections" element={<ConnectionsPage />} />
                     <Route path="/help" element={<HelpPage />} />
                     <Route path="/memory" element={<MemoryPage />} />
                     <Route path="/system" element={<SystemPage />} />
