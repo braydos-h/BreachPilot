@@ -38,6 +38,7 @@ from tools.exceptions import _EXC_GROUP_CATCH
 try:
     from tools.validation_utils import validate_target_or_ip
 except ImportError:  # pragma: no cover
+
     def validate_target_or_ip(v: str) -> bool:  # type: ignore[no-redef]
         return bool(v)
 

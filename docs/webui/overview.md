@@ -68,6 +68,7 @@ Defined in `webui/src/App.tsx:59`:
 | `/goals` | `GoalsPage` | `webui/src/routes/GoalsPage.tsx:81` |
 | `/graph` | `AttackGraphPage` | `webui/src/features/graph/AttackGraphPage.tsx:37` |
 | `/stats` | `StatsPage` | `webui/src/routes/StatsPage.tsx:218` |
+| `/connections` | `ConnectionsPage` | `webui/src/routes/ConnectionsPage.tsx:9` |
 | `/help` | `HelpPage` | `webui/src/routes/HelpPage.tsx:27` |
 | `/memory` | `MemoryPage` | `webui/src/routes/MemoryPage.tsx:9` |
 | `/system` | `SystemPage` → `SettingsPage` | `webui/src/routes/SystemPage.tsx:6`, `webui/src/features/settings/SettingsPage.tsx:20` |
@@ -116,4 +117,4 @@ Token storage: `sessionStorage` only (survives reload, clears on tab close). Hea
 
 ## Layout chrome
 
-`Layout.tsx:15` `NAV_ITEMS` (Home/Sessions/Modules/Goals/Attack Graph/Stats/Skills/Memory/Settings/Help). Desktop sidebar + mobile bottom bar. Active-run pill filters `isActiveState`. Permission banners for `approve`/`full_access`. Footer: loopback warning + GitHub link (`Layout.tsx:280`).
+`Layout.tsx:15` `NAV_ITEMS` (Home/Sessions/**Connections**/Modules/Goals/Attack Graph/Stats/Skills/Memory/Settings/Help). Connections nav shows active-count badge (desktop `active` + mobile pill) via `useConnections()` (`Layout.tsx:55`). Desktop sidebar + mobile bottom bar. Active-run pill filters `isActiveState`. Permission banners for `approve`/`full_access`. Footer: loopback warning + GitHub link (`Layout.tsx:280`).

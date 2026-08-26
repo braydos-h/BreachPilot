@@ -113,6 +113,16 @@ On Linux/macOS `make install|test|test-one F=…|run|doctor|mcp-exploit` work.
    3.11-3.13, coverage, repo-wide `ruff check .` + `ruff format --check .` + `mypy --follow-imports=skip tools`, package build, WebUI build+tests. Before a PR run the local commands
    listed in README §CI and verify README flags/config still match reality.
 
+9. **Agents must NEVER push to GitHub or create new branches.** Do not run
+   `git push`, `git push --force`, `git branch`, `git checkout -b`,
+   `git switch -c`, `gh repo create`, or any `gh` command that creates/pushes
+   a branch or PR. All work stays on the current local branch only. If a
+   remote update is needed, tell the user what to push and let them do it
+   manually. This is enforced by `permission.bash` deny rules in
+   `opencode.json` / `~/.config/opencode/opencode.json` (`git push*` →
+   `deny`, `git checkout -b*` → `deny`, etc.) and by the `pre-push` git hook
+   — do not bypass or remove those guards.
+
 ## Workspace dirs (all gitignored runtime state)
 
 - `reports/<run_id>/` — per-run artifacts

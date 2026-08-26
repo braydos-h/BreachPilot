@@ -31,6 +31,7 @@ Prefix constant `API_PREFIX="/api/v1"` (`client.ts:67`).
 
 | Export | Shape |
 |--------|-------|
+| `ConnectionStatus` `active|stale|removed|error` + `OperatorConnection {connection_id,target_ip,method,callback_host,callback_port,listener_name,status,created_at,created_at_iso,last_beacon,last_beacon_iso,last_check,last_check_iso,check_output,implant_path,mitre_technique,os_family,notes}` + `ConnectionsListResponse {connections,total,active,stale,removed,error}` + `ConnectionListenerResponse {connection_id,listener_name,output,updated_at,running,status}` + `RemoveConnectionResponse {connection,removed,listener_stopped}` | `tools/operator_connection/manager.py:47` `ConnectionRecord` via `/api/v1/connections` |
 | `RunState` | `draft|awaiting_confirmation|queued|running|awaiting_input|completed|failed|cancelled|interrupted|cancelling` |
 | `DecisionKind/Status/RiskTag/RunMode/RunKind/SkillsMode/ObserverMode` | `"start_confirm"|"goal_select"|"tool_approval"|"campaign_next_step"` etc. |
 | `CampaignCheckpointKind` `access|no_path` + `CampaignNextStepOption {action,label,goals?:{name,desc}[]}` | mid-run checkpoint |
@@ -64,6 +65,8 @@ Prefix constant `API_PREFIX="/api/v1"` (`client.ts:67`).
 | `useCredentials / useRevealCredential / useConfirmCredential / useLoot` | `GET/POST` | `/runs/<id>/credentials`, `POST /credentials/<i>/reveal`, `POST …/confirm`, `GET /…/loot` | cred masked |
 | `useWorkspace / useWorkspaceFileUrl / useFetchWorkspaceFile` | `GET` raw | `/runs/<id>/workspace`, `/workspace/<path>` `raw:true Blob` | |
 | `useArtifactUrl / useFetchArtifactBlob` | raw | `/runs/<id>/artifacts/<name>` `raw Blob` | download |
+| `useConnections / useConnection / useConnectionListener` | `GET` 10-15s poll | `/connections?status&target`, `/connections/<id>`, `/connections/<id>/listener?lines 1-500` bounded | `docs/api.md: Connections` `ConnectionManager` source of truth |
+| `useCheckConnection / useRemoveConnection` | `POST` invalidates lists | `/connections/<id>/check` updates `last_check/check_output/status`, `/connections/<id>/remove` graceful `mark_removed` + best-effort listener stop | `docs/api.md: POST /connections/*` |
 | `useRunGraph / useWitness` | `GET` 404 no retry | `/runs/<id>/graph`, `/witness` | `docs/api.md: Graph Explorer Routes` when gated |
 | Graph explorer (`graphApi.ts`) | `GET` | `/graph/runs/<id>`, `/…/summary`, `/…/conflicts`, `/…/nodes/<nid>`, `/…/nodes/<nid>/neighbors?max_hops&max_nodes`, `/…/paths?start&end&max_length&max_paths` | `docs/api.md: Graph Explorer Routes` bounds `limit≤500` caps |
 
@@ -79,7 +82,7 @@ Close codes handled in `ws.ts:275`: `4400 invalid cursor`, `4401 auth`, `4403 or
 
 ## `defaultQueryOptions` (`hooks.ts:107`) polling
 
-`useRuns` adaptive 5s active vs 60s idle; `useRun` 5s while `running|queued|cancelling`; `useDecisions` 5s while pending; `useArtifacts` 30s while active reading `qc.getQueryData(run)`.
+`useRuns` adaptive 5s active vs 60s idle; `useRun` 5s while `running|queued|cancelling`; `useDecisions` 5s while pending; `useArtifacts` 30s while active reading `qc.getQueryData(run)`. `useConnections` adaptive 12s active / 15s stale / 30s idle; `useConnection` 10s while active/stale else 30s (removed → no poll); `useConnectionListener` 3s while drawer open + active, `staleTime 2s`.
 
 ## Deserialization notes
 
@@ -105,3 +108,4 @@ Close codes handled in `ws.ts:275`: `4400 invalid cursor`, `4401 auth`, `4403 or
 | `ArtifactsPage` | `useArtifacts/useWorkspace/useAudit/useRunLog` |
 | `SkillsPage` | `useSkills/useSkillSearch/useSkillDetail/useConfig/usePatchConfig/useInstallSkill/useRemoveSkill` |
 | `GoalsPage/AttackModulesPage` | `useGoals/useAttackModules` |
+| `ConnectionsPage` | `useConnections/useConnection/useConnectionListener/useCheckConnection/useRemoveConnection` — KPI + filter/search/sort table (responsive cards on mobile) + details drawer with listener output (Live 3s poll, bounded monospace) + health-check + removal confirm; `ConnectionManager` source of truth |

@@ -1,0 +1,17 @@
+#!/bin/sh
+# Block all pushes by AI agents. Human operators may bypass with --no-verify
+# or by unsetting NETATTACKAI_ALLOW_PUSH. Agents must NEVER use --no-verify
+# to circumvent this hook; if a remote update is needed, tell the user what
+# to push and let them do it manually.
+#
+# This hook enforces AGENTS.md rule 9 / CLAUDE.md "Things To Watch Out For":
+# agents must never push to GitHub or create new branches.
+
+if [ "$NETATTACKAI_ALLOW_PUSH" = "1" ]; then
+  exit 0
+fi
+
+echo "pre-push hook: pushing is blocked by repo policy (AGENTS.md #9)." >&2
+echo "Agents must not push or create branches. Tell the user what to push instead." >&2
+echo "Human bypass: NETATTACKAI_ALLOW_PUSH=1 git push  OR  git push --no-verify" >&2
+exit 1

@@ -877,3 +877,55 @@ export interface WitnessFlag {
 export interface WitnessResponse {
   flags: WitnessFlag[];
 }
+
+// ── Operator connections (persisted access channels) ─────────────────────────
+// Backed by tools/operator_connection/manager.py — ConnectionManager is the
+// single source of truth, persisted to exploit_workspace/operator_connections.json.
+// The WebUI never parses the JSON directly; all access goes through /api/v1/connections.
+
+export type ConnectionStatus = "active" | "stale" | "removed" | "error";
+
+export interface OperatorConnection {
+  connection_id: string;
+  target_ip: string;
+  method: string;
+  callback_host: string;
+  callback_port: number;
+  listener_name: string;
+  status: ConnectionStatus;
+  created_at: number;
+  created_at_iso?: string;
+  last_beacon: number | null;
+  last_beacon_iso?: string;
+  last_check: number | null;
+  last_check_iso?: string;
+  check_output: string;
+  implant_path: string;
+  mitre_technique: string;
+  os_family: string;
+  notes: string;
+}
+
+export interface ConnectionsListResponse {
+  connections: OperatorConnection[];
+  total: number;
+  active: number;
+  stale: number;
+  removed: number;
+  error: number;
+}
+
+export interface ConnectionListenerResponse {
+  connection_id: string;
+  listener_name: string;
+  output: string;
+  updated_at: string;
+  running?: boolean;
+  status?: string;
+}
+
+export interface RemoveConnectionResponse {
+  connection: OperatorConnection;
+  removed: boolean;
+  listener_stopped: boolean;
+}

@@ -1,0 +1,20 @@
+{
+  // Repo-level guard: agents must NEVER push or create branches.
+  // Mirrors ~/.config/opencode/opencode.json permission.bash denies.
+  // AGENTS.md #9 / CLAUDE.md "Things To Watch Out For" is canonical.
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "bash": {
+      "*": "allow",
+      "git push*": "deny",
+      "git branch*": "deny",
+      "git checkout -b*": "deny",
+      "git checkout -B*": "deny",
+      "git switch -c*": "deny",
+      "git switch -C*": "deny",
+      "gh repo create*": "deny",
+      "gh repo fork*": "deny",
+      "gh pr create*": "deny"
+    }
+  }
+}

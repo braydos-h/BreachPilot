@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { Activity, BarChart3, BookOpen, Brain, Cpu, Crosshair, Eye, GitBranch, Github, HelpCircle, Home, List, Moon, Settings, ShieldAlert, Sparkles, Sun, Target, Terminal, X } from "lucide-react";
+import { Activity, BarChart3, BookOpen, Brain, Cpu, Crosshair, Eye, GitBranch, Github, HelpCircle, Home, List, Moon, PlugZap, Settings, ShieldAlert, Sparkles, Sun, Target, Terminal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { PermissionControl } from "@/components/permission/PermissionControl";
-import { useModels, useRuns } from "@/api/hooks";
+import { useConnections, useModels, useRuns } from "@/api/hooks";
 import { isActiveState, type DecisionListRow } from "@/api/types";
 import { clearStoredToken } from "@/api/client";
 import { useNavigate } from "react-router-dom";
@@ -15,6 +15,7 @@ import { useTheme } from "@/lib/useTheme";
 const NAV_ITEMS = [
   { to: "/", label: "Home", icon: Home, end: true },
   { to: "/sessions", label: "Sessions", icon: List, end: false },
+  { to: "/connections", label: "Connections", icon: PlugZap, end: false },
   { to: "/modules", label: "Modules", icon: Crosshair, end: false },
   { to: "/goals", label: "Goals", icon: Target, end: false },
   { to: "/graph", label: "Attack Graph", icon: GitBranch, end: false },
@@ -51,12 +52,14 @@ export function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
   const runs = useRuns(50, 0);
+  const connections = useConnections();
   const models = useModels();
   const provider = models.data?.provider ?? "ollama";
   const label = provider === "chatgpt" ? "ChatGPT" : "Ollama";
   const { mode, setMode } = usePermissionMode();
   const { theme, toggle: toggleTheme } = useTheme();
   const activeRuns = runs.data?.runs.filter((r) => isActiveState(r.state)) ?? [];
+  const activeConnections = connections.data?.active ?? 0;
   const [showHelp, setShowHelp] = useState(false);
   const [permOpen, setPermOpen] = useState(false);
 
@@ -85,6 +88,7 @@ export function Layout() {
         <nav className="flex flex-1 flex-col gap-1 p-2" aria-label="Primary">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
+            const isConnections = item.to === "/connections";
             return (
               <NavLink
                 key={item.to}
@@ -100,7 +104,12 @@ export function Layout() {
                 }
               >
                 <Icon className="h-4 w-4" />
-                <span>{item.label}</span>
+                <span className="flex-1">{item.label}</span>
+                {isConnections && activeConnections > 0 && (
+                  <span className="flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-emerald-500/15 px-1.5 text-[10px] font-semibold tabular-nums text-emerald-600 dark:text-emerald-300" aria-label={`${activeConnections} active connections`}>
+                    {activeConnections}
+                  </span>
+                )}
               </NavLink>
             );
           })}
@@ -170,6 +179,7 @@ export function Layout() {
         <nav className="flex items-center gap-1" aria-label="Primary mobile">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
+            const showBadge = item.to === "/connections" && activeConnections > 0;
             return (
               <NavLink
                 key={item.to}
@@ -177,15 +187,20 @@ export function Layout() {
                 end={item.end}
                 className={({ isActive }) =>
                   cn(
-                    "flex h-9 w-9 items-center justify-center rounded-md transition-colors",
+                    "relative flex h-9 w-9 items-center justify-center rounded-md transition-colors",
                     isActive
                       ? "bg-primary/10 text-primary"
                       : "text-muted-foreground hover:bg-accent hover:text-foreground",
                   )
                 }
-                aria-label={item.label}
+                aria-label={item.label + (showBadge ? ` (${activeConnections} active)` : "")}
               >
                 <Icon className="h-4 w-4" />
+                {showBadge && (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-emerald-500 px-1 text-[8px] font-bold leading-none text-white">
+                    {activeConnections > 99 ? "99+" : activeConnections}
+                  </span>
+                )}
               </NavLink>
             );
           })}

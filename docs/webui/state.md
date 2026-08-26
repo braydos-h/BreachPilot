@@ -28,6 +28,7 @@ subsystem: webui
 
 | key | value | invalidation fans |
 |-----|-------|-------------------|
+| `connections / connection(id) / connectionListener(id)` | `["connections"]`, `["connections",id]`, `["connections",id,"listener"]` | `useConnections` adaptive poll + `Layout` badge; `useCheckConnection` invalidates lists + detail + listener |
 | `capabilities` | `["capabilities"]` | capabilities guard |
 | `config/schema/secrets` | `["config"]`, `["config","schema"]`, `["secrets"]` | settings |
 | `models / modelsLive / providers` | `["models"]` etc. | `usePatchConfig` (`hooks.ts:152`) invalidates modelsLive/providers only when patch keys contain `models|ollama|chatgpt|provider` |
@@ -55,6 +56,7 @@ subsystem: webui
 | Create/cancel/resume/delete/retitle | `useCreateRun POST /runs`, `useCancelRun POST /runs/<id>/cancel`, `useResumeRun POST /…/resume`, `useDeleteRun DELETE /…?purge`, `useRetitleRun POST /…/title {title||regen}` | invalidate `["runs"]` + `run(runId)` |
 | Decisions | `useDecisions` (5s while pending), `useDecision`, `useAnswerDecision POST /runs/<id>/decisions/<decId> {answer}` invalidates `runDecisions+run+runs` | |
 | Artifacts/tool gateway | `useRunTools GET /runs/<id>/tools` `15s` (enabled only while active), `useCallTool POST /…/tools/<name>/calls {arguments}`, `useArtifacts GET /…/artifacts` 30s while active else off (reads run cache), `useAudit`, `useSwarmState` (404 no retry), `useCampaignState`, `useRunLog tail+attempt/target`, `useCredentials` + `useRevealCredential/ConfirmCredential POST /credentials/<i>/{reveal,confirm}`, `useLoot`, `useWorkspace` + `useWorkspaceFileUrl/useFetchWorkspaceFile` raw, `useArtifactUrl/useFetchArtifactBlob` raw, `useRunGraph` (404 no retry), `useWitness` | |
+| Connections | `useConnections GET /connections?status&target` adaptive 12s/15s/30s, `useConnection GET /connections/<id>` 10s while active/stale, `useConnectionListener GET /connections/<id>/listener?lines` 3s while drawer open + active (`staleTime 2s`), `useCheckConnection POST /…/check`, `useRemoveConnection POST /…/remove` | Invalidates `["connections"]` + detail + listener; `ConnectionManager` is sole persistence (`operator_connections.json`) |
 | Graph explorer | re-exported from `features/graph/graphApi.ts` — own `graphKeys` prefix, 10s polling while active | |
 
 All mutating hooks set/ invalidate related queries — see table `onSuccess`.

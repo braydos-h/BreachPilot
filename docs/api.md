@@ -63,6 +63,12 @@ the CLI uses.
 9. [Event Routes](#event-routes)
    - [Replay Events](#get-runsrun_idevents)
    - [WebSocket Stream](#ws-ws-v1runsrun_id)
+9. [Connections Routes](#connections-routes)
+   - [List Connections](#get-connections)
+   - [Get Connection](#get-connectionsconnection_id)
+   - [Check Connection](#post-connectionsconnection_idcheck)
+   - [Remove Connection](#post-connectionsconnection_idremove)
+   - [Get Listener Output](#get-connectionsconnection_idlistener)
 10. [Data Models](#data-models)
 11. [Event Types](#event-types)
 12. [Config Reference](#config-reference)
@@ -1056,6 +1062,168 @@ Heartbeats (`{"type": "heartbeat", "run_id": "..."}`) are sent every 30s of idle
 **Message shape (server → client):** the `Event` object (see [Data Models](#event)).
 
 **Close codes:** see [Security Model](#security-model).
+
+---
+
+## Connections Routes
+
+Source: `tools/api/routes/connections.py` (backed by `tools/operator_connection/manager.py`). Prefix `/api/v1/connections`, tag `connections`.
+
+Operator-oriented overview of persisted access channels. The `ConnectionManager` (`tools/operator_connection/manager.py:106`) is the **single source of truth** persisted to `exploit_workspace/operator_connections.json` (plus per-target shards). The WebUI/API never parse that JSON directly; every read/write goes through the manager. Listener output goes through `PersistentSessionManager` (`tools/persistent_session_manager.py:732`) so the same tmux/nohup/nc back-end is reused.
+
+| Status | Meaning |
+|--------|---------|
+| `active` | Listener running, recent beacon or successful health check |
+| `stale` | Listener not running or no recent beacon, needs operator attention |
+| `removed` | Gracefully marked removed (record preserved for audit) |
+| `error` | Health check encountered an error |
+
+All routes are **bearer-authenticated** (loopback-only) and respect `operator_connection.workspace_dir` (default `exploit_workspace`, resolved relative to `config.yaml` parent when relative).
+
+### `GET /connections`
+
+**Auth:** bearer.
+
+List all known connection records, optionally filtered.
+
+**Query params:**
+
+| Param | Type | Default | Notes |
+|-------|------|---------|-------|
+| `status` | string | — | `active|stale|removed|error` (400 on invalid) |
+| `target` | string | — | Exact `target_ip` match |
+
+**Response:** `200`
+```json
+{
+  "connections": [
+    {
+      "connection_id": "conn-ab12cd34",
+      "target_ip": "10.0.0.15",
+      "method": "linux_cron",
+      "callback_host": "192.168.1.5",
+      "callback_port": 4444,
+      "listener_name": "persist-10-0-0-15-linux-cron",
+      "status": "active",
+      "created_at": 1714000000.0,
+      "created_at_iso": "2026-04-24T10:00:00+00:00",
+      "last_beacon": 1714000012.0,
+      "last_beacon_iso": "2026-04-24T10:00:12+00:00",
+      "last_check": 1714000018.0,
+      "last_check_iso": "2026-04-24T10:00:18+00:00",
+      "check_output": "listener running",
+      "implant_path": "exploit_workspace/10.0.0.15/attempt-abc/implant_linux_cron_10_0_0_15.py",
+      "mitre_technique": "T1053.003",
+      "os_family": "linux",
+      "notes": "attempt_id=attempt-abc auto_listener=true"
+    }
+  ],
+  "total": 1,
+  "active": 1,
+  "stale": 0,
+  "removed": 0,
+  "error": 0
+}
+```
+
+Counts reflect the **filtered** set (when `?status=active`, `total == active`). The WebUI recomputes KPI cards from the same payload and also shows the badge count (`active` only) beside *Connections* in the sidebar (`webui/src/components/Layout.tsx:60`).
+
+Polling: WebUI `useConnections` adaptive — `12s` while any `active`, `15s` while any `stale`, else `30s`; respects `staleTime 8s`, `refetchOnWindowFocus:false`.
+
+**Errors:** `400` invalid `status`, `401` missing/invalid bearer.
+
+---
+
+### `GET /connections/{connection_id}`
+
+**Auth:** bearer.
+
+Return the complete connection record.
+
+**Response:** `200` — single `OperatorConnection` JSON (same shape as an element of `GET /connections`).
+
+**Errors:** `400` malformed `connection_id` (contains `..`, `/`, or invalid chars), `404` not found (standard `{error:{code:http_error,message:Connection not found,...}}` envelope), `401`.
+
+---
+
+### `POST /connections/{connection_id}/check`
+
+**Auth:** bearer.
+
+Perform the connection/listener health-check operation. Reuses the existing persistent session abstractions rather than spawning an unrelated mechanism.
+
+**Steps:**
+1. Resolve the connection through `ConnectionManager.get`.
+2. Read listener output via `PersistentSessionManager.read_listener_output(listener_name, lines=100)` (bounded, never unlimited).
+3. Check `list_all_sessions()` fallback for `running` state.
+4. Determine `healthy = listener running && no LOG_NOT_FOUND style output`.
+5. Call `ConnectionManager.mark_check(connection_id, output, healthy)` — updates `last_check` (now), `check_output` (truncated 2000), `status = active if healthy else stale`. On hard error promotes to `error`.
+6. Return the updated connection.
+
+Does not block indefinitely — the listener read is bounded and synchronous; no remote implant command is executed over the network (the verify command for the implant is surfaced to the operator via `check_connection` MCP tool, not here).
+
+**Response:** `200` — updated `OperatorConnection`.
+
+**Errors:** `400` malformed id, `404` not found, `500` on unexpected failure (never exposes filesystem paths).
+
+WebUI: `useCheckConnection` mutation invalidates `["connections"]`, `["connections", id]`, and `["connections", id, "listener"]` so the table, details drawer, and live listener output all refresh immediately.
+
+---
+
+### `POST /connections/{connection_id}/remove`
+
+**Auth:** bearer.
+
+Use the existing removal lifecycle (graceful). Calls `ConnectionManager.mark_removed(connection_id)` which sets `status=removed` and persists — the record is preserved for audit, not hard-deleted. Best-effort also stops the associated listener via `PersistentSessionManager.stop_listener` / `stop_background_job` (failure to stop does not fail the request).
+
+The UI action never edits `operator_connections.json` directly.
+
+**Response:** `200`
+```json
+{
+  "connection": { /* updated OperatorConnection with status removed */ },
+  "removed": true,
+  "listener_stopped": true
+}
+```
+
+`listener_stopped` is `false` when the listener was already stopped or could not be stopped.
+
+**Errors:** `400` malformed id, `404` not found, `401`.
+
+WebUI: confirmation dialog required; shows `Target` + `Listener`; after success closes/updates drawer, invalidates queries, updates table/sidebar badge, shows toast.
+
+---
+
+### `GET /connections/{connection_id}/listener`
+
+**Auth:** bearer.
+
+Expose recent output associated with that connection's `listener_name` via `PersistentSessionManager.read_listener_output`. Bounded only — `?lines` clamped `1–500` (default `100`), and output truncated to `16k` chars server-side. The raw terminal log is returned as plain text (preserved newlines, never rendered as HTML).
+
+**Query params:**
+
+| Param | Type | Default | Range | Notes |
+|-------|------|---------|-------|-------|
+| `lines` | int | 100 | 1–500 | Last N lines from the listener log |
+
+**Response:** `200`
+```json
+{
+  "connection_id": "conn-ab12cd34",
+  "listener_name": "persist-10-0-0-5-linux-cron",
+  "output": "...",
+  "updated_at": "2026-04-24T10:00:20+00:00",
+  "running": true,
+  "status": "running"
+}
+```
+
+`status` is `running|stopped|not_found|error`. `running` mirrors `PersistentSessionManager` liveness. `output` may be `LOG_NOT_FOUND: ...` when no log file exists — the WebUI shows the “listener unavailable / stopped” empty state instead of blanking the page.
+
+Missing/stopped listener is handled cleanly — never `500` unless the connection itself is missing (`404`). The entire `/connections` page does not blank out because one listener endpoint failed.
+
+Polling: WebUI `useConnectionListener` with `enabled` only while the details drawer is open and `status !== removed`, `staleTime 2s`, `refetchInterval 3s`, `Live` indicator while polling + active.
 
 ---
 

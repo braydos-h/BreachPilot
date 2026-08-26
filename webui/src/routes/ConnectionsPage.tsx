@@ -2,9 +2,6 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import {
   AlertTriangle,
-  CheckCircle2,
-  Clock3,
-  Copy,
   Loader2,
   PlugZap,
   RefreshCw,
@@ -13,7 +10,6 @@ import {
   Trash2,
   Wifi,
   Radio,
-  X,
 } from "lucide-react";
 import { ApiError } from "@/api/client";
 import {
@@ -23,7 +19,7 @@ import {
   useConnections,
   useRemoveConnection,
 } from "@/api/hooks";
-import type { ConnectionStatus, OperatorConnection } from "@/api/types";
+import type { ConnectionStatus } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";

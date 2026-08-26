@@ -664,6 +664,22 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "allow_write": False,
         "destructive_ics": False,
     },
+    # Operator-box -> victim persistent RCE channel (new, Phase 7). Advisory
+    # defaults: the channel is opt-in only when an implant is actually
+    # deployed (establish_persistence). auto_start_listener creates the
+    # operator-side beacon listener automatically so the operator does not need
+    # a manual start_listener call. default_callback_* are fallbacks when the
+    # caller does not pass callback_host/port; they are allowlist-checked at
+    # the tool layer (same pivot lock as generate_payload LHOST).
+    "operator_connection": {
+        "enabled": True,
+        "auto_start_listener": True,
+        "default_callback_port": 4444,
+        "default_listener_type": "netcat",
+        "beacon_interval_seconds": 300,
+        "health_check_interval_seconds": 60,
+        "workspace_dir": "exploit_workspace",
+    },
 }
 
 # Known top-level keys

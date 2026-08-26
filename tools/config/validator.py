@@ -92,6 +92,16 @@ class ConfigValidator:
                 continue
             result.unknown_keys.append(key)
 
+        # Strict nested-key check for core sections (typos like exploit.permision
+        # must be errors, not silent warnings — see test_exploit_permision_typo_is_error).
+        for strict_section in ("ollama", "models", "mcp", "exploit"):
+            sec = self._config.get(strict_section)
+            if isinstance(sec, dict):
+                allowed = set(CONFIG_SCHEMA.get(strict_section, {}).keys())
+                for key in sec:
+                    if key not in allowed:
+                        result.errors.append(f"Unknown key '{strict_section}.{key}'")
+
         # Validate required sections exist
         for section in ("ollama", "models", "mcp", "exploit"):
             if section not in self._config:
@@ -190,6 +200,11 @@ class ConfigValidator:
             exploit = self._config["exploit"]
             if not isinstance(exploit, dict):
                 result.errors.append("'exploit' must be a mapping.")
+            else:
+                perm = exploit.get("permission")
+                if perm is not None:
+                    if perm not in ("read_only", "approve_only", "full_access"):
+                        result.errors.append("exploit.permission must be one of: read_only, approve_only, full_access")
 
         # Validate cve_lookup section (Tier 1.2: circuit-breaker tuning)
         if "cve_lookup" in self._config:

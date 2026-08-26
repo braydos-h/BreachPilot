@@ -493,3 +493,16 @@ agent:
   max_retries_per_task: 2
   max_actions: 0
   generated_code_repair_attempts: 3
+# Operator-box -> victim persistent RCE channel (Phase 7). The operator box
+# hosts the beacon listener; the victim runs one of the implants below that
+# beacons back. All victim touches are allowlist-gated (@require_allowlist);
+# callback_host must be in exploit.allowed_targets (pivot lock). Default
+# port/type are fallbacks when the tool caller omits them.
+operator_connection:
+  enabled: true
+  auto_start_listener: true
+  default_callback_port: 4444
+  default_listener_type: netcat
+  beacon_interval_seconds: 300
+  health_check_interval_seconds: 60
+  workspace_dir: exploit_workspace

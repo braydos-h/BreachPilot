@@ -29,6 +29,7 @@ from tools.api.auth import (
 from tools.api.errors import install_error_handlers, install_middleware
 from tools.api.event_broker import EventBrokerRegistry
 from tools.api.persistence import ApiPersistence
+from tools.api.routes import connections as connections_routes
 from tools.api.routes import decisions as decisions_routes
 from tools.api.routes import events as events_routes
 from tools.api.routes import graph as graph_routes
@@ -137,6 +138,7 @@ def create_app(
     events_routes.configure(auth, event_registry, persistence, token, allowed_origins)
     graph_routes.configure(auth, persistence, config)
     graph_explorer_routes.configure(auth, persistence, config)
+    connections_routes.configure(auth, config, config_path)
 
     # D4: multi-operator user accounts + annotations (loopback-only; no roles).
     # Only wired when ``api.multi_operator`` is true — default false restores
@@ -151,6 +153,7 @@ def create_app(
     app.include_router(events_routes.router)
     app.include_router(graph_routes.router)
     app.include_router(graph_explorer_routes.router)
+    app.include_router(connections_routes.router)
     if bool(api_cfg.get("multi_operator", False)):
         app.include_router(users_routes.router)
 
