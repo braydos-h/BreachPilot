@@ -88,22 +88,22 @@ export function HomePage() {
             <h1 className="text-3xl font-semibold leading-tight tracking-tight md:text-4xl">
               {returning ? (
                 <>
-                  <span className="text-gradient-primary">Welcome back</span>
-                  <span className="text-foreground">.</span>
+                  <span className="text-gradient-primary">Mission Control</span>
                 </>
               ) : (
                 <>
                   <span className="text-gradient-primary">NetAttack</span>
                   <span className="text-foreground">AI</span>
+                  <span className="text-sm font-normal tracking-wide text-muted-foreground"> — Mission Console</span>
                 </>
               )}
             </h1>
-            <p className="max-w-2xl text-sm text-muted-foreground md:text-base">
+            <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground md:text-[15px]">
               {returning
-                ? `You have ${rows.length} run${rows.length === 1 ? "" : "s"} on record${
-                    lastRow ? `, last targeting ${lastTarget} ${formatRelative(lastRow.created_at)}` : ""
-                  }. Pick up where you left off or start a new assessment.`
-                : "AI-driven penetration testing console. Plan, execute, and review authorized assessments against assets you own or are explicitly authorized to test."}
+                ? `${rows.length} run${rows.length === 1 ? "" : "s"} on record${
+                    lastRow ? ` · Last target ${lastTarget} · ${formatRelative(lastRow.created_at)}` : ""
+                  } — resume an active session or initiate a new assessment.`
+                : "Autonomous assessment platform for authorized security testing. Plan, execute, and review assessments against assets you own or are explicitly authorized to test."}
             </p>
           </div>
 
@@ -134,7 +134,7 @@ export function HomePage() {
               onClick={() => window.dispatchEvent(new Event("netattackai:open-welcome"))}
             >
               <Compass className="h-4 w-4" />
-              Take the tour
+              Product tour
             </Button>
           </div>
 
@@ -233,9 +233,9 @@ export function HomePage() {
       </section>
 
       {/* Safety footer */}
-      <p className="flex items-center justify-center gap-1.5 text-center text-[11px] text-muted-foreground">
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
-        Run only against assets you own or are explicitly authorized to test.
+      <p className="flex items-center justify-center gap-1.5 text-center text-[11px] tracking-wide text-muted-foreground">
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
+        Authorized use only — operate exclusively against assets you own or are explicitly authorized to test.
       </p>
     </div>
   );

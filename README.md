@@ -90,50 +90,50 @@ NetAttackAI is a **full-spectrum autonomous assessment platform**. Core capabili
 - **Domain recon** — `resolve_domain`, `enumerate_subdomains`, `dns_recon` (AXFR/DNSSEC), `vhost_enum` (Host-header rotation), `domain_whois` — all allowlist-gated.
 - **Threat intel** — NVD + EPSS + CISA KEV + OSV + GHSA, with circuit breaker, rate limiting, and GitHub token support for PoC search.
 
-### 💥 Exploit Engine That Chains
+### Exploitation & Chaining
 - **15 attack module families** (`tools/attack_modules/modules/`): `web`, `auth_creds`, `crypto_jwt`, `deserialize`, `network_smb`, `privesc`, `services`, `ssh`, `synthesis`, `supply_chain`, `persistence`, `ad`, `ics_iot`, `detection`, `orchestrator_phases` — each scores its own applicability (0–100) against your target's services/ports/CVEs.
 - **Capability-aware planning** — every module declares `requires` / `produces` / `read_only` / `cost` / `phase_hint` so the planner can **dynamically compose prerequisites** (`find_producers(artifact)`) and gate execution.
 - **Payload crafting & mutation** — `PayloadCrafter` + `ExploitMutator` with 5 strategies: parameter tweak, encoding change, delivery swap, context-aware. Auto-generates and mutates Python exploit scripts.
 - **Metasploit bridge** — `run_msf_module`, `msfconsole` lifecycle, `msfvenom` payload generation, session/payload/post-module orchestration, resource scripts. Full Kali arsenal on Linux, Python-only on Windows.
 - **Web scanning** — nikto / nuclei / sqlmap / gobuster / feroxbuster / whatweb / wpscan — argv-list execution, `which`-checked, parsed `WEB_SCAN_RESULT` blocks.
 
-### 🧬 Intelligence That Learns
+### Adaptive Intelligence
 - **140+ advisory skills** — YAML + markdown prompt-context layer, scored by deterministic tags + lexical search + **cross-mission Bayesian feedback** + **semantic cosine similarity** over `nomic-embed-text` embeddings. Mid-run re-selection as new CVEs surface.
 - **Semantic memory** — `nomic-embed-text` cross-mission learning via `SemanticMemoryManager` + `ExperienceStore`. The orchestrator stores lessons on every confirmed win.
 - **Attack memory** — per-attempt context window management (6K chars), compaction every 50 rounds, persistent campaign state.
 - **Model telemetry** — token counts, context utilization, duration, tokens/sec for every LLM call.
 - **Multi-model war room** — consult Kimi K2.6, DeepSeek V4 Pro (1M context), GLM-5.2, Minimax M3 mid-run for advisory ideas without tool access. Configurable `consult_aliases`.
 
-### 🏴 Post-Exploit & Lateral
+### Post-Exploitation & Lateral Movement
 - **Credential ops** — encrypted vault (`credential_store`), `lateral_exec` via Impacket, `dump_credentials`, `kerberoast`, `hash_crack` (hashcat/john with auto hash-type ID + `--show` recovery).
 - **AD domination** — BloodHound CE, AD ACL abuse, AS-REP roast, pass-the-hash, ADCS/Certipy, Golden Ticket, Responder relay, SMB signing checks.
 - **Operator connection** — persistent RCE beacons (netcat/TLS/DNS/HTTPS/SOCKS pivot) with `exploit_workspace` callback management.
 - **ICS/IoT** — Modbus & S7 PLC modules (read-only by default; **destructive writes dual-gated** behind `ics.allow_write` + `ics.destructive_ics`).
 
-### 🕵️ OPSEC & Evasion
+### Operational Security
 - **Target-aware OPSEC** — auto-disabled on private/local targets (RFC1918/loopback/link-local) so the agent moves freely in your lab; full posture on public targets. UA rotation, DoH, pacing with jitter, rate limiting, quiet-command rewrites, noise budget — all **advisory, never a gate** (the command always executes, but you get `OPSEC_ADVISORY` blocks suggesting quieter alternatives).
 
-### 📊 Report Like a Pro
+### Reporting & Export
 - **MITRE ATT&CK Navigator** export — technique-mapped layer JSON for SOC handoff (`reports/mitre/`).
 - **Ticketing** — auto-create Jira/GitHub issues from confirmed findings.
 - **Enhanced reporting** — timelines, CVSS, exploit chains, Markdown + HTML, `decision_log.jsonl`, tamper-evident audit, loot & credential tables, graph evidence.
 
 ---
 
-## The WebUI — Your Mission Control
+## WebUI — Mission Control
 
-Everything lives at **`http://127.0.0.1:8765`** — loopback-only, bearer-token gated, dark-mode, real-time.
+Available at **`http://127.0.0.1:8765`** — loopback-only, bearer-token authenticated, real-time.
 
-| Page | What you get |
+| Page | Description |
 |------|-------------|
-| **New Run Wizard** | Pick target → model → goal → power-ups → confirm & launch. Domain or IP. One click. |
-| **Live Run** | Real-time event stream, tool calls, decisions, telemetry — WebSocket + SSE, token-gated, ring-buffered. |
-| **Attack Graph** | Interactive **DAG** (ReactFlow) — pan, zoom, filter, find paths, inspect evidence. Powered by `AttackPlan` with `ready_steps()` / `blocked_steps()` / `graph_summary()`. |
-| **Artifacts & Audit** | Reports, raw Nmap, findings, SHA256 audit chain — everything tamper-evident. |
-| **Loot & Credentials** | Captured creds and loot per run, encrypted at rest. |
-| **System** | Config editor, secrets, models/providers, skills, plugins, diagnostics — no YAML editing needed. |
+| **New Run Wizard** | Configure target, model, goal, and execution options — then review and launch. Supports IP and domain targets. |
+| **Live Run** | Real-time event stream including tool calls, decisions, and telemetry via WebSocket and SSE. Token-gated and ring-buffered. |
+| **Attack Graph** | Interactive DAG (ReactFlow) with pan, zoom, filtering, path finding, and evidence inspection. Backed by `AttackPlan` (`ready_steps()` / `blocked_steps()` / `graph_summary()`). |
+| **Artifacts & Audit** | Reports, raw Nmap output, findings, and SHA-256 audit chain — all tamper-evident. |
+| **Loot & Credentials** | Captured credentials and loot per run, encrypted at rest. |
+| **System** | Configuration, secrets, models and providers, skills, plugins, and diagnostics — no manual YAML editing required. |
 
-Built as a **Vite + React + TypeScript SPA** (`webui/`) with TanStack Query, Radix UI, Tailwind. First run auto-builds `webui/dist/` if Node is present.
+Built as a **Vite + React + TypeScript SPA** (`webui/`) with TanStack Query, Radix UI, and Tailwind CSS. The production bundle is built automatically on first launch when Node.js is available.
 
 For dev hot-reload:
 
@@ -145,14 +145,14 @@ Full reference: [docs/webui.md](docs/webui.md) · API: [docs/api.md](docs/api.md
 
 ---
 
-## The Brains — Skills, Agents & Memory
+## Intelligence — Skills, Agents & Memory
 
-### 140+ Skills — A Brain That Keeps Growing
-Each skill is a curated `SKILL.md` under `skills/` — from `conducting-network-penetration-test` and `executing-red-team-engagement-planning` to `exploiting-jwt-algorithm-confusion-attack`, `exploiting-ssti`, `exploiting-nopac-cve-2021-42278-42287`, and `attacking-domains-end-to-end`. The engine deterministically selects the top 6 for your context, re-selects mid-run, and can do semantic matching via embeddings.
+### 140+ Advisory Skills
+Each skill is a curated `SKILL.md` under `skills/` — from `conducting-network-penetration-test` and `executing-red-team-engagement-planning` to `exploiting-jwt-algorithm-confusion-attack`, `exploiting-ssti`, `exploiting-nopac-cve-2021-42278-42287`, and `attacking-domains-end-to-end`. The engine deterministically selects the top six for the current context, re-evaluates mid-run, and supports semantic matching via embeddings.
 
-Categories include: **network pentest, web/API, auth/JWT/OAuth, deserialization, AD/BloodHound, SMB/network, privesc, crypto, supply chain, detection, persistence, ICS/IoT**, and more. See [docs/skills.md](docs/skills.md) and [docs/skill-authoring.md](docs/skill-authoring.md).
+Categories include network penetration testing, web/API, auth/JWT/OAuth, deserialization, AD/BloodHound, SMB/network, privilege escalation, cryptography, supply chain, detection, persistence, and ICS/IoT. See [docs/skills.md](docs/skills.md) and [docs/skill-authoring.md](docs/skill-authoring.md).
 
-### Swarm — 6 Specialists, One Blackboard
+### Swarm — Six Specialists, One Blackboard
 
 | Agent | Job |
 |-------|-----|
@@ -165,27 +165,27 @@ Categories include: **network pentest, web/API, auth/JWT/OAuth, deserialization,
 
 Orchestrated via `tools/swarm/orchestrator.py` with shared blackboard, battle log, parallel dispatch, and phase-aware skill hints. See [docs/swarm.md](docs/swarm.md).
 
-### MCP Tool Arsenal — ~90 Tools Across 27 Families
+### MCP Tool Suite — Approximately 90 Tools Across 27 Families
 
-| Family | Superpower |
+| Family | Capability |
 |--------|-----------|
-| `terminal` | Shell execution with target-IP allowlist lock + OPSEC advisory |
-| `workspace` | `write_python_file` / `run_python_file` / `read_workspace_file` — workspace-contained file ops |
+| `terminal` | Shell execution with target-IP allowlist enforcement and OPSEC advisory |
+| `workspace` | `write_python_file` / `run_python_file` / `read_workspace_file` — workspace-contained file operations |
 | `recon` | `check_os`, `quick_scan`, `run_full_recon`, `get_service_fingerprint` |
-| `attack_modules` | `run_attack_module`, `craft_exploit`, `mutate_exploit` + hypothesis/state tools |
-| `metasploit` | Full `msfconsole` lifecycle, sessions, payloads, post modules |
+| `attack_modules` | `run_attack_module`, `craft_exploit`, `mutate_exploit` and hypothesis/state tools |
+| `metasploit` | Full `msfconsole` lifecycle, sessions, payloads, and post modules |
 | `payloads` | `generate_payload` via msfvenom |
-| `web_scan` | nikto/nuclei/sqlmap/gobuster/feroxbuster/whatweb/wpscan |
-| `cracking` | hashcat/john with auto hash-type ID |
-| `credentials` | Encrypted vault + Impacket lateral / Kerberoast |
-| `sessions` | tmux / background jobs / listeners (beacons) |
+| `web_scan` | nikto, nuclei, sqlmap, gobuster, feroxbuster, whatweb, wpscan |
+| `cracking` | hashcat/john with automatic hash-type identification |
+| `credentials` | Encrypted vault and Impacket-based lateral execution / Kerberoast |
+| `sessions` | tmux, background jobs, and listeners (beacons) |
 | `research` | `search_exploit_db`, `search_web_exploit`, `deep_research`, `search_cve_intel` |
-| `domain` | DNS, subdomain enum, AXFR, vhost, WHOIS — with auto-authorization |
+| `domain` | DNS, subdomain enumeration, AXFR, vhost, WHOIS — with automatic authorization |
 | `peer_models` | `consult_peer_models` — advisory multi-model consultation |
-| `runtime_skills` | `list/search/load` skills at runtime |
-| + 13 more | `assessment_state`, `parallel_agents`, `poc_verifier`, `replay_simulator`, `mitre`, `ad`, `operator_connection` … |
+| `runtime_skills` | `list`, `search`, and `load` skills at runtime |
+| + 13 more | `assessment_state`, `parallel_agents`, `poc_verifier`, `replay_simulator`, `mitre`, `ad`, `operator_connection`, and others |
 
-All wired through `tools/mcp_tools/registry.py` with `@audit_tool` / `@require_allowlist()` decorators. Auto-discovered via `collect_tools()` — no manual registration. See [docs/mcp-tools.md](docs/mcp-tools.md).
+All tools are registered via `tools/mcp_tools/registry.py` using `@audit_tool` / `@require_allowlist()` decorators and auto-discovered through `collect_tools()` — no manual registration required. See [docs/mcp-tools.md](docs/mcp-tools.md).
 
 ---
 
@@ -341,7 +341,7 @@ Shipped (enabled in lab build, require their API key to actually run):
 
 ---
 
-## Quality — Tested Like It Matters
+## Quality Assurance
 
 - **~251 test files** in `tests/` — all mock subprocess/network, no live Nmap. Scope gates, safety review, recon, swarm, audit chains, credential storage, Metasploit, and more.
 - **CI on every push/PR** — Python 3.11–3.13 matrix, coverage, CodeQL, dependency-review.

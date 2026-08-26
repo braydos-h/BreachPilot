@@ -16,7 +16,7 @@ import { STEPS } from "@/components/welcome/steps";
 const WELCOME_KEY = "netattackai.welcome.v1";
 const OPEN_EVENT = "netattackai:open-welcome";
 
-const TAGLINE = "An AI-driven, local-first penetration testing & bug bounty research agent.";
+const TAGLINE = "Autonomous assessment platform for authorized security testing — local-first, audited, operator-supervised.";
 
 export function WelcomeGate({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState<boolean>(() => {
@@ -110,10 +110,10 @@ function Hero({ onStart, onSkip }: { onStart: () => void; onSkip: () => void }) 
         >
           <Button size="lg" className="gap-1.5 glow-primary-strong" onClick={onStart}>
             <Compass className="h-4 w-4" />
-            Take the tour
+            Product tour
           </Button>
           <Button size="lg" variant="outline" onClick={onSkip}>
-            Skip — go to console
+            Continue to console
           </Button>
         </div>
 
@@ -182,11 +182,11 @@ function Tour({ onExit }: { onExit: () => void }) {
               <span className="text-gradient-primary">NetAttack</span>
               <span className="text-foreground">AI</span>
             </span>
-            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Tour</span>
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Product Tour</span>
           </div>
           <Button variant="ghost" size="sm" className="gap-1.5" onClick={onExit}>
             <X className="h-4 w-4" />
-            Skip tour
+            Exit tour
           </Button>
         </header>
 
@@ -222,7 +222,7 @@ function Tour({ onExit }: { onExit: () => void }) {
                 Back
               </Button>
               <Button size="sm" className="gap-1.5 glow-primary" onClick={onNext}>
-                {isLast ? "Start your first run" : "Next"}
+                {isLast ? "Create first run" : "Next"}
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </div>

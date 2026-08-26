@@ -131,6 +131,7 @@ ignore = ["E501", "F405", "F403", "F841"]
 # Lab build: operator-box filesystem is unrestricted; path-traversal gates removed intentionally
 "tools/mcp_tools/*.py" = ["F405", "F403", "F401", "F841", "E402"]
 "tools/mcp_tools/modules/*.py" = ["F405", "F403", "F401", "F841", "E402"]
+"tools/mcp_tools/terminal/*.py" = ["F405", "F403", "F401", "F841", "E402"]
 "tools/kernel/*.py" = ["F401"]
 "tests/*.py" = ["F401", "F841", "E402"]
 # facade re-exports intentional — public API via __all__, private helpers patched via sys.modules

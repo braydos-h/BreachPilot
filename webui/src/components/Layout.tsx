@@ -295,7 +295,7 @@ export function Layout() {
         <footer className="flex items-center justify-between gap-2 border-t px-4 py-2 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
             <Eye className="h-3 w-3" />
-            Loopback only. Run only against assets you own or are authorized to test.
+            Loopback-only · Authorized use only — operate exclusively against owned or explicitly authorized assets.
           </span>
           <a
             href="https://github.com/braydos-h/NetAttackAi"
