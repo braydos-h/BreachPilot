@@ -569,3 +569,160 @@ def test_config_yaml_keys_subset_of_schema():
     assert not extra, (
         f"config.yaml has keys not in CONFIG_SCHEMA: {sorted(extra)} (add them to CONFIG_SCHEMA or PLUGIN_REGISTRY.config_sections)"
     )
+
+
+def test_exploit_permision_typo_is_error(tmp_path: Path):
+    """Regression: exploit.permision typo must raise ERROR, not silent warning (issue: misconfig silently degrades to read_only).
+
+    The strict-sections promotion makes unknown exploit.* keys errors. A typo like
+    ``exploit.permision: full_access`` must fail validation so CI catches it, not
+    degrade to read_only via _resolve_exploit_permission fallback.
+    """
+    from tools.config_manager import ConfigValidator
+
+    cfg_path = tmp_path / "typo.yaml"
+    yaml.safe_dump(
+        {
+            "ollama": {"host": "http://localhost:11434"},
+            "models": {"registry": {"glm": "glm-5.2:cloud"}, "default_alias": "glm"},
+            "mcp": {"default_transport": "stdio"},
+            "exploit": {"permision": "full_access", "enabled": True},
+        },
+        cfg_path.open("w", encoding="utf-8"),
+    )
+    validator = ConfigValidator(cfg_path)
+    _, result = validator.load_and_validate()
+    # Must be invalid (error, not just unknown_keys warning)
+    assert not result.is_valid, "typo exploit.permision should make config invalid"
+    assert any("permision" in e for e in result.errors), f"expected error about permision typo, got {result.errors}"
+    # unknown_keys stays for top-level only; nested typo goes to errors
+    assert "permision" not in str(result.unknown_keys)
+
+
+def test_exploit_permission_strict_allowlist(tmp_path: Path):
+    """exploit.permission must be one of read_only/approve_only/full_access (strict)."""
+    from tools.config_manager import ConfigValidator
+
+    for bad in ["Full_Access", "fullaccess", "invalid", ""]:
+        cfg_path = tmp_path / f"bad_perm_{bad or 'empty'}.yaml"
+        yaml.safe_dump(
+            {
+                "ollama": {"host": "http://localhost:11434"},
+                "models": {"registry": {"glm": "glm-5.2:cloud"}, "default_alias": "glm"},
+                "mcp": {"default_transport": "stdio"},
+                "exploit": {"permission": bad, "enabled": True},
+            },
+            cfg_path.open("w", encoding="utf-8"),
+        )
+        validator = ConfigValidator(cfg_path)
+        _, result = validator.load_and_validate()
+        if bad == "":
+            # empty string is invalid (not in allowlist) -> error
+            assert not result.is_valid
+        else:
+            assert not result.is_valid, f"permission {bad!r} should be invalid"
+            assert any("exploit.permission" in e for e in result.errors)
+
+    # valid values pass
+    for good in ["read_only", "approve_only", "full_access"]:
+        cfg_path = tmp_path / f"good_perm_{good}.yaml"
+        yaml.safe_dump(
+            {
+                "ollama": {"host": "http://localhost:11434"},
+                "models": {"registry": {"glm": "glm-5.2:cloud"}, "default_alias": "glm"},
+                "mcp": {"default_transport": "stdio"},
+                "exploit": {"permission": good, "enabled": True},
+            },
+            cfg_path.open("w", encoding="utf-8"),
+        )
+        validator = ConfigValidator(cfg_path)
+        _, result = validator.load_and_validate()
+        # Valid permission should not produce an exploit.permission error
+        assert not any("exploit.permission" in e for e in result.errors), f"good {good!r} should not error"
+
+
+def test_strict_unknown_keys_error_for_mcp_ollama_models(tmp_path: Path):
+    """Unknown nested keys in strict sections mcp/ollama/models must be errors."""
+    from tools.config_manager import ConfigValidator
+
+    cases = [
+        ("mcp", {"default_transport": "stdio", "unknown_mcp_key": True}),
+        ("ollama", {"host": "http://localhost:11434", "unknown_ollama_key": True}),
+        ("models", {"registry": {"glm": "glm-5.2:cloud"}, "default_alias": "glm", "unknown_models_key": True}),
+        ("exploit", {"enabled": True, "unknown_exploit_key": True}),
+    ]
+    for section, payload in cases:
+        cfg_path = tmp_path / f"strict_{section}.yaml"
+        base = {
+            "ollama": {"host": "http://localhost:11434"},
+            "models": {"registry": {"glm": "glm-5.2:cloud"}, "default_alias": "glm"},
+            "mcp": {"default_transport": "stdio"},
+            "exploit": {"enabled": True},
+        }
+        base[section] = payload
+        yaml.safe_dump(base, cfg_path.open("w", encoding="utf-8"))
+        validator = ConfigValidator(cfg_path)
+        _, result = validator.load_and_validate()
+        assert not result.is_valid, f"unknown key in {section} should be error"
+        assert any(section in e for e in result.errors), f"expected error mentioning {section}, got {result.errors}"
+
+
+def test_plugin_sections_remain_warnings(tmp_path: Path):
+    """Plugin-registered top-level sections stay warnings (unknown_keys), not errors."""
+    from tools.config_manager import ConfigValidator
+    from tools.plugins import PLUGIN_REGISTRY
+
+    # Register a fake plugin section for this test
+    PLUGIN_REGISTRY.register_config_section("fake_plugin_section", {"enabled": True})
+    try:
+        cfg_path = tmp_path / "plugin_warn.yaml"
+        yaml.safe_dump(
+            {
+                "ollama": {"host": "http://localhost:11434"},
+                "models": {"registry": {"glm": "glm-5.2:cloud"}, "default_alias": "glm"},
+                "mcp": {"default_transport": "stdio"},
+                "exploit": {"enabled": True},
+                "fake_plugin_section": {"enabled": True, "custom": "value"},
+            },
+            cfg_path.open("w", encoding="utf-8"),
+        )
+        validator = ConfigValidator(cfg_path)
+        _, result = validator.load_and_validate()
+        # Plugin section should NOT be in errors, should be either known or unknown_keys? Actually plugin sections are whitelisted, so not unknown
+        assert result.is_valid, f"plugin section should not make invalid: {result.errors}"
+        assert "fake_plugin_section" not in result.unknown_keys
+        # Unknown top-level non-plugin should still be warning (unknown_keys) not error
+        cfg_path2 = tmp_path / "unknown_top.yaml"
+        yaml.safe_dump(
+            {
+                "ollama": {"host": "http://localhost:11434"},
+                "models": {"registry": {"glm": "glm-5.2:cloud"}, "default_alias": "glm"},
+                "mcp": {"default_transport": "stdio"},
+                "exploit": {"enabled": True},
+                "totally_unknown_top": {"foo": "bar"},
+            },
+            cfg_path2.open("w", encoding="utf-8"),
+        )
+        validator2 = ConfigValidator(cfg_path2)
+        _, result2 = validator2.load_and_validate()
+        assert result2.is_valid, "unknown top-level non-strict should be warning not error"
+        assert "totally_unknown_top" in result2.unknown_keys
+    finally:
+        PLUGIN_REGISTRY._config_sections.pop("fake_plugin_section", None)
+
+
+def test_config_yaml_and_schema_in_sync_via_python_c():
+    """CI check: python -c "assert set(yaml.safe_load(open('config.yaml')))==set(CONFIG_SCHEMA)" """
+    import pathlib as _pl
+
+    import yaml
+
+    from tools.config_manager import CONFIG_SCHEMA
+
+    cfg_path = _pl.Path("config.yaml")
+    assert cfg_path.exists()
+    cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    assert set(cfg.keys()) == set(CONFIG_SCHEMA.keys()), (
+        f"config.yaml and CONFIG_SCHEMA top-level keys differ: extra in yaml {sorted(set(cfg.keys()) - set(CONFIG_SCHEMA.keys()))}, missing in yaml {sorted(set(CONFIG_SCHEMA.keys()) - set(cfg.keys()))}"
+    )
+
