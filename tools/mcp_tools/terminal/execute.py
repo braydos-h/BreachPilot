@@ -1,0 +1,271 @@
+"""Execution tools for terminal MCP (run_exploit_terminal, run_as_root, git_clone)."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+import signal
+import subprocess
+import time
+from pathlib import Path
+from typing import Any
+
+from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
+from tools.mcp_shared import _is_inside_workspace
+from tools.mcp_tools.registry import ToolContext, _attempt_dir, _run_with_pgrp_timeout
+from tools.mcp_tools.terminal.allowlist import _opsec_advisory_block, _target_lock_block
+from tools.mcp_tools.terminal.privilege import _find_windows_bash, _require_sudo_or_pivot
+from tools.validation_utils import preflight_command_check
+
+__all__ = ["_register_execute_tools"]
+
+
+def _platform_system() -> str:
+    import platform
+
+    if os.name == "nt":
+        return "Windows"
+    try:
+        return platform.system()
+    except Exception:
+        return "Linux"
+
+
+def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
+    workspace = ctx.workspace
+    config = ctx.config
+    audit_tool = ctx.audit_tool
+
+    @mcp.tool()
+    @audit_tool
+    def run_exploit_terminal(command: str) -> str:
+        """Run any shell command in a dedicated visible terminal window. The command executes synchronously; output is captured and RETURNED in the result under an OUTPUT: section. Use for running Kali tools, nmap, curl, netcat, searchsploit, etc. IMPORTANT: for long scans (nmap -sV), redirect output to a file with -oN scan.txt so you can read it later with read_workspace_file."""
+        if not command or not command.strip():
+            return "BLOCKED: empty command."
+        if len(command) > 4000:
+            return "BLOCKED: command too long."
+
+        original_command = command
+        preflight = preflight_command_check(command)
+        if not preflight["valid"]:
+            return (
+                f"TERMINAL_RESULT: blocked (exit_code=None, duration=0.0s)\n"
+                f"ATTEMPT_ID: preflight\n"
+                f"COMMAND_ORIGINAL: {original_command}\n"
+                f"COMMAND_SANITIZED: {preflight['sanitized_command']}\n"
+                f"BLOCKED_REASON: {preflight['blocked_reason']}"
+            )
+
+        sanitized_command = preflight["sanitized_command"]
+        corrections = preflight["corrections"]
+
+        _lock_reason = _target_lock_block(sanitized_command, config)
+        if _lock_reason:
+            return (
+                f"TERMINAL_RESULT: blocked (exit_code=None, duration=0.0s)\n"
+                f"ATTEMPT_ID: preflight\n"
+                f"COMMAND_ORIGINAL: {original_command}\n"
+                f"COMMAND_SANITIZED: {sanitized_command}\n"
+                f"BLOCKED_REASON: {_lock_reason}"
+            )
+
+        missing_tools = preflight["missing_tools"]
+        preflight_note = ""
+        if missing_tools:
+            preflight_note = f"PREFLIGHT_WARNING: Missing tools on PATH: {', '.join(missing_tools)}.\n"
+        if corrections:
+            preflight_note += f"PREFLIGHT_CORRECTIONS: {json.dumps(corrections)}\n"
+
+        attempt_dir, attempt_id = _attempt_dir(workspace)
+        log_path = attempt_dir / "terminal.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        start = time.monotonic()
+        is_windows = _platform_system() == "Windows"
+        header = f"{'=' * 60}\nCOMMAND: {sanitized_command}\n{'=' * 60}\n"
+        log_path.write_text(header, encoding="utf-8", errors="replace")
+
+        _bash_on_windows = _find_windows_bash(config) if is_windows else None
+        if is_windows and _bash_on_windows is None:
+            wrapper = attempt_dir / "run_exploit.cmd"
+            wrapper.write_text(
+                f"@echo off\r\n"
+                f"title AI Exploit Terminal\r\n"
+                f'cd /d "{attempt_dir}"\r\n'
+                f"{sanitized_command} >> terminal.log 2>&1\r\n"
+                f"echo EXIT_CODE: %ERRORLEVEL% >> terminal.log\r\n",
+                encoding="ascii",
+                errors="replace",
+            )
+            proc = subprocess.Popen(
+                ["cmd.exe", "/c", str(wrapper)],
+                cwd=str(attempt_dir),
+                creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+            )
+        else:
+            if _bash_on_windows:
+                _shell_bin = _bash_on_windows
+            else:
+                _shell = str((config or {}).get("exploit", {}).get("shell", "bash")) or "bash"
+                _shell_bin = shutil.which(_shell) or _shell
+            wrapper = attempt_dir / "run_exploit.sh"
+            wrapper.write_text(
+                f'#!{_shell_bin}\ncd "{attempt_dir}"\n{sanitized_command} 2>&1\necho EXIT_CODE: $?\n',
+                encoding="utf-8",
+            )
+            wrapper.chmod(0o755)
+            proc = subprocess.Popen(
+                [_shell_bin, str(wrapper)],
+                cwd=str(attempt_dir),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+
+        timeout = 300
+        out_bytes: bytes | str | None = None
+        try:
+            if is_windows and _bash_on_windows is None:
+                exit_code = proc.wait(timeout=timeout)
+                status = "completed" if exit_code == 0 else "failed"
+            else:
+                out_bytes, _ = proc.communicate(timeout=timeout)
+                exit_code = proc.returncode
+                status = "completed" if exit_code == 0 else "failed"
+        except subprocess.TimeoutExpired:
+            if is_windows:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+            else:
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    try:
+                        proc.kill()
+                    except ProcessLookupError:
+                        pass
+            if not (is_windows and _bash_on_windows is None):
+                try:
+                    out_bytes, _ = proc.communicate(timeout=5)
+                except _EXC_GROUP_CATCH:
+                    out_bytes = out_bytes or b""
+            exit_code = None
+            status = "timed_out"
+
+        elapsed = time.monotonic() - start
+        output_tail = ""
+        if out_bytes is not None:
+            try:
+                text = out_bytes.decode("utf-8", errors="replace") if isinstance(out_bytes, bytes) else str(out_bytes)
+                log_path.write_text(header + text, encoding="utf-8", errors="replace")
+                output_tail = text[-4000:]
+            except _EXC_GROUP_CATCH:
+                pass
+        elif log_path.exists():
+            text = log_path.read_text(encoding="utf-8", errors="replace")
+            output_tail = text[-4000:]
+
+        _opsec_advisory = _opsec_advisory_block(sanitized_command, config)
+
+        return (
+            f"TERMINAL_RESULT: {status} (exit_code={exit_code}, duration={elapsed:.1f}s)\n"
+            f"ATTEMPT_ID: {attempt_id}\n"
+            f"COMMAND_ORIGINAL: {original_command}\n"
+            f"COMMAND_SANITIZED: {sanitized_command}\n"
+            f"{preflight_note}"
+            f"{_opsec_advisory}"
+            f"WORKSPACE: {attempt_dir}\n"
+            f"OUTPUT:\n{output_tail}"
+        )
+
+    @mcp.tool()
+    @audit_tool
+    def run_as_root(command: str) -> str:
+        """Run ANY command with sudo (root privileges). Use for commands that require root: tcpdump, iptables, systemctl, writing to /etc, raw socket operations, etc. The command runs synchronously and output is captured."""
+        if not command or not command.strip():
+            return "BLOCKED: empty command."
+        if len(command) > 4000:
+            return "BLOCKED: command too long."
+        original_command = command
+        _lock_reason = _target_lock_block(command, config)
+        if _lock_reason:
+            return f"ROOT_CMD_RESULT: blocked (target lock: {_lock_reason})"
+        _pivot = _require_sudo_or_pivot("run_as_root", original_command)
+        if _pivot:
+            return _pivot
+        cmd = f"sudo {command} 2>&1"
+        try:
+            returncode, out, err = _run_with_pgrp_timeout(
+                ["bash", "-c", cmd],
+                300,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            output = (out + "\n" + err)[-4000:]
+            status = "completed" if returncode == 0 else "failed"
+            return f"ROOT_CMD_RESULT: {status} (exit_code={returncode})\nCOMMAND: {original_command}\nOUTPUT:\n{output}"
+        except subprocess.TimeoutExpired:
+            return f"ROOT_CMD_RESULT: timed_out\nCOMMAND: {original_command}"
+        except _EXC_GROUP_CATCH as exc:
+            _log_nested_exceptions(exc)
+            return f"ROOT_CMD_RESULT: error - {exc}"
+
+    @mcp.tool()
+    @audit_tool
+    def git_clone(repo_url: str, target_dir: str = "") -> str:
+        """Clone a Git repository (GitHub exploit/PoC/tool) into the workspace. Provide the full repo URL (e.g., 'https://github.com/user/repo.git'). Optional target_dir for a custom folder name."""
+        if not repo_url or not repo_url.strip():
+            return "BLOCKED: repo_url is required."
+        url = repo_url.strip()
+        if not re.fullmatch(r"https?://[a-zA-Z0-9._/\-:@]+\.git", url) and not re.fullmatch(
+            r"https?://github\.com/[a-zA-Z0-9._\-/]+", url
+        ):
+            return "BLOCKED: invalid repo URL. Must be a GitHub/GitLab HTTPS URL."
+        dir_name = target_dir.strip() if target_dir.strip() else url.rstrip("/").split("/")[-1].replace(".git", "")
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", dir_name):
+            return f"BLOCKED: target_dir must match [A-Za-z0-9._-]{{1,80}} (got {dir_name!r})."
+        clone_dir = workspace / dir_name
+        if not _is_inside_workspace(workspace, clone_dir.resolve()):
+            return f"BLOCKED: clone target {clone_dir} escapes the exploit workspace."
+
+        preflight_note = ""
+        if url.lower().startswith(("http://", "https://")):
+            try:
+                from tools.exploit_search import url_exists as _url_exists_check
+
+                _ok, _reason = _url_exists_check(url, timeout=8)
+            except _EXC_GROUP_CATCH:
+                _ok, _reason = True, None
+            if not _ok:
+                preflight_note = (
+                    f"PREFLIGHT_WARNING: URL existence check failed ({_reason}); "
+                    f"if this is a private/auth-gated repo the clone may still "
+                    f"succeed. If the clone fails, use cve_to_poc instead of "
+                    f"guessing URLs.\n"
+                )
+
+        try:
+            returncode, out, err = _run_with_pgrp_timeout(
+                ["git", "clone", "--", url, str(clone_dir)],
+                120,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            output = (out + "\n" + err)[-3000:]
+            status = "completed" if returncode == 0 else "failed"
+            return (
+                f"{preflight_note}GIT_CLONE_RESULT: {status} (exit_code={returncode})\n"
+                f"REPO: {url}\nPATH: {clone_dir}\nOUTPUT:\n{output}"
+            )
+        except subprocess.TimeoutExpired:
+            return f"{preflight_note}GIT_CLONE_RESULT: timed_out\nREPO: {url}"
+        except _EXC_GROUP_CATCH as exc:
+            _log_nested_exceptions(exc)
+            return f"{preflight_note}GIT_CLONE_RESULT: error - {exc}"

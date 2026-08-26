@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from tools.api.auth import BearerAuth
 
@@ -91,6 +91,7 @@ def _validate_connection_id(cid: str) -> str:
 
 # -- Pydantic response models ---------------------------------------------
 
+
 class ConnectionResponse(BaseModel):
     connection_id: str
     target_ip: str
@@ -138,6 +139,7 @@ class RemoveResponse(BaseModel):
 
 # -- Helpers ---------------------------------------------------------------
 
+
 def _to_response_dict(rec: Any) -> dict[str, Any]:
     """Convert ConnectionRecord to API dict via to_dict()."""
     return rec.to_dict()
@@ -154,6 +156,7 @@ def _counts(conns: list[Any]) -> dict[str, int]:
 
 # -- Routes ----------------------------------------------------------------
 
+
 @router.get("/connections", response_model=ConnectionsListResponse)
 async def list_connections(
     status: str | None = Query(None, description="Filter by status: active|stale|removed|error"),
@@ -165,7 +168,10 @@ async def list_connections(
     if status is not None:
         status = status.strip().lower()
         if status and status not in _VALID_STATUSES:
-            raise HTTPException(status_code=400, detail=f"Invalid status {status!r}. Must be one of: {', '.join(sorted(_VALID_STATUSES))}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid status {status!r}. Must be one of: {', '.join(sorted(_VALID_STATUSES))}",
+            )
     else:
         status = ""
     target_ip = (target or "").strip()
