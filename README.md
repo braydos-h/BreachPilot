@@ -10,15 +10,15 @@
 ![MCP Tools](https://img.shields.io/badge/MCP%20Tools-120%2B-ec4899?style=flat-square)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)
 
-<img width="1725" height="912" alt="NetAttackAI WebUI — Mission Control" src="https://github.com/user-attachments/assets/45b6af2f-91e2-4eaf-a4cd-1352dbd42e0c" />
+<img width="1725" height="912" alt="NetAttackAI WebUI: Mission Control" src="https://github.com/user-attachments/assets/45b6af2f-91e2-4eaf-a4cd-1352dbd42e0c" />
 
 ### Autonomous adversary platform for authorized assessments
 
-**Plan · Recon · Exploit · Verify · Report — end-to-end, against assets you own.**
+**Plan · Recon · Exploit · Verify · Report: end-to-end, against assets you own.**
 
-NetAttackAI is an agentic operator that plans, discovers, reasons, chains, and verifies — then delivers a complete report. Built on Ollama Cloud (976K context), the Model Context Protocol, and 140+ advisory skills. Lab-only, target-locked, and fully audited. An open-source autonomous assessment platform designed for rigorous, operator-supervised use.
+NetAttackAI is an open-source agentic operator that plans, discovers, reasons, chains, and verifies, then delivers a complete report. It is built on Ollama Cloud (976K context), the Model Context Protocol, and 140+ advisory skills. It runs lab-only and target-locked, audits every action, and is designed for rigorous, operator-supervised use.
 
-[Quick Start — 60s](#quick-start--60-seconds) · [WebUI](#the-webui--your-mission-control) · [Capabilities](#platform-capabilities) · [Safety Model](#safety) · [Docs](docs/)
+[Quick start](#quick-start-in-60-seconds) · [WebUI](#webui-mission-control) · [Capabilities](#platform-capabilities) · [Safety model](#safety-model) · [Docs](docs/)
 
 </div>
 
@@ -26,52 +26,52 @@ NetAttackAI is an agentic operator that plans, discovers, reasons, chains, and v
 
 > [!WARNING]
 > **Authorized use only.** Only test systems you own or have explicit written permission to assess. Run on a throwaway operator box.
-> **Attack mode = `full_access`** — every in-scope action is auto-approved. The safeties are the **target-IP allowlist lock** (a destination guard, not a sandbox) and the **mission scope gate** (`exploit.forbidden_actions` / `disallowed_assets` deny with a `SCOPE_DENIED` audit row). Recon stays fully scope-gated. See [Safety Model](#safety).
+> **Attack mode = `full_access`**: every in-scope action is auto-approved. The safeties are the **target-IP allowlist lock** (a destination guard, not a sandbox) and the **mission scope gate** (`exploit.forbidden_actions` / `disallowed_assets` deny with a `SCOPE_DENIED` audit row). Recon stays fully scope-gated. See [Safety model](#safety-model).
 
 ---
 
 ## Why NetAttackAI
 
-NetAttackAI covers the full assessment lifecycle — from reconnaissance through exploitation, verification, and reporting — under continuous operator supervision.
+NetAttackAI covers the full assessment lifecycle, from reconnaissance through exploitation, verification, and reporting, under continuous operator supervision.
 
 <table>
 <tr>
 <td width="33%" valign="top">
 
-### Adversarial Planning
-Structured **AttackPlan DAG** with prerequisites, hypotheses, and automated failure recovery. Retries with refined parameters, switches capabilities, and composes prerequisites dynamically. Every decision is recorded in `decision_log.jsonl`.
+### Adversarial planning
+A structured AttackPlan DAG with prerequisites, hypotheses, and automated failure recovery. It retries with refined parameters, switches capabilities, and composes prerequisites dynamically. Every decision is recorded in `decision_log.jsonl`.
 
 </td>
 <td width="33%" valign="top">
 
-### Multi-Agent Orchestration
-**Six specialist agents** on a shared blackboard — `recon`, `vuln`, `exploit`, `post_exploit`, `critic`, `reflection`. Parallel dispatch, battle logs, and cross-phase negotiation, plus a persistent **Autonomous Orchestrator** for extended campaigns.
+### Multi-agent orchestration
+Six specialist agents on a shared blackboard: `recon`, `vuln`, `exploit`, `post_exploit`, `critic`, `reflection`. Dispatch is parallel, with battle logs and cross-phase negotiation, plus a persistent Autonomous Orchestrator for extended campaigns.
 
 </td>
 <td width="33%" valign="top">
 
-### Evidence-Based Verification
-Hypothesis-driven verdicts via `OutcomeJudge`: every finding is `confirmed` / `refuted` / `exhausted`. Execution success is not conflated with evidential success. Findings require supporting evidence.
+### Evidence-based verification
+Hypothesis-driven verdicts via `OutcomeJudge`: every finding is `confirmed`, `refuted`, or `exhausted`. Execution success is not conflated with evidential success; findings require supporting evidence.
 
 </td>
 </tr>
 <tr>
 <td width="33%" valign="top">
 
-### Domain-Aware Reconnaissance
-Provide `example.com` — the platform **resolves and expands the attack surface** (crt.sh, DNS bruteforce, subfinder/amass), auto-authorizes discovered hosts, flags dangling-CNAME takeovers, and assesses the full surface. Wildcard and CIDR allowlist support.
+### Domain-aware reconnaissance
+Give it `example.com` and the platform resolves and expands the attack surface (crt.sh, DNS bruteforce, subfinder/amass), auto-authorizes discovered hosts, flags dangling-CNAME takeovers, and assesses the full surface. Wildcard and CIDR allowlist support.
 
 </td>
 <td width="33%" valign="top">
 
-### Target-Locked Safety Model
-`full_access` on the operator host is **constrained to the allowlist** at the MCP tool layer. Every destination is extracted from every command — URL authorities, `/dev/tcp`, LHOST/RHOST, bare IPs, hostnames. Not in the allowlist = `BLOCKED`. The policy also enforces the mission scope gate (`exploit.forbidden_actions` / `disallowed_assets` → `SCOPE_DENIED`), and approve_only denials are audited. All target-touching actions are recorded in a **tamper-evident SHA-256 audit chain**.
+### Target-locked safety model
+`full_access` on the operator host is constrained to the allowlist at the MCP tool layer. Every destination is extracted from every command: URL authorities, `/dev/tcp`, LHOST/RHOST, bare IPs, hostnames. Anything not in the allowlist is `BLOCKED`. The policy also enforces the mission scope gate (`exploit.forbidden_actions` / `disallowed_assets` → `SCOPE_DENIED`), and approve_only denials are audited. All target-touching actions are recorded in a tamper-evident SHA-256 audit chain.
 
 </td>
 <td width="33%" valign="top">
 
-### Comprehensive Knowledge Base
-**140+ skills, 90+ tools, 15 attack families** — from network penetration testing and AD CS ESC1 to JWT confusion, SSTI, GraphQL, XXE, BloodHound, EternalBlue, Zerologon, and noPac. Deterministic and semantic skill selection, re-evaluated as new services and CVEs emerge.
+### Knowledge base
+140+ skills, 90+ tools, and 15 attack families covering network penetration testing, AD CS ESC1, JWT confusion, SSTI, GraphQL, XXE, BloodHound, EternalBlue, Zerologon, and noPac. Skill selection is deterministic and semantic, re-evaluated as new services and CVEs emerge.
 
 </td>
 </tr>
@@ -79,61 +79,61 @@ Provide `example.com` — the platform **resolves and expands the attack surface
 
 ---
 
-## Platform Capabilities
+## Platform capabilities
 
-NetAttackAI is a **full-spectrum autonomous assessment platform**. Core capabilities include:
+Core capabilities:
 
 ### Reconnaissance
-- **Fast recon pipeline** — parallel TCP discovery, service fingerprinting, OS detection, vulnerability enrichment — all concurrent, all cached.
-- **Nmap done right** — ping sweep → triage → service → vuln scans, with `priv_fallback` auto-downgrade and pre-flight reachability probes so firewalled hosts don't waste your time.
-- **Extended enumerators** — UDP top-ports, SNMP, DNS zone transfer / DNSSEC / SPF / DMARC, ASN/WHOIS, cloud metadata probe, WAF fingerprinting, vhost discovery.
-- **Domain recon** — `resolve_domain`, `enumerate_subdomains`, `dns_recon` (AXFR/DNSSEC), `vhost_enum` (Host-header rotation), `domain_whois` — all allowlist-gated.
-- **Threat intel** — NVD + EPSS + CISA KEV + OSV + GHSA, with circuit breaker, rate limiting, and GitHub token support for PoC search.
+- Fast recon pipeline: parallel TCP discovery, service fingerprinting, OS detection, and vulnerability enrichment, all concurrent and cached.
+- Nmap done right: ping sweep → triage → service → vuln scans, with `priv_fallback` auto-downgrade and pre-flight reachability probes so firewalled hosts don't waste your time.
+- Extended enumerators: UDP top-ports, SNMP, DNS zone transfer / DNSSEC / SPF / DMARC, ASN/WHOIS, cloud metadata probe, WAF fingerprinting, vhost discovery.
+- Domain recon: `resolve_domain`, `enumerate_subdomains`, `dns_recon` (AXFR/DNSSEC), `vhost_enum` (Host-header rotation), `domain_whois`, all allowlist-gated.
+- Threat intel: NVD + EPSS + CISA KEV + OSV + GHSA, with circuit breaker, rate limiting, and GitHub token support for PoC search.
 
-### Exploitation & Chaining
-- **15 attack module families** (`tools/attack_modules/modules/`): `web`, `auth_creds`, `crypto_jwt`, `deserialize`, `network_smb`, `privesc`, `services`, `ssh`, `synthesis`, `supply_chain`, `persistence`, `ad`, `ics_iot`, `detection`, `orchestrator_phases` — each scores its own applicability (0–100) against your target's services/ports/CVEs.
-- **Capability-aware planning** — every module declares `requires` / `produces` / `read_only` / `cost` / `phase_hint` so the planner can **dynamically compose prerequisites** (`find_producers(artifact)`) and gate execution.
-- **Payload crafting & mutation** — `PayloadCrafter` + `ExploitMutator` with 5 strategies: parameter tweak, encoding change, delivery swap, context-aware. Auto-generates and mutates Python exploit scripts.
-- **Metasploit bridge** — `run_msf_module`, `msfconsole` lifecycle, `msfvenom` payload generation, session/payload/post-module orchestration, resource scripts. Full Kali arsenal on Linux, Python-only on Windows.
-- **Web scanning** — nikto / nuclei / sqlmap / gobuster / feroxbuster / whatweb / wpscan — argv-list execution, `which`-checked, parsed `WEB_SCAN_RESULT` blocks.
+### Exploitation and chaining
+- 15 attack module families (`tools/attack_modules/modules/`): `web`, `auth_creds`, `crypto_jwt`, `deserialize`, `network_smb`, `privesc`, `services`, `ssh`, `synthesis`, `supply_chain`, `persistence`, `ad`, `ics_iot`, `detection`, `orchestrator_phases`. Each scores its own applicability (0-100) against your target's services, ports, and CVEs.
+- Capability-aware planning: every module declares `requires` / `produces` / `read_only` / `cost` / `phase_hint`, so the planner can dynamically compose prerequisites (`find_producers(artifact)`) and gate execution.
+- Payload crafting and mutation: `PayloadCrafter` + `ExploitMutator` with 5 strategies (parameter tweak, encoding change, delivery swap, context-aware). Auto-generates and mutates Python exploit scripts.
+- Metasploit bridge: `run_msf_module`, `msfconsole` lifecycle, `msfvenom` payload generation, session/payload/post-module orchestration, resource scripts. Full Kali arsenal on Linux, Python-only on Windows.
+- Web scanning: nikto / nuclei / sqlmap / gobuster / feroxbuster / whatweb / wpscan. Argv-list execution, `which`-checked, parsed `WEB_SCAN_RESULT` blocks.
 
-### Adaptive Intelligence
-- **140+ advisory skills** — YAML + markdown prompt-context layer, scored by deterministic tags + lexical search + **cross-mission Bayesian feedback** + **semantic cosine similarity** over `nomic-embed-text` embeddings. Mid-run re-selection as new CVEs surface.
-- **Semantic memory** — `nomic-embed-text` cross-mission learning via `SemanticMemoryManager` + `ExperienceStore`. The orchestrator stores lessons on every confirmed win.
-- **Attack memory** — per-attempt context window management (6K chars), compaction every 50 rounds, persistent campaign state.
-- **Model telemetry** — token counts, context utilization, duration, tokens/sec for every LLM call.
-- **Multi-model war room** — consult Kimi K2.6, DeepSeek V4 Pro (1M context), GLM-5.2, Minimax M3 mid-run for advisory ideas without tool access. Configurable `consult_aliases`.
+### Adaptive intelligence
+- 140+ advisory skills: a YAML + markdown prompt-context layer, scored by deterministic tags + lexical search + cross-mission Bayesian feedback + semantic cosine similarity over `nomic-embed-text` embeddings. Mid-run re-selection as new CVEs surface.
+- Semantic memory: `nomic-embed-text` cross-mission learning via `SemanticMemoryManager` + `ExperienceStore`. The orchestrator stores lessons on every confirmed win.
+- Attack memory: per-attempt context window management (6K chars), compaction every 50 rounds, persistent campaign state.
+- Model telemetry: token counts, context utilization, duration, and tokens/sec for every LLM call.
+- Peer model consult: brings Kimi K2.6, DeepSeek V4 Pro (1M context), GLM-5.2, and Minimax M3 in mid-run for advisory ideas without tool access. Configurable `consult_aliases`.
 
-### Post-Exploitation & Lateral Movement
-- **Credential ops** — encrypted vault (`credential_store`), `lateral_exec` via Impacket, `dump_credentials`, `kerberoast`, `hash_crack` (hashcat/john with auto hash-type ID + `--show` recovery).
-- **AD domination** — BloodHound CE, AD ACL abuse, AS-REP roast, pass-the-hash, ADCS/Certipy, Golden Ticket, Responder relay, SMB signing checks.
-- **Operator connection** — persistent RCE beacons (netcat/TLS/DNS/HTTPS/SOCKS pivot) with `exploit_workspace` callback management.
-- **ICS/IoT** — Modbus & S7 PLC modules (read-only by default; **destructive writes dual-gated** behind `ics.allow_write` + `ics.destructive_ics`).
+### Post-exploitation and lateral movement
+- Credential ops: encrypted vault (`credential_store`), `lateral_exec` via Impacket, `dump_credentials`, `kerberoast`, and `hash_crack` (hashcat/john with auto hash-type ID + `--show` recovery).
+- Active Directory: BloodHound CE, AD ACL abuse, AS-REP roast, pass-the-hash, ADCS/Certipy, Golden Ticket, Responder relay, SMB signing checks.
+- Operator connection: persistent RCE beacons (netcat/TLS/DNS/HTTPS/SOCKS pivot) with `exploit_workspace` callback management.
+- ICS/IoT: Modbus & S7 PLC modules, read-only by default. Destructive writes are dual-gated behind `ics.allow_write` + `ics.destructive_ics`.
 
-### Operational Security
-- **Target-aware OPSEC** — auto-disabled on private/local targets (RFC1918/loopback/link-local) so the agent moves freely in your lab; full posture on public targets. UA rotation, DoH, pacing with jitter, rate limiting, quiet-command rewrites, noise budget — all **advisory, never a gate** (the command always executes, but you get `OPSEC_ADVISORY` blocks suggesting quieter alternatives).
+### Operational security
+- Target-aware OPSEC: auto-disabled on private/local targets (RFC1918/loopback/link-local) so the agent moves freely in your lab; full posture on public targets. UA rotation, DoH, pacing with jitter, rate limiting, quiet-command rewrites, noise budget. All advisory, never a gate: the command always executes, and you get `OPSEC_ADVISORY` blocks suggesting quieter alternatives.
 
-### Reporting & Export
-- **MITRE ATT&CK Navigator** export — technique-mapped layer JSON for SOC handoff (`reports/mitre/`).
-- **Ticketing** — auto-create Jira/GitHub issues from confirmed findings.
-- **Enhanced reporting** — timelines, CVSS, exploit chains, Markdown + HTML, `decision_log.jsonl`, tamper-evident audit, loot & credential tables, graph evidence.
+### Reporting and export
+- MITRE ATT&CK Navigator export: technique-mapped layer JSON for SOC handoff (`reports/mitre/`).
+- Ticketing: auto-create Jira/GitHub issues from confirmed findings.
+- Report contents: timelines, CVSS, exploit chains, Markdown + HTML, `decision_log.jsonl`, tamper-evident audit, loot and credential tables, and graph evidence.
 
 ---
 
-## WebUI — Mission Control
+## WebUI: mission control
 
-Available at **`http://127.0.0.1:8765`** — loopback-only, bearer-token authenticated, real-time.
+The WebUI serves at `http://127.0.0.1:8765`. It is loopback-only, bearer-token authenticated, and streams events in real time.
 
 | Page | Description |
 |------|-------------|
-| **New Run Wizard** | Configure target, model, goal, and execution options — then review and launch. Supports IP and domain targets. |
-| **Live Run** | Real-time event stream including tool calls, decisions, and telemetry via WebSocket and SSE. Token-gated and ring-buffered. |
-| **Attack Graph** | Interactive DAG (ReactFlow) with pan, zoom, filtering, path finding, and evidence inspection. Backed by `AttackPlan` (`ready_steps()` / `blocked_steps()` / `graph_summary()`). |
-| **Artifacts & Audit** | Reports, raw Nmap output, findings, and SHA-256 audit chain — all tamper-evident. |
-| **Loot & Credentials** | Captured credentials and loot per run, encrypted at rest. |
-| **System** | Configuration, secrets, models and providers, skills, plugins, and diagnostics — no manual YAML editing required. |
+| New Run Wizard | Configure target, model, goal, and execution options, then review and launch. Supports IP and domain targets. |
+| Live Run | Real-time event stream including tool calls, decisions, and telemetry via WebSocket and SSE. Token-gated and ring-buffered. |
+| Attack Graph | Interactive DAG (ReactFlow) with pan, zoom, filtering, path finding, and evidence inspection. Backed by `AttackPlan` (`ready_steps()` / `blocked_steps()` / `graph_summary()`). |
+| Artifacts & Audit | Reports, raw Nmap output, findings, and the SHA-256 audit chain, all tamper-evident. |
+| Loot & Credentials | Captured credentials and loot per run, encrypted at rest. |
+| System | Configuration, secrets, models and providers, skills, plugins, and diagnostics. No manual YAML editing required. |
 
-Built as a **Vite + React + TypeScript SPA** (`webui/`) with TanStack Query, Radix UI, and Tailwind CSS. The production bundle is built automatically on first launch when Node.js is available.
+The UI is a Vite + React + TypeScript SPA (`webui/`) with TanStack Query, Radix UI, and Tailwind CSS. The production bundle is built automatically on first launch when Node.js is available.
 
 For dev hot-reload:
 
@@ -145,14 +145,14 @@ Full reference: [docs/webui.md](docs/webui.md) · API: [docs/api.md](docs/api.md
 
 ---
 
-## Intelligence — Skills, Agents & Memory
+## Skills, agents, and memory
 
-### 140+ Advisory Skills
-Each skill is a curated `SKILL.md` under `skills/` — from `conducting-network-penetration-test` and `executing-red-team-engagement-planning` to `exploiting-jwt-algorithm-confusion-attack`, `exploiting-ssti`, `exploiting-nopac-cve-2021-42278-42287`, and `attacking-domains-end-to-end`. The engine deterministically selects the top six for the current context, re-evaluates mid-run, and supports semantic matching via embeddings.
+### 140+ advisory skills
+Each skill is a curated `SKILL.md` under `skills/`, such as `conducting-network-penetration-test`, `executing-red-team-engagement-planning`, `exploiting-jwt-algorithm-confusion-attack`, `exploiting-ssti`, `exploiting-nopac-cve-2021-42278-42287`, and `attacking-domains-end-to-end`. The engine deterministically selects the top six for the current context, re-evaluates mid-run, and supports semantic matching via embeddings.
 
 Categories include network penetration testing, web/API, auth/JWT/OAuth, deserialization, AD/BloodHound, SMB/network, privilege escalation, cryptography, supply chain, detection, persistence, and ICS/IoT. See [docs/skills.md](docs/skills.md) and [docs/skill-authoring.md](docs/skill-authoring.md).
 
-### Swarm — Six Specialists, One Blackboard
+### Swarm: six specialists, one blackboard
 
 | Agent | Job |
 |-------|-----|
@@ -163,14 +163,14 @@ Categories include network penetration testing, web/API, auth/JWT/OAuth, deseria
 | `critic` | Pre-execution scope, risk & policy review |
 | `reflection` | Strategy review, lessons learned |
 
-Orchestrated via `tools/swarm/orchestrator.py` with shared blackboard, battle log, parallel dispatch, and phase-aware skill hints. See [docs/swarm.md](docs/swarm.md).
+Orchestrated via `tools/swarm/orchestrator.py` with a shared blackboard, battle log, parallel dispatch, and phase-aware skill hints. See [docs/swarm.md](docs/swarm.md).
 
-### MCP Tool Suite — 120+ Tools Across 27 Families
+### MCP tool suite: 120+ tools across 27 families
 
 | Family | Capability |
 |--------|-----------|
 | `terminal` | Shell execution with target-IP allowlist enforcement and OPSEC advisory |
-| `workspace` | `write_python_file` / `run_python_file` / `read_workspace_file` — workspace-contained file operations |
+| `workspace` | `write_python_file` / `run_python_file` / `read_workspace_file`, all workspace-contained |
 | `recon` | `check_os`, `quick_scan`, `run_full_recon`, `get_service_fingerprint` |
 | `attack_modules` | `run_attack_module`, `craft_exploit`, `mutate_exploit` and hypothesis/state tools |
 | `metasploit` | Full `msfconsole` lifecycle, sessions, payloads, and post modules |
@@ -180,22 +180,22 @@ Orchestrated via `tools/swarm/orchestrator.py` with shared blackboard, battle lo
 | `credentials` | Encrypted vault and Impacket-based lateral execution / Kerberoast |
 | `sessions` | tmux, background jobs, and listeners (beacons) |
 | `research` | `search_exploit_db`, `search_web_exploit`, `deep_research`, `search_cve_intel` |
-| `domain` | DNS, subdomain enumeration, AXFR, vhost, WHOIS — with automatic authorization |
-| `peer_models` | `consult_peer_models` — advisory multi-model consultation |
+| `domain` | DNS, subdomain enumeration, AXFR, vhost, WHOIS, with automatic authorization |
+| `peer_models` | `consult_peer_models`, advisory multi-model consultation |
 | `runtime_skills` | `list`, `search`, and `load` skills at runtime |
 | + 13 more | `assessment_state`, `parallel_agents`, `poc_verifier`, `replay_simulator`, `mitre`, `ad`, `operator_connection`, and others |
 
-All tools are registered via `tools/mcp_tools/registry.py` using `@audit_tool` / `@require_allowlist()` decorators and auto-discovered through `collect_tools()` (which also fails CI if a tool lacks its audit/allowlist gate) — no manual registration required. See [docs/mcp-tools.md](docs/mcp-tools.md).
+All tools are registered via `tools/mcp_tools/registry.py` using the `@audit_tool` / `@require_allowlist()` decorators and auto-discovered through `collect_tools()`, which also fails CI if a tool lacks its audit or allowlist gate. No manual registration required. See [docs/mcp-tools.md](docs/mcp-tools.md).
 
 ---
 
-## Safety
+## Safety model
 
 | Mode | What happens |
 |------|--------------|
-| **Recon** | Always `read_only` — gathers and proposes, never executes offensively |
-| **Attack** | `full_access` — auto-approves after the mission scope gate (`forbidden_actions` / `disallowed_assets` → `SCOPE_DENIED`); no command-content inspection |
-| **The lock** | **Target-IP allowlist** at the MCP tool layer — every destination is extracted and refused if not in the allowlist (supports `IP`, `domain`, `*.wildcard`, `CIDR`). Domain runs auto-authorize discovered subdomains. |
+| Recon | Always `read_only`: gathers and proposes, never executes offensively |
+| Attack | `full_access`: auto-approves after the mission scope gate (`forbidden_actions` / `disallowed_assets` → `SCOPE_DENIED`); no command-content inspection |
+| The lock | Target-IP allowlist at the MCP tool layer. Every destination is extracted and refused if not in the allowlist (supports `IP`, `domain`, `*.wildcard`, `CIDR`). Domain runs auto-authorize discovered subdomains. |
 
 Operational guards that always apply: 300s/600s timeouts, full JSONL audit trail, OS-aware tooling.
 
@@ -205,9 +205,9 @@ Full model: [docs/safety-model.md](docs/safety-model.md)
 
 ---
 
-## Quick Start — 60 seconds
+## Quick start in 60 seconds
 
-### Windows — double-click install
+### Windows: double-click install
 
 ```powershell
 .\install.bat    # checks Python/Node/Nmap/Ollama, creates .venv, builds WebUI, pulls models, runs --doctor
@@ -217,7 +217,7 @@ Full model: [docs/safety-model.md](docs/safety-model.md)
 Or after install, from any terminal:
 
 ```powershell
-python main.py   # opens the WebUI in your browser — that is it
+python main.py   # opens the WebUI in your browser
 ```
 
 ### Linux / macOS
@@ -227,9 +227,9 @@ python main.py   # opens the WebUI in your browser — that is it
 python3 main.py           # opens http://127.0.0.1:8765
 ```
 
-That is the whole app. No CLI flags to memorize — everything happens in the WebUI.
+That is the whole app. No CLI flags to memorize: everything happens in the WebUI.
 
-### 1. Set your API key
+### Set your API key
 
 The default model is Ollama Cloud (`glm-5.2:cloud`). You need one key:
 
@@ -238,9 +238,9 @@ python main.py --setup-api-keys   # prompts and saves to secr.json (gitignored)
 # or set env:  OLLAMA_API_KEY=your_key_here
 ```
 
-Get a free key at https://ollama.com/settings/keys — then `python main.py --doctor` should be all green.
+Get a free key at https://ollama.com/settings/keys. Then `python main.py --doctor` should be all green.
 
-> Prefer local Ollama or ChatGPT? Switch in the WebUI under **System → Models**, or see [docs/providers.md](docs/providers.md). Embeddings always stay local (`nomic-embed-text`).
+> Prefer local Ollama or ChatGPT? Switch in the WebUI under System → Models, or see [docs/providers.md](docs/providers.md). Embeddings always stay local (`nomic-embed-text`).
 
 ---
 
@@ -248,17 +248,17 @@ Get a free key at https://ollama.com/settings/keys — then `python main.py --do
 
 | Need | Notes |
 |------|-------|
-| **Python 3.11+** | `python --version` — `--doctor` rejects 3.10 |
-| **nmap** | On `PATH` or set `nmap.path` in `config.yaml` |
-| **Ollama** | Cloud default (`https://api.ollama.com` + `OLLAMA_API_KEY`) or local daemon |
-| **Node.js + npm** | Only for first WebUI build — auto-built on first launch if present |
-| **Linux extras** | Metasploit/searchsploit/impacket/hydra only on Linux — Windows = Python-only exploits |
+| Python 3.11+ | `python --version`; `--doctor` rejects 3.10 |
+| nmap | On `PATH` or set `nmap.path` in `config.yaml` |
+| Ollama | Cloud default (`https://api.ollama.com` + `OLLAMA_API_KEY`) or local daemon |
+| Node.js + npm | Only for the first WebUI build; auto-built on first launch if present |
+| Linux extras | Metasploit/searchsploit/impacket/hydra only on Linux. Windows runs Python-only exploits. |
 
 `python main.py --doctor` checks all of this. `python main.py --self-test` runs a safe localhost smoke test.
 
 ---
 
-## API Keys
+## API keys
 
 One command handles everything:
 
@@ -279,27 +279,25 @@ Keys live in env or `secr.json` (gitignored). The app does **not** auto-load `.e
 
 ## Configuration
 
-Everything is in **`config.yaml`** — validated against `tools/config/schema.py::CONFIG_SCHEMA` (re-exported by the `tools/config_manager.py` compat shim).
+Everything lives in `config.yaml`, validated against `tools/config/schema.py::CONFIG_SCHEMA` (re-exported by the `tools/config_manager.py` compat shim).
 
-For day-to-day use you do not need to touch it — the WebUI **System → Config** editor and **System → Secrets / Models** pages cover it. For the full key reference:
-
-→ **[docs/config-reference.md](docs/config-reference.md)**
+For day-to-day use you do not need to touch it: the WebUI System → Config editor and System → Secrets / Models pages cover it. Full key reference: [docs/config-reference.md](docs/config-reference.md)
 
 Switching providers (Ollama ↔ ChatGPT), models, skills, swarm, OPSEC, persistence, and API settings are all in there. Highlights:
 
-- **Models** — cloud-first (`glm-5.2:cloud` 976K, `deepseek-v4-pro:cloud` 1M, `kimi-k2.6:cloud` 256K, `minimax-m3:cloud` 512K) with per-role routing (planner/executor/critic/etc.)
-- **Swarm & Autonomous** — toggle agents, concurrency, persistence phases, adaptive replan
-- **OPSEC** — target-aware pacing, UA rotation, DoH, noise budget
-- **ICS** — destructive PLC writes dual-gated (`allow_write` + `destructive_ics`)
-- **API** — concurrent runs (default 3), multi-operator, graph route, loopback auth
+- Models: cloud-first (`glm-5.2:cloud` 976K, `deepseek-v4-pro:cloud` 1M, `kimi-k2.6:cloud` 256K, `minimax-m3:cloud` 512K) with per-role routing (planner/executor/critic/etc.)
+- Swarm & autonomous: toggle agents, concurrency, persistence phases, adaptive replan
+- OPSEC: target-aware pacing, UA rotation, DoH, noise budget
+- ICS: destructive PLC writes dual-gated (`allow_write` + `destructive_ics`)
+- API: concurrent runs (default 3), multi-operator, graph route, loopback auth
 
 ---
 
-## Plugins — Extend Without Forking
+## Plugins: extend without forking
 
-Managed in `tools/plugins.py` — a plugin can add attack modules, MCP tools, skills, and config. Enable via `config.yaml` `plugins.enabled`. Reference example at `plugins/example_recon_report/`.
+Managed in `tools/plugins.py`. A plugin can add attack modules, MCP tools, skills, and config. Enable via `config.yaml` `plugins.enabled`. Reference example: `plugins/example_recon_report/`.
 
-Shipped (enabled in lab build, require their API key to actually run):
+Shipped (enabled in the lab build; each requires its API key to actually run):
 
 | Plugin | What it adds |
 |--------|-------------|
@@ -317,7 +315,7 @@ Shipped (enabled in lab build, require their API key to actually run):
 | `caldera` | MITRE Caldera adversary emulation |
 | `firmware_analysis` | Firmware extraction & analysis |
 
-→ [docs/plugin-development.md](docs/plugin-development.md)
+See [docs/plugin-development.md](docs/plugin-development.md).
 
 ---
 
@@ -341,12 +339,12 @@ Shipped (enabled in lab build, require their API key to actually run):
 
 ---
 
-## Quality Assurance
+## Quality assurance
 
-- **Large mocked pytest suite** (~250 files in `tests/`) — all mock subprocess/network, no live Nmap. Scope gates, safety review, recon, swarm, audit chains, credential storage, Metasploit, and more.
-- **CI on every push/PR** — Python 3.11–3.13 matrix, coverage (`coverage run -m pytest`), CodeQL, dependency-review.
-- **Lint is law** — `ruff check .` (0 errors) + `ruff format --check .` (0 diffs) + `mypy --follow-imports=skip tools` (216 files) — all CI-enforced.
-- **WebUI tested** — `tsc -b && vite build` + `vitest` on every PR.
+- Mocked pytest suite (~250 files in `tests/`): all subprocess and network calls are mocked, so no live Nmap. Covers scope gates, safety review, recon, swarm, audit chains, credential storage, Metasploit, and more.
+- CI on every push and PR: Python 3.11-3.13 matrix, coverage (`coverage run -m pytest`), CodeQL, dependency-review.
+- Lint is law: `ruff check .` (0 errors), `ruff format --check .` (0 diffs), and `mypy --follow-imports=skip tools` (216 files), all CI-enforced.
+- WebUI tested: `tsc -b && vite build` plus `vitest` on every PR.
 
 ```bash
 python -m pytest tests/ -v
@@ -355,7 +353,7 @@ mypy --follow-imports=skip tools
 cd webui && npm ci && npm run build && npm run test
 ```
 
-Coverage (matches CI — uses `coverage`, not `pytest-cov`):
+Coverage (matches CI; uses `coverage`, not `pytest-cov`):
 
 ```bash
 python -m coverage run -m pytest tests/ && python -m coverage report
@@ -365,7 +363,7 @@ See [docs/testing-guide.md](docs/testing-guide.md).
 
 ---
 
-## Architecture at a Glance
+## Architecture
 
 ```
 operator ──► main.py / app.py (WebUI @ :8765)
@@ -383,14 +381,14 @@ operator ──► main.py / app.py (WebUI @ :8765)
                └─ AutonomousOrchestrator (persistent campaigns, adaptive aggression, vuln chaining)
 ```
 
-Two flows: **Flow A** (modern, `main.py` → `tools/exploit_agent` / `tools/mcp_tools` / `tools/swarm`) is what you run. **Flow B** (legacy, frozen in `legacy/`) is the SQLite research loop — still tested, but frozen. See [docs/architecture.md](docs/architecture.md) and [docs/runtime-flows.md](docs/runtime-flows.md).
+Two flows: Flow A (modern: `main.py` → `tools/exploit_agent`, `tools/mcp_tools`, `tools/swarm`) is what you run. Flow B (legacy, frozen in `legacy/`) is the SQLite research loop, still tested but frozen. See [docs/architecture.md](docs/architecture.md) and [docs/runtime-flows.md](docs/runtime-flows.md).
 
 ---
 
 ## Contributing
 
-1. Read [AGENTS.md](AGENTS.md) — non-obvious rules you will otherwise break.
-2. `python main.py --doctor && python main.py --self-test` after safety changes.
+1. Read [AGENTS.md](AGENTS.md): non-obvious rules you will otherwise break.
+2. Run `python main.py --doctor && python main.py --self-test` after safety changes.
 3. Before a PR:
    ```bash
    python -m pip install -e ".[dev]"
@@ -399,15 +397,15 @@ Two flows: **Flow A** (modern, `main.py` → `tools/exploit_agent` / `tools/mcp_
    mypy --follow-imports=skip tools
    cd webui && npm ci && npm run build && npm run test
    ```
-   CI runs the same on Python 3.11–3.13 + CodeQL + dependency-review.
+   CI runs the same on Python 3.11-3.13 plus CodeQL and dependency-review.
 4. Do not edit frozen Flow B safety files (`scope_gate.py`, `safety_reviewer.py`, `legacy/`).
-5. New exploit MCP tools: just add `@audit_tool` / `@require_allowlist()` in `tools/mcp_tools/<family>.py` — auto-discovered via `tools/mcp_tools/registry.py`.
+5. New exploit MCP tools: add `@audit_tool` / `@require_allowlist()` in `tools/mcp_tools/<family>.py`; they are auto-discovered via `tools/mcp_tools/registry.py`.
 
 ---
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+Apache 2.0. See [LICENSE](LICENSE).
 
 ---
 
