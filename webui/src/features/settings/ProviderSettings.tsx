@@ -9,6 +9,14 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SettingsSection } from "./SettingsSection";
 import { SettingRow } from "./SettingRow";
@@ -174,8 +182,10 @@ function ModelRegistry() {
   const removeModel = useRemoveModel();
   const isChatgpt = (models.data?.provider ?? "ollama") === "chatgpt";
   const registry = Object.entries(models.data?.registry ?? {});
+  const registryMap = new Map(registry);
   const [newAlias, setNewAlias] = useState("");
   const [newModel, setNewModel] = useState("");
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
 
   const onAdd = () => {
     const alias = newAlias.trim();
@@ -286,7 +296,7 @@ function ModelRegistry() {
                         size="sm"
                         variant="ghost"
                         className="ml-auto h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
-                        onClick={() => removeModel.mutate(alias)}
+                        onClick={() => setConfirmRemove(alias)}
                         disabled={removeModel.isPending}
                         aria-label={`Remove ${alias}`}
                         title={`Remove ${alias}`}
@@ -307,6 +317,36 @@ function ModelRegistry() {
           )}
         </div>
       )}
+
+      <Dialog open={confirmRemove !== null} onOpenChange={(open) => { if (!open) setConfirmRemove(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove model alias?</DialogTitle>
+            <DialogDescription>
+              Removes <span className="font-mono">{confirmRemove}</span>
+              {confirmRemove && registryMap.get(confirmRemove) && (
+                <> → <span className="font-mono">{registryMap.get(confirmRemove)}</span>
+                  </>
+              )}{" "}
+              from the registry. Runs already started keep their configured model.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmRemove(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={removeModel.isPending}
+              onClick={() => {
+                if (confirmRemove) removeModel.mutate(confirmRemove);
+                setConfirmRemove(null);
+              }}
+            >
+              {removeModel.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

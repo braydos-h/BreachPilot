@@ -385,6 +385,39 @@ Probe live, reachable models. Branches on `models.provider`:
 
 ---
 
+### `POST /models/refresh`
+
+**Auth:** bearer. Ollama provider only (`400 invalid_provider` otherwise).
+
+Sync `models.registry` to the newest versions the Ollama API actually lists
+(`GET {ollama.host}/api/tags`, bearer-authed). Every alias is bumped to the
+strictly newest **same-family** version — `glm-5.2:cloud` → `glm-5.3:cloud`,
+including when the configured version has vanished from the catalog. Tag
+preference (`:cloud`, `:8b`, …) is preserved when several specs share the
+newest version; versionless specs (`nomic-embed-text`) are never touched. No
+pulls are issued (for Ollama Cloud a pull only registers a pointer). When
+updates are found they persist through the validated config-write path, so the
+change survives restarts; `models.info` labels/context windows stay
+operator-managed. Implementation: `tools/ollama_models.py`. The daemon runs
+the same sync at boot when `models.auto_update` is true (default); the WebUI
+model picker's refresh button triggers it for Ollama.
+
+**Response:** `200`
+```json
+{
+  "ok": true,
+  "host": "https://api.ollama.com",
+  "available_count": 12,
+  "updates": { "glm": { "old": "glm-5.2:cloud", "new": "glm-5.3:cloud" } },
+  "registry": { "glm": "glm-5.3:cloud" },
+  "persisted": true
+}
+```
+
+`503` when the Ollama API is unreachable: `{ "ok": false, "host": "...", "error": "..." }`.
+
+---
+
 ### `GET /providers`
 
 **Auth:** bearer.

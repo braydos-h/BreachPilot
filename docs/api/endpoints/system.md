@@ -57,6 +57,10 @@ Internal helpers: `_write_config(merged)` and `_apply_config_patch(patch)` (`too
 
 `tools/api/routes/system.py:323` — bearer. Body `{provider}` must be `ollama|chatgpt` else `400 invalid_provider`. Patches `models.provider`, returns `{status:"ok", provider}`.
 
+## `POST /api/v1/models/refresh` — `refresh_models`
+
+`tools/api/routes/system.py` — bearer, ollama provider only (`400 invalid_provider`). Off-thread `tools/ollama_models.refresh_model_registry(_CONFIG, persist=False)`: `GET {ollama.host}/api/tags` (bearer), bumps every alias to the strictly newest same-family version (`glm-5.2:cloud` → `glm-5.3:cloud`; tag preference preserved; versionless specs untouched; no pulls). Updates persist via `_apply_config_patch` (validated write). `200 {ok, host, available_count, updates:{alias:{old,new}}, registry, persisted}`; `503 {ok:false, error}` when Ollama is unreachable. Same sync runs at daemon boot when `models.auto_update` is true.
+
 ## `GET /api/v1/system/info` — `get_system_info`
 
 `tools/api/routes/system.py:338` — bearer. `hostname`, `platform`, `os`, `python`, `local_ips` (`socket.getaddrinfo`), `public_ip` via `urllib.request https://api.ipify.org` 3 s timeout degraded to `null` offline (`tools/api/routes/system.py:368` off-thread).
