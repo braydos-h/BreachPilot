@@ -1,14 +1,46 @@
 import { useState } from "react";
-import { Activity, AlertTriangle, CheckCircle2, XCircle, Users, ListTree, ShieldCheck } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, Clock, XCircle, Users, ListTree, ShieldCheck, TrendingUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/Loading";
 import { ApiError } from "@/api/client";
 import { asRecord, asArray, str, num, bool, json, type Json } from "@/lib/stateShape";
+import {
+  CAMPAIGN_PHASES,
+  CAMPAIGN_PHASE_LABELS,
+  aggressionVariant,
+  isKnownPhase,
+  phaseIndex,
+  type CampaignTimelineEntry,
+} from "@/lib/campaignPhases";
 
 function EmptyState({ msg }: { msg: string }) {
   return <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">{msg}</div>;
+}
+
+/** Reflection headline badge colour, keyed off the recommended_strategy_shift
+ *  prefix the reflection agent emits (MAJOR PIVOT/PIVOT/ACCELERATE/PROCEED/…). */
+function reflectionShiftVariant(shift: string): "danger" | "success" | "warn" | "muted" {
+  const s = shift.toUpperCase();
+  if (s.includes("PIVOT")) return "danger";
+  if (s.startsWith("ACCELERATE")) return "success";
+  return s ? "warn" : "muted";
+}
+
+/** Bullet list shared by the reflection card's three outcome columns. */
+function ReflectionList({ label, items }: { label: string; items: Json[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div>
+      <Label className="text-[10px] text-muted-foreground">{label}</Label>
+      <ul className="mt-1 list-inside list-disc space-y-0.5 text-foreground">
+        {items.map((item, i) => (
+          <li key={i} className="break-words">{str(item)}</li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 function NotFound({ error }: { error: unknown }) {
@@ -104,6 +136,10 @@ export function SwarmView({ loading, error, state, witnessFlags, witnessLoading,
         <p className="text-xs text-muted-foreground">Loading witness flags…</p>
       )}
 
+      {Object.keys(asRecord(s.last_reflection)).length > 0 && (
+        <ReflectionCard reflection={asRecord(s.last_reflection)} />
+      )}
+
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-sm">
@@ -172,8 +208,11 @@ export function SwarmView({ loading, error, state, witnessFlags, witnessLoading,
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">Battle log (last {battleLog.length})</CardTitle>
+            <p className="text-[10px] text-muted-foreground">
+              The server persists the most recent 20 entries per swarm run.
+            </p>
           </CardHeader>
-          <CardContent className="space-y-1.5">
+          <CardContent className="max-h-72 space-y-1.5 overflow-y-auto">
             {battleLog.map((entry, i) => {
               const rec = asRecord(entry);
               return (
@@ -194,6 +233,63 @@ export function SwarmView({ loading, error, state, witnessFlags, witnessLoading,
         </Card>
       )}
     </div>
+  );
+}
+
+/** Last reflection_agent output from the blackboard (`state.last_reflection`).
+ *  Renders only the known keys — never the raw object. */
+function ReflectionCard({ reflection }: { reflection: Record<string, Json> }) {
+  const shift = str(reflection.recommended_strategy_shift);
+  const confidence = num(reflection.confidence);
+  const why = str(reflection.why);
+  const hypothesis = str(reflection.new_hypothesis);
+  const worked = asArray(reflection.what_worked);
+  const failed = asArray(reflection.what_failed);
+  const patterns = asArray(reflection.patterns_identified);
+
+  if (!shift && !why && !hypothesis && worked.length === 0 && failed.length === 0 && patterns.length === 0) {
+    return null;
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <TrendingUp className="h-4 w-4" /> Reflection
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2.5 text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          {shift && (
+            <Badge variant={reflectionShiftVariant(shift)} className="text-[10px]">
+              {shift}
+            </Badge>
+          )}
+          {confidence > 0 && (
+            <span className="text-muted-foreground tabular-nums">
+              confidence {Math.round(confidence * 100)}%
+            </span>
+          )}
+        </div>
+        {why && (
+          <p className="break-words text-foreground">
+            <span className="font-medium">Why: </span>
+            {why}
+          </p>
+        )}
+        {hypothesis && (
+          <p className="break-words text-foreground">
+            <span className="font-medium">New hypothesis: </span>
+            {hypothesis}
+          </p>
+        )}
+        <div className="grid gap-3 sm:grid-cols-3">
+          <ReflectionList label="What worked" items={worked} />
+          <ReflectionList label="What failed" items={failed} />
+          <ReflectionList label="Patterns identified" items={patterns} />
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -267,18 +363,27 @@ export function CampaignView({ loading, error, state }: CampaignViewProps) {
           const loot = asArray(st.loot);
           const pivots = asArray(st.pivot_targets);
           const access = bool(st.access_achieved);
+          const currentPhase = str(st.current_phase);
+          const aggression = str(st.aggression);
           return (
             <Card key={target}>
               <CardHeader className="pb-2">
                 <CardTitle className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="font-mono">{target}</span>
-                  <Badge variant="info" className="text-[10px]">{str(st.current_phase)}</Badge>
+                  <Badge variant="info" className="text-[10px]">{currentPhase}</Badge>
+                  {aggression && (
+                    <Badge variant={aggressionVariant(aggression)} className="text-[10px]">
+                      {aggression}
+                    </Badge>
+                  )}
                   <Badge variant={access ? "success" : "muted"} className="text-[10px]">
                     <ShieldCheck className="h-3 w-3" /> {str(st.privilege_level)}
                   </Badge>
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-xs">
+                <KillChainStepper currentPhase={currentPhase} />
+                <CampaignTimeline timeline={st.timeline} />
                 {exploits.length > 0 && (
                   <div>
                     <Label className="text-[10px] text-muted-foreground">Successful exploits</Label>
@@ -383,6 +488,100 @@ export function CampaignView({ loading, error, state }: CampaignViewProps) {
             </div>
           </CardContent>
         </Card>
+      )}
+    </div>
+  );
+}
+
+/** 8-chip kill-chain stepper. `current_phase: "done"` (campaign finished) is
+ *  not one of the 8 phases — every chip renders neutral plus the raw badge the
+ *  header already shows, so a state file from a different version degrades. */
+function KillChainStepper({ currentPhase }: { currentPhase: string }) {
+  const current = phaseIndex(currentPhase);
+  return (
+    <div>
+      <Label className="text-[10px] text-muted-foreground">Kill chain</Label>
+      <ol className="mt-1 flex flex-wrap gap-1" aria-label="Campaign kill chain progress">
+        {CAMPAIGN_PHASES.map((phase, i) => {
+          const state =
+            current < 0 ? "future" : i < current ? "done" : i === current ? "current" : "future";
+          return (
+            <li key={phase}>
+              <Badge
+                variant={state === "current" ? "info" : state === "done" ? "success" : "outline"}
+                className="text-[10px]"
+                aria-current={state === "current" ? "step" : undefined}
+              >
+                {CAMPAIGN_PHASE_LABELS[phase]}
+              </Badge>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
+/** Per-target event timeline (`AttackState.timeline`), newest first.
+ *  ISO-8601 timestamps sort lexically; entries without a timestamp sort last. */
+function CampaignTimeline({ timeline }: { timeline: unknown }) {
+  const [showAll, setShowAll] = useState(false);
+  const entries = asArray(timeline)
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => {
+      const ta = str(asRecord(a.e).timestamp);
+      const tb = str(asRecord(b.e).timestamp);
+      if (ta === tb) return b.i - a.i;
+      if (!ta) return 1;
+      if (!tb) return -1;
+      return tb > ta ? 1 : -1;
+    })
+    .map(({ e }) => e as CampaignTimelineEntry);
+
+  if (entries.length === 0) return null;
+
+  const visible = showAll ? entries : entries.slice(0, 100);
+  return (
+    <div>
+      <Label className="text-[10px] text-muted-foreground">Timeline ({entries.length})</Label>
+      <div className="mt-1 max-h-72 space-y-1 overflow-y-auto pr-1">
+        {visible.map((entry, i) => {
+          const et = entry.event_type.toLowerCase();
+          const icon =
+            et.includes("success") ? (
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+            ) : et.includes("fail") || et.includes("error") ? (
+              <XCircle className="h-3.5 w-3.5 text-red-400" />
+            ) : (
+              <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+            );
+          const moduleName = str(asRecord(entry.metadata).module);
+          return (
+            <div key={i} className="flex items-start gap-2 text-xs">
+              <span className="mt-0.5 shrink-0 font-mono text-muted-foreground tabular-nums">
+                {entry.timestamp.split("T")[1]?.slice(0, 8) || "—"}
+              </span>
+              <span className="mt-0.5 shrink-0">{icon}</span>
+              <span className="shrink-0 font-mono text-muted-foreground">{entry.event_type}</span>
+              <span className="min-w-0 break-words text-foreground">{entry.description}</span>
+              {moduleName && (
+                <Badge variant="outline" className="shrink-0 font-mono text-[10px]">
+                  {moduleName}
+                </Badge>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {entries.length > 100 && (
+        <button
+          type="button"
+          onClick={() => setShowAll((v) => !v)}
+          className="mt-1 text-xs text-muted-foreground underline-offset-4 hover:underline"
+          aria-pressed={showAll}
+        >
+          {showAll ? "Show less" : `Show all ${entries.length} entries`}
+        </button>
       )}
     </div>
   );

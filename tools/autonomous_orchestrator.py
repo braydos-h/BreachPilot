@@ -18,10 +18,6 @@ from tools.campaign.executor import AttackModuleExecutor
 # Re-export orchestrator
 from tools.campaign.orchestrator import AutonomousOrchestrator
 
-# Re-export recon pipeline (pre-extraction patch seam: tests patch
-# tools.autonomous_orchestrator.ReconPipeline.recon_host)
-from tools.recon.pipeline import ReconPipeline
-
 # Re-export state
 from tools.campaign.state import (
     AggressionLevel,
@@ -33,6 +29,10 @@ from tools.campaign.state import (
     _report_autonomous_progress,
     observe_autonomous_progress,
 )
+
+# Re-export recon pipeline (pre-extraction patch seam: tests patch
+# tools.autonomous_orchestrator.ReconPipeline.recon_host)
+from tools.recon.pipeline import ReconPipeline
 
 __all__ = [
     "AggressionLevel",
