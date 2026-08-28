@@ -342,10 +342,11 @@ CONFIG_SCHEMA: dict[str, Any] = {
     },
     # Witness agent — advisory real-time audit-stream watcher (agent-on-agent
     # safety). Library default is OFF (conservative for downstream re-use);
-    # config.yaml (the lab runtime) flips it ON so a lab run streams
-    # anomaly telemetry by default. When enabled it polls the audit JSONL
-    # trails (exploit_audit.jsonl, activity.jsonl) mid-run and flags
-    # anomalies (allowlist breach, PoC escape, permission escalation,
+    # the checked-in config.yaml flips it ON for the lab runtime. NOTE: nothing
+    # in the run lifecycle instantiates WitnessAgent — to observe a run, start
+    # it manually (python -m tools.swarm.agents.witness_agent). When running,
+    # it polls the audit JSONL trails (exploit_audit.jsonl, activity.jsonl)
+    # and flags anomalies (allowlist breach, PoC escape, permission escalation,
     # prompt-injection pattern, DoS drift) to a witness log + the event
     # broker. It is advisory ONLY: it flags, it never blocks / modifies /
     # kills a run. See tools/swarm/agents/witness_agent.py.

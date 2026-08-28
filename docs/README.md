@@ -27,7 +27,7 @@ These docs are the fastest path into this codebase for new contributors. The roo
 - [Run Service](run-service.md): run lifecycle, providers, event/decision brokers, persistence, auth, and WebSocket transport.
 - [Model Providers](providers.md): Ollama wiring for chat/generate, embeddings, and research — and how to add a new provider.
 - [Config Reference](config-reference.md): every `config.yaml` key — type, default, consumer `file:line`, env overrides.
-- [CLI Reference](cli-reference.md): every entry point and flag across `main.py` / `app.py` / `cli.py`, interactive menu, exit codes, example workflows.
+- [CLI Reference](cli-reference.md): every entry point and flag across `main.py` / `app.py` / `cli.py`, WebUI daemon default, `--menu` terminal menu, exit codes, example workflows.
 - [Database & Mission](database-mission.md): SQLite schema (both DBs), mission lifecycle, task queue, memory, target graph, evidence-to-report pipeline.
 - [Outcomes & Evidence](outcome-evidence.md): outcome taxonomy, truth-vs-claim, evidence model, audit JSONL, finding verification, PoE, report generation.
 - [Research](research.md): research assistant, web research, recon enrichers, CVE lookup, and how findings flow into the agent.

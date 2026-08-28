@@ -11,7 +11,7 @@ The repo is NOT a generic nmap wrapper. It couples:
 - A defensive MCP tool server (`mcp_server.py`) that exposes scope-gated Nmap scanning, sanitized vulnerability search, and NVD CVE lookup.
 - A second permissive MCP tool server (`mcp_exploit_server.py`, port 8001 by default) that exposes terminal execution, Python file write/run, searchsploit, Metasploit, msfvenom, impacket lateral movement, and credential dumping — gated at the policy layer in `tools/exploit_agent/policy.py`, not in the MCP server itself.
 - A multi-agent swarm (`tools/swarm/`) that decomposes work across 6 specialist agents with a shared blackboard.
-- A questionary-driven interactive menu and direct CLI entry points.
+- A questionary-driven interactive terminal menu (`--menu`), direct CLI entry points, and the WebUI daemon (the default no-args launch).
 - An autonomous attack orchestrator (`tools/autonomous_orchestrator.py`) that drives persistent multi-phase campaigns with adaptive aggression levels.
 
 The operator must only ever run this against networks they own or are explicitly authorized to assess. Scope, command, and search safety are enforced in Python code, not just in prompts.
@@ -45,7 +45,7 @@ make doctor           # python main.py --doctor
 make self-test        # python main.py --self-test
 make test             # full pytest suite
 make test-one F=tests/test_scope_gate.py  # single file
-make run              # interactive menu
+make run              # python main.py (WebUI daemon)
 make mcp-defensive    # defensive MCP server
 make mcp-exploit      # exploit MCP server
 make clean            # remove venv + __pycache__ dirs
@@ -58,12 +58,11 @@ make clean            # remove venv + __pycache__ dirs
 
 ### Run
 ```bash
-python main.py                               # interactive questionary menu (the DEFAULT no-args behavior)
-python main.py --menu                         # same interactive menu, explicit
+python main.py                               # WebUI daemon + browser (the DEFAULT no-args behavior)
+python main.py --menu                         # legacy interactive terminal menu, explicit
 python main.py --target 10.0.0.50 --mode attack --goal backdoor
 python main.py --target 10.0.0.50 --mode recon --recon-first
 python main.py --target 10.0.0.50 --mode attack --swarm --critic --reflection --adaptive-exploits
-python main.py --exploit --exploit-mode standalone --exploit-target 10.0.0.50 --exploit-cve CVE-2021-44228 --exploit-permission full_access
 ```
 
 ### WebUI API daemon (--demon / --daemon / --web)
@@ -74,7 +73,8 @@ python main.py --web                          # build webui/ if needed, serve it
 # Interactive docs: http://127.0.0.1:8765/docs
 # OpenAPI schema:  http://127.0.0.1:8765/openapi.json
 # Bearer token: generated into .webui_secret_key (gitignored) or set NETATTACKAI_API_TOKEN
-# v1 is loopback-only; one active run at a time; bundled WebUI served when api.serve_webui is true.
+# v1 is loopback-only; concurrent runs capped by api.max_concurrent_runs (default 3);
+# bundled WebUI served when api.serve_webui is true.
 ```
 `--web` is shorthand for: build `webui/dist/` if missing (runs `npm install && npm run build` in `webui/`), set `api.serve_webui: true` in memory (not written to `config.yaml`), start the daemon, and open `http://127.0.0.1:8765/` in a browser. The built UI is a Vite + React + TypeScript SPA under `webui/` that talks to the `/api/v1` REST + WebSocket surface. `--web` has the same mutual-exclusion constraints as `--demon`.
 
@@ -111,7 +111,7 @@ python -m pip install -e ".[dev]"   # includes ruff
 ruff check .                         # must pass (0 errors)
 ruff format --check .                # must pass (0 diffs)
 mypy --follow-imports=skip tools     # must pass (216 files)
-python -m pytest --cov=tools --cov=main --cov=cli
+python -m coverage run -m pytest tests/ && python -m coverage report   # coverage (CI command; pytest-cov is not installed)
 ```
 
 ## Configuration
@@ -123,7 +123,7 @@ Everything behavior-defining lives in **`config.yaml`**. Top-level keys (current
 - `nmap` (path, sudo, priv_fallback)
 - `exploit` (mode, permission, attack_mode, timeouts, workspace_dir, allowed_targets, require_explicit_allowlist, shell, msfconsole_path, disallowed_assets, forbidden_actions) — **lab build: default permission is `full_access`** with `attack_mode: true`; the one remaining safety is the target-IP lock (`require_explicit_allowlist` unions the runtime `--target` via `EXPLOIT_TARGET`). Set `permission: read_only` for propose-only recon; a missing key also falls back to `read_only`.
 - `stealth` (rotate_ua, dns_over_https) — inert/UI-only legacy block; the live Phase 6.2 block is `opsec`
-- `opsec` (enabled, ua_rotation, doh, doh_provider, min_gap_seconds, jitter_seconds, rate_per_minute, quiet_command_patterns, noise_budget, **local_targets_off**, **local_cidrs**, **public_autonomy**) — agent self-hardening + detection-coverage. **Target-aware (Phase 6.2+):** `OpsecProfile.resolve_for_target(ip)` / `OpsecManager.resolve_for_target(ip)` force the profile OFF for private/local target IPs (RFC1918/loopback/link-local/reserved/ULA, plus `local_cidrs`) so the AI moves freely on the operator's own box; a public-routable target keeps the configured posture ON. Classification via `tools/validation_utils.is_private_or_local_target` (distinct from `is_local_target`, which means "operator's own host"). Wired at `AutonomousOrchestrator.__init__` (process-global UA resolved against the primary target) and per-action at `AttackModuleExecutor.execute` (`resolve_for_target(task.target)` before `acquire_pacing`). Defaults: `local_targets_off: true`, `public_autonomy: true`. **AI-facing surfaces (advisory, never a gate):** `tools/exploit_agent/prompt.build_opsec_briefing` renders a target-aware OPSEC posture section into the system prompt (empty for local/off targets) via the `opsec_context` kwarg, wired at `run_exploit_agent`'s `build_exploit_system_prompt` call site (`tools/exploit_agent/loop.py`); `tools/mcp_tools/terminal._opsec_advisory_block` appends a live `OPSEC_ADVISORY:` block (noise score + suggested quieter rewrite + pacing posture) to every `run_exploit_terminal` result. Both reuse `OpsecManager.score_command_noise` / `suggest_low_noise_alternative` / `pacing_delay` and share the `OpsecManager._LOW_NOISE_REWRITES` table (single source of truth). `is_quiet_blocked` / `noise_budget` stay **dormant** — they are NOT consulted and must not become attack-path gates; the command always executes.
+- `opsec` (enabled, ua_rotation, doh, doh_provider, min_gap_seconds, jitter_seconds, rate_per_minute, quiet_command_patterns, noise_budget, **local_targets_off**, **local_cidrs**, **public_autonomy**) — agent self-hardening + detection-coverage. **Target-aware (Phase 6.2+):** `OpsecProfile.resolve_for_target(ip)` / `OpsecManager.resolve_for_target(ip)` force the profile OFF for private/local target IPs (RFC1918/loopback/link-local/reserved/ULA, plus `local_cidrs`) so the AI moves freely on the operator's own box; a public-routable target keeps the configured posture ON. Classification via `tools/validation_utils.is_private_or_local_target` (distinct from `is_local_target`, which means "operator's own host"). Wired at `AutonomousOrchestrator.__init__` (process-global UA resolved against the primary target) and per-action at `AttackModuleExecutor.execute` (`resolve_for_target(task.target)` before `acquire_pacing`). Defaults: `local_targets_off: true`, `public_autonomy: true`. **AI-facing surfaces (advisory, never a gate):** `tools/exploit_agent/prompt.build_opsec_briefing` renders a target-aware OPSEC posture section into the system prompt (empty for local/off targets) via the `opsec_context` kwarg, wired at `run_exploit_agent`'s `build_exploit_system_prompt` call site (`scripts/runner_impl.py`); `tools/mcp_tools/terminal._opsec_advisory_block` appends a live `OPSEC_ADVISORY:` block (noise score + suggested quieter rewrite + pacing posture) to every `run_exploit_terminal` result. Both reuse `OpsecManager.score_command_noise` / `suggest_low_noise_alternative` / `pacing_delay` and share the `OpsecManager._LOW_NOISE_REWRITES` table (single source of truth). `is_quiet_blocked` / `noise_budget` stay **dormant** — they are NOT consulted and must not become attack-path gates; the command always executes.
 - `cve_lookup`, `research`, `swarm`, `reasoning`, `memory`, `adaptive_exploits`, `multi_model` (optional peer consultation; off by default)
 - `long_session` (opt-in multi-hour attack mode, also enabled by `--long-session`)
 - `skills` (runtime skills system: selection, re-selection, feedback, semantic matching, sanitization)
@@ -212,8 +212,8 @@ The exploit MCP server's tool implementations live in a structured subpackage, r
 
 | Module | Purpose |
 |--------|---------|
-| `registry.py` | Central wiring — `@audit_tool` decorator, workspace helpers, model-router resolution, multi-model/consult-alias config, process timeouts. Registers no tools itself. |
-| `terminal.py` | `run_exploit_terminal` + package/clone primitives (`apt_install`, `git_clone`, `pip_install`, `run_as_root`, `check_environment`, `install_package`, `download_and_install`, `update_system`) — shell execution with the target-IP lock (`_target_lock_block`) |
+| `registry.py` | Central wiring — `@audit_tool` decorator, workspace helpers, model-router resolution, multi-model/consult-alias config, process timeouts, `collect_tools()` discovery. Registers no tools itself. |
+| `terminal/` (pkg) | `run_exploit_terminal` + package/clone primitives (`apt_install`, `git_clone`, `pip_install`, `run_as_root`, `check_environment`, `install_package`, `download_and_install`, `update_system`). `allowlist.py` holds the target-IP lock (`_target_lock_block`) and the OPSEC advisory block; `execute.py`/`package.py`/`privilege.py` register the tools |
 | `recon.py` | `check_os`, `quick_scan`, `run_full_recon`, `get_service_fingerprint` |
 | `attack_modules.py` | Web-app probes (`jwt_tamper`, `ssti_probe`, `graphql_introspect`, `race_request`, `timing_oracle`, `request_smuggling_probe`, `password_spray`, `cve_to_exploit_synth`, `hash_crack_identify`) + autonomous campaign planner (`create_attack_plan`/`get_current_plan`/`replan`, `start_autonomous_campaign`/`get_campaign_status`/`run_campaign_step`) + `list_attack_modules`, `run_attack_module`, `craft_exploit`, `mutate_exploit` |
 | `metasploit.py` | `run_msf_module`, `msfconsole_start`/`stop`/`command`, `msf_run_exploit`, `msf_run_auxiliary`, `msf_list_sessions`, `msf_interact_session`, `msf_run_post_module`, `msf_kill_session`, `msf_generate_payload`, `msf_run_resource_script` |
@@ -247,46 +247,48 @@ The exploit MCP server's tool implementations live in a structured subpackage, r
 
 | Module | Purpose |
 |--------|---------|
-| `exploit_agent/` (pkg, ~3.8K lines) | Split from the old 164K monolith: `loop.py` (main agent loop), `policy.py` (ExploitPolicy / ExploitPermission), `context.py` (context sizing/compaction/attack memory), `prompt.py`, `reflection.py`, `skills.py` (mid-run re-selection), `tool_calls.py`, `ollama_client.py`, `_common.py` (shared import surface) |
-| `autonomous_orchestrator.py` (58K) | Persistent multi-phase attack campaigns, aggression levels, auto-retry, vuln chaining |
-| `attack_ui.py` (51K) | Interactive questionary-based menu system (AttackUi) |
-| `interactive_menu.py` (32K) | Arrow-key-driven main menu (no-args default) |
-| `recon_pipeline.py` (63K) | Host discovery, service identification, enrichment, goal suggestion |
-| `attack_modules/` (pkg, ~2.2K lines) | Split from the old 87K monolith: `base.py` (AttackModule ABC + ModuleContext), `registry.py` (ranking), `modules/` per-category (`web`, `auth_creds`, `crypto_jwt`, `deserialize`, `network_smb`, `privesc`, `services`, `ssh`, `synthesis`) |
-| `command_analyzer.py` (30K) | Destructive command and egress analysis |
-| `config_manager.py` (30K) | Config schema, validation, and defaults |
-| `payload_crafter.py` (31K) | Payload generation and mutation |
-| `metasploit_bridge.py` (30K) | Metasploit RPC integration |
-| `persistent_session_manager.py` (36K) | Session persistence, checkpoint, resume |
-| `web_researcher.py` (57K) | Provider-backed web research (Ollama/SerpAPI), source ranking, caching |
-| `model_router.py` (12K) | Ollama model client routing, retry, context window normalization |
+| `exploit_agent/` (pkg) + `scripts/runner_impl.py` | `scripts/runner_impl.py` (~2.1K lines) is the **canonical loop implementation** (`run_exploit_agent`); `tools/exploit_agent/runner/loop.py` loads it via importlib and `runner.py`/`runner/` coexist as re-export shims. `tools/exploit_agent/loop.py` is a **deprecated shim** (DeprecationWarning) re-exporting from `runner`. Supporting modules in the package: `policy.py` (ExploitPolicy / ExploitPermission), `context.py` (context sizing/compaction/attack memory), `phase_tracker.py` (`_PhaseTracker`), `prompt.py`, `reflection.py`, `skills.py` (mid-run re-selection), `tool_calls.py`, `tool_catalog.py`, `ollama_client.py`, `research_assistant.py`, `outcome_{classify,truth,adapter}.py`, `_common.py` (shared import surface). The package root `__init__.py` re-exports `run_exploit_agent` (with `_sync_patchable_symbols` for test monkeypatching). |
+| `campaign/` (pkg) | The autonomous campaign engine behind the `tools/autonomous_orchestrator.py` facade: `state.py` (AttackState/phases/aggression), `executor.py` (AttackModuleExecutor, Path-B target lock), `orchestrator.py` (AutonomousOrchestrator), `planner.py`, `phases.py`, `persistence.py`. |
+| `recon/` (pkg) | The recon pipeline behind the deprecated `tools/recon_pipeline.py` shim: `pipeline.py`, `scanner.py` (PrimaryReconScanner), `enumerator.py` (SecondaryEnumerator), `config.py`. |
+| `attack_ui.py` (64K) | Interactive questionary-based menu system (AttackUi) |
+| `interactive_menu.py` (27K) | Arrow-key-driven main menu (`--menu`) |
+| `run_service/` (pkg) | Transport-neutral `AssessmentService` (prepare/execute), typed models, decision/event/approval adapters for CLI + API |
+| `api/` (pkg) | WebUI API daemon: auth, event broker, decision broker, persistence, routes |
+| `attack_modules/` (pkg, ~15 module families) | `base.py` (AttackModule ABC + ModuleContext), `registry.py` (ranking), `modules/` per-category (`web`, `auth_creds`, `crypto_jwt`, `deserialize`, `network_smb`, `privesc`, `services`, `ssh`, `synthesis`, `ad`, `ics_iot`, `detection`, `persistence`, `supply_chain`, `orchestrator_phases`, ...) |
+| `command_analyzer.py` (31K) | Destructive command and egress analysis (load-bearing for the MCP target-lock destination extraction) |
+| `config/` (pkg) | Canonical config schema/validator/loader (`schema.py::CONFIG_SCHEMA`, `validator.py`, `loader.py`); `tools/config_manager.py` is a re-export shim |
+| `payload_crafter.py` (35K) | Payload generation and mutation |
+| `metasploit_bridge.py` (38K) | Metasploit RPC integration |
+| `persistent_session_manager.py` (45K) | Session persistence, checkpoint, resume |
+| `web_researcher.py` (59K) | Provider-backed web research (Ollama/SerpAPI), source ranking, caching |
+| `model_router.py` (22K) | Ollama model client routing, retry, context window normalization, provider seam |
 | `model_telemetry.py` (11K) | LLM usage telemetry (tokens, context, duration, tokens/sec) |
-| `validation_utils.py` (10K) | IP validation, command sanitization, banner parsing |
-| `mcp_shared.py` (45K) | Workspace path checks, allowlist checks, audit helpers, redaction |
+| `validation_utils.py` (24K) | IP validation, command sanitization, banner parsing, allowlist matcher |
+| `mcp_shared.py` (20K) | Workspace path checks, allowlist checks, audit helpers, redaction, HTTP server hardening |
 | `skill_registry.py` (15K) | Skill catalog loading, sanitization, metadata |
-| `skill_selector.py` (15K) | Deterministic + semantic skill selection |
+| `skill_selector.py` (20K) | Deterministic + semantic skill selection |
 | `skill_embeddings.py` (7K) | nomic-embed-text cosine similarity ranking |
 | `skill_pipeline.py` (8K) | Skill context injection into agent prompts |
 | `skill_feedback.py` (5K) | Cross-mission skill outcome feedback (ExperienceStore) |
-| `semantic_memory.py` (15K) | Ollama nomic-embed-text cross-mission learning |
+| `semantic_memory.py` (18K) | Ollama nomic-embed-text cross-mission learning |
 | `experience_store.py` (10K) | Bayesian confidence scoring for attack outcomes |
 | `attack_memory.py` (17K) | Per-attempt memory with context window management |
-| `credential_store.py` (21K) | Encrypted credential storage |
-| `cve_lookup.py` (12K) | NVD CVE lookup with circuit breaker + rate limiting |
+| `credential_store.py` (23K) | Encrypted credential storage |
+| `cve_lookup.py` (23K) | NVD CVE lookup with circuit breaker, rate limiting, EPSS/KEV enrichment |
 | `goal_engine.py` (16K) | Goal preset resolution and risk gating |
 | `goal_suggester.py` (31K) | Recon-driven goal suggestion |
-| `enhanced_reporting.py` (37K) | Exploit-session reporting, timelines, CVSS, chains |
-| `exploit_search.py` (11K) | Exploit database search (searchsploit wrapper) |
+| `enhanced_reporting.py` (66K) | Exploit-session reporting, timelines, CVSS, chains |
+| `exploit_search.py` (20K) | Exploit database search (searchsploit wrapper) |
 | `exploit_mutator.py` (8K) | Exploit parameter mutation strategies |
 | `session_manager.py` (11K) | Session lifecycle management |
-| `attack_planner.py` (12K) | Attack plan generation and step sequencing |
-| `safety_reviewer.py` (4K) | Pre-flight safety checks for tool calls |
-| `doctor.py` (12K) | Environment and configuration diagnostics |
+| `attack_planner.py` (19K) | Attack plan generation and step sequencing |
+| `safety_reviewer.py` (5K) | Pre-flight safety checks for tool calls |
+| `doctor.py` (28K) | Environment and configuration diagnostics |
 | `self_test.py` (10K) | Safe localhost smoke test |
-| `api_key_store.py` (8K) | API key collection, storage, env loading |
+| `api_key_store.py` (10K) | API key collection, storage, env loading |
 | `activity_log.py` (6K) | Per-run activity JSONL logging |
 | `reliability.py` (38K) | Retry logic, circuit breakers, error classification |
-| `post_exploit.py` (6K) | Post-exploitation helpers |
+| `post_exploit.py` (7K) | Post-exploitation helpers |
 | `demo_mode.py` (7K) | Demo/presentation mode |
 | `logging_setup.py` (5K) | Logging configuration |
 | `exceptions.py` (1.5K) | `_EXC_GROUP_CATCH`, `_is_exception_group`, `_log_nested_exceptions` |
@@ -311,8 +313,8 @@ target IP. Recon keeps its full safety (post-session SafetyReviewer, READ_ONLY
 propose-only, goal-menu SAFE/GATED narrowing, defensive scope-gated MCP server).
 
 Three levels, defined in `tools/exploit_agent/policy.py`:
-- **`full_access`** (config + schema default) — the lab attack posture. `ExploitPolicy.approve_action` auto-approves every action with **no command-content or scope inspection** — destructive commands, egress, reverse shells, credential dumping, Metasploit, and Python file write/run are all allowed. The `is_full_access` branch just increments the per-session command budget and returns True. `_check_command_safety` / `_check_scope_gate` / `_gate_pivot_and_count` were removed from this branch.
-- **`approve_only`** — every tool call prints an "EXPLOIT ACTION REQUIRES APPROVAL" banner; user must type `ALLOW <target_ip>` to proceed. Used by recon/interactive paths; the banner code stays but is unreachable from attack mode.
+- **`full_access`** (config + schema default) — the lab attack posture. `ExploitPolicy.approve_action` auto-approves every action with **no command-content or scope inspection** — destructive commands, egress, reverse shells, credential dumping, Metasploit, and Python file write/run are all allowed. The `is_full_access` branch just increments the per-session command budget and returns True. The former `_check_command_safety` / `_check_scope_gate` / `_gate_pivot_and_count` gates were removed from the policy entirely.
+- **`approve_only`** — every tool call prints an "EXPLOIT ACTION REQUIRES APPROVAL" banner; user must type `ALLOW <target_ip>` to proceed. Active when config explicitly sets `exploit.permission: approve_only` (it is also the `ExploitSettings` dataclass's programmatic default, but every CLI entry path resolves the permission from config first).
 - **`read_only`** — agent gathers intel and proposes attacks without executing them. Recon uses this (`tools/cli_exploit_settings.py:_resolve_exploit_permission` hard-codes `read_only` as the missing-key fallback so a partial config never silently becomes live).
 
 **The ONE attack-mode safety kept: target-IP lock (no pivoting to other hosts).**
@@ -346,23 +348,23 @@ Kali arsenal including searchsploit/metasploit/hydra/crackmapexec/impacket).
 
 ## Testing Notes
 
-- **248** test files in `tests/` (was ~80; verify via `python -c "len(list(Path('tests').glob('test_*.py')))"` → 248, all mock subprocess/network). No fixtures for live Nmap; everything mocks subprocess / network.
+- **~250** test files in `tests/` (verify via `python -c "import pathlib; print(len(list(pathlib.Path('tests').glob('test_*.py'))))"`, all mock subprocess/network). No fixtures for live Nmap; everything mocks subprocess / network.
 - New safety-relevant code needs regression tests in `test_scope_gate.py`, `test_safety_reviewer.py`, `test_validate_target.py` (or a new file if the surface is new).
-- `pyproject.toml` configures pytest with `asyncio_mode = "auto"` and `testpaths = ["tests"]`. Coverage is configured for `tools/`, `main`, and `cli` (`pyproject.toml:94` `source = ["tools", "main", "cli"]`, `python -m pytest --cov=tools --cov=main --cov=cli`).
+- `pyproject.toml` configures pytest with `asyncio_mode = "auto"` and `testpaths = ["tests"]`. Coverage is configured in `[tool.coverage.run]` with `source = ["tools", "main", "cli"]`; run it the way CI does — `python -m coverage run -m pytest tests/` then `python -m coverage report` (pytest-cov is NOT a dependency, so `pytest --cov` fails).
 - Lint / type-check are CI-enforced repo-wide: `ruff check .` (0 errors) + `ruff format --check .` (0 diffs) and `mypy --follow-imports=skip tools` (216 files, 0 errors with current `disable_error_code` masks; see `.github/workflows/ci.yml`). `pyproject.toml` has `ruff` line-length 120 `select = ["E","F","W","I"]` `ignore = ["E501"]` (`pyproject.toml:102-106`) and `mypy` configs. Keep security-sensitive diffs readable.
 
 ## Things To Watch Out For
 
-- **`config.yaml` exploit.permission is `full_access` in the lab checked-in file (`config.yaml:61`) — schema default is also `full_access` (`tools/config_manager.py:152`); the *missing-key* fallback (`tools/cli_exploit_settings.py:12-30`) is `read_only` so a partial config never silently becomes live.** Do not change the lab default without updating `docs/safety-model.md` and README.
+- **`config.yaml` exploit.permission is `full_access` in the lab checked-in file (`config.yaml:61`) — schema default is also `full_access` (`tools/config/schema.py:150`); the *missing-key* fallback (`tools/cli_exploit_settings.py:13-30`) is `read_only` so a partial config never silently becomes live.** Do not change the lab default without updating `docs/safety-model.md` and README.
 - **The `BaseExceptionGroup` thing** (`tools/exceptions.py:38-41` `_EXC_GROUP_CATCH = (Exception, BaseExceptionGroup)` on 3.11+) — any new code that wraps MCP `stdio_client` / `streamable_http_client` / `ClientSession.initialize()` calls must use `_EXC_GROUP_CATCH` and the `_is_exception_group` / `_log_nested_exceptions` helpers (`tools/exceptions.py:15-35`), not `except Exception`. Boot timeout `MCP_BOOT_TIMEOUT_SECONDS=30` (`tools/mcp_session.py:32`).
 - **`config.yaml` exploit.permission defaults to `full_access` (lab build).** The attack path is unrestricted; the one safety kept is the target-IP lock (above). Recon still uses `read_only` via `_resolve_exploit_permission`'s missing-key fallback. Do not re-add the removed attack-path gates (command-content/scope/pivot) without first ensuring the MCP allowlist target-lock covers the path you are de-restricting — the allowlist IS the lock.
 - **Two mission/agent paths coexist** (`main.py` exploit engine vs `legacy/cli.py` legacy). When touching `scope_gate.py`, `risk_controller.py`, `legacy/mission.py`, `db.py` — those affect Flow B. When touching `tools/exploit_agent/`, `mcp_exploit_server.py`, `tools/swarm/`, `tools/mcp_tools/` — those affect Flow A. The two share `db.py` and `legacy/mission.py` schemas (root `mission.py` is a shim). **Do not edit `scope_gate.py`, `safety_reviewer.py`, or Flow B's `legacy/agent_loop.py`/`legacy/tool_router.py`/`legacy/risk_controller.py`/`legacy/mission.py`/`db.py` — recon safety depends on them.**
 - **The exploit workspace is shared host filesystem state.** `mcp_exploit_server.py` and `tools/exploit_agent/` both write into `exploit_workspace/`. **Lab build: path-traversal protection was removed** — the operator box is unrestricted. The MCP tool layer enforces only the target-IP allowlist lock.
-- **Ollama is required at runtime** — the model client is built at the top of `main.py`; if Ollama is unreachable, the boot will surface this as a `[WARN]` line on the recon path or a hard fail on the attack path.
+- **The model backend is Ollama Cloud by default** (`ollama.host: https://api.ollama.com` + `OLLAMA_API_KEY`; the ollama client attaches the bearer token automatically). A local daemon works by pointing `ollama.host` at it (`http://localhost:11434`) — no code change; embeddings always use `ollama.embed_host` (local by default). An unreachable/unauthenticated model backend surfaces as a `[WARN]` on the recon path or a hard fail on the attack path.
 - **ChatGPT provider is opt-in and provider-agnostic by design.** `models.provider: chatgpt` swaps the chat/generate client at the single seam `tools/model_router.py::_build_model_client` (injects a `ChatGptProxyClient` from `tools/providers/chatgpt_provider.py` instead of `ollama.Client`); every consumer already receives a `ModelClient` and is untouched. **OAuth tokens live in `~/.codex/auth.json` — never copy them into `config.yaml` or logs; `is_authenticated()` checks file existence only, never reads it.** The proxy is loopback-only (`127.0.0.1:10531`); lifecycle uses openai-oauth's own `--detach`/`stop` CLI — never Popen+kill `serve`, and never stop a proxy we didn't start (`_we_started`). **This is a provider integration, not an auth-scope change: do not weaken the target-IP allowlist, permission model, MCP target locks, or recon restrictions.** Embeddings stay on Ollama under either provider. Default `provider: ollama` behavior is byte-identical to pre-provider code (the `raw_client is None` branch), so `monkeypatch.setattr(model_router, "OllamaClient", ...)` tests stay green.
-- **CI runs on every push/PR** (`.github/workflows/ci.yml` + codeql + dependency-review, `.github/dependabot.yml`): mocked test suite on Python 3.11-3.13 (`tests/: 248 files`), coverage (`Python 3.12`), repo-wide `ruff check .` + `ruff format --check .` + `mypy --follow-imports=skip tools` (see README §CI), package build (`python -m build` + `twine check`), WebUI build+tests (`npm ci` + `tsc -b && vite build` + `vitest`). Before a PR run `python -m pytest tests/ -v`, `ruff check .`, `ruff format --check .`, and `mypy --follow-imports=skip tools`, and verify README flags/config still match reality.
-- **The README is the canonical user-facing doc**. When adding a CLI flag, MCP tool, or config key, update the relevant section there. The CHANGELOG is for user-visible releases; the v1.0.0 entry there is a good template.
-- **`pyproject.toml` and `requirements.txt` are synced** — both list runtime + dev (`pip install -e ".[dev]" == pip install -r requirements.txt`). `requirements.txt` header says “Synced from pyproject.toml”. The `opencode.json` file configures an Ollama Cloud provider for the opencode.ai editor, not for the app itself.
-- **`tools/mcp_tools/registry.py` is the central wiring point** for all exploit MCP tools — new tools must be registered there with the `@audit_tool` decorator and added to the tool list in `mcp_exploit_server.py`.
+- **CI runs on every push/PR** (`.github/workflows/ci.yml` + codeql + dependency-review, `.github/dependabot.yml`): mocked test suite on Python 3.11-3.13 (`tests/`: ~250 files), coverage (`python -m coverage run -m pytest tests/` on Python 3.12), repo-wide `ruff check .` + `ruff format --check .` + `mypy --follow-imports=skip tools` (see README §CI), package build (`python -m build` + `twine check`), WebUI build+tests (`npm ci` + `tsc -b && vite build` + `vitest`). Before a PR run `python -m pytest tests/ -v`, `ruff check .`, `ruff format --check .`, and `mypy --follow-imports=skip tools`, and verify README flags/config still match reality.
+- **The README is the canonical user-facing doc**. When adding a CLI flag, MCP tool, or config key, update the relevant section there. There is no `CHANGELOG.md`; release history is the git history plus the version in `pyproject.toml` / `main.__version__`.
+- **`pyproject.toml` and `requirements.txt` are synced** — both list runtime + dev (`pip install -e ".[dev]" == pip install -r requirements.txt`). `requirements.txt` header says “Synced from pyproject.toml”. The `opencode.jsonc` file configures an Ollama Cloud provider for the opencode.ai editor, not for the app itself.
+- **`tools/mcp_tools/registry.py` is the central wiring point** for all exploit MCP tools — add tools there with the `@audit_tool` / `@require_allowlist()` decorators; `mcp_exploit_server.py` auto-discovers every `register_*_tools` via `collect_tools()` (pkgutil + AST validation, fails CI if a decorator is missing), so no manual list edit is needed.
 - **`tools/autonomous_orchestrator.py` is a separate campaign engine** from the swarm — it drives persistent multi-phase attacks with adaptive aggression levels, while the swarm is a parallel specialist-agent decomposition. They can be used independently.
 - **Agents must NEVER push to GitHub or create new branches.** Do not run `git push`, `git branch`, `git checkout -b`, `git switch -c`, `gh repo create`, or any branch/push-creating `gh` command. All work stays on the current local branch; remote updates are the user's job. Enforced via `permission.bash` deny rules in `~/.config/opencode/opencode.json` and the repo `pre-push` hook — do not bypass.

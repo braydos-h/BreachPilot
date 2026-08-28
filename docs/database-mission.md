@@ -102,7 +102,7 @@ create_from_config (mission.py:312-383)
   → audit_logs 'mission_created'
   → workspace dirs (research_workspace/<id>/…)
 
-run loop (agent_loop.py)
+run loop (legacy/agent_loop.py)
   → tasks created (pending) → picked by priority → running
   → observation + evidence + outcome assessment per task
   → hypothesis status transitions (open → confirmed/refuted/inconclusive/exhausted)

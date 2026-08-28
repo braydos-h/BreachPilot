@@ -29,7 +29,7 @@ target-safe (private/internal hosts are blocked by default).
 ## Research Flow
 
 ```text
-exploit agent (tools/exploit_agent/loop.py)
+exploit agent (scripts/runner_impl.py)
   |  consult_research_assistant (explicit)  /  automatic triggers
   v
 ResearchAssistant.consult (research_assistant.py:257)

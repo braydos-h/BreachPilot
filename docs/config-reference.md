@@ -12,7 +12,7 @@ vars can override it.
 
 ## Purpose
 
-- `config.yaml` is the checked-in operator defaults; `tools/config_manager.py::CONFIG_SCHEMA` mirrors the same defaults for when the file is missing or a key is absent (config_manager.py:22-476). **The two are proven in sync** by `tests/test_config_manager.py::test_config_yaml_keys_subset_of_schema` (`assert set(yaml.safe_load(open('config.yaml')))==set(CONFIG_SCHEMA)` — CI fails on drift).
+- `config.yaml` is the checked-in operator defaults; `tools/config/schema.py::CONFIG_SCHEMA` mirrors the same defaults for when the file is missing or a key is absent (re-exported for back-compat by the `tools/config_manager.py` shim). **The two are proven in sync** by `tests/test_config_manager.py::test_config_yaml_keys_subset_of_schema` (`assert set(yaml.safe_load(open('config.yaml')))==set(CONFIG_SCHEMA)` — CI fails on drift; the same check runs as a CI lint step on top-level keys).
 - Every top-level key is consumed somewhere; a missing key almost always falls back to a schema default rather than failing. **Strict sections** `exploit`, `mcp`, `ollama`, `models` promote unknown nested keys (e.g. `exploit.permision` typo) from warning to **error**, so CI fails on typos (`python -m pytest tests/test_config_manager.py -k unknown`).
 - Secrets never live here — they are env vars (or `secr.json` via `--setup-api-keys`), named by `api_key_env` / `token_env` keys.
 - **Machine-readable health:** `python main.py --doctor --json` emits `{checks:[{name, ok, error}], is_valid, unknown_keys}` (see `tools/doctor.py::build_doctor_report`) for `make doctor --json | jq -e '.is_valid'`.
@@ -21,14 +21,20 @@ vars can override it.
 
 | Step | Where | Behavior |
 |------|-------|----------|
-| Load YAML | `ConfigValidator.load` (config_manager.py:528-542) | Missing file → defaults; non-mapping → `ValueError` |
-| Validate | `ConfigValidator.validate` (config_manager.py:544-948) | Unknown top-level keys → warnings (plugin-registered sections exempt, :553-562); type/range checks per section; **errors** for hard violations (e.g. `api.host` non-loopback, :921-926) |
-| Merge defaults | `apply_defaults` (config_manager.py:963-979) | Deep-merge loaded config over `CONFIG_SCHEMA` defaults |
-| Entry points | `load_validated_config` (config_manager.py:1043-1058) raises on errors, logs warnings; `main.py:596` and `mcp_*_server.py` use the lighter `tools/config_cli.load_config` |
-| Live PATCH | `PATCH /config` (tools/api/routes/system.py:110) | Atomic deep-merge, re-validated through `ConfigValidator`; loopback-only `allowed_origins` enforced |
+| Load YAML | `ConfigValidator.load` (`tools/config/validator.py`) | Missing file → defaults; non-mapping → `ValueError` |
+| Validate | `ConfigValidator.validate` (`tools/config/validator.py`) | Unknown top-level keys → warnings (plugin-registered sections exempt); type/range checks per section; **errors** for hard violations (e.g. `api.host` non-loopback) |
+| Merge defaults | `apply_defaults` (`tools/config/validator.py`) | Deep-merge loaded config over `CONFIG_SCHEMA` defaults |
+| Entry points | `load_validated_config` (`tools/config/loader.py`) raises on errors, logs warnings; `main.py` and `mcp_*_server.py` use the lighter `tools/config_cli.load_config` (raw YAML, no defaults merged) |
+| Live PATCH | `PATCH /config` (tools/api/routes/system.py) | Atomic deep-merge, re-validated through `ConfigValidator`; loopback-only `allowed_origins` enforced |
 
 Required sections (warned if absent, defaults apply): `ollama`, `models`,
-`mcp`, `exploit` (config_manager.py:565-569).
+`mcp`, `exploit` (`tools/config/validator.py`).
+
+**Two load paths matter for defaults:** `tools/kernel/config.py::load_config` (raw YAML; `{}` when
+the file is missing; no defaults merged) is what `main.py`/`mcp_shared`/`exploit_session` use, so
+run-time consumers read missing keys defensively with their own fallbacks (e.g. `exploit.permission`
+→ `read_only`). `tools/config/loader.py::load_validated_config` (validation + `apply_defaults()`
+over `CONFIG_SCHEMA`) is what policy-adjacent helpers use.
 
 ## Config CLI
 
@@ -37,12 +43,12 @@ There is no dedicated `config` subcommand; config interaction is via flags on
 
 | Command / flag | What it does | Source |
 |----------------|--------------|--------|
-| `--config <path>` | Path to the YAML file (default `config.yaml`) | main.py:349 |
-| `--setup-api-keys` / `--api-key-file` / `--no-api-key-prompt` | Prompt for provider keys, persist to `secr.json`, load into env at boot | main.py:357-359; `bootstrap_startup_api_keys` config_cli.py:175-194; `tools/api_key_store.py` |
-| Start New Session (target entry) | Persists target into `exploit.allowed_targets` via atomic, comment-preserving YAML edit | `add_target_to_allowlist` config_cli.py:30-93, `_add_allowed_target_to_yaml` :96-148 |
-| `--skills*` flags | Mutate the in-memory `config["skills"]` dict only (advisory) | `apply_skills_cli_overrides` tools/skills_cli.py:23-80 |
-| `--doctor` | Loads config, checks ollama host/models/nmap/ports/workspace | tools/doctor.py:305-419 |
-| `--self-test` | Same config reads as doctor, localhost smoke test | tools/self_test.py:101-115 |
+| `--config <path>` | Path to the YAML file (default `config.yaml`) | main.py `--config` |
+| `--setup-api-keys` / `--api-key-file` / `--no-api-key-prompt` | Prompt for provider keys, persist to `secr.json`, load into env at boot | main.py api-keys group; `bootstrap_startup_api_keys` (`tools/config_cli.py`); `tools/api_key_store.py` |
+| Start New Session (target entry) | Persists target into `exploit.allowed_targets` via atomic, comment-preserving YAML edit | `add_target_to_allowlist` / `_add_allowed_target_to_yaml` (`tools/config_cli.py`) |
+| `--skills*` flags | Mutate the in-memory `config["skills"]` dict only (advisory) | `apply_skills_cli_overrides` (`tools/skills_cli.py`) |
+| `--doctor` | Loads config, checks ollama host/models/nmap/ports/workspace | `tools/doctor.py` |
+| `--self-test` | Same config reads as doctor, localhost smoke test | `tools/self_test.py` |
 
 **Change config → verify with `python main.py --doctor`** (env, nmap, Ollama
 reachability, model registry, port conflicts) and `python main.py --self-test`
@@ -71,35 +77,37 @@ reachability, model registry, port conflicts) and `python main.py --self-test`
 
 ## Top-level sections
 
-### `ollama:` (config.yaml:1-14) — model backend
+### `ollama:` (config.yaml:2-6) — model backend
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `host` | str | `https://api.ollama.com` | Ollama endpoint for chat/generate (cloud default; point at a local daemon to go local) | config_manager.py:996, model_router.py:287-316, doctor.py:320 |
-| `model` | str | `glm-5.2:cloud` | Default concrete model id | config_manager.py:31, interactive_menu.py:452 (menu default write) |
-| `api_key_env` | str | `OLLAMA_API_KEY` | Env var holding the bearer token | api_key_store.py:49 |
-| `embed_host` | str | `http://localhost:11434` | Embedding host (falls back to `host`) | config_manager.py:998-1006, exploit_agent/loop.py:478, skill_embeddings.py:180-186 |
+| `host` | str | `https://api.ollama.com` | Ollama endpoint for chat/generate (cloud default; point at a local daemon to go local). The ollama Python client auto-attaches `Authorization: Bearer $OLLAMA_API_KEY`. | `tools/config/loader.py` `get_ollama_host`, `tools/model_router.py`, `tools/doctor.py` |
+| `model` | str | `glm-5.2:cloud` | Default concrete model id | `tools/config/schema.py`, `tools/interactive_menu.py` (menu default write) |
+| `api_key_env` | str | `OLLAMA_API_KEY` | Env var holding the bearer token | `tools/api_key_store.py` |
+| `embed_host` | str | `http://localhost:11434` | Embedding host (falls back to `host`) — embeddings stay local by default even on the cloud chat path | `scripts/runner_impl.py` (SemanticMemoryManager wiring), `tools/skill_embeddings.py` |
 
 ### `models:` (config.yaml:15-44) — model registry
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `provider` | enum | `ollama` | Active chat/generate provider (`ollama`\|`chatgpt`); absent = `ollama` (today's behavior). Warn-only validated. | config_manager.py `get_ai_provider`, model_router.py `build_router`/`build_model_client_for_provider`, run_service/service.py, doctor.py, api/routes/system.py |
-| `registry` | map[alias→model id] | kimi/deepseek/deepseek_flash/glm/minimax | Alias → concrete cloud model mapping (Ollama path) | config_manager.py:1011, doctor.py:321, run_service/service.py:345, tools/mcp_tools/registry.py:158-200 |
-| `default_alias` | str | `glm` | Active model alias (Ollama path; ChatGPT path uses `chatgpt.default_model`) | config_manager.py:1008, run_service/service.py:349, eval_harness.py:399, agent_loop.py:253 |
+| `provider` | enum | `ollama` | Active chat/generate provider (`ollama`\|`chatgpt`); absent = `ollama` (today's behavior). Warn-only validated. | `tools/config/loader.py` `get_ai_provider`, `tools/model_router.py` `build_router`/`build_model_client_for_provider`, run_service/service.py, doctor.py, api/routes/system.py |
+| `registry` | map[alias→model id] | kimi/deepseek/deepseek_flash/glm/minimax | Alias → concrete cloud model mapping (Ollama path) | `tools/config/schema.py`, `tools/doctor.py`, `tools/run_service/service.py`, `tools/mcp_tools/registry.py` |
+| `default_alias` | str | `glm` | Active model alias (Ollama path; ChatGPT path uses `chatgpt.default_model`) | `tools/config/schema.py`, `tools/run_service/service.py`, `tools/eval_harness.py`, `legacy/agent_loop.py` |
 | `info.<alias>.context_window` | int | per-model | Source of truth for the adaptive context compactor | model_router.py:202-221, exploit_agent/context.py:63-104 |
 | `info.<alias>.label/description` | str | per-model | Display metadata | model_router.py:130, api routes/system.py:193-194 |
 
-### `chatgpt:` (top-level; absent from config.yaml by default) — ChatGPT provider (opt-in)
+### `chatgpt:` (top-level) — ChatGPT provider (opt-in)
 
-Opt-in alternative chat/generate provider backed by the vendored
-`openai-oauth/` loopback proxy. Active only when `models.provider: chatgpt`.
+Alternative chat/generate provider backed by the vendored
+`openai-oauth/` loopback proxy. Active only when `models.provider: chatgpt`
+(the checked-in `config.yaml` carries `chatgpt.enabled: true`, but `models.provider`
+defaults to `ollama`, so the block is inert until the provider is switched).
 Embeddings stay on Ollama regardless. See
 [docs/providers.md § ChatGPT provider](providers.md#chatgpt-provider-openai-oauth).
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `enabled` | bool | `false` | Master switch (advisory; `models.provider` is the real selector) | config_manager.py `get_chatgpt_config` |
+| `enabled` | bool | `false` | Master switch (advisory; `models.provider` is the real selector) | `tools/config/loader.py` `get_chatgpt_config` |
 | `host` | str | `127.0.0.1` | Proxy bind — **loopback-only; do not point at a non-loopback interface** | chatgpt_provider.py `ensure_running` |
 | `port` | int | `10531` | Proxy port | chatgpt_provider.py `ensure_running` |
 | `base_url` | str | `http://127.0.0.1:10531/v1` | OpenAI-compatible endpoint the adapter POSTs to | chatgpt_provider.py `ChatGptProxyClient`, `discover_models` |
@@ -119,8 +127,8 @@ Embeddings stay on Ollama regardless. See
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `default_transport` | str | `stdio` | Default exploit-server transport (`stdio`\|`http`) | config_manager.py:1014; CLI `--mcp-transport` (main.py:353) is **ignored on the run path** — always forced to `http` so the target-IP lock reaches the server |
-| `http_host` / `http_port` | str / int | `127.0.0.1` / `8001` | HTTP transport bind (schema default; absent from config.yaml) | doctor.py:326, self_test.py:106, eval_harness.py:409, run_service/service.py:446 |
+| `default_transport` | str | `stdio` | Default exploit-server transport (`stdio`\|`http`) | `tools/config/schema.py`; CLI `--mcp-transport` is **ignored on the run path** — always forced to `http` so the target-IP lock reaches the server |
+| `http_host` / `http_port` | str / int | `127.0.0.1` / `8001` | HTTP transport bind (schema default; absent from config.yaml) | `tools/doctor.py`, `tools/self_test.py`, `tools/eval_harness.py`, `tools/run_service/service.py` |
 
 ### `engine_mcp:` (config.yaml:54-57) — advisory MCP server for foreign AI assistants
 
@@ -167,15 +175,15 @@ touching. CLI-runnable regardless; block supplies entrypoint defaults.
 | `max_pivot_depth` | int | `2` | Pivot recursion cap | cli_exploit_settings.py:142, autonomous_orchestrator.py:1091,1638 |
 | `workspace_dir` | str | `exploit_workspace` | Workspace root | cli_exploit_settings.py:148, interactive_menu.py:417 |
 | `loot_workspace` | str | `exploit_workspace/loot` | Loot dir | cli_exploit_settings.py:144 |
-| `attacker_os` | str | `auto` | OS-aware instructions/tools | exploit_agent/loop.py:378 |
+| `attacker_os` | str | `auto` | OS-aware instructions/tools | scripts/runner_impl.py (`_resolve_attacker_os`) |
 | `searchsploit_path` | str | `searchsploit` | Searchsploit binary | mcp_shared.py:78, doctor.py:123 |
 | `shell` | str | `bash` | Shell for `run_exploit_terminal` (cmd.exe on Windows) | cli_exploit_settings.py:146 |
 | `msfconsole_path` | str | `msfconsole` | Metasploit console binary | cli_exploit_settings.py:147, tools/mcp_tools/metasploit.py:83 |
 | `web_search` | bool | `true` | Web search for exploit intel | mcp_shared.py:73-87 (via `search` block) |
 | `max_query_chars` / `cache_ttl_seconds` / `cache_max_entries` | int | `200` / `3600` / `50` | ExploitSearch cache limits | mcp_shared.py:85-87 |
 | `require_explicit_allowlist` | bool | `true` | **The target-IP lock** — when true every target-touching tool checks the allowlist | mcp_shared.py:561,635; mcp_exploit_server.py:141 |
-| `allowed_targets` | list[str] | `[127.0.0.1]` | Operator-authorized hosts (IP, domain, `*.wildcard`, CIDR); Start New Session persists here | mcp_shared.py:521, config_cli.py:30-93, exploit_agent/loop.py:267 |
-| `disallowed_assets` / `forbidden_actions` | list[str] | `[]` | Flow A scope opt-outs (matched against `_TOOL_ACTION_CATEGORY`); hard-forbidden actions are always blocked by `scope_gate._HARD_FORBIDDEN_ACTIONS` | exploit_session.py:59-60, config.yaml:112-125 |
+| `allowed_targets` | list[str] | `[127.0.0.1]` | Operator-authorized hosts (IP, domain, `*.wildcard`, CIDR); Start New Session persists here | `tools/mcp_shared.py`, `tools/config_cli.py`, `scripts/runner_impl.py` (`_resolve_allowed_targets`) |
+| `disallowed_assets` / `forbidden_actions` | list[str] | `[]` | **Currently inert on the standalone attack path.** They are parsed into the `ScopeGate` object handed to `ExploitPolicy` (`tools/exploit_session.py::_build_exploit_scope_gate`), but the policy's scope checks were removed with the lab build — nothing on the standalone MCP path consults them, and the old `_TOOL_ACTION_CATEGORY` consumer is gone. Enforcement that still exists: the swarm **critic agent** blocks actions in the swarm mission's `forbidden_actions` (`tools/swarm/agents/critic_agent.py`), and Flow B's `ScopeGate` enforces them (`scope_gate.py`). Keep the lists for mission bookkeeping / future re-wiring; do not treat them as a live gate on the attack path. | `tools/exploit_session.py`, `tools/swarm/agents/critic_agent.py`, `scope_gate.py` |
 | `ad_kerberos.enabled` + per-tool flags | bool | `false` (all; `smb_signing_check: true`) | AD/Kerberos post-exploit suite — master + per-tool must both be true | tools/mcp_tools/ad.py:36, tests/test_ad_mcp_tools.py |
 | `msf.recipes_enabled` / `auto_local_exploit_suggester` | bool | `false` | MSF recipe dispatch + advisory LES task | tools/mcp_tools/metasploit.py, autonomous_orchestrator.py:1114-1115 |
 | `listeners.tls/dns/https_beacon/socks_pivot` | bool | `false` | Extended C2 listener types (legacy nc/socat/http ungated) | persistent_session_manager.py:399-524, tests/test_listeners_extended.py |
@@ -229,7 +237,7 @@ The `opsec` block is the **active** detection-evasion / pacing / UA-rotation / D
 | `allow_local_fetch` | bool | `false` | Permit localhost/private fetches | mcp_shared.py:139 |
 | `ollama.api_key_env` / `max_results` / `use_web_search` / `use_web_fetch` | — | `OLLAMA_API_KEY` / `8` / `true` / `true` | Ollama research provider | mcp_shared.py:153-158, web_researcher.py:319-369 |
 | `serpapi.api_key_env` / `endpoint` / `engine` / `region` | — | `SERPAPI_API_KEY` / serpapi.com / `duckduckgo` / `us-en` | SerpAPI provider | mcp_shared.py:159-164 |
-| `assistant.*` | see research_assistant.py:97-140 | enabled, `automatic: true`, `failure_trigger: 2`, budgets | Read-only in-loop research assistant (advisory) | exploit_agent/research_assistant.py:111-140, exploit_agent/loop.py:638-657 |
+| `assistant.*` | see research_assistant.py:97-140 | enabled, `automatic: true`, `failure_trigger: 2`, budgets | Read-only in-loop research assistant (advisory) | `tools/exploit_agent/research_assistant.py`, `scripts/runner_impl.py` |
 
 ### `swarm:` (config.yaml:214-233) — multi-agent swarm
 
@@ -237,7 +245,7 @@ The `opsec` block is the **active** detection-evasion / pacing / UA-rotation / D
 |-----|------|---------|----------|-------------|
 | `enabled` | bool | `true` | Swarm mode | cli_exploit_settings.py:105, run_service/service.py:437 |
 | `agents` | list[str] | recon/vuln/exploit/post_exploit/critic/reflection | Agent roster | swarm/orchestrator.py:564 |
-| `max_parallel_agents` | int | `3` | Flow B parallel cap | agent_loop.py:267-272 |
+| `max_parallel_agents` | int | `3` | Flow B parallel cap | `legacy/agent_loop.py` |
 | `parallel_enabled` | bool | `false` | Gates `route_parallel` + `spawn_subagent` MCP tool; CLI `--parallel-swarm` flips it (main.py:365-370) | mcp_tools/parallel_agents.py:268, prompt.py:386-390 |
 | `per_phase_concurrency` | int | `3` | Semaphore for same-phase parallel dispatch | prompt.py |
 | `exploit_parallel` | bool | `false` | Parallelize exploit/post_exploit phases | swarm/orchestrator.py:60-73, prompt.py:387 |
@@ -325,33 +333,33 @@ Enabled by `--long-session` (main.py:374-376) or `enabled: true`.
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
 | `chain_of_thought` | bool | `true` | CoT mode | cli_exploit_settings.py:89 |
-| `reflection_every_n_actions` | int | `10` | Reflection cadence | cli_exploit_settings.py:93, exploit_agent/loop.py:1685 |
+| `reflection_every_n_actions` | int | `10` | Reflection cadence | cli_exploit_settings.py:93, `scripts/runner_impl.py` (reflection cadence) |
 | `critic_enabled` | bool | `true` | Critic agent (swarm) | cli_exploit_settings.py:106 |
 | `observer_mode` | str | `hybrid` | `heuristic`\|`llm`\|`hybrid` fact extraction | cli_exploit_settings.py:98, main.py:641 |
 | `ultrathink` | bool | `true` (config.yaml) / `false` (schema) | Deep-reasoning mode; CLI `--ultrathink` overrides | cli_exploit_settings.py:90 |
 | `ultrathink_reflection_interval` | int | `3` | Ultrathink reflection cadence | cli_exploit_settings.py:92 |
 | `llm_reflection` | bool | `true` (config.yaml) / `false` (schema) | LLM-driven reflection in the hot loop (extra LLM calls) | cli_exploit_settings.py:94, exploit_agent/reflection.py:135 |
-| `peer_consult_on_failure_threshold` | int | `3` | Auto-consult peers after N consecutive exploit failures (0 disables) | cli_exploit_settings.py:97, exploit_agent/loop.py:1756 |
+| `peer_consult_on_failure_threshold` | int | `3` | Auto-consult peers after N consecutive exploit failures (0 disables) | cli_exploit_settings.py:97, `scripts/runner_impl.py` |
 
 ### `memory:` (config.yaml:346-352) — learning stores
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `semantic_enabled` | bool | `true` | Semantic memory / embeddings | agent_loop.py:173, skill_embeddings.py:167, exploit_agent/loop.py:477 |
+| `semantic_enabled` | bool | `true` | Semantic memory / embeddings | agent_loop.py (legacy), `tools/skill_embeddings.py`, `scripts/runner_impl.py` (semantic memory wiring) |
 | `embedding_model` | str | `nomic-embed-text` | Embedding model | skill_embeddings.py:174, semantic_memory.py:29 |
 | `cross_mission_learning` | bool | `true` | Learn across missions | eval_benchmark.py:176 |
-| `attack_memory_enabled` | bool | `true` | AttackMemoryStore in the exploit loop | exploit_agent/loop.py:278-290,560-577 |
-| `attack_memory_max_context_chars` | int | `6000` | Attack-memory advisory size | exploit_agent/loop.py:287, context.py:260 |
-| `experience_min_samples` | int | `3` | ExperienceStore soundness gate | agent_loop.py:192, exploit_agent/loop.py:438, skill_feedback.py:127 |
+| `attack_memory_enabled` | bool | `true` | AttackMemoryStore in the exploit loop | `scripts/runner_impl.py` (`_load_attack_memory_settings` + store wiring) |
+| `attack_memory_max_context_chars` | int | `6000` | Attack-memory advisory size | `scripts/runner_impl.py`, `tools/exploit_agent/context.py` |
+| `experience_min_samples` | int | `3` | ExperienceStore soundness gate | agent_loop.py (legacy), `scripts/runner_impl.py`, `tools/skill_feedback.py` |
 | `experience_time_decay_days` | float | `90` | Experience decay (≤0 disables) | agent_loop.py:193, skill_feedback.py:128 |
 
 ### `outcome_judgment:` (config.yaml:354-365) — evidence-grounded verdicts
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `max_inconclusive_attempts` | int | `3` | ≥2 prevents one failed command exhausting a hypothesis | config_manager.py:735-743 (validation) |
-| `confirmation_threshold` / `refutation_threshold` | float | `0.75` | Evidence thresholds (0.5-1.0) | config_manager.py:744-753 |
-| `min_evidence_references` | int | `1` | Min evidence refs for a verdict | config_manager.py:754-762 |
+| `max_inconclusive_attempts` | int | `3` | ≥2 prevents one failed command exhausting a hypothesis | `tools/config/validator.py` (validation) |
+| `confirmation_threshold` / `refutation_threshold` | float | `0.75` | Evidence thresholds (0.5-1.0) | `tools/config/validator.py` |
+| `min_evidence_references` | int | `1` | Min evidence refs for a verdict | `tools/config/validator.py` |
 | `flow_a` | bool | `true` (config.yaml) / `false` (schema) | Wire OutcomeJudge into Flow A exploit loop (overrides shallow exit-code success) | cli_exploit_settings.py:154, eval_benchmark.py:231 |
 | `peer_review` | bool | `false` | D3: cross-model outcome grading (`peer_review_outcome` MCP tool — one alias plans, a different alias grades evidence; advisory-only, deterministic judge stays authority) | mcp_tools/peer_models.py:162 |
 
@@ -424,14 +432,14 @@ Advisory prompt context only — never permission/scope/audit (docs/skills.md:16
 | `include_metadata` | bool | `false` | Append references in rendered context | skills.md:127 |
 | `allow_reference_listing` | bool | `true` | `list_skill_references` MCP tool | skills.md:153 |
 
-### `plugins:` (schema default, config_manager.py:454-459; absent from config.yaml)
+### `plugins:` (schema default `[]`; the lab `config.yaml` enables 13 shipped plugins)
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `enabled` | list[str] | `[]` | Explicitly loaded plugins (OFF by default — trusted Python, full operator-box privileges) | tools/plugins.py:638,650 |
-| `disabled` | list[str] | `[]` | Hard-blocked regardless of manifest | plugins.py:639,651 |
-| `search_paths` | list[str] | `["plugins"]` | Filesystem dirs scanned for `plugin.yaml` | plugins.py:640-646 |
-| `entry_points` | bool | `true` | `netattackai.plugins` entry-point discovery | plugins.py:647,656 |
+| `enabled` | list[str] | `[]` | Explicitly loaded plugins (schema default OFF — trusted Python, full operator-box privileges; the lab `config.yaml` lists 13, each no-op until its own API key/URL is configured) | tools/plugins.py |
+| `disabled` | list[str] | `[]` | Hard-blocked regardless of manifest | tools/plugins.py |
+| `search_paths` | list[str] | `["plugins"]` | Filesystem dirs scanned for `plugin.yaml` | tools/plugins.py |
+| `entry_points` | bool | `true` | `netattackai.plugins` entry-point discovery | tools/plugins.py |
 
 ### `threat_intel:` (config.yaml:126-137) — threat-feed ingestion (OSV.dev + GHSA + KEV)
 
@@ -449,17 +457,25 @@ Advisory-only, never touches the target. Lab build ON so the feed is live out-of
 
 ### `witness:` (config.yaml:187-194) — advisory audit-stream watcher (agent-on-agent safety)
 
-Library default OFF (conservative for downstream re-use); `config.yaml` lab default ON so a lab run streams anomaly telemetry by default. Polls `exploit_audit.jsonl`/`activity.jsonl` mid-run and flags anomalies (allowlist breach, PoC escape, perm escalation, prompt injection, DoS drift) to `witness.log` + event broker. Advisory ONLY: flags, never blocks.
+Library default OFF (conservative for downstream re-use); the checked-in `config.yaml` flips it ON
+for the lab runtime. **The witness agent is NOT started by the run lifecycle** — no production
+code instantiates `WitnessAgent` when a run launches, so `enabled: true` alone does nothing. To
+use it, start it manually against the audit trails (`python -m tools.swarm.agents.witness_agent`,
+see the module's `demo()`), and it polls `exploit_audit.jsonl`/`activity.jsonl`, flagging anomalies
+(allowlist breach, PoC escape, permission escalation, prompt-injection pattern, DoS drift) to the
+witness log + event broker. **Detection/auditing only — it never blocks, modifies, or kills a
+run.** The WebUI reads the log via `GET /api/v1/runs/{run_id}/witness`
+(`tools/api/routes/runs.py`), which 404s when the log file does not exist.
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `enabled` | bool | `false` (schema) / `true` (config.yaml lab) | Master switch | config_manager.py:353-361, tools/swarm/agents/witness_agent.py:42 |
-| `log_path` | str | `reports/witness.jsonl` | Witness log | witness_agent.py:50 |
-| `poll_interval_seconds` | int | `5` | Poll interval | witness_agent.py:51 |
-| `escalate_to_event_broker` | bool | `true` | Escalate flags to WS/event broker | witness_agent.py:52 |
-| `max_flags_per_signal_per_minute` | int | `10` | Per-signal rate cap | witness_agent.py:53 |
-| `dos_failure_window_seconds` | float | `60.0` | DoS drift window | witness_agent.py:54 |
-| `dos_failure_threshold` | int | `8` | DoS drift threshold | witness_agent.py:55 |
+| `enabled` | bool | `false` (schema) / `true` (config.yaml lab) | Master switch, read by `WitnessConfig.from_config` when an agent instance is created | `tools/swarm/agents/witness_agent.py` (manual launch / tests) |
+| `log_path` | str | `reports/witness.jsonl` | Witness log (process-global, not per-run) | witness_agent.py; `tools/api/routes/runs.py` (`GET /runs/{id}/witness`) |
+| `poll_interval_seconds` | int | `5` | Poll interval | witness_agent.py |
+| `escalate_to_event_broker` | bool | `true` | Escalate flags to WS/event broker | witness_agent.py |
+| `max_flags_per_signal_per_minute` | int | `10` | Per-signal rate cap | witness_agent.py |
+| `dos_failure_window_seconds` | float | `60.0` | DoS drift window | witness_agent.py |
+| `dos_failure_threshold` | int | `8` | DoS drift threshold | witness_agent.py |
 
 ### `ics:` (config.yaml:416-418) — D8 ICS write-side modules
 
@@ -467,7 +483,7 @@ Library default OFF (conservative for downstream re-use); `config.yaml` lab defa
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `allow_write` | bool | `false` | ICS write gate (read-only enum when false) | tools/attack_modules/modules/ics_iot.py:40, config_manager.py |
+| `allow_write` | bool | `false` | ICS write gate (read-only enum when false) | tools/attack_modules/modules/ics_iot.py |
 | `destructive_ics` | bool | `false` | Second physical-damage gate (both must be true) | tools/attack_modules/modules/ics_iot.py:42 |
 
 ### `webhook_notify:` (config.yaml:438-449) — outbound Slack/Discord run-status notifications
@@ -476,7 +492,7 @@ Lab build `enabled: true`. No-op without a `url` — logs once then drops events
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `enabled` | bool | `true` | Master switch | tools/plugins/webhook_notify.py:30, config_manager.py:589 |
+| `enabled` | bool | `true` | Master switch | tools/plugins/webhook_notify.py, `tools/config/schema.py` |
 | `url` | str | `""` | Webhook URL (secret, never logged) | webhook_notify.py:35 |
 | `events` | list[str] | `["finding","state"]` | Event-type filter | webhook_notify.py:36 |
 | `timeout_seconds` | int | `5` | HTTP timeout | webhook_notify.py:37 |
@@ -490,7 +506,7 @@ Lab build `enabled: true`. `export_attack_navigator` MCP tool writes Navigator l
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `enabled` | bool | `true` | Master switch | tools/mitre_export.py:30, config_manager.py:598 |
+| `enabled` | bool | `true` | Master switch | `tools/mitre_export.py`, `tools/config/schema.py` |
 | `technique_map` | str | `tools/mitre_technique_map.json` | ATT&CK technique map | mitre_export.py:31 |
 | `navigator_output_dir` | str | `reports/mitre` | Output dir | mitre_export.py:32 |
 | `include_skill_tags` | bool | `true` | Include skill tags | mitre_export.py:33 |
@@ -501,7 +517,7 @@ Lab build `enabled: true`. No-op without `provider`/`base_url`/`token` — logs 
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `enabled` | bool | `true` | Master switch | tools/ticketing.py:30, config_manager.py:610 |
+| `enabled` | bool | `true` | Master switch | `tools/ticketing.py`, `tools/config/schema.py` |
 | `provider` | str | `""` | `jira` \| `github` | ticketing.py:31 |
 | `base_url` | str | `""` | Ticketing base URL | ticketing.py:32 |
 | `token_env` | str | `TICKETING_TOKEN` | Token env var | ticketing.py:33, api_key_store.py |
@@ -515,7 +531,7 @@ Lab build `enabled: true`. The Caldera server is target-side — operator adds i
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `enabled` | bool | `true` | Master switch | plugins/caldera/plugin.py:40, config_manager.py |
+| `enabled` | bool | `true` | Master switch | `plugins/caldera/plugin.py`, `tools/config/schema.py` |
 | `url` | str | `""` | Caldera server base URL | caldera/plugin.py:41 |
 | `api_key_env` | str | `CALDERA_API_KEY` | Caldera API key env | caldera/plugin.py:42 |
 
@@ -523,31 +539,39 @@ Lab build `enabled: true`. The Caldera server is target-side — operator adds i
 
 Toggles + budgets for the task graph, capability discovery, AI-facing state tools, planner hints, decision logging, reflection, and retry/repair budgets. Defaults preserve today's behavior. `config_cli.load_config` merges NO defaults, so every consumer reads defensively via `cfg.get("agent", {}).get(key, default)`.
 
+**Wiring status (verify before claiming behavior):** only `capability_discovery_enabled` has a
+live runtime consumer today (`scripts/runner_impl.py` reads it to toggle the capability-guidance
+prompt block; `tools/exploit_agent/prompt.py:build_capability_guidance`). The remaining keys are
+validated/whitelisted by the schema but are **not currently consumed at runtime** — they are
+forward-compat toggles, not active gates. `reflection` in the loop is gated by
+`reasoning.llm_reflection` / `reasoning.reflection_every_n_actions`; swarm reflection by
+`swarm.reflection_enabled`.
+
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `task_graph_enabled` | bool | `true` | Gate task-graph/DAG planner | tools/attack_planner.py:45, tools/config_manager.py:648 |
-| `capability_discovery_enabled` | bool | `true` | Gate capability discovery (`find_producers`) | tools/attack_modules/registry.py:120 |
-| `state_tools_enabled` | bool | `true` | Gate AI-facing state MCP tools | tools/mcp_tools/assessment_state.py:40 |
-| `planner_hints_enabled` | bool | `true` | Inject planner hints into system prompt | tools/exploit_agent/prompt.py:210 |
-| `decision_log_enabled` | bool | `true` | Append to `decision_log.jsonl` | tools/decision_log.py:30 |
-| `reflection_enabled` | bool | `true` | Gate post-step reflection | tools/exploit_agent/reflection.py:45 |
-| `max_retries_per_task` | int | `2` | Per-task retry ceiling | tools/failure_taxonomy.py:80 |
-| `max_actions` | int | `0` | Total action cap (0 = legacy exploit budgets) | tools/exploit_agent/loop.py:520 |
-| `generated_code_repair_attempts` | int | `3` | Max self-repair iterations on PoC | tools/poc_verifier.py:60 |
+| `task_graph_enabled` | bool | `true` | Validated only — no runtime consumer yet (task graph is always available) | — |
+| `capability_discovery_enabled` | bool | `true` | Gate the capability-discovery prompt block | `scripts/runner_impl.py`, `tools/exploit_agent/prompt.py` |
+| `state_tools_enabled` | bool | `true` | Validated only — assessment-state MCP tools always register | — |
+| `planner_hints_enabled` | bool | `true` | Validated only — planner hints come from prompt assembly, not this key | — |
+| `decision_log_enabled` | bool | `true` | Validated only — `tools/decision_log.py` writes unconditionally when called | — |
+| `reflection_enabled` | bool | `true` | Validated only — use `reasoning.llm_reflection` / `swarm.reflection_enabled` | — |
+| `max_retries_per_task` | int | `2` | Validated only — retry ceilings come from the exploit budgets | — |
+| `max_actions` | int | `0` | Validated only — **no runtime consumer**; the planned "0 = legacy-budget sentinel" semantics are not wired | — |
+| `generated_code_repair_attempts` | int | `3` | Validated only — `tools/poc_verifier.py` uses its own retry loop | — |
 
 ### `api:` (config.yaml:386-407) — WebUI daemon (`--demon` / `--daemon` / `--web`)
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `enabled` | bool | `true` | Daemon enablement | app.py:64 |
-| `host` | str | `127.0.0.1` | **Loopback-only in v1; any other value is a validation ERROR**; CLI `--api-host` overrides | main.py:513-518, config_manager.py:918-926 |
-| `port` | int | `8765` | Daemon port; CLI `--api-port` overrides | main.py:514 |
+| `enabled` | bool | `true` | Daemon enablement | `app.create_app` |
+| `host` | str | `127.0.0.1` | **Loopback-only in v1; any other value is a validation ERROR**; CLI `--api-host` overrides | `main._run_daemon`, `tools/config/validator.py` |
+| `port` | int | `8765` | Daemon port; CLI `--api-port` overrides | `main._run_daemon` |
 | `token_file` | str | `.webui_secret_key` | Auto-generated bearer token file (gitignored); `NETATTACKAI_API_TOKEN` env overrides | app.py:70, tools/api/auth.py:42-46 |
 | `allowed_origins` | list[str] | `[]` | Extra loopback origins for CORS/WS; `null` and non-loopback always rejected | app.py:108 |
 | `event_buffer_size` | int | `256` | In-memory ring buffer per run for WS subscribers | app.py:81 |
 | `shutdown_timeout_seconds` | int | `15` | Graceful shutdown wait | tools/api/run_manager.py:320 |
 | `serve_webui` | bool | `false` | Mount `webui/dist/` at `/`; `--web` sets this **in memory only** | app.py:145, main.py:542 |
-| `max_concurrent_runs` | int | `3` | D3: N concurrent runs (1 = legacy 409) | tools/api/run_manager.py:22, config_manager.py |
+| `max_concurrent_runs` | int | `3` | D3: N concurrent runs (1 = legacy 409) | `tools/api/run_manager.py`, `tools/config/schema.py` |
 | `multi_operator` | bool | `true` | D4: user accounts + annotations (loopback-only) | tools/api/auth.py:60 |
 | `graph_route` | bool | `true` | Attack-path DAG API route | tools/api/routes/graph_explorer.py:30 |
 
@@ -555,27 +579,9 @@ Toggles + budgets for the task graph, capability discovery, AI-facing state tool
 
 - `reports_dir` (not in schema): `Path(config.get("reports_dir", "reports"))` — app.py:76; also `mcp_engine_server.py:74` defaults to `reports`.
 
-## `agent` — capability-upgrade agent block (design §23)
-
-Source of truth: `tools/config_manager.py::CONFIG_SCHEMA` (`"agent"` key, auto-whitelisted via `KNOWN_TOP_KEYS`). Mirrored into `config.yaml` under the `agent:` mapping. Validation: `ConfigValidator.validate` checks bools for the toggles and non-negative integers for the budgets (warn-not-reject — see `chatgpt` / `skills` precedent).
-
-All defaults preserve today's behavior. **`config_cli.load_config` merges no defaults**, so every consumer reads defensively: `cfg.get("agent", {}).get(key, default)`.
-
-| Key | Default | Type | Purpose |
-|-----|---------|------|---------|
-| `task_graph_enabled` | `true` | bool | Gate the live task-graph/DAG planner (AttackPlan/AttackStep). On = the agent drives the graph; off = legacy sequential planning. |
-| `capability_discovery_enabled` | `true` | bool | Gate AI-facing capability discovery (module `capability_record()` / `find_producers` / `missing_prerequisites`). |
-| `state_tools_enabled` | `true` | bool | Gate AI-facing state MCP tools (assessment state store + decision log surface). |
-| `planner_hints_enabled` | `true` | bool | Inject planner hints (hypothesis, expected_evidence, capability) into the agent system prompt. |
-| `decision_log_enabled` | `true` | bool | Append structured decisions to `decision_log.jsonl` via `tools/decision_log.py::log_decision`. |
-| `reflection_enabled` | `true` | bool | Gate post-step reflection / retry-with-modified-parameters behavior. |
-| `max_retries_per_task` | `2` | int | Per-task retry ceiling on retryable failure classes (see `tools/failure_taxonomy.py::is_retryable`). |
-| `max_actions` | `0` | int | Total action cap. **`0` is the legacy-budget sentinel** — consumption sites treat 0 as "use the existing exploit budgets" (`exploit.attack_max_commands` / `max_rounds`), not a hard zero cap. |
-| `generated_code_repair_attempts` | `3` | int | Max self-repair iterations on a generated PoC that fails `py_compile` (compile-only, never executed on the operator box). |
-
 ## `models.roles` — model-role routing (design §23)
 
-Nested under the existing `models` key in `CONFIG_SCHEMA` (`tools/config_manager.py::CONFIG_SCHEMA["models"]["roles"]`). Mirrored into `config.yaml` under `models.roles`. Validation: `ConfigValidator.validate` warns when a value is not a string or when a non-empty alias is not in `models.registry` (warn-not-reject).
+Nested under the existing `models` key in `CONFIG_SCHEMA` (`tools/config/schema.py`, `"models"["roles"]`). Mirrored into `config.yaml` under `models.roles`. Validation: `ConfigValidator.validate` warns when a value is not a string or when a non-empty alias is not in `models.registry` (warn-not-reject).
 
 Each role maps to a model alias; **an empty string means "use `models.default_alias`"** so first-run behavior is unchanged. Consumed by `tools/model_router.py::ModelRouter.get_client_for_role`, which falls back to `models.default_alias` when the role's alias is empty.
 
@@ -596,13 +602,13 @@ Explicit CLI flags win over config values; config wins over schema defaults:
 
 | Config key | CLI override |
 |------------|--------------|
-| `models.default_alias` | `--model <alias>` (main.py:631) |
+| `models.default_alias` | `--model <alias>` |
 | `long_session.enabled` | `--long-session` (cli_exploit_settings.py:43,75) |
-| `swarm.parallel_enabled` | `--parallel-swarm` (main.py:365-370) |
-| `multi_model.enabled` | `--multi-model-consult` / `--no-multi-model-consult` (main.py:607-609) |
+| `swarm.parallel_enabled` | `--parallel-swarm` |
+| `multi_model.enabled` | `--multi-model-consult` / `--no-multi-model-consult` |
 | `exploit.attack_max_commands/rounds` | `--max-commands` / `--max-rounds` (cli_exploit_settings.py:119-124,167-168) |
-| `skills.*` | `--skills on\|off\|hints\|lookup`, `--skills-include`, `--skills-exclude`, `--no-skills-reselect` (skills_cli.py:23-80) |
-| `api.host` / `api.port` | `--api-host` / `--api-port` (main.py:513-514) |
-| `mcp.default_transport` | `--mcp-transport` (main.py:353; ignored on the run path — always `http`) |
-| `api.serve_webui` | `--web` (in-memory only, never persisted; main.py:541-542) |
-| `reasoning.ultrathink` | `--ultrathink` (main.py:405-406) |
+| `skills.*` | `--skills on\|off\|hints\|lookup`, `--skills-include`, `--skills-exclude`, `--no-skills-reselect` (tools/skills_cli.py) |
+| `api.host` / `api.port` | `--api-host` / `--api-port` |
+| `mcp.default_transport` | `--mcp-transport` (ignored on the run path — always `http`) |
+| `api.serve_webui` | `--web` (in-memory only, never persisted) |
+| `reasoning.ultrathink` | `--ultrathink` |

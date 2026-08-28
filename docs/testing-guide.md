@@ -25,12 +25,18 @@ Run smoke checks:
 ```bash
 python main.py --doctor
 python main.py --self-test
-python tests/test_new_modules.py
+```
+
+Coverage (matches CI; `pytest-cov` is not a dependency, so `pytest --cov` fails):
+
+```bash
+python -m coverage run -m pytest tests/
+python -m coverage report
 ```
 
 ## What To Test By Change Type
 
-The suite has **248** files (all mock subprocess/network — no live Nmap); this table covers the most common change types grouped by feature. When in doubt, grep `tests/` for the module name. Run `python -m pytest tests/ -v` for the full list; focused: `python -m pytest tests/test_scope_gate.py -v`.
+The suite has **~250** files (all mock subprocess/network — no live Nmap); this table covers the most common change types grouped by feature. When in doubt, grep `tests/` for the module name. Run `python -m pytest tests/ -v` for the full list; focused: `python -m pytest tests/test_scope_gate.py -v`.
 
 | Change | Tests to consider |
 | --- | --- |

@@ -180,8 +180,10 @@ state on the target, never the agent's text. The agent's own exit code and
 
 ## PoE Canary Verification (`tools/verification/poe_verifier.py`)
 
-The proof-of-execution verifier is the verification primitive a compromise
-oracle can be built on. Given a `tool_executor` wired to the target
+**Status: scaffolded primitive — not part of the live execution path.** No
+production code calls it yet (only `tests/test_poe_verifier.py`); it exists so a
+compromise oracle for the benchmark harness can be built on it. Given a
+`tool_executor` wired to the target
 (`(tool_name, args) -> result_text`, the same shape as
 `SwarmMcpBridge.dispatch`), it:
 

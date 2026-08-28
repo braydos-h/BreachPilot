@@ -23,20 +23,20 @@ python -m venv .venv; .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 python main.py --doctor          # env check (Python/nmap/Ollama/config)
 python main.py --self-test       # safe localhost smoke test
-python main.py                   # interactive menu (default no-args)
+python main.py                   # WebUI daemon + browser (default no-args); --menu for the terminal menu
 
-# Tests (248 files in tests/, all mock subprocess/network — no live Nmap)
+# Tests (~250 files in tests/, all mock subprocess/network — no live Nmap)
 python -m pytest tests/ -v                                            # full suite
 python -m pytest tests/test_scope_gate.py -v                          # one file
 python -m pytest tests/test_recon_pipeline.py::TestClass::test_method # one test
 python -m pytest tests/ -v -k "scope"                                 # by keyword
-python -m pytest --cov=tools --cov=main --cov=cli               # coverage
+python -m coverage run -m pytest tests/; python -m coverage report    # coverage (CI command; pytest-cov is not installed)
 
 # Lint (repo-wide, CI honest: 0 errors, 0 format diffs)
 python -m pip install -e ".[dev]"   # ruff + pytest + coverage + mypy + build + twine
 ruff check .                        # must pass (0 errors; per-file-ignores document intentional patterns)
 ruff format --check .               # must pass (0 diffs)
-mypy --follow-imports=skip tools    # must pass (216 files; disables documented in pyproject.toml:136)
+mypy --follow-imports=skip tools    # must pass (216 files; disables documented in pyproject.toml [tool.mypy])
 ```
 
 On Linux/macOS `make install|test|test-one F=…|run|doctor|mcp-exploit` work.
@@ -72,7 +72,7 @@ On Linux/macOS `make install|test|test-one F=…|run|doctor|mcp-exploit` work.
 
 4. **New exploit MCP tools: single-source registration** — add `@audit_tool` (or `@require_allowlist()` for target-touching) in `tools/mcp_tools/<family>.py` only; `mcp_exploit_server.py` auto-discovers every `register_*_tools` via `tools/mcp_tools/registry.py:collect_tools()` (pkgutil + AST validation, fails CI if decorator missing). No manual list edit in `mcp_exploit_server.py`. `tools/mcp_tools/registry.py` is central wiring. Target-touching = `@require_allowlist()` + `validate_target_or_ip`.
 
-5. **`opencode.json` is editor-local config** (gitignored) for the opencode.ai
+5. **`opencode.jsonc` is editor-local config** (gitignored) for the opencode.ai
    editor's own model provider — it is NOT application config. Don't treat it
    as app state. App config lives in `config.yaml`. **Never copy `~/.codex/auth.json` OAuth tokens into `config.yaml` or logs** (provider `chatgpt` only).
 

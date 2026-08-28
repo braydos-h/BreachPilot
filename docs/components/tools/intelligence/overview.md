@@ -6,18 +6,33 @@ subpackages: [belief, evidence, fingerprint, graph, schemas, adapters]
 
 # Intelligence — Overview (`tools/intelligence/`)
 
-Flow A primitives for AttackGraph v2, belief modelling, evidence provenance, attempt fingerprinting, structured schemas, planning and evaluation. 26 Python files across 6 subpackages + package `__init__.py`.
+AttackGraph v2, belief modelling, evidence provenance, attempt fingerprinting,
+structured schemas, and legacy adapters. 26 Python files across 6 subpackages + package `__init__.py`.
+
+**Wiring status (verified against callers — do not describe all of this as a
+Flow A primitive):**
+
+- `graph/` — **active production path**: wrapped by `tools/api/graph_service.py`
+  and `tools/api/graph_builder.py` behind the WebUI attack-path DAG API
+  (`GET /api/v1/runs/{run_id}/graph`, `api.graph_route`).
+- `adapters/` — **legacy Flow B path (best-effort)**: `legacy/observer.py`
+  (ObserverAdapter) and `legacy/finding_verifier.py` (FindingAdapter) import
+  them lazily; the other adapters are test-only.
+- `belief/`, `evidence/`, `fingerprint/`, `schemas/` — **scaffold / test-only**.
+  Nothing in Flow A (`main.py`, the exploit loop, `mcp_exploit_server.py`)
+  imports them; `fingerprint.tracker.is_permanent_failure` is used only by the
+  legacy observer adapter. `SafeSchemaLoader` has no production caller.
 
 ## Layout
 
-| Subpackage | Files | Purpose |
-|---|---|---|
-| `belief/` | `state.py`, `confidence.py`, `store.py` | Hypothesis state + confidence calculus |
-| `evidence/` | `reference.py`, `store.py`, `provenance.py` | Immutable refs + store + lineage |
-| `fingerprint/` | `attempt.py`, `tracker.py` | Safe retry/fingerprinting |
-| `graph/` | `types.py`, `store.py`, `merge.py`, `traversal.py` | Attack graph |
-| `schemas/` | `base.py`, `validator.py`, `graph.py`, `outcome.py`, `planner.py`, `critic.py`, `strategy.py` | LLM output contracts |
-| `adapters/` | `planner_adapter.py`, `finding_adapter.py`, `memory_adapter.py`, `observer_adapter.py`, `target_graph_adapter.py` | Bridge to legacy surfaces |
+| Subpackage | Files | Purpose | Status |
+|---|---|---|---|
+| `belief/` | `state.py`, `confidence.py`, `store.py` | Hypothesis state + confidence calculus | scaffold (legacy adapter consumer) |
+| `evidence/` | `reference.py`, `store.py`, `provenance.py` | Immutable refs + store + lineage | scaffold / test-only |
+| `fingerprint/` | `attempt.py`, `tracker.py` | Safe retry/fingerprinting | scaffold (tracker used by legacy adapter) |
+| `graph/` | `types.py`, `store.py`, `merge.py`, `traversal.py` | Attack graph | **active (WebUI API)** |
+| `schemas/` | `base.py`, `validator.py`, `graph.py`, `outcome.py`, `planner.py`, `critic.py`, `strategy.py` | LLM output contracts | scaffold / test-only |
+| `adapters/` | `planner_adapter.py`, `finding_adapter.py`, `memory_adapter.py`, `observer_adapter.py`, `target_graph_adapter.py` | Bridge to legacy surfaces | legacy Flow B (observer + finding adapters) |
 
 ---
 

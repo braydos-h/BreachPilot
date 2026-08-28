@@ -4,9 +4,10 @@
 
 | Path | Responsibility |
 | --- | --- |
-| `main.py` | Primary launcher for interactive, recon, attack, doctor, self-test, resume, model, and MCP transport flows. |
-| `cli.py` | Deterministic workflow CLI over missions, scope, tasks, findings, and reports. |
-| `agent_loop.py` | Full database-backed research loop orchestration. |
+| `main.py` | Primary launcher: **WebUI daemon by default (no args)**, direct recon/attack runs, `--menu` terminal menu, doctor, self-test, resume, model, and MCP transport flows. |
+| `app.py` | FastAPI app factory for the WebUI API daemon (`main._run_daemon` imports it; never run directly). |
+| `cli.py` | Deterministic workflow CLI over missions, scope, tasks, findings, and reports (legacy Flow B shim → `legacy/cli.py`). |
+| `agent_loop.py` | Full database-backed research loop orchestration (legacy Flow B shim → `legacy/agent_loop.py`). |
 | `db.py` | SQLite schema, migrations, IDs, shared default database manager. |
 | `mission.py` | Mission dataclass, validation, normalization, workspace initialization. |
 | `scope_gate.py` | Asset allow/deny matching, forbidden actions, third-party detection, rate limiting. |
@@ -31,9 +32,9 @@
 | Area | Files |
 | --- | --- |
 | Model and reasoning | `model_router.py`, `model_telemetry.py`, `goal_engine.py`, `goal_suggester.py`, `semantic_memory.py` |
-| Safety and validation | `config_manager.py`, `doctor.py`, `safety_reviewer.py`, `validation_utils.py`, `command_analyzer.py`, `exceptions.py`, `env_probe.py` |
-| Recon and research | `recon_pipeline.py`, `cve_lookup.py`, `exploit_search.py`, `web_researcher.py`, `recon_enrichers.py`, `recon_diff.py`, `recon_osint.py`, `nmap_priv.py`, `socket_scan.py` |
-| Exploit orchestration | `exploit_agent/` (pkg: `loop.py`, `policy.py`, `context.py`, `prompt.py`, `reflection.py`, `skills.py`, `tool_calls.py`, `ollama_client.py`, `research_assistant.py`, `outcome_classify.py`, `outcome_adapter.py`), `autonomous_orchestrator.py`, `attack_planner.py`, `attack_modules/` (pkg: `base.py`, `registry.py`, `modules/`), `payload_crafter.py`, `exploit_mutator.py`, `post_exploit.py` |
+| Safety and validation | `tools/config/` (pkg: `schema.py`, `validator.py`, `loader.py`; `config_manager.py` is a re-export shim), `doctor.py`, `safety_reviewer.py`, `validation_utils.py`, `command_analyzer.py`, `exceptions.py`, `env_probe.py` |
+| Recon and research | `tools/recon/` (pkg: `pipeline.py`, `scanner.py`, `enumerator.py`, `config.py`; `recon_pipeline.py` is a deprecated shim), `fast_recon.py`, `cve_lookup.py`, `exploit_search.py`, `web_researcher.py`, `recon_enrichers.py`, `recon_diff.py`, `recon_osint.py`, `nmap_priv.py`, `socket_scan.py` |
+| Exploit orchestration | `scripts/runner_impl.py` (**canonical agent loop**; loaded by `tools/exploit_agent/runner/loop.py`), `exploit_agent/` (pkg: `policy.py`, `phase_tracker.py`, `context.py`, `prompt.py`, `reflection.py`, `skills.py`, `tool_calls.py`, `tool_catalog.py`, `ollama_client.py`, `research_assistant.py`, `outcome_classify.py`, `outcome_truth.py`, `outcome_adapter.py`; `loop.py` is a deprecated re-export shim), `tools/campaign/` (pkg behind the `autonomous_orchestrator.py` facade), `attack_planner.py`, `attack_modules/` (pkg: `base.py`, `registry.py`, `modules/`), `payload_crafter.py`, `exploit_mutator.py`, `post_exploit.py` |
 | OPSEC and detection | `opsec.py`, `detection_coverage.py` |
 | External tooling | `metasploit_bridge.py`, `mcp_shared.py` |
 | Persistence and learning | `session_manager.py`, `persistent_session_manager.py`, `experience_store.py`, `credential_store.py`, `activity_log.py`, `attack_memory.py`, `api_key_store.py` |
@@ -71,13 +72,14 @@ Add a new module by subclassing `AttackModule`, implementing applicability and r
 - `agents/post_exploit_agent.py`: post-exploit specialist.
 - `agents/critic_agent.py`: safety/policy critic.
 - `agents/reflection_agent.py`: strategy reflection specialist.
+- `agents/witness_agent.py`: advisory audit-stream watcher (NOT routed by the orchestrator and NOT started by the run lifecycle — launch manually with `python -m tools.swarm.agents.witness_agent`; detection/flagging only).
 - `skill_phase.py`: skill phase routing.
 
 Update `tests/test_swarm.py`, `tests/test_swarm_integration.py`, and `tests/test_swarm_observability.py` when changing this area.
 
 ## Tests
 
-Tests are organized by module or feature; the suite has grown to **248** files (all mock subprocess/network — `python -m pytest tests/ -v` for the full set, or `python -m pytest tests/test_scope_gate.py -v` for one file). The list below highlights major areas, not every file.
+Tests are organized by module or feature; the suite has grown to **~250** files (all mock subprocess/network — `python -m pytest tests/ -v` for the full set, or `python -m pytest tests/test_scope_gate.py -v` for one file). The list below highlights major areas, not every file.
 
 - Core workflow: `test_mission.py`, `test_scope_gate.py`, `test_risk_controller.py`, `test_task_queue.py`, `test_outcome_judge.py`, `test_agent_loop.py`
 - Persistence/reporting: `test_evidence.py`, `test_finding_verifier.py`, `test_report_generator.py`

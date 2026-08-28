@@ -87,7 +87,7 @@ Allowlist check is `tools/validation_utils.is_target_in_allowlist` — supports 
 
 | Env var | Purpose | Set by | Consumed at |
 |---------|---------|--------|-------------|
-| `AI_NMAP_DEBUG` | Verbose nmap/exploit loop logging | `main.py:593` from `--debug` | `exploit_agent/loop.py:182`, `exploit_agent/*` |
+| `AI_NMAP_DEBUG` | Verbose nmap/exploit loop logging | `main.py:593` from `--debug` | `scripts/runner_impl.py:182`, `exploit_agent/*` |
 | `AI_NMAP_ACTIVE_MODEL_ALIAS` | Active model alias threaded into MCP server | `mcp_session.py:270` | `tools/mcp_tools/registry.py:201`, `peer_models.py:80` |
 | `AI_NMAP_MULTI_MODEL_ENABLED` | Force multi-model enablement in MCP server | — | `tools/mcp_tools/registry.py:220` |
 | `AI_NMAP_AUDIT_VERIFY_VERBOSE` | Verbose audit verification | — | `exploit_agent/policy.py:340` |

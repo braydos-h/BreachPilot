@@ -169,6 +169,16 @@ Tests: `tests/test_swarm.py`, `tests/test_swarm_history_bound.py`, `tests/test_r
 
 Advisory audit-stream watcher running as side task, not routed by orchestrator (docstring `witness_agent.py:15`, class note `:334`).
 
+**Wiring status: NOT started by the run lifecycle.** No production code
+instantiates `WitnessAgent` — the orchestrator, `run_service`, and `main.py`
+never launch it. `witness.enabled: true` in config.yaml only configures it; to
+actually observe a run, start the watcher manually
+(`python -m tools.swarm.agents.witness_agent`, or `WitnessAgent(...)` in a
+script/tests). It is **detection/auditing only**: it flags anomalies to the
+witness log + event broker; it never blocks, modifies, or kills a run. The
+WebUI surfaces flags via `GET /api/v1/runs/{run_id}/witness`, which reads the
+process-global log file (404 when absent).
+
 | Symbol | Line | Description |
 |---|---|---|
 | `WitnessAgent` | 333 | Poll loop over audit paths |

@@ -40,7 +40,7 @@ operator ── python main.py --target <ip> --mode attack
            │       └─ wait_for_mcp_http_ready       (owned-child TCP listener)
            │       └─ _streamable_http_transport    (mcp_session.py:718; Bearer token)
            │       └─ ClientSession.initialize()    (mcp_session.py:486-497)
-           │       └─ yield session  →  run_exploit_agent(loop.py) → call_tool
+           │       └─ yield session  →  run_exploit_agent(scripts/runner_impl.py) → call_tool
            └─ transport="stdio" (fallback / direct)
                └─ StdioServerParameters(python mcp_exploit_server.py
                     --transport stdio ...)          (mcp_session.py:288-297)
@@ -123,7 +123,7 @@ on the main loop via `run_coroutine_threadsafe`
 
 ## How the Exploit Agent Dispatches Tool Calls
 
-The loop (`tools/exploit_agent/loop.py`) does, per round:
+The loop (`scripts/runner_impl.py`) does, per round:
 
 1. **Phase-narrow the catalog** — `select_tools_for_phase` (`tool_catalog.py:102-133`)
    keeps the universal set plus the current phase's families

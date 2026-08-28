@@ -85,7 +85,7 @@ ChatGPT provider (`models.provider: chatgpt`) uses browser OAuth tokens at `~/.c
 
 | Job | Command | Notes |
 |-----|---------|-------|
-| **Tests** (3.11/3.12/3.13) | `python -m pytest tests/ -v` | 248 files, all mock subprocess/network — no live Nmap |
+| **Tests** (3.11/3.12/3.13) | `python -m pytest tests/ -v` | ~250 files, all mock subprocess/network — no live Nmap |
 | **Coverage** (3.12) | `python -m coverage run -m pytest tests/` + `coverage report`/`coverage xml` | `pyproject.toml:95` `source = ["tools","main","cli"]` |
 | **Lint** | `ruff check .` (0 errors) + `ruff format --check .` (0 diffs) | `pyproject.toml:102` line-length 120, `select = ["E","F","W","I"]`, `ignore = ["E501"]` |
 | **Lint guards** | bare-`except Exception` guard + god-file budget + `config.yaml`↔`CONFIG_SCHEMA` sync + `doctor --json` shape | See `ci.yml:99-146` |

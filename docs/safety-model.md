@@ -45,7 +45,9 @@ Risk profiles used in the sample mission:
 - per-target rate limiting
 - risk level gating
 
-Any new execution path should call the scope gate before network or system actions. If a change bypasses `ToolRouter`, it must add equivalent checks.
+Any new Flow B / recon execution path should call the scope gate before network
+or system actions (the lab attack path is intentionally exempt — its one lock is
+the MCP allowlist). If a change bypasses `ToolRouter`, it must add equivalent checks.
 
 ## Risk Controller
 
@@ -72,10 +74,9 @@ explicitly authorized to test, on a throwaway operator box. An explicit
   `ExploitPolicy.approve_action` auto-approves every action with no command-content
   or scope inspection — destructive commands, egress, reverse shells, credential
   dumping, Metasploit, and Python write/run are all allowed. The `is_full_access`
-  branch increments the per-session command budget and returns True. The
+  branch increments the per-session command budget and returns True. The former
   `_check_command_safety` / `_check_scope_gate` / `_gate_pivot_and_count` gates
-  were removed from this branch (they remain referenced by the `read_only` /
-  `approve_only` recon paths' comments only).
+  were removed from the policy entirely (no code path calls them anymore).
 - `approve_only`: require operator approval for sensitive actions.
 - `read_only`: gather information and avoid active exploitation. Set it for
   propose-only recon; `_resolve_exploit_permission` uses it as the missing-key
@@ -86,7 +87,8 @@ hosts).** It is enforced at the MCP tool layer: `tools/mcp_shared._allowed_targe
 (`tools/mcp_shared.py:494-534`) unions `os.environ["EXPLOIT_TARGET"]` (the runtime `--target`, set in
 `tools/mcp_session.py:255`) with `exploit.allowed_targets` **plus** `EXPLOIT_TARGET_IP` (resolved IP for domain targets), `EXPLOIT_TARGET_DOMAIN` (domain string), and `EXPLOIT_DISCOVERED_TARGETS` (comma-separated subdomains/IPs auto-authorized mid-run via `tools/mcp_shared.add_discovered_target:537-555`); `is_target_in_allowlist` (`tools/validation_utils.py:380-420`) supports domains + `*.wildcard` + CIDR. `@require_allowlist` on
 every target-touching tool plus `tools/mcp_tools/terminal._target_lock_block`
-(`tools/mcp_tools/terminal.py:57-94`) refuse any destination that is not in the union. The lock is applied
+(defined in `tools/mcp_tools/terminal/allowlist.py`, re-exported from the
+`terminal` package) refuse any destination that is not in the union. The lock is applied
 wherever a non-target host can be named:
 
 - `run_exploit_terminal` / `run_as_root`: `_target_lock_block` scans the shell
@@ -119,12 +121,12 @@ containment where relevant.
 
 ```yaml
 exploit:
-  permission: full_access            # lab build; missing-key fallback is read_only (tools/cli_exploit_settings.py:12-30)
+  permission: full_access            # lab build; missing-key fallback is read_only (tools/cli_exploit_settings.py:13-30)
   attack_mode: true
   require_explicit_allowlist: true   # the target-IP lock (tools/mcp_shared.py:494-534)
-  allowed_targets: [127.0.0.1]        # lab checked-in default; schema default is [] (config_manager.py:183)
-  disallowed_assets: []
-  forbidden_actions: []
+  allowed_targets: [127.0.0.1]        # lab checked-in default; schema default is [] (tools/config/schema.py:181)
+  disallowed_assets: []               # inert on the standalone attack path (no consumer since the policy gates were removed)
+  forbidden_actions: []               # ditto; still enforced by the swarm critic agent and Flow B's ScopeGate
 multi_model:
   enabled: true                      # lab default true (schema False); advisory peer consultation
 ```

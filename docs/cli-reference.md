@@ -9,12 +9,12 @@ There are three top-level Python entry points, one per flow (see AGENTS.md Flow 
 
 | Command | Flow | Purpose |
 |---------|------|---------|
-| `python main.py` | Flow A (modern, what users run) | Interactive menu, direct recon/attack runs, doctor/self-test/eval/demo, WebUI daemon |
-| `python app.py` | Flow A | ASGI app factory — **not a CLI**; imported by `main._run_daemon` (`app.py:38`), never run directly |
+| `python main.py` | Flow A (modern, what users run) | **WebUI daemon + browser by default** (no args), direct recon/attack runs, doctor/self-test/eval/demo, API-only daemon, `--menu` terminal menu |
+| `python app.py` | Flow A | ASGI app factory — **not a CLI**; imported by `main._run_daemon`, never run directly |
 | `python cli.py` | Flow B (legacy, SQLite-backed) | Database-backed mission/scope/task/finding/report workflow commands |
 
 `app.py` contains no argument parser; it is invoked as `python main.py --demon` which imports
-`create_app` (`main.py:532`) and serves it with uvicorn (`main.py:560`).
+`create_app` and serves it with uvicorn (`main._run_daemon`).
 
 The MCP servers are separate entry points: `python mcp_server.py` (defensive),
 `python mcp_exploit_server.py` (exploit, target-lock enforced), `python mcp_engine_server.py`
@@ -23,119 +23,126 @@ The MCP servers are separate entry points: `python mcp_server.py` (defensive),
 
 ## `python main.py` — Flow A
 
-Argument parser: `main.py:342-430`. Dispatch order in `main()` (`main.py:803`): API-key bootstrap →
+Argument parser: `main.parse_args`. Dispatch order in `main()`: API-key bootstrap →
 `--setup-api-keys` exit → daemon (`--demon`/`--daemon`/`--web`) → `--doctor` → `--self-test` →
-`--eval` → `--demo` → `--skills-list` → `--list-plugins` → interactive menu (`--menu` or no args)
-→ `async_main` (`main.py:566`).
+`--eval` → `--ctf` → `--demo` → `--skills-list` → `--list-plugins` → `--menu` (terminal menu) →
+**no-args default (WebUI daemon, `--web`)** → `async_main`.
 
 ### Run flags
 
-| Flag | Default | Description | Line |
+Parser group: **targeting** (plus `--version`). The "Group" column names the argparse
+argument group in `main.parse_args`, so references survive line drift.
+
+| Flag | Default | Description | Group |
 |------|---------|-------------|------|
-| `--version` | — | Print `NetAttackAI <version>` and exit | `main.py:344` |
-| `--target <ip-or-domain>` | `""` | Target to attack or recon. Accepts an IP **or a domain** (Phase 4); domains resolve via `tools/validation_utils.resolve_target_to_ip` and thread `EXPLOIT_TARGET`/`EXPLOIT_TARGET_IP`/`EXPLOIT_TARGET_DOMAIN` into the MCP server (AGENTS.md rule 6) | `main.py:345` |
-| `--mode {recon,attack}` | `""` | `recon` = gather intel only, `attack` = full exploitation. Recon is always `read_only` (`tools/cli_exploit_settings.py:157-159`) | `main.py:346` |
-| `--goal <name>` | `""` | Preset goal: `backdoor`, `initial_access`, `privilege_escalation`, … | `main.py:347` |
-| `--custom-goal <text>` | `""` | Free-text goal description | `main.py:348` |
-| `--config <path>` | `config.yaml` | Config file path | `main.py:349` |
-| `--model <alias>` | config default | Override model alias (`glm`/`kimi`/`deepseek`/`deepseek_flash`/`minimax`) | `main.py:350` |
-| `--model-strategy {default,round-robin,random,specific}` | `default` | How to pick model across targets | `main.py:351` |
-| `--mcp-transport {stdio,http}` | `None` | MCP transport. Ignored on the run path: always forced to `http` so the target-IP lock reaches the server | `main.py:353` |
-| `--http-port <n>` | `None` | HTTP port for the MCP server (http transport) | `main.py:355` |
-| `--reports-dir <path>` | `reports` | Root dir for run artifacts (`reports/<run_id>/`) | `main.py:356` |
-| `--resume <run_id\|session_id>` | `""` | Resume a prior run by run_id or session_id | `main.py:391` |
+| `--version` | — | Print `NetAttackAI <version>` and exit | — |
+| `--target <ip-or-domain>` | `""` | Target to attack or recon. Accepts an IP **or a domain** (Phase 4); domains resolve via `tools/validation_utils.resolve_target_to_ip` and thread `EXPLOIT_TARGET`/`EXPLOIT_TARGET_IP`/`EXPLOIT_TARGET_DOMAIN` into the MCP server (AGENTS.md rule 6) | targeting |
+| `--mode {recon,attack,fast}` | `""` | `recon` = gather intel only, `attack` = full exploitation, `fast` = parallel recon preset then attack. Recon is always `read_only` (`tools/cli_exploit_settings.py:157-163`) | targeting |
+| `--goal <name>` | `""` | Preset goal: `backdoor`, `initial_access`, `privilege_escalation`, … | targeting |
+| `--custom-goal <text>` | `""` | Free-text goal description | targeting |
+| `--config <path>` | `config.yaml` | Config file path | targeting |
+| `--model <alias>` | config default | Override model alias (`glm`/`kimi`/`deepseek`/`deepseek_flash`/`minimax`) | targeting |
+| `--model-strategy {default,round-robin,random,specific}` | `default` | How to pick model across targets | targeting |
+| `--mcp-transport {stdio,http}` | `None` | MCP transport. Ignored on the run path: always forced to `http` so the target-IP lock reaches the server | targeting |
+| `--http-port <n>` | `None` | HTTP port for the MCP server (http transport) | targeting |
+| `--reports-dir <path>` | `reports` | Root dir for run artifacts (`reports/<run_id>/`) | targeting |
+| `--resume <run_id\|session_id>` | `""` | Resume a prior run by run_id or session_id | operational |
 
 ### Swarm / reasoning flags
 
-| Flag | Description | Line |
+| Flag | Description | Group |
 |------|-------------|------|
-| `--swarm` | Enable multi-agent swarm mode | `main.py:363` |
-| `--parallel-swarm` | Parallel sub-agents (recon + vuln-research parallelize; exploit/post_exploit stay sequential unless `swarm.exploit_parallel`) | `main.py:364` |
-| `--critic` | Critic agent pre-approval (requires `--swarm`) | `main.py:371` |
-| `--reflection` | Reflection agent (requires `--swarm`) | `main.py:372` |
-| `--adaptive-exploits` | Adaptive exploit generation with mutation on failure | `main.py:373` |
-| `--long-session` | Raise context window, LLM call timeout, round/command/duration budgets, and the swarm cap for multi-hour runs; checkpointed messages for crash-safe resume | `main.py:374` |
-| `--multi-model-consult` / `--no-multi-model-consult` | Allow / forbid the agent asking configured peer models for advisory help | `main.py:377`, `main.py:379` |
-| `--observer-mode {heuristic,llm,hybrid}` | Observer fact-extraction mode | `main.py:381` |
-| `--recon-first` / `--no-recon-first` | Force recon-first (scan, suggest rated goals, then ask) / skip straight to goal selection | `main.py:382`, `main.py:384` |
-| `--ultrathink` | Deep reasoning: verbose chain-of-thought and frequent reflection | `main.py:405` |
+| `--swarm` | Enable multi-agent swarm mode | swarm & reasoning |
+| `--parallel-swarm` | Parallel sub-agents (recon + vuln-research parallelize; exploit/post_exploit stay sequential unless `swarm.exploit_parallel`) | swarm & reasoning |
+| `--critic` | Critic agent pre-approval (requires `--swarm`) | swarm & reasoning |
+| `--reflection` | Reflection agent (requires `--swarm`) | swarm & reasoning |
+| `--adaptive-exploits` | Adaptive exploit generation with mutation on failure | swarm & reasoning |
+| `--long-session` | Raise context window, LLM call timeout, round/command/duration budgets, and the swarm cap for multi-hour runs; checkpointed messages for crash-safe resume | swarm & reasoning |
+| `--multi-model-consult` / `--no-multi-model-consult` | Allow / forbid the agent asking configured peer models for advisory help | swarm & reasoning |
+| `--observer-mode {heuristic,llm,hybrid}` | Observer fact-extraction mode (default `hybrid`) | swarm & reasoning |
+| `--recon-first` / `--no-recon-first` | Force recon-first (scan, suggest rated goals, then ask) / skip straight to goal selection | swarm & reasoning |
+| `--ultrathink` | Deep reasoning: verbose chain-of-thought and frequent reflection | swarm & reasoning |
 
 ### Operational flags
 
-| Flag | Description | Line |
+| Flag | Description | Group |
 |------|-------------|------|
-| `--doctor` | Run the self-check (Python, nmap, Ollama, config) and exit — `tools.doctor.run_doctor` | `main.py:387`, dispatched `main.py:858` |
-| `--self-test` | Run the safe localhost smoke test against `127.0.0.1` and exit — `tools.self_test.run_self_test` | `main.py:401`, dispatched `main.py:863` |
-| `--eval` | Run the eval/benchmark harness against `--target` and write `reports/eval/<run_id>/`; requires `--target`, returns 2 without one (`tools/eval_harness.py:362-367`) | `main.py:403`, dispatched `main.py:868` |
-| `--demo` | Run against a local sandbox target (DVWA via Docker on `127.0.0.1:8081`, synthetic in-process HTTP server as fallback); writes `reports/demo/demo_report.md` (`tools/demo_mode.py:118-198`) | `main.py:389`, dispatched `main.py:873` |
-| `--resume <run_id>` | See run flags | `main.py:391` |
-| `--yes` | Skip the ready-to-begin confirmation gate (`main.py:747-763`) — use with caution | `main.py:399` |
-| `--json` | Machine-readable JSON to stdout where supported; also forces plain output | `main.py:393` |
-| `--quiet` | Warnings/errors only; forces plain output | `main.py:395` |
-| `--debug` | Verbose debug output; sets `AI_NMAP_DEBUG=1` (`main.py:590`) | `main.py:397` |
-| `--plain` | Disable color output (ANSI) | `main.py:360` |
+| `--doctor` | Run the self-check (Python, nmap, Ollama, config) and exit — `tools.doctor.run_doctor` | operational |
+| `--self-test` | Run the safe localhost smoke test against `127.0.0.1` and exit — `tools.self_test.run_self_test` | operational |
+| `--eval` | Run the eval/benchmark harness against `--target` and write `reports/eval/<run_id>/`; requires `--target`, returns 2 without one (`tools/eval_harness.py`) | operational |
+| `--demo` | Run against a local sandbox target (DVWA via Docker on `127.0.0.1:8081`, synthetic in-process HTTP server as fallback); writes `reports/demo/demo_report.md` (`tools/demo_mode.py`) | operational |
+| `--yes` | Skip the ready-to-begin confirmation gate — use with caution | operational |
+| `--json` | Machine-readable JSON to stdout where supported; also forces plain output | output |
+| `--quiet` | Warnings/errors only; forces plain output | output |
+| `--debug` | Verbose debug output; sets `AI_NMAP_DEBUG=1` | output |
+| `--plain` | Disable color output (ANSI) | output |
+| `--menu` | Force the legacy interactive terminal menu even with other args | output |
 
 ### API keys / config
 
-| Flag | Description | Line |
+| Flag | Description | Group |
 |------|-------------|------|
-| `--setup-api-keys` | Prompt for provider API keys and save them to the key file; exits after saving | `main.py:357` |
-| `--api-key-file <path>` | Local JSON file for saved provider API keys (default `secr.json` / `DEFAULT_API_KEY_FILE`) | `main.py:358` |
-| `--no-api-key-prompt` | Skip the interactive startup API-key prompt | `main.py:359` |
+| `--setup-api-keys` | Prompt for provider API keys and save them to the key file; exits after saving (when no other action is requested) | api keys |
+| `--api-key-file <path>` | Local JSON file for saved provider API keys (default `secr.json` / `DEFAULT_API_KEY_FILE`) | api keys |
+| `--no-api-key-prompt` | Skip the interactive startup API-key prompt | api keys |
 
-Startup key loading lives in `tools/config_cli.py:175` (`bootstrap_startup_api_keys`) and
-`tools/api_key_store.py`.
+Startup key loading lives in `tools/config_cli.py` (`bootstrap_startup_api_keys`) and
+`tools/api_key_store.py`. The interactive prompt only fires in `--menu` mode; the WebUI
+daemon default and direct runs load keys without prompting.
 
-### Skills / plugins flags
+### Skills / plugins / CTF flags
 
-| Flag | Description | Line |
+| Flag | Description | Group |
 |------|-------------|------|
-| `--skills {on,off,hints,lookup}` | Override runtime-skills behavior: `on`=startup context, `hints`=hints only (default), `lookup`=MCP tools only, `off`=disabled | `main.py:408` |
-| `--skills-list` | Print the read-only runtime-skill catalog and exit | `main.py:411` |
-| `--skills-include <name>` | Force-include a skill for this run. Repeatable (`action="append"`) | `main.py:413` |
-| `--skills-exclude <name>` | Exclude a skill for this run. Repeatable | `main.py:415` |
-| `--no-skills-reselect` | Disable mid-run skill re-selection | `main.py:417` |
-| `--list-plugins` | Print discovered plugins (name/version/capabilities/loaded) and exit | `main.py:420` |
-| `--ctf` | CTF autopilot: hunt flag file and exit when found | `main.py:431` |
-| `--ctf-flag-path <path>` | CTF flag file path (default `/flag.txt`) | `main.py:432` |
-| `--ctf-marker <str>` | CTF known-string marker expected from `--ctf-port` | `main.py:434` |
-| `--ctf-port <n>` | CTF port to probe for marker | `main.py:433` |
-| `--ctf-root-shell` | CTF: assume root shell | `main.py:435` |
+| `--skills {on,off,hints,lookup}` | Override runtime-skills behavior: `on`=startup context, `hints`=hints only (default), `lookup`=MCP tools only, `off`=disabled | runtime skills |
+| `--skills-list` | Print the read-only runtime-skill catalog and exit | runtime skills |
+| `--skills-include <name>` | Force-include a skill for this run. Repeatable (`action="append"`) | runtime skills |
+| `--skills-exclude <name>` | Exclude a skill for this run. Repeatable | runtime skills |
+| `--no-skills-reselect` | Disable mid-run skill re-selection | runtime skills |
+| `--list-plugins` | Print discovered plugins (name/version/capabilities/loaded) and exit | plugins |
+| `--ctf` | CTF autopilot: run against `--target` and stop when the goal is heuristically met (flag marker / uid=0 / port-marker) | ctf autopilot |
+| `--ctf-flag-path <path>` | CTF goal: flag file path on the target (e.g. `/root/flag.txt`; default empty) | ctf autopilot |
+| `--ctf-marker <str>` | CTF known-string marker expected from `--ctf-port` | ctf autopilot |
+| `--ctf-port <n>` | CTF port to probe for marker | ctf autopilot |
+| `--ctf-root-shell` | CTF: treat `uid=0` in any output as goal-met (default True) | ctf autopilot |
 
 ### WebUI / API daemon flags
 
-| Flag | Description | Line |
+| Flag | Description | Group |
 |------|-------------|------|
-| `--demon`, `--daemon` | Start the local WebUI API server instead of the terminal menu (`main._run_daemon`, `main.py:509`) | `main.py:423` |
-| `--web` | Daemon mode plus: build `webui/dist/` if needed, serve it at `/`, open a browser (`main.py:537-558`, `_ensure_webui_build` `main.py:436`) | `main.py:425` |
-| `--api-host <host>` | Daemon bind host — **loopback only** (`127.0.0.1`/`localhost`/`::1`); any other host exits with code 2 (`main.py:516-518`) | `main.py:427` |
-| `--api-port <n>` | Daemon port (default 8765) | `main.py:428` |
+| `--demon`, `--daemon` | Start the local WebUI API server instead of the terminal menu (`main._run_daemon`) | webui |
+| `--web` | Daemon mode plus: build `webui/dist/` if needed, serve it at `/`, open a browser (`main._ensure_webui_build`) | webui |
+| `--api-host <host>` | Daemon bind host — **loopback only** (`127.0.0.1`/`localhost`/`::1`); any other host exits with code 2 | webui |
+| `--api-port <n>` | Daemon port (default 8765) | webui |
 
 Daemon mode refuses to combine with target/goal/menu/doctor/demo/eval/self-test/skills-list/
-list-plugins/setup-api-keys flags and exits 2 on conflict (`main.py:841-855`). The API is served
-by the FastAPI factory in `app.py:38`, mounted under `/api/v1`, bearer-token protected
-(`NETATTACKAI_API_TOKEN` env override, `app.py:69-73`).
+list-plugins/setup-api-keys flags and exits 2 on conflict. The API is served
+by the FastAPI factory in `app.py` (`create_app`), mounted under `/api/v1`, bearer-token protected
+(`NETATTACKAI_API_TOKEN` env override; `tools/api/auth.py`).
 
-### Interactive menu (default no-args)
+### Interactive menu (`--menu`)
 
-`python main.py` with no arguments (or `--menu`, `main.py:903-905`) launches the questionary menu
-(`tools/interactive_menu.py:633`):
+`--menu` (or `ui.ask_advanced_settings` in an interactive session without `--target`) launches the
+questionary terminal menu (`tools/interactive_menu.py`):
 
-1. **Recon & Suggest Goals** — recon-first session (`interactive_menu.py:576`)
-2. **Start New Session** — interactive wizard → `async_main` (`interactive_menu.py:565`)
-3. **Manage Missions** — list/create/delete Flow B missions in `research_workspace/research.db` (`interactive_menu.py:81`)
-4. **View Reports** — browse `reports/<run_id>/` sessions (`interactive_menu.py:257`)
-5. **Settings** — write a default `config.yaml` if missing (`interactive_menu.py:480`)
-6. **Help** — quick reference (`interactive_menu.py:587`)
+1. **Recon & Suggest Goals** — recon-first session
+2. **Start New Session** — interactive wizard → `async_main`
+3. **Manage Missions** — list/create/delete Flow B missions in `research_workspace/research.db`
+4. **View Reports** — browse `reports/<run_id>/` sessions
+5. **Settings** — write a default `config.yaml` if missing
+6. **Help** — quick reference
 7. **Exit**
 
-Menu choices defined at `interactive_menu.py:540-553`; fallback numbered menu at
-`interactive_menu.py:53`. The wizard itself lives in `tools/attack_ui.py`:
-`ask_advanced_settings` (`attack_ui.py:1261`) covers all CLI flags with current values as
-defaults; `ask_power_ups` (`attack_ui.py:1214`) is a multi-select for
+The wizard itself lives in `tools/attack_ui.py`:
+`ask_advanced_settings` covers all CLI flags with current values as
+defaults; `ask_power_ups` is a multi-select for
 swarm/critic/reflection/adaptive-exploits/long-session/ultrathink/debug/yes. When no `--target`
-is given, the flow prompts for one (`main.py:656-664`) and, in interactive sessions, persists it
-to `exploit.allowed_targets` in the config (`main.py:685-693`, `tools/config_cli.py:30`).
+is given, the flow prompts for one and, in interactive sessions, persists it
+to `exploit.allowed_targets` in the config (`tools/config_cli.add_target_to_allowlist`).
+
+> **No-args default:** `python main.py` with no arguments starts the **WebUI daemon** (`--web`:
+> build `webui/dist/` if needed, serve at `http://127.0.0.1:8765/`, open a browser). It does NOT
+> open the terminal menu; use `--menu` for that.
 
 ## `python cli.py` — Flow B (SQLite mission workflow)
 
@@ -179,9 +186,9 @@ Exit codes: 0 success, 1 error (including scope/risk blocks that set the task to
 | Code | Meaning | Source |
 |------|---------|--------|
 | 0 | Success / clean exit | throughout |
-| 1 | Run failure, invalid config/target, aborted session, setup-only path | `main.py:622, 664, 681, 693, 778, 799`; `cli.py` errors |
-| 2 | Daemon flag conflicts; non-loopback `--api-host`; `--eval` without `--target` | `main.py:518, 854`; `tools/eval_harness.py:367` |
-| 130 | `KeyboardInterrupt` | `main.py:908-910`; `cli.py:588-590` |
+| 1 | Run failure, invalid config/target, aborted session, setup-only path | `main.main` / `async_main` error paths; `cli.py` errors |
+| 2 | Daemon flag conflicts; non-loopback `--api-host`; `--eval` without `--target` | `main._run_daemon`; `tools/eval_harness.py` |
+| 130 | `KeyboardInterrupt` | `main.main`; `cli.py` |
 
 ## Example Workflows
 
@@ -256,7 +263,7 @@ Keys are loaded from the `--api-key-file` JSON into `os.environ` when not alread
 
 | Variable | Effect | Source |
 |----------|--------|--------|
-| `AI_NMAP_DEBUG` | Verbose nmap/exploit loop logging (`--debug` sets it) | `tools/exploit_agent/loop.py:182`; `main.py:590` |
+| `AI_NMAP_DEBUG` | Verbose nmap/exploit loop logging (`--debug` sets it) | `scripts/runner_impl.py:_debug_enabled`; `main.py` debug handling |
 | `AI_NMAP_ACTIVE_MODEL_ALIAS` | Active model alias override for MCP registry/peer tools | `tools/mcp_tools/registry.py:201` |
 | `AI_NMAP_MULTI_MODEL_ENABLED` | Force multi-model enablement for the MCP server | `tools/mcp_tools/registry.py:220` |
 | `AI_NMAP_AUDIT_VERIFY_VERBOSE` | Verbose audit verification output | `tools/exploit_agent/policy.py:340` |

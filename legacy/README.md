@@ -13,7 +13,7 @@ Phase 2 ADR-001 (`docs/architecture.md`) kept both in one checkout for migration
 ## Import rules
 
 - New code MUST NOT import from Flow B. Use `tools/kernel/`, `tools/run_service/`, `tools/exploit_agent/`.
-- Root shims (`agent_loop.py`, `cli.py`, etc.) remain for one release (248 tests still import `import agent_loop`) and emit `DeprecationWarning`. They simply do `sys.modules[__name__] = importlib.import_module("legacy.<name>")`.
+- Root shims (`agent_loop.py`, `cli.py`, etc.) remain for one release (the ~250-file test suite still imports `import agent_loop`) and emit `DeprecationWarning`. They simply do `sys.modules[__name__] = importlib.import_module("legacy.<name>")`.
 - Shared kernel `db.py`, `scope_gate.py`, and `mission.py` schema are intentionally dual-homed: `legacy/mission.py` is canonical, root `mission.py` is a shim (likewise `db.py`/`scope_gate.py` stay at root until 0.50 for minimal diff).
 
 ## If you thought Flow B was the product

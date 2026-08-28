@@ -10,7 +10,7 @@ verify: every flag exists in main.py:parse_args at time of generation (2026-08-2
 
 > Verified against `main.py:parse_args` (`main.py:340-562`). No invented flags. Run `python main.py --help` to cross-check. Dispatch order is in `main()` (`main.py:1154`).
 
-- **Default no-args** → interactive menu (`--menu` explicit) via `tools/interactive_menu.py`; not the daemon.
+- **Default no-args** → **WebUI daemon** (`--web`: build `webui/dist/` if needed, serve `http://127.0.0.1:8765/`, open a browser) via `main._run_daemon`. `--menu` forces the legacy interactive terminal menu instead.
 - **API-key bootstrap** → `tools/config_cli.bootstrap_startup_api_keys` (`main.py:1169`) with `prompt = --menu` only.
 - **Daemon guard** (`main.py:1210`) — `--demon/--daemon/--web` refuse `target/mode/goal/custom_goal/menu/doctor/demo/eval/self_test/skills_list/list_plugins/setup_api_keys` → exit 2.
 - **Dispatch** — `setup_api_keys` solo exit → daemon/web → `--doctor` → `--self-test` → `--eval` → `--ctf` → `--demo` → `--skills-list` → `--list-plugins` → `async_main`.
@@ -95,7 +95,8 @@ Exit: `0` success, `1` error/scope-or-risk block, `130` Ctrl-C. Data `research_w
 ## Examples (from `main.py:342` epilog and dispatch)
 
 ```powershell
-python main.py                                          # interactive menu (default)
+python main.py                                          # WebUI daemon + browser (default)
+python main.py --menu                                    # legacy interactive terminal menu
 python main.py --target 10.0.0.50 --mode attack --goal backdoor
 python main.py --target 10.0.0.50 --mode recon --goal initial_access
 python main.py --target 10.0.0.50 --ctf --ctf-flag-path /root/flag.txt

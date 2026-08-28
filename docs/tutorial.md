@@ -174,14 +174,15 @@ safety-sensitive code change (see the developer loop in
 
 ## Section 3: Recon-first run against a lab target
 
-Use the interactive menu — the default with no arguments:
+Use the WebUI daemon — the default with no arguments:
 
 ```powershell
 python main.py
 ```
 
-You get the banner and the arrow-key menu
-(`tools/interactive_menu.py`):
+This builds and serves the WebUI at `http://127.0.0.1:8765` and opens a
+browser. Prefer the terminal? The legacy arrow-key menu is available with
+`--menu` (`tools/interactive_menu.py`):
 
 ```text
 ============================================================
@@ -386,7 +387,7 @@ The UI prints distinct milestones (`tools/attack_ui.py:404`):
 ```
 
 The agent loop also stops early on a verified win
-(`tools/exploit_agent/loop.py:1030`):
+(`scripts/runner_impl.py:1030`):
 
 ```text
 [INFO] Goal complete - verified compromise/cred dump; terminating.

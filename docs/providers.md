@@ -148,7 +148,7 @@ All of these receive a `ModelClient` and call `.chat()` — provider-agnostic:
 | Consumer | File:line | Notes |
 |---|---|---|
 | Exploit agent loop | `tools/exploit_agent/ollama_client.py:70, 125` | streaming + non-streaming, wrapped by `_call_ollama_with_retry` (`ollama_client.py:19-48`) |
-| Exploit agent entry | `tools/exploit_agent/loop.py:938` | the main `await _call_ollama_with_retry(client, model, ...)` |
+| Exploit agent entry | `scripts/runner_impl.py (per-round LLM call)` | the main `await _call_ollama_with_retry(client, model, ...)` |
 | Router-wrapped chat | `tools/model_router.py:330` | the actual `raw_client.chat(**raw_kwargs)` inside the closure |
 | Payload crafter | `tools/payload_crafter.py:709, 815` | script generation + LLM mutation |
 | Semantic memory summarization | `tools/semantic_memory.py:358` | uses the routed model client (not the raw HTTP path) |
@@ -326,7 +326,7 @@ read in three places:
 
 - `tools/config_manager.py:998-1006` — `get_ollama_embed_host()` accessor
 - `agent_loop.py:176-182` (Flow B) — `_ollama_cfg.get("embed_host") or _ollama_cfg.get("host")`
-- `tools/exploit_agent/loop.py:478-486` (Flow A) — same pattern
+- `scripts/runner_impl.py (embed host resolution)` (Flow A) — same pattern
 - `tools/skill_embeddings.py:180-186` (skill ranking) — same pattern
 
 ### Embedding consumers
@@ -396,7 +396,7 @@ tables are in [config-reference.md](config-reference.md); the summary:
 | `host` | `https://api.ollama.com` | `config_manager.py:996`, `model_router.py:287-316`, `doctor.py:320` |
 | `model` | `glm-5.2:cloud` | `config_manager.py:31` |
 | `api_key_env` | `OLLAMA_API_KEY` | `api_key_store.py:49` |
-| `embed_host` | `http://localhost:11434` | `config_manager.py:998-1006`, `exploit_agent/loop.py:478` |
+| `embed_host` | `http://localhost:11434` | `config_manager.py:998-1006`, `scripts/runner_impl.py (embed host resolution)` |
 
 **`models:` (`config.yaml:15-44`)** — model registry
 
@@ -552,7 +552,7 @@ The current `_generate_embedding` body (`semantic_memory.py:48-106`) becomes
 
 `SemanticMemoryManager.__init__` (`semantic_memory.py:25-33`) takes a
 provider instance instead of a host string. The three construction sites
-(`agent_loop.py:176-182`, `exploit_agent/loop.py:478-486`,
+(`agent_loop.py:176-182`, `scripts/runner_impl.py (embed host resolution)`,
 `skill_embeddings.py:180-186`) build the provider from config.
 
 ### 4. Consumers stay untouched
@@ -625,7 +625,7 @@ See [research.md](research.md) for the full research-subsystem walkthrough.
   (`main.py`/`app.py` → `tools/exploit_agent/`) and Flow B (`cli.py` +
   root-level `agent_loop.py`/`db.py`/`mission.py`) both construct
   `SemanticMemoryManager` with the `embed_host`→`host` fallback
-  (`agent_loop.py:176-182` vs `exploit_agent/loop.py:478-486`). An embeddings
+  (`agent_loop.py:176-182` vs `scripts/runner_impl.py (embed host resolution)`). An embeddings
   provider change must update both construction sites.
 - **No CI.** Before a PR adding a provider: run `python -m pytest tests/ -v`
   and `ruff check .`, and verify the README/provider config still matches

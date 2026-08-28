@@ -29,7 +29,7 @@ where the term is defined or primarily used.
 ## Flows & Lifecycle
 
 - **Agent loop** — The main agent cycle: plan → call tools → observe →
-  reflect → repeat (`tools/exploit_agent/loop.py`, Flow B `agent_loop.py:61
+  reflect → repeat (`scripts/runner_impl.py`, Flow B `agent_loop.py:61
   AgentLoop`).
 - **Autonomous orchestrator** — Unattended mission driver that starts the MCP
   exploit server, feeds target/goal, and monitors the agent to completion
@@ -81,8 +81,9 @@ where the term is defined or primarily used.
   lifecycle created → validated → rejected → report_ready
   (`finding_verifier.py:77 FindingVerifier`).
 - **PoE (Proof of Execution)** — Canary-based verification that an exploit
-  actually ran, not just that the model claimed it did
-  (`tools/verification/poe_verifier.py`).
+  actually ran, not just that the model claimed it did. Available as a
+  primitive (`tools/verification/poe_verifier.py`) but **not wired into the
+  live loop** — no production code calls it yet (test-only).
 - **Report** — Generated summary of a mission/run, written under
   `reports/` (`report_generator.py`, `tools/enhanced_reporting.py`).
 - **Audit trail** — Append-only JSONL of every tool call with redaction and

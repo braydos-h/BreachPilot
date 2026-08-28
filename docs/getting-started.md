@@ -68,13 +68,14 @@ Run the safe localhost smoke test:
 python main.py --self-test
 ```
 
-Launch the interactive questionary menu (default with no arguments):
+Launch the WebUI daemon (the default with no arguments — builds the SPA if
+needed, serves it at http://127.0.0.1:8765, and opens a browser):
 
 ```bash
 python main.py
 ```
 
-The `--menu` flag is equivalent to the no-argument default:
+Prefer the terminal? The legacy interactive questionary menu is still available:
 
 ```bash
 python main.py --menu
@@ -106,7 +107,7 @@ Important defaults in `config.yaml`:
 - `exploit.permission: full_access` (lab build; set `read_only` for propose-only recon)
 - `exploit.attack_mode: true`
 - `exploit.require_explicit_allowlist: true`
-- `exploit.allowed_targets: []` initially (a target entered in Start New Session is saved here; the runtime `--target` is also unioned in via `EXPLOIT_TARGET`)
+- `exploit.allowed_targets: [127.0.0.1]` in the shipped lab config (a target entered in Start New Session is added here; the runtime `--target` is also unioned in via `EXPLOIT_TARGET`)
 - `swarm.enabled: true`
 - `memory.semantic_enabled: true`
 - `outcome_judgment.max_inconclusive_attempts: 3`
@@ -122,11 +123,12 @@ control interpretation and replanning—they do not grant execution authority.
 
 ## Main Entry Points
 
-- `python main.py`: launch the interactive questionary menu — the default with no arguments (same as `--menu`).
-- `python main.py --menu`: force the interactive terminal menu.
+- `python main.py`: start the WebUI daemon — the default with no arguments (build + serve the SPA at http://127.0.0.1:8765 and open a browser).
+- `python main.py --menu`: force the legacy interactive terminal menu.
 - `python main.py --target <ip> --mode recon`: reconnaissance mode.
 - `python main.py --target <ip> --mode attack`: exploitation mode, still subject to config and policy gates.
-- `python main.py --mcp-transport stdio|http`: select exploit MCP transport.
+- `python main.py --demon` / `--web`: API-only daemon / daemon + SPA + browser.
+- `python main.py --mcp-transport stdio|http`: select exploit MCP transport (ignored on the run path — always http).
 - `python main.py --swarm --critic --reflection`: enable swarm orchestration helpers.
 - `python main.py --list-plugins`: list discovered plugins.
 - `python main.py --skills {on,off,hints,lookup}`: set runtime skill mode.

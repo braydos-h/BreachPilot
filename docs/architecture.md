@@ -18,14 +18,16 @@ User
   -> ReportGenerator
 ```
 
-There is also a newer exploit and swarm path:
+There is also a newer exploit, swarm, and WebUI path:
 
 ```text
-main.py
-  -> tools.exploit_agent.ExploitPolicy
+main.py / app.py (WebUI daemon @ :8765, or direct CLI run)
+  -> tools.run_service.AssessmentService (transport-neutral prep + execute)
+  -> tools.exploit_session.run_exploit_session
+  -> tools.exploit_agent (scripts/runner_impl.py loop) + ExploitPolicy
   -> mcp_exploit_server.py
   -> tools.mcp_tools exploit tool registrations
-  -> tools.autonomous_orchestrator / tools.swarm
+  -> tools.campaign (AutonomousOrchestrator; facade: tools.autonomous_orchestrator) / tools.swarm
   -> tools.attack_planner + tools.attack_modules
   -> tools.payload_crafter + tools.exploit_mutator
   -> workspace/session/evidence artifacts
@@ -35,7 +37,18 @@ main.py
 
 ### `main.py`
 
-The main launcher for interactive menu, recon, attack, doctor, demo, self-test, resume, swarm, and model selection flows. It loads `config.yaml`, starts or connects to MCP transport, routes model calls through the configured provider (`models.provider: ollama` default, or `chatgpt` via the vendored `oauth/` loopback proxy — see [providers.md](providers.md)), and runs recon/attack sessions.
+The main launcher. **With no arguments it starts the WebUI daemon** (builds
+`webui/dist/` if needed, serves it at `http://127.0.0.1:8765/`, opens a
+browser). It also handles direct recon/attack runs, `--menu` (the legacy
+questionary terminal menu), doctor, self-test, eval, demo, resume, CTF
+autopilot, swarm, and model selection flows. It loads `config.yaml`, starts or connects to MCP transport, routes model calls through the configured provider (`models.provider: ollama` default, or `chatgpt` via the vendored `oauth/` loopback proxy — see [providers.md](providers.md)), and runs recon/attack sessions.
+
+### `app.py` / the WebUI API daemon
+
+`app.py` exposes `create_app`, the FastAPI factory behind `--demon`/`--daemon`/`--web`
+(`main._run_daemon`). The daemon serves `/api/v1` (loopback-only, bearer-token)
+plus the bundled SPA when `api.serve_webui` is true. See `docs/api/` for the
+endpoint reference.
 
 Important functions (`main.py:342-430` `parse_args`; `tools/config_cli.py:30` `load_config`; `tools/mcp_session.py:117` `open_exploit_mcp_session`; `tools/mcp_session.py:609` `start_exploit_http_server`; `tools/exploit_session.py:70` `run_exploit_session`; `tools/safety_review_cli.py` `run_safety_review`; `tools/recon_assessment_cli.py` `run_recon_assessment`; `main.py:566` `async_main`):
 
@@ -62,7 +75,7 @@ Commands:
 ### MCP Servers (all share `tools/mcp_shared.run_mcp_http_server:1064-1084` hardening)
 
 - `mcp_server.py` (`mcp_server.py:346-349` HTTP `8000`): defensive scanner surface. Tools are scope-aware and focused on nmap, limited terminal commands, and vulnerability intelligence.
-- `mcp_exploit_server.py` (`mcp_exploit_server.py:76-184` wiring `create_mcp_server`; `206-208` default `8001`): thin exploit MCP wiring layer. It parses CLI args, loads config, creates shared services and the `FastMCP` instance, registers 27 tool families from `tools/mcp_tools/` (`mcp_exploit_server.py:153-177`), and runs the server.
+- `mcp_exploit_server.py` (`mcp_exploit_server.py:76-184` wiring `create_mcp_server`; `206-208` default `8001`): thin exploit MCP wiring layer. It parses CLI args, loads config, creates shared services and the `FastMCP` instance, registers every tool family via `tools/mcp_tools/registry.py:collect_tools()` (pkgutil auto-discovery of `register_*_tools` + AST decorator validation), and runs the server.
 - `mcp_engine_server.py` (`mcp_engine_server.py:200-203` HTTP `8002`): advisory engine server for foreign assistants (`search_skills`, `get_skill`, `cve_lookup`, `list_runs`, `get_run`).
 - `tools/mcp_tools/` (27 families — 20 in `tools/mcp_tools/*.py` + 7 in `tools/mcp_tools/modules/*.py`: web, synthesis, planning, hash, campaign, adaptive, etc. — `mcp_exploit_server.py:40-64` imports): terminal/workspace, research, runtime skills, peer models, Metasploit, credentials, payloads, recon, attack modules, sessions, domain, cracking, web_scan, assessment_state, parallel_agents, poc_verifier, replay_simulator, mitre, ad. `registry.py:104-112` `ToolContext` wiring + `registry.py:478-495` shared helpers.
 
@@ -184,9 +197,9 @@ failure_class, success, evidence_refs}` fields only, never raw chain-of-thought.
 `tools/` contains the operational helpers:
 
 - AI/model: `model_router.py`, `goal_engine.py`, `goal_suggester.py`, `semantic_memory.py`, `model_telemetry.py`
-- Safety/config: `config_manager.py`, `doctor.py`, `safety_reviewer.py`, `validation_utils.py`, `command_analyzer.py`, `opsec.py`, `detection_coverage.py`
-- Recon/research: `recon_pipeline.py`, `cve_lookup.py`, `exploit_search.py`, `web_researcher.py`
-- Exploitation: `exploit_agent/` (pkg), `attack_planner.py`, `attack_modules/` (pkg), `payload_crafter.py`, `exploit_mutator.py`, `post_exploit.py`, `metasploit_bridge.py`
+- Safety/config: `tools/config/` (schema/validator/loader; `config_manager.py` is a re-export shim), `doctor.py`, `safety_reviewer.py`, `validation_utils.py`, `command_analyzer.py`, `opsec.py`, `detection_coverage.py`
+- Recon/research: `tools/recon/` (pkg; `recon_pipeline.py` is a deprecated shim), `fast_recon.py`, `cve_lookup.py`, `exploit_search.py`, `web_researcher.py`
+- Exploitation: `exploit_agent/` (pkg) + `scripts/runner_impl.py` (canonical loop), `tools/campaign/` (pkg; `autonomous_orchestrator.py` is a facade shim), `attack_planner.py`, `attack_modules/` (pkg), `payload_crafter.py`, `exploit_mutator.py`, `post_exploit.py`, `metasploit_bridge.py`
 - State/reporting: `session_manager.py`, `persistent_session_manager.py`, `activity_log.py`, `enhanced_reporting.py`, `experience_store.py`, `credential_store.py`, `attack_memory.py`
 - API keys: `api_key_store.py`
 - Plugin system: `plugins.py`
@@ -232,7 +245,7 @@ This mirrors CLAUDE.md's "Flow A CLI orchestration layer" bullet list.
 
 **Decision:**
 
-1. **Flow B is frozen as `legacy` namespace.** New code MUST NOT add features to Flow B files. Root shims (`agent_loop.py`, `executor.py`, `planner.py`, `observer.py`, `task_queue.py`, `cli.py`, `mission.py`, etc.) remain for one release and emit `DeprecationWarning` (`import legacy.agent_loop`), preserving 248 tests. Canonical location is `legacy/` (physical move completed 2026-08-24).
+1. **Flow B is frozen as `legacy` namespace.** New code MUST NOT add features to Flow B files. Root shims (`agent_loop.py`, `executor.py`, `planner.py`, `observer.py`, `task_queue.py`, `cli.py`, `mission.py`, etc.) remain for one release and emit `DeprecationWarning` (`import legacy.agent_loop`), preserving the ~250-file test suite. Canonical location is `legacy/` (physical move completed 2026-08-24).
 2. **Shared kernel stays at repo root / `tools/kernel/`.** `db.py`, `mission.py`, `scope_gate.py` remain at the root because both flows import them (see `docs/phase2-audit/architecture-debt.md` §1.2 import maps: `db.py` 62 sites, `scope_gate.py` 7 sites including 2 Flow A consumers for the Path B target lock). They are not moved in Phase 2. `tools/kernel/` (`allowlist.py`, `audit.py`, `workspace.py`) is the shared-kernel extraction for pure functions previously duplicated between `tools/mcp_shared.py` and `tools/mcp_tools/registry.py` / `tools/persistent_session_manager.py`.
 3. **Safety files are untouched.** `scope_gate.py`, `safety_reviewer.py`, `agent_loop.py`, `tool_router.py`, `risk_controller.py`, `mission.py`, `db.py` are not edited for Flow A features (invariant `AGENTS.md` §2). Flow B safety stays intact.
 4. **Deprecation signal:** Any new import of a Flow B module from Flow A code SHOULD emit a `DeprecationWarning` via `warnings.warn("Flow B is legacy; use tools.kernel / tools/run_service", DeprecationWarning, stacklevel=2)` — advisory only, not a gate.

@@ -227,8 +227,14 @@ needed to fill missing evidence/reproduction steps.
 
 ## Proof-of-Execution Verification (tools/verification/poe_verifier.py)
 
-A claimed compromise is only trusted after independent verification against the
-live target (poe_verifier.py:1-5). `_verify_sync` (poe_verifier.py:172-237):
+**Status: available primitive, NOT wired into the live execution path.** No
+production code calls `verify_compromise` today — the exploit loop
+(`scripts/runner_impl.py`), the report generators, and the eval harness never
+invoke it; only `tests/test_poe_verifier.py` exercises it. Do not describe a
+PoE-verified foothold as a runtime guarantee.
+
+When a caller does wire it in, the primitive works as follows. `_verify_sync`
+(poe_verifier.py:172-237):
 
 1. Writes a unique canary token (`PoE-<ip>-<uuid>`, poe_verifier.py:67-80) to a
    temp file on the target via `run_exploit_terminal`.
@@ -352,7 +358,7 @@ time-to-first-verified-success. Baseline disables the smart features
    (hash-chained, policy.py:468)
           │
           v
-   poe_verifier.verify_compromise      (independent target-side canary check)
+   poe_verifier.verify_compromise      (canary check primitive — NOT called by the current loop)
           │
           v
    evidence.promote_exploit_audit -> EvidenceStore (structured_json rows)
