@@ -53,6 +53,11 @@ export interface StreamSseOptions {
   onFatal?: (error: SseFatalError) => void;
   /** Max reconnect attempts before giving up. Default: unlimited (transient). */
   maxRetries?: number;
+  /** Fired on every successful transport-level read. Server keepalives are
+   *  `:` comments that SseParser drops, so they never reach onEvent — this
+   *  hook is what lets a caller (and the internal watchdog) see that the
+   *  stream is alive during idle-but-healthy periods. */
+  onActivity?: () => void;
 }
 
 export interface SseHandle {
@@ -63,6 +68,13 @@ export interface SseHandle {
 }
 
 const MAX_BACKOFF_MS = 10_000;
+
+/** The API daemon emits a keepalive comment every 30s while a stream is open
+ *  (tools/api/routes/events.py). Three missed keepalives means the connection
+ *  is silently dead (laptop sleep, NAT drop, no TCP RST) — abort it and let
+ *  the normal reconnect path recover. Kept well above the cadence so a slow
+ *  server never trips it on a healthy stream. */
+export const SSE_WATCHDOG_MS = 90_000;
 
 function backoffMs(attempt: number): number {
   return Math.min(MAX_BACKOFF_MS, 1000 * 2 ** attempt);
@@ -163,11 +175,41 @@ export function streamSSE(options: StreamSseOptions): SseHandle {
   let attempt = 0;
   let activeController: AbortController | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // Set when the silence watchdog aborted the active connection, so the catch
+  // branch can distinguish "stale, reconnect" from "closed on purpose".
+  let watchdogTripped = false;
+  let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+  // Set when the watchdog (not the external signal) aborted the current
+  // attempt, so the catch branch can reconnect instead of returning silently.
+  let watchdogTripped = false;
 
   const emitStatus = (state: SseConnectionState) => options.onStatus?.(state);
+
+  const clearWatchdog = () => {
+    if (watchdogTimer) {
+      clearTimeout(watchdogTimer);
+      watchdogTimer = null;
+    }
+  };
+
+  const resetWatchdog = () => {
+    if (closed) return;
+    clearWatchdog();
+    watchdogTimer = setTimeout(() => {
+      watchdogTimer = null;
+      if (closed) return;
+      // A silent stream is stale, not failed: restart the backoff ladder so a
+      // healthy-then-idle connection doesn't inherit accumulated attempts.
+      attempt = 0;
+      watchdogTripped = true;
+      activeController?.abort();
+    }, SSE_WATCHDOG_MS);
+  };
+
   const fatal = (error: SseFatalError) => {
     if (closed) return;
     closed = true;
+    clearWatchdog();
     activeController?.abort();
     options.onFatal?.(error);
   };
@@ -176,6 +218,7 @@ export function streamSSE(options: StreamSseOptions): SseHandle {
     if (closed) return;
     closed = true;
     generation += 1;
+    clearWatchdog();
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
@@ -190,7 +233,11 @@ export function streamSSE(options: StreamSseOptions): SseHandle {
     const gen = ++generation;
     const controller = new AbortController();
     activeController = controller;
+    watchdogTripped = false;
     emitStatus("connecting");
+    // Arm before the fetch too: a server that accepts the TCP connection but
+    // never answers headers is exactly the silent-death case we're guarding.
+    resetWatchdog();
     try {
       const url = typeof options.url === "function" ? options.url() : options.url;
       const headers: Record<string, string> = {
@@ -221,16 +268,23 @@ export function streamSSE(options: StreamSseOptions): SseHandle {
       attempt = 0;
       emitStatus("open");
       options.onOpen?.();
+      resetWatchdog();
 
       const reader = response.body.getReader();
       const parser = new SseParser();
       const decoder = new TextDecoder();
       while (!closed && gen === generation) {
         const { done, value } = await reader.read();
+        // Activity is measured at the read level: keepalive comments are
+        // dropped by the parser, so per-message activity would never fire on
+        // an idle-but-healthy stream.
+        resetWatchdog();
+        options.onActivity?.();
         if (done) break;
         const text = decoder.decode(value, { stream: true });
         for (const message of parser.push(text)) options.onEvent(message);
       }
+      clearWatchdog();
       // Flush any bytes still in the decoder, then any unterminated event.
       for (const message of parser.push(decoder.decode())) options.onEvent(message);
       for (const message of parser.finish()) options.onEvent(message);
@@ -245,7 +299,16 @@ export function streamSSE(options: StreamSseOptions): SseHandle {
       scheduleReconnect(gen);
     } catch (error) {
       if (closed || gen !== generation) return;
-      if (isAbortError(error) && controller.signal.aborted) return;
+      if (isAbortError(error) && controller.signal.aborted) {
+        // Two abort sources share this path: our own watchdog (stale stream —
+        // reconnect) and close()/restart() (closed already handled above).
+        if (watchdogTripped) {
+          watchdogTripped = false;
+          emitStatus("reconnecting");
+          scheduleReconnect(gen);
+        }
+        return;
+      }
       emitStatus("reconnecting");
       scheduleReconnect(gen);
     }
@@ -268,6 +331,10 @@ export function streamSSE(options: StreamSseOptions): SseHandle {
   function restart(): void {
     if (closed) return;
     generation += 1;
+    // Kill any watchdog armed for the previous generation — left alone it
+    // would fire later and abort the *fresh* connection.
+    clearWatchdog();
+    watchdogTripped = false;
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;

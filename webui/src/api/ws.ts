@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { apiFetch, clearStoredToken } from "@/api/client";
+import { apiFetch, clearStoredToken, expireSession, getStoredToken } from "@/api/client";
 import { queryKeys } from "@/api/hooks";
 import { eventStore } from "@/api/eventStore";
 import { MAX_EVENTS_PER_RUN, appendBounded } from "@/api/eventBuffer";
@@ -21,6 +21,14 @@ const WS_CLOSE_NOT_FOUND = 4404;
 const MAX_BACKOFF = 10_000;
 const SSE_FALLBACK_THRESHOLD = 3;
 
+// The API daemon emits a heartbeat after 30s of quiet on both transports
+// (tools/api/event_broker.py). 45s of silence marks the stream stale; 90s
+// (three missed heartbeats) force-reconnects a socket the OS has silently
+// dropped (laptop sleep, NAT expiry) — those never produce onclose.
+const STALE_AFTER_MS = 45_000;
+const WATCHDOG_TIMEOUT_MS = 90_000;
+const WATCHDOG_TICK_MS = 10_000;
+
 // Event types that must reach the UI immediately (terminal state, decisions,
 // errors, and title updates) rather than waiting for the next animation frame.
 const IMMEDIATE_EVENT_TYPES = new Set(["state", "approval", "error", "title"]);
@@ -36,7 +44,8 @@ function useSafeQueryClient(): QueryClient {
 export function useRunEvents(runId: string | null | undefined, options: UseRunEventsOptions = {}) {
   const { after: initialAfter = 0, enabled = true } = options;
   const [events, setEvents] = useState<RunEvent[]>([]);
-  const [status, setStatus] = useState<WsStatus>("idle");
+  const [status, setStatusState] = useState<WsStatus>("idle");
+  const [stale, setStale] = useState(false);
   const [authError, setAuthError] = useState<string>("");
   const [transport, setTransport] = useState<"websocket" | "sse" | "none">("none");
   const [dropped, setDropped] = useState<number>(0);
@@ -56,6 +65,18 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
   const runIdRef = useRef<string | null>(null);
   const pendingRef = useRef<RunEvent[]>([]);
   const rafRef = useRef<number | null>(null);
+  // Silence watchdog state: last frame of any kind (heartbeats count), a
+  // statusRef mirror so the tick interval doesn't need to be recreated on
+  // every status change, and a flag so a watchdog-forced close skips the
+  // failure counters (a NAT drop is not a WebSocket defect).
+  const lastFrameAtRef = useRef<number>(0);
+  const statusRef = useRef<WsStatus>("idle");
+  const forceReconnectRef = useRef(false);
+
+  const setStreamStatus = useCallback((next: WsStatus) => {
+    statusRef.current = next;
+    setStatusState(next);
+  }, []);
 
   const queryClient = useSafeQueryClient();
 
@@ -113,6 +134,10 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
 
   const handleEvent = useCallback(
     (event: RunEvent) => {
+      // Every frame of any kind refreshes the silence watchdog — heartbeats
+      // included (they early-return below but are still proof of life).
+      lastFrameAtRef.current = Date.now();
+      setStale(false);
       if (event.type === "heartbeat") {
         if (typeof event.sequence === "number" && event.sequence > lastSeqRef.current) {
           lastSeqRef.current = event.sequence;
@@ -158,7 +183,7 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
   const connectSse = useCallback(
     (id: string) => {
       closeSse();
-      const token = sessionStorage.getItem("netattackai.apiToken.v1") ?? "";
+      const token = getStoredToken();
       const loc = window.location;
       const controller = new AbortController();
       sseAbortRef.current = controller;
@@ -179,19 +204,21 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
           }
         },
         onStatus: (state) => {
-          if (state === "open") setStatus("open");
-          else if (state === "connecting") setStatus("connecting");
-          else if (state === "reconnecting") setStatus("reconnecting");
-          else setStatus("closed");
+          if (state === "open") setStreamStatus("open");
+          else if (state === "connecting") setStreamStatus("connecting");
+          else if (state === "reconnecting") setStreamStatus("reconnecting");
+          else setStreamStatus("closed");
         },
         onFatal: (error) => {
           if (error.authError) {
             setAuthError("Authentication failed. Token rejected by the API.");
-            clearStoredToken();
+            // Routed through the shared funnel so the token gate actually
+            // appears (clearStoredToken alone doesn't re-render it).
+            expireSession("Your session token was rejected by the API.");
           } else {
             setAuthError(error.message);
           }
-          setStatus("error");
+          setStreamStatus("error");
         },
       });
       sseHandleRef.current = handle;
@@ -242,16 +269,16 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
       try {
         socket = new WebSocket(url);
       } catch {
-        setStatus("error");
+        setStreamStatus("error");
         return;
       }
       wsRef.current = socket;
       setTransport("websocket");
-      setStatus("connecting");
+      setStreamStatus("connecting");
 
       socket.onopen = () => {
         attemptRef.current = 0;
-        setStatus("open");
+        setStreamStatus("open");
         try {
           socket.send(JSON.stringify({ auth: token, after: lastSeqRef.current }));
         } catch {
@@ -269,22 +296,22 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
       };
 
       socket.onerror = () => {
-        setStatus("error");
+        setStreamStatus("error");
       };
 
       socket.onclose = (event) => {
         wsRef.current = null;
-        setStatus("closed");
+        setStreamStatus("closed");
         if (closedByUnmountRef.current) return;
         if (event.code === WS_CLOSE_AUTH) {
           setAuthError("Authentication failed. Token rejected by the API.");
           clearStoredToken();
-          setStatus("error");
+          setStreamStatus("error");
           return;
         }
         if (event.code === WS_CLOSE_ORIGIN) {
           setAuthError("Origin rejected by the API.");
-          setStatus("error");
+          setStreamStatus("error");
           return;
         }
         if (event.code === WS_CLOSE_CURSOR) {
@@ -298,7 +325,7 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
         }
         if (event.code === WS_CLOSE_NOT_FOUND) {
           setAuthError("Run not found.");
-          setStatus("error");
+          setStreamStatus("error");
           return;
         }
         wsFailureCountRef.current += 1;
@@ -331,7 +358,7 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
   useEffect(() => {
     runIdRef.current = runId ?? null;
     if (!runId || !enabled) {
-      setStatus("idle");
+      setStreamStatus("idle");
       return;
     }
     closedByUnmountRef.current = false;

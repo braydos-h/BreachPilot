@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Activity, KeyRound, Loader2, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { getStoredToken, setStoredToken } from "@/api/client";
+import { AUTH_EXPIRED_EVENT, getStoredToken, setStoredToken } from "@/api/client";
 import { useCapabilities } from "@/api/hooks";
 import { ApiError } from "@/api/client";
 
@@ -17,9 +17,19 @@ export function TokenGate({ children }: TokenGateProps) {
   const [tokenInput, setTokenInput] = useState("");
   const [connectError, setConnectError] = useState("");
   const [verifying, setVerifying] = useState(false);
+  // Tick bumped when an AUTH_EXPIRED_EVENT arrives. hasToken reads sessionStorage
+  // at render time, which nothing observes — without this a mid-session 401
+  // would clear the token while the gate (already mounted) never re-renders.
+  const [authExpiredAt, setAuthExpiredAt] = useState(0);
   const navigate = useNavigate();
 
-  const hasToken = !!getStoredToken();
+  useEffect(() => {
+    const onExpired = () => setAuthExpiredAt(Date.now());
+    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
+  }, []);
+
+  const hasToken = authExpiredAt === 0 && !!getStoredToken();
   const capabilities = useCapabilities(hasToken);
 
   const submit = async (e: React.FormEvent) => {
@@ -36,6 +46,7 @@ export function TokenGate({ children }: TokenGateProps) {
     try {
       await capabilities.refetch();
       setTokenInput("");
+      setAuthExpiredAt(0);
     } catch (err) {
       if (err instanceof ApiError && err.isAuth) {
         setConnectError("Token rejected by the API.");

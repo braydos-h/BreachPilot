@@ -2,6 +2,7 @@ import type {
   ApiErrorEnvelope,
   ApiErrorShape,
 } from "@/api/types";
+import { toast } from "@/hooks/use-toast";
 
 const TOKEN_KEY = "netattackai.apiToken.v1";
 
@@ -24,6 +25,26 @@ export function setStoredToken(token: string): void {
 
 export function clearStoredToken(): void {
   setStoredToken("");
+}
+
+/** Window event fired when the API rejects the session token (HTTP 401 or a
+ *  WS 4401 close). TokenGate subscribes to it because it reads the token at
+ *  render time — without this signal a mid-session expiry would never
+ *  re-render the gate and the app would sit on a dead console. */
+export const AUTH_EXPIRED_EVENT = "netattackai:auth-expired";
+
+/** Single funnel for session expiry. The stored-token guard makes the first
+ *  caller win: several 401s (query + mutation + stream) landing in the same
+ *  tick fire exactly one event and one toast. */
+export function expireSession(reason: string): void {
+  if (!getStoredToken()) return;
+  clearStoredToken();
+  window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT, { detail: { reason } }));
+  toast({
+    title: "Session expired",
+    description: reason,
+    variant: "destructive",
+  });
 }
 
 export class ApiError extends Error {

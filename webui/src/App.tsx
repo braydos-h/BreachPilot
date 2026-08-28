@@ -1,6 +1,13 @@
 // NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
 import { lazy, Suspense } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  MutationCache,
+  QueryCache,
+  QueryClient,
+  QueryClientProvider,
+  type Mutation,
+  type Query,
+} from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "@/components/Layout";
 import { OnboardingGate } from "@/components/OnboardingGate";
@@ -9,6 +16,7 @@ import { WelcomeGate } from "@/components/WelcomeScreen";
 import { HomePage } from "@/routes/HomePage";
 import { Spinner } from "@/components/Loading";
 import { Toaster } from "@/components/Toaster";
+import { ApiError, expireSession } from "@/api/client";
 
 const AttackGraphPage = lazy(() =>
   import("@/features/graph/AttackGraphPage").then((m) => ({ default: m.AttackGraphPage })),
@@ -28,7 +36,34 @@ const StatsPage = lazy(() => import("@/routes/StatsPage").then((m) => ({ default
 const HelpPage = lazy(() => import("@/routes/HelpPage").then((m) => ({ default: m.HelpPage })));
 const ConnectionsPage = lazy(() => import("@/routes/ConnectionsPage").then((m) => ({ default: m.ConnectionsPage })));
 
+/** Global 401 funnel: any query or mutation rejected with 401 means the
+ *  session token is dead, so clear it and surface the token gate (via
+ *  expireSession's AUTH_EXPIRED_EVENT) instead of leaving the UI half-broken.
+ *  A query opts out with meta.onErrorAuthClear === false; mutations always
+ *  fire (they carry no meta). Retries already refuse 4xx, so this fires once. */
+function isAuthRejection(error: unknown, meta: unknown): boolean {
+  if (!(error instanceof ApiError) || !error.isAuth) return false;
+  const opts = (meta ?? {}) as { onErrorAuthClear?: boolean };
+  return opts.onErrorAuthClear !== false;
+}
+
 const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError: (error, query) => {
+      if (isAuthRejection(error, query.meta)) {
+        expireSession("Your session token was rejected by the API.");
+        queryClient.removeQueries();
+      }
+    },
+  }),
+  mutationCache: new MutationCache({
+    onError: (error) => {
+      if (error instanceof ApiError && error.isAuth) {
+        expireSession("Your session token was rejected by the API.");
+        queryClient.removeQueries();
+      }
+    },
+  }),
   defaultOptions: {
     queries: {
       retry: (failureCount, error) => {
