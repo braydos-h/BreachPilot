@@ -20,15 +20,18 @@ MCP tool layer (the allowlist unions the runtime ``--target`` via
 
 from __future__ import annotations
 
+import asyncio
+import copy
 import json
 import re
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from tools.config_manager import load_validated_config
+from tools.eval_checks import CheckExecutor, default_check_executor
 from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
 from tools.exploit_agent import ExploitPermission, ExploitSettings
 from tools.exploit_session import run_exploit_session
@@ -50,6 +53,16 @@ __all__ = [
     "run_eval_suite",
     "docker_suite_up",
     "docker_suite_down",
+    # Graded eval loop (Feature 1)
+    "FlagCheckResult",
+    "TargetScore",
+    "EvalReport",
+    "verify_flag_check",
+    "default_check_executor",
+    "run_graded_eval",
+    "default_agent_runner",
+    "save_baseline",
+    "check_regression",
 ]
 
 
