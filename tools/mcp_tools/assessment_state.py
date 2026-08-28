@@ -225,6 +225,7 @@ def register_assessment_state_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 try:
                     from tools.skill_registry_cache import get_registry
 
+<<<<<<< Updated upstream
                     registry = get_registry({"skills": _skills_config(config)}, base_dir=Path.cwd())
                     skill = registry.get(name)
                 except Exception as exc:  # noqa: BLE001 -- best-effort lookup
@@ -245,6 +246,74 @@ def register_assessment_state_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 lines.append(f"PATH: {m.path}")
                 return "\n".join(lines)
             return f"BLOCKED: unknown scope {scope!r} (use modules|skills)."
+=======
+                registry = get_registry({"skills": _skills_config(config)}, base_dir=Path.cwd())
+                skills = registry.list_skills()
+                lines.append(f"COUNT: {len(skills)}")
+                for skill in skills[:50]:
+                    tags = ",".join(skill.metadata.tags[:6]) or "-"
+                    desc = _truncate_text(skill.metadata.description, 120).replace("\n", " ")
+                    lines.append(f"- {skill.name} | tags={tags} | {desc}")
+                if registry.errors:
+                    lines.append(f"WARNINGS: {len(registry.errors)} skill file(s) failed to load.")
+            except _EXC_GROUP_CATCH as exc:  # noqa: BLE001 -- skills listing is best-effort
+                _log_nested_exceptions(exc)
+                lines.append(f"NOTE: skill registry unavailable: {exc}")
+            return "\n".join(lines)
+        return f"BLOCKED: unknown scope {scope!r} (use modules|tools|skills)."
+
+    @mcp.tool()
+    @audit_tool
+    def get_capability_details(name: str, scope: str = "modules") -> str:
+        """Get the full capability record for one named module or skill, plus (for modules) an applicability explanation against a minimal empty-services context so the model can see why it would/wouldn't rank. Advisory only. Returns a CAPABILITY_DETAILS: block."""
+        scope_lc = (scope or "modules").strip().lower()
+        if scope_lc == "modules":
+            mod = get_module(name)
+            if mod is None:
+                return f"CAPABILITY_DETAILS: module not found: {name!r}"
+            from tools.attack_modules import ModuleContext
+
+            rec = mod.capability_record()
+            ctx_min = ModuleContext(target_ip="")
+            report = mod.applicability_explain(ctx_min)
+            lines = ["CAPABILITY_DETAILS: scope=modules"]
+            for k, v in rec.items():
+                lines.append(f"{k.upper()}: {v}")
+            lines.append(f"APPLICABILITY_SCORE: {report.score}")
+            if report.reasons:
+                lines.append("REASONS:")
+                for r in report.reasons:
+                    lines.append(f"  - {r}")
+            if report.penalties:
+                lines.append("PENALTIES:")
+                for p in report.penalties:
+                    lines.append(f"  - {p}")
+            return "\n".join(lines)
+        if scope_lc == "skills":
+            try:
+                from tools.skill_registry_cache import get_registry
+
+                registry = get_registry({"skills": _skills_config(config)}, base_dir=Path.cwd())
+                skill = registry.get(name)
+            except Exception as exc:  # noqa: BLE001 -- best-effort lookup
+                return f"CAPABILITY_DETAILS: skill registry unavailable: {exc}"
+            if skill is None:
+                return f"CAPABILITY_DETAILS: skill not found: {name!r}"
+            m = skill.metadata
+            lines = ["CAPABILITY_DETAILS: scope=skills"]
+            lines.append(f"NAME: {skill.name}")
+            lines.append(f"DESCRIPTION: {_truncate_text(m.description, 300)}")
+            lines.append(f"DOMAIN: {m.domain} SUBDOMAIN: {m.subdomain}")
+            lines.append(f"TAGS: {', '.join(m.tags)}")
+            lines.append(f"VERSION: {m.version} MAYBE: {m.maybe}")
+            if m.nist_csf:
+                lines.append(f"NIST_CSF: {', '.join(m.nist_csf)}")
+            if m.mitre_attack:
+                lines.append(f"MITRE_ATTACK: {', '.join(m.mitre_attack)}")
+            lines.append(f"PATH: {m.path}")
+            return "\n".join(lines)
+        return f"BLOCKED: unknown scope {scope!r} (use modules|skills)."
+>>>>>>> Stashed changes
 
     @mcp.tool()
     @require_allowlist()

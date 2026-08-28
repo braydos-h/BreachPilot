@@ -140,10 +140,18 @@ ignore = ["E501", "F405", "F403", "F841"]
 "skills/**/*.py" = ["F401"]
 # main.py and exploit loop use late imports after ui bootstrap (ui = get_ui() must precede)
 "main.py" = ["E402"]
+<<<<<<< Updated upstream
 "tools/exploit_agent/loop.py" = ["E402"]
 "tools/exploit_agent/runner.py" = ["E402"]
 "tools/exploit_agent/phase_tracker.py" = ["E402"]
 "tools/campaign/*.py" = ["E402", "F821", "I001"]
+=======
+"tools/exploit_agent/loop.py" = ["E402", "I001"]
+"tools/exploit_agent/runner.py" = ["E402", "I001"]
+"tools/exploit_agent/phase_tracker.py" = ["E402", "I001"]
+"tools/autonomous_orchestrator.py" = ["I001", "E402"]
+"tools/campaign/*.py" = ["I001", "E402", "F821", "F401"]
+>>>>>>> Stashed changes
 
 [tool.mypy]
 python_version = "3.11"
@@ -200,6 +208,7 @@ disable_error_code = [
 ]
 
 [[tool.mypy.overrides]]
+<<<<<<< Updated upstream
 module = ["tools.validation_utils", "tools.exceptions", "tools.mcp_shared"]
 # Strict: per-file incremental — zero disables (ponytail: 2026-08-25)
 disable_error_code = []
@@ -232,3 +241,7 @@ enable_error_code = [
 [[tool.mypy.overrides]]
 module = ["tools.nmap_priv"]
 warn_return_any = false
+=======
+module = ["tools.exceptions", "tools.validation_utils", "tools.nmap_priv"]
+warn_return_any = false
+>>>>>>> Stashed changes

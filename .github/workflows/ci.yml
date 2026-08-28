@@ -98,6 +98,7 @@ jobs:
         run: ruff format --check .
       - name: MCP bare-except guard (no hidden BaseExceptionGroup)
         run: |
+<<<<<<< Updated upstream
           # Fail if any MCP-adjacent bare `except Exception` hides a BaseExceptionGroup.
           # Anyio task groups (stdio_client / streamable_http_client / ClientSession)
           # raise BaseExceptionGroup on subprocess death — bare `except Exception` misses it.
@@ -112,6 +113,32 @@ jobs:
             exit 1
           fi
           echo "MCP bare-except guard: OK"
+=======
+          python -c "
+          import pathlib, re, glob, sys
+          pat_ex = re.compile(r'^\s*except\s+Exception\b')
+          pat_mcp = re.compile(r'mcp|anyio|stdio_client|streamable_http|ClientSession', re.I)
+          paths = glob.glob('tools/mcp_tools/*.py') + glob.glob('tools/exploit_agent/*.py') + ['tools/mcp_session.py']
+          offenders = []
+          for p in paths:
+              try:
+                  lines = pathlib.Path(p).read_text(encoding='utf-8', errors='replace').splitlines()
+              except Exception:
+                  continue
+              for i, l in enumerate(lines):
+                  if pat_ex.search(l) and '_EXC_GROUP_CATCH' not in l and 'ponytail: bare except intentional' not in l:
+                      window = '\n'.join(lines[max(0,i-5):min(len(lines), i+6)])
+                      if pat_mcp.search(window):
+                          offenders.append(f'{p}:{i+1}: {l.strip()}')
+          if offenders:
+              print(\"ERROR: bare 'except Exception' within 5 lines of MCP keywords without _EXC_GROUP_CATCH:\")
+              [print(o) for o in offenders]
+              print(\"Use 'except _EXC_GROUP_CATCH as exc:' + '_log_nested_exceptions(exc)' (see tools/exceptions.py).\")
+              print(\"If this is intentionally non-MCP, annotate with '# ponytail: bare except intentional'.\")
+              sys.exit(1)
+          print('MCP bare-except guard: OK (0 MCP-adjacent bare except)')
+          "
+>>>>>>> Stashed changes
       - name: God-file budget (no new file >1000 LOC / 72kB)
         run: |
           python -c "

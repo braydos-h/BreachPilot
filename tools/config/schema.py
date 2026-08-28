@@ -44,6 +44,15 @@ CONFIG_SCHEMA: dict[str, Any] = {
             "minimax": "minimax-m3:cloud",
         },
         "default_alias": "glm",
+        # Auto-update the registry against the live Ollama API (GET /api/tags):
+        # on daemon boot (main._run_daemon) each alias is bumped to the newest
+        # same-family version the host lists (e.g. glm-5.2:cloud ->
+        # glm-5.3:cloud). No pulls are issued — for Ollama Cloud a pull only
+        # registers a pointer (see tools/doctor.py), and the registry stores
+        # ids, so rewriting the id IS the update. models.info labels/context
+        # windows are operator-managed and deliberately not auto-edited. Also
+        # on demand via POST /api/v1/models/refresh (tools/ollama_models.py).
+        "auto_update": True,
         # Per-model metadata. The ``context_window`` value is the SOURCE OF
         # TRUTH for the adaptive context compactor in ``tools.exploit_agent``
         # -- keep in sync with config.yaml's ``models.info`` block. Mirrored
