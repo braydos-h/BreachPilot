@@ -203,8 +203,9 @@ export function RunListPage() {
 
       {runs.isLoading && <SkeletonRows count={4} className="p-2" />}
       {runs.error && (
-        <div className="text-sm text-destructive">
-          {runs.error instanceof ApiError ? runs.error.message : "Failed to load runs."}
+        <div className="flex items-center gap-2 text-sm text-destructive">
+          <span>{runs.error instanceof ApiError ? runs.error.message : "Failed to load runs."}</span>
+          <Button size="sm" variant="outline" onClick={() => runs.refetch()}>Retry</Button>
         </div>
       )}
 

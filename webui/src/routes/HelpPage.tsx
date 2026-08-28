@@ -52,12 +52,18 @@ export function HelpPage() {
               answer it or let your permission mode auto-answer it.
             </li>
             <li>
-              Follow progress under <span className="font-mono text-foreground">Recon</span>,{" "}
-              <span className="font-mono text-foreground">Attack</span>, and{" "}
-              <span className="font-mono text-foreground">Report</span> tabs on the run page.
+              Follow progress under the <span className="font-mono text-foreground">Recon</span>,{" "}
+              <span className="font-mono text-foreground">Attack Path</span>,{" "}
+              <span className="font-mono text-foreground">Summary</span>,{" "}
+              <span className="font-mono text-foreground">Tools</span>,{" "}
+              <span className="font-mono text-foreground">Advisory</span>,{" "}
+              <span className="font-mono text-foreground">Audit</span>,{" "}
+              <span className="font-mono text-foreground">Swarm</span>, and{" "}
+              <span className="font-mono text-foreground">Campaign</span> tabs on the run page.
             </li>
             <li>
-              Artifacts, loot, credentials, and the attack graph are each a tab on the run page.
+              Artifacts, loot, and the full-page attack graph open from the run header as separate
+              pages. Credentials surface under <span className="font-mono text-foreground">Loot</span>.
             </li>
           </ol>
         </CardContent>

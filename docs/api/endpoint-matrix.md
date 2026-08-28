@@ -45,6 +45,7 @@ Generated from code — no invented routes. Handler names are the Python functio
 | `POST` | `/api/v1/models` | `add_model` (`system.py:284`) | `{alias:str, model:str}` | `200 {status:"ok", alias, model, registry}` | bearer | — | — |
 | `DELETE` | `/api/v1/models/{alias}` | `remove_model` (`system.py:302`) | — | `200 {status:"ok", alias, deleted:true}` | bearer | — | — |
 | `POST` | `/api/v1/models/provider` | `set_model_provider` (`system.py:323`) | `{provider:"ollama|chatgpt"}` | `200 {status:"ok", provider}` | bearer | `webui/src/features/settings/SettingsPage.tsx` | — |
+| `POST` | `/api/v1/models/refresh` | `refresh_models` (`system.py`) | — | `200 {ok, host, available_count, updates:{alias:{old,new}}, registry, persisted}` or `503 {ok:false, error}` / `400 invalid_provider` | bearer | `webui/src/api/hooks.ts:useSyncModels` | `tests/test_api_models.py:test_refresh_models_*` |
 | `GET` | `/api/v1/system/info` | `get_system_info` (`system.py:338`) | — | `200 {hostname, platform, os, python, local_ips, public_ip}` | bearer | `webui/src/features/settings/SystemInfo` | — |
 | `GET` | `/api/v1/system/telemetry` | `get_telemetry` (`system.py:380`) | — | `200 {summary, recent:[50]}` | bearer | `webui/src/routes/StatsPage.tsx` | — |
 | `GET` | `/api/v1/system/memory` | `get_memory` (`system.py:520`) | — | `200 {lessons:[], confidence:[], attack_memory:[]}` | bearer | `webui/src/routes/MemoryPage.tsx` | `tests/test_api_memory.py` |
