@@ -370,6 +370,11 @@ export function CampaignView({ loading, error, state }: CampaignViewProps) {
                 <CardTitle className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="font-mono">{target}</span>
                   <Badge variant="info" className="text-[10px]">{currentPhase}</Badge>
+                  {aggression && (
+                    <Badge variant={aggressionVariant(aggression)} className="text-[10px]">
+                      {aggression}
+                    </Badge>
+                  )}
                   <Badge variant={access ? "success" : "muted"} className="text-[10px]">
                     <ShieldCheck className="h-3 w-3" /> {str(st.privilege_level)}
                   </Badge>
