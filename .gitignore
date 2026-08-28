@@ -59,3 +59,5 @@ Thumbs.db
 logs/
 /docs/phase1-audit
 /build
+demo/dist/
+demo/*.tsbuildinfo

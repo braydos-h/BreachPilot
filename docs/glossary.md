@@ -29,7 +29,7 @@ where the term is defined or primarily used.
 ## Flows & Lifecycle
 
 - **Agent loop** — The main agent cycle: plan → call tools → observe →
-  reflect → repeat (`scripts/runner_impl.py`, Flow B `agent_loop.py:61
+  reflect → repeat (`tools/exploit_agent/runner/_impl.py`, Flow B `agent_loop.py:61
   AgentLoop`).
 - **Autonomous orchestrator** — Unattended mission driver that starts the MCP
   exploit server, feeds target/goal, and monitors the agent to completion

@@ -12,7 +12,7 @@ Wiring status by subpackage (verified against production callers):
 | `schemas/` (incl. `SafeSchemaLoader`) | Scaffold. Package-internal + tests only; no production caller. | tests |
 
 Not wired into `main.py` / `mcp_exploit_server.py` / the exploit loop
-(`scripts/runner_impl.py`). The graph store is the only piece with a live
+(`tools/exploit_agent/runner/_impl.py`). The graph store is the only piece with a live
 production caller. `belief/`, `evidence/`, `schemas/`, and the unused adapters
 remain gated behind the existing `tools.*` mypy disables — wire or delete
 before 0.50.

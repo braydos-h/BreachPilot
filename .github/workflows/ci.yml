@@ -144,6 +144,20 @@ jobs:
           assert 'checks' in data and 'is_valid' in data and 'unknown_keys' in data, 'doctor --json missing keys'
           print(f\"doctor --json ok: is_valid={data['is_valid']}, checks={len(data['checks'])}\")
           "
+      - name: Docs truth guard (no-args startup)
+        run: |
+          # Fail if any doc claims the no-args default launches the interactive
+          # menu. Truth: `python main.py` with no args starts the WebUI daemon
+          # (main.py no-args branch -> _run_daemon); `--menu` is the terminal menu.
+          offenders=$(grep -R -n -i -E \
+            "interactive menu \(default|menu (is )?the default no-arg|no-args default.*(interactive|questionary) menu|# interactive menu \(default\)" \
+            README.md CLAUDE.md AGENTS.md CONTRIBUTING.md docs/ 2>/dev/null || true)
+          if [ -n "$offenders" ]; then
+            echo "ERROR: stale no-args startup claims found (no-args = WebUI daemon, not the menu):"
+            echo "$offenders"
+            exit 1
+          fi
+          echo "Docs truth guard (no-args startup): OK"
 
   types:
     name: Type check (mypy)
@@ -195,6 +209,10 @@ jobs:
         run: python -m build
       - name: Verify distributions
         run: python -m twine check dist/*
+      - name: Install wheel + import smoke
+        run: |
+          python -m pip install --force-reinstall dist/*.whl
+          python -c "import tools.exploit_agent; from tools.exploit_agent import run_exploit_agent; import tools.exploit_agent.runner._impl; print('wheel import smoke: ok')"
       - name: Upload dist
         uses: actions/upload-artifact@v4
         with:

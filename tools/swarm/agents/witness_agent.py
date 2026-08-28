@@ -417,6 +417,18 @@ class WitnessAgent:
             self._write_flags([err_flag])
             return [err_flag]
 
+    def add_audit_path(self, path: Path | str) -> bool:
+        """Register an additional audit stream to tail (e.g. the per-attempt
+        ``exploit_audit.jsonl`` once the run exposes its path). Returns True
+        if added, False when the path was already registered (so callers can
+        safely hand the same path twice — no duplicate reads/flags)."""
+        p = Path(path)
+        if p in self._audit_paths:
+            return False
+        self._audit_paths.append(p)
+        self._offsets[p] = 0
+        return True
+
     def stop(self) -> None:
         """Stop the poll loop after the current scan finishes."""
         self._stopped = True

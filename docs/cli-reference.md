@@ -263,7 +263,7 @@ Keys are loaded from the `--api-key-file` JSON into `os.environ` when not alread
 
 | Variable | Effect | Source |
 |----------|--------|--------|
-| `AI_NMAP_DEBUG` | Verbose nmap/exploit loop logging (`--debug` sets it) | `scripts/runner_impl.py:_debug_enabled`; `main.py` debug handling |
+| `AI_NMAP_DEBUG` | Verbose nmap/exploit loop logging (`--debug` sets it) | `tools/exploit_agent/runner/_impl.py:_debug_enabled`; `main.py` debug handling |
 | `AI_NMAP_ACTIVE_MODEL_ALIAS` | Active model alias override for MCP registry/peer tools | `tools/mcp_tools/registry.py:201` |
 | `AI_NMAP_MULTI_MODEL_ENABLED` | Force multi-model enablement for the MCP server | `tools/mcp_tools/registry.py:220` |
 | `AI_NMAP_AUDIT_VERIFY_VERBOSE` | Verbose audit verification output | `tools/exploit_agent/policy.py:340` |

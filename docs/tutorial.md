@@ -387,7 +387,7 @@ The UI prints distinct milestones (`tools/attack_ui.py:404`):
 ```
 
 The agent loop also stops early on a verified win
-(`scripts/runner_impl.py:1030`):
+(`tools/exploit_agent/runner/_impl.py:1030`):
 
 ```text
 [INFO] Goal complete - verified compromise/cred dump; terminating.

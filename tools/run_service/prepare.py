@@ -354,6 +354,15 @@ def _run_safety_default(*args: Any, **kwargs: Any) -> Any:
     return run_safety_review(*args, **kwargs)
 
 
+def _witness_agent_default(config: dict[str, Any] | None, **kwargs: Any) -> Any:
+    """Default WitnessAgent factory — imports lazily so the prepare path never
+    pays the ``tools.swarm`` package import (which pulls every specialist
+    agent + the orchestrator)."""
+    from tools.swarm.agents.witness_agent import WitnessAgent
+
+    return WitnessAgent(config, **kwargs)
+
+
 @dataclass
 class Callables:
     """Bundle of callables the service uses, overridable by the CLI path."""
@@ -364,6 +373,10 @@ class Callables:
     goal_engine_cls: type = field(default=GoalEngine)
     run_recon_assessment: Callable[..., Any] = field(default=_run_recon_default)
     run_safety_review: Callable[..., Any] = field(default=_run_safety_default)
+    # Advisory witness watcher factory (see tools/swarm/agents/witness_agent.py).
+    # Called as ``witness_agent_factory(config, audit_paths=[...],
+    # event_callback=...)`` only when ``witness.enabled`` is truthy.
+    witness_agent_factory: Callable[..., Any] = field(default=_witness_agent_default)
 
 
 _DEFAULT_CALLABLES = Callables()

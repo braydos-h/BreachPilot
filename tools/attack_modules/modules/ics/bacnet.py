@@ -777,5 +777,3 @@ _WRITE_BLOCKED_NOTE = (
     "(default false — physical-damage risk). The target-IP allowlist gate is "
     "enforced at the MCP tool layer; this is the second gate."
 )
-
-

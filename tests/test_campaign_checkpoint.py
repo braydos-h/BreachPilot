@@ -143,78 +143,42 @@ async def test_cred_dump_creates_access_checkpoint(tmp_path):
 
 @pytest.mark.asyncio
 async def test_natural_no_foothold_termination_creates_no_path_checkpoint(tmp_path):
-    """Agent does recon+enum+research+reporting actions (phase minima met), then
-    emits no tool calls → no-path checkpoint fires (no verified foothold)."""
+    """Agent does the real work (2 recon + 1 service_enum + 1 vuln_research —
+    the phase minima), then emits no tool calls: the summary turn credits the
+    reporting phase, can_terminate passes, and the no-path checkpoint fires
+    (no verified foothold). No can_terminate monkeypatch."""
     from tools.exploit_agent import run_exploit_agent
     from tools.exploit_agent.loop import CheckpointOutcome
 
     hook = _RecordingHook(CheckpointOutcome(action="finish"))
     policy = _policy(tmp_path)
-    # Sequence: 2 recon, 1 service_enum, 1 vuln_research, 1 validation, then done.
-    # Phase mapping in loop.py: check_os/nmap_scan→recon; run_exploit_terminal→
-    # service_enumeration; search_cve_intel→vulnerability_research;
-    # run_python_file→validation. reporting has no tool mapping; with
-    # services_detected=0 / versions_identified=0 the minima are 1 each for
-    # service_enum/vuln_research, so 2+1+1+1 = 5 actions satisfies recon(2),
-    # service_enumeration(1), vulnerability_research(1). The reporting minimum
-    # is checked too — but goal_complete is False and can_term returns True
-    # once recon+svc_enum+vuln_research minima are met (reporting min=1 is
-    # only enforced when permission != READ_ONLY AND not
-    # terminal_constraint_reached — the can_term check includes it). To be
-    # safe, add a 6th action mapping to reporting by using a tool name the
-    # loop counts as recon (the else branch) — but reporting requires a
-    # reporting-tagged tool. Simpler: register all tools and send 5 actions;
-    # if can_term is False due to reporting, the push-back fires and we need
-    # more rounds. Instead, use max_rounds high enough and send a final done
-    # after the push-back. The push-back appends a user message and continues,
-    # so the next round's done re-enters the no-tool-calls branch. Eventually
-    # can_term flips: reporting min is 1, but no tool maps to reporting, so
-    # the loop never increments reporting. The audit noted this: attack mode
-    # only stopped via budget exhaustion. So for this test, disable phase
-    # enforcement by using READ_ONLY? No — READ_ONLY skips the checkpoint.
-    # Cleanest: set services_detected/versions_identified via the recon
-    # output so minima are concrete, and send a 6th tool call that the loop
-    # maps to 'reporting'. There is no such tool name in the phase mapping,
-    # so the else branch counts it as 'recon'. reporting stays 0 → can_term
-    # False → push-back loop until max_rounds. To avoid that, set
-    # attack_max_rounds=1 so the single round ends via the for-loop exit,
-    # not the no-tool-calls break. But then the checkpoint never fires.
-    #
-    # Resolution: the no-path checkpoint guard also checks
-    # `not outcome_tracker.terminal_constraint_reached` and permission. The
-    # phase minima issue is real for the reporting phase. The simplest fix
-    # that exercises the checkpoint: send a compromised result that the
-    # classifier does NOT count as compromise (e.g. a bare "meterpreter"
-    # without "session N") — goal_complete stays False, but the action still
-    # ran. But that still doesn't meet reporting min. The real path: the
-    # loop's `if enforce_phase_minima and not can_term:` branch — when
-    # can_term is False it pushes back; when can_term is True (all minima
-    # met) it falls through to the no-path checkpoint. reporting min=1 is the
-    # blocker. Since no tool maps to reporting, can_term is never True in
-    # practice for a 5-action run. The test must instead drive the loop to
-    # the budget-exhaustion or max_rounds exit, which is NOT the natural-
-    # termination boundary. So: to test the no-path checkpoint cleanly, we
-    # monkeypatch phase_tracker.can_terminate to return (True, "") so the
-    # natural-termination boundary is reached after the first no-tool-calls
-    # turn.
+    # Phase mapping (runner/_impl.py): check_os→recon; run_exploit_terminal→
+    # service_enumeration; search_cve_intel→vulnerability_research. With
+    # services_detected=0 / versions_identified=0 the minima are 2/1/1, so
+    # 2+1+1 = 4 tool actions satisfy every non-reporting minimum, and the
+    # final no-tool summary turn records the reporting action.
     client = MagicMock()
     client.chat.side_effect = [
         _tool_call_msg("check_os"),
+        _tool_call_msg("check_os"),
+        _tool_call_msg("run_exploit_terminal"),
+        _tool_call_msg("search_cve_intel"),
         _done_msg(),
     ]
     session = AsyncMock()
     session.call_tool.return_value = _tool_result("ok\nno vulnerabilities found")
 
-    with (
-        patch("tools.exploit_agent._stream_ollama", new_callable=AsyncMock) as stream,
-        patch("tools.exploit_agent.loop._PhaseTracker.can_terminate", return_value=(True, "minima satisfied")),
-    ):
+    with patch("tools.exploit_agent._stream_ollama", new_callable=AsyncMock) as stream:
         stream.return_value = {"role": "assistant", "content": "done"}
         await run_exploit_agent(
             client=client,
             model="glm",
             session=session,
-            exploit_tools=[{"type": "function", "function": {"name": "check_os"}}],
+            exploit_tools=[
+                {"type": "function", "function": {"name": "check_os"}},
+                {"type": "function", "function": {"name": "run_exploit_terminal"}},
+                {"type": "function", "function": {"name": "search_cve_intel"}},
+            ],
             policy=policy,
             target_ip="10.0.0.50",
             config={"outcome_judgment": {"flow_a": False}},
@@ -390,27 +354,33 @@ async def test_no_path_decision_loop_guard_requires_fresh_actions(tmp_path):
 
     hook = _hook
     policy = _policy(tmp_path)
-    # check_os (1 action) → done (no_path #1 → continue) → done (no new
-    # actions → guard blocks no_path #2 → break).
+    # Meet every non-reporting phase minimum (2 recon + 1 service_enum +
+    # 1 vuln_research) → done (no_path #1 → continue) → done (no new
+    # actions → guard blocks no_path #2 → break). No can_terminate
+    # monkeypatch: the summary turn credits reporting for real.
     client = MagicMock()
     client.chat.side_effect = [
         _tool_call_msg("check_os"),
+        _tool_call_msg("check_os"),
+        _tool_call_msg("run_exploit_terminal"),
+        _tool_call_msg("search_cve_intel"),
         _done_msg(),
         _done_msg(),
     ]
     session = AsyncMock()
     session.call_tool.return_value = _tool_result("ok\nno vulns")
 
-    with (
-        patch("tools.exploit_agent._stream_ollama", new_callable=AsyncMock) as stream,
-        patch("tools.exploit_agent.loop._PhaseTracker.can_terminate", return_value=(True, "minima satisfied")),
-    ):
+    with patch("tools.exploit_agent._stream_ollama", new_callable=AsyncMock) as stream:
         stream.return_value = {"role": "assistant", "content": "done"}
         await run_exploit_agent(
             client=client,
             model="glm",
             session=session,
-            exploit_tools=[{"type": "function", "function": {"name": "check_os"}}],
+            exploit_tools=[
+                {"type": "function", "function": {"name": "check_os"}},
+                {"type": "function", "function": {"name": "run_exploit_terminal"}},
+                {"type": "function", "function": {"name": "search_cve_intel"}},
+            ],
             policy=policy,
             target_ip="10.0.0.50",
             config={"outcome_judgment": {"flow_a": False}},

@@ -71,13 +71,21 @@ explicitly authorized to test, on a throwaway operator box. An explicit
 `tools/exploit_agent/policy.py` defines exploit permissions:
 
 - `full_access` (config + schema default): the lab posture.
-  `ExploitPolicy.approve_action` auto-approves every action with no command-content
-  or scope inspection — destructive commands, egress, reverse shells, credential
-  dumping, Metasploit, and Python write/run are all allowed. The `is_full_access`
-  branch increments the per-session command budget and returns True. The former
-  `_check_command_safety` / `_check_scope_gate` / `_gate_pivot_and_count` gates
-  were removed from the policy entirely (no code path calls them anymore).
-- `approve_only`: require operator approval for sensitive actions.
+  `ExploitPolicy.approve_action` auto-approves after consulting the mission
+  ScopeGate threaded onto the policy (`_enforce_mission_scope`): a tool mapped
+  to a category in `exploit.forbidden_actions` (`_TOOL_ACTION_CATEGORY`), or an
+  action naming an asset outside the gate's allow rules / inside
+  `exploit.disallowed_assets`, is denied with a `SCOPE_DENIED` audit row. A
+  gate verdict of `requires_human_approval` still auto-approves (full_access is
+  the explicit lab grant — this check is not a blanket deny), and
+  `scope_gate=None` (swarm without a mission gate) stays permissive. Command
+  *content* is not inspected — destructive commands, egress, reverse shells,
+  credential dumping, Metasploit, and Python write/run are all allowed against
+  authorized targets. The former `_check_command_safety` / `_gate_pivot_and_count`
+  gates remain removed (no code path calls them).
+- `approve_only`: require operator approval for sensitive actions. Every
+  non-approved exit (operator denial, aborted prompt, exhausted budget) is
+  written to the tamper-evident audit chain as a `denied` row.
 - `read_only`: gather information and avoid active exploitation. Set it for
   propose-only recon; `_resolve_exploit_permission` uses it as the missing-key
   fallback so a partial config never silently becomes live.
@@ -125,8 +133,8 @@ exploit:
   attack_mode: true
   require_explicit_allowlist: true   # the target-IP lock (tools/mcp_shared.py:494-534)
   allowed_targets: [127.0.0.1]        # lab checked-in default; schema default is [] (tools/config/schema.py:181)
-  disallowed_assets: []               # inert on the standalone attack path (no consumer since the policy gates were removed)
-  forbidden_actions: []               # ditto; still enforced by the swarm critic agent and Flow B's ScopeGate
+  disallowed_assets: []               # enforced by the policy's full-access mission-scope check (SCOPE_DENIED) + Flow B
+  forbidden_actions: []               # ditto (via _TOOL_ACTION_CATEGORY); also enforced by the swarm critic agent
 multi_model:
   enabled: true                      # lab default true (schema False); advisory peer consultation
 ```

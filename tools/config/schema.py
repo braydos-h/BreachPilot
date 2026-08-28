@@ -342,14 +342,18 @@ CONFIG_SCHEMA: dict[str, Any] = {
     },
     # Witness agent — advisory real-time audit-stream watcher (agent-on-agent
     # safety). Library default is OFF (conservative for downstream re-use);
-    # the checked-in config.yaml flips it ON for the lab runtime. NOTE: nothing
-    # in the run lifecycle instantiates WitnessAgent — to observe a run, start
-    # it manually (python -m tools.swarm.agents.witness_agent). When running,
-    # it polls the audit JSONL trails (exploit_audit.jsonl, activity.jsonl)
+    # the checked-in config.yaml flips it ON for the lab runtime. Wiring: when
+    # ``enabled`` is true, the transport-neutral run lifecycle
+    # (tools/run_service/execute.py) spawns a WitnessAgent side task per run
+    # that polls the run's audit trails (reports/<run_id>/activity.jsonl plus
+    # the per-attempt exploit_audit.jsonl once the session exposes its path)
     # and flags anomalies (allowlist breach, PoC escape, permission escalation,
-    # prompt-injection pattern, DoS drift) to a witness log + the event
-    # broker. It is advisory ONLY: it flags, it never blocks / modifies /
-    # kills a run. See tools/swarm/agents/witness_agent.py.
+    # prompt-injection pattern, DoS drift) to ``log_path`` (process-global —
+    # the API GET /runs/{id}/witness route reads it verbatim) +, when
+    # ``escalate_to_event_broker`` is true, 'witness_flag' events through the
+    # transport's event sink. It is advisory ONLY: it flags, it never blocks /
+    # modifies / kills a run, and its failure never propagates into the run.
+    # See tools/swarm/agents/witness_agent.py.
     "witness": {
         "enabled": False,
         "log_path": "reports/witness.jsonl",

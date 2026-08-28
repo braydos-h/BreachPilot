@@ -24,7 +24,7 @@ There is also a newer exploit, swarm, and WebUI path:
 main.py / app.py (WebUI daemon @ :8765, or direct CLI run)
   -> tools.run_service.AssessmentService (transport-neutral prep + execute)
   -> tools.exploit_session.run_exploit_session
-  -> tools.exploit_agent (scripts/runner_impl.py loop) + ExploitPolicy
+  -> tools.exploit_agent (tools/exploit_agent/runner/_impl.py loop) + ExploitPolicy
   -> mcp_exploit_server.py
   -> tools.mcp_tools exploit tool registrations
   -> tools.campaign (AutonomousOrchestrator; facade: tools.autonomous_orchestrator) / tools.swarm
@@ -199,7 +199,7 @@ failure_class, success, evidence_refs}` fields only, never raw chain-of-thought.
 - AI/model: `model_router.py`, `goal_engine.py`, `goal_suggester.py`, `semantic_memory.py`, `model_telemetry.py`
 - Safety/config: `tools/config/` (schema/validator/loader; `config_manager.py` is a re-export shim), `doctor.py`, `safety_reviewer.py`, `validation_utils.py`, `command_analyzer.py`, `opsec.py`, `detection_coverage.py`
 - Recon/research: `tools/recon/` (pkg; `recon_pipeline.py` is a deprecated shim), `fast_recon.py`, `cve_lookup.py`, `exploit_search.py`, `web_researcher.py`
-- Exploitation: `exploit_agent/` (pkg) + `scripts/runner_impl.py` (canonical loop), `tools/campaign/` (pkg; `autonomous_orchestrator.py` is a facade shim), `attack_planner.py`, `attack_modules/` (pkg), `payload_crafter.py`, `exploit_mutator.py`, `post_exploit.py`, `metasploit_bridge.py`
+- Exploitation: `exploit_agent/` (pkg) + `tools/exploit_agent/runner/_impl.py` (canonical loop), `tools/campaign/` (pkg; `autonomous_orchestrator.py` is a facade shim), `attack_planner.py`, `attack_modules/` (pkg), `payload_crafter.py`, `exploit_mutator.py`, `post_exploit.py`, `metasploit_bridge.py`
 - State/reporting: `session_manager.py`, `persistent_session_manager.py`, `activity_log.py`, `enhanced_reporting.py`, `experience_store.py`, `credential_store.py`, `attack_memory.py`
 - API keys: `api_key_store.py`
 - Plugin system: `plugins.py`

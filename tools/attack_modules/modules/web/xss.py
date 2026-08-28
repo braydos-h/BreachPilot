@@ -540,5 +540,3 @@ print("\\n[!] Confirmed smuggling can be used for cache poisoning, request hijac
 # ---------------------------------------------------------------------------
 # Server-Side Request Forgery / XML External Entity / Local File Inclusion
 # ---------------------------------------------------------------------------
-
-

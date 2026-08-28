@@ -89,6 +89,42 @@ def test_record_action_updates_current_phase():
     assert pt._current_phase == "reporting"
 
 
+def test_record_summary_turn_satisfies_reporting_minimum():
+    pt = _PhaseTracker()
+    pt.record_action("recon")
+    pt.record_action("recon")
+    pt.record_action("service_enumeration")
+    pt.record_action("vulnerability_research")
+    can, reason = pt.can_terminate()
+    assert not can
+    assert "reporting" in reason
+    pt.record_summary_turn()
+    can, reason = pt.can_terminate()
+    assert can
+    assert "satisfied" in reason
+
+
+def test_record_summary_turn_does_not_move_current_phase():
+    """The summary turn is a reporting *credit*, not a phase transition — the
+    phase-narrowed tool surface (select_tools_for_phase) must stay on the last
+    executed action's phase so a continued run keeps its tools."""
+    pt = _PhaseTracker()
+    pt.record_action("vulnerability_research")
+    pt.record_summary_turn()
+    assert pt._current_phase == "vulnerability_research"
+    assert pt._counts["reporting"] == 1
+
+
+def test_record_summary_turn_is_idempotent_enough_for_single_use():
+    pt = _PhaseTracker()
+    pt.record_summary_turn()
+    pt.record_summary_turn()
+    assert pt._counts["reporting"] == 2
+    # Count-only: calling it does not affect the other phases' minima.
+    can, _ = pt.can_terminate()
+    assert not can  # recon minima still unmet
+
+
 def test_importable_via_legacy_paths():
     from tools.exploit_agent import _PhaseTracker as PTviaRoot  # noqa: F401
     from tools.exploit_agent.loop import _PhaseTracker as PTviaLoop  # noqa: F401

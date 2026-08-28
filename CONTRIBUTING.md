@@ -12,7 +12,7 @@ Thanks for helping improve NetAttackAI. This guide covers setup, workflow, and t
 | `AGENTS.md` | Compact agent guide — 8 non-obvious rules. Read before any edit. |
 | `CLAUDE.md` | Authoritative architecture, permission model, boot sequence, Flow A/B split |
 | `README.md` | Canonical user-facing doc — update it when you add a CLI flag, MCP tool, or config key |
-| `config.yaml` | Runtime source of truth — `tools/config_manager.py:CONFIG_SCHEMA` is validated in sync (`tests/test_config_manager.py`) |
+| `config.yaml` | Runtime source of truth — `tools/config/schema.py:CONFIG_SCHEMA` is validated in sync (`tests/test_config_manager.py`) |
 | `docs/architecture.md`, `docs/runtime-flows.md`, `docs/module-guide.md` | System shape and module responsibilities |
 | `docs/extension-guide.md` | Exact edit points for in-tree changes |
 | `docs/testing-guide.md` | Test layout and focused commands |
@@ -114,7 +114,7 @@ And verify `README.md` flags/config still match reality if you added any.
 python -m pytest tests/test_scope_gate.py -v
 python -m pytest tests/test_recon_pipeline.py::TestClass::test_method -v
 python -m pytest tests/ -v -k "scope"
-python -m pytest --cov=tools --cov=main --cov=cli
+python -m coverage run -m pytest tests/; python -m coverage report   # coverage (CI command; pytest-cov is not installed)
 ```
 
 On Linux/macOS `make test`, `make test-one F=tests/test_scope_gate.py`, `make doctor` also work.
@@ -152,7 +152,7 @@ New code must use Flow A or `legacy.*` for frozen reference.
 Enforced at the **MCP tool layer**, not in `tools/exploit_agent/policy.py`:
 
 - Allowlist: `tools/mcp_shared.py:494` `_allowed_target_list` unions `EXPLOIT_TARGET` (runtime `--target`) + `exploit.allowed_targets` + `EXPLOIT_TARGET_IP`/`EXPLOIT_TARGET_DOMAIN`/`EXPLOIT_DISCOVERED_TARGETS` (domain targeting).
-- Gate: `tools/mcp_tools/terminal.py:_target_lock_block` gated by `ctx.require_allowlist` (`tools/mcp_tools/registry.py:make_require_allowlist`), extracting every destination (URL authorities, `/dev/tcp`, LHOST/RHOST, bare IPs, hostnames) via `tools/command_analyzer.py`.
+- Gate: `tools/mcp_tools/terminal/allowlist.py:_target_lock_block` (re-exported from the `terminal` package) gated by `ctx.require_allowlist` (`tools/mcp_tools/registry.py:make_require_allowlist`), extracting every destination (URL authorities, `/dev/tcp`, LHOST/RHOST, bare IPs, hostnames) via `tools/command_analyzer.py`.
 - Matcher: `tools/validation_utils.py:380` `is_target_in_allowlist` supports domains, `*.wildcard`, and CIDR.
 
 `full_access` auto-approves everything with no command/scope/pivot inspection. **Do not re-add removed gates** without ensuring the allowlist covers the path — the allowlist IS the lock. Recon stays `read_only` via `tools/cli_exploit_settings.py:12` missing-key fallback.
@@ -161,9 +161,9 @@ Enforced at the **MCP tool layer**, not in `tools/exploit_agent/policy.py`:
 
 Add `@audit_tool` (or `@require_allowlist()` for target-touching) in `tools/mcp_tools/<family>.py` **only**. `mcp_exploit_server.py` auto-discovers every `register_*_tools` via `tools/mcp_tools/registry.py:collect_tools` (pkgutil + AST validation, fails CI if decorator missing). No manual list edit in `mcp_exploit_server.py`. Target-touching = `@require_allowlist()` + `validate_target_or_ip`.
 
-### 5.5 Config is `config.yaml`, not `opencode.json`
+### 5.5 Config is `config.yaml`, not `opencode.jsonc`
 
-`opencode.json` is gitignored editor-local config for the opencode.ai editor — not app state. App config lives in `config.yaml`. **Never copy `~/.codex/auth.json` OAuth tokens into `config.yaml` or logs** (`models.provider: chatgpt` only) — check `is_authenticated()` by file existence only.
+`opencode.jsonc` is gitignored editor-local config for the opencode.ai editor — not app state. App config lives in `config.yaml`. **Never copy `~/.codex/auth.json` OAuth tokens into `config.yaml` or logs** (`models.provider: chatgpt` only) — check `is_authenticated()` by file existence only.
 
 ### 5.6 `--target` accepts IP or domain (Phase 4)
 
@@ -183,10 +183,10 @@ See `docs/extension-guide.md` for the full edit-point table. Summary:
 | **Exploit MCP tool** | `tools/mcp_tools/<family>.py` `@audit_tool`/`@require_allowlist()` → `tools/mcp_tools/registry.py` helpers → `tools/command_analyzer.py` if shell/Python/MSF/file-write |
 | **Attack module** | `tools/attack_modules/modules/<category>/` subclass `AttackModule` → `tools/attack_modules/registry.py:_MODULE_CLASSES` (or `register_attack_module` for plugins) |
 | **Runtime skill** | `skills/<name>/SKILL.md` (YAML front matter + Markdown) + `config.yaml:skills.*` |
-| **Recon behavior** | `tools/recon_pipeline.py` (`ServiceInfo`/`HostReconResult`/`PrimaryReconScanner`/`ReconPipeline`) + `tools/goal_suggester.py` |
+| **Recon behavior** | `tools/recon/` pkg (`pipeline.py` / `scanner.py` / `enumerator.py` / `config.py`; `tools/recon_pipeline.py` is a deprecated shim) + `tools/goal_suggester.py` |
 | **Goal / suggestion** | `tools/goal_engine.py` presets + `tools/goal_suggester.py` heuristics |
-| **Model routing** | `tools/model_router.py` + `config.yaml:models.*` + `tools/config_manager.py:CONFIG_SCHEMA` |
-| **Config key** | `config.yaml` + `tools/config_manager.py:CONFIG_SCHEMA` + `ConfigValidator.validate` + `tools/config_cli.py` + `tests/test_config_manager.py` |
+| **Model routing** | `tools/model_router.py` + `config.yaml:models.*` + `tools/config/schema.py:CONFIG_SCHEMA` |
+| **Config key** | `config.yaml` + `tools/config/schema.py:CONFIG_SCHEMA` + `ConfigValidator.validate` + `tools/config_cli.py` + `tests/test_config_manager.py` |
 | **Persistent data** | `db.py` (`DDL`, `_SCHEMA_VERSION`, `_run_migration`) |
 | **Swarm behavior** | `tools/swarm/orchestrator.py` + `tools/swarm/agents/*.py` |
 | **Evidence/finding/report** | `evidence.py` / `finding_verifier.py` / `report_generator.py` / `tools/enhanced_reporting.py` |
@@ -201,7 +201,7 @@ Keep `pyproject.toml` and `requirements.txt` synced — header says "Synced from
 - **Mypy**: `mypy --follow-imports=skip tools` must pass. 216 files, masks at `pyproject.toml:156`; 3 hot files strict (`tools/validation_utils.py`, `tools/exceptions.py`, `tools/mcp_shared.py` — zero disables, `pyproject.toml:201`).
 - **God-file budget**: CI fails any new file >1000 LOC and ≥72 kB (600×120) under `tools/` unless split (`.github/workflows/ci.yml:115`).
 - **No new files unless necessary** — prefer editing existing files. Workspace dirs (`reports/`, `exploit_workspace/`, `research_workspace/`, `swarm_workspace/`, `webui/dist/`) are gitignored.
-- **Secrets**: never commit `.webui_secret_key`, `secr.json`, `.env`, `opencode.json`, or OAuth tokens. Use `python main.py --setup-api-keys`.
+- **Secrets**: never commit `.webui_secret_key`, `secr.json`, `.env`, `opencode.jsonc`, or OAuth tokens. Use `python main.py --setup-api-keys`.
 - **ics write-side** (`tools/attack_modules/` ICS modules): dual-gated — `ics.allow_write: true` **and** `ics.destructive_ics: true` **and** `@require_allowlist` (`config.yaml:416`). Default both `false`.
 
 ## 8. Safety-sensitive changes
@@ -228,7 +228,7 @@ Before requesting review, confirm:
 - [ ] `config.yaml` ↔ `CONFIG_SCHEMA` in sync (add key to both + validator + test if needed)
 - [ ] If new CLI flag / MCP tool / config key: `README.md` updated
 - [ ] If new exploit MCP tool: `@audit_tool` or `@require_allowlist()` + `validate_target_or_ip`, auto-discovered via `registry.collect_tools`
-- [ ] No Flow B safety file edits, no `opencode.json` app-state misuse, no OAuth token copying
+- [ ] No Flow B safety file edits, no `opencode.jsonc` app-state misuse, no OAuth token copying
 - [ ] No secrets committed; no god-file budget violation
 
 ## 11. Documentation and housekeeping

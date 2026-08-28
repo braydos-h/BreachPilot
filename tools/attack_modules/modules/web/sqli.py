@@ -522,5 +522,3 @@ else:
 
 print("\\n[!] Cloud metadata (169.254.169.254) is fetched BY the target — this probes the target's own cloud env, not a third-party host.")
 '''
-
-

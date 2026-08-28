@@ -229,7 +229,7 @@ needed to fill missing evidence/reproduction steps.
 
 **Status: available primitive, NOT wired into the live execution path.** No
 production code calls `verify_compromise` today — the exploit loop
-(`scripts/runner_impl.py`), the report generators, and the eval harness never
+(`tools/exploit_agent/runner/_impl.py`), the report generators, and the eval harness never
 invoke it; only `tests/test_poe_verifier.py` exercises it. Do not describe a
 PoE-verified foothold as a runtime guarantee.
 

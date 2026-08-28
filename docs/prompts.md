@@ -15,7 +15,7 @@ which prompt blocks get built (e.g. `ultrathink`, `attack_mode`,
 | 3 | Domain-target briefing block | `tools/exploit_agent/prompt.py:322` (`build_domain_briefing`) | Domain-vs-IP methodology for domain targets |
 | 4 | Parallel sub-agent briefing block | `tools/exploit_agent/prompt.py:368` (`build_parallel_agents_briefing`) | Delegation instructions when `swarm.parallel_enabled` |
 | 5 | Goal / primary mission block | `tools/goal_engine.py:189` (`AttackGoal.system_prompt_addition`) | Overriding mission + service-aware adaptive strategy |
-| 6 | Initial user message | `scripts/runner_impl.py (seed user message)` | First-turn target/permission briefing |
+| 6 | Initial user message | `tools/exploit_agent/runner/_impl.py (seed user message)` | First-turn target/permission briefing |
 | 7 | Research assistant system prompt | `tools/exploit_agent/research_assistant.py:46` (`_SYSTEM_PROMPT`) | Read-only research sidecar (JSON contract) |
 | 8 | Research assistant briefing | `tools/exploit_agent/research_assistant.py:171` | Tells the main agent the consultation tool exists |
 | 9 | Reflection prompt | `tools/exploit_agent/reflection.py:156` | LLM strategy reflection after N actions |
@@ -40,7 +40,7 @@ which prompt blocks get built (e.g. `ultrathink`, `attack_mode`,
 
 ## How the main system prompt is assembled
 
-`scripts/runner_impl.py (system-prompt build site)` calls `build_exploit_system_prompt` with
+`tools/exploit_agent/runner/_impl.py (system-prompt build site)` calls `build_exploit_system_prompt` with
 context from policy settings, env probe, OPSEC/domain/parallel briefings, and
 skill context. The research-assistant briefing is appended at `loop.py:692`.
 The ULTRATHINK `[REASONING]` blocks from prior rounds are re-injected as a

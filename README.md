@@ -26,7 +26,7 @@ NetAttackAI is an agentic operator that plans, discovers, reasons, chains, and v
 
 > [!WARNING]
 > **Authorized use only.** Only test systems you own or have explicit written permission to assess. Run on a throwaway operator box.
-> **Attack mode = `full_access`** — every action is auto-approved. The only safety is the **target-IP allowlist lock** (a destination guard, not a sandbox). Recon stays fully scope-gated. See [Safety Model](#safety).
+> **Attack mode = `full_access`** — every in-scope action is auto-approved. The safeties are the **target-IP allowlist lock** (a destination guard, not a sandbox) and the **mission scope gate** (`exploit.forbidden_actions` / `disallowed_assets` deny with a `SCOPE_DENIED` audit row). Recon stays fully scope-gated. See [Safety Model](#safety).
 
 ---
 
@@ -65,7 +65,7 @@ Provide `example.com` — the platform **resolves and expands the attack surface
 <td width="33%" valign="top">
 
 ### Target-Locked Safety Model
-`full_access` on the operator host is **constrained to the allowlist** at the MCP tool layer. Every destination is extracted from every command — URL authorities, `/dev/tcp`, LHOST/RHOST, bare IPs, hostnames. Not in the allowlist = `BLOCKED`. All target-touching actions are recorded in a **tamper-evident SHA-256 audit chain**.
+`full_access` on the operator host is **constrained to the allowlist** at the MCP tool layer. Every destination is extracted from every command — URL authorities, `/dev/tcp`, LHOST/RHOST, bare IPs, hostnames. Not in the allowlist = `BLOCKED`. The policy also enforces the mission scope gate (`exploit.forbidden_actions` / `disallowed_assets` → `SCOPE_DENIED`), and approve_only denials are audited. All target-touching actions are recorded in a **tamper-evident SHA-256 audit chain**.
 
 </td>
 <td width="33%" valign="top">
@@ -194,7 +194,7 @@ All tools are registered via `tools/mcp_tools/registry.py` using `@audit_tool` /
 | Mode | What happens |
 |------|--------------|
 | **Recon** | Always `read_only` — gathers and proposes, never executes offensively |
-| **Attack** | `full_access` — auto-approves everything, no command/scope inspection |
+| **Attack** | `full_access` — auto-approves after the mission scope gate (`forbidden_actions` / `disallowed_assets` → `SCOPE_DENIED`); no command-content inspection |
 | **The lock** | **Target-IP allowlist** at the MCP tool layer — every destination is extracted and refused if not in the allowlist (supports `IP`, `domain`, `*.wildcard`, `CIDR`). Domain runs auto-authorize discovered subdomains. |
 
 Operational guards that always apply: 300s/600s timeouts, full JSONL audit trail, OS-aware tooling.

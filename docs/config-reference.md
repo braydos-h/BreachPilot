@@ -84,7 +84,7 @@ reachability, model registry, port conflicts) and `python main.py --self-test`
 | `host` | str | `https://api.ollama.com` | Ollama endpoint for chat/generate (cloud default; point at a local daemon to go local). The ollama Python client auto-attaches `Authorization: Bearer $OLLAMA_API_KEY`. | `tools/config/loader.py` `get_ollama_host`, `tools/model_router.py`, `tools/doctor.py` |
 | `model` | str | `glm-5.2:cloud` | Default concrete model id | `tools/config/schema.py`, `tools/interactive_menu.py` (menu default write) |
 | `api_key_env` | str | `OLLAMA_API_KEY` | Env var holding the bearer token | `tools/api_key_store.py` |
-| `embed_host` | str | `http://localhost:11434` | Embedding host (falls back to `host`) — embeddings stay local by default even on the cloud chat path | `scripts/runner_impl.py` (SemanticMemoryManager wiring), `tools/skill_embeddings.py` |
+| `embed_host` | str | `http://localhost:11434` | Embedding host (falls back to `host`) — embeddings stay local by default even on the cloud chat path | `tools/exploit_agent/runner/_impl.py` (SemanticMemoryManager wiring), `tools/skill_embeddings.py` |
 
 ### `models:` (config.yaml:15-44) — model registry
 
@@ -175,15 +175,15 @@ touching. CLI-runnable regardless; block supplies entrypoint defaults.
 | `max_pivot_depth` | int | `2` | Pivot recursion cap | cli_exploit_settings.py:142, autonomous_orchestrator.py:1091,1638 |
 | `workspace_dir` | str | `exploit_workspace` | Workspace root | cli_exploit_settings.py:148, interactive_menu.py:417 |
 | `loot_workspace` | str | `exploit_workspace/loot` | Loot dir | cli_exploit_settings.py:144 |
-| `attacker_os` | str | `auto` | OS-aware instructions/tools | scripts/runner_impl.py (`_resolve_attacker_os`) |
+| `attacker_os` | str | `auto` | OS-aware instructions/tools | tools/exploit_agent/runner/_impl.py (`_resolve_attacker_os`) |
 | `searchsploit_path` | str | `searchsploit` | Searchsploit binary | mcp_shared.py:78, doctor.py:123 |
 | `shell` | str | `bash` | Shell for `run_exploit_terminal` (cmd.exe on Windows) | cli_exploit_settings.py:146 |
 | `msfconsole_path` | str | `msfconsole` | Metasploit console binary | cli_exploit_settings.py:147, tools/mcp_tools/metasploit.py:83 |
 | `web_search` | bool | `true` | Web search for exploit intel | mcp_shared.py:73-87 (via `search` block) |
 | `max_query_chars` / `cache_ttl_seconds` / `cache_max_entries` | int | `200` / `3600` / `50` | ExploitSearch cache limits | mcp_shared.py:85-87 |
 | `require_explicit_allowlist` | bool | `true` | **The target-IP lock** — when true every target-touching tool checks the allowlist | mcp_shared.py:561,635; mcp_exploit_server.py:141 |
-| `allowed_targets` | list[str] | `[127.0.0.1]` | Operator-authorized hosts (IP, domain, `*.wildcard`, CIDR); Start New Session persists here | `tools/mcp_shared.py`, `tools/config_cli.py`, `scripts/runner_impl.py` (`_resolve_allowed_targets`) |
-| `disallowed_assets` / `forbidden_actions` | list[str] | `[]` | **Currently inert on the standalone attack path.** They are parsed into the `ScopeGate` object handed to `ExploitPolicy` (`tools/exploit_session.py::_build_exploit_scope_gate`), but the policy's scope checks were removed with the lab build — nothing on the standalone MCP path consults them, and the old `_TOOL_ACTION_CATEGORY` consumer is gone. Enforcement that still exists: the swarm **critic agent** blocks actions in the swarm mission's `forbidden_actions` (`tools/swarm/agents/critic_agent.py`), and Flow B's `ScopeGate` enforces them (`scope_gate.py`). Keep the lists for mission bookkeeping / future re-wiring; do not treat them as a live gate on the attack path. | `tools/exploit_session.py`, `tools/swarm/agents/critic_agent.py`, `scope_gate.py` |
+| `allowed_targets` | list[str] | `[127.0.0.1]` | Operator-authorized hosts (IP, domain, `*.wildcard`, CIDR); Start New Session persists here | `tools/mcp_shared.py`, `tools/config_cli.py`, `tools/exploit_agent/runner/_impl.py` (`_resolve_allowed_targets`) |
+| `disallowed_assets` / `forbidden_actions` | list[str] | `[]` | **Enforced on the full_access attack path.** Parsed into the `ScopeGate` handed to `ExploitPolicy` (`tools/exploit_session.py::_build_exploit_scope_gate`) and consulted by `ExploitPolicy._enforce_mission_scope` in `approve_action`: a tool whose `_TOOL_ACTION_CATEGORY` category is listed in `forbidden_actions`, or a command whose destinations fall outside `allowed_assets` / inside `disallowed_assets`, is denied with a `SCOPE_DENIED` row in `exploit_audit.jsonl`. Hostname destinations are only vetted when the gate's allow rules include a domain/wildcard pattern (otherwise hostname authorization is delegated to the MCP-layer allowlist); loopback and `exploit.allowed_targets` hosts are pre-authorized at the policy layer. `scope_gate=None` (swarm without a mission gate) stays permissive. Additional enforcement: the swarm **critic agent** blocks actions in the swarm mission's `forbidden_actions` (`tools/swarm/agents/critic_agent.py`), and Flow B's `ScopeGate` enforces them (`scope_gate.py`). | `tools/exploit_session.py`, `tools/exploit_agent/policy.py`, `tools/swarm/agents/critic_agent.py`, `scope_gate.py` |
 | `ad_kerberos.enabled` + per-tool flags | bool | `false` (all; `smb_signing_check: true`) | AD/Kerberos post-exploit suite — master + per-tool must both be true | tools/mcp_tools/ad.py:36, tests/test_ad_mcp_tools.py |
 | `msf.recipes_enabled` / `auto_local_exploit_suggester` | bool | `false` | MSF recipe dispatch + advisory LES task | tools/mcp_tools/metasploit.py, autonomous_orchestrator.py:1114-1115 |
 | `listeners.tls/dns/https_beacon/socks_pivot` | bool | `false` | Extended C2 listener types (legacy nc/socat/http ungated) | persistent_session_manager.py:399-524, tests/test_listeners_extended.py |
@@ -237,7 +237,7 @@ The `opsec` block is the **active** detection-evasion / pacing / UA-rotation / D
 | `allow_local_fetch` | bool | `false` | Permit localhost/private fetches | mcp_shared.py:139 |
 | `ollama.api_key_env` / `max_results` / `use_web_search` / `use_web_fetch` | — | `OLLAMA_API_KEY` / `8` / `true` / `true` | Ollama research provider | mcp_shared.py:153-158, web_researcher.py:319-369 |
 | `serpapi.api_key_env` / `endpoint` / `engine` / `region` | — | `SERPAPI_API_KEY` / serpapi.com / `duckduckgo` / `us-en` | SerpAPI provider | mcp_shared.py:159-164 |
-| `assistant.*` | see research_assistant.py:97-140 | enabled, `automatic: true`, `failure_trigger: 2`, budgets | Read-only in-loop research assistant (advisory) | `tools/exploit_agent/research_assistant.py`, `scripts/runner_impl.py` |
+| `assistant.*` | see research_assistant.py:97-140 | enabled, `automatic: true`, `failure_trigger: 2`, budgets | Read-only in-loop research assistant (advisory) | `tools/exploit_agent/research_assistant.py`, `tools/exploit_agent/runner/_impl.py` |
 
 ### `swarm:` (config.yaml:214-233) — multi-agent swarm
 
@@ -333,24 +333,24 @@ Enabled by `--long-session` (main.py:374-376) or `enabled: true`.
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
 | `chain_of_thought` | bool | `true` | CoT mode | cli_exploit_settings.py:89 |
-| `reflection_every_n_actions` | int | `10` | Reflection cadence | cli_exploit_settings.py:93, `scripts/runner_impl.py` (reflection cadence) |
+| `reflection_every_n_actions` | int | `10` | Reflection cadence | cli_exploit_settings.py:93, `tools/exploit_agent/runner/_impl.py` (reflection cadence) |
 | `critic_enabled` | bool | `true` | Critic agent (swarm) | cli_exploit_settings.py:106 |
 | `observer_mode` | str | `hybrid` | `heuristic`\|`llm`\|`hybrid` fact extraction | cli_exploit_settings.py:98, main.py:641 |
 | `ultrathink` | bool | `true` (config.yaml) / `false` (schema) | Deep-reasoning mode; CLI `--ultrathink` overrides | cli_exploit_settings.py:90 |
 | `ultrathink_reflection_interval` | int | `3` | Ultrathink reflection cadence | cli_exploit_settings.py:92 |
 | `llm_reflection` | bool | `true` (config.yaml) / `false` (schema) | LLM-driven reflection in the hot loop (extra LLM calls) | cli_exploit_settings.py:94, exploit_agent/reflection.py:135 |
-| `peer_consult_on_failure_threshold` | int | `3` | Auto-consult peers after N consecutive exploit failures (0 disables) | cli_exploit_settings.py:97, `scripts/runner_impl.py` |
+| `peer_consult_on_failure_threshold` | int | `3` | Auto-consult peers after N consecutive exploit failures (0 disables) | cli_exploit_settings.py:97, `tools/exploit_agent/runner/_impl.py` |
 
 ### `memory:` (config.yaml:346-352) — learning stores
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `semantic_enabled` | bool | `true` | Semantic memory / embeddings | agent_loop.py (legacy), `tools/skill_embeddings.py`, `scripts/runner_impl.py` (semantic memory wiring) |
+| `semantic_enabled` | bool | `true` | Semantic memory / embeddings | agent_loop.py (legacy), `tools/skill_embeddings.py`, `tools/exploit_agent/runner/_impl.py` (semantic memory wiring) |
 | `embedding_model` | str | `nomic-embed-text` | Embedding model | skill_embeddings.py:174, semantic_memory.py:29 |
 | `cross_mission_learning` | bool | `true` | Learn across missions | eval_benchmark.py:176 |
-| `attack_memory_enabled` | bool | `true` | AttackMemoryStore in the exploit loop | `scripts/runner_impl.py` (`_load_attack_memory_settings` + store wiring) |
-| `attack_memory_max_context_chars` | int | `6000` | Attack-memory advisory size | `scripts/runner_impl.py`, `tools/exploit_agent/context.py` |
-| `experience_min_samples` | int | `3` | ExperienceStore soundness gate | agent_loop.py (legacy), `scripts/runner_impl.py`, `tools/skill_feedback.py` |
+| `attack_memory_enabled` | bool | `true` | AttackMemoryStore in the exploit loop | `tools/exploit_agent/runner/_impl.py` (`_load_attack_memory_settings` + store wiring) |
+| `attack_memory_max_context_chars` | int | `6000` | Attack-memory advisory size | `tools/exploit_agent/runner/_impl.py`, `tools/exploit_agent/context.py` |
+| `experience_min_samples` | int | `3` | ExperienceStore soundness gate | agent_loop.py (legacy), `tools/exploit_agent/runner/_impl.py`, `tools/skill_feedback.py` |
 | `experience_time_decay_days` | float | `90` | Experience decay (≤0 disables) | agent_loop.py:193, skill_feedback.py:128 |
 
 ### `outcome_judgment:` (config.yaml:354-365) — evidence-grounded verdicts
@@ -458,21 +458,23 @@ Advisory-only, never touches the target. Lab build ON so the feed is live out-of
 ### `witness:` (config.yaml:187-194) — advisory audit-stream watcher (agent-on-agent safety)
 
 Library default OFF (conservative for downstream re-use); the checked-in `config.yaml` flips it ON
-for the lab runtime. **The witness agent is NOT started by the run lifecycle** — no production
-code instantiates `WitnessAgent` when a run launches, so `enabled: true` alone does nothing. To
-use it, start it manually against the audit trails (`python -m tools.swarm.agents.witness_agent`,
-see the module's `demo()`), and it polls `exploit_audit.jsonl`/`activity.jsonl`, flagging anomalies
-(allowlist breach, PoC escape, permission escalation, prompt-injection pattern, DoS drift) to the
-witness log + event broker. **Detection/auditing only — it never blocks, modifies, or kills a
-run.** The WebUI reads the log via `GET /api/v1/runs/{run_id}/witness`
+for the lab runtime. **Wiring:** when `enabled` is true, the transport-neutral run lifecycle
+(`tools/run_service/execute.py`, serving BOTH the CLI and API transports) spawns a per-run
+`WitnessAgent` side task that polls the run's audit trails (`reports/<run_id>/activity.jsonl`,
+plus the per-attempt `exploit_audit.jsonl` registered from the session result at teardown) and
+flags anomalies (allowlist breach, PoC escape, permission escalation, prompt-injection pattern,
+DoS drift) to `log_path` (process-global) and, when `escalate_to_event_broker` is true, as
+`witness_flag` events through the transport's event sink (WS/SSE). **Detection/auditing only —
+it never blocks, modifies, or kills a run, and its failure never propagates into the run's
+result path.** The WebUI reads the log via `GET /api/v1/runs/{run_id}/witness`
 (`tools/api/routes/runs.py`), which 404s when the log file does not exist.
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `enabled` | bool | `false` (schema) / `true` (config.yaml lab) | Master switch, read by `WitnessConfig.from_config` when an agent instance is created | `tools/swarm/agents/witness_agent.py` (manual launch / tests) |
+| `enabled` | bool | `false` (schema) / `true` (config.yaml lab) | Master switch — gates the per-run witness side task | `tools/run_service/execute.py` (`_start_witness`), `tools/swarm/agents/witness_agent.py` |
 | `log_path` | str | `reports/witness.jsonl` | Witness log (process-global, not per-run) | witness_agent.py; `tools/api/routes/runs.py` (`GET /runs/{id}/witness`) |
-| `poll_interval_seconds` | int | `5` | Poll interval | witness_agent.py |
-| `escalate_to_event_broker` | bool | `true` | Escalate flags to WS/event broker | witness_agent.py |
+| `poll_interval_seconds` | int | `5` | Poll interval | witness_agent.py; execute.py poll task |
+| `escalate_to_event_broker` | bool | `true` | Emit `witness_flag` events through the event sink | witness_agent.py; execute.py |
 | `max_flags_per_signal_per_minute` | int | `10` | Per-signal rate cap | witness_agent.py |
 | `dos_failure_window_seconds` | float | `60.0` | DoS drift window | witness_agent.py |
 | `dos_failure_threshold` | int | `8` | DoS drift threshold | witness_agent.py |
@@ -540,7 +542,7 @@ Lab build `enabled: true`. The Caldera server is target-side — operator adds i
 Toggles + budgets for the task graph, capability discovery, AI-facing state tools, planner hints, decision logging, reflection, and retry/repair budgets. Defaults preserve today's behavior. `config_cli.load_config` merges NO defaults, so every consumer reads defensively via `cfg.get("agent", {}).get(key, default)`.
 
 **Wiring status (verify before claiming behavior):** only `capability_discovery_enabled` has a
-live runtime consumer today (`scripts/runner_impl.py` reads it to toggle the capability-guidance
+live runtime consumer today (`tools/exploit_agent/runner/_impl.py` reads it to toggle the capability-guidance
 prompt block; `tools/exploit_agent/prompt.py:build_capability_guidance`). The remaining keys are
 validated/whitelisted by the schema but are **not currently consumed at runtime** — they are
 forward-compat toggles, not active gates. `reflection` in the loop is gated by
@@ -550,7 +552,7 @@ forward-compat toggles, not active gates. `reflection` in the loop is gated by
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
 | `task_graph_enabled` | bool | `true` | Validated only — no runtime consumer yet (task graph is always available) | — |
-| `capability_discovery_enabled` | bool | `true` | Gate the capability-discovery prompt block | `scripts/runner_impl.py`, `tools/exploit_agent/prompt.py` |
+| `capability_discovery_enabled` | bool | `true` | Gate the capability-discovery prompt block | `tools/exploit_agent/runner/_impl.py`, `tools/exploit_agent/prompt.py` |
 | `state_tools_enabled` | bool | `true` | Validated only — assessment-state MCP tools always register | — |
 | `planner_hints_enabled` | bool | `true` | Validated only — planner hints come from prompt assembly, not this key | — |
 | `decision_log_enabled` | bool | `true` | Validated only — `tools/decision_log.py` writes unconditionally when called | — |

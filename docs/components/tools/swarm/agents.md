@@ -169,15 +169,21 @@ Tests: `tests/test_swarm.py`, `tests/test_swarm_history_bound.py`, `tests/test_r
 
 Advisory audit-stream watcher running as side task, not routed by orchestrator (docstring `witness_agent.py:15`, class note `:334`).
 
-**Wiring status: NOT started by the run lifecycle.** No production code
-instantiates `WitnessAgent` — the orchestrator, `run_service`, and `main.py`
-never launch it. `witness.enabled: true` in config.yaml only configures it; to
-actually observe a run, start the watcher manually
-(`python -m tools.swarm.agents.witness_agent`, or `WitnessAgent(...)` in a
-script/tests). It is **detection/auditing only**: it flags anomalies to the
-witness log + event broker; it never blocks, modifies, or kills a run. The
-WebUI surfaces flags via `GET /api/v1/runs/{run_id}/witness`, which reads the
-process-global log file (404 when absent).
+**Wiring status: started by the run lifecycle when `witness.enabled` is true.**
+`tools/run_service/execute.py` (the transport-neutral lifecycle serving BOTH
+the CLI and API transports) spawns a per-run WitnessAgent side task
+(`Callables.witness_agent_factory` seam): it polls
+`reports/<run_id>/activity.jsonl`, registers the per-attempt
+`exploit_audit.jsonl` (session result `audit_path`) at teardown for a final
+scan, and writes flags to the witness log +, when
+`escalate_to_event_broker` is true, `witness_flag` events through the
+transport's event sink. Not routed by the orchestrator (docstring
+`witness_agent.py:15`, class note `:334`). It is **detection/auditing only**:
+it flags anomalies; it never blocks, modifies, or kills a run, and its
+failure never propagates into the run's result path. The WebUI surfaces
+flags via `GET /api/v1/runs/{run_id}/witness`, which reads the process-global
+log file (404 when absent). Standalone use: `python -m
+tools.swarm.agents.witness_agent`.
 
 | Symbol | Line | Description |
 |---|---|---|

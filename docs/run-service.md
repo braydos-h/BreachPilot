@@ -368,7 +368,7 @@ The run service sits on top of the Flow A exploit stack (see `CLAUDE.md` and
    - opens the MCP exploit session via `open_exploit_mcp_session` (HTTP
      transport, `mcp.http_port` default 8001) (`exploit_session.py:186-196`),
    - attaches the swarm bridge if enabled (`exploit_session.py:202-206`),
-   - runs the agent loop `run_exploit_agent` (`scripts/runner_impl.py (run_exploit_agent)`)
+   - runs the agent loop `run_exploit_agent` (`tools/exploit_agent/runner/_impl.py (run_exploit_agent)`)
      with the model client, goal, exploit settings, and the `event_sink`.
 2. The loop emits `assistant` / `tool_request` / `tool_start` / `tool_result`
    / `phase` events through `event_sink.emit` (`loop.py:68-73, 943, 1050,

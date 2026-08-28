@@ -24,6 +24,7 @@ import os
 from typing import Any
 
 from tools.attack_modules.base import AttackModule, ModuleContext
+from tools.attack_modules.modules.ics.bacnet import _WRITE_BLOCKED_NOTE
 
 
 def _ics_write_allowed() -> bool:
@@ -423,5 +424,3 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 '''
-
-

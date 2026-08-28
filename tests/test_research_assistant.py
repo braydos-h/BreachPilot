@@ -429,7 +429,7 @@ async def test_explicit_loop_consultation_never_reaches_mcp(tmp_path: Path) -> N
     }
 
     with patch(
-        "tools.exploit_agent.loop.ResearchAssistant",
+        "tools.exploit_agent.ResearchAssistant",
         return_value=fake_assistant,
     ):
         result = await run_exploit_agent(
@@ -510,11 +510,11 @@ async def test_loop_automatically_consults_for_new_service_and_cve(
 
     with (
         patch(
-            "tools.exploit_agent.loop.ResearchAssistant",
+            "tools.exploit_agent.ResearchAssistant",
             return_value=fake_assistant,
         ),
         patch(
-            "tools.exploit_agent.loop.parse_service_banners",
+            "tools.exploit_agent.parse_service_banners",
             return_value=banners,
         ),
     ):
