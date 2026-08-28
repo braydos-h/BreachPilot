@@ -109,6 +109,17 @@ def register_assessment_state_tools(mcp: Any, *, ctx: ToolContext) -> None:
     audit_tool = ctx.audit_tool
     require_allowlist = ctx.require_allowlist
 
+    # §16/§23: agent.* gates. Defaults preserve today's behavior — the tools
+    # register when the agent block (or the keys) are absent, because
+    # config_cli.load_config merges NO defaults, so read defensively.
+    # state_tools_enabled gates the whole family; task_graph_enabled gates
+    # only the plan-mutating update_task tool.
+    _agent_cfg = (config or {}).get("agent") or {}
+    # capability_discovery_enabled gates the two read-only discovery tools.
+    _cap_discovery = bool(_agent_cfg.get("capability_discovery_enabled", True))
+    if not bool(_agent_cfg.get("state_tools_enabled", True)):
+        return
+
     @mcp.tool()
     @require_allowlist()
     def get_assessment_state(target_ip: str) -> str:
@@ -124,116 +135,117 @@ def register_assessment_state_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
     @mcp.tool()
     @audit_tool
-    def query_capabilities(scope: str = "modules", service: str = "") -> str:
-        """Discover available capabilities without touching the target. scope=modules lists all registered attack modules via capability_record() (filter by service substring against module.target_services when service is set). scope=tools lists registered MCP tool names. scope=skills best-effort lists runtime skills from the skill registry. Advisory only -- never executes anything. Returns a CAPABILITIES: block."""
-        scope_lc = (scope or "modules").strip().lower()
-        if scope_lc == "modules":
-            from tools.attack_modules import list_modules
+    if _cap_discovery:
+        def query_capabilities(scope: str = "modules", service: str = "") -> str:
+            """Discover available capabilities without touching the target. scope=modules lists all registered attack modules via capability_record() (filter by service substring against module.target_services when service is set). scope=tools lists registered MCP tool names. scope=skills best-effort lists runtime skills from the skill registry. Advisory only -- never executes anything. Returns a CAPABILITIES: block."""
+            scope_lc = (scope or "modules").strip().lower()
+            if scope_lc == "modules":
+                from tools.attack_modules import list_modules
 
-            svc_filter = (service or "").strip().lower()
-            lines = ["CAPABILITIES: scope=modules"]
-            count = 0
-            for mod in list_modules():
-                if svc_filter and svc_filter not in {s.lower() for s in mod.target_services}:
-                    continue
+                svc_filter = (service or "").strip().lower()
+                lines = ["CAPABILITIES: scope=modules"]
+                count = 0
+                for mod in list_modules():
+                    if svc_filter and svc_filter not in {s.lower() for s in mod.target_services}:
+                        continue
+                    rec = mod.capability_record()
+                    req = ",".join(rec.get("requires", [])) or "-"
+                    prod = ",".join(rec.get("produces", [])) or "-"
+                    lines.append(
+                        f"- {rec['name']} | phase={rec.get('phase_hint', '') or '?'} "
+                        f"cost={rec.get('cost', '')} ro={rec.get('read_only', False)} "
+                        f"requires={req} produces={prod}"
+                    )
+                    count += 1
+                if svc_filter and count == 0:
+                    lines.append(f"(no modules target service {service!r})")
+                lines.append(f"TOTAL: {count}")
+                return "\n".join(lines)
+            if scope_lc == "tools":
+                names = _registered_tool_names(mcp)
+                lines = ["CAPABILITIES: scope=tools"]
+                if names:
+                    lines.append(f"COUNT: {len(names)}")
+                    for n in names:
+                        lines.append(f"- {n}")
+                else:
+                    lines.append(
+                        "NOTE: tools scope lists registered MCP tool names; in-process registry not introspectable here."
+                    )
+                return "\n".join(lines)
+            if scope_lc == "skills":
+                lines = ["CAPABILITIES: scope=skills"]
+                try:
+                    from tools.skill_registry_cache import get_registry
+
+                    registry = get_registry({"skills": _skills_config(config)}, base_dir=Path.cwd())
+                    skills = registry.list_skills()
+                    lines.append(f"COUNT: {len(skills)}")
+                    for skill in skills[:50]:
+                        tags = ",".join(skill.metadata.tags[:6]) or "-"
+                        desc = _truncate_text(skill.metadata.description, 120).replace("\n", " ")
+                        lines.append(f"- {skill.name} | tags={tags} | {desc}")
+                    if registry.errors:
+                        lines.append(f"WARNINGS: {len(registry.errors)} skill file(s) failed to load.")
+                except _EXC_GROUP_CATCH as exc:  # noqa: BLE001 -- skills listing is best-effort
+                    _log_nested_exceptions(exc)
+                    lines.append(f"NOTE: skill registry unavailable: {exc}")
+                return "\n".join(lines)
+            return f"BLOCKED: unknown scope {scope!r} (use modules|tools|skills)."
+
+        @mcp.tool()
+        @audit_tool
+        def get_capability_details(name: str, scope: str = "modules") -> str:
+            """Get the full capability record for one named module or skill, plus (for modules) an applicability explanation against a minimal empty-services context so the model can see why it would/wouldn't rank. Advisory only. Returns a CAPABILITY_DETAILS: block."""
+            scope_lc = (scope or "modules").strip().lower()
+            if scope_lc == "modules":
+                mod = get_module(name)
+                if mod is None:
+                    return f"CAPABILITY_DETAILS: module not found: {name!r}"
+                from tools.attack_modules import ModuleContext
+
                 rec = mod.capability_record()
-                req = ",".join(rec.get("requires", [])) or "-"
-                prod = ",".join(rec.get("produces", [])) or "-"
-                lines.append(
-                    f"- {rec['name']} | phase={rec.get('phase_hint', '') or '?'} "
-                    f"cost={rec.get('cost', '')} ro={rec.get('read_only', False)} "
-                    f"requires={req} produces={prod}"
-                )
-                count += 1
-            if svc_filter and count == 0:
-                lines.append(f"(no modules target service {service!r})")
-            lines.append(f"TOTAL: {count}")
-            return "\n".join(lines)
-        if scope_lc == "tools":
-            names = _registered_tool_names(mcp)
-            lines = ["CAPABILITIES: scope=tools"]
-            if names:
-                lines.append(f"COUNT: {len(names)}")
-                for n in names:
-                    lines.append(f"- {n}")
-            else:
-                lines.append(
-                    "NOTE: tools scope lists registered MCP tool names; in-process registry not introspectable here."
-                )
-            return "\n".join(lines)
-        if scope_lc == "skills":
-            lines = ["CAPABILITIES: scope=skills"]
-            try:
-                from tools.skill_registry_cache import get_registry
+                ctx_min = ModuleContext(target_ip="")
+                report = mod.applicability_explain(ctx_min)
+                lines = ["CAPABILITY_DETAILS: scope=modules"]
+                for k, v in rec.items():
+                    lines.append(f"{k.upper()}: {v}")
+                lines.append(f"APPLICABILITY_SCORE: {report.score}")
+                if report.reasons:
+                    lines.append("REASONS:")
+                    for r in report.reasons:
+                        lines.append(f"  - {r}")
+                if report.penalties:
+                    lines.append("PENALTIES:")
+                    for p in report.penalties:
+                        lines.append(f"  - {p}")
+                return "\n".join(lines)
+            if scope_lc == "skills":
+                try:
+                    from tools.skill_registry_cache import get_registry
 
-                registry = get_registry({"skills": _skills_config(config)}, base_dir=Path.cwd())
-                skills = registry.list_skills()
-                lines.append(f"COUNT: {len(skills)}")
-                for skill in skills[:50]:
-                    tags = ",".join(skill.metadata.tags[:6]) or "-"
-                    desc = _truncate_text(skill.metadata.description, 120).replace("\n", " ")
-                    lines.append(f"- {skill.name} | tags={tags} | {desc}")
-                if registry.errors:
-                    lines.append(f"WARNINGS: {len(registry.errors)} skill file(s) failed to load.")
-            except _EXC_GROUP_CATCH as exc:  # noqa: BLE001 -- skills listing is best-effort
-                _log_nested_exceptions(exc)
-                lines.append(f"NOTE: skill registry unavailable: {exc}")
-            return "\n".join(lines)
-        return f"BLOCKED: unknown scope {scope!r} (use modules|tools|skills)."
+                    registry = get_registry({"skills": _skills_config(config)}, base_dir=Path.cwd())
+                    skill = registry.get(name)
+                except Exception as exc:  # noqa: BLE001 -- best-effort lookup
+                    return f"CAPABILITY_DETAILS: skill registry unavailable: {exc}"
+                if skill is None:
+                    return f"CAPABILITY_DETAILS: skill not found: {name!r}"
+                m = skill.metadata
+                lines = ["CAPABILITY_DETAILS: scope=skills"]
+                lines.append(f"NAME: {skill.name}")
+                lines.append(f"DESCRIPTION: {_truncate_text(m.description, 300)}")
+                lines.append(f"DOMAIN: {m.domain} SUBDOMAIN: {m.subdomain}")
+                lines.append(f"TAGS: {', '.join(m.tags)}")
+                lines.append(f"VERSION: {m.version} MAYBE: {m.maybe}")
+                if m.nist_csf:
+                    lines.append(f"NIST_CSF: {', '.join(m.nist_csf)}")
+                if m.mitre_attack:
+                    lines.append(f"MITRE_ATTACK: {', '.join(m.mitre_attack)}")
+                lines.append(f"PATH: {m.path}")
+                return "\n".join(lines)
+            return f"BLOCKED: unknown scope {scope!r} (use modules|skills)."
 
-    @mcp.tool()
-    @audit_tool
-    def get_capability_details(name: str, scope: str = "modules") -> str:
-        """Get the full capability record for one named module or skill, plus (for modules) an applicability explanation against a minimal empty-services context so the model can see why it would/wouldn't rank. Advisory only. Returns a CAPABILITY_DETAILS: block."""
-        scope_lc = (scope or "modules").strip().lower()
-        if scope_lc == "modules":
-            mod = get_module(name)
-            if mod is None:
-                return f"CAPABILITY_DETAILS: module not found: {name!r}"
-            from tools.attack_modules import ModuleContext
-
-            rec = mod.capability_record()
-            ctx_min = ModuleContext(target_ip="")
-            report = mod.applicability_explain(ctx_min)
-            lines = ["CAPABILITY_DETAILS: scope=modules"]
-            for k, v in rec.items():
-                lines.append(f"{k.upper()}: {v}")
-            lines.append(f"APPLICABILITY_SCORE: {report.score}")
-            if report.reasons:
-                lines.append("REASONS:")
-                for r in report.reasons:
-                    lines.append(f"  - {r}")
-            if report.penalties:
-                lines.append("PENALTIES:")
-                for p in report.penalties:
-                    lines.append(f"  - {p}")
-            return "\n".join(lines)
-        if scope_lc == "skills":
-            try:
-                from tools.skill_registry_cache import get_registry
-
-                registry = get_registry({"skills": _skills_config(config)}, base_dir=Path.cwd())
-                skill = registry.get(name)
-            except Exception as exc:  # noqa: BLE001 -- best-effort lookup
-                return f"CAPABILITY_DETAILS: skill registry unavailable: {exc}"
-            if skill is None:
-                return f"CAPABILITY_DETAILS: skill not found: {name!r}"
-            m = skill.metadata
-            lines = ["CAPABILITY_DETAILS: scope=skills"]
-            lines.append(f"NAME: {skill.name}")
-            lines.append(f"DESCRIPTION: {_truncate_text(m.description, 300)}")
-            lines.append(f"DOMAIN: {m.domain} SUBDOMAIN: {m.subdomain}")
-            lines.append(f"TAGS: {', '.join(m.tags)}")
-            lines.append(f"VERSION: {m.version} MAYBE: {m.maybe}")
-            if m.nist_csf:
-                lines.append(f"NIST_CSF: {', '.join(m.nist_csf)}")
-            if m.mitre_attack:
-                lines.append(f"MITRE_ATTACK: {', '.join(m.mitre_attack)}")
-            lines.append(f"PATH: {m.path}")
-            return "\n".join(lines)
-        return f"BLOCKED: unknown scope {scope!r} (use modules|skills)."
-
-    @mcp.tool()
+        @mcp.tool()
     @require_allowlist()
     def get_evidence(target_ip: str, limit: int = 25, tool: str = "") -> str:
         """Read recent exploit_audit.jsonl entries for one target and return compact evidence refs (exploit_audit:<target>:<attempt_id> with tool/status/duration only -- raw command/args are never emitted, they may contain secrets). target must be in the allowlist. Returns an EVIDENCE: block."""
@@ -313,6 +325,9 @@ def register_assessment_state_tools(mcp: Any, *, ctx: ToolContext) -> None:
             f"CONFIDENCE: {hyp.confidence:.2f}\n"
             f"STATUS: {hyp.status}"
         )
+
+    if not bool(_agent_cfg.get("task_graph_enabled", True)):
+        return
 
     @mcp.tool()
     @require_allowlist()
