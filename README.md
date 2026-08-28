@@ -7,7 +7,7 @@
 ![LLM](https://img.shields.io/badge/LLM-Ollama%20Cloud%20%7C%20ChatGPT-22c55e?style=flat-square)
 ![MCP](https://img.shields.io/badge/MCP-1.27%2B-f97316?style=flat-square)
 ![Skills](https://img.shields.io/badge/Skills-140%2B-8b5cf6?style=flat-square)
-![MCP Tools](https://img.shields.io/badge/MCP%20Tools-90%2B-ec4899?style=flat-square)
+![MCP Tools](https://img.shields.io/badge/MCP%20Tools-120%2B-ec4899?style=flat-square)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)
 
 <img width="1725" height="912" alt="NetAttackAI WebUI — Mission Control" src="https://github.com/user-attachments/assets/45b6af2f-91e2-4eaf-a4cd-1352dbd42e0c" />
@@ -165,7 +165,7 @@ Categories include network penetration testing, web/API, auth/JWT/OAuth, deseria
 
 Orchestrated via `tools/swarm/orchestrator.py` with shared blackboard, battle log, parallel dispatch, and phase-aware skill hints. See [docs/swarm.md](docs/swarm.md).
 
-### MCP Tool Suite — Approximately 90 Tools Across 27 Families
+### MCP Tool Suite — 120+ Tools Across 27 Families
 
 | Family | Capability |
 |--------|-----------|
@@ -185,7 +185,7 @@ Orchestrated via `tools/swarm/orchestrator.py` with shared blackboard, battle lo
 | `runtime_skills` | `list`, `search`, and `load` skills at runtime |
 | + 13 more | `assessment_state`, `parallel_agents`, `poc_verifier`, `replay_simulator`, `mitre`, `ad`, `operator_connection`, and others |
 
-All tools are registered via `tools/mcp_tools/registry.py` using `@audit_tool` / `@require_allowlist()` decorators and auto-discovered through `collect_tools()` — no manual registration required. See [docs/mcp-tools.md](docs/mcp-tools.md).
+All tools are registered via `tools/mcp_tools/registry.py` using `@audit_tool` / `@require_allowlist()` decorators and auto-discovered through `collect_tools()` (which also fails CI if a tool lacks its audit/allowlist gate) — no manual registration required. See [docs/mcp-tools.md](docs/mcp-tools.md).
 
 ---
 
@@ -279,7 +279,7 @@ Keys live in env or `secr.json` (gitignored). The app does **not** auto-load `.e
 
 ## Configuration
 
-Everything is in **`config.yaml`** — validated against `tools/config_manager.py::CONFIG_SCHEMA`.
+Everything is in **`config.yaml`** — validated against `tools/config/schema.py::CONFIG_SCHEMA` (re-exported by the `tools/config_manager.py` compat shim).
 
 For day-to-day use you do not need to touch it — the WebUI **System → Config** editor and **System → Secrets / Models** pages cover it. For the full key reference:
 
@@ -343,8 +343,8 @@ Shipped (enabled in lab build, require their API key to actually run):
 
 ## Quality Assurance
 
-- **~251 test files** in `tests/` — all mock subprocess/network, no live Nmap. Scope gates, safety review, recon, swarm, audit chains, credential storage, Metasploit, and more.
-- **CI on every push/PR** — Python 3.11–3.13 matrix, coverage, CodeQL, dependency-review.
+- **Large mocked pytest suite** (~250 files in `tests/`) — all mock subprocess/network, no live Nmap. Scope gates, safety review, recon, swarm, audit chains, credential storage, Metasploit, and more.
+- **CI on every push/PR** — Python 3.11–3.13 matrix, coverage (`coverage run -m pytest`), CodeQL, dependency-review.
 - **Lint is law** — `ruff check .` (0 errors) + `ruff format --check .` (0 diffs) + `mypy --follow-imports=skip tools` (216 files) — all CI-enforced.
 - **WebUI tested** — `tsc -b && vite build` + `vitest` on every PR.
 
@@ -353,6 +353,12 @@ python -m pytest tests/ -v
 ruff check . && ruff format --check .
 mypy --follow-imports=skip tools
 cd webui && npm ci && npm run build && npm run test
+```
+
+Coverage (matches CI — uses `coverage`, not `pytest-cov`):
+
+```bash
+python -m coverage run -m pytest tests/ && python -m coverage report
 ```
 
 See [docs/testing-guide.md](docs/testing-guide.md).
@@ -369,8 +375,8 @@ operator ──► main.py / app.py (WebUI @ :8765)
                │
                ├─ GoalEngine ──► resolves preset/custom goals, risk-gated (SAFE/GATED/HIGH)
                │
-               ├─ run_exploit_session() ──► tools/exploit_agent/ (loop + policy + prompt)
-               │     90+ MCP tools, 140+ skills, 15 attack module families
+                ├─ run_exploit_session() ──► tools/exploit_agent/ (runner loop + policy + prompt)
+                │     120+ MCP tools, 140+ skills, 15 attack module families
                │
                ├─ SwarmOrchestrator (6 agents, shared blackboard, parallel dispatch)
                │

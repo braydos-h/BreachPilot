@@ -1,7 +1,8 @@
 """AI Target Exploitation Engine — autonomous penetration testing AI.
 
 Usage:
-    python main.py                          # Interactive mode
+    python main.py                          # WebUI daemon (default; opens a browser)
+    python main.py --menu                   # legacy interactive terminal menu
     python main.py --target 10.0.0.50 --mode attack --goal backdoor
     python main.py --target 10.0.0.50 --mode recon --goal initial_access
 """
@@ -340,10 +341,15 @@ def _extract_tool_text(raw: Any) -> str:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="main.py",
-        description="NetAttackAI — autonomous penetration testing AI. Run with no arguments for the interactive menu.",
+        description=(
+            "NetAttackAI — autonomous penetration testing AI. Run with no arguments "
+            "to start the WebUI daemon (http://127.0.0.1:8765); use --menu for the "
+            "legacy interactive terminal menu."
+        ),
         epilog=(
             "examples:\n"
-            "  python main.py                                          interactive menu\n"
+            "  python main.py                                          WebUI daemon + browser (default)\n"
+            "  python main.py --menu                                   legacy interactive terminal menu\n"
             "  python main.py --target 10.0.0.50 --mode attack --goal backdoor\n"
             "  python main.py --target 10.0.0.50 --mode recon --goal initial_access\n"
             "  python main.py --target 10.0.0.50 --ctf --ctf-flag-path /root/flag.txt\n"
