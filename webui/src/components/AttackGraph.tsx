@@ -1,11 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Network } from "lucide-react";
+import { CheckCircle2, Clock, Loader2, Network, Wrench, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useFetchArtifactBlob } from "@/api/hooks";
 import { ApiError } from "@/api/client";
-import type { EnhancedReport, ExploitationChain, TechnicalFinding } from "@/api/types";
+import type {
+  AttackTimelineEntry,
+  EnhancedReport,
+  ExploitationChain,
+  FailureAnalysisEntry,
+  TechnicalFinding,
+} from "@/api/types";
 
 // B2: attack-graph view. Renders exploitation_chains[] from the enhanced
 // report JSON (Flow A writes reports/<run_id>/enhanced/enhanced_report.json).
@@ -86,8 +92,10 @@ export function AttackGraph({ runId, className, ready = true }: AttackGraphProps
 
   const chains = report.exploitation_chains ?? [];
   const findings = report.technical_findings ?? [];
+  const timeline = report.attack_timeline ?? [];
+  const failures = report.failure_analysis ?? [];
 
-  if (chains.length === 0 && findings.length === 0) {
+  if (chains.length === 0 && findings.length === 0 && timeline.length === 0 && failures.length === 0) {
     return (
       <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
         No exploitation chains or findings in this report.
@@ -100,6 +108,12 @@ export function AttackGraph({ runId, className, ready = true }: AttackGraphProps
       <div className="flex flex-wrap items-center gap-3">
         <Badge variant="outline" className="tabular-nums">{chains.length} chains</Badge>
         <Badge variant="outline" className="tabular-nums">{findings.length} findings</Badge>
+        {timeline.length > 0 && (
+          <Badge variant="outline" className="tabular-nums">{timeline.length} timeline events</Badge>
+        )}
+        {failures.length > 0 && (
+          <Badge variant="outline" className="tabular-nums">{failures.length} failure groups</Badge>
+        )}
         {report.report_metadata && (
           <span className="text-xs text-muted-foreground">
             generated: {String(report.report_metadata.generated_at ?? "—")}
@@ -112,6 +126,10 @@ export function AttackGraph({ runId, className, ready = true }: AttackGraphProps
       ))}
 
       {findings.length > 0 && <FindingsTable findings={findings} />}
+
+      {timeline.length > 0 && <TimelineCard entries={timeline} />}
+
+      {failures.length > 0 && <FailurePanel failures={failures} />}
     </div>
   );
 }
@@ -287,4 +305,104 @@ function FindingsTable({ findings }: { findings: TechnicalFinding[] }) {
 
 function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + "…";
+}
+
+// ── Attack timeline ─────────────────────────────────────────────────────────
+
+function timelineIcon(result: string) {
+  const r = result.toLowerCase();
+  if (r.includes("success")) return <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" />;
+  if (r.includes("fail") || r.includes("error")) return <XCircle className="h-3.5 w-3.5 shrink-0 text-red-400" />;
+  return <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
+}
+
+/** Vertical-rail timeline. The markdown report sorts ascending client-side;
+ *  the JSON artifact does not guarantee order, so sort here too. */
+function TimelineCard({ entries }: { entries: AttackTimelineEntry[] }) {
+  const rows = useMemo(
+    () =>
+      [...entries].sort((a, b) =>
+        (a.timestamp ?? "").localeCompare(b.timestamp ?? ""),
+      ),
+    [entries],
+  );
+  return (
+    <Card className="border-border/60">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">Attack Timeline</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ol className="relative space-y-2 border-l pl-4">
+          {rows.map((e, i) => (
+            <li key={i} className="relative flex flex-wrap items-start gap-2 text-xs">
+              <span
+                aria-hidden
+                className="absolute -left-[1.31rem] top-1 h-2 w-2 rounded-full bg-muted-foreground/50"
+              />
+              <span className="shrink-0 font-mono text-muted-foreground tabular-nums">
+                {e.timestamp || "—"}
+              </span>
+              {timelineIcon(e.result ?? "")}
+              <span className="shrink-0 font-mono text-muted-foreground">{e.event_type}</span>
+              <span className="min-w-0 break-words">{e.description}</span>
+              {e.target && <Badge variant="outline" className="font-mono text-[10px]">{e.target}</Badge>}
+              {e.module && <Badge variant="outline" className="font-mono text-[10px]">{e.module}</Badge>}
+            </li>
+          ))}
+        </ol>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Failure analysis ────────────────────────────────────────────────────────
+
+function FailurePanel({ failures }: { failures: FailureAnalysisEntry[] }) {
+  const rows = useMemo(
+    () => [...failures].sort((a, b) => (b.failure_count ?? 0) - (a.failure_count ?? 0)),
+    [failures],
+  );
+  return (
+    <Card className="border-border/60">
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <Wrench className="h-4 w-4" /> Failure Analysis
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {rows.map((f, i) => {
+          const breakdown = Object.entries(f.error_breakdown ?? {});
+          return (
+            <div key={i} className="rounded-md border p-2 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-mono font-medium">{f.operation}</span>
+                <Badge variant="danger" className="tabular-nums text-[10px]">
+                  {f.failure_count} failure{f.failure_count === 1 ? "" : "s"}
+                </Badge>
+              </div>
+              {f.primary_error && (
+                <p className="mt-1 break-words text-muted-foreground">{f.primary_error}</p>
+              )}
+              {breakdown.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {breakdown.map(([err, count]) => (
+                    <Badge key={err} variant="outline" className="max-w-full font-mono text-[10px]" title={err}>
+                      <span className="truncate">{truncate(err, 60)}</span>
+                      <span className="tabular-nums">×{count}</span>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+              {f.mitigation_suggestion && (
+                <p className="mt-1 break-words">
+                  <span className="font-medium">Mitigation: </span>
+                  <span className="text-muted-foreground">{f.mitigation_suggestion}</span>
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
+  );
 }

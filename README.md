@@ -345,6 +345,7 @@ See [docs/plugin-development.md](docs/plugin-development.md).
 - CI on every push and PR: Python 3.11-3.13 matrix, coverage (`coverage run -m pytest`), CodeQL, dependency-review.
 - Lint is law: `ruff check .` (0 errors), `ruff format --check .` (0 diffs), and `mypy --follow-imports=skip tools` (216 files), all CI-enforced.
 - WebUI tested: `tsc -b && vite build` plus `vitest` on every PR.
+- Graded eval loop: `python main.py --eval` scores the agent against the `eval_targets/` oracle targets (declarative flags verified independently — agent claims never decide a flag). `--save-baseline` persists a baseline and `--eval --check-regression` exits non-zero when a target's score drops beyond `eval.regression_tolerance`. A nightly workflow (`.github/workflows/eval.yml`) runs the mocked eval tests on push/PR and the live graded suite on schedule, skipping gracefully without `OLLAMA_API_KEY`.
 
 ```bash
 python -m pytest tests/ -v

@@ -25,7 +25,7 @@ The MCP servers are separate entry points: `python mcp_server.py` (defensive),
 
 Argument parser: `main.parse_args`. Dispatch order in `main()`: API-key bootstrap →
 `--setup-api-keys` exit → daemon (`--demon`/`--daemon`/`--web`) → `--doctor` → `--self-test` →
-`--eval` → `--ctf` → `--demo` → `--skills-list` → `--list-plugins` → `--menu` (terminal menu) →
+`--eval-list` → `--eval` → `--ctf` → `--demo` → `--skills-list` → `--list-plugins` → `--menu` (terminal menu) →
 **no-args default (WebUI daemon, `--web`)** → `async_main`.
 
 ### Run flags
@@ -69,7 +69,6 @@ argument group in `main.parse_args`, so references survive line drift.
 |------|-------------|------|
 | `--doctor` | Run the self-check (Python, nmap, Ollama, config) and exit — `tools.doctor.run_doctor` | operational |
 | `--self-test` | Run the safe localhost smoke test against `127.0.0.1` and exit — `tools.self_test.run_self_test` | operational |
-| `--eval` | Run the eval/benchmark harness against `--target` and write `reports/eval/<run_id>/`; requires `--target`, returns 2 without one (`tools/eval_harness.py`) | operational |
 | `--demo` | Run against a local sandbox target (DVWA via Docker on `127.0.0.1:8081`, synthetic in-process HTTP server as fallback); writes `reports/demo/demo_report.md` (`tools/demo_mode.py`) | operational |
 | `--yes` | Skip the ready-to-begin confirmation gate — use with caution | operational |
 | `--json` | Machine-readable JSON to stdout where supported; also forces plain output | output |
@@ -77,6 +76,15 @@ argument group in `main.parse_args`, so references survive line drift.
 | `--debug` | Verbose debug output; sets `AI_NMAP_DEBUG=1` | output |
 | `--plain` | Disable color output (ANSI) | output |
 | `--menu` | Force the legacy interactive terminal menu even with other args | output |
+
+### Eval & regression flags
+
+| Flag | Description | Group |
+|------|-------------|------|
+| `--eval [TARGET ...]` | With target ids: run the graded eval suite (oracle v2) against those `eval_targets/*.oracle.json` targets. Bare `--eval`: all oracle targets. With `--target <ip>`: the legacy single-target benchmark instead, writing `reports/eval/<run_id>/` (`tools/eval_harness.py`) | eval & regression |
+| `--eval-list` | Print the graded-eval oracle targets (id + flag count) and exit | eval & regression |
+| `--save-baseline` | With `--eval`: persist the graded report as the regression baseline (`eval.baseline_path`, default `reports/eval/baseline.json`) | eval & regression |
+| `--check-regression` | With `--eval`: exit 1 when a target's score drops below the baseline minus `eval.regression_tolerance` (default 0.05); fails closed on a missing baseline | eval & regression |
 
 ### API keys / config
 
@@ -187,7 +195,7 @@ Exit codes: 0 success, 1 error (including scope/risk blocks that set the task to
 |------|---------|--------|
 | 0 | Success / clean exit | throughout |
 | 1 | Run failure, invalid config/target, aborted session, setup-only path | `main.main` / `async_main` error paths; `cli.py` errors |
-| 2 | Daemon flag conflicts; non-loopback `--api-host`; `--eval` without `--target` | `main._run_daemon`; `tools/eval_harness.py` |
+| 2 | Daemon flag conflicts; non-loopback `--api-host`; `--save-baseline`/`--check-regression` without `--eval` | `main._run_daemon`; `tools/eval_harness.py` |
 | 130 | `KeyboardInterrupt` | `main.main`; `cli.py` |
 
 ## Example Workflows
@@ -219,6 +227,11 @@ python main.py --doctor
 python main.py --self-test
 python main.py --eval --target 10.0.0.50
 
+# Graded eval suite (oracle v2)
+python main.py --eval                # all eval_targets/ oracles, graded report
+python main.py --eval dvwa juice_shop --save-baseline
+python main.py --eval --check-regression   # exit 1 on score regression
+
 # Demo against a local sandbox (Docker DVWA or synthetic server)
 python main.py --demo
 
@@ -236,6 +249,7 @@ python cli.py run-task; python cli.py status; python cli.py list-findings
 | `EXPLOIT_TARGET` | Target IP lock for the exploit MCP server's terminal tool (`tools/mcp_tools/terminal.py:31`) | `tools/mcp_shared.py` |
 | `EXPLOIT_TARGET_IP`, `EXPLOIT_TARGET_DOMAIN` | Resolved IP / original domain of the target | AGENTS.md rule 6 |
 | `EXPLOIT_DISCOVERED_TARGETS` | Comma-separated discovered targets unioned into the allowlist matcher | `tools/mcp_shared.py:528-555` |
+| `EXPLOIT_ALLOWED_TARGETS` | Comma-separated operator/CI override unioned into the allowlist (set authorized targets without editing `config.yaml`; used by the nightly eval workflow) | `tools/kernel/allowlist.py` |
 | `EXPLOIT_WORKSPACE` | Workspace root (e.g. `.kev_catalog.json` path) | `tools/cve_lookup.py:171` |
 
 ### API keys

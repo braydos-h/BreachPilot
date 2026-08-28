@@ -536,13 +536,37 @@ export interface TechnicalFinding {
   [key: string]: unknown;
 }
 
+/** Mirrors tools/enhanced_reporting.py::AttackTimelineEntry.to_dict(). */
+export interface AttackTimelineEntry {
+  timestamp: string;
+  event_type: string;
+  description: string;
+  target: string;
+  module: string;
+  result: string;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+/** Mirrors tools/enhanced_reporting.py::FailureAnalysis.to_dict().
+ *  recovery_actions is currently never populated by the backend. */
+export interface FailureAnalysisEntry {
+  operation: string;
+  failure_count: number;
+  primary_error: string;
+  error_breakdown?: Record<string, number>;
+  mitigation_suggestion?: string;
+  recovery_actions?: string[];
+  [key: string]: unknown;
+}
+
 export interface EnhancedReport {
   report_metadata?: Record<string, unknown>;
   executive_summary?: string;
-  attack_timeline?: Array<Record<string, unknown>>;
+  attack_timeline?: AttackTimelineEntry[];
   exploitation_chains?: ExploitationChain[];
   technical_findings?: TechnicalFinding[];
-  failure_analysis?: Array<Record<string, unknown>>;
+  failure_analysis?: FailureAnalysisEntry[];
   [key: string]: unknown;
 }
 

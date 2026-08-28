@@ -478,10 +478,33 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     ops.add_argument(
         "--self-test", action="store_true", help="Run a safe localhost smoke test against 127.0.0.1 and exit"
     )
-    ops.add_argument(
+    evalgrp = parser.add_argument_group("eval & regression")
+    evalgrp.add_argument(
         "--eval",
+        nargs="*",
+        default=None,
+        metavar="TARGET",
+        help="Run the graded eval suite (oracle v2) against eval_targets/ — no target ids = all "
+        "targets, or pass specific ids (e.g. --eval dvwa juice_shop). With --target <ip>, runs the "
+        "legacy single-target benchmark instead and writes reports/eval/<run_id>/",
+    )
+    evalgrp.add_argument(
+        "--eval-list",
+        dest="eval_list",
         action="store_true",
-        help="Run the eval/benchmark harness against --target and write reports/eval/<run_id>/",
+        help="List graded-eval oracle targets (id + flag count) and exit",
+    )
+    evalgrp.add_argument(
+        "--save-baseline",
+        dest="save_baseline",
+        action="store_true",
+        help="With --eval: persist the graded report as the regression baseline (eval.baseline_path)",
+    )
+    evalgrp.add_argument(
+        "--check-regression",
+        dest="check_regression",
+        action="store_true",
+        help="With --eval: exit 1 when a target's score drops below the baseline minus eval.regression_tolerance",
     )
 
     ctf = parser.add_argument_group("ctf autopilot")
@@ -1197,6 +1220,10 @@ def main(argv: list[str] | None = None) -> int:
         # (ui.status, ui.error, ui.spinner, etc.) honors them.
         ui.plain = bool(args.plain or args.quiet or args.json)
         raw_argv = argv or sys.argv[1:]
+        # ponytail: --eval is nargs="*" (default None), so a bare "--eval" is an
+        # empty list — falsy. Every gate below that used to truthy-test --eval
+        # now goes through _eval_active instead.
+        _eval_active = getattr(args, "eval", None) is not None or getattr(args, "eval_list", False)
         # ponytail: prompt only in the terminal menu (--menu). The no-args
         # default now launches the WebUI daemon, not the terminal menu, so the
         # interactive key prompt should not fire there. --setup-api-keys still
@@ -1207,7 +1234,7 @@ def main(argv: list[str] | None = None) -> int:
             prompt=interactive_startup
             and not args.doctor
             and not getattr(args, "self_test", False)
-            and not getattr(args, "eval", False),
+            and not _eval_active,
         )
         setup_only = bool(args.setup_api_keys) and not any(
             [
@@ -1218,7 +1245,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.menu,
                 args.doctor,
                 getattr(args, "self_test", False),
-                getattr(args, "eval", False),
+                _eval_active,
                 args.demo,
                 getattr(args, "daemon", False),
                 getattr(args, "web", False),
@@ -1232,8 +1259,8 @@ def main(argv: list[str] | None = None) -> int:
         # proxy. Surfaces the fix (install/clone/install-deps) up front instead
         # of letting the proxy's own RuntimeError fire mid-run. Skipped for
         # --doctor/--self-test/--eval, which intentionally probe a partial state.
-        if not any(
-            getattr(args, flag, False) for flag in ("doctor", "self_test", "eval", "skills_list", "list_plugins")
+        if not _eval_active and not any(
+            getattr(args, flag, False) for flag in ("doctor", "self_test", "skills_list", "list_plugins")
         ):
             rc = _ensure_chatgpt_runtime(args)
             if rc != 0:
@@ -1252,7 +1279,6 @@ def main(argv: list[str] | None = None) -> int:
                 "menu",
                 "doctor",
                 "demo",
-                "eval",
                 "self_test",
                 "skills_list",
                 "list_plugins",
@@ -1260,6 +1286,8 @@ def main(argv: list[str] | None = None) -> int:
             ):
                 if getattr(args, flag, False):
                     _conflicting.append(f"--{flag.replace('_', '-')}")
+            if _eval_active:
+                _conflicting.append("--eval")
             if _conflicting:
                 ui.error(
                     (
@@ -1284,11 +1312,55 @@ def main(argv: list[str] | None = None) -> int:
 
             return asyncio.run(run_self_test(args))
 
-        # --eval: run the eval/benchmark harness against --target and exit.
-        if getattr(args, "eval", False):
-            from tools.eval_harness import run_eval
+        # --eval-list: print the graded-eval oracle targets (id + flag count) and exit.
+        if getattr(args, "eval_list", False):
+            import json as _json
 
-            return asyncio.run(run_eval(args))
+            for oracle_path in sorted(Path("eval_targets").glob("*.oracle.json")):
+                target_id = oracle_path.name.removesuffix(".oracle.json")
+                flag_count = 0
+                try:
+                    oracle = _json.loads(oracle_path.read_text(encoding="utf-8"))
+                    target_id = str(oracle.get("target_id") or target_id)
+                    flag_count = len(oracle.get("flags") or [])
+                except (OSError, ValueError):
+                    pass
+                print(f"{target_id}\t{flag_count} flags")
+            return 0
+
+        # --save-baseline/--check-regression only compose with --eval.
+        if (getattr(args, "save_baseline", False) or getattr(args, "check_regression", False)) and getattr(
+            args, "eval", None
+        ) is None:
+            ui.error("--save-baseline/--check-regression require --eval.")
+            return 2
+
+        # --eval: with --target, the legacy single-target benchmark harness;
+        # without, the graded eval suite (oracle v2) across all/specified targets.
+        if getattr(args, "eval", None) is not None:
+            if args.target.strip():
+                from tools.eval_harness import run_eval
+
+                return asyncio.run(run_eval(args))
+            from tools.eval_harness import check_regression, run_graded_eval, save_baseline
+
+            config = load_config(args.config)
+            eval_cfg = (config.get("eval", {}) or {}) if isinstance(config, dict) else {}
+            baseline_path = Path(str(eval_cfg.get("baseline_path", "reports/eval/baseline.json")))
+            report = asyncio.run(run_graded_eval(list(args.eval) or None, config))
+            print(report.render_markdown())
+            exit_code = 0
+            if getattr(args, "check_regression", False):
+                passed, messages = check_regression(
+                    report, baseline_path, float(eval_cfg.get("regression_tolerance", 0.05) or 0.05)
+                )
+                for message in messages:
+                    print(message)
+                if not passed:
+                    exit_code = 1
+            if getattr(args, "save_baseline", False):
+                save_baseline(report, baseline_path)
+            return exit_code
 
         # --ctf: CTF autopilot with goal-completion detection.
         if getattr(args, "ctf", False):

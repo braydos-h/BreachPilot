@@ -104,7 +104,7 @@ class SwarmOrchestrator:
 
         # In-memory growth caps. ``_results`` and ``_battle_log`` are only read
         # for their length and a recent tail (see _persist_state's
-        # ``battle_log[-20:]`` and _distill_episode_summary's win-count roll-up),
+        # ``battle_log[-200:]`` and _distill_episode_summary's win-count roll-up),
         # so bounding them reclaims the memory a long multi-cycle campaign would
         # otherwise leak without losing any consumed data. The full per-task
         # outcome is already persisted to swarm_state.json on every event.
@@ -547,7 +547,7 @@ class SwarmOrchestrator:
         """Bound ``_results`` and ``_battle_log`` in memory.
 
         Both lists are read only for their length and a recent tail
-        (``_persist_state`` snapshots ``battle_log[-20:]``;
+        (``_persist_state`` snapshots ``battle_log[-200:]``;
         ``_distill_episode_summary`` rolls up win-counts over the log). The
         full per-task outcome is persisted to ``swarm_state.json`` on every
         event, so dropping old in-memory entries reclaims the memory a long
@@ -581,7 +581,9 @@ class SwarmOrchestrator:
                 # returns ``{__global__: {...}, "<target>": {...}, ...}``.
                 "blackboard": self._blackboard.snapshot(),
                 "blackboard_schema": "namespaced",
-                "battle_log_tail": self._battle_log[-20:],
+                # 200 entries gives the WebUI battle-log card a useful history
+                # while keeping the snapshot bounded (_max_battle_log is 500).
+                "battle_log_tail": self._battle_log[-200:],
                 "results_count": len(self._results),
                 "last_reflection": self._blackboard.get("last_reflection", {}),
                 "strategy_shift": self._blackboard.get("strategy_shift", ""),

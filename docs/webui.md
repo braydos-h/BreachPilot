@@ -439,9 +439,35 @@ delivered before the REST poll caught up (deduped by decision id).
 | Tools | always | Manual tool panel (see below). Empty state if no live MCP session. |
 | Audit | always | Audit chain validity banner + audit records table (first 6 columns). |
 | Swarm | `request.swarm` | `swarm_state.json` viewer. |
-| Campaign | `request.long_session` | `attack_states.json` viewer. |
+| Campaign | `request.long_session` | `attack_states.json` viewer + manual campaign controls (see below). |
 
 ### Manual tool panel
+
+Lists live MCP tool schemas (`GET /runs/{id}/tools`, only meaningful while the
+run is active and the MCP session is open). Operator picks a tool, edits JSON
+arguments in a textarea, and calls `POST /runs/{id}/tools/{name}/calls`. The
+call is policy-gated server-side (`403 tool_denied` if the exploit policy
+rejects it) and serialized through the run's `tool_lock` so it can't race the
+agent loop. Result rendered in a mono `<pre>` with a copy button.
+
+### Manual campaign controls
+
+Active runs whose exploit session exposes the campaign tools get a "Manual
+campaign control" card on the Campaign tab. Start (`start_autonomous_campaign`,
+goal + aggression + confirm dialog — the run's target-IP allowlist lock still
+applies), Step (`run_campaign_step`) and Stop (`stop_campaign`) all go through
+the same tool-call endpoint as the manual tool panel. The campaign id returned
+via `CAMPAIGN_STARTED:` pre-fills the editable id input; the operator can also
+paste an id from an earlier or agent-started campaign. Manually started
+campaigns write `exploit_workspace/campaigns/<id>/state.json` and are tracked
+separately from the `attack_states.json` snapshot the tab displays.
+
+### Swarm state
+
+The Swarm tab renders the namespaced blackboard, the agent table, and the last
+`reflection_agent` output (strategy-shift badge, confidence, what
+worked/failed/patterns). The battle log card is scrollable; the server
+persists the most recent 200 entries per swarm run.
 
 Lists live MCP tool schemas (`GET /runs/{id}/tools`, only meaningful while the
 run is active and the MCP session is open). Operator picks a tool, edits JSON

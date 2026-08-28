@@ -2,7 +2,7 @@
 
 Extracted from ``tools.mcp_shared`` (Phase 2 kernel). The allowlist union
 (``exploit.allowed_targets`` + ``EXPLOIT_TARGET`` / ``_IP`` / ``_DOMAIN`` /
-``DISCOVERED_TARGETS`` env vars) IS the target-IP lock
+``DISCOVERED_TARGETS`` / ``ALLOWED_TARGETS`` env vars) IS the target-IP lock
 (``safety-model.md`` §Exploit Permission Modes). Both flows and every
 target-touching MCP tool import from here; ``tools.mcp_shared`` re-exports
 for backwards compat.
@@ -46,6 +46,14 @@ def _allowed_target_list(config: dict[str, Any] | None) -> list[str]:
     discovered = os.environ.get("EXPLOIT_DISCOVERED_TARGETS", "").strip()
     if discovered:
         for tok in discovered.split(","):
+            tok = tok.strip()
+            if tok and tok not in allowed:
+                allowed.append(tok)
+    # Operator/CI override (read-only): comma-separated extra authorized hosts
+    # set without editing config.yaml (eval harness / CI nightly-eval job).
+    override = os.environ.get("EXPLOIT_ALLOWED_TARGETS", "").strip()
+    if override:
+        for tok in override.split(","):
             tok = tok.strip()
             if tok and tok not in allowed:
                 allowed.append(tok)

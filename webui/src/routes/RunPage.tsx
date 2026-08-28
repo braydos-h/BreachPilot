@@ -63,7 +63,7 @@ export function RunPage() {
   const campaign = useCampaignState(runId ?? null, tab === "campaign", isActiveState(run.data?.state as RunState) ? 3000 : false);
   const witness = useWitness(runId ?? null, tab === "swarm" && capabilities.data?.features.includes("witness") === true);
   const config = useConfig();
-  const tools = useRunTools(runId ?? null, (tab === "tools" || tab === "advisory") && isActiveState(run.data?.state as RunState));
+  const tools = useRunTools(runId ?? null, (tab === "tools" || tab === "advisory" || tab === "campaign") && isActiveState(run.data?.state as RunState));
   const callTool = useCallTool(runId ?? "");
   const fetchArtifact = useFetchArtifactBlob(runId ?? "");
   const artifacts = useArtifacts(runId ?? null);
@@ -233,7 +233,7 @@ export function RunPage() {
                 </TabsContent>
                 <TabsContent value="audit" className="mt-0 space-y-2"><AuditView loading={audit.isLoading} error={audit.error} records={audit.data?.records ?? []} chainValid={audit.data?.chain_valid ?? false} chainReason={audit.data?.chain_reason ?? ""} /></TabsContent>
                 <TabsContent value="swarm" className="mt-0"><SwarmTab loading={swarm.isLoading} error={swarm.error} state={swarm.data?.state} witnessFlags={witness.data?.flags} witnessLoading={witness.isLoading} negotiationRounds={Number((config.data?.swarm as Record<string, unknown> | undefined)?.negotiation_rounds ?? 0) || 0} /></TabsContent>
-                <TabsContent value="campaign" className="mt-0"><CampaignTab loading={campaign.isLoading} error={campaign.error} state={campaign.data?.state} /></TabsContent>
+                <TabsContent value="campaign" className="mt-0"><CampaignTab loading={campaign.isLoading} error={campaign.error} state={campaign.data?.state} runId={runData.id} target={runData.request?.target || ""} runActive={active} tools={(tools.data?.tools ?? []).map((t) => t.function?.name ?? "")} /></TabsContent>
               </div>
             </Tabs>
           </div>

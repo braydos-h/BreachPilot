@@ -149,3 +149,40 @@ def test_is_target_in_allowlist_matches_resolved_ip():
 
     assert is_target_in_allowlist("93.184.216.34", ["93.184.216.34"]) is True
     assert is_target_in_allowlist("93.184.216.34", ["example.com"]) is False
+
+
+# --- EXPLOIT_ALLOWED_TARGETS operator/CI override (read-only env union) ---
+
+
+def test_allowed_target_list_unions_allowed_targets_env(monkeypatch):
+    _clear_env(monkeypatch)
+    monkeypatch.delenv("EXPLOIT_ALLOWED_TARGETS", raising=False)
+    from tools.mcp_shared import _allowed_target_list
+
+    config = {"exploit": {"allowed_targets": ["127.0.0.1"]}}
+    assert _allowed_target_list(config) == ["127.0.0.1"]  # empty by default
+
+    monkeypatch.setenv("EXPLOIT_ALLOWED_TARGETS", "10.0.0.99,10.0.0.100")
+    result = _allowed_target_list(config)
+    assert "10.0.0.99" in result
+    assert "10.0.0.100" in result
+    assert "127.0.0.1" in result
+
+
+def test_allowed_target_list_env_override_deduplicates_and_strips(monkeypatch):
+    _clear_env(monkeypatch)
+    from tools.kernel.allowlist import _allowed_target_list as _kernel_list
+
+    monkeypatch.setenv("EXPLOIT_ALLOWED_TARGETS", " 10.0.0.99 , 10.0.0.99,example.com,")
+    result = _kernel_list({"exploit": {"allowed_targets": ["example.com"]}})
+    assert result.count("10.0.0.99") == 1
+    assert result.count("example.com") == 1
+    assert "example.com" in result
+
+
+def test_allowed_target_list_env_override_empty_tokens_ignored(monkeypatch):
+    _clear_env(monkeypatch)
+    from tools.kernel.allowlist import _allowed_target_list as _kernel_list
+
+    monkeypatch.setenv("EXPLOIT_ALLOWED_TARGETS", ",,")
+    assert _kernel_list({"exploit": {"allowed_targets": ["10.0.0.5"]}}) == ["10.0.0.5"]

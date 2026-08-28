@@ -31,15 +31,24 @@ the MCP tool layer (the allowlist unions the runtime `--target` via
 | Command | What it does |
 | --- | --- |
 | `python main.py --eval --target <ip>` | Run the legacy eval harness against `<ip>`; writes `reports/eval/<run_id>/eval_report.{json,md,html}` (`main.py:403-404`, dispatched at `main.py:867-870`) |
+| `python main.py --eval` | Run the graded eval suite (oracle v2) across ALL `eval_targets/*.oracle.json` targets and print the report |
+| `python main.py --eval dvwa juice_shop` | Grade only the named oracle targets |
+| `python main.py --eval-list` | Print oracle target ids + flag counts, exit 0 (no docker, no agent) |
 | `make eval` | Makefile mirror of `--eval` (Linux/macOS) (`Makefile:28-29`) |
 | `python -m pytest tests/test_eval_harness.py -v` | Hermetic harness tests (mocked MCP session + exploit session; no network) |
 | `python -m pytest tests/test_eval_benchmark.py -v` | Oracle-backed benchmark tests (mock oracle + mock run_session) |
-| `python -m pytest tests/test_eval_cli.py tests/test_eval_config.py -v` | `--eval` flag parsing and `eval:` config-block schema tests |
+| `python -m pytest tests/test_eval_cli.py tests/test_eval_config.py -v` | `--eval` flag parsing/dispatch and `eval:` config-block schema tests |
 | `python main.py --eval --save-baseline` | Graded loop across all oracle targets, then persist `eval.baseline_path` (see *Graded Eval Loop* below) |
 | `python main.py --eval --check-regression` | Graded loop, then fail with a non-zero exit when any target regresses beyond `eval.regression_tolerance` |
 
-`--eval` requires `--target`; it returns exit code 2 without one, 1 on
+Bare `--eval` (no `--target`) runs the graded suite; `--save-baseline` /
+`--check-regression` require `--eval` and exit 2 without it. The legacy
+single-target path requires `--target`; it returns exit code 2 without one, 1 on
 config/MCP failure, 0 on success (`eval_harness.py:362-367, 452-467, 522-524`).
+
+The nightly `.github/workflows/eval.yml` runs the mocked eval unit tests on
+push/PR (no API key needed) and the live graded suite on schedule/manual
+dispatch — skipped gracefully when `OLLAMA_API_KEY` is not configured.
 
 The `eval:` block in `config.yaml` (lines 305-310) gates the harness defaults:
 `enabled`, `output_dir` (default `reports/eval`), `max_rounds` (default 30,

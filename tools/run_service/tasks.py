@@ -47,7 +47,7 @@ ui = get_ui()
 
 
 class TasksMixin:
-    def _find_resume_match(reports_dir: Path, resume_key: str) -> Path | None:
+    def _find_resume_match(self, reports_dir: Path, resume_key: str) -> Path | None:
         """Find a run subdir matching ``resume_key`` (name or session_id)."""
         for child in sorted(reports_dir.iterdir(), reverse=True):
             if not child.is_dir():

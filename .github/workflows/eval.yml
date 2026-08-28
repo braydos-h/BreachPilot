@@ -1,0 +1,92 @@
+name: Eval
+
+# Graded eval loop (oracle v2). The unit-test job is fully mocked and runs on
+# push/PR touching eval code; the live nightly-eval job needs real targets
+# (docker compose suite) + a model backend (Ollama Cloud), so it only runs on
+# schedule or manual dispatch and skips gracefully when OLLAMA_API_KEY is absent.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+  push:
+    paths:
+      - "tools/eval_harness.py"
+      - "tools/eval_checks.py"
+      - "eval_targets/**"
+      - "tests/test_eval_*.py"
+  pull_request:
+    paths:
+      - "tools/eval_harness.py"
+      - "tools/eval_checks.py"
+      - "eval_targets/**"
+      - "tests/test_eval_*.py"
+
+permissions:
+  contents: read
+
+jobs:
+  eval-unit:
+    name: Eval unit tests (mocked, no API key)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+      - name: Install project + dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Run eval unit tests (all mocked)
+        run: python -m pytest tests/test_eval_harness.py tests/test_eval_suite.py tests/test_eval_cli.py -v
+
+  nightly-eval:
+    name: Nightly graded eval (live targets)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    env:
+      OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+      EXPLOIT_ALLOWED_TARGETS: 127.0.0.1
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+      - name: Graceful skip without OLLAMA_API_KEY
+        if: env.OLLAMA_API_KEY == ''
+        run: |
+          echo "OLLAMA_API_KEY not set; skipping live graded eval (graceful skip)."
+          exit 0
+      - name: Install project + dev dependencies
+        if: env.OLLAMA_API_KEY != ''
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Start eval target suite (docker compose)
+        if: env.OLLAMA_API_KEY != ''
+        run: docker compose -f eval_targets/docker-compose.yml up -d
+      - name: Run graded eval suite
+        if: env.OLLAMA_API_KEY != ''
+        run: python main.py --eval --save-baseline
+      - name: Stop eval target suite
+        if: always()
+        run: docker compose -f eval_targets/docker-compose.yml down
+      - name: Upload eval reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-reports
+          path: reports/eval/
+          if-no-files-found: ignore
+          retention-days: 14
