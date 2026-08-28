@@ -96,7 +96,10 @@ class CriticAgent(Agent):
         scope_gate = context.get("scope_gate")
         risk_controller = context.get("risk_controller")
         mission = context.get("mission", {})
-        model_client = context.get("model_client")
+        # §13: prefer the role-routed critic client (models.roles.critic,
+        # resolved by SwarmOrchestrator._ensure_role_clients) over the shared
+        # default client. Unset -> shared client, unchanged behavior.
+        model_client = context.get("critic_model_client") or context.get("model_client")
         blackboard = context.get("blackboard", {})
 
         output: dict[str, Any] = {"decision": "approve", "reasoning": "", "modifications": {}}

@@ -156,6 +156,35 @@ class SwarmOrchestrator:
 
     # ── Public API ──────────────────────────────────────────────────────
 
+    def _ensure_role_clients(self) -> None:
+        """Resolve ``models.roles`` clients once, lazily (capability-upgrade §13).
+
+        Stashes ``critic_model_client`` in the shared context when the critic
+        role maps to a different model than the shared default client, so the
+        CriticAgent's LLM calls route to the configured role model. The
+        mission_config's ``models`` block (merged by the run-service task
+        builder / AgentLoop callers) is the source; resolution is best-effort —
+        any failure leaves the context untouched and the critic keeps using
+        the shared client, exactly the pre-role-routing behavior.
+        """
+        if self._role_clients_resolved:
+            return
+        self._role_clients_resolved = True
+        try:
+            cfg = self._context.get("config")
+            if not isinstance(cfg, dict) or not cfg.get("models"):
+                return
+            from tools.mcp_tools.registry import _get_model_router
+
+            router = _get_model_router(cfg)
+            if router is None:
+                return
+            client = router.get_client_for_role("critic", config=cfg)
+            if client is not None and client is not self._context.get("model_client"):
+                self._context["critic_model_client"] = client
+        except Exception:  # noqa: BLE001 — role routing must never break dispatch
+            pass
+
     def route(self, task: dict[str, Any]) -> AgentResult:
         """Route a single task to the appropriate agent (sequential).
 

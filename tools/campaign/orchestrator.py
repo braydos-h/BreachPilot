@@ -178,9 +178,7 @@ class AutonomousOrchestrator:
         # block -> the class default of 3 is preserved (byte-identical).
         _agent_cfg = (mission_config or {}).get("agent") or {}
         try:
-            self._max_module_failures = max(
-                1, int(_agent_cfg.get("max_retries_per_task", self._max_module_failures))
-            )
+            self._max_module_failures = max(1, int(_agent_cfg.get("max_retries_per_task", self._max_module_failures)))
         except (TypeError, ValueError):
             pass
         self._max_cycles = mission_config.get("max_cycles", 100)
