@@ -18,6 +18,10 @@ from tools.campaign.executor import AttackModuleExecutor
 # Re-export orchestrator
 from tools.campaign.orchestrator import AutonomousOrchestrator
 
+# Re-export recon pipeline (pre-extraction patch seam: tests patch
+# tools.autonomous_orchestrator.ReconPipeline.recon_host)
+from tools.recon.pipeline import ReconPipeline
+
 # Re-export state
 from tools.campaign.state import (
     AggressionLevel,
@@ -37,6 +41,7 @@ __all__ = [
     "AttackTask",
     "AttackModuleExecutor",
     "AutonomousOrchestrator",
+    "ReconPipeline",
     "RetryEngine",
     "TaskStatus",
     "find_modules",

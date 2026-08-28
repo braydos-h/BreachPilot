@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { Activity, BarChart3, BookOpen, Brain, Cpu, Crosshair, Eye, GitBranch, Github, HelpCircle, Home, List, Moon, PlugZap, Settings, ShieldAlert, Sparkles, Sun, Target, Terminal, X } from "lucide-react";
+import { Activity, BarChart3, BookOpen, Brain, Cpu, Crosshair, Eye, GitBranch, Github, HelpCircle, Home, List, Menu, Moon, PlugZap, Settings, ShieldAlert, Sparkles, Sun, Target, Terminal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { PermissionControl } from "@/components/permission/PermissionControl";
 import { useConnections, useModels, useRuns } from "@/api/hooks";
 import { isActiveState, type DecisionListRow } from "@/api/types";
@@ -62,12 +63,108 @@ export function Layout() {
   const activeConnections = connections.data?.active ?? 0;
   const [showHelp, setShowHelp] = useState(false);
   const [permOpen, setPermOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
+
+  // The mobile drawer is navigation chrome — always close it when a link
+  // inside it moves the user to a new route.
+  useEffect(() => {
+    setNavOpen(false);
+  }, [location.pathname]);
 
   const onSignOut = () => {
     clearStoredToken();
     navigate("/");
     window.location.reload();
   };
+
+  // Shared by the desktop <aside> and the mobile drawer — one source of truth
+  // for nav links, active-run rows, and the footer controls.
+  const navItems = (
+    <>
+      {NAV_ITEMS.map((item) => {
+        const Icon = item.icon;
+        const isConnections = item.to === "/connections";
+        return (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.end}
+            className={({ isActive }) =>
+              cn(
+                "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
+                isActive
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+              )
+            }
+          >
+            <Icon className="h-4 w-4" />
+            <span className="flex-1">{item.label}</span>
+            {isConnections && activeConnections > 0 && (
+              <span className="flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-emerald-500/15 px-1.5 text-[10px] font-semibold tabular-nums text-emerald-600 dark:text-emerald-300" aria-label={`${activeConnections} active connections`}>
+                {activeConnections}
+              </span>
+            )}
+          </NavLink>
+        );
+      })}
+      {activeRuns.length > 0 && activeRuns.map((r) => (
+        <NavLink
+          key={r.id}
+          to={`/runs/${r.id}`}
+          className="flex items-center gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-300 transition-colors hover:bg-yellow-500/20"
+        >
+          <Activity className="h-4 w-4 animate-pulse" />
+          <span className="truncate">{r.target || r.id.slice(0, 8)}</span>
+        </NavLink>
+      ))}
+    </>
+  );
+
+  const sidebarFooter = (
+    <div className="space-y-2">
+      <div className="space-y-1.5 px-1">
+        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+          <ShieldAlert className="h-3 w-3" />
+          <span>Permission mode</span>
+          <button
+            type="button"
+            onClick={() => setShowHelp(true)}
+            aria-label="What does Permission mode do?"
+            className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-muted-foreground/50 text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
+          >
+            <HelpCircle className="h-3 w-3" />
+          </button>
+        </div>
+        <PermissionControl mode={mode} onModeChange={setMode} />
+      </div>
+      <div className="flex items-center gap-2 rounded-md px-3 py-1.5 text-xs text-muted-foreground">
+        <span className="relative flex h-2 w-2">
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-muted-foreground/50" />
+        </span>
+        <span>{label} configured</span>
+      </div>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="w-full justify-start gap-2 text-muted-foreground"
+        onClick={onSignOut}
+      >
+        <Cpu className="h-4 w-4" />
+        <span>Clear token</span>
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="w-full justify-start gap-2 text-muted-foreground"
+        onClick={toggleTheme}
+        aria-label="Toggle theme"
+      >
+        {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+        <span>{theme === "dark" ? "Light mode" : "Dark mode"}</span>
+      </Button>
+    </div>
+  );
 
   return (
     <div className="flex min-h-dvh flex-col bg-background text-foreground md:flex-row xl:h-dvh xl:overflow-hidden">
@@ -86,124 +183,29 @@ export function Layout() {
           </div>
         </div>
         <nav className="flex flex-1 flex-col gap-1 p-2" aria-label="Primary">
-          {NAV_ITEMS.map((item) => {
-            const Icon = item.icon;
-            const isConnections = item.to === "/connections";
-            return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) =>
-                  cn(
-                    "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
-                    isActive
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                  )
-                }
-              >
-                <Icon className="h-4 w-4" />
-                <span className="flex-1">{item.label}</span>
-                {isConnections && activeConnections > 0 && (
-                  <span className="flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-emerald-500/15 px-1.5 text-[10px] font-semibold tabular-nums text-emerald-600 dark:text-emerald-300" aria-label={`${activeConnections} active connections`}>
-                    {activeConnections}
-                  </span>
-                )}
-              </NavLink>
-            );
-          })}
-          {activeRuns.length > 0 && activeRuns.map((r) => (
-            <NavLink
-              key={r.id}
-              to={`/runs/${r.id}`}
-              className="flex items-center gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-300 transition-colors hover:bg-yellow-500/20"
-            >
-              <Activity className="h-4 w-4 animate-pulse" />
-              <span className="truncate">{r.target || r.id.slice(0, 8)}</span>
-            </NavLink>
-          ))}
+          {navItems}
         </nav>
-        <div className="space-y-2 border-t p-2">
-          <div className="space-y-1.5 px-1">
-            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-              <ShieldAlert className="h-3 w-3" />
-              <span>Permission mode</span>
-              <button
-                type="button"
-                onClick={() => setShowHelp(true)}
-                aria-label="What does Permission mode do?"
-                className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-muted-foreground/50 text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
-              >
-                <HelpCircle className="h-3 w-3" />
-              </button>
-            </div>
-            <PermissionControl mode={mode} onModeChange={setMode} />
-          </div>
-          <div className="flex items-center gap-2 rounded-md px-3 py-1.5 text-xs text-muted-foreground">
-            <span className="relative flex h-2 w-2">
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-muted-foreground/50" />
-            </span>
-            <span>{label} configured</span>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full justify-start gap-2 text-muted-foreground"
-            onClick={onSignOut}
-          >
-            <Cpu className="h-4 w-4" />
-            <span>Clear token</span>
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full justify-start gap-2 text-muted-foreground"
-            onClick={toggleTheme}
-            aria-label="Toggle theme"
-          >
-            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            <span>{theme === "dark" ? "Light mode" : "Dark mode"}</span>
-          </Button>
-        </div>
+        <div className="space-y-2 border-t p-2">{sidebarFooter}</div>
       </aside>
 
-      <header className="flex items-center justify-between gap-3 border-b bg-card/30 px-4 py-2 md:hidden">
-        <div className="flex items-center gap-2">
-          <Terminal className="h-4 w-4 text-primary" />
-          <span className="text-sm font-semibold">
+      <header className="flex items-center justify-between gap-3 border-b bg-card/30 px-3 py-2 md:hidden">
+        <div className="flex min-w-0 items-center gap-2">
+          <button
+            type="button"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            onClick={() => setNavOpen(true)}
+            aria-label="Open navigation"
+            aria-expanded={navOpen}
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+          <Terminal className="h-4 w-4 shrink-0 text-primary" />
+          <span className="truncate text-sm font-semibold">
             <span className="text-gradient-primary">NetAttack</span>
             <span className="text-foreground">AI</span>
           </span>
         </div>
-        <nav className="flex items-center gap-1" aria-label="Primary mobile">
-          {NAV_ITEMS.map((item) => {
-            const Icon = item.icon;
-            const showBadge = item.to === "/connections" && activeConnections > 0;
-            return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) =>
-                  cn(
-                    "relative flex h-9 w-9 items-center justify-center rounded-md transition-colors",
-                    isActive
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                  )
-                }
-                aria-label={item.label + (showBadge ? ` (${activeConnections} active)` : "")}
-              >
-                <Icon className="h-4 w-4" />
-                {showBadge && (
-                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-emerald-500 px-1 text-[8px] font-bold leading-none text-white">
-                    {activeConnections > 99 ? "99+" : activeConnections}
-                  </span>
-                )}
-              </NavLink>
-            );
-          })}
+        <div className="flex shrink-0 items-center gap-1">
           <button
             type="button"
             className={cn(
@@ -228,16 +230,30 @@ export function Layout() {
           >
             {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </button>
-          <button
-            type="button"
-            className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            onClick={onSignOut}
-            aria-label="Clear token"
-          >
-            <Cpu className="h-4 w-4" />
-          </button>
-        </nav>
+        </div>
       </header>
+
+      <Sheet open={navOpen} onOpenChange={setNavOpen}>
+        <SheetContent side="left" className="w-72 gap-0 p-0">
+          <SheetHeader className="relative flex items-center gap-2 overflow-hidden border-b px-4 py-4">
+            <div className="absolute inset-0 bg-grid-sm bg-radial-fade opacity-40" aria-hidden />
+            <Terminal className="relative h-5 w-5 text-primary" />
+            <div className="relative flex flex-col">
+              <SheetTitle className="text-sm font-semibold leading-tight">
+                <span className="text-gradient-primary">NetAttack</span>
+                <span className="text-foreground">AI</span>
+              </SheetTitle>
+              <SheetDescription className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                v{__APP_VERSION__} beta · Local console
+              </SheetDescription>
+            </div>
+          </SheetHeader>
+          <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-2" aria-label="Primary mobile">
+            {navItems}
+          </nav>
+          <div className="border-t p-2">{sidebarFooter}</div>
+        </SheetContent>
+      </Sheet>
 
       <main className="flex min-h-0 min-w-0 flex-1 flex-col xl:overflow-hidden">
         {mode === "approve" && (
