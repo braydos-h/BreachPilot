@@ -38,9 +38,7 @@ function setup({ activeRuns = [] as Array<{ id: string; state: string; target: s
 
   render(
     <MemoryRouter initialEntries={["/"]}>
-      <Layout>
-        <div data-testid="page">page body</div>
-      </Layout>
+      <Layout />
     </MemoryRouter>,
   );
 }

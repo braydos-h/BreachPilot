@@ -10,7 +10,6 @@ import {
   CAMPAIGN_PHASES,
   CAMPAIGN_PHASE_LABELS,
   aggressionVariant,
-  isKnownPhase,
   phaseIndex,
   type CampaignTimelineEntry,
 } from "@/lib/campaignPhases";
@@ -29,7 +28,7 @@ function reflectionShiftVariant(shift: string): "danger" | "success" | "warn" | 
 }
 
 /** Bullet list shared by the reflection card's three outcome columns. */
-function ReflectionList({ label, items }: { label: string; items: Json[] }) {
+function ReflectionList({ label, items }: { label: string; items: unknown[] }) {
   if (items.length === 0) return null;
   return (
     <div>
@@ -238,7 +237,7 @@ export function SwarmView({ loading, error, state, witnessFlags, witnessLoading,
 
 /** Last reflection_agent output from the blackboard (`state.last_reflection`).
  *  Renders only the known keys — never the raw object. */
-function ReflectionCard({ reflection }: { reflection: Record<string, Json> }) {
+function ReflectionCard({ reflection }: { reflection: Record<string, unknown> }) {
   const shift = str(reflection.recommended_strategy_shift);
   const confidence = num(reflection.confidence);
   const why = str(reflection.why);
