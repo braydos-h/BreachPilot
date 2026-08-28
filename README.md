@@ -12,7 +12,7 @@
 
 <img width="1725" height="912" alt="NetAttackAI WebUI: Mission Control" src="https://github.com/user-attachments/assets/45b6af2f-91e2-4eaf-a4cd-1352dbd42e0c" />
 
-### Autonomous adversary platform for authorized assessments
+### Autonomous tool for authorized hacking
 
 **Plan · Recon · Exploit · Verify · Report: end-to-end, against assets you own.**
 
