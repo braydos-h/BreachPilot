@@ -13,6 +13,12 @@ models:
     glm: glm-5.2:cloud
     minimax: minimax-m3:cloud
   default_alias: glm
+  # Auto-update: on daemon boot each registry alias is bumped to the newest
+  # same-family version listed by the Ollama API (GET /api/tags) — e.g.
+  # glm-5.2:cloud -> glm-5.3:cloud. No pulls (cloud "pull" = pointer only).
+  # models.info labels/context windows stay operator-managed. Set false to
+  # pin the registry. Also on demand: POST /api/v1/models/refresh.
+  auto_update: true
   # Model-role routing: each role maps to an alias; empty = default_alias.
   # Consumed by tools/model_router.py::get_client_for_role.
   roles:
