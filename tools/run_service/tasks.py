@@ -427,6 +427,12 @@ class TasksMixin:
             "adaptive_exploits_enabled": bool(getattr(exploit_settings, "adaptive_exploits_enabled", False)),
             "reflection_every_n_actions": 10,
             "attack_max_rounds": int(exploit_cfg.get("max_rounds", 30)),
+            # §13/§23: the models + agent blocks ride along so the swarm
+            # orchestrator can resolve models.roles.<role> clients (critic role)
+            # and the campaign retry cap (agent.max_retries_per_task) applies
+            # on the autonomous path. Both read defensively downstream.
+            "models": (config or {}).get("models", {}),
+            "agent": (config or {}).get("agent", {}),
         }
         swarm_workspace = reports_dir / "swarm_workspace"
         swarm_workspace.mkdir(parents=True, exist_ok=True)

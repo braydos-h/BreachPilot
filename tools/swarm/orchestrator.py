@@ -87,6 +87,10 @@ class SwarmOrchestrator:
         self._results: list[AgentResult] = []
         self._battle_log: list[dict[str, Any]] = []
         self._lock = threading.RLock()
+        # §13: models.roles resolution runs lazily on first critic dispatch
+        # (the router build is lazy + cached, so deferring keeps construction
+        # cheap and avoids import weight on paths that never dispatch a critic).
+        self._role_clients_resolved = False
 
         # Phase 3: per-(target, phase) milestone events. A dependent task
         # (e.g. a vuln task waiting on recon for the same target) awaits the
@@ -188,6 +192,7 @@ class SwarmOrchestrator:
         # Blackboard.get) and may call an LLM; holding the orchestrator lock
         # across that would serialize all parallel agents.
         if self._critic_enabled and phase not in ("recon", "report"):
+            self._ensure_role_clients()
             critic_cls = self._agent_registry.get("critic", CriticAgent)
             critic = critic_cls()
             outcome = self._negotiate(critic, task, task_id, target, agent)

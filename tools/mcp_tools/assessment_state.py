@@ -133,9 +133,10 @@ def register_assessment_state_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return f"ERROR: aggregate_state failed: {exc}"
         return _format_state_block(snap)
 
-    @mcp.tool()
-    @audit_tool
     if _cap_discovery:
+
+        @mcp.tool()
+        @audit_tool
         def query_capabilities(scope: str = "modules", service: str = "") -> str:
             """Discover available capabilities without touching the target. scope=modules lists all registered attack modules via capability_record() (filter by service substring against module.target_services when service is set). scope=tools lists registered MCP tool names. scope=skills best-effort lists runtime skills from the skill registry. Advisory only -- never executes anything. Returns a CAPABILITIES: block."""
             scope_lc = (scope or "modules").strip().lower()
@@ -245,7 +246,7 @@ def register_assessment_state_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 return "\n".join(lines)
             return f"BLOCKED: unknown scope {scope!r} (use modules|skills)."
 
-        @mcp.tool()
+    @mcp.tool()
     @require_allowlist()
     def get_evidence(target_ip: str, limit: int = 25, tool: str = "") -> str:
         """Read recent exploit_audit.jsonl entries for one target and return compact evidence refs (exploit_audit:<target>:<attempt_id> with tool/status/duration only -- raw command/args are never emitted, they may contain secrets). target must be in the allowlist. Returns an EVIDENCE: block."""

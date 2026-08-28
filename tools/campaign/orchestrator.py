@@ -172,6 +172,17 @@ class AutonomousOrchestrator:
         self._tasks: dict[str, AttackTask] = {}
         self._task_counter = 0
         self._running = True
+        # §23: agent.max_retries_per_task overrides the per-module failure cap
+        # when the merged mission_config carries the agent block (the MCP
+        # campaign call sites and the swarm bridge both merge it now). Absent
+        # block -> the class default of 3 is preserved (byte-identical).
+        _agent_cfg = (mission_config or {}).get("agent") or {}
+        try:
+            self._max_module_failures = max(
+                1, int(_agent_cfg.get("max_retries_per_task", self._max_module_failures))
+            )
+        except (TypeError, ValueError):
+            pass
         self._max_cycles = mission_config.get("max_cycles", 100)
         self._max_aggression = AggressionLevel(mission_config.get("max_aggression", "maximum"))
         # Capability-upgrade (§9): dynamic-composition counters. When a module

@@ -98,6 +98,9 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 "semantic_memory": bool((config or {}).get("orchestrator", {}).get("semantic_memory", False)),
                 "ollama": (config or {}).get("ollama", {}),
                 "embedding_model": (config or {}).get("memory", {}).get("embedding_model", "nomic-embed-text"),
+                # §23: the agent block rides along so the campaign retry cap
+                # (agent.max_retries_per_task) reaches the orchestrator.
+                "agent": (config or {}).get("agent", {}),
                 "target": target_ip,
                 "goal": goal,
                 "aggression": agg.value,
@@ -342,6 +345,9 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 "semantic_memory": bool((config or {}).get("orchestrator", {}).get("semantic_memory", False)),
                 "ollama": (config or {}).get("ollama", {}),
                 "embedding_model": (config or {}).get("memory", {}).get("embedding_model", "nomic-embed-text"),
+                # §23: same agent-block merge as start_autonomous_campaign so a
+                # stepped campaign honors agent.max_retries_per_task too.
+                "agent": (config or {}).get("agent", {}),
                 "target": target_ip,
                 "goal": state_data.get("goal", "initial_access"),
                 "max_cycles": 1,

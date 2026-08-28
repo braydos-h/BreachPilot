@@ -265,13 +265,21 @@ def render_verify_result(result: VerifyResult) -> str:
 
 
 def poc_verification_config(config: dict[str, Any] | None) -> dict[str, Any]:
-    """Resolve the ``poc_verification`` config block with defaults."""
+    """Resolve the ``poc_verification`` config block with defaults.
+
+    ``max_retries`` falls back to ``agent.generated_code_repair_attempts``
+    (capability-upgrade §23) when the ``poc_verification`` block does not set
+    it explicitly, so the documented agent-block budget is honored. An absent
+    agent block preserves the historical default of 3.
+    """
     cfg = (config or {}).get("poc_verification", {}) or {}
+    agent_cfg = (config or {}).get("agent", {}) or {}
+    default_retries = int(agent_cfg.get("generated_code_repair_attempts", 3) or 3)
     return {
         "enabled": bool(cfg.get("enabled", False)),
         "docker_image": str(cfg.get("docker_image", "python:3.11-slim")),
         "compile_timeout_seconds": int(cfg.get("compile_timeout_seconds", 30)),
-        "max_retries": int(cfg.get("max_retries", 3)),
+        "max_retries": int(cfg.get("max_retries", default_retries)),
         "docker_network": str(cfg.get("docker_network", "none")),
         "docker_read_only": bool(cfg.get("docker_read_only", True)),
         "docker_memory": str(cfg.get("docker_memory", "256m")),
