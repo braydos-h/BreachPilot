@@ -24,30 +24,47 @@ def _discover_attack_modules() -> None:
         import tools.attack_modules.modules as _pkg
     except ImportError:
         return
-    for _, modname, ispkg in pkgutil.iter_modules(_pkg.__path__):
-        if ispkg:
-            continue
-        try:
-            mod = importlib.import_module(f"tools.attack_modules.modules.{modname}")
-        except Exception:
-            continue
-        for attr in dir(mod):
+    # Walk subpackages too: category families split into packages (web/, ics/)
+    # must still register their classes — a plain iter_modules loop skips
+    # packages, which silently dropped every module in web/ from the registry
+    # when web.py became the web/ package.
+    todo: list[tuple[str, Any]] = [("", _pkg.__path__)]
+    while todo:
+        prefix, path = todo.pop(0)
+        for _, modname, ispkg in pkgutil.iter_modules(path):
+            full = f"{prefix}{modname}"
+            if ispkg:
+                try:
+                    sub = importlib.import_module(f"tools.attack_modules.modules.{full}")
+                except Exception:
+                    continue
+                todo.append((f"{full}.", sub.__path__))
+                continue
             try:
-                obj = getattr(mod, attr)
+                mod = importlib.import_module(f"tools.attack_modules.modules.{full}")
             except Exception:
                 continue
-            if not isinstance(obj, type):
-                continue
-            try:
-                is_sub = issubclass(obj, AttackModule)
-            except Exception:
-                continue
-            if not is_sub or obj is AttackModule:
-                continue
-            # Only top-level AttackModule subclasses whose name matches the
-            # file's PascalCase export (defense against importing helper bases).
-            if obj not in _MODULE_CLASSES:
-                _MODULE_CLASSES.append(obj)
+            for attr in dir(mod):
+                try:
+                    obj = getattr(mod, attr)
+                except Exception:
+                    continue
+                if not isinstance(obj, type):
+                    continue
+                try:
+                    is_sub = issubclass(obj, AttackModule)
+                except Exception:
+                    continue
+                if not is_sub or obj is AttackModule:
+                    continue
+                # Only top-level AttackModule subclasses whose name matches the
+                # file's PascalCase export (defense against importing helper bases).
+                # Dedupe by NAME too: a family mid-split (ics_iot.py -> ics/)
+                # defines the same modules twice; ``module.name`` is the registry
+                # key (get_module / run_attack_module), so a duplicate would run
+                # twice in every ranked selection.
+                if obj not in _MODULE_CLASSES and all(c.name != obj.name for c in _MODULE_CLASSES):
+                    _MODULE_CLASSES.append(obj)
 
 
 # Populate on import — single source, no manual list.

@@ -17,5 +17,28 @@
     "true_positive": "finding matches an expected OWASP vuln or the admin cred",
     "false_positive": "finding claims a vuln not in expected_findings.vulnerabilities",
     "success_criteria": "admin login OR ≥2 OWASP vulns confirmed"
-  }
+  },
+  "flags": [
+    {
+      "id": "juice_shop_admin_login",
+      "description": "Admin credentials authenticate against the JSON login API",
+      "check": {
+        "type": "http_login",
+        "url": "http://127.0.0.1:3000/rest/user/login",
+        "user": "admin@juice-sh.op",
+        "password": "admin123",
+        "expect_status": 200
+      }
+    },
+    {
+      "id": "juice_shop_product_api_accessible",
+      "description": "Product REST API readable anonymously (API-abuse surface)",
+      "check": {
+        "type": "http_request",
+        "url": "http://127.0.0.1:3000/rest/products/search?q=",
+        "expect_status": 200
+      }
+    }
+  ],
+  "host_owned_when": "any"
 }

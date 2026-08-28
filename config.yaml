@@ -290,6 +290,8 @@ eval:
   max_rounds: 30
   write_markdown: true
   write_html: true
+  regression_tolerance: 0.05
+  baseline_path: reports/eval/baseline.json
 long_session:
   enabled: true
   request_timeout_seconds: 600

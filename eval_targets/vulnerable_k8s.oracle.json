@@ -19,5 +19,35 @@
     "true_positive": "finding matches an expected k8s misconfiguration",
     "false_positive": "finding claims a misconfiguration not in expected_findings.misconfigurations",
     "success_criteria": "container escape OR SA token abuse OR ≥2 misconfigs confirmed"
-  }
+  },
+  "flags": [
+    {
+      "id": "k8s_anonymous_api_access",
+      "description": "Anonymous access allowed on the exposed 8083 endpoint (misconfiguration)",
+      "check": {
+        "type": "http_request",
+        "url": "http://127.0.0.1:8083/",
+        "expect_status": 200
+      }
+    },
+    {
+      "id": "k8s_root_flag_read",
+      "description": "Root flag file read inside the cluster (flag_path /root/flag.txt)",
+      "check": {
+        "type": "shell_command",
+        "exec": "cat /root/flag.txt",
+        "expect_stdout": ""
+      }
+    },
+    {
+      "id": "k8s_container_root",
+      "description": "Privileged container escape yields a root shell (uid 0)",
+      "check": {
+        "type": "shell_command",
+        "exec": "id -u",
+        "expect_stdout": "0"
+      }
+    }
+  ],
+  "host_owned_when": "any"
 }

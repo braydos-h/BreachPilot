@@ -175,13 +175,10 @@ export function streamSSE(options: StreamSseOptions): SseHandle {
   let attempt = 0;
   let activeController: AbortController | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  // Set when the silence watchdog aborted the active connection, so the catch
-  // branch can distinguish "stale, reconnect" from "closed on purpose".
-  let watchdogTripped = false;
-  let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
   // Set when the watchdog (not the external signal) aborted the current
   // attempt, so the catch branch can reconnect instead of returning silently.
   let watchdogTripped = false;
+  let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
 
   const emitStatus = (state: SseConnectionState) => options.onStatus?.(state);
 

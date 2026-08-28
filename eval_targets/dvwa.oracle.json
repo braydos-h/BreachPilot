@@ -17,5 +17,28 @@
     "true_positive": "finding matches an expected web vuln or the admin cred",
     "false_positive": "finding claims a vuln not in expected_findings.vulnerabilities",
     "success_criteria": "admin login OR ≥2 web vulns confirmed"
-  }
+  },
+  "flags": [
+    {
+      "id": "dvwa_admin_login",
+      "description": "Admin credentials grant dashboard access",
+      "check": {
+        "type": "http_login",
+        "url": "http://127.0.0.1:8081/login.php",
+        "user": "admin",
+        "password": "password",
+        "expect_status": 200
+      }
+    },
+    {
+      "id": "dvwa_setup_page_exposed",
+      "description": "Unauthenticated setup page reachable (setup misconfiguration)",
+      "check": {
+        "type": "http_request",
+        "url": "http://127.0.0.1:8081/setup.php",
+        "expect_status": 200
+      }
+    }
+  ],
+  "host_owned_when": "any"
 }

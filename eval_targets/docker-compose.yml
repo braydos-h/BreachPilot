@@ -5,10 +5,10 @@
 # run (the eval harness targets `localhost` / 127.0.0.1).
 #
 # Targets:
-#   - Metasploitable2  (tvisMetasploitable/metasploitable-2)  :  ports 21,22,23,80,445,3306,8080
+#   - Metasploitable2  (tleemcandra/metasploitable2)           :  ports 21,22,23,80,445,3306 (host 2121,2222,2323,8082,4455,3306)
 #   - DVWA             (vulnerables/web-dvwa)                  :  port 8081
 #   - juice-shop       (bkimminich/juice-shop)                 :  port 3000
-#   - vulnerable-k8s   (kinvolk/vulnerable-kubernetes-cluster) :  port 8082 (API on 6443 mapped)
+#   - vulnerable-k8s   (kinvolk/vulnerable-kubernetes-cluster) :  port 8083 (no 6443 mapping — only 8083 is exposed)
 #
 # Usage:
 #   docker compose -f eval_targets/docker-compose.yml up -d

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { SseParser, streamSSE, type SseMessage } from "@/api/sse";
+import { SSE_WATCHDOG_MS, SseParser, streamSSE, type SseMessage } from "@/api/sse";
 
 function messagesFrom(...chunks: string[]): SseMessage[] {
   const parser = new SseParser();
@@ -255,5 +255,160 @@ describe("streamSSE", () => {
     expect(events.length).toBe(callsBeforeAbort);
     // No reconnect after abort.
     expect(statuses.filter((s) => s === "reconnecting")).toHaveLength(0);
+  });
+
+  it("fires onActivity on every read, including keepalive-only chunks that never reach onEvent", async () => {
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(": keepalive 1\n"));
+        controller.enqueue(encoder.encode(": keepalive 2\n"));
+        controller.enqueue(encoder.encode('data: {"seq":1}\n\n'));
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })),
+    );
+
+    let activity = 0;
+    const events: string[] = [];
+    const controller = new AbortController();
+    const handle = streamSSE({
+      url: "http://localhost:8765/events/stream",
+      token: "t",
+      signal: controller.signal,
+      onEvent: (m) => events.push(m.data ?? ""),
+      onActivity: () => {
+        activity += 1;
+      },
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    handle.close();
+
+    // Three enqueued chunks + the final done-read = 4 reads. Keepalives never
+    // reach onEvent, so per-message activity would have counted just one.
+    expect(activity).toBe(4);
+    expect(events).toEqual(['{"seq":1}']);
+  });
+
+  it("watchdog aborts a silent stream and reconnects with a reset backoff ladder", async () => {
+    vi.useFakeTimers();
+    try {
+      const encoder = new TextEncoder();
+      let openCount = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+          openCount += 1;
+          if (openCount === 1) {
+            // A stream that opens and then goes permanently silent. Real fetch
+            // aborts the body stream when the signal fires — mimic that, or
+            // the abort would never reject the pending read in the test.
+            const body = new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(encoder.encode('data: {"seq":1}\n\n'));
+                // keep open, never enqueue again
+                init?.signal?.addEventListener("abort", () => {
+                  controller.error(new DOMException("The operation was aborted.", "AbortError"));
+                });
+              },
+            });
+            return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+          }
+          return sseResponse(['data: {"seq":2}\n\n']);
+        }),
+      );
+
+      const events: string[] = [];
+      const statuses: string[] = [];
+      const controller = new AbortController();
+      const handle = streamSSE({
+        url: "http://localhost:8765/events/stream",
+        token: "t",
+        signal: controller.signal,
+        onEvent: (m) => events.push(m.data ?? ""),
+        onStatus: (s) => statuses.push(s),
+      });
+
+      // Let the first connection open.
+      await vi.advanceTimersByTimeAsync(10);
+      expect(events).toEqual(['{"seq":1}']);
+      expect(statuses).toContain("open");
+
+      // Just under the watchdog: nothing happens.
+      await vi.advanceTimersByTimeAsync(SSE_WATCHDOG_MS - 100);
+      expect(fetchMockCalls()).toBe(1);
+
+      // Crossing the watchdog aborts the silent stream and schedules a
+      // reconnect (2s ladder reset — not an accumulated-attempt backoff).
+      await vi.advanceTimersByTimeAsync(200);
+      expect(statuses).toContain("reconnecting");
+      expect(fetchMockCalls()).toBe(1);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(fetchMockCalls()).toBe(2);
+      expect(events).toContain('{"seq":2}');
+
+      handle.close();
+      controller.abort();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    function fetchMockCalls(): number {
+      return (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.length;
+    }
+  });
+
+  it("watchdog stays quiet while reads keep arriving", async () => {
+    vi.useFakeTimers();
+    try {
+      const encoder = new TextEncoder();
+      // A server that sends a keepalive comment every 30s, forever.
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => {
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              const interval = setInterval(() => {
+                try {
+                  controller.enqueue(encoder.encode(": keepalive\n"));
+                } catch {
+                  clearInterval(interval);
+                }
+              }, 30_000);
+              // The stream never closes; the watchdog is what must not fire.
+            },
+          });
+          return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
+        }),
+      );
+
+      const statuses: string[] = [];
+      const controller = new AbortController();
+      const handle = streamSSE({
+        url: "http://localhost:8765/events/stream",
+        token: "t",
+        signal: controller.signal,
+        onEvent: () => undefined,
+        onStatus: (s) => statuses.push(s),
+      });
+
+      // Six simulated minutes of keepalives — far past the 90s watchdog.
+      await vi.advanceTimersByTimeAsync(10);
+      for (let i = 0; i < 12; i += 1) {
+        await vi.advanceTimersByTimeAsync(30_000);
+      }
+      // Only the initial fetch: no watchdog abort, no reconnect.
+      expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+      expect(statuses).toContain("open");
+      expect(statuses).not.toContain("reconnecting");
+
+      handle.close();
+      controller.abort();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

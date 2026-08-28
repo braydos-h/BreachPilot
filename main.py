@@ -842,9 +842,7 @@ def _auto_update_models(config: dict[str, Any], config_path: str) -> None:
         return
     updates = result.get("updates") or {}
     if updates:
-        ui.status(
-            "Model auto-update: " + ", ".join(f"{a}: {u['old']} -> {u['new']}" for a, u in updates.items())
-        )
+        ui.status("Model auto-update: " + ", ".join(f"{a}: {u['old']} -> {u['new']}" for a, u in updates.items()))
     else:
         ui.status(
             f"Model registry current ({result.get('available_count', 0)} models on {result.get('host', 'Ollama')})."

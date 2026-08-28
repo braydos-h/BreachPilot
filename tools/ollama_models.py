@@ -126,12 +126,22 @@ def refresh_model_registry(
     ``ok=False`` + ``error`` when the catalog is unreachable.
     """
     ollama_cfg = config.get("ollama") if isinstance(config, dict) else None
-    ohost = host or (str(ollama_cfg.get("host")) if isinstance(ollama_cfg, dict) and ollama_cfg.get("host") else "https://api.ollama.com")
+    ohost = host or (
+        str(ollama_cfg.get("host"))
+        if isinstance(ollama_cfg, dict) and ollama_cfg.get("host")
+        else "https://api.ollama.com"
+    )
     registry = dict((config.get("models") or {}).get("registry") or {})
     try:
         available = fetch_available_models(ohost, api_key_env=api_key_env, timeout=timeout)
     except Exception as exc:  # noqa: BLE001 -- any transport failure is a soft error
-        return {"ok": False, "host": ohost, "available_count": 0, "updates": {}, "error": f"{type(exc).__name__}: {exc}"}
+        return {
+            "ok": False,
+            "host": ohost,
+            "available_count": 0,
+            "updates": {},
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
     updates = compute_registry_updates(registry, available)
     result: dict[str, Any] = {

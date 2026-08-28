@@ -17,5 +17,26 @@
     "true_positive": "finding matches an expected service/cred/CVE",
     "false_positive": "finding claims a service/CVE not in expected_findings",
     "success_criteria": "root shell OR flag read OR ≥3 expected creds recovered"
-  }
+  },
+  "flags": [
+    {
+      "id": "ms2_root_flag_read",
+      "description": "Root flag file read via shell (flag_path /root/flag.txt)",
+      "check": {
+        "type": "shell_command",
+        "exec": "cat /root/flag.txt",
+        "expect_stdout": ""
+      }
+    },
+    {
+      "id": "ms2_root_shell",
+      "description": "Root-level shell obtained (uid 0; a msfadmin `id` is not a flag)",
+      "check": {
+        "type": "shell_command",
+        "exec": "id -u",
+        "expect_stdout": "0"
+      }
+    }
+  ],
+  "host_owned_when": "any"
 }

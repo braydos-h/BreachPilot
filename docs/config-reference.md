@@ -314,6 +314,8 @@ Semantic-memory consumer for the autonomous orchestrator. When true, the orchest
 | `output_dir` | str | `reports/eval` | Where `reports/eval/<run_id>/` trees go | eval_harness.py:377 |
 | `max_rounds` | int | `30` | `attack_max_rounds` for an eval run | eval_harness.py:378,421 |
 | `write_markdown` / `write_html` | bool | `true` | Emit markdown/HTML reports | eval_harness.py:379-380 |
+| `regression_tolerance` | float | `0.05` | Graded eval: a target regresses when `score < baseline_score - tolerance` | eval_harness.py `check_regression` |
+| `baseline_path` | str | `reports/eval/baseline.json` | Graded eval: baseline file written by `--save-baseline` / read by `--check-regression` | eval_harness.py `save_baseline` / `check_regression` |
 
 ### `long_session:` (config.yaml:319-326) — multi-hour mode
 
@@ -542,25 +544,23 @@ Lab build `enabled: true`. The Caldera server is target-side — operator adds i
 
 Toggles + budgets for the task graph, capability discovery, AI-facing state tools, planner hints, decision logging, reflection, and retry/repair budgets. Defaults preserve today's behavior. `config_cli.load_config` merges NO defaults, so every consumer reads defensively via `cfg.get("agent", {}).get(key, default)`.
 
-**Wiring status (verify before claiming behavior):** only `capability_discovery_enabled` has a
-live runtime consumer today (`tools/exploit_agent/runner/_impl.py` reads it to toggle the capability-guidance
-prompt block; `tools/exploit_agent/prompt.py:build_capability_guidance`). The remaining keys are
-validated/whitelisted by the schema but are **not currently consumed at runtime** — they are
-forward-compat toggles, not active gates. `reflection` in the loop is gated by
-`reasoning.llm_reflection` / `reasoning.reflection_every_n_actions`; swarm reflection by
-`swarm.reflection_enabled`.
+**Wiring status:** every key below has a live runtime consumer (regression-tested in
+`tests/test_agent_config_wiring.py`). All consumers read defensively — an absent `agent`
+block or key preserves the historical default behavior. `reflection` in the loop is also
+gated by `reasoning.llm_reflection` / `reasoning.reflection_every_n_actions`; swarm
+reflection by `swarm.reflection_enabled`.
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `task_graph_enabled` | bool | `true` | Validated only — no runtime consumer yet (task graph is always available) | — |
-| `capability_discovery_enabled` | bool | `true` | Gate the capability-discovery prompt block | `tools/exploit_agent/runner/_impl.py`, `tools/exploit_agent/prompt.py` |
-| `state_tools_enabled` | bool | `true` | Validated only — assessment-state MCP tools always register | — |
-| `planner_hints_enabled` | bool | `true` | Validated only — planner hints come from prompt assembly, not this key | — |
-| `decision_log_enabled` | bool | `true` | Validated only — `tools/decision_log.py` writes unconditionally when called | — |
-| `reflection_enabled` | bool | `true` | Validated only — use `reasoning.llm_reflection` / `swarm.reflection_enabled` | — |
-| `max_retries_per_task` | int | `2` | Validated only — retry ceilings come from the exploit budgets | — |
-| `max_actions` | int | `0` | Validated only — **no runtime consumer**; the planned "0 = legacy-budget sentinel" semantics are not wired | — |
-| `generated_code_repair_attempts` | int | `3` | Validated only — `tools/poc_verifier.py` uses its own retry loop | — |
+| `task_graph_enabled` | bool | `true` | When false, the plan-mutating `update_task` MCP tool is not registered (read-only state tools remain) | `tools/mcp_tools/assessment_state.py` |
+| `capability_discovery_enabled` | bool | `true` | Gate the capability-discovery prompt block + the `query_capabilities`/`get_capability_details` MCP tools | `tools/exploit_agent/runner/_impl.py`, `tools/exploit_agent/prompt.py`, `tools/mcp_tools/assessment_state.py` |
+| `state_tools_enabled` | bool | `true` | When false, the whole assessment-state MCP tool family is unregistered and its prompt section dropped | `tools/mcp_tools/assessment_state.py`, `tools/exploit_agent/prompt.py` |
+| `planner_hints_enabled` | bool | `true` | When false, the hypothesis-workflow advisory bullets are dropped from the capability-guidance prompt block | `tools/exploit_agent/prompt.py:build_capability_guidance` |
+| `decision_log_enabled` | bool | `true` | When false, the §17 decision-log hook writes nothing to `decision_log.jsonl` | `tools/exploit_agent/runner/_impl.py` |
+| `reflection_enabled` | bool | `true` | When false, inline reflection rounds in the exploit loop are skipped | `tools/exploit_agent/runner/_impl.py` |
+| `max_retries_per_task` | int | `2` | Per-module failure cap for autonomous campaigns (drop a module from the retry set after N failures); absent key falls back to the campaign class default of 3 | `tools/campaign/orchestrator.py` |
+| `max_actions` | int | `0` | Hard cap on agent actions per run; `0` = sentinel (legacy `attack_max_commands` / `max_commands_per_session` budgets apply) | `tools/cli_exploit_settings.py` → `ExploitSettings.effective_max_commands` |
+| `generated_code_repair_attempts` | int | `3` | Default for `poc_verification.max_retries` (explicit `poc_verification.max_retries` still wins) | `tools/poc_verifier.py:poc_verification_config` |
 
 ### `api:` (config.yaml:386-407) — WebUI daemon (`--demon` / `--daemon` / `--web`)
 
@@ -587,6 +587,11 @@ forward-compat toggles, not active gates. `reflection` in the loop is gated by
 Nested under the existing `models` key in `CONFIG_SCHEMA` (`tools/config/schema.py`, `"models"["roles"]`). Mirrored into `config.yaml` under `models.roles`. Validation: `ConfigValidator.validate` warns when a value is not a string or when a non-empty alias is not in `models.registry` (warn-not-reject).
 
 Each role maps to a model alias; **an empty string means "use `models.default_alias`"** so first-run behavior is unchanged. Consumed by `tools/model_router.py::ModelRouter.get_client_for_role`, which falls back to `models.default_alias` when the role's alias is empty.
+
+Live call sites (regression-tested in `tests/test_agent_config_wiring.py`):
+
+- **`critic`** — swarm critic pre-check: `tools/swarm/orchestrator.py::_ensure_role_clients` stashes `critic_model_client` into the shared context (resolved once, lazily, best-effort) and `tools/swarm/agents/critic_agent.py` prefers it over the shared client for its LLM calls.
+- **`critic`** — exploit-loop inline reflection: `tools/exploit_agent/runner/_impl.py` routes `_llm_reflect_inline` through `get_client_for_role("critic", ...)` when a role router is resolvable (falls back to the run's default model).
 
 | Role | Default | Purpose |
 |------|---------|---------|

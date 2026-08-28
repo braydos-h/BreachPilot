@@ -1285,7 +1285,9 @@ async def default_agent_runner(target_id: str, oracle: dict[str, Any], config: d
 
     config_path = Path(str(cfg.get(_CONFIG_PATH_KEY, "config.yaml") or "config.yaml"))
     eval_cfg = cfg.get("eval", {}) or {}
-    workspace_root = Path(str(cfg.get(_WORKSPACE_KEY, ""))) if cfg.get(_WORKSPACE_KEY) else Path("reports/eval/eval_workspace")
+    workspace_root = (
+        Path(str(cfg.get(_WORKSPACE_KEY, ""))) if cfg.get(_WORKSPACE_KEY) else Path("reports/eval/eval_workspace")
+    )
     workspace_root.mkdir(parents=True, exist_ok=True)
     max_rounds = int(eval_cfg.get("max_rounds", 30) or 30)
 
@@ -1311,9 +1313,13 @@ async def default_agent_runner(target_id: str, oracle: dict[str, Any], config: d
         from tools.model_router import _build_model_client, build_model_client_for_provider
 
         if provider == "chatgpt":
-            router.register(model_alias, build_model_client_for_provider(cfg, model_alias, request_timeout_seconds=None))
+            router.register(
+                model_alias, build_model_client_for_provider(cfg, model_alias, request_timeout_seconds=None)
+            )
         else:
-            router.register(model_alias, _build_model_client(model_alias, host=ollama_host, request_timeout_seconds=None))
+            router.register(
+                model_alias, _build_model_client(model_alias, host=ollama_host, request_timeout_seconds=None)
+            )
         model_client = router.get_client(model_alias)
 
     exploit_settings = ExploitSettings(

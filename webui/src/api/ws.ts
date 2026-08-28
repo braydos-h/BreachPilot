@@ -182,6 +182,13 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
   const connectSse = useCallback(
     (id: string) => {
       closeSse();
+      // Cancel any pending WS reconnect timer — the SSE fallback takes over
+      // the stream, and a timer left running would open a new WebSocket on
+      // top of the live SSE connection.
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
       const token = getStoredToken();
       const loc = window.location;
       const controller = new AbortController();
@@ -308,9 +315,15 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
       };
 
       socket.onclose = (event) => {
-        wsRef.current = null;
+        // Only clear the ref if this socket is still the active one: a
+        // watchdog/wake-triggered reconnect may already have opened a
+        // replacement, and clobbering it here would orphan the live socket.
+        if (wsRef.current === socket) {
+          wsRef.current = null;
+        }
         setStreamStatus("closed");
         if (closedByUnmountRef.current) return;
+        if (wsRef.current) return; // a newer socket already owns the stream
         if (event.code === WS_CLOSE_AUTH) {
           setAuthError("Authentication failed. Token rejected by the API.");
           // Shared funnel: clears the token AND signals the token gate, which

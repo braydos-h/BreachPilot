@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import inspect
 import ipaddress
 import json
 from pathlib import Path
@@ -162,8 +163,6 @@ def _shell_via_session(session: Any, command: str, loop: Any, timeout: float) ->
         call_tool = getattr(session, "call_tool", None)
         if call_tool is None:
             return None
-        import inspect
-
         if inspect.iscoroutinefunction(call_tool):
             if loop is None:
                 return None  # async session with no bound loop -> cannot bridge safely

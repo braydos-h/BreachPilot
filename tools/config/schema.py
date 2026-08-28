@@ -455,6 +455,8 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "max_rounds": 30,  # attack_max_rounds for an eval run
         "write_markdown": True,  # emit eval_report.md alongside the JSON
         "write_html": True,  # emit eval_report.html alongside the JSON
+        "regression_tolerance": 0.05,  # graded eval: a target regresses when score < baseline score minus this
+        "baseline_path": "reports/eval/baseline.json",  # graded eval: baseline file written by --save-baseline
     },
     # Long-session mode (opt-in). Absent/false = current behavior; the keys here
     # are the defaults applied when --long-session is passed or enabled: true.
