@@ -335,6 +335,42 @@ async def set_model_provider(request: Request, auth: str = Depends(_require_auth
     return {"status": "ok", "provider": provider}
 
 
+@router.post("/models/refresh")
+async def refresh_models(auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Sync ``models.registry`` to the newest same-family versions on the Ollama API.
+
+    Hits ``ollama.host`` ``GET /api/tags`` off-thread (bearer-auth like the
+    doctor), bumps every alias with a strictly newer same-family version
+    (``glm-5.2:cloud`` -> ``glm-5.3:cloud``), and persists via the validated
+    config-write path. ``503`` when the Ollama API is unreachable;
+    ``400 invalid_provider`` when ``models.provider`` is not ``ollama``.
+    See ``tools/ollama_models.py``.
+    """
+    from tools.api.errors import APIError
+    from tools.config_manager import get_ai_provider
+    from tools.ollama_models import refresh_model_registry
+
+    if get_ai_provider(_CONFIG) != "ollama":
+        raise APIError("invalid_provider", "Model refresh applies to the ollama provider only.", status_code=400)
+    result = await asyncio.to_thread(
+        refresh_model_registry,
+        _CONFIG,
+        config_path=_CONFIG_PATH,
+        persist=False,
+    )
+    if not result.get("ok"):
+        result.pop("available", None)
+        from fastapi import Response
+
+        return Response(content=json.dumps(result), status_code=503, media_type="application/json")
+    updates = result.get("updates") or {}
+    if updates:
+        merged = _apply_config_patch({"models": {"registry": {alias: upd["new"] for alias, upd in updates.items()}}})
+        result["registry"] = merged.get("models", {}).get("registry", {})
+        result["persisted"] = True
+    return result
+
+
 @router.get("/system/info")
 async def get_system_info(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     """Host info: hostname, OS, Python, local IPs, public IP (best-effort).
