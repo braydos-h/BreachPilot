@@ -2,12 +2,6 @@
 
 from __future__ import annotations
 
-<<<<<<< Updated upstream
-=======
-import hashlib
-
-from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
->>>>>>> Stashed changes
 from tools.mcp_tools.registry import *
 
 

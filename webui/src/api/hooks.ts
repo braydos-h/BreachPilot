@@ -8,7 +8,6 @@ import { useCallback, useEffect, useState } from "react";
 import {
   apiFetch,
   ApiError,
-  clearStoredToken,
 } from "@/api/client";
 import type {
   ArtifactListResponse,
@@ -168,9 +167,8 @@ export function usePatchConfig() {
         void qc.invalidateQueries({ queryKey: queryKeys.providers });
       }
     },
-    onError: (error) => {
-      if (error.isAuth) clearStoredToken();
-    },
+    // 401 handling is global now — App.tsx's MutationCache.onError funnels any
+    // mutation 401 through expireSession().
   });
 }
 

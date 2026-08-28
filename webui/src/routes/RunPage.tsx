@@ -190,7 +190,7 @@ export function RunPage() {
   return (
     <div className="flex min-h-0 flex-col gap-2 p-2 xl:h-full xl:flex-1 xl:overflow-hidden">
       <RunCommandHeader run={runData} state={currentState as RunState} active={active} terminal={terminal} transportLabel={transportLabel} eventsStatus={events.status} derived={derived} onCancelRequest={() => setShowCancel(true)} cancelPending={cancel.isPending} onResume={resumeRun} resumePending={resume.isPending} />
-      <RunAttentionBanner authError={events.authError} pendingCount={pendingDecisions.length} active={active} eventsStatus={events.status} />
+      <RunAttentionBanner authError={events.authError} pendingCount={pendingDecisions.length} active={active} eventsStatus={events.status} stale={events.stale} />
       <PhaseTracker derived={derived} runState={currentState as RunState} className="shrink-0 rounded-md border bg-card/40 px-2.5 py-1.5" />
       {(runData.request?.mode === "fast" || runData.preview?.mode === "fast" || (runData as unknown as Record<string, unknown>).mode === "fast") && <FastReconProgress events={events.events} />}
       <div className="flex min-h-0 flex-1 flex-col gap-2 xl:flex-row xl:overflow-hidden">
@@ -204,7 +204,7 @@ export function RunPage() {
             {terminal ? <RunOutcomeCard run={runData} state={currentState as RunState} derived={derived} onShowSummary={gotoSummary} onResume={resumeRun} resumePending={resume.isPending} /> : <RunNowCard derived={derived} active={active} state={currentState as RunState} />}
           </div>
           <div className="flex min-h-0 flex-1 flex-col gap-2 xl:overflow-hidden">
-            <EventViewer events={events.events} decisions={mergedDecisions} runId={runData.id} status={events.status} transport={events.transport} authError={events.authError} dropped={events.dropped} terminal={terminal} className="flex min-h-[280px] flex-col overflow-hidden xl:min-h-0 xl:flex-[1.35] xl:h-full" />
+            <EventViewer events={events.events} decisions={mergedDecisions} runId={runData.id} status={events.status} transport={events.transport} authError={events.authError} stale={events.stale} dropped={events.dropped} terminal={terminal} className="flex min-h-[280px] flex-col overflow-hidden xl:min-h-0 xl:flex-[1.35] xl:h-full" />
             <Tabs value={tab} onValueChange={setTab} className="flex min-h-[200px] flex-col overflow-hidden rounded-md border bg-card/30 xl:min-h-0 xl:flex-1 xl:max-h-[44%]">
               <div className="shrink-0 border-b bg-muted/30">
                 <ScrollArea type="scroll" className="w-full">

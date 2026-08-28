@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { apiFetch, clearStoredToken, expireSession, getStoredToken } from "@/api/client";
+import { apiFetch, expireSession, getStoredToken } from "@/api/client";
 import { queryKeys } from "@/api/hooks";
 import { eventStore } from "@/api/eventStore";
 import { MAX_EVENTS_PER_RUN, appendBounded } from "@/api/eventBuffer";
@@ -71,7 +71,6 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
   // failure counters (a NAT drop is not a WebSocket defect).
   const lastFrameAtRef = useRef<number>(0);
   const statusRef = useRef<WsStatus>("idle");
-  const forceReconnectRef = useRef(false);
 
   const setStreamStatus = useCallback((next: WsStatus) => {
     statusRef.current = next;
@@ -204,10 +203,18 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
           }
         },
         onStatus: (state) => {
-          if (state === "open") setStreamStatus("open");
-          else if (state === "connecting") setStreamStatus("connecting");
+          if (state === "open") {
+            lastFrameAtRef.current = Date.now();
+            setStreamStatus("open");
+          } else if (state === "connecting") setStreamStatus("connecting");
           else if (state === "reconnecting") setStreamStatus("reconnecting");
           else setStreamStatus("closed");
+        },
+        // Transport-level read activity: SSE keepalives are `:` comments the
+        // parser drops, so this — not onEvent — proves the stream is alive.
+        onActivity: () => {
+          lastFrameAtRef.current = Date.now();
+          setStale(false);
         },
         onFatal: (error) => {
           if (error.authError) {
@@ -261,7 +268,7 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
         wsRef.current.close();
         wsRef.current = null;
       }
-      const token = sessionStorage.getItem("netattackai.apiToken.v1") ?? "";
+      const token = getStoredToken();
       const loc = window.location;
       const scheme = loc.protocol === "https:" ? "wss" : "ws";
       const url = `${scheme}://${loc.host}/api/v1/ws/v1/runs/${encodeURIComponent(id)}`;
@@ -278,6 +285,7 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
 
       socket.onopen = () => {
         attemptRef.current = 0;
+        lastFrameAtRef.current = Date.now();
         setStreamStatus("open");
         try {
           socket.send(JSON.stringify({ auth: token, after: lastSeqRef.current }));
@@ -305,7 +313,9 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
         if (closedByUnmountRef.current) return;
         if (event.code === WS_CLOSE_AUTH) {
           setAuthError("Authentication failed. Token rejected by the API.");
-          clearStoredToken();
+          // Shared funnel: clears the token AND signals the token gate, which
+          // a bare clearStoredToken() never re-renders.
+          expireSession("Your session token was rejected by the API.");
           setStreamStatus("error");
           return;
         }
@@ -365,6 +375,7 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
     setAuthError("");
     attemptRef.current = 0;
     wsFailureCountRef.current = 0;
+    lastFrameAtRef.current = Date.now();
 
     let cancelled = false;
 
@@ -390,9 +401,49 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
       })();
     }
 
+    // Silence watchdog. The server heartbeats every 30s while a stream is
+    // open, so a silent-but-"open" socket means the connection died without
+    // a TCP close (laptop sleep, NAT expiry). Force it through the normal
+    // close path, which already handles backoff and the SSE fallback.
+    const watchdog = setInterval(() => {
+      if (closedByUnmountRef.current || !runIdRef.current) return;
+      const silence = Date.now() - lastFrameAtRef.current;
+      setStale(statusRef.current === "open" && silence > STALE_AFTER_MS);
+      if (silence <= WATCHDOG_TIMEOUT_MS) return;
+      if (statusRef.current !== "open") return;
+      lastFrameAtRef.current = Date.now();
+      attemptRef.current = 0;
+      if (wsRef.current) {
+        wsRef.current.close(); // onclose drives the normal reconnect path
+      } else {
+        sseHandleRef.current?.restart();
+      }
+    }, WATCHDOG_TICK_MS);
+
+    // Wake-up paths: a resumed laptop or restored tab would otherwise wait out
+    // the exponential backoff. Give a grace period first so throttled
+    // background timers don't trip an immediate false watchdog.
+    const wake = () => {
+      if (closedByUnmountRef.current || !runIdRef.current) return;
+      lastFrameAtRef.current = Date.now();
+      attemptRef.current = 0;
+      if (statusRef.current === "open") return;
+      setStale(false);
+      reconnect();
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") wake();
+    };
+    const onOnline = () => wake();
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", onOnline);
+
     return () => {
       cancelled = true;
       closedByUnmountRef.current = true;
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", onOnline);
+      clearInterval(watchdog);
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
@@ -410,5 +461,5 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId, enabled]);
 
-  return { events, status, authError, transport, reconnect, lastSeq: lastSeqRef, dropped };
+  return { events, status, stale, authError, transport, reconnect, lastSeq: lastSeqRef, dropped };
 }

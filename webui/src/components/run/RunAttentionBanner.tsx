@@ -8,6 +8,9 @@ interface RunAttentionBannerProps {
   pendingCount: number;
   active: boolean;
   eventsStatus: WsStatus;
+  /** True when the stream is open but silent past the watchdog threshold —
+   *  the socket says "connected" yet nothing has arrived for a while. */
+  stale?: boolean;
 }
 
 function scrollToPending() {
@@ -24,6 +27,7 @@ export const RunAttentionBanner = memo(function RunAttentionBanner({
   pendingCount,
   active,
   eventsStatus,
+  stale = false,
 }: RunAttentionBannerProps) {
   if (authError) {
     return (
@@ -65,7 +69,7 @@ export const RunAttentionBanner = memo(function RunAttentionBanner({
     );
   }
 
-  if (active && (eventsStatus === "reconnecting" || eventsStatus === "closed")) {
+  if (active && (eventsStatus === "reconnecting" || eventsStatus === "closed" || stale)) {
     return (
       <div
         role="status"
@@ -75,7 +79,9 @@ export const RunAttentionBanner = memo(function RunAttentionBanner({
         <span>
           {eventsStatus === "reconnecting"
             ? "Live connection lost — reconnecting…"
-            : "Live connection offline. Data shown is the last received snapshot."}
+            : eventsStatus === "closed"
+              ? "Live connection offline. Data shown is the last received snapshot."
+              : "No live data for a while — connection may be stale."}
         </span>
       </div>
     );

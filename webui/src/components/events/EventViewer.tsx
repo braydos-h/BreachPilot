@@ -35,6 +35,9 @@ interface EventViewerProps {
   status: WsStatus;
   transport: "websocket" | "sse" | "none";
   authError?: string;
+  /** True when the stream is open but no frames (incl. heartbeats) have
+   *  arrived recently — the socket is probably dead without a close event. */
+  stale?: boolean;
   /** Events omitted from the bounded window (still exist server-side). */
   dropped?: number;
   className?: string;
@@ -120,6 +123,7 @@ export function EventViewer({
   status,
   transport,
   authError,
+  stale = false,
   dropped = 0,
   className,
   terminal = false,
@@ -435,7 +439,7 @@ export function EventViewer({
           {paused ? "Resume" : "Pause"}
         </Button>
 
-        <ConnectionStatus status={status} transport={transport} authError={authError} paused={paused} unseen={unseen} />
+        <ConnectionStatus status={status} transport={transport} authError={authError} stale={stale} paused={paused} unseen={unseen} />
       </div>
 
       {/* Truncation notice: the bound is client-side; history is preserved. */}
@@ -522,12 +526,14 @@ function ConnectionStatus({
   status,
   transport,
   authError,
+  stale,
   paused,
   unseen,
 }: {
   status: WsStatus;
   transport: EventViewerProps["transport"];
   authError?: string;
+  stale?: boolean;
   paused: boolean;
   unseen: number;
 }) {
@@ -543,6 +549,10 @@ function ConnectionStatus({
     dot = "⏸";
     label = `Paused${unseen > 0 ? ` · ${unseen} new` : ""}`;
     cls = "text-foreground";
+  } else if (status === "open" && stale) {
+    dot = "◐";
+    label = "Stale";
+    cls = "text-yellow-300";
   } else if (status === "open") {
     dot = "●";
     label = "Live";
