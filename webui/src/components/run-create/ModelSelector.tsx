@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useLiveModels } from "@/api/hooks";
+import { useLiveModels, useSyncModels } from "@/api/hooks";
 import { useModelOptions, useProviderStatus } from "@/components/ProviderSetup";
 
 interface ModelSelectorProps {
@@ -23,8 +23,19 @@ interface StatusMeta {
 export function ModelSelector({ model, onModelChange }: ModelSelectorProps) {
   const modelOptions = useModelOptions();
   const liveModels = useLiveModels();
+  const syncModels = useSyncModels();
   const status = useProviderStatus();
   const refetch = liveModels.refetch;
+  // Ollama only: refresh also bumps models.registry to the newest versions
+  // the Ollama API lists (POST /models/refresh), then refetches the live list.
+  const handleRefresh = () => {
+    if (status.provider === "ollama") {
+      syncModels.mutate(undefined, { onSettled: () => void refetch() });
+    } else {
+      void refetch();
+    }
+  };
+  const busy = liveModels.isFetching || syncModels.isPending;
 
   const meta: StatusMeta = liveModels.isLoading
     ? { tone: "warn", label: "Checking…", detail: "Contacting the model provider." }
@@ -70,12 +81,12 @@ export function ModelSelector({ model, onModelChange }: ModelSelectorProps) {
           size="icon"
           variant="outline"
           className="h-10 w-10 shrink-0"
-          onClick={() => refetch()}
-          disabled={liveModels.isFetching}
+          onClick={handleRefresh}
+          disabled={busy}
           aria-label="Refresh models"
-          title="Refresh models"
+          title="Refresh models (also syncs the registry to the newest Ollama versions)"
         >
-          <RefreshCw className={cn("h-4 w-4", liveModels.isFetching && "animate-spin")} />
+          <RefreshCw className={cn("h-4 w-4", busy && "animate-spin")} />
         </Button>
       </div>
 

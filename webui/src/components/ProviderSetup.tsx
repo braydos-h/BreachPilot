@@ -8,7 +8,7 @@ import { useCallback, useMemo, useState } from "react";
 import { Loader2, LogIn, Play, ShieldCheck, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { SegmentedControl } from "@/components/RunForm";
+import { SegmentedControl } from "@/components/ui/segmented";
 import {
   useChatgptLogin,
   useChatgptProxyStart,
@@ -42,7 +42,7 @@ export function useProviderSwitch() {
 
 /** Provider-aware list of selectable models for a run: live models (when the
  *  provider is reachable) plus configured/registry models plus the provider
- *  default. Single source of truth — RunForm, Wizard, LiveStatus all use this
+ *  default. Single source of truth — RunWizard and ProviderPicker consumers all use this
  *  so a provider switch is reflected everywhere, not just one component. */
 export function useModelOptions(): string[] {
   const models = useModels();

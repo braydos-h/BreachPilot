@@ -1,5 +1,5 @@
 import { Label } from "@/components/ui/label";
-import { SegmentedControl, SkillMultiSelect } from "@/components/RunForm";
+import { SegmentedControl, SkillMultiSelect } from "@/components/ui/segmented";
 import type { SkillsMode } from "@/api/types";
 
 const SKILLS_OPTIONS: Array<{ value: SkillsMode; label: string; body: string }> = [

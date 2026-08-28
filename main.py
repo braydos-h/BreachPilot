@@ -823,6 +823,34 @@ def _api_daemon_ready(host: str, port: int) -> bool:
         return False
 
 
+def _auto_update_models(config: dict[str, Any], config_path: str) -> None:
+    """Best-effort ``models.registry`` sync against the Ollama API (boot hook).
+
+    Gated by ``models.auto_update`` (default true, ollama provider only); never
+    raises. Bumps each registry alias to the newest same-family version the
+    Ollama host lists (``glm-5.2:cloud`` -> ``glm-5.3:cloud``) — no pulls, the
+    registry stores ids. See ``tools/ollama_models.py``.
+    """
+    try:
+        from tools.ollama_models import auto_refresh_on_startup
+
+        result = auto_refresh_on_startup(config, config_path=config_path)
+    except Exception as exc:  # noqa: BLE001 -- advisory only, never blocks the daemon
+        ui.warning(f"Model auto-update skipped: {type(exc).__name__}: {exc}")
+        return
+    if not result:
+        return
+    updates = result.get("updates") or {}
+    if updates:
+        ui.status(
+            "Model auto-update: " + ", ".join(f"{a}: {u['old']} -> {u['new']}" for a, u in updates.items())
+        )
+    else:
+        ui.status(
+            f"Model registry current ({result.get('available_count', 0)} models on {result.get('host', 'Ollama')})."
+        )
+
+
 def _run_daemon(args: argparse.Namespace) -> int:
     """Start the local WebUI API server (``--demon`` / ``--daemon`` / ``--web``)."""
     config = load_config(args.config)
@@ -860,6 +888,10 @@ def _run_daemon(args: argparse.Namespace) -> int:
             return build_rc
         # In-memory override only; never persisted to config.yaml.
         api_cfg["serve_webui"] = True
+
+    # Auto-update the model registry against the live Ollama API before the
+    # app factory snapshots the config (models.auto_update, default true).
+    _auto_update_models(config, args.config)
 
     ui.banner()
     ui.status(f"Starting WebUI API daemon on http://{status_host}:{port}")

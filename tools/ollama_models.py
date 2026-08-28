@@ -200,7 +200,15 @@ def auto_refresh_on_startup(config: dict[str, Any], config_path: str | Path = "c
         logger.warning("Model auto-update skipped: %s: %s", type(exc).__name__, exc)
         return None
     try:
-        return refresh_model_registry(config, config_path=config_path, persist=True, timeout=5.0)
+        result = refresh_model_registry(config, config_path=config_path, persist=True, timeout=5.0)
     except Exception as exc:  # noqa: BLE001 -- advisory only
         logger.warning("Model auto-update failed: %s: %s", type(exc).__name__, exc)
         return None
+    if result.get("ok") and result.get("updates"):
+        # Mirror the bumps into the caller's config dict so an in-memory
+        # consumer (e.g. the WebUI daemon's ``create_app(config=config)``)
+        # sees the refreshed registry without a restart.
+        reg = (config.get("models") or {}).setdefault("registry", {})
+        for alias, upd in result["updates"].items():
+            reg[alias] = upd["new"]
+    return result

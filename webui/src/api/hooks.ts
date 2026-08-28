@@ -36,6 +36,7 @@ import type {
   LootResponse,
   MemoryResponse,
   ModelRegistryInfo,
+  ModelsSyncResponse,
   OperatorConnection,
   PluginSummary,
   ProvidersResponse,
@@ -248,6 +249,18 @@ export function useSetModelProvider() {
       void qc.invalidateQueries({ queryKey: queryKeys.models });
       void qc.invalidateQueries({ queryKey: queryKeys.modelsLive });
       void qc.invalidateQueries({ queryKey: queryKeys.providers });
+    },
+  });
+}
+
+/** POST /models/refresh — bump models.registry to the newest Ollama versions. */
+export function useSyncModels() {
+  const qc = useQueryClient();
+  return useMutation<ModelsSyncResponse, ApiError, void>({
+    mutationFn: () => apiFetch<ModelsSyncResponse>("/models/refresh", { method: "POST" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.models });
+      void qc.invalidateQueries({ queryKey: queryKeys.modelsLive });
     },
   });
 }

@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { SegmentedControl, TriStateToggle } from "@/components/RunForm";
+import { SegmentedControl, TriStateToggle } from "@/components/ui/segmented";
 import type { ObserverMode } from "@/api/types";
 
 const POWER_UPS = [

@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { SegmentedControl } from "@/components/RunForm";
+import { SegmentedControl } from "@/components/ui/segmented";
 import type { GoalPreset, RiskTag, RunMode } from "@/api/types";
 
 const RISK_BADGE: Record<RiskTag, "success" | "warn" | "danger"> = {

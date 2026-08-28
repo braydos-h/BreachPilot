@@ -14,6 +14,7 @@ vi.mock("@/api/hooks", () => ({
   useCreateRun: vi.fn(),
   useAnswerDecision: vi.fn(),
   useLiveModels: vi.fn(),
+  useSyncModels: vi.fn(),
   useConfig: vi.fn(),
   usePatchConfig: vi.fn(),
 }));
@@ -32,6 +33,7 @@ import {
   useLiveModels,
   usePatchConfig,
   useSkills,
+  useSyncModels,
 } from "@/api/hooks";
 import { useDefaultModel, useModelOptions, useProviderStatus } from "@/components/ProviderSetup";
 
@@ -41,6 +43,7 @@ const skillsMock = vi.mocked(useSkills);
 const createRunMock = vi.mocked(useCreateRun);
 const answerDecisionMock = vi.mocked(useAnswerDecision);
 const liveModelsMock = vi.mocked(useLiveModels);
+const syncModelsMock = vi.mocked(useSyncModels);
 const configMock = vi.mocked(useConfig);
 const patchConfigMock = vi.mocked(usePatchConfig);
 const modelOptionsMock = vi.mocked(useModelOptions);
@@ -84,6 +87,7 @@ function setup({
     isFetching: false,
     refetch: vi.fn(),
   } as never);
+  syncModelsMock.mockReturnValue({ mutate: vi.fn(), isPending: false, error: null } as never);
   configMock.mockReturnValue({ data: { opsec: {} }, isLoading: false, error: null } as never);
   patchConfigMock.mockReturnValue({ mutate: vi.fn(), isPending: false, error: null } as never);
   modelOptionsMock.mockReturnValue(["glm-5.2:cloud"]);

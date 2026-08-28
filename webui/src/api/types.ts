@@ -133,6 +133,17 @@ export interface LiveModelsResponse {
   error?: string;
 }
 
+/** POST /models/refresh — models.registry sync against the Ollama API. */
+export interface ModelsSyncResponse {
+  ok: boolean;
+  host?: string;
+  available_count?: number;
+  updates?: Record<string, { old: string; new: string }>;
+  registry?: Record<string, string>;
+  persisted?: boolean;
+  error?: string;
+}
+
 export interface ChatgptProviderStatus {
   enabled?: boolean;
   authenticated?: boolean;
