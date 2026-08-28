@@ -110,7 +110,7 @@ The HTTP transport refuses to bind to non-loopback interfaces unless `--allow-pu
 python -m pip install -e ".[dev]"   # includes ruff
 ruff check .                         # must pass (0 errors)
 ruff format --check .                # must pass (0 diffs)
-mypy --follow-imports=skip tools     # must pass (216 files)
+mypy --follow-imports=skip tools     # must pass (256 files)
 python -m coverage run -m pytest tests/ && python -m coverage report   # coverage (CI command; pytest-cov is not installed)
 ```
 
@@ -351,7 +351,7 @@ Kali arsenal including searchsploit/metasploit/hydra/crackmapexec/impacket).
 - **~250** test files in `tests/` (verify via `python -c "import pathlib; print(len(list(pathlib.Path('tests').glob('test_*.py'))))"`, all mock subprocess/network). No fixtures for live Nmap; everything mocks subprocess / network.
 - New safety-relevant code needs regression tests in `test_scope_gate.py`, `test_safety_reviewer.py`, `test_validate_target.py` (or a new file if the surface is new).
 - `pyproject.toml` configures pytest with `asyncio_mode = "auto"` and `testpaths = ["tests"]`. Coverage is configured in `[tool.coverage.run]` with `source = ["tools", "main", "cli"]`; run it the way CI does — `python -m coverage run -m pytest tests/` then `python -m coverage report` (pytest-cov is NOT a dependency, so `pytest --cov` fails).
-- Lint / type-check are CI-enforced repo-wide: `ruff check .` (0 errors) + `ruff format --check .` (0 diffs) and `mypy --follow-imports=skip tools` (216 files, 0 errors with current `disable_error_code` masks; see `.github/workflows/ci.yml`). `pyproject.toml` has `ruff` line-length 120 `select = ["E","F","W","I"]` `ignore = ["E501"]` (`pyproject.toml:102-106`) and `mypy` configs. Keep security-sensitive diffs readable.
+- Lint / type-check are CI-enforced repo-wide: `ruff check .` (0 errors) + `ruff format --check .` (0 diffs) and `mypy --follow-imports=skip tools` (256 files, 0 errors with current `disable_error_code` masks; see `.github/workflows/ci.yml`). `pyproject.toml` has `ruff` line-length 120 `select = ["E","F","W","I"]` `ignore = ["E501"]` (`pyproject.toml:102-106`) and `mypy` configs. Keep security-sensitive diffs readable.
 
 ## Things To Watch Out For
 

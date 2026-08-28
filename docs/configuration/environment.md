@@ -1,4 +1,4 @@
----
+﻿---
 title: Environment Variables
 description: .env.example, every env var, secrets vs runtime locks, provider auth, and precedence.
 source: [.env.example, config.yaml, tools/config_manager.py, tools/api_key_store.py, tools/mcp_session.py, tools/mcp_shared.py, tools/doctor.py, app.py, tools/api/auth.py]
@@ -102,7 +102,7 @@ OAuth tokens are **not env vars**. They live in `~/.codex/auth.json` (or `$CODEX
 ## Precedence (env vs file)
 
 1. **Env wins once set** — `load_api_keys_into_env(path, allowed_names)` (`api_key_store.py:105`) iterates `load_api_key_file(path)` but skips when `os.environ.get(name)` already truthy. So shell-exported env before `python main.py` beats `secr.json`.
-2. **File-to-env bootstrap** — at startup `bootstrap_startup_api_keys(args, prompt=…)` (`config_cli.py:160`) calls `bootstrap_api_keys(config, store_path, prompt, force_prompt)` which loads `secr.json` into env, optionally prompts for missing keys, saves, and re-checks. `prompt=True` only in `main.py:1047` interactive menu (`--menu`); `--setup-api-keys` uses `force_prompt=True`.
+2. **File-to-env bootstrap** — at startup `bootstrap_startup_api_keys(args, prompt=…)` (`config_cli.py:160`) calls `bootstrap_api_keys(config, store_path, prompt, force_prompt)` which loads `secr.json` into env, optionally prompts for missing keys, saves, and re-checks. `prompt=True` only in `--menu` mode (`main.py` sets `interactive_startup = bool(args.menu)`); `--setup-api-keys` uses `force_prompt=True`.
 3. **Config-to-env mapping** — `configured_api_key_env_names(config)` (`api_key_store.py:33`) collects `ollama.api_key_env`, `research.ollama.api_key_env`, `research.serpapi.api_key_env`, `cve_lookup.api_key_env`, `cve_lookup.github.token_env` deduped. `research_api_key_env_names` (`api_key_store.py:61`) collects only provider-relevant ones (`use_web_search/use_web_fetch` + `provider/fallback_provider`). Missing keys come from `missing_api_key_env_names`.
 
 Interactive prompt is via `questionary` or `getpass.getpass` (`api_key_store.py:243`); entered values saved via `save_api_keys` (atomic `NamedTemporaryFile` + `os.fsync` + `chmod 0o600` + `os.replace`).

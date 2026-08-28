@@ -36,7 +36,7 @@ python -m coverage run -m pytest tests/; python -m coverage report    # coverage
 python -m pip install -e ".[dev]"   # ruff + pytest + coverage + mypy + build + twine
 ruff check .                        # must pass (0 errors; per-file-ignores document intentional patterns)
 ruff format --check .               # must pass (0 diffs)
-mypy --follow-imports=skip tools    # must pass (216 files; disables documented in pyproject.toml [tool.mypy])
+mypy --follow-imports=skip tools    # must pass (256 files; disables documented in pyproject.toml [tool.mypy])
 ```
 
 On Linux/macOS `make install|test|test-one F=…|run|doctor|mcp-exploit` work.
@@ -119,7 +119,7 @@ On Linux/macOS `make install|test|test-one F=…|run|doctor|mcp-exploit` work.
    a branch or PR. All work stays on the current local branch only. If a
    remote update is needed, tell the user what to push and let them do it
    manually. This is enforced by `permission.bash` deny rules in
-   `opencode.json` / `~/.config/opencode/opencode.json` (`git push*` →
+   `opencode.jsonc` / `~/.config/opencode/opencode.json` (`git push*` →
    `deny`, `git checkout -b*` → `deny`, etc.) and by the `pre-push` git hook
    — do not bypass or remove those guards.
 

@@ -2,7 +2,7 @@
 
 Practical fixes for the failures you will actually hit, organized by symptom.
 Every entry lists the symptom, the likely cause, an exact check command, and
-an exact fix. When in doubt, start with the diagnostics table below â€” the
+an exact fix. When in doubt, start with the diagnostics table below — the
 `--doctor` check names the failing subsystem and prints its own hint.
 
 ## Diagnostics at a glance
@@ -11,12 +11,12 @@ an exact fix. When in doubt, start with the diagnostics table below â€” the
 |---|---|---|
 | `python main.py --doctor` | Python >= 3.11, imports, nmap binary, workspace writable, config validity, Ollama reachability + model registry, MCP/WebUI port free, (Linux) root/sudo + Kali tooling | 0 = all pass, 1 = any fail (`tools/doctor.py:305`) |
 | `python main.py --self-test` | Safe localhost-only smoke test; writes `reports/self_test_<run_id>/self_test_report.{json,md}` | 0 = pass, 1 = fail (`tools/self_test.py:65`) |
-| `python -m pytest tests/ -v` | Full suite (~250 files, all mocked â€” no live nmap/network) | 0 = pass |
+| `python -m pytest tests/ -v` | Full suite (~250 files, all mocked — no live nmap/network) | 0 = pass |
 | `ruff check .` | Lint (line-length 120, E/F/W/I, E501 ignored) | 0 = clean |
-| `python main.py --setup-api-keys` | Prompt for provider keys, save to `secr.json` (gitignored) | â€” |
+| `python main.py --setup-api-keys` | Prompt for provider keys, save to `secr.json` (gitignored) | — |
 
 `--doctor` and `--self-test` are mutually exclusive with each other and with
-`--web`/`--demon`/`--menu`/`--demo`/`--eval` â€” combining them exits 2
+`--web`/`--demon`/`--menu`/`--demo`/`--eval` — combining them exits 2
 (`main.py:838`).
 
 ## 1. Setup problems
@@ -84,7 +84,7 @@ an exact fix. When in doubt, start with the diagnostics table below â€” the
   sudo works)
 - **Fix:** one of:
   ```yaml
-  # config.yaml â€” run root-only scans via sudo -n (needs passwordless sudo)
+  # config.yaml — run root-only scans via sudo -n (needs passwordless sudo)
   nmap:
     sudo: true
   ```
@@ -93,7 +93,7 @@ an exact fix. When in doubt, start with the diagnostics table below â€” the
   `sudo: true` and no passwordless sudo, `sudo -n` fails fast instead of
   hanging on a password prompt (`tools/nmap_priv.py:79`).
 
-### OLLAMA_API_KEY missing â†’ auth failure on first chat
+### OLLAMA_API_KEY missing → auth failure on first chat
 
 - **Symptom:** `--doctor` reports `[FAIL] ollama_reachable` (401) against
   `https://api.ollama.com`; or the first LLM call fails with an auth error.
@@ -101,7 +101,7 @@ an exact fix. When in doubt, start with the diagnostics table below â€” the
   auto-attaches `Authorization: Bearer $OLLAMA_API_KEY` to every request, so
   a missing key 401s on the first chat (`tools/model_router.py:287`,
   `tools/doctor.py:145`). Keys are read from **process environment variables
-  or `secr.json`** â€” there is no `.env` auto-load.
+  or `secr.json`** — there is no `.env` auto-load.
 - **Check:** `echo $env:OLLAMA_API_KEY` (PowerShell) /
   `echo $OLLAMA_API_KEY` (bash); or `python main.py --doctor` and read the
   `ollama_reachable` line.
@@ -118,7 +118,7 @@ an exact fix. When in doubt, start with the diagnostics table below â€” the
 - **Symptom:** you want a local daemon but the app keeps hitting the cloud;
   or the doctor pings the wrong host.
 - **Cause:** `ollama.host` defaults to `https://api.ollama.com`; a host swap
-  is the whole wiring â€” no probe, no localâ†’cloud fallback
+  is the whole wiring — no probe, no local→cloud fallback
   (`tools/config_manager.py:30`, `tools/model_router.py:290`).
 - **Check:** `python main.py --doctor` shows the host it pings.
 - **Fix:**
@@ -136,7 +136,7 @@ an exact fix. When in doubt, start with the diagnostics table below â€” the
 - **Symptom:** `--doctor` reports `[FAIL] model_registry` with a
   `ollama pull <spec>` hint.
 - **Cause:** a configured local model isn't pulled. Cloud models
-  (`*:cloud`) are verified by a 1-token generation instead â€” `ollama pull`
+  (`*:cloud`) are verified by a 1-token generation instead — `ollama pull`
   only registers a pointer and isn't a real test (`tools/doctor.py:206`,
   `tools/doctor.py:361`).
 - **Check:** `ollama list`
@@ -165,13 +165,13 @@ an exact fix. When in doubt, start with the diagnostics table below â€” the
   python -c "from tools.config_manager import validate_config_file; r = validate_config_file('config.yaml'); print(r.errors)"
   ```
 - **Fix:** correct the reported keys in `config.yaml`. The doctor's
-  `_check_config` uses the real validator â€” a parseable-but-broken YAML
+  `_check_config` uses the real validator — a parseable-but-broken YAML
   reports `ok: False`, not a false green (`tools/doctor.py:262`).
 
 ### Import error at startup
 
 - **Symptom:** `ModuleNotFoundError` / `ImportError` before the menu shows.
-- **Cause:** missing dep (see Â§1) or a broken editable install.
+- **Cause:** missing dep (see §1) or a broken editable install.
 - **Check:** `python -c "import yaml, ollama, mcp, uvicorn, questionary"`
 - **Fix:** `python -m pip install -r requirements.txt`; if that fails,
   reinstall editable metadata: `python -m pip install -e ".[dev]"`.
@@ -184,7 +184,7 @@ an exact fix. When in doubt, start with the diagnostics table below â€” the
   (`tools/mcp_session.py:617`); or the daemon says it's "already running".
 - **Cause:** an orphaned server or another app holds the port.
 - **Check:** `netstat -ano | findstr :8001` (Windows) /
-  `lsof -i :8001` (Linux/macOS) â€” the doctor prints this hint itself
+  `lsof -i :8001` (Linux/macOS) — the doctor prints this hint itself
   (`tools/doctor.py:294`).
 - **Fix:** stop the holder, or move the port:
   ```yaml
@@ -234,9 +234,9 @@ an exact fix. When in doubt, start with the diagnostics table below â€” the
 - **Cause:** transient network errors (httpx `ReadTimeout`, `ConnectError`,
   `RemoteProtocolError`) against the Ollama backend.
 - **Check:** `python main.py --doctor` (Ollama reachability); watch the
-  retry lines â€” 3 retries with exponential backoff
+  retry lines — 3 retries with exponential backoff
   (`tools/exploit_agent/ollama_client.py:19`).
-- **Fix:** confirm the backend is up and the key is set (Â§1); for long
+- **Fix:** confirm the backend is up and the key is set (§1); for long
   generations use `--long-session`, which raises the LLM call timeout
   (`config.yaml` `long_session.request_timeout_seconds`, default 600).
   Retryable errors are matched in
@@ -248,7 +248,7 @@ an exact fix. When in doubt, start with the diagnostics table below â€” the
   or `secretsdump timed out after 300s` etc.
 - **Cause:** the operational command timeout (default 300s terminal/python,
   600s msf) killed a long-running command.
-- **Check:** `config.yaml` â†’ `exploit.command_timeout_seconds` (default 300,
+- **Check:** `config.yaml` → `exploit.command_timeout_seconds` (default 300,
   `tools/config_manager.py:114`).
 - **Fix:** raise the budget for the run:
   ```yaml
@@ -258,7 +258,7 @@ an exact fix. When in doubt, start with the diagnostics table below â€” the
   or use `--long-session` which raises round/command/duration budgets
   (`tools/cli_exploit_settings.py:116`).
 
-### No targets in allowlist â†’ target lock blocks every tool
+### No targets in allowlist → target lock blocks every tool
 
 - **Symptom:** every target-touching tool returns
   `Target <ip> is not in the explicit allowlist. Add it to config.yaml exploit.allowed_targets to authorize.`
@@ -296,8 +296,8 @@ an exact fix. When in doubt, start with the diagnostics table below â€” the
   taken, or a heavy import exceeded the boot window.
 - **Check:** the server log tail is printed in the error; also
   `exploit_workspace/<ip>/mcp_exploit_server.log`.
-- **Fix:** fix the underlying import/port issue (Â§1, Â§2). The recon-first
-  path tolerates MCP being unavailable (soft-fail â†’ `[WARN]`, session
+- **Fix:** fix the underlying import/port issue (§1, §2). The recon-first
+  path tolerates MCP being unavailable (soft-fail → `[WARN]`, session
   degrades to a minimal assessment) but a hard import failure still aborts
   (`tools/mcp_session.py:228`).
 
@@ -307,12 +307,12 @@ an exact fix. When in doubt, start with the diagnostics table below â€” the
 
 - **Symptom:** a test fails with `nmap not found` or tries to reach the
   network.
-- **Cause:** you ran a test that isn't mocked â€” but the whole suite is
+- **Cause:** you ran a test that isn't mocked — but the whole suite is
   designed to be offline. All ~250 tests mock subprocess/network; no live
-  Nmap, no live network (README Â§Testing).
+  Nmap, no live network (README §Testing).
 - **Check:** `python -m pytest tests/ -v`
 - **Fix:** nothing to install. If a specific test still hits the network,
-  it's a bug â€” report it. Run a single file:
+  it's a bug — report it. Run a single file:
   ```bash
   python -m pytest tests/test_doctor.py -v
   python -m pytest tests/ -v -k "scope"
@@ -336,7 +336,7 @@ an exact fix. When in doubt, start with the diagnostics table below â€” the
   `ignore = ["E501"]`.
 - **Check:** `ruff check .`
 - **Fix:** `ruff check . --fix` for auto-fixable issues; manually fix the
-  rest. No CI is configured â€” run it before a PR.
+  rest. No CI is configured — run it before a PR.
 
 ## 5. WebUI issues
 
@@ -373,7 +373,7 @@ an exact fix. When in doubt, start with the diagnostics table below â€” the
     port: 8766
   ```
   `--api-port` overrides it per-run (`main.py:514`). Only one run can be
-  active at a time â€” a second run returns HTTP 409
+  active at a time — a second run returns HTTP 409
   (`tools/api/run_manager.py:120`).
 
 ### Token auth failures (401)
@@ -400,15 +400,15 @@ an exact fix. When in doubt, start with the diagnostics table below â€” the
 
 - **Symptom:** `make install` / `make test` fail; exploit tools like
   `searchsploit`/`msfconsole` are missing.
-- **Cause:** Makefile targets don't run on Windows (AGENTS.md Â§Commands);
-  the Windows attacker profile is Python-only â€” the exploit agent's system
+- **Cause:** Makefile targets don't run on Windows (AGENTS.md §Commands);
+  the Windows attacker profile is Python-only — the exploit agent's system
   prompt is OS-aware and pivots to workspace Python implementations
   (`tools/env_probe.py:43`).
-- **Check:** `python main.py --doctor` â€” `linux_privilege` reports
+- **Check:** `python main.py --doctor` — `linux_privilege` reports
   `n/a (Windows)` and `optional_tools` lists what's missing
   (informational, never a failure, `tools/doctor.py:114`).
-- **Fix:** use the PowerShell commands from Â§1. For missing tools the agent
-  writes Python fallbacks instead of attempting `apt_install` â€” the
+- **Fix:** use the PowerShell commands from §1. For missing tools the agent
+  writes Python fallbacks instead of attempting `apt_install` — the
   pre-flight probe tells it up front which tools to pivot on
   (`tools/env_probe.py:67`). `sudo` is never used on Windows
   (`tools/nmap_priv.py:91`, `tools/env_probe.py:54`).
@@ -417,7 +417,7 @@ an exact fix. When in doubt, start with the diagnostics table below â€” the
 
 - **Symptom:** `-O`/`-sS` scans fail as non-root; `apt_install` hangs on a
   password prompt.
-- **Cause:** root-only nmap flags (Â§1) and interactive sudo.
+- **Cause:** root-only nmap flags (§1) and interactive sudo.
 - **Check:** `id -u`; `sudo -n true; echo $?`
 - **Fix:** set `nmap.sudo: true` (uses `sudo -n`, fails fast without
   passwordless sudo) or run as root. The tool layer pre-checks

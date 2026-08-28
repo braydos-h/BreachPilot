@@ -188,7 +188,7 @@ Evidence and auditability are part of the safety model:
 
 ## OPSEC (Advisory Layer)
 
-`tools/opsec.py` provides `OpsecProfile` / `OpsecManager` with `resolve_for_target(ip)` that forces the profile OFF for private/local target IPs (RFC1918/loopback/link-local) and ON for public routable targets, matching the `opsec` config block in CLAUDE.md. It is advisory-only on the attack path: `is_quiet_blocked` / `noise_budget` stay **dormant** and must NOT become attack-path gates — the command always executes. The AI-facing surfaces (`build_opsec_briefing` in `tools/exploit_agent/prompt.py`, `_opsec_advisory_block` in `tools/mcp_tools/terminal.py`) render advisory context (noise score, suggested quieter rewrite, pacing posture) only; they never gate execution.
+`tools/opsec.py` provides `OpsecProfile` / `OpsecManager` with `resolve_for_target(ip)` that forces the profile OFF for private/local target IPs (RFC1918/loopback/link-local) and ON for public routable targets, matching the `opsec` config block in CLAUDE.md. It is advisory-only on the attack path: `is_quiet_blocked` / `noise_budget` stay **dormant** and must NOT become attack-path gates — the command always executes. The AI-facing surfaces (`build_opsec_briefing` in `tools/exploit_agent/prompt.py`, `_opsec_advisory_block` in `tools/mcp_tools/terminal/allowlist.py`) render advisory context (noise score, suggested quieter rewrite, pacing posture) only; they never gate execution.
 
 ## Plugin Safety
 

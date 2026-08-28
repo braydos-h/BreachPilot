@@ -89,7 +89,7 @@ ChatGPT provider (`models.provider: chatgpt`) uses browser OAuth tokens at `~/.c
 | **Coverage** (3.12) | `python -m coverage run -m pytest tests/` + `coverage report`/`coverage xml` | `pyproject.toml:95` `source = ["tools","main","cli"]` |
 | **Lint** | `ruff check .` (0 errors) + `ruff format --check .` (0 diffs) | `pyproject.toml:102` line-length 120, `select = ["E","F","W","I"]`, `ignore = ["E501"]` |
 | **Lint guards** | bare-`except Exception` guard + god-file budget + `config.yaml`↔`CONFIG_SCHEMA` sync + `doctor --json` shape | See `ci.yml:99-146` |
-| **Types** | `mypy --follow-imports=skip tools` (216 files, 0 errors with masks) + strict `tools/validation_utils.py` `tools/exceptions.py` `tools/mcp_shared.py` | Masks at `pyproject.toml:156`; strict hot files at `pyproject.toml:201` |
+| **Types** | `mypy --follow-imports=skip tools` (256 files, 0 errors with masks) + strict `tools/validation_utils.py` `tools/exceptions.py` `tools/mcp_shared.py` | Masks at `pyproject.toml:156`; strict hot files at `pyproject.toml:201` |
 | **Package** | `python -m build` + `python -m twine check dist/*` | |
 | **WebUI** | `npm ci` + `npm run build` (tsc + vite) + `npm run test` (vitest) | `webui/` |
 | + CodeQL (Python + JS/TS), dependency-review, Dependabot (pip / Actions / npm weekly) | | |
@@ -198,7 +198,7 @@ Keep `pyproject.toml` and `requirements.txt` synced — header says "Synced from
 ## 7. Code style and constraints
 
 - **Ruff**: line-length 120, `select = ["E","F","W","I"]`, `ignore = ["E501"]` (`pyproject.toml:102`). Per-file ignores document intentional patterns (e.g. `tools/mcp_tools/*.py` star-import helpers, `tools/exploit_agent/__init__.py` facade re-exports). Keep security-sensitive diffs readable.
-- **Mypy**: `mypy --follow-imports=skip tools` must pass. 216 files, masks at `pyproject.toml:156`; 3 hot files strict (`tools/validation_utils.py`, `tools/exceptions.py`, `tools/mcp_shared.py` — zero disables, `pyproject.toml:201`).
+- **Mypy**: `mypy --follow-imports=skip tools` must pass. 256 files, masks at `pyproject.toml:156`; 3 hot files strict (`tools/validation_utils.py`, `tools/exceptions.py`, `tools/mcp_shared.py` — zero disables, `pyproject.toml:201`).
 - **God-file budget**: CI fails any new file >1000 LOC and ≥72 kB (600×120) under `tools/` unless split (`.github/workflows/ci.yml:115`).
 - **No new files unless necessary** — prefer editing existing files. Workspace dirs (`reports/`, `exploit_workspace/`, `research_workspace/`, `swarm_workspace/`, `webui/dist/`) are gitignored.
 - **Secrets**: never commit `.webui_secret_key`, `secr.json`, `.env`, `opencode.jsonc`, or OAuth tokens. Use `python main.py --setup-api-keys`.

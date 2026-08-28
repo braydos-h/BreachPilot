@@ -1,4 +1,4 @@
----
+﻿---
 title: Secrets Management
 description: How api_key_store, secr.json, .webui_secret_key, and ChatGPT OAuth tokens are handled — storage, permissions, rotation, and what never leaves the box.
 source: [tools/api_key_store.py, tools/config_cli.py, tools/api/auth.py, app.py, tools/providers/chatgpt_provider.py, tools/doctor.py, config.yaml]
@@ -52,7 +52,7 @@ MCP research gating uses `research_api_key_env_names(config)` (`api_key_store.py
 6. `saved = save_api_keys(store_path, entered)`; inject entered into `os.environ` when not already set
 7. Recompute `missing`; return `ApiKeyBootstrapResult(loaded, saved, missing, store_path)`
 
-CLI wiring: `bootstrap_startup_api_keys(args, prompt=False)` (`tools/config_cli.py:160`) wraps the above with `config = load_config(args.config)`, `store_path = Path(getattr(args, "api_key_file", DEFAULT_API_KEY_FILE))`, `prompt = prompt and not no_api_key_prompt`, `force_prompt = setup_api_keys`. Prompts only in interactive menu (`main.py:1047` `interactive_startup = bool(args.menu)`) and `--setup-api-keys --force`.
+CLI wiring: `bootstrap_startup_api_keys(args, prompt=False)` (`tools/config_cli.py`) wraps the above with `config = load_config(args.config)`, `store_path = Path(getattr(args, "api_key_file", DEFAULT_API_KEY_FILE))`, `prompt = prompt and not no_api_key_prompt`, `force_prompt = setup_api_keys`. The interactive prompt fires only in `--menu` mode (`main.py` sets `interactive_startup = bool(args.menu)`) or via `--setup-api-keys` (force).
 
 **When MCP research is gated** — `research_api_keys_available(config)` (`api_key_store.py:177`) returns `True` when `research.enabled==False` or `require_api_key_for_mcp_tools==False` or any `research_api_key_env_names` is in env. Else `disabled_mcp_tools_without_api_key(config)` (`api_key_store.py:186`) returns `{"search_web_exploit","fetch_webpage","deep_research"}`. Disabled tools cleanly return `RESEARCH_API_KEY_MISSING: ... Set one of: {names}; run python main.py --setup-api-keys; or save keys to secr.json.` (`disabled_research_tools_message`, `api_key_store.py:192`).
 
@@ -116,9 +116,9 @@ No migration tool — old `secr.json` entries not yet overlaid by new env remain
 
 - ✅ `secr.json` is the interactive path; `.env` is the template path. Pick one; env wins if both set.
 - ✅ Keep `.webui_secret_key` and `secr.json` out of backups that leave the box.
-- ❌ Never `cat` / `echo` tokens into `config.yaml`; never `git add secr.json`; never log `Authorization`.
-- ❌ Never read `~/.codex/auth.json`; check `is_authenticated()` by existence only.
-- ❌ Never `NETATTACKAI_API_TOKEN` in shell history — use `read -s` or `.env` + export.
+- âŒ Never `cat` / `echo` tokens into `config.yaml`; never `git add secr.json`; never log `Authorization`.
+- âŒ Never read `~/.codex/auth.json`; check `is_authenticated()` by existence only.
+- âŒ Never `NETATTACKAI_API_TOKEN` in shell history — use `read -s` or `.env` + export.
 
 ## Related
 

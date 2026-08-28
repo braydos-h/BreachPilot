@@ -1,4 +1,4 @@
-﻿name: CI
+name: CI
 
 on:
   push:
@@ -183,7 +183,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
-      - name: Mypy check (216 files, permissive)
+      - name: Mypy check (256 files, permissive)
         run: mypy --follow-imports=skip tools
       - name: Mypy strict hot files (zero disables)
         run: mypy --follow-imports=skip tools/validation_utils.py tools/exceptions.py tools/mcp_shared.py
