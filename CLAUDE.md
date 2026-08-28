@@ -117,7 +117,7 @@ python -m coverage run -m pytest tests/ && python -m coverage report   # coverag
 ## Configuration
 
 Everything behavior-defining lives in **`config.yaml`**. Top-level keys (current state):
-- `ollama` (host, model `glm-5.2:cloud`, 976K context) + `models.registry` (glm/deepseek/deepseek_flash/kimi/minimax aliases) + `models.default_alias` (glm) + `models.provider` (`ollama` default | `chatgpt` — selects the chat/generate provider; absent = Ollama)
+- `ollama` (host, model `glm-5.2:cloud`, 976K context) + `models.registry` (glm/deepseek/deepseek_flash/kimi/minimax aliases) + `models.default_alias` (glm) + `models.provider` (`ollama` default | `chatgpt` — selects the chat/generate provider; absent = Ollama) + `models.auto_update` (default true — daemon boot syncs `models.registry` to the newest same-family versions the Ollama API lists via `tools/ollama_models.py`; no pulls, `models.info` stays operator-managed; on demand via `POST /api/v1/models/refresh`)
 - `chatgpt` (opt-in ChatGPT provider; `enabled`, `host`/`port`/`base_url` loopback `127.0.0.1:10531`, `auto_start`, `local_repo` `./oauth`, `runtime` auto=bun-from-source, `default_model` `gpt-5.2`, `models` `[]`=discover from `/v1/models`, `context_window` 128000, login/start/discover timeouts, `oauth_file`) — active only when `models.provider: chatgpt`. Auth is browser OAuth via the vendored `oauth/` proxy; tokens live in `~/.codex/auth.json` and are **never** copied into config or logged. Embeddings stay on Ollama under either provider.
 - `mcp` (default_transport, http_host/port)
 - `nmap` (path, sudo, priv_fallback)

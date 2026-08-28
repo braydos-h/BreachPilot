@@ -285,7 +285,7 @@ For day-to-day use you do not need to touch it: the WebUI System → Config edit
 
 Switching providers (Ollama ↔ ChatGPT), models, skills, swarm, OPSEC, persistence, and API settings are all in there. Highlights:
 
-- Models: cloud-first (`glm-5.2:cloud` 976K, `deepseek-v4-pro:cloud` 1M, `kimi-k2.6:cloud` 256K, `minimax-m3:cloud` 512K) with per-role routing (planner/executor/critic/etc.)
+- Models: cloud-first (`glm-5.2:cloud` 976K, `deepseek-v4-pro:cloud` 1M, `kimi-k2.6:cloud` 256K, `minimax-m3:cloud` 512K) with per-role routing (planner/executor/critic/etc.). The registry auto-updates from the Ollama API (`models.auto_update`, default on): at daemon boot each alias is bumped to the newest same-family version the host lists — no manual edits when Ollama Cloud ships a new model. Also on demand via `POST /api/v1/models/refresh` (the WebUI model picker's refresh button).
 - Swarm & autonomous: toggle agents, concurrency, persistence phases, adaptive replan
 - OPSEC: target-aware pacing, UA rotation, DoH, noise budget
 - ICS: destructive PLC writes dual-gated (`allow_write` + `destructive_ics`)
