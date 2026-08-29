@@ -1,0 +1,225 @@
+// NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
+// Comparison view: two benchmark runs side by side (metric deltas + per-scenario rollup).
+import { useMemo, useState } from "react";
+import { ArrowLeftRight, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn, formatRelative } from "@/lib/utils";
+import { formatCost, formatDuration, formatPct } from "@/features/benchmarks/MetricCards";
+import { StatusBadge } from "@/features/benchmarks/ScenarioResultsTable";
+import { compareRuns } from "@/features/benchmarks/api";
+import type { CompareMetricRow, RunComparison } from "@/features/benchmarks/types";
+
+const METRIC_LABELS: Record<string, string> = {
+  verified_success_rate: "Verified success",
+  false_positive_rate: "False positives",
+  median_solve_time: "Median solve time",
+  median_tool_actions: "Median actions",
+  estimated_cost: "Cost",
+  total_tokens: "Tokens",
+  solved: "Solved",
+  infra_error_count: "Infra errors",
+};
+
+const CATEGORY_LABELS: Record<string, string> = {
+  newly_solved: "Newly solved",
+  regressed: "Regressed",
+  still_solved: "Still solved",
+  still_failing: "Still failing",
+};
+
+function formatMetricValue(metric: string, value: number | null): string {
+  if (value === null || value === undefined) return "n/a";
+  switch (metric) {
+    case "verified_success_rate":
+    case "false_positive_rate":
+      return formatPct(value);
+    case "median_solve_time":
+      return formatDuration(value);
+    case "estimated_cost":
+      return formatCost(value);
+    case "total_tokens":
+      return value.toLocaleString();
+    default:
+      return String(value);
+  }
+}
+
+function formatDelta(metric: string, row: CompareMetricRow): string {
+  if (row.delta === null || row.direction === "unchanged") return "";
+  const sign = row.delta > 0 ? "+" : "";
+  switch (metric) {
+    case "verified_success_rate":
+    case "false_positive_rate":
+      return `${sign}${(row.delta * 100).toFixed(1)}%`;
+    case "median_solve_time":
+      return `${sign}${formatDuration(Math.abs(row.delta))}`;
+    case "estimated_cost":
+      return `${sign}$${Math.abs(row.delta).toFixed(2)}`;
+    default:
+      return `${sign}${row.delta.toLocaleString()}`;
+  }
+}
+
+export interface ComparisonViewProps {
+  runs: Array<{ run_id: string; suite: string; timestamp: string; status: string }>;
+}
+
+export function ComparisonView({ runs }: ComparisonViewProps) {
+  const [runA, setRunA] = useState("");
+  const [runB, setRunB] = useState("");
+  const [comparison, setComparison] = useState<RunComparison | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const canCompare = useMemo(() => runA && runB && runA !== runB, [runA, runB]);
+
+  const onCompare = async () => {
+    if (!canCompare) return;
+    setLoading(true);
+    setError("");
+    try {
+      setComparison(await compareRuns(runA, runB));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setComparison(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const runPicker = (value: string, onChange: (v: string) => void, label: string) => (
+    <label className="flex min-w-0 flex-1 flex-col gap-1">
+      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-9 rounded-md border bg-background px-2 text-sm"
+        aria-label={label}
+      >
+        <option value="">Select run…</option>
+        {runs.map((r) => (
+          <option key={r.run_id} value={r.run_id}>
+            {r.run_id} · {formatRelative(r.timestamp)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+
+  return (
+    <div className="space-y-4" data-testid="benchmark-comparison">
+      <div className="flex flex-wrap items-end gap-3">
+        {runPicker(runA, setRunA, "Baseline run")}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="mb-0.5"
+          aria-label="Swap runs"
+          onClick={() => {
+            setRunA(runB);
+            setRunB(runA);
+          }}
+        >
+          <ArrowLeftRight className="h-4 w-4" />
+        </Button>
+        {runPicker(runB, setRunB, "Candidate run")}
+        <Button size="sm" className="mb-0.5" disabled={!canCompare || loading} onClick={onCompare}>
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          Compare
+        </Button>
+      </div>
+      {error && <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</div>}
+      {comparison && (
+        <div className="space-y-4">
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2.5 font-medium">Metric</th>
+                  <th className="px-3 py-2.5 font-medium">Baseline ({comparison.run_a.run_id})</th>
+                  <th className="px-3 py-2.5 font-medium">Candidate ({comparison.run_b.run_id})</th>
+                  <th className="px-3 py-2.5 font-medium">Change</th>
+                </tr>
+              </thead>
+              <tbody>
+                {comparison.comparison.metrics.map((row) => (
+                  <tr key={row.metric} className="border-t">
+                    <td className="px-3 py-2">{METRIC_LABELS[row.metric] ?? row.metric}</td>
+                    <td className="px-3 py-2 tabular-nums">{formatMetricValue(row.metric, row.baseline)}</td>
+                    <td className="px-3 py-2 tabular-nums">{formatMetricValue(row.metric, row.current)}</td>
+                    <td
+                      className={cn(
+                        "px-3 py-2 tabular-nums",
+                        row.direction === "improved" && "text-emerald-500",
+                        row.direction === "regressed" && "text-red-500",
+                      )}
+                    >
+                      {formatDelta(row.metric, row)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            {Object.entries(comparison.comparison.categories).map(([category, ids]) => (
+              <div key={category} className="rounded-lg border p-3">
+                <div
+                  className={cn(
+                    "text-xs font-medium uppercase tracking-wide",
+                    category === "regressed" && "text-red-500",
+                    category === "newly_solved" && "text-emerald-500",
+                    (category === "still_solved" || category === "still_failing") && "text-muted-foreground",
+                  )}
+                >
+                  {CATEGORY_LABELS[category] ?? category}
+                </div>
+                <div className="mt-1 text-xl font-semibold tabular-nums">{ids.length}</div>
+                {ids.length > 0 && (
+                  <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground" title={ids.join(", ")}>
+                    {ids.join(", ")}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2.5 font-medium">Scenario</th>
+                  <th className="px-3 py-2.5 font-medium">Baseline P(success)</th>
+                  <th className="px-3 py-2.5 font-medium">Candidate P(success)</th>
+                  <th className="px-3 py-2.5 font-medium">Category</th>
+                </tr>
+              </thead>
+              <tbody>
+                {comparison.comparison.scenarios.map((row) => (
+                  <tr key={row.scenario_id} className="border-t">
+                    <td className="px-3 py-2 font-mono text-xs">{row.scenario_id}</td>
+                    <td className="px-3 py-2 tabular-nums">{row.baseline.toFixed(2)}</td>
+                    <td className="px-3 py-2 tabular-nums">{row.current.toFixed(2)}</td>
+                    <td className="px-3 py-2">
+                      <StatusBadge
+                        status={
+                          row.category === "newly_solved"
+                            ? "VERIFIED"
+                            : row.category === "regressed"
+                              ? "FALSE_POSITIVE"
+                              : row.category === "still_solved"
+                                ? "VERIFIED"
+                                : "FAILED"
+                        }
+                      />
+                      <span className="ml-2 text-xs text-muted-foreground">{CATEGORY_LABELS[row.category]}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

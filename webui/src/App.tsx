@@ -28,6 +28,8 @@ const GoalsPage = lazy(() => import("@/routes/GoalsPage").then((m) => ({ default
 const StatsPage = lazy(() => import("@/routes/StatsPage").then((m) => ({ default: m.StatsPage })));
 const HelpPage = lazy(() => import("@/routes/HelpPage").then((m) => ({ default: m.HelpPage })));
 const ConnectionsPage = lazy(() => import("@/routes/ConnectionsPage").then((m) => ({ default: m.ConnectionsPage })));
+const BenchmarksPage = lazy(() => import("@/routes/BenchmarksPage").then((m) => ({ default: m.BenchmarksPage })));
+const BenchmarkRunPage = lazy(() => import("@/routes/BenchmarkRunPage").then((m) => ({ default: m.BenchmarkRunPage })));
 
 export default function App() {
   return (
@@ -57,6 +59,8 @@ export default function App() {
                     <Route path="/goals" element={<GoalsPage />} />
                     <Route path="/graph" element={<AttackGraphPage />} />
                     <Route path="/stats" element={<StatsPage />} />
+                    <Route path="/benchmarks" element={<BenchmarksPage />} />
+                    <Route path="/benchmarks/:runId" element={<BenchmarkRunPage />} />
                     <Route path="/connections" element={<ConnectionsPage />} />
                     <Route path="/help" element={<HelpPage />} />
                     <Route path="/memory" element={<MemoryPage />} />

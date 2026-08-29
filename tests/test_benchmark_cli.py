@@ -67,6 +67,11 @@ def _patch_runner(monkeypatch, tmp_path, mission_outcomes):
         async def run(self, run_config, **kw):  # type: ignore[override]
             from tools.benchmark.metrics import compute_run_summary
             from tools.benchmark.models import TrialResult, TrialStatus
+            from tools.benchmark.regression import (
+                compare_to_baseline,
+                load_baseline,
+                thresholds_from_config,
+            )
 
             trials = []
             for i in range(run_config.trials):
@@ -85,6 +90,12 @@ def _patch_runner(monkeypatch, tmp_path, mission_outcomes):
                     )
                 )
             summary = compute_run_summary(trials, run_id="r1", suite=run_config.suite)
+            regression = None
+            if run_config.check_regression:
+                benchmark_cfg = (self.config or {}).get("benchmark", {}) or {}
+                baseline_path = benchmark_cfg.get("baseline_path", "reports/benchmarks/baseline.json")
+                result = compare_to_baseline(summary, load_baseline(baseline_path), thresholds_from_config(self.config))
+                regression = result.to_dict()
             return {
                 "run_id": "r1",
                 "suite": run_config.suite,
@@ -94,7 +105,7 @@ def _patch_runner(monkeypatch, tmp_path, mission_outcomes):
                 "report_html": "x.html",
                 "summary": summary.to_dict(),
                 "trials": [t.to_dict() for t in trials],
-                "regression": None,
+                "regression": regression,
             }
 
     monkeypatch.setattr("tools.benchmark_cli.BenchmarkRunner", _PatchedRunner)
@@ -124,10 +135,12 @@ def test_cli_run_benchmark(tmp_path, monkeypatch, fake_suite, capsys):
     assert "100.0%" in out or "100%" in out
 
 
-def test_cli_run_benchmark_config_missing(tmp_path, monkeypatch, fake_suite):
+def test_cli_run_benchmark_invalid_config(tmp_path, monkeypatch, fake_suite):
+    """A broken config file is a usage error (exit 2), never a hang."""
     monkeypatch.chdir(tmp_path)
-    args = _args(config=tmp_path / "missing.yaml")
-    rc = run_benchmark_cli(args)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("benchmark: [unclosed\n  broken", encoding="utf-8")
+    rc = run_benchmark_cli(_args(config=config_path))
     assert rc == 2
 
 

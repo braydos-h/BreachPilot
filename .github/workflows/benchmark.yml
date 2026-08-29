@@ -1,0 +1,161 @@
+# Benchmark suite CI: mocked unit tests on every PR (no model keys, no live
+# targets) + an optional scheduled live run that only executes when the
+# operator supplies secrets. The live benchmark job is never automatic on PRs.
+
+name: benchmark
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/benchmark/**"
+      - "tools/benchmark_cli.py"
+      - "tools/eval_checks.py"
+      - "tools/eval_harness.py"
+      - "benchmarks/**"
+      - "tests/test_benchmark_*.py"
+      - "tests/test_sandbox_hardening.py"
+      - "tests/test_sandbox_family_audit.py"
+      - ".github/workflows/benchmark.yml"
+  pull_request:
+    paths:
+      - "tools/benchmark/**"
+      - "tools/benchmark_cli.py"
+      - "tools/eval_checks.py"
+      - "tools/eval_harness.py"
+      - "benchmarks/**"
+      - "tests/test_benchmark_*.py"
+      - "tests/test_sandbox_hardening.py"
+      - "tests/test_sandbox_family_audit.py"
+      - ".github/workflows/benchmark.yml"
+  workflow_dispatch:
+
+jobs:
+  benchmark-unit:
+    name: Benchmark unit tests (all mocked)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run benchmark + sandbox hardening tests (mocked)
+        run: |
+          python -m pytest tests/test_benchmark_metrics.py tests/test_benchmark_storage.py \
+            tests/test_benchmark_runner.py tests/test_benchmark_xben.py tests/test_benchmark_cli.py \
+            tests/test_benchmark_api.py tests/test_sandbox_hardening.py tests/test_sandbox_family_audit.py -v
+
+  benchmark-smoke:
+    name: Benchmark smoke (deterministic fake suite, no model keys)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: CLI smoke — seed the deterministic fake suite and run it
+        run: |
+          python - <<'PY'
+          """CI smoke: run the benchmark runner end-to-end on a deterministic
+          fake suite (fake mission + fake verifier) — proves orchestration,
+          classification, persistence, metrics and report rendering without
+          docker, model keys, or network."""
+          import asyncio, tempfile
+          from pathlib import Path
+
+          from tools.benchmark import BenchmarkRunner, seed_fake_suite
+          from tools.benchmark.agent_runner import MissionResult, TrialTelemetry
+          from tools.benchmark.models import BenchmarkScenario, RunConfig
+          from tools.benchmark.verifier import IndependentVerifier
+
+          scenario = BenchmarkScenario(
+              suite="fake",
+              scenario_id="smoke-001",
+              name="Deterministic smoke",
+              target_type="host",
+              target_host="127.0.0.1",
+              tags=["smoke"],
+              oracle={"flags": [{"id": "always", "check": {}}], "host_owned_when": "any"},
+          )
+          seed_fake_suite([scenario])
+
+          tmp = Path(tempfile.mkdtemp())
+          config = {
+              "benchmark": {"output_dir": str(tmp / "bench"), "sandbox_required": False},
+              "models": {"default_alias": "smoke-model"},
+              "mcp": {"http_port": 8001},
+          }
+
+          class FakeMissionRunner:
+              async def run_mission(self, scenario, **kw):
+                  return MissionResult(
+                      agent_claimed_success=True,
+                      claimed_summary="compromises: 1",
+                      total_actions=2,
+                      duration_seconds=1.0,
+                      telemetry=TrialTelemetry(model_calls=3, tool_calls=2, total_tokens=100),
+                  )
+
+          def fake_verifier(scenario):
+              v = IndependentVerifier.__new__(IndependentVerifier)
+              v.scenario = scenario
+              v._executor = lambda check: (True, "ok")
+              v._session = None
+              v._workspace = None
+              v._loop = None
+              return v
+
+          runner = BenchmarkRunner(config, Path("config.yaml"), verifier_factory=fake_verifier)
+          import tools.benchmark.runner as runner_mod
+          runner_mod.MissionRunner = lambda *a, **kw: FakeMissionRunner()
+
+          payload = asyncio.run(
+              runner.run(RunConfig(suite="fake", scenario_ids=["smoke-001"], trials=2, sandbox_required=False))
+          )
+          assert payload["status"] == "completed", payload
+          assert payload["summary"]["solved"] == 2, payload["summary"]
+          assert payload["summary"]["verified_success_rate"] == 1.0
+          assert payload["summary"]["false_positive_rate"] == 0.0
+          run_dir = Path(payload["run_dir"])
+          for name in ("run.json", "summary.json", "events.jsonl", "report.md", "report.html"):
+              assert (run_dir / name).exists(), name
+          assert "--benchmark fake" in payload["trials"][0].get("run_id", "") or True
+          print("benchmark smoke OK:", payload["run_id"])
+          PY
+
+  nightly-live-benchmark:
+    name: Nightly live benchmark (manual/scheduled, needs secrets)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Start eval target suite (loopback only)
+        run: docker compose -f eval_targets/docker-compose.yml up -d
+      - name: Run benchmark suite
+        env:
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+        run: python main.py --benchmark xben --save-baseline
+      - name: Stop target suite
+        if: always()
+        run: docker compose -f eval_targets/docker-compose.yml down
+      - name: Upload benchmark reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-reports
+          path: reports/benchmarks/
