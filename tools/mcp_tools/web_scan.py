@@ -82,7 +82,7 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
             except ValueError:
                 return "BLOCKED: options string could not be parsed (unbalanced quotes)."
 
-        if not shutil.which(sc):
+        if not shutil.which(sc) and getattr(ctx, "sandbox", None) is None:
             return (
                 f"SCANNER_NOT_INSTALLED: {sc} is not on PATH. "
                 f"Install it (e.g. apt install {sc}) on the operator box and retry."
@@ -91,6 +91,48 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
         argv = _build_argv(sc, target_ip, port, path.strip())
         argv.extend(extra_argv)
         cmd = " ".join(argv)  # reported for operator visibility
+
+        # ---- sandbox path: the scanner runs inside the disposable worker
+        # (no host PATH requirement; sandbox image ships the scanners).
+        if getattr(ctx, "sandbox", None) is not None:
+            from tools.mcp_tools.sandbox_exec import run_argv_in_sandbox, sandbox_error_block
+            from tools.sandbox.exceptions import SandboxError
+
+            attempt_dir, attempt_id = _attempt_dir(workspace)
+            log_path = attempt_dir / f"{sc}.log"
+            start = time.monotonic()
+            _elapsed = 0.0
+            try:
+                _ran, result = run_argv_in_sandbox(
+                    ctx,
+                    argv,
+                    target_ip=str(target_ip),
+                    command=cmd,
+                    timeout=timeout,
+                    cwd_host=attempt_dir,
+                    tool_name=f"run_web_scan:{sc}",
+                )
+                _elapsed = result.duration_seconds
+                output = (result.stdout or "") + ("\n" + result.stderr if result.stderr else "")
+                output = output[-4000:]
+                returncode = result.exit_code
+                status = result.status
+            except SandboxError as exc:
+                return f"WEB_SCAN_RESULT: blocked\n{sandbox_error_block(exc, tool_name='run_web_scan')}"
+            try:
+                log_path.write_text(str(output), encoding="utf-8")
+            except OSError:
+                pass
+            return (
+                f"WEB_SCAN_RESULT: {status}\n"
+                f"ATTEMPT_ID: {attempt_id}\n"
+                f"SCANNER: {sc}\n"
+                f"TARGET: {target_ip}:{port}\n"
+                f"COMMAND: {cmd}\n"
+                f"EXIT_CODE: {returncode}\n"
+                f"DURATION: {_elapsed:.1f}s (sandbox)\n"
+                f"OUTPUT:\n{output}"
+            )
 
         attempt_dir, attempt_id = _attempt_dir(workspace)
         log_path = attempt_dir / f"{sc}.log"

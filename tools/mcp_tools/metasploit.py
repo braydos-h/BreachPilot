@@ -78,6 +78,42 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
         rc_lines.append("exit -y")
         rc_path.write_text("\n".join(rc_lines) + "\n", encoding="utf-8")
 
+        # ---- sandbox path: msfconsole runs INSIDE the disposable worker from
+        # the resource file bound under /workspace (no host metasploit).
+        if getattr(ctx, "sandbox", None) is not None:
+            from tools.mcp_tools.sandbox_exec import run_argv_in_sandbox, sandbox_error_block
+            from tools.sandbox.exceptions import SandboxError
+
+            try:
+                _rc_container = ctx.sandbox.container_path(rc_path)
+            except SandboxError as exc:
+                return f"MSF_RESULT: blocked\n{sandbox_error_block(exc, tool_name='run_msf_module')}"
+            _msf_argv = ["msfconsole", "-q", "-r", _rc_container]
+            start = time.monotonic()
+            try:
+                _ran, result = run_argv_in_sandbox(
+                    ctx, _msf_argv, target_ip=str(target_ip), timeout=600, cwd_host=attempt_dir,
+                    tool_name="run_msf_module",
+                )
+            except SandboxError as exc:
+                return f"MSF_RESULT: blocked\n{sandbox_error_block(exc, tool_name='run_msf_module')}"
+            merged = result.stdout or ""
+            if result.stderr:
+                merged = f"{merged}\n{result.stderr}" if merged else result.stderr
+            try:
+                log_path.write_text(merged, encoding="utf-8", errors="replace")
+            except OSError:
+                pass
+            return (
+                f"MSF_RESULT: {result.status} (exit_code={result.exit_code}, "
+                f"duration={result.duration_seconds:.1f}s, sandbox)\n"
+                f"ATTEMPT_ID: {attempt_id}\n"
+                f"MODULE: {module}\n"
+                f"TARGET: {target_ip}\n"
+                f"OPTIONS: {opts}\n"
+                f"LOG_TAIL:\n{merged[-4000:]}"
+            )
+
         # Linux/macOS: honor exploit.msfconsole_path from config when msfconsole
         # isn't on PATH under that name (default "msfconsole"). No effect on
         # Windows, which still uses the same argv via CREATE_NEW_CONSOLE.
@@ -143,6 +179,29 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
     _msf_bridge: MetasploitBridge | None = None
     mcp._msf_bridge = None
+
+    def _msf_bridge_or_blocked() -> Any:
+        """Bridge accessor that FAILS CLOSED when the sandbox is enabled.
+
+        The Metasploit RPC bridge is a HOST-side process on the operator's
+        loopback that the sandbox netns deliberately denies. Under the sandbox,
+        bridge tooling cannot silently run on the host (no automatic fallback):
+        it raises SandboxUnsupportedError, which the MCP layer surfaces as a
+        SANDBOX_* block. Workarounds: drive msfconsole inside the worker via
+        run_exploit_terminal / run_msf_module, or deliberately set
+        ``sandbox.enabled: false`` in config.yaml for legacy host-mode metasploit.
+        """
+        if getattr(ctx, "sandbox", None) is not None:
+            from tools.sandbox.exceptions import SandboxUnsupportedError
+            from tools.sandbox.mcp_bridge import sandbox_block
+
+            raise SandboxUnsupportedError(
+                "Metasploit RPC bridge cannot execute inside the disposable sandbox "
+                "(host-side loopback process). Use msfconsole inside the worker via "
+                "run_exploit_terminal / run_msf_module, or set sandbox.enabled: false "
+                "to deliberately restore host-mode metasploit."
+            )
+        return _get_msf_bridge()
 
     def _get_msf_bridge() -> MetasploitBridge:
         if mcp._msf_bridge is None:

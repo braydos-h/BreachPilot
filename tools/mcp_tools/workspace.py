@@ -18,6 +18,8 @@ from tools.mcp_tools.terminal import _target_lock_block
 
 
 def register_workspace_tools(mcp: Any, *, ctx: ToolContext) -> None:
+    from tools.mcp_tools.sandbox_exec import run_argv_in_sandbox
+
     workspace = ctx.workspace
     config = ctx.config
     search = ctx.search
@@ -126,6 +128,55 @@ def register_workspace_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return f"BLOCKED: {_block}\nTOOL: run_python_file\nSCRIPT: {cleaned}"
 
         log_path = attempt_dir / "python_run.log"
+
+        # ---- sandbox path (fail closed): AI-generated Python NEVER runs in the
+        # operator's interpreter when the sandbox is enabled -- it is executed
+        # by the python3 inside the disposable worker, from the same
+        # attempt-dir copy under /workspace. Host execution is not a fallback.
+        if getattr(ctx, "sandbox", None) is not None:
+            from tools.mcp_tools.sandbox_exec import sandbox_error_block
+            from tools.sandbox.exceptions import SandboxError
+
+            sandbox = ctx.sandbox
+            try:
+                container_script = sandbox.container_path(attempt_dir / cleaned)
+                container_cwd = sandbox.container_path(attempt_dir)
+            except SandboxError as exc:
+                return f"BLOCKED: {exc}\nTOOL: run_python_file"
+            _argv = [
+                "python3",
+                container_script,
+                str(target_ip),
+                "--target",
+                str(target_ip),
+            ]
+            start = time.monotonic()
+            try:
+                _ran, result = run_argv_in_sandbox(
+                    ctx,
+                    _argv,
+                    target_ip=str(target_ip),
+                    timeout=300,
+                    cwd_host=attempt_dir,
+                    tool_name="run_python_file",
+                )
+            except SandboxError as exc:
+                return f"PYTHON_RUN_RESULT: blocked\n{sandbox_error_block(exc, tool_name='run_python_file')}"
+            merged = result.stdout or ""
+            if result.stderr:
+                merged = f"{merged}\n{result.stderr}" if merged else result.stderr
+            text = (
+                f"COMMAND: {' '.join(_argv)}\n" + merged + f"\nEXIT_CODE: {result.exit_code if result.exit_code is not None else 'timed_out'}\n"
+            )
+            log_path.write_text(text, encoding="utf-8", errors="replace")
+            return (
+                f"PYTHON_RUN_RESULT: {result.status} (exit_code={result.exit_code}, duration={result.duration_seconds:.1f}s, sandbox)\n"
+                f"ATTEMPT_ID: {attempt_id}\n"
+                f"SCRIPT: {script_path}\n"
+                f"TARGET: {target_ip}\n"
+                f"LOG_TAIL:\n{merged[-3000:]}"
+            )
+
         # Pass the target IP as BOTH a bare positional (argv[1]) AND --target <ip>.
         # The attack-module templates the AI copies (network_smb/web/auth_creds)
         # and the orchestrator's `python <path> <ip>` dispatch read sys.argv[1]
