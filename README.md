@@ -329,6 +329,7 @@ Switching providers (Ollama ↔ ChatGPT), models, skills, swarm, OPSEC, persiste
 - ICS: destructive PLC writes dual-gated (`allow_write` + `destructive_ics`)
 - Sandbox: per-run disposable execution worker (`sandbox.*` keys — image, resource limits, network enforcement, DNS mode, cleanup); see [docs/sandbox.md](docs/sandbox.md)
 - API: concurrent runs (default 3), multi-operator, graph route, loopback auth
+- Benchmark suite: `benchmark.*` keys — output dir, default trials, per-trial timeout, `sandbox_required`, baseline path, regression tolerances, telemetry toggles; see [docs/benchmarks.md](docs/benchmarks.md)
 
 ---
 
@@ -375,6 +376,7 @@ See [docs/plugin-development.md](docs/plugin-development.md).
 | [Plugin Development](docs/plugin-development.md) | Out-of-tree extensions |
 | [Config Reference](docs/config-reference.md) | Every `config.yaml` key |
 | [Evaluation](docs/evaluation.md) | Metrics & eval harness |
+| [Benchmarks](docs/benchmarks.md) | Reproducible benchmark suite, oracles, regression gates |
 
 ---
 
