@@ -115,21 +115,22 @@ class BenchmarkStorage:
         config: RunConfig,
         environment: RunEnvironment,
         scenario_ids: list[str],
+        manifest: dict[str, Any] | None = None,
     ) -> Path:
         """Write final run.json + summary.json (and refresh the suite index)."""
         run_dir = self.run_dir(suite, run_id)
-        _atomic_write_json(
-            run_dir / "run.json",
-            {
-                "run_id": run_id,
-                "suite": suite,
-                "status": status,
-                "config": config.to_dict(),
-                "environment": environment.to_dict(),
-                "scenario_ids": list(scenario_ids),
-                "trials": [t.to_dict() for t in trials],
-            },
-        )
+        payload: dict[str, Any] = {
+            "run_id": run_id,
+            "suite": suite,
+            "status": status,
+            "config": config.to_dict(),
+            "environment": environment.to_dict(),
+            "scenario_ids": list(scenario_ids),
+            "trials": [t.to_dict() for t in trials],
+        }
+        if manifest is not None:
+            payload["replay_manifest"] = manifest
+        _atomic_write_json(run_dir / "run.json", payload)
         if summary is not None:
             _atomic_write_json(run_dir / "summary.json", summary.to_dict())
             self._update_index(suite, run_id, summary, status)

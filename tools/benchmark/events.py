@@ -109,30 +109,18 @@ class BenchmarkEventLogger:
 
 
 def _redact_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Redact secrets + bound sizes in one event payload (shallow, recursive)."""
-    redacted: dict[str, Any] = {}
-    for key, value in payload.items():
-        if isinstance(value, str):
-            if key in _VERBATIM_FIELDS:
-                redacted[key] = truncate_output(value)
-            elif len(value) > _MAX_FIELD:
-                redacted[key] = truncate_output(value)
-            else:
-                redacted[key] = truncate_output(value)
-        elif isinstance(value, dict):
-            redacted[key] = _redact_payload(value)
-        elif isinstance(value, list):
-            redacted[key] = [
-                _redact_payload(item)
-                if isinstance(item, dict)
-                else truncate_output(item)
-                if isinstance(item, str)
-                else item
-                for item in value
-            ]
-        else:
-            redacted[key] = value
-    return redacted
+    """Redact secrets + bound sizes in one event payload (shallow, recursive).
+
+    Reuses the audit kernel's nested redaction (secret-key masking + content
+    masking) and additionally truncates oversized string values.
+    """
+    from tools.kernel.audit import _redact_nested
+
+    redacted = _redact_nested(payload)
+    return {
+        key: (truncate_output(value) if isinstance(value, str) and len(value) > _MAX_FIELD else value)
+        for key, value in redacted.items()
+    }
 
 
 #: A live event subscriber: one serialized event dict per call.

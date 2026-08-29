@@ -400,7 +400,14 @@ def compare_summaries_payload(base_summary: dict[str, Any], current_summary: dic
     ]
 
     def _scenario_map(summary: dict[str, Any]) -> dict[str, dict[str, Any]]:
-        return {str(s.get("scenario_id", "")): s for s in (summary.get("scenarios") or []) if isinstance(s, dict)}
+        raw = summary.get("scenarios") or []
+        # Serialized RunSummary rows are a list; hand-built payloads may pass a
+        # scenario_id -> row dict. Both shapes are accepted.
+        if isinstance(raw, dict):
+            rows = [dict(v, scenario_id=k) if isinstance(v, dict) and not v.get("scenario_id") else v for k, v in raw.items()]
+        else:
+            rows = [s for s in raw if isinstance(s, dict)]
+        return {str(s.get("scenario_id", "")): s for s in rows if isinstance(s, dict)}
 
     base_map = _scenario_map(base_summary)
     cur_map = _scenario_map(current_summary)

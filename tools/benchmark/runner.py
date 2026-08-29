@@ -44,6 +44,7 @@ from tools.benchmark.regression import (
     save_baseline,
     thresholds_from_config,
 )
+from tools.benchmark.replay import build_replay_manifest
 from tools.benchmark.report import render_report_html, render_report_markdown
 from tools.benchmark.storage import BenchmarkStorage
 from tools.benchmark.targets import TargetManager, TargetProvisionError
@@ -187,6 +188,9 @@ class BenchmarkRunner:
         meta = {s.scenario_id: {"name": s.name, "difficulty": s.difficulty, "tags": s.tags} for s in scenarios}
         summary = compute_run_summary(trials, run_id=run_id, suite=run_config.suite, scenario_meta=meta)
         status = "cancelled" if (cancel is not None and cancel.is_set()) else "completed"
+        manifest = build_replay_manifest(
+            run_id, run_config.suite, run_config, environment, target_images=environment.target_images
+        )
         self.storage.finalize_run(
             run_config.suite,
             run_id,
@@ -196,6 +200,7 @@ class BenchmarkRunner:
             config=run_config,
             environment=environment,
             scenario_ids=[s.scenario_id for s in scenarios],
+            manifest=manifest,
         )
 
         # Public report from the persisted structured payload.

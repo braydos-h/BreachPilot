@@ -77,6 +77,7 @@ class MissionResult:
     errors: list[str] = field(default_factory=list)
     timed_out: bool = False
     aborted: bool = False
+    duration_seconds: float = 0.0
 
 
 def _extract_sandbox_facts(workspace: Path, required: bool) -> SandboxSnapshot:

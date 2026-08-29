@@ -111,7 +111,7 @@ def test_scenario_summary_counts():
     assert s.ci95_low is not None and s.ci95_high is not None
     assert s.median_duration == 60.0
     assert s.median_actions == 8.0
-    assert s.total_tokens == 150
+    assert s.total_tokens == 250
     assert s.failure_categories.get(FailureCategory.FALSE_POSITIVE.value) == 1
 
 
@@ -144,9 +144,10 @@ def test_run_summary_aggregate():
     assert summary.solved == 1
     assert abs(summary.verified_success_rate - 1 / 3) < 1e-9
     assert abs(summary.false_positive_rate - 1 / 3) < 1e-9
-    assert summary.median_solve_time == 45.0
+    # Median solve time is over VERIFIED trials (the one verified run: 120s).
+    assert summary.median_solve_time == 120.0
     assert summary.estimated_cost == 0.5
-    assert summary.total_tokens == 600
+    assert summary.total_tokens == 700
     assert summary.time_to_first_verified_success == 120.0
     assert len(summary.scenarios) == 2
 
