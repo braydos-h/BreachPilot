@@ -385,6 +385,54 @@ def _check_port(host: str, port: int) -> dict[str, Any]:
             return {"name": f"port_{port}_free", "ok": True, "host": host, "port": port}
 
 
+def _check_sandbox(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Sandbox readiness: Docker CLI, daemon reachability, worker image.
+
+    When ``sandbox.enabled`` is true this check COUNTS toward failures: with
+    the sandbox on, attack execution is fail-closed, so a missing daemon or
+    worker image blocks every offensive command. When disabled it is an
+    informational pass with a note (legacy host-execution mode).
+    """
+    sandbox_cfg = (config or {}).get("sandbox", {}) or {}
+    enabled = bool(sandbox_cfg.get("enabled", False))
+    image = str(sandbox_cfg.get("image", "netattackai-sandbox:latest") or "netattackai-sandbox:latest")
+    result: dict[str, Any] = {"name": "sandbox", "enabled": enabled, "image": image}
+    if not enabled:
+        result["ok"] = True
+        result["note"] = "sandbox disabled -- legacy host-execution mode (uncontained)"
+        return result
+    try:
+        from tools.sandbox.docker_backend import docker_image_exists, docker_version
+    except Exception as exc:  # noqa: BLE001 -- doctor must never crash on import
+        result["ok"] = False
+        result["error"] = f"sandbox subsystem import failed: {exc}"
+        return result
+    daemon_ok, daemon_reason = docker_version()
+    if not daemon_ok:
+        result["ok"] = False
+        result["error"] = daemon_reason
+        result["hint"] = (
+            "Start Docker Desktop (Windows/macOS) or docker.io/docker-ce (Linux). "
+            "With sandbox.enabled: true attack execution is blocked until the daemon "
+            "is reachable (fail closed)."
+        )
+        return result
+    try:
+        image_ok = docker_image_exists(image)
+    except Exception as exc:  # noqa: BLE001 -- image probe failure is a real failure
+        result["ok"] = False
+        result["error"] = str(exc)
+        return result
+    if not image_ok:
+        result["ok"] = False
+        result["error"] = f"sandbox image {image!r} not found"
+        result["hint"] = f"Build it: docker build -t {image} docker/sandbox"
+        return result
+    result["ok"] = True
+    result["value"] = image
+    return result
+
+
 def _collect_doctor_checks(config_path: Path) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
     """Collect all doctor checks and config for JSON or human output."""
     import yaml
