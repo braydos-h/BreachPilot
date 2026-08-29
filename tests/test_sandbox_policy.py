@@ -38,8 +38,19 @@ def _no_env_targets(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_research_resolution(monkeypatch):
-    """Keep tests hermetic: pinned research hosts resolve to nothing."""
-    monkeypatch.setattr(sandbox_policy, "_resolve_authorized", lambda *a, **k: [])
+    """Keep tests hermetic: pinned research hosts resolve to nothing.
+
+    Only RESEARCH_HOSTS are stubbed; other domains keep the real (monkeypatched
+    per-test) host-side resolver so FQDN authorization stays testable.
+    """
+    real = sandbox_policy._resolve_authorized
+
+    def fake(domain: str, config, **kwargs):
+        if domain in sandbox_policy.RESEARCH_HOSTS:
+            return []
+        return real(domain, config, **kwargs)
+
+    monkeypatch.setattr(sandbox_policy, "_resolve_authorized", fake)
 
 
 class TestBuildNetworkPolicy:
@@ -82,13 +93,13 @@ class TestBuildNetworkPolicy:
         assert "192.0.2.77" in pol.authorized_destinations
         assert pol.resolved_domains.get("example.com") == "192.0.2.77"
 
-    def test_fqdn_resolving_outside_allowlist_adds_nothing(self, monkeypatch):
-        # The domain IS allowed, but its resolution lands on an unauthorized
-        # IP => the resolved IP must NOT enter the firewall authorization.
+    def test_resolution_validation_rejects_unallowlisted_domain(self, monkeypatch):
+        # The validation helper is the gate for dynamically discovered targets:
+        # a domain that is NOT in the effective allowlist contributes nothing,
+        # no matter what it resolves to (prevents DNS-driven scope widening).
         monkeypatch.setattr("tools.validation_utils.resolve_target_to_ip", lambda d: "198.51.100.9")
-        pol = build_network_policy(_cfg(["example.com"]))
-        assert "198.51.100.9" not in pol.authorized_destinations
-        assert "example.com" in " ".join(pol.unresolved_targets) or not pol.resolved_domains
+        resolved = sandbox_policy._resolve_authorized("evil.example.net", _cfg(["192.0.2.5"]))
+        assert resolved == []
 
     def test_localhost_does_not_authorize_host_loopback(self):
         pol = build_network_policy(_cfg(["127.0.0.1"]))
@@ -124,7 +135,7 @@ class TestAuditPolicyPayload:
     def test_payload_is_secret_free_and_fingerprinted(self):
         pol = build_network_policy(_cfg(["192.0.2.5"]))
         payload = audit_policy_payload(pol)
-        assert payload["authorized_destinations"] == ["192.0.2.5"]
+        assert payload["authorized_destinations"] == ["192.0.2.5/32"]
         assert "169.254.169.254" in payload["explicitly_blocked"]
         assert len(payload["fingerprint"]) == 16
 

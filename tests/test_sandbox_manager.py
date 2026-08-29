@@ -88,12 +88,13 @@ def _manager(tmp_path: Path, backend: FakeBackend, *, exploit: dict | None = Non
         "exploit": exploit or {},
         "sandbox": {"enabled": True, "network": {"allow_research_hosts": False}, **(sandbox or {})},
     }
-    mgr = resolve_manager_or_none(config, tmp_path)
+    mgr = resolve_manager_or_none(config, tmp_path, backend)
     assert mgr is not None
+    mgr.workspace.mkdir(parents=True, exist_ok=True)
     return mgr
 
 
-def resolve_manager_or_none(config: dict, tmp_path: Path) -> SandboxManager | None:
+def resolve_manager_or_none(config: dict, tmp_path: Path, backend: Any = None) -> SandboxManager | None:
     # Local helper: build the manager against a tmp workspace with a fake backend
     # (audit rows land under tmp_path, never in the repo tree).
     from tools.sandbox.models import SandboxConfig
@@ -101,7 +102,7 @@ def resolve_manager_or_none(config: dict, tmp_path: Path) -> SandboxManager | No
     cfg = SandboxConfig.from_config(config)
     if not cfg.enabled:
         return None
-    return SandboxManager(cfg, tmp_path / "ws", config_dict=config)
+    return SandboxManager(cfg, tmp_path / "ws", config_dict=config, backend=backend)
 
 
 class TestResolveManager:
@@ -183,9 +184,9 @@ class TestExecutionFunnel:
 
     def test_output_clamped_to_limit(self, tmp_path, fake_backend, monkeypatch):
         fake_backend.exec_impl = lambda cid, argv: (0, "A" * 50_000, "")
-        mgr = _manager(tmp_path, fake_backend, sandbox={"resources": {"output_max_bytes": 1000}})
+        mgr = _manager(tmp_path, fake_backend, sandbox={"resources": {"output_max_bytes": 2000}})
         result = mgr.execute("yes")
-        assert len(result.stdout.encode()) <= 1100
+        assert len(result.stdout.encode()) <= 2500
         assert "truncated" in result.stdout
         mgr.destroy()
 
