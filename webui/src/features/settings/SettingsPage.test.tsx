@@ -22,6 +22,7 @@ vi.mock("@/api/hooks", () => ({
   useResetSystem: vi.fn(),
   useAddModel: vi.fn(),
   useRemoveModel: vi.fn(),
+  useSandboxStatus: vi.fn(),
 }));
 vi.mock("@/components/ProviderSetup", () => ({
   useProviderStatus: vi.fn(),
@@ -44,6 +45,7 @@ import {
   usePutSecrets,
   useRemoveModel,
   useResetSystem,
+  useSandboxStatus,
   useSecrets,
   useSystemInfo,
   useTelemetry,
@@ -64,6 +66,7 @@ const diagnosticsMock = vi.mocked(useDiagnostics);
 const resetMock = vi.mocked(useResetSystem);
 const addModelMock = vi.mocked(useAddModel);
 const removeModelMock = vi.mocked(useRemoveModel);
+const sandboxStatusMock = vi.mocked(useSandboxStatus);
 const providerStatusMock = vi.mocked(useProviderStatus);
 const modelOptionsMock = vi.mocked(useModelOptions);
 
@@ -123,6 +126,7 @@ function setup() {
   resetMock.mockReturnValue({ mutate: vi.fn(), isPending: false, error: null } as never);
   addModelMock.mockReturnValue({ mutate: vi.fn(), isPending: false, error: null } as never);
   removeModelMock.mockReturnValue({ mutate: vi.fn(), isPending: false, error: null } as never);
+  sandboxStatusMock.mockReturnValue({ data: null, isLoading: false, error: null, isFetching: false, refetch: vi.fn() } as never);
   providerStatusMock.mockReturnValue({
     provider: "ollama",
     label: "Ollama",

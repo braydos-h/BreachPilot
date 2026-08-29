@@ -20,12 +20,15 @@ export function StatusOverview() {
   const modelCount = status.liveCount > 0 ? status.liveCount : Object.keys(models.data?.registry ?? {}).length;
 
   // Sandbox tone: enabled+docker-reachable is good; enabled+unreachable is bad
-  // (fail-closed blocks attack execution); disabled is a deliberate opt-out.
+  // (fail-closed blocks attack execution); image missing is warn (build needed);
+  // disabled is a deliberate opt-out.
   const sandboxEnabled = sandbox.data?.enabled ?? false;
   const sandboxTone: "ok" | "warn" | "bad" = !sandboxEnabled
     ? "warn"
     : sandbox.data?.docker_available
-      ? "ok"
+      ? sandbox.data?.image_present === false
+        ? "warn"
+        : "ok"
       : "bad";
 
   return (
@@ -54,7 +57,9 @@ export function StatusOverview() {
         value={
           sandboxEnabled
             ? sandbox.data?.docker_available
-              ? `Contained (${sandbox.data?.backend ?? "docker"})`
+              ? sandbox.data?.image_present === false
+                ? "Image missing"
+                : `Contained (${sandbox.data?.backend ?? "docker"})`
               : "Docker unreachable"
             : "Disabled (host exec)"
         }

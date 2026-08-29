@@ -26,7 +26,7 @@ from tools.sandbox.exceptions import (
     SandboxUnavailableError,
     SandboxWorkspaceError,
 )
-from tools.sandbox.manager import CONTAINER_WORKSPACE, SandboxManager, resolve_manager
+from tools.sandbox.manager import CONTAINER_WORKSPACE, SandboxManager, resolve_manager, status_report
 
 _EXPLOIT_ENV_KEYS = (
     "EXPLOIT_TARGET",
@@ -316,3 +316,36 @@ class TestAuditTrail:
         assert row["sandbox"]["network"]["authorized_destinations"] == ["192.0.2.5/32"]
         assert row["sandbox"]["env_keys"] == sorted(row["sandbox"]["env_keys"])
         mgr.destroy()
+
+
+class TestStatusReport:
+    """status_report is the WebUI/doctor surface; image_present must
+    distinguish "build the image" from "Docker unreachable" and stay None
+    when the answer cannot be known."""
+
+    def test_image_present_when_docker_and_image_ok(self, monkeypatch):
+        monkeypatch.setattr("tools.sandbox.docker_backend.docker_version", lambda: (True, "27.0.0"))
+        monkeypatch.setattr("tools.sandbox.docker_backend.docker_image_exists", lambda image: True)
+        report = status_report({"sandbox": {"enabled": True}})
+        assert report["docker_available"] is True
+        assert report["image_present"] is True
+
+    def test_image_missing_when_docker_ok_but_image_absent(self, monkeypatch):
+        monkeypatch.setattr("tools.sandbox.docker_backend.docker_version", lambda: (True, "27.0.0"))
+        monkeypatch.setattr("tools.sandbox.docker_backend.docker_image_exists", lambda image: False)
+        report = status_report({"sandbox": {"enabled": True}})
+        assert report["docker_available"] is True
+        assert report["image_present"] is False
+
+    def test_image_unknown_when_docker_unreachable(self, monkeypatch):
+        monkeypatch.setattr("tools.sandbox.docker_backend.docker_version", lambda: (False, "no daemon"))
+        report = status_report({"sandbox": {"enabled": True}})
+        assert report["docker_available"] is False
+        assert report["image_present"] is None
+        assert report["docker_error"] == "no daemon"
+
+    def test_image_unknown_when_disabled(self):
+        report = status_report({})
+        assert report["enabled"] is False
+        assert report["image_present"] is None
+        assert "note" in report

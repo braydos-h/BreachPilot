@@ -6,9 +6,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -462,28 +463,42 @@ async def get_workspace_file(run_id: str, path: str, auth: str = Depends(_requir
 # ── Audit trail (C6) ────────────────────────────────────────────────────────
 
 
-@router.get("/runs/{run_id}/audit")
-async def get_audit(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
-    """Read the tamper-evident exploit audit log + verify the hash chain."""
-    if _ps().get_run(run_id) is None:
-        raise HTTPException(status_code=404, detail="Run not found")
+def _find_audit_file(run_id: str) -> Path | None:
+    """Locate the run's exploit_audit.jsonl (reports/ root first, workspace fallback)."""
     run_dir = _run_dir(run_id)
     audit_path = run_dir / "exploit_audit.jsonl"
     if not audit_path.exists():
         # Fall back to the workspace copy.
         audit_path = run_dir / "exploit_workspace" / "exploit_audit.jsonl"
-    records: list[dict[str, Any]] = []
-    if audit_path.exists():
-        for line in audit_path.read_text(encoding="utf-8", errors="replace").splitlines():
+    return audit_path if audit_path.exists() else None
+
+
+def _read_jsonl_dicts(path: Path) -> Iterator[dict[str, Any]]:
+    """Yield parsed JSON objects from a JSONL file, skipping bad/blank lines."""
+    if not path.is_file():
+        return
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
             line = line.strip()
             if not line:
                 continue
             try:
-                records.append(json.loads(line))
+                record = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if isinstance(record, dict):
+                yield record
+
+
+@router.get("/runs/{run_id}/audit")
+async def get_audit(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Read the tamper-evident exploit audit log + verify the hash chain."""
+    if _ps().get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    audit_path = _find_audit_file(run_id)
+    records: list[dict[str, Any]] = list(_read_jsonl_dicts(audit_path)) if audit_path else []
     chain_valid, chain_reason = (True, "no audit log")
-    if audit_path.exists():
+    if audit_path is not None:
         try:
             from tools.exploit_agent.policy import verify_audit_chain
 
@@ -491,6 +506,133 @@ async def get_audit(run_id: str, auth: str = Depends(_require_auth)) -> dict[str
         except Exception as exc:
             chain_valid, chain_reason = False, f"verification error: {exc}"
     return {"records": records, "chain_valid": chain_valid, "chain_reason": chain_reason}
+
+
+# ── Per-run sandbox summary (WebUI Sandbox tab) ─────────────────────────────
+
+_SANDBOX_CODE_RE = re.compile(r"SANDBOX_[A-Z_]+")
+_BLOCK_MESSAGE_STOP = ("TOOL:", "EXECUTED:", "REMEDIATION:", "ATTEMPT_ID:", "TARGET:")
+_RECENT_BLOCK_LIMIT = 5
+
+
+def _sandbox_block_message(result_text: str, code: str) -> str:
+    """First human-readable line after the SANDBOX_* code line, clipped."""
+    lines = [ln.strip() for ln in result_text.splitlines() if ln.strip()]
+    for idx, line in enumerate(lines):
+        if code in line and idx + 1 < len(lines):
+            nxt = lines[idx + 1]
+            if nxt.startswith(_BLOCK_MESSAGE_STOP):
+                return ""
+            return nxt[:200]
+    return ""
+
+
+def _run_sandbox_summary(run_id: str) -> dict[str, Any]:
+    """Assemble the per-run sandbox picture from on-disk run artifacts.
+
+    Sources (read-only, no Docker controls -- see docs/sandbox.md):
+    - ``exploit_audit.jsonl`` sandbox rows: container/config identity, last
+      network policy, execution status counts (cleanup rows excluded).
+    - ``events.jsonl`` ``tool_result`` events: SANDBOX_* block text with the
+      reason code + message (audit rows only carry a generic blocked status).
+    """
+    summary: dict[str, Any] = {
+        "run_id": run_id,
+        "found": False,
+        "config": {},
+        "container": {},
+        "network": {},
+        "executions": {"started": 0, "completed": 0, "failed": 0, "timed_out": 0, "total": 0},
+        "blocked": {"total": 0, "recent": []},
+        "last_activity": "",
+    }
+
+    audit_path = _find_audit_file(run_id)
+    counts = summary["executions"]
+    if audit_path is not None:
+        for row in _read_jsonl_dicts(audit_path):
+            ts = str(row.get("timestamp") or "")
+            if ts:
+                summary["last_activity"] = ts
+            if str(row.get("status") or "") == "blocked":
+                summary["blocked"]["total"] += 1
+            payload = row.get("sandbox")
+            if not isinstance(payload, dict):
+                continue
+            tool_name = str(row.get("tool_name") or "")
+            if tool_name.endswith("cleanup"):
+                continue
+            summary["found"] = True
+            status = str(row.get("status") or "")
+            if status in ("started", "completed", "failed", "timed_out"):
+                counts[status] += 1
+            summary["config"] = {
+                "enabled": payload.get("enabled"),
+                "backend": payload.get("backend"),
+                "image": payload.get("image"),
+                "user": payload.get("user"),
+            }
+            summary["container"] = {
+                "id": payload.get("container_id"),
+                "sandbox_run_id": payload.get("run_id"),
+            }
+            network = payload.get("network")
+            if isinstance(network, dict):
+                summary["network"] = {
+                    "enforced": network.get("enforced"),
+                    "fingerprint": network.get("fingerprint"),
+                    "authorized_destinations": network.get("authorized_destinations") or [],
+                    "explicitly_blocked": network.get("explicitly_blocked") or [],
+                    "resolved_domains": network.get("resolved_domains") or {},
+                    "unresolved_targets": network.get("unresolved_targets") or [],
+                    "allow_dns": network.get("allow_dns"),
+                }
+    counts["total"] = counts["completed"] + counts["failed"] + counts["timed_out"]
+    summary["executions"] = {"attempts": counts.pop("started"), **counts}
+
+    events_path = _run_dir(run_id) / "events.jsonl"
+    blocks: list[dict[str, Any]] = []
+    for event in _read_jsonl_dicts(events_path):
+        if str(event.get("type") or "") != "tool_result":
+            continue
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        result_text = str(payload.get("result") or "")
+        match = _SANDBOX_CODE_RE.search(result_text)
+        if not match:
+            continue
+        code = match.group(0)
+        blocks.append(
+            {
+                "timestamp": event.get("timestamp") or "",
+                "tool": payload.get("name") or "",
+                "code": code,
+                "message": _sandbox_block_message(result_text, code),
+            }
+        )
+    if blocks:
+        summary["found"] = True
+        summary["blocked"]["recent"] = blocks[-_RECENT_BLOCK_LIMIT:]
+        # Audit rows count every blocked result; events only carry SANDBOX_*
+        # ones. Take the max so a missing/older audit log can't zero it out.
+        summary["blocked"]["total"] = max(int(summary["blocked"]["total"]), len(blocks))
+    return summary
+
+
+@router.get("/runs/{run_id}/sandbox")
+async def get_run_sandbox(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Read-only per-run sandbox summary for the WebUI Sandbox tab.
+
+    Derived entirely from run artifacts (exploit_audit.jsonl + events.jsonl):
+    container identity, last network-authorization policy, execution status
+    counts, and recent SANDBOX_* blocked-command reasons. 200 with empty
+    structures when the run has no sandbox data; 404 for unknown runs. No
+    Docker exec/remove controls -- live worker state stays manager-side.
+    """
+    if _ps().get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return _run_sandbox_summary(run_id)
 
 
 # ── Swarm + campaign state (C7-C8) ──────────────────────────────────────────

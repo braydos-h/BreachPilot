@@ -96,6 +96,7 @@ async def capabilities(auth: str = Depends(_require_auth)) -> dict[str, Any]:
             "single_decision",
             "diagnostics_output",
             "sandbox_status",
+            "run_sandbox",
             # ── commit fc0af19 ── advisory/local MCP tool families + new surfaces.
             # Each name keys a WebUI panel off capabilities.features so a disabled
             # backend feature renders an empty state, not a 404 loop.

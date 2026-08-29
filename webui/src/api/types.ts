@@ -580,6 +580,50 @@ export interface AuditResponse {
   chain_reason: string;
 }
 
+export interface RunSandboxBlock {
+  timestamp: string;
+  tool: string;
+  code: string;
+  message: string;
+}
+
+/** GET /runs/{id}/sandbox — per-run sandbox summary derived from run artifacts. */
+export interface RunSandboxResponse {
+  run_id: string;
+  found: boolean;
+  config: {
+    enabled?: boolean;
+    backend?: string;
+    image?: string;
+    user?: string;
+  };
+  container: {
+    id?: string;
+    sandbox_run_id?: string;
+  };
+  network: {
+    enforced?: boolean;
+    fingerprint?: string;
+    authorized_destinations?: string[];
+    explicitly_blocked?: string[];
+    resolved_domains?: Record<string, string>;
+    unresolved_targets?: string[];
+    allow_dns?: string;
+  };
+  executions: {
+    attempts: number;
+    completed: number;
+    failed: number;
+    timed_out: number;
+    total: number;
+  };
+  blocked: {
+    total: number;
+    recent: RunSandboxBlock[];
+  };
+  last_activity: string;
+}
+
 export interface SwarmStateResponse {
   state: Record<string, unknown>;
 }

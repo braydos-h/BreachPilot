@@ -547,6 +547,9 @@ def status_report(config: dict[str, Any] | None) -> dict[str, Any]:
 
     Probing is seam-mediated and cheap; a status endpoint never throws --
     any probe failure surfaces as ``docker_error`` text, never an exception.
+    ``image_present`` distinguishes "Docker up but worker image not built"
+    (the common first-run gap) from "Docker unreachable"; it stays ``None``
+    when the answer cannot be known (sandbox disabled / daemon down).
     """
     cfg = SandboxConfig.from_config(config)
     report: dict[str, Any] = {
@@ -557,6 +560,7 @@ def status_report(config: dict[str, Any] | None) -> dict[str, Any]:
         "read_only_rootfs": cfg.read_only_rootfs,
         "docker_available": False,
         "docker_error": "",
+        "image_present": None,
         "network": {
             "enforce": cfg.network_enforce,
             "fail_closed": cfg.network_fail_closed,
@@ -581,6 +585,8 @@ def status_report(config: dict[str, Any] | None) -> dict[str, Any]:
         report["docker_available"] = ok
         if not ok:
             report["docker_error"] = reason
+        else:
+            report["image_present"] = bool(_db.docker_image_exists(cfg.image))
     except SandboxError as exc:
         report["docker_error"] = str(exc)
     return report

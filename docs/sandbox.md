@@ -174,10 +174,21 @@ audit row on destroy.
 
 ## WebUI / API
 
-`GET /api/v1/system/sandbox` (bearer-auth) reports enabled/backend/image,
-Docker reachability, network policy posture, and resource limits. The System
-UI status bar shows the same. The WebUI never exposes Docker exec/remove
-controls — sandbox lifecycle belongs to the run engine.
+`GET /api/v1/system/sandbox` (bearer-auth) reports enabled/backend/image/user,
+rootfs mode, Docker reachability, worker-image presence (`image_present`, null
+when unknowable), network policy posture, resource limits, and cleanup flags.
+The System UI (Settings → Advanced → Sandbox) renders the same with a build
+hint when the worker image is missing; the status-bar chip surfaces the
+short state ("Contained", "Image missing", "Docker unreachable", "Disabled").
+
+`GET /api/v1/runs/{run_id}/sandbox` (bearer-auth) summarizes a run's sandbox
+activity for the run page's Sandbox tab, derived read-only from run artifacts:
+container identity and config echo (exploit_audit.jsonl `sandbox` rows), the
+last network-authorization policy (authorized/blocked destinations, resolved
+domains, fingerprint), execution status counts (cleanup rows excluded), and
+the last five SANDBOX_* blocked commands with reason codes (from tool_result
+events). Both endpoints are read-only — the WebUI never exposes Docker
+exec/remove controls; sandbox lifecycle belongs to the run engine.
 
 ## Doctor
 

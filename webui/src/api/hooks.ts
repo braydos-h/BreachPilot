@@ -46,6 +46,7 @@ import type {
   RunListResponse,
   RunListRow,
   RunGraphResponse,
+  RunSandboxResponse,
   SecretsStatus,
   SkillDetail,
   SkillInstallRequest,
@@ -90,6 +91,7 @@ export const queryKeys = {
   runTools: (runId: string) => ["runs", runId, "tools"] as const,
   runArtifacts: (runId: string) => ["runs", runId, "artifacts"] as const,
   runAudit: (runId: string) => ["runs", runId, "audit"] as const,
+  runSandbox: (runId: string) => ["runs", runId, "sandbox"] as const,
   runSwarm: (runId: string) => ["runs", runId, "swarm"] as const,
   runCampaign: (runId: string) => ["runs", runId, "campaign"] as const,
   runLog: (runId: string, name: string, tail: number, attempt?: string, target?: string) =>
@@ -303,8 +305,12 @@ export interface SandboxStatusResponse {
   enabled: boolean;
   backend: string;
   image: string;
+  user: string;
+  read_only_rootfs: boolean;
   docker_available: boolean;
   docker_error: string;
+  /** null = unknowable (sandbox disabled / daemon down); true/false when probed. */
+  image_present: boolean | null;
   network: {
     enforce: boolean;
     fail_closed: boolean;
@@ -319,6 +325,10 @@ export interface SandboxStatusResponse {
     timeout_seconds: number;
     output_max_bytes: number;
   };
+  cleanup: {
+    remove_on_exit: boolean;
+    remove_stale_on_startup: boolean;
+  };
   note?: string;
 }
 
@@ -329,6 +339,23 @@ export function useSandboxStatus() {
     queryFn: () => apiFetch<SandboxStatusResponse>("/system/sandbox"),
     ...defaultQueryOptions,
     staleTime: 30_000,
+  });
+}
+
+/** Per-run sandbox summary (Sandbox tab). Polls only while the run is active. */
+export function useRunSandbox(runId: string | null | undefined) {
+  const qc = useQueryClient();
+  return useQuery<RunSandboxResponse>({
+    queryKey: queryKeys.runSandbox(runId ?? ""),
+    queryFn: () => apiFetch<RunSandboxResponse>(`/runs/${encodeURIComponent(runId as string)}/sandbox`),
+    ...defaultQueryOptions,
+    enabled: !!runId,
+    refetchInterval: () => {
+      if (!runId) return false;
+      const run = qc.getQueryData<RunDetail>(queryKeys.run(runId));
+      if (!run || isActiveState(run.state)) return 30_000;
+      return false;
+    },
   });
 }
 

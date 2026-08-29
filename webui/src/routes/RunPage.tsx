@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ClipboardList, Flag, FlaskConical, Loader2, Network, ScanSearch, ScrollText, Share2, Square, Wrench } from "lucide-react";
+import { ClipboardList, Flag, FlaskConical, Loader2, Network, ScanSearch, ScrollText, Share2, ShieldCheck, Square, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -30,6 +30,7 @@ import {
   useFetchArtifactBlob,
   useResumeRun,
   useRun,
+  useRunSandbox,
   useRunTools,
   useSwarmState,
   useCampaignState,
@@ -44,6 +45,7 @@ import { SummaryTab } from "@/routes/run/tabs/SummaryTab";
 import { ManualToolPanel } from "@/routes/run/tabs/ToolsTab";
 import { AdvisoryPanel } from "@/routes/run/tabs/AdvisoryTab";
 import { AuditView } from "@/routes/run/tabs/AuditTab";
+import { SandboxTab } from "@/routes/run/tabs/SandboxTab";
 import { SwarmTab } from "@/routes/run/tabs/SwarmTab";
 import { CampaignTab } from "@/routes/run/tabs/CampaignTab";
 import { DecisionHistoryCard } from "@/routes/run/DecisionHistoryCard";
@@ -58,6 +60,7 @@ export function RunPage() {
   const cancel = useCancelRun();
   const resume = useResumeRun();
   const audit = useAudit(runId ?? null, tab === "audit");
+  const sandbox = useRunSandbox(tab === "sandbox" ? (runId ?? null) : null);
   const capabilities = useCapabilities();
   const swarm = useSwarmState(runId ?? null, tab === "swarm", isActiveState(run.data?.state as RunState) ? 3000 : false);
   const campaign = useCampaignState(runId ?? null, tab === "campaign", isActiveState(run.data?.state as RunState) ? 3000 : false);
@@ -216,6 +219,7 @@ export function RunPage() {
                     <TabsTrigger value="tools" className="h-6 px-2 py-0 text-xs"><Wrench className="mr-1 h-3 w-3" />Tools</TabsTrigger>
                     <TabsTrigger value="advisory" className="h-6 px-2 py-0 text-xs"><FlaskConical className="mr-1 h-3 w-3" />Advisory</TabsTrigger>
                     <TabsTrigger value="audit" className="h-6 px-2 py-0 text-xs"><ScrollText className="mr-1 h-3 w-3" />Audit</TabsTrigger>
+                    <TabsTrigger value="sandbox" className="h-6 px-2 py-0 text-xs"><ShieldCheck className="mr-1 h-3 w-3" />Sandbox</TabsTrigger>
                     <TabsTrigger value="swarm" className="h-6 px-2 py-0 text-xs"><Share2 className="mr-1 h-3 w-3" />Swarm</TabsTrigger>
                     <TabsTrigger value="campaign" className="h-6 px-2 py-0 text-xs"><Flag className="mr-1 h-3 w-3" />Campaign</TabsTrigger>
                   </TabsList>
@@ -232,6 +236,7 @@ export function RunPage() {
                   <AdvisoryPanel tools={tools.data?.tools ?? []} toolsLoading={tools.isLoading} features={capabilities.data?.features ?? []} runActive={active} onCall={(name: string, parsedArgs: Record<string, unknown>) => callTool.mutate({ tool: name, arguments: parsedArgs }, { onSuccess: (data) => setAdvisoryResult(data.result || "(no output)"), onError: (err) => setAdvisoryResult(err instanceof ApiError ? err.message : "Tool call failed.") })} calling={callTool.isPending} lastResult={advisoryResult} />
                 </TabsContent>
                 <TabsContent value="audit" className="mt-0 space-y-2"><AuditView loading={audit.isLoading} error={audit.error} records={audit.data?.records ?? []} chainValid={audit.data?.chain_valid ?? false} chainReason={audit.data?.chain_reason ?? ""} /></TabsContent>
+                <TabsContent value="sandbox" className="mt-0 space-y-2"><SandboxTab loading={sandbox.isLoading} error={sandbox.error} data={sandbox.data} /></TabsContent>
                 <TabsContent value="swarm" className="mt-0"><SwarmTab loading={swarm.isLoading} error={swarm.error} state={swarm.data?.state} witnessFlags={witness.data?.flags} witnessLoading={witness.isLoading} negotiationRounds={Number((config.data?.swarm as Record<string, unknown> | undefined)?.negotiation_rounds ?? 0) || 0} /></TabsContent>
                 <TabsContent value="campaign" className="mt-0"><CampaignTab loading={campaign.isLoading} error={campaign.error} state={campaign.data?.state} runId={runData.id} target={runData.request?.target || ""} runActive={active} tools={(tools.data?.tools ?? []).map((t) => t.function?.name ?? "")} /></TabsContent>
               </div>

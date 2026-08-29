@@ -40,7 +40,7 @@ def _sandbox_status_line(manager: Any) -> str:
             f"SANDBOX: run_id={st.get('run_id', '')} container={st.get('container_id', '')[:12]} "
             f"network_locked={st.get('network_locked', False)} image={st.get('image', '')}\n"
         )
-    except Exception:  # noqa: BLE001 -- status is advisory, never blocks the result
+    except Exception:  # ponytail: bare except intentional -- status is advisory, never blocks the result
         return "SANDBOX: active\n"
 
 
@@ -51,7 +51,7 @@ def _platform_system() -> str:
         return "Windows"
     try:
         return platform.system()
-    except Exception:
+    except Exception:  # ponytail: bare except intentional -- platform probe fallback only
         return "Linux"
 
 

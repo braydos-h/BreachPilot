@@ -1,16 +1,16 @@
-// Advanced: system information, diagnostics, LLM usage, the raw/advanced
+// Advanced: system information, sandbox, diagnostics, LLM usage, the raw/advanced
 // config (unknown fields surface here with their raw keys), and the Danger
 // Zone at the very bottom.
 
 import { useState } from "react";
-import { Loader2, RefreshCw, Stethoscope, Wrench } from "lucide-react";
+import { Loader2, RefreshCw, ShieldCheck, Stethoscope, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SettingsSection } from "./SettingsSection";
 import { ConfigEditor } from "./ConfigEditor";
 import { DangerZone } from "./DangerZone";
-import { useDiagnostics, useSystemInfo, useTelemetry } from "@/api/hooks";
+import { useDiagnostics, useSandboxStatus, useSystemInfo, useTelemetry } from "@/api/hooks";
 import { ApiError } from "@/api/client";
 import { formatRelative } from "@/lib/utils";
 import { SkeletonRows } from "@/components/Loading";
@@ -22,6 +22,12 @@ export function AdvancedSettings() {
       <SettingsSection title="System information" description="Host details for this daemon.">
         <SystemInfo />
       </SettingsSection>
+      <SettingsSection
+        title="Sandbox"
+        description="Disposable Docker worker that contains every attack command. Read-only status; no Docker controls."
+      >
+        <SandboxPanel />
+      </SettingsSection>
       <SettingsSection title="Diagnostics" description="Run the doctor or self-test.">
         <Diagnostics />
       </SettingsSection>
@@ -30,6 +36,89 @@ export function AdvancedSettings() {
       </SettingsSection>
       <ConfigEditor category="advanced" />
       <DangerZone />
+    </div>
+  );
+}
+
+function SandboxPanel() {
+  const sandbox = useSandboxStatus();
+  const data = sandbox.data;
+
+  return (
+    <div className="space-y-3 py-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Worker containment</span>
+        <Button size="sm" variant="ghost" onClick={() => sandbox.refetch()} disabled={sandbox.isFetching}>
+          <RefreshCw className={cn("h-3.5 w-3.5", sandbox.isFetching && "animate-spin")} />
+        </Button>
+      </div>
+      {sandbox.isLoading && <SkeletonRows count={4} className="p-2" />}
+      {sandbox.error && <div className="text-sm text-destructive">Failed to load sandbox status.</div>}
+      {data && (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            {data.enabled ? (
+              data.docker_available ? (
+                data.image_present === false ? (
+                  <Badge variant="warn">Image missing</Badge>
+                ) : (
+                  <Badge variant="success">
+                    <ShieldCheck className="mr-1 h-3 w-3" />
+                    Contained ({data.backend})
+                  </Badge>
+                )
+              ) : (
+                <Badge variant="danger">Docker unreachable</Badge>
+              )
+            ) : (
+              <Badge variant="warn">Disabled (host exec)</Badge>
+            )}
+            {data.docker_error && <span className="text-xs text-muted-foreground">{data.docker_error}</span>}
+          </div>
+          {data.enabled && data.image_present === false && (
+            <div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 p-2 text-xs">
+              <p>The worker image is not built — every attack command will be blocked (fail closed).</p>
+              <pre className="mt-1 overflow-x-auto font-mono text-xs scrollbar-thin">
+                docker build -t {data.image} docker/sandbox
+              </pre>
+            </div>
+          )}
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <Stat label="Image" value={data.image} />
+            <Stat label="Worker user" value={data.user || "—"} />
+            <Stat label="Root filesystem" value={data.read_only_rootfs ? "read-only" : "writable"} />
+            <Stat label="DNS policy" value={data.network.allow_dns || "—"} />
+            <Stat label="Memory" value={`${data.resources.memory_mb} MB`} />
+            <Stat label="CPUs" value={String(data.resources.cpus)} />
+            <Stat label="PIDs" value={String(data.resources.pids)} />
+            <Stat label="Exec timeout" value={`${data.resources.timeout_seconds}s`} />
+            <Stat label="Output cap" value={`${(data.resources.output_max_bytes / 1000).toFixed(0)} kB`} />
+            <Stat label="Network enforce" value={data.network.enforce ? "iptables lock" : "off"} />
+            <Stat label="Fail closed" value={data.network.fail_closed ? "yes" : "no"} />
+            <Stat label="Host loopback" value={data.network.map_host_loopback ? "mapped" : "blocked"} />
+            <div className="sm:col-span-2">
+              <Stat
+                label="Extra allowed CIDRs"
+                value={data.network.extra_allow_cidrs.length > 0 ? data.network.extra_allow_cidrs.join(", ") : "—"}
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <Stat
+                label="Cleanup"
+                value={
+                  [
+                    data.cleanup.remove_on_exit ? "remove on exit" : null,
+                    data.cleanup.remove_stale_on_startup ? "stale sweep on startup" : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || "—"
+                }
+              />
+            </div>
+          </div>
+          {data.note && <p className="text-xs text-muted-foreground">{data.note}</p>}
+        </>
+      )}
     </div>
   );
 }
