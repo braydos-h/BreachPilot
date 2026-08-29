@@ -538,3 +538,36 @@ operator_connection:
   beacon_interval_seconds: 300
   health_check_interval_seconds: 60
   workspace_dir: exploit_workspace
+
+# Disposable execution sandbox (tools/sandbox/): every attack command runs
+# inside a hardened per-run Docker worker (cap-dropped, non-root, read-only
+# rootfs, resource-bounded) with a default-DROP netns firewall authorizing
+# ONLY the effective target allowlist. Any sandbox failure blocks offensive
+# execution (fail closed) -- host execution is never an automatic fallback.
+# Build the worker image: docker build -t netattackai-sandbox:latest docker/sandbox
+# Set sandbox.enabled: false to explicitly restore legacy host execution.
+sandbox:
+  enabled: true
+  backend: docker
+  image: netattackai-sandbox:latest
+  user: sandbox
+  read_only_rootfs: true
+  env_passthrough: []
+  resources:
+    memory_mb: 4096
+    cpus: 2
+    pids: 512
+    timeout_seconds: 300
+    output_max_bytes: 2000000
+  network:
+    enforce: true
+    fail_closed: true
+    allow_dns: controlled
+    map_host_loopback: false
+    extra_allow_cidrs: []
+    allow_gateway: false
+    allow_research_hosts: true
+  cleanup:
+    remove_on_exit: true
+    remove_stale_on_startup: true
+  multi_net_raw: true
