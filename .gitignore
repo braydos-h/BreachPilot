@@ -61,3 +61,6 @@ logs/
 /build
 demo/dist/
 demo/*.tsbuildinfo
+
+# Scratch / accidental test artifacts
+x/

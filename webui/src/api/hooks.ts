@@ -299,6 +299,39 @@ export function useMemory() {
   });
 }
 
+export interface SandboxStatusResponse {
+  enabled: boolean;
+  backend: string;
+  image: string;
+  docker_available: boolean;
+  docker_error: string;
+  network: {
+    enforce: boolean;
+    fail_closed: boolean;
+    allow_dns: string;
+    map_host_loopback: boolean;
+    extra_allow_cidrs: string[];
+  };
+  resources: {
+    memory_mb: number;
+    cpus: number;
+    pids: number;
+    timeout_seconds: number;
+    output_max_bytes: number;
+  };
+  note?: string;
+}
+
+/** Disposable-sandbox status (System UI). Read-only; no Docker controls. */
+export function useSandboxStatus() {
+  return useQuery<SandboxStatusResponse>({
+    queryKey: ["system", "sandbox"],
+    queryFn: () => apiFetch<SandboxStatusResponse>("/system/sandbox"),
+    ...defaultQueryOptions,
+    staleTime: 30_000,
+  });
+}
+
 /** Invalidate providers + models caches (after login/proxy changes). */
 export function useInvalidateProviders() {
   const qc = useQueryClient();

@@ -2,7 +2,7 @@
 // "● AI Provider Connected ● Models 3 available ● Secrets Configured
 // ● Plugins 8/8 loaded". Wraps on narrow screens.
 
-import { useModels, usePlugins, useSecrets } from "@/api/hooks";
+import { useModels, usePlugins, useSandboxStatus, useSecrets } from "@/api/hooks";
 import { useProviderStatus } from "@/components/ProviderSetup";
 import { cn } from "@/lib/utils";
 
@@ -11,12 +11,22 @@ export function StatusOverview() {
   const models = useModels();
   const secrets = useSecrets();
   const plugins = usePlugins();
+  const sandbox = useSandboxStatus();
 
   const secretEntries = Object.entries(secrets.data?.keys ?? {});
   const configured = secretEntries.filter(([, s]) => s === "configured").length;
   const pluginList = plugins.data?.plugins ?? [];
   const loaded = pluginList.filter((p) => p.loaded).length;
   const modelCount = status.liveCount > 0 ? status.liveCount : Object.keys(models.data?.registry ?? {}).length;
+
+  // Sandbox tone: enabled+docker-reachable is good; enabled+unreachable is bad
+  // (fail-closed blocks attack execution); disabled is a deliberate opt-out.
+  const sandboxEnabled = sandbox.data?.enabled ?? false;
+  const sandboxTone: "ok" | "warn" | "bad" = !sandboxEnabled
+    ? "warn"
+    : sandbox.data?.docker_available
+      ? "ok"
+      : "bad";
 
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
@@ -38,6 +48,17 @@ export function StatusOverview() {
         }
       />
       <StatusItem tone="ok" label="Plugins" value={`${loaded}/${pluginList.length} loaded`} />
+      <StatusItem
+        tone={sandboxTone}
+        label="Sandbox"
+        value={
+          sandboxEnabled
+            ? sandbox.data?.docker_available
+              ? `Contained (${sandbox.data?.backend ?? "docker"})`
+              : "Docker unreachable"
+            : "Disabled (host exec)"
+        }
+      />
     </div>
   );
 }

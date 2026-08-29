@@ -95,6 +95,7 @@ async def capabilities(auth: str = Depends(_require_auth)) -> dict[str, Any]:
             "sse",
             "single_decision",
             "diagnostics_output",
+            "sandbox_status",
             # ── commit fc0af19 ── advisory/local MCP tool families + new surfaces.
             # Each name keys a WebUI panel off capabilities.features so a disabled
             # backend feature renders an empty state, not a 404 loop.
@@ -557,6 +558,19 @@ def _load_memory_sync(config_path: Path, config: dict[str, Any]) -> dict[str, An
 async def get_memory(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     """Attack memory + experience-store learnings (cross-mission, no secrets)."""
     return await asyncio.to_thread(_load_memory_sync, _CONFIG_PATH, _CONFIG)
+
+
+@router.get("/system/sandbox")
+async def get_sandbox_status(auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Disposable-sandbox status for the System UI (read-only, no Docker controls).
+
+    Reports sandbox.enabled/backend/image, Docker reachability, network policy
+    posture, and resource limits. Never exposes container exec/remove controls:
+    sandbox lifecycle is owned by the run engine, not the WebUI.
+    """
+    from tools.sandbox import status_report
+
+    return await asyncio.to_thread(status_report, _CONFIG)
 
 
 @router.post("/system/reset")
