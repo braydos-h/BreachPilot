@@ -27,11 +27,10 @@ from typing import Any
 
 import pytest
 
+from tests.test_sandbox_manager import _EXPLOIT_ENV_KEYS, FakeBackend
 from tools.sandbox.exceptions import SandboxError, SandboxWorkspaceError
 from tools.sandbox.network import build_ipv4_rules, build_ipv6_rules
 from tools.sandbox.policy import build_network_policy
-
-from tests.test_sandbox_manager import FakeBackend, _EXPLOIT_ENV_KEYS
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -123,11 +122,10 @@ def test_unauthorized_ipv6_target_denied(no_research_hosts):
     policy_v6 = build_network_policy(_base_config(["2001:db8::1"]))
     assert "-d 2001:db8::1/128 -j ACCEPT" in "\n".join(build_ipv6_rules(policy_v6))
 
+
 def test_unauthorized_hostname_denied(no_research_hosts, monkeypatch):
     """An allowlisted-but-unresolvable hostname authorizes nothing."""
-    monkeypatch.setattr(
-        "tools.sandbox.policy._resolve_authorized", lambda *a, **kw: []
-    )
+    monkeypatch.setattr("tools.sandbox.policy._resolve_authorized", lambda *a, **kw: [])
     policy = build_network_policy(_base_config(["attacker.example.com"]))
     assert "attacker.example.com" not in policy.authorized_destinations
     assert any("attacker.example.com" in u for u in policy.unresolved_targets)
@@ -219,9 +217,9 @@ def test_workspace_traversal_rejected(tmp_path, fake_backend):
 
 def test_docker_socket_never_mounted():
     """The worker spec never binds the Docker socket (static invariant)."""
-    from tools.sandbox import docker_backend as backend
-
     import ast
+
+    from tools.sandbox import docker_backend as backend
 
     source = Path(backend.__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)

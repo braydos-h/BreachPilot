@@ -53,11 +53,25 @@ class FamilyStatus:
 
 
 #: Families whose target-touching execution funnels through the sandbox.
+_SANDBOX_FAMILY_NOTES: dict[str, list[str]] = {
+    "metasploit": [
+        "msfconsole_start spawns the long-lived console on the host (operator-driven; "
+        "module EXECUTION funnels through run_argv_in_sandbox)"
+    ],
+    "workspace": [
+        "start_background_job/list_processes manage host-side long-running jobs; "
+        "run_python_file funnels through run_argv_in_sandbox"
+    ],
+}
 SANDBOXED_FAMILIES: dict[str, FamilyStatus] = {
-    name: FamilyStatus(module=name, status="sandboxed", reason="commands run inside the sandbox worker")
+    name: FamilyStatus(
+        module=name,
+        status="sandboxed",
+        reason="commands run inside the sandbox worker",
+        notes=_SANDBOX_FAMILY_NOTES.get(name, []),
+    )
     for name in (
-        "terminal/execute",  # run_exploit_terminal
-        "terminal",  # deprecated shim re-exporting the terminal package
+        "terminal/execute",  # run_exploit_terminal (sandboxed path)
         "web_scan",  # nikto/nuclei/sqlmap/... argv funnel
         "metasploit",  # msf module execution argv funnel
         "workspace",  # run_python_file argv funnel (sandbox path)
@@ -67,6 +81,17 @@ SANDBOXED_FAMILIES: dict[str, FamilyStatus] = {
 #: Documented host-execution exceptions. Every entry needs a reason a reviewer
 #: can verify; target-touching exceptions are bugs to fix, not features.
 HOST_EXCEPTIONS: dict[str, FamilyStatus] = {
+    "terminal": FamilyStatus(
+        module="terminal",
+        status="host_exception",
+        reason=(
+            "run_exploit_terminal's host path (wrapper-shell Popen); used ONLY when "
+            "sandbox.enabled is false — the documented, explicit operator opt-out. "
+            "When the sandbox is enabled, terminal/execute funnels the same tool "
+            "through the worker instead."
+        ),
+        target_touching=True,
+    ),
     "terminal/package": FamilyStatus(
         module="terminal/package",
         status="host_exception",

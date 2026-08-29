@@ -64,12 +64,18 @@ def test_sandboxed_families_use_the_sandbox_funnel():
 
 
 def test_target_touching_exceptions_are_documented_gaps():
-    """Target-touching host exceptions must say they are pending migration —
-    these are known gaps, not approved permanent host execution."""
+    """Target-touching host exceptions must say they are pending migration or
+    the explicit sandbox-disabled opt-out — never silent host execution."""
     for name, entry in HOST_EXCEPTIONS.items():
         if entry.target_touching:
-            assert "sandbox migration" in entry.reason or "pending" in entry.reason, (
-                f"{name}: target-touching host exceptions must state the migration plan"
+            ok = (
+                "sandbox migration" in entry.reason
+                or "pending" in entry.reason
+                or "sandbox.enabled is false" in entry.reason
+            )
+            assert ok, (
+                f"{name}: target-touching host exceptions must state the migration plan "
+                "or the explicit opt-out condition"
             )
 
 
