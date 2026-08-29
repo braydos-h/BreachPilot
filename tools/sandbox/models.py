@@ -191,6 +191,9 @@ class NetworkPolicy:
     resolved_domains: dict[str, str] = field(default_factory=dict)  # domain -> resolved IP (audit)
     unresolved_targets: list[str] = field(default_factory=list)  # wildcards/etc (audit)
     enforced: bool = True
+    # Whether the Docker bridge gateway (path to host-published services and
+    # the Docker daemon) is authorized. Default False: the gateway is DROPped.
+    allow_gateway: bool = False
 
     def fingerprint(self) -> str:
         """Stable fingerprint for change detection (re-apply rules only when set changes)."""

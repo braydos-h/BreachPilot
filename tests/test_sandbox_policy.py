@@ -12,6 +12,8 @@ Security invariants covered:
 
 from __future__ import annotations
 
+import ipaddress
+
 import pytest
 
 from tools.sandbox import policy as sandbox_policy
@@ -62,7 +64,8 @@ class TestBuildNetworkPolicy:
 
     def test_bare_ip_authorized(self):
         pol = build_network_policy(_cfg(["192.0.2.10"]))
-        assert "192.0.2.10" in pol.authorized_destinations
+        # Bare IPs are normalized to /32 CIDRs (iptables-equivalent).
+        assert any(ipaddress.ip_network(d) == ipaddress.ip_network("192.0.2.10/32") for d in pol.authorized_destinations)
 
     def test_cidr_authorized(self):
         pol = build_network_policy(_cfg(["10.0.0.0/24"]))
