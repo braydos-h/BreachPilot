@@ -392,7 +392,53 @@ if the LLM is unavailable, degrades to rule-based scoring. Zero target touch.
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `enabled` | bool | `false` | Registers the `replay_simulate` MCP tool | mcp_tools/replay_simulator.py |
+| `enabled` | bool | `true` (lab config.yaml) / `false` (schema) | Registers the `replay_simulate` MCP tool | mcp_tools/replay_simulator.py |
+| `counterfactual` | bool | `false` | Exploit-loop counterfactual replay: after a failed exploit action that had a snapshot taken, the loop reverts the snapshot and retries the mutated payload against the clean state, recording both outcomes in `final_result["counterfactual"]`. Requires `snapshots.enabled` for effect | exploit_agent/runner/_impl.py (`_counterfactual_enabled`) |
+
+### `killchain:` (top-level) — kill-chain state machine (opt-in, default OFF)
+
+When `enabled`, registers the kill-chain MCP tool family
+(`tools/mcp_tools/killchain.py`) and builds a per-target
+`tools/killchain/machine.py::KillChainMachine` inside the exploit loop. The
+machine tracks stage progression (recon → initial_access → escalation →
+objective), refuses out-of-order transitions when `require_verification` is
+true (a stage advance needs an evidence-verified exploit outcome, never an
+agent claim), and renders a `KILLCHAIN BRIEFING` block into the agent system
+prompt. The campaign orchestrator prefers kill-chain state for phase selection
+when enabled. Every transition is recorded on the audit trail.
+
+| Key | Type | Default | Controls | Consumed at |
+|-----|------|---------|---------|-------------|
+| `enabled` | bool | `false` | Registers the `killchain_*` MCP tools + loop wiring | mcp_tools/killchain.py, exploit_agent/runner/_impl.py (`_build_killchain_machine`) |
+| `goal_state` | str | `shell_as_root` | Objective stage the machine drives toward | killchain/machine.py |
+| `require_verification` | bool | `true` | Reporting verbosity only — stage-advance verification is always enforced | killchain/machine.py |
+| `graph_db` | str | `""` | Kill-chain graph store path; `""` = `<workspace>/killchain_graph.db` | killchain/ |
+
+### `snapshots:` (top-level) — snapshot + rollback (opt-in, default OFF)
+
+Snapshot-before-destructive infrastructure for the lab build. A pluggable
+provider layer (`tools/snapshots.py`: Docker commit/rollback is the mandatory,
+fully-implemented path; Proxmox / libvirt / Hyper-V / VMware are best-effort
+wrappers). Wired into all three dispatch funnels — the exploit loop
+(`tools/exploit_agent/runner/_impl.py`), the swarm bridge
+(`tools/swarm_bridge.py`), and the campaign executor
+(`tools/campaign/executor.py`) — plus three MCP tools. Every consumer is
+**fail-open**: a snapshot failure logs a warning and never blocks the attack
+path. The `vm_id`/container must be operator-authorized (the MCP tools are
+`@require_allowlist("vm_id")`-gated; the allowlist IS the lock).
+
+| Key | Type | Default | Controls | Consumed at |
+|-----|------|---------|----------|-------------|
+| `enabled` | bool | `false` | Master gate; when false no snapshot is taken and no `snapshot_*` tool registers | snapshots.py `should_snapshot`, mcp_tools/snapshots.py |
+| `provider` | str | `docker` | Active provider (`docker` \| `proxmox` \| `libvirt` \| `hyperv` \| `vmware`) | snapshots.py `get_provider` |
+| `auto_before_destructive` | bool | `true` | Snapshot automatically before destructive payloads / exploit-execution-category tools | snapshots.py `should_snapshot` |
+| `max_snapshots_per_target` | int | `3` | Rolling cap; oldest snapshot deleted when exceeded | snapshots.py `_enforce_cap` |
+| `vm_map` | map | `{}` | target IP → vm_id/container name (env override `SNAPSHOT_VM_MAP`); unmapped targets are used raw | snapshots.py `_vm_id_for_target` |
+| `providers.docker.compose_file` | str | `eval_targets/docker-compose.yml` | Documented compose file backing container targets | snapshots.py DockerProvider |
+| `providers.hyperv.powershell_command` | str | `powershell` | PowerShell executable for Checkpoint-VM / Restore-VMCheckpoint | snapshots.py HyperVProvider |
+| `providers.vmware.vmrun_path` | str | `vmrun` | vmrun binary path | snapshots.py VMwareProvider |
+| `providers.proxmox.host` / `.node` | str | `""` | Proxmox API endpoint + node (auth via `PROXMOX_API_TOKEN` env only — never config, never logged) | snapshots.py ProxmoxProvider |
+| `providers.libvirt.virsh_path` | str | `virsh` | virsh binary path | snapshots.py LibvirtProvider |
 
 ### `adaptive_exploits:` (config.yaml:366-373) — exploit mutation
 

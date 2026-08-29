@@ -23,9 +23,9 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from tools.mcp_tools.registry import *
 from tools.killchain import KillChainMachine, all_edges, get_edge
 from tools.killchain.states import AttackState
+from tools.mcp_tools.registry import *
 
 
 def _in_process_tool_executor(mcp: Any):
@@ -117,7 +117,9 @@ def register_killchain_tools(mcp: Any, *, ctx: ToolContext) -> None:
     # ------------------------------------------------------------------
     @mcp.tool()
     @require_allowlist("target")
-    def killchain_attempt(target: str, from_state: str, to_state: str, edge_id: str = "", context_json: str = "") -> str:
+    def killchain_attempt(
+        target: str, from_state: str, to_state: str, edge_id: str = "", context_json: str = ""
+    ) -> str:
         """Attempt a verified kill-chain transition (e.g. creds_in_hand -> shell_as_user). The machine runs the edge's playbook through the normal MCP tool layer (allowlist + audit apply) and then independently verifies success via check probes; the state is ONLY updated when verification passes. You can propose but cannot bypass verification.
 
         Args:
@@ -144,9 +146,20 @@ def register_killchain_tools(mcp: Any, *, ctx: ToolContext) -> None:
             except _json.JSONDecodeError as exc:
                 return f"BLOCKED: context_json is not valid JSON ({exc})."
         try:
-            result = asyncio.run(
-                machine.attempt_transition(target.strip(), from_state, to_state, edge_id=edge_id or None, context=context)
+            coro = machine.attempt_transition(
+                target.strip(), from_state, to_state, edge_id=edge_id or None, context=context
             )
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                result = asyncio.run(coro)
+            else:
+                # Already inside a loop (in-process test harnesses): hop to a
+                # worker thread so the machine gets its own clean loop.
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    result = pool.submit(asyncio.run, coro).result()
         except NotImplementedError as exc:
             return f"ERROR: killchain_attempt unavailable: {exc}"
         except Exception as exc:  # noqa: BLE001
@@ -167,7 +180,9 @@ def register_killchain_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if checks:
             lines.append("VERIFICATION:")
             for check in checks:
-                lines.append(f"  [{'PASS' if check.get('passed') else 'FAIL'}] {check.get('flag_id', '')}: {check.get('detail', '')}")
+                lines.append(
+                    f"  [{'PASS' if check.get('passed') else 'FAIL'}] {check.get('flag_id', '')}: {check.get('detail', '')}"
+                )
         if result.get("success") and result.get("evidence_ref"):
             lines.append(f"EVIDENCE: {result['evidence_ref']}")
         if not result.get("success"):

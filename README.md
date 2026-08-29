@@ -165,7 +165,7 @@ Categories include network penetration testing, web/API, auth/JWT/OAuth, deseria
 
 Orchestrated via `tools/swarm/orchestrator.py` with a shared blackboard, battle log, parallel dispatch, and phase-aware skill hints. See [docs/swarm.md](docs/swarm.md).
 
-### MCP tool suite: 120+ tools across 27 families
+### MCP tool suite: 120+ tools across 29 families
 
 | Family | Capability |
 |--------|-----------|
@@ -183,6 +183,8 @@ Orchestrated via `tools/swarm/orchestrator.py` with a shared blackboard, battle 
 | `domain` | DNS, subdomain enumeration, AXFR, vhost, WHOIS, with automatic authorization |
 | `peer_models` | `consult_peer_models`, advisory multi-model consultation |
 | `runtime_skills` | `list`, `search`, and `load` skills at runtime |
+| `killchain` | `killchain_status`, `killchain_attempt`, `killchain_plan` — evidence-verified stage machine (opt-in, `killchain.enabled`) |
+| `snapshots` | `snapshot_create`, `snapshot_revert`, `snapshot_list` — provider-backed VM/container rollback (opt-in, `snapshots.enabled`) |
 | + 13 more | `assessment_state`, `parallel_agents`, `poc_verifier`, `replay_simulator`, `mitre`, `ad`, `operator_connection`, and others |
 
 All tools are registered via `tools/mcp_tools/registry.py` using the `@audit_tool` / `@require_allowlist()` decorators and auto-discovered through `collect_tools()`, which also fails CI if a tool lacks its audit or allowlist gate. No manual registration required. See [docs/mcp-tools.md](docs/mcp-tools.md).
@@ -346,6 +348,8 @@ See [docs/plugin-development.md](docs/plugin-development.md).
 - Lint is law: `ruff check .` (0 errors), `ruff format --check .` (0 diffs), and `mypy --follow-imports=skip tools` (216 files), all CI-enforced.
 - WebUI tested: `tsc -b && vite build` plus `vitest` on every PR.
 - Graded eval loop: `python main.py --eval` scores the agent against the `eval_targets/` oracle targets (declarative flags verified independently — agent claims never decide a flag). `--save-baseline` persists a baseline and `--eval --check-regression` exits non-zero when a target's score drops beyond `eval.regression_tolerance`. A nightly workflow (`.github/workflows/eval.yml`) runs the mocked eval tests on push/PR and the live graded suite on schedule, skipping gracefully without `OLLAMA_API_KEY`.
+- Kill-chain state machine (opt-in, `killchain.enabled`): a per-target stage machine tracks recon → initial access → escalation → objective; `killchain_attempt` only advances state after independent verification probes pass (agent claims can't move the chain), and a BFS plan + system-prompt briefing steer the agent toward the configured `goal_state`.
+- Snapshot + rollback (opt-in, `snapshots.enabled`): automatic snapshots before destructive actions across all three dispatch funnels (exploit loop, swarm bridge, campaign executor), backed by pluggable providers (Docker commit/rollback is the implemented path; Proxmox/libvirt/Hyper-V/VMware best-effort) and exposed as `snapshot_*` MCP tools. With `replay_simulator.counterfactual`, a failed exploit auto-reverts its snapshot and retries the mutated payload against the clean state, recording both outcomes in the final result. Fail-open by contract: a snapshot failure never blocks the attack path; provider tokens (`PROXMOX_API_TOKEN`) live in env vars only.
 
 ```bash
 python -m pytest tests/ -v

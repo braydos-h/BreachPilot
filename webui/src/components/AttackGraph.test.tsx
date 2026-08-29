@@ -157,4 +157,19 @@ describe("AttackGraph timeline + failure analysis", () => {
     // mutate never fired — the component skipped the artifact fetch entirely.
     expect(vi.mocked(fetchMock.mock.results[0].value as { mutate: () => void }).mutate).not.toHaveBeenCalled();
   });
+
+  it("shows the generic error branch for non-404 failures", async () => {
+    setup(null, { fails: true });
+    expect(await screen.findByText("Failed to load enhanced report.")).toBeInTheDocument();
+  });
+
+  it("paints neutral events with the pending icon even when the backend marks result 'failure'", async () => {
+    // enhanced_reporting derives result="failure" for every non-success event;
+    // the icon must key off event_type (like the markdown report), so a plain
+    // recon event stays ⏳ rather than turning red.
+    setup(JSON.stringify(reportFixture()));
+    const row = (await screen.findByText("Port sweep")).closest("li")!;
+    expect(row.querySelector("svg.lucide-clock")).not.toBeNull();
+    expect(row.querySelector("svg.lucide-x-circle")).toBeNull();
+  });
 });

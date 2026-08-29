@@ -173,7 +173,7 @@ async def run_exploit_session(
     assessment: ReconAssessment | None = None,
     approval_prompt: Callable[[str], str] | None = None,
     approval_provider: Any = None,
-    swarm_attach: Callable[[Any, list[dict[str, Any]], Any], None] | None = None,
+    swarm_attach: Callable[..., None] | None = None,
     heartbeat: "_mcp_session._RunHeartbeat | None" = None,
     original_target: str | None = None,
     resolved_ip: str | None = None,

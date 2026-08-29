@@ -214,17 +214,21 @@ export function SwarmView({ loading, error, state, witnessFlags, witnessLoading,
           <CardContent className="max-h-72 space-y-1.5 overflow-y-auto">
             {battleLog.map((entry, i) => {
               const rec = asRecord(entry);
+              // Backend entries are {task_id, tool, target, success: bool,
+              // summary, error, ...} — `success`/`tool`, not the legacy
+              // outcome/agent_type keys this card once assumed.
+              const success = "success" in rec ? bool(rec.success) : str(rec.outcome) === "success";
               return (
                 <div key={i} className="flex items-start gap-2 text-xs">
                   <span className="mt-0.5 shrink-0">
-                    {str(rec.outcome) === "success" ? (
+                    {success ? (
                       <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
                     ) : (
                       <XCircle className="h-3.5 w-3.5 text-red-400" />
                     )}
                   </span>
-                  <span className="font-mono text-muted-foreground">{str(rec.agent_type)}</span>
-                  <span className="text-foreground">{str(rec.summary ?? rec.output ?? rec.action)}</span>
+                  <span className="font-mono text-muted-foreground">{str(rec.tool)}</span>
+                  <span className="text-foreground">{str(rec.summary ?? rec.error)}</span>
                 </div>
               );
             })}
@@ -522,7 +526,9 @@ function KillChainStepper({ currentPhase }: { currentPhase: string }) {
 }
 
 /** Per-target event timeline (`AttackState.timeline`), newest first.
- *  ISO-8601 timestamps sort lexically; entries without a timestamp sort last. */
+ *  ISO-8601 timestamps sort lexically; entries without a timestamp sort last.
+ *  Entries are untrusted JSON — every field goes through a stateShape
+ *  accessor so a malformed row degrades instead of throwing. */
 function CampaignTimeline({ timeline }: { timeline: unknown }) {
   const [showAll, setShowAll] = useState(false);
   const entries = asArray(timeline)
@@ -535,7 +541,7 @@ function CampaignTimeline({ timeline }: { timeline: unknown }) {
       if (!tb) return -1;
       return tb > ta ? 1 : -1;
     })
-    .map(({ e }) => e as CampaignTimelineEntry);
+    .map(({ e }) => asRecord(e) as unknown as CampaignTimelineEntry);
 
   if (entries.length === 0) return null;
 
@@ -545,7 +551,7 @@ function CampaignTimeline({ timeline }: { timeline: unknown }) {
       <Label className="text-[10px] text-muted-foreground">Timeline ({entries.length})</Label>
       <div className="mt-1 max-h-72 space-y-1 overflow-y-auto pr-1">
         {visible.map((entry, i) => {
-          const et = entry.event_type.toLowerCase();
+          const et = str(entry.event_type).toLowerCase();
           const icon =
             et.includes("success") ? (
               <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
@@ -558,11 +564,11 @@ function CampaignTimeline({ timeline }: { timeline: unknown }) {
           return (
             <div key={i} className="flex items-start gap-2 text-xs">
               <span className="mt-0.5 shrink-0 font-mono text-muted-foreground tabular-nums">
-                {entry.timestamp.split("T")[1]?.slice(0, 8) || "—"}
+                {str(entry.timestamp).split("T")[1]?.slice(0, 8) || "—"}
               </span>
               <span className="mt-0.5 shrink-0">{icon}</span>
-              <span className="shrink-0 font-mono text-muted-foreground">{entry.event_type}</span>
-              <span className="min-w-0 break-words text-foreground">{entry.description}</span>
+              <span className="shrink-0 font-mono text-muted-foreground">{str(entry.event_type)}</span>
+              <span className="min-w-0 break-words text-foreground">{str(entry.description)}</span>
               {moduleName && (
                 <Badge variant="outline" className="shrink-0 font-mono text-[10px]">
                   {moduleName}

@@ -98,6 +98,10 @@ class AttackModuleExecutor:
         self._critic = critic_agent
         self._reflection = reflection_agent
         self._action_count = 0
+        # Snapshot/rollback (design §snapshots): lazily-built in
+        # _snapshot_before_destructive; None until a destructive dispatch
+        # first needs it (opt-in — snapshots.enabled defaults false).
+        self._snapshot_mgr: Any | None = None
 
     async def execute(
         self,
@@ -500,6 +504,13 @@ class AttackModuleExecutor:
         if not command:
             return None
 
+        # ── Snapshot before destructive dispatch (design §snapshots) ────────
+        # Fail-open and additive: when snapshots are enabled AND the artifact
+        # command is destructive, take an infrastructure snapshot first so the
+        # Path-B funnel (no-MCP module dispatch) gets the same rollback story
+        # as the MCP loop. A failure only logs — never blocks the dispatch.
+        await self._snapshot_before_destructive(task, state, command)
+
         try:
             output = await asyncio.to_thread(executor, command, {"target": task.target})
         except Exception as exc:  # noqa: BLE001 -- best-effort dispatch
@@ -529,6 +540,47 @@ class AttackModuleExecutor:
             classification = {"outcome": "unknown", "shell_type": "", "privilege_level": "", "evidence": []}
 
         return output_text, classification
+
+    async def _snapshot_before_destructive(
+        self,
+        task: AttackTask,
+        state: AttackState,
+        command: str,
+    ) -> None:
+        """Take an auto-snapshot before a destructive Path-B dispatch (fail-open).
+
+        Mirrors the exploit-loop hook: gated on ``snapshots.enabled`` +
+        ``snapshots.auto_before_destructive`` + a destructive command (via
+        ``tools.snapshots.should_snapshot`` — module names are not in the tool
+        category map, so Path-B reduces to destructive-command detection, the
+        conservative choice). The manager is built lazily and cached; any
+        failure is a timeline event only.
+        """
+        try:
+            from tools.snapshots import SnapshotManager, should_snapshot
+
+            if not should_snapshot(task.module_name, command, self._mission_config):
+                return
+            if getattr(self, "_snapshot_mgr", None) is None:
+                workspace = str(self._mission_config.get("workspace", ".") or ".")
+                self._snapshot_mgr = SnapshotManager(
+                    self._mission_config,
+                    index_dir=workspace,
+                )
+            mgr = self._snapshot_mgr
+            label = f"pre-{task.module_name}-{task.retry_count + 1}"
+            ref = await asyncio.to_thread(mgr.before_destructive, task.target, label)
+            if ref is not None:
+                state.add_timeline_event(
+                    "snapshot_taken",
+                    f"Snapshot {ref.snapshot_id} ({ref.provider}) before {task.module_name}",
+                    {"snapshot_id": ref.snapshot_id, "provider": ref.provider, "label": ref.label},
+                )
+        except Exception as exc:  # noqa: BLE001 -- fail-open by contract
+            state.add_timeline_event(
+                "snapshot_err",
+                f"Snapshot before {task.module_name} failed (continuing): {exc}",
+            )
 
     # ── Swarm integration helpers (Tier 0 item 0.6b) ───────────────────────
     #

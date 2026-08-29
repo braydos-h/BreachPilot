@@ -151,6 +151,8 @@ SAFE/GATED narrowing, and the defensive scope-gated `mcp_server.py` are unchange
 
 When `multi_model.enabled` is true, the exploit MCP server also exposes `consult_peer_models`. This is advisory only: peer models receive no MCP tool schemas, cannot execute commands, and their responses must still pass through the main agent and `ExploitPolicy` before any target-touching action occurs.
 
+When `snapshots.enabled` is true, the exploit MCP server also exposes `snapshot_create` / `snapshot_revert` / `snapshot_list`. These are infrastructure-touching but not privilege-escalating: they snapshot/restore the operator's own backing VM or container for an allowlisted target, gated by `@require_allowlist("vm_id")` (the allowlist IS the lock) and `@audit_tool`. The automatic snapshot-before-destructive hooks in the exploit loop, swarm bridge, and campaign executor are fail-open by contract — a snapshot failure logs a warning and the action proceeds, so snapshot infrastructure can never become an attack-path gate. `replay_simulator.counterfactual` uses the same snapshots for revert-and-retry after a failed exploit action; it records both outcomes to the audit trail and never widens what the agent may execute. Provider credentials (`PROXMOX_API_TOKEN`) live in environment variables only — never in `config.yaml`, never logged.
+
 When adding exploit MCP tools:
 
 - Add policy checks in `ExploitPolicy`.

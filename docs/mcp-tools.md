@@ -474,6 +474,55 @@ handlers re-validate the target against the allowlist before writing (the
 `CAPABILITIES:` / `CAPABILITY_DETAILS:` / `EVIDENCE:` / `HYPOTHESIS_RECORDED:` /
 `TASK_UPDATED:`.
 
+### Kill-Chain — `tools/mcp_tools/killchain.py` (cfg: `killchain.enabled`, default OFF)
+
+Conditional family (the `replay_simulate` / peer-models precedent): nothing
+registers unless `killchain.enabled` is true in config. Backed by
+`tools/killchain/` (machine, stages, persistence). The exploit loop builds a
+per-target `KillChainMachine` when enabled and renders a `KILLCHAIN BRIEFING`
+into the system prompt.
+
+| Tool | Params | Target | Lock |
+|---|---|---|---|
+| `killchain_status` | `target` | no (graph read) | audit |
+| `killchain_attempt` | `target`, `from_state`, `to_state`, `edge_id` (optional), `context_json` (optional) | yes | allowlist + audit (verification enforced) |
+| `killchain_plan` | `target`, `goal_state` (optional) | no (graph read) | audit |
+
+`killchain_status` returns a `KILLCHAIN_STATUS:` block (current state, goal,
+applicable edges, BFS path to goal). `killchain_attempt` runs the edge's
+playbook through the normal MCP tool layer (allowlist + audit apply) and then
+independently verifies success via check probes — the state is only updated
+when verification passes; the returned block is `KILLCHAIN_TRANSITION:` on
+success or `KILLCHAIN_FAILED:`. `killchain_plan` runs a BFS over the verified
+edge graph (stub edges excluded) toward `killchain.goal_state` (default
+`shell_as_root`) and returns `KILLCHAIN_PLAN:`.
+
+### Snapshots — `tools/mcp_tools/snapshots.py` (cfg: `snapshots.enabled`, default OFF)
+
+Infrastructure-touching family backed by `tools/snapshots.py` (Docker
+commit/rollback mandatory path; Proxmox/libvirt/Hyper-V/VMware best-effort).
+Both write tools take a `vm_id` that must resolve to an operator-authorized
+target — `@require_allowlist("vm_id")` + `@audit_tool`, and the vm_id → target
+resolution goes through `snapshots._vm_id_for_target` (the `snapshots.vm_map`
+or `SNAPSHOT_VM_MAP` env). Fail-open by contract: provider errors return
+`ERROR:` blocks, never crash the server.
+
+| Tool | Params | Target | Lock |
+|---|---|---|---|
+| `snapshot_create` | `vm_id`, `label` (optional) | yes | allowlist + audit |
+| `snapshot_revert` | `vm_id`, `ref` (optional; empty = latest recorded) | yes | allowlist + audit |
+| `snapshot_list` | `vm_id` | read-only | allowlist + audit |
+
+Returned blocks: `SNAPSHOT_CREATED:` / `SNAPSHOT_REVERTED:` / `SNAPSHOT_LIST:`.
+The same `SnapshotManager` backs the automatic snapshot-before-destructive
+hooks in the exploit loop (`tools/exploit_agent/runner/_impl.py`), the swarm
+bridge (`tools/swarm_bridge.py`), and the campaign executor
+(`tools/campaign/executor.py`) — those hooks are always fail-open and take no
+snapshot at all when `snapshots.enabled` is false. With
+`replay_simulator.counterfactual: true`, a failed exploit action that had a
+snapshot is auto-reverted and the mutated payload retries against the clean
+state; both outcomes land in `final_result["counterfactual"]`.
+
 ## Adding a New Exploit MCP Tool (checklist)
 
 Matches AGENTS.md rule 4 and `mcp_exploit_server.py:153-177` (27 families — 20 in `tools/mcp_tools/*.py` + 7 in `tools/mcp_tools/modules/*.py` via `collect_tools()`).

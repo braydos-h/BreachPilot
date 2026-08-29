@@ -141,6 +141,7 @@ function CampaignControls({ runId, target }: { runId: string; target: string }) 
               value={aggression}
               onChange={setAggression}
               options={AGGRESSION_LEVELS.map((a) => ({ value: a, label: a }))}
+              label="Campaign aggression"
             />
           </div>
           <Button size="sm" onClick={() => setConfirmOpen(true)} disabled={busy}>

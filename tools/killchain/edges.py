@@ -37,6 +37,69 @@ from tools.killchain.states import AttackState
 Edge = dict[str, Any]
 
 EDGES: dict[str, Edge] = {
+    # -- baseline reachability edges (discovered -> creds_in_hand) ---------
+    "tcp_reachable": {
+        "edge_id": "tcp_reachable",
+        "from_state": AttackState.DISCOVERED.value,
+        "to_state": AttackState.REACHABLE.value,
+        "description": "Confirm at least one TCP port is open on the target",
+        "playbook": [
+            {
+                "tool": "run_exploit_terminal",
+                "args": {"command": "nmap -Pn -p {port} {target_ip}"},
+            }
+        ],
+        "verify": [
+            {"id": "port_open_probe", "type": "http_request", "url": "http://{target_ip}:{port}/", "expect_status": 200}
+        ],
+        "evidence_type": "port_scan",
+    },
+    "service_confirmed": {
+        "edge_id": "service_confirmed",
+        "from_state": AttackState.REACHABLE.value,
+        "to_state": AttackState.SERVICE_ACCESS.value,
+        "description": "Fingerprint an exposed service (version/banner identified)",
+        "playbook": [
+            {
+                "tool": "get_service_fingerprint",
+                "args": {"target_ip": "{target_ip}", "port": "{port}"},
+            }
+        ],
+        "verify": [
+            {
+                "id": "service_banner_probe",
+                "type": "http_request",
+                "url": "http://{target_ip}:{port}/",
+                "expect_status": 200,
+            }
+        ],
+        "evidence_type": "service_fingerprint",
+    },
+    "cred_harvest": {
+        "edge_id": "cred_harvest",
+        "from_state": AttackState.SERVICE_ACCESS.value,
+        "to_state": AttackState.CREDS_IN_HAND.value,
+        "description": "Validate a credential pair against an exposed service",
+        "playbook": [
+            {
+                "tool": "run_exploit_terminal",
+                "args": {
+                    "command": "curl -s -X POST -d 'username={user}&password={password}' http://{target_ip}:{port}/login",
+                },
+            }
+        ],
+        "verify": [
+            {
+                "id": "cred_validated",
+                "type": "http_login",
+                "url": "http://{target_ip}:{port}/login",
+                "user": "{user}",
+                "password": "{password}",
+            }
+        ],
+        "evidence_type": "valid_credentials",
+    },
+    # -- credential-driven transitions -------------------------------------
     "cred_ssh_login": {
         "edge_id": "cred_ssh_login",
         "from_state": AttackState.CREDS_IN_HAND.value,
@@ -50,9 +113,7 @@ EDGES: dict[str, Edge] = {
                 },
             }
         ],
-        "verify": [
-            {"id": "ssh_uid_probe", "type": "shell_command", "exec": "id", "expect_stdout": "uid="}
-        ],
+        "verify": [{"id": "ssh_uid_probe", "type": "shell_command", "exec": "id", "expect_stdout": "uid="}],
         "evidence_type": "authenticated_shell",
     },
     "cred_smb_login": {
@@ -71,9 +132,7 @@ EDGES: dict[str, Edge] = {
                 },
             }
         ],
-        "verify": [
-            {"id": "smb_session_probe", "type": "shell_command", "exec": "whoami", "expect_stdout": "\\"}
-        ],
+        "verify": [{"id": "smb_session_probe", "type": "shell_command", "exec": "whoami", "expect_stdout": "\\"}],
         "evidence_type": "authenticated_share",
     },
     "cred_http_login": {
@@ -104,9 +163,7 @@ EDGES: dict[str, Edge] = {
                 "args": {"module": "{module}", "target_ip": "{target_ip}", "options": "{options}"},
             }
         ],
-        "verify": [
-            {"id": "msf_session_probe", "type": "shell_command", "exec": "id", "expect_stdout": "uid="}
-        ],
+        "verify": [{"id": "msf_session_probe", "type": "shell_command", "exec": "id", "expect_stdout": "uid="}],
         "evidence_type": "exploit_session",
     },
     "file_upload_webshell": {
@@ -146,7 +203,12 @@ EDGES: dict[str, Edge] = {
             }
         ],
         "verify": [
-            {"id": "da_group_probe", "type": "shell_command", "exec": "net group 'Domain Admins' /domain", "expect_stdout": "Domain Admins"}
+            {
+                "id": "da_group_probe",
+                "type": "shell_command",
+                "exec": "net group 'Domain Admins' /domain",
+                "expect_stdout": "Domain Admins",
+            }
         ],
         "evidence_type": "domain_admin_access",
     },
@@ -162,7 +224,10 @@ def get_edge(edge_id: str) -> Edge | None:
 
 
 def edges_from(state: str | AttackState) -> list[Edge]:
-    """All registered (non-stub) edges whose ``from_state`` matches ``state``."""
+    """All registered (non-stub) edges whose ``from_state`` matches ``state``.
+
+    Tolerant: an unparseable state yields ``[]`` rather than raising.
+    """
     try:
         key = AttackState.parse(state).value
     except ValueError:

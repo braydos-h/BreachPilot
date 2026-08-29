@@ -6,11 +6,17 @@ interface SegmentedControlProps {
   value: string;
   onChange: (value: string) => void;
   options: Array<{ value: string; label: string }>;
+  /** Accessible name for the radiogroup when no visible label is associated. */
+  label?: string;
 }
 
-export function SegmentedControl({ value, onChange, options }: SegmentedControlProps) {
+export function SegmentedControl({ value, onChange, options, label }: SegmentedControlProps) {
   return (
-    <div className="inline-flex h-9 items-center rounded-md border bg-muted/40 p-0.5" role="radiogroup">
+    <div
+      className="inline-flex h-9 items-center rounded-md border bg-muted/40 p-0.5"
+      role="radiogroup"
+      aria-label={label}
+    >
       {options.map((opt) => (
         <button
           key={opt.value}

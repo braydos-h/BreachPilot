@@ -101,6 +101,16 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 # §23: the agent block rides along so the campaign retry cap
                 # (agent.max_retries_per_task) reaches the orchestrator.
                 "agent": (config or {}).get("agent", {}),
+                # Kill-chain state machine (design §killchain): pass the block
+                # through so the orchestrator's edge-preference branch can be
+                # enabled. Default off (opt-in per the new-attack-path rule).
+                "killchain": (config or {}).get("killchain", {}),
+                # Snapshot/rollback (design §snapshots): pass the blocks through
+                # so the executor's snapshot-before-destructive hook and the
+                # counterfactual toggle reach the Path-B dispatch funnel.
+                # Default off (opt-in per the new-attack-path rule).
+                "snapshots": (config or {}).get("snapshots", {}),
+                "replay_simulator": (config or {}).get("replay_simulator", {}),
                 "target": target_ip,
                 "goal": goal,
                 "aggression": agg.value,
@@ -348,6 +358,13 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 # §23: same agent-block merge as start_autonomous_campaign so a
                 # stepped campaign honors agent.max_retries_per_task too.
                 "agent": (config or {}).get("agent", {}),
+                # Kill-chain state machine (design §killchain): same merge as
+                # start_autonomous_campaign so stepped campaigns honor it too.
+                "killchain": (config or {}).get("killchain", {}),
+                # Snapshot/rollback (design §snapshots): same merge as
+                # start_autonomous_campaign so stepped campaigns honor it too.
+                "snapshots": (config or {}).get("snapshots", {}),
+                "replay_simulator": (config or {}).get("replay_simulator", {}),
                 "target": target_ip,
                 "goal": state_data.get("goal", "initial_access"),
                 "max_cycles": 1,

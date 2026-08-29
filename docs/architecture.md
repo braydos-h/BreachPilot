@@ -200,6 +200,8 @@ failure_class, success, evidence_refs}` fields only, never raw chain-of-thought.
 - Safety/config: `tools/config/` (schema/validator/loader; `config_manager.py` is a re-export shim), `doctor.py`, `safety_reviewer.py`, `validation_utils.py`, `command_analyzer.py`, `opsec.py`, `detection_coverage.py`
 - Recon/research: `tools/recon/` (pkg; `recon_pipeline.py` is a deprecated shim), `fast_recon.py`, `cve_lookup.py`, `exploit_search.py`, `web_researcher.py`
 - Exploitation: `exploit_agent/` (pkg) + `tools/exploit_agent/runner/_impl.py` (canonical loop), `tools/campaign/` (pkg; `autonomous_orchestrator.py` is a facade shim), `attack_planner.py`, `attack_modules/` (pkg), `payload_crafter.py`, `exploit_mutator.py`, `post_exploit.py`, `metasploit_bridge.py`
+- Kill-chain: `tools/killchain/` (pkg — stage machine with evidence-verified transitions, BFS planning; conditional on `killchain.enabled`, default OFF) + `tools/mcp_tools/killchain.py`
+- Snapshots/rollback: `snapshots.py` (pluggable providers — Docker commit/rollback mandatory, Proxmox/libvirt/Hyper-V/VMware best-effort — plus fail-open `SnapshotManager` with a JSON index), `tools/mcp_tools/snapshots.py`; automatic snapshot-before-destructive hooks in the exploit loop / swarm bridge / campaign executor, with optional counterfactual replay (`replay_simulator.counterfactual`) that reverts a failed exploit's snapshot and retries the mutated payload against the clean state
 - State/reporting: `session_manager.py`, `persistent_session_manager.py`, `activity_log.py`, `enhanced_reporting.py`, `experience_store.py`, `credential_store.py`, `attack_memory.py`
 - API keys: `api_key_store.py`
 - Plugin system: `plugins.py`

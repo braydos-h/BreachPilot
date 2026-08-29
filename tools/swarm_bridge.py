@@ -42,6 +42,12 @@ class SwarmMcpBridge:
         self._schemas: list[dict[str, Any]] | None = None
         self._policy: Any = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        # Snapshot/rollback (design §snapshots): optional app config dict. When
+        # supplied (exploit_session passes the loaded config at attach), the
+        # dispatch funnel snapshots before destructive swarm tool calls.
+        # None (legacy callers, tests) -> snapshot hook is inert.
+        self._config: dict[str, Any] | None = None
+        self._snapshot_mgr: Any | None = None
         self.dispatched: int = 0
 
     def attach(
@@ -50,11 +56,14 @@ class SwarmMcpBridge:
         schemas: list[dict[str, Any]],
         policy: Any,
         loop: asyncio.AbstractEventLoop | None = None,
+        *,
+        config: dict[str, Any] | None = None,
     ) -> None:
         self._session = session
         self._schemas = schemas
         self._policy = policy
         self._loop = loop or asyncio.get_running_loop()
+        self._config = config
 
     def ready(self) -> bool:
         return self._session is not None and self._policy is not None and self._loop is not None
@@ -134,6 +143,11 @@ class SwarmMcpBridge:
             return f"TOOL_EXECUTION_ERROR: policy approve failed: {exc}"
         if not approved:
             return f"BLOCKED: ExploitPolicy denied {name}"
+        # ── Snapshot before destructive swarm dispatch (design §snapshots) ──
+        # Fail-open and additive: mirrors the exploit-loop hook. Only fires
+        # when attach() was given the app config AND snapshots.enabled — so
+        # legacy callers and tests (config=None) keep the old behavior.
+        self._snapshot_before_destructive(name, command)
         try:
             result = self._run_async(self._session.call_tool(name, arguments=args))
         except _EXC_GROUP_CATCH as exc:
@@ -142,3 +156,37 @@ class SwarmMcpBridge:
             return f"TOOL_EXECUTION_ERROR: {exc}"
         self.dispatched += 1
         return self._extract_text(result)
+
+    def _snapshot_before_destructive(self, name: str, command: str) -> None:
+        """Auto-snapshot before a destructive swarm tool call (fail-open).
+
+        Gated on ``snapshots.enabled`` + ``auto_before_destructive`` via
+        ``tools.snapshots.should_snapshot``. The bridge runs on a worker
+        thread, so the (subprocess-backed) provider call runs inline here —
+        never on the MCP loop. A failure only logs; the dispatch proceeds.
+        The vm_id comes from the first IP in the command payload (the swarm
+        dispatch has no separate target arg) resolved through the snapshot
+        vm map; commands with no IP are skipped.
+        """
+        if self._config is None:
+            return
+        try:
+            from tools.snapshots import SnapshotManager, should_snapshot
+            from tools.validation_utils import extract_ips_from_command
+
+            if not should_snapshot(name, command, self._config):
+                return
+            ips = extract_ips_from_command(command) or []
+            if not ips:
+                return
+            if self._snapshot_mgr is None:
+                workspace = str((self._config or {}).get("exploit", {}).get("workspace_dir", ".") or ".")
+                self._snapshot_mgr = SnapshotManager(self._config, index_dir=workspace)
+            ref = self._snapshot_mgr.before_destructive(ips[0], f"pre-{name}")
+            if ref is not None:
+                print(f"[swarm] snapshot taken: {ref.snapshot_id} ({ref.provider}) before {name}")
+        except Exception as exc:  # noqa: BLE001 -- fail-open by contract
+            try:
+                print(f"[swarm] snapshot before {name} failed (continuing): {exc}")
+            except Exception:  # pragma: no cover
+                pass

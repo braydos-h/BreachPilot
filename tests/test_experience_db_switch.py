@@ -34,10 +34,18 @@ def test_get_default_db_singleton_identity():
 
 def test_attack_modules_uses_default_db_no_workspace_literal():
     """Structural regression guard: the per-workspace experience.db literal is
-    gone and get_default_db() is used instead."""
-    src = Path(__file__).resolve().parents[1] / "tools" / "mcp_tools" / "attack_modules.py"
-    text = src.read_text(encoding="utf-8")
-    assert 'workspace / "experience.db"' not in text, (
-        "regression: per-workspace experience.db literal re-introduced in attack_modules.py"
-    )
-    assert "get_default_db()" in text, "regression: get_default_db() call missing from attack_modules.py"
+    gone and get_default_db() is used instead.
+
+    The ExperienceStore wiring moved from the ``attack_modules.py`` god file
+    into ``tools/mcp_tools/modules/adaptive.py`` during the split, so the
+    get_default_db() assertion follows the code there; the no-workspace-literal
+    assertion still covers the old path too.
+    """
+    root = Path(__file__).resolve().parents[1]
+    am_text = (root / "tools" / "mcp_tools" / "attack_modules.py").read_text(encoding="utf-8")
+    adaptive_text = (root / "tools" / "mcp_tools" / "modules" / "adaptive.py").read_text(encoding="utf-8")
+    for label, text in (("attack_modules.py", am_text), ("modules/adaptive.py", adaptive_text)):
+        assert 'workspace / "experience.db"' not in text, (
+            f"regression: per-workspace experience.db literal re-introduced in {label}"
+        )
+    assert "get_default_db()" in adaptive_text, "regression: get_default_db() call missing from modules/adaptive.py"

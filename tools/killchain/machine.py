@@ -27,13 +27,12 @@ from tools.exceptions import (
     _is_exception_group,
     _log_nested_exceptions,
 )
-from tools.intelligence.graph.store import AttackGraphStore
 from tools.intelligence.graph.types import (
     EdgeType,
     GraphEdge,
     GraphNode,
-    NodeType,
     NodeStatus,
+    NodeType,
 )
 from tools.killchain.edges import EDGES, STUB_EDGES, resolve_placeholders
 from tools.killchain.states import AttackState
@@ -150,7 +149,11 @@ class KillChainMachine:
             dst = AttackState.parse(to_state)
         except ValueError:
             return False
-        return any(e for e in EDGES.values() if e["from_state"] == src.value and e["to_state"] == dst.value)
+        return any(
+            e
+            for e in EDGES.values()
+            if e["from_state"] == src.value and e["to_state"] == dst.value and e["edge_id"] not in STUB_EDGES
+        )
 
     def _resolve_edge(self, from_state: str, to_state: str, edge_id: str | None) -> tuple[Any | None, str]:
         """Resolve the edge to run. Returns (edge, error)."""
@@ -216,8 +219,9 @@ class KillChainMachine:
         executor = self._executor()
         all_passed = True
         for spec in edge["verify"]:
+            resolved_spec = _resolve_check_spec(spec, ctx)
             try:
-                result = await asyncio_to_thread(verify_flag_check, spec, executor)
+                result = await asyncio_to_thread(verify_flag_check, resolved_spec, executor)
             except Exception as exc:  # noqa: BLE001
                 checks.append({"flag_id": str(spec.get("id", "")), "passed": False, "detail": f"check error: {exc}"})
                 all_passed = False
@@ -341,9 +345,7 @@ class KillChainMachine:
                 outcome="verified_transition" if success else "verification_failed",
                 failure_class="" if success else "verify_failed",
                 success=success,
-                evidence_refs=[
-                    f"check:{c.get('flag_id', '')}:{'pass' if c.get('passed') else 'fail'}" for c in checks
-                ],
+                evidence_refs=[f"check:{c.get('flag_id', '')}:{'pass' if c.get('passed') else 'fail'}" for c in checks],
             )
         except Exception:  # noqa: BLE001 - decision logging must never break the loop
             pass
@@ -353,7 +355,9 @@ class KillChainMachine:
     def status(self, target: str) -> dict[str, Any]:
         """Current kill-chain state for ``target`` (default ``discovered``)."""
         node = self.graph_store.get_node_by_value(NodeType.HOST, target, self._scope(target))
-        raw = (node.properties.get("attack_state", "") if node and node.properties else "") or AttackState.DISCOVERED.value
+        raw = (
+            node.properties.get("attack_state", "") if node and node.properties else ""
+        ) or AttackState.DISCOVERED.value
         current = AttackState.parse(raw).value
         return {
             "target": target,
@@ -370,7 +374,9 @@ class KillChainMachine:
         except ValueError:
             return []
         node = self.graph_store.get_node_by_value(NodeType.HOST, target, self._scope(target))
-        raw = (node.properties.get("attack_state", "") if node and node.properties else "") or AttackState.DISCOVERED.value
+        raw = (
+            node.properties.get("attack_state", "") if node and node.properties else ""
+        ) or AttackState.DISCOVERED.value
         try:
             start = AttackState.parse(raw).value
         except ValueError:
@@ -394,6 +400,19 @@ class KillChainMachine:
                 visited.add(nxt)
                 queue.append((nxt, new_path))
         return []
+
+
+def _resolve_check_spec(spec: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    """Resolve ``{placeholder}`` tokens in a verify check spec.
+
+    Handles both shapes ``verify_flag_check`` accepts: a bare check spec and
+    a nested ``{"id", "description", "check": {...}}`` entry.
+    """
+    resolved = {k: resolve_placeholders(v, ctx) for k, v in spec.items()}
+    inner = resolved.get("check")
+    if isinstance(inner, dict):
+        resolved["check"] = {k: resolve_placeholders(v, ctx) for k, v in inner.items()}
+    return resolved
 
 
 def edges_from_safe(state: str) -> list[dict[str, Any]]:

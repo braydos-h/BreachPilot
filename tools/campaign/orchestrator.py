@@ -220,6 +220,15 @@ class AutonomousOrchestrator:
         self._persistence_enabled = bool(mission_config.get("persistence_phase", False))
         self._checkpoint_every = max(0, int(mission_config.get("checkpoint_every", 0) or 0))
         self._adaptive_replan = bool(mission_config.get("adaptive_replan", False))
+        # Kill-chain state machine (design §killchain). Opt-in (default off):
+        # when enabled, _attack_target prefers verified kill-chain edges over
+        # free-form module planning and falls back on the first unverified
+        # edge. The machine lives in tools/killchain/ and commits transitions
+        # only after independent verification.
+        _kc_cfg = (mission_config or {}).get("killchain", {}) or {}
+        self._killchain_enabled = bool(_kc_cfg.get("enabled", False))
+        self._killchain_goal_state = str(_kc_cfg.get("goal_state", "shell_as_root"))
+        self._killchain_machine: Any | None = None
         # Phase 3: advisory local_exploit_suggester follow-up after the privesc
         # batch. Passed through as ``msf_auto_les`` (or nested ``msf`` dict) by
         # the campaign call sites. Default off. When on AND access was
@@ -505,7 +514,13 @@ class AutonomousOrchestrator:
         # (Phase 2.4, opt-in) the exploit/privesc/lateral sequence runs as a
         # bounded multi-round loop with pre-round replan and post-success
         # vuln-chaining; persistence still runs once after the rounds converge.
-        if self._adaptive_replan:
+        # Kill-chain preference (design §killchain, opt-in): before either
+        # branch, attempt the verified edge path toward the configured goal
+        # state. A fully-verified path short-circuits free-form planning; the
+        # first unverified edge falls back to the normal phases unchanged.
+        if self._killchain_enabled and await self._phase_killchain(state):
+            pass  # verified edge path reached its goal (or progressed); keep the normal post-phases below
+        elif self._adaptive_replan:
             await self._run_adaptive_rounds(state, _depth)
         else:
             # Phase 3: Exploitation - automatically select and run attack modules
@@ -951,3 +966,5 @@ AutonomousOrchestrator._module_context = _phases._module_context  # type: ignore
 AutonomousOrchestrator._phase_persistence = _phases._phase_persistence  # type: ignore[attr-defined]
 AutonomousOrchestrator._run_adaptive_rounds = _phases._run_adaptive_rounds  # type: ignore[attr-defined]
 AutonomousOrchestrator._schedule_vuln_chain = _phases._schedule_vuln_chain  # type: ignore[attr-defined]
+AutonomousOrchestrator._get_killchain_machine = _phases._get_killchain_machine  # type: ignore[attr-defined]
+AutonomousOrchestrator._phase_killchain = _phases._phase_killchain  # type: ignore[attr-defined]

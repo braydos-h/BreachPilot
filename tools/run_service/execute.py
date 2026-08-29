@@ -472,13 +472,21 @@ class ExecuteMixin:
 
         try:
             # Swarm attach callback.
-            def _swarm_attach(session: Any, schemas: list[dict[str, Any]], policy: Any) -> None:
+            def _swarm_attach(
+                session: Any,
+                schemas: list[dict[str, Any]],
+                policy: Any,
+                config: dict[str, Any] | None = None,
+            ) -> None:
                 if session_attach is not None:
                     session_attach(session, schemas, policy)
                 if not request.swarm:
                     return
                 main_loop = asyncio.get_running_loop()
-                swarm_bridge.attach(session, schemas, policy, loop=main_loop)
+                # Snapshot/rollback (design §snapshots): pass the loaded app
+                # config so the bridge's snapshot-before-destructive funnel is
+                # armed. None (legacy/tests) keeps the hook inert.
+                swarm_bridge.attach(session, schemas, policy, loop=main_loop, config=config)
                 if swarm_loop is not None:
                     ctx = getattr(getattr(swarm_loop, "_swarm", None), "_context", None)
                     if isinstance(ctx, dict):

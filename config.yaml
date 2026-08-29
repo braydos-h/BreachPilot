@@ -292,6 +292,11 @@ eval:
   write_html: true
   regression_tolerance: 0.05
   baseline_path: reports/eval/baseline.json
+killchain:
+  enabled: false
+  goal_state: shell_as_root
+  require_verification: true
+  graph_db: ""
 long_session:
   enabled: true
   request_timeout_seconds: 600
@@ -334,6 +339,25 @@ poc_verification:
   docker_memory: 256m
 replay_simulator:
   enabled: true
+  counterfactual: false
+snapshots:
+  enabled: false
+  provider: docker
+  auto_before_destructive: true
+  max_snapshots_per_target: 3
+  vm_map: {}
+  providers:
+    docker:
+      compose_file: eval_targets/docker-compose.yml
+    hyperv:
+      powershell_command: powershell
+    vmware:
+      vmrun_path: vmrun
+    proxmox:
+      host: ""
+      node: ""
+    libvirt:
+      virsh_path: virsh
 adaptive_exploits:
   enabled: true
   max_mutations: 5

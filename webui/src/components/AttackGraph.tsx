@@ -309,10 +309,13 @@ function truncate(s: string, n: number): string {
 
 // ── Attack timeline ─────────────────────────────────────────────────────────
 
-function timelineIcon(result: string) {
-  const r = result.toLowerCase();
-  if (r.includes("success")) return <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" />;
-  if (r.includes("fail") || r.includes("error")) return <XCircle className="h-3.5 w-3.5 shrink-0 text-red-400" />;
+/** Icon keyed off event_type, mirroring enhanced_reporting.py's markdown
+ *  timeline (✅/❌/⏳). The JSON's `result` field is derived ("failure" for
+ *  any non-success event), so it would paint neutral events red. */
+function timelineIcon(eventType: string) {
+  const t = eventType.toLowerCase();
+  if (t.includes("success")) return <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" />;
+  if (t.includes("fail") || t.includes("error")) return <XCircle className="h-3.5 w-3.5 shrink-0 text-red-400" />;
   return <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
 }
 
@@ -342,7 +345,7 @@ function TimelineCard({ entries }: { entries: AttackTimelineEntry[] }) {
               <span className="shrink-0 font-mono text-muted-foreground tabular-nums">
                 {e.timestamp || "—"}
               </span>
-              {timelineIcon(e.result ?? "")}
+              {timelineIcon(e.event_type ?? "")}
               <span className="shrink-0 font-mono text-muted-foreground">{e.event_type}</span>
               <span className="min-w-0 break-words">{e.description}</span>
               {e.target && <Badge variant="outline" className="font-mono text-[10px]">{e.target}</Badge>}

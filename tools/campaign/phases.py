@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import asyncio
 import re
+from pathlib import Path
+from typing import Any
 
 from tools.attack_modules import ModuleContext
 from tools.logging_setup import get_logger
@@ -730,6 +732,136 @@ def _schedule_vuln_chain(self, state: AttackState) -> None:
             f"Scheduled {len(chains)} vuln-chain step(s) from {tail}",
             {"chains": chains},
         )
+
+
+# ── Kill-chain state machine (design §killchain) ─────────────────────
+
+
+def _get_killchain_machine(self, state: AttackState) -> Any | None:
+    """Build (once) the campaign's kill-chain machine, or None when off/unavailable.
+
+    The machine's tool executor adapts the campaign's SYNC ``tool_executor``
+    (the same dispatch ``AttackModuleExecutor`` uses) onto the async machine
+    seam — edge playbooks therefore run through the exact same tool layer,
+    so allowlist + audit semantics are unchanged. Any build failure degrades
+    to None and the caller falls back to free-form planning.
+    """
+    if not getattr(self, "_killchain_enabled", False):
+        return None
+    if self._killchain_machine is not None:
+        return self._killchain_machine
+    try:
+        from tools.intelligence.graph.store import AttackGraphStore
+        from tools.killchain import KillChainMachine
+
+        kc_cfg = (self._mission or {}).get("killchain", {}) or {}
+        db_path = Path(str(kc_cfg.get("graph_db") or (self._workspace / "killchain_graph.db")))
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def _sync_exec(tool_name: str, args: dict[str, Any]) -> str:
+            if self._tool_executor is None:
+                raise NotImplementedError("no tool executor wired for killchain playbooks")
+            return str(self._tool_executor(tool_name, args))
+
+        async def _executor(tool_name: str, args: dict[str, Any]) -> str:
+            return await asyncio.to_thread(_sync_exec, tool_name, args)
+
+        self._killchain_machine = KillChainMachine(
+            graph_store=AttackGraphStore(db_path, scope=f"target:{state.target}"),
+            workspace=self._workspace,
+            config=self._mission,
+            tool_executor=_executor,
+            run_dir=self._workspace,
+            decision_log_enabled=bool(
+                (((self._mission or {}).get("agent", {}) or {}).get("decision_log_enabled", True))
+            ),
+        )
+        return self._killchain_machine
+    except Exception as exc:  # noqa: BLE001 -- killchain must never break the campaign
+        logger.debug("killchain machine build failed: %r", exc)
+        self._killchain_machine = None
+        return None
+
+
+async def _phase_killchain(self, state: AttackState) -> bool:
+    """Prefer verified kill-chain edges before free-form module planning.
+
+    Opt-in via ``killchain.enabled`` (default off). Walks the BFS edge path
+    from the target's current state toward the configured goal state,
+    attempting each edge (up to twice per the design's fail-twice rule). The
+    machine runs each playbook through the campaign tool executor and
+    verifies independently — an unverified edge NEVER commits state. On the
+    first unverified edge the phase gives up and the caller falls back to
+    the normal module-planning phases.
+
+    Returns True only when the FULL edge path verified (goal state reached —
+    the caller skips free-form exploitation); False otherwise (verified
+    partial progress is kept on the graph, but the caller falls back to the
+    normal module-planning phases to finish the job).
+    """
+    machine = self._get_killchain_machine(state)
+    if machine is None:
+        return False
+    plan = machine.plan(state.target, self._killchain_goal_state)
+    if not plan:
+        state.add_timeline_event(
+            "killchain_no_path",
+            f"No registered kill-chain edge path to {self._killchain_goal_state}",
+        )
+        return False
+    state.add_timeline_event(
+        "killchain_plan",
+        f"Kill-chain edge path selected: {' -> '.join(plan)}",
+        {"path": plan},
+    )
+    progressed = False
+    for edge_id in plan:
+        edge = None
+        try:
+            from tools.killchain import get_edge
+
+            edge = get_edge(edge_id)
+        except Exception:  # noqa: BLE001
+            edge = None
+        if edge is None:
+            return False
+        result: dict[str, Any] = {}
+        for _attempt in range(2):  # design: fall back after verification fails twice
+            context = {
+                "user": (state.credentials_found[-1] if state.credentials_found else ""),
+                "port": "",
+            }
+            result = await machine.attempt_transition(
+                state.target,
+                edge["from_state"],
+                edge["to_state"],
+                edge_id=edge_id,
+                context=context,
+            )
+            if result.get("success"):
+                break
+        if not result.get("success"):
+            state.add_timeline_event(
+                "killchain_edge_failed",
+                f"Edge {edge_id} not verified; falling back to free-form planning",
+                {"edge_id": edge_id},
+            )
+            return False
+        progressed = True
+        to_state = edge["to_state"]
+        state.add_timeline_event(
+            "killchain_state_advanced",
+            f"Verified transition via {edge_id}: {edge['from_state']} -> {to_state}",
+            {"edge_id": edge_id, "to_state": to_state},
+        )
+        if to_state == "shell_as_user" and not state.access_achieved:
+            state.access_achieved = True
+            state.privilege_level = "user"
+        elif to_state == "shell_as_root":
+            state.access_achieved = True
+            state.privilege_level = "root"
+    # Full path verified — the goal state was reached via registered edges.
+    return True
 
 
 # ── Task execution ───────────────────────────────────────────────────

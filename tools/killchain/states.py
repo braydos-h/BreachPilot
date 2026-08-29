@@ -57,6 +57,4 @@ class AttackState(str, Enum):
         key = str(value or "").strip().lower()
         if key in _ALIASES:
             return cls(_ALIASES[key])
-        raise ValueError(
-            f"unknown attack state {value!r} (valid: {', '.join(s.value for s in cls)})"
-        )
+        raise ValueError(f"unknown attack state {value!r} (valid: {', '.join(s.value for s in cls)})")

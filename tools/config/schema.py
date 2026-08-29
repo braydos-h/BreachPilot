@@ -458,6 +458,18 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "regression_tolerance": 0.05,  # graded eval: a target regresses when score < baseline score minus this
         "baseline_path": "reports/eval/baseline.json",  # graded eval: baseline file written by --save-baseline
     },
+    # Kill-chain state machine (opt-in, default off). When enabled, the exploit
+    # MCP server registers the killchain_* tools and the autonomous
+    # orchestrator prefers verified kill-chain edges over free-form module
+    # planning. Transitions commit ONLY after independent verification —
+    # require_verification toggles reporting verbosity, never enforcement
+    # (there is no unverified-transition code path).
+    "killchain": {
+        "enabled": False,
+        "goal_state": "shell_as_root",  # BFS goal for killchain_plan / the orchestrator edge path
+        "require_verification": True,  # reporting verbosity only — verification is always enforced
+        "graph_db": "",  # kill-chain graph store path; "" = <workspace>/killchain_graph.db
+    },
     # Long-session mode (opt-in). Absent/false = current behavior; the keys here
     # are the defaults applied when --long-session is passed or enabled: true.
     "long_session": {
@@ -525,9 +537,31 @@ CONFIG_SCHEMA: dict[str, Any] = {
     # D2: replay simulator. When enabled, registers the ``replay_simulate``
     # MCP tool -- a local-only ``@audit_tool`` that dry-runs an attack plan
     # against a saved ReconAssessment JSON for pre-commit critique. Zero
-    # target touch. Default OFF.
+    # target touch. Default OFF. ``counterfactual`` (design §snapshots) is
+    # NOT a plan-critic flag: it toggles the loop's auto-revert + one-variant
+    # re-run behavior after a snapshot-backed tool failure (bounded: ONE
+    # variant-B retry per failed action; both outcomes recorded).
     "replay_simulator": {
         "enabled": False,
+        "counterfactual": False,
+    },
+    # Snapshot + rollback (design §snapshots). Opt-in (default OFF): when
+    # enabled, the snapshot_* MCP tools register and the loop may take an
+    # automatic snapshot before destructive tool calls. Provider credentials
+    # live in env vars only (PROXMOX_API_TOKEN etc.) — never in config.
+    "snapshots": {
+        "enabled": False,
+        "provider": "docker",
+        "auto_before_destructive": True,
+        "max_snapshots_per_target": 3,
+        "vm_map": {},  # target -> snapshottable vm_id (container name / VM id)
+        "providers": {
+            "docker": {"compose_file": "eval_targets/docker-compose.yml"},
+            "hyperv": {"powershell_command": "powershell"},
+            "vmware": {"vmrun_path": "vmrun"},
+            "proxmox": {"host": "", "node": ""},
+            "libvirt": {"virsh_path": "virsh"},
+        },
     },
     "adaptive_exploits": {
         "enabled": True,
