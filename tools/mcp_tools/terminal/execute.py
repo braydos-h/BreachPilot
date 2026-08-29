@@ -15,11 +15,33 @@ from typing import Any
 from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
 from tools.mcp_shared import _is_inside_workspace
 from tools.mcp_tools.registry import ToolContext, _attempt_dir, _run_with_pgrp_timeout
+from tools.mcp_tools.sandbox_exec import run_argv_in_sandbox, run_command_in_sandbox, sandbox_error_block
 from tools.mcp_tools.terminal.allowlist import _opsec_advisory_block, _target_lock_block
 from tools.mcp_tools.terminal.privilege import _find_windows_bash, _require_sudo_or_pivot
+from tools.sandbox.exceptions import SandboxError
 from tools.validation_utils import preflight_command_check
 
 __all__ = ["_register_execute_tools"]
+
+
+def _sandbox_terminal_ok(result: Any) -> tuple[str, str, int | None, float]:
+    """(status, output_tail, exit_code, duration) from a contained SandboxResult."""
+    merged = result.stdout or ""
+    if result.stderr:
+        merged = f"{merged}\n{result.stderr}" if merged else result.stderr
+    tail = merged[-4000:]
+    return result.status, tail, result.exit_code, result.duration_seconds
+
+
+def _sandbox_status_line(manager: Any) -> str:
+    try:
+        st = manager.status()
+        return (
+            f"SANDBOX: run_id={st.get('run_id', '')} container={st.get('container_id', '')[:12]} "
+            f"network_locked={st.get('network_locked', False)} image={st.get('image', '')}\n"
+        )
+    except Exception:  # noqa: BLE001 -- status is advisory, never blocks the result
+        return "SANDBOX: active\n"
 
 
 def _platform_system() -> str:
@@ -81,6 +103,45 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
         attempt_dir, attempt_id = _attempt_dir(workspace)
         log_path = attempt_dir / "terminal.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # ---- sandbox path (fail closed): when the disposable execution
+        # sandbox is enabled, the command runs inside the hardened worker
+        # container -- NEVER on the host. Any sandbox failure returns a
+        # SANDBOX_* block instead of falling back to host execution.
+        if getattr(ctx, "sandbox", None) is not None:
+            _opsec_advisory = _opsec_advisory_block(sanitized_command, config)
+            try:
+                _ran, result = run_command_in_sandbox(
+                    ctx, sanitized_command, timeout=300, cwd_host=attempt_dir, tool_name="run_exploit_terminal"
+                )
+            except SandboxError as exc:
+                return (
+                    f"TERMINAL_RESULT: blocked (exit_code=None, duration=0.0s)\n"
+                    f"ATTEMPT_ID: {attempt_id}\n"
+                    f"COMMAND_ORIGINAL: {original_command}\n"
+                    f"COMMAND_SANITIZED: {sanitized_command}\n"
+                    f"{preflight_note}"
+                    f"{sandbox_error_block(exc, tool_name='run_exploit_terminal')}"
+                )
+            _sstatus, _output_tail, _exit_code, _elapsed = _sandbox_terminal_ok(result)
+            log_path.write_text(
+                f"{'=' * 60}\nCOMMAND: {sanitized_command}\n{'=' * 60}\n"
+                + ((result.stdout or "") + ("\n" + result.stderr if result.stderr else ""))
+                + f"\nEXIT_CODE: {_exit_code if _exit_code is not None else 'timed_out'}\n",
+                encoding="utf-8",
+                errors="replace",
+            )
+            return (
+                f"TERMINAL_RESULT: {_sstatus} (exit_code={_exit_code}, duration={_elapsed:.1f}s)\n"
+                f"ATTEMPT_ID: {attempt_id}\n"
+                f"COMMAND_ORIGINAL: {original_command}\n"
+                f"COMMAND_SANITIZED: {sanitized_command}\n"
+                f"{preflight_note}"
+                f"{_sandbox_status_line(ctx.sandbox)}"
+                f"{_opsec_advisory}"
+                f"WORKSPACE: {attempt_dir}\n"
+                f"OUTPUT:\n{_output_tail}"
+            )
 
         start = time.monotonic()
         is_windows = _platform_system() == "Windows"
@@ -198,6 +259,24 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
         _pivot = _require_sudo_or_pivot("run_as_root", original_command)
         if _pivot:
             return _pivot
+        # ---- sandbox path: root INSIDE the disposable worker (confined by
+        # --cap-drop ALL / no devices / netns firewall / workspace-only bind);
+        # host root is never involved.
+        if getattr(ctx, "sandbox", None) is not None:
+            try:
+                _ran, result = run_command_in_sandbox(
+                    ctx, command, timeout=300, tool_name="run_as_root", user="root"
+                )
+            except SandboxError as exc:
+                return f"ROOT_CMD_RESULT: blocked\n{sandbox_error_block(exc, tool_name='run_as_root')}"
+            merged = result.stdout or ""
+            if result.stderr:
+                merged = f"{merged}\n{result.stderr}" if merged else result.stderr
+            return (
+                f"ROOT_CMD_RESULT: {result.status} (exit_code={result.exit_code}, sandbox)\n"
+                f"COMMAND: {original_command}\nSUDO: not required (executed as container root)\n"
+                f"OUTPUT:\n{merged[-4000:]}"
+            )
         cmd = f"sudo {command} 2>&1"
         try:
             returncode, out, err = _run_with_pgrp_timeout(
@@ -249,6 +328,27 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     f"succeed. If the clone fails, use cve_to_poc instead of "
                     f"guessing URLs.\n"
                 )
+
+        # ---- sandbox path: clone inside the worker (egress is governed by
+        # the pinned RESEARCH_HOSTS set + the netns firewall, not by the host).
+        if getattr(ctx, "sandbox", None) is not None:
+            import shlex as _shlex
+
+            _clone_cmd = f"git clone -- {_shlex.quote(url)} {_shlex.quote(dir_name)}"
+            try:
+                _ran, result = run_command_in_sandbox(
+                    ctx, _clone_cmd, timeout=120, cwd_host=workspace, tool_name="git_clone"
+                )
+            except SandboxError as exc:
+                return f"{preflight_note}GIT_CLONE_RESULT: blocked\n{sandbox_error_block(exc, tool_name='git_clone')}"
+            merged = result.stdout or ""
+            if result.stderr:
+                merged = f"{merged}\n{result.stderr}" if merged else result.stderr
+            return (
+                f"{preflight_note}GIT_CLONE_RESULT: {result.status} (exit_code={result.exit_code}, sandbox)\n"
+                f"REPO: {url}\nPATH: {clone_dir} (container: /workspace/{dir_name})\n"
+                f"OUTPUT:\n{merged[-3000:]}"
+            )
 
         try:
             returncode, out, err = _run_with_pgrp_timeout(

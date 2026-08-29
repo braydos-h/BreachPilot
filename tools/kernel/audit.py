@@ -174,6 +174,7 @@ def _audit_log(
     attempt_id: str = "",
     code_sha256: str = "",
     duration_seconds: float = 0.0,
+    extra: dict[str, Any] | None = None,
 ) -> None:
     import json as _json
 
@@ -189,6 +190,15 @@ def _audit_log(
         "code_sha256": code_sha256,
         "duration_seconds": duration_seconds,
     }
+    if extra:
+        # Optional structured context (e.g. the sandbox subsystem's container
+        # id / network-policy fingerprint). Merged after the base keys so a
+        # caller-supplied override is explicit. Values are written as-is;
+        # callers must keep secrets out (sandbox audit payloads are built
+        # secret-free by construction in tools/sandbox/policy.py).
+        for key, value in extra.items():
+            if value is not None:
+                record[key] = value
     audit_path.parent.mkdir(parents=True, exist_ok=True)
     with audit_path.open("a", encoding="utf-8") as handle:
         handle.write(_json.dumps(record, default=str) + "\n")

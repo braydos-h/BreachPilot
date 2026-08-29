@@ -1,0 +1,63 @@
+"""Disposable execution sandbox: hardened worker containers for attack tools.
+
+Architecture (see docs/safety-model.md + docs/sandbox.md):
+
+    LLM/MCP tool ->application policy/allowlist checks -> disposable sandbox
+    worker -> target
+
+The sandbox is the security boundary; the legacy application-layer controls
+(ScopeGate, ``@require_allowlist``, destination parsing) remain active as
+defense-in-depth. The worker is a disposable Docker container per attack
+session: cap-dropped (NET_RAW at most, never NET_ADMIN), non-root,
+no-new-privileges, bounded resources, read-only rootfs, the run workspace bound
+at ``/workspace`` only, and a default-DROP netns firewall installed by an
+ephemeral NET_ADMIN sidecar that authorizes ONLY the target allowlist. Any
+sandbox failure FAILS CLOSED: ``SandboxError``
+subclasses surface as ``SANDBOX_*`` result blocks and host execution is never
+an automatic fallback for attack commands.
+
+Docker access is seam-mediated (house convention from ``tools/snapshots.py``):
+tests monkeypatch the named wrappers in ``tools.sandbox.docker_backend``,
+never ``subprocess``.
+"""
+
+from tools.sandbox.exceptions import (
+    SANDBOX_POLICY_FAILED,
+    SANDBOX_SCOPE_DENIED,
+    SANDBOX_UNAVAILABLE,
+    SANDBOX_UNSUPPORTED,
+    SANDBOX_WORKSPACE_FAILED,
+    SandboxError,
+    SandboxPolicyError,
+    SandboxScopeError,
+    SandboxUnavailableError,
+    SandboxUnsupportedError,
+    SandboxWorkspaceError,
+)
+from tools.sandbox.mcp_bridge import is_sandbox_active, manager_from_ctx, sandbox_block
+from tools.sandbox.manager import SandboxManager, resolve_manager, status_report
+from tools.sandbox.models import NetworkPolicy, SandboxConfig, SandboxResult, SandboxSpec
+
+__all__ = [
+    "SandboxManager",
+    "resolve_manager",
+    "status_report",
+    "SandboxConfig",
+    "SandboxResult",
+    "SandboxSpec",
+    "NetworkPolicy",
+    "SandboxError",
+    "SandboxPolicyError",
+    "SandboxScopeError",
+    "SandboxUnavailableError",
+    "SandboxUnsupportedError",
+    "SandboxWorkspaceError",
+    "SANDBOX_UNAVAILABLE",
+    "SANDBOX_POLICY_FAILED",
+    "SANDBOX_SCOPE_DENIED",
+    "SANDBOX_UNSUPPORTED",
+    "SANDBOX_WORKSPACE_FAILED",
+    "sandbox_block",
+    "manager_from_ctx",
+    "is_sandbox_active",
+]

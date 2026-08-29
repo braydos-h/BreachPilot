@@ -109,6 +109,10 @@ class ToolContext:
     researcher: WebResearcher
     audit_tool: Any
     require_allowlist: Any
+    # Disposable execution sandbox (tools/sandbox/) — None when disabled
+    # (documented legacy host-execution mode). Optional at the END so positional
+    # construction and test FakeCtx duck-typing keep working.
+    sandbox: Any | None = None
 
 
 def _run_with_pgrp_timeout(*args: Any, **kwargs: Any) -> Any:
