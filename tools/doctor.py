@@ -474,6 +474,7 @@ def _collect_doctor_checks(config_path: Path) -> tuple[list[dict[str, Any]], dic
 
     if get_ai_provider(config) == "chatgpt":
         checks.append(_check_chatgpt(config))
+    checks.append(_check_sandbox(config))
 
     # Self-heal missing cloud models: ping each via /api/generate
     for c in checks:
@@ -610,6 +611,7 @@ def run_doctor(config_path: Path, json_output: bool = False) -> int:
 
     if get_ai_provider(config) == "chatgpt":
         checks.append(_check_chatgpt(config))
+    checks.append(_check_sandbox(config))
 
     failed = 0
 
@@ -668,6 +670,11 @@ def run_doctor(config_path: Path, json_output: bool = False) -> int:
                     print(f"        -> pull missing local model: ollama pull {spec}")
         if name == "ollama_reachable" and not c.get("ok"):
             print("        -> start Ollama, set OLLAMA_API_KEY, or update ollama.host in config.yaml")
+        if name == "sandbox":
+            if c.get("note"):
+                print(f"        -> {c['note']}")
+            elif c.get("ok"):
+                print(f"        -> worker image ready: {c.get('image', '')} (attack commands run contained)")
         # Informational drill-downs (these checks never fail)
         if name == "linux_privilege" and c.get("note"):
             print(f"        -> {c['note']}")
