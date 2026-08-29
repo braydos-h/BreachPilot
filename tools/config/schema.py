@@ -730,6 +730,55 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "health_check_interval_seconds": 60,
         "workspace_dir": "exploit_workspace",
     },
+    # Disposable execution sandbox (tools/sandbox/): every attack command runs
+    # inside a hardened, per-run Docker worker instead of on the operator host.
+    # The worker is cap-dropped (NET_RAW at most, never NET_ADMIN), non-root,
+    # no-new-privileges, resource-bounded, and gets a default-DROP netns
+    # firewall authorizing ONLY the effective target allowlist. ANY sandbox
+    # failure blocks offensive execution (fail closed) -- host execution is
+    # never an automatic fallback. ``enabled: false`` is the explicit opt-out
+    # that restores the legacy uncontained host-execution mode. See
+    # docs/sandbox.md and docs/safety-model.md.
+    "sandbox": {
+        "enabled": True,
+        "backend": "docker",
+        "image": "netattackai-sandbox:latest",
+        "user": "sandbox",
+        "read_only_rootfs": True,
+        # Host env vars the worker MAY receive (allowlist; never the whole env).
+        "env_passthrough": [],
+        "resources": {
+            "memory_mb": 4096,
+            "cpus": 2,
+            "pids": 512,
+            "timeout_seconds": 300,
+            "output_max_bytes": 2000000,
+        },
+        "network": {
+            "enforce": True,
+            "fail_closed": True,
+            # "controlled": in-container DNS only reaches host-side-validated
+            # resolutions; "none": port 53 blocked entirely (no DNS bypass).
+            "allow_dns": "controlled",
+            # Explicit dev-only mapping of sandbox loopback to the host gateway.
+            # NEVER enable for production attack runs.
+            "map_host_loopback": False,
+            # Extra operator-authorized CIDRs (e.g. a lab supernet).
+            "extra_allow_cidrs": [],
+            # Allow the Docker bridge gateway (host-published services). Keep
+            # false: the gateway is also the path to the Docker daemon.
+            "allow_gateway": False,
+            # Pinned exploit-research egress (github.com etc., host-resolved).
+            "allow_research_hosts": True,
+        },
+        "cleanup": {
+            "remove_on_exit": True,
+            "remove_stale_on_startup": True,
+        },
+        # NET_RAW for raw-packet scanning (nmap -sS). Minimum-capability grant;
+        # set false for strictly connect-scanning missions.
+        "multi_net_raw": True,
+    },
 }
 
 # Known top-level keys
