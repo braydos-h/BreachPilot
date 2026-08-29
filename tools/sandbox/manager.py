@@ -76,7 +76,14 @@ def resolve_manager(workspace: Path, config: dict[str, Any] | None) -> SandboxMa
     cfg = SandboxConfig.from_config(config)
     if not cfg.enabled:
         return None
-    return SandboxManager(cfg, workspace, config_dict=config)
+    # cap_raw honors sandbox.multi_net_raw: NET_RAW is the ONLY capability the
+    # worker may receive (raw packet scanning); NET_ADMIN is never granted.
+    return SandboxManager(
+        cfg,
+        workspace,
+        config_dict=config,
+        backend=_db.DockerBackend(cap_raw=cfg.multi_net_raw),
+    )
 
 
 class SandboxManager:
