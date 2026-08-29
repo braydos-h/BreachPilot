@@ -45,18 +45,35 @@ def _clear_target_env(monkeypatch):
 
 
 @pytest.fixture
+def fake_backend(monkeypatch):
+    """Docker-seam-free backend (same seams as test_sandbox_manager.py)."""
+    backend = FakeBackend()
+    monkeypatch.setattr("tools.sandbox.docker_backend.docker_container_list_stale", lambda *a, **k: [])
+    monkeypatch.setattr("tools.sandbox.docker_backend.docker_network_list_stale", lambda *a, **k: [])
+    monkeypatch.setattr("tools.sandbox.docker_backend.docker_network_gateway", lambda *a, **k: "172.30.0.1")
+    monkeypatch.setattr("tools.sandbox.docker_backend.docker_inspect_state", lambda *a, **k: "running")
+    monkeypatch.setattr("tools.sandbox.docker_backend.docker_network_rm", lambda *a, **k: True)
+    monkeypatch.setattr("tools.sandbox.manager.apply_network_policy", lambda *a, **k: True)
+    return backend
+
+
+@pytest.fixture
 def no_research_hosts(monkeypatch):
     """Disable the pinned research-host egress so policy tests see only the
     explicit allowlist (keeps DNS resolution out of these tests)."""
     monkeypatch.setattr("tools.sandbox.policy.RESEARCH_HOSTS", ())
 
 
-def _manager(tmp_path: Path, config: dict[str, Any], monkeypatch) -> Any:
+def _manager(tmp_path: Path, backend: Any) -> Any:
     from tools.sandbox.manager import SandboxManager
     from tools.sandbox.models import SandboxConfig
 
+    config: dict[str, Any] = {
+        "exploit": {"require_explicit_allowlist": True, "allowed_targets": ["10.0.0.50"]},
+        "sandbox": {"enabled": True, "network": {"allow_research_hosts": False}},
+    }
     cfg = SandboxConfig.from_config(config)
-    mgr = SandboxManager(cfg, tmp_path / "ws", config_dict=config, backend=FakeBackend())
+    mgr = SandboxManager(cfg, tmp_path / "ws", config_dict=config, backend=backend)
     mgr.workspace.mkdir(parents=True, exist_ok=True)
     return mgr
 
@@ -155,32 +172,29 @@ def test_authorize_all_token_refused(no_research_hosts):
 # ---------------------------------------------------------------------------
 
 
-def test_sandbox_failure_never_triggers_host_execution(tmp_path, monkeypatch):
+def test_sandbox_failure_never_triggers_host_execution(tmp_path, fake_backend):
     """A sandbox execution failure raises SandboxError — it NEVER produces a
     host-executed result (the MCP layer renders the SANDBOX_* block)."""
-    mgr = _manager(tmp_path, _base_config(["10.0.0.50"]), monkeypatch)
-    # Neutralize the sidecar policy installer (real docker not needed here);
-    # the manager calls it after worker creation and before the first exec.
-    monkeypatch.setattr("tools.sandbox.manager.apply_network_policy", lambda *a, **kw: True)
+    mgr = _manager(tmp_path, fake_backend)
 
     def _boom(cid, argv, **kw):
         raise SandboxError("exec failed inside worker")
 
-    mgr.backend.exec_impl = _boom
+    fake_backend.exec_impl = _boom
     with pytest.raises(SandboxError):
         mgr.execute("id", timeout=10, target_ip="10.0.0.50")
     # The only exec calls went to the (failing) worker inside the sandbox —
     # no host execution path was taken.
-    assert len(mgr.backend.exec_calls) >= 1
+    assert len(fake_backend.exec_calls) >= 1
 
 
-def test_sandbox_restart_never_triggers_host_execution(tmp_path, monkeypatch):
+def test_sandbox_restart_never_triggers_host_execution(tmp_path, monkeypatch, fake_backend):
     """When the worker vanishes mid-run, ensure_sandbox recreates it — and if
     recreation fails the execution path still fails closed (SandboxError),
     never silently re-runs the command on the host."""
-    mgr = _manager(tmp_path, _base_config(["10.0.0.50"]), monkeypatch)
-    monkeypatch.setattr("tools.sandbox.manager.apply_network_policy", lambda *a, **kw: True)
-    mgr.container_id = "gone"  # worker vanished
+    monkeypatch.setattr("tools.sandbox.docker_backend.docker_inspect_state", lambda *a, **k: "")
+    mgr = _manager(tmp_path, fake_backend)
+    mgr.container_id = "gone"  # worker vanished (inspect state mocked to exited)
 
     def _fail_create_worker(spec: Any, *, read_only_rootfs: bool) -> str:
         raise SandboxError("docker unavailable on restart")
@@ -191,12 +205,12 @@ def test_sandbox_restart_never_triggers_host_execution(tmp_path, monkeypatch):
     # And the execute funnel must not fall back either:
     with pytest.raises(SandboxError):
         mgr.execute("id", timeout=10, target_ip="10.0.0.50")
-    assert mgr.backend.exec_calls == []
+    assert fake_backend.exec_calls == []
 
 
-def test_workspace_traversal_rejected(tmp_path, monkeypatch):
+def test_workspace_traversal_rejected(tmp_path, fake_backend):
     """container_path refuses paths outside the sandbox workspace."""
-    mgr = _manager(tmp_path, _base_config(["10.0.0.50"]), monkeypatch)
+    mgr = _manager(tmp_path, fake_backend)
     with pytest.raises(SandboxWorkspaceError):
         mgr.container_path("C:\\Windows\\System32\\config.sys")
     with pytest.raises(SandboxWorkspaceError):
