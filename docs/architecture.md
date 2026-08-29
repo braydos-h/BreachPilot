@@ -27,11 +27,20 @@ main.py / app.py (WebUI daemon @ :8765, or direct CLI run)
   -> tools.exploit_agent (tools/exploit_agent/runner/_impl.py loop) + ExploitPolicy
   -> mcp_exploit_server.py
   -> tools.mcp_tools exploit tool registrations
+  -> tools.mcp_tools.sandbox_exec -> tools.sandbox (disposable worker container; isolation boundary)
   -> tools.campaign (AutonomousOrchestrator; facade: tools.autonomous_orchestrator) / tools.swarm
   -> tools.attack_planner + tools.attack_modules
   -> tools.payload_crafter + tools.exploit_mutator
   -> workspace/session/evidence artifacts
 ```
+
+The sandbox (`tools/sandbox/`, default-on) sits between the MCP tool layer and
+the network: the MCP tool registrations call `run_command_in_sandbox` /
+`run_argv_in_sandbox`, the `SandboxManager` owns one hardened worker container
+per run (cap-dropped, non-root, read-only rootfs, bounded resources), and a
+default-DROP netns firewall authorizes only the effective target allowlist.
+Sandbox failures fail closed as structured `SANDBOX_*` blocks; see
+[sandbox.md](sandbox.md).
 
 ## Entry Points
 

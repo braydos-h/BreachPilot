@@ -146,18 +146,14 @@ def docker_network_gateway(name: str) -> str:
 
 
 def docker_network_list_stale(*, label: str = "netattackai=true") -> list[str]:
-    rc, out, _err = _docker(
-        "network", "ls", "--filter", f"label={label}", "--format", "{{.Name}}", timeout=30
-    )
+    rc, out, _err = _docker("network", "ls", "--filter", f"label={label}", "--format", "{{.Name}}", timeout=30)
     if rc != 0:
         return []
     return [ln.strip() for ln in out.splitlines() if ln.strip()]
 
 
 def docker_container_list_stale(*, label: str = "netattackai=true") -> list[str]:
-    rc, out, _err = _docker(
-        "ps", "-a", "--filter", f"label={label}", "--format", "{{.Names}}", timeout=30
-    )
+    rc, out, _err = _docker("ps", "-a", "--filter", f"label={label}", "--format", "{{.Names}}", timeout=30)
     if rc != 0:
         return []
     return [ln.strip() for ln in out.splitlines() if ln.strip()]
@@ -232,26 +228,40 @@ def _build_create_args(spec: SandboxSpec, *, cap_raw: bool, read_only_rootfs: bo
         raise SandboxUnavailableError("worker requires a validated workspace bind")
     args = [
         "create",
-        "--name", cver,
-        "--network", str(spec.network_name),
-        "--label", "netattackai=true",
-        "--label", f"run_id={spec.labels.get('run_id', '')}",
+        "--name",
+        cver,
+        "--network",
+        str(spec.network_name),
+        "--label",
+        "netattackai=true",
+        "--label",
+        f"run_id={spec.labels.get('run_id', '')}",
         # Capabilities: drop everything; NET_RAW only when configured for raw
         # packet scanning. NET_ADMIN is deliberately NEVER granted here.
-        "--cap-drop", "ALL",
+        "--cap-drop",
+        "ALL",
     ]
     if cap_raw:
         args += ["--cap-add", "NET_RAW"]
     args += [
-        "--security-opt", "no-new-privileges",
-        "--user", user,
-        "--memory", f"{int(spec.memory_mb)}m",
-        "--memory-swap", f"{int(spec.memory_mb)}m",
-        "--cpus", str(spec.cpus),
-        "--pids-limit", str(int(spec.pids_limit)),
-        "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
-        "-v", f"{src}:/workspace:rw",
-        "-w", "/workspace",
+        "--security-opt",
+        "no-new-privileges",
+        "--user",
+        user,
+        "--memory",
+        f"{int(spec.memory_mb)}m",
+        "--memory-swap",
+        f"{int(spec.memory_mb)}m",
+        "--cpus",
+        str(spec.cpus),
+        "--pids-limit",
+        str(int(spec.pids_limit)),
+        "--tmpfs",
+        "/tmp:rw,noexec,nosuid,size=256m",
+        "-v",
+        f"{src}:/workspace:rw",
+        "-w",
+        "/workspace",
     ]
     if read_only_rootfs:
         args.append("--read-only")
@@ -282,8 +292,7 @@ class DockerBackend:
     def ensure_image(self, image: str) -> None:
         if not docker_image_exists(image):
             raise SandboxUnavailableError(
-                f"sandbox image {image!r} not found. Build it with: "
-                "'docker build -t <image> docker/sandbox'."
+                f"sandbox image {image!r} not found. Build it with: 'docker build -t <image> docker/sandbox'."
             )
 
     def create_network(self, name: str) -> str:

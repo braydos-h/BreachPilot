@@ -28,7 +28,13 @@ from tools.sandbox.exceptions import (
 )
 from tools.sandbox.manager import CONTAINER_WORKSPACE, SandboxManager, resolve_manager
 
-_EXPLOIT_ENV_KEYS = ("EXPLOIT_TARGET", "EXPLOIT_TARGET_IP", "EXPLOIT_TARGET_DOMAIN", "EXPLOIT_DISCOVERED_TARGETS", "EXPLOIT_ALLOWED_TARGETS")
+_EXPLOIT_ENV_KEYS = (
+    "EXPLOIT_TARGET",
+    "EXPLOIT_TARGET_IP",
+    "EXPLOIT_TARGET_DOMAIN",
+    "EXPLOIT_DISCOVERED_TARGETS",
+    "EXPLOIT_ALLOWED_TARGETS",
+)
 
 
 class FakeBackend:
@@ -51,7 +57,17 @@ class FakeBackend:
     def create_worker(self, spec: Any, *, read_only_rootfs: bool) -> str:
         return spec.sandbox_id
 
-    def exec(self, cid: str, argv: list[str], *, timeout: int, user: str = "", env=None, input_text: str = "", workdir: str = ""):
+    def exec(
+        self,
+        cid: str,
+        argv: list[str],
+        *,
+        timeout: int,
+        user: str = "",
+        env=None,
+        input_text: str = "",
+        workdir: str = "",
+    ):
         self.exec_calls.append({"cid": cid, "argv": argv, "env": dict(env or {}), "user": user, "workdir": workdir})
         if self.exec_impl is not None:
             return self.exec_impl(cid, argv)
@@ -84,7 +100,9 @@ def fake_backend(monkeypatch):
     return backend
 
 
-def _manager(tmp_path: Path, backend: FakeBackend, *, exploit: dict | None = None, sandbox: dict | None = None) -> SandboxManager:
+def _manager(
+    tmp_path: Path, backend: FakeBackend, *, exploit: dict | None = None, sandbox: dict | None = None
+) -> SandboxManager:
     config: dict[str, Any] = {
         "exploit": exploit or {},
         "sandbox": {"enabled": True, "network": {"allow_research_hosts": False}, **(sandbox or {})},
@@ -134,7 +152,9 @@ class TestExecutionFunnel:
         mgr.destroy()
 
     def test_unauthorized_target_denied_before_container_work(self, tmp_path, fake_backend):
-        mgr = _manager(tmp_path, fake_backend, exploit={"require_explicit_allowlist": True, "allowed_targets": ["192.0.2.5"]})
+        mgr = _manager(
+            tmp_path, fake_backend, exploit={"require_explicit_allowlist": True, "allowed_targets": ["192.0.2.5"]}
+        )
         with pytest.raises(SandboxScopeError):
             mgr.execute("curl http://203.0.113.9", target_ip="203.0.113.9")
         assert not fake_backend.exec_calls, "denied execution must never reach the sandbox"
@@ -148,7 +168,9 @@ class TestExecutionFunnel:
         assert not fake_backend.exec_calls
 
     def test_authorized_target_passes_scope(self, tmp_path, fake_backend):
-        mgr = _manager(tmp_path, fake_backend, exploit={"require_explicit_allowlist": True, "allowed_targets": ["192.0.2.0/24"]})
+        mgr = _manager(
+            tmp_path, fake_backend, exploit={"require_explicit_allowlist": True, "allowed_targets": ["192.0.2.0/24"]}
+        )
         result = mgr.execute("id", target_ip="192.0.2.5")
         assert result.status == "completed"
         mgr.destroy()
@@ -238,9 +260,7 @@ class TestWorkspace:
     def test_symlink_workspace_rejected(self, tmp_path, fake_backend, monkeypatch):
         mgr = _manager(tmp_path, fake_backend)
         mgr.workspace = mgr.workspace  # keep
-        monkeypatch.setattr(
-            "pathlib.Path.is_symlink", lambda self: True, raising=False
-        )
+        monkeypatch.setattr("pathlib.Path.is_symlink", lambda self: True, raising=False)
         with pytest.raises(SandboxWorkspaceError, match="symlink"):
             mgr._validate_workspace()
 

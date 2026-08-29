@@ -343,9 +343,7 @@ class SandboxManager:
         try:
             rel = resolved.relative_to(self.workspace.resolve())
         except ValueError:
-            raise SandboxWorkspaceError(
-                f"path {resolved} is outside the sandbox workspace {self.workspace}"
-            ) from None
+            raise SandboxWorkspaceError(f"path {resolved} is outside the sandbox workspace {self.workspace}") from None
         if str(rel) == ".":
             return CONTAINER_WORKSPACE
         return f"{CONTAINER_WORKSPACE}/{rel.as_posix()}"

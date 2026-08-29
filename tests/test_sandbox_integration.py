@@ -156,7 +156,9 @@ def _run(it_env: dict, command: str, timeout: int = 40) -> Any:
 class TestNetworkBoundary:
     def test_allowed_target_reachable(self, it_env):
         ip = it_env["target_ip"]
-        result = _run(it_env, f"python3 -c \"import socket;s=socket.create_connection(('{ip}',8090),5);print('REACH_OK')\"")
+        result = _run(
+            it_env, f"python3 -c \"import socket;s=socket.create_connection(('{ip}',8090),5);print('REACH_OK')\""
+        )
         assert result.exit_code == 0
         assert "REACH_OK" in result.stdout
 
@@ -198,7 +200,9 @@ class TestNetworkBoundary:
     def test_unauthorized_hostname_blocked(self, it_env):
         # Controlled DNS resolves (docker embedded resolver on loopback), but
         # the resolved foreign IP is not authorized => connect fails.
-        result = _run(it_env, "curl --max-time 8 -sS -o /dev/null -w '%{http_code}' http://example.com/ || echo CURL_BLOCKED")
+        result = _run(
+            it_env, "curl --max-time 8 -sS -o /dev/null -w '%{http_code}' http://example.com/ || echo CURL_BLOCKED"
+        )
         assert "CURL_BLOCKED" in result.stdout or "000" in result.stdout
         assert "200" not in result.stdout
 
@@ -234,7 +238,10 @@ class TestHostProtection:
 
     def test_rootfs_read_only_outside_workspace(self, it_env):
         # /workspace is the ONLY writable persistent path; system dirs are not.
-        result = _run(it_env, "touch /workspace/ok.txt && echo WS_OK; touch /etc/nai-ro-test 2>/dev/null && echo ROOT_WRITABLE || echo ROOT_RO")
+        result = _run(
+            it_env,
+            "touch /workspace/ok.txt && echo WS_OK; touch /etc/nai-ro-test 2>/dev/null && echo ROOT_WRITABLE || echo ROOT_RO",
+        )
         assert "WS_OK" in result.stdout
         assert "ROOT_WRITABLE" not in result.stdout
         assert "ROOT_RO" in result.stdout
@@ -287,7 +294,14 @@ class TestCleanup:
         # The module fixture destroyed its manager; nothing labeled with this
         # run_id may remain.
         rc, out, _e = _docker(
-            "ps", "-a", "--filter", "label=netattackai=true", "--filter", f"label=run_id={it_env['mgr'].run_id}", "--format", "{{.Names}}"
+            "ps",
+            "-a",
+            "--filter",
+            "label=netattackai=true",
+            "--filter",
+            f"label=run_id={it_env['mgr'].run_id}",
+            "--format",
+            "{{.Names}}",
         )
         assert rc == 0
         assert out == ""

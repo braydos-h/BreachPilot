@@ -133,12 +133,13 @@ def apply_network_policy(
         from tools.sandbox.docker_backend import run_netns_sidecar as run_sidecar
     rules_v4 = build_ipv4_rules(policy, gateway=gateway)
     rules_v6 = build_ipv6_rules(policy, gateway=gateway)
-    for proto, rules in (("iptables-restore", "\n".join(rules_v4) + "\n"), ("ip6tables-restore", "\n".join(rules_v6) + "\n")):
+    for proto, rules in (
+        ("iptables-restore", "\n".join(rules_v4) + "\n"),
+        ("ip6tables-restore", "\n".join(rules_v6) + "\n"),
+    ):
         rc, out, err = run_sidecar(container_id, image, proto, rules)
         if rc != 0:
-            raise SandboxPolicyError(
-                f"{proto} failed in sandbox netns (rc={rc}): {(err or out).strip()[:300]}"
-            )
+            raise SandboxPolicyError(f"{proto} failed in sandbox netns (rc={rc}): {(err or out).strip()[:300]}")
     logger.info(
         "sandbox network policy installed: %d authorized destinations, dns=%s",
         len(policy.authorized_destinations),

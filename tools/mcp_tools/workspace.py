@@ -166,7 +166,9 @@ def register_workspace_tools(mcp: Any, *, ctx: ToolContext) -> None:
             if result.stderr:
                 merged = f"{merged}\n{result.stderr}" if merged else result.stderr
             text = (
-                f"COMMAND: {' '.join(_argv)}\n" + merged + f"\nEXIT_CODE: {result.exit_code if result.exit_code is not None else 'timed_out'}\n"
+                f"COMMAND: {' '.join(_argv)}\n"
+                + merged
+                + f"\nEXIT_CODE: {result.exit_code if result.exit_code is not None else 'timed_out'}\n"
             )
             log_path.write_text(text, encoding="utf-8", errors="replace")
             return (

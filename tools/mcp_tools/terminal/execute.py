@@ -264,9 +264,7 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
         # host root is never involved.
         if getattr(ctx, "sandbox", None) is not None:
             try:
-                _ran, result = run_command_in_sandbox(
-                    ctx, command, timeout=300, tool_name="run_as_root", user="root"
-                )
+                _ran, result = run_command_in_sandbox(ctx, command, timeout=300, tool_name="run_as_root", user="root")
             except SandboxError as exc:
                 return f"ROOT_CMD_RESULT: blocked\n{sandbox_error_block(exc, tool_name='run_as_root')}"
             merged = result.stdout or ""

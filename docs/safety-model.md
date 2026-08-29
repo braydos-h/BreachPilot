@@ -4,14 +4,27 @@ This project can run powerful security tooling. The codebase relies on layered c
 
 ## Layers
 
-1. Mission authorization in `mission.py`
-2. Scope enforcement in `scope_gate.py`
-3. Risk and budget enforcement in `risk_controller.py`
-4. Tool routing controls in `tool_router.py`
-5. Exploit permission controls in `tools/exploit_agent/`
-6. Runtime configuration in `config.yaml`
-7. OPSEC advisory layer in `tools/opsec.py` (target-aware, advisory-only — never a gate)
-8. Audit logs, evidence records, and workspace artifacts
+1. Disposable execution sandbox (`tools/sandbox/`) — the **isolation boundary**: attack commands run in a hardened per-run container with a default-DROP netns firewall (see [sandbox.md](sandbox.md))
+2. Mission authorization in `mission.py`
+3. Scope enforcement in `scope_gate.py`
+4. Risk and budget enforcement in `risk_controller.py`
+5. Tool routing controls in `tool_router.py`
+6. Exploit permission controls in `tools/exploit_agent/`
+7. Runtime configuration in `config.yaml`
+8. OPSEC advisory layer in `tools/opsec.py` (target-aware, advisory-only — never a gate)
+9. Audit logs, evidence records, and workspace artifacts
+
+Two different things protect the operator, and both stay active:
+
+- **Application controls** (ScopeGate, MCP `@require_allowlist` decorators,
+  destination parsing, mission policy) decide *what may be attempted*. They
+  inspect command strings and targets and remain defense-in-depth.
+- **Isolation boundary** (disposable worker container, host filesystem
+  isolation, resource limits, network-layer egress allowlist) decides *what
+  can physically be reached or damaged*. Docker alone does not make
+  exploitation safe — the netns firewall is the containment mechanism, and it
+  is independent of the command string. See [sandbox.md](sandbox.md) for the
+  full invariant list and residual risks.
 
 ## Mission Rules
 
@@ -147,7 +160,7 @@ SAFE/GATED narrowing, and the defensive scope-gated `mcp_server.py` are unchange
 
 `mcp_server.py` is a defensive, scope-aware MCP server.
 
-`mcp_exploit_server.py` is not the main safety boundary. It exposes tools for shell execution, script writing/running, package installation, Metasploit, payloads, credential storage, recon, autonomous campaigns, sessions, listeners, and exploit modules. Its file-level docstring explicitly says policy gating is expected in `tools.exploit_agent`.
+`mcp_exploit_server.py` is not the main safety boundary. It exposes tools for shell execution, script writing/running, package installation, Metasploit, payloads, credential storage, recon, autonomous campaigns, sessions, listeners, and exploit modules. Its file-level docstring explicitly says policy gating is expected in `tools.exploit_agent`. When the sandbox is enabled (default), every attack-execution tool funnels through the disposable worker (`tools/mcp_tools/sandbox_exec.py`) and any sandbox failure returns a structured `SANDBOX_*` block — host execution is never an automatic fallback.
 
 When `multi_model.enabled` is true, the exploit MCP server also exposes `consult_peer_models`. This is advisory only: peer models receive no MCP tool schemas, cannot execute commands, and their responses must still pass through the main agent and `ExploitPolicy` before any target-touching action occurs.
 
@@ -181,6 +194,10 @@ Evidence and auditability are part of the safety model:
 - Require explicit allowlists for target-touching behavior (`require_explicit_allowlist: true` + the `EXPLOIT_TARGET` union is the target lock).
 - Default new *recon* features to read-only behavior; new *attack* features inherit the unrestricted-but-locked posture.
 - Do not add new network, shell, package install, or file-write paths without tests.
+- New attack-execution paths MUST go through the sandbox funnel
+  (`tools/mcp_tools/sandbox_exec.py`); never `subprocess` agent-generated
+  commands directly on the host, and never add a host-execution fallback for
+  sandbox failures (fail closed with `SANDBOX_*` blocks).
 - Keep output sanitization and secret redaction near the boundary where output enters logs, model context, or reports.
 - Keep evidential status separate from execution status. New outcome rules may
   reduce/reprioritize activity only; they must remain downstream of the

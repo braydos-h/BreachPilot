@@ -624,6 +624,39 @@ reflection by `swarm.reflection_enabled`.
 | `multi_operator` | bool | `true` | D4: user accounts + annotations (loopback-only) | tools/api/auth.py:60 |
 | `graph_route` | bool | `true` | Attack-path DAG API route | tools/api/routes/graph_explorer.py:30 |
 
+### `sandbox:` (config.yaml:541-566) — disposable execution sandbox (isolation boundary)
+
+Every attack command (terminal commands, generated Python, nmap, Metasploit,
+etc.) runs inside a hardened per-run Docker worker. Any sandbox failure blocks
+offensive execution with a structured `SANDBOX_*` error — host execution is
+never an automatic fallback. Full architecture + threat model:
+[docs/sandbox.md](sandbox.md).
+
+| Key | Type | Default | Controls | Consumed at |
+|-----|------|---------|----------|-------------|
+| `enabled` | bool | `true` | Master switch; `false` = explicit legacy host-execution opt-out (uncontained) | `tools/sandbox/manager.py:resolve_manager` |
+| `backend` | str | `docker` | Execution backend | `tools/sandbox/models.py` |
+| `image` | str | `netattackai-sandbox:latest` | Worker image (build: `docker build -t <image> docker/sandbox`) | `tools/sandbox/docker_backend.py` |
+| `user` | str | `sandbox` | Container user (non-root default) | `tools/sandbox/docker_backend.py:_build_create_args` |
+| `read_only_rootfs` | bool | `true` | Read-only container rootfs; `/workspace` + tmpfs stay writable | `_build_create_args` |
+| `env_passthrough` | list[str] | `[]` | Extra host env var names the worker may receive (allowlist; never the whole env) | `tools/sandbox/manager.py:_build_env` |
+| `resources.memory_mb` | int | `4096` | Container memory cap (min 256) | `_build_create_args` |
+| `resources.cpus` | float | `2` | CPU cap (min 0.1) | `_build_create_args` |
+| `resources.pids` | int | `512` | Process-count cap (min 32) | `_build_create_args` |
+| `resources.timeout_seconds` | int | `300` | Per-command default timeout | `tools/sandbox/manager.py:execute` |
+| `resources.output_max_bytes` | int | `2000000` | Per-stream output clamp (min 1024) | `tools/sandbox/manager.py:_clamp_output` |
+| `network.enforce` | bool | `true` | Install the netns firewall; `false` = Docker bridge isolation only (NOT containment) | `tools/sandbox/manager.py:_apply_policy` |
+| `network.fail_closed` | bool | `true` | Policy failures block execution | `tools/sandbox/*` |
+| `network.allow_dns` | str | `controlled` | `controlled` (host-side validated resolution) or `none` (port 53 blocked everywhere) | `tools/sandbox/policy.py`, `network.py` |
+| `network.map_host_loopback` | bool | `false` | Dev-only mapping of sandbox loopback targets to the host gateway; never enable for production runs | `tools/sandbox/policy.py` |
+| `network.extra_allow_cidrs` | list[str] | `[]` | Operator-authorized extra CIDRs | `tools/sandbox/policy.py` |
+| `network.allow_gateway` | bool | `false` | Authorize the Docker bridge gateway (path to host services + Docker daemon) — keep false | `tools/sandbox/network.py` |
+| `network.allow_research_hosts` | bool | `true` | Pinned exploit-research egress (github.com et al., host-resolved + audited) | `tools/sandbox/policy.py` |
+| `cleanup.remove_on_exit` | bool | `true` | Destroy worker + network after the run | `tools/sandbox/manager.py:destroy` |
+| `cleanup.remove_stale_on_startup` | bool | `true` | Sweep exited labeled containers / empty networks at startup (running concurrent-session workers kept) | `tools/sandbox/manager.py:cleanup_stale` |
+| `multi_net_raw` | bool | `true` | Grant NET_RAW for raw-packet scanning (nmap -sS); NET_ADMIN is never granted to the worker | `tools/sandbox/manager.py:resolve_manager` |
+
+
 ## Other consumed keys
 
 - `reports_dir` (not in schema): `Path(config.get("reports_dir", "reports"))` — app.py:76; also `mcp_engine_server.py:74` defaults to `reports`.

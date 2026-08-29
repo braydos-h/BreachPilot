@@ -72,6 +72,17 @@ On Linux/macOS `make install|test|test-one F=…|run|doctor|mcp-exploit` work.
 
 4. **New exploit MCP tools: single-source registration** — add `@audit_tool` (or `@require_allowlist()` for target-touching) in `tools/mcp_tools/<family>.py` only; `mcp_exploit_server.py` auto-discovers every `register_*_tools` via `tools/mcp_tools/registry.py:collect_tools()` (pkgutil + AST validation, fails CI if decorator missing). No manual list edit in `mcp_exploit_server.py`. `tools/mcp_tools/registry.py` is central wiring. Target-touching = `@require_allowlist()` + `validate_target_or_ip`.
 
+4.5. **Attack execution runs inside the sandbox** (`tools/sandbox/`, default-on
+   via `config.yaml sandbox.enabled: true`). `run_exploit_terminal`,
+   `run_as_root`, `git_clone`, `run_python_file`, Metasploit, and the scanners
+   funnel through `tools/mcp_tools/sandbox_exec.py` into a disposable worker
+   container whose netns firewall authorizes only the effective allowlist.
+   NEVER run agent-generated commands via host `subprocess` on new paths, and
+   NEVER add a host-execution fallback for sandbox failures — convert
+   `SandboxError` into `SANDBOX_*` blocks (fail closed). The worker image must
+   be built: `docker build -t netattackai-sandbox:latest docker/sandbox`. See
+   `docs/sandbox.md`.
+
 5. **`opencode.jsonc` is editor-local config** (gitignored) for the opencode.ai
    editor's own model provider — it is NOT application config. Don't treat it
    as app state. App config lives in `config.yaml`. **Never copy `~/.codex/auth.json` OAuth tokens into `config.yaml` or logs** (provider `chatgpt` only).

@@ -37,6 +37,35 @@ jobs:
       - name: Run test suite (offline/mocked)
         run: python -m pytest tests/ -v
 
+  sandbox:
+    name: Sandbox integration (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+      - name: Install project + dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Build sandbox worker image
+        run: docker build -t netattackai-sandbox:latest docker/sandbox
+      - name: Sandbox unit + integration tests (real Docker containment)
+        run: |
+          python -m pytest tests/test_sandbox_models.py \
+            tests/test_sandbox_policy.py \
+            tests/test_sandbox_network.py \
+            tests/test_sandbox_backend.py \
+            tests/test_sandbox_manager.py \
+            tests/test_sandbox_mcp_exec.py \
+            tests/test_sandbox_integration.py -v
+
   coverage:
     name: Coverage report
     runs-on: ubuntu-latest
@@ -247,7 +276,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [tests, coverage, lint, types, package, webui]
+    needs: [tests, sandbox, coverage, lint, types, package, webui]
     steps:
       - name: Check all jobs passed
         run: |

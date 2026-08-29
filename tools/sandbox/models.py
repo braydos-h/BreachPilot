@@ -99,14 +99,10 @@ class SandboxConfig:
         if allow_dns not in ("controlled", "none"):
             allow_dns = "controlled"
         extra_cidrs = [
-            str(c).strip()
-            for c in (network.get("extra_allow_cidrs") or [])
-            if isinstance(c, str) and str(c).strip()
+            str(c).strip() for c in (network.get("extra_allow_cidrs") or []) if isinstance(c, str) and str(c).strip()
         ]
         passthrough = [
-            str(k).strip()
-            for k in (sec.get("env_passthrough") or [])
-            if isinstance(k, str) and str(k).strip()
+            str(k).strip() for k in (sec.get("env_passthrough") or []) if isinstance(k, str) and str(k).strip()
         ]
         return cls(
             enabled=_as_bool(sec.get("enabled"), False),
@@ -146,7 +142,9 @@ class SandboxResult:
     status: str = "completed"  # completed | failed | timed_out
 
     @classmethod
-    def timed_out_result(cls, duration: float, sandbox_id: str = "", stdout: str = "", stderr: str = "") -> "SandboxResult":
+    def timed_out_result(
+        cls, duration: float, sandbox_id: str = "", stdout: str = "", stderr: str = ""
+    ) -> "SandboxResult":
         return cls(
             exit_code=None,
             stdout=stdout,
@@ -197,8 +195,8 @@ class NetworkPolicy:
 
     def fingerprint(self) -> str:
         """Stable fingerprint for change detection (re-apply rules only when set changes)."""
-        import json as _json
         import hashlib as _hashlib
+        import json as _json
 
         payload = _json.dumps(
             {

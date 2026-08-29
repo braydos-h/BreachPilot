@@ -19,7 +19,16 @@ import pytest
 from tools.sandbox import policy as sandbox_policy
 from tools.sandbox.policy import METADATA_DESTINATIONS, audit_policy_payload, build_network_policy
 
-_CLEAR_ENV = {k: None for k in ("EXPLOIT_TARGET", "EXPLOIT_TARGET_IP", "EXPLOIT_TARGET_DOMAIN", "EXPLOIT_DISCOVERED_TARGETS", "EXPLOIT_ALLOWED_TARGETS")}
+_CLEAR_ENV = {
+    k: None
+    for k in (
+        "EXPLOIT_TARGET",
+        "EXPLOIT_TARGET_IP",
+        "EXPLOIT_TARGET_DOMAIN",
+        "EXPLOIT_DISCOVERED_TARGETS",
+        "EXPLOIT_ALLOWED_TARGETS",
+    )
+}
 
 
 def _cfg(allowed_targets: list[str], **network) -> dict:
@@ -76,7 +85,9 @@ class TestBuildNetworkPolicy:
     def test_bare_ip_authorized(self):
         pol = build_network_policy(_cfg(["192.0.2.10"]))
         # Bare IPs are normalized to /32 CIDRs (iptables-equivalent).
-        assert any(ipaddress.ip_network(d) == ipaddress.ip_network("192.0.2.10/32") for d in pol.authorized_destinations)
+        assert any(
+            ipaddress.ip_network(d) == ipaddress.ip_network("192.0.2.10/32") for d in pol.authorized_destinations
+        )
 
     def test_cidr_authorized(self):
         pol = build_network_policy(_cfg(["10.0.0.0/24"]))
@@ -147,7 +158,9 @@ class TestAuditPolicyPayload:
 
 class TestAuthorizeDestinations:
     def test_empty_allowlist_deny_when_required(self):
-        ok, reason = sandbox_policy.authorize_destinations(["192.0.2.5"], {"exploit": {"require_explicit_allowlist": True}})
+        ok, reason = sandbox_policy.authorize_destinations(
+            ["192.0.2.5"], {"exploit": {"require_explicit_allowlist": True}}
+        )
         assert ok is False
         assert "empty" in reason.lower()
 

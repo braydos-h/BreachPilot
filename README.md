@@ -201,7 +201,42 @@ All tools are registered via `tools/mcp_tools/registry.py` using the `@audit_too
 
 Operational guards that always apply: 300s/600s timeouts, full JSONL audit trail, OS-aware tooling.
 
-This is **not** a sandbox or authorization proof. Only run against what you own.
+### Disposable execution sandbox (on by default)
+
+Attack commands do not run on the operator host. Every terminal command,
+generated Python script, exploit tool, and Metasploit run executes inside a
+**disposable Docker worker** (`tools/sandbox/`) that is created per run and
+destroyed afterward:
+
+- **Hardened container**: non-root, `--cap-drop ALL` (NET_RAW at most — never
+  NET_ADMIN), `no-new-privileges`, read-only rootfs, CPU/memory/PID limits,
+  per-command timeout, output clamping. No Docker socket, no host mounts
+  beyond the run workspace, no host networking.
+- **Network containment (fail closed)**: an ephemeral `NET_ADMIN` sidecar
+  installs a default-DROP firewall inside the worker's network namespace that
+  authorizes ONLY the effective target allowlist — the same list the
+  application layer enforces, resolved host-side for domains and recorded in
+  the audit trail. Cloud metadata, the Docker gateway, host LAN devices, and
+  the open internet are unreachable regardless of what the command says — a
+  script with no destination on its command line cannot egress either.
+- **Fail closed**: Docker unavailable, image missing, or firewall install
+  failing blocks offensive execution with a structured `SANDBOX_*` error.
+  Host execution is never an automatic fallback. `sandbox.enabled: false` is
+  the explicit operator opt-out for the legacy uncontained mode.
+
+Build the worker image once (Linux is the primary hardened target; Windows/macOS
+work via Docker Desktop):
+
+```bash
+docker build -t netattackai-sandbox:latest docker/sandbox
+```
+
+`python main.py --doctor` verifies Docker and the worker image when the sandbox
+is enabled. Full architecture, threat model, and residual risks:
+[docs/sandbox.md](docs/sandbox.md).
+
+The target-IP allowlist remains the scope authority — the sandbox is
+containment, not an authorization proof. Only run against what you own.
 
 Full model: [docs/safety-model.md](docs/safety-model.md)
 
@@ -251,6 +286,7 @@ Get a free key at https://ollama.com/settings/keys. Then `python main.py --docto
 | Need | Notes |
 |------|-------|
 | Python 3.11+ | `python --version`; `--doctor` rejects 3.10 |
+| Docker | Recommended (default-on sandbox). Build the worker image: `docker build -t netattackai-sandbox:latest docker/sandbox` |
 | nmap | On `PATH` or set `nmap.path` in `config.yaml` |
 | Ollama | Cloud default (`https://api.ollama.com` + `OLLAMA_API_KEY`) or local daemon |
 | Node.js + npm | Only for the first WebUI build; auto-built on first launch if present |
@@ -291,6 +327,7 @@ Switching providers (Ollama ↔ ChatGPT), models, skills, swarm, OPSEC, persiste
 - Swarm & autonomous: toggle agents, concurrency, persistence phases, adaptive replan
 - OPSEC: target-aware pacing, UA rotation, DoH, noise budget
 - ICS: destructive PLC writes dual-gated (`allow_write` + `destructive_ics`)
+- Sandbox: per-run disposable execution worker (`sandbox.*` keys — image, resource limits, network enforcement, DNS mode, cleanup); see [docs/sandbox.md](docs/sandbox.md)
 - API: concurrent runs (default 3), multi-operator, graph route, loopback auth
 
 ---

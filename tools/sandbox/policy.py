@@ -85,9 +85,7 @@ def build_network_policy(config: dict[str, Any] | None, *, gateway: str = "") ->
     network_cfg = {**(defaults or {}), **(sandbox_cfg.get("network") or {})}
     map_loopback = bool(network_cfg.get("map_host_loopback", False))
     extra_cidrs = [
-        str(c).strip()
-        for c in (network_cfg.get("extra_allow_cidrs") or [])
-        if isinstance(c, str) and str(c).strip()
+        str(c).strip() for c in (network_cfg.get("extra_allow_cidrs") or []) if isinstance(c, str) and str(c).strip()
     ]
     allow_dns = str(network_cfg.get("allow_dns", "controlled") or "controlled").strip().lower()
     if allow_dns not in ("controlled", "none"):
@@ -105,9 +103,7 @@ def build_network_policy(config: dict[str, Any] | None, *, gateway: str = "") ->
             continue
         low = tok.lower()
         if low in _AUTHORIZE_ALL_TOKENS:
-            raise ValueError(
-                f"target {tok!r} authorizes all destinations; the sandbox policy refuses to express it"
-            )
+            raise ValueError(f"target {tok!r} authorizes all destinations; the sandbox policy refuses to express it")
         if low in ("localhost", "127.0.0.1", "::1"):
             loopback_hits = True
             continue  # sandbox loopback is always usable (lo interface)

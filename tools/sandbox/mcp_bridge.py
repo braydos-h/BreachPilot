@@ -52,7 +52,7 @@ def sandbox_block(exc: SandboxError, *, tool_name: str = "") -> str:
     """Canonical fail-closed result block for a sandbox failure."""
     code = getattr(exc, "code", None) or SANDBOX_UNAVAILABLE
     remediation = _REMEDIATION.get(code, "")
-    lines = [f"TERMINAL_RESULT: BLOCKED", code, str(exc)]
+    lines = ["TERMINAL_RESULT: BLOCKED", code, str(exc)]
     if tool_name:
         lines.append(f"TOOL: {tool_name}")
     lines.append("EXECUTED: nowhere -- the command was not run on the host (fail closed)")

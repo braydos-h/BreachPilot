@@ -92,7 +92,11 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
             start = time.monotonic()
             try:
                 _ran, result = run_argv_in_sandbox(
-                    ctx, _msf_argv, target_ip=str(target_ip), timeout=600, cwd_host=attempt_dir,
+                    ctx,
+                    _msf_argv,
+                    target_ip=str(target_ip),
+                    timeout=600,
+                    cwd_host=attempt_dir,
                     tool_name="run_msf_module",
                 )
             except SandboxError as exc:

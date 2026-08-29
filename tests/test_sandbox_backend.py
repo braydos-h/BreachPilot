@@ -130,6 +130,7 @@ class TestValidation:
 class TestExecSeam:
     def test_docker_command_timeout_becomes_bare_timeout(self):
         """The manager distinguishes 'agent command too long' from sandbox breakage."""
+
         def timeout_seam(argv, timeout, input_text=""):
             raise DockerCommandTimeout("docker exec timed out")
 
