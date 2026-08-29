@@ -502,6 +502,56 @@ class ConfigValidator:
                     if value is not None and not isinstance(value, bool):
                         result.errors.append(f"eval.{key} must be a boolean.")
 
+        # Validate benchmark suite section
+        if "benchmark" in self._config:
+            bm = self._config["benchmark"]
+            if not isinstance(bm, dict):
+                result.errors.append("'benchmark' must be a mapping.")
+            else:
+                enabled = bm.get("enabled")
+                if enabled is not None and not isinstance(enabled, bool):
+                    result.errors.append("benchmark.enabled must be a boolean.")
+                output_dir = bm.get("output_dir")
+                if output_dir is not None and (not isinstance(output_dir, str) or not output_dir.strip()):
+                    result.errors.append("benchmark.output_dir must be a non-empty string.")
+                trials = bm.get("trials")
+                if trials is not None and (not isinstance(trials, int) or isinstance(trials, bool) or not 1 <= trials <= 20):
+                    result.errors.append("benchmark.trials must be an integer in 1-20.")
+                timeout = bm.get("timeout_seconds")
+                if timeout is not None and (
+                    not isinstance(timeout, int) or isinstance(timeout, bool) or timeout < 30
+                ):
+                    result.errors.append("benchmark.timeout_seconds must be an integer >= 30.")
+                sandbox_required = bm.get("sandbox_required")
+                if sandbox_required is not None and not isinstance(sandbox_required, bool):
+                    result.errors.append("benchmark.sandbox_required must be a boolean.")
+                regression = bm.get("regression")
+                if regression is not None:
+                    if not isinstance(regression, dict):
+                        result.errors.append("benchmark.regression must be a mapping.")
+                    else:
+                        for key in (
+                            "success_rate_tolerance",
+                            "false_positive_tolerance",
+                            "median_time_tolerance",
+                            "tool_actions_tolerance",
+                            "cost_tolerance",
+                        ):
+                            val = regression.get(key)
+                            if val is not None and (
+                                not isinstance(val, (int, float)) or isinstance(val, bool) or not 0 <= val <= 1
+                            ):
+                                result.errors.append(f"benchmark.regression.{key} must be a number in 0-1.")
+                telemetry = bm.get("telemetry")
+                if telemetry is not None:
+                    if not isinstance(telemetry, dict):
+                        result.errors.append("benchmark.telemetry must be a mapping.")
+                    else:
+                        for key in ("events", "token_usage", "cost"):
+                            val = telemetry.get(key)
+                            if val is not None and not isinstance(val, bool):
+                                result.errors.append(f"benchmark.telemetry.{key} must be a boolean.")
+
         # Validate api (WebUI daemon) section
         if "api" in self._config:
             ap = self._config["api"]

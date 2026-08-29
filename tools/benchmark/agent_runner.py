@@ -323,9 +323,9 @@ class MissionRunner:
         result.telemetry.tool_calls = tool_calls
         result.telemetry.tool_errors = tool_errors
         result.telemetry.sandbox_blocked_actions = sandbox_blocked
-        result.sandbox = _extract_sandbox_facts(workspace, required=bool(
-            (self.config.get("benchmark", {}) or {}).get("sandbox_required", True)
-        ))
+        result.sandbox = _extract_sandbox_facts(
+            workspace, required=bool((self.config.get("benchmark", {}) or {}).get("sandbox_required", True))
+        )
 
         if event_logger is not None:
             self._emit_mission_events(event_logger, scenario, trial_id, result)

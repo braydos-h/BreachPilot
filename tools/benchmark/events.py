@@ -123,7 +123,11 @@ def _redact_payload(payload: dict[str, Any]) -> dict[str, Any]:
             redacted[key] = _redact_payload(value)
         elif isinstance(value, list):
             redacted[key] = [
-                _redact_payload(item) if isinstance(item, dict) else truncate_output(item) if isinstance(item, str) else item
+                _redact_payload(item)
+                if isinstance(item, dict)
+                else truncate_output(item)
+                if isinstance(item, str)
+                else item
                 for item in value
             ]
         else:

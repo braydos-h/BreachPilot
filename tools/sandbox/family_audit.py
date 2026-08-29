@@ -1,0 +1,213 @@
+"""Tool-family containment audit for the sandbox.
+
+The contract (docs/sandbox.md, docs/benchmarks.md): when ``sandbox.enabled``
+is true, NO offensive/target-touching execution may silently run on the host.
+This module is the explicit, reviewable registry of every tool family in
+``tools/mcp_tools/`` that spawns processes, and its containment status:
+
+- ``sandboxed``     — the family's target-touching commands funnel through
+                      :mod:`tools.mcp_tools.sandbox_exec` into the worker.
+- ``host_exception``— documented exception: the family executes on the host
+                      with a stated reason (e.g. local-only utility, or
+                      pending migration). Exceptions must be auditable and
+                      intentional — this registry is enforced by test.
+
+``audit_families()`` scans the package for modules that reference
+``subprocess`` and asserts each is accounted for (sandboxed or registered
+exception). The test suite fails when a new subprocess-using tool family
+appears without a registry entry, so containment can never silently rot.
+"""
+
+from __future__ import annotations
+
+import ast
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+__all__ = ["FamilyStatus", "SANDBOXED_FAMILIES", "HOST_EXCEPTIONS", "audit_families", "describe_family_audit"]
+
+_MCP_TOOLS_DIR = Path(__file__).resolve().parent.parent / "mcp_tools"
+
+_SANDBOX_SEAM_SYMBOLS = {"run_command_in_sandbox", "run_argv_in_sandbox", "manager_from_ctx", "sandbox_error_block"}
+
+
+@dataclass
+class FamilyStatus:
+    """Containment status of one tool family."""
+
+    module: str
+    status: str  # "sandboxed" | "host_exception"
+    reason: str = ""
+    target_touching: bool = True
+    notes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "module": self.module,
+            "status": self.status,
+            "reason": self.reason,
+            "target_touching": self.target_touching,
+            "notes": list(self.notes),
+        }
+
+
+#: Families whose target-touching execution funnels through the sandbox.
+SANDBOXED_FAMILIES: dict[str, FamilyStatus] = {
+    name: FamilyStatus(module=name, status="sandboxed", reason="commands run inside the sandbox worker")
+    for name in (
+        "terminal/execute",  # run_exploit_terminal
+        "terminal/package",  # apt/pip/git/clone primitives
+        "terminal/privilege",  # run_as_root
+        "terminal",  # shim re-exporting the terminal package
+        "web_scan",  # nikto/nuclei/sqlmap/... argv funnel
+        "metasploit",  # msf module execution argv funnel
+        "workspace",  # run_python_file argv funnel (sandbox path)
+        "attack_modules",  # module executors via run_python_file/terminal inside worker
+    )
+}
+
+#: Documented host-execution exceptions. Every entry needs a reason a reviewer
+#: can verify; target-touching exceptions are bugs to fix, not features.
+HOST_EXCEPTIONS: dict[str, FamilyStatus] = {
+    "recon": FamilyStatus(
+        module="recon",
+        status="host_exception",
+        reason=(
+            "check_os/quick_scan run TTL pings and banner socket sweeps from the operator host "
+            "(passive OS fingerprinting; pending sandbox migration — target-locked at the MCP layer)"
+        ),
+        target_touching=True,
+    ),
+    "credentials": FamilyStatus(
+        module="credentials",
+        status="host_exception",
+        reason=(
+            "lateral_exec/dump_credentials/kerberoast still execute impacket on the host "
+            "(documented gap; pending sandbox migration — target-locked by the MCP allowlist in the meantime)"
+        ),
+        target_touching=True,
+    ),
+    "payloads": FamilyStatus(
+        module="payloads",
+        status="host_exception",
+        reason="msfvenom payload generation runs on the host (generates a file; touches no target)",
+        target_touching=False,
+    ),
+    "cracking": FamilyStatus(
+        module="cracking",
+        status="host_exception",
+        reason="hashcat/john run locally on hashes the operator supplies (no network, audit-only tool)",
+        target_touching=False,
+    ),
+    "domain": FamilyStatus(
+        module="domain",
+        status="host_exception",
+        reason=(
+            "DNS/dns tools execute dig/host/subfinder on the host; reads are passive recon "
+            "and the families are allowlist-locked at the MCP layer"
+        ),
+        target_touching=True,
+    ),
+    "ad": FamilyStatus(
+        module="ad",
+        status="host_exception",
+        reason="AD enumeration helpers run ldapsearch-class tools on the host (pending sandbox migration)",
+        target_touching=True,
+    ),
+    "operator_connection": FamilyStatus(
+        module="operator_connection",
+        status="host_exception",
+        reason="operator-directed connection lifecycle (RDP/VNC client launch) is an interactive operator tool, not agent offense",
+        target_touching=False,
+    ),
+    "registry": FamilyStatus(
+        module="registry",
+        status="host_exception",
+        reason="process-timeout helper wraps model-router work, not target execution",
+        target_touching=False,
+    ),
+}
+
+
+def _module_key(path: Path) -> str:
+    """Module key relative to mcp_tools, without the .py suffix."""
+    rel = path.relative_to(_MCP_TOOLS_DIR)
+    return str(rel.with_suffix("")).replace("\\", "/")
+
+
+def _uses_subprocess(path: Path) -> bool:
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, SyntaxError):
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(alias.name == "subprocess" for alias in node.names):
+                return True
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == "subprocess":
+                return True
+    return False
+
+
+def _uses_sandbox_seam(path: Path) -> bool:
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, SyntaxError):
+        return False
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.asname or alias.name.split(".")[0])
+    return bool(names & _SANDBOX_SEAM_SYMBOLS)
+
+
+def audit_families(mcp_tools_dir: Path | None = None) -> list[dict[str, Any]]:
+    """Audit every subprocess-using module under ``tools/mcp_tools``.
+
+    Returns a list of ``{module, status, reason, target_touching, problem}``
+    rows. A row has ``problem`` set when the module spawns processes but has
+    NO registry entry — the test suite treats that as a hard failure.
+    """
+    root = Path(mcp_tools_dir) if mcp_tools_dir else _MCP_TOOLS_DIR
+    rows: list[dict[str, Any]] = []
+    if not root.exists():
+        return rows
+    for path in sorted(root.rglob("*.py")):
+        if path.name == "__init__.py" or "__pycache__" in path.parts:
+            continue
+        if not _uses_subprocess(path):
+            continue
+        key = _module_key(path)
+        entry = SANDBOXED_FAMILIES.get(key) or HOST_EXCEPTIONS.get(key)
+        if entry is not None:
+            row = entry.to_dict()
+            row["problem"] = ""
+            # A module that spawns subprocesses AND imports the sandbox seam
+            # but is registered as a host exception is a registry bug.
+            if entry.status == "host_exception" and _uses_sandbox_seam(path):
+                row["problem"] = "registered host_exception but module imports the sandbox seam"
+        else:
+            row = FamilyStatus(module=key, status="unregistered", reason="").to_dict()
+            row["problem"] = "subprocess use without a containment registry entry"
+        rows.append(row)
+    return rows
+
+
+def describe_family_audit() -> dict[str, Any]:
+    """Machine-readable audit summary (used by docs + tests + status page)."""
+    rows = audit_families()
+    problems = [r for r in rows if r.get("problem")]
+    return {
+        "total": len(rows),
+        "sandboxed": sum(1 for r in rows if r.get("status") == "sandboxed"),
+        "host_exceptions": sum(1 for r in rows if r.get("status") == "host_exception"),
+        "unregistered": sum(1 for r in rows if r.get("status") == "unregistered"),
+        "problems": [r["module"] for r in problems],
+        "rows": rows,
+    }

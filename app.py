@@ -29,6 +29,7 @@ from tools.api.auth import (
 from tools.api.errors import install_error_handlers, install_middleware
 from tools.api.event_broker import EventBrokerRegistry
 from tools.api.persistence import ApiPersistence
+from tools.api.routes import benchmarks as benchmarks_routes
 from tools.api.routes import connections as connections_routes
 from tools.api.routes import decisions as decisions_routes
 from tools.api.routes import events as events_routes
@@ -38,6 +39,8 @@ from tools.api.routes import runs as runs_routes
 from tools.api.routes import system as system_routes
 from tools.api.routes import users as users_routes
 from tools.api.run_manager import RunManager
+from tools.benchmark.service import BenchmarkService
+from tools.benchmark.storage import BenchmarkStorage
 
 
 def create_app(
@@ -97,12 +100,19 @@ def create_app(
         callables=callables,
     )
 
+    # Benchmark suite (tools/benchmark/): service owns the active benchmark
+    # run; storage reads/writes reports/benchmarks/<suite>/<run_id>/.
+    benchmark_cfg = config.get("benchmark", {}) or {}
+    benchmark_storage = BenchmarkStorage(str(benchmark_cfg.get("output_dir", "reports/benchmarks") or "reports/benchmarks"))
+    benchmark_service = BenchmarkService(config, config_path)
+
     # Lifespan: recover interrupted runs on startup; cancel active run on shutdown.
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         persistence.recover_interrupted()
         yield
         await run_manager.shutdown()
+        await benchmark_service.shutdown()
 
     app = FastAPI(
         title="NetAttackAI WebUI API",
@@ -139,6 +149,7 @@ def create_app(
     graph_routes.configure(auth, persistence, config)
     graph_explorer_routes.configure(auth, persistence, config)
     connections_routes.configure(auth, config, config_path)
+    benchmarks_routes.configure(auth, benchmark_service, benchmark_storage, config)
 
     # D4: multi-operator user accounts + annotations (loopback-only; no roles).
     # Only wired when ``api.multi_operator`` is true — default false restores
@@ -154,6 +165,7 @@ def create_app(
     app.include_router(graph_routes.router)
     app.include_router(graph_explorer_routes.router)
     app.include_router(connections_routes.router)
+    app.include_router(benchmarks_routes.router)
     if bool(api_cfg.get("multi_operator", False)):
         app.include_router(users_routes.router)
 

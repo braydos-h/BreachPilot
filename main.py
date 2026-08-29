@@ -504,7 +504,43 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--check-regression",
         dest="check_regression",
         action="store_true",
-        help="With --eval: exit 1 when a target's score drops below the baseline minus eval.regression_tolerance",
+        help="With --eval/--benchmark: exit 1 on hard regressions vs the saved baseline",
+    )
+    benchgrp = parser.add_argument_group("benchmark suite")
+    benchgrp.add_argument(
+        "--benchmark",
+        nargs="*",
+        default=None,
+        metavar="SUITE",
+        help="Run a benchmark suite (e.g. --benchmark xben). With --trials N runs repeated trials; "
+        "filters via --scenario/--tag. Use --save-baseline/--check-regression for baseline workflows.",
+    )
+    benchgrp.add_argument(
+        "--benchmark-list",
+        dest="benchmark_list",
+        action="store_true",
+        help="List registered benchmark suites (id, scenario count, tags) and exit",
+    )
+    benchgrp.add_argument(
+        "--scenario",
+        action="append",
+        default=None,
+        metavar="ID",
+        help="With --benchmark: restrict to specific scenario ids (repeatable)",
+    )
+    benchgrp.add_argument(
+        "--tag",
+        action="append",
+        default=None,
+        metavar="TAG",
+        help="With --benchmark: restrict to scenarios carrying a tag (repeatable)",
+    )
+    benchgrp.add_argument(
+        "--trials",
+        type=int,
+        default=None,
+        metavar="N",
+        help="With --benchmark: repeated trials per scenario (default benchmark.trials, 1-20)",
     )
 
     ctf = parser.add_argument_group("ctf autopilot")
@@ -1224,6 +1260,7 @@ def main(argv: list[str] | None = None) -> int:
         # empty list — falsy. Every gate below that used to truthy-test --eval
         # now goes through _eval_active instead.
         _eval_active = getattr(args, "eval", None) is not None or getattr(args, "eval_list", False)
+        _benchmark_active = getattr(args, "benchmark", None) is not None or getattr(args, "benchmark_list", False)
         # ponytail: prompt only in the terminal menu (--menu). The no-args
         # default now launches the WebUI daemon, not the terminal menu, so the
         # interactive key prompt should not fire there. --setup-api-keys still
@@ -1234,7 +1271,8 @@ def main(argv: list[str] | None = None) -> int:
             prompt=interactive_startup
             and not args.doctor
             and not getattr(args, "self_test", False)
-            and not _eval_active,
+            and not _eval_active
+            and not _benchmark_active,
         )
         setup_only = bool(args.setup_api_keys) and not any(
             [
@@ -1258,8 +1296,8 @@ def main(argv: list[str] | None = None) -> int:
         # `bun install` are all in place before any runtime path can hit the
         # proxy. Surfaces the fix (install/clone/install-deps) up front instead
         # of letting the proxy's own RuntimeError fire mid-run. Skipped for
-        # --doctor/--self-test/--eval, which intentionally probe a partial state.
-        if not _eval_active and not any(
+        # --doctor/--self-test/--eval/--benchmark, which intentionally probe a partial state.
+        if not _eval_active and not _benchmark_active and not any(
             getattr(args, flag, False) for flag in ("doctor", "self_test", "skills_list", "list_plugins")
         ):
             rc = _ensure_chatgpt_runtime(args)
@@ -1288,6 +1326,8 @@ def main(argv: list[str] | None = None) -> int:
                     _conflicting.append(f"--{flag.replace('_', '-')}")
             if _eval_active:
                 _conflicting.append("--eval")
+            if _benchmark_active:
+                _conflicting.append("--benchmark")
             if _conflicting:
                 ui.error(
                     (
@@ -1328,12 +1368,19 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{target_id}\t{flag_count} flags")
             return 0
 
-        # --save-baseline/--check-regression only compose with --eval.
-        if (getattr(args, "save_baseline", False) or getattr(args, "check_regression", False)) and getattr(
-            args, "eval", None
-        ) is None:
-            ui.error("--save-baseline/--check-regression require --eval.")
+        # --save-baseline/--check-regression compose with --eval or --benchmark.
+        if (
+            getattr(args, "save_baseline", False) or getattr(args, "check_regression", False)
+        ) and getattr(args, "eval", None) is None and getattr(args, "benchmark", None) is None:
+            ui.error("--save-baseline/--check-regression require --eval or --benchmark.")
             return 2
+
+        # --benchmark / --benchmark-list: the reproducible benchmark suite
+        # (tools/benchmark/). A bare --benchmark defaults to the xben suite.
+        if getattr(args, "benchmark", None) is not None or getattr(args, "benchmark_list", False):
+            from tools.benchmark_cli import run_benchmark_cli
+
+            return run_benchmark_cli(args)
 
         # --eval: with --target, the legacy single-target benchmark harness;
         # without, the graded eval suite (oracle v2) across all/specified targets.

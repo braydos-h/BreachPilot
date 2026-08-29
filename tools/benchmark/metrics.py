@@ -31,6 +31,7 @@ __all__ = [
     "wilson_interval",
     "is_false_positive",
     "is_false_negative",
+    "run_summary_from_dict",
 ]
 
 
@@ -63,12 +64,16 @@ def _mean_or_none(values: list[float]) -> float | None:
     return statistics.fmean(values) if values else None
 
 
-def compute_scenario_summary(trials: list[TrialResult], scenario_id: str, name: str = "", **meta: Any) -> ScenarioSummary:
+def compute_scenario_summary(
+    trials: list[TrialResult], scenario_id: str, name: str = "", **meta: Any
+) -> ScenarioSummary:
     """Aggregate one scenario's trials (repeated-trial aware)."""
     summary = ScenarioSummary(scenario_id=scenario_id, name=name)
     summary.tags = list(meta.get("tags", []) or [])
     summary.difficulty = str(meta.get("difficulty", "unknown") or "unknown")
-    completed = [t for t in trials if t.status not in (TrialStatus.INFRASTRUCTURE_ERROR.value, TrialStatus.SKIPPED.value)]
+    completed = [
+        t for t in trials if t.status not in (TrialStatus.INFRASTRUCTURE_ERROR.value, TrialStatus.SKIPPED.value)
+    ]
     summary.trials = len(trials)
     if not trials:
         return summary
@@ -149,7 +154,9 @@ def compute_run_summary(
     summary.time_to_first_verified_success = min(
         (t.duration_seconds for t in verified if t.duration_seconds > 0), default=None
     )
-    summary.sandbox_blocked_actions = sum(t.sandbox.blocked_events + t.telemetry.sandbox_blocked_actions for t in trials)
+    summary.sandbox_blocked_actions = sum(
+        t.sandbox.blocked_events + t.telemetry.sandbox_blocked_actions for t in trials
+    )
     summary.infra_error_count = sum(1 for t in trials if t.status == TrialStatus.INFRASTRUCTURE_ERROR.value)
     summary.timeout_count = sum(1 for t in trials if t.status == TrialStatus.TIMEOUT.value)
     for t in trials:
@@ -164,8 +171,26 @@ def compute_run_summary(
     for t in trials:
         by_scenario.setdefault(t.scenario_id, []).append(t)
     for scenario_id in sorted(by_scenario):
-        m = meta.get(scenario_id, {})
-        summary.scenarios.append(
-            compute_scenario_summary(by_scenario[scenario_id], scenario_id, name=str(m.get("name", "") or ""), **m)
-        )
+        m = dict(meta.get(scenario_id, {}))
+        summary.scenarios.append(compute_scenario_summary(by_scenario[scenario_id], scenario_id, **m))
     return summary
+
+
+def run_summary_from_dict(payload: dict[str, Any]) -> RunSummary:
+    """Rebuild a RunSummary from its persisted dict form (scenario rows included)."""
+    scenarios = [
+        ScenarioSummary(
+            **{
+                **s,
+                "tags": list(s.get("tags", []) or []),
+                "failure_categories": dict(s.get("failure_categories", {}) or {}),
+            }
+        )
+        for s in (payload.get("scenarios") or [])
+        if isinstance(s, dict)
+    ]
+    known = set(RunSummary.__dataclass_fields__)
+    return RunSummary(
+        **{k: v for k, v in payload.items() if k in known and k != "scenarios"},
+        scenarios=scenarios,
+    )

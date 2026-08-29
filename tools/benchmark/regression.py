@@ -31,6 +31,7 @@ __all__ = [
     "save_baseline",
     "load_baseline",
     "compare_to_baseline",
+    "compare_summaries_payload",
     "DEFAULT_BASELINE_PATH",
     "thresholds_from_config",
 ]
@@ -239,9 +240,7 @@ def compare_to_baseline(
             )
         )
     else:
-        result.findings.append(
-            RegressionFinding("unchanged", "false_positive_rate", f"{cur_fp:.3f} vs {base_fp:.3f}")
-        )
+        result.findings.append(RegressionFinding("unchanged", "false_positive_rate", f"{cur_fp:.3f} vs {base_fp:.3f}"))
 
     base_time = baseline.get("median_solve_time")
     cur_time = summary.median_solve_time
@@ -258,7 +257,9 @@ def compare_to_baseline(
         )
     elif inc is not None and inc < -th.median_time_tolerance:
         result.findings.append(
-            RegressionFinding("improvement", "median_solve_time", f"{cur_time:.1f}s ({inc:.0%})", baseline=base_time, current=cur_time)
+            RegressionFinding(
+                "improvement", "median_solve_time", f"{cur_time:.1f}s ({inc:.0%})", baseline=base_time, current=cur_time
+            )
         )
 
     base_actions = baseline.get("median_tool_actions")
@@ -319,3 +320,122 @@ def compare_to_baseline(
 
     result.passed = result.hard_count == 0
     return result
+
+
+# ---------------------------------------------------------------------------
+# Two-run comparison (WebUI comparison view)
+# ---------------------------------------------------------------------------
+
+
+def compare_summaries_payload(base_summary: dict[str, Any], current_summary: dict[str, Any]) -> dict[str, Any]:
+    """Compare two RunSummary dicts (baseline + candidate) into a UI payload.
+
+    Metric rows carry ``baseline``/``current``/``delta`` (+ direction); the
+    per-scenario rollup classifies every scenario as newly_solved / regressed /
+    still_solved / still_failing. Pure dict-in/dict-out so both the API and
+    the CLI can use it.
+    """
+
+    def _pct(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _row(metric: str, base: Any, cur: Any, *, lower_is_better: bool = False) -> dict[str, Any]:
+        base_num = base if isinstance(base, (int, float)) else None
+        cur_num = cur if isinstance(cur, (int, float)) else None
+        delta = (cur_num - base_num) if (base_num is not None and cur_num is not None) else None
+        direction = "unchanged"
+        if delta is not None and abs(delta) > 1e-9:
+            improved = delta < 0 if lower_is_better else delta > 0
+            direction = "improved" if improved else "regressed"
+        return {
+            "metric": metric,
+            "baseline": base,
+            "current": cur,
+            "delta": delta,
+            "direction": direction,
+        }
+
+    metrics = [
+        _row(
+            "verified_success_rate",
+            _pct(base_summary.get("verified_success_rate")),
+            _pct(current_summary.get("verified_success_rate")),
+        ),
+        _row(
+            "false_positive_rate",
+            _pct(base_summary.get("false_positive_rate")),
+            _pct(current_summary.get("false_positive_rate")),
+        ),
+        _row(
+            "median_solve_time",
+            base_summary.get("median_solve_time"),
+            current_summary.get("median_solve_time"),
+            lower_is_better=True,
+        ),
+        _row(
+            "median_tool_actions",
+            base_summary.get("median_tool_actions"),
+            current_summary.get("median_tool_actions"),
+            lower_is_better=True,
+        ),
+        _row(
+            "estimated_cost",
+            base_summary.get("estimated_cost"),
+            current_summary.get("estimated_cost"),
+            lower_is_better=True,
+        ),
+        _row(
+            "total_tokens", base_summary.get("total_tokens"), current_summary.get("total_tokens"), lower_is_better=True
+        ),
+        _row("solved", base_summary.get("solved", 0), current_summary.get("solved", 0)),
+        _row(
+            "infra_error_count",
+            base_summary.get("infra_error_count", 0),
+            current_summary.get("infra_error_count", 0),
+            lower_is_better=True,
+        ),
+    ]
+
+    def _scenario_map(summary: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        return {str(s.get("scenario_id", "")): s for s in (summary.get("scenarios") or []) if isinstance(s, dict)}
+
+    base_map = _scenario_map(base_summary)
+    cur_map = _scenario_map(current_summary)
+    per_scenario: dict[str, list[str]] = {
+        "newly_solved": [],
+        "regressed": [],
+        "still_solved": [],
+        "still_failing": [],
+    }
+    scenario_rows: list[dict[str, Any]] = []
+    for scenario_id in sorted(set(base_map) | set(cur_map)):
+        base_sc = base_map.get(scenario_id)
+        cur_sc = cur_map.get(scenario_id)
+        base_prob = _pct((base_sc or {}).get("success_probability"))
+        cur_prob = _pct((cur_sc or {}).get("success_probability"))
+        if base_prob == 0 and cur_prob > 0:
+            category = "newly_solved"
+        elif base_prob > 0 and cur_prob == 0:
+            category = "regressed"
+        elif base_prob > 0 and cur_prob > 0:
+            category = "still_solved"
+        else:
+            category = "still_failing"
+        per_scenario[category].append(scenario_id)
+        scenario_rows.append(
+            {
+                "scenario_id": scenario_id,
+                "baseline": base_prob,
+                "current": cur_prob,
+                "delta": cur_prob - base_prob,
+                "category": category,
+            }
+        )
+    return {
+        "metrics": metrics,
+        "scenarios": scenario_rows,
+        "categories": per_scenario,
+    }

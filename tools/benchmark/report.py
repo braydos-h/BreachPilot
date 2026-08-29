@@ -78,12 +78,10 @@ def render_report_markdown(run: dict[str, Any], summary: dict[str, Any] | None) 
         "# NetAttackAI Benchmark Report",
         "",
         f"- **Version**: {env.get('netattack_version', 'unknown')}",
-        f"- **Git**: `{env.get('git_sha', 'unknown')}`"
-        + (f" (dirty)" if env.get("git_dirty") else ""),
+        f"- **Git**: `{env.get('git_sha', 'unknown')}`" + (" (dirty)" if env.get("git_dirty") else ""),
         f"- **Model**: {env.get('model_provider', 'unknown')} / {env.get('model_id', 'unknown')}"
         f" (alias {env.get('model_alias', 'unknown')}, version {env.get('model_version', 'unknown')})",
-        f"- **Sandbox image**: {env.get('sandbox_image', 'unknown')}"
-        f" @ `{env.get('sandbox_image_digest', 'unknown')}`",
+        f"- **Sandbox image**: {env.get('sandbox_image', 'unknown')} @ `{env.get('sandbox_image_digest', 'unknown')}`",
         f"- **Benchmark**: {run.get('suite', 'unknown')}",
         f"- **Trials per scenario**: {config.get('trials', 1)}",
         f"- **Run ID**: `{run.get('run_id', 'unknown')}` ({run.get('timestamp') or run.get('status', '')})",
@@ -144,7 +142,7 @@ def render_report_html(run: dict[str, Any], summary: dict[str, Any] | None) -> s
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>NetAttackAI Benchmark Report — {e(str(run.get('run_id', '')))}</title>
+  <title>NetAttackAI Benchmark Report — {e(str(run.get("run_id", "")))}</title>
   <style>
     body {{ font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 60rem; }}
     table {{ border-collapse: collapse; margin: 1rem 0; }}
@@ -157,26 +155,26 @@ def render_report_html(run: dict[str, Any], summary: dict[str, Any] | None) -> s
 <body>
   <h1>NetAttackAI Benchmark Report</h1>
   <p>
-    <strong>Version:</strong> {e(str(env.get('netattack_version', 'unknown')))} ·
-    <strong>Git:</strong> <code>{e(str(env.get('git_sha', 'unknown')))}</code> ·
-    <strong>Benchmark:</strong> {e(str(run.get('suite', 'unknown')))} ·
-    <strong>Trials:</strong> {e(str((run.get('config') or {}).get('trials', 1)))}
+    <strong>Version:</strong> {e(str(env.get("netattack_version", "unknown")))} ·
+    <strong>Git:</strong> <code>{e(str(env.get("git_sha", "unknown")))}</code> ·
+    <strong>Benchmark:</strong> {e(str(run.get("suite", "unknown")))} ·
+    <strong>Trials:</strong> {e(str((run.get("config") or {}).get("trials", 1)))}
   </p>
   <p>
-    <strong>Model:</strong> {e(str(env.get('model_provider', 'unknown')))} / {e(str(env.get('model_id', 'unknown')))}<br>
-    <strong>Sandbox image digest:</strong> <code>{e(str(env.get('sandbox_image_digest', 'unknown')))}</code>
+    <strong>Model:</strong> {e(str(env.get("model_provider", "unknown")))} / {e(str(env.get("model_id", "unknown")))}<br>
+    <strong>Sandbox image digest:</strong> <code>{e(str(env.get("sandbox_image_digest", "unknown")))}</code>
   </p>
-  <div class="stat">{s.get('solved', 0)}/{s.get('trials_total', 0)} verified ({_fmt_pct(s.get('verified_success_rate'))})</div>
+  <div class="stat">{s.get("solved", 0)}/{s.get("trials_total", 0)} verified ({_fmt_pct(s.get("verified_success_rate"))})</div>
   <p>
-    False positives: {_fmt_pct(s.get('false_positive_rate'))} ·
-    Median solve time: {_fmt_duration(s.get('median_solve_time'))} ·
-    Average cost: {_fmt_cost(s.get('estimated_cost'))}
+    False positives: {_fmt_pct(s.get("false_positive_rate"))} ·
+    Median solve time: {_fmt_duration(s.get("median_solve_time"))} ·
+    Average cost: {_fmt_cost(s.get("estimated_cost"))}
   </p>
   <h2>Per-scenario results</h2>
   <table>
     <thead><tr><th>Scenario</th><th>Verified</th><th>P(success)</th><th>FP</th><th>Median time</th></tr></thead>
     <tbody>
-      {''.join(md_rows) or '<tr><td colspan="5">no completed trials</td></tr>'}
+      {"".join(md_rows) or '<tr><td colspan="5">no completed trials</td></tr>'}
     </tbody>
   </table>
   <h2>Methodology</h2>

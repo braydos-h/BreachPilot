@@ -104,16 +104,6 @@ class BenchmarkStorage:
         _atomic_write_json(path, trial.to_dict())
         return path
 
-    def write_trial_events(self, suite: str, run_id: str, scenario_id: str, trial_index: int, events: list[dict[str, Any]]) -> Path:
-        path = self.scenario_dir(suite, run_id, scenario_id) / f"trial_{trial_index}_events.jsonl"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        with tmp.open("w", encoding="utf-8") as handle:
-            for event in events:
-                handle.write(json.dumps(event, default=str) + "\n")
-        os.replace(tmp, path)
-        return path
-
     def finalize_run(
         self,
         suite: str,
@@ -230,7 +220,9 @@ class BenchmarkStorage:
             return []
         return sorted(p.name for p in self.root.iterdir() if p.is_dir())
 
-    def load_events(self, suite: str, run_id: str, *, trial_id: str = "", after: int = 0, limit: int = 500) -> list[dict[str, Any]]:
+    def load_events(
+        self, suite: str, run_id: str, *, trial_id: str = "", after: int = 0, limit: int = 500
+    ) -> list[dict[str, Any]]:
         """Read events.jsonl (optionally filtered by trial, after a sequence)."""
         path = self.run_dir(suite, run_id) / "events.jsonl"
         if not path.exists():

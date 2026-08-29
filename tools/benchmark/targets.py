@@ -16,8 +16,7 @@ from __future__ import annotations
 import subprocess
 from typing import Any
 
-from tools.benchmark.models import BenchmarkScenario, TargetSnapshot
-from tools.benchmark.models import ResetStrategy
+from tools.benchmark.models import BenchmarkScenario, ResetStrategy, TargetSnapshot
 
 __all__ = [
     "TargetProvisionError",

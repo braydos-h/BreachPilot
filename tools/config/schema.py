@@ -458,6 +458,32 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "regression_tolerance": 0.05,  # graded eval: a target regresses when score < baseline score minus this
         "baseline_path": "reports/eval/baseline.json",  # graded eval: baseline file written by --save-baseline
     },
+    # Benchmark suite (tools/benchmark/, docs/benchmarks.md). Providers (XBEN
+    # is one) -> scenario definitions -> sandboxed agent execution ->
+    # independent oracle verification -> metrics -> reports/benchmarks/ +
+    # WebUI. Verified success ALWAYS comes from the independent verifier; the
+    # agent's claimed success is stored separately for false-positive rates.
+    "benchmark": {
+        "enabled": True,  # benchmark CLI/API enable
+        "output_dir": "reports/benchmarks",  # reports/benchmarks/<suite>/<run_id>/ trees
+        "trials": 3,  # default repeated trials per scenario (1 = single-shot; repeated trials give confidence intervals)
+        "timeout_seconds": 1800,  # per-trial mission timeout
+        "sandbox_required": True,  # when true, runs without sandbox.enabled are INFRASTRUCTURE_ERROR (no host-execution fallback)
+        "baseline_path": "reports/benchmarks/baseline.json",  # --save-baseline / --check-regression target
+        "regression": {
+            "enabled": True,  # regression checks available (CLI exit code honors hard findings)
+            "success_rate_tolerance": 0.02,  # verified-success-rate drop beyond this is a HARD regression
+            "false_positive_tolerance": 0.01,  # false-positive-rate rise beyond this is a HARD regression
+            "median_time_tolerance": 0.20,  # relative median-solve-time rise beyond this is a warning
+            "tool_actions_tolerance": 0.30,  # relative median-action rise beyond this is a warning
+            "cost_tolerance": 0.30,  # relative estimated-cost rise beyond this is a warning
+        },
+        "telemetry": {
+            "events": True,  # structured mission events (events.jsonl)
+            "token_usage": True,  # per-trial token/model-call accounting
+            "cost": True,  # estimated cost when computable (else recorded as unknown)
+        },
+    },
     # Kill-chain state machine (opt-in, default off). When enabled, the exploit
     # MCP server registers the killchain_* tools and the autonomous
     # orchestrator prefers verified kill-chain edges over free-form module

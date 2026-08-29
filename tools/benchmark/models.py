@@ -239,7 +239,6 @@ class TrialResult:
     evidence_refs: list[str] = field(default_factory=list)
     audit_path: str = ""
     workspace: str = ""
-    events_ref: str = ""  # per-trial events file relative to the run dir
     errors: list[str] = field(default_factory=list)
     sandbox: SandboxSnapshot = field(default_factory=SandboxSnapshot)
     target: TargetSnapshot = field(default_factory=TargetSnapshot)
