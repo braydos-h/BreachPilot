@@ -57,25 +57,40 @@ SANDBOXED_FAMILIES: dict[str, FamilyStatus] = {
     name: FamilyStatus(module=name, status="sandboxed", reason="commands run inside the sandbox worker")
     for name in (
         "terminal/execute",  # run_exploit_terminal
-        "terminal/package",  # apt/pip/git/clone primitives
-        "terminal/privilege",  # run_as_root
-        "terminal",  # shim re-exporting the terminal package
+        "terminal",  # deprecated shim re-exporting the terminal package
         "web_scan",  # nikto/nuclei/sqlmap/... argv funnel
         "metasploit",  # msf module execution argv funnel
         "workspace",  # run_python_file argv funnel (sandbox path)
-        "attack_modules",  # module executors via run_python_file/terminal inside worker
     )
 }
 
 #: Documented host-execution exceptions. Every entry needs a reason a reviewer
 #: can verify; target-touching exceptions are bugs to fix, not features.
 HOST_EXCEPTIONS: dict[str, FamilyStatus] = {
+    "terminal/package": FamilyStatus(
+        module="terminal/package",
+        status="host_exception",
+        reason=(
+            "apt/pip/git-clone install primitives execute on the operator host "
+            "(pending sandbox migration; lab-only convenience tools, target-locked)"
+        ),
+        target_touching=False,
+    ),
+    "terminal/privilege": FamilyStatus(
+        module="terminal/privilege",
+        status="host_exception",
+        reason=(
+            "run_as_root and the Windows bash-locator execute on the operator host "
+            "(pending sandbox migration; operator-box privilege helper)"
+        ),
+        target_touching=False,
+    ),
     "recon": FamilyStatus(
         module="recon",
         status="host_exception",
         reason=(
             "check_os/quick_scan run TTL pings and banner socket sweeps from the operator host "
-            "(passive OS fingerprinting; pending sandbox migration — target-locked at the MCP layer)"
+            "(pending sandbox migration — target-locked at the MCP layer)"
         ),
         target_touching=True,
     ),
@@ -104,8 +119,8 @@ HOST_EXCEPTIONS: dict[str, FamilyStatus] = {
         module="domain",
         status="host_exception",
         reason=(
-            "DNS/dns tools execute dig/host/subfinder on the host; reads are passive recon "
-            "and the families are allowlist-locked at the MCP layer"
+            "DNS tools execute dig/host/subfinder on the host (pending sandbox migration; "
+            "reads are passive recon and the families are allowlist-locked at the MCP layer)"
         ),
         target_touching=True,
     ),
