@@ -78,6 +78,7 @@ def fake_backend(monkeypatch):
     monkeypatch.setattr("tools.sandbox.docker_backend.docker_network_list_stale", lambda *a, **k: [])
     monkeypatch.setattr("tools.sandbox.docker_backend.docker_network_gateway", lambda *a, **k: "172.30.0.1")
     monkeypatch.setattr("tools.sandbox.docker_backend.docker_inspect_state", lambda *a, **k: "running")
+    monkeypatch.setattr("tools.sandbox.docker_backend.docker_network_rm", lambda *a, **k: True)
     # Policy install is a no-op (sidecar install is covered by network tests).
     monkeypatch.setattr("tools.sandbox.manager.apply_network_policy", lambda *a, **k: True)
     return backend
@@ -154,7 +155,12 @@ class TestExecutionFunnel:
 
     def test_research_hosts_exempt_from_target_allowlist(self, tmp_path, fake_backend):
         # Pinned research egress (github/gitlab) is authorized by the fixed set.
-        mgr = _manager(tmp_path, fake_backend, exploit={"require_explicit_allowlist": True, "allowed_targets": []})
+        mgr = _manager(
+            tmp_path,
+            fake_backend,
+            exploit={"require_explicit_allowlist": True, "allowed_targets": []},
+            sandbox={"network": {"allow_research_hosts": True}},
+        )
         result = mgr.execute("git clone https://github.com/x/y", target_ip="github.com")
         assert result.status == "completed"
         mgr.destroy()
@@ -242,8 +248,10 @@ class TestWorkspace:
 class TestLifecycle:
     def test_destroy_idempotent_and_audited(self, tmp_path, fake_backend):
         mgr = _manager(tmp_path, fake_backend)
+        mgr.execute("id", target_ip="192.0.2.5")
         r1 = mgr.destroy()
         assert r1["container_removed"] is True
+        assert r1["network_removed"] is True
         r2 = mgr.destroy()
         assert r2 == {"container_removed": False, "network_removed": False}
         audit = tmp_path / "ws" / "exploit_audit.jsonl"
@@ -275,7 +283,7 @@ class TestLifecycle:
 
 class TestAuditTrail:
     def test_execution_writes_sandbox_context(self, tmp_path, fake_backend):
-        mgr = _manager(tmp_path, fake_backend)
+        mgr = _manager(tmp_path, fake_backend, exploit={"allowed_targets": ["192.0.2.5"]})
         mgr.run_id = "auditrun1"
         mgr.execute("id", target_ip="192.0.2.5", tool_name="run_exploit_terminal")
         audit = tmp_path / "ws" / "exploit_audit.jsonl"
@@ -285,6 +293,6 @@ class TestAuditTrail:
         row = sandbox_rows[0]
         assert row["sandbox"]["run_id"] == "auditrun1"
         assert row["sandbox"]["image"] == "netattackai-sandbox:latest"
-        assert row["sandbox"]["network"]["authorized_destinations"] == ["192.0.2.5"]
+        assert row["sandbox"]["network"]["authorized_destinations"] == ["192.0.2.5/32"]
         assert row["sandbox"]["env_keys"] == sorted(row["sandbox"]["env_keys"])
         mgr.destroy()
