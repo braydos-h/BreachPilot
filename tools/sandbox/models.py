@@ -129,6 +129,7 @@ class SandboxConfig:
             allow_research_hosts=_as_bool(network.get("allow_research_hosts"), True),
             remove_on_exit=_as_bool(cleanup.get("remove_on_exit"), True),
             remove_stale_on_startup=_as_bool(cleanup.get("remove_stale_on_startup"), True),
+            multi_net_raw=_as_bool(sec.get("multi_net_raw"), True),
         )
 
 
