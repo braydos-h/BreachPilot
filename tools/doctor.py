@@ -481,7 +481,7 @@ def _check_sandbox(config: dict[str, Any] | None = None) -> dict[str, Any]:
     """
     sandbox_cfg = (config or {}).get("sandbox", {}) or {}
     enabled = bool(sandbox_cfg.get("enabled", False))
-    image = str(sandbox_cfg.get("image", "netattackai-sandbox:latest") or "netattackai-sandbox:latest")
+    image = str(sandbox_cfg.get("image", "breachpilot-sandbox:latest") or "breachpilot-sandbox:latest")
     result: dict[str, Any] = {"name": "sandbox", "enabled": enabled, "image": image}
     if not enabled:
         result["ok"] = True
@@ -653,7 +653,7 @@ def run_doctor(config_path: Path, json_output: bool = False) -> int:
         return 0 if report["is_valid"] else 1
 
     print("=" * 60)
-    print("  NetAttackAI - Self-Check (`--doctor`)")
+    print("  BreachPilot - Self-Check (`--doctor`)")
     print("=" * 60)
 
     # Load config first (other checks may need it)

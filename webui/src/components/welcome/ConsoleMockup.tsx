@@ -39,7 +39,7 @@ export function ConsoleMockup({ step }: { step: TourStep }) {
           <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground/30" />
         </div>
         <div className="flex-1 text-center text-[10px] text-muted-foreground">
-          NetAttackAI · Local console
+          BreachPilot · Local console
         </div>
         <div className="text-[9px] text-muted-foreground">v{__APP_VERSION__}</div>
       </div>
@@ -50,7 +50,7 @@ export function ConsoleMockup({ step }: { step: TourStep }) {
           <div className="mb-2 flex items-center gap-1.5 px-1">
             <Terminal className="h-3.5 w-3.5 text-primary" />
             <span className="text-[10px] font-semibold">
-              <span className="text-gradient-primary">NetAttack</span>
+              <span className="text-gradient-primary">BreachPilot</span>
               <span>AI</span>
             </span>
           </div>
@@ -114,7 +114,7 @@ function MockupContent({ step }: { step: TourStep }) {
         <div className="space-y-2">
           <div className="rounded-lg border bg-card/60 p-3">
             <div className="text-sm font-semibold">
-              <span className="text-gradient-primary">NetAttack</span>
+              <span className="text-gradient-primary">BreachPilot</span>
               <span>AI</span>
             </div>
             <p className="text-[10px] text-muted-foreground">

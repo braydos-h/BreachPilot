@@ -1,9 +1,9 @@
-# Contributing to NetAttackAI
+# Contributing to BreachPilot
 
-Thanks for helping improve NetAttackAI. This guide covers setup, workflow, and the non-obvious rules you will break otherwise.
+Thanks for helping improve BreachPilot. This guide covers setup, workflow, and the non-obvious rules you will break otherwise.
 
 > [!WARNING]
-> **Authorized use only.** NetAttackAI is a lab-only offensive security tool. Contribute and test only against networks/systems you own or have explicit written authorization to assess, on a throwaway operator box. Attack mode ships as `full_access` (`config.yaml:61`) — the single remaining attack-path safety is the target-IP allowlist lock at the MCP tool layer (`tools/mcp_shared.py:494` + `tools/mcp_tools/terminal.py:_target_lock_block`). See `docs/safety-model.md` and `README.md#safety-model`.
+> **Authorized use only.** BreachPilot is a lab-only offensive security tool. Contribute and test only against networks/systems you own or have explicit written authorization to assess, on a throwaway operator box. Attack mode ships as `full_access` (`config.yaml:61`) — the single remaining attack-path safety is the target-IP allowlist lock at the MCP tool layer (`tools/mcp_shared.py:494` + `tools/mcp_tools/terminal.py:_target_lock_block`). See `docs/safety-model.md` and `README.md#safety-model`.
 
 ## 1. What to read first
 
@@ -68,7 +68,7 @@ python main.py --setup-api-keys   # prompts and writes secr.json
 | `NVD_API_KEY` | Raises NVD CVE lookup rate limit |
 | `GITHUB_TOKEN` | Raises `cve_to_poc` GitHub Search limit 60→5000/hr |
 | `SERPAPI_API_KEY` | Optional fallback research provider |
-| `NETATTACKAI_API_TOKEN` | Override auto-generated WebUI bearer token |
+| `BREACHPILOT_API_TOKEN` | Override auto-generated WebUI bearer token |
 
 ChatGPT provider (`models.provider: chatgpt`) uses browser OAuth tokens at `~/.codex/auth.json` — **never copy them into `config.yaml` or logs**.
 
@@ -246,6 +246,6 @@ By contributing, you agree that your contributions will be licensed under the **
 
 - Docs: `docs/getting-started.md`, `docs/providers.md`, `docs/api.md`, `docs/webui.md`
 - Diagnostics: `python main.py --doctor --json` (machine-readable)
-- Issues: https://github.com/braydos-h/NetAttackAi/issues
+- Issues: https://github.com/braydos-h/BreachPilot/issues
 - Feedback on this guide: open an issue or PR editing `CONTRIBUTING.md`
 

@@ -4,7 +4,7 @@ import type {
 } from "@/api/types";
 import { toast } from "@/hooks/use-toast";
 
-const TOKEN_KEY = "netattackai.apiToken.v1";
+const TOKEN_KEY = "breachpilot.apiToken.v1";
 
 export function getStoredToken(): string {
   try {
@@ -31,7 +31,7 @@ export function clearStoredToken(): void {
  *  WS 4401 close). TokenGate subscribes to it because it reads the token at
  *  render time — without this signal a mid-session expiry would never
  *  re-render the gate and the app would sit on a dead console. */
-export const AUTH_EXPIRED_EVENT = "netattackai:auth-expired";
+export const AUTH_EXPIRED_EVENT = "breachpilot:auth-expired";
 
 /** Single funnel for session expiry. The stored-token guard makes the first
  *  caller win: several 401s (query + mutation + stream) landing in the same

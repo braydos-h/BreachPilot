@@ -1,4 +1,4 @@
-// NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
+// BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 // Comparison view: two benchmark runs side by side (metric deltas + per-scenario rollup).
 import { useMemo, useState } from "react";
 import { ArrowLeftRight, Loader2 } from "lucide-react";

@@ -230,7 +230,7 @@ def test_resolved_disabled_manager_no_pacing_no_quiet_block() -> None:
     # Quiet-blocking is off even for a command that matches a pattern.
     assert local_mgr.is_quiet_blocked("nmap -sS -Pn masscan 10.0.0.5") is False
     # UA rotation is off -> fixed default UA.
-    assert local_mgr.user_agent() == "NetAttackAi/1.0"
+    assert local_mgr.user_agent() == "BreachPilot/1.0"
     # The public-resolved manager keeps pacing on.
     pub_mgr = mgr.resolve_for_target("8.8.8.8")
     assert pub_mgr.pacing_delay("stealth") > 0.0
@@ -246,12 +246,12 @@ def test_process_user_agent_follows_resolved_profile() -> None:
         # Local target -> disabled profile -> no UA rotation -> default arg.
         local_profile = _enabled_profile().resolve_for_target("10.0.0.50")
         configure(local_profile)
-        assert process_user_agent("NetAttackAi-OSINT/1.0") == "NetAttackAi-OSINT/1.0"
+        assert process_user_agent("BreachPilot-OSINT/1.0") == "BreachPilot-OSINT/1.0"
         # Public target -> configured profile with ua_rotation -> pool UA.
         configure(_enabled_profile())
-        ua = process_user_agent("NetAttackAi-OSINT/1.0")
-        assert ua != "NetAttackAi-OSINT/1.0"
-        assert "NetAttackAi" not in ua  # a rotated browser UA, not the default
+        ua = process_user_agent("BreachPilot-OSINT/1.0")
+        assert ua != "BreachPilot-OSINT/1.0"
+        assert "BreachPilot" not in ua  # a rotated browser UA, not the default
     finally:
         # Reset the process-global so other tests are unaffected.
         from tools import opsec as _opsec_mod

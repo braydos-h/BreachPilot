@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 
 def _make_client(tmp_path, monkeypatch, token="test-token"):
     """Create a TestClient with a known token + minimal config (no Ollama needed)."""
-    monkeypatch.setenv("NETATTACKAI_API_TOKEN", token)
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", token)
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(

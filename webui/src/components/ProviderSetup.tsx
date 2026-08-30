@@ -243,7 +243,7 @@ export function ChatGptControls() {
         <Badge variant={cg?.proxy_running ? "success" : "muted"}>
           {cg?.proxy_running ? "proxy running" : "proxy stopped"}
         </Badge>
-        {cg?.we_started && <Badge variant="outline">started by NetAttackAi</Badge>}
+        {cg?.we_started && <Badge variant="outline">started by BreachPilot</Badge>}
         {cg && (
           <span className="text-muted-foreground">
             <span className="font-mono">{cg.host}:{cg.port}</span> · default{" "}

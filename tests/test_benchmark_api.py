@@ -43,7 +43,7 @@ def _config(output_dir: Path) -> dict[str, Any]:
 
 
 def _make_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("NETATTACKAI_API_TOKEN", TOKEN)
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", TOKEN)
     from app import create_app
 
     app = create_app(config=_config(tmp_path))

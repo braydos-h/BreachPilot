@@ -1,4 +1,4 @@
-"""SNMP enumeration plugin for NetAttackAi.
+"""SNMP enumeration plugin for BreachPilot.
 
 Runs snmpwalk-style queries (system inventory, users, processes, open ports)
 against a target's UDP/161 SNMP service, and brute-guesses community strings

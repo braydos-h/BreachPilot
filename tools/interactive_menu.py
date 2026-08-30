@@ -1,4 +1,4 @@
-"""Interactive menu system for NetAttackAI.
+"""Interactive menu system for BreachPilot.
 
 Provides a polished arrow-key-driven menu when `python main.py` is run
 with no arguments. Uses questionary for rich terminal interaction.
@@ -630,7 +630,7 @@ def _create_default_config(path: Path) -> None:
 BANNER = (
     "\n"
     "============================================================\n"
-    "  NetAttackAI — AI Bug Bounty Research Agent\n"
+    "  BreachPilot — AI Bug Bounty Research Agent\n"
     "  Authorized reconnaissance, research, evidence, reporting\n"
     "============================================================\n"
 )
@@ -641,7 +641,7 @@ def _show_banner() -> None:
     print(
         "\n"
         "============================================================\n"
-        "  NetAttackAI — AI Bug Bounty Research Agent\n"
+        "  BreachPilot — AI Bug Bounty Research Agent\n"
         "  Authorized reconnaissance, research, evidence, reporting\n"
         "============================================================\n"
     )
@@ -704,7 +704,7 @@ def _show_help() -> None:
     print(
         """
 ============================================================
-  NetAttackAI — QUICK REFERENCE
+  BreachPilot — QUICK REFERENCE
 ============================================================
 
   INTERACTIVE MODE (no arguments)

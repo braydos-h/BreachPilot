@@ -99,7 +99,7 @@ def test_snapshot_ref_roundtrip() -> None:
     ref = SnapshotRef(
         provider="docker",
         vm_id="web",
-        snapshot_id="netattackai-snap-web-pre1",
+        snapshot_id="breachpilot-snap-web-pre1",
         label="pre1",
         metadata={"ports": ["-p", "8080:80"]},
     )
@@ -132,8 +132,8 @@ def test_should_snapshot_disabled_and_gate_off() -> None:
 
 
 def test_vm_id_for_target_map_env_and_fallback(monkeypatch, tmp_path: Path) -> None:
-    cfg = {"snapshots": {"vm_map": {"10.0.0.50": "netattackai-metasploitable2"}}}
-    assert _vm_id_for_target("10.0.0.50", cfg) == "netattackai-metasploitable2"
+    cfg = {"snapshots": {"vm_map": {"10.0.0.50": "breachpilot-metasploitable2"}}}
+    assert _vm_id_for_target("10.0.0.50", cfg) == "breachpilot-metasploitable2"
     # Unmapped target falls back to the raw string.
     assert _vm_id_for_target("10.0.0.99", cfg) == "10.0.0.99"
     # Env map wins over nothing (no config entry).
@@ -190,14 +190,14 @@ def test_docker_create_commit_tag_and_port_capture(monkeypatch) -> None:
     monkeypatch.setattr(snaps, "docker_inspect", fake_inspect)
 
     provider = snaps.DockerProvider({})
-    ref = provider.create("netattackai-metasploitable2", "pre-attack-1")
+    ref = provider.create("breachpilot-metasploitable2", "pre-attack-1")
 
-    assert commits == [("netattackai-metasploitable2", ref.snapshot_id)]
-    assert ref.snapshot_id.startswith("netattackai-snap-netattackai-metasploitable2-pre-attack-1")
+    assert commits == [("breachpilot-metasploitable2", ref.snapshot_id)]
+    assert ref.snapshot_id.startswith("breachpilot-snap-breachpilot-metasploitable2-pre-attack-1")
     assert ref.metadata["image"] == ref.snapshot_id
     # Ports captured as "-p host:container" args for the re-create.
     assert ref.metadata["ports"] == ["-p", "8080:80", "-p", "8443:443"]
-    assert inspect_calls == ["netattackai-metasploitable2"]
+    assert inspect_calls == ["breachpilot-metasploitable2"]
 
 
 def test_docker_create_commit_failure_raises(monkeypatch) -> None:
@@ -256,18 +256,18 @@ def test_docker_list_filters_by_prefix(monkeypatch) -> None:
             0,
             stdout="\n".join(
                 [
-                    "netattackai-snap-web-pre1",
-                    "netattackai-snap-other-pre9",
+                    "breachpilot-snap-web-pre1",
+                    "breachpilot-snap-other-pre9",
                     "nginx:latest",
-                    "netattackai-snap-web-pre2",
+                    "breachpilot-snap-web-pre2",
                 ]
             ),
         ),
     )
     refs = snaps.DockerProvider({}).list("web")
     assert [r.snapshot_id for r in refs] == [
-        "netattackai-snap-web-pre1",
-        "netattackai-snap-web-pre2",
+        "breachpilot-snap-web-pre1",
+        "breachpilot-snap-web-pre2",
     ]
 
 
@@ -373,7 +373,7 @@ def _build_ctx(tmp_path: Path, *, enabled: bool, allowed: tuple[str, ...] = ("10
             "enabled": enabled,
             "auto_before_destructive": True,
             "provider": "fake",
-            "vm_map": {"10.0.0.50": "netattackai-metasploitable2"},
+            "vm_map": {"10.0.0.50": "breachpilot-metasploitable2"},
             "max_snapshots_per_target": 3,
         },
         "exploit": {
@@ -426,8 +426,8 @@ def test_snapshot_create_maps_target_to_vm_and_records(tmp_path: Path) -> None:
     mcp, prov, _cfg_out = _register_with_fake_provider(tmp_path, enabled=True)
     out = mcp.tools["snapshot_create"](vm_id="10.0.0.50", label="pre-attack")
     assert out.startswith("SNAPSHOT_CREATED:")
-    assert "netattackai-metasploitable2" in out  # vm_map resolved
-    assert ("create", "netattackai-metasploitable2", "pre-attack") in prov.calls
+    assert "breachpilot-metasploitable2" in out  # vm_map resolved
+    assert ("create", "breachpilot-metasploitable2", "pre-attack") in prov.calls
 
 
 def test_snapshot_revert_latest_and_unknown(tmp_path: Path) -> None:

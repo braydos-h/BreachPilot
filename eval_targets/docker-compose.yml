@@ -1,4 +1,4 @@
-# NetAttackAI — Standard Docker Target Suite for Benchmarking (D1)
+# BreachPilot — Standard Docker Target Suite for Benchmarking (D1)
 #
 # Spins up a set of deliberately vulnerable local-lab targets for eval/benchmark
 # runs. The operator adds the host ports to `exploit.allowed_targets` for the
@@ -22,7 +22,7 @@
 services:
   metasploitable2:
     image: tleemcandra/metasploitable2
-    container_name: netattackai-metasploitable2
+    container_name: breachpilot-metasploitable2
     ports:
       - "127.0.0.1:8082:80"
       - "127.0.0.1:2222:22"
@@ -36,7 +36,7 @@ services:
 
   dvwa:
     image: vulnerables/web-dvwa
-    container_name: netattackai-dvwa
+    container_name: breachpilot-dvwa
     ports:
       - "127.0.0.1:8081:80"
     networks:
@@ -45,7 +45,7 @@ services:
 
   juice_shop:
     image: bkimminich/juice-shop
-    container_name: netattackai-juice-shop
+    container_name: breachpilot-juice-shop
     ports:
       - "127.0.0.1:3000:3000"
     networks:
@@ -57,7 +57,7 @@ services:
   # loopback port so the eval harness can reach it.
   vulnerable_k8s:
     image: kinvolk/vulnerable-kubernetes-cluster
-    container_name: netattackai-vuln-k8s
+    container_name: breachpilot-vuln-k8s
     ports:
       - "127.0.0.1:8083:8080"
     privileged: true

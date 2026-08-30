@@ -1,4 +1,4 @@
-"""BloodHound CE plugin for NetAttackAi.
+"""BloodHound CE plugin for BreachPilot.
 
 Pairs with the existing ``tools/mcp_tools/ad.py:bloodhound_collect`` tool.
 The existing tool collects AD data via bloodhound-python and emits a zip; this

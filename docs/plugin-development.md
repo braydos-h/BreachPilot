@@ -1,7 +1,7 @@
 # Plugin Development Guide
 
 This guide explains how to write, package, enable, and distribute plugins for
-NetAttackAi. It is the companion to [extension-guide.md](extension-guide.md):
+BreachPilot. It is the companion to [extension-guide.md](extension-guide.md):
 that guide covers *in-tree* edits (modifying built-in modules); this one covers
 the *no-recompile* extension path for capabilities that live outside the core
 repository.
@@ -288,11 +288,11 @@ The manager discovers plugins from two sources:
    working directory). Override via `config plugins.search_paths`.
 
 2. **Python entry points.** `PluginManager.discover_entry_points()` reads
-   importlib entry points in the `netattackai.plugins` group via
+   importlib entry points in the `breachpilot.plugins` group via
    `importlib.metadata.entry_points(group=...)`. Each entry point's `.load()`
    returns a `create_plugin` factory, a `Plugin` subclass, or a `Plugin`
    instance; the manager coerces it to a `Plugin`. This is the distribution
-   path: publish a wheel that declares an entry point in `netattackai.plugins`
+   path: publish a wheel that declares an entry point in `breachpilot.plugins`
    and the manager will find it without any filesystem layout.
 
    In tests, `discover_entry_points` accepts an injectable `loader` callable
@@ -313,7 +313,7 @@ enablement:
 |                |            |               | name is in this list OR its manifest `enabled: true`.|
 | `disabled`     | `list[str]`| `[]`          | Names to never load. Overrides manifest + enabled.   |
 | `search_paths` | `list[str]`| `["plugins"]` | Filesystem plugin search roots.                      |
-| `entry_points` | `bool`     | `true`        | Whether to consult the `netattackai.plugins` group.  |
+| `entry_points` | `bool`     | `true`        | Whether to consult the `breachpilot.plugins` group.  |
 
 The exact rule (`PluginManager._is_enabled`): a plugin is loaded iff
 (`enabled` list is None -> use `manifest.enabled`; otherwise `name in enabled`
@@ -350,7 +350,7 @@ safe shape.
 name: example_recon_report
 version: 0.1.0
 description: Example plugin - a read-only recon-report attack module + plugin_info MCP tool
-author: NetAttackAi
+author: BreachPilot
 capabilities: [attack_module, mcp_tool]
 enabled: false   # opt-in
 ```
@@ -484,7 +484,7 @@ ship inside the core repository and run on the next boot.
 This guide is the **external** extension path. Use a plugin when:
 
 - the capability should be distributable independently of the core repo (a
-  wheel with a `netattackai.plugins` entry point),
+  wheel with a `breachpilot.plugins` entry point),
 - the operator wants to add an attack module / MCP tool / skill set / config
   block without modifying core files, or
 - multiple operators share a capability but not a fork.

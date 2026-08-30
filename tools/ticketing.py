@@ -177,7 +177,7 @@ def create_ticket(
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": "NetAttackAI-ticketing/0.1",
+        "User-Agent": "BreachPilot-ticketing/0.1",
     }
     if provider == "jira":
         headers["Authorization"] = f"Bearer {token}"

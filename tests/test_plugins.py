@@ -332,7 +332,7 @@ def test_discover_entry_points_with_injected_loader():
             registry.register_config_section("epplugin", {})
 
     def loader(group: str):
-        assert group == "netattackai.plugins"
+        assert group == "breachpilot.plugins"
         return [_FakeEP("epplugin", EP)]
 
     reg = PluginRegistry()

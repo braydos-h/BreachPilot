@@ -1,4 +1,4 @@
-"""Shodan passive-recon plugin for NetAttackAi.
+"""Shodan passive-recon plugin for BreachPilot.
 
 Advisory-only OSINT: queries the Shodan REST API (``https://api.shodan.io``)
 for host banners, ports, services, and CVEs. NEVER touches the target -- the
@@ -72,7 +72,7 @@ def _shodan_get(
         return fetch_fn(full)
     req = urllib.request.Request(
         full,
-        headers={"User-Agent": process_user_agent("netattackai-shodan/1.0")},
+        headers={"User-Agent": process_user_agent("breachpilot-shodan/1.0")},
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8", errors="replace"))

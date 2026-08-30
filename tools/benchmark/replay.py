@@ -44,7 +44,7 @@ def build_replay_manifest(
     manifest: dict[str, Any] = {
         "run_id": run_id,
         "suite": suite,
-        "netattack_version": env.get("netattack_version"),
+        "breachpilot_version": env.get("breachpilot_version"),
         "git_sha": env.get("git_sha"),
         "git_dirty": env.get("git_dirty"),
         "git_branch": env.get("git_branch"),

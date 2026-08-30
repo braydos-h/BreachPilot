@@ -1,4 +1,4 @@
-"""Benchmark mission runner: drives one NetAttackAI attack mission per trial.
+"""Benchmark mission runner: drives one BreachPilot attack mission per trial.
 
 Thin adapter around :func:`tools.exploit_session.run_exploit_session` (the same
 entry the ``--eval`` graded loop uses), plus:

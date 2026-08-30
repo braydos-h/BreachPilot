@@ -1,4 +1,4 @@
-"""Wireless / Bluetooth assessment plugin for NetAttackAi.
+"""Wireless / Bluetooth assessment plugin for BreachPilot.
 
 Wraps bettercap / aircrack-ng / hcxtools / bluez for authorized WLAN/BT
 assessments. Radio-touching tools use ``@require_allowlist()`` with the BSSID

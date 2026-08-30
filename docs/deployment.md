@@ -1,6 +1,6 @@
 # Deployment
 
-How to stand up NetAttackAI on a fresh operator box: supported platforms,
+How to stand up BreachPilot on a fresh operator box: supported platforms,
 dependency installation, Ollama wiring, nmap privileges, the WebUI build, and
 running the API daemon as a service. Ends with runtime state layout, backup
 guidance, and a production hardening checklist.
@@ -46,7 +46,7 @@ Explorer** — no PowerShell knowledge needed. From a terminal:
 # Easiest path (recommended for new users):
 .\install.bat          # one-click: checks/installs Python/Node/Nmap/Ollama via winget,
                        # creates .venv, installs deps, builds WebUI, pulls models,
-                       # guides OLLAMA_API_KEY setup, runs --doctor, installs `natai`
+                       # guides OLLAMA_API_KEY setup, runs --doctor, installs `breachpilot`
 .\START.bat            # after install: double-click to launch (WebUI at http://127.0.0.1:8765)
 # Options: install.bat --check  (audit only), --yes (non-interactive), --help, --uninstall
 
@@ -61,7 +61,7 @@ python main.py --self-test
 ```
 
 `install.bat` is idempotent and non-fatal on missing optional tools; it also
-installs a `natai` command to `%USERPROFILE%\.local\bin` that always runs from
+installs a `breachpilot` command to `%USERPROFILE%\.local\bin` that always runs from
 the repo root. Uninstall with `install.bat --uninstall`. `START.bat` is a
 double-click launcher that passes args through (e.g. `START.bat --menu`).
 
@@ -191,18 +191,18 @@ python main.py --web                # build + serve SPA + open browser
 
 ```powershell
 # Windows: NSSM or a scheduled task
-nssm install NetAttackAI "C:\Users\BH\Documents\GitHub\NetAttackAi\.venv\Scripts\python.exe" "C:\Users\BH\Documents\GitHub\NetAttackAi\main.py" --daemon
+nssm install BreachPilot "C:\Users\BH\Documents\GitHub\BreachPilot\.venv\Scripts\python.exe" "C:\Users\BH\Documents\GitHub\BreachPilot\main.py" --daemon
 ```
 
 ```bash
 # Linux: systemd unit
 [Unit]
-Description=NetAttackAI WebUI API daemon
+Description=BreachPilot WebUI API daemon
 After=network.target
 
 [Service]
-WorkingDirectory=/opt/NetAttackAi
-ExecStart=/opt/NetAttackAi/.venv/bin/python main.py --daemon
+WorkingDirectory=/opt/BreachPilot
+ExecStart=/opt/BreachPilot/.venv/bin/python main.py --daemon
 Restart=on-failure
 
 [Install]
@@ -254,7 +254,7 @@ secr.json             # provider keys (encrypt this copy separately)
 # What to regenerate, don't back up:
 .venv/                # python -m venv + pip install -r requirements.txt
 webui/dist/           # first --web run rebuilds it
-.webui_secret_key     # regenerated; or re-set NETATTACKAI_API_TOKEN
+.webui_secret_key     # regenerated; or re-set BREACHPILOT_API_TOKEN
 ```
 
 Migration notes:
@@ -290,7 +290,7 @@ Deployment-time verification for a box you intend to run for a while:
 
 **Token auth (WebUI daemon)**
 
-- [ ] Bearer token set explicitly via `NETATTACKAI_API_TOKEN` (precedes the
+- [ ] Bearer token set explicitly via `BREACHPILOT_API_TOKEN` (precedes the
       auto-generated `.webui_secret_key`; docs/api.md:75, docs/api.md:935)
 - [ ] `.webui_secret_key` perms `0o600` where supported
 - [ ] `api.allowed_origins` left `[]` or loopback-only entries

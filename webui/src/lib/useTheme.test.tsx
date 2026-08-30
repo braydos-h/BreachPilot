@@ -63,7 +63,7 @@ describe("useTheme shared store", () => {
   });
 
   it("reads the initial value from localStorage and applies the class at import time", async () => {
-    window.localStorage.setItem("netattack.theme", "light");
+    window.localStorage.setItem("breachpilot.theme", "light");
     const mod = await importTheme();
     expect(document.documentElement.classList.contains("dark")).toBe(false);
     const Probe = makeHarness(mod);
@@ -102,13 +102,13 @@ describe("useTheme shared store", () => {
     expect(screen.getByLabelText("layout").textContent).toBe("layout:light");
     expect(screen.getByLabelText("canvas").textContent).toBe("canvas:light");
     expect(document.documentElement.classList.contains("dark")).toBe(false);
-    expect(window.localStorage.getItem("netattack.theme")).toBe("light");
+    expect(window.localStorage.getItem("breachpilot.theme")).toBe("light");
 
     await act(async () => {
       await user.click(screen.getByLabelText("canvas"));
     });
     expect(screen.getByLabelText("layout").textContent).toBe("layout:dark");
     expect(document.documentElement.classList.contains("dark")).toBe(true);
-    expect(window.localStorage.getItem("netattack.theme")).toBe("dark");
+    expect(window.localStorage.getItem("breachpilot.theme")).toBe("dark");
   });
 });

@@ -103,12 +103,12 @@ Native `EventSource` cannot send `Authorization`; token was leaking in URL (`?to
 
 | Store | Key | API | Used in |
 |-------|-----|-----|---------|
-| API token | `sessionStorage netattackai.apiToken.v1` (`api/client.ts:6`) | `getStoredToken/setStoredToken/clearStoredToken`, injected `Authorization: Bearer` | `TokenGate`, `ws.ts`, `sse.ts`, `Layout signOut` |
-| Onboarding dismissed | `sessionStorage netattackai.onboarding.v1` | `OnboardingGate` | |
-| Welcome tour open | event `netattackai:open-welcome` + `sessionStorage` dismiss flag (`components/WelcomeScreen.tsx`) | `HomePage Take the tour`, `App WelcomeGate` | |
-| Theme | `localStorage netattack.theme` + `lib/useTheme.ts` | `toggle` `dark↔light`, script in `index.html` removes `dark` on `light` | `Layout` (`Layout.tsx:59`) |
+| API token | `sessionStorage breachpilot.apiToken.v1` (`api/client.ts:6`) | `getStoredToken/setStoredToken/clearStoredToken`, injected `Authorization: Bearer` | `TokenGate`, `ws.ts`, `sse.ts`, `Layout signOut` |
+| Onboarding dismissed | `sessionStorage breachpilot.onboarding.v1` | `OnboardingGate` | |
+| Welcome tour open | event `breachpilot:open-welcome` + `sessionStorage` dismiss flag (`components/WelcomeScreen.tsx`) | `HomePage Take the tour`, `App WelcomeGate` | |
+| Theme | `localStorage breachpilot.theme` + `lib/useTheme.ts` | `toggle` `dark↔light`, script in `index.html` removes `dark` on `light` | `Layout` (`Layout.tsx:59`) |
 | Permission mode | `localStorage permissionMode` (`lib/permissionMode.ts`) | `read_only|approve|full_access`, `autoAnswerFor` returns `answer|null`, `RunPage` auto-answers pending decisions with `useAnswerDecision` + `inFlight Set` dedup | |
-| Run sort | `localStorage netattack.runSort` | `RunListPage.tsx:54` | |
+| Run sort | `localStorage breachpilot.runSort` | `RunListPage.tsx:54` | |
 | Graph explorer | `AttackGraphPage.tsx:38` React local state (filters, selection, expansions) — no store | | |
 
 ## Decision + checkpoint wiring

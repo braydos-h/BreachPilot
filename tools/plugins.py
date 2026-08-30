@@ -1,11 +1,11 @@
-"""Plugin manager for NetAttackAi (lab build).
+"""Plugin manager for BreachPilot (lab build).
 
 Plugins are *trusted* Python packages that extend the engine with attack
 modules, MCP tools, skill directories, and config sections. A plugin is a
 directory containing a ``plugin.yaml`` manifest and (optionally) a sibling
 ``plugin.py`` module that exposes a ``create_plugin()`` factory or a ``Plugin``
 subclass. Plugins may also be distributed as importlib entry points in the
-``netattackai.plugins`` group.
+``breachpilot.plugins`` group.
 
 SAFETY (lab build)
 ------------------
@@ -400,7 +400,7 @@ class PluginManager:
         *,
         enabled: list[str] | None = None,
         disabled: list[str] | None = None,
-        entry_point_group: str = "netattackai.plugins",
+        entry_point_group: str = "breachpilot.plugins",
     ) -> None:
         self._registry = registry
         self._enabled = list(enabled) if enabled is not None else None
@@ -483,7 +483,7 @@ class PluginManager:
 
     @staticmethod
     def _load_module_from_file(path: Path, name: str):
-        mod_name = f"netattackai_plugin_{name}_{abs(hash(path))}".replace("-", "_")
+        mod_name = f"breachpilot_plugin_{name}_{abs(hash(path))}".replace("-", "_")
         spec = importlib.util.spec_from_file_location(mod_name, str(path))
         if spec is None or spec.loader is None:
             raise ImportError(f"could not create module spec for {path}")

@@ -55,7 +55,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
       - name: Build sandbox worker image
-        run: docker build -t netattackai-sandbox:latest docker/sandbox
+        run: docker build -t breachpilot-sandbox:latest docker/sandbox
       - name: Sandbox unit + integration tests (real Docker containment)
         run: |
           python -m pytest tests/test_sandbox_models.py \

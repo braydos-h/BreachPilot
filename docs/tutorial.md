@@ -1,7 +1,7 @@
 # Hands-On Tutorial
 
 > [!WARNING]
-> **Safety first.** NetAttackAI is a **lab-only build** for systems you own or
+> **Safety first.** BreachPilot is a **lab-only build** for systems you own or
 > have explicit written authorization to test, on a throwaway operator box.
 > Attack mode ships as `full_access` — every action is auto-approved with no
 > command-content or scope inspection. The one attack-path safety kept is the
@@ -66,7 +66,7 @@ $env:OLLAMA_API_KEY = "sk-..."
 | `NVD_API_KEY` | Raises NVD CVE lookup rate limit |
 | `GITHUB_TOKEN` | Raises `cve_to_poc` GitHub Search API limit 60→5000/hr |
 | `SERPAPI_API_KEY` | Optional fallback web research provider |
-| `NETATTACKAI_API_TOKEN` | Override the auto-generated WebUI bearer token |
+| `BREACHPILOT_API_TOKEN` | Override the auto-generated WebUI bearer token |
 
 ### 1.3 Verify the environment: `--doctor`
 
@@ -79,7 +79,7 @@ A clean run looks like:
 
 ```text
 ============================================================
-  NetAttackAI - Self-Check (`--doctor`)
+  BreachPilot - Self-Check (`--doctor`)
 ============================================================
   [OK] python_version             3.11.9
   [OK] python_imports
@@ -147,7 +147,7 @@ output:
 
 ```text
 ============================================================
-  NetAttackAI — Self-Test (`--self-test`)
+  BreachPilot — Self-Test (`--self-test`)
   Target: 127.0.0.1 (localhost only)
   Workspace: reports\self_test_20260814_103000
 ============================================================
@@ -186,7 +186,7 @@ browser. Prefer the terminal? The legacy arrow-key menu is available with
 
 ```text
 ============================================================
-  NetAttackAI — AI Bug Bounty Research Agent
+  BreachPilot — AI Bug Bounty Research Agent
   Authorized reconnaissance, research, evidence, reporting
 ============================================================
 ? What would you like to do?
@@ -537,7 +537,7 @@ refused) and prints:
 ```
 
 A 256-bit bearer token is auto-generated into `.webui_secret_key`
-(gitignored) on first boot, or overridden via `NETATTACKAI_API_TOKEN`
+(gitignored) on first boot, or overridden via `BREACHPILOT_API_TOKEN`
 (`tools/api/auth.py:39`). A browser opens automatically; paste the token into
 the TokenGate prompt. All routes except `/health` require it, and the
 WebSocket needs `{"auth": "<token>"}` as its first message.
@@ -571,7 +571,7 @@ design — never a real exploit, never a non-local target). Expected output:
 
 ```text
 ============================================================
-  NetAttackAI — DEMO mode (`--demo`)
+  BreachPilot — DEMO mode (`--demo`)
   Target: 127.0.0.1:8081 (local sandbox only)
 ============================================================
   [i] Starting DVWA via Docker…
@@ -601,7 +601,7 @@ Markdown + HTML reports on):
 
 ```text
 ============================================================
-  NetAttackAI — Eval Harness (`--eval`)
+  BreachPilot — Eval Harness (`--eval`)
   Target: 10.0.0.50
   Run ID: 20260814_105500_ab12
   Output: reports/eval/20260814_105500_ab12

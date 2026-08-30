@@ -1,4 +1,4 @@
-// NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
+// BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 // API accessors for the benchmark suite (/api/v1/benchmarks/*).
 import { apiFetch } from "@/api/client";
 import type {

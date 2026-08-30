@@ -185,7 +185,7 @@ describe("TokenGate auth-expiry subscription", () => {
       expireSession("Your session token was rejected by the API.");
     });
     expect(getStoredToken()).toBe("");
-    await waitFor(() => expect(screen.getByText("NetAttackAI console")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("BreachPilot console")).toBeInTheDocument());
     expect(screen.queryByTestId("app")).not.toBeInTheDocument();
   });
 
@@ -195,7 +195,7 @@ describe("TokenGate auth-expiry subscription", () => {
     apiFetchMock.mockResolvedValue({ capabilities: {}, constraints: { max_concurrent_runs: 1 } });
     renderGate(<div data-testid="app">console body</div>);
     // No token → gate.
-    expect(screen.getByText("NetAttackAI console")).toBeInTheDocument();
+    expect(screen.getByText("BreachPilot console")).toBeInTheDocument();
     await user.type(screen.getByLabelText("Bearer token"), "fresh-token");
     await user.click(screen.getByRole("button", { name: /connect/i }));
     await waitFor(() => expect(screen.getByTestId("app")).toBeInTheDocument());

@@ -19,7 +19,7 @@ function truncate(s: string, n: number): string {
 }
 
 /**
- * "What is NetAttackAI doing right now?" — the single operator-facing answer
+ * "What is BreachPilot doing right now?" — the single operator-facing answer
  * derived from the existing event stream. Never shows chain-of-thought: only
  * the phase, the latest assistant message, the tool currently executing (or
  * waiting on a decision), and run counters the backend already emits.

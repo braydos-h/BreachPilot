@@ -1,4 +1,4 @@
-// NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
+// BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 // Dashboard metric cards for a benchmark run summary.
 import { AlertTriangle, CheckCircle2, Clock3, Coins, Flame, ShieldAlert, Target } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";

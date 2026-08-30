@@ -168,7 +168,7 @@ def build_navigator_layer(
     *,
     target_ip: str = "",
     include_skills: bool = True,
-    layer_name: str = "NetAttackAI run",
+    layer_name: str = "BreachPilot run",
 ) -> dict[str, Any]:
     """Build an ATT&CK Navigator layer JSON from audit records + technique map.
 
@@ -240,7 +240,7 @@ def build_navigator_layer(
             "layer": "4.5",
         },
         "domain": "enterprise-attack",
-        "description": f"NetAttackAI run techniques for target {target_ip or '(all)'}",
+        "description": f"BreachPilot run techniques for target {target_ip or '(all)'}",
         "filters": [{"platforms": ["Linux", "Windows", "Network", "PRE"]}],
         "sorting": 0,
         "layout": {
@@ -301,7 +301,7 @@ def export_attack_navigator(
         technique_map,
         target_ip=target_ip,
         include_skills=include_skills,
-        layer_name=f"NetAttackAI {target_ip or 'run'}",
+        layer_name=f"BreachPilot {target_ip or 'run'}",
     )
 
     # Coerce output_path under navigator_output_dir (path-traversal guard).

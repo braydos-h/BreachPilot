@@ -1,4 +1,4 @@
-"""Typed data models for the NetAttackAI benchmark suite.
+"""Typed data models for the BreachPilot benchmark suite.
 
 Pure data + enums + JSON serialization. No I/O, no imports of heavy modules —
 everything here is importable from any platform and unit-testable in isolation.
@@ -262,7 +262,7 @@ class RunEnvironment:
     ``"unknown"``/``None``, never a fabricated value.
     """
 
-    netattack_version: str = "unknown"
+    breachpilot_version: str = "unknown"
     git_sha: str = "unknown"
     git_dirty: bool | None = None  # None = unknown
     git_branch: str = "unknown"

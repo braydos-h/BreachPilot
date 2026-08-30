@@ -21,7 +21,7 @@ Exit codes: `0` success/clean abort, `1` run/config/auth failure, `2` flag confl
 
 | Flag | Aliases | Type | Default | Conflicts | Runtime path | Examples | Config keys | Exit |
 |------|---------|------|---------|-----------|--------------|----------|-------------|------|
-| `--version` | — | `store version` | n/a | — | `main.py:357` `argparse version` | `python main.py --version` | — | 0 + print `NetAttackAI <ver>` |
+| `--version` | — | `store version` | n/a | — | `main.py:357` `argparse version` | `python main.py --version` | — | 0 + print `BreachPilot <ver>` |
 | `--target` | — | `str` | `""` | daemon/web | `main.py:360` core targeting; threaded via `mcp_session.py:255` → `EXPLOIT_TARGET*` env; `_allowed_target_list` union; persisted via `config_cli.add_target_to_allowlist` on interactive menu | `python main.py --target 10.0.0.50 --mode attack --goal backdoor`<br>`python main.py --target example.com --mode recon` | `exploit.allowed_targets` (union), `exploit.require_explicit_allowlist` | 1 if malformed (not IP/FQDN) |
 | `--mode` | — | `choices: recon \| attack \| fast` | `""` → `attack` in `RunRequest` | — | `main.py:361` core | `python main.py --target 10.0.0.50 --mode recon --goal initial_access`<br>`--mode fast` = parallel recon preset then attack | `exploit.*`, `reasoning.*` budgets; recon always `READ_ONLY` via `cli_exploit_settings:157` | — |
 | `--goal` | — | `str` | `""` | — | `main.py:368` core → `GoalEngine` | `python main.py --target 10.0.0.50 --goal backdoor` | — | 1 if preset unknown (via `GoalEngine`) |

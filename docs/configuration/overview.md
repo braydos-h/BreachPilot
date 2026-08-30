@@ -17,7 +17,7 @@ Runtime source of truth is `config.yaml` at the repo root. `tools/config_manager
 | `config.yaml` | Operator defaults (35 top-level blocks, 495 lines). Checked-in lab defaults. | `config.yaml` | `--config <path>` (`main.py:371`) | no |
 | `secr.json` | Persisted provider API keys `{version, updated_at, api_keys: {ENV: value}}`, `0o600`. | `secr.json` (`tools/api_key_store.py:21`) | `--api-key-file <path>` (`main.py:398`) | yes |
 | `.env` / `.env.example` | Template env file; `.env` never committed. Documents NVD/GITHUB/OLLAMA/SERPAPI + runtime locks. | `.env.example` at root | `python -m dotenv` or manual export | `.env` yes |
-| `.webui_secret_key` | WebUI API bearer token (256-bit `secrets.token_urlsafe(32)`, `0o600` best-effort). | `.webui_secret_key` (`config.yaml:390`, `tools/api/auth.py:46`) | `NETATTACKAI_API_TOKEN` env or `api.token_file` | yes |
+| `.webui_secret_key` | WebUI API bearer token (256-bit `secrets.token_urlsafe(32)`, `0o600` best-effort). | `.webui_secret_key` (`config.yaml:390`, `tools/api/auth.py:46`) | `BREACHPILOT_API_TOKEN` env or `api.token_file` | yes |
 | `~/.codex/auth.json` / `$CODEX_HOME/auth.json` | ChatGPT OAuth tokens (openai-oauth). Existence-only check; never read/logged. | `~/.codex/auth.json` | `chatgpt.oauth_file` when set (`tools/providers/chatgpt_provider.py`) | n/a (outside repo) |
 | `exploit_workspace/` | Per-target attempt artifacts + threat-intel cache | `exploit_workspace` (`exploit.workspace_dir`) | `EXPLOIT_WORKSPACE` env | yes |
 | `reports/<run_id>/` | Per-run audit, nmap, session logs | `reports` (`--reports-dir`) | `--reports-dir` | yes |
@@ -71,7 +71,7 @@ Interactive allowlist write: `tools/config_cli.add_target_to_allowlist` (`tools/
 ## Precedence (highest wins)
 
 1. **Explicit CLI flag** — e.g. `--model glm`, `--long-session`, `--parallel-swarm`, `--mcp-transport`, `--api-host/--api-port`, `--swarm`, `--adaptive-exploits`, `--multi-model-consult`, `--skills*`, `--target`.
-2. **Process env var** — API keys (`OLLAMA_API_KEY`, `NVD_API_KEY`, `GITHUB_TOKEN`, `SERPAPI_API_KEY`, `SHODAN_API_KEY`, `CALDERA_API_KEY`, `TICKETING_TOKEN`), runtime locks (`EXPLOIT_TARGET*`, `EXPLOIT_WORKSPACE`, `NETATTACKAI_API_TOKEN`, `MCP_ALLOW_PUBLIC_BIND`, `AI_NMAP_DEBUG`), embeddings host fallback.
+2. **Process env var** — API keys (`OLLAMA_API_KEY`, `NVD_API_KEY`, `GITHUB_TOKEN`, `SERPAPI_API_KEY`, `SHODAN_API_KEY`, `CALDERA_API_KEY`, `TICKETING_TOKEN`), runtime locks (`EXPLOIT_TARGET*`, `EXPLOIT_WORKSPACE`, `BREACHPILOT_API_TOKEN`, `MCP_ALLOW_PUBLIC_BIND`, `AI_NMAP_DEBUG`), embeddings host fallback.
 3. **File `config.yaml`** — checked-in operator defaults.
 4. **Schema defaults `CONFIG_SCHEMA`** (`tools/config_manager.py:23`) — used when file missing or key absent.
 
@@ -91,7 +91,7 @@ Per-key precedence examples:
 | `multi_model.enabled` | `--multi-model-consult` / `--no-multi-model-consult` (`main.py:433`) | `AI_NMAP_MULTI_MODEL_ENABLED` | Tri-state `default=None` → falls back to config |
 | `skills.*` | `--skills`, `--skills-include/--skills-exclude`, `--no-skills-reselect` (`main.py:509`) | — | Mutates in-memory `config["skills"]` only (advisory) |
 | `api.host` / `api.port` | `--api-host` / `--api-port` (`main.py:559`) | — | Loopback-only; non-loopback exits 2 |
-| `api.token_file` | — | `NETATTACKAI_API_TOKEN` | Env wins over file; never logged |
+| `api.token_file` | — | `BREACHPILOT_API_TOKEN` | Env wins over file; never logged |
 | `ollama.host` / `ollama.embed_host` | — | — | `embed_host` falls back to `host` when absent |
 | `ollama.api_key_env` etc. | — | `OLLAMA_API_KEY`, `NVD_API_KEY`, `GITHUB_TOKEN`, `SERPAPI_API_KEY` | Named by `api_key_env` / `token_env` keys; loaded via `api_key_store` |
 | `recon.shodan_api_key` | — | `SHODAN_API_KEY` | File value wins; env is fallback (`recon_pipeline.py:287`) |
@@ -142,7 +142,7 @@ Keys never hold secrets — they hold **env var names**:
 | `recon.shodan_api_key` | `SHODAN_API_KEY` (fallback) | `recon_pipeline:287` |
 | `caldera.api_key_env` | `CALDERA_API_KEY` | `plugins/caldera/plugin.py:42` |
 | `ticketing.token_env` | `TICKETING_TOKEN` | `ticketing.py:33` |
-| `api.token_file` | `NETATTACKAI_API_TOKEN` | `app.py:71`, `api/auth.py:46` |
+| `api.token_file` | `BREACHPILOT_API_TOKEN` | `app.py:71`, `api/auth.py:46` |
 
 Runtime target-lock env (threaded by `tools/mcp_session.py:255`):
 

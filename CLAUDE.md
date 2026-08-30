@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Project Is
 
-**AI Target Exploitation Engine** (also branded "NetAttackAI") — an AI-driven, locally-run penetration testing / bug bounty research agent. It is a local-first Python application that uses Ollama LLMs to plan and execute authorized security assessments against targets the operator owns or has explicit written authorization to test.
+**AI Target Exploitation Engine** (also branded "BreachPilot") — an AI-driven, locally-run penetration testing / bug bounty research agent. It is a local-first Python application that uses Ollama LLMs to plan and execute authorized security assessments against targets the operator owns or has explicit written authorization to test.
 
 The repo is NOT a generic nmap wrapper. It couples:
 - An assessment controller (`main.py` / `app.py`) that opens an MCP exploit session (`tools/mcp_session.py:open_exploit_mcp_session`, an async context manager emitting `[BOOT]`/`[OK]` markers via `AttackUi.boot_step`) and dispatches tool calls.
@@ -72,7 +72,7 @@ python main.py --daemon --api-port 9000       # alias, custom port
 python main.py --web                          # build webui/ if needed, serve it at /, open a browser
 # Interactive docs: http://127.0.0.1:8765/docs
 # OpenAPI schema:  http://127.0.0.1:8765/openapi.json
-# Bearer token: generated into .webui_secret_key (gitignored) or set NETATTACKAI_API_TOKEN
+# Bearer token: generated into .webui_secret_key (gitignored) or set BREACHPILOT_API_TOKEN
 # v1 is loopback-only; concurrent runs capped by api.max_concurrent_runs (default 3);
 # bundled WebUI served when api.serve_webui is true.
 ```

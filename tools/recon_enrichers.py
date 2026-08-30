@@ -582,7 +582,7 @@ def _detect_technologies(body: str, status: int) -> list[str]:
 
 def _default_fetch(url: str) -> tuple[int, str]:
     """Real-network fetch via urllib. Only invoked when fetch_fn is None."""
-    req = urllib.request.Request(url, headers={"User-Agent": process_user_agent("NetAttackAi-recon-spider/1.0")})
+    req = urllib.request.Request(url, headers={"User-Agent": process_user_agent("BreachPilot-recon-spider/1.0")})
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             status = getattr(resp, "status", resp.getcode())

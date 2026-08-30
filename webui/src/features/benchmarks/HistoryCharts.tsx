@@ -1,4 +1,4 @@
-// NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
+// BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 // Benchmark history charts (verified rate / FP rate / solve time / cost over runs).
 // Pure SVG sparkline — no chart library dependency (same as components/run/Sparkline).
 import { formatRelative } from "@/lib/utils";

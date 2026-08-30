@@ -3,7 +3,7 @@
 v1 security posture:
 - Bearer token required on every route except ``/health``.
 - Token is 256-bit, generated into ``api.token_file`` (gitignored) on first
-  boot, or overridden via ``NETATTACKAI_API_TOKEN`` env. Never logged/returned.
+  boot, or overridden via ``BREACHPILOT_API_TOKEN`` env. Never logged/returned.
 - Bind is loopback-only (127.0.0.1/localhost/::1); no public override in v1.
 - WebSocket: first message must be ``{"auth": "<token>"}``; close 4401 on
   failure. Origin must be loopback or in ``api.allowed_origins``.
@@ -46,11 +46,11 @@ def assert_api_loopback(host: str) -> None:
 def load_or_create_token(token_file: Path | str, *, env_override: str = "") -> str:
     """Load the bearer token from env or file, generating one if neither exists.
 
-    ``env_override`` (``NETATTACKAI_API_TOKEN``) takes precedence. The file is
+    ``env_override`` (``BREACHPILOT_API_TOKEN``) takes precedence. The file is
     created with ``0o600`` perms where the OS supports it (best-effort on
     Windows). The token is never logged or returned through the API.
     """
-    env_token = (env_override or os.environ.get("NETATTACKAI_API_TOKEN", "")).strip()
+    env_token = (env_override or os.environ.get("BREACHPILOT_API_TOKEN", "")).strip()
     if env_token:
         return env_token
     path = Path(token_file)

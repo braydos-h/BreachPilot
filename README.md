@@ -10,13 +10,13 @@
 ![MCP Tools](https://img.shields.io/badge/MCP%20Tools-120%2B-ec4899?style=flat-square)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)
 
-<img width="1725" height="912" alt="NetAttackAI WebUI: Mission Control" src="https://github.com/user-attachments/assets/45b6af2f-91e2-4eaf-a4cd-1352dbd42e0c" />
+<img width="1725" height="912" alt="BreachPilot WebUI: Mission Control" src="https://github.com/user-attachments/assets/45b6af2f-91e2-4eaf-a4cd-1352dbd42e0c" />
 
 ### Autonomous tool for authorized hacking
 
 **Plan · Recon · Exploit · Verify · Report: end-to-end, against assets you own.**
 
-NetAttackAI is an open-source agentic operator that plans, discovers, reasons, chains, and verifies, then delivers a complete report. It is built on Ollama Cloud (976K context), the Model Context Protocol, and 140+ advisory skills. It runs lab-only and target-locked, audits every action, and is designed for rigorous, operator-supervised use.
+BreachPilot is an open-source agentic operator that plans, discovers, reasons, chains, and verifies, then delivers a complete report. It is built on Ollama Cloud (976K context), the Model Context Protocol, and 140+ advisory skills. It runs lab-only and target-locked, audits every action, and is designed for rigorous, operator-supervised use.
 
 [Quick start](#quick-start-in-60-seconds) · [WebUI](#webui-mission-control) · [Capabilities](#platform-capabilities) · [Safety model](#safety-model) · [Docs](docs/)
 
@@ -30,9 +30,9 @@ NetAttackAI is an open-source agentic operator that plans, discovers, reasons, c
 
 ---
 
-## Why NetAttackAI
+## Why BreachPilot
 
-NetAttackAI covers the full assessment lifecycle, from reconnaissance through exploitation, verification, and reporting, under continuous operator supervision.
+BreachPilot covers the full assessment lifecycle, from reconnaissance through exploitation, verification, and reporting, under continuous operator supervision.
 
 <table>
 <tr>
@@ -228,7 +228,7 @@ Build the worker image once (Linux is the primary hardened target; Windows/macOS
 work via Docker Desktop):
 
 ```bash
-docker build -t netattackai-sandbox:latest docker/sandbox
+docker build -t breachpilot-sandbox:latest docker/sandbox
 ```
 
 `python main.py --doctor` verifies Docker and the worker image when the sandbox
@@ -286,7 +286,7 @@ Get a free key at https://ollama.com/settings/keys. Then `python main.py --docto
 | Need | Notes |
 |------|-------|
 | Python 3.11+ | `python --version`; `--doctor` rejects 3.10 |
-| Docker | Recommended (default-on sandbox). Build the worker image: `docker build -t netattackai-sandbox:latest docker/sandbox` |
+| Docker | Recommended (default-on sandbox). Build the worker image: `docker build -t breachpilot-sandbox:latest docker/sandbox` |
 | nmap | On `PATH` or set `nmap.path` in `config.yaml` |
 | Ollama | Cloud default (`https://api.ollama.com` + `OLLAMA_API_KEY`) or local daemon |
 | Node.js + npm | Only for the first WebUI build; auto-built on first launch if present |

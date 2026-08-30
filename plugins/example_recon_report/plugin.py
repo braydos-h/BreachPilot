@@ -1,4 +1,4 @@
-"""Example NetAttackAi plugin: read-only recon-report attack module + plugin_info MCP tool.
+"""Example BreachPilot plugin: read-only recon-report attack module + plugin_info MCP tool.
 
 This is a *reference* plugin. It demonstrates the full plugin contract:
 

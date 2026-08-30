@@ -89,7 +89,7 @@ def _gh_search(
     params = {"q": query, "per_page": str(per_page)}
     url = _GH_CODE_SEARCH_URL + "?" + urllib.parse.urlencode(params)
     headers = {
-        "User-Agent": process_user_agent("netattackai-github-dorks/1.0"),
+        "User-Agent": process_user_agent("breachpilot-github-dorks/1.0"),
         "Accept": "application/vnd.github+json",
         "Authorization": f"Bearer {token}",
     }

@@ -1,4 +1,4 @@
-# NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
+# BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 ollama:
   host: https://api.ollama.com
   model: glm-5.2:cloud
@@ -577,12 +577,12 @@ operator_connection:
 # rootfs, resource-bounded) with a default-DROP netns firewall authorizing
 # ONLY the effective target allowlist. Any sandbox failure blocks offensive
 # execution (fail closed) -- host execution is never an automatic fallback.
-# Build the worker image: docker build -t netattackai-sandbox:latest docker/sandbox
+# Build the worker image: docker build -t breachpilot-sandbox:latest docker/sandbox
 # Set sandbox.enabled: false to explicitly restore legacy host execution.
 sandbox:
   enabled: true
   backend: docker
-  image: netattackai-sandbox:latest
+  image: breachpilot-sandbox:latest
   user: sandbox
   read_only_rootfs: true
   env_passthrough: []

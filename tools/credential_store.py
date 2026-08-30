@@ -73,7 +73,7 @@ from typing import Any
 # Use the application's configured logger tree (``ai_bug_bounty``, set up by
 # tools/logging_setup.setup_logging) so the plaintext-fallback WARNING is
 # captured by the app's file/console handlers instead of being silently
-# dropped by a stray ``netattackai.creds`` logger that nothing configures.
+# dropped by a stray ``breachpilot.creds`` logger that nothing configures.
 _LOG = logging.getLogger("ai_bug_bounty.creds")
 
 

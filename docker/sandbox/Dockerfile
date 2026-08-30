@@ -1,9 +1,9 @@
-# NetAttackAI disposable sandbox worker image.
+# BreachPilot disposable sandbox worker image.
 #
-# Build:  docker build -t netattackai-sandbox:latest docker/sandbox
+# Build:  docker build -t breachpilot-sandbox:latest docker/sandbox
 #
 # SECURITY CONTRACT (see docs/sandbox.md):
-# - This image runs ONLY as the NetAttackAI sandbox worker (or as the ephemeral
+# - This image runs ONLY as the BreachPilot sandbox worker (or as the ephemeral
 #   NET_ADMIN firewall sidecar sharing the worker's netns). It is never run
 #   privileged, never given the Docker socket, and never bound to host paths
 #   beyond the validated per-run workspace at /workspace.
@@ -31,7 +31,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 #   whois / dnsutils     light recon helpers
 #   sqlmap, nikto, gobuster, metasploit, hashcat/john, impacket, masscan are
 #   deliberately NOT pinned here: they bloat the image and age badly. Install
-#   them in a derived image (FROM netattackai-sandbox:latest) when a mission
+#   them in a derived image (FROM breachpilot-sandbox:latest) when a mission
 #   needs them, or run them via pip inside the workspace. Document any
 #   host-only tool in docs/sandbox.md instead of silently falling back.
 RUN set -eux; \

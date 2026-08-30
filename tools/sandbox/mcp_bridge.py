@@ -22,7 +22,7 @@ from tools.sandbox.exceptions import (
 _REMEDIATION = {
     SANDBOX_UNAVAILABLE: (
         "Ensure Docker Desktop (Windows/macOS) or docker.io/docker-ce (Linux) is installed "
-        "and running; build the sandbox image: docker build -t netattackai-sandbox:latest docker/sandbox. "
+        "and running; build the sandbox image: docker build -t breachpilot-sandbox:latest docker/sandbox. "
         "To deliberately keep the legacy UNCONTAINED host-execution mode, set sandbox.enabled: false "
         "in config.yaml (explicit operator opt-out -- never automatic)."
     ),

@@ -179,7 +179,7 @@ class PlannerMixin:
                     try:
                         req = _urlreq.Request(
                             f"https://crt.sh/?q=%25.{dom}&output=json",
-                            headers={"User-Agent": "NetAttackAi-Orchestrator/1.0"},
+                            headers={"User-Agent": "BreachPilot-Orchestrator/1.0"},
                         )
                         with _urlreq.urlopen(req, timeout=20) as resp:  # noqa: S310
                             body = resp.read().decode(errors="replace")

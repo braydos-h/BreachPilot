@@ -80,7 +80,7 @@ On Linux/macOS `make install|test|test-one F=…|run|doctor|mcp-exploit` work.
    NEVER run agent-generated commands via host `subprocess` on new paths, and
    NEVER add a host-execution fallback for sandbox failures — convert
    `SandboxError` into `SANDBOX_*` blocks (fail closed). The worker image must
-   be built: `docker build -t netattackai-sandbox:latest docker/sandbox`. See
+   be built: `docker build -t breachpilot-sandbox:latest docker/sandbox`. See
    `docs/sandbox.md`.
 
 5. **`opencode.jsonc` is editor-local config** (gitignored) for the opencode.ai

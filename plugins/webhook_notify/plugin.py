@@ -81,7 +81,7 @@ def _post_webhook(url: str, payload: bytes, timeout: int) -> tuple[bool, str]:
     req = urllib.request.Request(
         url,
         data=payload,
-        headers={"Content-Type": "application/json", "User-Agent": "NetAttackAI-webhook-notify/0.1"},
+        headers={"Content-Type": "application/json", "User-Agent": "BreachPilot-webhook-notify/0.1"},
         method="POST",
     )
     try:

@@ -1,6 +1,6 @@
 # Benchmarks
 
-NetAttackAI's benchmark suite turns evaluation into a first-class, reproducible
+BreachPilot's benchmark suite turns evaluation into a first-class, reproducible
 feature: benchmark targets run under the existing sandboxed execution
 architecture, outcomes are verified by an **independent oracle**, and every
 run records enough metadata to reproduce and defend the numbers.
@@ -8,7 +8,7 @@ run records enough metadata to reproduce and defend the numbers.
 > **Warning — authorized lab environments only.** Benchmark targets are
 > deliberately vulnerable images. Operate them exclusively against
 > infrastructure you own or are explicitly authorized to test, in an isolated
-> lab. The same authorization rules as the rest of NetAttackAI apply.
+> lab. The same authorization rules as the rest of BreachPilot apply.
 
 ## Architecture
 
@@ -20,7 +20,7 @@ benchmark provider (XBEN is one; suites plug in via tools/benchmark/registry.py)
     -> scenarios (tools/benchmark/models.py::BenchmarkScenario)
         -> provision/reset target   (tools/benchmark/targets.py)
         -> create sandbox           (existing tools/sandbox; no host fallback)
-        -> run NetAttackAI mission  (tools/benchmark/agent_runner.py
+        -> run BreachPilot mission  (tools/benchmark/agent_runner.py
                                      wrapping tools/exploit_session.run_exploit_session)
         -> independently verify     (tools/benchmark/verifier.py reusing
                                      tools/eval_checks executors + eval_harness flag semantics)
@@ -134,7 +134,7 @@ CI spans most of the range.
 
 ## Failure classification
 
-Unsuccessful trials are classified to answer "why does NetAttackAI fail
+Unsuccessful trials are classified to answer "why does BreachPilot fail
 here?": `TARGET_PROVISION_FAILED`, `SANDBOX_FAILED`, `MODEL_FAILED`,
 `TIMEOUT`, `PLANNER_FAILURE`, `TOOL_FAILURE`, `VERIFICATION_FAILURE`,
 `FALSE_POSITIVE`, `NO_EXPLOIT_PATH`, `AGENT_ABORTED`, `TARGET_RESET_FAILED`,

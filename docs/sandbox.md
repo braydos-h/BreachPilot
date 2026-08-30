@@ -1,12 +1,12 @@
 # Disposable Execution Sandbox
 
-The sandbox is NetAttackAI's **isolation boundary** for offensive execution.
+The sandbox is BreachPilot's **isolation boundary** for offensive execution.
 Every attack command — arbitrary terminal commands, generated Python, exploit
 tools, Metasploit — runs inside a hardened, disposable Docker worker instead
 of on the operator host.
 
 ```
-LLM/MCP tool → NetAttackAI policy/scope checks → disposable sandbox → target
+LLM/MCP tool → BreachPilot policy/scope checks → disposable sandbox → target
 ```
 
 This document distinguishes the two layers the rest of the safety docs refer
@@ -30,7 +30,7 @@ at the packet level and DROPs everything else.
 One worker per attack run/session (`tools/sandbox/manager.py`):
 
 1. **create** — `docker create` + `start` a hardened worker (never reuse
-   existing containers; containers are labeled `netattackai=true`,
+   existing containers; containers are labeled `breachpilot=true`,
    `run_id=<id>`)
 2. **configure network policy** — an ephemeral `NET_ADMIN` sidecar sharing the
    worker's network namespace installs a default-DROP `iptables`/`ip6tables`
@@ -47,7 +47,7 @@ One worker per attack run/session (`tools/sandbox/manager.py`):
    completion, exception, timeout, cancellation, and interpreter shutdown
    (atexit)
 
-Stale exited NetAttackAI-labeled containers and empty labeled networks are
+Stale exited BreachPilot-labeled containers and empty labeled networks are
 swept at MCP server startup (running workers of concurrent sessions are kept).
 
 ## Worker hardening
@@ -75,7 +75,7 @@ allowlist sources the application layer uses (`exploit.allowed_targets` +
 `EXPLOIT_TARGET*` env vars):
 
 - **IPs / CIDRs** — authorized verbatim.
-- **FQDNs** — resolved **host-side** by NetAttackAI, validated against the
+- **FQDNs** — resolved **host-side** by BreachPilot, validated against the
   allowlist, resolved IPs added to the firewall authorization, and the
   domain→IP mapping recorded in the audit trail. The worker never performs
   arbitrary DNS-driven egress.
@@ -142,7 +142,7 @@ way to run attack commands on the host is the explicit operator opt-out
 | PoC verifier (`poc_verifier`) compile gate | host docker (isolated, network `none` — pre-existing separate mechanism) |
 
 Tools absent from the worker image surface as missing-tool warnings from
-preflight; extend a derived image (`FROM netattackai-sandbox:latest`) for
+preflight; extend a derived image (`FROM breachpilot-sandbox:latest`) for
 mission-specific tooling. Do not add host fallbacks.
 
 ## Worker image
@@ -153,7 +153,7 @@ client, and recon helpers. No secrets, API keys, repo credentials, or user
 configuration are baked in. Rebuild/upgrade independently:
 
 ```bash
-docker build -t netattackai-sandbox:latest docker/sandbox
+docker build -t breachpilot-sandbox:latest docker/sandbox
 ```
 
 ## Secrets & environment
@@ -203,7 +203,7 @@ blocked).
 sandbox:
   enabled: true                # false = explicit legacy host-execution opt-out
   backend: docker
-  image: netattackai-sandbox:latest
+  image: breachpilot-sandbox:latest
   user: sandbox
   read_only_rootfs: true
   env_passthrough: []          # extra host env var names the worker may receive

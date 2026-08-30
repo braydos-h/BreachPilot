@@ -1,4 +1,4 @@
-"""Sliver C2 bridge plugin for NetAttackAi.
+"""Sliver C2 bridge plugin for BreachPilot.
 
 Mirrors tools/metasploit_bridge.py for modern C2 (implant generation, team
 server control, session management) via the Sliver gRPC client.

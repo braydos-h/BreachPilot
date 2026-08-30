@@ -507,7 +507,7 @@ def _stdlib_fetch(
     or the body is truncated mid-stream and JSON parsing silently fails.
     """
     try:
-        hdrs = {"User-Agent": "NetAttackAi-DomainRecon/1.0"}
+        hdrs = {"User-Agent": "BreachPilot-DomainRecon/1.0"}
         if headers:
             hdrs.update(headers)
         req = urllib.request.Request(url, headers=hdrs, data=data)

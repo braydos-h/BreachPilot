@@ -1,7 +1,7 @@
 name: spiderfoot
 version: 0.1.0
 description: SpiderFoot OSINT integration (passive) - DNS, whois, certs, leaks in one tool. Passive only; uses @audit_tool; plugin default-off.
-author: NetAttackAi
+author: BreachPilot
 capabilities: [mcp_tool]
 enabled: false
 config_section:

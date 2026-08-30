@@ -38,7 +38,7 @@ export function TokenGate({ children }: TokenGateProps) {
     setVerifying(true);
     const trimmed = tokenInput.trim();
     if (!trimmed) {
-      setConnectError("Enter the bearer token from .webui_secret_key or NETATTACKAI_API_TOKEN.");
+      setConnectError("Enter the bearer token from .webui_secret_key or BREACHPILOT_API_TOKEN.");
       setVerifying(false);
       return;
     }
@@ -79,11 +79,11 @@ export function TokenGate({ children }: TokenGateProps) {
               <ShieldAlert className="h-4 w-4" />
               <span className="text-xs uppercase tracking-wide">Local console</span>
             </div>
-            <CardTitle className="text-xl">NetAttackAI console</CardTitle>
+            <CardTitle className="text-xl">BreachPilot console</CardTitle>
             <CardDescription>
               Enter the API bearer token to continue. The token is generated into{" "}
               <code className="rounded bg-muted px-1 py-0.5 text-xs">.webui_secret_key</code> or set via{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-xs">NETATTACKAI_API_TOKEN</code>.
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">BREACHPILOT_API_TOKEN</code>.
             </CardDescription>
           </CardHeader>
           <CardContent>

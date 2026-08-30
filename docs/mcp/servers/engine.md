@@ -17,8 +17,8 @@ Read-only advisory surface at `mcp_engine_server.py:1-223` for foreign AI assist
 
 ## Server Identity
 
-- FastMCP name: `netattackai-engine` (`mcp_engine_server.py:77`)
-- Instructions: "NetAttackAI engine advisory surface. Tools are read-only..." (`mcp_engine_server.py:78-84`)
+- FastMCP name: `breachpilot-engine` (`mcp_engine_server.py:77`)
+- Instructions: "BreachPilot engine advisory surface. Tools are read-only..." (`mcp_engine_server.py:78-84`)
 - `json_response=True` (`mcp_engine_server.py:85`)
 - Transports: `stdio` (default) or `http` (`mcp_engine_server.py:200-218`)
 - Default HTTP port: `8002` (`mcp_engine_server.py:203`)
@@ -69,7 +69,7 @@ No in-repo client. Example for Claude Desktop `mcp.json`:
 ```json
 {
   "mcpServers": {
-    "netattackai-engine": {
+    "breachpilot-engine": {
       "command": "python",
       "args": ["mcp_engine_server.py", "--transport", "stdio"]
     }

@@ -279,12 +279,12 @@ class OpsecManager:
 
         When ``profile.ua_rotation`` is on, pick from :attr:`_UA_POOL` using
         the (optionally injected) rng -- deterministic when an rng is injected.
-        Otherwise return the fixed default ``NetAttackAi/1.0``.
+        Otherwise return the fixed default ``BreachPilot/1.0``.
         """
         if self.profile.ua_rotation and self._UA_POOL:
             idx = int(self._rand() * len(self._UA_POOL)) % len(self._UA_POOL)
             return self._UA_POOL[idx]
-        return "NetAttackAi/1.0"
+        return "BreachPilot/1.0"
 
     # -- Pacing ------------------------------------------------------------
 
@@ -553,12 +553,12 @@ def configure(profile: OpsecProfile, **kwargs: Any) -> None:
     _process_manager = OpsecManager(profile, **kwargs)
 
 
-def process_user_agent(default: str = "NetAttackAi/1.0") -> str:
+def process_user_agent(default: str = "BreachPilot/1.0") -> str:
     """Return a User-Agent for egress sites.
 
     When OPSEC is configured **and** UA rotation is on, returns a pool UA from
     the configured manager. Otherwise returns ``default`` unchanged -- so
-    egress sites can call ``process_user_agent("NetAttackAi-OSINT/1.0")`` with
+    egress sites can call ``process_user_agent("BreachPilot-OSINT/1.0")`` with
     zero behavior change when OPSEC is not configured, and get rotating UAs
     when it is.
     """

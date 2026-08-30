@@ -93,7 +93,7 @@ class TargetManager:
             "-d",
             "--rm",
             "--name",
-            f"netattackai-bench-{scenario.scenario_id}",
+            f"breachpilot-bench-{scenario.scenario_id}",
             *self._port_args(scenario),
             scenario.target_image,
         )

@@ -1,6 +1,6 @@
 # WebUI
 
-The bundled single-page app for driving NetAttackAI assessments from a browser.
+The bundled single-page app for driving BreachPilot assessments from a browser.
 A Vite + React + TypeScript SPA under `webui/`, served by the local API daemon
 and talking to the same `/api/v1` REST + WebSocket surface documented in
 [api.md](api.md).
@@ -72,7 +72,7 @@ python main.py --web
   `api.serve_webui` is already `true` in `config.yaml`.
 
 Bearer token is auto-generated into `.webui_secret_key` (gitignored) on first
-boot, or set via `NETATTACKAI_API_TOKEN`. Paste it into the TokenGate prompt.
+boot, or set via `BREACHPILOT_API_TOKEN`. Paste it into the TokenGate prompt.
 
 ### Dev server (hot reload)
 
@@ -102,8 +102,8 @@ npm run preview    # vite preview --port 5173 --strictPort
 | Var | Where | Purpose |
 |-----|-------|---------|
 | `VITE_API_URL` | `vite.config.ts` | Override the dev/preview `/api` proxy target (default `http://127.0.0.1:8765`) |
-| `NETATTACKAI_API_TOKEN` | daemon | Bearer token (precedes `.webui_secret_key`) |
-| `NETATTACKAI_API_KEY_FILE` | daemon | Provider secrets file (default `secr.json`) |
+| `BREACHPILOT_API_TOKEN` | daemon | Bearer token (precedes `.webui_secret_key`) |
+| `BREACHPILOT_API_KEY_FILE` | daemon | Provider secrets file (default `secr.json`) |
 
 `__APP_VERSION__` is a Vite `define` injected from `package.json` version
 (shown in the sidebar + footer).
@@ -147,8 +147,8 @@ hasn't dismissed it this session.
 |-------|-------|-------|
 | Server state (runs, decisions, config, secrets, tools, artifacts, audit, swarm, loot) | TanStack Query | `api/hooks.ts`. Cache keys centralized in `queryKeys`. Polls while active, stops at terminal. |
 | Live run events | `useRunEvents` (`api/ws.ts`) | WS-first, SSE fallback. Local React state, deduped by `sequence`. |
-| Token | `sessionStorage` (`netattackai.apiToken.v1`) | Cleared on 401 / sign-out. Never `localStorage`. |
-| Onboarding dismissed | `sessionStorage` (`netattackai.onboarding.v1`) | Per-session flag. |
+| Token | `sessionStorage` (`breachpilot.apiToken.v1`) | Cleared on 401 / sign-out. Never `localStorage`. |
+| Onboarding dismissed | `sessionStorage` (`breachpilot.onboarding.v1`) | Per-session flag. |
 | Wizard form state | `Wizard.tsx` local `useState` | Lifted goal/target/review state so `buildRequest()` can serialize it. |
 | URL state | react-router | `?path=recon\|attack` preselects wizard path; `:runId` route params. |
 
@@ -178,7 +178,7 @@ pending.
 ### TokenGate
 
 First-load screen. Operator pastes the bearer token (from `.webui_secret_key`
-or `NETATTACKAI_API_TOKEN`). On submit the SPA stores it via
+or `BREACHPILOT_API_TOKEN`). On submit the SPA stores it via
 `setStoredToken` and calls `GET /capabilities` to verify:
 
 - 401 → "Token rejected", clear token.
@@ -191,7 +191,7 @@ to `/`.
 
 ### Token storage
 
-- Key: `netattackai.apiToken.v1` in **`sessionStorage`** (survives reloads,
+- Key: `breachpilot.apiToken.v1` in **`sessionStorage`** (survives reloads,
   clears on tab close — deliberate, so a forgotten tab doesn't leak a token).
 - Sent as `Authorization: Bearer <token>` on every REST call (`apiFetch`) and
   as the `auth` field of the WS/SSE handshake.
@@ -206,7 +206,7 @@ Close `4401` clears the token and surfaces "Authentication failed". See
 ### OnboardingGate
 
 After TokenGate, before routes. Calls `useSecrets`; if any key is `missing`
-and the user hasn't dismissed onboarding this session (`netattackai.onboarding.v1`
+and the user hasn't dismissed onboarding this session (`breachpilot.onboarding.v1`
 not `"1"`), renders the first-run setup card. The card asks for three things
 up front so a fresh operator can configure everything before launching a run:
 
@@ -224,7 +224,7 @@ up front so a fresh operator can configure everything before launching a run:
 later under System → Models (provider + ChatGPT) and System → Secrets (keys).
 
 > Provider secrets are stored in `secr.json` (default; override with
-> `NETATTACKAI_API_KEY_FILE`). This is **distinct** from `.webui_secret_key`,
+> `BREACHPILOT_API_KEY_FILE`). This is **distinct** from `.webui_secret_key`,
 > which holds the API bearer token. See [api.md §Secrets](api.md).
 
 ---
@@ -515,7 +515,7 @@ run always goes through the confirmation gate (`yes=false`).
 |-----|---------|
 | Config | `ConfigEditor` — redacted `GET /config` view + `PATCH /config` form. Atomic write, `400 config_invalid` on validation failure. |
 | Secrets | Per-provider-key status (`configured`/`missing`) + write-only inputs. `PUT /secrets` also loads values into the running daemon's env. Values are never returned. |
-| Models | **AI provider card** — `SegmentedControl` picker (Ollama / ChatGPT) bound to `models.provider`; switching PATCHes `/config` (deep-merge: → chatgpt also sets `chatgpt.enabled: true`, mirroring the CLI menu; `/models` + `/providers` + `/models/live` are invalidated immediately so there's no stale window). When ChatGPT is active the card shows `GET /providers` status (signed-in / proxy-running / started-by-NetAttackAi badges, host:port + default_model), a "Sign in with ChatGPT" prompt when not authenticated, "Sign in with ChatGPT" (`POST /providers/chatgpt/login` — backend-driven OAuth, URL shown as a link, tokens never reach the SPA), and Start/Stop proxy (`POST /providers/chatgpt/proxy/{start,stop}` — Stop only enabled when `we_started`). When Ollama is active the card notes embeddings also use Ollama. Below: live model list (`GET /models/live`, source badge `ollama`/`registry`/`chatgpt`, error line — for ChatGPT the proxy auto-starts on fetch so available GPT models populate once signed in) + configured models (registry for Ollama, `chatgpt.configured_models` for ChatGPT) + default. |
+| Models | **AI provider card** — `SegmentedControl` picker (Ollama / ChatGPT) bound to `models.provider`; switching PATCHes `/config` (deep-merge: → chatgpt also sets `chatgpt.enabled: true`, mirroring the CLI menu; `/models` + `/providers` + `/models/live` are invalidated immediately so there's no stale window). When ChatGPT is active the card shows `GET /providers` status (signed-in / proxy-running / started-by-BreachPilot badges, host:port + default_model), a "Sign in with ChatGPT" prompt when not authenticated, "Sign in with ChatGPT" (`POST /providers/chatgpt/login` — backend-driven OAuth, URL shown as a link, tokens never reach the SPA), and Start/Stop proxy (`POST /providers/chatgpt/proxy/{start,stop}` — Stop only enabled when `we_started`). When Ollama is active the card notes embeddings also use Ollama. Below: live model list (`GET /models/live`, source badge `ollama`/`registry`/`chatgpt`, error line — for ChatGPT the proxy auto-starts on fetch so available GPT models populate once signed in) + configured models (registry for Ollama, `chatgpt.configured_models` for ChatGPT) + default. |
 | Skills | Searchable list (`GET /skills/search?q=`) + detail pane (`GET /skills/<name>`) showing body, sections, tags, NIST CSF, MITRE ATT&CK, references. |
 | Plugins | `GET /plugins` list with name/version/loaded/capabilities. Defensive `[]` on error. |
 | Diagnostics | Buttons to run `POST /diagnostics/doctor` and `POST /diagnostics/self-test`; renders exit code badge + output `<pre>`. |

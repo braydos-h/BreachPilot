@@ -34,7 +34,7 @@ import {
 } from "@/api/types";
 import { formatRelative, truncateId } from "@/lib/utils";
 
-const SORT_KEY_STORAGE = "netattack.runSort";
+const SORT_KEY_STORAGE = "breachpilot.runSort";
 const PAGE_SIZE = 50;
 
 const STATE_FILTER_OPTIONS: { value: string; label: string }[] = [

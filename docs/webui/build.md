@@ -61,7 +61,7 @@ CI scoped checks: `ruff`/`mypy` scopes listed in `README §CI`; `tsc -b` is the 
 | Field | Value |
 |-------|-------|
 | import | `type Config` + `typography(@tailwindcss/typography)`, `animate(tailwindcss-animate)` |
-| `darkMode` | `["class"]` (`index.html:class="dark"` toggled by `lib/useTheme.ts` via `localStorage netattack.theme`) |
+| `darkMode` | `["class"]` (`index.html:class="dark"` toggled by `lib/useTheme.ts` via `localStorage breachpilot.theme`) |
 | `content` | `["./index.html","./src/**/*.{ts,tsx}"]` |
 | `theme.container` | `center true, padding 1rem` |
 | `theme.extend.typography.invert.css` | prose vars `prose-body/headings/links/code/pre-bg/pre-code/bullets/quotes/quote-borders → hsl(var(--*))` for `SkillMarkdown` in `SkillsPage.tsx` + `docs/api.md` pages |
@@ -72,7 +72,7 @@ CI scoped checks: `ruff`/`mypy` scopes listed in `README §CI`; `tsc -b` is the 
 
 `postcss.config.js` — `{plugins:{tailwindcss:{}, autoprefixer:{}}}`.
 
-`src/index.css` (`@tailwind base/components/utilities` + `@layer base` vars `:root` light + `.dark` dark (`:6`/`:29`), `@layer utilities` `bg-grid/grid-sm/radial-fade/glow-primary/skeleton/scrollbar-thin/animate-*`). `index.html` has `color-scheme dark light` + `referrer no-referrer` + inline `localStorage "netattack.theme"` script to remove `dark` on light preference before paint.
+`src/index.css` (`@tailwind base/components/utilities` + `@layer base` vars `:root` light + `.dark` dark (`:6`/`:29`), `@layer utilities` `bg-grid/grid-sm/radial-fade/glow-primary/skeleton/scrollbar-thin/animate-*`). `index.html` has `color-scheme dark light` + `referrer no-referrer` + inline `localStorage "breachpilot.theme"` script to remove `dark` on light preference before paint.
 
 Deps (`package.json:13`):
 

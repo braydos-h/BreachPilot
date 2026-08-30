@@ -410,7 +410,7 @@ export function SkillsPage() {
               <div className="min-w-0">
                 <h1 className="text-xl font-semibold leading-tight tracking-tight">Skills</h1>
                 <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                  Manage the methodologies and specialist knowledge available to NetAttackAI.
+                  Manage the methodologies and specialist knowledge available to BreachPilot.
                 </p>
               </div>
             </div>

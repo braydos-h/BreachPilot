@@ -76,7 +76,7 @@ Re-wrapped helpers (module-level re-exports for test patch points):
 |-------|------|-------|
 | `argv` | `list[str]` | CLI args; defaults to `sys.argv[1:]` |
 | `config.yaml` | file | Loaded via `tools/config_cli.load_config` |
-| Env `OLLAMA_API_KEY`, `NETATTACKAI_API_TOKEN`, `RESEARCH_WORKSPACE` | env | Provider auth / API token / workspace root |
+| Env `OLLAMA_API_KEY`, `BREACHPILOT_API_TOKEN`, `RESEARCH_WORKSPACE` | env | Provider auth / API token / workspace root |
 | MCP transport | `stdio` / `http` | Forced to `http` on run path for target-IP lock |
 
 | Output | Type | Notes |
@@ -153,7 +153,7 @@ flowchart TD
 ## Security Boundaries
 
 - API daemon is **loopback-only** (`127.0.0.1/localhost/::1`); public bind refused.
-- Bearer token from `.webui_secret_key` or `NETATTACKAI_API_TOKEN` guards `/api/v1`.
+- Bearer token from `.webui_secret_key` or `BREACHPILOT_API_TOKEN` guards `/api/v1`.
 - Allowlist lock: `AssessmentService.prepare` resolves domain→IP and persists new domain IP to `config.yaml` exploit allowlist for interactive sessions.
 - `full_access` is the lab attack posture; recon stays `read_only`.
 

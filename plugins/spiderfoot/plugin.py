@@ -1,4 +1,4 @@
-"""SpiderFoot OSINT integration plugin for NetAttackAi.
+"""SpiderFoot OSINT integration plugin for BreachPilot.
 
 Wraps the SpiderFoot REST API for passive OSINT (DNS, whois, certs, leaks) in
 one tool. All tools are passive — no target touch — so they use

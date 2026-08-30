@@ -9,7 +9,7 @@ Security invariants covered:
 - Environment is allowlisted (never a host-env copy).
 - Output is size-clamped; timeouts surface as timed_out results.
 - Workspace mapping blocks traversal/escape; destroy is idempotent.
-- Stale cleanup touches only exited NetAttackAI-labeled resources.
+- Stale cleanup touches only exited BreachPilot-labeled resources.
 """
 
 from __future__ import annotations
@@ -134,7 +134,7 @@ class TestResolveManager:
     def test_enabled_true_returns_manager(self, tmp_path):
         mgr = resolve_manager(tmp_path, {"sandbox": {"enabled": True}})
         assert mgr is not None
-        assert mgr.cfg.image == "netattackai-sandbox:latest"
+        assert mgr.cfg.image == "breachpilot-sandbox:latest"
         mgr.destroy()
 
 
@@ -312,7 +312,7 @@ class TestAuditTrail:
         assert sandbox_rows, "sandbox executions must write sandbox-context audit rows"
         row = sandbox_rows[0]
         assert row["sandbox"]["run_id"] == "auditrun1"
-        assert row["sandbox"]["image"] == "netattackai-sandbox:latest"
+        assert row["sandbox"]["image"] == "breachpilot-sandbox:latest"
         assert row["sandbox"]["network"]["authorized_destinations"] == ["192.0.2.5/32"]
         assert row["sandbox"]["env_keys"] == sorted(row["sandbox"]["env_keys"])
         mgr.destroy()

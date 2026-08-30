@@ -170,7 +170,7 @@ def run_ctf(args: Any) -> int:
         goal = default_goal_for_target(target_ip)
 
     print("=" * 60)
-    print("  NetAttackAI — CTF autopilot (`--ctf`)")
+    print("  BreachPilot — CTF autopilot (`--ctf`)")
     print(f"  Target: {target_ip}")
     print(
         f"  Goal: flag_path={goal.flag_path or '(heuristic)'} "

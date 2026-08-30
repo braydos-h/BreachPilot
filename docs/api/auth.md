@@ -24,11 +24,11 @@ status: maintained
 
 `load_or_create_token(token_file, env_override)` (`tools/api/auth.py:46`):
 
-1. `NETATTACKAI_API_TOKEN` env (trimmed). If non-empty, returned and file is untouched.
+1. `BREACHPILOT_API_TOKEN` env (trimmed). If non-empty, returned and file is untouched.
 2. `api.token_file` (default `.webui_secret_key`, gitignored) — read if exists and trimmed non-empty.
 3. Otherwise `secrets.token_urlsafe(32)` (256-bit), `parent.mkdir(exist_ok=True)`, `write_text`, `chmod 0o600` best-effort (Windows: no-op).
 
-Never logged; no endpoint returns it. `app.py:73` calls `load_or_create_token(api_cfg.get("token_file", ".webui_secret_key"), env_override=os.environ.get("NETATTACKAI_API_TOKEN",""))`.
+Never logged; no endpoint returns it. `app.py:73` calls `load_or_create_token(api_cfg.get("token_file", ".webui_secret_key"), env_override=os.environ.get("BREACHPILOT_API_TOKEN",""))`.
 
 ### Enforcement
 

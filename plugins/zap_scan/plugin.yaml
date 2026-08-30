@@ -1,7 +1,7 @@
 name: zap_scan
 version: 0.1.0
 description: OWASP ZAP REST integration - spider + active scan for authenticated web targets. Correlated with the AI's hypothesis loop. Target-touching tools are allowlist-locked; plugin default-off.
-author: NetAttackAi
+author: BreachPilot
 capabilities: [mcp_tool]
 enabled: false
 config_section:
@@ -9,5 +9,5 @@ config_section:
     enabled: false
     api_url: http://127.0.0.1:8080
     api_key_env: ZAP_API_KEY
-    context_name: netattackai
+    context_name: breachpilot
     max_scan_duration_mins: 30

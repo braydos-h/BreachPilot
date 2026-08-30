@@ -8,7 +8,7 @@ function sandboxData(overrides: Partial<RunSandboxResponse> = {}): RunSandboxRes
   return {
     run_id: "run1",
     found: true,
-    config: { enabled: true, backend: "docker", image: "netattackai-sandbox:latest", user: "sandbox" },
+    config: { enabled: true, backend: "docker", image: "breachpilot-sandbox:latest", user: "sandbox" },
     container: { id: "abc123def4567890", sandbox_run_id: "sandboxrun1" },
     network: {
       enforced: true,
@@ -66,7 +66,7 @@ describe("SandboxTab", () => {
     renderTab({ loading: false, error: null, data: sandboxData() });
     expect(screen.getByText("Contained (docker)")).toBeInTheDocument();
     expect(screen.getByText("abc123def456")).toBeInTheDocument(); // short container id
-    expect(screen.getByText("netattackai-sandbox:latest")).toBeInTheDocument();
+    expect(screen.getByText("breachpilot-sandbox:latest")).toBeInTheDocument();
     expect(screen.getByText("locked (default drop)")).toBeInTheDocument();
     expect(screen.getByText("10.0.0.50/32")).toBeInTheDocument();
     expect(screen.getByText("github.com -> 140.82.121.4")).toBeInTheDocument();

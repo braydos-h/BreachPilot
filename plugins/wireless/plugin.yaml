@@ -1,7 +1,7 @@
 name: wireless
 version: 0.1.0
 description: Wireless/BT assessment integration - bettercap/aircrack-ng/hcxtools/bluez for authorized WLAN/BT testing. Radio-touching tools are allowlist-gated (BSSID as the target identifier); plugin default-off.
-author: NetAttackAi
+author: BreachPilot
 capabilities: [mcp_tool]
 enabled: false
 config_section:

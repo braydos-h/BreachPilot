@@ -27,7 +27,7 @@ subsystem: webui
 |---------|-------|----------------|
 | Search input | `q` → debounced 300ms (`RunListPage.tsx:84`) → `debouncedQ` | `GET /runs?limit&offset&sort&q&state` (`api/hooks.ts:432`, `queryKeys.runs`) |
 | State filter | `stateFilter` (`RunListPage.tsx:68`) | `&state=<RunState>` (draft..cancelling etc., `api/types.ts:1`) |
-| Sort select | `sortKey` persisted `localStorage netattack.runSort` (`RunListPage.tsx:54`) → `RUN_SORT_OPTIONS` (`api/types.ts:345`) | `&sort=created_desc|created_asc|title_{asc,desc}|state_{asc,desc}` |
+| Sort select | `sortKey` persisted `localStorage breachpilot.runSort` (`RunListPage.tsx:54`) → `RUN_SORT_OPTIONS` (`api/types.ts:345`) | `&sort=created_desc|created_asc|title_{asc,desc}|state_{asc,desc}` |
 | Pagination | `page` × `PAGE_SIZE=50` (`RunListPage.tsx:38`) | `offset, limit` |
 
 `useRuns(PAGE_SIZE, page*PAGE_SIZE, sortKey, debouncedQ, stateFilter)` (`RunListPage.tsx:70`) adaptive poll `5s` active else `60s` (`hooks.ts:441`). `maxConcurrent` from `capabilities.constraints.max_concurrent_runs` gates `New run` button (`RunListPage.tsx:72`).

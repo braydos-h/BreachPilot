@@ -17,7 +17,7 @@ Worker hardening is enforced in ``_build_create_args``:
 - dedicated per-run bridge network (never ``host``, never a shared network)
 - NO docker.sock, NO host mounts other than the validated run workspace,
   no devices, no host pid/ipc namespaces
-- labels ``netattackai=true`` / ``run_id=<id>`` -- stale cleanup and audits
+- labels ``breachpilot=true`` / ``run_id=<id>`` -- stale cleanup and audits
   identify OUR resources only; existing containers are NEVER reused
 """
 
@@ -145,14 +145,14 @@ def docker_network_gateway(name: str) -> str:
     return ""
 
 
-def docker_network_list_stale(*, label: str = "netattackai=true") -> list[str]:
+def docker_network_list_stale(*, label: str = "breachpilot=true") -> list[str]:
     rc, out, _err = _docker("network", "ls", "--filter", f"label={label}", "--format", "{{.Name}}", timeout=30)
     if rc != 0:
         return []
     return [ln.strip() for ln in out.splitlines() if ln.strip()]
 
 
-def docker_container_list_stale(*, label: str = "netattackai=true") -> list[str]:
+def docker_container_list_stale(*, label: str = "breachpilot=true") -> list[str]:
     rc, out, _err = _docker("ps", "-a", "--filter", f"label={label}", "--format", "{{.Names}}", timeout=30)
     if rc != 0:
         return []
@@ -233,7 +233,7 @@ def _build_create_args(spec: SandboxSpec, *, cap_raw: bool, read_only_rootfs: bo
         "--network",
         str(spec.network_name),
         "--label",
-        "netattackai=true",
+        "breachpilot=true",
         "--label",
         f"run_id={spec.labels.get('run_id', '')}",
         # Capabilities: drop everything; NET_RAW only when configured for raw

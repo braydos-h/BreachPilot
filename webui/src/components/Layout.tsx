@@ -175,7 +175,7 @@ export function Layout() {
           <Terminal className="relative h-5 w-5 text-primary" />
           <div className="relative flex flex-col">
             <span className="text-sm font-semibold leading-tight">
-              <span className="text-gradient-primary">NetAttack</span>
+              <span className="text-gradient-primary">BreachPilot</span>
               <span className="text-foreground">AI</span>
             </span>
             <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
@@ -202,7 +202,7 @@ export function Layout() {
           </button>
           <Terminal className="h-4 w-4 shrink-0 text-primary" />
           <span className="truncate text-sm font-semibold">
-            <span className="text-gradient-primary">NetAttack</span>
+            <span className="text-gradient-primary">BreachPilot</span>
             <span className="text-foreground">AI</span>
           </span>
         </div>
@@ -241,7 +241,7 @@ export function Layout() {
             <Terminal className="relative h-5 w-5 text-primary" />
             <div className="relative flex flex-col">
               <SheetTitle className="text-sm font-semibold leading-tight">
-                <span className="text-gradient-primary">NetAttack</span>
+                <span className="text-gradient-primary">BreachPilot</span>
                 <span className="text-foreground">AI</span>
               </SheetTitle>
               <SheetDescription className="text-[10px] uppercase tracking-wide text-muted-foreground">
@@ -315,7 +315,7 @@ export function Layout() {
             Loopback-only · Authorized use only — operate exclusively against owned or explicitly authorized assets.
           </span>
           <a
-            href="https://github.com/braydos-h/NetAttackAi"
+            href="https://github.com/braydos-h/BreachPilot"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 hover:text-foreground"

@@ -1,4 +1,4 @@
-// NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
+// BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 // Run-benchmark panel: suite/scenario selection, trials, model, sandbox, baseline options.
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";

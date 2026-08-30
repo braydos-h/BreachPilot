@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
+// BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 import { describe, expect, it } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -37,7 +37,7 @@ function makeTrial(overrides: Partial<Trial> & { scenario_id: string; trial_inde
     sandbox: {
       enabled: true,
       required: true,
-      image: "netattackai-sandbox:latest",
+      image: "breachpilot-sandbox:latest",
       image_digest: "sha256:abc",
       container_id: "c1",
       network_policy_fingerprint: "",

@@ -1,4 +1,4 @@
-// NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
+// BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 // Structured mission-event timeline for a benchmark run.
 import { useMemo } from "react";
 import { AlertCircle, CheckCircle2, Clock, PlayCircle, ShieldAlert, Wrench } from "lucide-react";

@@ -107,7 +107,7 @@ class SandboxConfig:
         return cls(
             enabled=_as_bool(sec.get("enabled"), False),
             backend=str(sec.get("backend", "docker") or "docker").strip().lower(),
-            image=str(sec.get("image", "netattackai-sandbox:latest") or "").strip(),
+            image=str(sec.get("image", "breachpilot-sandbox:latest") or "").strip(),
             user=str(sec.get("user", "sandbox") or "sandbox").strip(),
             read_only_rootfs=_as_bool(sec.get("read_only_rootfs"), True),
             env_passthrough=passthrough,
@@ -160,7 +160,7 @@ class SandboxResult:
 class SandboxSpec:
     """Immutable description of the worker container to create."""
 
-    sandbox_id: str  # container name, e.g. netattack-<run_id>-<rand>
+    sandbox_id: str  # container name, e.g. breachpilot-<run_id>-<rand>
     image: str
     user: str
     network_name: str
@@ -169,7 +169,7 @@ class SandboxSpec:
     cpus: float
     pids_limit: int
     read_only_rootfs: bool
-    labels: dict[str, str] = field(default_factory=lambda: {"netattackai": "true"})
+    labels: dict[str, str] = field(default_factory=lambda: {"breachpilot": "true"})
 
 
 @dataclass(frozen=True)

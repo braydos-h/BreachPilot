@@ -140,9 +140,9 @@ def collect_environment(
     try:
         from main import __version__ as version  # noqa: PLC0415 -- avoids a heavy import at module load
 
-        env.netattack_version = unknown(version)
+        env.breachpilot_version = unknown(version)
     except Exception:  # noqa: BLE001
-        env.netattack_version = "unknown"
+        env.breachpilot_version = "unknown"
 
     sha = _git("rev-parse", "HEAD")
     env.git_sha = sha or "unknown"
@@ -163,7 +163,7 @@ def collect_environment(
     env.benchmark_config_hash = config_hash(benchmark_config)
     env.sandbox_enabled = sandbox_enabled
     env.sandbox_required = sandbox_required
-    sandbox_image = str(((config.get("sandbox", {}) or {}).get("image", "")) or "netattackai-sandbox:latest")
+    sandbox_image = str(((config.get("sandbox", {}) or {}).get("image", "")) or "breachpilot-sandbox:latest")
     env.sandbox_image = unknown(sandbox_image)
     env.sandbox_image_digest = docker_image_digest(sandbox_image)
     env.platform = f"{platform.system()}/{platform.release()}"

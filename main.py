@@ -7,7 +7,7 @@ Usage:
     python main.py --target 10.0.0.50 --mode recon --goal initial_access
 """
 
-# NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
+# BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 from __future__ import annotations
 
 __version__ = "0.49.12"
@@ -342,7 +342,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="main.py",
         description=(
-            "NetAttackAI — autonomous penetration testing AI. Run with no arguments "
+            "BreachPilot — autonomous penetration testing AI. Run with no arguments "
             "to start the WebUI daemon (http://127.0.0.1:8765); use --menu for the "
             "legacy interactive terminal menu."
         ),
@@ -360,7 +360,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--version", action="version", version=f"NetAttackAI {__version__}")
+    parser.add_argument("--version", action="version", version=f"BreachPilot {__version__}")
 
     core = parser.add_argument_group("targeting")
     core.add_argument("--target", default="", help="Target IP address or domain to attack or recon")
@@ -871,7 +871,7 @@ def _open_browser_when_ready(host: str, port: int, ui: Any) -> None:
 
 
 def _api_daemon_ready(host: str, port: int) -> bool:
-    """Return whether a NetAttackAI API daemon already owns this endpoint."""
+    """Return whether a BreachPilot API daemon already owns this endpoint."""
     import urllib.request
 
     base = f"http://{host}:{port}/" if host != "::1" else f"http://[{host}]:{port}/"
@@ -962,7 +962,7 @@ def _run_daemon(args: argparse.Namespace) -> int:
 
     token = load_or_create_token(
         api_cfg.get("token_file", ".webui_secret_key"),
-        env_override=os.environ.get("NETATTACKAI_API_TOKEN", ""),
+        env_override=os.environ.get("BREACHPILOT_API_TOKEN", ""),
     )
     # Gate the token reveal + browser launch on Enter presses so the
     # user can copy the key before it scrolls away under request logs.

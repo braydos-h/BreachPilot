@@ -171,4 +171,4 @@ Report generation should stay evidence-linked, reproducible, and conservative in
 
 ## Plugin Load Flow
 
-`tools/plugins.load_plugins(config)` runs once during boot before the MCP exploit server is created. It discovers filesystem plugins under `plugins/` (configurable via `plugins.search_paths`) plus entry-point plugins in the `netattackai.plugins` group. Only enabled plugins are registered; each `Plugin.register(registry)` contributes attack modules, MCP tool factories, skill dirs, and config sections to the shared `PLUGIN_REGISTRY`.
+`tools/plugins.load_plugins(config)` runs once during boot before the MCP exploit server is created. It discovers filesystem plugins under `plugins/` (configurable via `plugins.search_paths`) plus entry-point plugins in the `breachpilot.plugins` group. Only enabled plugins are registered; each `Plugin.register(registry)` contributes attack modules, MCP tool factories, skill dirs, and config sections to the shared `PLUGIN_REGISTRY`.

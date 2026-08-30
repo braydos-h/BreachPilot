@@ -80,7 +80,7 @@ def test_non_loopback_still_refused(host):
 
 def _make_multi_operator_client(tmp_path, monkeypatch, token="test-token"):
     """Create a TestClient with ``api.multi_operator: true`` so user routes mount."""
-    monkeypatch.setenv("NETATTACKAI_API_TOKEN", token)
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", token)
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -97,7 +97,7 @@ def _make_multi_operator_client(tmp_path, monkeypatch, token="test-token"):
 
 def _make_legacy_client(tmp_path, monkeypatch, token="test-token"):
     """Create a TestClient with default config (multi_operator absent/false)."""
-    monkeypatch.setenv("NETATTACKAI_API_TOKEN", token)
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", token)
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(

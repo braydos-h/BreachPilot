@@ -1,4 +1,4 @@
-"""NetAttackAI Benchmark Suite.
+"""BreachPilot Benchmark Suite.
 
 First-class, reproducible benchmarking on the existing evaluation
 infrastructure: providers (XBEN is one) -> scenario definitions -> sandboxed

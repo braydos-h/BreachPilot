@@ -23,7 +23,7 @@ def _make_client(tmp_path, monkeypatch, token="test-token", ollama_host="http://
     host so the 503 fallback fires deterministically even when a real Ollama
     is running on the dev box's :11434.
     """
-    monkeypatch.setenv("NETATTACKAI_API_TOKEN", token)
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", token)
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -118,7 +118,7 @@ def test_doctor_returns_output(tmp_path, monkeypatch):
     data = resp.json()
     assert "exit_code" in data
     assert "output" in data and isinstance(data["output"], str)
-    assert "NetAttackAI" in data["output"] or "Self-Check" in data["output"]
+    assert "BreachPilot" in data["output"] or "Self-Check" in data["output"]
 
 
 def test_self_test_returns_output(tmp_path, monkeypatch):
@@ -148,7 +148,7 @@ def test_models_live_falls_back_when_ollama_unreachable(tmp_path, monkeypatch):
 def _make_chatgpt_client(tmp_path, monkeypatch, token="test-token"):
     """Like _make_client but with provider=chatgpt + a chatgpt block pointing at a
     closed port so the /v1/models probe fails deterministically."""
-    monkeypatch.setenv("NETATTACKAI_API_TOKEN", token)
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", token)
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(

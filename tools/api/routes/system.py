@@ -216,7 +216,7 @@ async def get_secrets(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     )
 
     names = configured_api_key_env_names(_CONFIG)
-    path = Path(os.environ.get("NETATTACKAI_API_KEY_FILE", DEFAULT_API_KEY_FILE))
+    path = Path(os.environ.get("BREACHPILOT_API_KEY_FILE", DEFAULT_API_KEY_FILE))
     loaded = load_api_key_file(path)
     status = {}
     for name in names:
@@ -253,7 +253,7 @@ async def put_secrets(
             "Secret names must be configured provider environment variables and values must be non-empty strings.",
             status_code=400,
         )
-    path = Path(os.environ.get("NETATTACKAI_API_KEY_FILE", DEFAULT_API_KEY_FILE))
+    path = Path(os.environ.get("BREACHPILOT_API_KEY_FILE", DEFAULT_API_KEY_FILE))
     written = save_api_keys(path, secrets)
     for name in written:
         os.environ[name] = secrets[name].strip()
@@ -1107,7 +1107,7 @@ async def chatgpt_proxy_start(auth: str = Depends(_require_auth)) -> dict[str, A
 
 @router.post("/providers/chatgpt/proxy/stop")
 async def chatgpt_proxy_stop(auth: str = Depends(_require_auth)) -> dict[str, Any]:
-    """Stop the proxy only if NetAttackAi started it."""
+    """Stop the proxy only if BreachPilot started it."""
     from tools.config_manager import get_chatgpt_config
     from tools.providers.chatgpt_provider import ChatGptProxyManager
 

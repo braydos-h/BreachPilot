@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 
 def _make_client(tmp_path, monkeypatch, token="test-token"):
-    monkeypatch.setenv("NETATTACKAI_API_TOKEN", token)
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", token)
     monkeypatch.setenv("RESEARCH_WORKSPACE", str(tmp_path / "research_workspace"))
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"

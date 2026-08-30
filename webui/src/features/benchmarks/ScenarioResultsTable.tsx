@@ -1,4 +1,4 @@
-// NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
+// BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 // Scenario results table: sortable + status-filtered trial results.
 import { useMemo, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";

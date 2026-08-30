@@ -132,11 +132,11 @@ class SandboxManager:
             self._validate_workspace()
             if self.cfg.remove_stale_on_startup:
                 self.cleanup_stale()
-            self.network_name = f"netattack-net-{self.run_id}-{secrets.token_hex(3)}"
+            self.network_name = f"breachpilot-net-{self.run_id}-{secrets.token_hex(3)}"
             self.backend.create_network(self.network_name)
             self.gateway = _db.docker_network_gateway(self.network_name)
             spec = SandboxSpec(
-                sandbox_id=f"netattack-{self.run_id}-{secrets.token_hex(3)}",
+                sandbox_id=f"breachpilot-{self.run_id}-{secrets.token_hex(3)}",
                 image=self.cfg.image,
                 user=self.cfg.user,
                 network_name=self.network_name,
@@ -486,7 +486,7 @@ class SandboxManager:
             pass
 
     def cleanup_stale(self) -> int:
-        """Remove exited NetAttackAI-labeled containers + empty labeled networks.
+        """Remove exited BreachPilot-labeled containers + empty labeled networks.
 
         Conservative by design: a RUNNING worker may belong to a concurrent
         session (``api.max_concurrent_runs`` > 1), so only containers that are

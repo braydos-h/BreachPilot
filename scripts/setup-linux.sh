@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Linux/macOS bootstrap for the NetAttackAI engine.
+# Linux/macOS bootstrap for the BreachPilot engine.
 #
 # Idempotent: safe to re-run. Creates the venv, installs Python deps, checks
 # for the external tools the engine uses (nmap, ollama, optional Kali

@@ -156,7 +156,7 @@ def _http_json(
 ) -> Any:
     """HTTP GET/POST returning parsed JSON. ``fetch_fn(url, method, body_json, headers)``
     overrides the real urllib path so tests never touch the network."""
-    h = {"User-Agent": process_user_agent("netattackai-threat-intel/1.0")}
+    h = {"User-Agent": process_user_agent("breachpilot-threat-intel/1.0")}
     if headers:
         h.update(headers)
     body_str = json.dumps(body) if body is not None else ""

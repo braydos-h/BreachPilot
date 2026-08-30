@@ -1,4 +1,4 @@
-// NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
+// BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 // Benchmark run detail — tabbed like the normal run page (RunPage).
 // Layout: header + live bar, main tabs (Overview/Trials/Timeline/Evidence/Config)
 // + aside telemetry. Incremental event polling, progressive skeletons, live progress.

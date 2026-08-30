@@ -1,4 +1,4 @@
-"""Mobile attack plugin for NetAttackAi.
+"""Mobile attack plugin for BreachPilot.
 
 Wraps frida/objection/apktool/jadx for mobile testing. Local APK analysis uses
 ``@audit_tool`` (no target touch); device-touching tools (USB / remote frida

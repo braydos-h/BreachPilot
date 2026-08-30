@@ -1,7 +1,7 @@
 name: caldera
 version: 0.1.0
 description: Caldera adversary emulation plugin - runs abilities against an authorized Caldera server (target-side). Target-touching tools use @require_allowlist; the Caldera server must be in exploit.allowed_targets.
-author: NetAttackAi
+author: BreachPilot
 capabilities: [mcp_tool]
 # Lab build: enabled true. Caldera server must be in exploit.allowed_targets.
 enabled: true

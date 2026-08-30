@@ -10,7 +10,7 @@ import { useSecrets, usePutSecrets } from "@/api/hooks";
 import { ApiError } from "@/api/client";
 import { useToast } from "@/hooks/use-toast";
 
-const ONBOARDING_KEY = "netattackai.onboarding.v1";
+const ONBOARDING_KEY = "breachpilot.onboarding.v1";
 
 interface OnboardingGateProps {
   children: React.ReactNode;
@@ -129,7 +129,7 @@ function OnboardingCard({ entries, onDone }: OnboardingCardProps) {
             <KeyRound className="h-4 w-4" />
             <span className="text-xs uppercase tracking-wide">First-run setup</span>
           </div>
-          <CardTitle className="text-xl">Set up NetAttackAI</CardTitle>
+          <CardTitle className="text-xl">Set up BreachPilot</CardTitle>
           <CardDescription>
             Pick your AI provider, add provider API keys, and (optionally) sign in to ChatGPT.
             Missing keys are required; configured ones can be replaced. You can change any of this

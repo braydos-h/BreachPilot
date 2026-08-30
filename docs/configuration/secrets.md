@@ -64,7 +64,7 @@ CLI wiring: `bootstrap_startup_api_keys(args, prompt=False)` (`tools/config_cli.
 
 **Create/load** — `load_or_create_token(token_file, env_override)` (`api/auth.py:46`):
 
-1. `env_override` (`NETATTACKAI_API_TOKEN` or `os.environ["NETATTACKAI_API_TOKEN"]`) **wins** — returned verbatim, file ignored.
+1. `env_override` (`BREACHPILOT_API_TOKEN` or `os.environ["BREACHPILOT_API_TOKEN"]`) **wins** — returned verbatim, file ignored.
 2. If file exists, `read_text().strip()` returned when non-empty.
 3. Else `secrets.token_urlsafe(32)` (256-bit) generated, `parent.mkdir(parents=True)`, `write_text(token)`, `chmod 0o600` best-effort, returned.
 
@@ -74,7 +74,7 @@ Called at `app.create_app(config_path)` (`app.py:71`) and again at `main._run_da
 
 **WebSocket** — `authenticate_websocket(ws, token, allowed_origins)` (`api/auth.py:128`) checks `is_loopback_origin(origin, allowed_origins)` (null/non-loopback always rejected, `api.allowed_origins` only loopback HTTP(S) origins, `port` 1–65535), then `await ws.receive_json()` must be `{"auth": "<token>"}` within 5s, else `4401`.
 
-**Rotation** — delete file + restart daemon. Or set `NETATTACKAI_API_TOKEN` env. Token is per-host, not per-user; multi-operator (`api.multi_operator: true`, `config.yaml:404`) adds user accounts but not a permissions system.
+**Rotation** — delete file + restart daemon. Or set `BREACHPILOT_API_TOKEN` env. Token is per-host, not per-user; multi-operator (`api.multi_operator: true`, `config.yaml:404`) adds user accounts but not a permissions system.
 
 ### ChatGPT OAuth (`oauth/` + `~/.codex/auth.json`)
 
@@ -106,7 +106,7 @@ All three are gitignored. Verify `.gitignore` covers `secr.json`, `.webui_secret
 | Secret | Rotate | Revoke remote |
 |--------|--------|---------------|
 | `OLLAMA_API_KEY` / `SERPAPI_API_KEY` / `NVD_API_KEY` / `GITHUB_TOKEN` | Edit `secr.json`, delete + `export NEW=…`, or `python main.py --setup-api-keys` then restart; next `load_api_keys_into_env` on boot picks new value (or env override immediately) | Ollama Cloud dashboard / SerpAPI / NVD / GitHub token settings |
-| `.webui_secret_key` | `rm .webui_secret_key` + restart daemon, or `export NETATTACKAI_API_TOKEN=new` | — (local daemon only; old WS connections drop at `run_manager.shutdown()`) |
+| `.webui_secret_key` | `rm .webui_secret_key` + restart daemon, or `export BREACHPILOT_API_TOKEN=new` | — (local daemon only; old WS connections drop at `run_manager.shutdown()`) |
 | `~/.codex/auth.json` | Re-run `Sign in with ChatGPT` from menu / `python main.py --doctor` then login | ChatGPT account settings |
 | `AI_NMAP_VAULT_KEY` | `export AI_NMAP_VAULT_KEY=new` + migrate store | — |
 
@@ -118,7 +118,7 @@ No migration tool — old `secr.json` entries not yet overlaid by new env remain
 - ✅ Keep `.webui_secret_key` and `secr.json` out of backups that leave the box.
 - âŒ Never `cat` / `echo` tokens into `config.yaml`; never `git add secr.json`; never log `Authorization`.
 - âŒ Never read `~/.codex/auth.json`; check `is_authenticated()` by existence only.
-- âŒ Never `NETATTACKAI_API_TOKEN` in shell history — use `read -s` or `.env` + export.
+- âŒ Never `BREACHPILOT_API_TOKEN` in shell history — use `read -s` or `.env` + export.
 
 ## Related
 

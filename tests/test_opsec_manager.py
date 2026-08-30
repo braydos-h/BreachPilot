@@ -169,7 +169,7 @@ def test_profile_from_config_tolerates_none_cfg():
 
 def test_user_agent_fixed_default_when_rotation_off():
     mgr = OpsecManager(OpsecProfile(ua_rotation=False))
-    assert mgr.user_agent() == "NetAttackAi/1.0"
+    assert mgr.user_agent() == "BreachPilot/1.0"
 
 
 def test_user_agent_rotates_across_pool_when_on():
@@ -470,8 +470,8 @@ def test_process_user_agent_unconfigured_returns_default():
     import tools.opsec as opsec_mod
 
     opsec_mod._process_manager = None
-    assert process_user_agent("NetAttackAi-OSINT/1.0") == "NetAttackAi-OSINT/1.0"
-    assert process_user_agent() == "NetAttackAi/1.0"
+    assert process_user_agent("BreachPilot-OSINT/1.0") == "BreachPilot-OSINT/1.0"
+    assert process_user_agent() == "BreachPilot/1.0"
 
 
 def test_process_user_agent_after_configure_with_rotation_returns_pool_ua():
@@ -480,9 +480,9 @@ def test_process_user_agent_after_configure_with_rotation_returns_pool_ua():
     opsec_mod._process_manager = None
     p = OpsecProfile(enabled=True, ua_rotation=True)
     configure(p, rng=lambda: 0.0)
-    ua = process_user_agent("NetAttackAi-OSINT/1.0")
+    ua = process_user_agent("BreachPilot-OSINT/1.0")
     assert ua in OpsecManager._UA_POOL
-    assert ua != "NetAttackAi-OSINT/1.0"
+    assert ua != "BreachPilot-OSINT/1.0"
     # Cleanup so other tests see the unconfigured state.
     opsec_mod._process_manager = None
 

@@ -3,14 +3,14 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "netattackai"
+name = "breachpilot"
 version = "0.49.12"
 description = "AI-driven, locally-run penetration testing / bug bounty research agent"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.11"
 authors = [
-    {name = "NetAttackAI Team"},
+    {name = "BreachPilot Team"},
 ]
 keywords = ["security", "penetration-testing", "nmap", "ai", "mcp"]
 classifiers = [
@@ -50,7 +50,7 @@ dev = [
 ]
 
 [project.scripts]
-netattackai = "main:main"
+breachpilot = "main:main"
 
 [tool.setuptools]
 py-modules = [

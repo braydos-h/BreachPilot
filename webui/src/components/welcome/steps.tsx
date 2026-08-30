@@ -28,7 +28,7 @@ export const STEPS: TourStep[] = [
     id: "what",
     eyebrow: "Overview",
     title: "Autonomous assessment platform, local-first",
-    body: "NetAttackAI is a local-first, AI-driven penetration testing and vulnerability research platform. It operates across the full kill chain — planning, reconnaissance, exploitation, verification, and reporting — against assets you own or are explicitly authorized to assess. Findings are evidence-backed with full auditability. Built on Ollama LLMs, the Model Context Protocol, and a 140-skill advisory knowledge base.",
+    body: "BreachPilot is a local-first, AI-driven penetration testing and vulnerability research platform. It operates across the full kill chain — planning, reconnaissance, exploitation, verification, and reporting — against assets you own or are explicitly authorized to assess. Findings are evidence-backed with full auditability. Built on Ollama LLMs, the Model Context Protocol, and a 140-skill advisory knowledge base.",
     mockup: "killchain",
   },
   {

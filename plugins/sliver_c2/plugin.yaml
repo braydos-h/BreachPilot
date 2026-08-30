@@ -1,7 +1,7 @@
 name: sliver_c2
 version: 0.1.0
 description: Sliver C2 bridge - implant generation, team server, session management. Mirrors tools/metasploit_bridge.py for modern C2. Target-touching tools are allowlist-locked; callback hosts must be added to exploit.allowed_targets.
-author: NetAttackAi
+author: BreachPilot
 capabilities: [mcp_tool]
 enabled: false
 config_section:

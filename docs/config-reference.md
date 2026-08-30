@@ -68,7 +68,7 @@ reachability, model registry, port conflicts) and `python main.py --self-test`
 | `EXPLOIT_TARGET_DOMAIN` | — | Domain string for a domain `--target` | mcp_session.py:266 | mcp_shared.py:523 |
 | `EXPLOIT_DISCOVERED_TARGETS` | — | Comma-separated subdomains/IPs auto-authorized mid-run | `add_discovered_target` mcp_shared.py:537-555 | mcp_shared.py:528-533 |
 | `EXPLOIT_WORKSPACE` | `exploit_workspace` | Exploit workspace root override | set by mcp_session.py:256 | cve_lookup.py:171 (KEV cache), tools/kernel/workspace.py:139 |
-| `NETATTACKAI_API_TOKEN` | token file | WebUI daemon bearer token override (never logged) | `api.token_file` | app.py:71, tools/api/auth.py:46 |
+| `BREACHPILOT_API_TOKEN` | token file | WebUI daemon bearer token override (never logged) | `api.token_file` | app.py:71, tools/api/auth.py:46 |
 | `MCP_HTTP_TOKEN` | — | Optional bearer auth for MCP HTTP transport | — | mcp_shared.run_mcp_http_server, mcp_engine_server.py:27 |
 | `MCP_ALLOW_PUBLIC_BIND` | — | Second half of the two-person rule for non-loopback MCP binds | — | mcp_shared.run_mcp_http_server |
 | `AI_NMAP_ACTIVE_MODEL_ALIAS` | — | Active model alias threaded into the MCP server subprocess | set by mcp_session.py:270 | tools/mcp_tools/registry.py:201, peer_models.py:80 |
@@ -507,7 +507,7 @@ Advisory prompt context only — never permission/scope/audit (docs/skills.md:16
 | `enabled` | list[str] | `[]` | Explicitly loaded plugins (schema default OFF — trusted Python, full operator-box privileges; the lab `config.yaml` lists 13, each no-op until its own API key/URL is configured) | tools/plugins.py |
 | `disabled` | list[str] | `[]` | Hard-blocked regardless of manifest | tools/plugins.py |
 | `search_paths` | list[str] | `["plugins"]` | Filesystem dirs scanned for `plugin.yaml` | tools/plugins.py |
-| `entry_points` | bool | `true` | `netattackai.plugins` entry-point discovery | tools/plugins.py |
+| `entry_points` | bool | `true` | `breachpilot.plugins` entry-point discovery | tools/plugins.py |
 
 ### `threat_intel:` (config.yaml:126-137) — threat-feed ingestion (OSV.dev + GHSA + KEV)
 
@@ -634,7 +634,7 @@ reflection by `swarm.reflection_enabled`.
 | `enabled` | bool | `true` | Daemon enablement | `app.create_app` |
 | `host` | str | `127.0.0.1` | **Loopback-only in v1; any other value is a validation ERROR**; CLI `--api-host` overrides | `main._run_daemon`, `tools/config/validator.py` |
 | `port` | int | `8765` | Daemon port; CLI `--api-port` overrides | `main._run_daemon` |
-| `token_file` | str | `.webui_secret_key` | Auto-generated bearer token file (gitignored); `NETATTACKAI_API_TOKEN` env overrides | app.py:70, tools/api/auth.py:42-46 |
+| `token_file` | str | `.webui_secret_key` | Auto-generated bearer token file (gitignored); `BREACHPILOT_API_TOKEN` env overrides | app.py:70, tools/api/auth.py:42-46 |
 | `allowed_origins` | list[str] | `[]` | Extra loopback origins for CORS/WS; `null` and non-loopback always rejected | app.py:108 |
 | `event_buffer_size` | int | `256` | In-memory ring buffer per run for WS subscribers | app.py:81 |
 | `shutdown_timeout_seconds` | int | `15` | Graceful shutdown wait | tools/api/run_manager.py:320 |
@@ -655,7 +655,7 @@ never an automatic fallback. Full architecture + threat model:
 |-----|------|---------|----------|-------------|
 | `enabled` | bool | `true` | Master switch; `false` = explicit legacy host-execution opt-out (uncontained) | `tools/sandbox/manager.py:resolve_manager` |
 | `backend` | str | `docker` | Execution backend | `tools/sandbox/models.py` |
-| `image` | str | `netattackai-sandbox:latest` | Worker image (build: `docker build -t <image> docker/sandbox`) | `tools/sandbox/docker_backend.py` |
+| `image` | str | `breachpilot-sandbox:latest` | Worker image (build: `docker build -t <image> docker/sandbox`) | `tools/sandbox/docker_backend.py` |
 | `user` | str | `sandbox` | Container user (non-root default) | `tools/sandbox/docker_backend.py:_build_create_args` |
 | `read_only_rootfs` | bool | `true` | Read-only container rootfs; `/workspace` + tmpfs stay writable | `_build_create_args` |
 | `env_passthrough` | list[str] | `[]` | Extra host env var names the worker may receive (allowlist; never the whole env) | `tools/sandbox/manager.py:_build_env` |

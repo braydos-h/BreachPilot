@@ -1,4 +1,4 @@
-"""Engine MCP server — exposes NetAttackAi's advisory capabilities to other AI
+"""Engine MCP server — exposes BreachPilot's advisory capabilities to other AI
 assistants (Claude Desktop, Cursor, etc.) as MCP tools.
 
 Distinct from ``mcp_server.py`` (defensive Nmap scanning) and
@@ -72,9 +72,9 @@ def create_mcp_server(
     persistence = ApiPersistence(Path(reports_dir))
 
     mcp = FastMCP(
-        "netattackai-engine",
+        "breachpilot-engine",
         instructions=(
-            "NetAttackAI engine advisory surface. Tools are read-only: skill "
+            "BreachPilot engine advisory surface. Tools are read-only: skill "
             "search, skill body retrieval, NVD CVE lookup, and run history. "
             "No target touching, no terminal, no exploit execution. For active "
             "scanning use mcp_server.py; for exploitation use mcp_exploit_server.py."

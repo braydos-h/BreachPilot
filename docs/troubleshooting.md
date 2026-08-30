@@ -381,14 +381,14 @@ an exact fix. When in doubt, start with the diagnostics table below — the
 - **Symptom:** API/WebSocket calls return 401; the SPA can't connect.
 - **Cause:** every route except `/health` requires a bearer token. The token
   is auto-generated into `.webui_secret_key` (gitignored) on first boot, or
-  overridden by `NETATTACKAI_API_TOKEN` (`tools/api/auth.py:39`). WebSocket
+  overridden by `BREACHPILOT_API_TOKEN` (`tools/api/auth.py:39`). WebSocket
   clients must send `{"auth": "<token>"}` as the first message or get closed
   with 4401 (`tools/api/auth.py:8`).
 - **Check:** `Get-Content .webui_secret_key` (Windows) /
   `cat .webui_secret_key` (Linux)
 - **Fix:** set a stable token:
   ```powershell
-  $env:NETATTACKAI_API_TOKEN = "your-token"
+  $env:BREACHPILOT_API_TOKEN = "your-token"
   python main.py --web
   ```
   or delete `.webui_secret_key` to regenerate. The token is never logged or

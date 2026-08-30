@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
+// BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MetricCards, formatCost, formatDuration, formatPct } from "@/features/benchmarks/MetricCards";

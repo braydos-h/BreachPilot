@@ -29,7 +29,7 @@ skip_if_no_build = pytest.mark.skipif(
 
 def _make_client(tmp_path, monkeypatch, *, serve_webui: bool, callables=None):
     """Create a TestClient with a known token and an in-memory serve_webui flag."""
-    monkeypatch.setenv("NETATTACKAI_API_TOKEN", "test-token")
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-token")
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -60,7 +60,7 @@ def test_serve_webui_returns_index_html(tmp_path, monkeypatch):
     assert "text/html" in resp.headers.get("content-type", "")
     body = resp.text
     assert '<div id="root"></div>' in body
-    assert "NetAttackAI" in body or "root" in body
+    assert "BreachPilot" in body or "root" in body
 
 
 @skip_if_no_build

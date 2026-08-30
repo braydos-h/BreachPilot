@@ -1,4 +1,4 @@
-# Convenience targets for the NetAttackAI engine.
+# Convenience targets for the BreachPilot engine.
 # Thin wrappers -- no real logic lives here. On Windows use the equivalent
 # `python`/`python -m` commands directly (see README / docs/getting-started.md).
 

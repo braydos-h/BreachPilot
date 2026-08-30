@@ -1,5 +1,5 @@
 """Shared dependencies and helpers for exploit MCP tool registration."""
-# NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
+# BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 
 from __future__ import annotations
 

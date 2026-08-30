@@ -29,7 +29,7 @@ class TestSandboxConfigFromConfig:
                 "sandbox": {
                     "enabled": True,
                     "backend": "docker",
-                    "image": "netattackai-sandbox:latest",
+                    "image": "breachpilot-sandbox:latest",
                     "user": "sandbox",
                     "read_only_rootfs": True,
                     "env_passthrough": ["OLLAMA_HOST"],
@@ -55,7 +55,7 @@ class TestSandboxConfigFromConfig:
             }
         )
         assert cfg.enabled is True
-        assert cfg.image == "netattackai-sandbox:latest"
+        assert cfg.image == "breachpilot-sandbox:latest"
         assert cfg.user == "sandbox"
         assert cfg.read_only_rootfs is True
         assert cfg.env_passthrough == ["OLLAMA_HOST"]

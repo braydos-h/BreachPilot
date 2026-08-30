@@ -1,8 +1,8 @@
 @echo off
 REM ============================================================================
-REM  NetAttackAI — Quick Launcher
+REM  BreachPilot — Quick Launcher
 REM ============================================================================
-REM  Double-click this file to start NetAttackAI. No install needed if you
+REM  Double-click this file to start BreachPilot. No install needed if you
 REM  already ran install.bat — this just launches the app.
 REM
 REM  If the venv or deps are missing it will tell you to run install.bat first.
@@ -50,7 +50,7 @@ if errorlevel 1 (
 REM Launch. Pass through any args given to START.bat (e.g. --target 10.0.0.50)
 REM No args = WebUI daemon (same as `python main.py` default). Use --menu for TUI.
 if "%~1"=="" (
-    echo  Starting NetAttackAI -- WebUI at http://127.0.0.1:8765
+    echo  Starting BreachPilot -- WebUI at http://127.0.0.1:8765
     echo  (Use START.bat --menu for the terminal menu, or --help for flags)
     echo.
 )
@@ -74,7 +74,7 @@ exit /b
 set "RC=%ERRORLEVEL%"
 if not "%RC%"=="0" (
     echo.
-    echo  [!] NetAttackAI exited with code %RC%
+    echo  [!] BreachPilot exited with code %RC%
     echo      Run install.bat --check  or  python main.py --doctor  for diagnostics.
 )
 

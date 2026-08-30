@@ -3,7 +3,7 @@
 Centralizes the duplicated config-loading and builder logic that previously
 lived in both ``mcp_server.py`` and ``mcp_exploit_server.py``.
 """
-# NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
+# BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 
 from __future__ import annotations
 

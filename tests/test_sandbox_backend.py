@@ -21,10 +21,10 @@ from tools.sandbox.models import SandboxSpec
 
 def _spec(**overrides) -> SandboxSpec:
     defaults = dict(
-        sandbox_id="netattack-run123-deadbe",
-        image="netattackai-sandbox:latest",
+        sandbox_id="breachpilot-run123-deadbe",
+        image="breachpilot-sandbox:latest",
         user="sandbox",
-        network_name="netattack-net-run123-beef01",
+        network_name="breachpilot-net-run123-beef01",
         workspace_src="C:/tmp/exploit_workspace/run123",
         memory_mb=1024,
         cpus=1.0,
@@ -95,7 +95,7 @@ class TestBuildCreateArgs:
 
     def test_labels_mark_our_containers(self):
         args = _build_create_args(_spec(), cap_raw=True, read_only_rootfs=True)
-        assert args[args.index("--label") + 1] == "netattackai=true"
+        assert args[args.index("--label") + 1] == "breachpilot=true"
         assert any(a.startswith("run_id=") for a in args)
 
     def test_invalid_image_rejected(self):

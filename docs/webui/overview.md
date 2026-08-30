@@ -29,7 +29,7 @@ Vite + React 18 + TypeScript SPA under `webui/src/`. Loopback-only; all authorit
 
 | Layer | File | Detail |
 |-------|------|--------|
-| HTML entry | `webui/index.html:2` | `<html class="dark">`, theme toggle script (`netattack.theme`), `#root` mount |
+| HTML entry | `webui/index.html:2` | `<html class="dark">`, theme toggle script (`breachpilot.theme`), `#root` mount |
 | React root | `webui/src/main.tsx:8` | `ReactDOM.createRoot` → `<ErrorBoundary>` → `<App />` |
 | CSS | `webui/src/index.css:1` | Tailwind base/components/utilities, HSL CSS vars (`:root`/`.dark`), custom utilities (`bg-grid`, `glow-primary`, `animate-scan`, etc.) |
 | Version inject | `webui/vite.config.ts:13` | `define.__APP_VERSION__` from `package.json:version` (`0.49.12`) |
@@ -84,9 +84,9 @@ All routes are nested under `<Layout>` (`src/components/Layout.tsx:50`) which pr
 
 | Gate | File | Behaviour |
 |------|------|-----------|
-| `TokenGate` | `webui/src/components/TokenGate.tsx` | Reads `sessionStorage netattackai.apiToken.v1` via `api/client.ts:6`. Verifies via `GET /capabilities` (`api/hooks.ts:114`). 401→ clear+error. `status 0` → daemon unreachable hint. |
-| `OnboardingGate` | `webui/src/components/OnboardingGate.tsx` | After token: `GET /secrets` (`api/hooks.ts:169`). If any `missing` and `sessionStorage netattackai.onboarding.v1 !== "1"`, shows provider+keys+ChatGPT setup. |
-| `WelcomeGate` | `webui/src/components/WelcomeScreen.tsx` | First-visit tour (event `netattackai:open-welcome` from `HomePage`) |
+| `TokenGate` | `webui/src/components/TokenGate.tsx` | Reads `sessionStorage breachpilot.apiToken.v1` via `api/client.ts:6`. Verifies via `GET /capabilities` (`api/hooks.ts:114`). 401→ clear+error. `status 0` → daemon unreachable hint. |
+| `OnboardingGate` | `webui/src/components/OnboardingGate.tsx` | After token: `GET /secrets` (`api/hooks.ts:169`). If any `missing` and `sessionStorage breachpilot.onboarding.v1 !== "1"`, shows provider+keys+ChatGPT setup. |
+| `WelcomeGate` | `webui/src/components/WelcomeScreen.tsx` | First-visit tour (event `breachpilot:open-welcome` from `HomePage`) |
 | `ErrorBoundary` | `webui/src/components/ErrorBoundary.tsx` | Wraps entire app (`main.tsx:10`) |
 
 Token storage: `sessionStorage` only (survives reload, clears on tab close). Header `Authorization: Bearer <token>` injected by `apiFetch` (`api/client.ts:75`). WS/SSE handshake also uses `sessionStorage` token (`api/ws.ts:236`, `api/sse.ts:200`).
@@ -101,7 +101,7 @@ Token storage: `sessionStorage` only (survives reload, clears on tab close). Hea
 | Live events | `useRunEvents` (`api/ws.ts:36`) | WS-primary, SSE fallback, `sequence` dedupe, `appendBounded` + `requestAnimationFrame` batching |
 | Event cache | `eventStore` (`api/eventStore.ts:19`) | In-memory LRU (10 runs), `MAX_EVENTS_PER_RUN=1000` (`api/eventBuffer.ts:4`) |
 | Permission mode | `lib/permissionMode.ts` + `components/permission/PermissionControl.tsx` | `read_only`/`approve`/`full_access`, auto-answer via `autoAnswerFor` (`routes/RunPage.tsx:169`) |
-| Theme | `lib/useTheme.ts` | `localStorage netattack.theme`, toggled in `Layout` |
+| Theme | `lib/useTheme.ts` | `localStorage breachpilot.theme`, toggled in `Layout` |
 | Wizard | `RunWizard.tsx:37` local `useState` | Lifted model/mode/target/goal/power-ups state, `buildRequest()` serialises to `RunCreateRequest` |
 | Router | `react-router-dom 6.27` | `?path=recon|attack|fast` pre-selects mode; `:runId` params |
 

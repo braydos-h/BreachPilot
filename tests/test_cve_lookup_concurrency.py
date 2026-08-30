@@ -149,4 +149,4 @@ def test_fetch_sync_sends_user_agent_header() -> None:
     with patch("urllib.request.urlopen", side_effect=fake_urlopen):
         client.search_sync("nginx 1.18.0")
 
-    assert "netattackai-cve-lookup" in captured["ua"]
+    assert "breachpilot-cve-lookup" in captured["ua"]

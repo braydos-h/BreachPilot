@@ -1,7 +1,7 @@
 # CLI Reference
 
 Complete reference for every command-line entry point, flag, interactive option, and environment
-variable in NetAttackAI. See `docs/getting-started.md` for setup and first commands.
+variable in BreachPilot. See `docs/getting-started.md` for setup and first commands.
 
 ## Entry Points
 
@@ -35,7 +35,7 @@ argument group in `main.parse_args`, so references survive line drift.
 
 | Flag | Default | Description | Group |
 |------|---------|-------------|------|
-| `--version` | — | Print `NetAttackAI <version>` and exit | — |
+| `--version` | — | Print `BreachPilot <version>` and exit | — |
 | `--target <ip-or-domain>` | `""` | Target to attack or recon. Accepts an IP **or a domain** (Phase 4); domains resolve via `tools/validation_utils.resolve_target_to_ip` and thread `EXPLOIT_TARGET`/`EXPLOIT_TARGET_IP`/`EXPLOIT_TARGET_DOMAIN` into the MCP server (AGENTS.md rule 6) | targeting |
 | `--mode {recon,attack,fast}` | `""` | `recon` = gather intel only, `attack` = full exploitation, `fast` = parallel recon preset then attack. Recon is always `read_only` (`tools/cli_exploit_settings.py:157-163`) | targeting |
 | `--goal <name>` | `""` | Preset goal: `backdoor`, `initial_access`, `privilege_escalation`, … | targeting |
@@ -126,7 +126,7 @@ daemon default and direct runs load keys without prompting.
 Daemon mode refuses to combine with target/goal/menu/doctor/demo/eval/self-test/skills-list/
 list-plugins/setup-api-keys flags and exits 2 on conflict. The API is served
 by the FastAPI factory in `app.py` (`create_app`), mounted under `/api/v1`, bearer-token protected
-(`NETATTACKAI_API_TOKEN` env override; `tools/api/auth.py`).
+(`BREACHPILOT_API_TOKEN` env override; `tools/api/auth.py`).
 
 ### Interactive menu (`--menu`)
 
@@ -270,8 +270,8 @@ Keys are loaded from the `--api-key-file` JSON into `os.environ` when not alread
 
 | Variable | Effect | Source |
 |----------|--------|--------|
-| `NETATTACKAI_API_TOKEN` | Bearer token override for the API daemon (else `.webui_secret_key` file) | `app.py:69-73`; `tools/api/auth.py:46` |
-| `NETATTACKAI_API_KEY_FILE` | API key file path used by the API routes | `tools/api/routes/system.py:144, 181` |
+| `BREACHPILOT_API_TOKEN` | Bearer token override for the API daemon (else `.webui_secret_key` file) | `app.py:69-73`; `tools/api/auth.py:46` |
+| `BREACHPILOT_API_KEY_FILE` | API key file path used by the API routes | `tools/api/routes/system.py:144, 181` |
 
 ### Behavior / debug
 

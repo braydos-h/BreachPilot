@@ -1,4 +1,4 @@
-# NetAttackAI WebUI API — v1 Reference
+# BreachPilot WebUI API — v1 Reference
 
 The local WebUI API daemon (`--demon` / `--daemon` / `--web`) exposes a versioned,
 loopback-only REST + WebSocket API so the bundled WebUI (or third-party clients)
@@ -85,7 +85,7 @@ v1 is locked down by design. There is no public-bind path.
 |-------|-------------|
 | Bind | `assert_api_loopback` refuses any host not in `{127.0.0.1, localhost, ::1}`. `--api-host` is validated in `main._run_daemon` and re-validated in `create_app`. |
 | HTTP auth | `BearerAuth` (FastAPI dependency) on every route except `GET /health`. Constant-time `hmac.compare_digest` comparison. Missing/invalid/malformed → `401`. |
-| Token | 256-bit URL-safe, generated into `api.token_file` (default `.webui_secret_key`, gitignored) on first boot, or overridden via `NETATTACKAI_API_TOKEN` env. File perms `0o600` where supported. Never logged, never returned by any endpoint. |
+| Token | 256-bit URL-safe, generated into `api.token_file` (default `.webui_secret_key`, gitignored) on first boot, or overridden via `BREACHPILOT_API_TOKEN` env. File perms `0o600` where supported. Never logged, never returned by any endpoint. |
 | CORS | `CORSMiddleware` allows only loopback + `api.allowed_origins`. Credentials enabled. `allowed_origins` entries must be loopback HTTP(S) or the factory raises. |
 | WebSocket origin | `is_loopback_origin` rejects `null`, non-loopback, schemes other than `http`/`https`, userinfo, query, fragment, non-root paths, out-of-range ports. Close `4403` on failure. |
 | WebSocket auth | First message after accept must be `{"auth": "<token>"}`. Close `4401` on missing/invalid auth (5s timeout). |
@@ -192,7 +192,7 @@ The **concurrency** invariant is enforced by `RunManager` (`tools/api/run_manage
 
 Every protected route uses `Authorization: Bearer <token>`. The token is loaded by `load_or_create_token`:
 
-1. `NETATTACKAI_API_TOKEN` env var (if set, non-empty) — takes precedence.
+1. `BREACHPILOT_API_TOKEN` env var (if set, non-empty) — takes precedence.
 2. `api.token_file` (default `.webui_secret_key`) — read if it exists.
 3. Otherwise generate `secrets.token_urlsafe(32)` (256-bit), write to `token_file` with `0o600` perms (best-effort on Windows).
 
@@ -469,7 +469,7 @@ enter the request, response, or config. The WebUI surfaces the URL as a link
 
 ### `POST /providers/chatgpt/proxy/stop`
 
-**Auth:** bearer. Stop the proxy **only if NetAttackAi started it**
+**Auth:** bearer. Stop the proxy **only if BreachPilot started it**
 (`we_started`); otherwise a no-op that leaves an operator-started proxy alone.
 Returns `{ok, stopped}`.
 
@@ -1444,8 +1444,8 @@ api:
 | `graph_route` | bool | true | Attack-path DAG route (`tools/api/routes/graph_explorer.py:30`) |
 
 **Env overrides:**
-- `NETATTACKAI_API_TOKEN` — bearer token (precedes `token_file`).
-- `NETATTACKAI_API_KEY_FILE` — API key file path (for `GET/PUT /secrets`).
+- `BREACHPILOT_API_TOKEN` — bearer token (precedes `token_file`).
+- `BREACHPILOT_API_KEY_FILE` — API key file path (for `GET/PUT /secrets`).
 
 ---
 

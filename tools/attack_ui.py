@@ -189,7 +189,7 @@ class AttackUi:
     def banner(self) -> None:
         print()
         print("=" * 60)
-        print(f"  {self._c('header')}NetAttackAI — AI Target Exploitation Engine{self._c('reset')}")
+        print(f"  {self._c('header')}BreachPilot — AI Target Exploitation Engine{self._c('reset')}")
         print("  Autonomous penetration testing AI")
         print("=" * 60)
         print()

@@ -1,7 +1,7 @@
 name: webhook_notify
 version: 0.1.0
 description: Outbound-only Slack/Discord run-status notifications. Pings a webhook URL when a run hits a milestone/finding so the operator does not have to poll the WebUI.
-author: NetAttackAi
+author: BreachPilot
 capabilities: [event_subscriber, config]
 # opt-in: plugins default to disabled; enable via config plugins.enabled list
 enabled: false

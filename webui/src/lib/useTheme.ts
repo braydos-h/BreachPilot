@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 
 type Theme = "dark" | "light";
 
-const STORAGE_KEY = "netattack.theme";
+const STORAGE_KEY = "breachpilot.theme";
 
 function readInitial(): Theme {
   try {

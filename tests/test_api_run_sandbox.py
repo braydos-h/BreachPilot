@@ -24,7 +24,7 @@ def _sandbox_payload(container: str = "abc123def456") -> dict:
         "backend": "docker",
         "run_id": "sandboxrun1",
         "container_id": container,
-        "image": "netattackai-sandbox:latest",
+        "image": "breachpilot-sandbox:latest",
         "user": "sandbox",
         "env_keys": ["EXPLOIT_SANDBOX", "EXPLOIT_WORKSPACE", "TERM"],
         "network": {
@@ -131,7 +131,7 @@ def test_sandbox_endpoint_summarizes_audit_and_events(tmp_path, monkeypatch):
     assert resp.status_code == 200
     data = resp.json()
     assert data["found"] is True
-    assert data["config"]["image"] == "netattackai-sandbox:latest"
+    assert data["config"]["image"] == "breachpilot-sandbox:latest"
     assert data["config"]["user"] == "sandbox"
     assert data["container"]["id"] == "abc123def456"
     assert data["container"]["sandbox_run_id"] == "sandboxrun1"

@@ -6,7 +6,7 @@ Provides:
 - Warning about unknown keys
 - Save updated config back to disk
 """
-# NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
+# BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 
 from __future__ import annotations
 
@@ -103,7 +103,7 @@ CONFIG_SCHEMA: dict[str, Any] = {
     # chat/generate path routes through the local openai-oauth proxy at
     # ``base_url`` (loopback-only by default). OAuth credentials stay in
     # openai-oauth's ``~/.codex/auth.json`` — they are NEVER copied into this
-    # config or read by NetAttackAi (only their existence is checked). See
+    # config or read by BreachPilot (only their existence is checked). See
     # tools/providers/chatgpt_provider.py and docs/providers.md.
     "chatgpt": {
         "enabled": False,
@@ -666,7 +666,7 @@ CONFIG_SCHEMA: dict[str, Any] = {
     # ``enabled`` explicitly loads the named plugins; ``disabled`` hard-blocks
     # them regardless of manifest enablement; ``search_paths`` are the
     # filesystem dirs scanned for plugin.yaml manifests; ``entry_points`` gates
-    # importlib entry-point discovery in the ``netattackai.plugins`` group.
+    # importlib entry-point discovery in the ``breachpilot.plugins`` group.
     "plugins": {
         "enabled": [],
         "disabled": [],
@@ -712,7 +712,7 @@ CONFIG_SCHEMA: dict[str, Any] = {
     # Local WebUI API daemon (``--demon`` / ``--daemon``). V1 is loopback-only;
     # there is no public-bind override. The bearer token is generated into
     # ``token_file`` (gitignored) on first boot, or overridden via
-    # ``NETATTACKAI_API_TOKEN``. ``allowed_origins`` are extra loopback origins
+    # ``BREACHPILOT_API_TOKEN``. ``allowed_origins`` are extra loopback origins
     # permitted for CORS/WS (in addition to localhost/127.0.0.1); ``null`` and
     # non-loopback origins are always rejected.
     "api": {
@@ -785,7 +785,7 @@ CONFIG_SCHEMA: dict[str, Any] = {
     "sandbox": {
         "enabled": True,
         "backend": "docker",
-        "image": "netattackai-sandbox:latest",
+        "image": "breachpilot-sandbox:latest",
         "user": "sandbox",
         "read_only_rootfs": True,
         # Host env vars the worker MAY receive (allowlist; never the whole env).

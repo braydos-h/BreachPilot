@@ -1,4 +1,4 @@
-// NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
+// BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 // Types for the benchmark suite API (/api/v1/benchmarks/*).
 
 export type TrialStatus =
@@ -126,7 +126,7 @@ export interface Trial {
 }
 
 export interface RunEnvironment {
-  netattack_version: string;
+  breachpilot_version: string;
   git_sha: string;
   git_dirty: boolean | null;
   git_branch: string;
@@ -216,7 +216,7 @@ export interface RunConfig {
 export interface ReplayManifest {
   run_id: string;
   suite: string;
-  netattack_version: string;
+  breachpilot_version: string;
   git_sha: string;
   git_dirty: boolean | null;
   git_branch: string;

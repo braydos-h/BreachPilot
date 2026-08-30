@@ -24,7 +24,7 @@ Creates the FastAPI ASGI app served by `main._run_daemon` (`--demon/--daemon/--w
 
 ## Responsibilities
 
-- Build a `FastAPI(title="NetAttackAI WebUI API")` with `lifespan` that calls `persistence.recover_interrupted()` on startup and `run_manager.shutdown()` on shutdown (`app.py:98`).
+- Build a `FastAPI(title="BreachPilot WebUI API")` with `lifespan` that calls `persistence.recover_interrupted()` on startup and `run_manager.shutdown()` on shutdown (`app.py:98`).
 - Load/generate bearer token via `tools/api/auth.load_or_create_token` (`app.py:73`), enforce loopback host (`app.py:70` `assert_api_loopback`), create `BearerAuth`.
 - Create `ApiPersistence(reports_dir)` and `EventBrokerRegistry(reports_dir, buffer_size)` (`app.py:81`, `app.py:88`).
 - Create `RunManager(persistence, event_registry, config, config_path, callables)` (`app.py:91`).
@@ -59,7 +59,7 @@ No other public symbols — `app.py` is import-only via `main._run_daemon` / tes
 | `config_path` | `main._run_daemon` passes `args.config` |
 | `config` dict | In-memory override when `--web` sets `api.serve_webui=true` |
 | `callables` | Injectable `Callables` for tests (fake router, no Ollama) |
-| Env `NETATTACKAI_API_TOKEN` | Overrides token file |
+| Env `BREACHPILOT_API_TOKEN` | Overrides token file |
 
 | Output | Notes |
 |--------|-------|

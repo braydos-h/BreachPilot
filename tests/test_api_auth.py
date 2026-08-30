@@ -29,7 +29,7 @@ def test_non_loopback_refused(host):
 
 
 def test_token_env_override(monkeypatch):
-    monkeypatch.setenv("NETATTACKAI_API_TOKEN", "test-token-123")
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-token-123")
     token = load_or_create_token(".webui_secret_key", env_override="test-token-123")
     assert token == "test-token-123"
 
@@ -84,7 +84,7 @@ def test_explicit_allowed_origin():
 
 def _make_client(tmp_path, monkeypatch):
     """Create a TestClient with a known token."""
-    monkeypatch.setenv("NETATTACKAI_API_TOKEN", "test-bearer-token")
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-bearer-token")
     monkeypatch.chdir(tmp_path)
     from app import create_app
 
@@ -130,7 +130,7 @@ def test_config_redacts_secrets(tmp_path, monkeypatch):
         "cve_lookup:\n  api_key_env: NVD_API_KEY\n",
         encoding="utf-8",
     )
-    monkeypatch.setenv("NETATTACKAI_API_TOKEN", "test-token")
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-token")
     monkeypatch.chdir(tmp_path)
     from app import create_app
 
@@ -155,7 +155,7 @@ def test_secret_write_rejects_unknown_names(tmp_path, monkeypatch):
 
 def test_secret_write_uses_configured_store(tmp_path, monkeypatch):
     store = tmp_path / "keys.json"
-    monkeypatch.setenv("NETATTACKAI_API_KEY_FILE", str(store))
+    monkeypatch.setenv("BREACHPILOT_API_KEY_FILE", str(store))
     client = _make_client(tmp_path, monkeypatch)
     response = client.put(
         "/api/v1/secrets",

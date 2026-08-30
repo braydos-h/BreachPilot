@@ -1,6 +1,6 @@
 // Full-screen welcome experience: an animated hero intro plus a guided tour
 // of the project and the WebUI. WelcomeGate is the sessionStorage-gated
-// wrapper (mirrors OnboardingGate); the "netattackai:open-welcome" DOM event
+// wrapper (mirrors OnboardingGate); the "breachpilot:open-welcome" DOM event
 // re-opens it from anywhere (HomePage's "Take the tour" button).
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -13,8 +13,8 @@ import { KillChain } from "@/components/welcome/KillChain";
 import { ConsoleMockup } from "@/components/welcome/ConsoleMockup";
 import { STEPS } from "@/components/welcome/steps";
 
-const WELCOME_KEY = "netattackai.welcome.v1";
-const OPEN_EVENT = "netattackai:open-welcome";
+const WELCOME_KEY = "breachpilot.welcome.v1";
+const OPEN_EVENT = "breachpilot:open-welcome";
 
 const TAGLINE = "Autonomous assessment platform for authorized security testing — local-first, audited, operator-supervised.";
 
@@ -84,7 +84,7 @@ function Hero({ onStart, onSkip }: { onStart: () => void; onSkip: () => void }) 
           className="text-4xl font-semibold leading-tight tracking-tight md:text-6xl animate-fade-in-up"
           style={{ animationDelay: "120ms" }}
         >
-          <span className="text-gradient-primary">NetAttack</span>
+          <span className="text-gradient-primary">BreachPilot</span>
           <span className="text-foreground">AI</span>
           <span className="text-primary/40">.</span>
         </h1>
@@ -179,7 +179,7 @@ function Tour({ onExit }: { onExit: () => void }) {
           <div className="flex items-center gap-2">
             <Terminal className="h-4 w-4 text-primary" />
             <span className="text-sm font-semibold">
-              <span className="text-gradient-primary">NetAttack</span>
+              <span className="text-gradient-primary">BreachPilot</span>
               <span className="text-foreground">AI</span>
             </span>
             <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Product Tour</span>

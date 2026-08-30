@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
+// BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -53,7 +53,7 @@ vi.mock("@/features/benchmarks/api", () => ({
     suite: "xben",
     status: "completed",
     config: { suite: "xben", scenario_ids: [], tags: [], trials: 1, timeout_seconds: 1800, model_alias: "", reasoning_profile: "", sandbox_required: true, save_baseline: false, check_regression: false, output_dir: "" },
-    environment: { netattack_version: "0.50.0", git_sha: "abc123", git_dirty: false, git_branch: "main", model_provider: "ollama", model_alias: "glm", model_id: "glm-5.2:cloud", model_version: "cloud", reasoning_config: {}, temperature: null, config_hash: "h1", benchmark_config_hash: "h2", sandbox_image: "netattackai-sandbox:latest", sandbox_image_digest: "sha256:abc", sandbox_enabled: true, sandbox_required: true, target_images: {}, platform: "test", python_version: "3.11" },
+    environment: { breachpilot_version: "0.50.0", git_sha: "abc123", git_dirty: false, git_branch: "main", model_provider: "ollama", model_alias: "glm", model_id: "glm-5.2:cloud", model_version: "cloud", reasoning_config: {}, temperature: null, config_hash: "h1", benchmark_config_hash: "h2", sandbox_image: "breachpilot-sandbox:latest", sandbox_image_digest: "sha256:abc", sandbox_enabled: true, sandbox_required: true, target_images: {}, platform: "test", python_version: "3.11" },
     scenario_ids: ["s1"],
     trials: [],
     replay_manifest: { replay_command: "python main.py --benchmark xben" },

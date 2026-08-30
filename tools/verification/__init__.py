@@ -1,4 +1,4 @@
-"""Self-verification primitives for the NetAttackAi exploit engine.
+"""Self-verification primitives for the BreachPilot exploit engine.
 
 Phase 1.3 of the self-verification core. This package provides proof-of-exec
 (PoE) verification helpers that confirm a claimed compromise is real by

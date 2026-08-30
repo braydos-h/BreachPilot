@@ -1,7 +1,7 @@
 name: mobile_attack
 version: 0.1.0
 description: Mobile testing integration - Frida/objection/apktool/jadx for local APK analysis and remote device instrumentation. Local APK analysis uses @audit_tool; device-touching tools use @require_allowlist. Plugin default-off.
-author: NetAttackAi
+author: BreachPilot
 capabilities: [mcp_tool]
 enabled: false
 config_section:

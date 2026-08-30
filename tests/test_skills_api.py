@@ -25,7 +25,7 @@ from fastapi.testclient import TestClient
 
 def _make_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str = "test-token") -> TestClient:
     """Create a TestClient whose skills.roots points at tmp_path/skills."""
-    monkeypatch.setenv("NETATTACKAI_API_TOKEN", token)
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", token)
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(

@@ -15,7 +15,7 @@ Supports:
 
 Every executor action passes through `check_scope()` before execution.
 """
-# NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
+# BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 
 from __future__ import annotations
 

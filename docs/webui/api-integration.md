@@ -21,7 +21,7 @@ SPA targets same `/api/v1` REST + WebSocket as `docs/api.md`. Base `http://127.0
 
 | Symbol | Detail |
 |--------|--------|
-| `get/set/clearStoredToken` | `sessionStorage netattackai.apiToken.v1`, defensive try/catch, `removeItem` when empty |
+| `get/set/clearStoredToken` | `sessionStorage breachpilot.apiToken.v1`, defensive try/catch, `removeItem` when empty |
 | `ApiError extends Error` (`client.ts:29`) | `{status,code,details,requestId,raw}` + `isAuth(401)` `isNotFound(404)` `isConflict(409)` |
 | `apiFetch<T>(path, {method,body,signal,headers,raw})` | injects `Accept: application/json` + bearer + `Content-Type` on writes; prefixes `/api/v1` unless `http` or `/api/`; 204→undefined; `fetch` throws → `ApiError status0 network`; else read `content-type` + `json/text`; on `!ok` → `normalizeError`, on `raw` blob mode returns `Blob`; `normalizeError(status,body)` (`client.ts:125`): if `body.error`→ from envelope, if `body.detail`→ `http_error`, else `responseStatusText(map 400/401/403/404/409/422/500/502/503/504)` |
 

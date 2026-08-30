@@ -1,4 +1,4 @@
-"""Passive OSINT module for the NetAttackAi pentest agent (lab build).
+"""Passive OSINT module for the BreachPilot pentest agent (lab build).
 
 All lookups are PASSIVE and READ-ONLY: they query PUBLIC data sources
 (certificate transparency, reverse DNS, DNS AAAA, optional Shodan) about
@@ -95,7 +95,7 @@ def reverse_dns(ip: str, *, resolver_fn=None) -> str:
 
 def _default_fetch(url: str) -> str:
     """Default HTTP GET via urllib returning text."""
-    req = urllib.request.Request(url, headers={"User-Agent": process_user_agent("NetAttackAi-OSINT/1.0")})
+    req = urllib.request.Request(url, headers={"User-Agent": process_user_agent("BreachPilot-OSINT/1.0")})
     with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310 - passive OSINT
         data = resp.read()
     if isinstance(data, bytes):

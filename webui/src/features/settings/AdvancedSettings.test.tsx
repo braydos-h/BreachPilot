@@ -28,7 +28,7 @@ function sandboxData(overrides: Partial<SandboxStatusResponse> = {}): SandboxSta
   return {
     enabled: true,
     backend: "docker",
-    image: "netattackai-sandbox:latest",
+    image: "breachpilot-sandbox:latest",
     user: "sandbox",
     read_only_rootfs: true,
     docker_available: true,
@@ -103,7 +103,7 @@ describe("AdvancedSettings sandbox panel", () => {
     setup(sandboxData());
     const section = sandboxSection();
     expect(within(section).getByText("Contained (docker)")).toBeInTheDocument();
-    expect(within(section).getByText("netattackai-sandbox:latest")).toBeInTheDocument();
+    expect(within(section).getByText("breachpilot-sandbox:latest")).toBeInTheDocument();
     expect(within(section).getByText("read-only")).toBeInTheDocument();
     expect(within(section).getByText("iptables lock")).toBeInTheDocument();
     expect(within(section).getByText("4096 MB")).toBeInTheDocument();
@@ -114,7 +114,7 @@ describe("AdvancedSettings sandbox panel", () => {
     const section = sandboxSection();
     expect(within(section).getByText("Image missing")).toBeInTheDocument();
     expect(
-      within(section).getByText("docker build -t netattackai-sandbox:latest docker/sandbox"),
+      within(section).getByText("docker build -t breachpilot-sandbox:latest docker/sandbox"),
     ).toBeInTheDocument();
   });
 

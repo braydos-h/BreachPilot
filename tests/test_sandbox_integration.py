@@ -1,7 +1,7 @@
 """Docker-gated integration tests for the sandbox network boundary.
 
 These tests run ONLY when the Docker daemon is reachable AND the sandbox
-worker image exists (build it: ``docker build -t netattackai-sandbox:latest
+worker image exists (build it: ``docker build -t breachpilot-sandbox:latest
 docker/sandbox``) — otherwise they skip cleanly so the mocked suite stays
 hermetic and offline.
 
@@ -30,8 +30,8 @@ from typing import Any
 
 import pytest
 
-SANDBOX_IMAGE = "netattackai-sandbox:latest"
-TARGET_NAME = "netattack-sandbox-it-target"
+SANDBOX_IMAGE = "breachpilot-sandbox:latest"
+TARGET_NAME = "breachpilot-sandbox-it-target"
 UNAUTHORIZED_IP = "192.0.2.1"  # TEST-NET-1: reserved, never routed
 METADATA_IP = "169.254.169.254"
 
@@ -93,7 +93,7 @@ def _ensure_target_container() -> None:
             "--name",
             TARGET_NAME,
             "--label",
-            "netattackai=true",
+            "breachpilot=true",
             SANDBOX_IMAGE,
             "python3",
             "-m",
@@ -297,7 +297,7 @@ class TestCleanup:
             "ps",
             "-a",
             "--filter",
-            "label=netattackai=true",
+            "label=breachpilot=true",
             "--filter",
             f"label=run_id={it_env['mgr'].run_id}",
             "--format",

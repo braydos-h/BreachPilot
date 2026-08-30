@@ -132,7 +132,7 @@ class EPSSClient:
         url = "https://api.first.org/data/v1/epss?cve=" + ",".join(missing[:100])
         try:
             if fetch_fn is None:
-                req = urllib.request.Request(url, headers={"User-Agent": process_user_agent("netattackai-epss/1.0")})
+                req = urllib.request.Request(url, headers={"User-Agent": process_user_agent("breachpilot-epss/1.0")})
                 with urllib.request.urlopen(req, timeout=self.settings.timeout_seconds) as resp:
                     payload = json.loads(resp.read().decode("utf-8", errors="replace"))
             else:
@@ -191,7 +191,7 @@ class KEVCatalog:
                     data = self._fetch_fn(self.KEV_URL)
                 else:
                     req = urllib.request.Request(
-                        self.KEV_URL, headers={"User-Agent": process_user_agent("netattackai-kev/1.0")}
+                        self.KEV_URL, headers={"User-Agent": process_user_agent("breachpilot-kev/1.0")}
                     )
                     with urllib.request.urlopen(req, timeout=self.settings.timeout_seconds) as resp:
                         raw = resp.read().decode("utf-8", errors="replace")
@@ -419,7 +419,7 @@ class NVDClient:
         # UA so the request is not filtered/blocked at the edge.
         request = urllib.request.Request(
             url,
-            headers={"User-Agent": process_user_agent("netattackai-cve-lookup/1.0")},
+            headers={"User-Agent": process_user_agent("breachpilot-cve-lookup/1.0")},
         )
         try:
             response = urllib.request.urlopen(request, timeout=self.settings.timeout_seconds)

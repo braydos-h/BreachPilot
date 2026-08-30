@@ -6,7 +6,7 @@ repo root). openai-oauth exposes a loopback OpenAI-compatible HTTP proxy
 OAuth. Credentials are reused from the Codex CLI at ``~/.codex/auth.json``
 (or ``$CODEX_HOME/auth.json``); this adapter NEVER reads, copies, prints, or
 logs OAuth access/refresh tokens, cookies, or Authorization headers. Tokens
-stay in openai-oauth's auth file — they never enter NetAttackAi config.
+stay in openai-oauth's auth file — they never enter BreachPilot config.
 
 Two classes:
 

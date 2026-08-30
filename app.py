@@ -1,4 +1,4 @@
-"""ASGI application factory for the NetAttackAI WebUI API daemon.
+"""ASGI application factory for the BreachPilot WebUI API daemon.
 
 Called by ``main._run_daemon`` (``--demon`` / ``--daemon``). Creates a FastAPI
 app with all routers mounted under ``/api/v1``, error handlers, CORS/origin
@@ -8,7 +8,7 @@ on startup and cleans up the active run on shutdown.
 The app stays thin — orchestration lives in ``tools/api/`` services so this
 file does not become a second copy of ``main.py``.
 """
-# NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
+# BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 
 from __future__ import annotations
 
@@ -76,7 +76,7 @@ def create_app(
     # Bearer token.
     token = load_or_create_token(
         api_cfg.get("token_file", ".webui_secret_key"),
-        env_override=os.environ.get("NETATTACKAI_API_TOKEN", ""),
+        env_override=os.environ.get("BREACHPILOT_API_TOKEN", ""),
     )
     auth = BearerAuth(token)
 
@@ -117,7 +117,7 @@ def create_app(
         await benchmark_service.shutdown()
 
     app = FastAPI(
-        title="NetAttackAI WebUI API",
+        title="BreachPilot WebUI API",
         version="v1",
         description="Local WebUI API for AI-driven penetration testing assessments.",
         lifespan=lifespan,

@@ -83,7 +83,7 @@ def _base_config(allowlist: list[str], **sandbox_extra: Any) -> dict[str, Any]:
         "sandbox": {
             "enabled": True,
             "backend": "docker",
-            "image": "netattackai-sandbox:latest",
+            "image": "breachpilot-sandbox:latest",
             **sandbox_extra,
         },
     }

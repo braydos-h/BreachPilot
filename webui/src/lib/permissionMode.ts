@@ -3,7 +3,7 @@ import type { DecisionListRow } from "@/api/types";
 
 export type PermissionMode = "read_only" | "approve" | "full_access";
 
-const STORAGE_KEY = "netattackai.permissionMode.v1";
+const STORAGE_KEY = "breachpilot.permissionMode.v1";
 const DEFAULT_MODE: PermissionMode = "read_only";
 
 function readStored(): PermissionMode {

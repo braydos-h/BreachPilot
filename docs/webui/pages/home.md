@@ -45,14 +45,14 @@ Derived:
 
 ### FullAccessNotice dialog
 
-`FullAccessNotice` (`HomePage.tsx:29`) — `sessionStorage netattackai.fullNotice.shown.v1` once-per-session. `Dialog` (`components/ui/dialog.tsx:Radix`) with `ShieldAlert` + read-only/approve blurb. Triggered via `useEffect` on mount.
+`FullAccessNotice` (`HomePage.tsx:29`) — `sessionStorage breachpilot.fullNotice.shown.v1` once-per-session. `Dialog` (`components/ui/dialog.tsx:Radix`) with `ShieldAlert` + read-only/approve blurb. Triggered via `useEffect` on mount.
 
 ### Hero (`HomePage.tsx:77`)
 
 `bg-grid bg-radial-fade` + `animate-scan` + blurred primary orb. Conditional `h1`:
 
 - returning: `Welcome back.` (`text-gradient-primary`)
-- first visit: `NetAttackAI`
+- first visit: `BreachPilot`
 
 Subtitle: returning → `"<n> runs on record, last targeting <target> <relative>"` using `formatRelative` (`lib/utils.ts:14`); first → authorized-assets tagline.
 
@@ -62,7 +62,7 @@ CTA row (`HomePage.tsx:110`):
 |--------|------|------|------|
 | New recon | `/runs/new?path=recon` | `ScanSearch` | `glow-primary`, primary |
 | Resume active | `/runs/<id>` (when `activeRun`) | `Activity` pulse | yellow outline `border-yellow-500/40` |
-| Take the tour | dispatch `netattackai:open-welcome` | `Compass` | opens `WelcomeGate` (`components/WelcomeScreen.tsx`) |
+| Take the tour | dispatch `breachpilot:open-welcome` | `Compass` | opens `WelcomeGate` (`components/WelcomeScreen.tsx`) |
 
 ### Stats strip (`HomePage.tsx:142`)
 

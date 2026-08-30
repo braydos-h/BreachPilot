@@ -4,12 +4,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 
 const DOC_LINKS: Array<{ href: string; title: string; desc: string }> = [
-  { href: "https://github.com/braydos-h/NetAttackAi/blob/main/docs/getting-started.md", title: "Getting Started", desc: "Setup, commands, and the local development loop." },
-  { href: "https://github.com/braydos-h/NetAttackAi/blob/main/docs/safety-model.md", title: "Safety Model", desc: "Scope checks, risk checks, permission modes, audit records." },
-  { href: "https://github.com/braydos-h/NetAttackAi/blob/main/docs/attack-modules.md", title: "Attack Modules", desc: "The module registry, families, applicability scoring." },
-  { href: "https://github.com/braydos-h/NetAttackAi/blob/main/docs/webui.md", title: "WebUI", desc: "This console — stack, pages, auth, real-time transport." },
-  { href: "https://github.com/braydos-h/NetAttackAi/blob/main/docs/providers.md", title: "Model Providers", desc: "Ollama cloud/local and the ChatGPT opt-in provider." },
-  { href: "https://github.com/braydos-h/NetAttackAi/blob/main/docs/troubleshooting.md", title: "Troubleshooting", desc: "Symptom → cause → check → fix." },
+  { href: "https://github.com/braydos-h/BreachPilot/blob/main/docs/getting-started.md", title: "Getting Started", desc: "Setup, commands, and the local development loop." },
+  { href: "https://github.com/braydos-h/BreachPilot/blob/main/docs/safety-model.md", title: "Safety Model", desc: "Scope checks, risk checks, permission modes, audit records." },
+  { href: "https://github.com/braydos-h/BreachPilot/blob/main/docs/attack-modules.md", title: "Attack Modules", desc: "The module registry, families, applicability scoring." },
+  { href: "https://github.com/braydos-h/BreachPilot/blob/main/docs/webui.md", title: "WebUI", desc: "This console — stack, pages, auth, real-time transport." },
+  { href: "https://github.com/braydos-h/BreachPilot/blob/main/docs/providers.md", title: "Model Providers", desc: "Ollama cloud/local and the ChatGPT opt-in provider." },
+  { href: "https://github.com/braydos-h/BreachPilot/blob/main/docs/troubleshooting.md", title: "Troubleshooting", desc: "Symptom → cause → check → fix." },
 ];
 
 const MODES: Array<{ name: string; badge: "default" | "warn" | "danger"; desc: string }> = [

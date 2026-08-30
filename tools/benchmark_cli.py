@@ -91,7 +91,7 @@ def run_benchmark_cli(args: Any) -> int:
     )
 
     print("=" * 60)
-    print("  NetAttackAI — Benchmark Suite")
+    print("  BreachPilot — Benchmark Suite")
     print(f"  Suite: {run_config.suite}  trials={run_config.trials}  sandbox_required={run_config.sandbox_required}")
     if run_config.scenario_ids:
         print(f"  Scenarios: {', '.join(run_config.scenario_ids)}")

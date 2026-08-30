@@ -406,7 +406,7 @@ async def run_eval(args: Any) -> int:
     workspace_root.mkdir(parents=True, exist_ok=True)
 
     print("=" * 60)
-    print("  NetAttackAI — Eval Harness (`--eval`)")
+    print("  BreachPilot — Eval Harness (`--eval`)")
     print(f"  Target: {target_ip}")
     print(f"  Run ID: {run_id}")
     print(f"  Output: {eval_reports_dir}")

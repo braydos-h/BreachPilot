@@ -24,7 +24,7 @@ import {
 } from "@/api/types";
 import { formatRelative, truncateId } from "@/lib/utils";
 
-const NOTICE_KEY = "netattackai.fullNotice.shown.v1";
+const NOTICE_KEY = "breachpilot.fullNotice.shown.v1";
 
 function FullAccessNotice() {
   const [open, setOpen] = useState(false);
@@ -92,7 +92,7 @@ export function HomePage() {
                 </>
               ) : (
                 <>
-                  <span className="text-gradient-primary">NetAttack</span>
+                  <span className="text-gradient-primary">BreachPilot</span>
                   <span className="text-foreground">AI</span>
                   <span className="text-sm font-normal tracking-wide text-muted-foreground"> — Mission Console</span>
                 </>
@@ -131,7 +131,7 @@ export function HomePage() {
               size="sm"
               variant="outline"
               className="gap-1.5"
-              onClick={() => window.dispatchEvent(new Event("netattackai:open-welcome"))}
+              onClick={() => window.dispatchEvent(new Event("breachpilot:open-welcome"))}
             >
               <Compass className="h-4 w-4" />
               Product tour

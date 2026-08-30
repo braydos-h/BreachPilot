@@ -1,4 +1,4 @@
-// NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
+// BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 // Benchmarks dashboard: overview cards, run panel, history, run list, comparison.
 // Optimized for fast perceived load: progressive skeletons, parallel fetches, incremental history.
 import { useMemo } from "react";

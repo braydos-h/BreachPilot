@@ -34,11 +34,11 @@ def _load_plugin_module():
 def _example_factory_registered(registry: PluginRegistry) -> bool:
     """True if the example plugin's own MCP factory is in the registry.
 
-    Filesystem plugins are loaded under a ``netattackai_plugin_<name>_<hash>``
+    Filesystem plugins are loaded under a ``breachpilot_plugin_<name>_<hash>``
     module name (see tools/plugins._load_module_from_file), so match by prefix.
     """
     return any(
-        getattr(f, "__module__", "").startswith("netattackai_plugin_example_recon_report_")
+        getattr(f, "__module__", "").startswith("breachpilot_plugin_example_recon_report_")
         for f in registry.mcp_tool_factories
     )
 
@@ -93,7 +93,7 @@ def test_manifest_version_description_author_capabilities():
     plugin = module.create_plugin()
     m = plugin.manifest
     assert m.version == "0.1.0"
-    assert m.author == "NetAttackAi"
+    assert m.author == "BreachPilot"
     assert "attack_module" in m.capabilities
     assert "mcp_tool" in m.capabilities
     assert m.description.startswith("Example plugin")

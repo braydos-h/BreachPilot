@@ -75,9 +75,9 @@ def render_report_markdown(run: dict[str, Any], summary: dict[str, Any] | None) 
     config = run.get("config", {}) or {}
     s = summary or {}
     lines = [
-        "# NetAttackAI Benchmark Report",
+        "# BreachPilot Benchmark Report",
         "",
-        f"- **Version**: {env.get('netattack_version', 'unknown')}",
+        f"- **Version**: {env.get('breachpilot_version', 'unknown')}",
         f"- **Git**: `{env.get('git_sha', 'unknown')}`" + (" (dirty)" if env.get("git_dirty") else ""),
         f"- **Model**: {env.get('model_provider', 'unknown')} / {env.get('model_id', 'unknown')}"
         f" (alias {env.get('model_alias', 'unknown')}, version {env.get('model_version', 'unknown')})",
@@ -142,7 +142,7 @@ def render_report_html(run: dict[str, Any], summary: dict[str, Any] | None) -> s
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>NetAttackAI Benchmark Report — {e(str(run.get("run_id", "")))}</title>
+  <title>BreachPilot Benchmark Report — {e(str(run.get("run_id", "")))}</title>
   <style>
     body {{ font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 60rem; }}
     table {{ border-collapse: collapse; margin: 1rem 0; }}
@@ -153,9 +153,9 @@ def render_report_html(run: dict[str, Any], summary: dict[str, Any] | None) -> s
   </style>
 </head>
 <body>
-  <h1>NetAttackAI Benchmark Report</h1>
+  <h1>BreachPilot Benchmark Report</h1>
   <p>
-    <strong>Version:</strong> {e(str(env.get("netattack_version", "unknown")))} ·
+    <strong>Version:</strong> {e(str(env.get("breachpilot_version", "unknown")))} ·
     <strong>Git:</strong> <code>{e(str(env.get("git_sha", "unknown")))}</code> ·
     <strong>Benchmark:</strong> {e(str(run.get("suite", "unknown")))} ·
     <strong>Trials:</strong> {e(str((run.get("config") or {}).get("trials", 1)))}

@@ -1,8 +1,8 @@
-# NetAttackAI Skill Catalog
+# BreachPilot Skill Catalog
 
-Curated for NetAttackAI: a local AI-assisted penetration testing and bug bounty assistant for authorized targets. This folder now contains only direct-fit skills; original skill contents were not edited.
+Curated for BreachPilot: a local AI-assisted penetration testing and bug bounty assistant for authorized targets. This folder now contains only direct-fit skills; original skill contents were not edited.
 
-## Retained for NetAttackAI
+## Retained for BreachPilot
 
 ### Core methodology, scope, recon, and workflow
 
@@ -158,7 +158,7 @@ Curated for NetAttackAI: a local AI-assisted penetration testing and bug bounty 
 
 - `auditing-mcp-servers-for-tool-poisoning` - MCP server and tool-poisoning audit for agent tool safety.
 - `securing-agentic-ai-tool-invocation` - tool allowlisting, approval gates, identity binding, and audit logging for AI agents.
-- `performing-threat-modeling-with-owasp-threat-dragon` - threat modeling for NetAttackAI workflows and trust boundaries.
+- `performing-threat-modeling-with-owasp-threat-dragon` - threat modeling for BreachPilot workflows and trust boundaries.
 
 Everything not listed above was removed from the catalog as not directly useful for this project.
 

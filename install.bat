@@ -1,9 +1,9 @@
 @echo off
 REM ============================================================================
-REM  NetAttackAI — One-Click Installer for Windows
+REM  BreachPilot — One-Click Installer for Windows
 REM ============================================================================
 REM  Double-click this file and it will set up everything you need to run
-REM  NetAttackAI. No manual steps required — just follow the prompts.
+REM  BreachPilot. No manual steps required — just follow the prompts.
 REM
 REM  What it does (all best-effort, safe to re-run any number of times):
 REM    1. Checks / installs Python 3.11+, Node.js, Nmap, Ollama via winget
@@ -12,14 +12,14 @@ REM    3. Builds the WebUI (npm install + build) if Node is available
 REM    4. Starts Ollama, pulls the default model + embedding model
 REM    5. Guides you through the Ollama Cloud API key (OLLAMA_API_KEY)
 REM    6. Runs `python main.py --doctor` to verify everything
-REM    7. Installs the `natai` launcher to %USERPROFILE%\.local\bin + PATH
+REM    7. Installs the `breachpilot` launcher to %USERPROFILE%\.local\bin + PATH
 REM    8. Offers to launch the app immediately
 REM
 REM  Usage:
 REM    install.bat                 one-click install (interactive, recommended)
 REM    install.bat --yes           non-interactive (auto-approve winget installs)
 REM    install.bat --check         only check prerequisites, don't install
-REM    install.bat --uninstall     remove the `natai` command
+REM    install.bat --uninstall     remove the `breachpilot` command
 REM    install.bat --help          show this help
 REM
 REM  Env knobs (set before invoking, all optional):
@@ -27,7 +27,7 @@ REM    set PYTHON=py -3.11         Python launcher to try first (default: auto)
 REM    set VENV=.venv              venv directory (default: .venv)
 REM    set SKIP_MODEL_PULL=1       skip `ollama pull ...`
 REM    set SKIP_WEBUI_BUILD=1      skip WebUI npm build
-REM    set ADD_TO_PATH=0           skip the `natai` launcher + PATH wiring
+REM    set ADD_TO_PATH=0           skip the `breachpilot` launcher + PATH wiring
 REM    set AUTO_WINGET=1           auto-approve winget installs without prompting
 REM ============================================================================
 setlocal enabledelayedexpansion
@@ -62,10 +62,10 @@ if "%ASSUME_YES%"=="1" set "AUTO_WINGET=1"
 REM --- banner -----------------------------------------------------------------
 echo.
 echo  ============================================================
-echo    NetAttackAI  --  One-Click Installer  (Windows)
+echo    BreachPilot  --  One-Click Installer  (Windows)
 echo  ============================================================
 echo.
-echo    This will set up everything you need to run NetAttackAI.
+echo    This will set up everything you need to run BreachPilot.
 echo    Safe to re-run. Takes 2-5 minutes on first run.
 echo.
 if "%CHECK_ONLY%"=="1" (
@@ -264,15 +264,15 @@ if "!HAS_OLLAMA!"=="1" (
 
 REM Check ollama daemon
 if "!HAS_OLLAMA!"=="1" (
-    powershell -NoProfile -Command "try { (Invoke-WebRequest -UseBasicParsing -Uri 'http://localhost:11434/api/version' -TimeoutSec 3).Content | Out-Null; $true } catch { $false }" >"%TEMP%\natai_ollama.txt" 2>nul
-    set /p OLLAMA_UP=<"%TEMP%\natai_ollama.txt" 2>nul
+    powershell -NoProfile -Command "try { (Invoke-WebRequest -UseBasicParsing -Uri 'http://localhost:11434/api/version' -TimeoutSec 3).Content | Out-Null; $true } catch { $false }" >"%TEMP%\breachpilot_ollama.txt" 2>nul
+    set /p OLLAMA_UP=<"%TEMP%\breachpilot_ollama.txt" 2>nul
     if /i "!OLLAMA_UP!"=="True" (
         echo   [OK] ollama daemon responding on http://localhost:11434
     ) else (
         echo   [--] ollama daemon not responding -- will try to start it later.
         echo       You can also start it via the Ollama tray app or `ollama serve`.
     )
-    if exist "%TEMP%\natai_ollama.txt" del "%TEMP%\natai_ollama.txt" >nul 2>&1
+    if exist "%TEMP%\breachpilot_ollama.txt" del "%TEMP%\breachpilot_ollama.txt" >nul 2>&1
 )
 
 where curl >nul 2>&1 && ( echo   [OK] curl found on PATH ) || ( echo   [--] curl not on PATH -- Windows 10+ ships it, but not required. )
@@ -334,7 +334,7 @@ if "%VENV_OK%"=="1" if exist "%VENV_PY%" (
         if errorlevel 1 (
             echo   [!!] pip install still failing -- check your internet.
             echo       You can re-run install.bat after fixing the network.
-            echo       `natai` will still be installed, but `python main.py` may fail until deps are present.
+            echo       `breachpilot` will still be installed, but `python main.py` may fail until deps are present.
         ) else (
             echo   [OK] dependencies installed on retry.
         )
@@ -343,7 +343,7 @@ if "%VENV_OK%"=="1" if exist "%VENV_PY%" (
     )
 ) else (
     echo   [--] No usable venv -- will use system python for remaining steps.
-    echo       Deps may be missing; `natai` will fall back to system python.
+    echo       Deps may be missing; `breachpilot` will fall back to system python.
 )
 
 REM --- openai-oauth (ChatGPT provider, opt-in) -------------------------------
@@ -449,16 +449,16 @@ if "%SKIP_MODEL_PULL%"=="1" (
         echo                            and: ollama pull nomic-embed-text
     ) else (
         REM Try to start daemon if not responding
-        powershell -NoProfile -Command "try { (Invoke-WebRequest -UseBasicParsing -Uri 'http://localhost:11434/api/version' -TimeoutSec 2).Content | Out-Null; $true } catch { $false }" >"%TEMP%\natai_ollama2.txt" 2>nul
-        set /p OLLAMA_UP2=<"%TEMP%\natai_ollama2.txt" 2>nul
+        powershell -NoProfile -Command "try { (Invoke-WebRequest -UseBasicParsing -Uri 'http://localhost:11434/api/version' -TimeoutSec 2).Content | Out-Null; $true } catch { $false }" >"%TEMP%\breachpilot_ollama2.txt" 2>nul
+        set /p OLLAMA_UP2=<"%TEMP%\breachpilot_ollama2.txt" 2>nul
         if /i not "!OLLAMA_UP2!"=="True" (
             echo   Starting ollama serve in background...
             start "" /min ollama serve >nul 2>&1
             echo   Waiting for daemon ^(up to 15s^)...
             for /l %%I in (1,1,15) do (
                 timeout /t 1 /nobreak >nul 2>&1
-                powershell -NoProfile -Command "try { (Invoke-WebRequest -UseBasicParsing -Uri 'http://localhost:11434/api/version' -TimeoutSec 2).Content | Out-Null; $true } catch { $false }" >"%TEMP%\natai_ollama2.txt" 2>nul
-                set /p OLLAMA_UP2=<"%TEMP%\natai_ollama2.txt" 2>nul
+                powershell -NoProfile -Command "try { (Invoke-WebRequest -UseBasicParsing -Uri 'http://localhost:11434/api/version' -TimeoutSec 2).Content | Out-Null; $true } catch { $false }" >"%TEMP%\breachpilot_ollama2.txt" 2>nul
+                set /p OLLAMA_UP2=<"%TEMP%\breachpilot_ollama2.txt" 2>nul
                 if /i "!OLLAMA_UP2!"=="True" goto :ollama_up
             )
             :ollama_up
@@ -466,7 +466,7 @@ if "%SKIP_MODEL_PULL%"=="1" (
         ) else (
             echo   [OK] ollama daemon responding.
         )
-        if exist "%TEMP%\natai_ollama2.txt" del "%TEMP%\natai_ollama2.txt" >nul 2>&1
+        if exist "%TEMP%\breachpilot_ollama2.txt" del "%TEMP%\breachpilot_ollama2.txt" >nul 2>&1
 
         echo   Pulling models ^(best-effort; cloud model needs OLLAMA_API_KEY^)...
         ollama pull glm-5.2:cloud
@@ -483,7 +483,7 @@ echo.
 echo  ============================================================
 echo   [6/7] API keys
 echo  ============================================================
-echo   NetAttackAI uses Ollama Cloud by default ^(https://api.ollama.com^).
+echo   BreachPilot uses Ollama Cloud by default ^(https://api.ollama.com^).
 echo   That needs OLLAMA_API_KEY. Without it, --doctor will report
 echo   Ollama unreachable and local-only mode is the fallback.
 echo.
@@ -533,11 +533,11 @@ if "!HAS_KEY!"=="1" (
 )
 
 REM ============================================================================
-REM  7. Doctor + natai launcher
+REM  7. Doctor + breachpilot launcher
 REM ============================================================================
 echo.
 echo  ============================================================
-echo   [7/7] Final checks  (doctor + natai launcher)
+echo   [7/7] Final checks  (doctor + breachpilot launcher)
 echo  ============================================================
 
 echo   Running: python main.py --doctor
@@ -557,34 +557,37 @@ if "%DOCTOR_RC%"=="0" (
     echo       Re-run install.bat after fixing, or run `python main.py --doctor` again.
 )
 
-REM --- Install the `natai` command to %USERPROFILE%\.local\bin ----------------
+REM --- Install the `breachpilot` command to %USERPROFILE%\.local\bin ----------------
 if "%ADD_TO_PATH%"=="1" (
     echo.
-    echo   Installing `natai` launcher...
+    echo   Installing `breachpilot` launcher...
     if not exist "%BIN_DIR%" mkdir "%BIN_DIR%" >nul 2>&1
 
     REM Write a tiny launcher that always runs from the repo root, so
     REM config.yaml / mission.yaml / reports/ resolve regardless of cwd.
     REM NOTE: the launcher references %REPO_ROOT% literally at generation time;
     REM re-running install.bat after moving the repo rewrites it correctly.
-    > "%BIN_DIR%\natai.bat" echo @echo off
-    >> "%BIN_DIR%\natai.bat" echo REM natai - NetAttackAI launcher ^(generated by install.bat^)
-    >> "%BIN_DIR%\natai.bat" echo REM Always runs from the repo root so config.yaml/mission.yaml/reports/ resolve.
-    >> "%BIN_DIR%\natai.bat" echo pushd "%REPO_ROOT%" 2^>nul ^|^| ( echo natai: repo not found at %REPO_ROOT% ^& exit /b 1 )
-    >> "%BIN_DIR%\natai.bat" echo set "NATAI_PY=%VENV_PY%"
-    >> "%BIN_DIR%\natai.bat" echo if not exist "%%NATAI_PY%%" set "NATAI_PY=python"
-    >> "%BIN_DIR%\natai.bat" echo "%%NATAI_PY%%" "%REPO_ROOT%\main.py" %%*
-    >> "%BIN_DIR%\natai.bat" echo set "NATAI_PY="
-    >> "%BIN_DIR%\natai.bat" echo popd
-    echo   [OK] natai -^> %BIN_DIR%\natai.bat
+    > "%BIN_DIR%\breachpilot.bat" echo @echo off
+    >> "%BIN_DIR%\breachpilot.bat" echo REM breachpilot - BreachPilot launcher ^(generated by install.bat^)
+    >> "%BIN_DIR%\breachpilot.bat" echo REM Always runs from the repo root so config.yaml/mission.yaml/reports/ resolve.
+    >> "%BIN_DIR%\breachpilot.bat" echo pushd "%REPO_ROOT%" 2^>nul ^|^| ( echo breachpilot: repo not found at %REPO_ROOT% ^& exit /b 1 )
+    >> "%BIN_DIR%\breachpilot.bat" echo set "BREACHPILOT_PY=%VENV_PY%"
+    >> "%BIN_DIR%\breachpilot.bat" echo if not exist "%%BREACHPILOT_PY%%" set "BREACHPILOT_PY=python"
+    >> "%BIN_DIR%\breachpilot.bat" echo "%%BREACHPILOT_PY%%" "%REPO_ROOT%\main.py" %%*
+    >> "%BIN_DIR%\breachpilot.bat" echo set "BREACHPILOT_PY="
+    >> "%BIN_DIR%\breachpilot.bat" echo popd
+    echo   [OK] breachpilot -^> %BIN_DIR%\breachpilot.bat
+    REM Deprecated alias for backwards compatibility
+    copy /Y "%BIN_DIR%\breachpilot.bat" "%BIN_DIR%\natai.bat" >nul 2>&1
+    echo   [OK] natai ^(deprecated alias^) -^> %BIN_DIR%\natai.bat
 
     REM Ensure %USERPROFILE%\.local\bin is on the user PATH (idempotent)
     for /f "usebackq tokens=*" %%P in (`powershell -NoProfile -Command "try { $p = [Environment]::GetEnvironmentVariable('PATH','User'); if (-not $p) { [Environment]::SetEnvironmentVariable('PATH', '%BIN_DIR%', 'User'); 'added' } elseif ($p.Split(';') -contains '%BIN_DIR%') { 'present' } else { $new = if ($p.EndsWith(';')) { $p + '%BIN_DIR%' } else { $p + ';%BIN_DIR%' }; [Environment]::SetEnvironmentVariable('PATH', $new, 'User'); 'added' } } catch { 'error' }"`) do set "PATHRES=%%P"
     if /i "!PATHRES!"=="present" ( echo   [OK] %BIN_DIR% already on user PATH )
-    if /i "!PATHRES!"=="added"  ( echo   [OK] added %BIN_DIR% to user PATH -- open a NEW terminal for `natai` to work )
+    if /i "!PATHRES!"=="added"  ( echo   [OK] added %BIN_DIR% to user PATH -- open a NEW terminal for `breachpilot` to work )
     if /i "!PATHRES!"=="error"  ( echo   [!] could not update user PATH -- add %BIN_DIR% manually )
 ) else (
-    echo   [--] Skipping `natai` install ^(ADD_TO_PATH=0^)
+    echo   [--] Skipping `breachpilot` install ^(ADD_TO_PATH=0^)
 )
 
 REM ============================================================================
@@ -597,12 +600,12 @@ echo  ============================================================
 echo.
 echo    Quick start  (after opening a NEW terminal if PATH was just updated):
 echo.
-echo      natai                         interactive menu ^(or: START.bat^)
-echo      natai --target 10.0.0.50 --mode attack --goal backdoor
-echo      natai --doctor                re-check environment
-echo      natai --web                   launch WebUI at http://127.0.0.1:8765
+echo      breachpilot                         interactive menu ^(or: START.bat^)
+echo      breachpilot --target 10.0.0.50 --mode attack --goal backdoor
+echo      breachpilot --doctor                re-check environment
+echo      breachpilot --web                   launch WebUI at http://127.0.0.1:8765
 echo.
-echo    Without `natai` ^(same, from this repo folder^):
+echo    Without `breachpilot` ^(same, from this repo folder^):
 echo      python main.py                interactive menu
 echo      python main.py --web          WebUI + browser
 echo      START.bat                     double-click launcher
@@ -614,12 +617,12 @@ echo      - Ollama Cloud key: https://ollama.com/settings/keys
 echo      - Only run against networks you own or are explicitly authorized to test.
 echo.
 echo    Re-run install.bat any time to update deps or fix issues.
-echo    Uninstall the `natai` command with:  install.bat --uninstall
+echo    Uninstall the `breachpilot` command with:  install.bat --uninstall
 echo.
 
 REM Offer to launch now (interactive only)
 if "%ASSUME_YES%"=="0" if "%CHECK_ONLY%"=="0" (
-    echo    Launch NetAttackAI now?
+    echo    Launch BreachPilot now?
     echo      [1] Yes -- interactive menu  ^(python main.py^)
     echo      [2] Yes -- WebUI in browser  ^(python main.py --web^)
     echo      [3] No  -- exit installer
@@ -635,7 +638,7 @@ if "%ASSUME_YES%"=="0" if "%CHECK_ONLY%"=="0" (
         call :py_run main.py --web
     ) else (
         echo.
-        echo    Exit. Run START.bat or `natai` when ready.
+        echo    Exit. Run START.bat or `breachpilot` when ready.
     )
 )
 
@@ -714,13 +717,13 @@ exit /b
 
 :show_help
 echo.
-echo  NetAttackAI Installer -- Help
+echo  BreachPilot Installer -- Help
 echo.
 echo  Usage:
 echo    install.bat                 one-click install ^(interactive^)
 echo    install.bat --yes           non-interactive ^(auto-approve winget^)
 echo    install.bat --check         only check prerequisites, don't install
-echo    install.bat --uninstall     remove the `natai` command
+echo    install.bat --uninstall     remove the `breachpilot` command
 echo    install.bat --help          show this help
 echo.
 echo  What it does:
@@ -729,32 +732,33 @@ echo    2. Creates .venv and installs Python deps
 echo    3. Builds the WebUI if Node is available
 echo    4. Starts Ollama and pulls default models
 echo    5. Guides API key setup ^(OLLAMA_API_KEY^)
-echo    6. Runs --doctor and installs the `natai` launcher
+echo    6. Runs --doctor and installs the `breachpilot` launcher
 echo.
 echo  Env knobs:
 echo    PYTHON=py -3.11           Python command to try first
 echo    VENV=.venv                venv directory
 echo    SKIP_MODEL_PULL=1         skip ollama pull
 echo    SKIP_WEBUI_BUILD=1        skip WebUI build
-echo    ADD_TO_PATH=0             skip natai launcher
+echo    ADD_TO_PATH=0             skip breachpilot launcher
 echo    AUTO_WINGET=1             auto-approve winget installs
 echo.
 echo  After install:
-echo    natai / START.bat / python main.py
+echo    breachpilot / START.bat / python main.py
 echo.
 popd
 endlocal
 exit /b 0
 
 :do_uninstall
-echo  ==^> Removing the `natai` command
-if exist "%BIN_DIR%\natai.bat" (
-    del "%BIN_DIR%\natai.bat" >nul 2>&1 && echo   [OK] removed %BIN_DIR%\natai.bat
+echo  ==^> Removing the `breachpilot` command
+if exist "%BIN_DIR%\breachpilot.bat" (
+    del "%BIN_DIR%\breachpilot.bat" >nul 2>&1 && echo   [OK] removed %BIN_DIR%\breachpilot.bat
 ) else (
-    echo   [--] %BIN_DIR%\natai.bat was not present
+    echo   [--] %BIN_DIR%\breachpilot.bat was not present
 )
+if exist "%BIN_DIR%\natai.bat" del "%BIN_DIR%\natai.bat" >nul 2>&1 && echo   [OK] removed deprecated %BIN_DIR%\natai.bat
 echo.
-echo  Uninstalled. The `natai` command is gone; %BIN_DIR% left on PATH ^(shared with other tools^).
+echo  Uninstalled. The `breachpilot` command is gone; %BIN_DIR% left on PATH ^(shared with other tools^).
 popd
 endlocal
 exit /b 0

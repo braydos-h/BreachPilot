@@ -16,7 +16,7 @@ architecture diagram but did not exist. It mirrors the structure of
 All tools require the caller to provide an asset that has been
 approved in the mission scope. Out-of-scope requests are rejected.
 """
-# NetAttackAI by @braydos-h — https://github.com/braydos-h/NetAttackAi
+# BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 
 from __future__ import annotations
 
@@ -337,7 +337,7 @@ def create_mcp_server(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Defensive MCP server for the NetAttackAI agent.")
+    parser = argparse.ArgumentParser(description="Defensive MCP server for the BreachPilot agent.")
     parser.add_argument("--transport", choices=("stdio", "http"), default="stdio")
     parser.add_argument("--config", type=Path, default=Path("config.yaml"))
     parser.add_argument("--host", default="127.0.0.1")

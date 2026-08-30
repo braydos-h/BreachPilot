@@ -137,13 +137,13 @@ def docker_images() -> subprocess.CompletedProcess[str]:
 class DockerProvider:
     """Snapshot a container via ``docker commit``; revert = rm + re-create.
 
-    ``vm_id`` is a container name (e.g. ``netattackai-metasploitable2`` from
+    ``vm_id`` is a container name (e.g. ``breachpilot-metasploitable2`` from
     eval_targets/docker-compose.yml). Port maps are captured from
     ``docker inspect`` at create time so the re-created container exposes the
     same services.
     """
 
-    prefix = "netattackai-snap"
+    prefix = "breachpilot-snap"
 
     def __init__(self, cfg: dict[str, Any] | None = None) -> None:
         self.cfg = cfg or {}
@@ -532,7 +532,7 @@ def should_snapshot(tool_name: str, payload: str, config: dict[str, Any] | None)
 def _vm_id_for_target(target: str, config: dict[str, Any] | None) -> str:
     """Map an attack target to a snapshottable vm_id (injectable seam).
 
-    Reads ``snapshots.vm_map`` (``{"10.0.0.50": "netattackai-metasploitable2"}``)
+    Reads ``snapshots.vm_map`` (``{"10.0.0.50": "breachpilot-metasploitable2"}``)
     then ``SNAPSHOT_VM_MAP`` env (``10.0.0.50=container``), falling back to
     the raw target string.
     """

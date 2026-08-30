@@ -77,7 +77,7 @@ async def run_self_test(args: Any) -> int:
     workspace.mkdir(parents=True, exist_ok=True)
 
     print("=" * 60)
-    print("  NetAttackAI — Self-Test (`--self-test`)")
+    print("  BreachPilot — Self-Test (`--self-test`)")
     print(f"  Target: {target_ip} (localhost only)")
     print(f"  Workspace: {workspace}")
     print("=" * 60)

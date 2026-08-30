@@ -54,7 +54,7 @@ def _start_dvwa_docker() -> bool:
         return True
     try:
         proc = subprocess.run(
-            ["docker", "run", "-d", "-p", f"{_DVWA_HOST_PORT}:80", "--name", "netattackai-demo", _DVWA_IMAGE],
+            ["docker", "run", "-d", "-p", f"{_DVWA_HOST_PORT}:80", "--name", "breachpilot-demo", _DVWA_IMAGE],
             capture_output=True,
             text=True,
             timeout=120,
@@ -109,7 +109,7 @@ def _start_synthetic_server() -> HTTPServer:
 def _teardown_dvwa() -> None:
     try:
         subprocess.run(
-            ["docker", "rm", "-f", "netattackai-demo"],
+            ["docker", "rm", "-f", "breachpilot-demo"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -120,7 +120,7 @@ def _teardown_dvwa() -> None:
 
 def run_demo(args: Any) -> int:
     print("=" * 60)
-    print("  NetAttackAI — DEMO mode (`--demo`)")
+    print("  BreachPilot — DEMO mode (`--demo`)")
     print("  Target: 127.0.0.1:%d (local sandbox only)" % _DVWA_HOST_PORT)
     print("=" * 60)
 

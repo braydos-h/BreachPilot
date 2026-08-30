@@ -4,7 +4,7 @@ Flow per trial (docs/benchmarks.md §architecture):
 
     provider scenario
       -> provision/reset target          (tools.benchmark.targets)
-      -> run NetAttackAI mission         (tools.benchmark.agent_runner, sandboxed
+      -> run BreachPilot mission         (tools.benchmark.agent_runner, sandboxed
                                           when sandbox.enabled — never a host fallback)
       -> independent verification        (tools.benchmark.verifier, eval_checks executors)
       -> classify + record metrics

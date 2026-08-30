@@ -23,7 +23,7 @@ From the repository root.
 (offering to install anything missing via `winget` when you approve), creates
 `.venv`, installs `requirements.txt`, builds `webui/dist/` if Node is present,
 starts Ollama, pulls the default model + embedding model, walks you through
-`OLLAMA_API_KEY`, runs `python main.py --doctor`, and wires the `natai`
+`OLLAMA_API_KEY`, runs `python main.py --doctor`, and wires the `breachpilot`
 launcher. Safe to re-run; try `install.bat --check` for an audit-only pass
 or `install.bat --help` for options.
 
@@ -42,7 +42,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 # one-shot bootstraps (pick one):
-./install.sh               # full bootstrap (OS prereqs + Ollama + venv + natai)
+./install.sh               # full bootstrap (OS prereqs + Ollama + venv + breachpilot)
 ./scripts/setup-linux.sh   # lightweight: venv + deps + doctor
 ```
 

@@ -64,7 +64,7 @@ Mount order matters: `/api/v1`, `/docs`, `/openapi.json` are matched before the 
 Summary — detail in `docs/api/auth.md`.
 
 - Bind: `assert_api_loopback` (`tools/api/auth.py:38`) rejects any host not in `{127.0.0.1, localhost, ::1}`. v1 has no public-bind override.
-- HTTP: `BearerAuth` (`tools/api/auth.py:72`) as a FastAPI dependency on every route except `GET /api/v1/health`. Constant-time `hmac.compare_digest`. Token source: `NETATTACKAI_API_TOKEN` env → `api.token_file` (default `.webui_secret_key`, `0o600` where supported) → generate `secrets.token_urlsafe(32)` (`tools/api/auth.py:46`).
+- HTTP: `BearerAuth` (`tools/api/auth.py:72`) as a FastAPI dependency on every route except `GET /api/v1/health`. Constant-time `hmac.compare_digest`. Token source: `BREACHPILOT_API_TOKEN` env → `api.token_file` (default `.webui_secret_key`, `0o600` where supported) → generate `secrets.token_urlsafe(32)` (`tools/api/auth.py:46`).
 - CORS: `CORSMiddleware` allowlist = `api.allowed_origins` + loopback defaults; entries must pass `is_loopback_origin` or factory raises (`app.py:115`).
 - WebSocket: `authenticate_websocket` (`tools/api/auth.py:128`) checks `Origin` (→ `4403`), accepts, then requires first JSON `{"auth": "<token>", "after": <int>}` within 5 s (→ `4401` auth, `4400` cursor).
 - Multi-operator passwords (when `api.multi_operator`): `hash_password` / `verify_password` PBKDF2-HMAC-SHA256, 200 k iterations, 16-byte salt (`tools/api/auth.py:164`).

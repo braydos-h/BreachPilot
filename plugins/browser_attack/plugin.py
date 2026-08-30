@@ -1,4 +1,4 @@
-"""Headless browser attack plugin for NetAttackAi.
+"""Headless browser attack plugin for BreachPilot.
 
 Wraps Playwright + Chromium to drive authenticated web flows and harvest
 XSS-hunter callbacks. Browser-based attacks: authenticated flows, DOM-based

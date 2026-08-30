@@ -110,7 +110,7 @@ def detection_probe_plan(target_ip: str) -> list[dict[str, Any]]:
         canary_command(
             category="file",
             description="Canary file creation in a sensitive directory",
-            command=f"echo netattackai-canary > /tmp/.netattackai_canary_{target_ip}",
+            command=f"echo breachpilot-canary > /tmp/.breachpilot_canary_{target_ip}",
             detection_hint="FIM: new file written under a monitored directory",
             target_ip=target_ip,
         ),

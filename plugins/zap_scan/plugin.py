@@ -1,4 +1,4 @@
-"""OWASP ZAP REST integration plugin for NetAttackAi.
+"""OWASP ZAP REST integration plugin for BreachPilot.
 
 Wraps the ZAP REST API to run spider + active scans against authenticated web
 targets, correlated with the AI's hypothesis loop. Pairs with the existing
