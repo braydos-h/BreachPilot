@@ -45,7 +45,13 @@ export function ModelSelector({ model, onModelChange }: ModelSelectorProps) {
         ? { tone: "warn", label: "Registry fallback", detail: "Ollama unreachable — using configured registry models." }
         : status.provider === "chatgpt"
           ? { tone: "err", label: "Authentication required", detail: status.error ?? "Sign in via System → Models." }
-          : { tone: "err", label: "Offline", detail: status.error ?? `${status.label} is not reachable.` };
+          : status.provider === "opencode_go"
+            ? {
+                tone: "err",
+                label: "Authentication required",
+                detail: status.error ?? "Set OPENCODE_GO_API_KEY via System → API keys.",
+              }
+            : { tone: "err", label: "Offline", detail: status.error ?? `${status.label} is not reachable.` };
 
   const dot = cn(
     "h-1.5 w-1.5 rounded-full",

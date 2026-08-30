@@ -21,7 +21,7 @@ import {
 import { ApiError } from "@/api/client";
 
 /** Active provider + a switch() that persists `models.provider` (and flips
- *  `chatgpt.enabled` on when switching to chatgpt, mirroring the CLI menu). */
+ *  `chatgpt.enabled` / `opencode_go.enabled` on when switching, mirroring the CLI menu). */
 export function useProviderSwitch() {
   const models = useModels();
   const patchConfig = usePatchConfig();
@@ -29,10 +29,11 @@ export function useProviderSwitch() {
   const switchTo = useCallback(
     (next: string) => {
       if (next === provider) return;
-      const patch =
-        next === "chatgpt"
-          ? { models: { provider: "chatgpt" }, chatgpt: { enabled: true } }
-          : { models: { provider: "ollama" } };
+      let patch: Record<string, unknown>;
+      if (next === "chatgpt") patch = { models: { provider: "chatgpt" }, chatgpt: { enabled: true } };
+      else if (next === "opencode_go")
+        patch = { models: { provider: "opencode_go" }, opencode_go: { enabled: true } };
+      else patch = { models: { provider: "ollama" } };
       patchConfig.mutate(patch);
     },
     [provider, patchConfig],
@@ -54,6 +55,10 @@ export function useModelOptions(): string[] {
       if (live.data?.source === "chatgpt") (live.data.models ?? []).forEach((m) => set.add(m));
       (models.data?.chatgpt?.configured_models ?? []).forEach((m) => set.add(m));
       if (models.data?.chatgpt?.default_model) set.add(models.data.chatgpt.default_model);
+    } else if (provider === "opencode_go") {
+      if (live.data?.source === "opencode_go") (live.data.models ?? []).forEach((m) => set.add(m));
+      (models.data?.opencode_go?.configured_models ?? []).forEach((m) => set.add(m));
+      if (models.data?.opencode_go?.default_model) set.add(models.data.opencode_go.default_model);
     } else {
       if (live.data?.source === "ollama") (live.data.models ?? []).forEach((m) => set.add(m));
       Object.values(models.data?.registry ?? {}).forEach((m) => set.add(String(m)));
@@ -63,24 +68,36 @@ export function useModelOptions(): string[] {
   }, [models.data, live.data, provider]);
 }
 
-/** Provider-aware default model id to preselect (chatgpt default_model, else
+/** Provider-aware default model id to preselect (chatgpt/opencode_go default_model, else
  *  ollama default_alias). Empty string when neither is configured. */
 export function useDefaultModel(): string {
   const models = useModels();
   const provider = models.data?.provider ?? "ollama";
   if (provider === "chatgpt") return models.data?.chatgpt?.default_model ?? "";
+  if (provider === "opencode_go") return models.data?.opencode_go?.default_model ?? "";
   return models.data?.default_alias ?? "";
 }
 
 export interface ProviderStatus {
   provider: string;
-  /** Human label for badges: "Ollama" | "ChatGPT". */
+  /** Human label for badges: "Ollama" | "ChatGPT" | "OpenCode Go". */
   label: string;
   /** Live models are available and the live query reported no error. */
   online: boolean;
   source: string;
   liveCount: number;
   error?: string;
+}
+
+function providerLabel(provider: string): string {
+  switch (provider) {
+    case "chatgpt":
+      return "ChatGPT";
+    case "opencode_go":
+      return "OpenCode Go";
+    default:
+      return "Ollama";
+  }
 }
 
 /** Provider-aware connectivity status for badges/status rows. Replaces the
@@ -92,7 +109,7 @@ export function useProviderStatus(): ProviderStatus {
   const liveModels = live.data?.models ?? [];
   return {
     provider,
-    label: provider === "chatgpt" ? "ChatGPT" : "Ollama",
+    label: providerLabel(provider),
     online: liveModels.length > 0 && !live.data?.error,
     source: live.data?.source ?? "—",
     liveCount: liveModels.length,
@@ -100,7 +117,7 @@ export function useProviderStatus(): ProviderStatus {
   };
 }
 
-/** Ollama / ChatGPT segmented picker bound to models.provider (persists on change). */
+/** Ollama / ChatGPT / OpenCode Go segmented picker bound to models.provider (persists on change). */
 export function ProviderPicker() {
   const { provider, switchTo, isPending, error } = useProviderSwitch();
   return (
@@ -111,6 +128,7 @@ export function ProviderPicker() {
         options={[
           { value: "ollama", label: "Ollama" },
           { value: "chatgpt", label: "ChatGPT" },
+          { value: "opencode_go", label: "OpenCode Go" },
         ]}
       />
       {isPending && <p className="text-xs text-muted-foreground">Switching provider…</p>}
@@ -119,6 +137,56 @@ export function ProviderPicker() {
           {error instanceof ApiError ? error.message : "Failed to switch provider."}
         </p>
       )}
+    </div>
+  );
+}
+
+/** OpenCode Go controls — API-key status, base URL, default model, live count. No secrets leave the backend. */
+export function OpenCodeGoControls() {
+  const providers = useProviders();
+  const models = useModels();
+  const live = useLiveModels();
+  const og = providers.data?.opencode_go;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <Badge variant={og?.api_key_present ? "success" : "muted"}>
+          <ShieldCheck className="h-3 w-3" />
+          {og?.api_key_present ? "API key configured" : "API key missing"}
+        </Badge>
+        <Badge variant={og?.reachable ? "success" : "muted"}>{og?.reachable ? "online" : "offline"}</Badge>
+        {og && (
+          <span className="text-muted-foreground">
+            <span className="font-mono">{og.base_url}</span> · default{" "}
+            <span className="font-mono text-foreground">{og.default_model ?? "muse-spark-1.2-contributor"}</span>
+          </span>
+        )}
+      </div>
+      {!og?.api_key_present && (
+        <p className="text-xs text-amber-200">
+          Set <span className="font-mono">OPENCODE_GO_API_KEY</span> via System → API keys or secr.json. Responses API:{" "}
+          <span className="font-mono">https://opencode.ai/zen/go/v1/responses</span> (model{" "}
+          <span className="font-mono">muse-spark-1.2-contributor</span>).
+        </p>
+      )}
+      <p className="text-xs text-muted-foreground">
+        Uses <span className="font-mono">OPENCODE_GO_API_KEY</span> as{" "}
+        <span className="font-mono">Authorization: Bearer</span> to{" "}
+        <span className="font-mono">https://opencode.ai/zen/go/v1</span>. Key never leaves the server.{" "}
+        {og?.available_models?.length ? `Discovered ${og.available_models.length} models.` : ""}
+        {models.data?.opencode_go?.configured_models?.length
+          ? ` Configured: ${models.data.opencode_go.configured_models.join(", ")}.`
+          : ""}
+      </p>
+      <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+        <span>Live source: {live.data?.source ?? "—"}</span>
+        <span>·</span>
+        <span>{(live.data?.models ?? []).length} live models</span>
+        {og?.context_window && <span>· {og.context_window} ctx</span>}
+      </div>
+      {og?.error && <p className="text-xs text-destructive">{og.error}</p>}
+      {live.data?.error && <p className="text-xs text-amber-200">{live.data.error}</p>}
     </div>
   );
 }
@@ -215,17 +283,17 @@ export function ChatGptControls() {
   );
 }
 
-/** Picker + provider-appropriate body (ChatGPT controls when chatgpt, Ollama note otherwise). */
+/** Picker + provider-appropriate body (ChatGPT / OpenCode Go controls, Ollama note otherwise). */
 export function ProviderSetup() {
   const { provider } = useProviderSwitch();
+  let body: React.ReactNode;
+  if (provider === "chatgpt") body = <ChatGptControls />;
+  else if (provider === "opencode_go") body = <OpenCodeGoControls />;
+  else body = <p className="text-xs text-muted-foreground">Local Ollama models. Embeddings also use Ollama.</p>;
   return (
     <div className="space-y-3">
       <ProviderPicker />
-      {provider === "chatgpt" ? (
-        <ChatGptControls />
-      ) : (
-        <p className="text-xs text-muted-foreground">Local Ollama models. Embeddings also use Ollama.</p>
-      )}
+      {body}
     </div>
   );
 }

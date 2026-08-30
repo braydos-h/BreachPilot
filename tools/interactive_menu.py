@@ -363,9 +363,9 @@ def _edit_settings() -> None:
         style=_get_style(),
     ).unsafe_ask()
 
-    # AI provider selection (ollama | chatgpt). Defaults to ollama so an
+    # AI provider selection (ollama | chatgpt | opencode_go). Defaults to ollama so an
     # absent key (the common case) is unchanged.
-    from tools.config_manager import get_ai_provider, get_chatgpt_config
+    from tools.config_manager import get_ai_provider, get_chatgpt_config, get_opencode_go_config
 
     current_provider = get_ai_provider(config)
     provider = questionary.select(
@@ -373,8 +373,9 @@ def _edit_settings() -> None:
         choices=[
             Choice(title="Ollama (local or Ollama Cloud)", value="ollama"),
             Choice(title="ChatGPT (local openai-oauth proxy)", value="chatgpt"),
+            Choice(title="OpenCode Go (Responses API)", value="opencode_go"),
         ],
-        default=current_provider if current_provider in ("ollama", "chatgpt") else "ollama",
+        default=current_provider if current_provider in ("ollama", "chatgpt", "opencode_go") else "ollama",
         style=_get_style(),
     ).unsafe_ask()
 
@@ -411,6 +412,42 @@ def _edit_settings() -> None:
             style=_get_style(),
         ).unsafe_ask()
         # Skip the Ollama alias picker below.
+        _skip_ollama_picker = True
+    elif provider == "opencode_go":
+        from tools.providers.opencode_go_provider import OpenCodeGoResponsesClient
+
+        og_cfg = get_opencode_go_config(config)
+        env_name = str(og_cfg.get("api_key_env") or "OPENCODE_GO_API_KEY")
+        api_key = (os.environ.get(env_name, "") or "").strip()
+        if not api_key:
+            print(
+                f"\n  OpenCode Go: API key not set ({env_name}). Set it via 'python main.py --setup-api-keys' or env."
+            )
+        else:
+            # Probe discovery (best-effort)
+            try:
+                client = OpenCodeGoResponsesClient(
+                    base_url=str(og_cfg.get("base_url") or "https://opencode.ai/zen/go/v1"),
+                    api_key=api_key,
+                    timeout=float(og_cfg.get("request_timeout_seconds") or 300),
+                    config=og_cfg,
+                )
+                proxy_models = client.discover_models(
+                    str(og_cfg.get("base_url") or "https://opencode.ai/zen/go/v1"), og_cfg
+                )
+            except Exception as exc:
+                print(f"\n  OpenCode Go discovery failed: {exc}")
+                proxy_models = []
+        if not proxy_models:
+            configured = list(og_cfg.get("models") or [])
+            proxy_models = configured or [str(og_cfg.get("default_model") or "muse-spark-1.2-contributor")]
+        default_model = str(og_cfg.get("default_model") or proxy_models[0])
+        new_model = questionary.select(
+            "OpenCode Go model (Responses API — discovered from /models):",
+            choices=[Choice(title=m, value=m) for m in proxy_models],
+            default=default_model if default_model in proxy_models else proxy_models[0],
+            style=_get_style(),
+        ).unsafe_ask()
         _skip_ollama_picker = True
     else:
         _skip_ollama_picker = False
@@ -504,6 +541,10 @@ def _edit_settings() -> None:
             cg = config.setdefault("chatgpt", {})
             cg["enabled"] = True
             cg["default_model"] = new_model
+        elif provider == "opencode_go":
+            og = config.setdefault("opencode_go", {})
+            og["enabled"] = True
+            og["default_model"] = new_model
         config.setdefault("stealth", {})["rotate_ua"] = rotate_ua
         config.setdefault("stealth", {})["dns_over_https"] = doh
         config.setdefault("exploit", {})["workspace_dir"] = new_ws

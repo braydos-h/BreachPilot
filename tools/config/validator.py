@@ -126,8 +126,8 @@ class ConfigValidator:
                 if "default_alias" not in models:
                     result.warnings.append("models.default_alias is missing. Default: glm")
                 provider = models.get("provider")
-                if provider is not None and str(provider).lower() not in {"ollama", "chatgpt"}:
-                    result.warnings.append("models.provider should be one of: ollama, chatgpt.")
+                if provider is not None and str(provider).lower() not in {"ollama", "chatgpt", "opencode_go"}:
+                    result.warnings.append("models.provider should be one of: ollama, chatgpt, opencode_go.")
                 # Model-role routing: each value should be a string alias (or
                 # empty = use default_alias). A non-string / non-alias value
                 # is ambiguous only when it doesn't resolve — warn, never
@@ -181,6 +181,36 @@ class ConfigValidator:
                 models_list = chatgpt.get("models")
                 if models_list is not None and not isinstance(models_list, list):
                     result.warnings.append("chatgpt.models must be a list.")
+
+        # Validate opencode_go provider block (opt-in; warn-only on absence).
+        if "opencode_go" in self._config:
+            og = self._config["opencode_go"]
+            if not isinstance(og, dict):
+                result.errors.append("'opencode_go' must be a mapping.")
+            else:
+                enabled = og.get("enabled")
+                if enabled is not None and not isinstance(enabled, bool):
+                    result.warnings.append("opencode_go.enabled must be a boolean.")
+                base_url = og.get("base_url")
+                if base_url is not None and (not isinstance(base_url, str) or not base_url.strip()):
+                    result.warnings.append("opencode_go.base_url must be a non-empty string.")
+                api_key_env = og.get("api_key_env")
+                if api_key_env is not None and (not isinstance(api_key_env, str) or not api_key_env.strip()):
+                    result.warnings.append("opencode_go.api_key_env must be a non-empty string.")
+                for nkey in (
+                    "request_timeout_seconds",
+                    "context_window",
+                    "discover_cache_seconds",
+                ):
+                    val = og.get(nkey)
+                    if val is not None and (not isinstance(val, (int, float)) or val < 0):
+                        result.warnings.append(f"opencode_go.{nkey} must be a non-negative number.")
+                default_model = og.get("default_model")
+                if default_model is not None and (not isinstance(default_model, str) or not default_model.strip()):
+                    result.warnings.append("opencode_go.default_model must be a non-empty string.")
+                models_list = og.get("models")
+                if models_list is not None and not isinstance(models_list, list):
+                    result.warnings.append("opencode_go.models must be a list.")
 
         # Validate MCP section
         if "mcp" in self._config:

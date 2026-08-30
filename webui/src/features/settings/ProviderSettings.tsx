@@ -23,7 +23,7 @@ import { SettingRow } from "./SettingRow";
 import { ConfigEditor } from "./ConfigEditor";
 import { StatusDot } from "./StatusOverview";
 import { useSettingsDraft } from "./useSettingsDraft";
-import { ChatGptControls, ProviderPicker, useModelOptions, useProviderStatus } from "@/components/ProviderSetup";
+import { ChatGptControls, OpenCodeGoControls, ProviderPicker, useModelOptions, useProviderStatus } from "@/components/ProviderSetup";
 import { useAddModel, useLiveModels, useModels, usePutSecrets, useRemoveModel, useSecrets } from "@/api/hooks";
 import { ApiError } from "@/api/client";
 import { SkeletonRows } from "@/components/Loading";
@@ -54,15 +54,21 @@ function ProviderStatusRow() {
 
   const provider = status.provider;
   const chatgptDraft = draft.chatgpt as Record<string, unknown> | undefined;
+  const ogDraft = draft.opencode_go as Record<string, unknown> | undefined;
   const modelsDraft = draft.models as Record<string, unknown> | undefined;
-  const current =
-    provider === "chatgpt"
-      ? (chatgptDraft?.default_model as string | undefined) ?? models.data?.chatgpt?.default_model ?? ""
-      : (modelsDraft?.default_alias as string | undefined) ?? models.data?.default_alias ?? "";
+  let current = "";
+  if (provider === "chatgpt") {
+    current = (chatgptDraft?.default_model as string | undefined) ?? models.data?.chatgpt?.default_model ?? "";
+  } else if (provider === "opencode_go") {
+    current = (ogDraft?.default_model as string | undefined) ?? models.data?.opencode_go?.default_model ?? "";
+  } else {
+    current = (modelsDraft?.default_alias as string | undefined) ?? models.data?.default_alias ?? "";
+  }
   const all = current && !options.includes(current) ? [current, ...options] : options;
 
   const onDefaultModel = (value: string) => {
     if (provider === "chatgpt") update("chatgpt", "default_model", value);
+    else if (provider === "opencode_go") update("opencode_go", "default_model", value);
     else update("models", "default_alias", value);
   };
 
@@ -116,6 +122,8 @@ function ProviderStatusRow() {
           <ProviderPicker />
           {provider === "chatgpt" ? (
             <ChatGptControls />
+          ) : provider === "opencode_go" ? (
+            <OpenCodeGoControls />
           ) : (
             <p className="text-xs text-muted-foreground">Local Ollama models. Embeddings also use Ollama.</p>
           )}
@@ -180,7 +188,9 @@ function ModelRegistry() {
   const live = useLiveModels();
   const addModel = useAddModel();
   const removeModel = useRemoveModel();
-  const isChatgpt = (models.data?.provider ?? "ollama") === "chatgpt";
+  const provider = models.data?.provider ?? "ollama";
+  const isChatgpt = provider === "chatgpt";
+  const isOpencodeGo = provider === "opencode_go";
   const registry = Object.entries(models.data?.registry ?? {});
   const registryMap = new Map(registry);
   const [newAlias, setNewAlias] = useState("");
@@ -199,7 +209,7 @@ function ModelRegistry() {
       <div>
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            {isChatgpt ? "Live ChatGPT models" : "Live Ollama models"}
+            {isChatgpt ? "Live ChatGPT models" : isOpencodeGo ? "Live OpenCode Go models" : "Live Ollama models"}
           </span>
           <Button size="sm" variant="ghost" onClick={() => live.refetch()} disabled={live.isFetching}>
             <RefreshCw className={cn("h-3.5 w-3.5", live.isFetching && "animate-spin")} />
@@ -219,7 +229,12 @@ function ModelRegistry() {
           ))}
           {(live.data?.models ?? []).length === 0 && (
             <li className="text-muted-foreground">
-              No models reported. {isChatgpt ? "Sign in and start the proxy, then refresh." : "Is the daemon running?"}
+              No models reported.{" "}
+              {isChatgpt
+                ? "Sign in and start the proxy, then refresh."
+                : isOpencodeGo
+                  ? "Set OPENCODE_GO_API_KEY, then refresh. Uses https://opencode.ai/zen/go/v1/responses."
+                  : "Is the daemon running?"}
             </li>
           )}
         </ul>
@@ -238,6 +253,24 @@ function ModelRegistry() {
               <li className="text-muted-foreground">Empty — models are discovered from /v1/models at run time.</li>
             )}
           </ul>
+        </div>
+      ) : isOpencodeGo ? (
+        <div>
+          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Configured OpenCode Go models</span>
+          <ul className="mt-1.5 space-y-1 font-mono text-xs">
+            {(models.data?.opencode_go?.configured_models ?? []).map((m) => (
+              <li key={m} className="rounded bg-muted/40 px-2 py-1">
+                {m}
+              </li>
+            ))}
+            {(models.data?.opencode_go?.configured_models ?? []).length === 0 && (
+              <li className="text-muted-foreground">
+                Empty — models are discovered from {models.data?.opencode_go?.base_url ?? "https://opencode.ai/zen/go/v1"}/models at run
+                time (Responses API: muse-spark-1.2-contributor).
+              </li>
+            )}
+          </ul>
+          <p className="mt-2 text-xs text-muted-foreground">Registry editing for OpenCode Go uses opencode_go.models.</p>
         </div>
       ) : (
         <div>

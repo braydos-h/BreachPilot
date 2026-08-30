@@ -44,6 +44,7 @@ def configured_api_key_env_names(config: dict[str, Any]) -> list[str]:
     serpapi = research.get("serpapi", {}) or {}
     cve_lookup = config.get("cve_lookup", {}) or {}
     github = cve_lookup.get("github", {}) or {}
+    opencode_go = config.get("opencode_go", {}) or {}
 
     for value in (
         top_ollama.get("api_key_env", "OLLAMA_API_KEY"),
@@ -51,6 +52,7 @@ def configured_api_key_env_names(config: dict[str, Any]) -> list[str]:
         serpapi.get("api_key_env", "SERPAPI_API_KEY"),
         cve_lookup.get("api_key_env", "NVD_API_KEY"),
         github.get("token_env", "GITHUB_TOKEN"),
+        opencode_go.get("api_key_env", "OPENCODE_GO_API_KEY"),
     ):
         name = str(value or "").strip()
         if name and name not in names:

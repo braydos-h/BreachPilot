@@ -39,7 +39,7 @@ def load_validated_config(path: Path | str = "config.yaml") -> dict[str, Any]:
 
 
 def get_ai_provider(config: dict[str, Any] | None = None) -> str:
-    """Return the active chat/generate provider (``ollama`` | ``chatgpt``).
+    """Return the active chat/generate provider (``ollama`` | ``chatgpt`` | ``opencode_go``).
 
     Reads ``models.provider``; defaults to ``ollama`` so an absent key (the
     common case) is unchanged. Tolerates a None config.
@@ -63,6 +63,23 @@ def get_chatgpt_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
     base = copy.deepcopy(CONFIG_SCHEMA.get("chatgpt", {}))
     cfg = config or {}
     overlay = cfg.get("chatgpt") if isinstance(cfg, dict) else None
+    if isinstance(overlay, dict):
+        for key, value in overlay.items():
+            if value is not None:
+                base[key] = value
+    return base
+
+
+def get_opencode_go_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return the ``opencode_go`` block with schema defaults applied.
+
+    The merge is shallow-over-defaults; used by the model-router and discovery.
+    Never returns None.
+    """
+
+    base = copy.deepcopy(CONFIG_SCHEMA.get("opencode_go", {}))
+    cfg = config or {}
+    overlay = cfg.get("opencode_go") if isinstance(cfg, dict) else None
     if isinstance(overlay, dict):
         for key, value in overlay.items():
             if value is not None:

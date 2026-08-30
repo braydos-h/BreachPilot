@@ -263,7 +263,7 @@ async def put_secrets(
 @router.get("/models")
 async def list_models(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     """List configured model aliases + metadata (provider-aware)."""
-    from tools.config_manager import get_ai_provider, get_chatgpt_config
+    from tools.config_manager import get_ai_provider, get_chatgpt_config, get_opencode_go_config
 
     models = _CONFIG.get("models", {})
     provider = get_ai_provider(_CONFIG)
@@ -279,6 +279,15 @@ async def list_models(auth: str = Depends(_require_auth)) -> dict[str, Any]:
             "default_model": chatgpt_cfg.get("default_model", "gpt-5.2"),
             "context_window": chatgpt_cfg.get("context_window", 128000),
             "configured_models": list(chatgpt_cfg.get("models") or []),
+        }
+    if provider == "opencode_go":
+        og_cfg = get_opencode_go_config(_CONFIG)
+        response["opencode_go"] = {
+            "base_url": og_cfg.get("base_url", "https://opencode.ai/zen/go/v1"),
+            "default_model": og_cfg.get("default_model", "muse-spark-1.2-contributor"),
+            "context_window": og_cfg.get("context_window", 128000),
+            "configured_models": list(og_cfg.get("models") or []),
+            "enabled": bool(og_cfg.get("enabled", False)),
         }
     return response
 
@@ -324,16 +333,22 @@ async def remove_model(alias: str, auth: str = Depends(_require_auth)) -> dict[s
 
 @router.post("/models/provider")
 async def set_model_provider(request: Request, auth: str = Depends(_require_auth)) -> dict[str, Any]:
-    """Switch the active chat/generate provider (``ollama`` | ``chatgpt``)."""
+    """Switch the active chat/generate provider (``ollama`` | ``chatgpt`` | ``opencode_go``)."""
     from tools.api.errors import APIError
 
     body = await request.json()
     if not isinstance(body, dict):
         raise APIError("invalid_body", "Expected a JSON object.", status_code=400)
     provider = str(body.get("provider") or "").strip().lower()
-    if provider not in ("ollama", "chatgpt"):
-        raise APIError("invalid_provider", "provider must be 'ollama' or 'chatgpt'.", status_code=400)
-    merged = _apply_config_patch({"models": {"provider": provider}})
+    if provider not in ("ollama", "chatgpt", "opencode_go"):
+        raise APIError("invalid_provider", "provider must be 'ollama', 'chatgpt', or 'opencode_go'.", status_code=400)
+    patch: dict[str, Any] = {"models": {"provider": provider}}
+    # Auto-enable the provider block when switching to it (mirrors chatgpt behaviour)
+    if provider == "opencode_go":
+        patch["opencode_go"] = {"enabled": True}
+    elif provider == "chatgpt":
+        patch["chatgpt"] = {"enabled": True}
+    merged = _apply_config_patch(patch)
     return {"status": "ok", "provider": provider}
 
 
@@ -812,8 +827,12 @@ async def list_live_models(auth: str = Depends(_require_auth)) -> dict[str, Any]
     only when signed in + ``auto_start``), then probes ``/v1/models``; falls
     back to the configured ``chatgpt.models`` / ``default_model`` with a 503
     (e.g. not signed in, or proxy failed to start).
+    OpenCode Go: probes ``{base_url}/models`` with ``Authorization: Bearer``
+    (when configured), filtered to Responses-compatible models; falls back to
+    ``opencode_go.models`` / ``default_model`` with a 503 when unreachable
+    (e.g. missing API key).
     """
-    from tools.config_manager import get_ai_provider, get_chatgpt_config
+    from tools.config_manager import get_ai_provider, get_chatgpt_config, get_opencode_go_config
 
     provider = get_ai_provider(_CONFIG)
     if provider == "chatgpt":
@@ -867,6 +886,72 @@ async def list_live_models(auth: str = Depends(_require_auth)) -> dict[str, Any]
                 status_code=503,
                 media_type="application/json",
             )
+    if provider == "opencode_go":
+        from tools.config_manager import get_opencode_go_config
+
+        og_cfg = get_opencode_go_config(_CONFIG)
+        base_url = str(og_cfg.get("base_url") or "https://opencode.ai/zen/go/v1").rstrip("/")
+        env_name = str(og_cfg.get("api_key_env") or "OPENCODE_GO_API_KEY")
+        api_key = (os.environ.get(env_name, "") or "").strip()
+        fallback = list(og_cfg.get("models") or []) or [og_cfg.get("default_model", "muse-spark-1.2-contributor")]
+        if not api_key:
+            from fastapi import Response
+
+            return Response(
+                content=json.dumps(
+                    {
+                        "models": fallback,
+                        "source": "registry",
+                        "error": f"OpenCode Go API key not set ({env_name}). Set it via secrets or env.",
+                    }
+                ),
+                status_code=503,
+                media_type="application/json",
+            )
+        try:
+            import httpx
+            from fastapi import Response
+
+            headers = {"Authorization": f"Bearer {api_key}"}
+            async with httpx.AsyncClient(timeout=5.0, headers=headers) as client:
+                resp = await client.get(f"{base_url}/models")
+                resp.raise_for_status()
+                data = resp.json()
+                raw_data = data.get("data") if isinstance(data, dict) else None
+                if isinstance(raw_data, list):
+                    # Filter to Responses-compatible models when we can reliably tell
+                    from tools.model_router import _is_opencode_responses_model
+
+                    models: list[str] = []
+                    for item in raw_data:
+                        if not isinstance(item, dict):
+                            continue
+                        mid = str(item.get("id") or "")
+                        if not mid:
+                            continue
+                        if _is_opencode_responses_model(mid, item, og_cfg):
+                            models.append(mid)
+                    # If filtering removed everything, fall back to raw list (at least show something)
+                    if not models:
+                        models = [str(m.get("id", "")) for m in raw_data if isinstance(m, dict) and m.get("id")]
+                    return {"models": models, "source": "opencode_go"}
+                # Fallback for non-standard shape
+                models = [str(m.get("id", "")) for m in (raw_data or []) if isinstance(m, dict) and m.get("id")]
+                return {"models": models, "source": "opencode_go"}
+        except Exception as exc:
+            # Sanitize key from error string
+            err_text = str(exc)
+            if api_key and api_key in err_text:
+                err_text = err_text.replace(api_key, "[REDACTED]")
+            from fastapi import Response
+
+            return Response(
+                content=json.dumps(
+                    {"models": fallback, "source": "registry", "error": f"OpenCode Go unreachable: {err_text}"}
+                ),
+                status_code=503,
+                media_type="application/json",
+            )
 
     ollama_host = _CONFIG.get("ollama", {}).get("host", "https://api.ollama.com")
     registry = _CONFIG.get("models", {}).get("registry", {})
@@ -905,16 +990,81 @@ def _chatgpt_status_sync(chatgpt_cfg: dict[str, Any]) -> tuple[bool, bool]:
     return manager.is_authenticated(chatgpt_cfg), manager._health_ok(chatgpt_cfg)
 
 
+def _opencode_go_status_sync(og_cfg: dict[str, Any]) -> dict[str, Any]:
+    """Return OpenCode Go reachable/online status without exposing secrets.
+
+    Never returns the API key.  Probes ``GET {base_url}/models`` with a short
+    timeout when a key is present; otherwise reachable stays False.
+    """
+    import os
+
+    env_name = str(og_cfg.get("api_key_env") or "OPENCODE_GO_API_KEY")
+    api_key = (os.environ.get(env_name, "") or "").strip()
+    api_key_present = bool(api_key)
+    base_url = str(og_cfg.get("base_url") or "https://opencode.ai/zen/go/v1").rstrip("/")
+    default_model = str(og_cfg.get("default_model") or "muse-spark-1.2-contributor")
+    enabled = bool(og_cfg.get("enabled", False))
+
+    reachable = False
+    available_models: list[str] = list(og_cfg.get("models") or [])
+    error: str | None = None
+
+    if not api_key_present:
+        error = f"API key not set ({env_name})"
+    else:
+        # Lightweight probe: GET /models with bearer auth, short timeout.
+        try:
+            import httpx
+
+            headers = {"Authorization": f"Bearer {api_key}"}
+            with httpx.Client(timeout=3.0, headers=headers) as client:
+                resp = client.get(f"{base_url}/models")
+                if resp.status_code < 400:
+                    reachable = True
+                    try:
+                        data = resp.json()
+                        raw = data.get("data") if isinstance(data, dict) else None
+                        if isinstance(raw, list):
+                            parsed = [str(m.get("id", "")) for m in raw if isinstance(m, dict) and m.get("id")]
+                            if parsed:
+                                available_models = parsed
+                    except Exception:
+                        pass
+                else:
+                    error = f"HTTP {resp.status_code}"
+        except Exception as exc:
+            txt = str(exc)
+            if api_key and api_key in txt:
+                txt = txt.replace(api_key, "[REDACTED]")
+            error = txt[:500]
+
+    result: dict[str, Any] = {
+        "enabled": enabled,
+        "base_url": base_url,
+        "default_model": default_model,
+        "api_key_present": api_key_present,
+        "reachable": reachable,
+        "available_models": available_models,
+        "configured_models": list(og_cfg.get("models") or []),
+        "context_window": og_cfg.get("context_window", 128000),
+    }
+    if error:
+        result["error"] = error
+    return result
+
+
 @router.get("/providers")
 async def get_providers(auth: str = Depends(_require_auth)) -> dict[str, Any]:
-    """Return the active provider + ChatGPT auth/proxy status (no secrets)."""
-    from tools.config_manager import get_ai_provider, get_chatgpt_config
+    """Return the active provider + ChatGPT / OpenCode Go status (no secrets)."""
+    from tools.config_manager import get_ai_provider, get_chatgpt_config, get_opencode_go_config
     from tools.providers.chatgpt_provider import ChatGptProxyManager
 
     provider = get_ai_provider(_CONFIG)
     chatgpt_cfg = get_chatgpt_config(_CONFIG)
+    og_cfg = get_opencode_go_config(_CONFIG)
     manager = ChatGptProxyManager.get()
     authenticated, proxy_running = await asyncio.to_thread(_chatgpt_status_sync, chatgpt_cfg)
+    og_status = await asyncio.to_thread(_opencode_go_status_sync, og_cfg)
     return {
         "provider": provider,
         "chatgpt": {
@@ -926,6 +1076,7 @@ async def get_providers(auth: str = Depends(_require_auth)) -> dict[str, Any]:
             "default_model": chatgpt_cfg.get("default_model", "gpt-5.2"),
             "we_started": manager._we_started,
         },
+        "opencode_go": og_status,
     }
 
 

@@ -116,20 +116,30 @@ export interface ChatgptModelsBlock {
   configured_models?: string[];
 }
 
+export interface OpencodeGoModelsBlock {
+  base_url?: string;
+  default_model?: string;
+  context_window?: number;
+  configured_models?: string[];
+  enabled?: boolean;
+}
+
 export interface ModelRegistryInfo {
-  /** Active chat/generate provider: "ollama" (default) or "chatgpt". */
+  /** Active chat/generate provider: "ollama" (default) | "chatgpt" | "opencode_go". */
   provider?: string;
   default_alias: string;
   registry: Record<string, string>;
   info?: Record<string, ModelInfo>;
   /** Present only when provider === "chatgpt". */
   chatgpt?: ChatgptModelsBlock;
+  /** Present only when provider === "opencode_go". */
+  opencode_go?: OpencodeGoModelsBlock;
 }
 
 export interface LiveModelsResponse {
   models: string[];
-  /** "ollama" | "registry" (ollama path) | "chatgpt" (chatgpt path). */
-  source: "ollama" | "registry" | "chatgpt";
+  /** "ollama" | "registry" (ollama path) | "chatgpt" (chatgpt path) | "opencode_go" (opencode path). */
+  source: "ollama" | "registry" | "chatgpt" | "opencode_go";
   error?: string;
 }
 
@@ -154,9 +164,22 @@ export interface ChatgptProviderStatus {
   we_started?: boolean;
 }
 
+export interface OpencodeGoProviderStatus {
+  enabled?: boolean;
+  base_url?: string;
+  default_model?: string;
+  api_key_present?: boolean;
+  reachable?: boolean;
+  available_models?: string[];
+  configured_models?: string[];
+  context_window?: number;
+  error?: string;
+}
+
 export interface ProvidersResponse {
   provider: string;
   chatgpt?: ChatgptProviderStatus;
+  opencode_go?: OpencodeGoProviderStatus;
 }
 
 /** POST /providers/chatgpt/login → {ok, url?, reason?}. Tokens never appear here. */

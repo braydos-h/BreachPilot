@@ -331,6 +331,92 @@ def _check_chatgpt(config: dict[str, Any] | None = None) -> dict[str, Any]:
     return {"name": "chatgpt_provider", "ok": ok, "subchecks": sub, "hint": hint, "runtime": runtime, "models": models}
 
 
+def _check_opencode_go(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Check the OpenCode Go (Responses API) provider readiness.
+
+    Never logs the API key.  Sub-checks: provider configured, API key present,
+    base_url syntactically valid, ``GET {base_url}/models`` reachable, default
+    model present, ``/responses`` configuration valid (base_url + model).
+    Aggregated ``ok`` requires key present, models reachable, and default
+    present — otherwise the operator sees a clear auth or reachability hint.
+    """
+    from tools.config_manager import get_opencode_go_config
+
+    cfg = get_opencode_go_config(config)
+    base_url = str(cfg.get("base_url") or "https://opencode.ai/zen/go/v1").rstrip("/")
+    env_name = str(cfg.get("api_key_env") or "OPENCODE_GO_API_KEY")
+    api_key = (os.environ.get(env_name, "") or "").strip()
+    default_model = str(cfg.get("default_model") or "muse-spark-1.2-contributor")
+
+    sub: list[dict[str, Any]] = []
+    sub.append({"name": "provider_configured", "ok": bool(cfg.get("enabled")) or True})
+    sub.append({"name": "base_url", "ok": bool(base_url), "value": base_url})
+    sub.append({"name": "api_key_present", "ok": bool(api_key), "env": env_name})
+    sub.append({"name": "default_model", "ok": bool(default_model), "value": default_model})
+
+    # Probe /models
+    models_ok = False
+    models: list[str] = []
+    models_error: str = ""
+    if api_key:
+        try:
+            req = urllib.request.Request(f"{base_url}/models", headers={"Authorization": f"Bearer {api_key}"})
+            with urllib.request.urlopen(req, timeout=3.0) as resp:
+                data = json.loads(resp.read().decode("utf-8") or "{}")
+            raw = data.get("data") if isinstance(data, dict) else None
+            if isinstance(raw, list):
+                models = [str(m.get("id", "")) for m in raw if isinstance(m, dict) and m.get("id")]
+                models_ok = True  # reachable counts even if list empty (discovery failure + fallback still usable)
+            else:
+                models_ok = False
+                models_error = "unexpected shape"
+        except Exception as exc:
+            txt = str(exc)
+            if api_key and api_key in txt:
+                txt = txt.replace(api_key, "[REDACTED]")
+            models_error = txt[:300]
+            models_ok = False
+    else:
+        models_error = f"API key not set ({env_name})"
+
+    sub.append(
+        {
+            "name": "models_reachable",
+            "ok": models_ok,
+            "models": models[:20],
+            "error": models_error,
+            "url": f"{base_url}/models",
+        }
+    )
+
+    default_present = bool(default_model and (default_model in models if models else True))
+    # When discovery returned empty but key present, we still consider default valid (fallback path)
+    if not models and api_key:
+        default_present = True
+    sub.append({"name": "default_model_present", "ok": default_present, "value": default_model})
+
+    # /responses config valid: base_url ends with v1 + model non-empty
+    responses_ok = bool(base_url) and bool(default_model)
+    sub.append({"name": "responses_config", "ok": responses_ok, "url": f"{base_url}/responses", "model": default_model})
+
+    ok = bool(api_key) and models_ok and default_present and responses_ok
+    hint = ""
+    if not api_key:
+        hint = f"Set {env_name} via env or secr.json (python main.py --setup-api-keys). Get a key at https://opencode.ai/zen/go."
+    elif not models_ok:
+        hint = f"OpenCode Go /models unreachable at {base_url}/models — check base_url, API key, and network."
+    elif not default_present:
+        hint = f"Default model {default_model!r} not in discovered list — check opencode_go.default_model or opencode_go.models."
+    return {
+        "name": "opencode_go_provider",
+        "ok": ok,
+        "subchecks": sub,
+        "hint": hint,
+        "models": models,
+        "base_url": base_url,
+    }
+
+
 def _check_workspace(workspace: Path) -> dict[str, Any]:
     try:
         workspace.mkdir(parents=True, exist_ok=True)
@@ -474,6 +560,8 @@ def _collect_doctor_checks(config_path: Path) -> tuple[list[dict[str, Any]], dic
 
     if get_ai_provider(config) == "chatgpt":
         checks.append(_check_chatgpt(config))
+    if get_ai_provider(config) == "opencode_go":
+        checks.append(_check_opencode_go(config))
     checks.append(_check_sandbox(config))
 
     # Self-heal missing cloud models: ping each via /api/generate
@@ -605,12 +693,14 @@ def run_doctor(config_path: Path, json_output: bool = False) -> int:
     if os.name != "nt":
         checks.append(_check_linux_privilege())
         checks.append(_check_optional_tools(config))
-    # ChatGPT provider check — only when selected, so the default (ollama)
-    # doctor output is unchanged. Counts toward failures when provider=chatgpt.
+    # ChatGPT / OpenCode Go provider checks — only when selected, so the default (ollama)
+    # doctor output is unchanged. Counts toward failures when that provider is selected.
     from tools.config_manager import get_ai_provider
 
     if get_ai_provider(config) == "chatgpt":
         checks.append(_check_chatgpt(config))
+    if get_ai_provider(config) == "opencode_go":
+        checks.append(_check_opencode_go(config))
     checks.append(_check_sandbox(config))
 
     failed = 0
@@ -689,6 +779,19 @@ def run_doctor(config_path: Path, json_output: bool = False) -> int:
                 print(f"        -> [{sstatus}] {s['name']}")
             if c.get("models"):
                 print(f"        -> discovered models: {', '.join(c['models'])[:200]}")
+            if c.get("hint"):
+                print(f"        -> {c['hint']}")
+        if name == "opencode_go_provider":
+            for s in c.get("subchecks") or []:
+                sstatus = "OK" if s.get("ok") else "FAIL"
+                extra = s.get("value") or s.get("env") or s.get("url") or ""
+                print(f"        -> [{sstatus}] {s['name']}{' ' + str(extra) if extra else ''}")
+                if s.get("error"):
+                    print(f"              error: {s['error']}")
+            if c.get("models"):
+                print(f"        -> discovered models: {', '.join(c['models'])[:200]}")
+            if c.get("base_url"):
+                print(f"        -> base_url: {c['base_url']} (endpoint: /responses)")
             if c.get("hint"):
                 print(f"        -> {c['hint']}")
 

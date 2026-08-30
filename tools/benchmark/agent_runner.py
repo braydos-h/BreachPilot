@@ -336,7 +336,7 @@ class MissionRunner:
 
     def _build_model_client(self) -> Any:
         """Build the model client for the recorded alias (provider-aware)."""
-        from tools.config_manager import get_ai_provider, get_chatgpt_config
+        from tools.config_manager import get_ai_provider, get_chatgpt_config, get_opencode_go_config
         from tools.model_router import build_router
 
         ollama_host = self.config.get("ollama", {}).get("host", "https://api.ollama.com")
@@ -350,12 +350,20 @@ class MissionRunner:
                 chatgpt_config=get_chatgpt_config(self.config),
                 config=self.config,
             )
+        elif provider == "opencode_go":
+            router = build_router(
+                registry,
+                host=ollama_host,
+                provider="opencode_go",
+                opencode_go_config=get_opencode_go_config(self.config),
+                config=self.config,
+            )
         else:
             router = build_router(registry, host=ollama_host)
         try:
             return router.get_client(self.model_alias)
         except KeyError:
-            if provider == "chatgpt":
+            if provider in ("chatgpt", "opencode_go"):
                 from tools.model_router import build_model_client_for_provider
 
                 router.register(

@@ -122,6 +122,23 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "discover_cache_seconds": 300,
         "oauth_file": "",
     },
+    # OpenCode Go provider (Responses API). Opt-in: ``enabled: false`` by
+    # default so first-run behavior is unchanged. When ``models.provider:
+    # opencode_go`` the chat/generate path routes through the hosted
+    # ``https://opencode.ai/zen/go/v1/responses`` endpoint (OpenAI Responses
+    # API). The API key is read from ``OPENCODE_GO_API_KEY`` (or the env var
+    # named by ``api_key_env``) and never copied into config or logs. See
+    # tools/providers/opencode_go_provider.py and docs/providers.md.
+    "opencode_go": {
+        "enabled": False,
+        "base_url": "https://opencode.ai/zen/go/v1",
+        "api_key_env": "OPENCODE_GO_API_KEY",
+        "request_timeout_seconds": 300,
+        "default_model": "muse-spark-1.2-contributor",
+        "models": [],
+        "context_window": 128000,
+        "discover_cache_seconds": 300,
+    },
     "mcp": {
         "default_transport": "stdio",
         "http_host": "127.0.0.1",

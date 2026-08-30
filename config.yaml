@@ -517,6 +517,21 @@ ticketing:
   backoff_seconds: 2.0
 chatgpt:
   enabled: true
+# OpenCode Go provider (Responses API). Opt-in: ``enabled: false`` by default
+# would be the fresh-install default; the lab build flips it to ``true`` so
+# the new provider is visible in the UI. When ``models.provider:
+# opencode_go``, chat/generate go to https://opencode.ai/zen/go/v1/responses
+# (OpenAI Responses API, not chat/completions) via Authorization: Bearer
+# $OPENCODE_GO_API_KEY. See docs/providers.md and tools/providers/opencode_go_provider.py.
+opencode_go:
+  enabled: false
+  base_url: https://opencode.ai/zen/go/v1
+  api_key_env: OPENCODE_GO_API_KEY
+  request_timeout_seconds: 300
+  default_model: muse-spark-1.2-contributor
+  models: []
+  context_window: 128000
+  discover_cache_seconds: 300
 # Phase 6.3 (D6): Caldera adversary emulation plugin. Lab build: enabled true.
 # The Caldera server is target-side — operator adds its IP to
 # exploit.allowed_targets. The plugin's MCP tools (caldera_list_abilities,

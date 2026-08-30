@@ -115,6 +115,36 @@ def _chatgpt_title(config: Mapping[str, Any], prompt: str) -> str:
         return ""
 
 
+def _opencode_go_title(config: Mapping[str, Any], prompt: str) -> str:
+    """Best-effort title via the OpenCode Go provider. Returns "" on any failure.
+
+    Uses ``opencode_go.default_model`` (muse-spark-1.2-contributor).  The
+    Responses adapter drops Ollama-only kwargs and forwards temperature.
+    """
+    try:
+        from tools.config_manager import get_opencode_go_config
+        from tools.model_router import build_model_client_for_provider
+
+        og_cfg = get_opencode_go_config(config)
+        model_id = str(og_cfg.get("default_model") or "muse-spark-1.2-contributor")
+        client = build_model_client_for_provider(config, model_id, request_timeout_seconds=_REQUEST_TIMEOUT_S)
+        response = client.chat(
+            model=model_id,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=30,
+        )
+        content = ""
+        try:
+            content = response["message"]["content"]
+        except (KeyError, TypeError, IndexError):
+            content = ""
+        return _clean_title(content)
+    except Exception as exc:  # best-effort — never raise to the caller
+        log.debug("opencode_go session title generation failed: %s", exc)
+        return ""
+
+
 def _provider_is_chatgpt(config: Mapping[str, Any] | None) -> bool:
     if not config:
         return False
@@ -122,6 +152,17 @@ def _provider_is_chatgpt(config: Mapping[str, Any] | None) -> bool:
         from tools.config_manager import get_ai_provider
 
         return get_ai_provider(config) == "chatgpt"
+    except Exception:
+        return False
+
+
+def _provider_is_opencode_go(config: Mapping[str, Any] | None) -> bool:
+    if not config:
+        return False
+    try:
+        from tools.config_manager import get_ai_provider
+
+        return get_ai_provider(config) == "opencode_go"
     except Exception:
         return False
 
@@ -160,6 +201,8 @@ def generate_session_title_sync(
     prompt = _build_prompt(result, request)
     if _provider_is_chatgpt(config):
         return _chatgpt_title(config, prompt)
+    if _provider_is_opencode_go(config):
+        return _opencode_go_title(config, prompt)
     if OllamaClient is None:
         return ""
     try:

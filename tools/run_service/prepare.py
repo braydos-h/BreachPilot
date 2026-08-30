@@ -413,7 +413,7 @@ class PrepareMixin:
     # byte-compatible; the chatgpt path forwards the extra kwargs (no test
     # exercises chatgpt with a fake router).
     def _build_router_for_config(self, config: dict[str, Any], req_timeout: float | None) -> Any:
-        from tools.config_manager import get_ai_provider, get_chatgpt_config
+        from tools.config_manager import get_ai_provider, get_chatgpt_config, get_opencode_go_config
 
         ollama_host = config.get("ollama", {}).get("host", "https://api.ollama.com")
         registry = config.get("models", {}).get("registry")
@@ -425,6 +425,15 @@ class PrepareMixin:
                 request_timeout_seconds=req_timeout,
                 provider="chatgpt",
                 chatgpt_config=get_chatgpt_config(config),
+                config=config,
+            )
+        if provider == "opencode_go":
+            return self._c.build_router(
+                registry,
+                host=ollama_host,
+                request_timeout_seconds=req_timeout,
+                provider="opencode_go",
+                opencode_go_config=get_opencode_go_config(config),
                 config=config,
             )
         return self._c.build_router(registry, host=ollama_host, request_timeout_seconds=req_timeout)
@@ -446,7 +455,7 @@ class PrepareMixin:
             return
         except KeyError:
             pass
-        if get_ai_provider(config) == "chatgpt":
+        if get_ai_provider(config) in ("chatgpt", "opencode_go"):
             from tools.model_router import build_model_client_for_provider
 
             router.register(
@@ -472,10 +481,13 @@ class PrepareMixin:
         """
         if request.model_alias:
             return request.model_alias
-        from tools.config_manager import get_ai_provider, get_chatgpt_config
+        from tools.config_manager import get_ai_provider, get_chatgpt_config, get_opencode_go_config
 
-        if get_ai_provider(config) == "chatgpt":
+        provider = get_ai_provider(config)
+        if provider == "chatgpt":
             return str(get_chatgpt_config(config).get("default_model") or "gpt-5.2")
+        if provider == "opencode_go":
+            return str(get_opencode_go_config(config).get("default_model") or "muse-spark-1.2-contributor")
         return config.get("models", {}).get("default_alias", "glm")
 
     # ------------------------------------------------------------------

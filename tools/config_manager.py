@@ -6,6 +6,7 @@ from tools.config.loader import (
     get_ai_provider,
     get_chatgpt_config,
     get_ollama_host,
+    get_opencode_go_config,
     load_validated_config,
     validate_config_file,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "get_ai_provider",
     "get_chatgpt_config",
     "get_ollama_host",
+    "get_opencode_go_config",
     "load_validated_config",
     "validate_config_file",
 ]

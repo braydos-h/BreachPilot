@@ -157,7 +157,7 @@ def _get_model_router_impl(config: dict[str, Any] | None) -> Any | None:
             return _model_router_cache
         _model_router_init_attempted = True
         try:
-            from tools.config_manager import get_ai_provider, get_chatgpt_config
+            from tools.config_manager import get_ai_provider, get_chatgpt_config, get_opencode_go_config
             from tools.model_router import build_router
 
             registry = (config or {}).get("models", {}).get("registry", {})
@@ -169,6 +169,10 @@ def _get_model_router_impl(config: dict[str, Any] | None) -> Any | None:
             if provider == "chatgpt":
                 kwargs["provider"] = "chatgpt"
                 kwargs["chatgpt_config"] = get_chatgpt_config(config)
+                kwargs["config"] = config
+            elif provider == "opencode_go":
+                kwargs["provider"] = "opencode_go"
+                kwargs["opencode_go_config"] = get_opencode_go_config(config)
                 kwargs["config"] = config
             _model_router_cache = build_router(**kwargs)
             return _model_router_cache
@@ -188,11 +192,19 @@ def _get_model_router(config: dict[str, Any] | None) -> Any | None:
 
 
 def _get_model_client(config: dict[str, Any] | None) -> tuple[Any | None, str]:
-    """Return (client, model_name) from the router for the default alias."""
+    """Return (client, model_name) from the router for the default alias (provider-aware)."""
+    from tools.config_manager import get_ai_provider, get_chatgpt_config, get_opencode_go_config
+
     router = _get_model_router(config)
     if router is None:
         return None, ""
-    default_alias = (config or {}).get("models", {}).get("default_alias", "glm")
+    provider = get_ai_provider(config)
+    if provider == "chatgpt":
+        default_alias = str(get_chatgpt_config(config).get("default_model") or "gpt-5.2")
+    elif provider == "opencode_go":
+        default_alias = str(get_opencode_go_config(config).get("default_model") or "muse-spark-1.2-contributor")
+    else:
+        default_alias = str((config or {}).get("models", {}).get("default_alias", "glm") or "glm")
     try:
         client = router.get_client(default_alias)
         return client, default_alias

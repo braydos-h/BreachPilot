@@ -265,7 +265,7 @@ async def _run_one_trial(
             merged = _merge_config(base_config, config)
             ollama_host = merged.get("ollama", {}).get("host", "https://api.ollama.com")
             registry = merged.get("models", {}).get("registry")
-            from tools.config_manager import get_ai_provider, get_chatgpt_config
+            from tools.config_manager import get_ai_provider, get_chatgpt_config, get_opencode_go_config
 
             provider = get_ai_provider(merged)
             if provider == "chatgpt":
@@ -276,13 +276,23 @@ async def _run_one_trial(
                     chatgpt_config=get_chatgpt_config(merged),
                     config=merged,
                 )
+            elif provider == "opencode_go":
+                router = build_router(
+                    registry,
+                    host=ollama_host,
+                    provider="opencode_go",
+                    opencode_go_config=get_opencode_go_config(merged),
+                    config=merged,
+                )
             else:
                 router = build_router(registry, host=ollama_host)
             model_alias = merged.get("models", {}).get("default_alias", "glm")
+            if provider == "opencode_go":
+                model_alias = str(get_opencode_go_config(merged).get("default_model") or "muse-spark-1.2-contributor")
             try:
                 model_client = router.get_client(model_alias)
             except KeyError:
-                if provider == "chatgpt":
+                if provider in ("chatgpt", "opencode_go"):
                     from tools.model_router import build_model_client_for_provider
 
                     router.register(

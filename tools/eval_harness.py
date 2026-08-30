@@ -413,7 +413,7 @@ async def run_eval(args: Any) -> int:
     print("=" * 60)
 
     # Build the model client exactly as main.py does (provider-aware).
-    from tools.config_manager import get_ai_provider, get_chatgpt_config
+    from tools.config_manager import get_ai_provider, get_chatgpt_config, get_opencode_go_config
 
     ollama_host = config.get("ollama", {}).get("host", "https://api.ollama.com")
     registry = config.get("models", {}).get("registry")
@@ -426,13 +426,25 @@ async def run_eval(args: Any) -> int:
             chatgpt_config=get_chatgpt_config(config),
             config=config,
         )
+    elif provider == "opencode_go":
+        router = build_router(
+            registry,
+            host=ollama_host,
+            provider="opencode_go",
+            opencode_go_config=get_opencode_go_config(config),
+            config=config,
+        )
     else:
         router = build_router(registry, host=ollama_host)
     model_alias = config.get("models", {}).get("default_alias", "glm")
+    if provider == "opencode_go":
+        # For opencode_go the alias namespace is the model id itself (like chatgpt)
+        # Prefer the configured default_model when the ollama default_alias is stale
+        model_alias = str(get_opencode_go_config(config).get("default_model") or "muse-spark-1.2-contributor")
     try:
         model_client = router.get_client(model_alias)
     except KeyError:
-        if provider == "chatgpt":
+        if provider in ("chatgpt", "opencode_go"):
             from tools.model_router import build_model_client_for_provider
 
             router.register(
@@ -1291,7 +1303,7 @@ async def default_agent_runner(target_id: str, oracle: dict[str, Any], config: d
     workspace_root.mkdir(parents=True, exist_ok=True)
     max_rounds = int(eval_cfg.get("max_rounds", 30) or 30)
 
-    from tools.config_manager import get_ai_provider, get_chatgpt_config
+    from tools.config_manager import get_ai_provider, get_chatgpt_config, get_opencode_go_config
 
     ollama_host = cfg.get("ollama", {}).get("host", "https://api.ollama.com")
     registry = cfg.get("models", {}).get("registry")
@@ -1304,15 +1316,25 @@ async def default_agent_runner(target_id: str, oracle: dict[str, Any], config: d
             chatgpt_config=get_chatgpt_config(cfg),
             config=cfg,
         )
+    elif provider == "opencode_go":
+        router = build_router(
+            registry,
+            host=ollama_host,
+            provider="opencode_go",
+            opencode_go_config=get_opencode_go_config(cfg),
+            config=cfg,
+        )
     else:
         router = build_router(registry, host=ollama_host)
     model_alias = cfg.get("models", {}).get("default_alias", "glm")
+    if provider == "opencode_go":
+        model_alias = str(get_opencode_go_config(cfg).get("default_model") or "muse-spark-1.2-contributor")
     try:
         model_client = router.get_client(model_alias)
     except KeyError:
         from tools.model_router import _build_model_client, build_model_client_for_provider
 
-        if provider == "chatgpt":
+        if provider in ("chatgpt", "opencode_go"):
             router.register(
                 model_alias, build_model_client_for_provider(cfg, model_alias, request_timeout_seconds=None)
             )

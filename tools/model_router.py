@@ -449,6 +449,7 @@ def build_router(
     request_timeout_seconds: float | None = None,
     provider: str = "ollama",
     chatgpt_config: Mapping[str, Any] | None = None,
+    opencode_go_config: Mapping[str, Any] | None = None,
     config: Mapping[str, Any] | None = None,
 ) -> ModelRouter:
     """Build and return a router from alias -> model name.
@@ -459,12 +460,24 @@ def build_router(
     running, discovers models from ``/v1/models`` (falling back to the
     ``chatgpt.default_model`` / configured ``chatgpt.models`` list), and
     registers one ``ModelClient`` per discovered GPT model — each backed by a
-    single shared ``ChatGptProxyClient``. ``alias`` == ``model_id`` for the
-    ChatGPT path (there is no separate alias namespace).
+    single shared ``ChatGptProxyClient``. ``"opencode_go"`` routes through the
+    hosted Responses endpoint (``https://opencode.ai/zen/go/v1/responses``).
+    ``alias`` == ``model_id`` for the chatgpt / opencode_go paths (no alias
+    namespace).
     """
     if provider == "chatgpt":
         return _build_chatgpt_router(
             chatgpt_config or {},
+            request_timeout_seconds=request_timeout_seconds,
+        )
+    if provider == "opencode_go":
+        cfg = opencode_go_config
+        if cfg is None and isinstance(config, Mapping):
+            from tools.config.loader import get_opencode_go_config
+
+            cfg = get_opencode_go_config(config)
+        return _build_opencode_go_router(
+            cfg or {},
             request_timeout_seconds=request_timeout_seconds,
         )
 
@@ -536,6 +549,142 @@ def _build_chatgpt_router(
     return router
 
 
+def _is_opencode_responses_model(
+    model_id: str,
+    raw_item: Mapping[str, Any] | None,
+    cfg: Mapping[str, Any] | None = None,
+) -> bool:
+    """True if a discovered model is safe to route through the Responses adapter.
+
+    The hosted catalog mixes providers/protocols.  Our Responses adapter must
+    NOT blindly expose ``/chat/completions``-only or Anthropic ``/messages``-only
+    models via ``/responses``.  The reliable signal (when present) is an
+    explicit protocol hint in the discovery payload (e.g. ``supported_api``,
+    ``endpoints``, ``capabilities`` containing ``responses``).  When no hint
+    exists we conservatively allow only the known Responses family and the
+    configured default.
+    """
+    cleaned = str(model_id or "").strip()
+    if not cleaned:
+        return False
+    # Always allow the configured default
+    default = str((cfg or {}).get("default_model") or "muse-spark-1.2-contributor")
+    if cleaned == default:
+        return True
+    # Known Responses family
+    if cleaned == "muse-spark-1.2-contributor":
+        return True
+    # Heuristic for spark family (future spark releases stay on Responses)
+    if "muse-spark" in cleaned or "spark" in cleaned.lower():
+        return True
+    if raw_item is not None:
+        # Look for explicit protocol metadata
+        for key in ("supported_api", "api", "protocol", "endpoints", "capabilities", "supported_endpoints", "type"):
+            val = raw_item.get(key)  # type: ignore[attr-defined]
+            if val is None:
+                continue
+            text = str(val).lower() if not isinstance(val, list) else " ".join(str(v).lower() for v in val)
+            if "response" in text:
+                return True
+        # Some catalogs nest under metadata
+        meta = raw_item.get("metadata") if isinstance(raw_item.get("metadata"), Mapping) else None  # type: ignore[attr-defined]
+        if isinstance(meta, Mapping):
+            for key in ("supported_api", "protocol", "endpoints"):
+                val = meta.get(key)
+                if val is None:
+                    continue
+                text = str(val).lower() if not isinstance(val, list) else " ".join(str(v).lower() for v in val)
+                if "response" in text:
+                    return True
+    return False
+
+
+def _build_opencode_go_router(
+    opencode_config: Mapping[str, Any],
+    *,
+    request_timeout_seconds: float | None = None,
+) -> ModelRouter:
+    """Build a router backed by the hosted OpenCode Go Responses API."""
+    from tools.providers.opencode_go_provider import OpenCodeGoResponsesClient
+
+    cfg = dict(opencode_config)
+    # Resolve API key (fail-closed before any network)
+    import os
+
+    env_name = str(cfg.get("api_key_env") or "OPENCODE_GO_API_KEY").strip() or "OPENCODE_GO_API_KEY"
+    api_key = (os.environ.get(env_name, "") or "").strip()
+    if not api_key:
+        raise RuntimeError(
+            f"OpenCode Go provider unavailable: API key not set (env {env_name}). "
+            f"Set {env_name}=... or run python main.py --setup-api-keys."
+        )
+    base_url = str(cfg.get("base_url") or "https://opencode.ai/zen/go/v1").rstrip("/")
+    timeout = request_timeout_seconds
+    if timeout is None and cfg.get("request_timeout_seconds") is not None:
+        try:
+            timeout = float(cfg["request_timeout_seconds"])
+        except (TypeError, ValueError):
+            timeout = None
+    if timeout is None:
+        timeout = 300.0
+
+    shared = OpenCodeGoResponsesClient(
+        base_url=base_url,
+        api_key=api_key,
+        timeout=float(timeout),
+        default_model=str(cfg.get("default_model") or "muse-spark-1.2-contributor"),
+        config=cfg,
+    )
+
+    # Resolve model list: explicit -> discover (filtered) -> fallback
+    configured = cfg.get("models") or []
+    if configured:
+        model_ids = [str(m).strip() for m in configured if str(m).strip()]
+    else:
+        model_ids = []
+        try:
+            discovered = shared.discover_models(base_url, cfg)
+        except Exception:
+            discovered = []
+        if discovered:
+            # If discovery returned ids but we have no raw metadata, filter by id heuristic
+            filtered = [mid for mid in discovered if _is_opencode_responses_model(mid, None, cfg)]
+            if filtered:
+                model_ids = filtered
+            else:
+                # Discovery contained only non-Responses models; fall back to default
+                model_ids = []
+
+    if not model_ids:
+        default_model = str(cfg.get("default_model") or "muse-spark-1.2-contributor")
+        model_ids = [default_model]
+
+    # De-duplicate preserving order and ensure default present
+    seen: set[str] = set()
+    unique: list[str] = []
+    for mid in model_ids:
+        if mid not in seen:
+            seen.add(mid)
+            unique.append(mid)
+    default_model = str(cfg.get("default_model") or "muse-spark-1.2-contributor")
+    if default_model not in seen:
+        unique.append(default_model)
+
+    router = ModelRouter()
+    for model_id in unique:
+        router.register(
+            model_id,
+            _build_model_client(
+                model_id,
+                alias=model_id,
+                request_timeout_seconds=float(timeout) if timeout is not None else None,
+                raw_client=shared,
+                provider="opencode_go",
+            ),
+        )
+    return router
+
+
 def build_model_client_for_provider(
     config: Mapping[str, Any] | None,
     alias: str,
@@ -546,12 +695,14 @@ def build_model_client_for_provider(
 
     Root-cause replacement for the duplicated ``_build_model_client(alias,
     host=...)`` fallback call sites: reads ``models.provider`` +
-    ``ollama.host`` / the ``chatgpt`` block from config and builds the right
-    client. For ``ollama`` this is byte-identical to the old direct call. For
-    ``chatgpt`` it ensures the proxy and wraps a ``ChatGptProxyClient``.
+    ``ollama.host`` / the ``chatgpt``/``opencode_go`` block from config and
+    builds the right client. For ``ollama`` this is byte-identical to the old
+    direct call. For ``chatgpt`` it ensures the proxy and wraps a
+    ``ChatGptProxyClient``. For ``opencode_go`` it wraps an
+    ``OpenCodeGoResponsesClient``.
     """
     cfg = config or {}
-    from tools.config_manager import get_ai_provider, get_chatgpt_config, get_ollama_host
+    from tools.config_manager import get_ai_provider, get_chatgpt_config, get_ollama_host, get_opencode_go_config
 
     provider = get_ai_provider(cfg)
     if provider == "chatgpt":
@@ -575,6 +726,37 @@ def build_model_client_for_provider(
             request_timeout_seconds=timeout,
             raw_client=shared,
             provider="chatgpt",
+        )
+    if provider == "opencode_go":
+        og_cfg = get_opencode_go_config(cfg)
+        import os
+
+        env_name = str(og_cfg.get("api_key_env") or "OPENCODE_GO_API_KEY").strip() or "OPENCODE_GO_API_KEY"
+        api_key = (os.environ.get(env_name, "") or "").strip()
+        if not api_key:
+            raise RuntimeError(f"OpenCode Go provider unavailable: API key not set (env {env_name}).")
+        timeout = request_timeout_seconds
+        if timeout is None and og_cfg.get("request_timeout_seconds") is not None:
+            try:
+                timeout = float(og_cfg["request_timeout_seconds"])
+            except (TypeError, ValueError):
+                timeout = None
+        base_url = str(og_cfg.get("base_url") or "https://opencode.ai/zen/go/v1").rstrip("/")
+        from tools.providers.opencode_go_provider import OpenCodeGoResponsesClient
+
+        shared = OpenCodeGoResponsesClient(
+            base_url=base_url,
+            api_key=api_key,
+            timeout=float(timeout) if timeout is not None else 300.0,
+            default_model=str(og_cfg.get("default_model") or alias or "muse-spark-1.2-contributor"),
+            config=og_cfg,
+        )
+        return _build_model_client(
+            alias,
+            alias=alias,
+            request_timeout_seconds=timeout,
+            raw_client=shared,
+            provider="opencode_go",
         )
 
     host = get_ollama_host(cfg)

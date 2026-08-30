@@ -159,10 +159,11 @@ export function usePatchConfig() {
       // provider/model config; skills-only edits must not trigger provider probing.
       const keys = Object.keys(variables);
       const touchesModels =
-        keys.some((k) => ["models", "ollama", "chatgpt", "provider"].includes(k)) ||
+        keys.some((k) => ["models", "ollama", "chatgpt", "opencode_go", "provider"].includes(k)) ||
         (variables.models != null &&
           typeof variables.models === "object" &&
-          "provider" in (variables.models as Record<string, unknown>));
+          "provider" in (variables.models as Record<string, unknown>)) ||
+        variables.opencode_go != null;
       if (touchesModels) {
         void qc.invalidateQueries({ queryKey: queryKeys.models });
         void qc.invalidateQueries({ queryKey: queryKeys.modelsLive });
