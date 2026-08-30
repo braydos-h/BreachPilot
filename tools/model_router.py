@@ -604,20 +604,24 @@ def _build_opencode_go_router(
     *,
     request_timeout_seconds: float | None = None,
 ) -> ModelRouter:
-    """Build a router backed by the hosted OpenCode Go Responses API."""
+    """Build a router backed by the hosted OpenCode Go Responses API.
+
+    The API key is resolved from ``api_key_env`` (default ``OPENCODE_GO_API_KEY``)
+    but a missing key does NOT block router construction — the resulting
+    ``OpenCodeGoResponsesClient`` will surface a clear ``API key not configured``
+    error on the first ``chat`` call, matching the Ollama Cloud behaviour
+    (preview succeeds, auth fails on first generation). This prevents a silent
+    ``500`` on ``POST /runs`` when the operator has switched provider but not
+    yet set the key.
+    """
     from tools.providers.opencode_go_provider import OpenCodeGoResponsesClient
 
     cfg = dict(opencode_config)
-    # Resolve API key (fail-closed before any network)
     import os
 
     env_name = str(cfg.get("api_key_env") or "OPENCODE_GO_API_KEY").strip() or "OPENCODE_GO_API_KEY"
     api_key = (os.environ.get(env_name, "") or "").strip()
-    if not api_key:
-        raise RuntimeError(
-            f"OpenCode Go provider unavailable: API key not set (env {env_name}). "
-            f"Set {env_name}=... or run python main.py --setup-api-keys."
-        )
+    # Do NOT raise here — defer to chat-time so run previews still succeed.
     base_url = str(cfg.get("base_url") or "https://opencode.ai/zen/go/v1").rstrip("/")
     timeout = request_timeout_seconds
     if timeout is None and cfg.get("request_timeout_seconds") is not None:
@@ -733,8 +737,8 @@ def build_model_client_for_provider(
 
         env_name = str(og_cfg.get("api_key_env") or "OPENCODE_GO_API_KEY").strip() or "OPENCODE_GO_API_KEY"
         api_key = (os.environ.get(env_name, "") or "").strip()
-        if not api_key:
-            raise RuntimeError(f"OpenCode Go provider unavailable: API key not set (env {env_name}).")
+        # Do not raise here — let the chat-time missing-key error surface on first generation,
+        # matching Ollama behaviour (preview succeeds, auth fails later).
         timeout = request_timeout_seconds
         if timeout is None and og_cfg.get("request_timeout_seconds") is not None:
             try:

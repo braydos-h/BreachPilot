@@ -240,15 +240,17 @@ def test_missing_api_key_raises(monkeypatch):
 
 
 def test_missing_api_key_via_env(monkeypatch):
-    # Ensure router raises when key missing
+    # Router now defers the missing-key error to chat-time so run previews still succeed.
     monkeypatch.delenv("OPENCODE_GO_API_KEY", raising=False)
     cfg = _og_config(api_key_env="OPENCODE_GO_API_KEY")
-    with pytest.raises(RuntimeError, match="API key"):
-        build_router(
-            provider="opencode_go",
-            opencode_go_config=cfg,
-            config={"models": {"provider": "opencode_go"}, "opencode_go": cfg},
-        )
+    router = build_router(
+        provider="opencode_go",
+        opencode_go_config=cfg,
+        config={"models": {"provider": "opencode_go"}, "opencode_go": cfg},
+    )
+    client = router.get_client("muse-spark-1.2-contributor")
+    with pytest.raises(RuntimeError, match="API key not configured"):
+        client.chat(messages=[{"role": "user", "content": "hi"}])
 
 
 # ---------------------------------------------------------------------------

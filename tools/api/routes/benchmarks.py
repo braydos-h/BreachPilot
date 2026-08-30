@@ -13,6 +13,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import time
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -28,6 +30,11 @@ from tools.benchmark.service import BenchmarkService
 from tools.benchmark.storage import BenchmarkStorage
 
 router = APIRouter(prefix="/api/v1/benchmarks", tags=["benchmarks"])
+
+# Lightweight TTL cache for suite discovery — manifests are static between deploys
+# so re-parsing them on every overview poll (3s) is pure overhead. Cached 15s.
+_SUITE_CACHE: dict[str, object] = {"expiry": 0.0, "data": None}
+_SUITE_TTL_S = 15.0
 
 # Set by create_app.
 _AUTH: BearerAuth | None = None
@@ -109,11 +116,23 @@ async def list_suites_route(auth: str = Depends(_require_auth)) -> dict[str, Any
 
 
 def _suite_list() -> list[dict[str, Any]]:
+    # Serve from TTL cache when fresh — avoids re-parsing manifests on every overview poll.
+    cached_expiry = float(_SUITE_CACHE.get("expiry", 0.0) or 0.0)
+    if time.monotonic() < cached_expiry and _SUITE_CACHE.get("data") is not None:
+        return list(_SUITE_CACHE["data"] or [])  # type: ignore[return-value]
     from tools.benchmark import register_default_providers
     from tools.benchmark.registry import list_suites as registry_suites
 
     register_default_providers()
-    return registry_suites()
+    data = registry_suites()
+    _SUITE_CACHE["data"] = data
+    _SUITE_CACHE["expiry"] = time.monotonic() + _SUITE_TTL_S
+    return data
+
+
+def _invalidate_suite_cache() -> None:
+    _SUITE_CACHE["expiry"] = 0.0
+    _SUITE_CACHE["data"] = None
 
 
 @router.get("/suites/{suite_id}/scenarios")

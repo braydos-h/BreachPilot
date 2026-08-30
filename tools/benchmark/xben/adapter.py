@@ -55,11 +55,11 @@ class XbenProvider(BenchmarkProvider):
         return out
 
     def describe(self) -> dict[str, Any]:
-        scenarios = self.load_scenarios()
+        scenarios: list[BenchmarkScenario] = []
         invalid = 0
         for path in self._manifest_paths():
             try:
-                load_manifest_file(path, suite=self.suite_id)
+                scenarios.extend(load_manifest_file(path, suite=self.suite_id))
             except ManifestError:
                 invalid += 1
         tags: dict[str, int] = {}
