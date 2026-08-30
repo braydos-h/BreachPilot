@@ -515,12 +515,12 @@ class ConfigValidator:
                 if output_dir is not None and (not isinstance(output_dir, str) or not output_dir.strip()):
                     result.errors.append("benchmark.output_dir must be a non-empty string.")
                 trials = bm.get("trials")
-                if trials is not None and (not isinstance(trials, int) or isinstance(trials, bool) or not 1 <= trials <= 20):
+                if trials is not None and (
+                    not isinstance(trials, int) or isinstance(trials, bool) or not 1 <= trials <= 20
+                ):
                     result.errors.append("benchmark.trials must be an integer in 1-20.")
                 timeout = bm.get("timeout_seconds")
-                if timeout is not None and (
-                    not isinstance(timeout, int) or isinstance(timeout, bool) or timeout < 30
-                ):
+                if timeout is not None and (not isinstance(timeout, int) or isinstance(timeout, bool) or timeout < 30):
                     result.errors.append("benchmark.timeout_seconds must be an integer >= 30.")
                 sandbox_required = bm.get("sandbox_required")
                 if sandbox_required is not None and not isinstance(sandbox_required, bool):

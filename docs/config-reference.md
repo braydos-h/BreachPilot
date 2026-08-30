@@ -317,6 +317,25 @@ Semantic-memory consumer for the autonomous orchestrator. When true, the orchest
 | `regression_tolerance` | float | `0.05` | Graded eval: a target regresses when `score < baseline_score - tolerance` | eval_harness.py `check_regression` |
 | `baseline_path` | str | `reports/eval/baseline.json` | Graded eval: baseline file written by `--save-baseline` / read by `--check-regression` | eval_harness.py `save_baseline` / `check_regression` |
 
+### `benchmark:` (top-level) — reproducible benchmark suite
+
+See [docs/benchmarks.md](benchmarks.md). Defaults in `tools/config/schema.py`; validated in `tools/config/validator.py`.
+
+| Key | Type | Default | Controls | Consumed at |
+|-----|------|---------|----------|-------------|
+| `enabled` | bool | `true` | Gates the benchmark CLI (`--benchmark*`) | tools/benchmark_cli.py |
+| `output_dir` | str | `reports/benchmarks` | Where `reports/benchmarks/<suite>/<run_id>/` trees go | tools/benchmark/runner.py, storage.py |
+| `trials` | int | `3` | Default repeated trials per scenario (1-20; CLI `--trials` overrides) | tools/benchmark_cli.py, service.py |
+| `timeout_seconds` | int | `1800` | Per-trial mission timeout | tools/benchmark/runner.py |
+| `sandbox_required` | bool | `true` | When true, runs without `sandbox.enabled` are `INFRASTRUCTURE_ERROR` (no host-execution fallback) | tools/benchmark/runner.py |
+| `baseline_path` | str | `reports/benchmarks/baseline.json` | Baseline file written by `--save-baseline` / read by `--check-regression` | tools/benchmark/regression.py |
+| `regression.success_rate_tolerance` | float | `0.02` | Verified-success-rate drop beyond this is a HARD regression (CI exit 1) | tools/benchmark/regression.py |
+| `regression.false_positive_tolerance` | float | `0.01` | False-positive-rate rise beyond this is a HARD regression | tools/benchmark/regression.py |
+| `regression.median_time_tolerance` | float | `0.20` | Relative median-solve-time rise beyond this is a warning | tools/benchmark/regression.py |
+| `regression.tool_actions_tolerance` | float | `0.30` | Relative median-action rise beyond this is a warning | tools/benchmark/regression.py |
+| `regression.cost_tolerance` | float | `0.30` | Relative estimated-cost rise beyond this is a warning | tools/benchmark/regression.py |
+| `telemetry.events` / `token_usage` / `cost` | bool | `true` | Telemetry toggles (events JSONL, token accounting, cost) | tools/benchmark/agent_runner.py |
+
 ### `long_session:` (config.yaml:319-326) — multi-hour mode
 
 Enabled by `--long-session` (main.py:374-376) or `enabled: true`.

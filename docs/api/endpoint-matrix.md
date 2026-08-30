@@ -8,6 +8,7 @@ sources:
   - tools/api/routes/graph.py
   - tools/api/routes/graph_explorer.py
   - tools/api/routes/users.py
+  - tools/api/routes/benchmarks.py
   - app.py
 tests:
   - tests/test_api_auth.py
@@ -21,6 +22,7 @@ tests:
   - tests/test_api_cli_args.py
   - tests/test_api_reset.py
   - tests/test_api_memory.py
+  - tests/test_benchmark_api.py
 subsystem: api
 status: maintained
 ---
@@ -128,6 +130,24 @@ All below additionally gated `api.graph_route` → `404 graph_disabled` (`graph_
 | `GET` | `/api/v1/graph/runs/{run_id}/nodes/{node_id}` | `get_node` (`graph_explorer.py:120`) | — | `200 {run_id,node,edges,neighbors}` `404 node_not_found` | bearer | same | — |
 | `GET` | `/api/v1/graph/runs/{run_id}/nodes/{node_id}/neighbors` | `get_neighbors` (`graph_explorer.py:133`) | `?max_hops1..4 default1&max_nodes1..200 default50` | `200 {run_id,start_node,nodes,edges}` `404` | bearer | same | — |
 | `GET` | `/api/v1/graph/runs/{run_id}/paths` | `get_paths` (`graph_explorer.py:154`) | `?start&end&max_length1..8 default4&max_paths1..8 default5` | `200 {run_id,paths:[[[{distance,node,edge}]]]}` unknown endpoints `[]` | bearer | same | — |
+
+## Benchmarks — `tools/api/routes/benchmarks.py` (`APIRouter(prefix="/api/v1/benchmarks", tags=["benchmarks"])`) — `app.py` (wired unconditionally; backed by `tools/benchmark/`)
+
+| Method | Route | Handler | Request | Response | Auth | Frontend consumer | Tests |
+|--------|-------|---------|---------|----------|------|-------------------|-------|
+| `GET` | `/api/v1/benchmarks` | `benchmarks_overview` (`benchmarks.py:94`) | — | `200 {suites:[SuiteInfo],runs:[RunIndexRow],active:{run_id,state,error},baseline:BaselineMeta}` | bearer | `webui/src/features/benchmarks/api.ts:fetchOverview` | `tests/test_benchmark_api.py` |
+| `GET` | `/api/v1/benchmarks/suites` | `list_suites_route` (`benchmarks.py:107`) | — | `200 {suites:[SuiteInfo]}` | bearer | same `fetchSuites` | same |
+| `GET` | `/api/v1/benchmarks/suites/{suite_id}/scenarios` | `list_scenarios_route` (`benchmarks.py:120`) | — | `200 {suite,scenarios:[ScenarioInfo]}` `404 unknown suite` | bearer | same `fetchSuiteScenarios` | same |
+| `GET` | `/api/v1/benchmarks/runs` | `list_runs` (`benchmarks.py:137`) | `?suite&limit1..200 default50` | `200 {runs:[RunIndexRow]}` | bearer | same `fetchRuns` | same |
+| `GET` | `/api/v1/benchmarks/runs/{run_id}` | `get_run` (`benchmarks.py:145`) | — | `200 RunDetail(+summary)` `404 run not found` | bearer | same `fetchRun` | same |
+| `GET` | `/api/v1/benchmarks/runs/{run_id}/scenarios` | `get_run_scenarios` (`benchmarks.py:152`) | — | `200 {run_id,scenarios:[Trial]}` | bearer | same `fetchRunScenarios` | same |
+| `GET` | `/api/v1/benchmarks/runs/{run_id}/events` | `get_run_events` (`benchmarks.py:170`) | `?after≥0&trial_id&limit1..5000` | `200 {run_id,events:[BenchmarkEvent],latest_sequence}` | bearer | same `fetchRunEvents` | same |
+| `GET` | `/api/v1/benchmarks/runs/{run_id}/events/stream` | `stream_run_events` (`benchmarks.py:184`) | `?after≥0` | SSE `data: {event}` heartbeats, closes after ~60 s idle | bearer | — (polling used) | same |
+| `POST` | `/api/v1/benchmarks/run` | `start_run` (`benchmarks.py:222`) | `BenchmarkRunRequest{suite,scenarios?,tags?,trials?,model?,reasoning?,sandbox_required?,timeout_seconds?,save_baseline?,check_regression?}` | `200 {run_id,state}` `409 conflict/invalid` | bearer | same `startBenchmarkRun` (`RunBenchmarkPanel`) | same |
+| `POST` | `/api/v1/benchmarks/runs/{run_id}/cancel` | `cancel_run` (`benchmarks.py:230`) | — | `200 {run_id,cancelled}` `404 not active` | bearer | same `cancelBenchmarkRun` | same |
+| `GET` | `/api/v1/benchmarks/baseline` | `get_baseline` (`benchmarks.py:254`) | — | `200 BaselineMeta` | bearer | same `fetchBaseline` | same |
+| `POST` | `/api/v1/benchmarks/baseline` | `save_baseline_route` (`benchmarks.py:259`) | `{run_id}` | `200 {saved,path,run_id}` `404/409` | bearer | same `saveBaseline` | same |
+| `GET` | `/api/v1/benchmarks/compare` | `compare_runs` (`benchmarks.py:276`) | `?run_a&run_b` | `200 RunComparison{run_a,run_b,comparison:{metrics,scenarios,categories}}` `404/409` | bearer | same `compareRuns` (`ComparisonView`) | same |
 
 ## Users/annotations — `tools/api/routes/users.py` (`APIRouter(prefix="/api/v1", tags=["users"])`) — `app.py:154` only when `api.multi_operator:true`
 

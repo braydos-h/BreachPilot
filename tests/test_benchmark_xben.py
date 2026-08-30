@@ -9,8 +9,8 @@ import pytest
 
 from tools.benchmark.envinfo import collect_environment, config_hash, resolve_model_metadata
 from tools.benchmark.events import BenchmarkEventLogger, truncate_output
-from tools.benchmark.xben.manifest import ManifestError, load_manifest_file, parse_manifest
 from tools.benchmark.xben.adapter import XbenProvider
+from tools.benchmark.xben.manifest import ManifestError, load_manifest_file, parse_manifest
 
 _VALID = {
     "benchmark_id": "xben-001",
@@ -21,7 +21,13 @@ _VALID = {
     "goal": "initial_access",
     "expected_flags": ["flag{abc}"],
     "oracle": {
-        "flags": [{"id": "f1", "description": "flag readable", "check": {"type": "http_request", "url": "http://127.0.0.1:8080/"}}],
+        "flags": [
+            {
+                "id": "f1",
+                "description": "flag readable",
+                "check": {"type": "http_request", "url": "http://127.0.0.1:8080/"},
+            }
+        ],
         "host_owned_when": "any",
     },
     "tags": ["web", "sqli"],
@@ -93,7 +99,9 @@ def test_load_manifest_file_invalid(tmp_path):
 
 def test_provider_discovers_and_filters(tmp_path):
     (tmp_path / "a.json").write_text(json.dumps(_VALID), encoding="utf-8")
-    (tmp_path / "b.json").write_text(json.dumps(dict(_VALID, benchmark_id="xben-002", tags=["crypto"])), encoding="utf-8")
+    (tmp_path / "b.json").write_text(
+        json.dumps(dict(_VALID, benchmark_id="xben-002", tags=["crypto"])), encoding="utf-8"
+    )
     (tmp_path / "bad.json").write_text("{ broken", encoding="utf-8")
     provider = XbenProvider(tmp_path)
     scenarios = provider.load_scenarios()

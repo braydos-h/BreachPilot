@@ -103,7 +103,9 @@ def create_app(
     # Benchmark suite (tools/benchmark/): service owns the active benchmark
     # run; storage reads/writes reports/benchmarks/<suite>/<run_id>/.
     benchmark_cfg = config.get("benchmark", {}) or {}
-    benchmark_storage = BenchmarkStorage(str(benchmark_cfg.get("output_dir", "reports/benchmarks") or "reports/benchmarks"))
+    benchmark_storage = BenchmarkStorage(
+        str(benchmark_cfg.get("output_dir", "reports/benchmarks") or "reports/benchmarks")
+    )
     benchmark_service = BenchmarkService(config, config_path)
 
     # Lifespan: recover interrupted runs on startup; cancel active run on shutdown.

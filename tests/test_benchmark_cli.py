@@ -83,7 +83,9 @@ def _patch_runner(monkeypatch, tmp_path, mission_outcomes):
                         scenario_id="s1",
                         trial_index=i,
                         trial_id=f"s1#t{i}",
-                        status=TrialStatus.VERIFIED.value if outcome.agent_claimed_success else TrialStatus.FAILED.value,
+                        status=TrialStatus.VERIFIED.value
+                        if outcome.agent_claimed_success
+                        else TrialStatus.FAILED.value,
                         oracle_verified_success=outcome.agent_claimed_success,
                         agent_claimed_success=outcome.agent_claimed_success,
                         duration_seconds=60.0,

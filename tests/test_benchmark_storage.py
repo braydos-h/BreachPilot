@@ -10,8 +10,8 @@ from tools.benchmark.metrics import compute_run_summary
 from tools.benchmark.models import FailureCategory, RunConfig, RunEnvironment, TrialResult, TrialStatus
 from tools.benchmark.regression import (
     RegressionThresholds,
-    compare_to_baseline,
     compare_summaries_payload,
+    compare_to_baseline,
     load_baseline,
     save_baseline,
     thresholds_from_config,
@@ -48,7 +48,14 @@ def test_storage_roundtrip(tmp_path):
     storage.write_trial("xben", "run1", trial)
     summary = compute_run_summary([trial], run_id="run1", suite="xben")
     storage.finalize_run(
-        "xben", "run1", status="completed", trials=[trial], summary=summary, config=config, environment=env, scenario_ids=["s1"]
+        "xben",
+        "run1",
+        status="completed",
+        trials=[trial],
+        summary=summary,
+        config=config,
+        environment=env,
+        scenario_ids=["s1"],
     )
 
     run = storage.load_run("xben", "run1")
@@ -79,8 +86,14 @@ def test_storage_list_runs_across_suites(tmp_path):
         storage.init_run(suite, rid, RunConfig(suite=suite), RunEnvironment(), ["s1"])
         summary = compute_run_summary([_trial("s1", 0, "VERIFIED")], run_id=rid, suite=suite)
         storage.finalize_run(
-            suite, rid, status="completed", trials=[], summary=summary,
-            config=RunConfig(suite=suite), environment=RunEnvironment(), scenario_ids=["s1"],
+            suite,
+            rid,
+            status="completed",
+            trials=[],
+            summary=summary,
+            config=RunConfig(suite=suite),
+            environment=RunEnvironment(),
+            scenario_ids=["s1"],
         )
     runs = storage.list_runs()
     assert {r["suite"] for r in runs} == {"xben", "fake"}
@@ -120,8 +133,7 @@ def _summary_payload(rate=0.9, fp=0.02, time=600.0, actions=30.0, cost=1.0, scen
         "median_solve_time": time,
         "median_tool_actions": actions,
         "estimated_cost": cost,
-        "scenarios": scenarios
-        or {"s1": {"scenario_id": "s1", "success_probability": 1.0, "verified": 1, "trials": 1}},
+        "scenarios": scenarios or {"s1": {"scenario_id": "s1", "success_probability": 1.0, "verified": 1, "trials": 1}},
     }
 
 
@@ -182,7 +194,10 @@ def test_regression_hard_on_previously_solved_now_unsolved():
 def test_regression_improvement_detection():
     baseline = _summary_payload(rate=0.8)
     current = compute_run_summary(
-        [_trial("s1", 0, "VERIFIED", oracle_verified_success=True), _trial("s1", 1, "VERIFIED", oracle_verified_success=True)]
+        [
+            _trial("s1", 0, "VERIFIED", oracle_verified_success=True),
+            _trial("s1", 1, "VERIFIED", oracle_verified_success=True),
+        ]
     )
     result = compare_to_baseline(current, baseline)
     assert result.passed
@@ -282,6 +297,7 @@ def test_verifier_host_owned_when_all():
     scenario = _scenario_with_oracle(oracle)
     outcome = IndependentVerifier(scenario, executor=lambda c: (True, "ok")).verify_sync()
     assert outcome.verified
+
     # One flag failing fails the host with host_owned_when: all.
     def half(check):
         return check.get("type") != "x", "ok"

@@ -54,10 +54,15 @@ def _valid_id(value: str) -> bool:
 
 
 class BenchmarkStorage:
-    """Filesystem-backed benchmark result store."""
+    """Filesystem-backed benchmark result store.
+
+    The root is resolved to an ABSOLUTE path at construction so a mid-run CWD
+    change (some MCP/session machinery manipulates process state) can never
+    split one run's files across two trees.
+    """
 
     def __init__(self, root: Path | str = "reports/benchmarks") -> None:
-        self.root = Path(root)
+        self.root = Path(root).absolute()
 
     # ------------------------------------------------------------------ paths
 

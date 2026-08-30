@@ -331,6 +331,22 @@ Interactive three-panel investigation of a run's Attack Graph v2 store. See
 [Attack Graph Page](#attack-graph-page). Enabled by `api.graph_route: true`
 in `config.yaml`; when disabled the page shows the disabled-route error.
 
+### Benchmarks (`/benchmarks`)
+
+Benchmark dashboard + run detail (see [docs/benchmarks.md](benchmarks.md)).
+The dashboard shows the latest run's metric cards (verified success rate,
+solved, false-positive rate, median solve time, average cost, sandbox
+violations), a run panel (suite / scenarios / tags / trials / model / sandbox
+requirement / baseline options → `POST /api/v1/benchmarks/run`), run history
+with SVG charts (verified rate, FP rate, solve time, cost), a comparison view
+for any two runs (metric deltas + newly-solved / regressed / still-solved /
+still-failing), and the run list. `BenchmarksRunPage` (`/benchmarks/:runId`)
+adds the live progress view (current trial, phases, actions, sandbox state),
+the structured mission timeline, scenario results table with
+verified-vs-claimed columns, failure categories, the configuration and
+environment (reproducibility pins: git SHA, model id/version, config hash,
+sandbox image digest), and a Save-as-baseline action.
+
 ### System (`/system`)
 
 See [System Page](#system-page).

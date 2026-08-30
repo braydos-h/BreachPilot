@@ -404,7 +404,10 @@ def compare_summaries_payload(base_summary: dict[str, Any], current_summary: dic
         # Serialized RunSummary rows are a list; hand-built payloads may pass a
         # scenario_id -> row dict. Both shapes are accepted.
         if isinstance(raw, dict):
-            rows = [dict(v, scenario_id=k) if isinstance(v, dict) and not v.get("scenario_id") else v for k, v in raw.items()]
+            rows = [
+                dict(v, scenario_id=k) if isinstance(v, dict) and not v.get("scenario_id") else v
+                for k, v in raw.items()
+            ]
         else:
             rows = [s for s in raw if isinstance(s, dict)]
         return {str(s.get("scenario_id", "")): s for s in rows if isinstance(s, dict)}

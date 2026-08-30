@@ -270,9 +270,9 @@ def test_baseline_get_post_and_compare(tmp_path, monkeypatch):
 def test_run_detail_scenarios_and_events(tmp_path, monkeypatch):
     _seed_and_patch_runner(monkeypatch, tmp_path)
     client = _make_client(tmp_path, monkeypatch)
-    from tools.benchmark.storage import BenchmarkStorage
     from tools.benchmark.events import BenchmarkEventLogger
     from tools.benchmark.models import RunConfig, RunEnvironment
+    from tools.benchmark.storage import BenchmarkStorage
 
     storage = BenchmarkStorage(tmp_path / "bench")
     _persist_run(storage, "fake", "run-1", verified=True)
@@ -303,7 +303,5 @@ def test_run_detail_scenarios_and_events(tmp_path, monkeypatch):
     assert [e["sequence"] for e in resp.json()["events"]] == [2]
 
     # Trial filter.
-    resp = client.get(
-        "/api/v1/benchmarks/runs/run-1/events", headers=_headers(), params={"trial_id": "s1#t0"}
-    )
+    resp = client.get("/api/v1/benchmarks/runs/run-1/events", headers=_headers(), params={"trial_id": "s1#t0"})
     assert len(resp.json()["events"]) == 2

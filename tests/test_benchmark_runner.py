@@ -61,7 +61,9 @@ def _verified_mission(**kw) -> MissionResult:
 
 
 def _make_runner(tmp_path, config, mission, *, verifier_factory=None, target_manager=None):
-    runner = BenchmarkRunner(config, Path("config.yaml"), verifier_factory=verifier_factory, target_manager=target_manager)
+    runner = BenchmarkRunner(
+        config, Path("config.yaml"), verifier_factory=verifier_factory, target_manager=target_manager
+    )
     runner._make_mission = lambda: mission  # type: ignore[attr-defined]
     return runner
 
@@ -192,9 +194,7 @@ def test_sandbox_required_but_disabled_is_infrastructure_error(tmp_path, runner_
     config = _config(tmp_path, sandbox_required=True)
     config["sandbox"] = {"enabled": False}
     runner = BenchmarkRunner(config, Path("config.yaml"))
-    payload = asyncio.run(
-        runner.run(RunConfig(suite="fake", scenario_ids=["s1"], trials=1, sandbox_required=True))
-    )
+    payload = asyncio.run(runner.run(RunConfig(suite="fake", scenario_ids=["s1"], trials=1, sandbox_required=True)))
     trial = payload["trials"][0]
     assert trial["status"] == TrialStatus.INFRASTRUCTURE_ERROR.value
     assert trial["failure_category"] == FailureCategory.SANDBOX_FAILED.value
@@ -203,14 +203,21 @@ def test_sandbox_required_but_disabled_is_infrastructure_error(tmp_path, runner_
 def test_multiple_trials_and_cancellation(tmp_path, runner_cls_patched):
     """Repeated trials record per-scenario stats; cancel stops further trials."""
     seed_fake_suite([_scenario("s1"), _scenario("s2")])
-    outcomes = [_verified_mission(), MissionResult(total_actions=1), _verified_mission(), MissionResult(total_actions=1)]
+    outcomes = [
+        _verified_mission(),
+        MissionResult(total_actions=1),
+        _verified_mission(),
+        MissionResult(total_actions=1),
+    ]
     mission = runner_cls_patched(outcomes)
     runner = BenchmarkRunner(_config(tmp_path), Path("config.yaml"), verifier_factory=lambda s: _v(s, _pass_executor))
     cancel = asyncio.Event()
 
     async def _run():
         if True:  # cancel after the first scenario's first trial
-            task = asyncio.create_task(runner.run(RunConfig(suite="fake", trials=2, sandbox_required=False), cancel=cancel))
+            task = asyncio.create_task(
+                runner.run(RunConfig(suite="fake", trials=2, sandbox_required=False), cancel=cancel)
+            )
             await asyncio.sleep(0.05)
             if len(mission.calls) >= 1:
                 cancel.set()
@@ -244,6 +251,7 @@ def test_no_scenarios_match(tmp_path):
 
     seed_fake_suite([_scenario("s1")])
     runner = R(_config(tmp_path), Path("config.yaml"))
-    payload = asyncio.run(runner.run(RunConfig(suite="fake", scenario_ids=["does-not-exist"], trials=1, sandbox_required=False)))
+    payload = asyncio.run(
+        runner.run(RunConfig(suite="fake", scenario_ids=["does-not-exist"], trials=1, sandbox_required=False))
+    )
     assert "error" in payload
-

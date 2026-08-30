@@ -1297,8 +1297,10 @@ def main(argv: list[str] | None = None) -> int:
         # proxy. Surfaces the fix (install/clone/install-deps) up front instead
         # of letting the proxy's own RuntimeError fire mid-run. Skipped for
         # --doctor/--self-test/--eval/--benchmark, which intentionally probe a partial state.
-        if not _eval_active and not _benchmark_active and not any(
-            getattr(args, flag, False) for flag in ("doctor", "self_test", "skills_list", "list_plugins")
+        if (
+            not _eval_active
+            and not _benchmark_active
+            and not any(getattr(args, flag, False) for flag in ("doctor", "self_test", "skills_list", "list_plugins"))
         ):
             rc = _ensure_chatgpt_runtime(args)
             if rc != 0:
@@ -1370,8 +1372,10 @@ def main(argv: list[str] | None = None) -> int:
 
         # --save-baseline/--check-regression compose with --eval or --benchmark.
         if (
-            getattr(args, "save_baseline", False) or getattr(args, "check_regression", False)
-        ) and getattr(args, "eval", None) is None and getattr(args, "benchmark", None) is None:
+            (getattr(args, "save_baseline", False) or getattr(args, "check_regression", False))
+            and getattr(args, "eval", None) is None
+            and getattr(args, "benchmark", None) is None
+        ):
             ui.error("--save-baseline/--check-regression require --eval or --benchmark.")
             return 2
 
