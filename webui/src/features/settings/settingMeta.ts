@@ -572,11 +572,11 @@ export const SETTING_META: Record<string, SettingMeta> = {
     dependsOn: "exploit.enabled",
   },
   "exploit.attack_max_commands": {
-    label: "Attack max commands",
+    label: "Max commands per assessment",
+    description: "Stop an assessment after this many commands.",
     category: "runs",
-    group: "Engine",
-    order: 10,
-    dependsOn: "exploit.enabled",
+    group: "Limits",
+    order: 30,
   },
   "exploit.attack_max_duration_minutes": {
     label: "Attack max duration (min)",
@@ -870,11 +870,12 @@ export const SETTING_META: Record<string, SettingMeta> = {
   },
   // -- nmap / Nmap --
   "nmap.path": {
-    label: "Nmap path",
-    description: "Path to the nmap binary.",
+    label: "Nmap binary path",
+    description: "Path to the Nmap executable. Leave as 'nmap' if it is on your PATH.",
     category: "runs",
-    group: "Scanner",
-    order: 1,
+    group: "Scanning",
+    order: 20,
+    advanced: true,
   },
   "nmap.priv_fallback": {
     label: "Auto-downgrade privileged flags",
@@ -885,11 +886,11 @@ export const SETTING_META: Record<string, SettingMeta> = {
     advanced: true,
   },
   "nmap.sudo": {
-    label: "Run nmap with sudo",
-    description: "Use sudo -n for root-only scans (Linux).",
-    category: "runs",
-    group: "Scanner",
-    order: 3,
+    label: "Use privileged scanning",
+    description: "Run Nmap with sudo for OS detection and SYN scans on Linux.",
+    category: "general",
+    group: "Scanning",
+    order: 10,
   },
   // -- opsec / OPSEC --
   "opsec.doh": {
@@ -908,10 +909,11 @@ export const SETTING_META: Record<string, SettingMeta> = {
     options: ["cloudflare", "google"],
   },
   "opsec.enabled": {
-    label: "OPSEC",
+    label: "Stealth mode",
+    description: "Slow down and randomise traffic to look less like a scan.",
     category: "runs",
     group: "Stealth",
-    order: 3,
+    order: 10,
   },
   "opsec.jitter_seconds": {
     label: "Jitter (s)",
@@ -2392,12 +2394,11 @@ export const SETTING_META: Record<string, SettingMeta> = {
     advanced: true,
   },
   "api.max_concurrent_runs": {
-    label: "Max concurrent runs",
-    description: "How many assessments can run at once.",
-    category: "advanced",
-    group: "WebUI",
-    order: 6,
-    dependsOn: "api.enabled",
+    label: "Simultaneous assessments",
+    description: "How many assessments BreachPilot can run at the same time.",
+    category: "general",
+    group: "Assessments",
+    order: 10,
   },
   "api.multi_operator": {
     label: "Multi-operator accounts",

@@ -1,11 +1,10 @@
-# BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 ollama:
   host: https://api.ollama.com
   model: glm-5.2:cloud
   api_key_env: OLLAMA_API_KEY
   embed_host: http://localhost:11434
 models:
-  provider: ollama
+  provider: opencode_go
   registry:
     kimi: kimi-k2.6:cloud
     deepseek: deepseek-v4-pro:cloud
@@ -13,14 +12,7 @@ models:
     glm: glm-5.2:cloud
     minimax: minimax-m3:cloud
   default_alias: glm
-  # Auto-update: on daemon boot each registry alias is bumped to the newest
-  # same-family version listed by the Ollama API (GET /api/tags) — e.g.
-  # glm-5.2:cloud -> glm-5.3:cloud. No pulls (cloud "pull" = pointer only).
-  # models.info labels/context windows stay operator-managed. Set false to
-  # pin the registry. Also on demand: POST /api/v1/models/refresh.
   auto_update: true
-  # Model-role routing: each role maps to an alias; empty = default_alias.
-  # Consumed by tools/model_router.py::get_client_for_role.
   roles:
     planner: ''
     executor: ''
@@ -204,40 +196,20 @@ autonomous:
   adaptive_replan: false
   max_cycles: 100
   max_pivot_depth: 0
-  # Phase 5: campaign-entry preflight (all opt-in, default off).
-  # dedup_targets: collapse duplicate IPs / CIDR overlap / hosts resolving
-  #   to the same IP before any scan fires.
-  # skip_non_routable: drop RFC1918/link-local/reserved addresses that are
-  #   not the operator's own host (those use the local-takeover playbook).
-  # hard_target_max_rounds: give up on a target after this many adaptive
-  #   rounds with no access achieved (0 = off, current behavior).
   dedup_targets: false
   skip_non_routable: false
   hard_target_max_rounds: 0
 orchestrator:
-  # D1: cross-mission semantic-memory consumer. When true, the autonomous
-  # orchestrator builds a SemanticMemoryManager (from the ``memory`` config
-  # block's embed_host/embedding_model) and calls store_lesson on every
-  # confirmed module win so the campaign learns across missions. Lab default
-  # is ON (matches ``memory.semantic_enabled: true`` — the orchestrator is the
-  # missing campaign-level consumer of an already-on capability). Advisory-only
-  # — read-only memory store consumer, no execution authority change.
   semantic_memory: true
 recon:
   extended_enumerators: true
   udp_top_ports: 100
   shodan_api_key: ''
-  # Phase 5: pre-flight reachability probe (opt-in, default off). When true,
-  # recon_host runs a couple of bare TCP connects before the full Nmap -p-
-  # scan and bails to no_attack_surface when every probe port is definitively
-  # refused. Ambiguous (timeout/filtered) results fall through to the full
-  # scan so a firewalled-but-live host is never skipped.
   preflight_probe: false
-  preflight_ports: [80, 443]
+  preflight_ports:
+  - 80
+  - 443
   preflight_timeout_ms: 1000
-  # Nmap retry budget. On Windows, nmap -sS/-O can hang on Npcap driver
-  # issues; set max_retries: 0 to skip straight to the native Python socket
-  # fallback instead of burning ~45s on 3 retries with 5-7.5s backoff.
   max_retries: 2
   retry_delay: 5.0
   timeout_seconds: 300
@@ -303,9 +275,9 @@ benchmark:
     enabled: true
     success_rate_tolerance: 0.02
     false_positive_tolerance: 0.01
-    median_time_tolerance: 0.20
-    tool_actions_tolerance: 0.30
-    cost_tolerance: 0.30
+    median_time_tolerance: 0.2
+    tool_actions_tolerance: 0.3
+    cost_tolerance: 0.3
   telemetry:
     events: true
     token_usage: true
@@ -314,7 +286,7 @@ killchain:
   enabled: false
   goal_state: shell_as_root
   require_verification: true
-  graph_db: ""
+  graph_db: ''
 long_session:
   enabled: true
   request_timeout_seconds: 600
@@ -372,8 +344,8 @@ snapshots:
     vmware:
       vmrun_path: vmrun
     proxmox:
-      host: ""
-      node: ""
+      host: ''
+      node: ''
     libvirt:
       virsh_path: virsh
 adaptive_exploits:
@@ -442,27 +414,9 @@ api:
   event_buffer_size: 256
   shutdown_timeout_seconds: 15
   serve_webui: true
-  # Phase 6.3 (D3): lift the one-active-run limit to N concurrent runs for
-  # authorized wide-scope assessments. Default 1 = legacy single-run behavior
-  # (HTTP 409 on a second run). Each concurrent run carries its own allowlist
-  # snapshot so Run A's target never leaks into Run B's allowlist.
   max_concurrent_runs: 3
-  # Phase 6.3 (D4): multi-operator user accounts + per-run annotations for
-  # pair-testing collaboration. Default false = legacy single-token mode (no
-  # user-account surface). Auth is loopback-only; user accounts add attribution,
-  # not a permissions system.
   multi_operator: true
-  # D3: attack-path DAG API route (GET /api/v1/runs/{id}/graph). Lab build:
-  # enabled true so the interactive reactflow graph renders in the WebUI.
   graph_route: true
-# Phase 6.3 (D8): ICS write-side modules (ModbusWriteCoil/ModbusWriteRegister/
-# S7PlcStop/S7PlcStart) are DESTRUCTIVE — they change physical process state.
-# Default false: read-only ICS enum works without it. Set true ONLY for
-# authorized PLC testing. PHYSICAL-DAMAGE RISK: a coil/register write or PLC
-# stop can change real-world process state. Dual-gated: @require_allowlist on
-# run_attack_module (target in allowlist) AND ics.allow_write: true AND
-# ics.destructive_ics: true (Phase 1 safety: both flags must be set; the
-# allow_write default flipped to false so the checked-in config is safe).
 ics:
   allow_write: false
   destructive_ics: false
@@ -486,8 +440,6 @@ plugins:
   - plugins
   entry_points: true
 webhook_notify:
-  # Lab build: enabled true. No-op without a url — logs once then drops events.
-  # Set ``url`` to a Slack/Discord incoming webhook to actually receive pings.
   enabled: true
   url: ''
   events:
@@ -498,16 +450,11 @@ webhook_notify:
   backoff_seconds: 2.0
   max_payload_chars: 8192
 mitre:
-  # Lab build: enabled true. ``export_attack_navigator`` MCP tool writes
-  # Navigator layer JSON to navigator_output_dir for SOC handoff.
   enabled: true
   technique_map: tools/mitre_technique_map.json
   navigator_output_dir: reports/mitre
   include_skill_tags: true
 ticketing:
-  # Lab build: enabled true. No-op without provider/base_url/token — logs
-  # once then drops. Set provider (jira|github), base_url, and the named env
-  # var (token_env) to actually create tickets from confirmed findings.
   enabled: true
   provider: ''
   base_url: ''
@@ -517,14 +464,8 @@ ticketing:
   backoff_seconds: 2.0
 chatgpt:
   enabled: true
-# OpenCode Go provider (Responses API). Opt-in: ``enabled: false`` by default
-# would be the fresh-install default; the lab build flips it to ``true`` so
-# the new provider is visible in the UI. When ``models.provider:
-# opencode_go``, chat/generate go to https://opencode.ai/zen/go/v1/responses
-# (OpenAI Responses API, not chat/completions) via Authorization: Bearer
-# $OPENCODE_GO_API_KEY. See docs/providers.md and tools/providers/opencode_go_provider.py.
 opencode_go:
-  enabled: false
+  enabled: true
   base_url: https://opencode.ai/zen/go/v1
   api_key_env: OPENCODE_GO_API_KEY
   request_timeout_seconds: 300
@@ -532,22 +473,10 @@ opencode_go:
   models: []
   context_window: 128000
   discover_cache_seconds: 300
-# Phase 6.3 (D6): Caldera adversary emulation plugin. Lab build: enabled true.
-# The Caldera server is target-side — operator adds its IP to
-# exploit.allowed_targets. The plugin's MCP tools (caldera_list_abilities,
-# caldera_run_ability) are @require_allowlist-gated on the target IP. Set
-# ``url`` to the Caldera server base URL and ``api_key_env`` to the env var
-# holding the Caldera API key (default CALDERA_API_KEY).
 caldera:
   enabled: true
   url: ''
   api_key_env: CALDERA_API_KEY
-# Capability-upgrade agent block (design §23). Toggles + budgets for the task
-# graph, capability discovery, AI-facing state tools, planner hints, decision
-# logging, reflection, and retry/repair budgets. Defaults preserve today's
-# behavior. ``max_actions: 0`` = use legacy exploit budgets (not a hard cap).
-# config_cli.load_config merges NO defaults, so every consumer reads
-# defensively via .get(key, default).
 agent:
   task_graph_enabled: true
   capability_discovery_enabled: true
@@ -558,11 +487,6 @@ agent:
   max_retries_per_task: 2
   max_actions: 0
   generated_code_repair_attempts: 3
-# Operator-box -> victim persistent RCE channel (Phase 7). The operator box
-# hosts the beacon listener; the victim runs one of the implants below that
-# beacons back. All victim touches are allowlist-gated (@require_allowlist);
-# callback_host must be in exploit.allowed_targets (pivot lock). Default
-# port/type are fallbacks when the tool caller omits them.
 operator_connection:
   enabled: true
   auto_start_listener: true
@@ -571,14 +495,6 @@ operator_connection:
   beacon_interval_seconds: 300
   health_check_interval_seconds: 60
   workspace_dir: exploit_workspace
-
-# Disposable execution sandbox (tools/sandbox/): every attack command runs
-# inside a hardened per-run Docker worker (cap-dropped, non-root, read-only
-# rootfs, resource-bounded) with a default-DROP netns firewall authorizing
-# ONLY the effective target allowlist. Any sandbox failure blocks offensive
-# execution (fail closed) -- host execution is never an automatic fallback.
-# Build the worker image: docker build -t breachpilot-sandbox:latest docker/sandbox
-# Set sandbox.enabled: false to explicitly restore legacy host execution.
 sandbox:
   enabled: true
   backend: docker

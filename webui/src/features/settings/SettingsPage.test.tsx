@@ -79,6 +79,7 @@ const CONFIG = {
   opsec: { enabled: true, unknown_field: "x" },
   exploit: { attack_max_commands: 150 },
   webhook_notify: { enabled: false, url: "" },
+  ticketing: { enabled: true },
   api: { max_concurrent_runs: 3 },
 };
 
@@ -93,6 +94,7 @@ const SCHEMA = {
   opsec: { enabled: true, unknown_field: "x" },
   exploit: { attack_max_commands: 150 },
   webhook_notify: { enabled: false, url: "" },
+  ticketing: { enabled: true },
   api: { max_concurrent_runs: 3 },
 };
 
@@ -197,8 +199,8 @@ describe("SettingsPage", () => {
   it("shows Integrations category with webhook and ticketing", async () => {
     const { user } = setup();
     await goTo(user, "Notifications & Integrations");
-    expect(screen.getByText("Webhook notifications")).toBeInTheDocument();
-    expect(screen.getByText("Remediation tickets")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Webhook notifications" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Remediation tickets" })).toBeInTheDocument();
   });
 
   it("hides dependent settings when parent is disabled", async () => {
@@ -253,16 +255,16 @@ describe("SettingsPage", () => {
   it("surfaces unknown fields under Advanced with their raw key", async () => {
     const { user } = setup();
     await goTo(user, "Advanced");
-    expect(screen.getByText("opsec.unknown_field")).toBeInTheDocument();
+    expect(screen.getAllByText("opsec.unknown_field").length).toBeGreaterThan(0);
   });
 
   it("search finds a setting by friendly label and jumps to its category", async () => {
     const { user } = setup();
     const search = screen.getByLabelText("Search settings");
-    await user.type(search, "ollama api");
-    const result = await screen.findByRole("option", { name: /Ollama API address/ });
+    await user.type(search, "Simultaneous");
+    const result = await screen.findByRole("option", { name: /Simultaneous assessments/ });
     await user.click(result);
-    expect(screen.getByText("AI provider")).toBeInTheDocument();
+    expect(screen.getByLabelText("Simultaneous assessments")).toBeInTheDocument();
   });
 
   it("search navigates to Runs & Scanning for run limits", async () => {

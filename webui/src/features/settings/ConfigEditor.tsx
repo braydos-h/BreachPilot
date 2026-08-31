@@ -24,48 +24,57 @@ export function ConfigEditor({ category, sections, className }: ConfigEditorProp
   const { draft, schema, isLoading, error, update } = useSettingsDraft();
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  const isDepSatisfied = (dependsOn?: string) => {
+  const isDepSatisfied = (dependsOn: unknown): boolean => {
     if (!dependsOn) return true;
-    const eqIdx = dependsOn.indexOf("=");
-    if (eqIdx !== -1) {
-      const key = dependsOn.slice(0, eqIdx).trim();
-      const expected = dependsOn.slice(eqIdx + 1).trim();
-      const [depSection, depField] = key.split(".");
+    if (typeof dependsOn === "string") {
+      const eqIdx = dependsOn.indexOf("=");
+      if (eqIdx !== -1) {
+        const key = dependsOn.slice(0, eqIdx).trim();
+        const expected = dependsOn.slice(eqIdx + 1).trim();
+        const [depSection, depField] = key.split(".");
+        if (!depSection || !depField) return true;
+        const val = resolveValue(draft, depSection, depField);
+        return String(val) === expected;
+      }
+      const [depSection, depField] = dependsOn.split(".");
       if (!depSection || !depField) return true;
       const val = resolveValue(draft, depSection, depField);
-      return String(val) === expected;
+      return Boolean(val);
     }
-    const [depSection, depField] = dependsOn.split(".");
-    if (!depSection || !depField) return true;
-    const val = resolveValue(draft, depSection, depField);
-    return Boolean(val);
+    if (typeof dependsOn === "object" && dependsOn !== null) {
+      const dep = dependsOn as { section: string; field: string; value?: unknown };
+      const depVal = resolveValue(draft, dep.section, dep.field);
+      if (dep.value !== undefined) return depVal === dep.value;
+      return Boolean(depVal);
+    }
+    return true;
   };
 
   const sectionEntries = useMemo(() => {
     if (!schema) return [];
-    return Object.entries(schema as Record<string, unknown>)
+    const entries = Object.entries(schema as Record<string, unknown>)
       .filter(([section]) => !sections || sections.includes(section))
       .map(([section, value]) => {
-        const fields = Object.entries((value ?? {}) as Record<string, unknown>)
-          .filter(([field]) => {
-            const meta = getSettingMeta(section, field);
-            if (meta?.hide) return false;
-            if (fieldCategory(section, field) !== category) return false;
-            if (meta?.dependsOn && !isDepSatisfied(meta.dependsOn)) return false;
-            if (meta?.advanced && !showAdvanced) return false;
-            return true;
-          })
-          .sort((a, b) => {
-            const ma = getSettingMeta(section, a[0]);
-            const mb = getSettingMeta(section, b[0]);
-            const oa = ma?.order ?? 999;
-            const ob = mb?.order ?? 999;
-            if (oa !== ob) return oa - ob;
-            return a[0].localeCompare(b[0]);
-          });
+        let fields = Object.entries((value ?? {}) as Record<string, unknown>).filter(([field]) => {
+          const meta = getSettingMeta(section, field);
+          if (meta?.hide) return false;
+          if (fieldCategory(section, field) !== category) return false;
+          if (meta?.advanced && !showAdvanced) return false;
+          if (meta?.dependsOn && !isDepSatisfied(meta.dependsOn)) return false;
+          return true;
+        });
+        fields = fields.sort((a, b) => {
+          const ma = getSettingMeta(section, a[0]);
+          const mb = getSettingMeta(section, b[0]);
+          const oa = ma?.order ?? 999;
+          const ob = mb?.order ?? 999;
+          if (oa !== ob) return oa - ob;
+          return a[0].localeCompare(b[0]);
+        });
         return { section, fields };
       })
       .filter(({ fields }) => fields.length > 0);
+    return entries;
   }, [schema, category, sections, showAdvanced, draft]);
 
   const hasAdvanced = useMemo(() => {
