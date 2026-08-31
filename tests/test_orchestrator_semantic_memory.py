@@ -109,8 +109,16 @@ def test_orchestrator_builds_manager_when_flag_set(tmp_path, monkeypatch) -> Non
     orch = AutonomousOrchestrator(cfg, tmp_path / "ws")
     assert orch._semantic_memory is not None
     assert orch._executor._semantic_memory is orch._semantic_memory
-    # The embed_host wins over host (local embeddings stay local).
-    assert built["args"][1]["ollama_host"] == "http://localhost:11434"
+    # The embeddings provider owns the endpoint (``embeddings.provider``);
+    # legacy backcompat: an untouched embeddings block inherits
+    # ollama.embed_host so local embeddings stay local.
+    from tools.providers.embeddings import OllamaEmbeddingProvider
+
+    kw = built["args"][1]
+    provider = kw["embedding_provider"]
+    assert isinstance(provider, OllamaEmbeddingProvider)
+    assert provider._host == "http://localhost:11434"
+    assert provider._model == "nomic-embed-text"
 
 
 # ── _record_lesson_on_success unit ─────────────────────────────────────────

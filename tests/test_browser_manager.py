@@ -164,6 +164,7 @@ def test_delegate_to_backend_always_raises_in_this_build():
     manager = BrowserManager({**STOCK_CONFIG, "browser": {**STOCK_CONFIG["browser"], "enabled": True}},
                              backend=_stub_backend())
     session = manager.start_session(target_ip="10.0.0.50")
+    manager.transition(session.session_id, BrowserSessionState.STARTING)
     manager.mark_ready(session.session_id)
     with pytest.raises(BrowserBackendError, match="deferred implementation"):
         manager.delegate_to_backend(session.session_id, "navigate",

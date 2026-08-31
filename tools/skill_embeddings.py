@@ -172,7 +172,21 @@ def get_shared_skill_embedder(config: dict[str, Any] | None) -> SkillEmbedder:
                     build_embedding_provider,
                 )
 
-                embedding_provider = build_embedding_provider(config)
+                # ``skills.semantic_model`` is the skill-search-specific model
+                # override (pre-registry behavior kept): an explicit
+                # ``embeddings.model`` wins, else skills.semantic_model — and
+                # only ``memory.embedding_model`` otherwise (one normalization
+                # layer: tools.config.loader.get_embeddings_config).
+                embed_cfg = dict(config or {})
+                skill_model = str(
+                    ((config or {}).get("skills", {}) or {}).get("semantic_model") or ""
+                ).strip()
+                embeddings_block = dict(embed_cfg.get("embeddings") or {})
+                if skill_model and not embeddings_block.get("model"):
+                    embeddings_block["model"] = skill_model
+                if embeddings_block:
+                    embed_cfg["embeddings"] = embeddings_block
+                embedding_provider = build_embedding_provider(embed_cfg)
                 if isinstance(embedding_provider, NullEmbeddingProvider):
                     embedder = SkillEmbedder(None)
                     _shared_embedder = embedder

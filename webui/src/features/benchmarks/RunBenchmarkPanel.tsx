@@ -43,6 +43,15 @@ export function RunBenchmarkPanel({ suites, active, defaultModel }: RunBenchmark
 
   const busy = isActiveState(active.state);
 
+  // The panel can mount before the overview query delivers the suite list
+  // (e.g. rendered directly on the "New run" sub-page) — pick the first suite
+  // once suites arrive so the user never sees a stuck "Select suite…" default.
+  useEffect(() => {
+    if (!suite && suites.length > 0) {
+      setSuite(suites[0].suite_id);
+    }
+  }, [suite, suites]);
+
   // Load the suite's scenario checklist. Re-runs when the suite changes and
   // on retry; failures are surfaced (never silently swallowed).
   useEffect(() => {

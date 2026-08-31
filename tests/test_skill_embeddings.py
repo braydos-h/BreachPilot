@@ -98,12 +98,13 @@ def test_shared_embedder_honors_skills_semantic_model(monkeypatch):
     import db
     import tools.semantic_memory as semantic_memory
 
-    captured: dict[str, str] = {}
+    from tools.providers.embeddings import OllamaEmbeddingProvider
+
+    captured: dict[str, object] = {}
 
     class _CapturingManager:
-        def __init__(self, _db, *, ollama_host: str, embedding_model: str):
-            captured["host"] = ollama_host
-            captured["model"] = embedding_model
+        def __init__(self, _db, *, embedding_provider):
+            captured["provider"] = embedding_provider
 
         def embed(self, _text: str) -> list[float]:
             return [1.0, 0.0]
@@ -115,15 +116,19 @@ def test_shared_embedder_honors_skills_semantic_model(monkeypatch):
         {
             "memory": {"semantic_enabled": True, "embedding_model": "memory-default"},
             "skills": {"semantic_model": "skill-specific-model"},
-            "ollama": {"host": "http://embedder.test:11434"},
+            # Legacy backcompat: an untouched embeddings block inherits the
+            # ollama embed host (local embeddings stay local).
+            "ollama": {"host": "http://embedder.test:11434", "embed_host": "http://embedder.test:11434"},
         }
     )
 
     assert embedder.available()
-    assert captured == {
-        "host": "http://embedder.test:11434",
-        "model": "skill-specific-model",
-    }
+    provider = captured["provider"]
+    assert isinstance(provider, OllamaEmbeddingProvider)
+    # skills.semantic_model wins over memory.embedding_model for skill search.
+    assert provider._model == "skill-specific-model"
+    assert provider._model != "memory-default"
+    assert provider._host == "http://embedder.test:11434"
 
 
 # ── semantic_rank ────────────────────────────────────────────────────────
