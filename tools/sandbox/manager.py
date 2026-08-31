@@ -65,6 +65,12 @@ _RUN_ENV_ALLOWLIST = {
 }
 
 
+def _build_manager(cfg: SandboxConfig, workspace: Path, config: dict[str, Any] | None) -> SandboxManager:
+    # cap_raw honors sandbox.multi_net_raw: NET_RAW is the ONLY capability the
+    # worker may receive (raw packet scanning); NET_ADMIN is never granted.
+    return SandboxManager(cfg, workspace, config_dict=config, backend=_db.DockerBackend(cap_raw=cfg.multi_net_raw))
+
+
 def resolve_manager(workspace: Path, config: dict[str, Any] | None) -> SandboxManager | None:
     """Build a SandboxManager from config; returns None when the sandbox is disabled.
 
@@ -76,14 +82,60 @@ def resolve_manager(workspace: Path, config: dict[str, Any] | None) -> SandboxMa
     cfg = SandboxConfig.from_config(config)
     if not cfg.enabled:
         return None
-    # cap_raw honors sandbox.multi_net_raw: NET_RAW is the ONLY capability the
-    # worker may receive (raw packet scanning); NET_ADMIN is never granted.
-    return SandboxManager(
-        cfg,
-        workspace,
-        config_dict=config,
-        backend=_db.DockerBackend(cap_raw=cfg.multi_net_raw),
+    return _build_manager(cfg, workspace, config)
+
+
+def native_fallback_notice(reason: str) -> str:
+    """Canonical one-line native-fallback notice (boot log, ctx, tool result)."""
+    return (
+        f"Docker sandbox unavailable ({reason}) -- falling back to NATIVE "
+        f"(uncontained) legacy host execution for this session "
+        f"(sandbox.fallback_native=true). Start Docker and build the sandbox "
+        f"image to contain execution; set sandbox.fallback_native: false to "
+        f"fail closed instead."
     )
+
+
+def resolve_manager_with_fallback(
+    workspace: Path,
+    config: dict[str, Any] | None,
+    *,
+    probe: Any = None,
+) -> tuple[SandboxManager | None, str]:
+    """Boot-time sandbox resolution WITH the documented native fallback.
+
+    Same contract as :func:`resolve_manager` plus the one sanctioned fallback
+    decision: when the sandbox is enabled but the Docker stack is unusable
+    (CLI / daemon / worker image missing) and ``sandbox.fallback_native`` is
+    true, return ``(None, notice)`` so the caller runs the documented legacy
+    host-execution mode for the whole session and can warn loudly. With
+    ``fallback_native: false`` the manager is returned either way -- it then
+    fail-closes at execution time exactly as before.
+
+    Probes are injected (``probe``: ``(ok, reason)`` callable) so tests never
+    need a real Docker daemon. The image probe only runs when Docker answers;
+    its failure is treated as "sandboxing doesn't work" for the fallback
+    decision (a missing first-run image is the common broken-lab case).
+    """
+    cfg = SandboxConfig.from_config(config)
+    if not cfg.enabled:
+        return None, ""
+    probe_fn = probe or _db.docker_version
+    try:
+        ok, reason = probe_fn()
+    except Exception as exc:  # noqa: BLE001 -- a probe must never break server boot
+        ok, reason = False, f"docker probe failed: {exc}"
+    if ok:
+        try:
+            image_ok = bool(_db.docker_image_exists(cfg.image))
+        except SandboxError as exc:
+            image_ok, reason = False, str(exc)
+        if image_ok or not cfg.fallback_native:
+            return _build_manager(cfg, workspace, config), ""
+        return None, native_fallback_notice(f"sandbox image '{cfg.image}' not built")
+    if not cfg.fallback_native:
+        return _build_manager(cfg, workspace, config), ""
+    return None, native_fallback_notice(reason)
 
 
 class SandboxManager:
@@ -550,6 +602,16 @@ def status_report(config: dict[str, Any] | None) -> dict[str, Any]:
     ``image_present`` distinguishes "Docker up but worker image not built"
     (the common first-run gap) from "Docker unreachable"; it stays ``None``
     when the answer cannot be known (sandbox disabled / daemon down).
+
+    ``mode`` is the effective execution posture the WebUI home screen
+    banners:
+    - "disabled": sandbox.enabled false -- legacy host-execution mode.
+    - "contained": Docker + worker image usable -- commands run contained.
+    - "native_fallback": enabled but Docker/image unusable AND
+      fallback_native=true -- the session degrades to uncontained host
+      execution (one warning, never per-command).
+    - "blocked": enabled, Docker/image unusable, fallback_native=false --
+      every execution fail-closes.
     """
     cfg = SandboxConfig.from_config(config)
     report: dict[str, Any] = {
@@ -558,6 +620,9 @@ def status_report(config: dict[str, Any] | None) -> dict[str, Any]:
         "image": cfg.image,
         "user": cfg.user,
         "read_only_rootfs": cfg.read_only_rootfs,
+        "fallback_native": cfg.fallback_native,
+        "mode": "disabled",
+        "fallback_reason": "",
         "docker_available": False,
         "docker_error": "",
         "image_present": None,
@@ -585,8 +650,18 @@ def status_report(config: dict[str, Any] | None) -> dict[str, Any]:
         report["docker_available"] = ok
         if not ok:
             report["docker_error"] = reason
+            report["mode"] = "native_fallback" if cfg.fallback_native else "blocked"
+            report["fallback_reason"] = reason
         else:
-            report["image_present"] = bool(_db.docker_image_exists(cfg.image))
+            image_ok = bool(_db.docker_image_exists(cfg.image))
+            report["image_present"] = image_ok
+            if image_ok:
+                report["mode"] = "contained"
+            else:
+                report["mode"] = "native_fallback" if cfg.fallback_native else "blocked"
+                report["fallback_reason"] = f"sandbox image '{cfg.image}' not built"
     except SandboxError as exc:
         report["docker_error"] = str(exc)
+        report["mode"] = "native_fallback" if cfg.fallback_native else "blocked"
+        report["fallback_reason"] = str(exc)
     return report

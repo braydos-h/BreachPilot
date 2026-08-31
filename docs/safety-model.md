@@ -197,7 +197,15 @@ Evidence and auditability are part of the safety model:
 - New attack-execution paths MUST go through the sandbox funnel
   (`tools/mcp_tools/sandbox_exec.py`); never `subprocess` agent-generated
   commands directly on the host, and never add a host-execution fallback for
-  sandbox failures (fail closed with `SANDBOX_*` blocks).
+  sandbox failures (fail closed with `SANDBOX_*` blocks). The ONE sanctioned
+  fallback is the boot-time decision in
+  `tools/sandbox/manager.py::resolve_manager_with_fallback`: with
+  `sandbox.fallback_native: true` (default), an unusable Docker stack degrades
+  the WHOLE server process to the legacy host-execution mode before any tool
+  exists — surfacing as a boot-log warning, an amber WebUI home-screen banner,
+  and a `SANDBOX_FALLBACK:` line in every legacy-path tool result. Never
+  switch a session between contained and native execution mid-stream, and keep
+  `sandbox.fallback_native: false` fail-closed (`SANDBOX_UNAVAILABLE` blocks).
 - Keep output sanitization and secret redaction near the boundary where output enters logs, model context, or reports.
 - Keep evidential status separate from execution status. New outcome rules may
   reduce/reprioritize activity only; they must remain downstream of the

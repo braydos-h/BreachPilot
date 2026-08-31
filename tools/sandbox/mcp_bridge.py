@@ -23,8 +23,11 @@ _REMEDIATION = {
     SANDBOX_UNAVAILABLE: (
         "Ensure Docker Desktop (Windows/macOS) or docker.io/docker-ce (Linux) is installed "
         "and running; build the sandbox image: docker build -t breachpilot-sandbox:latest docker/sandbox. "
-        "To deliberately keep the legacy UNCONTAINED host-execution mode, set sandbox.enabled: false "
-        "in config.yaml (explicit operator opt-out -- never automatic)."
+        "With sandbox.fallback_native: true (default) the server degrades to the legacy "
+        "UNCONTAINED host-execution mode at boot when the Docker probe fails -- this "
+        "in-session block means Docker died (or was unavailable) AFTER boot "
+        "(fallback happens once, at boot, never mid-session). Set sandbox.fallback_native: "
+        "false in config.yaml to keep the strict fail-closed contract instead."
     ),
     SANDBOX_POLICY_FAILED: (
         "The worker network firewall could not be installed (iptables-restore failed in the "

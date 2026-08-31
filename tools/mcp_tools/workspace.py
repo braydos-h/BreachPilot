@@ -254,7 +254,10 @@ def register_workspace_tools(mcp: Any, *, ctx: ToolContext) -> None:
             text = log_path.read_text(encoding="utf-8", errors="replace")
             log_tail = text[-3000:]
 
+        from tools.mcp_tools.sandbox_exec import sandbox_fallback_notice
+
         return (
+            f"{sandbox_fallback_notice(ctx)}"
             f"PYTHON_RUN_RESULT: {status} (exit_code={exit_code}, duration={elapsed:.1f}s)\n"
             f"ATTEMPT_ID: {attempt_id}\n"
             f"SCRIPT: {script_path}\n"

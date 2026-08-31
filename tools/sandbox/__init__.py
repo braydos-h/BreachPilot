@@ -12,9 +12,13 @@ session: cap-dropped (NET_RAW at most, never NET_ADMIN), non-root,
 no-new-privileges, bounded resources, read-only rootfs, the run workspace bound
 at ``/workspace`` only, and a default-DROP netns firewall installed by an
 ephemeral NET_ADMIN sidecar that authorizes ONLY the target allowlist. Any
-sandbox failure FAILS CLOSED: ``SandboxError``
-subclasses surface as ``SANDBOX_*`` result blocks and host execution is never
-an automatic fallback for attack commands.
+sandbox failure DURING a session FAILS CLOSED: ``SandboxError`` subclasses
+surface as ``SANDBOX_*`` result blocks and host execution is never a
+per-command fallback. The single sanctioned fallback is the boot-time
+decision in ``resolve_manager_with_fallback``: with ``sandbox.fallback_native``
+true (default) a server whose Docker stack is unusable degrades wholly to the
+documented legacy host-execution mode with a warning (surfaced by the WebUI
+home screen); ``fallback_native: false`` fails closed instead.
 
 Docker access is seam-mediated (house convention from ``tools/snapshots.py``):
 tests monkeypatch the named wrappers in ``tools.sandbox.docker_backend``,
@@ -34,13 +38,21 @@ from tools.sandbox.exceptions import (
     SandboxUnsupportedError,
     SandboxWorkspaceError,
 )
-from tools.sandbox.manager import SandboxManager, resolve_manager, status_report
+from tools.sandbox.manager import (
+    SandboxManager,
+    native_fallback_notice,
+    resolve_manager,
+    resolve_manager_with_fallback,
+    status_report,
+)
 from tools.sandbox.mcp_bridge import is_sandbox_active, manager_from_ctx, sandbox_block
 from tools.sandbox.models import NetworkPolicy, SandboxConfig, SandboxResult, SandboxSpec
 
 __all__ = [
     "SandboxManager",
     "resolve_manager",
+    "resolve_manager_with_fallback",
+    "native_fallback_notice",
     "status_report",
     "SandboxConfig",
     "SandboxResult",

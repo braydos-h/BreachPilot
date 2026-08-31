@@ -514,6 +514,12 @@ sandbox:
   enabled: true
   backend: docker
   image: breachpilot-sandbox:latest
+  # When true (default): if Docker is unusable at boot (CLI missing, daemon
+  # down, or the sandbox image not built), the MCP server degrades to the
+  # legacy UNCONTAINED host-execution mode for the whole session and warns
+  # loudly (server log + WebUI home screen + SANDBOX_FALLBACK lines in tool
+  # results). Set false to fail closed instead (SANDBOX_UNAVAILABLE blocks).
+  fallback_native: true
   user: sandbox
   read_only_rootfs: true
   env_passthrough: []

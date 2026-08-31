@@ -216,10 +216,18 @@ destroyed afterward:
   the audit trail. Cloud metadata, the Docker gateway, host LAN devices, and
   the open internet are unreachable regardless of what the command says — a
   script with no destination on its command line cannot egress either.
-- **Fail closed**: Docker unavailable, image missing, or firewall install
-  failing blocks offensive execution with a structured `SANDBOX_*` error.
-  Host execution is never an automatic fallback. `sandbox.enabled: false` is
-  the explicit operator opt-out for the legacy uncontained mode.
+- **Fail closed (or degrade loudly)**: mid-session sandbox failures always
+  block offensive execution with a structured `SANDBOX_*` error — there is no
+  per-command host fallback. At **boot**, though, one fallback decision is
+  made: with `sandbox.fallback_native: true` (the default), an unusable Docker
+  stack (CLI missing, daemon down, worker image not built) degrades the whole
+  session to the legacy **uncontained native host-execution mode** — the
+  server logs a warning, the WebUI home screen shows an amber "Sandbox
+  unavailable" banner, and every execution result carries a `SANDBOX_FALLBACK:`
+  line. Set `sandbox.fallback_native: false` to restore the strict fail-closed
+  posture (executions denied until Docker works). `sandbox.enabled: false` is
+  the explicit operator opt-out for the legacy uncontained mode, without the
+  Docker probing.
 
 Build the worker image once (Linux is the primary hardened target; Windows/macOS
 work via Docker Desktop):
@@ -332,7 +340,7 @@ Switching providers (Ollama ↔ OpenCode Go ↔ ChatGPT), models, skills, swarm,
 - Swarm & autonomous: toggle agents, concurrency, persistence phases, adaptive replan
 - OPSEC: target-aware pacing, UA rotation, DoH, noise budget
 - ICS: destructive PLC writes dual-gated (`allow_write` + `destructive_ics`)
-- Sandbox: per-run disposable execution worker (`sandbox.*` keys — image, resource limits, network enforcement, DNS mode, cleanup); see [docs/sandbox.md](docs/sandbox.md)
+- Sandbox: per-run disposable execution worker (`sandbox.*` keys — image, resource limits, network enforcement, DNS mode, `fallback_native` boot-time degrade-to-native, cleanup); see [docs/sandbox.md](docs/sandbox.md)
 - API: concurrent runs (default 3), multi-operator, graph route, loopback auth
 - Benchmark suite: `benchmark.*` keys — output dir, default trials, per-trial timeout, `sandbox_required`, baseline path, regression tolerances, telemetry toggles; see [docs/benchmarks.md](docs/benchmarks.md)
 - Browser agent (prepared, OFF): `browser.*` keys exist with `enabled: false` / `backend: none` — architecture seam only, no browser execution in this build; see [docs/browser-agent-design.md](docs/browser-agent-design.md)

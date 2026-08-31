@@ -15,7 +15,12 @@ from typing import Any
 from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
 from tools.mcp_shared import _is_inside_workspace
 from tools.mcp_tools.registry import ToolContext, _attempt_dir, _run_with_pgrp_timeout
-from tools.mcp_tools.sandbox_exec import run_argv_in_sandbox, run_command_in_sandbox, sandbox_error_block
+from tools.mcp_tools.sandbox_exec import (
+    run_argv_in_sandbox,
+    run_command_in_sandbox,
+    sandbox_error_block,
+    sandbox_fallback_notice,
+)
 from tools.mcp_tools.terminal.allowlist import _opsec_advisory_block, _target_lock_block
 from tools.mcp_tools.terminal.privilege import _find_windows_bash, _require_sudo_or_pivot
 from tools.sandbox.exceptions import SandboxError
@@ -239,6 +244,7 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
             f"COMMAND_ORIGINAL: {original_command}\n"
             f"COMMAND_SANITIZED: {sanitized_command}\n"
             f"{preflight_note}"
+            f"{sandbox_fallback_notice(ctx)}"
             f"{_opsec_advisory}"
             f"WORKSPACE: {attempt_dir}\n"
             f"OUTPUT:\n{output_tail}"
@@ -286,12 +292,15 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
             )
             output = (out + "\n" + err)[-4000:]
             status = "completed" if returncode == 0 else "failed"
-            return f"ROOT_CMD_RESULT: {status} (exit_code={returncode})\nCOMMAND: {original_command}\nOUTPUT:\n{output}"
+            return (
+                f"{sandbox_fallback_notice(ctx)}"
+                f"ROOT_CMD_RESULT: {status} (exit_code={returncode})\nCOMMAND: {original_command}\nOUTPUT:\n{output}"
+            )
         except subprocess.TimeoutExpired:
-            return f"ROOT_CMD_RESULT: timed_out\nCOMMAND: {original_command}"
+            return f"{sandbox_fallback_notice(ctx)}ROOT_CMD_RESULT: timed_out\nCOMMAND: {original_command}"
         except _EXC_GROUP_CATCH as exc:
             _log_nested_exceptions(exc)
-            return f"ROOT_CMD_RESULT: error - {exc}"
+            return f"{sandbox_fallback_notice(ctx)}ROOT_CMD_RESULT: error - {exc}"
 
     @mcp.tool()
     @audit_tool
@@ -359,11 +368,11 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
             output = (out + "\n" + err)[-3000:]
             status = "completed" if returncode == 0 else "failed"
             return (
-                f"{preflight_note}GIT_CLONE_RESULT: {status} (exit_code={returncode})\n"
+                f"{preflight_note}{sandbox_fallback_notice(ctx)}GIT_CLONE_RESULT: {status} (exit_code={returncode})\n"
                 f"REPO: {url}\nPATH: {clone_dir}\nOUTPUT:\n{output}"
             )
         except subprocess.TimeoutExpired:
-            return f"{preflight_note}GIT_CLONE_RESULT: timed_out\nREPO: {url}"
+            return f"{preflight_note}{sandbox_fallback_notice(ctx)}GIT_CLONE_RESULT: timed_out\nREPO: {url}"
         except _EXC_GROUP_CATCH as exc:
             _log_nested_exceptions(exc)
-            return f"{preflight_note}GIT_CLONE_RESULT: error - {exc}"
+            return f"{preflight_note}{sandbox_fallback_notice(ctx)}GIT_CLONE_RESULT: error - {exc}"

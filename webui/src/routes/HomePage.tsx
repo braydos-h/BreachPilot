@@ -5,9 +5,12 @@ import {
   ArrowRight,
   Compass,
   History,
+  Info,
   ListFilter,
   ScanSearch,
   ShieldAlert,
+  ShieldCheck,
+  ShieldX,
   Target,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -16,7 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
 import { SkeletonRows } from "@/components/Loading";
-import { useRuns } from "@/api/hooks";
+import { useRuns, useSandboxStatus } from "@/api/hooks";
 import {
   isActiveState,
   isTerminalState,
@@ -56,6 +59,77 @@ function FullAccessNotice() {
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+const FALLBACK_HINT = "Start Docker and build the sandbox image (docker build -t breachpilot-sandbox:latest docker/sandbox) to contain execution — until then commands run directly on this machine.";
+
+/**
+ * Sandbox posture banner for the home screen. Surfaced at startup so the
+ * operator always knows the effective execution mode before launching a run:
+ * - contained: quiet green line (worker container active).
+ * - disabled: quiet muted line (legacy host mode as configured).
+ * - native_fallback: amber card — Docker unusable, session degraded to
+ *   uncontained native execution (sandbox.fallback_native=true default).
+ * - blocked: red card — strict fail-closed mode, executions will be denied.
+ */
+export function SandboxBanner() {
+  const sandbox = useSandboxStatus();
+  if (sandbox.isLoading || sandbox.error || !sandbox.data) return null;
+  const s = sandbox.data;
+  const reason: string = s.fallback_reason || s.docker_error || "";
+
+  if (s.mode === "contained") {
+    return (
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground" data-testid="sandbox-banner-contained">
+        <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+        Sandbox active — commands run inside the disposable Docker worker.
+      </p>
+    );
+  }
+  if (s.mode === "disabled") {
+    return (
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground" data-testid="sandbox-banner-disabled">
+        <Info className="h-3.5 w-3.5" />
+        Sandbox disabled — commands execute directly on the host (legacy mode). Enable it in settings for containment.
+      </p>
+    );
+  }
+  if (s.mode === "native_fallback") {
+    return (
+      <Card className="border-amber-500/40 bg-amber-500/5" data-testid="sandbox-banner-fallback">
+        <CardContent className="space-y-1 p-3 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <ShieldAlert className="h-4 w-4 text-amber-300" />
+            <Badge variant="warn">Sandbox unavailable</Badge>
+            <span className="font-medium text-amber-200">
+              Running natively — execution is NOT contained.
+            </span>
+          </div>
+          {reason && <p className="text-xs text-muted-foreground">Reason: {reason}</p>}
+          <p className="text-xs text-amber-200/80">{FALLBACK_HINT}</p>
+        </CardContent>
+      </Card>
+    );
+  }
+  // blocked (fail closed): sandbox required by config but unusable.
+  return (
+    <Card className="border-red-500/40 bg-red-500/5" data-testid="sandbox-banner-blocked">
+      <CardContent className="space-y-1 p-3 text-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <ShieldX className="h-4 w-4 text-red-300" />
+          <Badge variant="danger">Sandbox required</Badge>
+          <span className="font-medium text-red-200">
+            Execution is blocked — the sandbox is unavailable and fallback is disabled.
+          </span>
+        </div>
+        {reason && <p className="text-xs text-muted-foreground">Reason: {reason}</p>}
+        <p className="text-xs text-red-200/80">
+          Start Docker and build the sandbox image, or set sandbox.fallback_native: true in config.yaml to allow
+          uncontained native execution.
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -151,6 +225,9 @@ export function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* Sandbox posture (effective execution mode for this session) */}
+      <SandboxBanner />
 
       {/* Active run banner */}
       {activeRun && (

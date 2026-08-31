@@ -113,6 +113,11 @@ class ToolContext:
     # (documented legacy host-execution mode). Optional at the END so positional
     # construction and test FakeCtx duck-typing keep working.
     sandbox: Any | None = None
+    # Non-empty when the server degraded to legacy host-execution via the
+    # boot-time native fallback (sandbox enabled, Docker unusable,
+    # sandbox.fallback_native=true): tools embed this in results so the agent
+    # (and the audit trail) knows execution is UNCONTAINED. "" otherwise.
+    sandbox_notice: str = ""
 
 
 def _run_with_pgrp_timeout(*args: Any, **kwargs: Any) -> Any:

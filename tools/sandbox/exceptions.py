@@ -1,9 +1,15 @@
 """Sandbox exception hierarchy + the structured error codes MCP tools surface.
 
-Every failure on the sandbox path is FAIL CLOSED: the tool layer catches
-``SandboxError`` subclasses and converts them into ``SANDBOX_*`` result blocks.
-Host execution is NEVER an automatic fallback for an attack command -- a
-sandbox/daemon/policy failure blocks the execution instead. See
+Every failure DURING an active sandbox session is FAIL CLOSED: the tool layer
+catches ``SandboxError`` subclasses and converts them into ``SANDBOX_*`` result
+blocks. Host execution is NEVER a per-command fallback -- a
+sandbox/daemon/policy failure blocks the execution instead. The single
+sanctioned fallback is the boot-time decision in
+``tools/sandbox/manager.py::resolve_manager_with_fallback``: with
+``sandbox.fallback_native`` true (default), a server whose Docker stack is
+unusable degrades wholly to the documented legacy host-execution mode (with a
+warning) BEFORE any tool exists, so no in-session command ever silently
+switches between contained and native execution. See
 ``tools/sandbox/mcp_bridge.py::sandbox_block`` for the text protocol.
 """
 

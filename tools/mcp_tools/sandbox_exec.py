@@ -22,6 +22,7 @@ __all__ = [
     "run_command_in_sandbox",
     "run_argv_in_sandbox",
     "sandbox_error_block",
+    "sandbox_fallback_notice",
 ]
 
 
@@ -66,6 +67,19 @@ def sandbox_error_block(exc: Exception, *, tool_name: str = "") -> str:
         SandboxError(f"sandbox execution failed: {exc}"),
         tool_name=tool_name,
     )
+
+
+def sandbox_fallback_notice(ctx: Any) -> str:
+    """``SANDBOX_FALLBACK:`` result line for the legacy host-execution path.
+
+    Non-empty only when this server process degraded to native execution via
+    the boot-time native fallback (``ctx.sandbox_notice`` set by
+    ``mcp_exploit_server``); empty when the sandbox is disabled as
+    configured -- degraded-mode executions must be loud, configured host mode
+    stays quiet.
+    """
+    notice = getattr(ctx, "sandbox_notice", "") or ""
+    return f"SANDBOX_FALLBACK: {notice}\n" if notice else ""
 
 
 def run_command_in_sandbox(

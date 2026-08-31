@@ -818,9 +818,13 @@ CONFIG_SCHEMA: dict[str, Any] = {
     # The worker is cap-dropped (NET_RAW at most, never NET_ADMIN), non-root,
     # no-new-privileges, resource-bounded, and gets a default-DROP netns
     # firewall authorizing ONLY the effective target allowlist. ANY sandbox
-    # failure blocks offensive execution (fail closed) -- host execution is
-    # never an automatic fallback. ``enabled: false`` is the explicit opt-out
-    # that restores the legacy uncontained host-execution mode. See
+    # failure DURING a session blocks offensive execution (fail closed -- host
+    # execution is never a per-command fallback). The one sanctioned fallback
+    # is the boot-time decision: when the Docker probe fails at server boot
+    # and ``fallback_native`` is true (default), the whole server process
+    # degrades to the legacy uncontained host-execution mode with a warning;
+    # ``fallback_native: false`` fails closed instead. ``enabled: false`` is
+    # the explicit opt-out that always uses the legacy mode. See
     # docs/sandbox.md and docs/safety-model.md.
     "sandbox": {
         "enabled": True,
@@ -828,6 +832,10 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "image": "breachpilot-sandbox:latest",
         "user": "sandbox",
         "read_only_rootfs": True,
+        # Degrade to the legacy host-execution mode when the boot-time Docker
+        # probe (CLI / daemon / worker image) fails, instead of blocking every
+        # execution. The WebUI home screen surfaces the degraded state.
+        "fallback_native": True,
         # Host env vars the worker MAY receive (allowlist; never the whole env).
         "env_passthrough": [],
         "resources": {
