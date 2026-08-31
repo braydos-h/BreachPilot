@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from tools.config.schema import CONFIG_SCHEMA
 
-
 BROWSER_DEFAULTS = {
     "enabled": False,
     "backend": "none",
@@ -46,13 +45,12 @@ def test_ollama_provider_untouched_by_browser_block():
 
 def test_missing_browser_block_loads_disabled_and_actives_nothing(tmp_path):
     """A config file with no browser key loads the disabled defaults + no capabilities."""
-    from tools.config.loader import load_validated_config
     from tools.browser.capabilities import browser_available, browser_capabilities
+    from tools.config.loader import load_validated_config
 
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "ollama:\n  host: http://localhost:11434\n"
-        "models:\n  default_alias: glm\n  registry:\n    glm: glm-5.2:cloud\n",
+        "ollama:\n  host: http://localhost:11434\nmodels:\n  default_alias: glm\n  registry:\n    glm: glm-5.2:cloud\n",
         encoding="utf-8",
     )
     cfg = load_validated_config(config_path)
@@ -67,11 +65,7 @@ def test_validator_warns_on_bad_browser_values(tmp_path):
 
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "browser:\n"
-        "  enabled: \"yes-please\"\n"
-        "  backend: 7\n"
-        "  max_sessions: -3\n"
-        "  capture_screenshots: \"sure\"\n",
+        'browser:\n  enabled: "yes-please"\n  backend: 7\n  max_sessions: -3\n  capture_screenshots: "sure"\n',
         encoding="utf-8",
     )
     result = validate_config_file(config_path)

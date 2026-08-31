@@ -15,7 +15,6 @@ from tools.benchmark.registry import scenario_summary
 from tools.benchmark.xben.manifest import parse_manifest
 from tools.browser.capabilities import browser_available, unmet_requirements
 
-
 VALID_ORACLE = {"flags": [{"flag_id": "f1", "description": "d", "check": {"type": "http", "path": "/"}}]}
 BASE_MANIFEST = {
     "benchmark_id": "xben-9001",

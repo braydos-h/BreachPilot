@@ -61,10 +61,18 @@ def test_capabilities_never_lies_even_with_browser_enabled(tmp_path, monkeypatch
     client = _make_client(
         tmp_path,
         monkeypatch,
-        browser_block={"enabled": True, "backend": "playwright", "headless": True, "max_sessions": 2,
-                       "session_timeout_seconds": 300, "navigation_timeout_seconds": 30,
-                       "capture_screenshots": True, "capture_network": True, "capture_console": False,
-                       "persist_storage": False},
+        browser_block={
+            "enabled": True,
+            "backend": "playwright",
+            "headless": True,
+            "max_sessions": 2,
+            "session_timeout_seconds": 300,
+            "navigation_timeout_seconds": 30,
+            "capture_screenshots": True,
+            "capture_network": True,
+            "capture_console": False,
+            "persist_storage": False,
+        },
     )
     resp = client.get("/api/v1/capabilities", headers=_capabilities_headers())
     browser = resp.json()["browser"]

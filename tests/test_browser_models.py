@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+from tools.browser.errors import BrowserTransitionError
 from tools.browser.models import (
     REDACTED,
     BrowserAction,
@@ -32,9 +33,7 @@ from tools.browser.models import (
     new_session_id,
     validate_session_transition,
 )
-from tools.browser.errors import BrowserTransitionError
 from tools.failure_taxonomy import FailureClass
-
 
 # ── Deterministic serialization ───────────────────────────────────────────
 
@@ -42,8 +41,12 @@ from tools.failure_taxonomy import FailureClass
 @pytest.mark.parametrize(
     "obj",
     [
-        BrowserAction(action_id="a-1", session_id="bs-0001-ab",
-                      parameters={"url": "http://127.0.0.1/login"}, target_ip="10.0.0.50"),
+        BrowserAction(
+            action_id="a-1",
+            session_id="bs-0001-ab",
+            parameters={"url": "http://127.0.0.1/login"},
+            target_ip="10.0.0.50",
+        ),
         BrowserResult(success=False, failure_class=BrowserFailureClass.TIMEOUT, retryable=True, confidence=0.5),
         BrowserSession(session_id="bs-0001-ab", run_id="run-1", target_ip="10.0.0.50"),
         BrowserPageState(session_id="bs-0001-ab", url="http://127.0.0.1/", title="Login"),
@@ -135,8 +138,12 @@ def test_overlapping_failure_classes_map_to_global_taxonomy():
 
 
 def test_browser_only_failure_classes_have_no_global_mapping():
-    for cls in (BrowserFailureClass.SESSION_NOT_FOUND, BrowserFailureClass.INVALID_TRANSITION,
-                BrowserFailureClass.NAVIGATION_FAILED, BrowserFailureClass.SCRIPT_ERROR):
+    for cls in (
+        BrowserFailureClass.SESSION_NOT_FOUND,
+        BrowserFailureClass.INVALID_TRANSITION,
+        BrowserFailureClass.NAVIGATION_FAILED,
+        BrowserFailureClass.SCRIPT_ERROR,
+    ):
         assert cls.failure_class() is None
 
 
@@ -158,8 +165,11 @@ def test_artifact_evidence_type_default_maps_to_legacy_store():
 
 def test_observation_audit_dict_drops_payload():
     obs = BrowserObservation(
-        observation_id="o-1", session_id="s-1", kind=BrowserObservationKind.PAGE_STATE,
-        payload={"title": "admin panel", "secret": "hunter2"}, evidence_refs=["browser_artifact:ba-1"],
+        observation_id="o-1",
+        session_id="s-1",
+        kind=BrowserObservationKind.PAGE_STATE,
+        payload={"title": "admin panel", "secret": "hunter2"},
+        evidence_refs=["browser_artifact:ba-1"],
     )
     audit = obs.to_audit_dict()
     assert "payload" not in audit  # raw payload must never reach generic audit metadata

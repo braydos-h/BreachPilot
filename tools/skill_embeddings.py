@@ -178,9 +178,7 @@ def get_shared_skill_embedder(config: dict[str, Any] | None) -> SkillEmbedder:
                 # only ``memory.embedding_model`` otherwise (one normalization
                 # layer: tools.config.loader.get_embeddings_config).
                 embed_cfg = dict(config or {})
-                skill_model = str(
-                    ((config or {}).get("skills", {}) or {}).get("semantic_model") or ""
-                ).strip()
+                skill_model = str(((config or {}).get("skills", {}) or {}).get("semantic_model") or "").strip()
                 embeddings_block = dict(embed_cfg.get("embeddings") or {})
                 if skill_model and not embeddings_block.get("model"):
                     embeddings_block["model"] = skill_model

@@ -24,7 +24,6 @@ from tools.browser.models import (
     redact_value,
 )
 
-
 SECRET_TOKEN = "sk-SUPER-SECRET-SESSION-TOKEN-1234567890abcdef"
 BEARER = "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9.STAGE_SECRET_SIGNATURE_PART"
 URL_WITH_CREDS = "https://admin:hunter2pass@10.0.0.50/admin/login"
@@ -149,8 +148,9 @@ def test_json_roundtrip_of_redacted_forms_is_secret_free(surface_name):
     """Even serialized redacted artifacts (e.g. pasted into a report) stay safe."""
     surfaces = {
         "cookie": [BrowserCookie(name="session", value=SECRET_TOKEN).to_dict()],
-        "storage": [BrowserStorageSnapshot(origin="http://10.0.0.50",
-                                           entries=[{"key": "t", "value": SECRET_TOKEN}]).to_dict()],
+        "storage": [
+            BrowserStorageSnapshot(origin="http://10.0.0.50", entries=[{"key": "t", "value": SECRET_TOKEN}]).to_dict()
+        ],
         "network": [_network_event().to_redacted_dict()],
     }
     _assert_no_secret(surfaces[surface_name], surface_name)

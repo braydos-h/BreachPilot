@@ -27,7 +27,6 @@ from tools.browser.errors import (
 from tools.browser.interfaces import BrowserBackend
 from tools.browser.models import BrowserAction, BrowserFailureClass, BrowserResult
 
-
 # ── Import hygiene: no browser-automation package enters the process ──────
 
 
@@ -111,8 +110,18 @@ def _inert_backend(backend_id: str = "inert") -> BrowserBackend:
         return _fn
 
     namespace: dict = {"backend_id": backend_id}
-    for name in ("start_session", "stop_session", "navigate", "observe", "execute_action",
-                 "capture_screenshot", "get_network_events", "get_storage", "get_page_state", "close"):
+    for name in (
+        "start_session",
+        "stop_session",
+        "navigate",
+        "observe",
+        "execute_action",
+        "capture_screenshot",
+        "get_network_events",
+        "get_storage",
+        "get_page_state",
+        "close",
+    ):
         namespace[name] = staticmethod(_raising(name))
     return type("_InertBackend", (BrowserBackend,), namespace)()
 

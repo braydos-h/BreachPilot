@@ -25,7 +25,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-__all__ = ["FamilyStatus", "SANDBOXED_FAMILIES", "HOST_EXCEPTIONS", "PLANNED_FAMILIES", "audit_families", "describe_family_audit"]
+__all__ = [
+    "FamilyStatus",
+    "SANDBOXED_FAMILIES",
+    "HOST_EXCEPTIONS",
+    "PLANNED_FAMILIES",
+    "audit_families",
+    "describe_family_audit",
+]
 
 _MCP_TOOLS_DIR = Path(__file__).resolve().parent.parent / "mcp_tools"
 
@@ -195,8 +202,7 @@ PLANNED_FAMILIES: dict[str, FamilyStatus] = {
             "no backend is registered (tools/browser/capabilities.py:BACKEND_REGISTRY is empty)",
             "future implementation must be sandboxed: isolated browser worker, "
             "allowlist-aware network policy, no host fallback",
-            "this entry is metadata only: audit_families() does not emit rows for "
-            "families without module files",
+            "this entry is metadata only: audit_families() does not emit rows for families without module files",
         ],
     ),
 }

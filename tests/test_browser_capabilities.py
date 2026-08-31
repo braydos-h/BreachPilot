@@ -11,15 +11,14 @@ from __future__ import annotations
 import pytest
 
 from tools.browser.capabilities import (
-    BROWSER_CAPABILITIES,
     BACKEND_REGISTRY,
+    BROWSER_CAPABILITIES,
+    backend_configured,
     browser_available,
     browser_capabilities,
     browser_capability_names,
-    backend_configured,
     unmet_requirements,
 )
-
 
 EXPECTED_CAPABILITIES = (
     "browser.navigate",

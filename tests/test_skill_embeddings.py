@@ -97,7 +97,6 @@ def test_skill_embedder_unavailable_wrapping_none():
 def test_shared_embedder_honors_skills_semantic_model(monkeypatch):
     import db
     import tools.semantic_memory as semantic_memory
-
     from tools.providers.embeddings import OllamaEmbeddingProvider
 
     captured: dict[str, object] = {}

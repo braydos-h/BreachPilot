@@ -46,6 +46,7 @@ from tools.browser.errors import (
 from tools.browser.interfaces import BrowserBackend
 from tools.browser.manager import BrowserManager
 from tools.browser.models import (
+    REDACTED,
     BrowserAction,
     BrowserActionKind,
     BrowserArtifact,
@@ -64,7 +65,6 @@ from tools.browser.models import (
     BrowserSessionState,
     BrowserStorageKind,
     BrowserStorageSnapshot,
-    REDACTED,
     new_session_id,
     redact_value,
     validate_session_transition,
@@ -95,6 +95,7 @@ __all__ = [
     "BrowserSessionId",
     "BrowserSessionNotFound",
     "BrowserSessionState",
+    "BrowserStorageKind",
     "BrowserStorageSnapshot",
     "BrowserTransitionError",
     "REDACTED",

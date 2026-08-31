@@ -31,7 +31,6 @@ from tools.browser.errors import BrowserBackendUnavailable, BrowserSessionNotFou
 from tools.browser.interfaces import BrowserBackend
 from tools.browser.models import (
     BrowserAction,
-    BrowserResult,
     BrowserSession,
     BrowserSessionId,
     BrowserSessionState,
@@ -127,7 +126,13 @@ class BrowserManager:
         if not target_ip:
             raise BrowserBackendUnavailable("browser session requires a locked target_ip")
         if (
-            len([s for s in self._sessions.values() if s.state not in (BrowserSessionState.CLOSED, BrowserSessionState.FAILED)])
+            len(
+                [
+                    s
+                    for s in self._sessions.values()
+                    if s.state not in (BrowserSessionState.CLOSED, BrowserSessionState.FAILED)
+                ]
+            )
             >= self._max_sessions
         ):
             raise BrowserBackendUnavailable(

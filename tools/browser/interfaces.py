@@ -36,7 +36,6 @@ from tools.browser.models import (
     BrowserPageState,
     BrowserResult,
     BrowserSession,
-    BrowserSessionId,
     BrowserStorageSnapshot,
 )
 
@@ -105,7 +104,9 @@ class BrowserBackend(ABC):
         """Navigate the session (SPA- and redirect-aware)."""
 
     @abstractmethod
-    async def observe(self, session_id: str, *, include_forms: bool = True, include_endpoints: bool = True) -> BrowserObservation:
+    async def observe(
+        self, session_id: str, *, include_forms: bool = True, include_endpoints: bool = True
+    ) -> BrowserObservation:
         """Harvest a compact :class:`BrowserPageState` observation of the live page."""
 
     @abstractmethod
@@ -117,7 +118,9 @@ class BrowserBackend(ABC):
         """Capture a full/viewport screenshot as a persisted artifact."""
 
     @abstractmethod
-    async def get_network_events(self, session_id: str, *, limit: int = 100, after_id: str = "") -> list[BrowserNetworkEvent]:
+    async def get_network_events(
+        self, session_id: str, *, limit: int = 100, after_id: str = ""
+    ) -> list[BrowserNetworkEvent]:
         """Return captured network events (request/response records)."""
 
     @abstractmethod

@@ -50,8 +50,18 @@ def _stub_backend(backend_id: str = "stub") -> BrowserBackend:
         return _fn
 
     namespace: dict = {"backend_id": backend_id}
-    for name in ("start_session", "stop_session", "navigate", "observe", "execute_action",
-                 "capture_screenshot", "get_network_events", "get_storage", "get_page_state", "close"):
+    for name in (
+        "start_session",
+        "stop_session",
+        "navigate",
+        "observe",
+        "execute_action",
+        "capture_screenshot",
+        "get_network_events",
+        "get_storage",
+        "get_page_state",
+        "close",
+    ):
         namespace[name] = staticmethod(_raising(name))
     return type("_StubBrowserBackend", (BrowserBackend,), namespace)()
 
@@ -89,8 +99,9 @@ def test_start_session_fails_closed_without_backend(config):
 
 
 def test_start_session_requires_a_locked_target():
-    manager = BrowserManager({**STOCK_CONFIG, "browser": {**STOCK_CONFIG["browser"], "enabled": True}},
-                             backend=_stub_backend())
+    manager = BrowserManager(
+        {**STOCK_CONFIG, "browser": {**STOCK_CONFIG["browser"], "enabled": True}}, backend=_stub_backend()
+    )
     with pytest.raises(BrowserBackendUnavailable):
         manager.start_session(target_ip="")
 
@@ -99,8 +110,9 @@ def test_start_session_requires_a_locked_target():
 
 
 def test_session_lifecycle_with_stub_backend():
-    manager = BrowserManager({**STOCK_CONFIG, "browser": {**STOCK_CONFIG["browser"], "enabled": True}},
-                             backend=_stub_backend())
+    manager = BrowserManager(
+        {**STOCK_CONFIG, "browser": {**STOCK_CONFIG["browser"], "enabled": True}}, backend=_stub_backend()
+    )
     assert manager.available() is True
 
     session = manager.start_session(target_ip="10.0.0.50", run_id="run-1")
@@ -136,8 +148,9 @@ def test_unknown_session_raises_typed_error():
 
 
 def test_invalid_transition_is_rejected_and_recorded_not_applied():
-    manager = BrowserManager({**STOCK_CONFIG, "browser": {**STOCK_CONFIG["browser"], "enabled": True}},
-                             backend=_stub_backend())
+    manager = BrowserManager(
+        {**STOCK_CONFIG, "browser": {**STOCK_CONFIG["browser"], "enabled": True}}, backend=_stub_backend()
+    )
     session = manager.start_session(target_ip="10.0.0.50")
     with pytest.raises(BrowserTransitionError):
         manager.mark_ready(session.session_id)  # PENDING must pass through STARTING
@@ -161,14 +174,16 @@ def test_max_sessions_cap_enforced():
 
 def test_delegate_to_backend_always_raises_in_this_build():
     """Even with a backend injected, delegation is a deferred implementation."""
-    manager = BrowserManager({**STOCK_CONFIG, "browser": {**STOCK_CONFIG["browser"], "enabled": True}},
-                             backend=_stub_backend())
+    manager = BrowserManager(
+        {**STOCK_CONFIG, "browser": {**STOCK_CONFIG["browser"], "enabled": True}}, backend=_stub_backend()
+    )
     session = manager.start_session(target_ip="10.0.0.50")
     manager.transition(session.session_id, BrowserSessionState.STARTING)
     manager.mark_ready(session.session_id)
     with pytest.raises(BrowserBackendError, match="deferred implementation"):
-        manager.delegate_to_backend(session.session_id, "navigate",
-                                   BrowserAction(action_id="a-1", session_id=session.session_id))
+        manager.delegate_to_backend(
+            session.session_id, "navigate", BrowserAction(action_id="a-1", session_id=session.session_id)
+        )
 
 
 def test_delegate_to_backend_without_session_or_availability():

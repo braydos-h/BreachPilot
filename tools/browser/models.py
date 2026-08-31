@@ -170,14 +170,14 @@ def new_session_id(seq: int) -> BrowserSessionId:
 class BrowserSessionState(str, enum.Enum):
     """Lifecycle states of one browser session (see manager transition map)."""
 
-    PENDING = "pending"      # requested, not yet started
-    STARTING = "starting"    # backend is launching the worker/session
-    READY = "ready"          # running, idle — safe to navigate
-    ACTIVE = "active"        # executing an action / observation
+    PENDING = "pending"  # requested, not yet started
+    STARTING = "starting"  # backend is launching the worker/session
+    READY = "ready"  # running, idle — safe to navigate
+    ACTIVE = "active"  # executing an action / observation
     SUSPENDED = "suspended"  # parked (e.g. between planner steps)
-    STOPPING = "stopping"    # graceful close in progress
-    CLOSED = "closed"        # terminal: fully stopped, resources released
-    FAILED = "failed"        # terminal: backend failed to start/died
+    STOPPING = "stopping"  # graceful close in progress
+    CLOSED = "closed"  # terminal: fully stopped, resources released
+    FAILED = "failed"  # terminal: backend failed to start/died
 
 
 class BrowserActionKind(str, enum.Enum):
@@ -205,15 +205,15 @@ class BrowserActionKind(str, enum.Enum):
 class BrowserObservationKind(str, enum.Enum):
     """What an observation harvested from a page represents."""
 
-    PAGE_STATE = "page_state"        # URL/title/DOM summary snapshot
-    DOM = "dom"                      # DOM indicator / selector discovery
-    FORMS = "forms"                  # discovered form metadata
-    ENDPOINTS = "endpoints"          # REST/GraphQL endpoints discovered
-    NETWORK = "network"              # captured network request/response events
-    STORAGE = "storage"              # cookie / localStorage / sessionStorage
-    CONSOLE = "console"              # console output (opt-in capture)
-    SCREENSHOT = "screenshot"        # screenshot artifact metadata
-    SCRIPTS = "scripts"              # JS bundle references
+    PAGE_STATE = "page_state"  # URL/title/DOM summary snapshot
+    DOM = "dom"  # DOM indicator / selector discovery
+    FORMS = "forms"  # discovered form metadata
+    ENDPOINTS = "endpoints"  # REST/GraphQL endpoints discovered
+    NETWORK = "network"  # captured network request/response events
+    STORAGE = "storage"  # cookie / localStorage / sessionStorage
+    CONSOLE = "console"  # console output (opt-in capture)
+    SCREENSHOT = "screenshot"  # screenshot artifact metadata
+    SCRIPTS = "scripts"  # JS bundle references
 
 
 class BrowserEventDirection(str, enum.Enum):
@@ -268,12 +268,48 @@ class BrowserFailureClass(str, enum.Enum):
 # Session lifecycle validation (single source used by tools/browser/manager.py).
 _ALLOWED_SESSION_TRANSITIONS: dict[BrowserSessionState, frozenset[BrowserSessionState]] = {
     BrowserSessionState.PENDING: frozenset(
-        {BrowserSessionState.STARTING, BrowserSessionState.STOPPING, BrowserSessionState.FAILED, BrowserSessionState.CLOSED}
+        {
+            BrowserSessionState.STARTING,
+            BrowserSessionState.STOPPING,
+            BrowserSessionState.FAILED,
+            BrowserSessionState.CLOSED,
+        }
     ),
-    BrowserSessionState.STARTING: frozenset({BrowserSessionState.READY, BrowserSessionState.FAILED, BrowserSessionState.CLOSED, BrowserSessionState.STOPPING}),
-    BrowserSessionState.READY: frozenset({BrowserSessionState.ACTIVE, BrowserSessionState.SUSPENDED, BrowserSessionState.STOPPING, BrowserSessionState.FAILED, BrowserSessionState.CLOSED}),
-    BrowserSessionState.ACTIVE: frozenset({BrowserSessionState.READY, BrowserSessionState.SUSPENDED, BrowserSessionState.STOPPING, BrowserSessionState.FAILED, BrowserSessionState.CLOSED}),
-    BrowserSessionState.SUSPENDED: frozenset({BrowserSessionState.READY, BrowserSessionState.ACTIVE, BrowserSessionState.STOPPING, BrowserSessionState.CLOSED, BrowserSessionState.FAILED}),
+    BrowserSessionState.STARTING: frozenset(
+        {
+            BrowserSessionState.READY,
+            BrowserSessionState.FAILED,
+            BrowserSessionState.CLOSED,
+            BrowserSessionState.STOPPING,
+        }
+    ),
+    BrowserSessionState.READY: frozenset(
+        {
+            BrowserSessionState.ACTIVE,
+            BrowserSessionState.SUSPENDED,
+            BrowserSessionState.STOPPING,
+            BrowserSessionState.FAILED,
+            BrowserSessionState.CLOSED,
+        }
+    ),
+    BrowserSessionState.ACTIVE: frozenset(
+        {
+            BrowserSessionState.READY,
+            BrowserSessionState.SUSPENDED,
+            BrowserSessionState.STOPPING,
+            BrowserSessionState.FAILED,
+            BrowserSessionState.CLOSED,
+        }
+    ),
+    BrowserSessionState.SUSPENDED: frozenset(
+        {
+            BrowserSessionState.READY,
+            BrowserSessionState.ACTIVE,
+            BrowserSessionState.STOPPING,
+            BrowserSessionState.CLOSED,
+            BrowserSessionState.FAILED,
+        }
+    ),
     BrowserSessionState.STOPPING: frozenset({BrowserSessionState.CLOSED, BrowserSessionState.FAILED}),
     BrowserSessionState.CLOSED: frozenset(set()),
     BrowserSessionState.FAILED: frozenset(set()),
@@ -285,9 +321,7 @@ def validate_session_transition(current: BrowserSessionState, new: BrowserSessio
     from tools.browser.errors import BrowserTransitionError
 
     if new not in _ALLOWED_SESSION_TRANSITIONS[current]:
-        raise BrowserTransitionError(
-            f"invalid browser session transition {current.value!r} -> {new.value!r}"
-        )
+        raise BrowserTransitionError(f"invalid browser session transition {current.value!r} -> {new.value!r}")
 
 
 # ---------------------------------------------------------------------------
