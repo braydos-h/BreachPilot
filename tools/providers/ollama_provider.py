@@ -226,10 +226,9 @@ def refresh_model_registry(
         "persisted": False,
     }
     if updates:
-        new_config = _persist_config if False else config  # never mutate caller's dict
         import copy
 
-        new_config = copy.deepcopy(config)
+        new_config = copy.deepcopy(config)  # never mutate the caller's dict
         models = new_config.setdefault("models", {})
         reg = models.setdefault("registry", {})
         for alias, upd in updates.items():
@@ -244,14 +243,13 @@ def refresh_model_registry(
 def _write_validated_config(config: dict[str, Any], config_path: str | os.PathLike[str]) -> None:
     """Validate + atomically write ``config`` (mirrors system.py ``_write_config``)."""
     import uuid
+    from pathlib import Path
 
     import yaml
 
     from tools.config_manager import ConfigValidator
 
-    path = type(config_path in ("",) and str(config_path) or str(config_path)) and __import__(
-        "pathlib", fromlist=["Path"]
-    ).Path(config_path)
+    path = Path(config_path)
     validator = ConfigValidator(path)
     validator._config = config
     result = validator.validate()
@@ -375,7 +373,6 @@ class OllamaProvider(BaseProvider):
         except Exception:
             # Defer to the static models.registry aliases when unreachable.
             available = []
-        registry_info = (config or {}).get("models", {}).get("info", {}) or {}
         infos: list[ModelInfo] = []
         seen: set[str] = set()
         for spec in available:
