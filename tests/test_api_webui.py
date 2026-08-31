@@ -128,6 +128,39 @@ def test_serve_webui_asset_traversal_blocked(tmp_path, monkeypatch):
     assert "root:" not in resp.text
 
 
+@skip_if_no_build
+def test_serve_webui_traversal_probes_do_not_crash(tmp_path, monkeypatch):
+    """Real-world traversal probes (seen from an in-lab web scan of the daemon)
+    must return 4xx, never raise. On Windows, decoded probes like
+    "//../../../boot.ini" become "\\..\\..\\boot.ini" — pathlib treats the
+    leading backslashes as a rooted UNC path, so the old code's
+    (webui_dist / full_path).resolve() raised PermissionError [WinError 31]
+    ("A device attached to the system is not functioning") and returned 500.
+    """
+    client = TestClient(_make_client(tmp_path, monkeypatch, serve_webui=True).app, raise_server_exceptions=False)
+    probes = [
+        # Percent-encoded backslash traversal (decodes to //..\..\..\boot.ini).
+        "/%2F%2F..%5C..%5C..%5Cboot.ini",
+        # Leading-slash blob followed by ../ (decodes rooted/UNC-looking input).
+        "/..%5C..%5C..%5C..%5C..%5Cboot.ini",
+        # Backslash-only traversal.
+        "/..%5C..%5Cboot.ini",
+        # Drive-letter absolute path.
+        # Drive-letter absolute path.
+        "/C:%5Cboot.ini",
+        "/C:%5CWindows%5Cwin.ini",
+        # NUL byte inside the path (realpath raises ValueError/OSError).
+        "/%00boot.ini",
+    ]
+    for probe in probes:
+        resp = client.get(probe, follow_redirects=False)
+        assert resp.status_code in (200, 400, 404), f"{probe} returned {resp.status_code} (expected 4xx-safe)"
+        assert resp.status_code != 500, f"{probe} leaked a server exception"
+    # Sanity: normal deep links still serve the SPA after the guard tightened.
+    resp = client.get("/runs/123", follow_redirects=False)
+    assert resp.status_code == 200 and '<div id="root"></div>' in resp.text
+
+
 def test_serve_webui_missing_build_is_noop(tmp_path, monkeypatch):
     """When dist/index.html is absent, serve_webui: true does not mount anything."""
     if INDEX_HTML.exists():
