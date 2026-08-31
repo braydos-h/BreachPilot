@@ -9,9 +9,6 @@
 ![Skills](https://img.shields.io/badge/Skills-140%2B-8b5cf6?style=flat-square)
 ![MCP Tools](https://img.shields.io/badge/MCP%20Tools-120%2B-ec4899?style=flat-square)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)
-
-<img width="1725" height="912" alt="BreachPilot WebUI: Mission Control" src="https://github.com/user-attachments/assets/45b6af2f-91e2-4eaf-a4cd-1352dbd42e0c" />
-
 ### Autonomous tool for authorized hacking
 
 **Plan · Recon · Exploit · Verify · Report: end-to-end, against assets you own.**
