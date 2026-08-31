@@ -1,4 +1,4 @@
-// Schema-driven config editor filtered to one category. Renders each section
+﻿// Schema-driven config editor filtered to one category. Renders each section
 // as a SettingsSection with ConfigField rows, using friendly labels from
 // SETTING_META. Fields marked `advanced` stay hidden behind a "Show advanced
 // settings" disclosure. Unknown fields (no meta) surface under Advanced with
@@ -24,22 +24,49 @@ export function ConfigEditor({ category, sections, className }: ConfigEditorProp
   const { draft, schema, isLoading, error, update } = useSettingsDraft();
   const [showAdvanced, setShowAdvanced] = useState(false);
 
+  const isDepSatisfied = (dependsOn?: string) => {
+    if (!dependsOn) return true;
+    const eqIdx = dependsOn.indexOf("=");
+    if (eqIdx !== -1) {
+      const key = dependsOn.slice(0, eqIdx).trim();
+      const expected = dependsOn.slice(eqIdx + 1).trim();
+      const [depSection, depField] = key.split(".");
+      if (!depSection || !depField) return true;
+      const val = resolveValue(draft, depSection, depField);
+      return String(val) === expected;
+    }
+    const [depSection, depField] = dependsOn.split(".");
+    if (!depSection || !depField) return true;
+    const val = resolveValue(draft, depSection, depField);
+    return Boolean(val);
+  };
+
   const sectionEntries = useMemo(() => {
     if (!schema) return [];
     return Object.entries(schema as Record<string, unknown>)
       .filter(([section]) => !sections || sections.includes(section))
       .map(([section, value]) => {
-        const fields = Object.entries((value ?? {}) as Record<string, unknown>).filter(([field]) => {
-          const meta = getSettingMeta(section, field);
-          if (meta?.hide) return false;
-          if (fieldCategory(section, field) !== category) return false;
-          if (meta?.advanced && !showAdvanced) return false;
-          return true;
-        });
+        const fields = Object.entries((value ?? {}) as Record<string, unknown>)
+          .filter(([field]) => {
+            const meta = getSettingMeta(section, field);
+            if (meta?.hide) return false;
+            if (fieldCategory(section, field) !== category) return false;
+            if (meta?.dependsOn && !isDepSatisfied(meta.dependsOn)) return false;
+            if (meta?.advanced && !showAdvanced) return false;
+            return true;
+          })
+          .sort((a, b) => {
+            const ma = getSettingMeta(section, a[0]);
+            const mb = getSettingMeta(section, b[0]);
+            const oa = ma?.order ?? 999;
+            const ob = mb?.order ?? 999;
+            if (oa !== ob) return oa - ob;
+            return a[0].localeCompare(b[0]);
+          });
         return { section, fields };
       })
       .filter(({ fields }) => fields.length > 0);
-  }, [schema, category, sections, showAdvanced]);
+  }, [schema, category, sections, showAdvanced, draft]);
 
   const hasAdvanced = useMemo(() => {
     if (!schema) return false;
@@ -47,10 +74,14 @@ export function ConfigEditor({ category, sections, className }: ConfigEditorProp
       if (sections && !sections.includes(section)) return false;
       return Object.keys((value ?? {}) as Record<string, unknown>).some((field) => {
         const meta = getSettingMeta(section, field);
-        return meta?.advanced === true && meta.category === category;
+        if (!meta || meta.advanced !== true || meta.category !== category) return false;
+        if (meta.hide) return false;
+        if (fieldCategory(section, field) !== category) return false;
+        if (meta.dependsOn && !isDepSatisfied(meta.dependsOn)) return false;
+        return true;
       });
     });
-  }, [schema, category, sections]);
+  }, [schema, category, sections, draft]);
 
   if (isLoading) {
     return (

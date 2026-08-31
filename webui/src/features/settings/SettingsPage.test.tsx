@@ -1,11 +1,9 @@
-// @vitest-environment jsdom
+﻿// @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { SettingsPage } from "@/features/settings/SettingsPage";
-
-// ── module mocks ────────────────────────────────────────────────────────────
 
 vi.mock("@/api/hooks", () => ({
   useConfig: vi.fn(),
@@ -71,7 +69,7 @@ const providerStatusMock = vi.mocked(useProviderStatus);
 const modelOptionsMock = vi.mocked(useModelOptions);
 
 const CONFIG = {
-  nmap: { path: "/usr/bin/nmap" },
+  nmap: { path: "/usr/bin/nmap", sudo: true },
   reasoning: { observer_mode: "hybrid", critic_enabled: true },
   mcp: { http_port: 8000, http_host: "127.0.0.1" },
   ollama: { host: "http://127.0.0.1:11434" },
@@ -79,10 +77,13 @@ const CONFIG = {
   skills: { enabled: ["recon"] },
   memory: { semantic_enabled: true },
   opsec: { enabled: true, unknown_field: "x" },
+  exploit: { attack_max_commands: 150 },
+  webhook_notify: { enabled: false, url: "" },
+  api: { max_concurrent_runs: 3 },
 };
 
 const SCHEMA = {
-  nmap: { path: "/usr/bin/nmap" },
+  nmap: { path: "/usr/bin/nmap", sudo: true },
   reasoning: { observer_mode: "hybrid", critic_enabled: true },
   mcp: { http_port: 8000, http_host: "127.0.0.1" },
   ollama: { host: "http://127.0.0.1:11434" },
@@ -90,6 +91,9 @@ const SCHEMA = {
   skills: { enabled: ["recon"] },
   memory: { semantic_enabled: true },
   opsec: { enabled: true, unknown_field: "x" },
+  exploit: { attack_max_commands: 150 },
+  webhook_notify: { enabled: false, url: "" },
+  api: { max_concurrent_runs: 3 },
 };
 
 function setup() {
@@ -155,47 +159,72 @@ describe("SettingsPage", () => {
     vi.clearAllMocks();
   });
 
-  it("renders the four categories with General active by default", () => {
+  it("renders six categories with General active by default", () => {
     setup();
     const nav = screen.getByRole("navigation", { name: "Settings categories" });
     expect(within(nav).getByRole("button", { name: "General" })).toHaveAttribute("aria-current", "page");
-    for (const name of ["AI & Providers", "Features", "Advanced"]) {
+    for (const name of ["AI & Models", "Runs & Scanning", "Features", "Notifications & Integrations", "Advanced"]) {
       expect(within(nav).getByRole("button", { name })).toBeInTheDocument();
     }
   });
 
-  it("shows friendly labels and section titles in General", () => {
+  it("shows friendly labels in General and hides technical fields", () => {
     setup();
-    expect(screen.getByText("Nmap path")).toBeInTheDocument();
-    expect(screen.getByText("Nmap")).toBeInTheDocument(); // section title, not "nmap"
-    expect(screen.getByText("Reasoning")).toBeInTheDocument();
+    expect(screen.getByText("Simultaneous assessments")).toBeInTheDocument();
+    expect(screen.getByText("Use privileged scanning")).toBeInTheDocument();
+    // Technical fields like MCP HTTP port should not be in General
+    expect(screen.queryByText("MCP HTTP port")).not.toBeInTheDocument();
+    // General is calm, shows Appearance
+    expect(screen.getByText("Appearance")).toBeInTheDocument();
   });
 
-  it("hides advanced fields behind the disclosure", async () => {
+  it("shows Runs & Scanning with execution limits and scanning options", async () => {
     const { user } = setup();
-    expect(screen.queryByText("MCP HTTP port")).not.toBeInTheDocument();
+    await goTo(user, "Runs & Scanning");
+    expect(screen.getByText("Max commands per assessment")).toBeInTheDocument();
+    expect(screen.getByText("Stealth mode")).toBeInTheDocument();
+  });
+
+  it("hides advanced fields behind disclosure in Runs & Scanning", async () => {
+    const { user } = setup();
+    await goTo(user, "Runs & Scanning");
+    // Nmap path is advanced in Runs
+    expect(screen.queryByText("Nmap binary path")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Show advanced settings" }));
-    expect(screen.getByText("MCP HTTP port")).toBeInTheDocument();
+    expect(screen.getByText("Nmap binary path")).toBeInTheDocument();
+  });
+
+  it("shows Integrations category with webhook and ticketing", async () => {
+    const { user } = setup();
+    await goTo(user, "Notifications & Integrations");
+    expect(screen.getByText("Webhook notifications")).toBeInTheDocument();
+    expect(screen.getByText("Remediation tickets")).toBeInTheDocument();
+  });
+
+  it("hides dependent settings when parent is disabled", async () => {
+    const { user } = setup();
+    await goTo(user, "Notifications & Integrations");
+    // webhook url depends on enabled=false, so hidden
+    expect(screen.queryByText("Webhook URL")).not.toBeInTheDocument();
   });
 
   it("shows the unsaved bar on edit and patches the diff on save", async () => {
     const { user } = setup();
     const mutate = vi.fn();
     patchMock.mockReturnValue({ mutate, isPending: false, error: null } as never);
-
-    const input = screen.getByLabelText("Nmap path");
+    // Simultaneous assessments is in General, uses number input
+    const input = screen.getByLabelText("Simultaneous assessments");
     await user.clear(input);
-    await user.type(input, "/usr/local/bin/nmap");
-
+    await user.type(input, "5");
     expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Save changes" }));
     expect(mutate).toHaveBeenCalledTimes(1);
-    expect(mutate.mock.calls[0][0]).toEqual({ nmap: { path: "/usr/local/bin/nmap" } });
+    expect(mutate.mock.calls[0][0]).toEqual({ api: { max_concurrent_runs: 5 } });
   });
 
-  it("consolidates provider status, default model, and secrets under AI & Providers", async () => {
+  it("consolidates provider status, default model, and secrets under AI & Models", async () => {
     const { user } = setup();
-    await goTo(user, "AI & Providers");
+    await goTo(user, "AI & Models");
     expect(screen.getByText("1 live models")).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Default model" })).toBeInTheDocument();
     expect(screen.getByText("Provider API keys")).toBeInTheDocument();
@@ -210,7 +239,6 @@ describe("SettingsPage", () => {
     const section = highlights as HTMLElement;
     expect(within(section).getByText("Memory")).toBeInTheDocument();
     expect(within(section).getByText("Plugins")).toBeInTheDocument();
-    expect(within(section).getByText("Telemetry")).toBeInTheDocument();
   });
 
   it("keeps the Danger Zone in Advanced, not elsewhere", async () => {
@@ -231,9 +259,36 @@ describe("SettingsPage", () => {
   it("search finds a setting by friendly label and jumps to its category", async () => {
     const { user } = setup();
     const search = screen.getByLabelText("Search settings");
-    await user.type(search, "ollama host");
-    const result = await screen.findByRole("option", { name: /Ollama host/ });
+    await user.type(search, "ollama api");
+    const result = await screen.findByRole("option", { name: /Ollama API address/ });
     await user.click(result);
     expect(screen.getByText("AI provider")).toBeInTheDocument();
+  });
+
+  it("search navigates to Runs & Scanning for run limits", async () => {
+    const { user } = setup();
+    const search = screen.getByLabelText("Search settings");
+    await user.type(search, "max commands per assessment");
+    const result = await screen.findByRole("option", { name: /Max commands per assessment/ });
+    await user.click(result);
+    expect(screen.getByText("Max commands per assessment")).toBeInTheDocument();
+  });
+
+  it("does not expose internal keys in General", () => {
+    setup();
+    // General should not show api.host etc.
+    expect(screen.queryByText("api.host")).not.toBeInTheDocument();
+    expect(screen.queryByText("api.port")).not.toBeInTheDocument();
+  });
+
+  it("shows theme selector in General", () => {
+    setup();
+    expect(screen.getByLabelText("Theme")).toBeInTheDocument();
+  });
+
+  it("header shows user-focused wording, not diagnostics", () => {
+    setup();
+    expect(screen.getByText("Manage how BreachPilot works for you.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Diagnostics" })).not.toBeInTheDocument();
   });
 });

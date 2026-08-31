@@ -19,6 +19,10 @@ import type { DiagnosticsResponse } from "@/api/types";
 export function AdvancedSettings() {
   return (
     <div className="space-y-4">
+      <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-5 py-3 text-xs leading-relaxed text-muted-foreground">
+        Technical settings for operators who need fine control. Most daily use does not require changes here. If you are
+        unsure, leave these at their defaults.
+      </div>
       <SettingsSection title="System information" description="Host details for this daemon.">
         <SystemInfo />
       </SettingsSection>

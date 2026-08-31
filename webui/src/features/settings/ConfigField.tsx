@@ -1,4 +1,4 @@
-// Renders one config field as a labeled row with the right control for its
+﻿// Renders one config field as a labeled row with the right control for its
 // type: boolean → switch, list → tag editor, dict → collapsible JSON, int →
 // number input, string → select / password / text. Friendly labels come from
 // SETTING_META; unknown fields fall back to their raw `section.field` key.
@@ -30,6 +30,8 @@ const CONTROL_W = "w-full sm:w-56";
 export function ConfigField({ section, field, value, defaultValue, options, onChange }: ConfigFieldProps) {
   const meta = getSettingMeta(section, field);
   const known = isKnownSetting(section, field);
+  const showRaw = meta?.category === "advanced" || !known;
+  const rawKey = showRaw ? `${section}.${field}` : undefined;
   const label = meta?.label ?? `${section}.${field}`;
   const isRedacted = typeof value === "string" && value === REDACTED;
   const type = inferType(defaultValue, value);
@@ -37,7 +39,7 @@ export function ConfigField({ section, field, value, defaultValue, options, onCh
 
   if (type === "boolean") {
     return (
-      <SettingRow id={`setting-${section}-${field}`} label={label} description={meta?.description} rawKey={known ? `${section}.${field}` : undefined} htmlFor={fieldId}>
+      <SettingRow id={`setting-${section}-${field}`} label={label} description={meta?.description} rawKey={rawKey} htmlFor={fieldId}>
         <Switch
           id={fieldId}
           checked={isRedacted ? false : Boolean(value)}
@@ -51,7 +53,7 @@ export function ConfigField({ section, field, value, defaultValue, options, onCh
 
   if (type === "list") {
     return (
-      <SettingRow id={`setting-${section}-${field}`} label={label} description={meta?.description} rawKey={known ? `${section}.${field}` : undefined}>
+      <SettingRow id={`setting-${section}-${field}`} label={label} description={meta?.description} rawKey={rawKey}>
         {isRedacted ? (
           <Input value={REDACTED} disabled className={CONTROL_W} aria-label={label} />
         ) : (
@@ -67,7 +69,7 @@ export function ConfigField({ section, field, value, defaultValue, options, onCh
         id={`setting-${section}-${field}`}
         label={label}
         description={meta?.description}
-        rawKey={known ? `${section}.${field}` : undefined}
+        rawKey={rawKey}
         value={value}
         isRedacted={isRedacted}
         onChange={onChange}
@@ -77,7 +79,7 @@ export function ConfigField({ section, field, value, defaultValue, options, onCh
 
   if (type === "int") {
     return (
-      <SettingRow id={`setting-${section}-${field}`} label={label} description={meta?.description} rawKey={known ? `${section}.${field}` : undefined} htmlFor={fieldId}>
+      <SettingRow id={`setting-${section}-${field}`} label={label} description={meta?.description} rawKey={rawKey} htmlFor={fieldId}>
         <Input
           id={fieldId}
           type="number"
@@ -96,7 +98,7 @@ export function ConfigField({ section, field, value, defaultValue, options, onCh
     const current = String(value ?? "");
     const all = options.includes(current) ? options : [current, ...options];
     return (
-      <SettingRow id={`setting-${section}-${field}`} label={label} description={meta?.description} rawKey={known ? `${section}.${field}` : undefined} htmlFor={fieldId}>
+      <SettingRow id={`setting-${section}-${field}`} label={label} description={meta?.description} rawKey={rawKey} htmlFor={fieldId}>
         <Select value={current} onValueChange={onChange}>
           <SelectTrigger id={fieldId} className={CONTROL_W} aria-label={label}>
             <SelectValue />
@@ -115,7 +117,7 @@ export function ConfigField({ section, field, value, defaultValue, options, onCh
 
   if (meta?.secret) {
     return (
-      <SettingRow id={`setting-${section}-${field}`} label={label} description={meta?.description} rawKey={known ? `${section}.${field}` : undefined} htmlFor={fieldId}>
+      <SettingRow id={`setting-${section}-${field}`} label={label} description={meta?.description} rawKey={rawKey} htmlFor={fieldId}>
         <SecretInput
           id={fieldId}
           value={isRedacted ? REDACTED : String(value ?? "")}
@@ -130,7 +132,7 @@ export function ConfigField({ section, field, value, defaultValue, options, onCh
   }
 
   return (
-    <SettingRow id={`setting-${section}-${field}`} label={label} description={meta?.description} rawKey={known ? `${section}.${field}` : undefined} htmlFor={fieldId}>
+    <SettingRow id={`setting-${section}-${field}`} label={label} description={meta?.description} rawKey={rawKey} htmlFor={fieldId}>
       <Input
         id={fieldId}
         value={isRedacted ? REDACTED : String(value ?? "")}
