@@ -333,23 +333,37 @@ async def remove_model(alias: str, auth: str = Depends(_require_auth)) -> dict[s
 
 @router.post("/models/provider")
 async def set_model_provider(request: Request, auth: str = Depends(_require_auth)) -> dict[str, Any]:
-    """Switch the active chat/generate provider (``ollama`` | ``chatgpt`` | ``opencode_go``)."""
+    """Switch the active chat/generate provider.
+
+    Validity is resolved through the provider registry (``resolve_known_provider_ids``
+    — provider #4 needs no route change). The active provider's legacy config
+    block is auto-enabled on switch (``chatgpt``/``opencode_go`` top-level
+    blocks, ``providers.<id>`` for newer providers).
+    """
     from tools.api.errors import APIError
+    from tools.config_manager import resolve_known_provider_ids
 
     body = await request.json()
     if not isinstance(body, dict):
         raise APIError("invalid_body", "Expected a JSON object.", status_code=400)
     provider = str(body.get("provider") or "").strip().lower()
-    if provider not in ("ollama", "chatgpt", "opencode_go"):
-        raise APIError("invalid_provider", "provider must be 'ollama', 'chatgpt', or 'opencode_go'.", status_code=400)
+    known = resolve_known_provider_ids()
+    if provider not in known:
+        raise APIError(
+            "invalid_provider",
+            f"provider must be one of: {', '.join(known)}.",
+            status_code=400,
+        )
     patch: dict[str, Any] = {"models": {"provider": provider}}
     # Auto-enable the provider block when switching to it (mirrors chatgpt behaviour)
     if provider == "opencode_go":
         patch["opencode_go"] = {"enabled": True}
     elif provider == "chatgpt":
         patch["chatgpt"] = {"enabled": True}
+    else:
+        patch["providers"] = {provider: {"enabled": True}}
     merged = _apply_config_patch(patch)
-    return {"status": "ok", "provider": provider}
+    return {"status": "ok", "provider": provider, "registered_providers": sorted(known)}
 
 
 @router.post("/models/refresh")
@@ -818,161 +832,57 @@ async def get_config_schema(auth: str = Depends(_require_auth)) -> dict[str, Any
 
 @router.get("/models/live")
 async def list_live_models(auth: str = Depends(_require_auth)) -> dict[str, Any]:
-    """List models actually installed in the configured backend (provider-aware).
+    """List models actually installed in the configured backend (provider-neutral).
 
-    Ollama: hits ``ollama.host`` ``/api/tags`` live each call (cloud host
-    requires ``Authorization: Bearer $OLLAMA_API_KEY``); falls back to the
-    configured registry with a 503 when the backend is unreachable.
-    ChatGPT: auto-starts the local openai-oauth proxy (``ensure_running`` —
-    only when signed in + ``auto_start``), then probes ``/v1/models``; falls
-    back to the configured ``chatgpt.models`` / ``default_model`` with a 503
-    (e.g. not signed in, or proxy failed to start).
-    OpenCode Go: probes ``{base_url}/models`` with ``Authorization: Bearer``
-    (when configured), filtered to Responses-compatible models; falls back to
-    ``opencode_go.models`` / ``default_model`` with a 503 when unreachable
-    (e.g. missing API key).
+    Single registry-dispatch path: the active provider adapter
+    (``tools.providers.registry.get_provider``) owns its own live discovery
+    (``adapter.list_models(config)`` — off-thread so slow probes never block
+    the event loop) and raises :class:`ProviderDiscoveryError` on failure with
+    the registry-mode fallback. The route never branches on provider id —
+    adding provider #4 requires no route change. On discovery failure the
+    response degrades to ``{"source": "registry"}`` with a 503 and the
+    provider's fallback models.
     """
-    from tools.config_manager import get_ai_provider, get_chatgpt_config, get_opencode_go_config
+    from fastapi import Response
+
+    from tools.config_manager import get_ai_provider
+    from tools.providers.registry import get_provider
+    from tools.providers.types import ProviderDiscoveryError
 
     provider = get_ai_provider(_CONFIG)
-    if provider == "chatgpt":
-        from tools.providers.chatgpt_provider import ChatGptProxyManager
-
-        chatgpt_cfg = get_chatgpt_config(_CONFIG)
-        manager = ChatGptProxyManager.get()
-        # Auto-start the openai-oauth proxy (when authenticated + auto_start) so the
-        # available-model list populates even before a run is launched. Idempotent:
-        # a pre-existing proxy is health-checked and reused (_we_started stays False,
-        # so we never stop a proxy we didn't start). Run off-thread so a cold start
-        # (up to start_timeout_seconds) does not block the event loop.
-        try:
-            result = await asyncio.to_thread(manager.ensure_running, chatgpt_cfg)
-        except Exception as exc:  # pragma: no cover - defensive
-            result = {"ok": False, "reason": f"ensure_running error: {exc}"}
-        if not result.get("ok"):
-            fallback = list(chatgpt_cfg.get("models") or []) or [chatgpt_cfg.get("default_model", "gpt-5.2")]
-            reason = result.get("reason", "proxy_unavailable")
-            msg = (
-                "Not signed in to ChatGPT — sign in via System → Models."
-                if reason == "not_authenticated"
-                else f"ChatGPT proxy unavailable: {reason}"
-            )
-            from fastapi import Response
-
-            return Response(
-                content=json.dumps({"models": fallback, "source": "registry", "error": msg}),
-                status_code=503,
-                media_type="application/json",
-            )
-        base_url = result.get("base_url") or chatgpt_cfg.get("base_url") or "http://127.0.0.1:10531/v1"
-        try:
-            import httpx
-            from fastapi import Response
-
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(f"{str(base_url).rstrip('/')}/models")
-                resp.raise_for_status()
-                data = resp.json()
-                models = [str(m.get("id", "")) for m in data.get("data", []) if m.get("id")]
-                return {"models": models, "source": "chatgpt"}
-        except Exception as exc:
-            fallback = list(chatgpt_cfg.get("models") or []) or [chatgpt_cfg.get("default_model", "gpt-5.2")]
-            from fastapi import Response
-
-            return Response(
-                content=json.dumps(
-                    {"models": fallback, "source": "registry", "error": f"ChatGPT proxy unreachable: {exc}"}
-                ),
-                status_code=503,
-                media_type="application/json",
-            )
-    if provider == "opencode_go":
-        from tools.config_manager import get_opencode_go_config
-
-        og_cfg = get_opencode_go_config(_CONFIG)
-        base_url = str(og_cfg.get("base_url") or "https://opencode.ai/zen/go/v1").rstrip("/")
-        env_name = str(og_cfg.get("api_key_env") or "OPENCODE_GO_API_KEY")
-        api_key = (os.environ.get(env_name, "") or "").strip()
-        fallback = list(og_cfg.get("models") or []) or [og_cfg.get("default_model", "muse-spark-1.2-contributor")]
-        if not api_key:
-            from fastapi import Response
-
-            return Response(
-                content=json.dumps(
-                    {
-                        "models": fallback,
-                        "source": "registry",
-                        "error": f"OpenCode Go API key not set ({env_name}). Set it via secrets or env.",
-                    }
-                ),
-                status_code=503,
-                media_type="application/json",
-            )
-        try:
-            import httpx
-            from fastapi import Response
-
-            headers = {"Authorization": f"Bearer {api_key}"}
-            async with httpx.AsyncClient(timeout=5.0, headers=headers) as client:
-                resp = await client.get(f"{base_url}/models")
-                resp.raise_for_status()
-                data = resp.json()
-                raw_data = data.get("data") if isinstance(data, dict) else None
-                if isinstance(raw_data, list):
-                    # Filter to Responses-compatible models when we can reliably tell
-                    from tools.model_router import _is_opencode_responses_model
-
-                    models: list[str] = []
-                    for item in raw_data:
-                        if not isinstance(item, dict):
-                            continue
-                        mid = str(item.get("id") or "")
-                        if not mid:
-                            continue
-                        if _is_opencode_responses_model(mid, item, og_cfg):
-                            models.append(mid)
-                    # If filtering removed everything, fall back to raw list (at least show something)
-                    if not models:
-                        models = [str(m.get("id", "")) for m in raw_data if isinstance(m, dict) and m.get("id")]
-                    return {"models": models, "source": "opencode_go"}
-                # Fallback for non-standard shape
-                models = [str(m.get("id", "")) for m in (raw_data or []) if isinstance(m, dict) and m.get("id")]
-                return {"models": models, "source": "opencode_go"}
-        except Exception as exc:
-            # Sanitize key from error string
-            err_text = str(exc)
-            if api_key and api_key in err_text:
-                err_text = err_text.replace(api_key, "[REDACTED]")
-            from fastapi import Response
-
-            return Response(
-                content=json.dumps(
-                    {"models": fallback, "source": "registry", "error": f"OpenCode Go unreachable: {err_text}"}
-                ),
-                status_code=503,
-                media_type="application/json",
-            )
-
-    ollama_host = _CONFIG.get("ollama", {}).get("host", "https://api.ollama.com")
-    registry = _CONFIG.get("models", {}).get("registry", {})
+    registry_fallback = [str(v) for v in (_CONFIG.get("models", {}).get("registry", {}) or {}).values() if v]
     try:
-        import httpx
-        from fastapi import Response
-
-        headers = {}
-        api_key = (os.environ.get("OLLAMA_API_KEY", "") or "").strip()
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        async with httpx.AsyncClient(timeout=5.0, headers=headers) as client:
-            resp = await client.get(f"{ollama_host}/api/tags")
-            resp.raise_for_status()
-            data = resp.json()
-            models = [m.get("name", "") for m in data.get("models", []) if m.get("name")]
-            return {"models": models, "source": "ollama"}
-    except Exception as exc:
+        adapter = get_provider(provider)
+    except Exception as exc:  # unknown provider id — surface, don't crash
         return Response(
             content=json.dumps(
-                {"models": list(registry.values()), "source": "registry", "error": f"Ollama unreachable: {exc}"}
+                {"models": registry_fallback, "source": "registry", "error": f"Unknown provider '{provider}': {exc}"}
+            ),
+            status_code=503,
+            media_type="application/json",
+        )
+    try:
+        infos = await asyncio.to_thread(adapter.list_models, _CONFIG)
+        models = [i.id for i in infos if i.id]
+        if not models:
+            raise ProviderDiscoveryError(f"{provider} reported no models")
+        return {"models": models, "source": provider}
+    except ProviderDiscoveryError as exc:
+        return Response(
+            content=json.dumps(
+                {
+                    "models": exc.fallback_models or registry_fallback,
+                    "source": "registry",
+                    "error": exc.message,
+                }
+            ),
+            status_code=503,
+            media_type="application/json",
+        )
+    except Exception as exc:  # defensive: never 500 the models panel
+        return Response(
+            content=json.dumps(
+                {"models": registry_fallback, "source": "registry", "error": f"{provider} discovery failed: {exc}"}
             ),
             status_code=503,
             media_type="application/json",
@@ -1055,9 +965,17 @@ def _opencode_go_status_sync(og_cfg: dict[str, Any]) -> dict[str, Any]:
 
 @router.get("/providers")
 async def get_providers(auth: str = Depends(_require_auth)) -> dict[str, Any]:
-    """Return the active provider + ChatGPT / OpenCode Go status (no secrets)."""
+    """Registry-driven provider metadata + status (no secrets).
+
+    ``providers`` lists every registered adapter's metadata (id, display name,
+    ``ProviderCapabilities``, configured/default-model) off-thread per adapter
+    so provider #4 appears without route changes. ``active`` mirrors
+    ``provider``; ``chatgpt``/``opencode_go`` legacy status blocks stay for the
+    existing WebUI consumers.
+    """
     from tools.config_manager import get_ai_provider, get_chatgpt_config, get_opencode_go_config
     from tools.providers.chatgpt_provider import ChatGptProxyManager
+    from tools.providers.registry import PROVIDERS
 
     provider = get_ai_provider(_CONFIG)
     chatgpt_cfg = get_chatgpt_config(_CONFIG)
@@ -1065,8 +983,17 @@ async def get_providers(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     manager = ChatGptProxyManager.get()
     authenticated, proxy_running = await asyncio.to_thread(_chatgpt_status_sync, chatgpt_cfg)
     og_status = await asyncio.to_thread(_opencode_go_status_sync, og_cfg)
+    provider_rows: list[dict[str, Any]] = []
+    for adapter in sorted(PROVIDERS.all(), key=lambda a: a.id):
+        try:
+            meta = await asyncio.to_thread(adapter.metadata, _CONFIG)
+            provider_rows.append(meta)
+        except Exception as exc:  # one bad adapter must not kill the panel
+            provider_rows.append({"id": adapter.id, "provider": adapter.id, "error": str(exc)})
     return {
         "provider": provider,
+        "active": provider,
+        "providers": provider_rows,
         "chatgpt": {
             "enabled": bool(chatgpt_cfg.get("enabled", False)),
             "authenticated": authenticated,

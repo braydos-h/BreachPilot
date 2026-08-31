@@ -75,14 +75,16 @@ def test_switch_provider_invalid(tmp_path, monkeypatch):
 
 
 def _mock_fetch(monkeypatch, available):
-    from tools import ollama_models
+    # The implementation lives in the Ollama provider module now
+    # (tools/ollama_models.py is a compat shim), so patch there.
+    from tools.providers import ollama_provider
 
     monkeypatch.setattr(
-        ollama_models,
+        ollama_provider,
         "fetch_available_models",
         lambda host, api_key_env="OLLAMA_API_KEY", timeout=5.0: list(available),
     )
-    return ollama_models
+    return ollama_provider
 
 
 def test_refresh_models_updates_registry_and_persists(tmp_path, monkeypatch):
@@ -115,12 +117,12 @@ def test_refresh_models_unreachable_503(tmp_path, monkeypatch):
     import urllib.error
 
     client = _make_client(tmp_path, monkeypatch)
-    ollama_models = _mock_fetch(monkeypatch, [])
+    ollama_provider = _mock_fetch(monkeypatch, [])
 
     def _boom(host, api_key_env="OLLAMA_API_KEY", timeout=5.0):
         raise urllib.error.URLError("connection refused")
 
-    monkeypatch.setattr(ollama_models, "fetch_available_models", _boom)
+    monkeypatch.setattr(ollama_provider, "fetch_available_models", _boom)
     resp = client.post("/api/v1/models/refresh", headers=_auth())
     assert resp.status_code == 503
     assert resp.json()["ok"] is False

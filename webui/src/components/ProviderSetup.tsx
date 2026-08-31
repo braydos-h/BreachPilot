@@ -33,7 +33,10 @@ export function useProviderSwitch() {
       if (next === "chatgpt") patch = { models: { provider: "chatgpt" }, chatgpt: { enabled: true } };
       else if (next === "opencode_go")
         patch = { models: { provider: "opencode_go" }, opencode_go: { enabled: true } };
-      else patch = { models: { provider: "ollama" } };
+      else if (next === "ollama") patch = { models: { provider: "ollama" } };
+      // Generic registered provider: the backend persists its `providers.<id>`
+      // block (mirrored from POST /models/provider).
+      else patch = { models: { provider: next }, providers: { [next]: { enabled: true } } };
       patchConfig.mutate(patch);
     },
     [provider, patchConfig],
@@ -59,22 +62,34 @@ export function useModelOptions(): string[] {
       if (live.data?.source === "opencode_go") (live.data.models ?? []).forEach((m) => set.add(m));
       (models.data?.opencode_go?.configured_models ?? []).forEach((m) => set.add(m));
       if (models.data?.opencode_go?.default_model) set.add(models.data.opencode_go.default_model);
-    } else {
+    } else if (provider === "ollama") {
       if (live.data?.source === "ollama") (live.data.models ?? []).forEach((m) => set.add(m));
       Object.values(models.data?.registry ?? {}).forEach((m) => set.add(String(m)));
       if (models.data?.default_alias) set.add(models.data.default_alias);
+    } else {
+      // Generic registered provider: live models come straight from the
+      // provider adapter (/models/live dispatches by registry id); the static
+      // registry is the configured fallback.
+      if (live.data?.source === provider) (live.data.models ?? []).forEach((m) => set.add(m));
+      Object.values(models.data?.registry ?? {}).forEach((m) => set.add(String(m)));
     }
     return Array.from(set);
   }, [models.data, live.data, provider]);
 }
 
-/** Provider-aware default model id to preselect (chatgpt/opencode_go default_model, else
- *  ollama default_alias). Empty string when neither is configured. */
+/** Provider-aware default model id to preselect (chatgpt/opencode_go default_model, registry
+ *  metadata default_model for other providers, else the ollama default_alias). Empty string
+ *  when nothing is configured. */
 export function useDefaultModel(): string {
   const models = useModels();
+  const providers = useProviders();
   const provider = models.data?.provider ?? "ollama";
   if (provider === "chatgpt") return models.data?.chatgpt?.default_model ?? "";
   if (provider === "opencode_go") return models.data?.opencode_go?.default_model ?? "";
+  if (provider !== "ollama") {
+    const meta = providers.data?.providers?.find((p) => p.id === provider);
+    if (meta?.default_model) return meta.default_model;
+  }
   return models.data?.default_alias ?? "";
 }
 
@@ -91,12 +106,16 @@ export interface ProviderStatus {
 
 function providerLabel(provider: string): string {
   switch (provider) {
+    case "ollama":
+      return "Ollama";
     case "chatgpt":
       return "ChatGPT";
     case "opencode_go":
       return "OpenCode Go";
     default:
-      return "Ollama";
+      // Generic registered provider — derive a readable label from its id and
+      // prefer the registry display name when the metadata is loaded.
+      return provider.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   }
 }
 
@@ -117,20 +136,29 @@ export function useProviderStatus(): ProviderStatus {
   };
 }
 
-/** Ollama / ChatGPT / OpenCode Go segmented picker bound to models.provider (persists on change). */
+/** Provider picker bound to models.provider (persists on change). Options are
+ *  registry-driven (one per registered adapter) with the built-in three as
+ *  fallback while metadata loads. */
+const BUILTIN_PROVIDER_OPTIONS = [
+  { value: "ollama", label: "Ollama" },
+  { value: "chatgpt", label: "ChatGPT" },
+  { value: "opencode_go", label: "OpenCode Go" },
+];
+
 export function ProviderPicker() {
   const { provider, switchTo, isPending, error } = useProviderSwitch();
+  const providers = useProviders();
+  const rows = providers.data?.providers;
+  const options =
+    rows && rows.length > 0
+      ? rows.map((r) => ({
+          value: r.id,
+          label: BUILTIN_PROVIDER_OPTIONS.find((o) => o.value === r.id)?.label ?? r.name,
+        }))
+      : BUILTIN_PROVIDER_OPTIONS;
   return (
     <div className="space-y-2">
-      <SegmentedControl
-        value={provider}
-        onChange={switchTo}
-        options={[
-          { value: "ollama", label: "Ollama" },
-          { value: "chatgpt", label: "ChatGPT" },
-          { value: "opencode_go", label: "OpenCode Go" },
-        ]}
-      />
+      <SegmentedControl value={provider} onChange={switchTo} options={options} />
       {isPending && <p className="text-xs text-muted-foreground">Switching provider…</p>}
       {error && (
         <p className="text-xs text-destructive">

@@ -24,7 +24,14 @@ import re
 from typing import TYPE_CHECKING, Any, Mapping
 
 from .base import BaseProvider
-from .types import ModelClient, ModelInfo, ProviderCapabilities, ProviderHealth, ProviderMissingDependencyError
+from .types import (
+    ModelClient,
+    ModelInfo,
+    ProviderCapabilities,
+    ProviderDiscoveryError,
+    ProviderHealth,
+    ProviderMissingDependencyError,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from tools.model_router import ModelRouter
@@ -115,7 +122,7 @@ def apply_context_window(raw_kwargs: dict[str, Any], context_window_tokens: Any)
     if tokens > 0:
         options = dict(raw_kwargs.get("options") or {})
         options["num_ctx"] = tokens
-        raw_kwargs["options"] = options
+        return {**raw_kwargs, "options": options}  # never mutate the caller's dict
     return raw_kwargs
 
 
@@ -368,11 +375,15 @@ class OllamaProvider(BaseProvider):
         cfg = self.provider_config(config)
         host = str(cfg.get("host") or OLLAMA_CLOUD_HOST)
         api_key_env = str(cfg.get("api_key_env") or "OLLAMA_API_KEY")
+        registry = (config or {}).get("models", {}).get("registry", {}) or {}
         try:
             available = fetch_available_models(host, api_key_env=api_key_env, timeout=5.0)
-        except Exception:
-            # Defer to the static models.registry aliases when unreachable.
-            available = []
+        except Exception as exc:
+            # Live discovery failed — the route-level contract degrades to the
+            # static models.registry aliases ("registry" source). The fallback
+            # list rides on the error so every caller degrades identically.
+            fallback = [str(v) for v in registry.values() if v]
+            raise ProviderDiscoveryError(f"Ollama unreachable: {exc}", fallback_models=fallback) from exc
         infos: list[ModelInfo] = []
         seen: set[str] = set()
         for spec in available:
@@ -387,7 +398,7 @@ class OllamaProvider(BaseProvider):
                 )
             )
         # Include configured registry ids (e.g. checked-in aliases) not present live.
-        for model_id in (config or {}).get("models", {}).get("registry", {}).values():
+        for model_id in registry.values():
             if model_id not in seen:
                 infos.append(ModelInfo(id=str(model_id), label=str(model_id)))
         return infos

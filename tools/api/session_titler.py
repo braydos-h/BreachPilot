@@ -2,13 +2,17 @@
 
 Best-effort, fire-and-forget: a failure here must never break a run or the
 API. ``generate_session_title`` builds a short prompt from the run's
-result/request and asks ``gemma4:31b-cloud`` (via the Ollama client) for a
-<=60-char human-readable title summarizing what the session did.
+result/request and asks the configured provider (``models.provider``) via the
+provider registry for a <=60-char human-readable title summarizing what the
+session did.
 
-The model is a separate, smaller cloud model (not the main attack model) so
-titling stays cheap and never competes with the attack loop for the main
-model's context window. The host and API key reuse the same Ollama Cloud
-wiring (``ollama.host`` + ``OLLAMA_API_KEY``) — no extra config.
+Provider-neutral: the non-Ollama path resolves the active provider adapter
+(``tools.providers.registry.get_provider``) and asks it for the cheap title
+model (``title_model(config)``) before routing every call through
+``build_model_client_for_provider`` — no per-provider branches here. The
+Ollama path keeps its raw ``/api/chat`` client (with the Ollama-only
+``options={...}`` kwarg) because the Ollama API shape is Ollama's, and it is
+the only place in this module that touches the Ollama SDK.
 """
 
 from __future__ import annotations
@@ -17,10 +21,7 @@ import asyncio
 import logging
 from typing import Any, Mapping
 
-try:
-    from ollama import Client as OllamaClient
-except ImportError:  # pragma: no cover - ollama is a runtime dep
-    OllamaClient = None  # type: ignore
+from tools.providers.ollama_provider import load_client_cls
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +29,12 @@ TITLE_MODEL = "gemma4:31b-cloud"
 _MAX_TITLE_CHARS = 60
 _MAX_INPUT_CHARS = 1500  # cap the prompt's run-summary payload
 _REQUEST_TIMEOUT_S = 30.0
+
+# Raw Ollama SDK client class, loaded through the Ollama provider (the only
+# module allowed to touch the SDK). ``None`` when the optional Ollama
+# dependency is absent — the Ollama titling path then degrades to "" while the
+# generic provider path stays fully functional.
+OllamaClient = load_client_cls()
 
 
 def _clip(text: Any, limit: int) -> str:
@@ -84,19 +91,21 @@ def _clean_title(raw: str) -> str:
     return title
 
 
-def _chatgpt_title(config: Mapping[str, Any], prompt: str) -> str:
-    """Best-effort title via the ChatGPT provider. Returns "" on any failure.
+def _generic_title(config: Mapping[str, Any] | None, provider_id: str, prompt: str) -> str:
+    """Best-effort title via the active non-Ollama provider adapter.
 
-    Uses ``chatgpt.default_model`` (GPT models have no dedicated cheap title
-    model in openai-oauth's /v1/models). Ollama-only kwargs (options/num_predict)
-    are dropped by the adapter; temperature + max_tokens are forwarded.
+    Single provider-neutral path: the adapter resolves the cheap title model
+    (``title_model(config)``) and ``build_model_client_for_provider`` routes
+    through the registry — no per-provider branches. Ollama-only kwargs are
+    dropped by the model-router closure; temperature + max_tokens forward.
+    Returns "" on any failure.
     """
     try:
-        from tools.config_manager import get_chatgpt_config
         from tools.model_router import build_model_client_for_provider
+        from tools.providers.registry import get_provider
 
-        chatgpt_cfg = get_chatgpt_config(config)
-        model_id = str(chatgpt_cfg.get("default_model") or "gpt-5.2")
+        provider = get_provider(provider_id)
+        model_id = provider.title_model(config)
         client = build_model_client_for_provider(config, model_id, request_timeout_seconds=_REQUEST_TIMEOUT_S)
         response = client.chat(
             model=model_id,
@@ -111,60 +120,18 @@ def _chatgpt_title(config: Mapping[str, Any], prompt: str) -> str:
             content = ""
         return _clean_title(content)
     except Exception as exc:  # best-effort — never raise to the caller
-        log.debug("chatgpt session title generation failed: %s", exc)
+        log.debug("%s session title generation failed: %s", provider_id, exc)
         return ""
 
 
-def _opencode_go_title(config: Mapping[str, Any], prompt: str) -> str:
-    """Best-effort title via the OpenCode Go provider. Returns "" on any failure.
-
-    Uses ``opencode_go.default_model`` (muse-spark-1.2-contributor).  The
-    Responses adapter drops Ollama-only kwargs and forwards temperature.
-    """
-    try:
-        from tools.config_manager import get_opencode_go_config
-        from tools.model_router import build_model_client_for_provider
-
-        og_cfg = get_opencode_go_config(config)
-        model_id = str(og_cfg.get("default_model") or "muse-spark-1.2-contributor")
-        client = build_model_client_for_provider(config, model_id, request_timeout_seconds=_REQUEST_TIMEOUT_S)
-        response = client.chat(
-            model=model_id,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=30,
-        )
-        content = ""
-        try:
-            content = response["message"]["content"]
-        except (KeyError, TypeError, IndexError):
-            content = ""
-        return _clean_title(content)
-    except Exception as exc:  # best-effort — never raise to the caller
-        log.debug("opencode_go session title generation failed: %s", exc)
-        return ""
-
-
-def _provider_is_chatgpt(config: Mapping[str, Any] | None) -> bool:
-    if not config:
-        return False
+def _active_provider_id(config: Mapping[str, Any] | None) -> str:
+    """Resolve the configured chat provider id (default ``ollama``)."""
     try:
         from tools.config_manager import get_ai_provider
 
-        return get_ai_provider(config) == "chatgpt"
+        return get_ai_provider(config) if config else "ollama"
     except Exception:
-        return False
-
-
-def _provider_is_opencode_go(config: Mapping[str, Any] | None) -> bool:
-    if not config:
-        return False
-    try:
-        from tools.config_manager import get_ai_provider
-
-        return get_ai_provider(config) == "opencode_go"
-    except Exception:
-        return False
+        return "ollama"
 
 
 async def generate_session_title(
@@ -179,9 +146,9 @@ async def generate_session_title(
 
     Returns "" on any failure (provider unreachable, missing pkg, bad
     response, timeout). Callers must treat the return as best-effort and
-    persist only when non-empty. When ``config`` indicates the ChatGPT
-    provider, titles go through the local openai-oauth proxy; otherwise the
-    Ollama ``gemma4:31b-cloud`` path runs unchanged.
+    persist only when non-empty. Non-Ollama providers go through the single
+    generic registry path (``_generic_title``); the Ollama path keeps its raw
+    ``/api/chat`` client with ``host``/``model`` unchanged.
     """
     return await asyncio.to_thread(generate_session_title_sync, result, request, host=host, model=model, config=config)
 
@@ -199,10 +166,9 @@ def generate_session_title_sync(
     Same best-effort contract: returns "" on any failure.
     """
     prompt = _build_prompt(result, request)
-    if _provider_is_chatgpt(config):
-        return _chatgpt_title(config, prompt)
-    if _provider_is_opencode_go(config):
-        return _opencode_go_title(config, prompt)
+    provider_id = _active_provider_id(config)
+    if provider_id != "ollama":
+        return _generic_title(config, provider_id, prompt)
     if OllamaClient is None:
         return ""
     try:

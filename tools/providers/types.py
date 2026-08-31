@@ -222,6 +222,27 @@ class ProviderMissingDependencyError(ProviderError):
     """
 
 
+class ProviderDiscoveryError(ProviderError):
+    """Raised when a provider cannot enumerate live models right now.
+
+    Carries the operator-safe ``message`` (shown verbatim by the API's
+    ``GET /models/live`` fallback) and a ``fallback_models`` list (the
+    provider's configured/default ids) so the UI can degrade to "registry"
+    mode. The original exception text is embedded in ``message`` with secrets
+    already redacted by the raising provider.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        fallback_models: list[str] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.fallback_models = [str(m) for m in (fallback_models or [])]
+
+
 @dataclass
 class ProviderHealth:
     """Provider health/config validation result (doctor-compatible checks).

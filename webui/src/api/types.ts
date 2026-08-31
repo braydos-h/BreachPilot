@@ -138,8 +138,8 @@ export interface ModelRegistryInfo {
 
 export interface LiveModelsResponse {
   models: string[];
-  /** "ollama" | "registry" (ollama path) | "chatgpt" (chatgpt path) | "opencode_go" (opencode path). */
-  source: "ollama" | "registry" | "chatgpt" | "opencode_go";
+  /** The active provider id ("ollama" | "chatgpt" | "opencode_go" | any registered provider), or "registry" when degraded to the static registry fallback. */
+  source: string;
   error?: string;
 }
 
@@ -176,8 +176,34 @@ export interface OpencodeGoProviderStatus {
   error?: string;
 }
 
+/** GET /providers — one row per registered provider adapter (registry metadata, no secrets). */
+export interface ProviderCapabilitiesInfo {
+  chat: boolean;
+  streaming: boolean;
+  tool_calls: boolean;
+  reasoning: boolean;
+  embeddings: boolean;
+  model_discovery: boolean;
+  local_models?: boolean;
+  remote_api?: boolean;
+}
+
+export interface ProviderMeta {
+  id: string;
+  name: string;
+  capabilities: ProviderCapabilitiesInfo;
+  configured?: boolean;
+  default_model?: string;
+  health?: { ok: boolean; checks: { name: string; ok: boolean; hint?: string }[] };
+  error?: string;
+}
+
 export interface ProvidersResponse {
   provider: string;
+  /** Mirror of `provider` for clarity. */
+  active?: string;
+  /** Registry-driven metadata rows for every registered provider adapter. */
+  providers?: ProviderMeta[];
   chatgpt?: ChatgptProviderStatus;
   opencode_go?: OpencodeGoProviderStatus;
 }

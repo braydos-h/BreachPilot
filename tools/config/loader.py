@@ -94,3 +94,87 @@ def get_ollama_host(config: dict[str, Any] | None = None) -> str:
     if isinstance(ollama, dict):
         return str(ollama.get("host", "https://api.ollama.com"))
     return "https://api.ollama.com"
+
+
+# ---------------------------------------------------------------------------
+# Provider architecture accessors (single normalization layer)
+# ---------------------------------------------------------------------------
+
+
+def get_provider_config(config: dict[str, Any] | None = None, provider_id: str = "") -> dict[str, Any]:
+    """Return provider ``provider_id``'s merged config block (never None).
+
+    Single normalization layer for the provider architecture:
+
+    1. Modern ``providers.<provider_id>`` block wins when present;
+    2. Otherwise falls back to the provider's legacy top-level block
+       (``ollama`` / ``chatgpt`` / ``opencode_go``) with schema defaults
+       applied — so existing config.yaml files stay byte-compatible;
+    3. Unknown providers get an empty block (schema defaults not applied —
+       third-party adapters supply their own ``_coalesce`` defaults).
+
+    Returns a fresh dict; callers may mutate freely.
+    """
+    cfg = config or {}
+    pid = str(provider_id or "").strip().lower()
+
+    providers_block = cfg.get("providers") if isinstance(cfg, dict) else None
+    if isinstance(providers_block, dict) and isinstance(providers_block.get(pid), dict):
+        return copy.deepcopy(providers_block[pid])
+
+    if pid == "chatgpt":
+        return get_chatgpt_config(cfg)
+    if pid == "opencode_go":
+        return get_opencode_go_config(cfg)
+    if pid == "ollama":
+        ollama = copy.deepcopy(CONFIG_SCHEMA.get("ollama", {}))
+        overlay = cfg.get("ollama") if isinstance(cfg, dict) else None
+        if isinstance(overlay, dict):
+            for key, value in overlay.items():
+                if value is not None:
+                    ollama[key] = value
+        return ollama
+    return {}
+
+
+def get_embeddings_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return the ``embeddings`` block with schema defaults applied (never None)."""
+    base = copy.deepcopy(CONFIG_SCHEMA.get("embeddings", {}))
+    cfg = config or {}
+    overlay = cfg.get("embeddings") if isinstance(cfg, dict) else None
+    if isinstance(overlay, dict):
+        for key, value in overlay.items():
+            if value is not None:
+                base[key] = value
+    # Legacy backcompat: when the modern block is untouched but the legacy
+    # ollama block exists, inherit its embedding knobs (host/model).
+    if dict(overlay or {}).get("provider") is None:
+        ollama_cfg = cfg.get("ollama") if isinstance(cfg, dict) else None
+        if isinstance(ollama_cfg, dict):
+            if base.get("provider") == "ollama":
+                host = ollama_cfg.get("embed_host") or ollama_cfg.get("host")
+                if host and not base.get("host"):
+                    base["host"] = str(host)
+                api_key_env = ollama_cfg.get("api_key_env")
+                if api_key_env and not base.get("api_key_env"):
+                    base["api_key_env"] = str(api_key_env)
+        memory_cfg = cfg.get("memory") if isinstance(cfg, dict) else None
+        if isinstance(memory_cfg, dict) and memory_cfg.get("embedding_model") and not base.get("model"):
+            base["model"] = str(memory_cfg["embedding_model"])
+    return base
+
+
+def get_model_host(config: dict[str, Any] | None = None, provider_id: str | None = None) -> str:
+    """The chat host for ``provider_id`` (default: active provider).
+
+    Only the Ollama provider has a host concept (cloud endpoint or local
+    daemon); other providers configure their endpoint inside their own
+    block and this returns an empty string for them. Callers use it for
+    display/log purposes and pass host straight to the ollama factory.
+    """
+    cfg = config or {}
+    pid = str(provider_id or get_ai_provider(cfg)).strip().lower()
+    if pid != "ollama":
+        return ""
+    provider_block = get_provider_config(cfg, "ollama")
+    return str(provider_block.get("host") or get_ollama_host(cfg))

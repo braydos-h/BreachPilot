@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { formatCost, formatDuration } from "@/features/benchmarks/MetricCards";
-import type { Trial, TrialStatus } from "@/features/benchmarks/types";
+import type { Trial } from "@/features/benchmarks/types";
 
 export const STATUS_META: Record<string, { label: string; className: string }> = {
   VERIFIED: { label: "Verified", className: "bg-emerald-500/15 text-emerald-500" },
@@ -14,6 +14,9 @@ export const STATUS_META: Record<string, { label: string; className: string }> =
   FALSE_POSITIVE: { label: "False positive", className: "bg-amber-500/15 text-amber-500" },
   TIMEOUT: { label: "Timeout", className: "bg-orange-500/15 text-orange-500" },
   INFRASTRUCTURE_ERROR: { label: "Infra error", className: "bg-sky-500/15 text-sky-500" },
+  RUNNING: { label: "Running", className: "bg-yellow-500/15 text-yellow-500" },
+  CANCELLED: { label: "Cancelled", className: "bg-muted text-muted-foreground" },
+  INTERRUPTED: { label: "Interrupted", className: "bg-amber-500/15 text-amber-500" },
   SKIPPED: { label: "Skipped", className: "bg-muted text-muted-foreground" },
 };
 
@@ -30,7 +33,20 @@ export function StatusBadge({ status }: { status: string }) {
 
 type SortKey = "scenario_id" | "status" | "duration_seconds" | "tool_calls" | "total_tokens" | "estimated_cost";
 
-const STATUS_ORDER: TrialStatus[] = ["VERIFIED", "FAILED", "FALSE_POSITIVE", "TIMEOUT", "INFRASTRUCTURE_ERROR", "SKIPPED"];
+// Sort order for status — includes UI-only states (RUNNING/CANCELLED/
+// INTERRUPTED) that appear on live/interrupted runs in addition to the
+// backend's per-trial vocabulary.
+const STATUS_ORDER: string[] = [
+  "VERIFIED",
+  "FAILED",
+  "FALSE_POSITIVE",
+  "TIMEOUT",
+  "INFRASTRUCTURE_ERROR",
+  "RUNNING",
+  "CANCELLED",
+  "INTERRUPTED",
+  "SKIPPED",
+];
 
 export interface ScenarioResultsTableProps {
   trials: Trial[];
@@ -58,7 +74,7 @@ export function ScenarioResultsTable({ trials, isLoading }: ScenarioResultsTable
     const dir = sortAsc ? 1 : -1;
     rows.sort((a, b) => {
       if (sortKey === "status") {
-        return dir * (STATUS_ORDER.indexOf(a.status as TrialStatus) - STATUS_ORDER.indexOf(b.status as TrialStatus));
+        return dir * (STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status));
       }
       const av = a[sortKey];
       const bv = b[sortKey];
@@ -80,20 +96,28 @@ export function ScenarioResultsTable({ trials, isLoading }: ScenarioResultsTable
 
   const statuses = ["all", ...Object.keys(STATUS_META)];
 
-  const header = (label: string, key?: SortKey) => (
-    <th
-      className={cn(
-        "px-3 py-2.5 font-medium",
-        key && "cursor-pointer select-none hover:text-foreground",
-      )}
-      onClick={key ? () => toggleSort(key) : undefined}
-    >
-      <span className="inline-flex items-center gap-1">
-        {label}
-        {key === sortKey && (sortAsc ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
-      </span>
-    </th>
-  );
+  const header = (label: string, key?: SortKey) => {
+    const isSorted = !!key && key === sortKey;
+    return (
+      <th
+        className="px-3 py-2.5 font-medium"
+        aria-sort={isSorted ? (sortAsc ? "ascending" : "descending") : key ? "none" : undefined}
+      >
+        {key ? (
+          <button
+            type="button"
+            className="inline-flex cursor-pointer select-none items-center gap-1 rounded hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            onClick={() => toggleSort(key)}
+          >
+            {label}
+            {isSorted && (sortAsc ? <ChevronUp className="h-3 w-3" aria-hidden /> : <ChevronDown className="h-3 w-3" aria-hidden />)}
+          </button>
+        ) : (
+          <span className="inline-flex items-center gap-1">{label}</span>
+        )}
+      </th>
+    );
+  };
 
   if (isLoading) {
     return <div className="py-8 text-center text-sm text-muted-foreground">Loading scenario results…</div>;
@@ -117,6 +141,7 @@ export function ScenarioResultsTable({ trials, isLoading }: ScenarioResultsTable
             <button
               key={s}
               type="button"
+              aria-pressed={statusFilter === s}
               onClick={() => setStatusFilter(s)}
               className={cn(
                 "rounded-md px-2 py-1 text-[11px] font-medium uppercase tracking-wide transition-colors",
@@ -149,23 +174,31 @@ export function ScenarioResultsTable({ trials, isLoading }: ScenarioResultsTable
             </tr>
           </thead>
           <tbody>
-            {filtered.map((t) => (
-              <tr key={t.trial_id} className="border-t hover:bg-muted/20">
-                <td className="px-3 py-2 font-mono text-xs">{t.scenario_id}</td>
-                <td className="px-3 py-2">
-                  <StatusBadge status={t.status} />
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={9} className="px-3 py-6 text-center text-sm text-muted-foreground">
+                  No trials match the current filters.
                 </td>
-                <td className="px-3 py-2 tabular-nums">{t.oracle_verified_success ? "yes" : "no"}</td>
-                <td className="px-3 py-2 tabular-nums">{t.agent_claimed_success ? "yes" : "no"}</td>
-                <td className="px-3 py-2 tabular-nums">
-                  {t.false_positive ? <Badge variant="destructive" className="px-1.5 py-0 text-[10px]">FP</Badge> : "—"}
-                </td>
-                <td className="px-3 py-2 tabular-nums">{formatDuration(t.duration_seconds)}</td>
-                <td className="px-3 py-2 tabular-nums">{t.tool_calls}</td>
-                <td className="px-3 py-2 tabular-nums">{t.total_tokens.toLocaleString()}</td>
-                <td className="px-3 py-2 tabular-nums">{formatCost(t.estimated_cost)}</td>
               </tr>
-            ))}
+            ) : (
+              filtered.map((t) => (
+                <tr key={t.trial_id} className="border-t hover:bg-muted/20">
+                  <td className="px-3 py-2 font-mono text-xs">{t.scenario_id}</td>
+                  <td className="px-3 py-2">
+                    <StatusBadge status={t.status} />
+                  </td>
+                  <td className="px-3 py-2 tabular-nums">{t.oracle_verified_success ? "yes" : "no"}</td>
+                  <td className="px-3 py-2 tabular-nums">{t.agent_claimed_success ? "yes" : "no"}</td>
+                  <td className="px-3 py-2 tabular-nums">
+                    {t.false_positive ? <Badge variant="destructive" className="px-1.5 py-0 text-[10px]">FP</Badge> : "—"}
+                  </td>
+                  <td className="px-3 py-2 tabular-nums">{formatDuration(t.duration_seconds)}</td>
+                  <td className="px-3 py-2 tabular-nums">{t.tool_calls}</td>
+                  <td className="px-3 py-2 tabular-nums">{t.total_tokens.toLocaleString()}</td>
+                  <td className="px-3 py-2 tabular-nums">{formatCost(t.estimated_cost)}</td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>

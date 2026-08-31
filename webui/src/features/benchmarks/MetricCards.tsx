@@ -3,29 +3,12 @@
 import { AlertTriangle, CheckCircle2, Clock3, Coins, Flame, ShieldAlert, Target } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { formatCost, formatDuration, formatPct } from "@/features/benchmarks/format";
 import type { RunSummary } from "@/features/benchmarks/types";
 
-export function formatDuration(seconds: number | null | undefined): string {
-  if (seconds === null || seconds === undefined) return "n/a";
-  const s = Math.round(seconds);
-  const minutes = Math.floor(s / 60);
-  const secs = s % 60;
-  if (minutes >= 60) {
-    const hours = Math.floor(minutes / 60);
-    return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`;
-  }
-  return `${minutes}m ${String(secs).padStart(2, "0")}s`;
-}
-
-export function formatCost(value: number | null | undefined): string {
-  if (value === null || value === undefined) return "n/a";
-  return `$${value.toFixed(2)}`;
-}
-
-export function formatPct(value: number | null | undefined, digits = 1): string {
-  if (value === null || value === undefined) return "n/a";
-  return `${(value * 100).toFixed(digits)}%`;
-}
+// Formatters live in ./format (shared with tables/charts/pages); re-exported
+// here for the established import path.
+export { formatCost, formatDuration, formatPct };
 
 interface MetricCardProps {
   title: string;
@@ -74,7 +57,13 @@ export function MetricCards({ summary }: MetricCardsProps) {
         icon={CheckCircle2}
         tone="success"
       />
-      <MetricCard title="Solved" value={String(summary.solved)} sub={`${summary.trials_total} trials`} icon={Target} />
+      <MetricCard
+        title="Timeouts"
+        value={String(summary.timeout_count)}
+        sub={`of ${summary.trials_total} trials`}
+        icon={Target}
+        tone={summary.timeout_count > 0 ? "warning" : "neutral"}
+      />
       <MetricCard
         title="False positives"
         value={formatPct(summary.false_positive_rate)}
@@ -89,9 +78,9 @@ export function MetricCards({ summary }: MetricCardsProps) {
         icon={Clock3}
       />
       <MetricCard
-        title="Average cost"
+        title="Estimated cost"
         value={formatCost(summary.estimated_cost)}
-        sub={`${summary.total_tokens.toLocaleString()} tokens`}
+        sub={`${summary.total_tokens.toLocaleString()} tokens (run total)`}
         icon={Coins}
       />
       <MetricCard

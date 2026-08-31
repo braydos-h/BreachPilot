@@ -130,42 +130,110 @@ class _RecordingClient:
 
 
 class TestNumCtxPassthrough:
-    def test_call_ollama_with_tools_passes_num_ctx(self):
-        from tools.exploit_agent import _call_ollama_with_tools
+    """Provider-neutral canonicalization: the generic model-client helpers send
+    the canonical ``context_window_tokens`` chat kwarg; ONLY the Ollama adapter
+    (``apply_context_window`` inside ``tools.model_router._build_model_client``)
+    translates it to Ollama's ``options.num_ctx``. No generic code mentions
+    ``options``/``num_ctx`` or the Ollama SDK."""
+
+    def test_call_model_with_tools_sends_canonical_context_window(self):
+        from tools.exploit_agent import _call_model_with_tools
 
         client = _RecordingClient()
-        _call_ollama_with_tools(client, "m", [{"role": "user", "content": "hi"}], context_window_tokens=976_000)
-        assert client.calls[0]["options"] == {"num_ctx": 976_000}
+        _call_model_with_tools(client, "m", [{"role": "user", "content": "hi"}], context_window_tokens=976_000)
+        assert client.calls[0].get("context_window_tokens") == 976_000
+        # No Ollama-specific kwarg may leak from generic code.
+        assert "options" not in client.calls[0]
+        assert "num_ctx" not in client.calls[0]
 
-    def test_call_ollama_with_tools_omits_num_ctx_when_none(self):
-        from tools.exploit_agent import _call_ollama_with_tools
+    def test_call_model_with_tools_omits_when_none(self):
+        from tools.exploit_agent import _call_model_with_tools
 
         client = _RecordingClient()
-        _call_ollama_with_tools(client, "m", [{"role": "user", "content": "hi"}])
+        _call_model_with_tools(client, "m", [{"role": "user", "content": "hi"}])
+        assert "context_window_tokens" not in client.calls[0]
         assert "options" not in client.calls[0]
 
-    def test_call_ollama_with_tools_omits_num_ctx_when_zero(self):
-        from tools.exploit_agent import _call_ollama_with_tools
+    def test_call_model_with_tools_omits_when_zero(self):
+        from tools.exploit_agent import _call_model_with_tools
 
         client = _RecordingClient()
-        _call_ollama_with_tools(client, "m", [{"role": "user", "content": "hi"}], context_window_tokens=0)
+        _call_model_with_tools(client, "m", [{"role": "user", "content": "hi"}], context_window_tokens=0)
+        assert "context_window_tokens" not in client.calls[0]
         assert "options" not in client.calls[0]
 
     @pytest.mark.asyncio
-    async def test_stream_ollama_passes_num_ctx(self):
-        from tools.exploit_agent import _stream_ollama
+    async def test_stream_model_sends_canonical_context_window(self):
+        from tools.exploit_agent import _stream_model
 
         client = _RecordingClient(stream=True)
-        await _stream_ollama(client, "m", [{"role": "user", "content": "hi"}], context_window_tokens=976_000)
-        assert client.calls[0]["options"] == {"num_ctx": 976_000}
+        await _stream_model(client, "m", [{"role": "user", "content": "hi"}], context_window_tokens=976_000)
+        assert client.calls[0].get("context_window_tokens") == 976_000
+        assert "options" not in client.calls[0]
 
     @pytest.mark.asyncio
-    async def test_stream_ollama_omits_num_ctx_when_none(self):
-        from tools.exploit_agent import _stream_ollama
+    async def test_stream_model_omits_when_none(self):
+        from tools.exploit_agent import _stream_model
 
         client = _RecordingClient(stream=True)
-        await _stream_ollama(client, "m", [{"role": "user", "content": "hi"}])
+        await _stream_model(client, "m", [{"role": "user", "content": "hi"}])
+        assert "context_window_tokens" not in client.calls[0]
         assert "options" not in client.calls[0]
+
+    def test_ollama_adapter_translates_canonical_to_num_ctx(self, monkeypatch):
+        """The Ollama adapter is the ONLY place canonical -> ``options.num_ctx``
+        happens (raw_client None = built-in Ollama path)."""
+        import tools.model_router as mr
+
+        sent: dict[str, Any] = {}
+
+        class FakeOllama:
+            def __init__(self, host=None, *, timeout=None, **kwargs):
+                pass
+
+            def chat(self, model, **kwargs):
+                sent.update(dict(kwargs))
+                return {"message": {"content": "x"}}
+
+        monkeypatch.setattr(mr, "OllamaClient", FakeOllama)
+        client = mr._build_model_client("glm-5.2:cloud", host="http://localhost:11434")
+        client.chat(messages=[{"role": "user", "content": "hi"}], context_window_tokens=976_000)
+        assert sent.get("options") == {"num_ctx": 976_000}
+
+    def test_non_ollama_provider_chat_strips_ollama_kwargs(self):
+        """Generic code must never ship ``options``/``num_ctx``/``keep_alive``
+        to a non-Ollama provider; the Ollama-only kwargs are stripped in the
+        model-router chat closure."""
+        import tools.model_router as mr
+
+        sent: dict[str, Any] = {}
+
+        class FakeRaw:
+            def chat(self, model, **kwargs):
+                sent.update(dict(kwargs))
+                return {"message": {"content": "x"}}
+
+        client = mr._build_model_client("gpt-5.2", raw_client=FakeRaw(), provider="chatgpt")
+        client.chat(
+            messages=[{"role": "user", "content": "hi"}],
+            options={"num_ctx": 5},
+            keep_alive="5m",
+            num_ctx=4096,
+            context_window_tokens=4096,
+            temperature=0.2,
+        )
+        for ollama_only in ("options", "keep_alive", "num_ctx"):
+            assert ollama_only not in sent
+        assert sent.get("temperature") == 0.2
+
+    def test_apply_context_window_translation_unit(self):
+        from tools.providers.ollama_provider import apply_context_window
+
+        raw = {"messages": [{"role": "user", "content": "hi"}]}
+        out = apply_context_window(raw, 976_000)
+        assert out["options"] == {"num_ctx": 976_000}
+        # The input dict is not mutated.
+        assert "options" not in raw
 
 
 # â”€â”€ 5: _build_model_client forwards timeout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

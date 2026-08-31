@@ -40,7 +40,15 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Any, Iterator, Mapping
+from typing import TYPE_CHECKING, Any, Iterator, Mapping
+
+from .base import BaseProvider, make_model_client
+from .types import ModelInfo, ProviderCapabilities, ProviderDiscoveryError, ProviderHealth
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from tools.model_router import ModelRouter
+
+    from .types import ModelClient
 
 try:
     import httpx
@@ -637,3 +645,197 @@ def _atexit_shutdown() -> None:
 
 
 atexit.register(_atexit_shutdown)
+
+
+# ---------------------------------------------------------------------------
+# Router builder (moved from tools/model_router.py) + provider adapter
+# ---------------------------------------------------------------------------
+
+
+def build_chatgpt_router(
+    chatgpt_config: Mapping[str, Any],
+    *,
+    request_timeout_seconds: float | None = None,
+) -> "ModelRouter":
+    """Build a router backed by the local openai-oauth ChatGPT proxy."""
+    from tools.model_router import ModelRouter
+
+    cfg = dict(chatgpt_config)
+    manager = ChatGptProxyManager.get()
+    running = manager.ensure_running(cfg)
+    if not running.get("ok"):
+        reason = running.get("reason") or "unavailable"
+        raise RuntimeError(
+            f"ChatGPT provider unavailable: {reason}. "
+            f"Run 'python main.py --doctor' or sign in via the interactive menu."
+        )
+    base_url = running["base_url"]
+
+    # Resolve the model list: explicit config override → discover → fallback.
+    configured = cfg.get("models") or []
+    if configured:
+        model_ids = [str(m) for m in configured if str(m).strip()]
+    else:
+        model_ids = manager.discover_models(base_url, cfg)
+    if not model_ids:
+        default_model = str(cfg.get("default_model") or "gpt-5.2")
+        model_ids = [default_model]
+
+    timeout = cfg.get("request_timeout_seconds")
+    client_timeout = request_timeout_seconds
+    if client_timeout is None and timeout is not None:
+        try:
+            client_timeout = float(timeout)
+        except (TypeError, ValueError):
+            client_timeout = None
+    shared = ChatGptProxyClient(base_url, timeout=client_timeout)
+
+    router = ModelRouter()
+    for model_id in model_ids:
+        router.register(
+            model_id,
+            make_model_client(
+                model_id,
+                alias=model_id,
+                request_timeout_seconds=client_timeout,
+                raw_client=shared,
+                provider="chatgpt",
+            ),
+        )
+    return router
+
+
+def resolve_chatgpt_timeout(cfg: Mapping[str, Any], request_timeout_seconds: float | None = None) -> float | None:
+    """Explicit timeout kwarg wins; else ``request_timeout_seconds`` from config."""
+    if request_timeout_seconds is not None:
+        return request_timeout_seconds
+    raw = cfg.get("request_timeout_seconds")
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+class ChatGptProvider(BaseProvider):
+    """ChatGPT provider adapter: local openai-oauth proxy (loopback).
+
+    Auth is the operator's ChatGPT session via browser OAuth (see module
+    docstring — tokens are never read by BreachPilot).  Disabling/replacing
+    this provider NEVER touches the target-IP allowlist, permission model,
+    MCP target locks, or recon restrictions.
+    """
+
+    id = "chatgpt"
+    display_name = "ChatGPT (openai-oauth)"
+    capabilities = ProviderCapabilities(chat=True, streaming=True, tool_calls=True, model_discovery=True)
+
+    def is_configured(self, cfg: Mapping[str, Any]) -> bool:
+        # Enabled + an auth file existing (bool-only check, never a read).
+        if not bool(cfg) or not bool(cfg.get("enabled")):
+            return False
+        return ChatGptProxyManager.get().is_authenticated(cfg)
+
+    def build_router(
+        self,
+        config: Mapping[str, Any] | None = None,
+        *,
+        request_timeout_seconds: float | None = None,
+        provider_config: Mapping[str, Any] | None = None,
+    ) -> "ModelRouter":
+        cfg = dict(provider_config) if provider_config is not None else self.provider_config(config)
+        return build_chatgpt_router(cfg, request_timeout_seconds=request_timeout_seconds)
+
+    def build_client(
+        self,
+        config: Mapping[str, Any] | None = None,
+        alias: str = "",
+        *,
+        request_timeout_seconds: float | None = None,
+    ) -> "ModelClient":
+        cfg = self.provider_config(config)
+        manager = ChatGptProxyManager.get()
+        running = manager.ensure_running(cfg)
+        if not running.get("ok"):
+            raise RuntimeError(f"ChatGPT provider unavailable: {running.get('reason') or 'unavailable'}.")
+        timeout = resolve_chatgpt_timeout(cfg, request_timeout_seconds)
+        shared = ChatGptProxyClient(running["base_url"], timeout=timeout)
+        model_id = str(alias or cfg.get("default_model") or "gpt-5.2")
+        return make_model_client(
+            model_id,
+            alias=alias or model_id,
+            request_timeout_seconds=timeout,
+            raw_client=shared,
+            provider="chatgpt",
+        )
+
+    def list_models(self, config: Mapping[str, Any] | None = None) -> list[ModelInfo]:
+        """Live model discovery, owning the openai-oauth lifecycle.
+
+        Explicitly configured ``chatgpt.models`` short-circuit (no proxy
+        spawn). Otherwise auto-starts the local proxy once (idempotent,
+        signed-in + auto_start honored) and probes ``/v1/models``. Every
+        failure raises :class:`ProviderDiscoveryError` carrying the
+        registry-mode fallback so callers degrade identically.
+        """
+        cfg = self.provider_config(config)
+        configured = [str(m) for m in (cfg.get("models") or []) if str(m).strip()]
+        default_model = str(cfg.get("default_model") or "gpt-5.2")
+        context_window = cfg.get("context_window")
+        ctx = int(context_window) if isinstance(context_window, (int, float)) else None
+
+        def _infos(ids: list[str]) -> list[ModelInfo]:
+            return [
+                ModelInfo(id=m, label=m, context_window=ctx, default=(m == default_model))
+                for m in (ids or [default_model])
+            ]
+
+        if configured:
+            return _infos(configured)
+        manager = ChatGptProxyManager.get()
+        # Auto-start the openai-oauth proxy (when authenticated + auto_start) so the
+        # available-model list populates even before a run is launched. Idempotent:
+        # a pre-existing proxy is health-checked and reused (_we_started stays False,
+        # so we never stop a proxy we didn't start).
+        running = manager.ensure_running(cfg)
+        if not running.get("ok"):
+            reason = str(running.get("reason") or "proxy_unavailable")
+            msg = (
+                "Not signed in to ChatGPT — sign in via System → Models."
+                if reason == "not_authenticated"
+                else f"ChatGPT proxy unavailable: {reason}"
+            )
+            raise ProviderDiscoveryError(msg, fallback_models=[default_model])
+        base_url = str(running.get("base_url") or _v1_url(cfg))
+        try:
+            import httpx
+
+            with httpx.Client(timeout=5.0) as client:
+                resp = client.get(f"{base_url.rstrip('/')}/models")
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception as exc:
+            raise ProviderDiscoveryError(
+                f"ChatGPT proxy unreachable: {exc}", fallback_models=[default_model]
+            ) from exc
+        ids = [str(m.get("id", "")) for m in data.get("data", []) if isinstance(m, dict) and m.get("id")]
+        return _infos(ids)
+
+    def title_model(self, config: Mapping[str, Any] | None = None) -> str:
+        return str(self.provider_config(config).get("default_model") or "gpt-5.2")
+
+    def health(self, config: Mapping[str, Any] | None = None) -> ProviderHealth:
+        cfg = self.provider_config(config)
+        checks: list[dict[str, Any]] = []
+        enabled = bool(cfg.get("enabled"))
+        checks.append({"name": "chatgpt_enabled", "ok": enabled, "hint": "" if enabled else "chatgpt.enabled is false"})
+        authenticated = ChatGptProxyManager.get().is_authenticated(cfg)
+        checks.append(
+            {
+                "name": "chatgpt_authenticated",
+                "ok": authenticated,
+                "hint": "" if authenticated else "No openai-oauth auth file found — sign in first",
+            }
+        )
+        return ProviderHealth(checks=checks)

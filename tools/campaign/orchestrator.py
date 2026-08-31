@@ -110,17 +110,20 @@ class AutonomousOrchestrator:
         if self._semantic_memory is None and bool(mission_config.get("semantic_memory", False)):
             try:
                 from db import get_default_db
+                from tools.providers.embeddings import (
+                    NullEmbeddingProvider as _NullEmbeddings,
+                    build_embedding_provider as _build_embeddings,
+                )
                 from tools.semantic_memory import SemanticMemoryManager
 
-                _ollama_cfg = mission_config.get("ollama", {}) or {}
-                # ponytail: embeddings stay on local Ollama (embed_host) when
-                # set; falls back to ollama.host for cloud-only installs.
-                _embed_host = _ollama_cfg.get("embed_host") or _ollama_cfg.get("host", "https://api.ollama.com")
-                self._semantic_memory = SemanticMemoryManager(
-                    db=get_default_db(),
-                    ollama_host=_embed_host,
-                    embedding_model=str(mission_config.get("embedding_model", "nomic-embed-text")),
-                )
+                # Embeddings provider owns the endpoint (``embeddings.provider``);
+                # ``none`` degrades to keyword storage with zero requests.
+                _embedding_provider = _build_embeddings(mission_config)
+                if not isinstance(_embedding_provider, _NullEmbeddings):
+                    self._semantic_memory = SemanticMemoryManager(
+                        db=get_default_db(),
+                        embedding_provider=_embedding_provider,
+                    )
             except Exception as exc:  # noqa: BLE001 -- cross-mission learning degrades to no-op
                 logger.debug("SemanticMemoryManager wiring skipped: %r", exc)
                 self._semantic_memory = None

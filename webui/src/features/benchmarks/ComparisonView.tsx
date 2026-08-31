@@ -73,6 +73,14 @@ export function ComparisonView({ runs }: ComparisonViewProps) {
 
   const canCompare = useMemo(() => runA && runB && runA !== runB, [runA, runB]);
 
+  // A previous comparison must never linger next to a new (unchanged) pair of
+  // pickers — drop the result + error as soon as either selection changes.
+  const onPick = (setter: (v: string) => void) => (v: string) => {
+    setter(v);
+    setComparison(null);
+    setError("");
+  };
+
   const onCompare = async () => {
     if (!canCompare) return;
     setLoading(true);
@@ -93,7 +101,7 @@ export function ComparisonView({ runs }: ComparisonViewProps) {
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-9 rounded-md border bg-background px-2 text-sm"
+        className="h-9 w-full min-w-0 rounded-md border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         aria-label={label}
       >
         <option value="">Select run…</option>
@@ -109,7 +117,7 @@ export function ComparisonView({ runs }: ComparisonViewProps) {
   return (
     <div className="space-y-4" data-testid="benchmark-comparison">
       <div className="flex flex-wrap items-end gap-3">
-        {runPicker(runA, setRunA, "Baseline run")}
+        {runPicker(runA, onPick(setRunA), "Baseline run")}
         <Button
           variant="ghost"
           size="icon"
@@ -118,17 +126,24 @@ export function ComparisonView({ runs }: ComparisonViewProps) {
           onClick={() => {
             setRunA(runB);
             setRunB(runA);
+            setComparison(null);
+            setError("");
           }}
         >
           <ArrowLeftRight className="h-4 w-4" />
         </Button>
-        {runPicker(runB, setRunB, "Candidate run")}
+        {runPicker(runB, onPick(setRunB), "Candidate run")}
         <Button size="sm" className="mb-0.5" disabled={!canCompare || loading} onClick={onCompare}>
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
           Compare
         </Button>
       </div>
       {error && <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</div>}
+      {!comparison && !error && (
+        <p className="text-xs text-muted-foreground">
+          Pick a baseline and a candidate run, then press Compare to see metric deltas and per-scenario changes.
+        </p>
+      )}
       {comparison && (
         <div className="space-y-4">
           <div className="overflow-x-auto rounded-lg border">
@@ -194,27 +209,35 @@ export function ComparisonView({ runs }: ComparisonViewProps) {
                 </tr>
               </thead>
               <tbody>
-                {comparison.comparison.scenarios.map((row) => (
-                  <tr key={row.scenario_id} className="border-t">
-                    <td className="px-3 py-2 font-mono text-xs">{row.scenario_id}</td>
-                    <td className="px-3 py-2 tabular-nums">{row.baseline.toFixed(2)}</td>
-                    <td className="px-3 py-2 tabular-nums">{row.current.toFixed(2)}</td>
-                    <td className="px-3 py-2">
-                      <StatusBadge
-                        status={
-                          row.category === "newly_solved"
-                            ? "VERIFIED"
-                            : row.category === "regressed"
-                              ? "FALSE_POSITIVE"
-                              : row.category === "still_solved"
-                                ? "VERIFIED"
-                                : "FAILED"
-                        }
-                      />
-                      <span className="ml-2 text-xs text-muted-foreground">{CATEGORY_LABELS[row.category]}</span>
+                {comparison.comparison.scenarios.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-3 py-4 text-center text-sm text-muted-foreground">
+                      No comparable scenarios recorded in either run.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  comparison.comparison.scenarios.map((row) => (
+                    <tr key={row.scenario_id} className="border-t">
+                      <td className="px-3 py-2 font-mono text-xs">{row.scenario_id}</td>
+                      <td className="px-3 py-2 tabular-nums">{row.baseline.toFixed(2)}</td>
+                      <td className="px-3 py-2 tabular-nums">{row.current.toFixed(2)}</td>
+                      <td className="px-3 py-2">
+                        <StatusBadge
+                          status={
+                            row.category === "newly_solved"
+                              ? "VERIFIED"
+                              : row.category === "regressed"
+                                ? "FALSE_POSITIVE"
+                                : row.category === "still_solved"
+                                  ? "VERIFIED"
+                                  : "FAILED"
+                          }
+                        />
+                        <span className="ml-2 text-xs text-muted-foreground">{CATEGORY_LABELS[row.category]}</span>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

@@ -115,6 +115,26 @@ class ConfigValidator:
             elif "host" not in ollama:
                 result.warnings.append("ollama.host is missing. Default: https://api.ollama.com")
 
+        # Validate provider-architecture sections
+        providers_block = self._config.get("providers")
+        if providers_block is not None and not isinstance(providers_block, dict):
+            result.errors.append("'providers' must be a mapping of provider id -> config block.")
+        embeddings_block = self._config.get("embeddings")
+        if embeddings_block is not None:
+            if not isinstance(embeddings_block, dict):
+                result.errors.append("'embeddings' must be a mapping.")
+            else:
+                allowed = set(CONFIG_SCHEMA.get("embeddings", {}).keys())
+                for key in embeddings_block:
+                    if key not in allowed:
+                        result.errors.append(f"Unknown key 'embeddings.{key}'")
+                provider = embeddings_block.get("provider")
+                if provider is not None and str(provider).lower() not in {"none", "null", "", "ollama"}:
+                    result.warnings.append(
+                        f"embeddings.provider {provider!r} is not a registered embedding provider "
+                        f"(registered: none, ollama). Semantic memory will degrade to keyword storage."
+                    )
+
         # Validate models section
         if "models" in self._config:
             models = self._config["models"]
@@ -126,8 +146,14 @@ class ConfigValidator:
                 if "default_alias" not in models:
                     result.warnings.append("models.default_alias is missing. Default: glm")
                 provider = models.get("provider")
-                if provider is not None and str(provider).lower() not in {"ollama", "chatgpt", "opencode_go"}:
-                    result.warnings.append("models.provider should be one of: ollama, chatgpt, opencode_go.")
+                if provider is not None:
+                    from tools.config_manager import resolve_known_provider_ids
+
+                    known_ids = resolve_known_provider_ids()
+                    if str(provider).lower() not in known_ids:
+                        result.warnings.append(
+                            f"models.provider should be one of: {', '.join(sorted(known_ids))}."
+                        )
                 # Model-role routing: each value should be a string alias (or
                 # empty = use default_alias). A non-string / non-alias value
                 # is ambiguous only when it doesn't resolve — warn, never

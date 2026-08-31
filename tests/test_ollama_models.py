@@ -105,7 +105,7 @@ def _write_config(path, registry=None, extra_models=""):
 def test_refresh_persists_and_reports(tmp_path, monkeypatch):
     cfg_path = _write_config(tmp_path / "config.yaml")
     monkeypatch.setattr(
-        "tools.ollama_models.fetch_available_models",
+        "tools.providers.ollama_provider.fetch_available_models",
         lambda host, api_key_env="OLLAMA_API_KEY", timeout=5.0: ["glm-5.2:cloud", "glm-5.3:cloud"],
     )
     config = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
@@ -123,7 +123,7 @@ def test_refresh_no_updates_does_not_write(tmp_path, monkeypatch):
     cfg_path = _write_config(tmp_path / "config.yaml")
     before = cfg_path.read_text(encoding="utf-8")
     monkeypatch.setattr(
-        "tools.ollama_models.fetch_available_models",
+        "tools.providers.ollama_provider.fetch_available_models",
         lambda host, api_key_env="OLLAMA_API_KEY", timeout=5.0: ["glm-5.2:cloud"],
     )
     result = refresh_model_registry({}, host="http://localhost:11434", config_path=cfg_path, persist=True)
@@ -136,7 +136,7 @@ def test_refresh_unreachable_is_soft_error(monkeypatch):
     def _boom(host, api_key_env="OLLAMA_API_KEY", timeout=5.0):
         raise urllib.error.URLError("connection refused")
 
-    monkeypatch.setattr("tools.ollama_models.fetch_available_models", _boom)
+    monkeypatch.setattr("tools.providers.ollama_provider.fetch_available_models", _boom)
     result = refresh_model_registry({"ollama": {"host": "http://localhost:9"}, "models": {"registry": {}}})
     assert result["ok"] is False
     assert "URLError" in result["error"]
@@ -150,7 +150,7 @@ def test_refresh_host_defaults_to_config(monkeypatch):
         seen["host"] = host
         return ["glm-5.2:cloud"]
 
-    monkeypatch.setattr("tools.ollama_models.fetch_available_models", _fake)
+    monkeypatch.setattr("tools.providers.ollama_provider.fetch_available_models", _fake)
     refresh_model_registry({"ollama": {"host": "http://example.invalid:1"}, "models": {}}, persist=False)
     assert seen["host"] == "http://example.invalid:1"
 
@@ -161,7 +161,7 @@ def test_refresh_host_defaults_to_config(monkeypatch):
 def test_auto_refresh_mutates_config_in_place(tmp_path, monkeypatch):
     cfg_path = _write_config(tmp_path / "config.yaml")
     monkeypatch.setattr(
-        "tools.ollama_models.fetch_available_models",
+        "tools.providers.ollama_provider.fetch_available_models",
         lambda host, api_key_env="OLLAMA_API_KEY", timeout=5.0: ["glm-5.3:cloud"],
     )
     config = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
@@ -178,7 +178,7 @@ def test_auto_refresh_skipped_when_disabled(tmp_path, monkeypatch):
     def _fail(*args, **kwargs):
         raise AssertionError("fetch must not run when auto_update is false")
 
-    monkeypatch.setattr("tools.ollama_models.fetch_available_models", _fail)
+    monkeypatch.setattr("tools.providers.ollama_provider.fetch_available_models", _fail)
     assert auto_refresh_on_startup(config, config_path=cfg_path) is None
 
 
@@ -188,7 +188,7 @@ def test_auto_refresh_skipped_for_chatgpt(monkeypatch):
     def _fail(*args, **kwargs):
         raise AssertionError("fetch must not run for non-ollama providers")
 
-    monkeypatch.setattr("tools.ollama_models.fetch_available_models", _fail)
+    monkeypatch.setattr("tools.providers.ollama_provider.fetch_available_models", _fail)
     assert auto_refresh_on_startup(config, config_path="config.yaml") is None
 
 
@@ -197,7 +197,7 @@ def test_auto_refresh_absent_key_defaults_on(tmp_path, monkeypatch):
     # must still behave as enabled (matches the schema default).
     cfg_path = _write_config(tmp_path / "config.yaml")
     monkeypatch.setattr(
-        "tools.ollama_models.fetch_available_models",
+        "tools.providers.ollama_provider.fetch_available_models",
         lambda host, api_key_env="OLLAMA_API_KEY", timeout=5.0: ["glm-5.3:cloud"],
     )
     config = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))

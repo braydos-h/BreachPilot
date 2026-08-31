@@ -1,33 +1,31 @@
 // BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 // Benchmarks dashboard: overview cards, run panel, history, run list, comparison.
 // Optimized for fast perceived load: progressive skeletons, parallel fetches, incremental history.
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Activity, Clock3, FlaskConical, Loader2 } from "lucide-react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Activity, Bookmark, Clock3, FlaskConical, Loader2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState, SkeletonCards, SkeletonRows } from "@/components/Loading";
 import { fetchOverview, fetchRun, fetchRunEvents, fetchRuns } from "@/features/benchmarks/api";
+import { isActiveState, runStatusToBadge } from "@/features/benchmarks/format";
 import { MetricCards } from "@/features/benchmarks/MetricCards";
 import { RunBenchmarkPanel } from "@/features/benchmarks/RunBenchmarkPanel";
 import { ScenarioResultsTable, StatusBadge } from "@/features/benchmarks/ScenarioResultsTable";
 import { BenchmarkTimeline } from "@/features/benchmarks/BenchmarkTimeline";
 import { ComparisonView } from "@/features/benchmarks/ComparisonView";
 import { HistoryCharts } from "@/features/benchmarks/HistoryCharts";
-import { formatCost, formatDuration, formatPct } from "@/features/benchmarks/MetricCards";
+import { formatCost, formatDuration, formatPct } from "@/features/benchmarks/format";
 import type { RunDetail, RunSummary } from "@/features/benchmarks/types";
 import { useModels } from "@/api/hooks";
 import { formatRelative } from "@/lib/utils";
 
 const REFRESH_MS = 3000;
 
-function isActiveState(state: string): boolean {
-  return state === "running" || state === "starting" || state === "cancelling";
-}
-
 export function BenchmarksPage() {
   const models = useModels();
+  const queryClient = useQueryClient();
   const defaultModel = models.data?.default_alias ?? "";
 
   const overview = useQuery({
@@ -97,7 +95,20 @@ export function BenchmarksPage() {
   const overviewError = overview.isError ? overview.error : null;
 
   const latestLoading = !!latestRunId && latestRunQuery.isLoading;
-  const activeBanner = active.run_id && isActiveState(active.state);
+  const activeBusy = !!active.run_id && isActiveState(active.state);
+  const activeBanner = activeBusy;
+
+  // When an active run reaches a terminal state, the polling intervals above
+  // stop — but the last 3s poll of the extended history may predate the run's
+  // index entry, leaving a stale "Run history". Invalidate once on the
+  // active→terminal transition so every benchmark query refetches.
+  const prevActiveBusy = useRef(false);
+  useEffect(() => {
+    if (prevActiveBusy.current && !activeBusy) {
+      void queryClient.invalidateQueries({ queryKey: ["benchmarks"] });
+    }
+    prevActiveBusy.current = activeBusy;
+  }, [activeBusy, queryClient]);
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 p-4 md:p-6">
@@ -156,6 +167,64 @@ export function BenchmarksPage() {
         </Card>
       )}
 
+      {/* A run failed to start/execute — surface the service's error instead of silently idling */}
+      {active.state === "error" && active.error ? (
+        <Card className="border-red-500/30 bg-red-500/5" data-testid="benchmark-error-banner">
+          <CardContent className="flex flex-wrap items-center gap-3 py-3">
+            <span className="text-sm font-medium text-red-400">Last benchmark attempt failed</span>
+            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={active.error}>
+              {active.error}
+            </span>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* Regression baseline — persisted reference the run panel can compare against */}
+      {overview.data?.baseline?.exists && (
+        <Card className="border-primary/20" data-testid="benchmark-baseline">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Bookmark className="h-3.5 w-3.5 text-primary" /> Regression baseline
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+            {overview.data.baseline.run_id ? (
+              <Link
+                to={`/benchmarks/${overview.data.baseline.run_id}`}
+                className="font-mono text-xs underline-offset-4 hover:underline"
+              >
+                {overview.data.baseline.run_id}
+              </Link>
+            ) : (
+              <span className="font-mono text-xs">{overview.data.baseline.path}</span>
+            )}
+            <span className="text-muted-foreground">
+              success{" "}
+              <span className="font-medium tabular-nums text-foreground">
+                {formatPct(overview.data.baseline.verified_success_rate)}
+              </span>
+            </span>
+            <span className="text-muted-foreground">
+              FP{" "}
+              <span className="font-medium tabular-nums text-foreground">
+                {formatPct(overview.data.baseline.false_positive_rate)}
+              </span>
+            </span>
+            {typeof overview.data.baseline.median_solve_time === "number" && (
+              <span className="text-muted-foreground">
+                median <span className="font-medium tabular-nums text-foreground">{formatDuration(overview.data.baseline.median_solve_time)}</span>
+              </span>
+            )}
+            {typeof overview.data.baseline.estimated_cost === "number" && (
+              <span className="text-muted-foreground">
+                cost <span className="font-medium tabular-nums text-foreground">{formatCost(overview.data.baseline.estimated_cost)}</span>
+              </span>
+            )}
+            <span className="text-xs text-muted-foreground">new runs can be checked against this in the panel below</span>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Latest run — progressive: skeletons while overview/latestRun fetch */}
       {overviewLoading ? (
         <Card>
@@ -179,7 +248,7 @@ export function BenchmarksPage() {
             <Link to={`/benchmarks/${summary.run_id}`} className="font-mono text-sm underline-offset-4 hover:underline">
               {summary.run_id}
             </Link>
-            <StatusBadge status="completed" />
+            <StatusBadge status="VERIFIED" />
             <span className="text-xs text-muted-foreground">{formatRelative(summary.timestamp)}</span>
             {latestLoading && <span className="flex items-center gap-1 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" /> updating…</span>}
           </div>
@@ -272,7 +341,7 @@ export function BenchmarksPage() {
                           </td>
                           <td className="px-3 py-2">{r.suite}</td>
                           <td className="px-3 py-2">
-                            <StatusBadge status={r.status === "completed" ? "VERIFIED" : "FAILED"} />
+                            <StatusBadge status={runStatusToBadge(r.status)} />
                           </td>
                           <td className="px-3 py-2 tabular-nums">
                             {r.solved}/{r.trials_total} ({formatPct(r.verified_success_rate)})

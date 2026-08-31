@@ -23,7 +23,15 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Iterator, Mapping
+from typing import TYPE_CHECKING, Any, Iterator, Mapping
+
+from .base import BaseProvider, make_model_client
+from .types import ModelInfo, ProviderCapabilities, ProviderDiscoveryError, ProviderHealth
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from tools.model_router import ModelRouter
+
+    from .types import ModelClient
 
 try:
     import httpx
@@ -141,17 +149,26 @@ def _convert_messages_to_input(messages: Any) -> list[dict[str, Any]]:
     * assistant with plain content
     * assistant with tool_calls -> function_call items (synthetic call_id where needed)
     * tool -> function_call_output items (matched to prior calls in order)
+
+    Well-formedness contract enforced for the hosted Responses gateway:
+
+    * **Adjacency** — every ``function_call`` item is immediately followed by
+      its ``function_call_output``. The agent loop appends operator notes
+      (service detection, research advisories, replan prompts) between tool
+      results; the gateway closes the tool-result block at the first
+      non-output item, which orphaned the later calls of the same turn
+      ("No tool output found for tool call call_1" 400s from round 2 onward).
+      Outputs are therefore attached to their call and emitted adjacent to it.
+    * **Totality** — every ``function_call`` gets exactly one output. When a
+      tool never returned (interrupted run, exhausted budget), a synthesized
+      placeholder output keeps the request valid; orphan tool results with no
+      pending call are demoted to user items instead of bare
+      ``function_call_output`` items (which strict gateways reject).
     """
     if not messages:
         return []
     if not isinstance(messages, list):
         messages = list(messages)
-
-    input_items: list[dict[str, Any]] = []
-    # queue of pending call_ids in order of creation (for matching outputs)
-    pending: list[str] = []
-    # map from pending slot index -> call_id already consumed? we pop in order.
-    counter = 0
 
     # We also need to handle assistant tool_calls that may be dict or object.
     # Helper to get field like chatgpt provider's _get_field.
@@ -159,6 +176,51 @@ def _convert_messages_to_input(messages: Any) -> list[dict[str, Any]]:
         if isinstance(obj, dict):
             return obj.get(key, default)
         return getattr(obj, key, default)
+
+    # First pass: walk messages in order collecting an op sequence.
+    #   ("item", dict)                -> plain role item, emitted verbatim
+    #   ("call", entry)               -> function_call; entry holds the output
+    #                                    slot so assembly can emit call+output
+    #                                    adjacent even when the result arrives
+    #                                    later in the walk
+    #   ("orphan", (tool_name, text)) -> tool result with no pending call;
+    #                                    demoted to a user item at its position
+    seq: list[tuple[str, Any]] = []
+    pending: list[dict[str, Any]] = []
+    counter = 0
+    used_ids: set[str] = set()
+
+    def _synthetic_id() -> str:
+        nonlocal counter
+
+        while True:
+            cid = f"call_{counter}"
+            counter += 1
+            if cid not in used_ids:
+                return cid
+
+    def _new_call_entry(call_id: str, name: str, args_str: str) -> dict[str, Any]:
+        entry = {"call_id": call_id, "name": name, "arguments": args_str, "output": None}
+        used_ids.add(call_id)
+        pending.append(entry)
+        seq.append(("call", entry))
+        return entry
+
+    def _attach_output(explicit_id: Any, tool_name: str, content: str) -> None:
+        entry: dict[str, Any] | None = None
+        if explicit_id:
+            wanted = str(explicit_id)
+            for cand in pending:
+                if cand["call_id"] == wanted:
+                    entry = cand
+                    pending.remove(cand)
+                    break
+        if entry is None and pending:
+            entry = pending.pop(0)
+        if entry is not None:
+            entry["output"] = content if content else "(empty result)"
+        else:
+            seq.append(("orphan", (tool_name, content)))
 
     for msg in messages:
         if not isinstance(msg, dict):
@@ -168,58 +230,51 @@ def _convert_messages_to_input(messages: Any) -> list[dict[str, Any]]:
                 content = _normalize_content(_get(msg, "content", ""))
             except Exception:
                 continue
-            if role == "system":
-                input_items.append({"role": "system", "content": content})
-            elif role == "user":
-                input_items.append({"role": "user", "content": content})
+            if role == "tool":
+                _attach_output(None, "", content)
             elif role == "assistant":
                 if content:
-                    input_items.append({"role": "assistant", "content": content})
-            elif role == "tool":
-                input_items.append({"type": "function_call_output", "call_id": f"call_{counter}", "output": content})
-                counter += 1
+                    seq.append(("item", {"role": "assistant", "content": content}))
+            else:
+                seq.append(("item", {"role": "system" if role == "system" else "user", "content": content}))
             continue
 
         role = str(msg.get("role") or "").strip().lower()
 
         if role in ("system", "developer"):
             content = _normalize_content(msg.get("content"))
-            # Preserve empty? Skip empty system?
-            input_items.append({"role": role, "content": content})
+            seq.append(("item", {"role": role, "content": content}))
             continue
 
         if role == "user":
             content = _normalize_content(msg.get("content"))
-            # Some history may have tool_name interleaved? No, user is plain.
-            input_items.append({"role": "user", "content": content})
+            seq.append(("item", {"role": "user", "content": content}))
+            continue
+
+        if role == "tool":
+            tool_name = str(msg.get("tool_name") or msg.get("name") or "").strip()
+            content = _normalize_content(msg.get("content"))
+            _attach_output(msg.get("tool_call_id") or msg.get("call_id") or msg.get("id"), tool_name, content)
             continue
 
         if role == "assistant":
             content = _normalize_content(msg.get("content"))
             thinking = _normalize_content(msg.get("thinking"))
-            # Some callers store assistant text in content, thinking separately; Prefer content
-            text_for_msg = content
-            # tool_calls may be under "tool_calls" key
             raw_tc = msg.get("tool_calls")
             if raw_tc is None:
-                # Some paths use function call shape already? fallback
                 raw_tc = []
 
             # If no tool calls, emit assistant message if there is text
             if not raw_tc:
-                # Prefer content, fallback to thinking if content empty? But thinking is not user-facing.
-                if text_for_msg:
-                    input_items.append({"role": "assistant", "content": text_for_msg})
-                elif thinking:
-                    # Don't send thinking as assistant content for Responses — drop.
-                    pass
+                if content:
+                    seq.append(("item", {"role": "assistant", "content": content}))
+                # thinking is never user-facing for Responses — drop
                 continue
 
-            # There are tool calls -> emit assistant content separately if present
-            if text_for_msg:
-                input_items.append({"role": "assistant", "content": text_for_msg})
+            # Assistant text precedes its calls; outputs stay adjacent to calls
+            if content:
+                seq.append(("item", {"role": "assistant", "content": content}))
 
-            # Emit each tool call as function_call item
             for tc in raw_tc or []:
                 func = _get(tc, "function", {}) or {}
                 if isinstance(func, dict):
@@ -229,10 +284,7 @@ def _convert_messages_to_input(messages: Any) -> list[dict[str, Any]]:
                     name = str(_get(tc, "name", "") or "").strip()
                     args = _get(tc, "arguments", "")
                 if not name:
-                    # Try alternative shape: {"name": "...", "arguments": ...}
-                    name = str(_get(tc, "name", "") or "").strip()
-                    if not name:
-                        continue
+                    continue
                 # arguments must be JSON string
                 if isinstance(args, dict):
                     try:
@@ -240,7 +292,6 @@ def _convert_messages_to_input(messages: Any) -> list[dict[str, Any]]:
                     except Exception:
                         args_str = "{}"
                 elif isinstance(args, str):
-                    # Keep string as-is (expected JSON)
                     args_str = args
                 elif args is None:
                     args_str = "{}"
@@ -251,86 +302,47 @@ def _convert_messages_to_input(messages: Any) -> list[dict[str, Any]]:
                         args_str = str(args)
 
                 call_id = _get(tc, "id", None) or _get(tc, "call_id", None) or _get(func, "call_id", None)
-                if not call_id:
-                    # Check nested id in top-level tc
-                    call_id = tc.get("call_id") if isinstance(tc, dict) else None
-                if not call_id:
-                    call_id = f"call_{counter}"
-                    counter += 1
+                if not call_id or str(call_id) in used_ids:
+                    call_id = _synthetic_id()
                 else:
                     call_id = str(call_id)
-                # Ensure uniqueness
-                # Avoid duplicate call_ids — if already pending, make unique suffix
-                if call_id in pending:
-                    call_id = f"{call_id}_{counter}"
-                    counter += 1
-                input_items.append(
-                    {
-                        "type": "function_call",
-                        "call_id": call_id,
-                        "name": name,
-                        "arguments": args_str,
-                    }
-                )
-                pending.append(call_id)
-            continue
-
-        if role == "tool":
-            # Tool result -> function_call_output
-            tool_name = str(msg.get("tool_name") or msg.get("name") or "").strip()
-            content = _normalize_content(msg.get("content"))
-            tool_call_id = msg.get("tool_call_id") or msg.get("call_id") or msg.get("id") or ""
-            if tool_call_id:
-                call_id = str(tool_call_id)
-                # Remove from pending if present
-                if call_id in pending:
-                    pending.remove(call_id)
-                # Emit with that id
-                input_items.append(
-                    {
-                        "type": "function_call_output",
-                        "call_id": call_id,
-                        "output": content,
-                    }
-                )
-            else:
-                # No explicit id: match the earliest pending call in FIFO order
-                if pending:
-                    call_id = pending.pop(0)
-                    input_items.append(
-                        {
-                            "type": "function_call_output",
-                            "call_id": call_id,
-                            "output": content,
-                        }
-                    )
-                else:
-                    # Orphan tool output (e.g., after invalid_tool_call or no prior call)
-                    # Synthesize an id so Responses can associate it. Include tool name in
-                    # output prefix to preserve context (some providers surface it).
-                    call_id = f"call_{counter}"
-                    counter += 1
-                    # Prefix with tool name for traceability if available
-                    prefix = f"[{tool_name}] " if tool_name else ""
-                    input_items.append(
-                        {
-                            "type": "function_call_output",
-                            "call_id": call_id,
-                            "output": f"{prefix}{content}" if prefix and content else content,
-                        }
-                    )
-                    # Also emit a preceding function_call to make the history well-formed?
-                    # We don't have a matching call — leave as output-only (some
-                    # Responses servers accept orphan outputs). To be safe, we
-                    # also ensure the model sees the output as user-provided context
-                    # by falling back to a user message if the provider rejects orphan outputs.
-                    # For now, emit only the output; the provider may accept it.
+                _new_call_entry(call_id, name, args_str)
             continue
 
         # Unknown role -> treat as user
         content = _normalize_content(msg.get("content"))
         if content or role:
-            input_items.append({"role": "user", "content": content if content else str(msg)})
+            seq.append(("item", {"role": "user", "content": content if content else str(msg)}))
+
+    # Second pass: assemble with call -> output adjacency guaranteed.
+    input_items: list[dict[str, Any]] = []
+    for kind, payload in seq:
+        if kind == "item":
+            input_items.append(payload)
+        elif kind == "orphan":
+            tool_name, content = payload
+            prefix = f"[{tool_name}] " if tool_name else ""
+            text = f"{prefix}{content}" if prefix and content else (content or "(empty tool result)")
+            input_items.append({"role": "user", "content": text})
+        else:  # call
+            output = payload["output"]
+            if output is None:
+                output = "(no tool result recorded — tool execution was interrupted)"
+            input_items.append(
+                {
+                    "type": "function_call",
+                    "call_id": payload["call_id"],
+                    "name": payload["name"],
+                    "arguments": payload["arguments"],
+                }
+            )
+            input_items.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": payload["call_id"],
+                    "output": output,
+                }
+            )
 
     return input_items
 
@@ -1086,3 +1098,311 @@ def discover_opencode_go_models(
     """Stateless discovery helper (for tests)."""
     client = OpenCodeGoResponsesClient(base_url=base_url, api_key=api_key or "", timeout=timeout, config=cfg)
     return client.discover_models(base_url, cfg)
+
+
+# ---------------------------------------------------------------------------
+# Responses-model filter + router builder (moved from tools/model_router.py)
+# ---------------------------------------------------------------------------
+
+
+def is_opencode_responses_model(
+    model_id: str,
+    raw_item: Mapping[str, Any] | None,
+    cfg: Mapping[str, Any] | None = None,
+) -> bool:
+    """True if a discovered model is safe to route through the Responses adapter.
+
+    The hosted catalog mixes providers/protocols.  Our Responses adapter must
+    NOT blindly expose ``/chat/completions``-only or Anthropic ``/messages``-only
+    models via ``/responses``.  The reliable signal (when present) is an
+    explicit protocol hint in the discovery payload (e.g. ``supported_api``,
+    ``endpoints``, ``capabilities`` containing ``responses``).  When no hint
+    exists we conservatively allow only the known Responses family and the
+    configured default.
+    """
+    cleaned = str(model_id or "").strip()
+    if not cleaned:
+        return False
+    # Always allow the configured default
+    default = str((cfg or {}).get("default_model") or "muse-spark-1.2-contributor")
+    if cleaned == default:
+        return True
+    # Known Responses family
+    if cleaned == "muse-spark-1.2-contributor":
+        return True
+    # Heuristic for spark family (future spark releases stay on Responses)
+    if "muse-spark" in cleaned or "spark" in cleaned.lower():
+        return True
+    if raw_item is not None:
+        # Look for explicit protocol metadata
+        for key in ("supported_api", "api", "protocol", "endpoints", "capabilities", "supported_endpoints", "type"):
+            val = raw_item.get(key)  # type: ignore[attr-defined]
+            if val is None:
+                continue
+            text = str(val).lower() if not isinstance(val, list) else " ".join(str(v).lower() for v in val)
+            if "response" in text:
+                return True
+        # Some catalogs nest under metadata
+        meta = raw_item.get("metadata") if isinstance(raw_item.get("metadata"), Mapping) else None  # type: ignore[attr-defined]
+        if isinstance(meta, Mapping):
+            for key in ("supported_api", "protocol", "endpoints"):
+                val = meta.get(key)
+                if val is None:
+                    continue
+                text = str(val).lower() if not isinstance(val, list) else " ".join(str(v).lower() for v in val)
+                if "response" in text:
+                    return True
+    return False
+
+
+def build_opencode_go_router(
+    opencode_config: Mapping[str, Any],
+    *,
+    request_timeout_seconds: float | None = None,
+) -> "ModelRouter":
+    """Build a router backed by the hosted OpenCode Go Responses API.
+
+    The API key is resolved from ``api_key_env`` (default ``OPENCODE_GO_API_KEY``)
+    but a missing key does NOT block router construction — the resulting
+    ``OpenCodeGoResponsesClient`` will surface a clear ``API key not configured``
+    error on the first ``chat`` call, matching the Ollama Cloud behaviour
+    (preview succeeds, auth fails on first generation). This prevents a silent
+    ``500`` on ``POST /runs`` when the operator has switched provider but not
+    yet set the key.
+    """
+    from tools.model_router import ModelRouter
+
+    cfg = dict(opencode_config)
+    import os
+
+    env_name = str(cfg.get("api_key_env") or "OPENCODE_GO_API_KEY").strip() or "OPENCODE_GO_API_KEY"
+    api_key = (os.environ.get(env_name, "") or "").strip()
+    # Do NOT raise here — defer to chat-time so run previews still succeed.
+    base_url = str(cfg.get("base_url") or _DEFAULT_BASE_URL).rstrip("/")
+    timeout = request_timeout_seconds
+    if timeout is None and cfg.get("request_timeout_seconds") is not None:
+        try:
+            timeout = float(cfg["request_timeout_seconds"])
+        except (TypeError, ValueError):
+            timeout = None
+    if timeout is None:
+        timeout = 300.0
+
+    shared = OpenCodeGoResponsesClient(
+        base_url=base_url,
+        api_key=api_key,
+        timeout=float(timeout),
+        default_model=str(cfg.get("default_model") or _DEFAULT_MODEL),
+        config=cfg,
+    )
+
+    # Resolve model list: explicit -> discover (filtered) -> fallback
+    configured = cfg.get("models") or []
+    if configured:
+        model_ids = [str(m).strip() for m in configured if str(m).strip()]
+    else:
+        model_ids = []
+        try:
+            discovered = shared.discover_models(base_url, cfg)
+        except Exception:
+            discovered = []
+        if discovered:
+            # If discovery returned ids but we have no raw metadata, filter by id heuristic
+            filtered = [mid for mid in discovered if is_opencode_responses_model(mid, None, cfg)]
+            if filtered:
+                model_ids = filtered
+            else:
+                # Discovery contained only non-Responses models; fall back to default
+                model_ids = []
+
+    if not model_ids:
+        default_model = str(cfg.get("default_model") or _DEFAULT_MODEL)
+        model_ids = [default_model]
+
+    # De-duplicate preserving order and ensure default present
+    seen: set[str] = set()
+    unique: list[str] = []
+    for mid in model_ids:
+        if mid not in seen:
+            seen.add(mid)
+            unique.append(mid)
+    default_model = str(cfg.get("default_model") or _DEFAULT_MODEL)
+    if default_model not in seen:
+        unique.append(default_model)
+
+    router = ModelRouter()
+    for model_id in unique:
+        router.register(
+            model_id,
+            make_model_client(
+                model_id,
+                alias=model_id,
+                request_timeout_seconds=float(timeout) if timeout is not None else None,
+                raw_client=shared,
+                provider="opencode_go",
+            ),
+        )
+    return router
+
+
+class OpenCodeGoProvider(BaseProvider):
+    """OpenCode Go provider adapter: hosted OpenAI Responses API.
+
+    The reference non-Ollama provider — sees only the canonical
+    ``context_window_tokens`` chat kwarg (dropped here; Responses has no
+    context-window override), OpenAI-shaped tool schemas translated by
+    ``_convert_tool_schemas``, and BreachPilot-format responses via
+    ``_normalize_responses_output``.
+    """
+
+    id = "opencode_go"
+    display_name = "OpenCode Go"
+    capabilities = ProviderCapabilities(
+        chat=True,
+        streaming=True,
+        tool_calls=True,
+        embeddings=False,
+        model_discovery=True,
+        reasoning=True,
+    )
+
+    def is_configured(self, cfg: Mapping[str, Any]) -> bool:
+        # A missing API key must NOT block router construction / previews —
+        # the first chat call surfaces a clear auth error (module contract).
+        return bool(cfg) and (bool(cfg.get("enabled")) or bool(cfg.get("base_url")))
+
+    def build_router(
+        self,
+        config: Mapping[str, Any] | None = None,
+        *,
+        request_timeout_seconds: float | None = None,
+        provider_config: Mapping[str, Any] | None = None,
+    ) -> "ModelRouter":
+        cfg = dict(provider_config) if provider_config is not None else self.provider_config(config)
+        return build_opencode_go_router(cfg, request_timeout_seconds=request_timeout_seconds)
+
+    def build_client(
+        self,
+        config: Mapping[str, Any] | None = None,
+        alias: str = "",
+        *,
+        request_timeout_seconds: float | None = None,
+    ) -> "ModelClient":
+        cfg = self.provider_config(config)
+        import os
+
+        env_name = str(cfg.get("api_key_env") or "OPENCODE_GO_API_KEY").strip() or "OPENCODE_GO_API_KEY"
+        api_key = (os.environ.get(env_name, "") or "").strip()
+        timeout = request_timeout_seconds
+        if timeout is None and cfg.get("request_timeout_seconds") is not None:
+            try:
+                timeout = float(cfg["request_timeout_seconds"])
+            except (TypeError, ValueError):
+                timeout = None
+        base_url = str(cfg.get("base_url") or _DEFAULT_BASE_URL).rstrip("/")
+        shared = OpenCodeGoResponsesClient(
+            base_url=base_url,
+            api_key=api_key,
+            timeout=float(timeout) if timeout is not None else float(_DEFAULT_TIMEOUT),
+            default_model=str(cfg.get("default_model") or alias or _DEFAULT_MODEL),
+            config=cfg,
+        )
+        model_id = str(alias or cfg.get("default_model") or _DEFAULT_MODEL)
+        return make_model_client(
+            model_id,
+            alias=model_id,
+            request_timeout_seconds=timeout,
+            raw_client=shared,
+            provider="opencode_go",
+        )
+
+    def list_models(self, config: Mapping[str, Any] | None = None) -> list[ModelInfo]:
+        """Live model discovery from ``{base_url}/models``.
+
+        Missing API key and unreachable endpoint raise
+        :class:`ProviderDiscoveryError` with the registry-mode fallback
+        (``opencode_go.models`` / ``default_model``); a successful probe is
+        filtered to Responses-compatible models (falling back to the raw list
+        when filtering removes everything). Secrets are redacted from errors.
+        """
+        cfg = self.provider_config(config)
+        configured = [str(m).strip() for m in (cfg.get("models") or []) if str(m).strip()]
+        default_model = str(cfg.get("default_model") or _DEFAULT_MODEL)
+        context_window = cfg.get("context_window")
+        ctx = int(context_window) if isinstance(context_window, (int, float)) else None
+
+        def _infos(ids: list[str]) -> list[ModelInfo]:
+            infos: list[ModelInfo] = []
+            seen: set[str] = set()
+            for model_id in ids:
+                if model_id in seen:
+                    continue
+                seen.add(model_id)
+                infos.append(
+                    ModelInfo(id=model_id, label=model_id, context_window=ctx, default=(model_id == default_model))
+                )
+            return infos
+
+        if configured:
+            return _infos(configured)
+        import os
+
+        base_url = str(cfg.get("base_url") or _DEFAULT_BASE_URL).rstrip("/")
+        env_name = str(cfg.get("api_key_env") or "OPENCODE_GO_API_KEY")
+        api_key = (os.environ.get(env_name, "") or "").strip()
+        if not api_key:
+            raise ProviderDiscoveryError(
+                f"OpenCode Go API key not set ({env_name}). Set it via secrets or env.",
+                fallback_models=[default_model],
+            )
+        try:
+            import httpx
+
+            headers = {"Authorization": f"Bearer {api_key}"}
+            with httpx.Client(timeout=5.0, headers=headers) as client:
+                resp = client.get(f"{base_url}/models")
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception as exc:
+            err_text = str(exc)
+            if api_key and api_key in err_text:
+                err_text = err_text.replace(api_key, "[REDACTED]")
+            raise ProviderDiscoveryError(
+                f"OpenCode Go unreachable: {err_text}", fallback_models=[default_model]
+            ) from exc
+        raw_data = data.get("data") if isinstance(data, dict) else None
+        if isinstance(raw_data, list):
+            # Filter to Responses-compatible models when we can reliably tell
+            ids = [mid for m in raw_data if isinstance(m, dict) for mid in [str(m.get("id") or "")] if mid]
+            filtered = [mid for mid in ids if is_opencode_responses_model(mid, None, cfg)]
+            # If filtering removed everything, fall back to raw list (at least show something)
+            return _infos(filtered or ids or [default_model])
+        # Fallback for non-standard shape
+        return _infos([str(m.get("id", "")) for m in (raw_data or []) if isinstance(m, dict) and m.get("id")] or [default_model])
+
+    def title_model(self, config: Mapping[str, Any] | None = None) -> str:
+        return str(self.provider_config(config).get("default_model") or _DEFAULT_MODEL)
+
+    def health(self, config: Mapping[str, Any] | None = None) -> ProviderHealth:
+        cfg = self.provider_config(config)
+        checks: list[dict[str, Any]] = []
+        base_ok = bool(cfg.get("base_url"))
+        checks.append(
+            {
+                "name": "opencode_go_endpoint",
+                "ok": base_ok,
+                "hint": "" if base_ok else "opencode_go.base_url is empty",
+            }
+        )
+        import os
+
+        env_name = str(cfg.get("api_key_env") or "OPENCODE_GO_API_KEY").strip() or "OPENCODE_GO_API_KEY"
+        key_present = bool((os.environ.get(env_name, "") or "").strip())
+        checks.append(
+            {
+                "name": "opencode_go_api_key",
+                "ok": key_present,
+                "hint": "" if key_present else f"${env_name} is not set — runs will fail on first generation",
+            }
+        )
+        return ProviderHealth(checks=checks)

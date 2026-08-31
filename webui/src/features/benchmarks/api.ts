@@ -11,6 +11,7 @@ import type {
   RunIndexRow,
   ScenarioInfo,
   SuiteInfo,
+  Trial,
 } from "@/features/benchmarks/types";
 
 export async function fetchOverview(): Promise<{
@@ -20,10 +21,6 @@ export async function fetchOverview(): Promise<{
   baseline: BaselineMeta;
 }> {
   return apiFetch("/api/v1/benchmarks");
-}
-
-export async function fetchSuites(): Promise<{ suites: SuiteInfo[] }> {
-  return apiFetch("/api/v1/benchmarks/suites");
 }
 
 export async function fetchSuiteScenarios(suite: string): Promise<{ suite: string; scenarios: ScenarioInfo[] }> {
@@ -41,7 +38,13 @@ export async function fetchRun(runId: string): Promise<RunDetail> {
   return apiFetch(`/api/v1/benchmarks/runs/${encodeURIComponent(runId)}`);
 }
 
-export async function fetchRunScenarios(runId: string): Promise<{ run_id: string; scenarios: unknown[] }> {
+/**
+ * Per-scenario trial results. Unlike `/runs/{id}` (whose `trials` array is
+ * only persisted at finalize), the runner writes each `trial_<n>.json` the
+ * moment that trial ends — so during a live run this is the only endpoint
+ * that reflects completed trials. Payload shape matches `Trial`.
+ */
+export async function fetchRunScenarios(runId: string): Promise<{ run_id: string; scenarios: Trial[] }> {
   return apiFetch(`/api/v1/benchmarks/runs/${encodeURIComponent(runId)}/scenarios`);
 }
 
@@ -62,10 +65,6 @@ export async function startBenchmarkRun(req: BenchmarkRunRequest): Promise<{ run
 
 export async function cancelBenchmarkRun(runId: string): Promise<{ run_id: string; cancelled: boolean }> {
   return apiFetch(`/api/v1/benchmarks/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" });
-}
-
-export async function fetchBaseline(): Promise<BaselineMeta> {
-  return apiFetch("/api/v1/benchmarks/baseline");
 }
 
 export async function saveBaseline(runId: string): Promise<{ saved: boolean; path: string; run_id: string }> {

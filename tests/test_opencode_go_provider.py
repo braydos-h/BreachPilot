@@ -710,6 +710,129 @@ def test_tool_result_without_id_uses_fifo(monkeypatch):
     assert fcos[1]["call_id"] == fcs[1]["call_id"]
 
 
+def test_interleaved_user_notes_keep_call_output_adjacent(monkeypatch):
+    """Regression: benchmark run 20260831_010450_09800 failed from round 2 with
+    'No tool output found for tool call call_1' (400). The agent loop appends
+    operator notes (Detected services / research advisories) between tool
+    results; the gateway closes the tool-result block at the first non-output
+    item, orphaning the later calls of the same assistant turn. Each
+    function_call must now be IMMEDIATELY followed by its function_call_output.
+    """
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "k")
+    seen: list[dict[str, Any]] = []
+
+    def handler(url, body, headers=None):
+        seen.append(body)
+        return _FakeResponse(_responses_text_model("ok"))
+
+    _FAKE_HTTPX.set("POST", "/responses", handler)
+    client = og.OpenCodeGoResponsesClient(api_key="k")
+    # Exact round-2 history shape produced by runner/_impl.py after round 1
+    history = [
+        {"role": "system", "content": "SYSTEM"},
+        {"role": "user", "content": "MISSION"},
+        {"role": "user", "content": "[RESEARCH ADVISORY] startup"},
+        {
+            "role": "assistant",
+            "content": "I'll start by checking the target OS and running initial recon in parallel.",
+            "thinking": "",
+            "tool_calls": [
+                {"function": {"name": "check_os", "arguments": {"target_ip": "127.0.0.1"}}},
+                {
+                    "function": {
+                        "name": "quick_scan",
+                        "arguments": {"target_ip": "127.0.0.1", "ports": "22,135"},
+                    }
+                },
+            ],
+        },
+        {"role": "tool", "tool_name": "check_os", "content": "OS_CHECK_RESULTS: WINDOWS"},
+        {"role": "user", "content": "Detected services: ssh on 127.0.0.1:22."},
+        {"role": "user", "content": "[RESEARCH ADVISORY] failed"},
+        {"role": "tool", "tool_name": "quick_scan", "content": "QUICK_SCAN_RESULTS: 2/14 ports open"},
+        {"role": "user", "content": "Detected services: ssh on :22; msrpc on :135."},
+        {"role": "user", "content": "[RESEARCH ADVISORY] failed"},
+    ]
+    client.chat(model="muse-spark-1.2-contributor", messages=history)
+    inp = seen[0]["input"]
+
+    fcs = [x for x in inp if x.get("type") == "function_call"]
+    fcos = [x for x in inp if x.get("type") == "function_call_output"]
+    assert len(fcs) == 2 and len(fcos) == 2
+    # FIFO pairing preserved: check_os result -> check_os call, quick_scan -> quick_scan
+    assert fcos[0]["call_id"] == fcs[0]["call_id"] and "OS_CHECK_RESULTS" in fcos[0]["output"]
+    assert fcos[1]["call_id"] == fcs[1]["call_id"] and "QUICK_SCAN_RESULTS" in fcos[1]["output"]
+    # Adjacency: every function_call is immediately followed by its output
+    for idx, item in enumerate(inp):
+        if item.get("type") == "function_call":
+            nxt = inp[idx + 1] if idx + 1 < len(inp) else {}
+            assert nxt.get("type") == "function_call_output", f"call {item['call_id']} not adjacent to its output"
+            assert nxt["call_id"] == item["call_id"]
+    # Operator notes are preserved as user items (not dropped)
+    joined = " ".join(x.get("content", "") for x in inp if x.get("role") == "user")
+    assert "Detected services" in joined and "RESEARCH ADVISORY" in joined
+
+
+def test_missing_tool_output_synthesized(monkeypatch):
+    """A call whose tool never returned (interrupted run / exhausted budget)
+    still gets a synthesized output so the request stays well-formed."""
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "k")
+    seen: list[dict[str, Any]] = []
+
+    def handler(url, body, headers=None):
+        seen.append(body)
+        return _FakeResponse(_responses_text_model("ok"))
+
+    _FAKE_HTTPX.set("POST", "/responses", handler)
+    client = og.OpenCodeGoResponsesClient(api_key="k")
+    history = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"function": {"name": "a", "arguments": "{}"}},
+                {"function": {"name": "b", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_name": "a", "content": "out a"},
+    ]
+    client.chat(model="muse-spark-1.2-contributor", messages=history)
+    inp = seen[0]["input"]
+    fcs = [x for x in inp if x.get("type") == "function_call"]
+    fcos = [x for x in inp if x.get("type") == "function_call_output"]
+    assert len(fcs) == 2 and len(fcos) == 2
+    assert "out a" in fcos[0]["output"]
+    assert "no tool result recorded" in fcos[1]["output"].lower()
+    for idx, item in enumerate(inp):
+        if item.get("type") == "function_call":
+            assert inp[idx + 1].get("type") == "function_call_output"
+
+
+def test_orphan_tool_output_demoted_to_user_item(monkeypatch):
+    """A tool result with no pending call (e.g. compaction dropped the
+    assistant tool_calls message) must not emit a bare function_call_output —
+    strict gateways reject outputs without calls. It becomes a user item."""
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "k")
+    seen: list[dict[str, Any]] = []
+
+    def handler(url, body, headers=None):
+        seen.append(body)
+        return _FakeResponse(_responses_text_model("ok"))
+
+    _FAKE_HTTPX.set("POST", "/responses", handler)
+    client = og.OpenCodeGoResponsesClient(api_key="k")
+    history = [
+        {"role": "user", "content": "hi"},
+        {"role": "tool", "tool_name": "check_os", "content": "OS_CHECK_RESULTS: WINDOWS"},
+    ]
+    client.chat(model="muse-spark-1.2-contributor", messages=history)
+    inp = seen[0]["input"]
+    assert not [x for x in inp if x.get("type") == "function_call_output"]
+    users = [x for x in inp if x.get("role") == "user"]
+    assert any("check_os" in x["content"] and "OS_CHECK_RESULTS" in x["content"] for x in users)
+
+
 # ---------------------------------------------------------------------------
 # 14. multiple function calls (already covered) — additional: preserves ids
 # ---------------------------------------------------------------------------

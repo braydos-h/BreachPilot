@@ -144,6 +144,25 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "http_host": "127.0.0.1",
         "http_port": 8001,
     },
+    # Provider architecture (docs/provider-development.md). Per-provider
+    # config blocks under ``providers.<id>`` are the modern layout; legacy
+    # top-level blocks (``ollama`` / ``chatgpt`` / ``opencode_go``) remain
+    # supported and are normalized in ONE place,
+    # ``tools.config.loader.get_provider_config``. Default: empty — every
+    # built-in provider keeps reading its legacy block, byte-compatible.
+    "providers": {},
+    # Embedding provider selection (semantic memory / skills embeddings).
+    # ``ollama`` (default) = legacy behavior (local Ollama embeddings at
+    # ``ollama.embed_host``). ``none`` disables embeddings entirely —
+    # semantic memory falls back to keyword storage and NO request (not
+    # even a health probe) is made to any Ollama endpoint.
+    "embeddings": {
+        "provider": "ollama",
+        "host": "",
+        "model": "",
+        "api_key_env": "OLLAMA_API_KEY",
+        "timeout_seconds": 30,
+    },
     # Engine advisory MCP server (``mcp_engine_server.py``): read-only skill
     # search / CVE lookup / run history for foreign AI assistants. Defaults
     # for the CLI entrypoint; HTTP transport is loopback-only via

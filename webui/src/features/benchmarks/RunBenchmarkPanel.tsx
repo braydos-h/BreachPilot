@@ -1,15 +1,21 @@
 // BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 // Run-benchmark panel: suite/scenario selection, trials, model, sandbox, baseline options.
-import { useMemo, useState } from "react";
+//
+// Selection semantics mirror the backend runner exactly: the request carries
+// explicitly-checked scenario ids; an empty selection runs the whole suite.
+// Tag chips are view filters for the checklist only — they are never sent to
+// the API, so what the user sees checked is exactly what will run.
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { FlaskConical, Loader2, Play } from "lucide-react";
+import { FlaskConical, Loader2, Play, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { fetchSuiteScenarios, startBenchmarkRun } from "@/features/benchmarks/api";
+import { isActiveState } from "@/features/benchmarks/format";
 import type { ScenarioInfo, SuiteInfo } from "@/features/benchmarks/types";
 import { cn } from "@/lib/utils";
 
@@ -24,30 +30,53 @@ export function RunBenchmarkPanel({ suites, active, defaultModel }: RunBenchmark
   const queryClient = useQueryClient();
   const [suite, setSuite] = useState(suites[0]?.suite_id ?? "");
   const [scenarios, setScenarios] = useState<ScenarioInfo[]>([]);
+  const [scenariosError, setScenariosError] = useState("");
+  const [scenariosReloading, setScenariosReloading] = useState(false);
+  const [scenariosRetryTick, setScenariosRetryTick] = useState(0);
   const [selectedScenarios, setSelectedScenarios] = useState<Set<string>>(new Set());
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
-  const [loadingScenarios, setLoadingScenarios] = useState(false);
   const [trials, setTrials] = useState(1);
-  const [model, setModel] = useState(defaultModel ?? "");
+  const [model, setModel] = useState("");
   const [sandboxRequired, setSandboxRequired] = useState(true);
   const [checkRegression, setCheckRegression] = useState(false);
   const [saveBaseline, setSaveBaseline] = useState(false);
 
-  const busy = active.state === "running" || active.state === "starting" || active.state === "cancelling";
+  const busy = isActiveState(active.state);
 
-  const loadScenarios = async (suiteId: string) => {
-    setSelectedScenarios(new Set());
-    setScenarios([]);
-    if (!suiteId) return;
-    setLoadingScenarios(true);
-    try {
-      const data = await fetchSuiteScenarios(suiteId);
-      setScenarios(data.scenarios);
-    } catch {
+  // Load the suite's scenario checklist. Re-runs when the suite changes and
+  // on retry; failures are surfaced (never silently swallowed).
+  useEffect(() => {
+    if (!suite) {
       setScenarios([]);
-    } finally {
-      setLoadingScenarios(false);
+      setScenariosError("");
+      return;
     }
+    let cancelled = false;
+    setScenariosError("");
+    setScenariosReloading(true);
+    fetchSuiteScenarios(suite)
+      .then((data) => {
+        if (cancelled) return;
+        setScenarios(data.scenarios);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setScenarios([]);
+        setScenariosError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setScenariosReloading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [suite, scenariosRetryTick]);
+
+  const onSuiteChange = (suiteId: string) => {
+    setSuite(suiteId);
+    setSelectedScenarios(new Set());
+    setSelectedTags(new Set());
+    setScenarios([]);
   };
 
   const allTags = useMemo(() => {
@@ -66,7 +95,6 @@ export function RunBenchmarkPanel({ suites, active, defaultModel }: RunBenchmark
       startBenchmarkRun({
         suite,
         scenarios: [...selectedScenarios],
-        tags: [...selectedTags],
         trials,
         model: model || undefined,
         sandbox_required: sandboxRequired,
@@ -80,7 +108,7 @@ export function RunBenchmarkPanel({ suites, active, defaultModel }: RunBenchmark
   });
 
   const suiteInfo = suites.find((s) => s.suite_id === suite);
-  const selectedCount = selectedTags.size > 0 ? visibleScenarios.length - selectedScenarios.size || visibleScenarios.length : selectedScenarios.size;
+  const willRunCount = selectedScenarios.size > 0 ? selectedScenarios.size : (suiteInfo?.scenarios ?? 0);
 
   return (
     <Card data-testid="run-benchmark-panel">
@@ -102,11 +130,8 @@ export function RunBenchmarkPanel({ suites, active, defaultModel }: RunBenchmark
               id="bench-suite"
               value={suite}
               disabled={busy}
-              onChange={(e) => {
-                setSuite(e.target.value);
-                void loadScenarios(e.target.value);
-              }}
-              className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+              onChange={(e) => onSuiteChange(e.target.value)}
+              className="h-9 w-full rounded-md border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
               <option value="">Select suite…</option>
               {suites.map((s) => (
@@ -126,8 +151,9 @@ export function RunBenchmarkPanel({ suites, active, defaultModel }: RunBenchmark
               value={model}
               disabled={busy}
               onChange={(e) => setModel(e.target.value)}
-              placeholder={defaultModel || "default alias"}
+              placeholder={defaultModel || "server default"}
             />
+            <p className="text-[11px] text-muted-foreground">Blank uses the server's default model.</p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="bench-trials">Trials per scenario</Label>
@@ -159,14 +185,28 @@ export function RunBenchmarkPanel({ suites, active, defaultModel }: RunBenchmark
           </div>
         </div>
 
-        {loadingScenarios && <div className="text-sm text-muted-foreground">Loading scenarios…</div>}
+        {scenariosReloading && <div className="text-sm text-muted-foreground">Loading scenarios…</div>}
+        {scenariosError && (
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+            <span>Failed to load scenarios: {scenariosError}</span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="ml-auto h-7"
+              onClick={() => setScenariosRetryTick((t) => t + 1)}
+            >
+              <RotateCcw className="h-3 w-3" /> Retry
+            </Button>
+          </div>
+        )}
         {visibleScenarios.length > 0 && (
           <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Tag filters">
+            <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Tag filters (list only)">
               {allTags.map((tag) => (
                 <button
                   key={tag}
                   type="button"
+                  aria-pressed={selectedTags.has(tag)}
                   disabled={busy}
                   onClick={() => {
                     setSelectedTags((prev) => {
@@ -189,9 +229,10 @@ export function RunBenchmarkPanel({ suites, active, defaultModel }: RunBenchmark
             </div>
             <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border p-2">
               {visibleScenarios.map((s) => (
-                <label key={s.scenario_id} className="flex items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-muted/40">
+                <div key={s.scenario_id} className="flex items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-muted/40">
                   <Checkbox
-                    checked={selectedScenarios.has(s.scenario_id) || selectedTags.size > 0}
+                    id={`bench-scenario-${s.scenario_id}`}
+                    checked={selectedScenarios.has(s.scenario_id)}
                     disabled={busy}
                     onCheckedChange={(v) => {
                       setSelectedScenarios((prev) => {
@@ -202,27 +243,34 @@ export function RunBenchmarkPanel({ suites, active, defaultModel }: RunBenchmark
                       });
                     }}
                   />
-                  <span className="font-mono text-xs">{s.scenario_id}</span>
-                  <span className="truncate text-muted-foreground">{s.name}</span>
+                  <label htmlFor={`bench-scenario-${s.scenario_id}`} className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
+                    <span className="font-mono text-xs">{s.scenario_id}</span>
+                    <span className="truncate text-muted-foreground">{s.name}</span>
+                  </label>
                   <span className="ml-auto text-[10px] uppercase tracking-wide text-muted-foreground">{s.difficulty}</span>
-                </label>
+                </div>
               ))}
             </div>
+            <p className="text-[11px] text-muted-foreground">
+              Leave every scenario unchecked to run the whole suite. Tags only filter this list.
+            </p>
           </div>
         )}
 
-        {active.error && busy && (
+        {active.error && (busy || active.state === "error") && (
           <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">{active.error}</div>
         )}
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <Button disabled={busy || !suite || startRun.isPending} onClick={() => startRun.mutate()} data-testid="run-benchmark-button">
             {startRun.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
             Run Benchmark
           </Button>
           {busy && <span className="text-sm text-amber-500">A benchmark run is active — watch progress on its page.</span>}
           <span className="ml-auto text-xs text-muted-foreground">
-            {selectedCount > 0 ? `~${selectedCount} scenario(s) × ${trials} trial(s)` : `${suiteInfo?.scenarios ?? 0} scenario(s) × ${trials} trial(s)`}
+            {willRunCount > 0
+              ? `${willRunCount === (suiteInfo?.scenarios ?? 0) && selectedScenarios.size === 0 ? "all " : ""}${willRunCount} scenario(s) × ${trials} trial(s)`
+              : `${trials} trial(s)`}
           </span>
         </div>
         {startRun.isError && (

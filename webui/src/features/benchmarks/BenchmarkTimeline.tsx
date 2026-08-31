@@ -1,23 +1,30 @@
 // BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 // Structured mission-event timeline for a benchmark run.
 import { useMemo } from "react";
-import { AlertCircle, CheckCircle2, Clock, PlayCircle, ShieldAlert, Wrench } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, PlayCircle, ShieldAlert, Wrench, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDuration } from "@/features/benchmarks/MetricCards";
 import type { BenchmarkEvent } from "@/features/benchmarks/types";
 
 const EVENT_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
   run_start: PlayCircle,
+  run_end: CheckCircle2,
+  run_cancelled: XCircle,
+  run_error: AlertCircle,
   target_ready: CheckCircle2,
+  target_provision_failed: AlertCircle,
   sandbox_unavailable: ShieldAlert,
   mission_start: PlayCircle,
   agent_phase: Clock,
+  agent_boot: Wrench,
   agent_tool_start: Wrench,
   agent_tool_result: Wrench,
   oracle_result: CheckCircle2,
+  verify_session_unavailable: ShieldAlert,
+  baseline_saved: CheckCircle2,
+  regression_check: ShieldAlert,
   mission_error: AlertCircle,
   mission_timeout: AlertCircle,
-  run_end: CheckCircle2,
 };
 
 const VERIFIED_TYPES = new Set(["oracle_result", "run_end"]);
@@ -26,14 +33,24 @@ function eventLabel(event: BenchmarkEvent): string {
   switch (event.type) {
     case "run_start":
       return `Benchmark started — ${String(event.payload.scenarios ?? "").slice(0, 120)}`;
+    case "run_end":
+      return `Run ${String(event.payload.status ?? "ended")} — solved ${String(event.payload.solved ?? 0)}/${String(event.payload.trials_total ?? 0)}`;
+    case "run_cancelled":
+      return "Run cancelled by operator";
+    case "run_error":
+      return `Run failed: ${String(event.payload.error ?? "").slice(0, 160)}`;
     case "target_ready":
       return `Target ready: ${event.target || String(event.payload.host ?? "")} (ports ${JSON.stringify(event.payload.ports ?? [])})`;
+    case "target_provision_failed":
+      return `Target provisioning failed: ${String(event.payload.detail ?? "").slice(0, 160)}`;
     case "sandbox_unavailable":
       return "Sandbox unavailable — no host-execution fallback";
     case "mission_start":
       return `Mission started (goal: ${String(event.payload.goal ?? "?")})`;
     case "agent_phase":
       return `Phase: ${String(event.payload.phase ?? "")}`;
+    case "agent_boot":
+      return `Agent: ${String(event.payload.label ?? event.payload.step ?? "boot")}${event.payload.ok === false ? " (failed)" : ""}`;
     case "agent_tool_request":
       return `Tool requested: ${event.tool}`;
     case "agent_tool_start":
@@ -44,12 +61,16 @@ function eventLabel(event: BenchmarkEvent): string {
       return `Model usage: ${String(event.payload.model_calls ?? 0)} calls, ${String(event.payload.total_tokens ?? 0)} tokens`;
     case "oracle_result":
       return `Oracle: ${event.payload.verified ? "VERIFIED" : "NOT verified"} (${String(event.payload.flags_captured ?? 0)}/${String(event.payload.flags_total ?? 0)} flags)`;
+    case "verify_session_unavailable":
+      return "Verifier session degraded — shell checks fail closed";
+    case "baseline_saved":
+      return `Baseline saved: ${String(event.payload.path ?? "")}`;
+    case "regression_check":
+      return `Regression check: ${event.payload.passed ? "passed" : "FAILED"}`;
     case "mission_timeout":
       return "Mission timed out";
     case "mission_error":
       return `Error: ${String(event.payload.error ?? "").slice(0, 160)}`;
-    case "run_end":
-      return `Run ${String(event.payload.status ?? "ended")} — solved ${String(event.payload.solved ?? 0)}/${String(event.payload.trials_total ?? 0)}`;
     default:
       return event.type;
   }

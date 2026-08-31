@@ -2,7 +2,7 @@
 // Benchmark history charts (verified rate / FP rate / solve time / cost over runs).
 // Pure SVG sparkline — no chart library dependency (same as components/run/Sparkline).
 import { formatRelative } from "@/lib/utils";
-import { formatCost, formatPct } from "@/features/benchmarks/MetricCards";
+import { formatCost, formatDuration, formatPct } from "@/features/benchmarks/format";
 import type { RunIndexRow } from "@/features/benchmarks/types";
 
 interface ChartProps {
@@ -17,6 +17,7 @@ const H = 64;
 
 function computePath(values: number[]): { points: string; min: number; max: number } {
   const finite = values.filter((v) => Number.isFinite(v));
+  if (finite.length === 0) return { points: "", min: 0, max: 0 };
   let min = Math.min(...finite);
   let max = Math.max(...finite);
   if (min === max) {
@@ -41,11 +42,13 @@ export function HistoryChart({ runs, extract, format, label }: ChartProps) {
     return (
       <div className="rounded-lg border p-4" data-testid={`history-${label}`}>
         <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
-        <div className="py-4 text-center text-xs text-muted-foreground">Not enough completed runs yet (need ≥ 2).</div>
+        <div className="py-4 text-center text-xs text-muted-foreground">
+          {values.length === 0 ? "No data recorded for this metric yet." : "Not enough data points yet (need ≥ 2 runs)."}
+        </div>
       </div>
     );
   }
-  const { points, max } = computePath(values);
+  const { points, min, max } = computePath(values);
   const latest = values[values.length - 1];
   return (
     <div className="rounded-lg border p-4" data-testid={`history-${label}`}>
@@ -53,7 +56,7 @@ export function HistoryChart({ runs, extract, format, label }: ChartProps) {
         <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</span>
         <span className="text-sm font-medium tabular-nums">{format ? format(latest) : latest.toLocaleString()}</span>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="mt-2 h-16 w-full" role="img" aria-label={`${label} over benchmark runs`}>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="mt-2 h-16 w-full" role="img" aria-label={`${label} over benchmark runs`}>
         <polyline
           points={points}
           fill="none"
@@ -61,11 +64,17 @@ export function HistoryChart({ runs, extract, format, label }: ChartProps) {
           strokeWidth={1.5}
           strokeLinejoin="round"
           strokeLinecap="round"
-          className={max >= 0 ? "text-primary/80" : "text-destructive/80"}
+          vectorEffect="non-scaling-stroke"
+          className="text-primary/80"
         />
       </svg>
-      <div className="mt-1 text-[10px] text-muted-foreground">
-        {ordered.length} runs · latest {formatRelative(ordered[ordered.length - 1].timestamp)}
+      <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
+        <span>
+          {ordered.length} runs · latest {formatRelative(ordered[ordered.length - 1].timestamp)}
+        </span>
+        <span className="tabular-nums">
+          {format ? format(min) : min.toLocaleString()} – {format ? format(max) : max.toLocaleString()}
+        </span>
       </div>
     </div>
   );
@@ -95,7 +104,7 @@ export function HistoryCharts({ runs }: HistoryChartsProps) {
         runs={completed}
         label="Median solve time"
         extract={(r) => r.median_solve_time}
-        format={(v) => `${Math.round(v / 60)}m`}
+        format={(v) => formatDuration(v)}
       />
       <HistoryChart runs={completed} label="Cost" extract={(r) => r.estimated_cost} format={(v) => formatCost(v)} />
     </div>

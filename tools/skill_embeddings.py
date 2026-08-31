@@ -164,21 +164,23 @@ def get_shared_skill_embedder(config: dict[str, Any] | None) -> SkillEmbedder:
         try:
             mem_cfg = (config or {}).get("memory", {}) or {}
             if mem_cfg.get("semantic_enabled", False):
+                # Provider architecture: embeddings come from the embeddings
+                # provider (``embeddings.provider``); ``none`` disables the
+                # whole embedder with zero endpoint requests.
+                from tools.providers.embeddings import (
+                    NullEmbeddingProvider,
+                    build_embedding_provider,
+                )
+
+                embedding_provider = build_embedding_provider(config)
+                if isinstance(embedding_provider, NullEmbeddingProvider):
+                    embedder = SkillEmbedder(None)
+                    _shared_embedder = embedder
+                    return _shared_embedder
                 from db import get_default_db
                 from tools.semantic_memory import SemanticMemoryManager
 
-                skills_cfg = (config or {}).get("skills", {}) or {}
-                model = str(
-                    skills_cfg.get("semantic_model")
-                    or mem_cfg.get("embedding_model")
-                    or mem_cfg.get("semantic_model")
-                    or "nomic-embed-text"
-                )
-                # ponytail: embeddings stay on local Ollama (embed_host) when
-                # set; falls back to ollama.host for cloud-only installs.
-                _ollama_cfg = (config or {}).get("ollama", {}) or {}
-                host = str(_ollama_cfg.get("embed_host") or _ollama_cfg.get("host") or "https://api.ollama.com")
-                sm = SemanticMemoryManager(get_default_db(), ollama_host=host, embedding_model=model)
+                sm = SemanticMemoryManager(get_default_db(), embedding_provider=embedding_provider)
         except Exception:
             sm = None
         embedder = SkillEmbedder(sm)

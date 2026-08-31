@@ -47,7 +47,13 @@ class ProviderRegistry:
         if not getattr(provider, "id", ""):
             raise ValueError("Provider must define a non-empty 'id'.")
         with self._lock:
-            self._providers[str(provider.id).lower()] = provider
+            key = str(provider.id).lower()
+            if key in self._providers and type(self._providers[key]) is not type(provider):
+                raise ValueError(
+                    f"Provider id '{key}' already registered to {type(self._providers[key]).__name__}; "
+                    f"refusing to shadow it with {type(provider).__name__}."
+                )
+            self._providers[key] = provider
 
     def get(self, provider_id: str) -> BaseProvider:
         key = str(provider_id or "").strip().lower()
@@ -149,6 +155,17 @@ def active_provider_metadata(config: Mapping[str, Any] | None = None) -> dict[st
 
 
 def resolve_default_model(config: Mapping[str, Any], provider_id: str) -> str:
-    """The default concrete model id for ``provider_id`` under ``config``."""
-    cfg = get_provider(config).provider_config(config)
-    return str(cfg.get("default_model", "") or "")
+    """The default concrete model id for ``provider_id`` under ``config``.
+
+    Resolution order: the provider's normalized config block (``providers.<id>``
+    > legacy top-level block) ``default_model``, else — for the Ollama
+    provider — the ``models.registry`` model bound to ``models.default_alias``.
+    """
+    cfg = get_provider(provider_id).provider_config(config)
+    default = str(cfg.get("default_model", "") or "")
+    if provider_id == "ollama" and not default:
+        models_cfg = (config or {}).get("models") or {}
+        alias = str(models_cfg.get("default_alias", "") or "")
+        if alias:
+            return str((models_cfg.get("registry") or {}).get(alias) or alias)
+    return default

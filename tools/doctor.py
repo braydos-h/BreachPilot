@@ -42,16 +42,28 @@ def _check_python() -> dict[str, Any]:
     return result
 
 
-def _check_imports() -> dict[str, Any]:
+def _check_imports(config: dict[str, Any] | None = None) -> dict[str, Any]:
     required = [
         "yaml",
-        "ollama",
         "mcp",
         "uvicorn",
         "websockets",
         "questionary",
         "pytest",
     ]
+    # Ollama is an optional provider dependency: only required when the Ollama
+    # provider is actually selected (``models.provider``, default "ollama").
+    # A non-Ollama provider needs no ollama import and zero Ollama access.
+    active_provider = "ollama"
+    try:
+        if config is not None:
+            from tools.config_manager import get_ai_provider
+
+            active_provider = get_ai_provider(config)
+    except Exception:
+        active_provider = "ollama"
+    if active_provider == "ollama":
+        required.append("ollama")
     missing: list[str] = []
     for mod in required:
         try:
@@ -417,6 +429,66 @@ def _check_opencode_go(config: dict[str, Any] | None = None) -> dict[str, Any]:
     }
 
 
+# Provider-aware AI-backend composition. Ollama is the default and keeps its
+# detailed probes; built-in alternative providers each have a detailed check
+# function here; any other registered provider falls back to its adapter's
+# ``ProviderHealth`` (via the provider registry) so adding a provider needs no
+# doctor change.
+_PROVIDER_DOCTOR_CHECKS: dict[str, Any] = {}  # populated lazily (see _check_ai_providers)
+
+
+def _check_ai_providers(config: dict[str, Any]) -> list[dict[str, Any]]:
+    """AI-backend doctor checks for the *active* provider only.
+
+    Provider-neutral: when a non-Ollama provider is selected, NO Ollama
+    endpoints are probed at all (no /api/tags, no cloud-model pings) — an
+    Ollama-less install gets zero Ollama traffic from ``--doctor``. The
+    Ollama default keeps the detailed ``_check_ollama`` / ``_check_models``
+    probes; built-in alternative providers have detailed check functions;
+    any other registered provider falls back to its adapter's
+    ``ProviderHealth`` through ``tools.providers.registry``.
+    """
+    from tools.config_manager import get_ai_provider
+
+    provider_id = get_ai_provider(config)
+    if provider_id == "ollama":
+        ollama_host = (config.get("ollama") or {}).get("host", "https://api.ollama.com")
+        models_cfg = config.get("models", {}).get("registry", {}) or {}
+        # Pass the registry *values* (actual model specs like "kimi-k2.6:cloud"),
+        # not the alias keys ("kimi") -- see _check_models docstring.
+        configured_models = list(models_cfg.values())
+        return [_check_ollama(ollama_host), _check_models(ollama_host, configured_models)]
+    if not _PROVIDER_DOCTOR_CHECKS:
+        _PROVIDER_DOCTOR_CHECKS.update({"chatgpt": _check_chatgpt, "opencode_go": _check_opencode_go})
+    fn = _PROVIDER_DOCTOR_CHECKS.get(provider_id)
+    if fn is not None:
+        return [fn(config)]
+    # Generic registered provider: consult the adapter's ProviderHealth.
+    try:
+        from tools.providers.registry import get_provider
+
+        health = get_provider(provider_id).health(config)
+        check: dict[str, Any] = {
+            "name": f"{provider_id}_provider",
+            "ok": health.ok,
+            "subchecks": [health.as_check(f"{provider_id}_health")],
+        }
+        if not health.ok:
+            check["hint"] = "; ".join(
+                str(c.get("hint") or "") for c in health.checks if not c.get("ok") and c.get("hint")
+            )
+        return [check]
+    except Exception as exc:
+        return [
+            {
+                "name": f"{provider_id}_provider",
+                "ok": False,
+                "error": f"provider check failed: {exc}",
+                "hint": "check models.provider in config.yaml",
+            }
+        ]
+
+
 def _check_workspace(workspace: Path) -> dict[str, Any]:
     try:
         workspace.mkdir(parents=True, exist_ok=True)
@@ -544,24 +616,17 @@ def _collect_doctor_checks(config_path: Path) -> tuple[list[dict[str, Any]], dic
 
     checks: list[dict[str, Any]] = [
         _check_python(),
-        _check_imports(),
+        _check_imports(config),
         _check_nmap(config),
         _check_workspace(workspace),
         _check_config(config_path),
-        _check_ollama(ollama_host),
-        _check_models(ollama_host, configured_models),
+        *_check_ai_providers(config),
         _check_port("127.0.0.1", mcp_http),
         _check_port("127.0.0.1", web_port),
     ]
     if os.name != "nt":
         checks.append(_check_linux_privilege())
         checks.append(_check_optional_tools(config))
-    from tools.config_manager import get_ai_provider
-
-    if get_ai_provider(config) == "chatgpt":
-        checks.append(_check_chatgpt(config))
-    if get_ai_provider(config) == "opencode_go":
-        checks.append(_check_opencode_go(config))
     checks.append(_check_sandbox(config))
 
     # Self-heal missing cloud models: ping each via /api/generate
@@ -679,12 +744,11 @@ def run_doctor(config_path: Path, json_output: bool = False) -> int:
 
     checks: list[dict[str, Any]] = [
         _check_python(),
-        _check_imports(),
+        _check_imports(config),
         _check_nmap(config),
         _check_workspace(workspace),
         _check_config(config_path),
-        _check_ollama(ollama_host),
-        _check_models(ollama_host, configured_models),
+        *_check_ai_providers(config),
         _check_port("127.0.0.1", mcp_http),
         _check_port("127.0.0.1", web_port),
     ]
@@ -693,14 +757,6 @@ def run_doctor(config_path: Path, json_output: bool = False) -> int:
     if os.name != "nt":
         checks.append(_check_linux_privilege())
         checks.append(_check_optional_tools(config))
-    # ChatGPT / OpenCode Go provider checks — only when selected, so the default (ollama)
-    # doctor output is unchanged. Counts toward failures when that provider is selected.
-    from tools.config_manager import get_ai_provider
-
-    if get_ai_provider(config) == "chatgpt":
-        checks.append(_check_chatgpt(config))
-    if get_ai_provider(config) == "opencode_go":
-        checks.append(_check_opencode_go(config))
     checks.append(_check_sandbox(config))
 
     failed = 0

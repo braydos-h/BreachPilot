@@ -1,12 +1,24 @@
-"""Multi-model abstraction layer for Ollama backends.
+"""Model client abstraction layer — provider-neutral.
 
 Provides:
-- ModelClient: unified interface for any Ollama model
+- ModelClient: the canonical BreachPilot client wrapper (re-exported from
+  ``tools.providers.types``, which formally defines the BreachPilot model
+  response format). No provider is special-cased here — Ollama is one
+  adapter among several (``tools/providers/``).
 - ModelRouter: manages multiple backends and distributes calls
-- build_router(): factory to get a pre-configured router with the default model registry
+- build_router(): factory that dispatches through the provider registry
+  (``tools.providers.registry``) for non-Ollama providers and keeps the
+  historical per-alias registry path for ``ollama``
+- build_model_client_for_provider(): single client for an alias under the
+  configured provider
 - MODEL_INFO: per-alias metadata (context window, description) so the UI
   can show operators what they're picking and the context compactor can
   size itself correctly.
+
+All Ollama API behavior lives in ``tools/providers/ollama_provider.py``;
+this module only keeps the ``OllamaClient`` module symbol as the
+historical monkeypatch seam (``monkeypatch.setattr(model_router,
+"OllamaClient", Fake)``) and re-exports the Ollama provider helpers.
 
 Usage:
     router = build_router()
@@ -18,7 +30,6 @@ from __future__ import annotations
 
 import random
 import time
-from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
 from tools.model_telemetry import (
@@ -26,11 +37,19 @@ from tools.model_telemetry import (
     now_iso,
     record_model_usage,
 )
+from tools.providers.ollama_provider import (
+    DEFAULT_MODEL_REGISTRY,
+    OLLAMA_CLOUD_HOST,
+    apply_context_window,
+    load_client_cls,
+)
+from tools.providers.types import ModelClient
 
-try:
-    from ollama import Client as OllamaClient
-except ImportError:
-    OllamaClient = None  # type: ignore
+# Historical monkeypatch seam: tests do ``monkeypatch.setattr(model_router,
+# "OllamaClient", Fake)`` and the factory reads this module global at call
+# time. ``None`` when the optional ollama package is absent — selecting the
+# Ollama provider without it raises the actionable ProviderMissingDependencyError.
+OllamaClient = load_client_cls()
 
 
 # Per-alias model metadata. The ``context_window`` value is the contract
@@ -67,13 +86,8 @@ MODEL_INFO: dict[str, dict[str, Any]] = {
     },
 }
 
-DEFAULT_MODEL_REGISTRY: dict[str, str] = {
-    "kimi": "kimi-k2.6:cloud",
-    "deepseek": "deepseek-v4-pro:cloud",
-    "deepseek_flash": "deepseek-v4-flash:cloud",
-    "glm": "glm-5.2:cloud",
-    "minimax": "minimax-m3:cloud",
-}
+# DEFAULT_MODEL_REGISTRY is imported from tools.providers.ollama_provider
+# (the Ollama adapter owns it) and re-exported here for compatibility.
 
 
 def get_model_info(alias: str, registry_info: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -153,18 +167,8 @@ def model_choice_items(
     ]
 
 
-@dataclass
-class ModelClient:
-    """Thin wrapper around a raw model callable."""
-
-    name: str
-    chat: Callable[..., Any]
-    stream: Callable[..., Any]
-    model_id: str = ""
-
-    def __post_init__(self):
-        if not self.model_id:
-            self.model_id = self.name
+# ModelClient is re-exported from tools.providers.types (canonical contract;
+# carries an explicit ``provider`` attribution field). It is NOT redefined here.
 
 
 # Model roles recognized for role-aware routing (models.roles.<role> -> alias).
@@ -357,25 +361,31 @@ def _build_model_client(
     daemon if you have one; the same code path runs against it.
 
     Provider seam: pass ``raw_client`` (any object with a ``chat(**kwargs)``
-    method returning an Ollama-shaped dict / stream iterable) to route through
-    a non-Ollama backend. When ``raw_client is None`` the Ollama client is
-    constructed exactly as before — byte-identical, so every test that
-    monkeypatches ``model_router.OllamaClient`` keeps working. ``provider`` is
-    threaded into telemetry so records attribute by provider (additive; default
+    method returning a BreachPilot model response dict / stream iterable) to
+    route through a non-Ollama backend. When ``raw_client is None`` (and
+    ``provider == "ollama"``) the Ollama client is constructed exactly as
+    before — byte-identical, so every test that monkeypatches
+    ``model_router.OllamaClient`` keeps working. Constructing it without the
+    optional ollama package raises the actionable
+    ``ProviderMissingDependencyError``. ``provider`` is threaded into
+    telemetry so records attribute by provider (additive; default
     ``"ollama"`` keeps old records valid).
+
+    Canonical chat kwarg: generic code passes ``context_window_tokens=N``
+    (never Ollama's ``options.num_ctx``). The Ollama adapter translates
+    (``apply_context_window``); other providers drop it — they have no such
+    knob. Generic code must not send ``options={"num_ctx": ...}``.
     """
     if raw_client is None:
-        if OllamaClient is None:
-            raise RuntimeError("ollama package not installed")
+        if provider != "ollama":
+            raise ValueError(
+                f"raw_client is required for non-Ollama providers (got provider={provider!r}); "
+                "build it via the provider adapter in tools.providers."
+            )
+        from tools.providers.ollama_provider import build_ollama_raw_client
 
-        # ponytail: pass timeout straight to the httpx-backed Ollama client. A hung
-        # generation raises httpx.ReadTimeout, already matched by
-        # exploit_agent._is_retryable_error → 3x retry → synthetic error dict, so
-        # the attack loop survives without a new error path. None = httpx default.
-        if request_timeout_seconds is not None:
-            raw_client = OllamaClient(host=host, timeout=request_timeout_seconds)
-        else:
-            raw_client = OllamaClient(host=host)
+        # Reads the module-level OllamaClient (monkeypatch seam) at call time.
+        raw_client = build_ollama_raw_client(host, request_timeout_seconds, client_cls=OllamaClient)
 
     telemetry_alias = alias or model_name
     context_window_tokens = _context_window_for(telemetry_alias, model_name)
@@ -383,6 +393,15 @@ def _build_model_client(
     def chat(*args: Any, **kwargs: Any) -> Any:
         source = str(kwargs.pop("telemetry_source", "") or "") or infer_source()
         raw_kwargs = _normalize_chat_args(args, kwargs, model_name)
+        # Canonical context-window kwarg: pop it before dispatch. Only the
+        # Ollama adapter has a translation (options.num_ctx); other providers
+        # simply don't receive Ollama-only kwargs.
+        canonical_ctx = raw_kwargs.pop("context_window_tokens", None)
+        if provider != "ollama":
+            for ollama_only in ("options", "keep_alive", "format", "suffix", "think", "raw", "num_ctx"):
+                raw_kwargs.pop(ollama_only, None)
+        elif canonical_ctx is not None:
+            raw_kwargs = apply_context_window(raw_kwargs, canonical_ctx)
         messages = raw_kwargs.get("messages", [])
         stream = bool(raw_kwargs.get("stream", False))
         started_at = now_iso()
@@ -439,7 +458,7 @@ def _build_model_client(
         kwargs.setdefault("tools", None)
         return chat(*args, **kwargs)
 
-    return ModelClient(name=model_name, chat=chat, stream=stream_chat, model_id=model_name)
+    return ModelClient(name=model_name, chat=chat, stream=stream_chat, model_id=model_name, provider=provider)
 
 
 def build_router(
@@ -455,30 +474,30 @@ def build_router(
     """Build and return a router from alias -> model name.
 
     ``provider`` selects the backend. ``"ollama"`` (default) is the unchanged
-    per-registry-alias path. ``"chatgpt"`` routes through the local
-    openai-oauth proxy (``127.0.0.1:10531/v1``): it ensures the proxy is
-    running, discovers models from ``/v1/models`` (falling back to the
-    ``chatgpt.default_model`` / configured ``chatgpt.models`` list), and
-    registers one ``ModelClient`` per discovered GPT model — each backed by a
-    single shared ``ChatGptProxyClient``. ``"opencode_go"`` routes through the
-    hosted Responses endpoint (``https://opencode.ai/zen/go/v1/responses``).
-    ``alias`` == ``model_id`` for the chatgpt / opencode_go paths (no alias
-    namespace).
-    """
-    if provider == "chatgpt":
-        return _build_chatgpt_router(
-            chatgpt_config or {},
-            request_timeout_seconds=request_timeout_seconds,
-        )
-    if provider == "opencode_go":
-        cfg = opencode_go_config
-        if cfg is None and isinstance(config, Mapping):
-            from tools.config.loader import get_opencode_go_config
+    per-registry-alias path. Any other provider id resolves through the
+    provider registry (``tools.providers.registry``) — there is no if/elif
+    chain here: provider #4 is an adapter + registration, no edits to this
+    function. ``alias`` == ``model_id`` for providers without an alias
+    namespace (chatgpt / opencode_go).
 
-            cfg = get_opencode_go_config(config)
-        return _build_opencode_go_router(
-            cfg or {},
+    ``ollama`` semantics are byte-identical: ``build_router(registry,
+    host)`` builds one ``ModelClient`` per registry alias whose ids come
+    from ``DEFAULT_MODEL_REGISTRY`` / ``config.yaml models.registry``.
+    """
+    if provider not in (None, "", "ollama"):
+        from tools.providers.registry import get_provider
+
+        adapter = get_provider(provider)
+        provider_config: Mapping[str, Any] | None = None
+        del host, registry
+        if provider == "chatgpt" and chatgpt_config is not None:
+            provider_config = chatgpt_config
+        elif provider == "opencode_go" and opencode_go_config is not None:
+            provider_config = opencode_go_config
+        return adapter.build_router(
+            config,
             request_timeout_seconds=request_timeout_seconds,
+            provider_config=provider_config,
         )
 
     registry = registry or DEFAULT_MODEL_REGISTRY
@@ -496,57 +515,24 @@ def build_router(
     return router
 
 
+# ``_build_chatgpt_router`` / ``_build_opencode_go_router`` /
+# ``_is_opencode_responses_model`` moved into their provider adapters:
+#   tools/providers/chatgpt_provider.py  → build_chatgpt_router
+#   tools/providers/opencode_go_provider.py → build_opencode_go_router,
+#       is_opencode_responses_model
+# Kept here as re-exports for the existing import sites (e.g.
+# tools/api/routes/system.py) and tests.
+
+
 def _build_chatgpt_router(
     chatgpt_config: Mapping[str, Any],
     *,
     request_timeout_seconds: float | None = None,
 ) -> ModelRouter:
-    """Build a router backed by the local openai-oauth ChatGPT proxy."""
-    from tools.providers.chatgpt_provider import ChatGptProxyClient, ChatGptProxyManager
+    """Compat re-export — implementation lives in the ChatGPT provider adapter."""
+    from tools.providers.chatgpt_provider import build_chatgpt_router
 
-    cfg = dict(chatgpt_config)
-    manager = ChatGptProxyManager.get()
-    running = manager.ensure_running(cfg)
-    if not running.get("ok"):
-        reason = running.get("reason") or "unavailable"
-        raise RuntimeError(
-            f"ChatGPT provider unavailable: {reason}. "
-            f"Run 'python main.py --doctor' or sign in via the interactive menu."
-        )
-    base_url = running["base_url"]
-
-    # Resolve the model list: explicit config override → discover → fallback.
-    configured = cfg.get("models") or []
-    if configured:
-        model_ids = [str(m) for m in configured if str(m).strip()]
-    else:
-        model_ids = manager.discover_models(base_url, cfg)
-    if not model_ids:
-        default_model = str(cfg.get("default_model") or "gpt-5.2")
-        model_ids = [default_model]
-
-    timeout = cfg.get("request_timeout_seconds")
-    client_timeout = request_timeout_seconds
-    if client_timeout is None and timeout is not None:
-        try:
-            client_timeout = float(timeout)
-        except (TypeError, ValueError):
-            client_timeout = None
-    shared = ChatGptProxyClient(base_url, timeout=client_timeout)
-
-    router = ModelRouter()
-    for model_id in model_ids:
-        router.register(
-            model_id,
-            _build_model_client(
-                model_id,
-                alias=model_id,
-                request_timeout_seconds=client_timeout,
-                raw_client=shared,
-                provider="chatgpt",
-            ),
-        )
-    return router
+    return build_chatgpt_router(chatgpt_config, request_timeout_seconds=request_timeout_seconds)
 
 
 def _is_opencode_responses_model(
@@ -554,49 +540,10 @@ def _is_opencode_responses_model(
     raw_item: Mapping[str, Any] | None,
     cfg: Mapping[str, Any] | None = None,
 ) -> bool:
-    """True if a discovered model is safe to route through the Responses adapter.
+    """Compat re-export — implementation lives in the OpenCode Go adapter."""
+    from tools.providers.opencode_go_provider import is_opencode_responses_model
 
-    The hosted catalog mixes providers/protocols.  Our Responses adapter must
-    NOT blindly expose ``/chat/completions``-only or Anthropic ``/messages``-only
-    models via ``/responses``.  The reliable signal (when present) is an
-    explicit protocol hint in the discovery payload (e.g. ``supported_api``,
-    ``endpoints``, ``capabilities`` containing ``responses``).  When no hint
-    exists we conservatively allow only the known Responses family and the
-    configured default.
-    """
-    cleaned = str(model_id or "").strip()
-    if not cleaned:
-        return False
-    # Always allow the configured default
-    default = str((cfg or {}).get("default_model") or "muse-spark-1.2-contributor")
-    if cleaned == default:
-        return True
-    # Known Responses family
-    if cleaned == "muse-spark-1.2-contributor":
-        return True
-    # Heuristic for spark family (future spark releases stay on Responses)
-    if "muse-spark" in cleaned or "spark" in cleaned.lower():
-        return True
-    if raw_item is not None:
-        # Look for explicit protocol metadata
-        for key in ("supported_api", "api", "protocol", "endpoints", "capabilities", "supported_endpoints", "type"):
-            val = raw_item.get(key)  # type: ignore[attr-defined]
-            if val is None:
-                continue
-            text = str(val).lower() if not isinstance(val, list) else " ".join(str(v).lower() for v in val)
-            if "response" in text:
-                return True
-        # Some catalogs nest under metadata
-        meta = raw_item.get("metadata") if isinstance(raw_item.get("metadata"), Mapping) else None  # type: ignore[attr-defined]
-        if isinstance(meta, Mapping):
-            for key in ("supported_api", "protocol", "endpoints"):
-                val = meta.get(key)
-                if val is None:
-                    continue
-                text = str(val).lower() if not isinstance(val, list) else " ".join(str(v).lower() for v in val)
-                if "response" in text:
-                    return True
-    return False
+    return is_opencode_responses_model(model_id, raw_item, cfg)
 
 
 def _build_opencode_go_router(
@@ -604,89 +551,10 @@ def _build_opencode_go_router(
     *,
     request_timeout_seconds: float | None = None,
 ) -> ModelRouter:
-    """Build a router backed by the hosted OpenCode Go Responses API.
+    """Compat re-export — implementation lives in the OpenCode Go adapter."""
+    from tools.providers.opencode_go_provider import build_opencode_go_router
 
-    The API key is resolved from ``api_key_env`` (default ``OPENCODE_GO_API_KEY``)
-    but a missing key does NOT block router construction — the resulting
-    ``OpenCodeGoResponsesClient`` will surface a clear ``API key not configured``
-    error on the first ``chat`` call, matching the Ollama Cloud behaviour
-    (preview succeeds, auth fails on first generation). This prevents a silent
-    ``500`` on ``POST /runs`` when the operator has switched provider but not
-    yet set the key.
-    """
-    from tools.providers.opencode_go_provider import OpenCodeGoResponsesClient
-
-    cfg = dict(opencode_config)
-    import os
-
-    env_name = str(cfg.get("api_key_env") or "OPENCODE_GO_API_KEY").strip() or "OPENCODE_GO_API_KEY"
-    api_key = (os.environ.get(env_name, "") or "").strip()
-    # Do NOT raise here — defer to chat-time so run previews still succeed.
-    base_url = str(cfg.get("base_url") or "https://opencode.ai/zen/go/v1").rstrip("/")
-    timeout = request_timeout_seconds
-    if timeout is None and cfg.get("request_timeout_seconds") is not None:
-        try:
-            timeout = float(cfg["request_timeout_seconds"])
-        except (TypeError, ValueError):
-            timeout = None
-    if timeout is None:
-        timeout = 300.0
-
-    shared = OpenCodeGoResponsesClient(
-        base_url=base_url,
-        api_key=api_key,
-        timeout=float(timeout),
-        default_model=str(cfg.get("default_model") or "muse-spark-1.2-contributor"),
-        config=cfg,
-    )
-
-    # Resolve model list: explicit -> discover (filtered) -> fallback
-    configured = cfg.get("models") or []
-    if configured:
-        model_ids = [str(m).strip() for m in configured if str(m).strip()]
-    else:
-        model_ids = []
-        try:
-            discovered = shared.discover_models(base_url, cfg)
-        except Exception:
-            discovered = []
-        if discovered:
-            # If discovery returned ids but we have no raw metadata, filter by id heuristic
-            filtered = [mid for mid in discovered if _is_opencode_responses_model(mid, None, cfg)]
-            if filtered:
-                model_ids = filtered
-            else:
-                # Discovery contained only non-Responses models; fall back to default
-                model_ids = []
-
-    if not model_ids:
-        default_model = str(cfg.get("default_model") or "muse-spark-1.2-contributor")
-        model_ids = [default_model]
-
-    # De-duplicate preserving order and ensure default present
-    seen: set[str] = set()
-    unique: list[str] = []
-    for mid in model_ids:
-        if mid not in seen:
-            seen.add(mid)
-            unique.append(mid)
-    default_model = str(cfg.get("default_model") or "muse-spark-1.2-contributor")
-    if default_model not in seen:
-        unique.append(default_model)
-
-    router = ModelRouter()
-    for model_id in unique:
-        router.register(
-            model_id,
-            _build_model_client(
-                model_id,
-                alias=model_id,
-                request_timeout_seconds=float(timeout) if timeout is not None else None,
-                raw_client=shared,
-                provider="opencode_go",
-            ),
-        )
-    return router
+    return build_opencode_go_router(opencode_config, request_timeout_seconds=request_timeout_seconds)
 
 
 def build_model_client_for_provider(
@@ -698,75 +566,16 @@ def build_model_client_for_provider(
     """Build a single ``ModelClient`` for ``alias`` under the configured provider.
 
     Root-cause replacement for the duplicated ``_build_model_client(alias,
-    host=...)`` fallback call sites: reads ``models.provider`` +
-    ``ollama.host`` / the ``chatgpt``/``opencode_go`` block from config and
-    builds the right client. For ``ollama`` this is byte-identical to the old
-    direct call. For ``chatgpt`` it ensures the proxy and wraps a
-    ``ChatGptProxyClient``. For ``opencode_go`` it wraps an
-    ``OpenCodeGoResponsesClient``.
+    host=...)`` fallback call sites: resolves the active provider through
+    the registry and asks its adapter for a client — no per-provider
+    branches here. For ``ollama`` this is byte-identical to the old direct
+    call (``_build_model_client(alias, host=get_ollama_host(cfg), ...)``);
+    for other providers the adapter owns auth/endpoint/model resolution.
     """
-    cfg = config or {}
-    from tools.config_manager import get_ai_provider, get_chatgpt_config, get_ollama_host, get_opencode_go_config
+    from tools.providers.registry import get_provider_from_config
 
-    provider = get_ai_provider(cfg)
-    if provider == "chatgpt":
-        chatgpt_config = get_chatgpt_config(cfg)
-        from tools.providers.chatgpt_provider import ChatGptProxyClient, ChatGptProxyManager
-
-        manager = ChatGptProxyManager.get()
-        running = manager.ensure_running(chatgpt_config)
-        if not running.get("ok"):
-            raise RuntimeError(f"ChatGPT provider unavailable: {running.get('reason') or 'unavailable'}.")
-        timeout = request_timeout_seconds
-        if timeout is None and chatgpt_config.get("request_timeout_seconds") is not None:
-            try:
-                timeout = float(chatgpt_config["request_timeout_seconds"])
-            except (TypeError, ValueError):
-                timeout = None
-        shared = ChatGptProxyClient(running["base_url"], timeout=timeout)
-        return _build_model_client(
-            alias,
-            alias=alias,
-            request_timeout_seconds=timeout,
-            raw_client=shared,
-            provider="chatgpt",
-        )
-    if provider == "opencode_go":
-        og_cfg = get_opencode_go_config(cfg)
-        import os
-
-        env_name = str(og_cfg.get("api_key_env") or "OPENCODE_GO_API_KEY").strip() or "OPENCODE_GO_API_KEY"
-        api_key = (os.environ.get(env_name, "") or "").strip()
-        # Do not raise here — let the chat-time missing-key error surface on first generation,
-        # matching Ollama behaviour (preview succeeds, auth fails later).
-        timeout = request_timeout_seconds
-        if timeout is None and og_cfg.get("request_timeout_seconds") is not None:
-            try:
-                timeout = float(og_cfg["request_timeout_seconds"])
-            except (TypeError, ValueError):
-                timeout = None
-        base_url = str(og_cfg.get("base_url") or "https://opencode.ai/zen/go/v1").rstrip("/")
-        from tools.providers.opencode_go_provider import OpenCodeGoResponsesClient
-
-        shared = OpenCodeGoResponsesClient(
-            base_url=base_url,
-            api_key=api_key,
-            timeout=float(timeout) if timeout is not None else 300.0,
-            default_model=str(og_cfg.get("default_model") or alias or "muse-spark-1.2-contributor"),
-            config=og_cfg,
-        )
-        return _build_model_client(
-            alias,
-            alias=alias,
-            request_timeout_seconds=timeout,
-            raw_client=shared,
-            provider="opencode_go",
-        )
-
-    host = get_ollama_host(cfg)
-    return _build_model_client(
+    return get_provider_from_config(config).build_client(
+        config,
         alias,
-        host=host,
-        alias=alias,
         request_timeout_seconds=request_timeout_seconds,
     )

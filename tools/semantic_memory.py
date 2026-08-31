@@ -1,34 +1,47 @@
 """Semantic Memory Manager — embedding-based retrieval for the research agent.
 
-Uses Ollama's /api/embeddings endpoint to generate embeddings and stores them
-in SQLite. Similarity search is done in Python with numpy cosine similarity.
+Embeddings are produced by a pluggable :class:`tools.providers.embeddings.EmbeddingProvider`
+(``embeddings.provider`` config: ``ollama`` default, ``none`` = disabled)
+and stored in SQLite. Similarity search is done in Python with numpy cosine
+similarity. When the provider is ``none`` this manager degrades to keyword
+storage with zero endpoint requests.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import math
-import os
 from typing import Any
 
 import numpy as np
 
 from db import DatabaseManager, _new_id, _now_iso
+from tools.providers.embeddings import OllamaEmbeddingProvider
 
 _logger = logging.getLogger(__name__)
 
 
 class SemanticMemoryManager:
-    """Generates, stores, and retrieves embeddings via Ollama + SQLite."""
+    """Generates, stores, and retrieves embeddings via a provider + SQLite."""
 
     def __init__(
         self,
         db: DatabaseManager,
         ollama_host: str = "https://api.ollama.com",
         embedding_model: str = "nomic-embed-text",
+        embedding_provider: Any | None = None,
     ) -> None:
+        """``ollama_host`` / ``embedding_model`` are the legacy kwargs (still
+        accepted — the frozen Flow B research loop passes them); newer callers
+        pass ``embedding_provider`` from ``tools.providers.embeddings``.
+        When no provider is given, the legacy Ollama behavior is preserved
+        byte-identically (raw /api/embeddings against ``ollama_host``).
+        """
         self._db = db
+        if embedding_provider is not None:
+            self._embedding_provider = embedding_provider
+        else:
+            self._embedding_provider = OllamaEmbeddingProvider(host=ollama_host, model=embedding_model)
         self._ollama_host = ollama_host.rstrip("/")
         self._embedding_model = embedding_model
 
@@ -46,66 +59,18 @@ class SemanticMemoryManager:
         return self._generate_embedding(text)
 
     def _generate_embedding(self, text: str) -> list[float] | None:
-        """Call Ollama /api/embeddings to get a vector for the given text.
+        """Embed ``text`` via the configured embedding provider.
 
-        Returns ``None`` on any failure (Ollama unreachable, network error, or a
-        response with no ``embedding`` list). Failures are logged at WARNING so
-        a down Ollama does not silently degrade cross-mission learning to a
-        no-op — this matches the boot ``[WARN]`` visibility convention. Every
-        caller (``store_embedding``/``store_lesson``/``find_similar``/
-        ``find_similar_lessons``) already handles ``None`` gracefully.
+        Returns ``None`` on any failure (provider unreachable, network error, or
+        a response with no embedding). Failures are logged at WARNING so a down
+        endpoint does not silently degrade cross-mission learning to a no-op —
+        this matches the boot ``[WARN]`` visibility convention. Every caller
+        (``store_embedding``/``store_lesson``/``find_similar``/
+        ``find_similar_lessons``) already handles ``None`` gracefully. With
+        ``embeddings.provider: none`` this always returns ``None`` and no
+        request is ever made.
         """
-        try:
-            import urllib.error
-            import urllib.request
-
-            payload = json.dumps(
-                {
-                    "model": self._embedding_model,
-                    "prompt": text,
-                }
-            ).encode("utf-8")
-
-            req = urllib.request.Request(
-                f"{self._ollama_host}/api/embeddings",
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            # ponytail: cloud embed host needs the bearer token; local daemon
-            # ignores it. Send unconditionally — one code path for both.
-            _api_key = (os.environ.get("OLLAMA_API_KEY", "") or "").strip()
-            if _api_key:
-                req.add_header("Authorization", f"Bearer {_api_key}")
-
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                embedding = data.get("embedding")
-                if isinstance(embedding, list):
-                    vec = [float(v) for v in embedding]
-                    # NaN/inf guard: a malformed Ollama response could hand back
-                    # non-finite floats that would poison cosine similarity
-                    # (dot/norm become NaN, silently corrupting recall). Treat
-                    # this like any other generation failure and return None —
-                    # callers already handle that contract.
-                    if any(not math.isfinite(v) for v in vec):
-                        _logger.warning(
-                            "semantic embedding failed: Ollama %s returned non-finite values",
-                            self._ollama_host,
-                        )
-                        return None
-                    return vec
-                _logger.warning(
-                    "semantic embedding failed: Ollama %s returned no 'embedding' list",
-                    self._ollama_host,
-                )
-        except Exception as exc:
-            _logger.warning(
-                "semantic embedding failed for host %s: %s",
-                self._ollama_host,
-                exc,
-            )
-        return None
+        return self._embedding_provider.embed(text)
 
     # ── Storage ─────────────────────────────────────────────────────────
 
