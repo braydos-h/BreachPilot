@@ -30,6 +30,7 @@ from typing import Any
 __all__ = [
     "BROWSER_CAPABILITIES",
     "BrowserCapability",
+    "BACKEND_REGISTRY",
     "browser_capability_names",
     "browser_capabilities",
     "browser_available",
