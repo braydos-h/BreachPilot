@@ -209,10 +209,27 @@ def create_app(
                 if full_path.startswith(("api/", "docs", "openapi.json", "redoc", "assets/")):
                     return _WebuiSpaResponse("Not found", status_code=404)
                 if full_path:
-                    candidate = (webui_dist / full_path).resolve()
+                    # Reject traversal probes before touching the filesystem.
+                    # On Windows, percent-decoded probes like "//../../../boot.ini"
+                    # become "\\..\..\boot.ini" — pathlib treats the leading
+                    # backslashes as a rooted UNC path, so (webui_dist / full_path)
+                    # discards the base entirely and ntpath.realpath() raises
+                    # PermissionError [WinError 31] on the device path. No SPA
+                    # deep link ever contains ".." or begins with a separator.
+                    segments = full_path.replace("\\", "/").split("/")
+                    if (
+                        ".." in segments
+                        or full_path.startswith(("/", "\\"))
+                        or (len(full_path) >= 2 and full_path[1] == ":" and full_path[0].isalpha())
+                    ):
+                        return _WebuiSpaResponse("Not found", status_code=404)
                     try:
+                        candidate = (webui_dist / full_path).resolve()
                         candidate.relative_to(_webui_dist_resolved)
-                    except ValueError:
+                    except (ValueError, OSError):
+                        # ValueError: candidate outside dist; OSError: malformed
+                        # path (NUL bytes, exotic reserved names) that realpath
+                        # refuses. Either way: not a servable path.
                         return _WebuiSpaResponse("Not found", status_code=404)
                     if candidate.is_file():
                         return FileResponse(str(candidate))  # type: ignore[return-value]

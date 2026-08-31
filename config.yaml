@@ -4,13 +4,14 @@ ollama:
   api_key_env: OLLAMA_API_KEY
   embed_host: http://localhost:11434
 models:
-  provider: opencode_go
+  provider: ollama
   registry:
     kimi: kimi-k2.6:cloud
     deepseek: deepseek-v4-pro:cloud
     deepseek_flash: deepseek-v4-flash:cloud
     glm: glm-5.2:cloud
     minimax: minimax-m3:cloud
+    glm3: glm-5.3-flash
   default_alias: glm
   auto_update: true
   roles:
@@ -287,10 +288,6 @@ killchain:
   goal_state: shell_as_root
   require_verification: true
   graph_db: ''
-# Browser-native web agent (architecture preparation, default OFF). See
-# docs/browser-agent-design.md. enabled: false + backend: none = zero behavior
-# change; no browser dependency is required. Credentials surfaced by browser
-# storage capture must flow through the credential store, never logs.
 browser:
   enabled: false
   backend: none
@@ -477,10 +474,6 @@ ticketing:
   project_key: ''
   max_retries: 3
   backoff_seconds: 2.0
-# Pluggable chat/generate providers (models.provider selects; registry-validated).
-# The blocks here are the modern `providers.<id>` shape; legacy top-level
-# blocks still resolve as fallback (ONE normalization layer in
-# tools.config.loader.get_provider_config).
 providers:
   opencode_go:
     enabled: true
