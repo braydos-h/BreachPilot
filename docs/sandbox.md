@@ -104,14 +104,15 @@ so agent commands — even as root inside the container — cannot modify the
 firewall. Rules are (re-)applied at each command boundary when the
 authorization fingerprint changes (dynamic target pickup), always host-driven.
 
-## Fail-closed behavior
+## Fail-closed behavior (with one boot-time fallback)
 
-Any of these **blocks offensive execution** and returns a structured
-`SANDBOX_*` result block (never a host fallback):
+Any failure DURING an active session **blocks offensive execution** and
+returns a structured `SANDBOX_*` result block (never a per-command host
+fallback):
 
 | Code | Trigger |
 |---|---|
-| `SANDBOX_UNAVAILABLE` | Docker CLI/daemon missing, image absent, worker start failed |
+| `SANDBOX_UNAVAILABLE` | Docker daemon died after boot, worker start failed |
 | `SANDBOX_POLICY_FAILED` | netns firewall could not be installed |
 | `SANDBOX_SCOPE_DENIED` | target outside allowlist, or empty allowlist with `require_explicit_allowlist: true` |
 | `SANDBOX_WORKSPACE_FAILED` | workspace missing/symlink/path escape |
@@ -121,9 +122,19 @@ Invariant: `require_explicit_allowlist: true` + empty effective allowlist ⇒
 **DENY all target-touching execution** (enforced in `tools/kernel/allowlist.py`,
 the sandbox scope gate, and the empty netns policy simultaneously).
 
-Host execution is never an automatic fallback for attack commands. The only
-way to run attack commands on the host is the explicit operator opt-out
-`sandbox.enabled: false` (legacy, uncontained, documented as such).
+The ONE sanctioned host-execution fallback is the boot-time decision in
+`tools/sandbox/manager.py::resolve_manager_with_fallback`: with
+`sandbox.fallback_native: true` (the default), a server whose Docker stack is
+unusable at boot (CLI missing, daemon down, **worker image not built**) wholly
+degrades to the legacy uncontained host-execution mode BEFORE any tool
+exists — loudly: a `SANDBOX FALLBACK:` boot-log warning, an amber
+"Sandbox unavailable — running natively" card on the WebUI home screen, and a
+`SANDBOX_FALLBACK:` line in every legacy-path tool result (and its audit
+chain). No session ever switches between contained and native execution
+mid-stream. Set `sandbox.fallback_native: false` to restore the strict
+fail-closed posture (executions denied until Docker works). `sandbox.enabled:
+false` remains the explicit operator opt-out for the legacy uncontained mode,
+without any Docker probing.
 
 ## What runs where
 
@@ -187,11 +198,18 @@ audit row on destroy.
 ## WebUI / API
 
 `GET /api/v1/system/sandbox` (bearer-auth) reports enabled/backend/image/user,
-rootfs mode, Docker reachability, worker-image presence (`image_present`, null
-when unknowable), network policy posture, resource limits, and cleanup flags.
-The System UI (Settings → Advanced → Sandbox) renders the same with a build
-hint when the worker image is missing; the status-bar chip surfaces the
-short state ("Contained", "Image missing", "Docker unreachable", "Disabled").
+rootfs mode, the effective posture (`mode`: `disabled` / `contained` /
+`native_fallback` / `blocked`, from the recorded BOOT-TIME decision — a
+session's posture never flips mid-run even if Docker state changes
+afterwards), `fallback_native`, the failure reason (`fallback_reason`),
+live Docker reachability, worker-image presence (`image_present`, null when
+unknowable), network policy posture, resource limits, and cleanup flags.
+The WebUI home screen renders a posture banner from this endpoint (green
+"contained" line, muted "disabled" line, amber native-fallback warning card,
+red fail-closed card). The System UI (Settings → Advanced → Sandbox) renders
+the same with a build hint when the worker image is missing; the status-bar
+chip surfaces the short state ("Contained", "Image missing", "Docker
+unreachable", "Disabled").
 
 `GET /api/v1/runs/{run_id}/sandbox` (bearer-auth) summarizes a run's sandbox
 activity for the run page's Sandbox tab, derived read-only from run artifacts:
@@ -205,9 +223,11 @@ exec/remove controls; sandbox lifecycle belongs to the run engine.
 ## Doctor
 
 `python main.py --doctor` adds a `sandbox` check when `sandbox.enabled: true`:
-Docker CLI present, daemon reachable, worker image present. With the sandbox
-enabled a failed check fails the doctor (because attack execution would be
-blocked).
+Docker CLI present, daemon reachable, worker image present. With
+`sandbox.fallback_native: false` a failed check fails the doctor (because
+attack execution would be blocked); with the default `fallback_native: true`
+the doctor still flags the check but the session would degrade to native
+execution instead of blocking.
 
 ## Configuration
 
@@ -216,6 +236,9 @@ sandbox:
   enabled: true                # false = explicit legacy host-execution opt-out
   backend: docker
   image: breachpilot-sandbox:latest
+  fallback_native: true        # boot-time Docker down/image missing => degrade to
+                               # uncontained native execution (loud warning) instead
+                               # of fail-closed blocks; false = strict fail-closed
   user: sandbox
   read_only_rootfs: true
   env_passthrough: []          # extra host env var names the worker may receive

@@ -23,6 +23,7 @@ is secret-free by construction -- see ``policy.audit_policy_payload``).
 from __future__ import annotations
 
 import atexit
+import json
 import logging
 import secrets
 import time
@@ -42,7 +43,15 @@ from tools.sandbox.network import apply_network_policy
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["SandboxManager", "resolve_manager", "status_report", "CONTAINER_WORKSPACE"]
+__all__ = [
+    "SandboxManager",
+    "resolve_manager",
+    "status_report",
+    "CONTAINER_WORKSPACE",
+    "BOOT_STATE_FILE",
+    "boot_state_path",
+    "read_boot_state",
+]
 
 CONTAINER_WORKSPACE = "/workspace"
 
@@ -96,6 +105,49 @@ def native_fallback_notice(reason: str) -> str:
     )
 
 
+# Boot-state plumbing: the fallback decision happens once per MCP server
+# process, at boot, inside that subprocess. The API daemon cannot re-derive
+# it, so it is recorded to a config-derived shared file that both the server
+# and the daemon resolve identically (both run from the same repo root CWD).
+# The home banner reports THIS decision, not a live Docker probe (which can
+# drift from the session after the fact -- e.g. the operator starts Docker
+# mid-run; the running session stays native/blocked regardless).
+BOOT_STATE_FILE = "sandbox_boot_state.json"
+_VALID_BOOT_MODES = ("disabled", "contained", "native_fallback", "blocked")
+
+
+def boot_state_path(config: dict[str, Any] | None) -> Path:
+    """Shared boot-state file location, derived from the config the same way
+    on both sides (MCP server subprocess + API daemon): the exploit
+    ``workspace_dir`` root, resolved against the process CWD."""
+    root = str((config or {}).get("exploit", {}).get("workspace_dir") or "exploit_workspace")
+    p = Path(root)
+    root_dir = p if p.is_absolute() else Path.cwd() / p
+    return root_dir / BOOT_STATE_FILE
+
+
+def _record_boot_state(config: dict[str, Any] | None, mode: str, reason: str = "") -> None:
+    """Best-effort boot-posture record; never breaks server boot."""
+    try:
+        path = boot_state_path(config)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"mode": mode, "reason": reason, "recorded_at": time.time()}),
+            encoding="utf-8",
+        )
+    except Exception:  # noqa: BLE001 -- status bookkeeping must never affect the attack path
+        logger.warning("sandbox boot-state record failed", exc_info=True)
+
+
+def read_boot_state(config: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Latest recorded boot posture, or None (missing/unreadable/stale)."""
+    try:
+        state = json.loads(boot_state_path(config).read_text(encoding="utf-8"))
+        return state if state.get("mode") in _VALID_BOOT_MODES else None
+    except Exception:  # noqa: BLE001 -- absence is a normal first-run state
+        return None
+
+
 def resolve_manager_with_fallback(
     workspace: Path,
     config: dict[str, Any] | None,
@@ -111,6 +163,11 @@ def resolve_manager_with_fallback(
     host-execution mode for the whole session and can warn loudly. With
     ``fallback_native: false`` the manager is returned either way -- it then
     fail-closes at execution time exactly as before.
+
+    The resolved boot posture is ALSO recorded to a shared boot-state file
+    (:func:`boot_state_path`) so the WebUI home banner reports the effective
+    session decision (decided ONCE, here) instead of a live Docker probe that
+    can drift from the session after the fact.
 
     Probes are injected (``probe``: ``(ok, reason)`` callable) so tests never
     need a real Docker daemon. The image probe only runs when Docker answers;
@@ -128,14 +185,27 @@ def resolve_manager_with_fallback(
     if ok:
         try:
             image_ok = bool(_db.docker_image_exists(cfg.image))
+            if not image_ok and not reason:
+                reason = f"sandbox image '{cfg.image}' not built"
         except SandboxError as exc:
             image_ok, reason = False, str(exc)
-        if image_ok or not cfg.fallback_native:
+        except Exception as exc:  # noqa: BLE001 -- probe seams may raise anything; degrade, never crash boot
+            image_ok, reason = False, f"sandbox image probe failed: {exc}"
+        if image_ok:
+            _record_boot_state(config, "contained")
             return _build_manager(cfg, workspace, config), ""
-        return None, native_fallback_notice(f"sandbox image '{cfg.image}' not built")
+        if not cfg.fallback_native:
+            _record_boot_state(config, "blocked", reason)
+            return _build_manager(cfg, workspace, config), ""
+        reason = native_fallback_notice(reason)
+        _record_boot_state(config, "native_fallback", reason)
+        return None, reason
     if not cfg.fallback_native:
+        _record_boot_state(config, "blocked", reason)
         return _build_manager(cfg, workspace, config), ""
-    return None, native_fallback_notice(reason)
+    reason = native_fallback_notice(reason)
+    _record_boot_state(config, "native_fallback", reason)
+    return None, reason
 
 
 class SandboxManager:
@@ -604,7 +674,13 @@ def status_report(config: dict[str, Any] | None) -> dict[str, Any]:
     when the answer cannot be known (sandbox disabled / daemon down).
 
     ``mode`` is the effective execution posture the WebUI home screen
-    banners:
+    banners. It comes from the recorded BOOT-TIME decision
+    (``sandbox_boot_state.json``, written by ``resolve_manager_with_fallback``
+    in the MCP server process) whenever one exists -- the session's posture
+    was fixed at ITS boot and a live Docker probe that drifts afterwards
+    (operator starts Docker mid-run, daemon dies mid-run) must not flip the
+    banner. When no boot state exists yet (fresh install / no session since
+    the feature landed) the live probe decides, same as before:
     - "disabled": sandbox.enabled false -- legacy host-execution mode.
     - "contained": Docker + worker image usable -- commands run contained.
     - "native_fallback": enabled but Docker/image unusable AND
@@ -645,23 +721,32 @@ def status_report(config: dict[str, Any] | None) -> dict[str, Any]:
     if not cfg.enabled:
         report["note"] = "sandbox disabled -- documented legacy host-execution mode"
         return report
+    boot = read_boot_state(config)
+    if boot:
+        report["mode"] = boot["mode"]
+        report["fallback_reason"] = str(boot.get("reason") or "")
+    # Live probes always fill the remediation fields (is Docker reachable
+    # RIGHT NOW?) but only decide ``mode`` when no boot state exists.
     try:
         ok, reason = _db.docker_version()
         report["docker_available"] = ok
         if not ok:
             report["docker_error"] = reason
-            report["mode"] = "native_fallback" if cfg.fallback_native else "blocked"
-            report["fallback_reason"] = reason
+            if not boot:
+                report["mode"] = "native_fallback" if cfg.fallback_native else "blocked"
+                report["fallback_reason"] = reason
         else:
             image_ok = bool(_db.docker_image_exists(cfg.image))
             report["image_present"] = image_ok
-            if image_ok:
-                report["mode"] = "contained"
-            else:
-                report["mode"] = "native_fallback" if cfg.fallback_native else "blocked"
-                report["fallback_reason"] = f"sandbox image '{cfg.image}' not built"
-    except SandboxError as exc:
+            if not boot:
+                if image_ok:
+                    report["mode"] = "contained"
+                else:
+                    report["mode"] = "native_fallback" if cfg.fallback_native else "blocked"
+                    report["fallback_reason"] = f"sandbox image '{cfg.image}' not built"
+    except Exception as exc:  # noqa: BLE001 -- a status endpoint never throws
         report["docker_error"] = str(exc)
-        report["mode"] = "native_fallback" if cfg.fallback_native else "blocked"
-        report["fallback_reason"] = str(exc)
+        if not boot:
+            report["mode"] = "native_fallback" if cfg.fallback_native else "blocked"
+            report["fallback_reason"] = str(exc)
     return report

@@ -39,8 +39,11 @@ from tools.sandbox.exceptions import (
     SandboxWorkspaceError,
 )
 from tools.sandbox.manager import (
+    BOOT_STATE_FILE,
     SandboxManager,
+    boot_state_path,
     native_fallback_notice,
+    read_boot_state,
     resolve_manager,
     resolve_manager_with_fallback,
     status_report,
@@ -54,6 +57,9 @@ __all__ = [
     "resolve_manager_with_fallback",
     "native_fallback_notice",
     "status_report",
+    "BOOT_STATE_FILE",
+    "boot_state_path",
+    "read_boot_state",
     "SandboxConfig",
     "SandboxResult",
     "SandboxSpec",

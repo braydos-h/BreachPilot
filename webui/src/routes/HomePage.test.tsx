@@ -118,6 +118,28 @@ describe("SandboxBanner", () => {
     expect(screen.getByText(/fallback is disabled/i)).toBeInTheDocument();
   });
 
+  it("renders nothing for an unknown/missing mode (old backend payload)", () => {
+    useSandboxStatusMock.mockReturnValue({
+      data: makeStatus({ mode: undefined as unknown as string, docker_available: true, image_present: true }),
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useSandboxStatus>);
+    const { container } = renderNode(<SandboxBanner />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("renders nothing on an unrecognized future mode", () => {
+    useSandboxStatusMock.mockReturnValue({
+      data: makeStatus({ mode: "quantum_isolated" }),
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useSandboxStatus>);
+    const { container } = renderNode(<SandboxBanner />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it("renders nothing while loading", () => {
     useSandboxStatusMock.mockReturnValue({
       data: undefined,

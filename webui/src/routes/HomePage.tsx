@@ -66,11 +66,14 @@ const FALLBACK_HINT = "Start Docker and build the sandbox image (docker build -t
 
 /**
  * Sandbox posture banner for the home screen. Surfaced at startup so the
- * operator always knows the effective execution mode before launching a run:
+ * operator always knows the effective execution mode before launching a run.
+ * The reported mode is the session's BOOT-TIME decision (the API's
+ * sandbox_boot_state.json), not a live Docker probe — a session's posture is
+ * fixed when its server boots and never flips mid-run:
  * - contained: quiet green line (worker container active).
  * - disabled: quiet muted line (legacy host mode as configured).
- * - native_fallback: amber card — Docker unusable, session degraded to
- *   uncontained native execution (sandbox.fallback_native=true default).
+ * - native_fallback: amber card — Docker was unusable at boot, the session
+ *   degraded to uncontained native execution (fallback_native=true default).
  * - blocked: red card — strict fail-closed mode, executions will be denied.
  */
 export function SandboxBanner() {
@@ -78,6 +81,10 @@ export function SandboxBanner() {
   if (sandbox.isLoading || sandbox.error || !sandbox.data) return null;
   const s = sandbox.data;
   const reason: string = s.fallback_reason || s.docker_error || "";
+  // Old backends (no ``mode``) or future modes: say nothing rather than
+  // rendering a false alarm (the cards below assert specific postures).
+  const knownMode = ["contained", "disabled", "native_fallback", "blocked"].includes(s.mode ?? "");
+  if (!knownMode) return null;
 
   if (s.mode === "contained") {
     return (
