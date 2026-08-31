@@ -7,14 +7,12 @@ import { Loader2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ErrorState, SkeletonRows } from "@/components/Loading";
 import { fetchRuns } from "@/features/benchmarks/api";
-import { formatPct, isActiveState, runStatusToBadge } from "@/features/benchmarks/format";
+import { formatCost, formatDuration, formatPct, isActiveState, runStatusToBadge } from "@/features/benchmarks/format";
 import { BenchmarksShell } from "@/features/benchmarks/BenchmarksShell";
 import { useBenchmarksOverview } from "@/features/benchmarks/useBenchmarksOverview";
 import { HistoryCharts } from "@/features/benchmarks/HistoryCharts";
 import { ComparisonView } from "@/features/benchmarks/ComparisonView";
 import { StatusBadge } from "@/features/benchmarks/ScenarioResultsTable";
-import { formatCost, formatDuration } from "@/features/benchmarks/format";
-import { formatRelative } from "@/lib/utils";
 
 const REFRESH_MS = 3000;
 

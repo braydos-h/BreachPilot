@@ -53,7 +53,7 @@ describe("BenchmarksHistoryPage", () => {
     });
     expect(screen.getByTestId("benchmark-comparison")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "run-1" })).toHaveAttribute("href", "/benchmarks/run-1");
-    expect(screen.getByText("66.7%")).toBeInTheDocument();
+    expect(screen.getByText("2/3 (66.7%)")).toBeInTheDocument();
     expect(screen.getByText("2m 00s")).toBeInTheDocument(); // median solve time
   });
 

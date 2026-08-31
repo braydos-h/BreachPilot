@@ -1,8 +1,9 @@
-// CDP-driven verification of the Benchmarks UI served by the live daemon.
+// CDP-driven verification of the Benchmarks sub-pages served by the live daemon.
 // Temporary script — deleted after the run. Uses Node 25's global WebSocket.
-const CDP_PORT = 9223;
+const CDP_PORT = 9228;
 const APP = "http://127.0.0.1:8765";
-const TOKEN = (await import("node:fs")).readFileSync(".webui_secret_key", "utf8").trim();
+const fs = await import("node:fs");
+const TOKEN = fs.readFileSync(".webui_secret_key", "utf8").trim();
 
 const { spawn } = await import("node:child_process");
 const chrome = spawn(
@@ -12,7 +13,7 @@ const chrome = spawn(
     `--remote-debugging-port=${CDP_PORT}`,
     "--no-first-run",
     "--no-default-browser-check",
-    "--user-data-dir=" + process.env.TEMP + "\\bench-cdp-profile",
+    "--user-data-dir=" + process.env.TEMP + "\\bench-cdp-sub",
     "--window-size=1440,900",
     "about:blank",
   ],
@@ -21,12 +22,9 @@ const chrome = spawn(
 await new Promise((r) => setTimeout(r, 2500));
 
 const targets = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json();
-console.error("targets:", targets.map((t) => `${t.type}:${t.url}`).join(" | "));
 const page = targets.find((t) => t.type === "page");
 const ws = new WebSocket(page.webSocketDebuggerUrl);
-console.error("ws connecting…");
-await new Promise((res, rej) => { ws.onopen = () => { console.error("ws open"); res(); }; ws.onerror = (e) => rej(new Error("ws error")); });
-console.error("ws connected");
+await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
 
 let msgId = 0;
 const pending = new Map();
@@ -39,14 +37,12 @@ ws.onmessage = (ev) => {
     pending.delete(msg.id);
   } else if (msg.method === "Runtime.consoleAPICalled" && ["error", "warning"].includes(msg.params.type)) {
     const text = msg.params.args.map((a) => a.value ?? a.description ?? a.type).join(" ");
-    if (!text.includes("Download the React DevTools")) consoleErrors.push(`[console.${msg.params.type}] ${text}`);
+    if (!text.includes("Download the React DevTools")) consoleErrors.push(`[console.${msg.params.type}] ${text.slice(0, 200)}`);
   } else if (msg.method === "Runtime.exceptionThrown") {
-    consoleErrors.push(`[exception] ${msg.params.exceptionDetails?.exception?.description ?? JSON.stringify(msg.params.exceptionDetails).slice(0, 300)}`);
+    consoleErrors.push(`[exception] ${msg.params.exceptionDetails?.exception?.description ?? ""}`.slice(0, 300));
   } else if (msg.method === "Network.responseReceived") {
     const s = msg.params.response.status;
-    if (s >= 400 && !msg.params.response.url.includes("/api/v1/benchmarks/compare?run_a=2026")) {
-      failedRequests.push(`${s} ${msg.params.response.url}`);
-    }
+    if (s >= 400) failedRequests.push(`${s} ${msg.params.response.url}`);
   }
 };
 function send(method, params = {}) {
@@ -65,7 +61,6 @@ async function evalJs(expr) {
 await send("Runtime.enable");
 await send("Page.enable");
 await send("Network.enable");
-// Seed the session token before any app script runs.
 await send("Page.addScriptToEvaluateOnNewDocument", {
   source: `sessionStorage.setItem('breachpilot.apiToken.v1', ${JSON.stringify(TOKEN)});
 sessionStorage.setItem('breachpilot.welcome.v1', '1');
@@ -74,7 +69,7 @@ sessionStorage.setItem('breachpilot.onboarding.v1', '1');`,
 
 async function goto(url) {
   await send("Page.navigate", { url });
-  await new Promise((r) => setTimeout(r, 1500));
+  await new Promise((r) => setTimeout(r, 1600));
 }
 async function waitFor(selector, timeoutMs = 15000) {
   const t0 = Date.now();
@@ -84,6 +79,16 @@ async function waitFor(selector, timeoutMs = 15000) {
   }
   return false;
 }
+// Radix tabs/checkboxes activate on mousedown — synthetic .click() alone is
+// not enough, so fire the full pointer/mouse sequence a real user produces.
+const FIRE = `(() => {
+  window.__bpFire = (el) => {
+    for (const type of ['pointerdown','mousedown','pointerup','mouseup','click']) {
+      el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window, button: 0 }));
+    }
+  };
+  return true;
+})()`;
 
 const results = { checks: [], consoleErrors, failedRequests };
 function check(name, ok, extra = "") {
@@ -96,128 +101,58 @@ const watchdog = setTimeout(() => {
   ws.close();
   chrome.kill();
   process.exit(2);
-}, 120000);
+}, 150000);
 
-// Radix tabs/checkboxes activate on mousedown — synthetic .click() alone is
-// not enough, so fire the full pointer/mouse sequence a real user produces.
-const FIRE = `(() => {
-  window.__bpFire = (el) => {
-    for (const type of ['pointerdown','mousedown','pointerup','mouseup','click']) {
-      el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window, button: 0 }));
-    }
-  };
-  return true;
-})()`;
-await evalJs(FIRE);
-
-// ── 1. Direct navigation to /benchmarks (fresh load = refresh equivalent)
+// ── 1. Overview sub-page (direct nav = refresh semantics)
 await goto(`${APP}/benchmarks`);
-const appMounted = await waitFor("[data-testid='run-benchmark-panel']");
-check("direct nav mounts the app on /benchmarks", appMounted);
-await waitFor("[data-testid='benchmark-metric-cards']");
-check("overview + latest-run data renders (metric cards)", await evalJs("!!document.querySelector(\"[data-testid='benchmark-metric-cards']\")"));
-check("history charts render", await evalJs("!!document.querySelector(\"[data-testid='benchmark-history']\")"));
-check("baseline card renders from overview.baseline", await evalJs("!!document.querySelector(\"[data-testid='benchmark-baseline']\")"));
-check("history table shows both seeded runs", await evalJs("document.querySelectorAll(\"tbody tr\").length >= 2"));
-check("suite select is pre-populated", await evalJs("document.querySelector('#bench-suite')?.value === 'xben'"));
-await new Promise((r) => setTimeout(r, 800));
-check("scenario checklist auto-loaded for default suite", await evalJs("!!document.querySelector('#bench-scenario-xben-dvwa')"));
-
-// ── 2. Explicit refresh on the route
-await send("Page.reload");
-await waitFor("[data-testid='run-benchmark-panel']");
-check("refresh on /benchmarks keeps working", await evalJs("!!document.querySelector(\"[data-testid='run-benchmark-panel']\")"));
-
-// ── 3. Deep link to a run detail (direct navigation)
-await goto(`${APP}/benchmarks/20260830_120000_00002`);
-await waitFor("[data-testid='benchmark-metric-cards']");
-check("deep link to run detail renders summary", await evalJs("!!document.querySelector(\"[data-testid='benchmark-metric-cards']\")"));
-check("run page shows no interrupted banner for completed run", await evalJs("!document.querySelector(\"[data-testid='benchmark-interrupted-banner']\")"));
 await evalJs(FIRE);
-await evalJs("window.__bpFire([...document.querySelectorAll('[role=tab]')].find(t => t.textContent.includes('Trials')))");
-await new Promise((r) => setTimeout(r, 400));
-check("trials tab shows the recorded trial", await evalJs("document.body.textContent.includes('xben-dvwa')"));
-// Sortable headers (re-query after React re-render)
-const sorted = await evalJs(
-  `(() => {
-     const btn = [...document.querySelectorAll("[data-testid='scenario-results-table'] th button")].find(b => b.textContent.includes('Time'));
-     if (!btn) return 'no button';
-     window.__bpFire(btn);
-     return new Promise(res => setTimeout(() => {
-       const th = [...document.querySelectorAll("[data-testid='scenario-results-table'] th")].find(x => x.textContent.includes('Time'));
-       res(JSON.stringify({ ariaSort: th?.getAttribute('aria-sort') }));
-     }, 300));
-   })()`,
-);
-check("sortable headers are keyboard-accessible buttons with aria-sort", sorted?.ariaSort === "ascending", JSON.stringify(sorted));
+check("overview mounts (metric cards + baseline + nav)", await waitFor("[data-testid='benchmark-metric-cards']"));
+check("baseline card renders", await evalJs("!!document.querySelector(\"[data-testid='benchmark-baseline']\")"));
+check("sub-nav highlights Overview", await evalJs(
+  "[...document.querySelectorAll('nav[aria-label=\"Benchmarks sections\"] a')].map(a => a.textContent + (a.className.includes('text-primary') ? '*' : '')).join('|')",
+));
+check("recent runs preview lists the seeded runs", await evalJs(
+  "[...document.querySelectorAll('tbody a')].some(a => a.textContent === '20260830_120000_00002')",
+));
 
-// ── 4. Deep link to an orphaned (stale 'running') run
-await goto(`${APP}/benchmarks/20260831_010450_09800`);
-await waitFor("[data-testid='benchmark-interrupted-banner']");
-check("orphaned run shows interrupted banner", await evalJs("!!document.querySelector(\"[data-testid='benchmark-interrupted-banner']\")"));
-check("orphaned run shows no live pill", await evalJs("!document.body.textContent.includes('live ·')"));
+// ── 2. Sub-nav click → New run page
+await evalJs("window.__bpFire([...document.querySelectorAll('nav[aria-label=\"Benchmarks sections\"] a')].find(a => a.textContent.includes('New run')))");
+await waitFor("[data-testid='run-benchmark-panel']");
+check("New run sub-page renders the panel", await evalJs("!!document.querySelector(\"[data-testid='run-benchmark-panel']\")"));
+check("New run URL applied", await evalJs("location.pathname === '/benchmarks/new'"));
+await new Promise((r) => setTimeout(r, 600));
+check("scenario checklist auto-loaded on New run", await evalJs("!!document.querySelector('#bench-scenario-xben-dvwa')"));
+check("baseline context card renders", await evalJs("!!document.querySelector(\"[data-testid='start-baseline-card']\")"));
 
-// ── 5. Responsive audit at 3 widths (page must not overflow horizontally)
-for (const w of [1440, 768, 360]) {
-  await send("Emulation.setDeviceMetricsOverride", { width: w, height: 900, deviceScaleFactor: 1, mobile: w < 700 });
-  await goto(`${APP}/benchmarks`);
-  await waitFor("[data-testid='run-benchmark-panel']");
+// ── 3. Sub-nav click → Past benchmarks page
+await evalJs("window.__bpFire([...document.querySelectorAll('nav[aria-label=\"Benchmarks sections\"] a')].find(a => a.textContent.includes('Past benchmarks')))");
+await waitFor("[data-testid='benchmark-history']");
+check("Past benchmarks renders charts", await evalJs("!!document.querySelector(\"[data-testid='benchmark-history']\")"));
+check("history URL applied", await evalJs("location.pathname === '/benchmarks/history'"));
+check("history table shows both seeded runs", await evalJs("document.querySelectorAll('tbody tr').length >= 2"));
+
+// ── 4. Direct deep link to /benchmarks/history (refresh semantics)
+await goto(`${APP}/benchmarks/history`);
+check("direct nav to history works", await waitFor("[data-testid='benchmark-history']"));
+
+// ── 5. Deep link to run detail still works
+await goto(`${APP}/benchmarks/20260830_120000_00002`);
+check("run detail deep link works", await waitFor("[data-testid='benchmark-metric-cards']"));
+check("breadcrumb links back to overview", await evalJs(
+  "[...document.querySelectorAll('a')].some(a => a.getAttribute('href') === '/benchmarks' && a.textContent.trim() === 'Benchmarks')",
+));
+
+// ── 6. Responsive audit of all three sub-pages at 360px
+for (const path of ["/benchmarks", "/benchmarks/new", "/benchmarks/history"]) {
+  await send("Emulation.setDeviceMetricsOverride", { width: 360, height: 800, deviceScaleFactor: 1, mobile: true });
+  await goto(`${APP}${path}`);
+  await new Promise((r) => setTimeout(r, 1200));
   const overflow = await evalJs(
     "(() => { const d = document.scrollingElement; return { sw: d.scrollWidth, cw: d.clientWidth }; })()",
   );
-  check(`no page-level horizontal overflow @${w}px`, overflow.sw <= overflow.cw + 1, JSON.stringify(overflow));
+  check(`no page-level horizontal overflow @360px ${path}`, overflow.sw <= overflow.cw + 1, JSON.stringify(overflow));
 }
 await send("Emulation.clearDeviceMetricsOverride");
-
-// ── 6. Comparison interaction: pick two runs and compare
-await goto(`${APP}/benchmarks`);
-await waitFor("[data-testid='benchmark-comparison']");
-const picked = await evalJs(
-  `(() => {
-     const sels = [...document.querySelectorAll("[data-testid='benchmark-comparison'] select")];
-     if (sels.length < 2) return "missing selects";
-     const opts = [...sels[0].querySelectorAll("option")].filter(o => o.value);
-     if (opts.length < 2) return "not enough runs";
-     const setVal = (el, v) => {
-       const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
-       setter.call(el, v);
-       el.dispatchEvent(new Event('change', { bubbles: true }));
-     };
-     setVal(sels[0], opts[0].value);
-     setVal(sels[1], opts[1].value);
-     return { a: opts[0].value, b: opts[1].value };
-   })()`,
-);
-check("comparison pickers populated", typeof picked === "object", JSON.stringify(picked));
-const cmpBtn = await evalJs(
-  "[...document.querySelectorAll(\"[data-testid='benchmark-comparison'] button\")].find(b => b.textContent.includes('Compare'))?.textContent ?? 'missing'",
-);
-check("compare button present", String(cmpBtn).includes("Compare"), String(cmpBtn));
-await evalJs(
-  "(() => { const b=[...document.querySelectorAll(\"[data-testid='benchmark-comparison'] button\")].find(b => b.textContent.includes('Compare')); b.click(); return 'ok'; })()",
-);
-await new Promise((r) => setTimeout(r, 1200));
-check("comparison table renders metric rows", await evalJs("document.querySelectorAll(\"[data-testid='benchmark-comparison'] tbody tr\").length >= 6"));
-
-// ── 7. Sorting + filtering on the run detail trials table (covered in step 3)
-
-// ── 8. Accessibility spot checks
-await goto(`${APP}/benchmarks`);
-await waitFor("[data-testid='run-benchmark-panel']");
-const a11y = await evalJs(
-  `(() => {
-     const unlabeled = [...document.querySelectorAll('button, [role=checkbox], select, input:not([type=hidden])')]
-       .filter((el) => {
-         if (el.getAttribute('aria-label') || el.getAttribute('aria-labelledby')) return false;
-         if (el.labels && el.labels.length > 0) return false;
-         if (el.textContent && el.textContent.trim().length > 0) return false;
-         return true;
-       })
-       .map((el) => el.outerHTML.slice(0, 80));
-     return { count: unlabeled.length, samples: unlabeled.slice(0, 4) };
-   })()`,
-);
-check("no unlabeled interactive controls on dashboard", a11y.count === 0, JSON.stringify(a11y));
 
 console.log(JSON.stringify(results, null, 1));
 ws.close();
