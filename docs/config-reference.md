@@ -719,6 +719,29 @@ never an automatic fallback. Full architecture + threat model:
 | `cleanup.remove_stale_on_startup` | bool | `true` | Sweep exited labeled containers / empty networks at startup (running concurrent-session workers kept) | `tools/sandbox/manager.py:cleanup_stale` |
 | `multi_net_raw` | bool | `true` | Grant NET_RAW for raw-packet scanning (nmap -sS); NET_ADMIN is never granted to the worker | `tools/sandbox/manager.py:resolve_manager` |
 
+### `browser:` (top-level) — browser-native web agent (architecture prep, default OFF)
+
+Prepared seam for a future browser-driven web agent. **Architecture only** in
+this build: `tools/browser/` holds provider-neutral domain models, the
+`BrowserBackend` ABC, and the fail-closed `BrowserManager` — nothing launches
+a browser, no Playwright/Chromium dependency exists, and every `browser.*`
+capability reports `available: false` until a backend is both configured and
+registered. Full design + future-implementation checklist:
+[docs/browser-agent-design.md](browser-agent-design.md).
+
+| Key | Type | Default | Controls |
+|-----|------|---------|----------|
+| `enabled` | bool | `false` | Master switch; stock installs never enable |
+| `backend` | str | `none` | `none`, or a future backend id (requires a `BACKEND_REGISTRY` entry — declared ≠ available) |
+| `headless` | bool | `true` | Future sessions run headless by default |
+| `max_sessions` | int | `2` | Concurrent session cap (manager-enforced) |
+| `session_timeout_seconds` | int | `300` | Session idle budget |
+| `navigation_timeout_seconds` | int | `30` | Per-navigation budget |
+| `capture_screenshots` | bool | `true` | Persist screenshots as hashed artifacts |
+| `capture_network` | bool | `true` | Capture request/response records (redacted at serialization) |
+| `capture_console` | bool | `false` | Console capture (opt-in) |
+| `persist_storage` | bool | `false` | Storage harvest goes to the credential store, never plaintext logs |
+
 
 ## Other consumed keys
 

@@ -145,6 +145,18 @@ Tools absent from the worker image surface as missing-tool warnings from
 preflight; extend a derived image (`FROM breachpilot-sandbox:latest`) for
 mission-specific tooling. Do not add host fallbacks.
 
+### Planned families
+
+`tools/sandbox/family_audit.py` also carries `PLANNED_FAMILIES` — tool
+families whose architecture exists but whose execution is not implemented.
+The future **browser** family is registered there with the pre-committed
+containment contract: when a browser backend lands it MUST be registered as
+`sandboxed` (or a documented host exception) and MUST execute inside an
+isolated browser worker obeying the effective target allowlist — no host
+fallback. Planned families emit no audit rows and never count as audit
+problems (see `tests/test_browser_sandbox_family.py`). Design:
+[docs/browser-agent-design.md §8](browser-agent-design.md).
+
 ## Worker image
 
 `docker/sandbox/Dockerfile` — Debian slim + python3, nmap, curl/wget,

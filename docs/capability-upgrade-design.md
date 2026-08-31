@@ -3,6 +3,12 @@
 Status: approved-by-author / implemented incrementally. Companion to the audit
 reports in `docs/phase1-audit/`.
 
+The capability model described here (declared vs available, capability
+records, requires/produces composition) is also the substrate the future
+browser-native web agent builds on: prepared seam
+`tools/browser/capabilities.py` (stable `browser.*` names, fail-closed
+availability) + design doc [docs/browser-agent-design.md](browser-agent-design.md).
+
 Governing principle, forced by the audit: **extend existing seams, build zero
 parallel systems.** Every wishlist item below names the existing substrate it
 extends.
