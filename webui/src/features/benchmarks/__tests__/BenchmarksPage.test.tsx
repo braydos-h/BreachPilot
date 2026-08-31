@@ -6,10 +6,6 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BenchmarksPage } from "@/routes/BenchmarksPage";
 
-vi.mock("@/api/hooks", () => ({
-  useModels: () => ({ data: { default_alias: "glm", provider: "ollama" } }),
-}));
-
 vi.mock("@/features/benchmarks/api", () => ({
   fetchOverview: vi.fn().mockResolvedValue({
     suites: [{ suite_id: "xben", scenarios: 4, tags: { web: 2 } }],
@@ -27,26 +23,22 @@ vi.mock("@/features/benchmarks/api", () => ({
         estimated_cost: 0.5,
         total_tokens: 9000,
       },
-    ],
-    active: { run_id: null, state: "idle", error: "" },
-    baseline: { exists: false, path: "reports/benchmarks/baseline.json" },
-  }),
-  fetchRuns: vi.fn().mockResolvedValue({
-    runs: [
       {
-        run_id: "run-1",
+        run_id: "run-0",
         suite: "xben",
         status: "completed",
-        timestamp: "2026-08-29T00:00:00Z",
+        timestamp: "2026-08-28T00:00:00Z",
         trials_total: 3,
-        solved: 2,
-        verified_success_rate: 0.6667,
-        false_positive_rate: 0.3333,
-        median_solve_time: 120,
-        estimated_cost: 0.5,
-        total_tokens: 9000,
+        solved: 1,
+        verified_success_rate: 0.3333,
+        false_positive_rate: 0,
+        median_solve_time: 140,
+        estimated_cost: 0.4,
+        total_tokens: 8000,
       },
     ],
+    active: { run_id: null, state: "idle", error: "" },
+    baseline: { exists: true, path: "reports/benchmarks/baseline.json", run_id: "run-0", verified_success_rate: 0.3333, false_positive_rate: 0 },
   }),
   fetchRun: vi.fn().mockResolvedValue({
     run_id: "run-1",
@@ -83,45 +75,56 @@ vi.mock("@/features/benchmarks/api", () => ({
     },
   }),
   fetchRunEvents: vi.fn().mockResolvedValue({ run_id: "run-1", events: [], latest_sequence: 0 }),
-  fetchSuiteScenarios: vi.fn().mockResolvedValue({ suite: "xben", scenarios: [] }),
-  startBenchmarkRun: vi.fn(),
-  cancelBenchmarkRun: vi.fn(),
-  saveBaseline: vi.fn(),
-  compareRuns: vi.fn(),
 }));
 
-function renderPage() {
+function renderPage(initialEntries = ["/benchmarks"]) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={initialEntries}>
         <BenchmarksPage />
       </MemoryRouter>
     </QueryClientProvider>,
   );
 }
 
-describe("BenchmarksPage", () => {
-  it("renders the dashboard with metric cards, run panel, history and comparison", async () => {
+describe("BenchmarksPage (Overview)", () => {
+  it("renders the sub-nav, latest run metrics, baseline and recent runs", async () => {
     renderPage();
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: /Benchmarks/ })).toBeInTheDocument();
     });
+    // Sub-page navigation.
+    expect(screen.getByRole("navigation", { name: "Benchmarks sections" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "New run" })).toHaveAttribute("href", "/benchmarks/new");
+    expect(screen.getByRole("link", { name: "Past benchmarks" })).toHaveAttribute("href", "/benchmarks/history");
+    // Verified success from the latest run summary.
     await waitFor(() => {
       expect(screen.getByTestId("benchmark-metric-cards")).toBeInTheDocument();
     });
-    // Verified success from the latest run summary.
     expect(screen.getByText("66.7%")).toBeInTheDocument();
-    // Run panel present with suite picker.
-    expect(screen.getByTestId("run-benchmark-panel")).toBeInTheDocument();
-    expect(screen.getByLabelText(/Benchmark suite/)).toBeInTheDocument();
-    // History + comparison sections.
-    expect(screen.getByTestId("benchmark-history")).toBeInTheDocument();
-    expect(screen.getByTestId("benchmark-comparison")).toBeInTheDocument();
-    // Run history row links to the run detail page (latest-run header + history row).
+    // Baseline card from overview.baseline.
+    expect(screen.getByTestId("benchmark-baseline")).toBeInTheDocument();
+    // Recent-runs preview links to the run detail + full history.
     expect(screen.getAllByRole("link", { name: "run-1" }).length).toBeGreaterThanOrEqual(1);
     for (const link of screen.getAllByRole("link", { name: "run-1" })) {
       expect(link).toHaveAttribute("href", "/benchmarks/run-1");
     }
+    expect(screen.getByRole("link", { name: /View all/ })).toHaveAttribute("href", "/benchmarks/history");
+  });
+
+  it("shows a start CTA instead of broken charts when there are no runs", async () => {
+    const { fetchOverview } = await import("@/features/benchmarks/api");
+    (fetchOverview as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      suites: [{ suite_id: "xben", scenarios: 4 }],
+      runs: [],
+      active: { run_id: null, state: "idle", error: "" },
+      baseline: { exists: false, path: "reports/benchmarks/baseline.json" },
+    });
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("benchmarks-empty-state")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("link", { name: /Start a benchmark/ })).toHaveAttribute("href", "/benchmarks/new");
   });
 });

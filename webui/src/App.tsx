@@ -29,6 +29,8 @@ const StatsPage = lazy(() => import("@/routes/StatsPage").then((m) => ({ default
 const HelpPage = lazy(() => import("@/routes/HelpPage").then((m) => ({ default: m.HelpPage })));
 const ConnectionsPage = lazy(() => import("@/routes/ConnectionsPage").then((m) => ({ default: m.ConnectionsPage })));
 const BenchmarksPage = lazy(() => import("@/routes/BenchmarksPage").then((m) => ({ default: m.BenchmarksPage })));
+const BenchmarksStartPage = lazy(() => import("@/routes/BenchmarksStartPage").then((m) => ({ default: m.BenchmarksStartPage })));
+const BenchmarksHistoryPage = lazy(() => import("@/routes/BenchmarksHistoryPage").then((m) => ({ default: m.BenchmarksHistoryPage })));
 const BenchmarkRunPage = lazy(() => import("@/routes/BenchmarkRunPage").then((m) => ({ default: m.BenchmarkRunPage })));
 
 export default function App() {
@@ -60,6 +62,8 @@ export default function App() {
                     <Route path="/graph" element={<AttackGraphPage />} />
                     <Route path="/stats" element={<StatsPage />} />
                     <Route path="/benchmarks" element={<BenchmarksPage />} />
+                    <Route path="/benchmarks/new" element={<BenchmarksStartPage />} />
+                    <Route path="/benchmarks/history" element={<BenchmarksHistoryPage />} />
                     <Route path="/benchmarks/:runId" element={<BenchmarkRunPage />} />
                     <Route path="/connections" element={<ConnectionsPage />} />
                     <Route path="/help" element={<HelpPage />} />
