@@ -816,9 +816,7 @@ class ChatGptProvider(BaseProvider):
                 resp.raise_for_status()
                 data = resp.json()
         except Exception as exc:
-            raise ProviderDiscoveryError(
-                f"ChatGPT proxy unreachable: {exc}", fallback_models=[default_model]
-            ) from exc
+            raise ProviderDiscoveryError(f"ChatGPT proxy unreachable: {exc}", fallback_models=[default_model]) from exc
         ids = [str(m.get("id", "")) for m in data.get("data", []) if isinstance(m, dict) and m.get("id")]
         return _infos(ids)
 

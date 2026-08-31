@@ -274,7 +274,14 @@ python main.py --setup-api-keys   # prompts and saves to secr.json (gitignored)
 
 Get a free key at https://ollama.com/settings/keys. Then `python main.py --doctor` should be all green.
 
-> Prefer local Ollama or ChatGPT? Switch in the WebUI under System → Models, or see [docs/providers.md](docs/providers.md). Embeddings always stay local (`nomic-embed-text`).
+> Prefer a different AI provider? The engine is provider-pluggable: Ollama is
+> one optional provider (OpenCode Go and ChatGPT ship built-in; the WebUI
+> System → Models page switches between them). `models.provider: opencode_go`
+> + `embeddings.provider: none` in `config.yaml` runs the engine with the
+> ollama package and endpoints not needed at all. The ollama Python package
+> is an install extra (`pip install -e ".[ollama]"`). See
+> [docs/providers.md](docs/providers.md) and
+> [docs/provider-development.md](docs/provider-development.md) for adding provider #4.
 
 ---
 
@@ -318,8 +325,9 @@ Everything lives in `config.yaml`, validated against `tools/config/schema.py::CO
 
 For day-to-day use you do not need to touch it: the WebUI System → Config editor and System → Secrets / Models pages cover it. Full key reference: [docs/config-reference.md](docs/config-reference.md)
 
-Switching providers (Ollama ↔ ChatGPT), models, skills, swarm, OPSEC, persistence, and API settings are all in there. Highlights:
+Switching providers (Ollama ↔ OpenCode Go ↔ ChatGPT), models, skills, swarm, OPSEC, persistence, and API settings are all in there. Highlights:
 
+- AI providers: a pluggable registry (`tools/providers/`; `models.provider` + `providers.<id>` blocks). Built-ins: `ollama` (default, cloud/local), `opencode_go` (OpenAI Responses API at opencode.ai), and `chatgpt` (vendored OAuth proxy). Ollama is optional end-to-end — a zero-Ollama install selects another provider and disables embeddings (`embeddings.provider: none`). Doctor probes only the active provider; `GET /api/v1/providers` returns registry metadata. See [docs/providers.md](docs/providers.md) / [docs/provider-development.md](docs/provider-development.md).
 - Models: cloud-first (`glm-5.2:cloud` 976K, `deepseek-v4-pro:cloud` 1M, `kimi-k2.6:cloud` 256K, `minimax-m3:cloud` 512K) with per-role routing (planner/executor/critic/etc.). The registry auto-updates from the Ollama API (`models.auto_update`, default on): at daemon boot each alias is bumped to the newest same-family version the host lists — no manual edits when Ollama Cloud ships a new model. Also on demand via `POST /api/v1/models/refresh` (the WebUI model picker's refresh button).
 - Swarm & autonomous: toggle agents, concurrency, persistence phases, adaptive replan
 - OPSEC: target-aware pacing, UA rotation, DoH, noise budget
@@ -364,7 +372,8 @@ See [docs/plugin-development.md](docs/plugin-development.md).
 | [WebUI](docs/webui.md) | SPA pages, wizard, live view, graph |
 | [WebUI API](docs/api.md) | `GET /api/v1` REST + WebSocket |
 | [Safety Model](docs/safety-model.md) | Scope, permission, audit, allowlist |
-| [Providers](docs/providers.md) | Ollama Cloud/local + ChatGPT (OAuth) |
+| [Providers](docs/providers.md) | Pluggable AI provider registry (Ollama / OpenCode Go / ChatGPT) |
+| [Provider Development](docs/provider-development.md) | Adding a new AI provider |
 | [Architecture](docs/architecture.md) | System shape, Flow A/B, persistence |
 | [Skills](docs/skills.md) | 140-skill advisory pipeline |
 | [Attack Modules](docs/attack-modules.md) | Pre-packaged exploit logic |

@@ -1378,7 +1378,9 @@ class OpenCodeGoProvider(BaseProvider):
             # If filtering removed everything, fall back to raw list (at least show something)
             return _infos(filtered or ids or [default_model])
         # Fallback for non-standard shape
-        return _infos([str(m.get("id", "")) for m in (raw_data or []) if isinstance(m, dict) and m.get("id")] or [default_model])
+        return _infos(
+            [str(m.get("id", "")) for m in (raw_data or []) if isinstance(m, dict) and m.get("id")] or [default_model]
+        )
 
     def title_model(self, config: Mapping[str, Any] | None = None) -> str:
         return str(self.provider_config(config).get("default_model") or _DEFAULT_MODEL)

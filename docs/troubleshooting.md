@@ -225,22 +225,21 @@ an exact fix. When in doubt, start with the diagnostics table below — the
           _log_nested_exceptions(exc)
   ```
   Existing correct call sites: `main.py:779`, `tools/mcp_session.py:188`,
-  `tools/api/run_manager.py:243`, `tools/exploit_agent/ollama_client.py:35`.
+  `tools/api/run_manager.py:243`, `tools/exploit_agent/model_client.py:35`.
 
 ### LLM server disconnected / timeouts
 
 - **Symptom:** `ERROR: LLM server disconnected after retries. Last error: ...`
-  or repeated `[OLLAMA RETRY n/3]` lines.
+  or repeated `[MODEL RETRY <provider> n/3]` lines.
 - **Cause:** transient network errors (httpx `ReadTimeout`, `ConnectError`,
-  `RemoteProtocolError`) against the Ollama backend.
-- **Check:** `python main.py --doctor` (Ollama reachability); watch the
-  retry lines — 3 retries with exponential backoff
-  (`tools/exploit_agent/ollama_client.py:19`).
+  `RemoteProtocolError`) against the active model provider.
+- **Check:** `python main.py --doctor` (probes the active provider only);
+  watch the retry lines — 3 retries with exponential backoff
+  (`tools/exploit_agent/model_client.py:35`).
 - **Fix:** confirm the backend is up and the key is set (§1); for long
   generations use `--long-session`, which raises the LLM call timeout
   (`config.yaml` `long_session.request_timeout_seconds`, default 600).
-  Retryable errors are matched in
-  `tools/exploit_agent/ollama_client.py:9`.
+  Retryable errors are matched in `tools/exploit_agent/model_client.py`.
 
 ### Command timeouts
 

@@ -29,7 +29,7 @@ def resolve_known_provider_ids() -> list[str]:
         from tools.providers.ollama_provider import OllamaProvider
 
         del OllamaProvider  # importing the module is what forces registration
-        from tools.providers.registry import _LazyDefaultRegistry, PROVIDERS
+        from tools.providers.registry import PROVIDERS, _LazyDefaultRegistry
 
         _LazyDefaultRegistry._ensure()
         return sorted(PROVIDERS.ids())

@@ -29,7 +29,6 @@ from tools.providers.registry import (
 )
 from tools.providers.types import ProviderCapabilities
 
-
 # ── Registration + lookup ───────────────────────────────────────────────
 
 

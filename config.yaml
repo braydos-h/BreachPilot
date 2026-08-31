@@ -462,17 +462,24 @@ ticketing:
   project_key: ''
   max_retries: 3
   backoff_seconds: 2.0
-chatgpt:
-  enabled: true
-opencode_go:
-  enabled: true
-  base_url: https://opencode.ai/zen/go/v1
-  api_key_env: OPENCODE_GO_API_KEY
-  request_timeout_seconds: 300
-  default_model: muse-spark-1.2-contributor
-  models: []
-  context_window: 128000
-  discover_cache_seconds: 300
+# Pluggable chat/generate providers (models.provider selects; registry-validated).
+# The blocks here are the modern `providers.<id>` shape; legacy top-level
+# blocks still resolve as fallback (ONE normalization layer in
+# tools.config.loader.get_provider_config).
+providers:
+  opencode_go:
+    enabled: true
+    base_url: https://opencode.ai/zen/go/v1
+    api_key_env: OPENCODE_GO_API_KEY
+    request_timeout_seconds: 300
+    default_model: muse-spark-1.2-contributor
+    models: []
+    context_window: 128000
+    discover_cache_seconds: 300
+  chatgpt:
+    enabled: true
+embeddings:
+  provider: none
 caldera:
   enabled: true
   url: ''

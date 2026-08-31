@@ -17,6 +17,7 @@ Covered:
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 import pytest
@@ -29,9 +30,6 @@ from tools.providers.embeddings import (
     build_embedding_provider,
     embeddings_disabled,
 )
-
-import os
-
 
 # ── build_embedding_provider dispatch ───────────────────────────────────
 
@@ -91,8 +89,6 @@ def test_null_provider_makes_no_network_calls(monkeypatch: pytest.MonkeyPatch):
 def test_null_provider_reads_no_api_key_env(monkeypatch: pytest.MonkeyPatch):
     """Building + calling the null provider must not look up any key env var."""
     import urllib.request
-
-    import tools.providers.embeddings as emb_mod
 
     def _forbidden_urlopen(*args: Any, **kwargs: Any) -> Any:
         raise AssertionError("null provider must not perform HTTP")

@@ -20,7 +20,7 @@ from typing import Any
 
 import pytest
 
-from tools.providers.base import BaseProvider, CANONICAL_CHAT_KWARGS
+from tools.providers.base import CANONICAL_CHAT_KWARGS, BaseProvider
 from tools.providers.registry import PROVIDERS, get_provider, get_provider_from_config
 from tools.providers.types import (
     ModelClient,
@@ -83,7 +83,8 @@ class TestProviderInterfaceContract:
             # Ollama's adapter delegates probes to doctor helpers — keep the
             # contract offline by stubbing them (they are call-time imports).
             monkeypatch.setattr(
-                "tools.doctor._check_ollama", lambda host: {"name": "ollama", "ok": False, "error": "mocked", "hint": ""}
+                "tools.doctor._check_ollama",
+                lambda host: {"name": "ollama", "ok": False, "error": "mocked", "hint": ""},
             )
             monkeypatch.setattr(
                 "tools.doctor._check_models",

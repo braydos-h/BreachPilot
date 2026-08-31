@@ -222,8 +222,7 @@ def test_ollama_sdk_import_is_isolated_to_its_provider():
         if _IMPORT_OLLAMA_RE.search(text):
             offenders.append(rel)
     assert offenders == [], (
-        "Generic ollama SDK imports found — isolate them in tools/providers/ollama_provider.py: "
-        + ", ".join(offenders)
+        "Generic ollama SDK imports found — isolate them in tools/providers/ollama_provider.py: " + ", ".join(offenders)
     )
 
 

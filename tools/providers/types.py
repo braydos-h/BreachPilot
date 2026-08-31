@@ -36,7 +36,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
-
 # ---------------------------------------------------------------------------
 # Canonical response format helpers
 # ---------------------------------------------------------------------------
@@ -45,9 +44,9 @@ from typing import Any, Callable, Mapping
 def tool_call(name: str, arguments: Any, call_id: str = "") -> dict[str, Any]:
     """Build a canonical tool-call entry.
 
-    ``arguments`` is normalized to a JSON string (the shape
-    ``tools/exploit_agent/tool_calls._normalize_tool_call`` parses).  A non-dict
-   /string value is JSON-encoded or stringified.
+     ``arguments`` is normalized to a JSON string (the shape
+     ``tools/exploit_agent/tool_calls._normalize_tool_call`` parses).  A non-dict
+    /string value is JSON-encoded or stringified.
     """
     import json
 
@@ -128,7 +127,9 @@ def stream_chunk(content: str, *, thinking: str = "") -> dict[str, Any]:
 
 def stream_tool_chunk(tool_calls: list[dict[str, Any]], *, usage: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Build the canonical final streaming chunk (assembled tool calls + usage)."""
-    chunk: dict[str, Any] = {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": list(tool_calls)}}
+    chunk: dict[str, Any] = {
+        "message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": list(tool_calls)}
+    }
     if usage is not None:
         chunk["usage"] = dict(usage)
     return chunk

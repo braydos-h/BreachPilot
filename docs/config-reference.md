@@ -90,21 +90,47 @@ reachability, model registry, port conflicts) and `python main.py --self-test`
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `provider` | enum | `ollama` | Active chat/generate provider (`ollama`\|`chatgpt`); absent = `ollama` (today's behavior). Warn-only validated. | `tools/config/loader.py` `get_ai_provider`, `tools/model_router.py` `build_router`/`build_model_client_for_provider`, run_service/service.py, doctor.py, api/routes/system.py |
+| `provider` | enum | `ollama` | Active chat/generate provider; validated against the provider **registry** (built-ins: `ollama`\|`opencode_go`\|`chatgpt`, via `tools.config_manager.resolve_known_provider_ids`) — adding provider #4 extends the whitelist automatically. Absent = `ollama`. | `tools/config/loader.py` `get_ai_provider`, `tools/providers/registry.py`, `tools/model_router.py` `build_router`/`build_model_client_for_provider`, run_service/service.py, doctor.py, api/routes/system.py |
 | `registry` | map[alias→model id] | kimi/deepseek/deepseek_flash/glm/minimax | Alias → concrete cloud model mapping (Ollama path) | `tools/config/schema.py`, `tools/doctor.py`, `tools/run_service/service.py`, `tools/mcp_tools/registry.py` |
 | `default_alias` | str | `glm` | Active model alias (Ollama path; ChatGPT path uses `chatgpt.default_model`) | `tools/config/schema.py`, `tools/run_service/service.py`, `tools/eval_harness.py`, `legacy/agent_loop.py` |
 | `auto_update` | bool | `true` | Auto-update `registry` against the live Ollama API (`GET /api/tags`): at daemon boot each alias is bumped to the newest same-family version (e.g. `glm-5.2:cloud` → `glm-5.3:cloud`). No pulls (cloud pull = pointer only); `models.info` stays operator-managed. On demand: `POST /api/v1/models/refresh` | `tools/ollama_models.py` (`auto_refresh_on_startup`, `refresh_model_registry`), `main.py` `_auto_update_models`, `api/routes/system.py` `refresh_models` |
 | `info.<alias>.context_window` | int | per-model | Source of truth for the adaptive context compactor | model_router.py:202-221, exploit_agent/context.py:63-104 |
 | `info.<alias>.label/description` | str | per-model | Display metadata | model_router.py:130, api routes/system.py:193-194 |
 
-### `chatgpt:` (top-level) — ChatGPT provider (opt-in)
+### `providers:` (config.yaml) — per-provider chat config (canonical shape)
+
+The modern home for chat-provider config. Each registered provider id gets its
+own block — exactly one normalization layer reads them
+(`tools/config/loader.py` `get_provider_config`): the `providers.<id>` block
+wins, the legacy top-level block (`chatgpt:`, `opencode_go:`) is the
+fallback, and `tools/config/schema.py` `DEFAULT_CONFIG["<id>"]` supplies
+schema defaults. Adding provider #4 adds a block here — no new top-level
+config plumbing. The checked-in `config.yaml` carries `providers.opencode_go`
+(the active provider) + `providers.chatgpt`.
+
+| Key (per provider) | Type | Default | Controls | Consumed at |
+|-----|------|---------|----------|-------------|
+| `enabled` | bool | `false` | Master switch (advisory; `models.provider` is the real selector) | `BaseProvider.is_configured`, adapters |
+| `base_url` | str | per adapter | Provider endpoint | adapter `build_client`/`list_models` |
+| `api_key_env` | str | per adapter | Env var holding the API key (value is env-only, never in config) | adapters, `tools/api_key_store.py` |
+| `request_timeout_seconds` | int | `300` | HTTP timeout for provider calls | `model_router.py`, adapters |
+| `default_model` | str | per adapter | Default concrete model id; also the session-titler model | `resolve_default_model` (`tools/providers/registry.py`), `session_titler.py` |
+| `models` | list[str] | `[]` | Override model list; `[]` = live discovery | `BaseProvider.list_models`, `build_router` |
+| `context_window` | int | `128000` | Conservative context window for the compactor | `model_router.py`, `exploit_agent/context.py` |
+| `discover_cache_seconds` | int | `300` | Live-model-discovery cache TTL | adapters |
+
+Built-in id → legacy-fallback block mapping: `chatgpt` → `chatgpt:`,
+`opencode_go` → `opencode_go:`, `ollama` → `ollama:` (host/model only —
+Ollama's alias registry stays in `models:`). See
+[provider-development.md](provider-development.md) for the provider #4 recipe.
+
+### `chatgpt:` (top-level, legacy fallback) — ChatGPT provider (opt-in)
 
 Alternative chat/generate provider backed by the vendored
-`openai-oauth/` loopback proxy. Active only when `models.provider: chatgpt`
-(the checked-in `config.yaml` carries `chatgpt.enabled: true`, but `models.provider`
-defaults to `ollama`, so the block is inert until the provider is switched).
-Embeddings stay on Ollama regardless. See
-[docs/providers.md § ChatGPT provider](providers.md#chatgpt-provider-openai-oauth).
+`openai-oauth/` loopback proxy. Active only when `models.provider: chatgpt`.
+Legacy top-level keys still resolve (see `providers:` above) — prefer the
+`providers.chatgpt` block in new configs. See
+[docs/providers.md § ChatGPT provider](providers.md#the-chatgpt-provider-openai-oauth).
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
@@ -123,6 +149,24 @@ Embeddings stay on Ollama regardless. See
 | `start_timeout_seconds` | int | `30` | `/health` poll budget when auto-starting | chatgpt_provider.py `ensure_running` |
 | `discover_cache_seconds` | int | `300` | `/v1/models` discovery cache TTL | chatgpt_provider.py `discover_models` |
 | `oauth_file` | str | `""` | `""` = auto-resolve `~/.codex/auth.json` \| `$CODEX_HOME/auth.json` (existence only — never read) | chatgpt_provider.py `is_authenticated` |
+
+### `embeddings:` (config.yaml) — embedding provider selection
+
+Semantic memory + skill embeddings go through a separate, chat-provider-
+independent abstraction (`tools/providers/embeddings.py`):
+
+| Key | Type | Default | Controls | Consumed at |
+|-----|------|---------|----------|-------------|
+| `provider` | enum | `ollama` | `ollama` (legacy: local Ollama embeddings) \| `none` (**zero requests — semantic memory falls back to keyword storage, skills to deterministic matching**) | `tools/providers/embeddings.py` `build_embedding_provider` |
+| `host` | str | `""` | Embedding endpoint; `""` = `ollama.embed_host` → `ollama.host` fallback | `OllamaEmbeddingProvider` |
+| `model` | str | `""` | Embedding model; `""` = `nomic-embed-text` | `OllamaEmbeddingProvider` |
+| `api_key_env` | str | `OLLAMA_API_KEY` | Env var holding the bearer token (sent unconditionally; local daemons ignore it) | `OllamaEmbeddingProvider` |
+| `timeout_seconds` | int | `30` | urlopen timeout | `OllamaEmbeddingProvider` |
+
+With `provider: none` (as checked in) the engine makes ZERO Ollama requests
+from the embeddings path — `embeddings_disabled()` short-circuits consumers.
+
+### `mcp:` (config.yaml:45-46) — exploit MCP transport
 
 ### `mcp:` (config.yaml:45-46) — exploit MCP transport
 

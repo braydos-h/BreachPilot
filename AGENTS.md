@@ -93,31 +93,45 @@ On Linux/macOS `make install|test|test-one F=…|run|doctor|mcp-exploit` work.
    (`tools/mcp_shared.py:494-534`) env vars into the MCP server. The allowlist matcher supports
    domains + `*.wildcard` + CIDR by design (`tools/validation_utils.py:380-420`).
 
-7. **Ollama Cloud is the default model path.** `ollama.host` defaults to
-   `https://api.ollama.com` (`config.yaml:3`); the ollama Python client auto-attaches
-   `Authorization: Bearer $OLLAMA_API_KEY` to every chat/generate request, so
-   a host swap is the whole wiring (no probe, no local→cloud fallback).
-   Override `ollama.host` in config.yaml to point at a local daemon and the
-   same code path runs against it. Embeddings stay local by default via
-   `ollama.embed_host` (falls back to `ollama.host` when absent) —
-   `nomic-embed-text` is small enough to self-host. `OLLAMA_API_KEY` env is
-   required for the cloud path; missing key surfaces as auth failure on the
-   first chat.
+7. **Ollama is ONE optional provider, not the internal protocol.** Chat/generate
+   dispatches through the provider registry (`tools/providers/registry.py`;
+   built-ins: `ollama` (default), `opencode_go`, `chatgpt`) to a
+   `BaseProvider` adapter, and every consumer receives the canonical
+   `ModelClient` (`tools/providers/types.py`) and calls `.chat()` over the
+   **BreachPilot model response format** (`model` / `message` / `usage` dict).
+   Provider config is `models.provider` + a `providers.<id>` block (legacy
+   top-level blocks still resolve; ONE normalization layer:
+   `tools.config.loader.get_provider_config`). The ollama Python package is
+   an EXTRA (`pip install -e ".[ollama]"`) and its SDK import is isolated to
+   `tools/providers/ollama_provider.py` (source-scan guard:
+   `tests/test_no_ollama_regression.py`) — a zero-Ollama install runs the
+   engine on another provider (`models.provider: opencode_go`,
+   `embeddings.provider: none`). Embeddings are a separate abstraction
+   (`tools/providers/embeddings.py`: `ollama` | `none`). `--doctor` probes
+   ONLY the active provider (no Ollama endpoints for non-ollama
+   selections). Adding provider #4 = adapter + registration + config
+   metadata + tests — NO edits to agent/swarm/run-service/doctor/WebUI
+   (see [docs/provider-development.md](docs/provider-development.md)).
 
-   **ChatGPT is an opt-in alternative provider** (`models.provider: chatgpt`,
-   vendored `oauth/` loopback proxy at `127.0.0.1:10531/v1`). The single
-   seam is `tools/model_router.py::_build_model_client` — it takes an injectable
-   `raw_client`; `ollama` (default) builds `ollama.Client`, `chatgpt` injects a
-   `ChatGptProxyClient` (`tools/providers/chatgpt_provider.py`). Consumers stay
-   untouched (they already receive a `ModelClient`). Auth is browser OAuth
-   ("Sign in with ChatGPT") whose tokens live in `~/.codex/auth.json` — **never
-   copy OAuth tokens into `config.yaml` or logs; check `is_authenticated()` by
-   file existence only, never read it.** The proxy is loopback-only; lifecycle
-   uses openai-oauth's own `--detach`/`stop` CLI (never Popen+kill `serve`, and
-   never stop a proxy we didn't start — `_we_started`). Embeddings stay on
-   Ollama under either provider. `--doctor` runs `_check_chatgpt` only when
-   `provider: chatgpt` (default Ollama doctor output unchanged). See
-   [docs/providers.md](docs/providers.md).
+   **Ollama Cloud remains the default model path.** `ollama.host` defaults
+   to `https://api.ollama.com` (`config.yaml:3`); the ollama Python client
+   auto-attaches `Authorization: Bearer $OLLAMA_API_KEY` to every
+   chat/generate request, so a host swap is the whole wiring (no probe, no
+   local→cloud fallback). Override `ollama.host` in config.yaml to point at
+   a local daemon and the same code path runs against it. Embeddings stay
+   local by default via the `embeddings:` block (`ollama.embed_host` falls
+   back to `ollama.host` when absent). `OLLAMA_API_KEY` env is required for
+   the cloud path; missing key surfaces as auth failure on the first chat.
+
+   **ChatGPT is an opt-in provider** (`models.provider: chatgpt`, vendored
+   `oauth/` loopback proxy at `127.0.0.1:10531/v1`, adapter
+   `tools/providers/chatgpt_provider.py`). Auth is browser OAuth
+   ("Sign in with ChatGPT") whose tokens live in `~/.codex/auth.json` —
+   **never copy OAuth tokens into `config.yaml` or logs; check
+   `is_authenticated()` by file existence only, never read it.** The proxy
+   is loopback-only; lifecycle uses openai-oauth's own `--detach`/`stop`
+   CLI (never Popen+kill `serve`, and never stop a proxy we didn't start —
+   `_we_started`). See [docs/providers.md](docs/providers.md).
 
 8. **CI runs on every push/PR** (`.github/workflows/ci.yml` + codeql +
    dependency-review, `.github/dependabot.yml`): mocked test suite on Python

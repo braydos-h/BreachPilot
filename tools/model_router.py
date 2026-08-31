@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import random
 import time
-from typing import Any, Callable, Mapping
+from typing import Any, Mapping
 
 from tools.model_telemetry import (
     infer_source,
@@ -332,14 +332,14 @@ def _stream_with_telemetry(
         )
 
 
-# ponytail: cloud-only. The host (default https://api.ollama.com) is set
-# from config.yaml's ``ollama.host`` at every call site; the ollama Python
-# client auto-attaches ``Authorization: Bearer $OLLAMA_API_KEY`` to every
-# request, so pointing the same Client at the cloud host is the whole
-# wiring. No reachability probe, no local→cloud fallback — the cloud IS
-# the default. A local-only install overrides ``ollama.host`` to point at
-# a local daemon and the same code path runs against that.
-OLLAMA_CLOUD_HOST = "https://api.ollama.com"
+# OLLAMA_CLOUD_HOST ("https://api.ollama.com") is imported from the Ollama
+# provider adapter above — cloud-only: the host is set from config.yaml's
+# ``ollama.host`` at every call site; the ollama Python client auto-attaches
+# ``Authorization: Bearer $OLLAMA_API_KEY`` to every request, so pointing the
+# same Client at the cloud host is the whole wiring. No reachability probe,
+# no local→cloud fallback — the cloud IS the default. A local-only install
+# overrides ``ollama.host`` to point at a local daemon and the same code
+# path runs against that.
 
 
 def _build_model_client(

@@ -207,9 +207,7 @@ def refresh_model_registry(
 
     ollama_cfg = config.get("ollama") if isinstance(config, dict) else None
     ohost = host or (
-        str(ollama_cfg.get("host"))
-        if isinstance(ollama_cfg, dict) and ollama_cfg.get("host")
-        else OLLAMA_CLOUD_HOST
+        str(ollama_cfg.get("host")) if isinstance(ollama_cfg, dict) and ollama_cfg.get("host") else OLLAMA_CLOUD_HOST
     )
     registry = dict((config.get("models") or {}).get("registry") or {})
     try:
@@ -273,7 +271,9 @@ def _write_validated_config(config: dict[str, Any], config_path: str | os.PathLi
             tmp.unlink()
 
 
-def auto_refresh_on_startup(config: dict[str, Any], config_path: str | os.PathLike[str] = "config.yaml") -> dict[str, Any] | None:
+def auto_refresh_on_startup(
+    config: dict[str, Any], config_path: str | os.PathLike[str] = "config.yaml"
+) -> dict[str, Any] | None:
     """Boot-time best-effort registry sync. ``None`` when skipped.
 
     Skips silently (returns ``None``) for non-Ollama providers, when
@@ -341,7 +341,7 @@ class OllamaProvider(BaseProvider):
         request_timeout_seconds: float | None = None,
         provider_config: Mapping[str, Any] | None = None,
     ) -> "ModelRouter":
-        from tools.model_router import ModelRouter, _build_model_client
+        from tools.model_router import ModelRouter
 
         cfg = self.provider_config(config)
         del provider_config  # ollama reads its block via provider_config
@@ -351,7 +351,9 @@ class OllamaProvider(BaseProvider):
         for alias, model_name in registry.items():
             router.register(
                 str(alias),
-                self.build_client(config, str(model_name), alias=str(alias), request_timeout_seconds=request_timeout_seconds),
+                self.build_client(
+                    config, str(model_name), alias=str(alias), request_timeout_seconds=request_timeout_seconds
+                ),
             )
         return router
 

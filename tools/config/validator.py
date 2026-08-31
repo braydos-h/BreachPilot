@@ -151,9 +151,7 @@ class ConfigValidator:
 
                     known_ids = resolve_known_provider_ids()
                     if str(provider).lower() not in known_ids:
-                        result.warnings.append(
-                            f"models.provider should be one of: {', '.join(sorted(known_ids))}."
-                        )
+                        result.warnings.append(f"models.provider should be one of: {', '.join(sorted(known_ids))}.")
                 # Model-role routing: each value should be a string alias (or
                 # empty = use default_alias). A non-string / non-alias value
                 # is ambiguous only when it doesn't resolve — warn, never
