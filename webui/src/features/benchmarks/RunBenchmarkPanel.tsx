@@ -170,16 +170,31 @@ export function RunBenchmarkPanel({ suites, active, defaultModel }: RunBenchmark
           </div>
           <div className="space-y-2 pt-1">
             <label className="flex items-center gap-2 text-sm">
-              <Checkbox checked={sandboxRequired} disabled={busy} onCheckedChange={(v) => setSandboxRequired(v === true)} />
+              <Checkbox
+                aria-label="Sandbox required"
+                checked={sandboxRequired}
+                disabled={busy}
+                onCheckedChange={(v) => setSandboxRequired(v === true)}
+              />
               Sandbox required
               <span className="text-[11px] text-muted-foreground">(no host-execution fallback)</span>
             </label>
             <label className="flex items-center gap-2 text-sm">
-              <Checkbox checked={saveBaseline} disabled={busy} onCheckedChange={(v) => setSaveBaseline(v === true)} />
+              <Checkbox
+                aria-label="Save as baseline"
+                checked={saveBaseline}
+                disabled={busy}
+                onCheckedChange={(v) => setSaveBaseline(v === true)}
+              />
               Save as baseline
             </label>
             <label className="flex items-center gap-2 text-sm">
-              <Checkbox checked={checkRegression} disabled={busy} onCheckedChange={(v) => setCheckRegression(v === true)} />
+              <Checkbox
+                aria-label="Check regression vs baseline"
+                checked={checkRegression}
+                disabled={busy}
+                onCheckedChange={(v) => setCheckRegression(v === true)}
+              />
               Check regression vs baseline
             </label>
           </div>

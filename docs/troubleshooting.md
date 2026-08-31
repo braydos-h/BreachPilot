@@ -366,7 +366,9 @@ an exact fix. When in doubt, start with the diagnostics table below — the
   `tools/config_manager.py:468`).
 - **Check:** `netstat -ano | findstr :8765` (Windows) /
   `lsof -i :8765` (Linux/macOS)
-- **Fix:** stop the other instance, or change the port:
+- **Fix:** when the "already running" message appears in an interactive
+  terminal, press `K` to kill the old daemon and start a fresh one (Enter
+  keeps it). Otherwise stop the other instance manually, or change the port:
   ```yaml
   api:
     port: 8766

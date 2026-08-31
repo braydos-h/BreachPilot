@@ -17,6 +17,7 @@ import asyncio
 import contextlib
 import ipaddress
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -882,6 +883,78 @@ def _api_daemon_ready(host: str, port: int) -> bool:
         return False
 
 
+def _find_port_listener_pid(port: int) -> int | None:
+    """Best-effort PID of the process listening on TCP ``port`` (None if unknown)."""
+    if sys.platform == "win32":
+        try:
+            proc = subprocess.run(
+                ["netstat", "-ano", "-p", "tcp"], capture_output=True, text=True, timeout=10, check=False
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        for line in proc.stdout.splitlines():
+            # TCP    127.0.0.1:8765    0.0.0.0:0    LISTENING    <pid>
+            fields = line.split()
+            if len(fields) >= 5 and fields[3].upper() == "LISTENING" and fields[1].endswith(f":{port}"):
+                try:
+                    return int(fields[4])
+                except ValueError:
+                    return None
+        return None
+    for cmd in (["lsof", "-nP", f"-tiTCP:{port}", "-sTCP:LISTEN"], ["ss", "-ltnp"]):
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10, check=False)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if proc.returncode != 0:
+            continue
+        for line in proc.stdout.splitlines():
+            if cmd[0] == "lsof":
+                try:
+                    return int(line.strip().split()[0])
+                except (IndexError, ValueError):
+                    continue
+            fields = line.split()
+            if len(fields) >= 4 and fields[0] == "LISTEN" and fields[3].endswith(f":{port}"):
+                match = re.search(r"pid=(\d+)", line)
+                if match:
+                    return int(match.group(1))
+    return None
+
+
+def _stop_running_daemon(host: str, port: int) -> bool:
+    """Terminate the process owning ``port``; True once the endpoint stops answering."""
+    pid = _find_port_listener_pid(port)
+    if pid is None:
+        return False
+    cmd = ["taskkill", "/F", "/PID", str(pid)] if sys.platform == "win32" else ["kill", str(pid)]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if proc.returncode != 0:
+        return False
+    deadline = time.monotonic() + 20.0
+    while time.monotonic() < deadline:
+        if not _api_daemon_ready(host, port):
+            return True
+        time.sleep(0.3)
+    return False
+
+
+def _offer_daemon_kill() -> bool:
+    """TTY-only prompt for the already-running-daemon case. Returns True on K."""
+    try:
+        if not sys.stdin.isatty():
+            return False
+    except (AttributeError, ValueError):
+        return False
+    try:
+        return input("  Press K to kill it and start fresh, or Enter to keep it: ").strip().lower() == "k"
+    except (EOFError, KeyboardInterrupt):
+        return False
+
+
 def _auto_update_models(config: dict[str, Any], config_path: str) -> None:
     """Best-effort ``models.registry`` sync against the Ollama API (boot hook).
 
@@ -925,9 +998,17 @@ def _run_daemon(args: argparse.Namespace) -> int:
     web_mode = getattr(args, "web", False)
     if _api_daemon_ready(host, port):
         ui.status(f"WebUI API daemon is already running on http://{status_host}:{port}")
-        if web_mode:
-            threading.Thread(target=_open_browser_when_ready, args=(host, port, ui), daemon=True).start()
-        return 0
+        restarted = False
+        if _offer_daemon_kill():
+            if _stop_running_daemon(host, port):
+                ui.status("Stopped the previous WebUI API daemon; starting a fresh one.")
+                restarted = True
+            else:
+                ui.error("Could not stop the running daemon; keeping it.")
+        if not restarted:
+            if web_mode:
+                threading.Thread(target=_open_browser_when_ready, args=(host, port, ui), daemon=True).start()
+            return 0
     try:
         import uvicorn  # noqa: F401 -- import gate
     except ImportError:

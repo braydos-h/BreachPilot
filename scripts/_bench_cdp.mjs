@@ -98,6 +98,18 @@ const watchdog = setTimeout(() => {
   process.exit(2);
 }, 120000);
 
+// Radix tabs/checkboxes activate on mousedown — synthetic .click() alone is
+// not enough, so fire the full pointer/mouse sequence a real user produces.
+const FIRE = `(() => {
+  window.__bpFire = (el) => {
+    for (const type of ['pointerdown','mousedown','pointerup','mouseup','click']) {
+      el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window, button: 0 }));
+    }
+  };
+  return true;
+})()`;
+await evalJs(FIRE);
+
 // ── 1. Direct navigation to /benchmarks (fresh load = refresh equivalent)
 await goto(`${APP}/benchmarks`);
 const appMounted = await waitFor("[data-testid='run-benchmark-panel']");
@@ -121,7 +133,23 @@ await goto(`${APP}/benchmarks/20260830_120000_00002`);
 await waitFor("[data-testid='benchmark-metric-cards']");
 check("deep link to run detail renders summary", await evalJs("!!document.querySelector(\"[data-testid='benchmark-metric-cards']\")"));
 check("run page shows no interrupted banner for completed run", await evalJs("!document.querySelector(\"[data-testid='benchmark-interrupted-banner']\")"));
+await evalJs(FIRE);
+await evalJs("window.__bpFire([...document.querySelectorAll('[role=tab]')].find(t => t.textContent.includes('Trials')))");
+await new Promise((r) => setTimeout(r, 400));
 check("trials tab shows the recorded trial", await evalJs("document.body.textContent.includes('xben-dvwa')"));
+// Sortable headers (re-query after React re-render)
+const sorted = await evalJs(
+  `(() => {
+     const btn = [...document.querySelectorAll("[data-testid='scenario-results-table'] th button")].find(b => b.textContent.includes('Time'));
+     if (!btn) return 'no button';
+     window.__bpFire(btn);
+     return new Promise(res => setTimeout(() => {
+       const th = [...document.querySelectorAll("[data-testid='scenario-results-table'] th")].find(x => x.textContent.includes('Time'));
+       res(JSON.stringify({ ariaSort: th?.getAttribute('aria-sort') }));
+     }, 300));
+   })()`,
+);
+check("sortable headers are keyboard-accessible buttons with aria-sort", sorted?.ariaSort === "ascending", JSON.stringify(sorted));
 
 // ── 4. Deep link to an orphaned (stale 'running') run
 await goto(`${APP}/benchmarks/20260831_010450_09800`);
@@ -171,32 +199,25 @@ await evalJs(
 await new Promise((r) => setTimeout(r, 1200));
 check("comparison table renders metric rows", await evalJs("document.querySelectorAll(\"[data-testid='benchmark-comparison'] tbody tr\").length >= 6"));
 
-// ── 7. Sorting + filtering on the run detail trials table
-await goto(`${APP}/benchmarks/20260830_120000_00002`);
-await waitFor("[data-testid='scenario-results-table']");
-const sorted = await evalJs(
-  `(() => {
-     const th = [...document.querySelectorAll("[data-testid='scenario-results-table'] th button")];
-     const time = th.find(b => b.textContent.includes('Time'));
-     time.click();
-     const th2 = time.closest('th');
-     return { ariaSort: th2.getAttribute('aria-sort'), isButton: true };
-   })()`,
-);
-check("sortable headers are keyboard-accessible buttons with aria-sort", sorted?.ariaSort === "ascending", JSON.stringify(sorted));
+// ── 7. Sorting + filtering on the run detail trials table (covered in step 3)
 
 // ── 8. Accessibility spot checks
 await goto(`${APP}/benchmarks`);
 await waitFor("[data-testid='run-benchmark-panel']");
 const a11y = await evalJs(
   `(() => {
-     const buttons = [...document.querySelectorAll('button')].filter(b => !b.textContent.trim() && !b.getAttribute('aria-label'));
-     const selectsNoLabel = [...document.querySelectorAll('select')].filter(s => !s.labels?.length && !s.getAttribute('aria-label'));
-     return { unlabeledIconButtons: buttons.length, selectsNoLabel: selectsNoLabel.length };
+     const unlabeled = [...document.querySelectorAll('button, [role=checkbox], select, input:not([type=hidden])')]
+       .filter((el) => {
+         if (el.getAttribute('aria-label') || el.getAttribute('aria-labelledby')) return false;
+         if (el.labels && el.labels.length > 0) return false;
+         if (el.textContent && el.textContent.trim().length > 0) return false;
+         return true;
+       })
+       .map((el) => el.outerHTML.slice(0, 80));
+     return { count: unlabeled.length, samples: unlabeled.slice(0, 4) };
    })()`,
 );
-check("no unlabeled icon buttons on dashboard", a11y.unlabeledIconButtons === 0, JSON.stringify(a11y));
-check("all selects have accessible names", a11y.selectsNoLabel === 0, JSON.stringify(a11y));
+check("no unlabeled interactive controls on dashboard", a11y.count === 0, JSON.stringify(a11y));
 
 console.log(JSON.stringify(results, null, 1));
 ws.close();
