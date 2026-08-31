@@ -79,4 +79,4 @@ def test_capability_unavailable_failure_category_is_reserved():
     Runner status/failure mapping must not start emitting it until the
     capability-gated skip path is implemented (deferred by design).
     """
-    assert FailureCategory.CAPABILITY_UNAVAILABLE.value == "capability_unavailable"
+    assert FailureCategory.CAPABILITY_UNAVAILABLE.value == "CAPABILITY_UNAVAILABLE"

@@ -47,7 +47,7 @@ def test_ollama_provider_untouched_by_browser_block():
 def test_missing_browser_block_loads_disabled_and_actives_nothing(tmp_path):
     """A config file with no browser key loads the disabled defaults + no capabilities."""
     from tools.config.loader import load_validated_config
-    from tools.browser.capabilities import browser_available
+    from tools.browser.capabilities import browser_available, browser_capabilities
 
     config_path = tmp_path / "config.yaml"
     config_path.write_text(

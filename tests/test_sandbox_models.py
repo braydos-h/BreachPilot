@@ -120,4 +120,9 @@ class TestSandboxConfigFromConfig:
 
         with open("config.yaml", encoding="utf-8") as fh:
             cfg = yaml.safe_load(fh)
-        assert set(cfg) == set(CONFIG_SCHEMA), "config.yaml and CONFIG_SCHEMA top-level keys drifted"
+        # Subset, not strict equality: the schema still carries the legacy
+        # top-level ``chatgpt`` / ``opencode_go`` blocks (supported fallbacks
+        # normalized by tools.config.loader.get_provider_config), but
+        # config.yaml intentionally uses the modern ``providers.<id>`` layout.
+        extra = sorted(set(cfg) - set(CONFIG_SCHEMA))
+        assert not extra, f"config.yaml has top-level keys unknown to CONFIG_SCHEMA: {extra}"
