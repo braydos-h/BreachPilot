@@ -712,7 +712,14 @@ def test_plugin_sections_remain_warnings(tmp_path: Path):
 
 
 def test_config_yaml_and_schema_in_sync_via_python_c():
-    """CI check: python -c "assert set(yaml.safe_load(open('config.yaml')))==set(CONFIG_SCHEMA)" """
+    """CI check: config.yaml only uses top-level keys known to CONFIG_SCHEMA.
+
+    Subset, not strict equality: the schema still carries the legacy
+    top-level ``chatgpt`` / ``opencode_go`` blocks (supported fallbacks
+    normalized by ``tools.config.loader.get_provider_config``), but the
+    checked-in ``config.yaml`` intentionally uses the modern ``providers.<id>``
+    layout — the legacy blocks are deprecated, not exercised.
+    """
     import pathlib as _pl
 
     import yaml
@@ -722,6 +729,8 @@ def test_config_yaml_and_schema_in_sync_via_python_c():
     cfg_path = _pl.Path("config.yaml")
     assert cfg_path.exists()
     cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
-    assert set(cfg.keys()) == set(CONFIG_SCHEMA.keys()), (
-        f"config.yaml and CONFIG_SCHEMA top-level keys differ: extra in yaml {sorted(set(cfg.keys()) - set(CONFIG_SCHEMA.keys()))}, missing in yaml {sorted(set(CONFIG_SCHEMA.keys()) - set(cfg.keys()))}"
-    )
+    extra = sorted(set(cfg.keys()) - set(CONFIG_SCHEMA.keys()))
+    assert not extra, f"config.yaml has top-level keys unknown to CONFIG_SCHEMA: {extra}"
+    # The modern provider layout must be present in the checked-in config.
+    for required in ("providers", "embeddings", "models"):
+        assert required in cfg, f"config.yaml must exercise the modern {required!r} block"

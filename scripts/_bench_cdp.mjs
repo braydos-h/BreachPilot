@@ -67,7 +67,9 @@ await send("Page.enable");
 await send("Network.enable");
 // Seed the session token before any app script runs.
 await send("Page.addScriptToEvaluateOnNewDocument", {
-  source: `sessionStorage.setItem('breachpilot.apiToken.v1', ${JSON.stringify(TOKEN)});`,
+  source: `sessionStorage.setItem('breachpilot.apiToken.v1', ${JSON.stringify(TOKEN)});
+sessionStorage.setItem('breachpilot.welcome.v1', '1');
+sessionStorage.setItem('breachpilot.onboarding.v1', '1');`,
 });
 
 async function goto(url) {
