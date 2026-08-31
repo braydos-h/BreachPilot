@@ -11,7 +11,7 @@
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)
 ### Autonomous tool for authorized hacking
 
-**Plan · Recon · Exploit · Verify · Report: end-to-end, against assets you own.**
+**Plan · Recon · Exploit · Verify · Report.**
 
 BreachPilot is an open-source agentic operator that plans, discovers, reasons, chains, and verifies, then delivers a complete report. It is built on Ollama Cloud (976K context), the Model Context Protocol, and 140+ advisory skills. It runs lab-only and target-locked, audits every action, and is designed for rigorous, operator-supervised use.
 
