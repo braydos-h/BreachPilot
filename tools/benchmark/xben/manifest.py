@@ -15,7 +15,8 @@ XBEN-style metadata::
       "tags": ["web", "sqli"],
       "difficulty": "easy",
       "reset_strategy": "recreate",
-      "timeout": 1800
+      "timeout": 1800,
+      "requires_capabilities": ["browser.navigate"]   # optional; [] = no capability gate
     }
 
 The oracle schema is exactly the graded-eval oracle v2 flag schema, executed
@@ -94,6 +95,7 @@ def parse_manifest(data: dict[str, Any], *, suite: str = "xben", source: str = "
         reset_strategy=str(data.get("reset_strategy", "recreate") or "recreate"),
         timeout_seconds=timeout_seconds,
         source_manifest=source,
+        requires_capabilities=_as_list(data.get("requires_capabilities")),
     )
 
 

@@ -27,6 +27,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from tools.browser.interfaces import BrowserBackend
+
 __all__ = [
     "BROWSER_CAPABILITIES",
     "BrowserCapability",
@@ -116,19 +118,35 @@ def browser_capability_names() -> tuple[str, ...]:
     return tuple(BROWSER_CAPABILITIES)
 
 
+#: Registered browser backends by id. EMPTY in this build — the Playwright
+#: backend (future PR) registers itself here, which is the ONLY way a
+#: ``browser.*`` capability can become available. Nothing registers at import
+#: time, so stock installs always report unavailable.
+BACKEND_REGISTRY: dict[str, BrowserBackend] = {}
+
+
+def backend_configured(backend_id: str, config: dict[str, Any] | None = None) -> bool:
+    """Whether ``backend_id`` names a registered backend that reports ready.
+
+    Deliberately requires BOTH a registry entry and the backend's own
+    ``is_configured`` verdict — a configured-but-uninstalled backend name in
+    config.yml can never make capabilities appear available (fail closed).
+    """
+    del config  # backend adapters read their own config via provider_config-style seams
+    backend = BACKEND_REGISTRY.get(backend_id)
+    return bool(backend) and bool(backend.is_configured({}))
+
+
 def browser_capabilities(config: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """Machine-readable capability records: name/description/read_only/available.
 
     ``available`` is False for every entry unless browser execution is
-    actually configured (it never is in this build — no backend exists).
+    actually configured (never true in this build — no backend exists).
     """
     cfg = (config or {}).get("browser", {}) or {}
     backend = str(cfg.get("backend", "none") or "none")
     enabled = bool(cfg.get("enabled", False))
-    # Backend registry: no backends ship yet, so even a configured backend id
-    # cannot provide capabilities — the future backend registry will extend
-    # this rule (is_configured probe) when the Playwright backend lands.
-    available = bool(enabled and backend != "none")
+    available = bool(enabled and backend != "none" and backend_configured(backend, cfg))
     return [
         {
             "name": cap.name,
@@ -156,11 +174,11 @@ def unmet_requirements(required: list[str] | tuple[str, ...] | None, config: dic
     cfg = (config or {}).get("browser", {}) or {}
     backend = str(cfg.get("backend", "none") or "none")
     enabled = bool(cfg.get("enabled", False))
-    available = bool(enabled and backend != "none")
+    available = bool(enabled and backend != "none" and backend_configured(backend, cfg))
     if not required:
         return []
     if available:
-        # With a real backend, only non-declared names can be unmet; that
-        # refinement lands with the backend registry (deferred).
+        # With a real backend, refinement lands with the backend registry
+        # (per-capability support + declared-vs-implemented) — deferred.
         return [r for r in required if r not in BROWSER_CAPABILITIES]
     return list(required)

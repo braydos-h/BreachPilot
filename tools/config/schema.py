@@ -532,6 +532,27 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "require_verification": True,  # reporting verbosity only — verification is always enforced
         "graph_db": "",  # kill-chain graph store path; "" = <workspace>/killchain_graph.db
     },
+    # Browser-native web agent (architecture preparation, default OFF).
+    # ``enabled: false`` + ``backend: "none"`` = zero behavior change: no
+    # browser code runs, no dependency is required, and every browser.*
+    # capability reports unavailable (tools/browser/capabilities.py). A real
+    # backend (e.g. playwright) registers itself in
+    # tools/browser/capabilities.py:BACKEND_REGISTRY in a later change; until
+    # then even an installed-looking backend name reports unavailable (fail
+    # closed). Playwright/Chromium are NOT dependencies — do not add them in
+    # this block's consumption path. See docs/browser-agent-design.md.
+    "browser": {
+        "enabled": False,
+        "backend": "none",  # none | future: playwright (requires the backend registry entry)
+        "headless": True,
+        "max_sessions": 2,
+        "session_timeout_seconds": 300,
+        "navigation_timeout_seconds": 30,
+        "capture_screenshots": True,
+        "capture_network": True,
+        "capture_console": False,
+        "persist_storage": False,  # storage harvest goes to the credential store, never plaintext logs
+    },
     # Long-session mode (opt-in). Absent/false = current behavior; the keys here
     # are the defaults applied when --long-session is passed or enabled: true.
     "long_session": {

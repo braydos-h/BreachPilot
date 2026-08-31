@@ -31,6 +31,7 @@ Invariants (mirrors ``tools/benchmark/models.py`` house style):
 from __future__ import annotations
 
 import enum
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -65,20 +66,91 @@ __all__ = [
 
 REDACTED = "***REDACTED***"
 
+#: Secret-shaped *keys* browser serialization must structurally mask (headers,
+#: storage entries, payload dicts). Complements — never replaces — the shared
+#: kernel redactor (``tools/kernel/audit.py``): its ``_SECRET_ARG_NAMES`` +
+#: regex table stays the single source for content masking; these names add
+#: the browser-specific header/cookie/storage vocabulary on top.
+_SECRET_BROWSER_KEYS = frozenset(
+    {
+        "authorization",
+        "proxy_authorization",
+        "cookie",
+        "cookie_value",
+        "set_cookie",
+        "cookies",
+        "session",
+        "session_id",
+        "sessionid",
+        "session_token",
+        "session_key",
+        "auth",
+        "auth_token",
+        "access_token",
+        "refresh_token",
+        "id_token",
+        "bearer",
+        "csrf",
+        "csrf_token",
+        "xsrf_token",
+        "api_key",
+        "apikey",
+        "password",
+        "secret",
+        "token",
+        "jwt",
+        "value",  # storage-snapshot entry values are credential material
+        "sessionstorage",
+        "localstorage",
+    }
+)
 
-def redact_value(value: Any) -> Any:
-    """Mask credential-shaped strings via the existing audit redactors.
+#: JSON/document bodies frequently carry ``"password": "..."``-style secrets
+#: the kernel regex table (KEY=value lines) cannot see — browser request body
+#: samples are exactly that shape.
+_JSON_SECRET_RE = re.compile(
+    r'("[^"]*(?:password|passwd|passphrase|secret|token|api[_-]?key|authorization|auth|'
+    r'cookie|session|jwt)[^"]*"\s*:\s*)("[^"]*"|\[?[^,}\]]+)'
+)
 
-    Reuses ``tools.kernel.audit._mask_secret_content`` (URL creds, bearer
-    headers, KEY=value pairs, ...) and ``._redact_nested`` (secret-named dict
-    keys) so browser serialization has exactly one redaction table with the
-    rest of the audit trail. Pure and lazy-imported to keep this module cheap.
-    """
-    from tools.kernel.audit import _mask_secret_content, _redact_nested
+
+def _is_secret_key(key: Any) -> bool:
+    """Whether a dict/header key names secret material (header-name aware)."""
+    normalized = str(key).lower().replace("-", "_").replace(" ", "_")
+    if normalized.startswith("x_"):
+        normalized = normalized[2:]
+    return normalized in _SECRET_BROWSER_KEYS
+
+
+def _mask_body(text: str) -> str:
+    """Mask credential-shaped content in a body sample (kernel table + JSON)."""
+    from tools.kernel.audit import _mask_secret_content
+
+    return _mask_secret_content(_JSON_SECRET_RE.sub(rf'\1"{REDACTED}"', text))
+
+
+def _redact_structure(value: Any) -> Any:
+    """Recursively redact browser payloads: secret-named keys, lists, strings."""
+    from tools.kernel.audit import _mask_secret_content
 
     if isinstance(value, dict):
-        return _redact_nested(dict(value))
-    return _mask_secret_content(value)
+        return {k: (REDACTED if _is_secret_key(k) else _redact_structure(v)) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact_structure(v) for v in value]
+    if isinstance(value, str):
+        return _mask_secret_content(value)
+    return value
+
+
+def redact_value(value: Any) -> Any:
+    """Mask secret material via the shared audit redactors.
+
+    Reuses ``tools.kernel.audit._mask_secret_content`` (URL creds, bearer
+    headers, KEY=value lines, ...) as the single content-masking table, and
+    adds a structural walk over browser payloads (nested lists + the browser
+    header/cookie/storage key vocabulary above).
+    """
+    return _redact_structure(value)
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +267,9 @@ class BrowserFailureClass(str, enum.Enum):
 
 # Session lifecycle validation (single source used by tools/browser/manager.py).
 _ALLOWED_SESSION_TRANSITIONS: dict[BrowserSessionState, frozenset[BrowserSessionState]] = {
-    BrowserSessionState.PENDING: frozenset({BrowserSessionState.STARTING, BrowserSessionState.FAILED, BrowserSessionState.CLOSED}),
+    BrowserSessionState.PENDING: frozenset(
+        {BrowserSessionState.STARTING, BrowserSessionState.STOPPING, BrowserSessionState.FAILED, BrowserSessionState.CLOSED}
+    ),
     BrowserSessionState.STARTING: frozenset({BrowserSessionState.READY, BrowserSessionState.FAILED, BrowserSessionState.CLOSED, BrowserSessionState.STOPPING}),
     BrowserSessionState.READY: frozenset({BrowserSessionState.ACTIVE, BrowserSessionState.SUSPENDED, BrowserSessionState.STOPPING, BrowserSessionState.FAILED, BrowserSessionState.CLOSED}),
     BrowserSessionState.ACTIVE: frozenset({BrowserSessionState.READY, BrowserSessionState.SUSPENDED, BrowserSessionState.STOPPING, BrowserSessionState.FAILED, BrowserSessionState.CLOSED}),
@@ -537,15 +611,23 @@ class BrowserNetworkEvent:
         }
 
     def to_redacted_dict(self) -> dict[str, Any]:
-        """Header values + body sample masked (Authorization/cookies/tokens)."""
-        from tools.kernel.audit import _mask_secret_content
+        """Header values + body sample masked (Authorization/cookies/tokens).
 
+        Secret-named headers (Cookie, Set-Cookie, Authorization, ...) are
+        redacted WHOLESALE — cookie values in particular are not matched by
+        the kernel content regexes, so key-aware structural masking is the
+        only reliable guarantee here.
+        """
         d = self.to_dict()
-        d["request_headers"] = {k: _mask_secret_content(str(v)) for k, v in d["request_headers"].items()}
-        d["response_headers"] = {k: _mask_secret_content(str(v)) for k, v in d["response_headers"].items()}
-        d["body_sample"] = _mask_secret_content(d["body_sample"]) if d["body_sample"] else ""
+        d["request_headers"] = {
+            k: (REDACTED if _is_secret_key(k) else _mask_body(str(v))) for k, v in d["request_headers"].items()
+        }
+        d["response_headers"] = {
+            k: (REDACTED if _is_secret_key(k) else _mask_body(str(v))) for k, v in d["response_headers"].items()
+        }
+        d["body_sample"] = _mask_body(d["body_sample"]) if d["body_sample"] else ""
         # URL userinfo (https://user:pass@host) is credential material too.
-        d["url"] = _mask_secret_content(d["url"])
+        d["url"] = _mask_body(d["url"])
         return d
 
     @classmethod
@@ -747,8 +829,9 @@ class BrowserObservation:
         d = self.to_dict()
         if self.sensitive:
             d["payload"] = redact_value(self.payload) if self.payload else {}
-            # Structural masking for observation payloads that carry storage
-            # or header material: secret-named keys + credential-shaped text.
+            # Structural masking for observation payloads that carry storage,
+            # header or network material: secret-named keys (including inside
+            # nested lists) + credential-shaped text, via the kernel table.
         d["url"] = redact_value(d["url"])
         d["metadata"] = dict(self.metadata)  # metadata is caller-owned, never auto-redacted
         return d

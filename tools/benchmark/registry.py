@@ -107,6 +107,7 @@ def scenario_summary(scenario: BenchmarkScenario) -> dict[str, Any]:
         "expected_flags": list(scenario.expected_flags),
         "oracle_flag_count": len(flags),
         "source_manifest": scenario.source_manifest,
+        "requires_capabilities": list(scenario.requires_capabilities),
     }
 
 

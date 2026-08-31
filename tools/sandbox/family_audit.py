@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-__all__ = ["FamilyStatus", "SANDBOXED_FAMILIES", "HOST_EXCEPTIONS", "audit_families", "describe_family_audit"]
+__all__ = ["FamilyStatus", "SANDBOXED_FAMILIES", "HOST_EXCEPTIONS", "PLANNED_FAMILIES", "audit_families", "describe_family_audit"]
 
 _MCP_TOOLS_DIR = Path(__file__).resolve().parent.parent / "mcp_tools"
 
@@ -37,7 +37,7 @@ class FamilyStatus:
     """Containment status of one tool family."""
 
     module: str
-    status: str  # "sandboxed" | "host_exception"
+    status: str  # "sandboxed" | "host_exception" | "planned" (PLANNED_FAMILIES only)
     reason: str = ""
     target_touching: bool = True
     notes: list[str] = field(default_factory=list)
@@ -170,6 +170,38 @@ HOST_EXCEPTIONS: dict[str, FamilyStatus] = {
 }
 
 
+#: Future families whose tooling is PLANNED but not yet implemented. These
+#: have no module file today (nothing to audit) and no active capability:
+#: the entries are the pre-committed containment contract — when the family
+#: lands it MUST be registered as sandboxed here (or a documented host
+#: exception), and its execution must run inside the sandbox worker with the
+#: same effective target allowlist as other offensive tooling.
+#: Design: docs/browser-agent-design.md §sandbox requirements.
+PLANNED_FAMILIES: dict[str, FamilyStatus] = {
+    "browser": FamilyStatus(
+        module="browser",
+        status="planned",
+        reason=(
+            "Browser-native web agent is architecture-only (tools/browser/, "
+            "docs/browser-agent-design.md): not yet implemented, no subprocess and "
+            "no network capability is active, and NOTHING launches a browser. The "
+            "future browser backend MUST execute inside an isolated sandbox worker, "
+            "obey the effective target allowlist, and funnel its containment status "
+            "through this registry as either 'sandboxed' or a documented exception."
+        ),
+        target_touching=True,
+        notes=[
+            "planned family: browser backend (tools/browser/interfaces.py::BrowserBackend) — "
+            "no backend is registered (tools/browser/capabilities.py:BACKEND_REGISTRY is empty)",
+            "future implementation must be sandboxed: isolated browser worker, "
+            "allowlist-aware network policy, no host fallback",
+            "this entry is metadata only: audit_families() does not emit rows for "
+            "families without module files",
+        ],
+    ),
+}
+
+
 def _module_key(path: Path) -> str:
     """Module key relative to mcp_tools, without the .py suffix."""
     rel = path.relative_to(_MCP_TOOLS_DIR)
@@ -243,6 +275,10 @@ def describe_family_audit() -> dict[str, Any]:
     """Machine-readable audit summary (used by docs + tests + status page)."""
     rows = audit_families()
     problems = [r for r in rows if r.get("problem")]
+    # ``planned`` is additive metadata: planned families have no module file
+    # yet, so they never appear as rows and never count as problems — the
+    # pre-committed containment contract for the future browser family lives
+    # in PLANNED_FAMILIES.
     return {
         "total": len(rows),
         "sandboxed": sum(1 for r in rows if r.get("status") == "sandboxed"),
@@ -250,4 +286,5 @@ def describe_family_audit() -> dict[str, Any]:
         "unregistered": sum(1 for r in rows if r.get("status") == "unregistered"),
         "problems": [r["module"] for r in problems],
         "rows": rows,
+        "planned": [entry.to_dict() for entry in PLANNED_FAMILIES.values()],
     }

@@ -429,6 +429,29 @@ class ConfigValidator:
                     if value is not None and (not isinstance(value, int) or value < 1):
                         result.warnings.append(f"multi_model.{key} must be a positive integer.")
 
+        # Validate browser-agent preparation section (disabled by default).
+        if "browser" in self._config:
+            browser = self._config["browser"]
+            if not isinstance(browser, dict):
+                result.errors.append("'browser' must be a mapping.")
+            else:
+                enabled = browser.get("enabled")
+                if enabled is not None and not isinstance(enabled, bool):
+                    result.warnings.append("browser.enabled must be a boolean.")
+                backend = browser.get("backend")
+                if backend is not None and not isinstance(backend, str):
+                    result.warnings.append("browser.backend must be a string.")
+                if enabled is True and not (browser.get("backend") or "none").strip():
+                    result.warnings.append("browser.enabled is true but browser.backend is empty ('none' disables).")
+                for key in ("max_sessions", "session_timeout_seconds", "navigation_timeout_seconds"):
+                    value = browser.get(key)
+                    if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 1):
+                        result.warnings.append(f"browser.{key} must be a positive integer.")
+                for key in ("capture_screenshots", "capture_network", "capture_console", "persist_storage", "headless"):
+                    value = browser.get(key)
+                    if value is not None and not isinstance(value, bool):
+                        result.warnings.append(f"browser.{key} must be a boolean.")
+
         # Validate runtime skill system section
         if "skills" in self._config:
             skills = self._config["skills"]

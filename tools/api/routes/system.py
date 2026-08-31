@@ -31,6 +31,20 @@ def configure(auth: BearerAuth, config: dict[str, Any], config_path: Path) -> No
     _CONFIG_PATH = config_path
 
 
+def browser_capability_status(config: dict[str, Any]) -> list[dict[str, Any]]:
+    """Capability-status metadata for /capabilities (never available here).
+
+    Lazy import: tools.browser is dependency-free, but the system routes stay
+    importable even if the browser seam is absent (bundled wheel edge case).
+    """
+    try:
+        from tools.browser.capabilities import browser_capabilities
+
+        return browser_capabilities(config)
+    except Exception:  # noqa: BLE001 — status metadata is best-effort, never breaks the route
+        return []
+
+
 def configure_run_manager(run_manager: Any) -> None:
     global _RUN_MANAGER
     _RUN_MANAGER = run_manager
@@ -70,8 +84,19 @@ async def capabilities(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     state, never a 404 loop).
     """
     api_cfg = _CONFIG.get("api", {}) or {}
+    # Browser status is advertised so the WebUI (and API clients) can detect
+    # that browser capabilities exist but are unavailable — capability-status
+    # metadata only; there are no browser endpoints to pretend otherwise.
+    # See docs/browser-agent-design.md §WebUI event model.
+    browser_cfg = _CONFIG.get("browser", {}) or {}
     return {
         "api_version": "v1",
+        "browser": {
+            "enabled": bool(browser_cfg.get("enabled", False)),
+            "backend": str(browser_cfg.get("backend", "none") or "none"),
+            "available": False,
+            "capabilities": browser_capability_status(_CONFIG),
+        },
         "features": [
             "runs",
             "decisions",

@@ -287,6 +287,21 @@ killchain:
   goal_state: shell_as_root
   require_verification: true
   graph_db: ''
+# Browser-native web agent (architecture preparation, default OFF). See
+# docs/browser-agent-design.md. enabled: false + backend: none = zero behavior
+# change; no browser dependency is required. Credentials surfaced by browser
+# storage capture must flow through the credential store, never logs.
+browser:
+  enabled: false
+  backend: none
+  headless: true
+  max_sessions: 2
+  session_timeout_seconds: 300
+  navigation_timeout_seconds: 30
+  capture_screenshots: true
+  capture_network: true
+  capture_console: false
+  persist_storage: false
 long_session:
   enabled: true
   request_timeout_seconds: 600

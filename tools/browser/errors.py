@@ -89,4 +89,7 @@ def browser_error_from_exception(exc: BaseException) -> tuple[str, str]:
         cls = classify_failure(str(exc))
         return cls.value, str(exc)
     except Exception:  # noqa: BLE001 — taxonomy is best-effort; never mask the original
-        return "unknown", str(exc)
+        try:
+            return "unknown", str(exc)
+        except Exception:  # noqa: BLE001 — even str() may raise; never mask the caller
+            return "unknown", "<unprintable browser exception>"
