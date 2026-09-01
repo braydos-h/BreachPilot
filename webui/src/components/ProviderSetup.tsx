@@ -95,16 +95,21 @@ export function useDefaultModel(): string {
 
 export interface ProviderStatus {
   provider: string;
-  /** Human label for badges: "Ollama" | "ChatGPT" | "OpenCode Go". */
+  /** Human label for badges: "Ollama" | "ChatGPT" | "OpenCode Go" or registry display name. */
   label: string;
   /** Live models are available and the live query reported no error. */
   online: boolean;
   source: string;
   liveCount: number;
   error?: string;
+  /** Derived connectivity state for UI: online | offline | checking | unreachable */
+  status: "online" | "offline" | "checking" | "unreachable";
+  statusText: string;
+  isChecking: boolean;
 }
 
-function providerLabel(provider: string): string {
+export function providerLabel(provider: string, registryDisplayName?: string): string {
+  if (registryDisplayName) return registryDisplayName;
   switch (provider) {
     case "ollama":
       return "Ollama";
@@ -113,8 +118,6 @@ function providerLabel(provider: string): string {
     case "opencode_go":
       return "OpenCode Go";
     default:
-      // Generic registered provider — derive a readable label from its id and
-      // prefer the registry display name when the metadata is loaded.
       return provider.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   }
 }
@@ -124,15 +127,43 @@ function providerLabel(provider: string): string {
 export function useProviderStatus(): ProviderStatus {
   const models = useModels();
   const live = useLiveModels();
+  const providers = useProviders();
   const provider = models.data?.provider ?? "ollama";
   const liveModels = live.data?.models ?? [];
+  const liveError = live.data?.error;
+  const queryError = live.error ? String((live.error as Error).message ?? live.error) : undefined;
+  const error = liveError ?? queryError;
+  const registryMeta = providers.data?.providers?.find((p) => p.id === provider);
+  const label = providerLabel(provider, registryMeta?.name);
+  const online = liveModels.length > 0 && !liveError && !live.error;
+  const isChecking =
+    (!models.data && models.isLoading) ||
+    (!live.data && (live.isLoading || live.isFetching));
+  let status: ProviderStatus["status"];
+  let statusText: string;
+  if (isChecking) {
+    status = "checking";
+    statusText = "Checking…";
+  } else if (live.error || liveError) {
+    status = "unreachable";
+    statusText = "Unreachable";
+  } else if (online) {
+    status = "online";
+    statusText = "Online";
+  } else {
+    status = "offline";
+    statusText = "Offline";
+  }
   return {
     provider,
-    label: providerLabel(provider),
-    online: liveModels.length > 0 && !live.data?.error,
+    label,
+    online,
     source: live.data?.source ?? "—",
     liveCount: liveModels.length,
-    error: live.data?.error,
+    error,
+    status,
+    statusText,
+    isChecking,
   };
 }
 

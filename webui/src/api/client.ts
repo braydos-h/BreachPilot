@@ -25,6 +25,11 @@ export function setStoredToken(token: string): void {
 
 export function clearStoredToken(): void {
   setStoredToken("");
+  try {
+    sessionStorage.removeItem("breachpilot.telemetry.sessionBaseline.v1");
+  } catch {
+    // Ignore
+  }
 }
 
 /** Window event fired when the API rejects the session token (HTTP 401 or a
@@ -39,6 +44,11 @@ export const AUTH_EXPIRED_EVENT = "breachpilot:auth-expired";
 export function expireSession(reason: string): void {
   if (!getStoredToken()) return;
   clearStoredToken();
+  try {
+    sessionStorage.removeItem("breachpilot.telemetry.sessionBaseline.v1");
+  } catch {
+    // Ignore
+  }
   window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT, { detail: { reason } }));
   toast({
     title: "Session expired",

@@ -290,6 +290,8 @@ export function useTelemetry() {
     queryFn: () => apiFetch<TelemetryResponse>("/system/telemetry"),
     ...defaultQueryOptions,
     staleTime: 15_000,
+    refetchInterval: 8_000,
+    refetchIntervalInBackground: true,
   });
 }
 

@@ -6,12 +6,15 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { PermissionControl } from "@/components/permission/PermissionControl";
-import { useConnections, useModels, useRuns } from "@/api/hooks";
+import { useConnections, useRuns } from "@/api/hooks";
 import { isActiveState, type DecisionListRow } from "@/api/types";
 import { clearStoredToken } from "@/api/client";
 import { useNavigate } from "react-router-dom";
 import { autoAnswerFor, usePermissionMode, type PermissionMode } from "@/lib/permissionMode";
 import { useTheme } from "@/lib/useTheme";
+import { useProviderStatus } from "@/components/ProviderSetup";
+import { clearStoredBaseline, useSessionTokens } from "@/lib/sessionTokens";
+import { formatTokens } from "@/lib/format";
 
 const NAV_ITEMS = [
   { to: "/", label: "Home", icon: Home, end: true },
@@ -55,9 +58,8 @@ export function Layout() {
   const navigate = useNavigate();
   const runs = useRuns(50, 0);
   const connections = useConnections();
-  const models = useModels();
-  const provider = models.data?.provider ?? "ollama";
-  const label = provider === "chatgpt" ? "ChatGPT" : "Ollama";
+  const providerStatus = useProviderStatus();
+  const { sessionTokens } = useSessionTokens();
   const { mode, setMode } = usePermissionMode();
   const { theme, toggle: toggleTheme } = useTheme();
   const activeRuns = runs.data?.runs.filter((r) => isActiveState(r.state)) ?? [];
@@ -74,6 +76,7 @@ export function Layout() {
 
   const onSignOut = () => {
     clearStoredToken();
+    clearStoredBaseline();
     navigate("/");
     window.location.reload();
   };
@@ -122,6 +125,17 @@ export function Layout() {
     </>
   );
 
+  const providerDotClass =
+    providerStatus.status === "online"
+      ? "bg-emerald-500"
+      : providerStatus.status === "unreachable"
+        ? "bg-destructive"
+        : providerStatus.status === "checking"
+          ? "bg-amber-500"
+          : "bg-amber-500/70";
+  const sessionTokensFormatted = formatTokens(sessionTokens);
+  const providerStatusTitle = `${providerStatus.label} · ${providerStatus.statusText} · ${sessionTokensFormatted} tokens this session`;
+
   const sidebarFooter = (
     <div className="space-y-2">
       <div className="space-y-1.5 px-1">
@@ -139,11 +153,21 @@ export function Layout() {
         </div>
         <PermissionControl mode={mode} onModeChange={setMode} />
       </div>
-      <div className="flex items-center gap-2 rounded-md px-3 py-1.5 text-xs text-muted-foreground">
-        <span className="relative flex h-2 w-2">
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-muted-foreground/50" />
-        </span>
-        <span>{label} configured</span>
+      <div
+        className="rounded-md px-3 py-2"
+        aria-label={`Provider: ${providerStatus.label}, status: ${providerStatus.statusText}, ${sessionTokensFormatted} tokens this session`}
+        title={providerStatusTitle}
+        role="status"
+      >
+        <div className="flex items-center gap-2 text-sm font-medium leading-none">
+          <span className="relative flex h-2 w-2 shrink-0" aria-hidden="true">
+            <span className={cn("relative inline-flex h-2 w-2 rounded-full", providerDotClass)} />
+          </span>
+          <span className="truncate">{providerStatus.label}</span>
+        </div>
+        <div className="ml-4 mt-1 text-xs text-muted-foreground">
+          {providerStatus.statusText} · {sessionTokensFormatted} tokens this session
+        </div>
       </div>
       <Button
         variant="ghost"
