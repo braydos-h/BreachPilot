@@ -22,6 +22,7 @@ _AUTH: BearerAuth | None = None
 _CONFIG: dict[str, Any] = {}
 _CONFIG_PATH: Path = Path("config.yaml")
 _RUN_MANAGER: Any = None
+_PERSISTENCE: Any = None
 
 
 def configure(auth: BearerAuth, config: dict[str, Any], config_path: Path) -> None:
