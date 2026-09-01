@@ -349,6 +349,91 @@ export function useSandboxStatus() {
   });
 }
 
+export interface SandboxFixPlanStep {
+  id: string;
+  title: string;
+  description: string;
+  command_preview: string | null;
+  requires_admin?: boolean;
+  manual?: boolean;
+}
+
+export interface SandboxFixPlanResponse {
+  platform: string;
+  reason: string;
+  docker_cli_present: boolean;
+  docker_daemon_running: boolean;
+  image_present: boolean | null;
+  requires_admin: boolean;
+  steps: SandboxFixPlanStep[];
+  image?: string;
+  mode?: string;
+  docker_error?: string;
+}
+
+export interface SandboxFixJobStepStatus {
+  id: string;
+  title: string;
+  description: string;
+  command_preview: string | null;
+  requires_admin?: boolean;
+  manual?: boolean;
+  status: "pending" | "running" | "succeeded" | "failed" | "skipped";
+  output?: string;
+  error?: string;
+}
+
+export interface SandboxFixJobResponse {
+  job_id: string;
+  status: "pending" | "running" | "succeeded" | "failed";
+  platform: string;
+  reason: string;
+  steps: SandboxFixJobStepStatus[];
+  error?: string;
+  docker_ready?: boolean;
+  requires_restart?: boolean;
+  current_step?: string | null;
+  docker_cli_present?: boolean;
+  docker_daemon_running?: boolean;
+  image_present?: boolean | null;
+  requires_admin?: boolean;
+}
+
+export function useSandboxFixPlan(enabled = true) {
+  return useQuery<SandboxFixPlanResponse>({
+    queryKey: ["system", "sandbox", "fix", "plan"] as const,
+    queryFn: () => apiFetch<SandboxFixPlanResponse>("/system/sandbox/fix/plan"),
+    ...defaultQueryOptions,
+    enabled,
+    staleTime: 15_000,
+  });
+}
+
+export function useSandboxFix() {
+  const qc = useQueryClient();
+  return useMutation<SandboxFixJobResponse, ApiError, void>({
+    mutationFn: () => apiFetch<SandboxFixJobResponse>("/system/sandbox/fix", { method: "POST", body: {} }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["system", "sandbox"] });
+    },
+  });
+}
+
+export function useSandboxFixStatus(jobId: string | null | undefined) {
+  return useQuery<SandboxFixJobResponse>({
+    queryKey: ["system", "sandbox", "fix", jobId ?? ""] as const,
+    queryFn: () => apiFetch<SandboxFixJobResponse>(`/system/sandbox/fix/${encodeURIComponent(jobId as string)}`),
+    ...defaultQueryOptions,
+    enabled: !!jobId,
+    refetchInterval: (query) => {
+      const data = query.state.data as SandboxFixJobResponse | undefined;
+      if (!data) return 2000;
+      if (data.status === "running" || data.status === "pending") return 1500;
+      return false;
+    },
+  });
+}
+
 /** Per-run sandbox summary (Sandbox tab). Polls only while the run is active. */
 export function useRunSandbox(runId: string | null | undefined) {
   const qc = useQueryClient();

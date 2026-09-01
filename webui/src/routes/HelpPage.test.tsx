@@ -1,0 +1,232 @@
+// @vitest-environment jsdom
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { render, screen, within, fireEvent } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
+import { HelpPage } from "@/routes/HelpPage";
+
+function renderHelp() {
+  return render(
+    <MemoryRouter>
+      <HelpPage />
+    </MemoryRouter>,
+  );
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  // jsdom doesn't implement scrollIntoView — stub on both prototypes.
+  window.HTMLElement.prototype.scrollIntoView = vi.fn() as unknown as typeof window.HTMLElement.prototype.scrollIntoView;
+  (window.Element.prototype as unknown as Record<string, unknown>).scrollIntoView = vi.fn();
+});
+
+describe("HelpPage renders", () => {
+  it("shows header, quick-start cards and main sections", () => {
+    renderHelp();
+    expect(screen.getByRole("heading", { name: /Help & Reference/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/What do you need help with/i)).toBeInTheDocument();
+    // quick-start cards
+    expect(screen.getByText("Start your first run")).toBeInTheDocument();
+    expect(screen.getByText("Understand a live run")).toBeInTheDocument();
+    expect(screen.getByText("Find collected evidence")).toBeInTheDocument();
+    expect(screen.getByText("Configure BreachPilot")).toBeInTheDocument();
+    // lifecycle
+    expect(screen.getByRole("heading", { name: /How a run flows/i })).toBeInTheDocument();
+    // permissions
+    expect(screen.getByRole("heading", { name: /Permission modes/i })).toBeInTheDocument();
+    expect(screen.getByText(/The target-IP allowlist lock applies in every mode/i)).toBeInTheDocument();
+    // directory
+    expect(screen.getByRole("heading", { name: /Where do I find/i })).toBeInTheDocument();
+    // workflows
+    expect(screen.getByRole("heading", { name: /Common workflows/i })).toBeInTheDocument();
+    // troubleshooting
+    expect(screen.getByRole("heading", { name: /Troubleshooting/i })).toBeInTheDocument();
+    // faq
+    expect(screen.getByRole("heading", { name: /FAQ/i })).toBeInTheDocument();
+    // docs
+    expect(screen.getByRole("heading", { name: /Documentation library/i })).toBeInTheDocument();
+  });
+
+  it("hides search results when query is empty", () => {
+    renderHelp();
+    expect(screen.queryByRole("listbox", { name: /Search results/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("HelpPage search", () => {
+  it("filters case-insensitively on title + description + keywords", async () => {
+    const user = userEvent.setup();
+    renderHelp();
+    const input = screen.getByPlaceholderText(/What do you need help with/i);
+
+    await user.type(input, "allowlist");
+    const listbox = screen.getByRole("listbox");
+    expect(within(listbox).getByText(/Target allowlist lock/i)).toBeInTheDocument();
+    expect(within(listbox).getByText(/What is the allowlist/i)).toBeInTheDocument();
+
+    await user.clear(input);
+    await user.type(input, "ALLOWLIST");
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    expect(within(screen.getByRole("listbox")).getByText(/Target allowlist lock/i)).toBeInTheDocument();
+  });
+
+  it("shows no-results state with guidance", async () => {
+    const user = userEvent.setup();
+    renderHelp();
+    const input = screen.getByPlaceholderText(/What do you need help with/i);
+    await user.type(input, "zzz_no_match_999");
+    expect(screen.getByText(/No results for/i)).toBeInTheDocument();
+    expect(screen.getByText(/Try.*allowlist.*recon.*artifact/i)).toBeInTheDocument();
+  });
+
+  it("search covers docs, workflows, troubleshooting and directory", async () => {
+    const user = userEvent.setup();
+    renderHelp();
+    const input = screen.getByPlaceholderText(/What do you need help with/i);
+
+    await user.type(input, "recon only");
+    expect(within(screen.getByRole("listbox")).getByText(/Recon only/i)).toBeInTheDocument();
+    await user.clear(input);
+
+    await user.type(input, "Getting Started");
+    expect(within(screen.getByRole("listbox")).getByText("Getting Started")).toBeInTheDocument();
+    await user.clear(input);
+
+    await user.type(input, "provider unavailable");
+    // troubleshooting symptom contains this phrase
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+  });
+
+  it('hitting "/" focuses search when not typing in another field', async () => {
+    renderHelp();
+    const input = screen.getByPlaceholderText(/What do you need help with/i) as HTMLInputElement;
+    expect(document.activeElement).not.toBe(input);
+    fireEvent.keyDown(window, { key: "/" });
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('hitting "/" does not hijack typing inside the search field itself', async () => {
+    const user = userEvent.setup();
+    renderHelp();
+    const input = screen.getByPlaceholderText(/What do you need help with/i) as HTMLInputElement;
+    await user.click(input);
+    await user.type(input, "/");
+    // the literal "/" should appear in the input, not be swallowed
+    expect(input.value).toContain("/");
+  });
+
+  it("Escape clears a non-empty query and blurs when already empty", async () => {
+    const user = userEvent.setup();
+    renderHelp();
+    const input = screen.getByPlaceholderText(/What do you need help with/i) as HTMLInputElement;
+    await user.type(input, "artifact");
+    expect(input.value).toBe("artifact");
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(input.value).toBe("");
+    // focus still inside, second Escape blurs
+    await user.click(input);
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(document.activeElement).not.toBe(input);
+  });
+
+  it("clicking a result scrolls to its section", async () => {
+    const user = userEvent.setup();
+    renderHelp();
+    const input = screen.getByPlaceholderText(/What do you need help with/i);
+    await user.type(input, "attack graph");
+    const listbox = screen.getByRole("listbox");
+    const btn = within(listbox).getAllByRole("option")[0];
+    await user.click(btn);
+    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+  });
+});
+
+describe("HelpPage links", () => {
+  it("internal header CTAs use React Router links with correct routes", () => {
+    renderHelp();
+    const newRun = screen.getByRole("link", { name: /Start a run/i });
+    expect(newRun).toHaveAttribute("href", "/runs/new");
+    const sessions = screen.getByRole("link", { name: /View sessions/i });
+    expect(sessions).toHaveAttribute("href", "/sessions");
+    // settings CTA in quick-start card
+    expect(screen.getByRole("link", { name: /Open settings/i })).toHaveAttribute("href", "/system");
+  });
+
+  it("directory items link to correct global routes where they exist", () => {
+    renderHelp();
+    expect(screen.getByRole("link", { name: /Runs \/ Sessions/ })).toHaveAttribute("href", "/sessions");
+    expect(screen.getByRole("link", { name: /^Goals/ })).toHaveAttribute("href", "/goals");
+    expect(screen.getByRole("link", { name: /Attack Modules/ })).toHaveAttribute("href", "/modules");
+    expect(screen.getByRole("link", { name: /^Skills$/ })).toHaveAttribute("href", "/skills");
+    expect(screen.getByRole("link", { name: /^Memory$/ })).toHaveAttribute("href", "/memory");
+    expect(screen.getByRole("link", { name: /^Stats$/ })).toHaveAttribute("href", "/stats");
+    // settings appears twice (directory + quick-start)
+    const settingsLinks = screen.getAllByRole("link", { name: /Settings/ });
+    expect(settingsLinks.some((a) => a.getAttribute("href") === "/system")).toBe(true);
+  });
+
+  it("documentation links have correct external URLs and open in new tabs", () => {
+    renderHelp();
+    const docSection = screen.getByRole("heading", { name: /Documentation library/i }).closest("section")!;
+    const links = within(docSection).getAllByRole("link");
+    for (const a of links) {
+      expect(a).toHaveAttribute("target", "_blank");
+      expect(a.getAttribute("href")).toMatch(/^https:\/\/github\.com\/braydos-h\/BreachPilot\/blob\/main\/docs\/.+\.md$/);
+    }
+    // retained original six still present
+    expect(screen.getByRole("link", { name: /Getting Started/ })).toHaveAttribute("href", expect.stringContaining("docs/getting-started.md"));
+    expect(screen.getByRole("link", { name: /Safety Model/ })).toHaveAttribute("href", expect.stringContaining("docs/safety-model.md"));
+    expect(screen.getByRole("link", { name: /Attack Modules/ })).toHaveAttribute("href", expect.stringContaining("docs/attack-modules.md"));
+    const webuiLinks = screen.getAllByRole("link", { name: "WebUI" });
+    expect(webuiLinks.length).toBeGreaterThan(0);
+    expect(webuiLinks.some((a) => a.getAttribute("href")?.includes("docs/webui.md"))).toBe(true);
+    expect(screen.getByRole("link", { name: /Model Providers/ })).toHaveAttribute("href", expect.stringContaining("docs/providers.md"));
+    expect(screen.getByRole("link", { name: /Troubleshooting/ })).toHaveAttribute("href", expect.stringContaining("docs/troubleshooting.md"));
+  });
+
+  it("anchor navigation links scroll cleanly", async () => {
+    const user = userEvent.setup();
+    renderHelp();
+    const onThisPageLinks = screen.getAllByRole("link", { name: /Start here|Run lifecycle|Permissions|Find a feature|Workflows|Troubleshooting|FAQ|Documentation/ });
+    expect(onThisPageLinks.length).toBeGreaterThanOrEqual(8);
+    await user.click(onThisPageLinks[0]);
+    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+  });
+});
+
+describe("HelpPage permission modes", () => {
+  it("renders all three modes and the allowlist invariant", () => {
+    renderHelp();
+    // badge texts
+    const badges = screen.getAllByText(/Read-only/i);
+    expect(badges.length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Approve/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Full access/i).length).toBeGreaterThan(0);
+    // matrix row example
+    expect(screen.getByText("Run start (start_confirm)")).toBeInTheDocument();
+    expect(screen.getByText("Destructive confirmations")).toBeInTheDocument();
+    expect(screen.getByText("Goal selection")).toBeInTheDocument();
+    // allowlist note
+    expect(screen.getByText(/The target-IP allowlist lock applies in every mode/i)).toBeInTheDocument();
+    // goal_select never auto-answered note
+    expect(screen.getByText(/goal_select.*never auto-answered/i)).toBeInTheDocument();
+  });
+});
+
+describe("HelpPage accessibility", () => {
+  it("has semantic headings and a labeled search input", () => {
+    renderHelp();
+    expect(screen.getByRole("heading", { level: 1, name: /Help & Reference/i })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 2 }).length).toBeGreaterThanOrEqual(7);
+    expect(screen.getByLabelText(/Search help topics/i)).toBeInTheDocument();
+  });
+
+  it("has no critical information conveyed only through color (badges + text)", () => {
+    renderHelp();
+    // permission badges have text, not just color classes
+    const approveBadges = screen.getAllByText("Approve");
+    for (const el of approveBadges) {
+      expect(el.textContent).toMatch(/Approve/);
+    }
+  });
+});

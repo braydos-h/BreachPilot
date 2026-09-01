@@ -294,7 +294,16 @@ class RunManager:
         try:
             preview = await service.prepare(request, run_id=handle.run_id, progress=on_stage)
         except asyncio.CancelledError:
-            # cancel_run()/shutdown() handles persistence + cleanup.
+            # cancel_run()/shutdown() set ``cancelling`` + cancelled the task;
+            # settle the run to ``cancelled`` here (mirror _execute_run) and
+            # release the event broker so no zombie active handle/broker stays.
+            try:
+                self._persistence.update_run_state(handle.run_id, RunState.CANCELLED.value)
+                await handle.event_broker.emit("state", {"state": RunState.CANCELLED.value})
+            except Exception:  # noqa: BLE001 -- broker may already be closed
+                pass
+            finally:
+                handle.event_broker.close()
             raise
         except BaseException as exc:
             # ExceptionGroup included (anyio/MCP surfaces groups, not Exception).

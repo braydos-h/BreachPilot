@@ -69,23 +69,15 @@ def test_prepare_maps_dns_timeout_to_actionable_error(tmp_path, monkeypatch):
     import tools.validation_utils as vu
     from tools.run_service.service import AssessmentService
 
-    def _slow(host, **kw):
-        time.sleep(1.0)
-        return None, None
+    def _timeout(host, **kw):
+        raise TimeoutError("DNS resolution timed out after 5s for unreachable.invalid")
 
-    monkeypatch.setattr(vu, "resolve_target_bounded", _slow, raising=False)
-    import tools.run_service.prepare as prepare_mod
-
-    monkeypatch.setattr(prepare_mod, "_resolve_target_bounded", _slow, raising=False)
+    monkeypatch.setattr(vu, "resolve_target_bounded", _timeout)
 
     service = AssessmentService(config={})
     request = RunRequest(target="unreachable.invalid", mode="recon")
     request.config_path = tmp_path / "config.yaml"
     request.reports_dir = tmp_path / "reports"
-
-    # The lazy import inside _prepare_sync reads tools.validation_utils —
-    # patch the module attribute the import resolves to.
-    real_vu = vu.resolve_target_bounded
 
     async def _run():
         with pytest.raises(ValueError, match="Could not resolve target"):
@@ -105,11 +97,10 @@ class _FakeRouter:
 
 
 def _make_service(tmp_path, monkeypatch) -> object:
-    from tools.run_service.service import Callables
-    from tools.run_service.service import AssessmentService as _Service
+    from tools.run_service.service import AssessmentService, Callables
 
     callables = Callables(build_router=lambda *a, **kw: _FakeRouter())
-    return _Service(config={}, callables=callables)
+    return AssessmentService(config={}, callables=callables)
 
 
 def _request(tmp_path, **kw) -> RunRequest:
@@ -147,10 +138,18 @@ def test_prepare_emits_progress_stages(tmp_path, monkeypatch):
     asyncio.run(
         service.prepare(_request(tmp_path), run_id="t-progress", progress=lambda s, m: stages.append(s))
     )
-    assert stages == sorted(EXPECTED_STAGES, key=EXPECTED_STAGES.__iter__.__self__.__reduce__().__class__ and [
-        "config", "plugins", "router", "model", "target_validate", "target_resolve",
-        "goals", "exploit_settings", "skills", "filesystem",
-    ].index)
+    assert stages == [
+        "config",
+        "plugins",
+        "router",
+        "model",
+        "target_validate",
+        "target_resolve",
+        "goals",
+        "exploit_settings",
+        "skills",
+        "filesystem",
+    ]
 
 
 def test_prepare_progress_survives_a_raising_callback(tmp_path, monkeypatch):
@@ -362,3 +361,22 @@ async def test_shutdown_cancels_in_flight_preparation(tmp_path, monkeypatch):
     run_id, _, _ = await manager.create_run(RunRequest(target="10.0.0.50"))
     await manager.shutdown()
     assert manager.active_for(run_id) is None
+
+
+# ── Persistence: preparing recovery ──────────────────────────────────────────
+
+
+def test_recover_interrupted_covers_preparing_state(tmp_path):
+    """A daemon restart during preparation must not leave a zombie ``preparing`` run."""
+    persistence = ApiPersistence(tmp_path / "reports")
+    persistence.create_run(run_id="r-prep", request={}, preview={}, state="preparing")
+    persistence.recover_interrupted()
+    assert persistence.get_run("r-prep")["state"] == "interrupted"
+
+
+def test_get_active_run_includes_preparing(tmp_path):
+    persistence = ApiPersistence(tmp_path / "reports")
+    persistence.create_run(run_id="r-prep", request={}, preview={}, state="preparing")
+    active = persistence.get_active_run()
+    assert active is not None
+    assert active["id"] == "r-prep"

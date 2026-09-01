@@ -628,6 +628,69 @@ async def get_sandbox_status(auth: str = Depends(_require_auth)) -> dict[str, An
     return await asyncio.to_thread(status_report, _CONFIG)
 
 
+@router.get("/system/sandbox/fix/plan")
+async def get_sandbox_fix_plan(auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Read-only remediation plan for the Docker sandbox.
+
+    Returns enough detail for the WebUI to explain exactly what would happen
+    before any host-changing commands run. No side effects, localhost/auth
+    protected like the rest of /system/sandbox.
+    """
+    from tools.sandbox.remediation import build_plan
+
+    return await asyncio.to_thread(build_plan, _CONFIG)
+
+
+@router.post("/system/sandbox/fix")
+async def start_sandbox_fix(auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Start the Docker sandbox remediation (localhost/auth protected).
+
+    Narrow, enum-like endpoint: the browser requests a fix job, not arbitrary
+    commands. No body params are accepted – the server's known project path
+    (docker/sandbox) is used, and the job is identified by a server-generated id.
+    Returns the initial job record; poll GET /system/sandbox/fix/{job_id} for
+    progress.
+    """
+    from tools.api.errors import APIError
+    from tools.sandbox.models import SandboxConfig
+    from tools.sandbox.remediation import _job_to_dict, _start_background_job, create_job
+    from tools.sandbox import remediation as _rem
+
+    # Do not treat disabled as success – refuse to "fix" an intentional choice.
+    cfg = SandboxConfig.from_config(_CONFIG)
+    if not cfg.enabled:
+        raise APIError(
+            "sandbox_disabled",
+            "Sandbox is intentionally disabled (sandbox.enabled: false). Enable it in config.yaml instead.",
+            status_code=400,
+        )
+
+    # Fail closed on concurrent running job: one fix at a time.
+    async with _rem._JOBS_LOCK:
+        for j in _rem._JOBS.values():
+            if j.status in ("pending", "running"):
+                raise APIError("conflict", "A sandbox fix is already running.", status_code=409)
+
+    job = await create_job(_CONFIG)
+    # Start background execution (does not block the HTTP response).
+    _start_background_job(job.job_id, _CONFIG)
+    return _job_to_dict(job)
+
+
+@router.get("/system/sandbox/fix/{job_id}")
+async def get_sandbox_fix_status(job_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Poll the fix job for structured step progress."""
+    from tools.sandbox.remediation import _job_to_dict, get_job
+
+    # Sanitize job_id: only hex ids we generate are valid – reject path traversal / injection.
+    if not re.fullmatch(r"[0-9a-fA-F]{6,32}", job_id):
+        raise HTTPException(status_code=404, detail="Fix job not found")
+    job = await get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Fix job not found")
+    return _job_to_dict(job)
+
+
 @router.post("/system/reset")
 async def reset_system(request: Request, auth: str = Depends(_require_auth)) -> dict[str, Any]:
     """Wipe all past work: run history, reports/, exploit_workspace/,
