@@ -25,6 +25,34 @@ Runtime source of truth is `config.yaml` at the repo root. `tools/config_manager
 
 All workspace/run dirs are gitignored. First `--web` run does `npm install && npm run build` (`main.py:565`).
 
+## Packaged vs runtime paths (wheel vs checkout)
+
+BreachPilot distinguishes three path kinds (see `tools/paths.py`):
+
+* **Packaged immutable resources** — default skill catalog (`skills/`), `tools/mitre_technique_map.json`, and `webui/dist` when built. Located via `importlib.resources` so a `pip install dist/*.whl` from `/tmp` still finds them without a repo checkout. Do not use `Path(__file__).parent / "../../skills"` — use `tools.paths.get_packaged_skills_dir()`.
+* **User/runtime state** — `reports/`, `exploit_workspace/`, `research_workspace/`, `swarm_workspace/`. Relative to **cwd** when not explicitly supplied (the operator chooses where artifacts go).
+* **Explicitly supplied paths** — `--config`, `--reports-dir`, `skills.roots` entries, `api.token_file`, etc. Always honored as given; relative values are resolved from **cwd** (or from the config file's directory when the source is known).
+
+| Kind | Example default | Resolved from | Wheel behavior |
+|------|-----------------|---------------|----------------|
+| Packaged skills | `skills` (default `skills.roots: ["skills"]`) | `importlib.resources.files("skills")` → `site-packages/skills` | Works from any cwd, even after `pip install` |
+| Explicit skill root | `skills.roots: ["my_skills"]` in `config.yaml` | `cwd / "my_skills"` (or config file's dir) | Honors operator's custom dir |
+| Runtime state | `reports/` (`--reports-dir`) | `cwd / "reports"` | Creates in the directory you launch from |
+| Config file | `config.yaml` | Hierarchy below | Falls back to packaged defaults when no file exists |
+
+## Config file hierarchy (effective config)
+
+`tools/paths.resolve_config_path()` and `tools/paths.load_effective_config()` implement:
+
+1. **Explicit `--config <path>`** — when the caller passes `--config` (even if the file is missing, the path is honored; a missing explicit file loads as `{}` for helper callers, but the effective loader still merges `CONFIG_SCHEMA` for runtime).
+2. **`./config.yaml` in cwd** — when it exists (local project config).
+3. **User config locations** — `$XDG_CONFIG_HOME/breachpilot/config.yaml`, `~/.config/breachpilot/config.yaml`, `~/.breachpilot/config.yaml` (first match wins).
+4. **Packaged defaults** — `tools/config/schema.py::CONFIG_SCHEMA` deep-copy (no file). This guarantees `sandbox.enabled: true` etc. survive when cwd has no `config.yaml` — the wheel-cwd bug.
+
+`tools/kernel/config.load_config(Path("config.yaml"))` is hierarchy-aware for the default sentinel: a missing `Path("config.yaml")` now returns the effective config (deep copy of `CONFIG_SCHEMA`) instead of `{}` so sandbox posture does not silently become disabled. An explicit custom path like `tmp_path / "missing.yaml"` still returns `{}` for helper/test callers that intentionally pass partial dicts (preserved).
+
+Runtime code that needs posture defaults (sandbox, exploit, skills) must use `load_effective_config()` or the hierarchy-aware `load_config` for the default sentinel; helper/test code that intentionally passes `{}` to `SandboxConfig.from_config({})` keeps the documented `enabled=False` behavior.
+
 ## Loading pipeline
 
 ```

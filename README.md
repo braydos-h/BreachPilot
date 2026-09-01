@@ -475,6 +475,10 @@ Apache 2.0. See [LICENSE](LICENSE).
 The CLI still works for scripting and headless runs. The WebUI is the default (`python main.py` opens it); add flags only if you need them.
 
 ```bash
+# Wheel installs work from any directory (no repo checkout needed):
+#   pip install dist/*.whl
+#   mkdir /tmp/clean && cd /tmp/clean && breachpilot --doctor --json  # uses packaged skills + defaults
+
 python main.py --help                              # full flag list
 python main.py --target 10.0.0.50 --mode recon      # recon only
 python main.py --target 10.0.0.50 --mode attack --goal backdoor

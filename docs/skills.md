@@ -10,6 +10,8 @@ The engine indexes them, deterministically selects a small set for the current
 assessment context, and exposes them to the LLM as compact hints plus
 read-only MCP tools. **Skills never grant execution authority.**
 
+> **Where skills come from.** The default catalog is the **packaged** `skills/` tree (`site-packages/skills/` after `pip install`). `tools/paths.get_packaged_skills_dir()` locates it via `importlib.resources.files("skills")` with an editable fallback to `<repo>/skills`. When `config.yaml` has no `skills.roots` key, `tools/skill_registry_cache.get_registry()` uses that packaged dir. When `skills.roots` is explicitly set (e.g. `skills.roots: ["my_skills"]`), the value is honored: absolute paths verbatim, relative paths resolved from **cwd** (or the config file's directory). The literal `"skills"` in an explicit list still prefers the packaged catalog when the cwd-relative `skills/` does not exist, so the default `config.yaml` works from `/tmp`.
+
 ## Pipeline
 
 ```
