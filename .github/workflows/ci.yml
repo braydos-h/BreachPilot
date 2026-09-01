@@ -220,6 +220,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
+      - name: Debug mypy env
+        run: |
+          mypy --version
+          python --version
+          grep -A2 "python_version" pyproject.toml || true
       - name: Mypy check (256 files, permissive)
         run: mypy --follow-imports=skip tools
       - name: Mypy strict hot files (zero disables)
