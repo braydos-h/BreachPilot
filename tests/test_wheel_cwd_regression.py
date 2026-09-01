@@ -59,7 +59,9 @@ class TestConfigHierarchy:
         from tools.paths import load_effective_config
 
         custom = tmp_path / "custom.yaml"
-        yaml.safe_dump({"sandbox": {"enabled": False}, "skills": {"roots": ["my_skills"]}}, custom.open("w", encoding="utf-8"))
+        yaml.safe_dump(
+            {"sandbox": {"enabled": False}, "skills": {"roots": ["my_skills"]}}, custom.open("w", encoding="utf-8")
+        )
         cfg = load_effective_config(custom)
         assert cfg["sandbox"]["enabled"] is False
         assert cfg["skills"]["roots"] == ["my_skills"]
@@ -126,7 +128,9 @@ class TestSkillDiscoveryFromCleanCwd:
 
         skill_root = tmp_path / "my_skills" / "demo_skill"
         skill_root.mkdir(parents=True)
-        (skill_root / "SKILL.md").write_text("---\nname: demo-skill\ntags: [demo]\ndescription: demo\n---\n# Demo\nbody\n", encoding="utf-8")
+        (skill_root / "SKILL.md").write_text(
+            "---\nname: demo-skill\ntags: [demo]\ndescription: demo\n---\n# Demo\nbody\n", encoding="utf-8"
+        )
         clear_cache()
         cfg = {"skills": {"roots": [str(tmp_path / "my_skills")]}}
         reg = get_registry(cfg)
@@ -139,7 +143,9 @@ class TestSkillDiscoveryFromCleanCwd:
         monkeypatch.chdir(tmp_path)
         rel_root = tmp_path / "rel_skills" / "rel_demo"
         rel_root.mkdir(parents=True)
-        (rel_root / "SKILL.md").write_text("---\nname: rel-demo\ntags: [demo]\ndescription: demo\n---\n# Rel Demo\n", encoding="utf-8")
+        (rel_root / "SKILL.md").write_text(
+            "---\nname: rel-demo\ntags: [demo]\ndescription: demo\n---\n# Rel Demo\n", encoding="utf-8"
+        )
         clear_cache()
         cfg = {"skills": {"roots": ["rel_skills"]}}
         reg = get_registry(cfg)
@@ -185,7 +191,14 @@ class TestDoctorFromCleanCwd:
     def test_doctor_json_via_subprocess_from_clean_cwd(self, tmp_path):
         env = dict(**{k: v for k, v in __import__("os").environ.items()}, PYTHONPATH=str(Path.cwd()))
         main_py = str(Path.cwd() / "main.py")
-        result = subprocess.run([sys.executable, main_py, "--doctor", "--json"], cwd=str(tmp_path), capture_output=True, text=True, timeout=30, env=env)
+        result = subprocess.run(
+            [sys.executable, main_py, "--doctor", "--json"],
+            cwd=str(tmp_path),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
         assert result.stdout.strip()
         import json
 
@@ -206,7 +219,12 @@ class TestWheelArtifact:
 
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
-            result = subprocess.run([sys.executable, "-m", "build", "--wheel", "--outdir", str(td_path)], capture_output=True, text=True, timeout=120)
+            result = subprocess.run(
+                [sys.executable, "-m", "build", "--wheel", "--outdir", str(td_path)],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
             assert result.returncode == 0, f"build failed: {result.stderr[:1000]}"
             wheels = list(td_path.glob("*.whl"))
             assert wheels

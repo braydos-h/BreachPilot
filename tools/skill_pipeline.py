@@ -11,7 +11,6 @@ authority or changes permission/scope/audit behavior.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Iterable
 
 from tools.skill_registry import SkillRegistry

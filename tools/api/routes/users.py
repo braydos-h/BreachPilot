@@ -28,7 +28,6 @@ from pydantic import BaseModel, Field
 from tools.api.auth import BearerAuth, hash_password, verify_password
 from tools.api.persistence import ApiPersistence
 
-
 # ── Request/response models ─────────────────────────────────────────────────
 
 

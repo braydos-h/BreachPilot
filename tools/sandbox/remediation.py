@@ -823,7 +823,9 @@ async def _execute_job_async(job_id: str, config: dict[str, Any] | None) -> None
                     )
                     docker_now_present = bool(_which("docker"))
                     if platform_name == "windows" and (already_installed or docker_now_present):
-                        step.output += "\nNote: winget reported non-zero but Docker CLI is now present – treating as success."
+                        step.output += (
+                            "\nNote: winget reported non-zero but Docker CLI is now present – treating as success."
+                        )
                         step.status = "succeeded"
                     elif platform_name == "windows":
                         # Provide Windows-specific remediation hint

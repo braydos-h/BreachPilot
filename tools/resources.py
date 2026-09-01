@@ -1,4 +1,5 @@
 """Compatibility shim — re-exports from :mod:`tools.paths`."""
+
 from tools.paths import (  # noqa: F401
     ensure_runtime_dir,
     get_packaged_config_path,
@@ -11,6 +12,7 @@ from tools.paths import (  # noqa: F401
     resolve_config_path,
     resolve_skill_roots,
 )
+
 __all__ = [
     "ensure_runtime_dir",
     "get_packaged_config_path",

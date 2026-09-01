@@ -1,17 +1,26 @@
 """Path and resource abstraction for BreachPilot."""
+
 from __future__ import annotations
-import copy, os
+
+import copy
+import os
 from pathlib import Path
 from typing import Any
+
 try:
     import importlib.resources as _resources
 except ImportError:
     _resources = None  # type: ignore
 from tools.config.schema import CONFIG_SCHEMA
+
 _PACKAGED_SKILLS_CACHE: Path | None = None
 _PACKAGED_CONFIG_CACHE: Path | None = None
+
+
 def _repo_root_from_this_file() -> Path:
     return Path(__file__).resolve().parent.parent
+
+
 def get_packaged_skills_dir() -> Path:
     global _PACKAGED_SKILLS_CACHE
     if _PACKAGED_SKILLS_CACHE is not None and _PACKAGED_SKILLS_CACHE.exists():
@@ -36,6 +45,8 @@ def get_packaged_skills_dir() -> Path:
         return candidate
     _PACKAGED_SKILLS_CACHE = Path("skills").resolve()
     return _PACKAGED_SKILLS_CACHE
+
+
 def get_packaged_config_path() -> Path | None:
     global _PACKAGED_CONFIG_CACHE
     if _PACKAGED_CONFIG_CACHE is not None:
@@ -57,6 +68,8 @@ def get_packaged_config_path() -> Path | None:
         _PACKAGED_CONFIG_CACHE = candidate
         return candidate
     return None
+
+
 def get_webui_dist_dir() -> Path | None:
     if _resources is not None:
         for pkg in ("webui", "tools.webui"):
@@ -81,6 +94,8 @@ def get_webui_dist_dir() -> Path | None:
     if candidate.is_dir():
         return candidate
     return None
+
+
 def _user_config_candidates() -> list[Path]:
     candidates: list[Path] = []
     xdg = os.environ.get("XDG_CONFIG_HOME", "").strip()
@@ -97,6 +112,8 @@ def _user_config_candidates() -> list[Path]:
             seen.add(key)
             unique.append(p)
     return unique
+
+
 def resolve_config_path(explicit: Path | str | None = None) -> Path | None:
     if explicit is not None:
         p = Path(explicit)
@@ -113,8 +130,11 @@ def resolve_config_path(explicit: Path | str | None = None) -> Path | None:
         if candidate.is_file():
             return candidate
     return None
+
+
 def load_effective_config(explicit: Path | str | None = None) -> dict[str, Any]:
     from tools.config.validator import ConfigValidator
+
     resolved = resolve_config_path(explicit)
     if resolved is None:
         return copy.deepcopy(CONFIG_SCHEMA)
@@ -124,6 +144,7 @@ def load_effective_config(explicit: Path | str | None = None) -> dict[str, Any]:
         error_msg = "; ".join(result.errors)
         raise ValueError(f"Config validation failed for {resolved}: {error_msg}")
     import logging as _logging
+
     _log = _logging.getLogger(__name__)
     if result.has_warnings:
         for w in result.warnings:
@@ -131,9 +152,15 @@ def load_effective_config(explicit: Path | str | None = None) -> dict[str, Any]:
         for uk in result.unknown_keys:
             _log.warning("Unknown config key: %s", uk)
     return validator.apply_defaults()
+
+
 def load_config_or_defaults(path: Path | str | None = None) -> dict[str, Any]:
     return load_effective_config(path)
-def resolve_skill_roots(config: dict[str, Any] | None, *, base_dir: Path | str | None = None, config_source_path: Path | str | None = None) -> list[Path]:
+
+
+def resolve_skill_roots(
+    config: dict[str, Any] | None, *, base_dir: Path | str | None = None, config_source_path: Path | str | None = None
+) -> list[Path]:
     skills = (config or {}).get("skills", {}) if isinstance(config, dict) else {}
     has_explicit_roots = isinstance(skills, dict) and "roots" in skills
     raw_roots = skills.get("roots") if isinstance(skills, dict) else None
@@ -173,8 +200,12 @@ def resolve_skill_roots(config: dict[str, Any] | None, *, base_dir: Path | str |
             continue
         resolved.append((base / p).resolve())
     return resolved
+
+
 def get_skill_roots_for_display(config: dict[str, Any] | None) -> list[str]:
     return [str(p) for p in resolve_skill_roots(config)]
+
+
 def is_packaged_resource(path: Path) -> bool:
     try:
         pkg_skills = get_packaged_skills_dir().resolve()
@@ -190,8 +221,23 @@ def is_packaged_resource(path: Path) -> bool:
         except Exception:
             pass
     return False
+
+
 def ensure_runtime_dir(path: Path | str) -> Path:
     p = Path(path).resolve()
     p.mkdir(parents=True, exist_ok=True)
     return p
-__all__ = ["get_packaged_skills_dir","get_packaged_config_path","get_webui_dist_dir","resolve_config_path","load_effective_config","load_config_or_defaults","resolve_skill_roots","get_skill_roots_for_display","is_packaged_resource","ensure_runtime_dir"]
+
+
+__all__ = [
+    "get_packaged_skills_dir",
+    "get_packaged_config_path",
+    "get_webui_dist_dir",
+    "resolve_config_path",
+    "load_effective_config",
+    "load_config_or_defaults",
+    "resolve_skill_roots",
+    "get_skill_roots_for_display",
+    "is_packaged_resource",
+    "ensure_runtime_dir",
+]

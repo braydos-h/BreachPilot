@@ -30,16 +30,15 @@ import pytest
 
 from tools.api.event_broker import (
     RunEventBroker,
-    _PluginEventDispatcher,
     _enqueue_plugin_event,
     _get_plugin_dispatcher,
+    _PluginEventDispatcher,
     _reset_plugin_dispatcher,
     _set_plugin_dispatcher,
     shutdown_plugin_dispatcher,
     wait_for_plugin_dispatcher_empty,
 )
 from tools.plugins import PLUGIN_REGISTRY, PluginRegistry
-
 
 # ── helpers ────────────────────────────────────────────────────────────────
 

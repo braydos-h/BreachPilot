@@ -95,7 +95,6 @@ def _safe_workspace_path(ws_root: Path, rel_path: str) -> Path:
     return candidate
 
 
-
 # ── Request models ──────────────────────────────────────────────────────────
 
 
@@ -136,8 +135,6 @@ class TitleRequest(BaseModel):
 
 class ToolCallRequest(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
-
-
 
 
 def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: RunManager) -> APIRouter:
@@ -317,7 +314,6 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
 
     # ── Routes ──────────────────────────────────────────────────────────────────
 
-
     @router.post("/runs", status_code=201)
     async def create_run(body: RunCreateRequest, auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Create a run. Returns immediately with ``state: "preparing"``; the run
@@ -369,7 +365,6 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
             }
         return result
 
-
     @router.post("/runs/demo/restore")
     async def restore_demo(auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Explicitly recreate the built-in demo session (clears the tombstone).
@@ -386,7 +381,6 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
         # restore_demo clears the tombstone and seeds if missing.
         _restore(persistence, reports_dir)
         return {"run_id": DEMO_RUN_ID, "restored": True}
-
 
     @router.get("/runs")
     async def list_runs(
@@ -432,7 +426,6 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
             )
         return {"runs": out, "sort": sort, "total": total}
 
-
     @router.get("/runs/{run_id}")
     async def get_run(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Get run details: effective state, progress, pending decisions, artifacts, result, errors."""
@@ -466,13 +459,11 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
             ],
         }
 
-
     @router.post("/runs/{run_id}/cancel")
     async def cancel_run(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Cooperative cancellation + guaranteed MCP/swarm child cleanup."""
         await _rm().cancel_run(run_id)
         return {"run_id": run_id, "state": "cancelled"}
-
 
     @router.post("/runs/{run_id}/resume")
     async def resume_run(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -493,7 +484,6 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
             "run_id": new_id,
             "resumed_from": run_id,
         }
-
 
     @router.post("/runs/{run_id}/title")
     async def set_run_title(
@@ -533,13 +523,11 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
             return {"run_id": run_id, "title": new_title, "regenerated": body.regen and not body.title}
         return {"run_id": run_id, "title": current, "regenerated": False}
 
-
     @router.get("/runs/{run_id}/tools")
     async def get_tools(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Return the live MCP tool schemas (including plugin-contributed tools)."""
         schemas = _rm().get_tool_schemas(run_id)
         return {"tools": schemas}
-
 
     @router.post("/runs/{run_id}/tools/{tool_name}/calls")
     async def call_tool(
@@ -548,9 +536,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
         """Policy-gated REST bridge for manual WebUI tool calls."""
         return await _rm().call_tool(run_id, tool_name, body.arguments)
 
-
     # ── Artifacts (B2-B3) ───────────────────────────────────────────────────────
-
 
     @router.get("/runs/{run_id}/artifacts")
     async def list_artifacts(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -575,7 +561,6 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
                         }
                     )
         return {"artifacts": artifacts}
-
 
     @router.get("/runs/{run_id}/artifacts/{name:path}")
     async def get_artifact(run_id: str, name: str, auth: str = Depends(_require_auth)) -> Any:
@@ -604,9 +589,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
 
         return Response(content=path.read_bytes(), media_type=content_type)
 
-
     # ── Workspace file browser (C10) ─────────────────────────────────────────────
-
 
     @router.get("/runs/{run_id}/workspace")
     async def list_workspace(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -622,7 +605,6 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
                 files.append({"path": p.relative_to(ws).as_posix(), "bytes": p.stat().st_size})
         return {"files": files}
 
-
     @router.get("/runs/{run_id}/workspace/{path:path}")
     async def get_workspace_file(run_id: str, path: str, auth: str = Depends(_require_auth)) -> Any:
         """Read one file under the run's exploit_workspace/ (path-traversal-safe)."""
@@ -637,9 +619,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
 
         return Response(content=target.read_bytes(), media_type=content_type)
 
-
     # ── Audit trail (C6) ────────────────────────────────────────────────────────
-
 
     @router.get("/runs/{run_id}/audit")
     async def get_audit(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -658,7 +638,6 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
                 chain_valid, chain_reason = False, f"verification error: {exc}"
         return {"records": records, "chain_valid": chain_valid, "chain_reason": chain_reason}
 
-
     # ── Per-run sandbox summary (WebUI Sandbox tab) ─────────────────────────────
 
     @router.get("/runs/{run_id}/sandbox")
@@ -675,9 +654,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
             raise HTTPException(status_code=404, detail="Run not found")
         return _run_sandbox_summary(run_id)
 
-
     # ── Swarm + campaign state (C7-C8) ──────────────────────────────────────────
-
 
     @router.get("/runs/{run_id}/witness")
     async def get_witness_flags(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -709,12 +686,10 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
                 continue
         return {"flags": flags}
 
-
     @router.get("/runs/{run_id}/swarm")
     async def get_swarm_state(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Read the swarm orchestrator state (swarm_state.json)."""
         return {"state": _read_state_json(run_id, "swarm_state.json")}
-
 
     @router.get("/runs/{run_id}/campaign")
     async def get_campaign_state(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -725,9 +700,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
         """
         return {"state": _read_state_json(run_id, "attack_states.json", subdir="autonomous")}
 
-
     # ── Log tailing (C9) ────────────────────────────────────────────────────────
-
 
     @router.get("/runs/{run_id}/logs/{name}")
     async def get_log(
@@ -774,9 +747,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
             "total_lines_in_file": len(all_lines),
         }
 
-
     # ── Credentials + loot (C3-C5) ──────────────────────────────────────────────
-
 
     @router.get("/runs/{run_id}/credentials")
     async def list_credentials(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -803,7 +774,6 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
             return {"credentials": out}
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Could not read credentials: {exc}")
-
 
     @router.post("/runs/{run_id}/credentials/{index}/reveal")
     async def reveal_credential(
@@ -848,7 +818,6 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
             "target_host": rec.target_host,
             "password": rec.password,
         }
-
 
     @router.post("/runs/{run_id}/credentials/{index}/confirm")
     async def confirm_credential(
@@ -907,7 +876,6 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
             "confirmed": changed,
         }
 
-
     @router.get("/runs/{run_id}/loot")
     async def list_loot(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """List loot captured during the run."""
@@ -930,9 +898,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
                     raise HTTPException(status_code=500, detail=f"Could not read loot: {exc}")
         return {"loot": []}
 
-
     # ── DELETE run history (D1) ─────────────────────────────────────────────────
-
 
     @router.delete("/runs/{run_id}")
     async def delete_run(

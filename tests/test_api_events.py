@@ -28,6 +28,7 @@ def test_event_sequence_monotonic(broker):
         assert e3["sequence"] == 3
         assert e1["run_id"] == "test-run-001"
         assert e1["type"] == "state"
+
     asyncio.run(_run())
 
 
@@ -43,6 +44,7 @@ def test_event_jsonl_persisted(broker):
         e1 = json.loads(lines[0])
         assert e1["sequence"] == 1
         assert e1["type"] == "state"
+
     asyncio.run(_run())
 
 
@@ -53,6 +55,7 @@ def test_event_replay_cursor(broker):
         events = await broker.replay(after=2)
         assert len(events) == 3
         assert events[0]["sequence"] == 3
+
     asyncio.run(_run())
 
 
@@ -61,10 +64,12 @@ def test_event_ring_buffer_bounded(tmp_path):
     reports_dir = tmp_path / "reports" / run_id
     reports_dir.mkdir(parents=True, exist_ok=True)
     broker = RunEventBroker(run_id, reports_dir, buffer_size=3)
+
     async def _run():
         for i in range(5):
             await broker.emit("state", {"i": i})
         assert len(broker._ring) == 3
+
     asyncio.run(_run())
 
 
@@ -73,6 +78,7 @@ def test_event_sanitize_secrets(broker):
         e = await broker.emit("test", {"api_key": "secret123", "normal": "ok"})
         assert e["payload"]["api_key"] == "[REDACTED]"
         assert e["payload"]["normal"] == "ok"
+
     asyncio.run(_run())
 
 
@@ -90,8 +96,11 @@ def test_concurrent_event_order_matches_jsonl(broker):
         await asyncio.gather(*(broker.emit("progress", {"i": i}) for i in range(20)))
         replayed = await broker.replay()
         assert [event["sequence"] for event in replayed] == list(range(1, 21))
-        persisted = [json.loads(line)["sequence"] for line in broker._events_path.read_text(encoding="utf-8").splitlines()]
+        persisted = [
+            json.loads(line)["sequence"] for line in broker._events_path.read_text(encoding="utf-8").splitlines()
+        ]
         assert persisted == list(range(1, 21))
+
     asyncio.run(_run())
 
 
@@ -103,6 +112,7 @@ def test_subscription_is_async_iterable_and_closes(broker):
         broker.close()
         with pytest.raises(StopAsyncIteration):
             await anext(subscription)
+
     asyncio.run(_run())
 
 
@@ -119,6 +129,7 @@ def test_replay_page_tail(broker):
         assert page["first_returned_sequence"] == 4
         assert page["last_returned_sequence"] == 5
         assert page["next_before"] == 4
+
     asyncio.run(_run())
 
 
@@ -135,6 +146,7 @@ def test_replay_page_tail_larger_than_history(broker):
         assert page["first_returned_sequence"] == 1
         assert page["last_returned_sequence"] == 5
         assert page["next_before"] is None
+
     asyncio.run(_run())
 
 
@@ -149,6 +161,7 @@ def test_replay_page_tail_exactly_equal(broker):
         assert page["first_returned_sequence"] == 1
         assert page["last_returned_sequence"] == 5
         assert page["next_before"] is None
+
     asyncio.run(_run())
 
 
@@ -165,6 +178,7 @@ def test_replay_page_before_limit(broker):
         assert page["next_before"] == 5
         assert page["latest_sequence"] == 10
         assert page["oldest_sequence"] == 1
+
     asyncio.run(_run())
 
 
@@ -179,6 +193,7 @@ def test_replay_page_before_limit_exhausted(broker):
         assert page["first_returned_sequence"] == 1
         assert page["last_returned_sequence"] == 5
         assert page["next_before"] is None
+
     asyncio.run(_run())
 
 
@@ -201,6 +216,7 @@ def test_replay_page_before_limit_partial_then_exhausted(broker):
         assert p3["has_more_before"] is False
         assert p3["omitted_before"] == 0
         assert p3["next_before"] is None
+
     asyncio.run(_run())
 
 
@@ -217,6 +233,7 @@ def test_replay_page_after_metadata(broker):
         assert page["last_returned_sequence"] == 3
         assert page["omitted_before"] == 0
         assert page["next_before"] is None
+
     asyncio.run(_run())
 
 
@@ -238,6 +255,7 @@ def test_replay_page_empty(broker):
         page3 = await broker.replay_page(after=0)
         assert page3["events"] == []
         assert page3["has_more_before"] is False
+
     asyncio.run(_run())
 
 
@@ -260,6 +278,7 @@ def test_replay_page_large_history_tail(broker):
         assert len(page_full["events"]) == 5000
         assert page_full["has_more_before"] is False
         assert page_full["omitted_before"] == 0
+
     asyncio.run(_run())
 
 
@@ -278,6 +297,7 @@ def test_replay_page_before_without_limit(broker):
         assert page2["has_more_before"] is True
         assert page2["omitted_before"] == 1
         assert page2["next_before"] == 2
+
     asyncio.run(_run())
 
 
