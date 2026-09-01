@@ -103,12 +103,32 @@ export function RunWizard({ onCreated }: RunWizardProps) {
     return found?.compatible ? found.name : null;
   }, [paramGoal, goals.data]);
 
+  const paramCustomGoalId = useMemo(
+    () => searchParams.get("customGoal")?.trim() ?? searchParams.get("custom_goal")?.trim() ?? "",
+    [searchParams],
+  );
+  const paramCustomGoalResolved = useMemo(() => {
+    if (!paramCustomGoalId) return null;
+    const found = (goals.data?.custom_goals ?? []).find((g) => g.id === paramCustomGoalId);
+    return found ?? null;
+  }, [paramCustomGoalId, goals.data]);
+
+  const customInitRef = useRef<string | null>(null);
   useEffect(() => {
-    if (paramGoalValid && !goal && goalMode !== "custom") {
+    if (!paramCustomGoalResolved) return;
+    if (customInitRef.current === paramCustomGoalResolved.id) return;
+    customInitRef.current = paramCustomGoalResolved.id;
+    setGoalMode("custom");
+    setCustomGoal(paramCustomGoalResolved.objective);
+    setGoal("");
+  }, [paramCustomGoalResolved]);
+
+  useEffect(() => {
+    if (paramGoalValid && !paramCustomGoalId && !goal && goalMode !== "custom") {
       setGoalMode("preset");
       setGoal(paramGoalValid);
     }
-  }, [paramGoalValid, goal, goalMode]);
+  }, [paramGoalValid, paramCustomGoalId, goal, goalMode]);
 
   const flags = capabilities.data?.run_options.flags ?? [];
   const skillsList = (skills.data?.skills ?? []).map((s) => s.name);
