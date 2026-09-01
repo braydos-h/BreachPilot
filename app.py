@@ -112,6 +112,13 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         persistence.recover_interrupted()
+        # Seed built-in demo session (idempotent; tombstone-aware; no network/LLM).
+        try:
+            from tools.api.demo_seed import ensure_demo_seed
+
+            ensure_demo_seed(persistence, reports_dir)
+        except Exception:
+            pass
         # Warm process-global caches (plugins/skills/model router) in the
         # background so the first POST /runs doesn't pay cold-start costs.
         from tools.run_service.warmup import start_background_warmup

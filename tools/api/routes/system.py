@@ -666,7 +666,7 @@ async def start_sandbox_fix(auth: str = Depends(_require_auth)) -> dict[str, Any
         )
 
     # Fail closed on concurrent running job: one fix at a time.
-    async with _rem._JOBS_LOCK:
+    with _rem._JOBS_LOCK:
         for j in _rem._JOBS.values():
             if j.status in ("pending", "running"):
                 raise APIError("conflict", "A sandbox fix is already running.", status_code=409)

@@ -389,6 +389,8 @@ export interface RunListRow {
   target_ip: string;
   model_alias: string;
   title?: string;
+  /** True for the built-in synthetic demo session (see tools/api/demo_seed.py). */
+  is_demo?: boolean;
 }
 
 export interface RunListResponse {
@@ -451,6 +453,7 @@ export interface RunDetail {
   title?: string;
   cancelled_at?: string;
   resumed_from?: string;
+  is_demo?: boolean;
   decisions: DecisionListRow[];
 }
 
@@ -966,6 +969,14 @@ export function stateCategory(state: RunState): "pending" | "active" | "done" {
   if (state === "draft" || state === "queued" || state === "preparing") return "pending";
   if (isActiveState(state)) return "active";
   return "done";
+}
+
+export const DEMO_RUN_ID = "demo-session-v1";
+
+export function isDemoRun(run: { id?: string; is_demo?: boolean } | null | undefined): boolean {
+  if (!run) return false;
+  if (run.is_demo === true) return true;
+  return run.id === DEMO_RUN_ID;
 }
 
 // ── Attack-path DAG (graph-viz-api) ─────────────────────────────────────────

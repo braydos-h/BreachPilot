@@ -22,12 +22,14 @@ import {
 } from "@/components/ui/select";
 import { StatusBadge } from "@/components/StatusBadge";
 import { CopyButton } from "@/components/CopyButton";
-import { useCapabilities, useDeleteRun, useResumeRun, useRetitleRun, useRuns } from "@/api/hooks";
+import { DemoBadge } from "@/components/DemoBadge";
+import { useCapabilities, useDeleteRun, useRestoreDemo, useResumeRun, useRetitleRun, useRuns } from "@/api/hooks";
 import { ApiError } from "@/api/client";
 import { SkeletonRows } from "@/components/Loading";
 import {
   RUN_SORT_OPTIONS,
   isActiveState,
+  isDemoRun,
   isTerminalState,
   type RunSortKey,
   type RunState,
@@ -73,6 +75,7 @@ export function RunListPage() {
   const deleteRun = useDeleteRun();
   const resumeRun = useResumeRun();
   const retitleRun = useRetitleRun();
+  const restoreDemo = useRestoreDemo();
   const navigate = useNavigate();
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -211,8 +214,19 @@ export function RunListPage() {
 
       {!runs.isLoading && rows.length === 0 && activeRuns.length === 0 && (
         <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
-          No past sessions yet.{" "}
-          <Link to="/" className="text-foreground underline-offset-4 hover:underline">Start one from home.</Link>
+          <div>No past sessions yet.{" "}<Link to="/" className="text-foreground underline-offset-4 hover:underline">Start one from home.</Link></div>
+          <div className="mt-4">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => restoreDemo.mutate(undefined)}
+              disabled={restoreDemo.isPending}
+            >
+              {restoreDemo.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+              Restore Demo Session
+            </Button>
+            <p className="mt-1 text-xs">Re-create the synthetic Meridian Finance Lab demo.</p>
+          </div>
         </div>
       )}
 
@@ -238,24 +252,29 @@ export function RunListPage() {
                 const active = isActiveState(row.state);
                 const terminal = isTerminalState(row.state as RunState);
                 const title = row.title || "";
+                const demo = isDemoRun(row);
                 return (
-                  <tr key={row.id}>
+                  <tr key={row.id} className={demo ? "bg-[rgba(99,102,241,0.04)]" : undefined}>
                     <td>
                       <div className="flex items-center gap-1.5">
                         <Link to={`/runs/${row.id}`} className="font-mono text-xs hover:underline" title={row.id}>
                           {truncateId(row.id)}
                         </Link>
                         <CopyButton value={row.id} size="icon" label="Copy ID" />
+                        {demo && <DemoBadge />}
                       </div>
                     </td>
                     <td className="max-w-[18rem]">
-                      {title ? (
-                        <Link to={`/runs/${row.id}`} className="block truncate text-xs hover:underline" title={title}>
-                          {title}
-                        </Link>
-                      ) : (
-                        <span className="text-xs text-muted-foreground italic">untitled</span>
-                      )}
+                      <div className="flex items-center gap-1.5">
+                        {title ? (
+                          <Link to={`/runs/${row.id}`} className="block truncate text-xs hover:underline" title={title}>
+                            {title}
+                          </Link>
+                        ) : (
+                          <span className="text-xs text-muted-foreground italic">untitled</span>
+                        )}
+                        {demo && <DemoBadge />}
+                      </div>
                     </td>
                     <td><StatusBadge state={row.state} /></td>
                     <td className="font-mono text-xs">{row.target || row.target_ip || "\u2014"}</td>

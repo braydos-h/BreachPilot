@@ -687,6 +687,16 @@ export function useDeleteRun() {
   });
 }
 
+export function useRestoreDemo() {
+  const qc = useQueryClient();
+  return useMutation<{ run_id: string; restored: boolean }, ApiError, void>({
+    mutationFn: () => apiFetch<{ run_id: string; restored: boolean }>("/runs/demo/restore", { method: "POST", body: {} }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["runs"] });
+    },
+  });
+}
+
 export function useRetitleRun() {
   const qc = useQueryClient();
   return useMutation<

@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/StatusBadge";
 import { CopyButton } from "@/components/CopyButton";
+import { DemoBadge } from "@/components/DemoBadge";
 import { phaseInfo, type DerivedRun } from "@/lib/deriveRun";
-import type { RunDetail, RunState } from "@/api/types";
+import { isDemoRun, type RunDetail, type RunState } from "@/api/types";
 import type { WsStatus } from "@/api/ws";
 
 interface RunCommandHeaderProps {
@@ -65,6 +66,7 @@ export const RunCommandHeader = memo(function RunCommandHeader({
             </h1>
             {resolvedIpBadge(resolvedIp)}
             {state && <StatusBadge state={state} />}
+            {isDemoRun(run) && <DemoBadge />}
             <Badge variant="info" className="gap-1 font-mono text-[10px] uppercase leading-none">
               {phase.label}
             </Badge>

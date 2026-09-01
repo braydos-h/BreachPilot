@@ -234,6 +234,23 @@ async def create_run(body: RunCreateRequest, auth: str = Depends(_require_auth))
     return result
 
 
+@router.post("/runs/demo/restore")
+async def restore_demo(auth: str = Depends(_require_auth)) -> dict[str, Any]:
+    """Explicitly recreate the built-in demo session (clears the tombstone).
+
+    Idempotent: when the demo already exists it just ensures artifacts are
+    present and returns the existing id. The tombstone ``demo_deleted`` is
+    cleared so future restarts keep the demo.
+    """
+    from tools.api.demo_seed import DEMO_RUN_ID, restore_demo as _restore
+
+    persistence = _ps()
+    reports_dir = persistence.reports_dir
+    # restore_demo clears the tombstone and seeds if missing.
+    _restore(persistence, reports_dir)
+    return {"run_id": DEMO_RUN_ID, "restored": True}
+
+
 @router.get("/runs")
 async def list_runs(
     limit: int = Query(50, ge=1, le=200),
@@ -257,6 +274,11 @@ async def list_runs(
     for r in runs:
         req = r.get("request_json", {}) or {}
         prev = r.get("preview_json", {}) or {}
+        is_demo = bool(r.get("is_demo"))
+        # Fallback for pre-migrated rows where is_demo not yet backfilled but
+        # the preview carries the marker.
+        if not is_demo and (prev.get("is_demo") is True or prev.get("source") == "demo"):
+            is_demo = True
         out.append(
             {
                 "id": r["id"],
@@ -268,6 +290,7 @@ async def list_runs(
                 "target_ip": prev.get("target_ip", ""),
                 "model_alias": prev.get("model_alias", ""),
                 "title": r.get("title", "") or "",
+                "is_demo": is_demo,
             }
         )
     return {"runs": out, "sort": sort, "total": total}
@@ -280,6 +303,12 @@ async def get_run(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, 
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
     decisions = _ps().list_decisions(run_id)
+    is_demo = bool(run.get("is_demo"))
+    # Backfill for pre-migrated rows
+    if not is_demo:
+        preview_tmp = run.get("preview_json") or {}
+        if isinstance(preview_tmp, dict) and (preview_tmp.get("is_demo") is True or preview_tmp.get("source") == "demo"):
+            is_demo = True
     return {
         "id": run["id"],
         "state": run["state"],
@@ -292,6 +321,7 @@ async def get_run(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, 
         "title": run.get("title", "") or "",
         "cancelled_at": run.get("cancelled_at", ""),
         "resumed_from": run.get("resumed_from", ""),
+        "is_demo": is_demo,
         "decisions": [
             {"id": d["id"], "kind": d["kind"], "status": d["status"], "answer": d["answer"]} for d in decisions
         ],
