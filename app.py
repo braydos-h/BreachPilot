@@ -1,6 +1,6 @@
 """ASGI application factory for the BreachPilot WebUI API daemon.
 
-Called by ``main._run_daemon`` (``--demon`` / ``--daemon``). Creates a FastAPI
+Called by ``main._run_daemon`` (``--daemon`` (legacy alias: ``--demon``)). Creates a FastAPI
 app with all routers mounted under ``/api/v1``, error handlers, CORS/origin
 middleware, bearer auth, and a lifespan handler that recovers interrupted runs
 on startup and cleans up the active run on shutdown.
