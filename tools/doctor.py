@@ -501,8 +501,27 @@ def _check_workspace(workspace: Path) -> dict[str, Any]:
 
 
 def _check_config(path: Path) -> dict[str, Any]:
+    # Hierarchy-aware: default sentinel with no cwd file uses packaged defaults
     if not path.exists():
-        return {"name": "config_valid", "ok": False, "path": str(path), "error": "missing"}
+        if path == Path("config.yaml"):
+            try:
+                from tools.paths import resolve_config_path
+
+                resolved = resolve_config_path(path)
+                if resolved is not None and resolved.exists():
+                    path = resolved
+                else:
+                    # No file anywhere — packaged defaults are valid
+                    return {
+                        "name": "config_valid",
+                        "ok": True,
+                        "path": "<packaged defaults>",
+                        "note": "using packaged defaults (no config.yaml found)",
+                    }
+            except Exception:
+                pass
+        if not path.exists():
+            return {"name": "config_valid", "ok": False, "path": str(path), "error": "missing"}
     try:
         from tools.config_manager import ConfigValidator
 

@@ -39,6 +39,7 @@ from tools.api.event_broker import (
 )
 from tools.plugins import PluginRegistry
 
+
 def _fresh_registry(monkeypatch) -> PluginRegistry:
     reg = PluginRegistry()
     monkeypatch.setattr("tools.plugins.PLUGIN_REGISTRY", reg)
