@@ -32,10 +32,10 @@ from tests.helpers.llm_tool_harness import (
 )
 from tools.providers.types import chat_response, tool_call
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _spec(
     name: str,
@@ -56,25 +56,48 @@ def _spec(
 # 1. Basic invocation
 # ---------------------------------------------------------------------------
 
+
 class TestBasicInvocation:
     @pytest.mark.asyncio
     async def test_agent_discovers_and_calls_tool_and_grounds_final_answer(self, tmp_path: Path):
         sentinel = make_sentinel("SERVICE_SENTINEL")
         specs = [
-            _spec("lookup_service", required=["target_ip"], properties={"target_ip": {"type": "string"}}, result=sentinel),
+            _spec(
+                "lookup_service", required=["target_ip"], properties={"target_ip": {"type": "string"}}, result=sentinel
+            ),
             _spec("read_file", required=["path"], properties={"path": {"type": "string"}}),
             _spec("calculate", required=["expr"], properties={"expr": {"type": "string"}}),
         ]
         queue = [
-            {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": [make_tool_call("lookup_service", {"target_ip": "127.0.0.1"})]}},
-            {"message": {"role": "assistant", "content": f"FINAL SERVICE_SENTINEL found: {sentinel}", "thinking": "", "tool_calls": []}},
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "thinking": "",
+                    "tool_calls": [make_tool_call("lookup_service", {"target_ip": "127.0.0.1"})],
+                }
+            },
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": f"FINAL SERVICE_SENTINEL found: {sentinel}",
+                    "thinking": "",
+                    "tool_calls": [],
+                }
+            },
         ]
         harness = ToolUseHarness(tmp_path=tmp_path)
         final, trace = await harness.run(specs, queue, sentinel_expected=sentinel)
         # Tool was selected
         assert "lookup_service" in trace.selected_tools
         # MCP session actually called
-        assert any(c["tool"] == "lookup_service" for c in [dict(tool=t, args=a) for t, a in [(c["tool"], c["args"]) for c in []]]) or True  # harness tracks
+        assert (
+            any(
+                c["tool"] == "lookup_service"
+                for c in [dict(tool=t, args=a) for t, a in [(c["tool"], c["args"]) for c in []]]
+            )
+            or True
+        )  # harness tracks
         # Final answer grounded in sentinel (agent consumed tool output)
         assert trace.oracle_result == "grounded"
         assert sentinel in json.dumps(final, default=str)
@@ -85,8 +108,22 @@ class TestBasicInvocation:
         sentinel = make_sentinel("READ_SENTINEL")
         specs = [_spec("read_file", required=["path"], properties={"path": {"type": "string"}}, result=sentinel)]
         queue = [
-            {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": [make_tool_call("read_file", {"path": "/tmp/flag.txt"})]}},
-            {"message": {"role": "assistant", "content": f"File contains {sentinel}", "thinking": "", "tool_calls": []}},
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "thinking": "",
+                    "tool_calls": [make_tool_call("read_file", {"path": "/tmp/flag.txt"})],
+                }
+            },
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": f"File contains {sentinel}",
+                    "thinking": "",
+                    "tool_calls": [],
+                }
+            },
         ]
         harness = ToolUseHarness(tmp_path=tmp_path)
         final, _ = await harness.run(specs, queue, sentinel_expected=sentinel)
@@ -113,7 +150,7 @@ class TestBasicInvocation:
 
     def test_model_client_normalizes_tool_call_string_args(self):
         """Arguments arriving as JSON string are parsed to dict for downstream validation."""
-        from tools.exploit_agent.tool_calls import _normalize_tool_call, _filter_and_validate_tool_calls
+        from tools.exploit_agent.tool_calls import _filter_and_validate_tool_calls, _normalize_tool_call
 
         raw = {"function": {"name": "lookup_service", "arguments": '{"target_ip":"127.0.0.1"}'}}
         norm = _normalize_tool_call(raw)
@@ -128,6 +165,7 @@ class TestBasicInvocation:
 # 2. Wrong-tool selection
 # ---------------------------------------------------------------------------
 
+
 class TestWrongToolSelection:
     @pytest.mark.asyncio
     async def test_correct_tool_selected_among_distractors(self, tmp_path: Path):
@@ -139,7 +177,14 @@ class TestWrongToolSelection:
             _spec("dump_credentials", required=["target_ip"], properties={"target_ip": {"type": "string"}}),
         ]
         queue = [
-            {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": [make_tool_call("search_target", {"query": "ports"})]}},
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "thinking": "",
+                    "tool_calls": [make_tool_call("search_target", {"query": "ports"})],
+                }
+            },
             {"message": {"role": "assistant", "content": f"Found {sentinel}", "thinking": "", "tool_calls": []}},
         ]
         harness = ToolUseHarness(tmp_path=tmp_path)
@@ -168,13 +213,16 @@ class TestWrongToolSelection:
 # 3. Argument validation
 # ---------------------------------------------------------------------------
 
+
 class TestArgumentValidation:
     def test_required_param_missing_is_recoverable_error(self):
         from tools.exploit_agent.tool_calls import _filter_and_validate_tool_calls
 
-        schemas = build_fake_tools([
-            _spec("lookup_service", required=["target_ip"], properties={"target_ip": {"type": "string"}}),
-        ])
+        schemas = build_fake_tools(
+            [
+                _spec("lookup_service", required=["target_ip"], properties={"target_ip": {"type": "string"}}),
+            ]
+        )
         calls = [{"function": {"name": "lookup_service", "arguments": {}}}]
         valid, invalid = _filter_and_validate_tool_calls(calls, all_tools=schemas)
         assert valid == []
@@ -184,9 +232,15 @@ class TestArgumentValidation:
     def test_optional_params_allowed(self):
         from tools.exploit_agent.tool_catalog import validate_tool_call
 
-        specs = build_fake_tools([
-            FakeToolSpec(name="get_http_headers", required=["url"], properties={"url": {"type": "string"}, "timeout": {"type": "integer"}}),
-        ])
+        specs = build_fake_tools(
+            [
+                FakeToolSpec(
+                    name="get_http_headers",
+                    required=["url"],
+                    properties={"url": {"type": "string"}, "timeout": {"type": "integer"}},
+                ),
+            ]
+        )
         # Missing optional timeout → valid
         assert validate_tool_call("get_http_headers", {"url": "http://127.0.0.1"}, specs) is None
         # With optional timeout → still valid
@@ -195,16 +249,24 @@ class TestArgumentValidation:
     def test_enum_violation_rejected(self):
         from tools.exploit_agent.tool_catalog import validate_tool_call
 
-        specs = build_fake_tools([
-            FakeToolSpec(name="run_web_scan", required=["scanner"], properties={"scanner": {"type": "string", "enum": ["nikto", "nuclei"]}}),
-        ])
+        specs = build_fake_tools(
+            [
+                FakeToolSpec(
+                    name="run_web_scan",
+                    required=["scanner"],
+                    properties={"scanner": {"type": "string", "enum": ["nikto", "nuclei"]}},
+                ),
+            ]
+        )
         err = validate_tool_call("run_web_scan", {"scanner": "bad_scanner"}, specs)
         assert err is not None and "must be one of" in err
 
     def test_malformed_target_ip_is_rejected_by_validator(self):
-        specs = build_fake_tools([
-            FakeToolSpec(name="quick_scan", required=["target_ip"], properties={"target_ip": {"type": "string"}}),
-        ])
+        specs = build_fake_tools(
+            [
+                FakeToolSpec(name="quick_scan", required=["target_ip"], properties={"target_ip": {"type": "string"}}),
+            ]
+        )
         from tools.exploit_agent.tool_catalog import validate_tool_call
 
         # validate_tool_call does type checks; malformed IP shape still string-typed so validator passes,
@@ -215,7 +277,9 @@ class TestArgumentValidation:
     def test_empty_string_vs_missing_required(self):
         from tools.exploit_agent.tool_calls import _filter_and_validate_tool_calls
 
-        schemas = build_fake_tools([_spec("store_note", required=["content"], properties={"content": {"type": "string"}})])
+        schemas = build_fake_tools(
+            [_spec("store_note", required=["content"], properties={"content": {"type": "string"}})]
+        )
         for bad_args in [{}, {"content": ""}, {"content": None}]:
             valid, invalid = _filter_and_validate_tool_calls(
                 [{"function": {"name": "store_note", "arguments": bad_args}}], all_tools=schemas
@@ -226,7 +290,9 @@ class TestArgumentValidation:
         from tools.exploit_agent.tool_catalog import validate_tool_call
 
         long_str = "A" * 10000
-        specs = build_fake_tools([_spec("store_note", required=["content"], properties={"content": {"type": "string"}})])
+        specs = build_fake_tools(
+            [_spec("store_note", required=["content"], properties={"content": {"type": "string"}})]
+        )
         assert validate_tool_call("store_note", {"content": long_str}, specs) is None
 
     def test_unicode_args_preserved(self):
@@ -239,7 +305,9 @@ class TestArgumentValidation:
     def test_unexpected_additional_args_are_leniently_allowed(self):
         from tools.exploit_agent.tool_catalog import validate_tool_call
 
-        specs = build_fake_tools([_spec("lookup_service", required=["target_ip"], properties={"target_ip": {"type": "string"}})])
+        specs = build_fake_tools(
+            [_spec("lookup_service", required=["target_ip"], properties={"target_ip": {"type": "string"}})]
+        )
         # Extra arg not in schema is leniently ignored (MCP schemas not strict)
         assert validate_tool_call("lookup_service", {"target_ip": "127.0.0.1", "extra_unknown": 123}, specs) is None
 
@@ -257,6 +325,7 @@ class TestArgumentValidation:
 # 4. Multiple calls (chaining)
 # ---------------------------------------------------------------------------
 
+
 class TestToolChaining:
     @pytest.mark.asyncio
     async def test_three_step_chain_with_dependency(self, tmp_path: Path):
@@ -265,16 +334,49 @@ class TestToolChaining:
         sentinel_b = make_sentinel("SENTINEL_B")
         sentinel_c = make_sentinel("SENTINEL_C")
         specs = [
-            _spec("lookup_service", required=["target_ip"], properties={"target_ip": {"type": "string"}}, result=sentinel_a),
+            _spec(
+                "lookup_service",
+                required=["target_ip"],
+                properties={"target_ip": {"type": "string"}},
+                result=sentinel_a,
+            ),
             _spec("get_http_headers", required=["url"], properties={"url": {"type": "string"}}, result=sentinel_b),
             _spec("calculate", required=["expr"], properties={"expr": {"type": "string"}}, result=sentinel_c),
         ]
         # Second call must use sentinel_a as input to prove chaining (model cannot shortcut)
         queue = [
-            {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": [make_tool_call("lookup_service", {"target_ip": "127.0.0.1"})]}},
-            {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": [make_tool_call("get_http_headers", {"url": f"http://127.0.0.1/{sentinel_a}"})]}},
-            {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": [make_tool_call("calculate", {"expr": sentinel_b})]}},
-            {"message": {"role": "assistant", "content": f"FINAL CHAIN COMPLETE {sentinel_a} {sentinel_b} {sentinel_c}", "thinking": "", "tool_calls": []}},
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "thinking": "",
+                    "tool_calls": [make_tool_call("lookup_service", {"target_ip": "127.0.0.1"})],
+                }
+            },
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "thinking": "",
+                    "tool_calls": [make_tool_call("get_http_headers", {"url": f"http://127.0.0.1/{sentinel_a}"})],
+                }
+            },
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "thinking": "",
+                    "tool_calls": [make_tool_call("calculate", {"expr": sentinel_b})],
+                }
+            },
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": f"FINAL CHAIN COMPLETE {sentinel_a} {sentinel_b} {sentinel_c}",
+                    "thinking": "",
+                    "tool_calls": [],
+                }
+            },
         ]
         harness = ToolUseHarness(tmp_path=tmp_path)
         final, trace = await harness.run(specs, queue, sentinel_expected=sentinel_c)
@@ -290,13 +392,45 @@ class TestToolChaining:
         flag = make_sentinel("FLAG")
         specs = [
             _spec("search_target", required=["query"], properties={"query": {"type": "string"}}, result=sentinel_svc),
-            _spec("get_service_fingerprint", required=["target_ip", "port"], properties={"target_ip": {"type": "string"}, "port": {"type": "integer"}}, result=sentinel_ver),
-            _spec("run_exploit_terminal", required=["command"], properties={"command": {"type": "string"}}, result=flag),
+            _spec(
+                "get_service_fingerprint",
+                required=["target_ip", "port"],
+                properties={"target_ip": {"type": "string"}, "port": {"type": "integer"}},
+                result=sentinel_ver,
+            ),
+            _spec(
+                "run_exploit_terminal", required=["command"], properties={"command": {"type": "string"}}, result=flag
+            ),
         ]
         queue = [
-            {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": [make_tool_call("search_target", {"query": "open ports"})]}},
-            {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": [make_tool_call("get_service_fingerprint", {"target_ip": "127.0.0.1", "port": 80})]}},
-            {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": [make_tool_call("run_exploit_terminal", {"command": f"exploit --target 127.0.0.1 --ver {sentinel_ver}"})]}},
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "thinking": "",
+                    "tool_calls": [make_tool_call("search_target", {"query": "open ports"})],
+                }
+            },
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "thinking": "",
+                    "tool_calls": [make_tool_call("get_service_fingerprint", {"target_ip": "127.0.0.1", "port": 80})],
+                }
+            },
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "thinking": "",
+                    "tool_calls": [
+                        make_tool_call(
+                            "run_exploit_terminal", {"command": f"exploit --target 127.0.0.1 --ver {sentinel_ver}"}
+                        )
+                    ],
+                }
+            },
             {"message": {"role": "assistant", "content": f"Exploit done {flag}", "thinking": "", "tool_calls": []}},
         ]
         harness = ToolUseHarness(tmp_path=tmp_path)
@@ -328,6 +462,7 @@ class TestToolChaining:
 # 5. Hallucination prevention
 # ---------------------------------------------------------------------------
 
+
 class TestHallucinationPrevention:
     @pytest.mark.asyncio
     async def test_nonexistent_tool_is_rejected_and_not_claimed_as_success(self, tmp_path: Path):
@@ -335,7 +470,11 @@ class TestHallucinationPrevention:
         # The loop must surface a recoverable error, not silently succeed
         all_content = json.dumps(final, default=str)
         # No compromise claim should be present when tool never executed
-        assert "compromise" not in trace.termination_reason.lower() or "blocked" in trace.termination_reason.lower() or "error" in all_content.lower()
+        assert (
+            "compromise" not in trace.termination_reason.lower()
+            or "blocked" in trace.termination_reason.lower()
+            or "error" in all_content.lower()
+        )
 
     @pytest.mark.asyncio
     async def test_failed_exploit_must_not_be_marked_success(self, tmp_path: Path):
@@ -375,7 +514,14 @@ class TestHallucinationPrevention:
 async def _run_with_invalid_tool(tmp_path: Path, tool_name: str = "ghost_tool"):
     specs = [_spec("lookup_service", result="ok")]
     queue = [
-        {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": [make_tool_call(tool_name, {})]}},
+        {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "thinking": "",
+                "tool_calls": [make_tool_call(tool_name, {})],
+            }
+        },
         {"message": {"role": "assistant", "content": "I succeeded with ghost_tool", "thinking": "", "tool_calls": []}},
     ]
     harness = ToolUseHarness(tmp_path=tmp_path)
@@ -385,6 +531,7 @@ async def _run_with_invalid_tool(tmp_path: Path, tool_name: str = "ghost_tool"):
 # ---------------------------------------------------------------------------
 # 6. Long tool output / noisy output extraction
 # ---------------------------------------------------------------------------
+
 
 class TestLongToolOutput:
     def test_noisy_output_still_classified_correctly(self):
@@ -403,7 +550,14 @@ class TestLongToolOutput:
         noise = "noise " * 80 + sentinel + " tail"
         specs = [_spec("read_file", required=["path"], properties={"path": {"type": "string"}}, result=noise)]
         queue = [
-            {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": [make_tool_call("read_file", {"path": "/tmp/big.txt"})]}},
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "thinking": "",
+                    "tool_calls": [make_tool_call("read_file", {"path": "/tmp/big.txt"})],
+                }
+            },
             {"message": {"role": "assistant", "content": f"Extracted {sentinel}", "thinking": "", "tool_calls": []}},
         ]
         harness = ToolUseHarness(tmp_path=tmp_path)
@@ -416,13 +570,21 @@ class TestLongToolOutput:
 # 7. Provider-neutral tool argument handling
 # ---------------------------------------------------------------------------
 
+
 class TestProviderNeutralArgs:
     def test_sentinel_grounding_requires_exact_value(self, tmp_path: Path):
         sentinel = make_sentinel("EXACT_SENTINEL")
         wrong = sentinel + "_WRONG"
         specs = [_spec("calculate", required=["expr"], properties={"expr": {"type": "string"}}, result=sentinel)]
         queue = [
-            {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": [make_tool_call("calculate", {"expr": "1+1"})]}},
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "thinking": "",
+                    "tool_calls": [make_tool_call("calculate", {"expr": "1+1"})],
+                }
+            },
             # Model guesses wrong sentinel
             {"message": {"role": "assistant", "content": f"Result is {wrong}", "thinking": "", "tool_calls": []}},
         ]
@@ -447,19 +609,41 @@ class TestProviderNeutralArgs:
 # 8. Observability trace shape
 # ---------------------------------------------------------------------------
 
+
 class TestObservabilityTrace:
     @pytest.mark.asyncio
     async def test_trace_captures_required_fields(self, tmp_path: Path):
         sentinel = make_sentinel("TRACE_SENTINEL")
-        specs = [_spec("lookup_service", required=["target_ip"], properties={"target_ip": {"type": "string"}}, result=sentinel)]
+        specs = [
+            _spec(
+                "lookup_service", required=["target_ip"], properties={"target_ip": {"type": "string"}}, result=sentinel
+            )
+        ]
         queue = [
-            {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": [make_tool_call("lookup_service", {"target_ip": "127.0.0.1"})]}},
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "thinking": "",
+                    "tool_calls": [make_tool_call("lookup_service", {"target_ip": "127.0.0.1"})],
+                }
+            },
             {"message": {"role": "assistant", "content": f"done {sentinel}", "thinking": "", "tool_calls": []}},
         ]
         harness = ToolUseHarness(target_ip="127.0.0.1", provider="ollama", model="glm-5.2:cloud", tmp_path=tmp_path)
         _, trace = await harness.run(specs, queue, sentinel_expected=sentinel)
         d = trace.to_dict()
-        for field in ("provider", "model", "available_tools", "selected_tools", "normalized_args", "step_count", "termination_reason", "elapsed_seconds", "token_usage"):
+        for field in (
+            "provider",
+            "model",
+            "available_tools",
+            "selected_tools",
+            "normalized_args",
+            "step_count",
+            "termination_reason",
+            "elapsed_seconds",
+            "token_usage",
+        ):
             assert field in d, f"missing trace field {field}"
         assert d["provider"] == "ollama"
         assert d["available_tools"] == ["lookup_service"]

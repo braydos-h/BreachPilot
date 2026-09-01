@@ -21,15 +21,15 @@ import pytest
 
 from tools.validation_utils import is_target_in_allowlist
 
-
 # ---------------------------------------------------------------------------
 # Blocked targets remain blocked
 # ---------------------------------------------------------------------------
 
+
 def test_blocked_target_still_blocked_after_eval_module_import():
     # Importing eval modules must not mutate allowlist globals
-    import tools.eval_harness  # noqa: F401
     import tools.benchmark.runner  # noqa: F401
+    import tools.eval_harness  # noqa: F401
 
     assert is_target_in_allowlist("8.8.8.8", ["127.0.0.1"]) is False
     assert is_target_in_allowlist("10.0.0.1", ["127.0.0.1"]) is False
@@ -46,6 +46,7 @@ def test_allowlist_supports_cidr_and_wildcard_but_not_superset():
 # ---------------------------------------------------------------------------
 # Sandbox failures fail closed (no host fallback)
 # ---------------------------------------------------------------------------
+
 
 def test_sandbox_unavailable_constant():
     from tools.sandbox import SANDBOX_UNAVAILABLE
@@ -72,6 +73,7 @@ def test_benchmark_sandbox_required_flag_enforced():
 # ---------------------------------------------------------------------------
 # Tool calls cannot bypass target lock
 # ---------------------------------------------------------------------------
+
 
 def test_extract_ips_captures_pivot_hosts():
     from tools.command_analyzer import extract_ips_from_command
@@ -103,6 +105,7 @@ def test_tool_catalog_hidden_tools_not_exposed():
 # Provider output cannot trigger host subprocess
 # ---------------------------------------------------------------------------
 
+
 def test_provider_output_is_data_not_code():
     """Model output text must never be eval'd or passed to shell unsanitized."""
     from tools.exploit_agent.context import sanitize_output
@@ -122,26 +125,43 @@ def test_provider_output_is_data_not_code():
 # Malformed tool calls do not escape validation
 # ---------------------------------------------------------------------------
 
+
 def test_malformed_tool_call_caught_before_dispatch():
     from tools.exploit_agent.tool_calls import _filter_and_validate_tool_calls
 
     schemas = [
-        {"type": "function", "function": {"name": "quick_scan", "description": "", "parameters": {"type": "object", "properties": {"target_ip": {"type": "string"}}, "required": ["target_ip"]}}}
+        {
+            "type": "function",
+            "function": {
+                "name": "quick_scan",
+                "description": "",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"target_ip": {"type": "string"}},
+                    "required": ["target_ip"],
+                },
+            },
+        }
     ]
     # Empty name → invalid
     _, inv1 = _filter_and_validate_tool_calls([{"function": {"name": "", "arguments": {}}}], all_tools=schemas)
     assert inv1
     # Non-dict args → invalid
-    _, inv2 = _filter_and_validate_tool_calls([{"function": {"name": "quick_scan", "arguments": "not a dict"}}], all_tools=schemas)
+    _, inv2 = _filter_and_validate_tool_calls(
+        [{"function": {"name": "quick_scan", "arguments": "not a dict"}}], all_tools=schemas
+    )
     assert inv2
     # Missing required → invalid
-    _, inv3 = _filter_and_validate_tool_calls([{"function": {"name": "quick_scan", "arguments": {}}}], all_tools=schemas)
+    _, inv3 = _filter_and_validate_tool_calls(
+        [{"function": {"name": "quick_scan", "arguments": {}}}], all_tools=schemas
+    )
     assert inv3
 
 
 # ---------------------------------------------------------------------------
 # Arbitrary model-generated tool names cannot invoke unregistered functions
 # ---------------------------------------------------------------------------
+
 
 def test_unknown_tool_name_does_not_map_to_python_callable():
     import tools.mcp_tools.registry as reg
@@ -162,6 +182,7 @@ def test_unknown_tool_schema_validation_is_none_not_pass():
 # ---------------------------------------------------------------------------
 # Alternate encodings / types bypass
 # ---------------------------------------------------------------------------
+
 
 def test_integer_target_not_considered_allowlisted():
     # allowlist expects string hosts; integer should not bypass

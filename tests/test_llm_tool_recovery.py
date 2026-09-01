@@ -21,10 +21,10 @@ from tools.exploit_agent.outcome_truth import normalize_action_result
 from tools.failure_taxonomy import FailureClass, classify_failure
 from tools.providers.types import chat_response
 
-
 # ---------------------------------------------------------------------------
 # Timeout / permission / transport style failures
 # ---------------------------------------------------------------------------
+
 
 class TestToolErrorRecovery:
     @pytest.mark.asyncio
@@ -34,8 +34,22 @@ class TestToolErrorRecovery:
         harness = ToolUseHarness(tmp_path=tmp_path)
         sentinel = make_sentinel("RECOVERY_SENT")
         queue = [
-            {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": [make_tool_call("run_exploit_terminal", {"command": "sleep 100"})]}},
-            {"message": {"role": "assistant", "content": "TIMED OUT so I will try alternative", "thinking": "", "tool_calls": []}},
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "thinking": "",
+                    "tool_calls": [make_tool_call("run_exploit_terminal", {"command": "sleep 100"})],
+                }
+            },
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "TIMED OUT so I will try alternative",
+                    "thinking": "",
+                    "tool_calls": [],
+                }
+            },
         ]
         final, trace = await harness.run(specs, queue)
         # An error tool message must be present
@@ -56,11 +70,22 @@ class TestToolErrorRecovery:
         and must NOT increment blocked counters."""
         from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings, run_exploit_agent
 
-        settings = ExploitSettings(enabled=True, permission=ExploitPermission.FULL_ACCESS, attack_mode=True, attack_max_rounds=3, attack_max_commands=3)
+        settings = ExploitSettings(
+            enabled=True,
+            permission=ExploitPermission.FULL_ACCESS,
+            attack_mode=True,
+            attack_max_rounds=3,
+            attack_max_commands=3,
+        )
         policy = ExploitPolicy(settings, tmp_path)
 
         client = MagicMock()
-        client.chat.side_effect = lambda *a, **k: {"message": {"content": "probing", "tool_calls": [{"function": {"name": "check_os", "arguments": {"target_ip": "127.0.0.1"}}}]}}
+        client.chat.side_effect = lambda *a, **k: {
+            "message": {
+                "content": "probing",
+                "tool_calls": [{"function": {"name": "check_os", "arguments": {"target_ip": "127.0.0.1"}}}],
+            }
+        }
         client.provider = "ollama"
 
         class _BadResult:
@@ -74,9 +99,17 @@ class TestToolErrorRecovery:
         async def _fake_stream(*a, **k):
             return {"role": "assistant", "content": "done", "thinking": ""}
 
-        with patch("tools.exploit_agent.runner._impl._stream_model", side_effect=_fake_stream), patch("tools.exploit_agent._stream_model", side_effect=_fake_stream):
+        with (
+            patch("tools.exploit_agent.runner._impl._stream_model", side_effect=_fake_stream),
+            patch("tools.exploit_agent._stream_model", side_effect=_fake_stream),
+        ):
             result = await run_exploit_agent(
-                client=client, model="fake", session=session, exploit_tools=[{"type": "function", "function": {"name": "check_os"}}], policy=policy, target_ip="127.0.0.1"
+                client=client,
+                model="fake",
+                session=session,
+                exploit_tools=[{"type": "function", "function": {"name": "check_os"}}],
+                policy=policy,
+                target_ip="127.0.0.1",
             )
         tool_msgs = [m for m in result["messages"] if m.get("role") == "tool"]
         assert any("INTERNAL_PARSE_ERROR" in str(m.get("content", "")) for m in tool_msgs)
@@ -114,7 +147,10 @@ class TestToolErrorRecovery:
                 calls.append(self.n)
                 if self.n == 1:
                     raise _HttpxConnectError("connect failed")
-                return {"model": "m", "message": {"role": "assistant", "content": "ok", "thinking": "", "tool_calls": []}}
+                return {
+                    "model": "m",
+                    "message": {"role": "assistant", "content": "ok", "thinking": "", "tool_calls": []},
+                }
 
         raw = _FlakyRaw()
         from tools.model_router import _build_model_client
@@ -122,7 +158,9 @@ class TestToolErrorRecovery:
         client = _build_model_client("fake-model", raw_client=raw, provider="ollama")
         # Patch sleep to avoid real delay
         with patch("tools.exploit_agent.model_client.asyncio.sleep", new_callable=AsyncMock):
-            result = await _call_model_with_retry(client, "fake-model", [{"role": "user", "content": "hi"}], max_retries=2)
+            result = await _call_model_with_retry(
+                client, "fake-model", [{"role": "user", "content": "hi"}], max_retries=2
+            )
         assert result["content"] == "ok"
         assert len(calls) == 2
 
@@ -144,6 +182,7 @@ class TestToolErrorRecovery:
 # ---------------------------------------------------------------------------
 # Hallucination matrix
 # ---------------------------------------------------------------------------
+
 
 class TestHallucinationMatrix:
     def test_bare_shell_markers_not_sufficient(self):
@@ -188,7 +227,5 @@ class TestHallucinationMatrix:
     def test_unknown_tool_name_creates_recoverable_error(self):
         from tools.exploit_agent.tool_calls import _filter_and_validate_tool_calls
 
-        valid, invalid = _filter_and_validate_tool_calls(
-            [{"function": {"name": "", "arguments": {}}}], all_tools=[]
-        )
+        valid, invalid = _filter_and_validate_tool_calls([{"function": {"name": "", "arguments": {}}}], all_tools=[])
         assert invalid and invalid[0]["recoverable"] is True

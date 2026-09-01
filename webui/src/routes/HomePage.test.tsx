@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -298,9 +298,9 @@ describe("SandboxBanner Fix sandbox action", () => {
     await user.click(screen.getByRole("button", { name: /Fix sandbox/i }));
     expect(await screen.findByText(/Fix Docker sandbox/i)).toBeInTheDocument();
     expect(screen.getByText(/BreachPilot is currently executing commands directly on this machine because the Docker sandbox could not start\./)).toBeInTheDocument();
-    expect(screen.getByText(/Docker CLI not found on PATH/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Docker CLI not found on PATH/).length).toBeGreaterThan(0);
     expect(screen.getByText(/What BreachPilot will do/i)).toBeInTheDocument();
-    expect(screen.getByText(/Install Docker/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Install Docker/).length).toBeGreaterThan(0);
     expect(screen.getByText(/sudo apt-get update/)).toBeInTheDocument();
   });
 
@@ -319,7 +319,7 @@ describe("SandboxBanner Fix sandbox action", () => {
     } as unknown as ReturnType<typeof useSandboxFixPlan>);
     renderNode(<SandboxBanner />);
     await user.click(screen.getByRole("button", { name: /Fix sandbox/i }));
-    expect(await screen.findByText(/custom reason 123/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/custom reason 123/)).length).toBeGreaterThan(0);
   });
 
   it("the planned host changes are visible before confirmation", async () => {
@@ -419,8 +419,8 @@ describe("SandboxBanner Fix sandbox action", () => {
     } as unknown as ReturnType<typeof useSandboxFix>);
     renderNode(<SandboxBanner />);
     await user.click(screen.getByRole("button", { name: /Fix sandbox/i }));
-    await screen.findByText(/Fix Docker sandbox/i);
-    await user.click(screen.getByRole("button", { name: /^Start fix$/i }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: /^Start fix$/i }));
     expect(mutateMock).toHaveBeenCalledTimes(1);
   });
 
@@ -445,9 +445,10 @@ describe("SandboxBanner Fix sandbox action", () => {
         { ...s, status: "pending" as const, output: "" }
       ),
     });
-    useSandboxFixStatusMock.mockReturnValue({
-      data: runningJob,
-    } as unknown as ReturnType<typeof useSandboxFixStatus>);
+    useSandboxFixStatusMock.mockImplementation((jobId: unknown) => {
+      if (!jobId) return { data: undefined, isLoading: false, error: null } as unknown as ReturnType<typeof useSandboxFixStatus>;
+      return { data: runningJob } as unknown as ReturnType<typeof useSandboxFixStatus>;
+    });
     const mutateMock = vi.fn().mockResolvedValue(runningJob);
     useSandboxFixMock.mockReturnValue({
       mutate: mutateMock,
@@ -458,9 +459,9 @@ describe("SandboxBanner Fix sandbox action", () => {
     } as unknown as ReturnType<typeof useSandboxFix>);
     renderNode(<SandboxBanner />);
     await user.click(screen.getByRole("button", { name: /Fix sandbox/i }));
-    await screen.findByText(/Fix Docker sandbox/i);
-    await user.click(screen.getByRole("button", { name: /^Start fix$/i }));
-    await waitFor(() => expect(screen.getByText(/Fixing sandbox\.\.\./)).toBeInTheDocument());
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: /^Start fix$/i }));
+    await waitFor(() => expect(within(dialog).getByText(/Fixing sandbox\.\.\./)).toBeInTheDocument());
   });
 
   it("successful remediation tells the user a BreachPilot restart is required", async () => {
@@ -480,9 +481,10 @@ describe("SandboxBanner Fix sandbox action", () => {
       status: "succeeded",
       steps: makePlan().steps.map((s) => ({ ...s, status: "succeeded" as const, output: "ok", error: "" })),
     });
-    useSandboxFixStatusMock.mockReturnValue({
-      data: successJob,
-    } as unknown as ReturnType<typeof useSandboxFixStatus>);
+    useSandboxFixStatusMock.mockImplementation((jobId: unknown) => {
+      if (!jobId) return { data: undefined, isLoading: false, error: null } as unknown as ReturnType<typeof useSandboxFixStatus>;
+      return { data: successJob } as unknown as ReturnType<typeof useSandboxFixStatus>;
+    });
     const mutateMock = vi.fn().mockResolvedValue(successJob);
     useSandboxFixMock.mockReturnValue({
       mutate: mutateMock,
@@ -493,10 +495,10 @@ describe("SandboxBanner Fix sandbox action", () => {
     } as unknown as ReturnType<typeof useSandboxFix>);
     renderNode(<SandboxBanner />);
     await user.click(screen.getByRole("button", { name: /Fix sandbox/i }));
-    await screen.findByText(/Fix Docker sandbox/i);
-    await user.click(screen.getByRole("button", { name: /^Start fix$/i }));
-    expect(await screen.findByText(/Docker is ready/i)).toBeInTheDocument();
-    expect(screen.getByText(/Restart BreachPilot to activate containment\./)).toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: /^Start fix$/i }));
+    expect(await within(dialog).findByText(/Docker is ready/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Restart BreachPilot to activate containment\./)).toBeInTheDocument();
   });
 
   it("a failed remediation displays the failed step/error and Retry", async () => {
@@ -520,9 +522,10 @@ describe("SandboxBanner Fix sandbox action", () => {
         { ...s, status: "pending" as const, output: "", error: "" }
       ),
     });
-    useSandboxFixStatusMock.mockReturnValue({
-      data: failedJob,
-    } as unknown as ReturnType<typeof useSandboxFixStatus>);
+    useSandboxFixStatusMock.mockImplementation((jobId: unknown) => {
+      if (!jobId) return { data: undefined, isLoading: false, error: null } as unknown as ReturnType<typeof useSandboxFixStatus>;
+      return { data: failedJob } as unknown as ReturnType<typeof useSandboxFixStatus>;
+    });
     const mutateMock = vi.fn().mockResolvedValue(failedJob);
     useSandboxFixMock.mockReturnValue({
       mutate: mutateMock,
@@ -533,12 +536,12 @@ describe("SandboxBanner Fix sandbox action", () => {
     } as unknown as ReturnType<typeof useSandboxFix>);
     renderNode(<SandboxBanner />);
     await user.click(screen.getByRole("button", { name: /Fix sandbox/i }));
-    await screen.findByText(/Fix Docker sandbox/i);
-    await user.click(screen.getByRole("button", { name: /^Start fix$/i }));
-    expect(await screen.findByText(/Sandbox fix failed/i)).toBeInTheDocument();
-    expect(screen.getByText(/apt-get failed: locked/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Retry/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Close/i })).toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: /^Start fix$/i }));
+    expect(await within(dialog).findByText(/Sandbox fix failed/i)).toBeInTheDocument();
+    expect(within(dialog).getAllByText(/apt-get failed: locked/).length).toBeGreaterThan(0);
+    expect(within(dialog).getByRole("button", { name: /Retry/i })).toBeInTheDocument();
+    expect(within(dialog).getAllByRole("button", { name: /Close/i }).length).toBeGreaterThanOrEqual(1);
   });
 
   it("unknown sandbox modes retain the existing safe behavior", () => {

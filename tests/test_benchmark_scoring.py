@@ -54,6 +54,7 @@ def _trial(
 # Task vs oracle success
 # ---------------------------------------------------------------------------
 
+
 class TestTaskVsOracle:
     def test_oracle_success_rate_excludes_infra(self):
         trials = [
@@ -68,7 +69,12 @@ class TestTaskVsOracle:
 
     def test_hallucinated_success_rate_is_false_positive_rate(self):
         trials = [
-            _trial(claimed=True, verified=False, status=TrialStatus.FALSE_POSITIVE.value, category=FailureCategory.FALSE_POSITIVE.value),
+            _trial(
+                claimed=True,
+                verified=False,
+                status=TrialStatus.FALSE_POSITIVE.value,
+                category=FailureCategory.FALSE_POSITIVE.value,
+            ),
             _trial(claimed=True, verified=True, status=TrialStatus.VERIFIED.value),
             _trial(claimed=False, verified=False, status=TrialStatus.FAILED.value),
         ]
@@ -86,23 +92,32 @@ class TestTaskVsOracle:
     def test_provider_error_classification_exists(self):
         assert FailureCategory.MODEL_FAILED.value == "MODEL_FAILED"
         # TOOL_FAILURE vs SANDBOX_FAILED vs TARGET_PROVISION_FAILED distinct
-        assert len({FailureCategory.TOOL_FAILURE.value, FailureCategory.SANDBOX_FAILED.value, FailureCategory.TARGET_PROVISION_FAILED.value}) == 3
+        assert (
+            len(
+                {
+                    FailureCategory.TOOL_FAILURE.value,
+                    FailureCategory.SANDBOX_FAILED.value,
+                    FailureCategory.TARGET_PROVISION_FAILED.value,
+                }
+            )
+            == 3
+        )
 
 
 # ---------------------------------------------------------------------------
 # Classification taxonomy depth
 # ---------------------------------------------------------------------------
 
+
 class TestFailureClassification:
     def test_model_vs_provider_vs_tool_distinction(self):
         # Simulate classify logic: model client build failed → MODEL_FAILED
         # MCP zero actions → PLANNER_FAILURE
         # All tool calls failed → TOOL_FAILURE
-        from tools.benchmark.runner import BenchmarkRunner
-
         # Pure mapping test via runner._classify introspection
         from tools.benchmark.agent_runner import MissionResult
         from tools.benchmark.models import SandboxSnapshot
+        from tools.benchmark.runner import BenchmarkRunner
 
         def _fake_mission_result(errors, tool_calls, tool_errors, total_actions):
             r = MissionResult()
@@ -125,7 +140,12 @@ class TestFailureClassification:
         assert cat == FailureCategory.TOOL_FAILURE.value
 
     def test_hallucinated_success_classification_is_false_positive(self):
-        t = _trial(claimed=True, verified=False, status=TrialStatus.FALSE_POSITIVE.value, category=FailureCategory.FALSE_POSITIVE.value)
+        t = _trial(
+            claimed=True,
+            verified=False,
+            status=TrialStatus.FALSE_POSITIVE.value,
+            category=FailureCategory.FALSE_POSITIVE.value,
+        )
         s = compute_scenario_summary([t], "s1")
         assert s.false_positives == 1
         assert s.failure_categories[FailureCategory.FALSE_POSITIVE.value] == 1
@@ -134,6 +154,7 @@ class TestFailureClassification:
 # ---------------------------------------------------------------------------
 # Steps / token / cost / latency
 # ---------------------------------------------------------------------------
+
 
 class TestStepsAndCost:
     def test_average_steps_to_success_uses_verified_only(self):
@@ -171,6 +192,7 @@ class TestStepsAndCost:
 # Multi-trial statistics
 # ---------------------------------------------------------------------------
 
+
 class TestMultiTrial:
     def test_repeated_trials_variance_and_ci(self):
         # 3 trials: 2 verified → p=0.66, variance, CI
@@ -195,7 +217,15 @@ class TestMultiTrial:
 
     def test_five_trials_success_probability(self):
         # Doc contract: 3-5 trials, aggregate success rate, median steps, mean tool calls
-        trials = [_trial(verified=(i < 3), status=TrialStatus.VERIFIED.value if i < 3 else TrialStatus.FAILED.value, duration=float(10 + i * 5), tool_calls=5 + i) for i in range(5)]
+        trials = [
+            _trial(
+                verified=(i < 3),
+                status=TrialStatus.VERIFIED.value if i < 3 else TrialStatus.FAILED.value,
+                duration=float(10 + i * 5),
+                tool_calls=5 + i,
+            )
+            for i in range(5)
+        ]
         s = compute_scenario_summary(trials, "s1")
         assert s.trials == 5
         assert s.verified == 3
@@ -210,8 +240,16 @@ class TestMultiTrial:
 
     def test_infra_errors_excluded_from_success_probability(self):
         trials = [
-            _trial(verified=False, status=TrialStatus.INFRASTRUCTURE_ERROR.value, category=FailureCategory.SANDBOX_FAILED.value),
-            _trial(verified=False, status=TrialStatus.INFRASTRUCTURE_ERROR.value, category=FailureCategory.SANDBOX_FAILED.value),
+            _trial(
+                verified=False,
+                status=TrialStatus.INFRASTRUCTURE_ERROR.value,
+                category=FailureCategory.SANDBOX_FAILED.value,
+            ),
+            _trial(
+                verified=False,
+                status=TrialStatus.INFRASTRUCTURE_ERROR.value,
+                category=FailureCategory.SANDBOX_FAILED.value,
+            ),
             _trial(verified=True, status=TrialStatus.VERIFIED.value),
         ]
         s = compute_scenario_summary(trials, "s1")
@@ -223,6 +261,7 @@ class TestMultiTrial:
 # ---------------------------------------------------------------------------
 # Failure categories coverage (docs/benchmarks.md)
 # ---------------------------------------------------------------------------
+
 
 class TestBenchmarkFailureCategories:
     def test_all_expected_categories_exist(self):
@@ -255,7 +294,9 @@ class TestBenchmarkFailureCategories:
         assert "INFRASTRUCTURE_ERROR" in statuses  # ERROR
 
         # Ensure storage round-trip preserves status
-        from tools.benchmark.storage import BenchmarkStorage
         import json as _j
+
+        from tools.benchmark.storage import BenchmarkStorage
+
         t = _trial(status=TrialStatus.SKIPPED.value)
         assert _j.loads(_j.dumps(t.to_dict()))["status"] == "SKIPPED"

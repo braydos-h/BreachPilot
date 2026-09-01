@@ -76,7 +76,9 @@ def test_live_provider_smoke_small_prompt(provider_id: str):
 
     deadline = time.monotonic() + 10.0
     try:
-        resp = client.chat(model=model_id, messages=[{"role": "user", "content": "Say 'pong' and nothing else."}], stream=False)
+        resp = client.chat(
+            model=model_id, messages=[{"role": "user", "content": "Say 'pong' and nothing else."}], stream=False
+        )
     except Exception as exc:
         # Provider error is not a test failure — report as skipped with reason
         # so CI does not fail because the cloud is down.
@@ -115,7 +117,9 @@ def test_live_provider_switching_mocked_without_network():
     from tools.providers.types import chat_response
 
     def _fake_client_for(provider_id: str):
-        raw = type("R", (), {"chat": lambda self, **kw: chat_response(kw.get("model", "m"), f"hello from {provider_id}")})()
+        raw = type(
+            "R", (), {"chat": lambda self, **kw: chat_response(kw.get("model", "m"), f"hello from {provider_id}")}
+        )()
         return make_model_client("m", alias="m", raw_client=raw, provider=provider_id)
 
     outputs: dict[str, str] = {}
@@ -135,7 +139,9 @@ def test_live_trace_jsonl_redacts_secrets(tmp_path: Path):
     """Harness trace JSONL must not contain secrets."""
     from tests.helpers.llm_tool_harness import HarnessTrace
 
-    trace = HarnessTrace(provider="opencode_go", model="muse-spark-1.2-contributor", scenario="live-trace", trial=1, goal="say pong")
+    trace = HarnessTrace(
+        provider="opencode_go", model="muse-spark-1.2-contributor", scenario="live-trace", trial=1, goal="say pong"
+    )
     trace.available_tools = ["run_exploit_terminal"]
     trace.selected_tools = ["run_exploit_terminal"]
     trace.normalized_args = [{"command": "id", "password": "s3cret"}]  # will be redacted by harness

@@ -30,7 +30,9 @@ def test_oracle_flag_via_shell_command_with_session(tmp_path: Path):
         return {"output": f"flag content: {sentinel}\nuid=0"}
 
     executor = default_check_executor(session=fake_session, workspace=None, loop=None)
-    passed, detail = executor({"type": "shell_command", "exec": f"cat /flag && echo {sentinel}", "expect_stdout": sentinel})
+    passed, detail = executor(
+        {"type": "shell_command", "exec": f"cat /flag && echo {sentinel}", "expect_stdout": sentinel}
+    )
     assert passed is True
 
 
@@ -57,7 +59,9 @@ def test_verify_flag_check_never_trusts_agent_claim():
         calls.append(check)
         return True, "ok"
 
-    result = verify_flag_check({"id": "f1", "check": {"type": "file_contains", "path": "/tmp/x", "pattern": "y"}}, exec_ok)
+    result = verify_flag_check(
+        {"id": "f1", "check": {"type": "file_contains", "path": "/tmp/x", "pattern": "y"}}, exec_ok
+    )
     assert isinstance(result, FlagCheckResult)
     assert result.passed is True
     assert result.flag_id == "f1"
@@ -68,7 +72,9 @@ def test_verify_flag_check_executor_crash_is_failed_not_pass():
     def exec_crash(check):
         raise RuntimeError("executor boom")
 
-    result = verify_flag_check({"id": "f1", "check": {"type": "file_contains", "path": "/tmp/x", "pattern": "y"}}, exec_crash)
+    result = verify_flag_check(
+        {"id": "f1", "check": {"type": "file_contains", "path": "/tmp/x", "pattern": "y"}}, exec_crash
+    )
     assert result.passed is False
     assert "executor error" in result.detail.lower()
 

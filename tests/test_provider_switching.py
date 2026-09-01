@@ -131,4 +131,7 @@ def test_resolve_default_model_prefers_provider_block():
     }
     assert resolve_default_model(cfg, "opencode_go") == "new-model"
     # Ollama falls back to registry alias when default_model empty
-    assert resolve_default_model({"models": {"registry": {"glm": "g:cloud"}, "default_alias": "glm"}}, "ollama") in ("g:cloud", "glm")
+    assert resolve_default_model({"models": {"registry": {"glm": "g:cloud"}, "default_alias": "glm"}}, "ollama") in (
+        "g:cloud",
+        "glm",
+    )

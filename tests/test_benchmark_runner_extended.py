@@ -71,6 +71,7 @@ def _fail_executor(check):
 # Discovery / parsing
 # ---------------------------------------------------------------------------
 
+
 def test_scenario_discovery_via_fake_registry(tmp_path, monkeypatch):
     from tools.benchmark.registry import get_provider
 
@@ -104,17 +105,25 @@ def test_model_metadata_unknown_defaults_to_unknown():
 # Trial isolation
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_trial_isolation_workspace_per_trial(tmp_path):
     seed_fake_suite([_scenario("s1")])
-    mission = _FakeMission([MissionResult(total_actions=1, telemetry=TrialTelemetry(tool_calls=1)), MissionResult(total_actions=1, telemetry=TrialTelemetry(tool_calls=1))])
+    mission = _FakeMission(
+        [
+            MissionResult(total_actions=1, telemetry=TrialTelemetry(tool_calls=1)),
+            MissionResult(total_actions=1, telemetry=TrialTelemetry(tool_calls=1)),
+        ]
+    )
     # Monkeypatch MissionRunner to use our fake
     import tools.benchmark.runner as runner_mod
 
     orig = runner_mod.MissionRunner
     runner_mod.MissionRunner = lambda *a, **kw: mission  # type: ignore
     try:
-        runner = BenchmarkRunner(_config(tmp_path), Path("config.yaml"), verifier_factory=lambda s: _v(s, _fail_executor))
+        runner = BenchmarkRunner(
+            _config(tmp_path), Path("config.yaml"), verifier_factory=lambda s: _v(s, _fail_executor)
+        )
         payload = await runner.run(RunConfig(suite="fake", trials=2, sandbox_required=False))
     finally:
         runner_mod.MissionRunner = orig
@@ -129,6 +138,7 @@ async def test_trial_isolation_workspace_per_trial(tmp_path):
 # Timeout handling
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_timeout_maps_to_timeout_status(tmp_path):
     seed_fake_suite([_scenario("s1")])
@@ -138,7 +148,9 @@ async def test_timeout_maps_to_timeout_status(tmp_path):
     orig = runner_mod.MissionRunner
     runner_mod.MissionRunner = lambda *a, **kw: mission  # type: ignore
     try:
-        runner = BenchmarkRunner(_config(tmp_path), Path("config.yaml"), verifier_factory=lambda s: _v(s, _pass_executor))
+        runner = BenchmarkRunner(
+            _config(tmp_path), Path("config.yaml"), verifier_factory=lambda s: _v(s, _pass_executor)
+        )
         payload = await runner.run(RunConfig(suite="fake", trials=1, sandbox_required=False))
     finally:
         runner_mod.MissionRunner = orig
@@ -150,6 +162,7 @@ async def test_timeout_maps_to_timeout_status(tmp_path):
 # Deterministic score calculations
 # ---------------------------------------------------------------------------
 
+
 def test_deterministic_score_same_input_same_output():
     trials = [TrialTelemetry(tool_calls=5, tool_errors=0, total_tokens=100)]
     # Run twice — must be identical
@@ -157,7 +170,18 @@ def test_deterministic_score_same_input_same_output():
     from tools.benchmark.models import TrialResult
 
     def _mk(i):
-        t = TrialResult(run_id="r", suite="xben", scenario_id="s1", trial_index=i, trial_id=f"s1#t{i}", status=TrialStatus.VERIFIED.value, oracle_verified_success=True, duration_seconds=10.0, tool_calls=5, total_tokens=100)
+        t = TrialResult(
+            run_id="r",
+            suite="xben",
+            scenario_id="s1",
+            trial_index=i,
+            trial_id=f"s1#t{i}",
+            status=TrialStatus.VERIFIED.value,
+            oracle_verified_success=True,
+            duration_seconds=10.0,
+            tool_calls=5,
+            total_tokens=100,
+        )
         t.telemetry = TrialTelemetry(tool_calls=5, tool_errors=0, total_tokens=100)
         return t
 
@@ -171,6 +195,7 @@ def test_deterministic_score_same_input_same_output():
 # Skipped / failed setup / agent failure / provider failure / sandbox failure
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_agent_failure_no_actions_is_planner_failure(tmp_path):
     seed_fake_suite([_scenario("s1")])
@@ -180,7 +205,9 @@ async def test_agent_failure_no_actions_is_planner_failure(tmp_path):
     orig = runner_mod.MissionRunner
     runner_mod.MissionRunner = lambda *a, **kw: mission  # type: ignore
     try:
-        runner = BenchmarkRunner(_config(tmp_path), Path("config.yaml"), verifier_factory=lambda s: _v(s, _fail_executor))
+        runner = BenchmarkRunner(
+            _config(tmp_path), Path("config.yaml"), verifier_factory=lambda s: _v(s, _fail_executor)
+        )
         payload = await runner.run(RunConfig(suite="fake", trials=1, sandbox_required=False))
     finally:
         runner_mod.MissionRunner = orig
@@ -192,11 +219,15 @@ async def test_provider_failure_maps_to_model_failed(tmp_path):
     seed_fake_suite([_scenario("s1")])
     import tools.benchmark.runner as runner_mod
 
-    mission = _FakeMission([MissionResult(total_actions=0, errors=["model client build failed: no key"], telemetry=TrialTelemetry())])
+    mission = _FakeMission(
+        [MissionResult(total_actions=0, errors=["model client build failed: no key"], telemetry=TrialTelemetry())]
+    )
     orig = runner_mod.MissionRunner
     runner_mod.MissionRunner = lambda *a, **kw: mission  # type: ignore
     try:
-        runner = BenchmarkRunner(_config(tmp_path), Path("config.yaml"), verifier_factory=lambda s: _v(s, _fail_executor))
+        runner = BenchmarkRunner(
+            _config(tmp_path), Path("config.yaml"), verifier_factory=lambda s: _v(s, _fail_executor)
+        )
         payload = await runner.run(RunConfig(suite="fake", trials=1, sandbox_required=False))
     finally:
         runner_mod.MissionRunner = orig
@@ -207,16 +238,28 @@ async def test_provider_failure_maps_to_model_failed(tmp_path):
 # Oracle success / failure
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_oracle_success_drives_verified(tmp_path):
     seed_fake_suite([_scenario("s1")])
     import tools.benchmark.runner as runner_mod
 
-    mission = _FakeMission([MissionResult(total_actions=5, telemetry=TrialTelemetry(tool_calls=5, total_tokens=100), agent_claimed_success=False, claimed_summary="")])
+    mission = _FakeMission(
+        [
+            MissionResult(
+                total_actions=5,
+                telemetry=TrialTelemetry(tool_calls=5, total_tokens=100),
+                agent_claimed_success=False,
+                claimed_summary="",
+            )
+        ]
+    )
     orig = runner_mod.MissionRunner
     runner_mod.MissionRunner = lambda *a, **kw: mission  # type: ignore
     try:
-        runner = BenchmarkRunner(_config(tmp_path), Path("config.yaml"), verifier_factory=lambda s: _v(s, _pass_executor))
+        runner = BenchmarkRunner(
+            _config(tmp_path), Path("config.yaml"), verifier_factory=lambda s: _v(s, _pass_executor)
+        )
         payload = await runner.run(RunConfig(suite="fake", trials=1, sandbox_required=False))
     finally:
         runner_mod.MissionRunner = orig
@@ -235,7 +278,9 @@ async def test_oracle_failure_is_failed_with_no_exploit_path(tmp_path):
     orig = runner_mod.MissionRunner
     runner_mod.MissionRunner = lambda *a, **kw: mission  # type: ignore
     try:
-        runner = BenchmarkRunner(_config(tmp_path), Path("config.yaml"), verifier_factory=lambda s: _v(s, _fail_executor))
+        runner = BenchmarkRunner(
+            _config(tmp_path), Path("config.yaml"), verifier_factory=lambda s: _v(s, _fail_executor)
+        )
         payload = await runner.run(RunConfig(suite="fake", trials=1, sandbox_required=False))
     finally:
         runner_mod.MissionRunner = orig
@@ -247,11 +292,23 @@ async def test_oracle_failure_is_failed_with_no_exploit_path(tmp_path):
 # Summary statistics
 # ---------------------------------------------------------------------------
 
+
 def test_summary_statistics_presence():
     from tools.benchmark.metrics import compute_run_summary
     from tools.benchmark.models import TrialResult, TrialTelemetry
 
-    t = TrialResult(run_id="r", suite="xben", scenario_id="s1", trial_index=0, trial_id="s1#t0", status=TrialStatus.VERIFIED.value, oracle_verified_success=True, duration_seconds=10.0, tool_calls=5, total_tokens=100)
+    t = TrialResult(
+        run_id="r",
+        suite="xben",
+        scenario_id="s1",
+        trial_index=0,
+        trial_id="s1#t0",
+        status=TrialStatus.VERIFIED.value,
+        oracle_verified_success=True,
+        duration_seconds=10.0,
+        tool_calls=5,
+        total_tokens=100,
+    )
     t.telemetry = TrialTelemetry(tool_calls=5)
     s = compute_run_summary([t], run_id="r", suite="xben")
     # Must have these fields
@@ -262,6 +319,7 @@ def test_summary_statistics_presence():
 # ---------------------------------------------------------------------------
 # Benchmark must distinguish PASS/PARTIAL/FAIL/ERROR/TIMEOUT/SKIPPED
 # ---------------------------------------------------------------------------
+
 
 def test_benchmark_distinguishes_six_outcomes():
     # Mapping to current TrialStatus
@@ -275,4 +333,3 @@ def test_benchmark_distinguishes_six_outcomes():
     }
     for label, val in mapping.items():
         assert val, f"{label} must have a distinct status value"
-

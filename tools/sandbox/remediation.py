@@ -687,6 +687,9 @@ def _install_docker_for_platform(platform_name: str, method: str | None) -> tupl
         return 1, "", f"Unsupported package manager {method} for linux"
     if platform_name == "windows":
         if method == "winget":
+            # Try silent machine-scope install first; winget will request UAC.
+            # If that fails with exit 1 (common for UAC denial or existing install),
+            # the caller will surface a helpful message with manual fallback.
             return _run(
                 [
                     "winget",
@@ -696,6 +699,7 @@ def _install_docker_for_platform(platform_name: str, method: str | None) -> tupl
                     "Docker.DockerDesktop",
                     "--accept-package-agreements",
                     "--accept-source-agreements",
+                    "--silent",
                 ],
                 timeout=600,
             )
@@ -800,16 +804,55 @@ async def _execute_job_async(job_id: str, config: dict[str, Any] | None) -> None
                 rc, out, err = await asyncio.to_thread(_install_docker_for_platform, platform_name, method)
                 combined = _sanitize((out or "") + "\n" + (err or ""), MAX_OUTPUT)
                 step.output = combined.strip() or f"install exit {rc}"
+                # Winget exit 1 on Windows is common: UAC denied, already installed,
+                # or WSL2/Hyper-V prerequisite missing. Check if docker now present
+                # as a fallback success, and otherwise surface actionable guidance.
                 if rc == 0:
                     step.status = "succeeded"
                 else:
-                    step.error = _sanitize(err or out or f"install failed rc={rc}", 1000)
-                    step.status = "failed"
-                    with _JOBS_LOCK:
-                        job.status = "failed"
-                        job.error = step.error
-                        job.updated_at = time.time()
-                    return
+                    # Handle "already installed" as success (winget reports non-zero for no-op)
+                    lower_combined = combined.lower()
+                    already_installed = any(
+                        s in lower_combined
+                        for s in [
+                            "already installed",
+                            "already exists",
+                            "no available upgrade",
+                            "no newer version",
+                        ]
+                    )
+                    docker_now_present = bool(_which("docker"))
+                    if platform_name == "windows" and (already_installed or docker_now_present):
+                        step.output += "\nNote: winget reported non-zero but Docker CLI is now present – treating as success."
+                        step.status = "succeeded"
+                    elif platform_name == "windows":
+                        # Provide Windows-specific remediation hint
+                        hint = (
+                            "Docker Desktop install via winget failed (exit 1). "
+                            "This usually means: the UAC prompt was dismissed/denied, the installer needs a reboot, "
+                            "or WSL2/Hyper-V is not enabled. "
+                            "Try: 1) Right-click PowerShell -> Run as Administrator and retry the fix, "
+                            "2) Accept the UAC prompt when it appears, "
+                            "3) Or install manually from https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe "
+                            "(then enable WSL2: wsl --install). "
+                            "After manual install, click Retry."
+                        )
+                        step.error = _sanitize(hint + "\n\nRaw output: " + (err or out or combined)[-800:], 1500)
+                        step.output += "\n" + hint
+                        step.status = "failed"
+                        with _JOBS_LOCK:
+                            job.status = "failed"
+                            job.error = step.error
+                            job.updated_at = time.time()
+                        return
+                    else:
+                        step.error = _sanitize(err or out or f"install failed rc={rc}", 1000)
+                        step.status = "failed"
+                        with _JOBS_LOCK:
+                            job.status = "failed"
+                            job.error = step.error
+                            job.updated_at = time.time()
+                        return
 
             elif step.id == "check_daemon":
                 ok, reason = await asyncio.to_thread(_db.docker_version)

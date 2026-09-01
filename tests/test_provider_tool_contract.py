@@ -22,7 +22,6 @@ import pytest
 from tools.providers.registry import PROVIDERS, get_provider
 from tools.providers.types import chat_response, tool_call, usage_report
 
-
 # Force lazy registration
 get_provider("ollama")
 ALL_IDS = sorted(PROVIDERS.ids())
@@ -35,7 +34,16 @@ class TestProviderToolContract:
         if provider_id == "opencode_go":
             from tools.providers.opencode_go_provider import _convert_tool_schemas
 
-            schemas = [{"type": "function", "function": {"name": "run_exploit_terminal", "description": "run", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}}}}]
+            schemas = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "run_exploit_terminal",
+                        "description": "run",
+                        "parameters": {"type": "object", "properties": {"command": {"type": "string"}}},
+                    },
+                }
+            ]
             converted = _convert_tool_schemas(schemas)
             assert converted[0]["name"] == "run_exploit_terminal"
             assert converted[0]["type"] == "function"
@@ -50,7 +58,12 @@ class TestProviderToolContract:
             from tools.providers.ollama_provider import apply_context_window
 
             # Ollama's context translation must not mutate tools
-            raw = {"model": "m", "messages": [], "tools": [{"type": "function", "function": {"name": "t"}}], "context_window_tokens": 123}
+            raw = {
+                "model": "m",
+                "messages": [],
+                "tools": [{"type": "function", "function": {"name": "t"}}],
+                "context_window_tokens": 123,
+            }
             out = apply_context_window(dict(raw), 123)
             assert out.get("tools") is not None or "tools" not in raw
 
@@ -104,7 +117,9 @@ class TestProviderToolContract:
         assert "options" not in seen
         assert "keep_alive" not in seen
 
-    def test_provider_client_callable_and_chat_returns_canonical_shape(self, provider_id: str, monkeypatch: pytest.MonkeyPatch):
+    def test_provider_client_callable_and_chat_returns_canonical_shape(
+        self, provider_id: str, monkeypatch: pytest.MonkeyPatch
+    ):
         from tools.providers.chatgpt_provider import ChatGptProxyManager
 
         adapter = get_provider(provider_id)
@@ -154,6 +169,7 @@ class _UnavailableMgr:
 # Opencode Go specific: message conversion
 # ---------------------------------------------------------------------------
 
+
 def test_opencode_go_message_conversion_preserves_tool_adjacency():
     from tools.providers.opencode_go_provider import _convert_messages_to_input
 
@@ -165,8 +181,16 @@ def test_opencode_go_message_conversion_preserves_tool_adjacency():
             "role": "assistant",
             "content": "",
             "tool_calls": [
-                {"id": "call_0", "type": "function", "function": {"name": "search_target", "arguments": '{"query":"x"}'}},
-                {"id": "call_1", "type": "function", "function": {"name": "lookup_service", "arguments": '{"target_ip":"127.0.0.1"}'}},
+                {
+                    "id": "call_0",
+                    "type": "function",
+                    "function": {"name": "search_target", "arguments": '{"query":"x"}'},
+                },
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "lookup_service", "arguments": '{"target_ip":"127.0.0.1"}'},
+                },
             ],
         },
         {"role": "tool", "tool_call_id": "call_0", "tool_name": "search_target", "content": sentinel},
@@ -184,21 +208,39 @@ def test_opencode_go_message_conversion_preserves_tool_adjacency():
 
 
 def test_opencode_go_streaming_sse_parses_tool_calls():
-    from tools.providers.opencode_go_provider import _parse_sse_stream
     import json as _json
+
+    from tools.providers.opencode_go_provider import _parse_sse_stream
 
     # Simulate a minimal Responses SSE sequence producing a tool call
     lines = [
         "event: response.output_item.added",
-        "data: " + _json.dumps({"type": "response.output_item.added", "item": {"type": "function_call", "call_id": "call_0", "name": "run_exploit_terminal", "arguments": '{"command":"id"}'}}),
+        "data: "
+        + _json.dumps(
+            {
+                "type": "response.output_item.added",
+                "item": {
+                    "type": "function_call",
+                    "call_id": "call_0",
+                    "name": "run_exploit_terminal",
+                    "arguments": '{"command":"id"}',
+                },
+            }
+        ),
         "event: response.completed",
-        "data: " + _json.dumps({"type": "response.completed", "response": {"output": [], "usage": {"input_tokens": 10, "output_tokens": 5}}}),
+        "data: "
+        + _json.dumps(
+            {
+                "type": "response.completed",
+                "response": {"output": [], "usage": {"input_tokens": 10, "output_tokens": 5}},
+            }
+        ),
     ]
 
     class _FakeResp:
         def iter_lines(self):
-            for l in lines:
-                yield l
+            for line in lines:
+                yield line
 
     chunks = list(_parse_sse_stream(_FakeResp()))
     # Last chunk carries assembled tool_calls
@@ -209,11 +251,19 @@ def test_opencode_go_streaming_sse_parses_tool_calls():
 # ChatGPT specific: streaming tool-call fragment accumulation
 # ---------------------------------------------------------------------------
 
+
 def test_chatgpt_stream_accumulates_tool_call_fragments():
-    from tools.providers.chatgpt_provider import ChatGptProxyClient
     import json as _json
+
+    from tools.providers.chatgpt_provider import ChatGptProxyClient
 
     # We don't hit network; verify _DROP_KWARGS does not strip tool schemas before payload build
     client = ChatGptProxyClient("http://127.0.0.1:1", timeout=1)
-    payload = client._build_payload({"model": "m", "messages": [{"role": "user", "content": "hi"}], "tools": [{"type": "function", "function": {"name": "t"}}]})
+    payload = client._build_payload(
+        {
+            "model": "m",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "function", "function": {"name": "t"}}],
+        }
+    )
     assert payload["tools"][0]["function"]["name"] == "t"

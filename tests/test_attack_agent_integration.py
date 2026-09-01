@@ -35,9 +35,30 @@ async def test_recon_then_attack_sequence(tmp_path: Path):
         FakeToolSpec(name="run_exploit_terminal", handler_result=flag),
     ]
     queue = [
-        {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": [make_tool_call("quick_scan", {"target_ip": "127.0.0.1"})]}},
-        {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": [make_tool_call("get_service_fingerprint", {"target_ip": "127.0.0.1", "port": 80})]}},
-        {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": [make_tool_call("run_exploit_terminal", {"command": "exploit 127.0.0.1"})]}},
+        {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "thinking": "",
+                "tool_calls": [make_tool_call("quick_scan", {"target_ip": "127.0.0.1"})],
+            }
+        },
+        {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "thinking": "",
+                "tool_calls": [make_tool_call("get_service_fingerprint", {"target_ip": "127.0.0.1", "port": 80})],
+            }
+        },
+        {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "thinking": "",
+                "tool_calls": [make_tool_call("run_exploit_terminal", {"command": "exploit 127.0.0.1"})],
+            }
+        },
         {"message": {"role": "assistant", "content": f"Done {flag}", "thinking": "", "tool_calls": []}},
     ]
     harness = ToolUseHarness(tmp_path=tmp_path)
@@ -60,9 +81,30 @@ async def test_exploit_hypothesis_chooses_relevant_tool(tmp_path: Path):
         FakeToolSpec(name="run_exploit_terminal", handler_result=strong_success),
     ]
     queue = [
-        {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": [make_tool_call("read_workspace_file", {"filename": "evidence.txt"})]}},
-        {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": [make_tool_call("run_exploit_terminal", {"command": "exploit 127.0.0.1"})]}},
-        {"message": {"role": "assistant", "content": f"Hypothesis confirmed via {strong_success}", "thinking": "", "tool_calls": []}},
+        {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "thinking": "",
+                "tool_calls": [make_tool_call("read_workspace_file", {"filename": "evidence.txt"})],
+            }
+        },
+        {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "thinking": "",
+                "tool_calls": [make_tool_call("run_exploit_terminal", {"command": "exploit 127.0.0.1"})],
+            }
+        },
+        {
+            "message": {
+                "role": "assistant",
+                "content": f"Hypothesis confirmed via {strong_success}",
+                "thinking": "",
+                "tool_calls": [],
+            }
+        },
     ]
     harness = ToolUseHarness(tmp_path=tmp_path)
     _, trace = await harness.run(specs, queue, sentinel_expected=strong_success)
@@ -79,10 +121,31 @@ async def test_failed_exploit_does_not_mark_success_and_replans(tmp_path: Path):
         FakeToolSpec(name="run_exploit_terminal", handler_result=alt_success),
     ]
     queue = [
-        {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": [make_tool_call("run_msf_module", {"module": "exploit/bad", "target_ip": "127.0.0.1"})]}},
+        {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "thinking": "",
+                "tool_calls": [make_tool_call("run_msf_module", {"module": "exploit/bad", "target_ip": "127.0.0.1"})],
+            }
+        },
         # After seeing failure, agent should not claim success; instead try alternative
-        {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": [make_tool_call("run_exploit_terminal", {"command": "id; cat /flag"})]}},
-        {"message": {"role": "assistant", "content": f"Alternative worked {alt_success}", "thinking": "", "tool_calls": []}},
+        {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "thinking": "",
+                "tool_calls": [make_tool_call("run_exploit_terminal", {"command": "id; cat /flag"})],
+            }
+        },
+        {
+            "message": {
+                "role": "assistant",
+                "content": f"Alternative worked {alt_success}",
+                "thinking": "",
+                "tool_calls": [],
+            }
+        },
     ]
     harness = ToolUseHarness(tmp_path=tmp_path)
     final, trace = await harness.run(specs, queue)
@@ -101,29 +164,48 @@ async def test_failed_exploit_reports_failure_when_no_alternative(tmp_path: Path
     fail_text = "exploit failed: target not vulnerable"
     specs = [FakeToolSpec(name="run_msf_module", handler_result=fail_text)]
     queue = [
-        {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": [make_tool_call("run_msf_module", {"module": "exploit/bad", "target_ip": "127.0.0.1"})]}},
-        {"message": {"role": "assistant", "content": "Unable to exploit; target not vulnerable per output", "thinking": "", "tool_calls": []}},
+        {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "thinking": "",
+                "tool_calls": [make_tool_call("run_msf_module", {"module": "exploit/bad", "target_ip": "127.0.0.1"})],
+            }
+        },
+        {
+            "message": {
+                "role": "assistant",
+                "content": "Unable to exploit; target not vulnerable per output",
+                "thinking": "",
+                "tool_calls": [],
+            }
+        },
     ]
     harness = ToolUseHarness(tmp_path=tmp_path)
     final, _ = await harness.run(specs, queue)
     res = normalize_action_result(tool_name="run_msf_module", result_text=fail_text)
     assert res.verified_success is False
     # Final answer should NOT contain hallucinated COMPROMISE marker
-    assert "COMPROMISE:" not in json.dumps(final, default=str) or "not vulnerable" in json.dumps(final, default=str).lower()
+    assert (
+        "COMPROMISE:" not in json.dumps(final, default=str)
+        or "not vulnerable" in json.dumps(final, default=str).lower()
+    )
 
 
 # ---------------------------------------------------------------------------
 # Successful benchmark target — oracle is ground truth
 # ---------------------------------------------------------------------------
 
+
 def test_successful_benchmark_requires_oracle_not_claim(tmp_path: Path):
     """Objective success is oracle_verified_success, not agent_claimed_success."""
     from tools.benchmark.metrics import is_false_positive
-
     from tools.benchmark.models import TrialResult
 
     # Agent claims success but oracle fails → FALSE_POSITIVE, not VERIFIED
-    t_fp = TrialResult(agent_claimed_success=True, oracle_verified_success=False, status=TrialStatus.FALSE_POSITIVE.value)
+    t_fp = TrialResult(
+        agent_claimed_success=True, oracle_verified_success=False, status=TrialStatus.FALSE_POSITIVE.value
+    )
     assert is_false_positive(t_fp) is True
     # Oracle verified → VERIFIED even if agent undersold
     t_fn = TrialResult(agent_claimed_success=False, oracle_verified_success=True, status=TrialStatus.VERIFIED.value)
@@ -160,6 +242,7 @@ async def test_benchmark_oracle_via_file_contains(tmp_path: Path):
 # Sandbox / allowlist behavior
 # ---------------------------------------------------------------------------
 
+
 def test_allowlist_blocks_non_allowlisted_target():
     from tools.validation_utils import is_target_in_allowlist
 
@@ -180,7 +263,8 @@ def test_sandbox_failure_fails_closed_no_host_fallback():
 
 def test_target_lock_remains_effective_during_tool_chains():
     """Model-generated tool args containing off-target IPs must be blocked."""
-    from tools.command_analyzer import extract_ips_from_command, analyze_command
+    from tools.command_analyzer import analyze_command, extract_ips_from_command
+
     # Simulated model-generated command tries to pivot to 8.8.8.8 while target is 127.0.0.1
     cmd = "curl http://8.8.8.8/evil && nmap -sV 127.0.0.1"
     ips = extract_ips_from_command(cmd)
@@ -195,7 +279,7 @@ def test_target_lock_remains_effective_during_tool_chains():
 
 
 def test_sandbox_block_sentinel_strings():
-    from tools.sandbox import SANDBOX_UNAVAILABLE, SANDBOX_POLICY_FAILED
+    from tools.sandbox import SANDBOX_POLICY_FAILED, SANDBOX_UNAVAILABLE
 
     assert "SANDBOX" in SANDBOX_UNAVAILABLE
     assert "SANDBOX" in SANDBOX_POLICY_FAILED

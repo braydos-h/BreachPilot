@@ -22,10 +22,10 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-
 # ---------------------------------------------------------------------------
 # Sentinels
 # ---------------------------------------------------------------------------
+
 
 def make_sentinel(prefix: str = "SENTINEL") -> str:
     """Generate a unique sentinel like ``SERVICE_SENTINEL_7C41_<uuid>``."""
@@ -36,6 +36,7 @@ def make_sentinel(prefix: str = "SENTINEL") -> str:
 # ---------------------------------------------------------------------------
 # Fake tool specs (used for low-level tool-catalog / validation tests)
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class FakeToolSpec:
@@ -68,6 +69,7 @@ def build_fake_tools(specs: list[FakeToolSpec]) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Fake MCP session
 # ---------------------------------------------------------------------------
+
 
 class FakeMcpSession:
     """AsyncMCP session double that validates allowlist-like checks and returns
@@ -107,6 +109,7 @@ class FakeMcpSession:
     async def list_tools(self) -> Any:
         class _Resp:
             pass
+
         resp = _Resp()
         # Expose tools as objects with name/description/inputSchema
         tools = []
@@ -143,6 +146,7 @@ def _mcp_error_result(text: str) -> Any:
 # ---------------------------------------------------------------------------
 # Scripted ModelClient (queued responses)
 # ---------------------------------------------------------------------------
+
 
 class ScriptedModelClient:
     """Deterministic fake ModelClient that returns queued responses.
@@ -186,12 +190,18 @@ class ScriptedModelClient:
             return resp
         return {
             "model": self.name,
-            "message": {"role": "assistant", "content": "FINAL: no more queued responses", "thinking": "", "tool_calls": []},
+            "message": {
+                "role": "assistant",
+                "content": "FINAL: no more queued responses",
+                "thinking": "",
+                "tool_calls": [],
+            },
         }
 
     def stream(self, *args: Any, **kwargs: Any) -> Any:
         kwargs["stream"] = True
         result = self.chat(*args, **kwargs)
+
         # Yield as single chunk then final tool chunk
         def _gen():
             content = result.get("message", {}).get("content", "")
@@ -199,7 +209,11 @@ class ScriptedModelClient:
                 yield {"message": {"role": "assistant", "content": content, "thinking": ""}}
             tcs = result.get("message", {}).get("tool_calls", [])
             if tcs:
-                yield {"message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": tcs}, "usage": result.get("usage", {})}
+                yield {
+                    "message": {"role": "assistant", "content": "", "thinking": "", "tool_calls": tcs},
+                    "usage": result.get("usage", {}),
+                }
+
         return _gen()
 
     # Alias used by runner internals
@@ -211,13 +225,18 @@ class ScriptedModelClient:
 def make_tool_call(name: str, args: Any, call_id: str = "") -> dict[str, Any]:
     """Build canonical tool-call entry (tool_calls wire format)."""
     import json as _json
+
     if isinstance(args, dict):
         args_s = _json.dumps(args, ensure_ascii=False)
     elif isinstance(args, str):
         args_s = args
     else:
         args_s = _json.dumps(args, ensure_ascii=False) if args is not None else "{}"
-    entry: dict[str, Any] = {"id": call_id or f"call_{uuid.uuid4().hex[:6]}", "type": "function", "function": {"name": name, "arguments": args_s}}
+    entry: dict[str, Any] = {
+        "id": call_id or f"call_{uuid.uuid4().hex[:6]}",
+        "type": "function",
+        "function": {"name": name, "arguments": args_s},
+    }
     if call_id:
         entry["call_id"] = call_id
     return entry
@@ -226,6 +245,7 @@ def make_tool_call(name: str, args: Any, call_id: str = "") -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Observability trace capture
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class TraceEvent:
@@ -285,6 +305,7 @@ class HarnessTrace:
 # ---------------------------------------------------------------------------
 # High-level harness — drives run_exploit_agent with fakes and captures trace
 # ---------------------------------------------------------------------------
+
 
 class ToolUseHarness:
     """Drives run_exploit_agent with scripted model + fake MCP session.
@@ -360,6 +381,7 @@ class ToolUseHarness:
             goal="test-goal",
             available_tools=[s.name for s in specs],
         )
+
         # Disable the read-only research sidecar whose model calls would consume
         # queued scripted responses (startup research + mid-run evidence triggers).
         # The harness drives a deterministic tool sequence; the assistant's extra
@@ -367,12 +389,21 @@ class ToolUseHarness:
         def _disabled_research(*_a, **_k):
             class _Off:
                 enabled = False
+
             return _Off()
 
-        with patch("tools.exploit_agent.runner._impl._stream_model", side_effect=_fake_stream), patch(
-            "tools.exploit_agent._stream_model", side_effect=_fake_stream
-        ), patch("tools.exploit_agent.research_assistant.ResearchAssistantSettings.from_config", side_effect=_disabled_research), patch(
-            "tools.exploit_agent.runner._impl.ResearchAssistantSettings.from_config", side_effect=_disabled_research, create=True
+        with (
+            patch("tools.exploit_agent.runner._impl._stream_model", side_effect=_fake_stream),
+            patch("tools.exploit_agent._stream_model", side_effect=_fake_stream),
+            patch(
+                "tools.exploit_agent.research_assistant.ResearchAssistantSettings.from_config",
+                side_effect=_disabled_research,
+            ),
+            patch(
+                "tools.exploit_agent.runner._impl.ResearchAssistantSettings.from_config",
+                side_effect=_disabled_research,
+                create=True,
+            ),
         ):
             from tools.exploit_agent import run_exploit_agent
 
