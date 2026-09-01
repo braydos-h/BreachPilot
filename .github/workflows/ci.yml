@@ -257,13 +257,13 @@ jobs:
           ls -la "$TMPDIR"
           (cd "$TMPDIR" && breachpilot --doctor --json > doctor.json || true)
           cat "$TMPDIR/doctor.json" || true
-          python -c "
+          python -c "import textwrap; exec(textwrap.dedent('''
           import json, pathlib, sys
           data = json.loads(pathlib.Path('$TMPDIR/doctor.json').read_text(encoding='utf-8'))
           assert 'checks' in data and 'is_valid' in data, 'doctor json shape'
           print('doctor checks:', [(c['name'], c['ok']) for c in data['checks']])
-          "
-          (cd "$TMPDIR" && python -c "
+          '''))"
+          (cd "$TMPDIR" && python -c "import textwrap; exec(textwrap.dedent('''
           import pathlib
           from tools.paths import get_packaged_skills_dir
           pkg = get_packaged_skills_dir()
@@ -304,7 +304,7 @@ jobs:
               assert 'demo' in reg2.skills, f'custom skill root not loaded: {list(reg2.skills.keys())[:5]}'
               print(f'explicit skill root ok: {td_path}/my_skills -> demo found')
           print('all clean-CWD wheel checks passed')
-          ")
+          '''))"
           rm -rf "$TMPDIR"
       - name: Upload dist
         uses: actions/upload-artifact@v4

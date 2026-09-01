@@ -61,6 +61,7 @@ logs/
 /build
 demo/dist/
 demo/*.tsbuildinfo
+webui/*.tsbuildinfo
 
 # Scratch / accidental test artifacts
 x/

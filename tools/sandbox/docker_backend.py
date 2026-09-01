@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import time
 from typing import Any
 
 from tools.sandbox.exceptions import SandboxUnavailableError
@@ -316,8 +317,6 @@ class DockerBackend:
         # The worker's keepalive (sleep infinity) must be observed as running
         # before the caller joins its netns. Poll briefly; fail closed if it
         # never reaches running (exited / dead).
-        import time
-
         for _ in range(30):
             state = docker_inspect_state(container)
             if state == "running":
