@@ -74,7 +74,7 @@ class _CheckpointService:
     def __init__(self, **kwargs):
         pass
 
-    async def prepare(self, request: RunRequest) -> RunPreview:
+    async def prepare(self, request: RunRequest, *, run_id=None, progress=None) -> RunPreview:
         return _preview(f"run-{request.target}", request.target, _tmp)
 
     async def execute(self, request, preview, *, decision_provider, event_sink, cancellation, **kw):

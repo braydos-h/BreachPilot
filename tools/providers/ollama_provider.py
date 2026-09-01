@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
 from typing import TYPE_CHECKING, Any, Mapping
 
 from .base import BaseProvider
@@ -90,6 +91,16 @@ def require_client_cls() -> Any:
     return _OllamaSdkClient
 
 
+_RAW_CLIENT_CACHE: dict[tuple[str, float | None, Any], Any] = {}
+_RAW_CLIENT_CACHE_LOCK = threading.Lock()
+
+
+def reset_raw_client_cache() -> None:
+    """Drop cached raw Ollama clients (tests that swap the SDK class use this)."""
+    with _RAW_CLIENT_CACHE_LOCK:
+        _RAW_CLIENT_CACHE.clear()
+
+
 def build_ollama_raw_client(host: str, request_timeout_seconds: float | None, client_cls: Any = None) -> Any:
     """Build the raw ollama SDK client for the chat path.
 
@@ -97,16 +108,33 @@ def build_ollama_raw_client(host: str, request_timeout_seconds: float | None, cl
     ``monkeypatch.setattr(model_router, "OllamaClient", Fake)`` seam: the
     factory consults that module symbol when supplied.  Without an installed
     SDK (and no override) raises the actionable missing-dependency error.
+
+    ponytail: constructing an httpx-backed client builds a fresh SSL context
+    (~600ms on Windows, once per alias) — ``build_router`` used to pay that
+    for EVERY registry alias on EVERY router build, which sat directly on the
+    synchronous create-run path. Clients are pure (host + timeout only), so
+    they are cached per ``(host, timeout, client_cls)`` and shared across
+    aliases and builds. The key includes ``client_cls`` so the historical
+    monkeypatch seam still gets a fresh client when a test swaps the class.
     """
     if client_cls is None:
         client_cls = require_client_cls()
+    key = (str(host), request_timeout_seconds, client_cls)
+    with _RAW_CLIENT_CACHE_LOCK:
+        cached = _RAW_CLIENT_CACHE.get(key)
+        if cached is not None:
+            return cached
     # ponytail: pass timeout straight to the httpx-backed Ollama client. A hung
     # generation raises httpx.ReadTimeout, already matched by
     # exploit_agent._is_retryable_error → 3x retry → synthetic error dict, so
     # the attack loop survives without a new error path. None = httpx default.
     if request_timeout_seconds is not None:
-        return client_cls(host=host, timeout=request_timeout_seconds)
-    return client_cls(host=host)
+        client = client_cls(host=host, timeout=request_timeout_seconds)
+    else:
+        client = client_cls(host=host)
+    with _RAW_CLIENT_CACHE_LOCK:
+        _RAW_CLIENT_CACHE[key] = client
+    return client
 
 
 def apply_context_window(raw_kwargs: dict[str, Any], context_window_tokens: Any) -> dict[str, Any]:

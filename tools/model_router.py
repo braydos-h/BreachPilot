@@ -29,7 +29,9 @@ Usage:
 from __future__ import annotations
 
 import random
+import threading
 import time
+from pathlib import Path
 from typing import Any, Mapping
 
 from tools.model_telemetry import (
@@ -252,7 +254,43 @@ class ModelRouter:
         return random.choice(list(self._clients.values()))
 
 
+# ``_registry_info_from_config`` re-reads + YAML-parses config.yaml on every
+# call. ``build_router`` calls ``_context_window_for`` once PER ALIAS, so an
+# uncached read cost ~6 YAML parses (~1.4s on Windows) per router build — on
+# the synchronous create-run path. Cache the parsed ``models.info`` mapping
+# keyed by the config file's mtime+size so warm router builds skip the disk
+# entirely and an operator config edit is still picked up immediately.
+_REGISTRY_INFO_CACHE: dict[tuple[str, int, int], Mapping[str, Any]] = {}
+_REGISTRY_INFO_CACHE_LOCK = threading.Lock()
+
+
+def _registry_info_cache_key() -> tuple[str, int, int] | None:
+    """(resolved path, mtime_ns, size) of the config file, or None when unknown.
+
+    Mirrors ``load_validated_config``'s default ``config.yaml`` lookup (the
+    caller passes no explicit path).
+    """
+    try:
+        path = Path("config.yaml")
+        stat = path.stat()
+        return (str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+    except OSError:  # missing/unreadable config = no stable cache key
+        return None
+
+
+def reset_registry_info_cache() -> None:
+    """Drop the cached ``models.info`` mapping (tests + config reloads)."""
+    with _REGISTRY_INFO_CACHE_LOCK:
+        _REGISTRY_INFO_CACHE.clear()
+
+
 def _registry_info_from_config() -> Mapping[str, Any]:
+    key = _registry_info_cache_key()
+    if key is not None:
+        with _REGISTRY_INFO_CACHE_LOCK:
+            cached = _REGISTRY_INFO_CACHE.get(key)
+        if cached is not None:
+            return cached
     try:
         from tools.config_manager import load_validated_config
 
@@ -261,7 +299,11 @@ def _registry_info_from_config() -> Mapping[str, Any]:
         return {}
     models_cfg = config.get("models", {}) if isinstance(config, Mapping) else {}
     info = models_cfg.get("info", {}) if isinstance(models_cfg, Mapping) else {}
-    return info if isinstance(info, Mapping) else {}
+    info = info if isinstance(info, Mapping) else {}
+    if key is not None:
+        with _REGISTRY_INFO_CACHE_LOCK:
+            _REGISTRY_INFO_CACHE[key] = info
+    return info
 
 
 def _context_window_for(alias: str, model_name: str) -> int | None:

@@ -27,6 +27,7 @@ class RunState(str, Enum):
     """Lifecycle states for a single assessment run."""
 
     DRAFT = "draft"  # created, not yet confirmed
+    PREPARING = "preparing"  # accepted; background preparation (target/model/skills) in progress
     AWAITING_CONFIRMATION = "awaiting_confirmation"  # preview ready, waiting on start_confirm decision
     QUEUED = "queued"  # confirmed, waiting for execution slot
     RUNNING = "running"  # execution in progress
@@ -163,6 +164,10 @@ class RunPreview:
     budgets: dict[str, Any] = field(default_factory=dict)  # commands/rounds/duration
     skill_activations: list[dict[str, str]] = field(default_factory=list)
     skill_errors: list[str] = field(default_factory=list)
+    # Per-stage create timings (milliseconds) recorded by ``prepare`` —
+    # ``{"config": 1.2, "plugins": 0.4, ...}``. Diagnostics only; empty when
+    # preparation came from a path without instrumentation.
+    timings: dict[str, float] = field(default_factory=dict)
     # Resume info
     resumed_from: str = ""
 

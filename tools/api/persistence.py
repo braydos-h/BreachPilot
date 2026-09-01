@@ -183,22 +183,43 @@ class ApiPersistence:
 
     # ── Runs ──────────────────────────────────────────────────────────────
 
-    def create_run(self, *, run_id: str, request: dict[str, Any], preview: dict[str, Any]) -> None:
+    def create_run(
+        self,
+        *,
+        run_id: str,
+        request: dict[str, Any],
+        preview: dict[str, Any],
+        state: str = "draft",
+    ) -> None:
         with self._lock:
             conn = self._connect()
             try:
                 conn.execute(
                     "INSERT INTO runs "
                     "(id, created_at, updated_at, state, request_json, preview_json, resumed_from) "
-                    "VALUES (?, ?, ?, 'draft', ?, ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
                         run_id,
                         _now_iso(),
                         _now_iso(),
+                        state,
                         json.dumps(request, default=str),
                         json.dumps(preview, default=str),
                         str(request.get("resume_source", "")),
                     ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def update_run_preview(self, run_id: str, preview: dict[str, Any]) -> None:
+        """Persist the prepared preview (target/mode/goal/model/...) after background preparation."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE runs SET preview_json=?, updated_at=? WHERE id=?",
+                    (json.dumps(preview, default=str), _now_iso(), run_id),
                 )
                 conn.commit()
             finally:
@@ -337,13 +358,13 @@ class ApiPersistence:
                 conn.close()
 
     def get_active_run(self) -> dict[str, Any] | None:
-        """Return the one live run (running/awaiting_input/queued/cancelling) if any."""
+        """Return the one live run (preparing/running/awaiting_input/queued/cancelling/...) if any."""
         with self._lock:
             conn = self._connect()
             try:
                 row = conn.execute(
                     "SELECT * FROM runs WHERE state IN "
-                    "('draft', 'awaiting_confirmation', 'running', 'awaiting_input', 'queued', 'cancelling') "
+                    "('draft', 'preparing', 'awaiting_confirmation', 'running', 'awaiting_input', 'queued', 'cancelling') "
                     "ORDER BY created_at DESC LIMIT 1"
                 ).fetchone()
                 return dict(row) if row else None
@@ -358,7 +379,7 @@ class ApiPersistence:
                 conn.execute(
                     "UPDATE runs SET state='interrupted', updated_at=? "
                     "WHERE state IN "
-                    "('draft', 'awaiting_confirmation', 'running', 'awaiting_input', 'queued', 'cancelling')",
+                    "('draft', 'preparing', 'awaiting_confirmation', 'running', 'awaiting_input', 'queued', 'cancelling')",
                     (_now_iso(),),
                 )
                 conn.execute(

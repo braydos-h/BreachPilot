@@ -540,7 +540,10 @@ export function useRun(runId: string | null | undefined) {
     enabled: !!runId,
     refetchInterval: (query) => {
       const data = query.state.data;
-      if (!data) return 5_000;
+      if (!data) return 1_000;
+      // ``preparing`` is the run-creation startup window — poll fast so the
+      // wizard's startup panel reflects the transition promptly.
+      if (data.state === "preparing") return 1_000;
       if (data.state === "running" || data.state === "queued" || data.state === "cancelling") {
         return 5_000;
       }

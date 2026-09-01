@@ -37,6 +37,8 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -64,6 +66,22 @@ from tools.run_service.providers import (
 if TYPE_CHECKING:
     from tools.run_service.service import Callables
 
+log = logging.getLogger(__name__)
+
+# Preparation failures are re-raised as ``failed`` runs. ValueError/OSError
+# messages from prepare() are already operator-actionable ("Could not resolve
+# domain: ..."), so they pass through; anything else is summarized (full
+# detail stays in server logs) so internals/exceptions never leak to the UI.
+_PREPARATION_PASS_THROUGH = (ValueError, OSError, TimeoutError)
+
+
+def _preparation_error_text(exc: BaseException) -> str:
+    if isinstance(exc, _PREPARATION_PASS_THROUGH):
+        text = str(exc).strip()
+        if text:
+            return text
+    return "Run preparation failed. View server logs for details."
+
 
 class RunHandle:
     """Runtime state for one active run."""
@@ -71,6 +89,9 @@ class RunHandle:
     def __init__(self, run_id: str) -> None:
         self.run_id = run_id
         self.task: asyncio.Task[Any] | None = None
+        # Background preparation task (``preparing`` state). Distinct from
+        # ``task`` (execution) so cancel/shutdown can stop either phase.
+        self.prep_task: asyncio.Task[Any] | None = None
         self.cancellation = CancellationToken()
         self.decision_broker: DecisionBroker | None = None
         self.event_broker: RunEventBroker | None = None
@@ -184,109 +205,207 @@ class RunManager:
     def active_run_ids(self) -> list[str]:
         return list(self._active.keys())
 
-    async def create_run(self, request: RunRequest) -> tuple[str, RunPreview, Decision | None]:
-        """Prepare a run and create a start_confirm decision (if needed).
+    async def create_run(self, request: RunRequest) -> tuple[str, RunPreview | None, Decision | None]:
+        """Accept a run and start preparation in the background.
 
-        Returns ``(run_id, preview, decision_or_none)``. The decision is None
-        when ``request.yes`` is True (skip gate) or the run is non-destructive
-        with no required confirmation.
+        The run row is persisted as ``preparing`` and the call returns
+        ``(run_id, None, None)`` immediately — preparation (plugins, model
+        router, target resolution, skills) continues on a background task and
+        transitions the run to ``awaiting_confirmation`` (or ``queued`` when
+        ``request.yes``) when it completes. ``preview``/``decision`` are None
+        at return time; clients poll ``GET /runs/{id}`` /
+        ``GET /runs/{id}/decisions`` (or subscribe to the run's events) to
+        observe the transition. Preparation failures mark the run ``failed``
+        with an actionable error.
         """
         async with self._lifecycle_lock:
-            return await self._create_run_locked(request)
+            if len(self._active) >= self.max_concurrent_runs:
+                raise APIError(
+                    "conflict",
+                    f"{self.max_concurrent_runs} run(s) already active. Cancel one first (api.max_concurrent_runs).",
+                    status_code=409,
+                )
 
-    async def _create_run_locked(
-        self,
-        request: RunRequest,
-    ) -> tuple[str, RunPreview, Decision | None]:
-        if len(self._active) >= self.max_concurrent_runs:
-            raise APIError(
-                "conflict",
-                f"{self.max_concurrent_runs} run(s) already active. Cancel one first (api.max_concurrent_runs).",
-                status_code=409,
+            request.config_path = self._config_path
+            request.reports_dir = self._persistence.reports_dir
+            run_id = self._allocate_run_id()
+
+            # Persist the run row up-front so the id exists (and events/WS
+            # routes can find it) before preparation finishes.
+            self._persistence.create_run(
+                run_id=run_id,
+                request=_request_to_dict(request),
+                preview={},
+                state=RunState.PREPARING.value,
             )
 
-        request.config_path = self._config_path
-        request.reports_dir = self._persistence.reports_dir
+            # Create event broker for this run.
+            event_broker = self._events.get_or_create(run_id)
+            handle = RunHandle(run_id)
+            handle.request = request
+            # Freeze the config for this run now so execution sees the same
+            # permission/budgets/destructive verdict the operator confirmed.
+            handle.config_snapshot = copy.deepcopy(self._config)
+            # Per-run allowlist snapshot is filled in when prepare() returns.
+            handle.event_broker = event_broker
+            handle.decision_broker = DecisionBroker(run_id, self._persistence)
+            self._active[run_id] = handle
+
+            await event_broker.emit("state", {"state": RunState.PREPARING.value})
+            await event_broker.emit(
+                "preparing",
+                {"stage": "accepted", "message": "Run accepted — preparing"},
+            )
+            handle.prep_task = asyncio.create_task(self._prepare_run(handle, request))
+            return run_id, None, None
+
+    def _allocate_run_id(self) -> str:
+        """Timestamp-based run id, uniquified against active + persisted ids."""
+        base = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+        run_id = base
+        counter = 0
+        while run_id in self._active or self._persistence.get_run(run_id) is not None:
+            counter += 1
+            run_id = f"{base}_{counter}"
+        return run_id
+
+    def _spawn_preparing_event(self, handle: RunHandle, stage: str, message: str) -> None:
+        """Fire-and-forget ``preparing`` stage event from the worker thread."""
+        broker = handle.event_broker
+
+        async def _emit() -> None:
+            try:
+                await broker.emit("preparing", {"stage": stage, "message": message})
+            except Exception:  # noqa: BLE001 -- progress events never break prepare
+                pass
+
+        asyncio.ensure_future(_emit())
+
+    async def _prepare_run(self, handle: RunHandle, request: RunRequest) -> None:
+        """Background preparation: ``AssessmentService.prepare`` + finalize."""
         from tools.run_service import AssessmentService
 
-        service = AssessmentService(config=self._config, callables=self._callables)
-        preview = await service.prepare(request)
+        service = AssessmentService(config=handle.config_snapshot, callables=self._callables)
+        loop = asyncio.get_running_loop()
 
-        # Persist the run row.
-        self._persistence.create_run(
-            run_id=preview.run_id,
-            request=_request_to_dict(request),
-            preview=_preview_to_dict(preview),
-        )
-
-        # Create event broker for this run.
-        event_broker = self._events.get_or_create(preview.run_id)
-        handle = RunHandle(preview.run_id)
-        handle.preview = preview
-        handle.request = request
-        # Freeze the config that produced this preview so execution sees the
-        # same permission/budgets/destructive verdict the operator confirmed.
-        handle.config_snapshot = copy.deepcopy(self._config)
-        # Per-run allowlist snapshot — Run A's target never appears in Run B's
-        # allowlist even when N runs are live concurrently.
-        handle.allowlist = _snapshot_allowlist(
-            handle.config_snapshot,
-            preview.original_target or preview.target_ip,
-        )
-        handle.event_broker = event_broker
-        handle.decision_broker = DecisionBroker(preview.run_id, self._persistence)
-        self._active[preview.run_id] = handle
+        def on_stage(stage: str, message: str) -> None:
+            loop.call_soon_threadsafe(self._spawn_preparing_event, handle, stage, message)
 
         try:
-            return await self._setup_handle_locked(handle, request, preview)
-        except BaseException:
-            handle.decision_broker.cancel_all()
-            event_broker.close()
-            self._active.pop(preview.run_id, None)
-            self._persistence.update_run_state(
-                preview.run_id,
-                RunState.FAILED.value,
-                error="Run setup failed.",
-            )
+            preview = await service.prepare(request, run_id=handle.run_id, progress=on_stage)
+        except asyncio.CancelledError:
+            # cancel_run()/shutdown() handles persistence + cleanup.
             raise
+        except BaseException as exc:
+            # ExceptionGroup included (anyio/MCP surfaces groups, not Exception).
+            await self._fail_preparation(handle, exc)
+            if _is_exception_group(exc):
+                _log_nested_exceptions(exc)
+            return
 
-    async def _setup_handle_locked(
-        self,
-        handle: RunHandle,
-        request: RunRequest,
-        preview: RunPreview,
-    ) -> tuple[str, RunPreview, Decision | None]:
-        decision = None
-        if not request.yes:
-            self._persistence.update_run_state(preview.run_id, RunState.AWAITING_CONFIRMATION.value)
-            await handle.event_broker.emit("state", {"state": RunState.AWAITING_CONFIRMATION.value})
-            decision = Decision(
-                id="",
-                run_id=preview.run_id,
-                kind=DecisionKind.START_CONFIRM,
-                prompt_text="Proceed?" if not preview.destructive else "DESTRUCTIVE mode — confirm to proceed.",
-                required_text=preview.required_confirmation_text,
+        async with self._lifecycle_lock:
+            # Re-check under the lock: the run may have been cancelled or
+            # removed while preparing.
+            if self._active.get(handle.run_id) is not handle:
+                return
+            current = self._persistence.get_run(handle.run_id) or {}
+            if current.get("state") == RunState.CANCELLED.value:
+                self._active.pop(handle.run_id, None)
+                return
+
+            handle.preview = preview
+            # Per-run allowlist snapshot — Run A's target never appears in
+            # Run B's allowlist even when N runs are live concurrently.
+            handle.allowlist = _snapshot_allowlist(
+                handle.config_snapshot,
+                preview.original_target or preview.target_ip,
             )
-            did = await handle.decision_broker.create(decision)
-            await handle.event_broker.emit(
-                "approval",
-                {
-                    "decision_id": did,
-                    "kind": "start_confirm",
-                    "prompt_text": decision.prompt_text,
-                    "required_text": decision.required_text,
-                },
-            )
-        else:
-            self._persistence.update_run_state(preview.run_id, RunState.QUEUED.value)
-            await handle.event_broker.emit("state", {"state": RunState.QUEUED.value})
-            handle.task = asyncio.create_task(self._execute_run(handle))
-        return preview.run_id, preview, decision
+            # Persist the prepared preview (target/mode/goal/model/...).
+            self._persistence.update_run_preview(handle.run_id, _preview_to_dict(preview))
+            try:
+                await handle.event_broker.emit(
+                    "preparing",
+                    {"stage": "done", "message": "Run prepared", "timings": dict(preview.timings or {})},
+                )
+                if not request.yes:
+                    self._persistence.update_run_state(handle.run_id, RunState.AWAITING_CONFIRMATION.value)
+                    await handle.event_broker.emit("state", {"state": RunState.AWAITING_CONFIRMATION.value})
+                    decision = Decision(
+                        id="",
+                        run_id=handle.run_id,
+                        kind=DecisionKind.START_CONFIRM,
+                        prompt_text="Proceed?" if not preview.destructive else "DESTRUCTIVE mode — confirm to proceed.",
+                        required_text=preview.required_confirmation_text,
+                    )
+                    did = await handle.decision_broker.create(decision)
+                    await handle.event_broker.emit(
+                        "approval",
+                        {
+                            "decision_id": did,
+                            "kind": "start_confirm",
+                            "prompt_text": decision.prompt_text,
+                            "required_text": decision.required_text,
+                        },
+                    )
+                else:
+                    self._persistence.update_run_state(handle.run_id, RunState.QUEUED.value)
+                    await handle.event_broker.emit("state", {"state": RunState.QUEUED.value})
+                    handle.task = asyncio.create_task(self._execute_run(handle))
+            except BaseException:
+                handle.decision_broker.cancel_all()
+                handle.event_broker.close()
+                self._active.pop(handle.run_id, None)
+                self._persistence.update_run_state(
+                    handle.run_id,
+                    RunState.FAILED.value,
+                    error="Run setup failed.",
+                )
+                raise
+
+    async def _fail_preparation(self, handle: RunHandle, exc: BaseException) -> None:
+        """Mark a failed preparation: failed state + actionable error + cleanup."""
+        async with self._lifecycle_lock:
+            if self._active.get(handle.run_id) is handle:
+                self._active.pop(handle.run_id, None)
+        if handle.decision_broker:
+            handle.decision_broker.cancel_all()
+        error_text = _preparation_error_text(exc)
+        log.exception("run %s preparation failed", handle.run_id)
+        try:
+            await handle.event_broker.emit("error", {"message": error_text})
+            await handle.event_broker.emit("state", {"state": RunState.FAILED.value, "error": error_text})
+        except Exception:  # noqa: BLE001 -- broker may already be closed
+            pass
+        finally:
+            handle.event_broker.close()
+        self._persistence.update_run_state(handle.run_id, RunState.FAILED.value, error=error_text)
+
+    async def wait_for_prepared(self, run_id: str, timeout: float = 10.0) -> RunHandle:
+        """Wait until ``run_id`` leaves the ``preparing`` state (tests + callers).
+
+        Raises :class:`APIError` (``not_found``) when there is no such active
+        run, and :class:`TimeoutError` when preparation does not settle in time.
+        """
+        deadline = asyncio.get_running_loop().time() + timeout
+        while True:
+            handle = self._active.get(run_id)
+            if handle is None:
+                # Either finished+removed (completed/failed) or never existed.
+                raise APIError("not_found", "No active run with that id.", status_code=404)
+            if handle.prep_task is None or handle.prep_task.done():
+                if handle.prep_task is not None and handle.prep_task.cancelled():
+                    raise asyncio.CancelledError
+                return handle
+            if asyncio.get_running_loop().time() >= deadline:
+                raise TimeoutError(f"run {run_id} still preparing after {timeout}s")
+            await asyncio.sleep(0.01)
 
     async def confirm_and_start(self, run_id: str, decision_id: str, answer: str) -> None:
         """Resolve the start_confirm decision and kick off execution."""
         async with self._lifecycle_lock:
             handle = self._require_active(run_id)
+            if handle.preview is None:
+                raise APIError("conflict", "Run is still preparing.", status_code=409)
             if handle.task is not None:
                 raise APIError("conflict", "Run execution has already started.", status_code=409)
             if handle.preview and handle.preview.destructive:
@@ -430,7 +549,9 @@ class RunManager:
             handle.cancellation.cancel()
             if handle.decision_broker:
                 handle.decision_broker.cancel_all()
-            task = handle.task
+            # A run in ``preparing`` has no execution task yet — cancel the
+            # preparation task instead so the run settles immediately.
+            task = handle.task or handle.prep_task
             if task is None:
                 try:
                     self._persistence.update_run_state(run_id, RunState.CANCELLED.value)
@@ -535,6 +656,11 @@ class RunManager:
         """Clean up on daemon shutdown: cancel all active runs, flush events."""
         try:
             for run_id in list(self._active.keys()):
+                handle = self._active.get(run_id)
+                if handle is not None and handle.prep_task is not None and not handle.prep_task.done():
+                    # In-flight preparation: stop it first so cancel_run's
+                    # wait covers the right task.
+                    handle.prep_task.cancel()
                 try:
                     await self.cancel_run(run_id)
                 except Exception:  # noqa: BLE001 -- best-effort, one bad cancel never blocks the rest
@@ -618,6 +744,7 @@ def _preview_to_dict(p: RunPreview) -> dict[str, Any]:
         "budgets": p.budgets,
         "skill_activations": p.skill_activations,
         "skill_errors": p.skill_errors,
+        "timings": dict(p.timings or {}),
         "resumed_from": p.resumed_from,
     }
 

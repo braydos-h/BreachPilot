@@ -1,5 +1,6 @@
 export type RunState =
   | "draft"
+  | "preparing"
   | "awaiting_confirmation"
   | "queued"
   | "running"
@@ -365,7 +366,8 @@ export interface CreateRunDecisionSummary {
 
 export interface CreateRunResponse {
   run_id: string;
-  preview: RunPreview;
+  /** Null while state === "preparing" — poll GET /runs/{id} for the filled preview. */
+  preview: RunPreview | null;
   state: RunState;
   decision?: CreateRunDecisionSummary;
 }
@@ -373,7 +375,8 @@ export interface CreateRunResponse {
 export interface ResumeRunResponse {
   run_id: string;
   resumed_from: string;
-  preview: { run_id: string; target_ip: string };
+  /** Deprecated: preparation is async now; the preview fills in via GET /runs/{id}. */
+  preview?: { run_id: string; target_ip: string };
 }
 
 export interface RunListRow {
@@ -755,6 +758,7 @@ export interface DeleteRunResponse {
 
 export type EventType =
   | "state"
+  | "preparing"
   | "boot"
   | "ok"
   | "progress"
@@ -935,6 +939,7 @@ export interface ApiErrorShape {
 }
 
 export const ACTIVE_RUN_STATES: RunState[] = [
+  "preparing",
   "awaiting_confirmation",
   "queued",
   "running",
@@ -958,7 +963,7 @@ export function isTerminalState(state: RunState): boolean {
 }
 
 export function stateCategory(state: RunState): "pending" | "active" | "done" {
-  if (state === "draft" || state === "queued") return "pending";
+  if (state === "draft" || state === "queued" || state === "preparing") return "pending";
   if (isActiveState(state)) return "active";
   return "done";
 }

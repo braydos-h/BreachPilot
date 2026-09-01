@@ -6,10 +6,11 @@ import { isValidTarget } from "@/lib/targetValidation";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { useCapabilities, useCreateRun, useGoals, useSkills } from "@/api/hooks";
+import { useCapabilities, useCreateRun, useGoals, useRun, useSkills } from "@/api/hooks";
+import { useRunEvents } from "@/api/ws";
 import { useDefaultModel } from "@/components/ProviderSetup";
 import { ApiError } from "@/api/client";
-import type { CreateRunResponse, GoalPreset, ObserverMode, RunCreateRequest, RunMode, SkillsMode } from "@/api/types";
+import type { GoalPreset, ObserverMode, RunCreateRequest, RunMode, SkillsMode } from "@/api/types";
 import { RunStepper, STEPS, type Step } from "./RunStepper";
 import { RunSummary } from "./RunSummary";
 import { ModeSelector } from "./ModeSelector";
@@ -21,6 +22,7 @@ import { AdvancedExecutionSettings } from "./AdvancedExecutionSettings";
 import { SkillsSettings } from "./SkillsSettings";
 import { OpsecSettings } from "./OpsecSettings";
 import { RunReview } from "./RunReview";
+import { type RunStartupState } from "./RunStartupProgress";
 import { profileFieldValues, type ExecutionProfileId } from "./profile";
 
 interface RunWizardProps {
@@ -64,15 +66,25 @@ export function RunWizard({ onCreated }: RunWizardProps) {
   // Target state
   const [target, setTarget] = useState("");
 
-  // Review state
-  const [createdRun, setCreatedRun] = useState<CreateRunResponse | null>(null);
+  // Launch state: feedback starts the instant the button is clicked. The
+  // server returns the run id immediately (state "preparing") and preparation
+  // continues in the background; `useRun` polls the transition and real
+  // `preparing` stage events drive the startup panel.
+  const [launching, setLaunching] = useState(false);
+  const [startedAt, setStartedAt] = useState(() => Date.now());
+  const [createdRunId, setCreatedRunId] = useState<string | null>(null);
   const [createError, setCreateError] = useState("");
+  const submitLockRef = useRef(false);
+  const navigatedRef = useRef(false);
 
   const capabilities = useCapabilities();
   const goals = useGoals();
   const skills = useSkills();
   const createRun = useCreateRun();
   const defaultModel = useDefaultModel();
+
+  const runDetail = useRun(createdRunId);
+  const runEvents = useRunEvents(createdRunId, { enabled: !!createdRunId });
 
   useEffect(() => {
     if (!modelAlias && defaultModel) setModelAlias(defaultModel);
@@ -168,21 +180,79 @@ export function RunWizard({ onCreated }: RunWizardProps) {
   });
 
   const createTheRun = () => {
+    // Duplicate-click protection: one in-flight launch at a time. The lock is
+    // released only on failure (so the operator can retry); on success the
+    // run lifecycle takes over (gate or navigation).
+    if (submitLockRef.current) return;
+    submitLockRef.current = true;
+    navigatedRef.current = false;
     setCreateError("");
+    setStartedAt(Date.now());
+    setLaunching(true);
     createRun.mutate(buildRequest(), {
       onSuccess: (data) => {
-        setCreatedRun(data);
-        // Auto-launch only when the server says the run is already queued/running
-        // (e.g. yes:true); otherwise surface the ready-to-begin gate.
+        setCreatedRunId(data.run_id);
+        // Synchronous fast-path (defensive): if the server already reports a
+        // running state, navigate right away.
         if (data.state === "queued" || data.state === "running") {
+          navigatedRef.current = true;
           onCreated?.(data.run_id, data.state);
         }
       },
       onError: (err) => {
+        submitLockRef.current = false;
+        setLaunching(false);
         setCreateError(err instanceof ApiError ? err.message : "Failed to create run.");
       },
     });
   };
+
+  // Run lifecycle transitions while the wizard owns the just-created run.
+  const runState = runDetail.data?.state;
+  const runError = runDetail.data?.error;
+  useEffect(() => {
+    if (!createdRunId) return;
+    if (runState === "failed") {
+      // Preparation failed: release the launch lock and surface the server's
+      // actionable error so the operator can edit + retry.
+      submitLockRef.current = false;
+      setLaunching(false);
+      setCreatedRunId(null);
+      setCreateError(runError || "Run preparation failed. View server logs for details.");
+      return;
+    }
+    if ((runState === "queued" || runState === "running") && !navigatedRef.current) {
+      navigatedRef.current = true;
+      onCreated?.(createdRunId, runState);
+    }
+  }, [createdRunId, runState, runError, onCreated]);
+
+  // Latest backend preparation stage event (real progress, no fake percent).
+  const preparingEvent = useMemo(() => {
+    const events = runEvents.events;
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i].type === "preparing") return events[i];
+    }
+    return null;
+  }, [runEvents.events]);
+
+  const prepared =
+    !!runDetail.data && runDetail.data.state !== "preparing" && runDetail.data.state !== "failed";
+  const startup: RunStartupState | null =
+    launching || (createdRunId && !prepared)
+      ? {
+          phase: createdRunId ? "preparing" : "sending",
+          backendStage:
+            preparingEvent != null
+              ? String((preparingEvent.payload as Record<string, unknown>).stage ?? "")
+              : "",
+          message:
+            preparingEvent != null
+              ? String((preparingEvent.payload as Record<string, unknown>).message ?? "")
+              : "",
+          startedAt,
+        }
+      : null;
 
   const stepIndex = STEPS.indexOf(step);
   const canGoNext = step === "opsec" || step === "settings" || (step === "target" && isValidTarget(target));
@@ -326,9 +396,10 @@ export function RunWizard({ onCreated }: RunWizardProps) {
               observerMode={observerMode}
               reconFirst={reconFirst}
               yes={yes}
-              isCreating={createRun.isPending}
+              isCreating={launching && !createdRunId}
+              startup={startup}
+              runDetail={prepared ? runDetail.data ?? null : null}
               createError={createError}
-              createdRun={createdRun}
               onCreate={createTheRun}
               onEdit={(s) => setStep(s)}
               onCreated={onCreated}
@@ -338,11 +409,11 @@ export function RunWizard({ onCreated }: RunWizardProps) {
 
           {step !== "review" && (
             <div className="flex items-center justify-between border-t pt-3">
-              <Button type="button" variant="ghost" size="sm" onClick={goBack} disabled={createRun.isPending}>
+              <Button type="button" variant="ghost" size="sm" onClick={goBack} disabled={launching}>
                 <ArrowLeft className="mr-1.5 h-4 w-4" /> Back
               </Button>
-              <Button type="button" size="sm" onClick={goNext} disabled={!canGoNext || createRun.isPending}>
-                {createRun.isPending ? (
+              <Button type="button" size="sm" onClick={goNext} disabled={!canGoNext || launching}>
+                {launching ? (
                   <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
                 ) : (
                   <ArrowRight className="mr-1.5 h-4 w-4" />

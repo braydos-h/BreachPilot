@@ -184,7 +184,13 @@ class ToolCallRequest(BaseModel):
 
 @router.post("/runs", status_code=201)
 async def create_run(body: RunCreateRequest, auth: str = Depends(_require_auth)) -> dict[str, Any]:
-    """Create a run (preview + start_confirm decision). Does not execute yet."""
+    """Create a run. Returns immediately with ``state: "preparing"``; the run
+    row is persisted up-front and preparation (plugins, model, target
+    resolution, skills) continues in the background, transitioning the run to
+    ``awaiting_confirmation``/``queued`` (events stream via
+    ``GET /runs/{id}/events``). ``preview``/``decision`` are null until
+    preparation completes — poll ``GET /runs/{id}`` for the filled preview
+    and ``GET /runs/{id}/decisions`` for the start_confirm decision."""
     request = RunRequest(
         target=body.target,
         mode=body.mode,
@@ -209,10 +215,14 @@ async def create_run(body: RunCreateRequest, auth: str = Depends(_require_auth))
         yes=body.yes,
     )
     run_id, preview, decision = await _rm().create_run(request)
+    if preview is not None:
+        state = "awaiting_confirmation" if decision else "queued"
+    else:
+        state = "preparing"
     result: dict[str, Any] = {
         "run_id": run_id,
-        "preview": _preview_to_dict(preview),
-        "state": "awaiting_confirmation" if decision else "queued",
+        "preview": _preview_to_dict(preview) if preview is not None else None,
+        "state": state,
     }
     if decision:
         result["decision"] = {
@@ -309,11 +319,10 @@ async def resume_run(run_id: str, auth: str = Depends(_require_auth)) -> dict[st
         yes=False,
     )
     request = RunRequest(**request_fields)
-    new_id, preview, decision = await _rm().create_run(request)
+    new_id, _preview, _decision = await _rm().create_run(request)
     return {
         "run_id": new_id,
         "resumed_from": run_id,
-        "preview": {"run_id": preview.run_id, "target_ip": preview.target_ip},
     }
 
 

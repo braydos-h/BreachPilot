@@ -531,17 +531,33 @@ def test_delete_run_purge_removes_directory(tmp_path, monkeypatch):
 # ── Single decision GET (D2) ─────────────────────────────────────────────────
 
 
+def _wait_start_confirm_decision(client, run_id: str, attempts: int = 50) -> dict:
+    """Poll until the background preparation creates the start_confirm decision."""
+    import time
+
+    last: list[dict] = []
+    for _ in range(attempts):
+        resp = client.get(f"/api/v1/runs/{run_id}/decisions", headers=_auth())
+        assert resp.status_code == 200
+        last = resp.json()["decisions"]
+        for row in last:
+            if row["kind"] == "start_confirm" and row["status"] == "pending":
+                return row
+        time.sleep(0.02)
+    raise AssertionError(f"no pending start_confirm decision for {run_id} (got {last})")
+
+
 def test_get_single_decision(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
     created = _create_run(client)
-    decision_id = created["decision"]["id"]
+    decision = _wait_start_confirm_decision(client, created["run_id"])
     resp = client.get(
-        f"/api/v1/runs/{created['run_id']}/decisions/{decision_id}",
+        f"/api/v1/runs/{created['run_id']}/decisions/{decision['id']}",
         headers=_auth(),
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["id"] == decision_id
+    assert data["id"] == decision["id"]
     assert data["kind"] == "start_confirm"
     assert "prompt_text" in data
 
@@ -549,9 +565,9 @@ def test_get_single_decision(tmp_path, monkeypatch):
 def test_get_single_decision_wrong_run(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
     created = _create_run(client)
-    decision_id = created["decision"]["id"]
+    decision = _wait_start_confirm_decision(client, created["run_id"])
     resp = client.get(
-        f"/api/v1/runs/nonexistent/decisions/{decision_id}",
+        f"/api/v1/runs/nonexistent/decisions/{decision['id']}",
         headers=_auth(),
     )
     assert resp.status_code == 404

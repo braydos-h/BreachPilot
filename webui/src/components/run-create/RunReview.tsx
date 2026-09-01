@@ -4,10 +4,10 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Spinner } from "@/components/Loading";
 import { useAnswerDecision } from "@/api/hooks";
 import { executionProfileLabel, type ExecutionProfileId } from "./profile";
-import type { CreateRunResponse, ObserverMode, RunMode, SkillsMode } from "@/api/types";
+import { RunStartupProgress, type RunStartupState } from "./RunStartupProgress";
+import type { DecisionListRow, RunDetail, ObserverMode, RunMode, SkillsMode } from "@/api/types";
 import type { Step } from "./RunStepper";
 
 interface RunReviewProps {
@@ -23,9 +23,13 @@ interface RunReviewProps {
   observerMode: ObserverMode;
   reconFirst: boolean | null;
   yes: boolean;
+  /** True while the create POST itself is in flight (no run id yet). */
   isCreating: boolean;
+  /** Live startup panel state (sending/preparing + backend stage). */
+  startup: RunStartupState | null;
+  /** Filled run detail once preparation completes (preview + decisions). */
+  runDetail: RunDetail | null;
   createError: string;
-  createdRun: CreateRunResponse | null;
   onCreate: () => void;
   onEdit: (step: Step) => void;
   onCreated?: (runId: string, state: string) => void;
@@ -67,10 +71,10 @@ function Row({
 const NONE = "Not selected";
 
 /** Review & launch: a structured pre-launch summary with per-section Edit
- *  links, then the primary launch action. Once the run is created and the
- *  server asks for confirmation, the ready-to-begin gate replaces the launch
- *  button (destructive runs require typed confirmation — server-side logic
- *  unchanged). */
+ *  links, then the primary launch action. Launching shows the live startup
+ *  panel immediately (duplicate submissions are locked out); once preparation
+ *  completes, the ready-to-begin gate replaces it (destructive runs require
+ *  typed confirmation — server-side logic unchanged). */
 export function RunReview({
   mode,
   target,
@@ -85,14 +89,15 @@ export function RunReview({
   reconFirst,
   yes,
   isCreating,
+  startup,
+  runDetail,
   createError,
-  createdRun,
   onCreate,
   onEdit,
   onCreated,
   onRetry,
 }: RunReviewProps) {
-  const answerDecision = useAnswerDecision(createdRun?.run_id ?? "");
+  const answerDecision = useAnswerDecision(runDetail?.id ?? "");
   const [confirmText, setConfirmText] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -104,24 +109,28 @@ export function RunReview({
   const isFast = mode === "fast";
   const launchLabel = isFast ? "Launch Fast Run" : isAttack ? "Launch Attack" : "Start Recon";
 
+  const gate: DecisionListRow | null =
+    runDetail?.decisions?.find((d) => d.kind === "start_confirm" && d.status === "pending") ?? null;
+  const preview = runDetail?.preview;
+  const destructive = preview?.destructive === true;
+  const requiredText =
+    (gate?.required_text as string | undefined) ||
+    (typeof preview?.required_confirmation_text === "string" ? preview.required_confirmation_text : "");
+
   const submitConfirm = (e: React.FormEvent, overrideAnswer?: string) => {
     e.preventDefault();
-    const decision = createdRun?.decision;
-    if (!decision || submitting) return;
+    if (!gate || !runDetail || submitting) return;
     setSubmitting(true);
     answerDecision.mutate(
-      { decisionId: decision.id, answer: overrideAnswer ?? confirmText },
+      { decisionId: gate.id, answer: overrideAnswer ?? confirmText },
       {
-        onSuccess: () => onCreated?.(createdRun.run_id, "running"),
+        onSuccess: () => onCreated?.(runDetail.id, "running"),
         onError: () => setSubmitting(false),
       },
     );
   };
 
-  const gate = createdRun?.decision;
-  const preview = createdRun?.preview;
-  const destructive = preview?.destructive;
-  const requiredText = preview?.required_confirmation_text ?? "";
+  const launchDisabled = isCreating || !!startup;
 
   return (
     <div className="space-y-4">
@@ -165,7 +174,7 @@ export function RunReview({
             </div>
           )}
 
-          {createError && !createdRun && (
+          {createError && !startup && (
             <div className="mt-3 flex items-center justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-red-200">
               <span>{createError}</span>
               <Button type="button" size="sm" variant="outline" onClick={onRetry}>
@@ -176,7 +185,9 @@ export function RunReview({
         </CardContent>
       </Card>
 
-      {!createdRun && (
+      {startup && <RunStartupProgress startup={startup} />}
+
+      {!startup && !runDetail && (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-muted-foreground">
             {yes
@@ -188,11 +199,11 @@ export function RunReview({
             size="lg"
             className={cn("gap-2", isAttack && "bg-amber-600 text-amber-950 hover:bg-amber-500", isFast && "bg-cyan-600 text-cyan-950 hover:bg-cyan-500")}
             onClick={onCreate}
-            disabled={isCreating}
+            disabled={launchDisabled}
           >
             {isCreating ? (
               <>
-                <Loader2 className="h-4 w-4 animate-spin" /> Creating run…
+                <Loader2 className="h-4 w-4 animate-spin" /> Sending request…
               </>
             ) : (
               <>
@@ -203,15 +214,13 @@ export function RunReview({
         </div>
       )}
 
-      {isCreating && !createdRun && <Spinner label="Creating run..." className="p-2" />}
-
-      {createdRun && !gate && (
+      {runDetail && !gate && (
         <p className="text-sm text-muted-foreground">
           Run created — waiting for the server to confirm readiness.
         </p>
       )}
 
-      {gate && (
+      {runDetail && gate && (
         <Card className={cn(destructive && "border-destructive/50")}>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-1.5 text-sm">

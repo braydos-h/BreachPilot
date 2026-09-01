@@ -55,9 +55,9 @@ class _FakeService:
     def __init__(self, **kwargs):
         pass
 
-    async def prepare(self, request: RunRequest) -> RunPreview:
+    async def prepare(self, request, *, run_id=None, progress=None):
         # Use the target as the run_id so each run is distinguishable.
-        return _preview(f"run-{request.target}", request.target, _tmp)
+        return _preview(run_id or f"run-{request.target}", request.target, _tmp)
 
 
 _tmp_path = None
@@ -110,10 +110,10 @@ async def test_legacy_has_active_and_active(tmp_path, monkeypatch):
     manager = _make_manager(tmp_path, monkeypatch, max_concurrent_runs=1)
     assert manager.has_active is False
     assert manager.active is None
-    await manager.create_run(RunRequest(target="10.0.0.50"))
+    run_id, _preview, _decision = await manager.create_run(RunRequest(target="10.0.0.50"))
     assert manager.has_active is True
     assert manager.active is not None
-    assert manager.active.run_id == "run-10.0.0.50"
+    assert manager.active.run_id == run_id
     await manager.cancel_run(manager.active.run_id)
 
 
@@ -144,11 +144,15 @@ async def test_per_run_allowlist_scoping_no_cross_leak(tmp_path, monkeypatch):
     never leaks into Run B's MCP subprocess scope.
     """
     manager = _make_manager(tmp_path, monkeypatch, max_concurrent_runs=3)
-    await manager.create_run(RunRequest(target="10.0.0.50"))
-    await manager.create_run(RunRequest(target="10.0.0.51"))
+    run_a, _, _ = await manager.create_run(RunRequest(target="10.0.0.50"))
+    run_b, _, _ = await manager.create_run(RunRequest(target="10.0.0.51"))
+    # The allowlist snapshot is frozen at prepare() time — wait for the
+    # background preparation to settle before asserting on it.
+    await manager.wait_for_prepared(run_a)
+    await manager.wait_for_prepared(run_b)
 
-    handle_a = manager.active_for("run-10.0.0.50")
-    handle_b = manager.active_for("run-10.0.0.51")
+    handle_a = manager.active_for(run_a)
+    handle_b = manager.active_for(run_b)
     assert handle_a is not None and handle_b is not None
 
     # Run A's target is in its own allowlist.

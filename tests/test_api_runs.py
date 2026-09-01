@@ -50,8 +50,39 @@ def _auth_headers(token="test-token"):
     return {"Authorization": f"Bearer {token}"}
 
 
+def _wait_state(client, run_id: str, states: set[str], attempts: int = 100) -> dict:
+    """Poll until the run reaches one of ``states`` (background preparation)."""
+    import time
+
+    last: dict = {}
+    for _ in range(attempts):
+        run = client.get(f"/api/v1/runs/{run_id}", headers=_auth_headers()).json()
+        last = run
+        if run.get("state") in states:
+            return run
+        time.sleep(0.02)
+    raise AssertionError(f"run {run_id} never reached {states} (last state: {last.get('state')})")
+
+
+def _wait_decision(client, run_id: str, attempts: int = 100) -> dict:
+    """Poll until background preparation creates the pending start_confirm decision."""
+    import time
+
+    last: list[dict] = []
+    for _ in range(attempts):
+        resp = client.get(f"/api/v1/runs/{run_id}/decisions", headers=_auth_headers())
+        assert resp.status_code == 200
+        last = resp.json()["decisions"]
+        for row in last:
+            if row["kind"] == "start_confirm" and row["status"] == "pending":
+                return row
+        time.sleep(0.02)
+    raise AssertionError(f"no pending start_confirm decision for {run_id} (got {last})")
+
+
 def test_create_run_returns_preview(tmp_path, monkeypatch):
-    """POST /runs creates a run and returns a preview + start_confirm decision."""
+    """POST /runs returns immediately (state preparing); preparation completes
+    in the background and fills the preview + start_confirm decision."""
     client = _make_client(tmp_path, monkeypatch)
     resp = client.post(
         "/api/v1/runs",
@@ -65,10 +96,14 @@ def test_create_run_returns_preview(tmp_path, monkeypatch):
     assert resp.status_code == 201
     data = resp.json()
     assert "run_id" in data
-    assert "preview" in data
-    assert data["preview"]["target_ip"] == "10.0.0.50"
-    assert data["state"] == "awaiting_confirmation"
-    assert "decision" in data
+    assert data["state"] == "preparing"
+    assert data["preview"] is None
+    assert "decision" not in data
+
+    run = _wait_state(client, data["run_id"], {"awaiting_confirmation"})
+    assert run["preview"]["target_ip"] == "10.0.0.50"
+    decision = _wait_decision(client, data["run_id"])
+    assert decision["kind"] == "start_confirm"
 
 
 def test_list_runs(tmp_path, monkeypatch):
@@ -108,11 +143,9 @@ def test_get_run_after_create(tmp_path, monkeypatch):
         headers=_auth_headers(),
     )
     run_id = create_resp.json()["run_id"]
-    resp = client.get(f"/api/v1/runs/{run_id}", headers=_auth_headers())
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["id"] == run_id
-    assert data["state"] == "awaiting_confirmation"
+    run = _wait_state(client, run_id, {"awaiting_confirmation"})
+    assert run["id"] == run_id
+    assert run["state"] == "awaiting_confirmation"
 
 
 def test_get_artifact_enhanced_missing_returns_404_not_500(tmp_path, monkeypatch):
@@ -201,7 +234,7 @@ def test_events_replay(tmp_path, monkeypatch):
 
 
 def test_decisions_list(tmp_path, monkeypatch):
-    """GET /runs/{id}/decisions lists pending decisions."""
+    """GET /runs/{id}/decisions lists pending decisions (after preparation)."""
     client = _make_client(tmp_path, monkeypatch)
     create_resp = client.post(
         "/api/v1/runs",
@@ -213,6 +246,7 @@ def test_decisions_list(tmp_path, monkeypatch):
         headers=_auth_headers(),
     )
     run_id = create_resp.json()["run_id"]
+    _wait_state(client, run_id, {"awaiting_confirmation"})
     resp = client.get(f"/api/v1/runs/{run_id}/decisions", headers=_auth_headers())
     assert resp.status_code == 200
     data = resp.json()
@@ -233,7 +267,8 @@ def test_answer_decision_wrong_confirmation(tmp_path, monkeypatch):
         headers=_auth_headers(),
     )
     run_id = create_resp.json()["run_id"]
-    decision_id = create_resp.json()["decision"]["id"]
+    _wait_state(client, run_id, {"awaiting_confirmation"})
+    decision_id = _wait_decision(client, run_id)["id"]
     resp = client.post(
         f"/api/v1/runs/{run_id}/decisions/{decision_id}",
         json={"answer": "wrong text"},
@@ -253,16 +288,15 @@ def test_answer_start_confirmation_schedules_execution(tmp_path, monkeypatch):
         },
         headers=_auth_headers(),
     ).json()
+    _wait_state(client, created["run_id"], {"awaiting_confirmation"})
+    decision_id = _wait_decision(client, created["run_id"])["id"]
     response = client.post(
-        f"/api/v1/runs/{created['run_id']}/decisions/{created['decision']['id']}",
+        f"/api/v1/runs/{created['run_id']}/decisions/{decision_id}",
         json={"answer": "yes"},
         headers=_auth_headers(),
     )
     assert response.status_code == 200
-    run = client.get(
-        f"/api/v1/runs/{created['run_id']}",
-        headers=_auth_headers(),
-    ).json()
+    run = _wait_state(client, created["run_id"], {"queued", "running", "completed"})
     assert run["state"] != "awaiting_confirmation"
 
 
@@ -279,8 +313,11 @@ def test_yes_starts_without_a_decision(tmp_path, monkeypatch):
         headers=_auth_headers(),
     )
     assert response.status_code == 201
-    assert response.json()["state"] == "queued"
+    assert response.json()["state"] == "preparing"
     assert "decision" not in response.json()
+    # yes=true still queues correctly once preparation completes.
+    run = _wait_state(client, response.json()["run_id"], {"queued", "running", "completed"})
+    assert run["state"] in {"queued", "running", "completed"}
 
 
 def test_cancel_before_start_releases_active_slot(tmp_path, monkeypatch):
@@ -357,7 +394,7 @@ def test_concurrent_create_keeps_one_active_run(tmp_path, monkeypatch):
         def __init__(self, **kwargs):
             pass
 
-        async def prepare(self, request):
+        async def prepare(self, request, *, run_id=None, progress=None):
             await asyncio.sleep(0.01)
             return RunPreview(
                 run_id=f"run-{request.target}",

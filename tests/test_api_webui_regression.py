@@ -107,6 +107,8 @@ def test_openapi_json_200_with_serve_webui(tmp_path, monkeypatch):
 
 def test_create_run_persists_preset_goal(tmp_path, monkeypatch):
     """``goal`` in the create-run request is reflected in preview.goal_name."""
+    import time
+
     client = _make_client(tmp_path, monkeypatch)
     resp = client.post(
         "/api/v1/runs",
@@ -118,9 +120,17 @@ def test_create_run_persists_preset_goal(tmp_path, monkeypatch):
         headers=_auth_headers(),
     )
     assert resp.status_code == 201
-    data = resp.json()
-    assert data["state"] == "awaiting_confirmation"
-    assert data["preview"]["goal_name"] == "recon_only"
+    run_id = resp.json()["run_id"]
+    assert resp.json()["state"] == "preparing"
+    # The preview is filled when background preparation completes.
+    detail: dict = {}
+    for _ in range(100):
+        detail = client.get(f"/api/v1/runs/{run_id}", headers=_auth_headers()).json()
+        if detail.get("state") == "awaiting_confirmation":
+            break
+        time.sleep(0.02)
+    assert detail.get("state") == "awaiting_confirmation"
+    assert detail.get("preview", {}).get("goal_name") == "recon_only"
 
 
 def test_create_run_persists_custom_goal(tmp_path, monkeypatch):
@@ -148,6 +158,8 @@ def test_create_run_state_is_awaiting_confirmation(tmp_path, monkeypatch):
     """A non-``yes`` attack run lands in awaiting_confirmation (the gate the
     wizard must advance to). This is the contract the wizard transition relies on.
     """
+    import time
+
     client = _make_client(tmp_path, monkeypatch)
     resp = client.post(
         "/api/v1/runs",
@@ -159,9 +171,21 @@ def test_create_run_state_is_awaiting_confirmation(tmp_path, monkeypatch):
         headers=_auth_headers(),
     )
     assert resp.status_code == 201
-    data = resp.json()
-    assert data["state"] == "awaiting_confirmation"
-    assert "decision" in data, "a start_confirm decision must be present for the review step"
+    run_id = resp.json()["run_id"]
+    # POST returns immediately with state=preparing; preparation is async.
+    assert resp.json()["state"] == "preparing"
+    state = ""
+    for _ in range(100):
+        detail = client.get(f"/api/v1/runs/{run_id}", headers=_auth_headers()).json()
+        state = detail.get("state", "")
+        if state == "awaiting_confirmation":
+            break
+        time.sleep(0.02)
+    assert state == "awaiting_confirmation"
+    decisions = client.get(f"/api/v1/runs/{run_id}/decisions", headers=_auth_headers()).json()["decisions"]
+    assert any(
+        d["kind"] == "start_confirm" and d["status"] == "pending" for d in decisions
+    ), "a start_confirm decision must be present for the review step"
 
 
 # ── Invalid IPv4 rejection (backend mirror of browser check) ─────────────────

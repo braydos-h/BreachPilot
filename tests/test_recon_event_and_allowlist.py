@@ -135,7 +135,7 @@ def test_run_manager_does_not_persist_target_to_allowlist(tmp_path, monkeypatch)
         def __init__(self, **kwargs):
             pass
 
-        async def prepare(self, request):
+        async def prepare(self, request, *, run_id=None, progress=None):
             return RunPreview(
                 run_id=f"run-{request.target}",
                 reports_dir=tmp_path / "reports" / request.target,
@@ -207,7 +207,7 @@ def test_run_manager_allowlist_failure_does_not_kill_run(tmp_path, monkeypatch):
         def __init__(self, **kwargs):
             pass
 
-        async def prepare(self, request):
+        async def prepare(self, request, *, run_id=None, progress=None):
             return RunPreview(
                 run_id=f"run-{request.target}",
                 reports_dir=tmp_path / "reports" / request.target,

@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import logging
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,6 +36,23 @@ from tools.run_service.models import (
     RunPreview,
     RunRequest,
 )
+
+log = logging.getLogger("breachpilot.run_create")
+
+# Human-readable text for preparation progress events (safe for the UI — no
+# targets, config values, or internals; stage ids are what clients key on).
+_STAGE_MESSAGES: dict[str, str] = {
+    "config": "Loading configuration",
+    "plugins": "Loading plugins",
+    "router": "Preparing model",
+    "model": "Preparing model",
+    "target_validate": "Validating target",
+    "target_resolve": "Resolving target",
+    "goals": "Loading run settings",
+    "exploit_settings": "Loading run settings",
+    "skills": "Loading skills",
+    "filesystem": "Preparing run",
+}
 
 # Exploit-action tool names that count toward ``successful_exploits`` in the
 # derived campaign_result. Recon/research tools with exit_code==0 are NOT
@@ -139,6 +158,50 @@ def _build_campaign_result_from_records(
             },
         },
     }
+
+
+class _CreateTimings:
+    """Per-stage monotonic timing for one run creation.
+
+    ``mark(stage)`` closes the previous stage and starts the next one; every
+    duration is measured with :func:`time.perf_counter`. The summary log line
+    carries stage ids + milliseconds only — never targets, hostnames, config
+    values, or secrets.
+    """
+
+    __slots__ = ("stages", "_start", "_last")
+
+    def __init__(self) -> None:
+        self.stages: dict[str, float] = {}
+        self._start = time.perf_counter()
+        self._last = self._start
+
+    def mark(self, stage: str) -> float:
+        now = time.perf_counter()
+        ms = (now - self._last) * 1000.0
+        self._last = now
+        if stage:
+            self.stages[stage] = round(ms, 1)
+        return ms
+
+    def total_ms(self) -> float:
+        return (time.perf_counter() - self._start) * 1000.0
+
+    def summary(self, *, run_id: str = "") -> str:
+        lines = [f"  {name}: {ms}ms" for name, ms in self.stages.items()]
+        lines.append(f"  total: {self.total_ms():.0f}ms")
+        suffix = f" (run {run_id})" if run_id else ""
+        return f"run create timing{suffix}:\n" + "\n".join(lines)
+
+
+def _log_create_timings(timings: _CreateTimings, *, run_id: str = "") -> None:
+    """Log the create timing breakdown. INFO when slow, DEBUG when fast."""
+    total = timings.total_ms()
+    text = timings.summary(run_id=run_id)
+    if total >= 1000.0:
+        log.info("%s", text)
+    else:
+        log.debug("%s", text)
 
 
 ui = get_ui()
@@ -494,33 +557,72 @@ class PrepareMixin:
     # Prepare: resolve target/goal/settings without I/O side effects
     # ------------------------------------------------------------------
 
-    async def prepare(self, request: RunRequest) -> RunPreview:
+    async def prepare(
+        self,
+        request: RunRequest,
+        *,
+        run_id: str | None = None,
+        progress: "Callable[[str, str], None] | None" = None,
+    ) -> RunPreview:
         """Resolve the target, goal, and effective settings; return a preview.
 
         Does NOT open the MCP session, does NOT write session_state.json, does
         NOT start any subprocess. The caller (CLI or API) shows the preview to
         the operator and asks for confirmation before calling ``execute``.
 
+        ``run_id`` lets the API pre-allocate the run id (the run row is
+        persisted as ``preparing`` before preparation starts); when omitted a
+        timestamp id is generated as before (CLI path).
+
+        ``progress(stage, message)`` is invoked synchronously from the worker
+        thread at each preparation stage so transport layers (the WebUI API)
+        can emit live progress events. Callback failures are swallowed —
+        progress reporting must never break preparation.
+
         The body is synchronous (config load, plugin load, router build, target
         resolve, skill selection, mkdir), so it runs on a worker thread to keep
         the event loop responsive.
         """
-        return await asyncio.to_thread(self._prepare_sync, request)
+        return await asyncio.to_thread(self._prepare_sync, request, run_id, progress)
 
-    def _prepare_sync(self, request: RunRequest) -> RunPreview:
-        """Synchronous body of ``prepare`` (see above)."""
+    def _prepare_sync(
+        self,
+        request: RunRequest,
+        run_id: str | None = None,
+        progress: "Callable[[str, str], None] | None" = None,
+    ) -> RunPreview:
+        """Synchronous body of ``prepare`` (see above).
+
+        Staged with monotonic timing (``_CreateTimings``) so the actual
+        create-path bottleneck is measurable rather than guessed:
+        config → plugins → router → model → target → goals → exploit_settings
+        → skills → filesystem, with a total. The breakdown is logged per run
+        (``breachpilot.run_create`` logger).
+        """
         from tools import config_cli as _config_cli
         from tools.cli_exploit_settings import build_cli_exploit_settings
         from tools.skills_cli import _build_runtime_skill_selection, apply_skills_cli_overrides
-        from tools.validation_utils import resolve_target as _resolve_target
+        from tools.validation_utils import resolve_target_bounded as _resolve_target_bounded
         from tools.validation_utils import validate_target as _validate_target
+
+        timings = _CreateTimings()
+
+        def stage(name: str) -> None:
+            timings.mark(name)
+            if progress is not None:
+                try:
+                    progress(name, _STAGE_MESSAGES.get(name, name))
+                except Exception:  # noqa: BLE001 -- progress never breaks prepare
+                    pass
 
         config_path = request.config_path
         config = copy.deepcopy(self._config if self._config is not None else _config_cli.load_config(config_path))
         # Apply skills CLI overrides to the in-memory config.
         config = apply_skills_cli_overrides(config, _request_to_args(request))
+        stage("config")
 
-        # Load plugins (best-effort; failure never blocks boot).
+        # Load plugins (best-effort; failure never blocks boot). Cached by
+        # config signature in tools.plugins — warm run creation skips discovery.
         try:
             from tools.plugins import load_plugins
 
@@ -528,6 +630,7 @@ class PrepareMixin:
                 load_plugins(config)
         except Exception:  # noqa: BLE001
             pass
+        stage("plugins")
 
         # Build router + resolve model alias.
         ollama_host = config.get("ollama", {}).get("host", "https://api.ollama.com")
@@ -539,20 +642,44 @@ class PrepareMixin:
             else None
         )
         router = self._build_router_for_config(config, _req_timeout)
+        stage("router")
+
         model_alias = self._resolve_model_alias(config, request)
         self._ensure_client_registered(router, config, model_alias, _req_timeout)
         model_client = router.get_client(model_alias)
+        stage("model")
 
-        # Resolve target (IP or domain).
+        # Resolve target (IP or domain). DNS runs on a bounded worker thread —
+        # a stalled resolver must never freeze run creation for minutes.
         original_target = request.target.strip()
         if not original_target:
             raise ValueError("Target is required.")
         if not _validate_target(original_target):
             raise ValueError(f"Invalid target (must be an IP or domain): {original_target}")
-        resolved_ip, resolved_domain = _resolve_target(original_target)
+        stage("target_validate")
+
+        dns_timeout = 5.0
+        try:
+            api_cfg = config.get("api", {}) or {}
+            dns_timeout = float(api_cfg.get("dns_timeout_seconds", 5.0) or 5.0)
+        except (TypeError, ValueError):
+            dns_timeout = 5.0
+        if dns_timeout <= 0:
+            dns_timeout = 5.0
+        try:
+            resolved_ip, resolved_domain = _resolve_target_bounded(
+                original_target, timeout_seconds=dns_timeout
+            )
+        except TimeoutError as exc:
+            raise ValueError(
+                f"Could not resolve target: {exc}. Check the hostname and your DNS settings, then try again."
+            ) from exc
+        except OSError as exc:
+            raise ValueError(f"Could not resolve target: {exc}") from exc
         if resolved_domain and resolved_ip is None:
             raise ValueError(f"Could not resolve domain: {original_target}")
         target_ip = resolved_ip if resolved_ip is not None else original_target
+        stage("target_resolve")
 
         # Determine mode.
         mode = request.mode
@@ -582,6 +709,7 @@ class PrepareMixin:
             # No goal yet -- will be resolved during execute (recon-first or
             # interactive). Use a placeholder for preview purposes.
             goal = goal_engine.get("custom", goal_name or "recon-first goal selection", risk_profile=risk_profile)
+        stage("goals")
 
         # Build exploit settings (pure data; no I/O).
         multi_model_consult = request.multi_model_consult
@@ -602,8 +730,9 @@ class PrepareMixin:
             debug=request.debug,
             long_session=request.long_session,
         )
+        stage("exploit_settings")
 
-        # Skill selection (pure data; no I/O).
+        # Skill selection (pure data; registry/embedder/store are process-cached).
         with _COLD_INIT_LOCK:
             skill_selection = _build_runtime_skill_selection(
                 config=config,
@@ -612,11 +741,14 @@ class PrepareMixin:
                 assessment=None,
                 is_domain=bool(resolved_domain),
             )
+        stage("skills")
 
         # Run ID + reports dir.
-        run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+        if not run_id:
+            run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
         reports_dir = request.reports_dir / run_id
         reports_dir.mkdir(parents=True, exist_ok=True)
+        stage("filesystem")
 
         # Effective settings for preview.
         exploit_cfg = config.get("exploit", {}) or {}
@@ -649,6 +781,9 @@ class PrepareMixin:
             else None,
         }
 
+        timings.mark("")  # close the final stage
+        _log_create_timings(timings, run_id=run_id)
+
         return RunPreview(
             run_id=run_id,
             reports_dir=reports_dir,
@@ -673,6 +808,7 @@ class PrepareMixin:
             budgets=budgets,
             skill_activations=[{"name": a.name, "reason": a.reason} for a in skill_selection.activations],
             skill_errors=list(skill_selection.errors),
+            timings=dict(timings.stages),
             resumed_from=request.resume_source,
         )
 

@@ -12,6 +12,7 @@ import ipaddress
 import re
 import shutil
 import socket
+import threading
 from collections.abc import Callable, Sequence
 from typing import TypedDict
 
@@ -241,6 +242,56 @@ def resolve_target(
         return None, None
     ip = resolve_target_to_ip(host, resolver_fn=resolver_fn)
     return ip, host
+
+
+def resolve_target_bounded(
+    host: str,
+    *,
+    timeout_seconds: float = 5.0,
+    resolver_fn: Callable[[str], Sequence[str]] | None = None,
+) -> tuple[str | None, str | None]:
+    """Resolve a target like :func:`resolve_target`, but never hang on DNS.
+
+    ``socket.getaddrinfo`` has no timeout of its own — a stalled resolver left
+    the WebUI create-run request blocked for minutes. Resolution runs on a
+    daemon thread bounded by ``timeout_seconds``; on timeout a
+    :class:`TimeoutError` is raised so callers can fail the request with an
+    actionable message (the daemon thread is abandoned and cannot block
+    interpreter exit).
+
+    IP literals skip DNS entirely. Semantics otherwise match
+    :func:`resolve_target` (``(ip, domain)``, domain returned verbatim).
+    """
+    if not host or not isinstance(host, str):
+        return None, None
+    host = host.strip()
+    if not host:
+        return None, None
+    try:
+        ipaddress.ip_address(host)
+        return host, None  # IP literal: no DNS, no timeout needed
+    except ValueError:
+        pass
+    if not is_fqdn(host):
+        return None, None
+    result: dict[str, str | None] = {"ip": None}
+    error: list[str] = []
+
+    def _run() -> None:
+        try:
+            ip, _domain = resolve_target(host, resolver_fn=resolver_fn)
+            result["ip"] = ip
+        except Exception as exc:  # noqa: BLE001 -- surfaced below, never hangs
+            error.append(str(exc))
+
+    worker = threading.Thread(target=_run, daemon=True, name="breachpilot-dns-resolve")
+    worker.start()
+    worker.join(max(0.05, float(timeout_seconds)))
+    if worker.is_alive():
+        raise TimeoutError(f"DNS resolution timed out after {timeout_seconds:.0f}s for {host}")
+    if error:
+        raise OSError(f"DNS resolution failed for {host}: {error[0]}")
+    return result["ip"], host
 
 
 def extract_ips_from_command(command: str) -> list[str]:

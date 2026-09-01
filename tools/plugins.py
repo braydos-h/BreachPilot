@@ -35,6 +35,7 @@ import importlib.metadata
 import importlib.util
 import logging
 import re
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -377,6 +378,9 @@ class PluginRegistry:
         self._config_sections.clear()
         self._loaded_plugins.clear()
         self._event_subscribers.clear()
+        # A reset clears the load cache too: the next load_plugins() call must
+        # re-run discovery so tests that reset the registry see fresh state.
+        reset_plugin_load_cache()
 
 
 # ─── Manager ──────────────────────────────────────────────────────────────────
@@ -641,6 +645,42 @@ def get_plugin_registry() -> PluginRegistry:
     return PLUGIN_REGISTRY
 
 
+# ─── load_plugins cache ───────────────────────────────────────────────────────
+# ``load_plugins`` re-walks every search path, re-imports each plugin.py, and
+# re-registers into the SINGLETON registry. Calling it per run creation (the
+# old behavior on the WebUI create-run path) cost ~70-135ms per run AND
+# duplicated every registration (extra module classes, MCP tool factories,
+# skill dirs, event subscribers) once per call. Discovery output depends only
+# on the plugins config + the injectable loader, so the load result is cached
+# by that signature: cold init happens once, warm run creation reuses it.
+# ``PluginRegistry.reset()`` (tests) and :func:`reset_plugin_load_cache` clear it.
+
+_PLUGIN_LOAD_CACHE: dict[tuple[Any, ...], list[PluginManifest]] = {}
+_PLUGIN_LOAD_LOCK = threading.RLock()
+
+
+def _plugin_load_signature(
+    enabled: Any,
+    disabled: Any,
+    paths: list[str],
+    entry_points_flag: bool,
+    entry_point_loader: Any,
+) -> tuple[Any, ...]:
+    return (
+        tuple(enabled) if isinstance(enabled, list) else enabled,
+        tuple(disabled) if isinstance(disabled, list) else disabled,
+        tuple(str(p) for p in paths),
+        entry_points_flag,
+        entry_point_loader,
+    )
+
+
+def reset_plugin_load_cache() -> None:
+    """Drop the cached plugin-load result (tests; config/file changes)."""
+    with _PLUGIN_LOAD_LOCK:
+        _PLUGIN_LOAD_CACHE.clear()
+
+
 def load_plugins(
     config: dict[str, Any] | None = None,
     *,
@@ -652,6 +692,13 @@ def load_plugins(
     Reads ``enabled`` (list), ``disabled`` (list), ``search_paths`` (list), and
     ``entry_points`` (bool). Defaults: ``search_paths=["plugins"]``,
     ``entry_points=True``. Tolerant of missing config.
+
+    Result is cached per (enabled, disabled, search_paths, entry_points,
+    loader) signature: repeated calls with an unchanged config return the
+    first load's manifests without re-discovering/re-registering (discovery
+    appends to the process-wide singleton registry, so re-running it would
+    duplicate every registration). Call :func:`reset_plugin_load_cache` after
+    changing plugin files on disk.
     """
     plugins_cfg: dict[str, Any] = {}
     if isinstance(config, dict):
@@ -668,16 +715,23 @@ def load_plugins(
     else:
         paths = ["plugins"]
     entry_points_flag = bool(plugins_cfg.get("entry_points", True))
-    manager = PluginManager(
-        PLUGIN_REGISTRY,
-        enabled=enabled if isinstance(enabled, list) else None,
-        disabled=disabled if isinstance(disabled, list) else None,
-    )
-    return manager.load_all(
-        paths,
-        entry_points=entry_points_flag,
-        entry_point_loader=entry_point_loader,
-    )
+    signature = _plugin_load_signature(enabled, disabled, paths, entry_points_flag, entry_point_loader)
+    with _PLUGIN_LOAD_LOCK:
+        cached = _PLUGIN_LOAD_CACHE.get(signature)
+        if cached is not None:
+            return list(cached)
+        manager = PluginManager(
+            PLUGIN_REGISTRY,
+            enabled=enabled if isinstance(enabled, list) else None,
+            disabled=disabled if isinstance(disabled, list) else None,
+        )
+        loaded = manager.load_all(
+            paths,
+            entry_points=entry_points_flag,
+            entry_point_loader=entry_point_loader,
+        )
+        _PLUGIN_LOAD_CACHE[signature] = list(loaded)
+        return loaded
 
 
 def list_discovered_plugins() -> list[dict[str, Any]]:
@@ -723,4 +777,5 @@ __all__ = [
     "get_plugin_registry",
     "load_plugins",
     "list_discovered_plugins",
+    "reset_plugin_load_cache",
 ]

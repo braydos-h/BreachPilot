@@ -79,6 +79,7 @@ interface StateMeta {
 
 const STATE_META: Record<RunState, StateMeta> = {
   draft: { label: "Draft", barClass: "bg-muted-foreground/45" },
+  preparing: { label: "Preparing", barClass: "bg-muted-foreground/50" },
   awaiting_confirmation: { label: "Awaiting confirmation", barClass: "bg-amber-500/80" },
   queued: { label: "Queued", barClass: "bg-muted-foreground/50" },
   running: { label: "Running", barClass: "bg-amber-500/80" },
