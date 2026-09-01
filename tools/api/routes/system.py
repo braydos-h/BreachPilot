@@ -15,7 +15,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from tools.api.auth import BearerAuth
 from tools.api.errors import sanitize
 
-
 _SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,63}$")
 
 
@@ -298,7 +297,6 @@ def create_router(
         """Health check — no authentication required."""
         return {"version": "v1", "ready": True}
 
-
     @router.get("/capabilities")
     async def capabilities(auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """API features, supported run options, constraints, and tool groups.
@@ -385,12 +383,10 @@ def create_router(
             },
         }
 
-
     @router.get("/config")
     async def get_config(auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Return redacted configuration."""
         return sanitize(config)
-
 
     def _write_config(merged: dict[str, Any]) -> dict[str, Any]:
         """Validate + atomically write ``merged`` as the new live config.
@@ -415,7 +411,9 @@ def create_router(
         validator._config = merged
         result = validator.validate()
         if not result.is_valid:
-            raise APIError("config_invalid", "Config validation failed", status_code=400, details={"errors": result.errors})
+            raise APIError(
+                "config_invalid", "Config validation failed", status_code=400, details={"errors": result.errors}
+            )
         import os
         from uuid import uuid4
 
@@ -434,11 +432,9 @@ def create_router(
         config.update(merged)
         return merged
 
-
     def _apply_config_patch(patch: dict[str, Any]) -> dict[str, Any]:
         """Deep-merge ``patch`` into the live config and write it."""
         return _write_config(_merge_config(config, patch))
-
 
     @router.patch("/config")
     async def patch_config(
@@ -453,7 +449,6 @@ def create_router(
             raise APIError("invalid_body", "Expected a JSON object.", status_code=400)
         merged = _apply_config_patch(body)
         return {"status": "ok", "config": sanitize(merged)}
-
 
     @router.get("/secrets")
     async def get_secrets(auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -476,7 +471,6 @@ def create_router(
             status[name] = "configured" if (name in loaded or _os.environ.get(name)) else "missing"
         return {"keys": status}
 
-
     @router.put("/secrets")
     async def put_secrets(
         request: Request,
@@ -498,7 +492,9 @@ def create_router(
 
         secrets = body["secrets"]
         allowed = set(configured_api_key_env_names(config))
-        if any(name not in allowed or not isinstance(value, str) or not value.strip() for name, value in secrets.items()):
+        if any(
+            name not in allowed or not isinstance(value, str) or not value.strip() for name, value in secrets.items()
+        ):
             raise APIError(
                 "invalid_secrets",
                 "Secret names must be configured provider environment variables and values must be non-empty strings.",
@@ -509,7 +505,6 @@ def create_router(
         for name in written:
             os.environ[name] = secrets[name].strip()
         return {"status": "ok", "written": written}
-
 
     @router.get("/models")
     async def list_models(auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -542,7 +537,6 @@ def create_router(
             }
         return response
 
-
     @router.post("/models")
     async def add_model(request: Request, auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Add a model alias to ``models.registry`` (writes through config validation)."""
@@ -558,8 +552,12 @@ def create_router(
         if len(alias) > 64 or len(model) > 256:
             raise APIError("invalid_body", "alias or model too long.", status_code=400)
         merged = _apply_config_patch({"models": {"registry": {alias: model}}})
-        return {"status": "ok", "alias": alias, "model": model, "registry": merged.get("models", {}).get("registry", {})}
-
+        return {
+            "status": "ok",
+            "alias": alias,
+            "model": model,
+            "registry": merged.get("models", {}).get("registry", {}),
+        }
 
     @router.delete("/models/{alias}")
     async def remove_model(alias: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -580,7 +578,6 @@ def create_router(
         models.setdefault("info", {}).pop(alias, None)
         _write_config(merged)
         return {"status": "ok", "alias": alias, "deleted": True}
-
 
     @router.post("/models/provider")
     async def set_model_provider(request: Request, auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -616,7 +613,6 @@ def create_router(
         merged = _apply_config_patch(patch)
         return {"status": "ok", "provider": provider, "registered_providers": sorted(known)}
 
-
     @router.post("/models/refresh")
     async def refresh_models(auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Sync ``models.registry`` to the newest same-family versions on the Ollama API.
@@ -647,11 +643,12 @@ def create_router(
             return Response(content=json.dumps(result), status_code=503, media_type="application/json")
         updates = result.get("updates") or {}
         if updates:
-            merged = _apply_config_patch({"models": {"registry": {alias: upd["new"] for alias, upd in updates.items()}}})
+            merged = _apply_config_patch(
+                {"models": {"registry": {alias: upd["new"] for alias, upd in updates.items()}}}
+            )
             result["registry"] = merged.get("models", {}).get("registry", {})
             result["persisted"] = True
         return result
-
 
     @router.get("/system/info")
     async def get_system_info(auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -694,7 +691,6 @@ def create_router(
             "public_ip": public_ip or None,
         }
 
-
     @router.get("/system/telemetry")
     async def get_telemetry(auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """LLM usage telemetry summary + recent records (numeric/categorical only).
@@ -713,14 +709,12 @@ def create_router(
 
         return await asyncio.to_thread(_load)
 
-
     def _safe_json(raw: Any) -> dict[str, Any]:
         try:
             data = json.loads(raw or "{}")
             return data if isinstance(data, dict) else {}
         except (TypeError, json.JSONDecodeError):
             return {}
-
 
     def _read_attack_memory_db(db_path: Path) -> list[dict[str, Any]]:
         """Read items from one ``attack_memory.db`` (best-effort, never raises)."""
@@ -758,7 +752,6 @@ def create_router(
                 }
             )
         return items
-
 
     def _load_memory_sync(config_path: Path, config: dict[str, Any]) -> dict[str, Any]:
         """Read experience-store lessons + attack-memory items (best-effort).
@@ -834,12 +827,10 @@ def create_router(
 
         return {"lessons": lessons, "confidence": confidence, "attack_memory": attack_memory}
 
-
     @router.get("/system/memory")
     async def get_memory(auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Attack memory + experience-store learnings (cross-mission, no secrets)."""
         return await asyncio.to_thread(_load_memory_sync, config_path, config)
-
 
     @router.get("/system/sandbox")
     async def get_sandbox_status(auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -853,7 +844,6 @@ def create_router(
 
         return await asyncio.to_thread(status_report, config)
 
-
     @router.get("/system/sandbox/fix/plan")
     async def get_sandbox_fix_plan(auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Read-only remediation plan for the Docker sandbox.
@@ -865,7 +855,6 @@ def create_router(
         from tools.sandbox.remediation import build_plan
 
         return await asyncio.to_thread(build_plan, config)
-
 
     @router.post("/system/sandbox/fix")
     async def start_sandbox_fix(auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -902,7 +891,6 @@ def create_router(
         _start_background_job(job.job_id, config)
         return _job_to_dict(job)
 
-
     @router.get("/system/sandbox/fix/{job_id}")
     async def get_sandbox_fix_status(job_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Poll the fix job for structured step progress."""
@@ -915,7 +903,6 @@ def create_router(
         if job is None:
             raise HTTPException(status_code=404, detail="Fix job not found")
         return _job_to_dict(job)
-
 
     @router.post("/system/reset")
     async def reset_system(request: Request, auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -1001,7 +988,6 @@ def create_router(
             "research_cleared": research_cleared,
         }
 
-
     @router.get("/plugins")
     async def list_plugins(auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """List discovered plugins."""
@@ -1011,7 +997,6 @@ def create_router(
             return {"plugins": list_discovered_plugins()}
         except Exception:
             return {"plugins": []}
-
 
     @router.get("/skills")
     async def list_skills(auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -1028,7 +1013,6 @@ def create_router(
         except Exception as exc:
             return {"skills": [], "error": f"{type(exc).__name__}: {exc}"}
 
-
     @router.get("/skills/search")
     async def search_skills(q: str = "", auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Search runtime skills by query."""
@@ -1040,7 +1024,6 @@ def create_router(
             return {"results": [{"name": s.name, "description": s.metadata.description} for s in results[:20]]}
         except Exception as exc:
             return {"results": [], "error": f"{type(exc).__name__}: {exc}"}
-
 
     def _run_doctor_sync(config_path: Path) -> tuple[int, str]:
         """Run the environment self-check off-thread and capture its stdout."""
@@ -1054,13 +1037,11 @@ def create_router(
             code = _run(config_path)
         return code, buf.getvalue()
 
-
     @router.post("/diagnostics/doctor")
     async def run_doctor(auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Run the environment self-check and capture its stdout output."""
         code, output = await asyncio.to_thread(_run_doctor_sync, config_path)
         return {"exit_code": code, "output": output}
-
 
     @router.post("/diagnostics/self-test")
     async def run_self_test(auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -1075,9 +1056,7 @@ def create_router(
             code = await _run(None)
         return {"exit_code": code, "output": buf.getvalue()}
 
-
     # ── Attack modules catalog ──────────────────────────────────────────────────
-
 
     @router.get("/attack/modules")
     async def list_attack_modules(auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -1100,15 +1079,12 @@ def create_router(
             )
         return {"modules": out}
 
-
     # ── Goals (B4) ──────────────────────────────────────────────────────────────
-
 
     # ── Custom goals helpers ─────────────────────────────────────────────────
 
     _CUSTOM_GOAL_NAME_MAX = 100
     _CUSTOM_GOAL_OBJECTIVE_MAX = 2000
-
 
     def _validate_custom_goal_name(name: Any) -> str:
         from tools.api.errors import APIError
@@ -1121,7 +1097,6 @@ def create_router(
         if len(cleaned) > _CUSTOM_GOAL_NAME_MAX:
             raise APIError("invalid_goal", f"name must be at most {_CUSTOM_GOAL_NAME_MAX} characters.", status_code=400)
         return cleaned
-
 
     def _validate_custom_goal_objective(objective: Any) -> str:
         from tools.api.errors import APIError
@@ -1139,7 +1114,6 @@ def create_router(
             )
         return cleaned
 
-
     def _check_duplicate_custom_goal_name(name: str, exclude_id: str | None = None) -> None:
         from tools.api.errors import APIError
         from tools.goal_engine import PRESET_GOALS
@@ -1155,7 +1129,6 @@ def create_router(
         existing = persistence.get_custom_goal_by_name(name)
         if existing and (exclude_id is None or existing["id"] != exclude_id):
             raise APIError("duplicate_goal", f"A custom goal with name '{name}' already exists.", status_code=409)
-
 
     @router.get("/goals")
     async def list_goals(auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -1206,7 +1179,6 @@ def create_router(
                 custom_goals = []
         return {"goals": out, "custom_goals": custom_goals}
 
-
     @router.post("/goals", status_code=201)
     async def create_custom_goal(request: Request, auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Create a persisted custom goal.
@@ -1240,7 +1212,6 @@ def create_router(
             "updated_at": row["updated_at"],
             "source": "custom",
         }
-
 
     @router.patch("/goals/{goal_id}")
     async def update_custom_goal(goal_id: str, request: Request, auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -1288,7 +1259,6 @@ def create_router(
             "source": "custom",
         }
 
-
     @router.delete("/goals/{goal_id}")
     async def delete_custom_goal(goal_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Delete a persisted custom goal.
@@ -1309,9 +1279,7 @@ def create_router(
             raise HTTPException(status_code=404, detail="Custom goal not found")
         return {"deleted": True, "id": goal_id}
 
-
     # ── Config schema (B5) ──────────────────────────────────────────────────────
-
 
     @router.get("/config/schema")
     async def get_config_schema(auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -1320,9 +1288,7 @@ def create_router(
 
         return {"schema": CONFIG_SCHEMA}
 
-
     # ── Live Ollama models (C1) ─────────────────────────────────────────────────
-
 
     @router.get("/models/live")
     async def list_live_models(auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -1350,7 +1316,11 @@ def create_router(
         except Exception as exc:  # unknown provider id — surface, don't crash
             return Response(
                 content=json.dumps(
-                    {"models": registry_fallback, "source": "registry", "error": f"Unknown provider '{provider}': {exc}"}
+                    {
+                        "models": registry_fallback,
+                        "source": "registry",
+                        "error": f"Unknown provider '{provider}': {exc}",
+                    }
                 ),
                 status_code=503,
                 media_type="application/json",
@@ -1382,9 +1352,7 @@ def create_router(
                 media_type="application/json",
             )
 
-
     # ── AI providers (ChatGPT / openai-oauth) ────────────────────────────────────
-
 
     def _chatgpt_status_sync(chatgpt_cfg: dict[str, Any]) -> tuple[bool, bool]:
         """Read ChatGPT auth + proxy health off-thread (health check does HTTP)."""
@@ -1392,7 +1360,6 @@ def create_router(
 
         manager = ChatGptProxyManager.get()
         return manager.is_authenticated(chatgpt_cfg), manager._health_ok(chatgpt_cfg)
-
 
     def _opencode_go_status_sync(og_cfg: dict[str, Any]) -> dict[str, Any]:
         """Return OpenCode Go reachable/online status without exposing secrets.
@@ -1456,7 +1423,6 @@ def create_router(
             result["error"] = error
         return result
 
-
     @router.get("/providers")
     async def get_providers(auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Registry-driven provider metadata + status (no secrets).
@@ -1500,7 +1466,6 @@ def create_router(
             "opencode_go": og_status,
         }
 
-
     @router.post("/providers/chatgpt/login")
     async def chatgpt_login(auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Start a ChatGPT OAuth login (browser flow) and return the login URL.
@@ -1515,7 +1480,6 @@ def create_router(
         result = await asyncio.to_thread(ChatGptProxyManager.get().run_login, chatgpt_cfg)
         return result
 
-
     @router.post("/providers/chatgpt/proxy/start")
     async def chatgpt_proxy_start(auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Ensure the local openai-oauth proxy is running."""
@@ -1524,7 +1488,6 @@ def create_router(
 
         chatgpt_cfg = get_chatgpt_config(config)
         return await asyncio.to_thread(ChatGptProxyManager.get().ensure_running, chatgpt_cfg)
-
 
     @router.post("/providers/chatgpt/proxy/stop")
     async def chatgpt_proxy_stop(auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -1538,9 +1501,7 @@ def create_router(
         await asyncio.to_thread(manager.shutdown, chatgpt_cfg)
         return {"ok": True, "stopped": we_started}
 
-
     # ── Skill detail (C2) ──────────────────────────────────────────────────────
-
 
     @router.get("/skills/{name}")
     async def get_skill(name: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -1570,7 +1531,6 @@ def create_router(
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Could not load skill: {exc}")
 
-
     # ── Skill install / remove (write path) ──────────────────────────────────────
     # Skills are advisory-only markdown guidance imported into the LLM system prompt.
     # Install writes a new SKILL.md under the first configured skills.roots dir;
@@ -1581,7 +1541,6 @@ def create_router(
     # on disk; the registry cache is cleared so the next read reloads from disk.
 
     _SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,63}$")
-
 
     def _skill_writable_root() -> Path:
         """Return the first configured skills.roots entry, resolved against the repo base.
@@ -1607,7 +1566,6 @@ def create_router(
             raise APIError("invalid_config", f"Skills root is not a directory: {first}", status_code=400)
         return first
 
-
     def _validate_skill_name(name: str) -> str:
         from tools.api.errors import APIError
 
@@ -1620,7 +1578,6 @@ def create_router(
             )
         return cleaned
 
-
     def _resolve_skill_dir(name: str, root: Path) -> Path:
         """Resolve the skill directory for a name and confirm it stays under root."""
         from tools.api.errors import APIError
@@ -1632,7 +1589,6 @@ def create_router(
             raise APIError("invalid_skill_name", "Skill name escapes the skills root.", status_code=400)
         return target
 
-
     def _plugin_skill_dirs() -> set[str]:
         """Return the set of plugin-contributed skill dir paths (read-only, never writable)."""
         try:
@@ -1641,7 +1597,6 @@ def create_router(
             return {str(p) for p in PLUGIN_REGISTRY.skill_dirs}
         except Exception:
             return set()
-
 
     @router.post("/skills")
     async def install_skill(request: Request, auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -1719,7 +1674,6 @@ def create_router(
                 except OSError:
                     pass
             raise APIError("install_failed", f"Could not install skill: {exc}", status_code=500)
-
 
     @router.delete("/skills/{name}")
     async def remove_skill(name: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
