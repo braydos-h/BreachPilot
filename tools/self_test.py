@@ -63,6 +63,16 @@ async def run_self_test(args: Any) -> int:
 
     Returns 0 when every stage passes, 1 otherwise.
     """
+    import sys
+
+    # Windows cp1252 cannot encode ✓/✗; ensure stdout/stderr handle utf-8 gracefully.
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+    except Exception:
+        pass
     target_ip = getattr(args, "target", "").strip() or "127.0.0.1"
     if target_ip not in ("127.0.0.1", "localhost", "::1"):
         ui.error(f"--self-test only supports 127.0.0.1/localhost; got {target_ip}")

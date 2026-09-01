@@ -113,11 +113,29 @@ class _PluginEventDispatcher:
                 if all(not w.done() for w in self._workers):
                     return
             if self._queue is not None and self._started_loop is not loop:
-                for w in list(self._workers):
-                    w.cancel()
+                stale = list(self._workers)
                 self._workers.clear()
+                for w in stale:
+                    try:
+                        if hasattr(w, "get_loop") and w.get_loop() is loop:
+                            w.cancel()
+                    except Exception:
+                        pass
+                old_q = self._queue
                 self._queue = None
                 self._started_loop = None
+                if old_q is not None:
+                    while True:
+                        try:
+                            old_q.get_nowait()
+                            try:
+                                old_q.task_done()
+                            except ValueError:
+                                pass
+                        except asyncio.QueueEmpty:
+                            break
+                        except Exception:
+                            break
             if self._queue is None:
                 self._queue = asyncio.Queue(maxsize=self._max_queue_size)
                 self._started_loop = loop
@@ -166,7 +184,15 @@ class _PluginEventDispatcher:
     async def _worker_loop(self, idx: int) -> None:
         assert self._queue is not None
         q = self._queue
+        try:
+            worker_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            worker_loop = None
         while True:
+            if q is not self._queue:
+                break
+            if worker_loop is not None and self._started_loop is not worker_loop:
+                break
             try:
                 event = await q.get()
                 if event is None:
@@ -179,8 +205,26 @@ class _PluginEventDispatcher:
                     self._processed += 1
             except asyncio.CancelledError:
                 break
+            except GeneratorExit:
+                break
+            except RuntimeError as exc:
+                if "bound to a different event loop" in str(exc):
+                    log.warning("plugin event dispatcher worker %d exiting: queue bound to different loop", idx)
+                    break
+                if "no running event loop" in str(exc):
+                    break
+                log.warning("plugin event dispatcher worker %d crashed", idx, exc_info=True)
+                try:
+                    await asyncio.sleep(0.05)
+                except (asyncio.CancelledError, GeneratorExit, RuntimeError):
+                    break
+                continue
             except BaseException:
                 log.warning("plugin event dispatcher worker %d crashed", idx, exc_info=True)
+                try:
+                    await asyncio.sleep(0.05)
+                except (asyncio.CancelledError, GeneratorExit, RuntimeError):
+                    break
                 continue
 
     async def _dispatch_one(self, event: dict[str, Any]) -> None:
@@ -310,10 +354,18 @@ class _PluginEventDispatcher:
                         pass
                 except asyncio.QueueEmpty:
                     break
+                except RuntimeError:
+                    break
                 except Exception:
                     break
         for w in list(self._workers):
-            w.cancel()
+            try:
+                if not w.done():
+                    w.cancel()
+            except RuntimeError:
+                pass
+            except Exception:
+                pass
         self._workers.clear()
         self._queue = None
         self._started_loop = None

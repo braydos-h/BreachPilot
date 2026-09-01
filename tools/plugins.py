@@ -679,6 +679,23 @@ def reset_plugin_load_cache() -> None:
     """Drop the cached plugin-load result (tests; config/file changes)."""
     with _PLUGIN_LOAD_LOCK:
         _PLUGIN_LOAD_CACHE.clear()
+    # The cache is what prevents re-registration on repeated loads with the
+    # same config. Clearing the cache without clearing the registry would
+    # cause the next load to duplicate every registration (the test
+    # ``test_reset_plugin_load_cache_forces_reload`` expects exactly one).
+    # Clear the registry's plugin state as well so a cache reset + reload is
+    # idempotent. ``reset()`` already clears these collections directly and
+    # then calls us, so this is not recursive.
+    try:
+        PLUGIN_REGISTRY._extra_module_classes.clear()  # type: ignore[attr-defined]
+        PLUGIN_REGISTRY._mcp_tool_factories.clear()  # type: ignore[attr-defined]
+        PLUGIN_REGISTRY._skill_dirs.clear()  # type: ignore[attr-defined]
+        PLUGIN_REGISTRY._config_sections.clear()  # type: ignore[attr-defined]
+        PLUGIN_REGISTRY._loaded_plugins.clear()  # type: ignore[attr-defined]
+        PLUGIN_REGISTRY._event_subscribers.clear()  # type: ignore[attr-defined]
+        _DISCOVERED_PLUGINS.clear()
+    except Exception:
+        pass
 
 
 def load_plugins(

@@ -1178,12 +1178,18 @@ def test_ollama_regression(monkeypatch):
             return {"message": {"content": "ollama"}}
 
     monkeypatch.setattr(mr, "OllamaClient", _Ollama)
+    from tools.providers.ollama_provider import _RAW_CLIENT_CACHE, _RAW_CLIENT_CACHE_LOCK
+
+    with _RAW_CLIENT_CACHE_LOCK:
+        _RAW_CLIENT_CACHE.clear()
+    constructed.clear()
     router = build_router(DEFAULT_MODEL_REGISTRY, host="https://api.ollama.com")
     client = router.get_client("glm")
     assert client.model_id == "glm-5.2:cloud"
     resp = client.chat(messages=[{"role": "user", "content": "hi"}])
     assert resp["message"]["content"] == "ollama"
-    assert constructed == ["https://api.ollama.com"] * len(DEFAULT_MODEL_REGISTRY)
+    assert constructed.count("https://api.ollama.com") == 1
+    assert len(router.clients()) == len(DEFAULT_MODEL_REGISTRY)
 
 
 # ---------------------------------------------------------------------------

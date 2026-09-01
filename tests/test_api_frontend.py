@@ -122,6 +122,15 @@ def test_doctor_returns_output(tmp_path, monkeypatch):
 
 
 def test_self_test_returns_output(tmp_path, monkeypatch):
+    # Self-test boots the real MCP server and runs nmap (~45 s); mock it for
+    # unit-test speed and Windows stability (unicode cp1252 would otherwise
+    # raise on print). The endpoint contract is still exercised.
+    async def _fake_self_test(args):
+        print("Self-Test (mock) — all checks passed")
+        return 0
+
+    monkeypatch.setattr("tools.api.routes.system.run_self_test", _fake_self_test, raising=False)
+    monkeypatch.setattr("tools.self_test.run_self_test", _fake_self_test, raising=False)
     client = _make_client(tmp_path, monkeypatch)
     resp = client.post("/api/v1/diagnostics/self-test", headers=_auth())
     assert resp.status_code == 200

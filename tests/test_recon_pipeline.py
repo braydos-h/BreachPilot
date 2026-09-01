@@ -392,7 +392,12 @@ class TestHostReconResult:
 class TestSecondaryEnumeration:
     @pytest.mark.asyncio
     async def test_enumerate_http(self, recon_config: ReconConfig) -> None:
-        with patch("tools.recon_pipeline.run_command") as mock_run:
+        with (
+            patch("tools.recon.config.ToolAvailability.check", return_value=True),
+            patch("tools.recon.enumerator.run_command") as mock_run,
+            patch("tools.recon.scanner.run_command", new=mock_run),
+            patch("tools.recon_pipeline.run_command", new=mock_run),
+        ):
             mock_run.return_value = (True, "Server: Apache/2.4.41", "", 1.0)
 
             enumerator = SecondaryEnumerator(recon_config)
@@ -405,7 +410,12 @@ class TestSecondaryEnumeration:
 
     @pytest.mark.asyncio
     async def test_enumerate_ssh(self, recon_config: ReconConfig) -> None:
-        with patch("tools.recon_pipeline.run_command") as mock_run:
+        with (
+            patch("tools.recon.config.ToolAvailability.check", return_value=True),
+            patch("tools.recon.enumerator.run_command") as mock_run,
+            patch("tools.recon.scanner.run_command", new=mock_run),
+            patch("tools.recon_pipeline.run_command", new=mock_run),
+        ):
             mock_run.return_value = (True, "arcfour", "", 1.0)
 
             enumerator = SecondaryEnumerator(recon_config)
@@ -419,7 +429,12 @@ class TestSecondaryEnumeration:
 
     @pytest.mark.asyncio
     async def test_enumerate_smb(self, recon_config: ReconConfig) -> None:
-        with patch("tools.recon_pipeline.run_command") as mock_run:
+        with (
+            patch("tools.recon.config.ToolAvailability.check", return_value=True),
+            patch("tools.recon.enumerator.run_command") as mock_run,
+            patch("tools.recon.scanner.run_command", new=mock_run),
+            patch("tools.recon_pipeline.run_command", new=mock_run),
+        ):
             mock_run.return_value = (True, "Sharename\n| test_share\n|", "", 1.0)
 
             enumerator = SecondaryEnumerator(recon_config)
@@ -437,16 +452,22 @@ class TestSecondaryEnumeration:
 class TestReconPipeline:
     @pytest.mark.asyncio
     async def test_recon_host(self, recon_config: ReconConfig, sample_nmap_xml: str) -> None:
-        with patch("tools.recon_pipeline.ToolAvailability.check", return_value=True):
-            with patch("tools.recon_pipeline.run_command") as mock_run:
-                mock_run.return_value = (True, sample_nmap_xml, "", 5.0)
+        with (
+            patch("tools.recon.config.ToolAvailability.check", return_value=True),
+            patch("tools.recon.scanner.ToolAvailability.check", return_value=True),
+            patch("tools.recon_pipeline.ToolAvailability.check", return_value=True),
+            patch("tools.recon.scanner.run_command") as mock_run,
+            patch("tools.recon.enumerator.run_command", new=mock_run),
+            patch("tools.recon_pipeline.run_command", new=mock_run),
+        ):
+            mock_run.return_value = (True, sample_nmap_xml, "", 5.0)
 
-                pipeline = ReconPipeline(recon_config)
-                result = await pipeline.recon_host("10.0.0.50")
+            pipeline = ReconPipeline(recon_config)
+            result = await pipeline.recon_host("10.0.0.50")
 
-                assert result.target_ip == "10.0.0.50"
-                assert len(result.open_ports) > 0
-                assert result.scan_duration > 0
+            assert result.target_ip == "10.0.0.50"
+            assert len(result.open_ports) > 0
+            assert result.scan_duration > 0
 
     @pytest.mark.asyncio
     async def test_recon_host_no_ports(self, recon_config: ReconConfig) -> None:
@@ -458,8 +479,12 @@ class TestReconPipeline:
             return []
 
         with (
+            patch("tools.recon.config.ToolAvailability.check", return_value=True),
+            patch("tools.recon.scanner.ToolAvailability.check", return_value=True),
             patch("tools.recon_pipeline.ToolAvailability.check", return_value=True),
-            patch("tools.recon_pipeline.run_command") as mock_run,
+            patch("tools.recon.scanner.run_command") as mock_run,
+            patch("tools.recon.enumerator.run_command", new=mock_run),
+            patch("tools.recon_pipeline.run_command", new=mock_run),
             patch("tools.socket_scan.socket_scan", side_effect=_no_open_ports),
         ):
             mock_run.return_value = (True, "", "", 1.0)
@@ -472,17 +497,23 @@ class TestReconPipeline:
 
     @pytest.mark.asyncio
     async def test_recon_hosts_parallel(self, recon_config: ReconConfig, sample_nmap_xml: str) -> None:
-        with patch("tools.recon_pipeline.ToolAvailability.check", return_value=True):
-            with patch("tools.recon_pipeline.run_command") as mock_run:
-                mock_run.return_value = (True, sample_nmap_xml, "", 5.0)
+        with (
+            patch("tools.recon.config.ToolAvailability.check", return_value=True),
+            patch("tools.recon.scanner.ToolAvailability.check", return_value=True),
+            patch("tools.recon_pipeline.ToolAvailability.check", return_value=True),
+            patch("tools.recon.scanner.run_command") as mock_run,
+            patch("tools.recon.enumerator.run_command", new=mock_run),
+            patch("tools.recon_pipeline.run_command", new=mock_run),
+        ):
+            mock_run.return_value = (True, sample_nmap_xml, "", 5.0)
 
-                pipeline = ReconPipeline(recon_config)
-                results = await pipeline.recon_hosts(["10.0.0.50", "10.0.0.51"])
+            pipeline = ReconPipeline(recon_config)
+            results = await pipeline.recon_hosts(["10.0.0.50", "10.0.0.51"])
 
-                assert len(results) == 2
-                for r in results:
-                    if not isinstance(r, Exception):
-                        assert len(r.open_ports) > 0
+            assert len(results) == 2
+            for r in results:
+                if not isinstance(r, Exception):
+                    assert len(r.open_ports) > 0
 
     def test_attack_surface_summary(self, recon_config: ReconConfig) -> None:
         result = HostReconResult(
@@ -619,7 +650,10 @@ class TestRegressions:
             mock_proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
             mock_exec.return_value = mock_proc
 
-            with patch("tools.recon_pipeline._kill_process", new=AsyncMock()) as mock_kill:
+            with (
+                patch("tools.recon.scanner._kill_process", new=AsyncMock()) as mock_kill,
+                patch("tools.recon_pipeline._kill_process", new=mock_kill),
+            ):
                 success, _stdout, stderr, _elapsed = await run_command(
                     ["sleep", "100"],
                     timeout=1,
@@ -643,7 +677,10 @@ class TestRegressions:
             mock_proc.communicate = AsyncMock(side_effect=RuntimeError("boom"))
             mock_exec.return_value = mock_proc
 
-            with patch("tools.recon_pipeline._kill_process", new=AsyncMock()) as mock_kill:
+            with (
+                patch("tools.recon.scanner._kill_process", new=AsyncMock()) as mock_kill,
+                patch("tools.recon_pipeline._kill_process", new=mock_kill),
+            ):
                 success, _stdout, stderr, _elapsed = await run_command(
                     ["sleep", "100"],
                     timeout=10,
@@ -664,7 +701,10 @@ class TestRegressions:
         mock_killpg = MagicMock()
         fake_os_posix = SimpleNamespace(killpg=mock_killpg, getpgid=lambda pid: 1234)
         fake_signal = SimpleNamespace(SIGKILL=9)
-        with patch("tools.recon_pipeline.os", fake_os_posix), patch("tools.recon_pipeline.signal", fake_signal):
+        with (
+            patch("tools.recon.scanner.os", fake_os_posix),
+            patch("tools.recon.scanner.signal", fake_signal),
+        ):
             mock_proc = MagicMock()
             mock_proc.pid = 99
             mock_proc.wait = AsyncMock()
@@ -674,7 +714,7 @@ class TestRegressions:
 
         # Windows path: os has no killpg attribute -> fallback to proc.kill().
         fake_os_win = SimpleNamespace(getpgid=lambda pid: 1234)
-        with patch("tools.recon_pipeline.os", fake_os_win):
+        with patch("tools.recon.scanner.os", fake_os_win):
             mock_proc = MagicMock()
             mock_proc.pid = 99
             mock_proc.kill = MagicMock(return_value=None)
@@ -720,17 +760,23 @@ class TestRegressions:
     async def test_enumerate_http_sets_technologies(self, recon_config: ReconConfig) -> None:
         """M13: _enumerate_http stores fingerprinted technologies on
         svc.technologies instead of the old non-existent new_technologies."""
-        with patch("tools.recon_pipeline.ToolAvailability.check", return_value=True):
-            with patch("tools.recon_pipeline.run_command") as mock_run:
-                mock_run.return_value = (True, "Server: Apache/2.4.41", "", 1.0)
-                enumerator = SecondaryEnumerator(recon_config)
-                result = HostReconResult(
-                    target_ip="10.0.0.50",
-                    services=[ServiceInfo(port=80, service="http")],
-                )
-                await enumerator._enumerate_http(result, result.services)
-                assert result.services[0].technologies
-                assert any("Apache" in t for t in result.services[0].technologies)
+        with (
+            patch("tools.recon.config.ToolAvailability.check", return_value=True),
+            patch("tools.recon.enumerator.ToolAvailability.check", return_value=True),
+            patch("tools.recon_pipeline.ToolAvailability.check", return_value=True),
+            patch("tools.recon.enumerator.run_command") as mock_run,
+            patch("tools.recon.scanner.run_command", new=mock_run),
+            patch("tools.recon_pipeline.run_command", new=mock_run),
+        ):
+            mock_run.return_value = (True, "Server: Apache/2.4.41", "", 1.0)
+            enumerator = SecondaryEnumerator(recon_config)
+            result = HostReconResult(
+                target_ip="10.0.0.50",
+                services=[ServiceInfo(port=80, service="http")],
+            )
+            await enumerator._enumerate_http(result, result.services)
+            assert result.services[0].technologies
+            assert any("Apache" in t for t in result.services[0].technologies)
 
     @pytest.mark.asyncio
     async def test_enumerate_redis_rejects_invalid_target(self) -> None:
@@ -751,28 +797,32 @@ class TestRegressions:
     async def test_enumerate_redis_no_shell_injection(self) -> None:
         """H7: _enumerate_redis talks to nc via an argv list (no bash -c) and
         writes INFO to stdin."""
-        with patch("tools.recon_pipeline.ToolAvailability.check", return_value=True):
-            with patch("asyncio.create_subprocess_exec") as mock_exec:
-                mock_proc = AsyncMock()
-                mock_proc.returncode = 0
-                mock_proc.communicate = AsyncMock(return_value=(b"redis_version:7.0.0\r\n", b""))
-                mock_exec.return_value = mock_proc
+        with (
+            patch("tools.recon.config.ToolAvailability.check", return_value=True),
+            patch("tools.recon.enumerator.ToolAvailability.check", return_value=True),
+            patch("tools.recon_pipeline.ToolAvailability.check", return_value=True),
+            patch("asyncio.create_subprocess_exec") as mock_exec,
+        ):
+            mock_proc = AsyncMock()
+            mock_proc.returncode = 0
+            mock_proc.communicate = AsyncMock(return_value=(b"redis_version:7.0.0\r\n", b""))
+            mock_exec.return_value = mock_proc
 
-                enumerator = SecondaryEnumerator(ReconConfig())
-                result = HostReconResult(
-                    target_ip="10.0.0.50",
-                    services=[ServiceInfo(port=6379, service="redis")],
-                )
-                out = await enumerator._enumerate_redis(result, result.services)
+            enumerator = SecondaryEnumerator(ReconConfig())
+            result = HostReconResult(
+                target_ip="10.0.0.50",
+                services=[ServiceInfo(port=6379, service="redis")],
+            )
+            out = await enumerator._enumerate_redis(result, result.services)
 
-                # Invoked as an argv list with nc first (no bash -c wrapper).
-                args, kwargs = mock_exec.call_args
-                assert args[0] == "nc"
-                assert "bash" not in args and "-c" not in args
-                assert list(args[1:]) == ["-w", "3", "10.0.0.50", "6379"]
-                assert kwargs.get("stdin") is asyncio.subprocess.PIPE
-                # INFO command sent via stdin, not shell echo.
-                mock_proc.communicate.assert_awaited()
-                communicated_kwargs = mock_proc.communicate.call_args.kwargs
-                assert communicated_kwargs.get("input") == b"INFO\n"
-                assert "redis_info:6379" in out.evidence_refs
+            # Invoked as an argv list with nc first (no bash -c wrapper).
+            args, kwargs = mock_exec.call_args
+            assert args[0] == "nc"
+            assert "bash" not in args and "-c" not in args
+            assert list(args[1:]) == ["-w", "3", "10.0.0.50", "6379"]
+            assert kwargs.get("stdin") is asyncio.subprocess.PIPE
+            # INFO command sent via stdin, not shell echo.
+            mock_proc.communicate.assert_awaited()
+            communicated_kwargs = mock_proc.communicate.call_args.kwargs
+            assert communicated_kwargs.get("input") == b"INFO\n"
+            assert "redis_info:6379" in out.evidence_refs

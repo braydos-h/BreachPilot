@@ -572,10 +572,56 @@ class RunManager:
                 if event_error is not None:
                     raise event_error
                 return
-            task.cancel()
+            # TestClient creates a fresh portal per request; the prep_task may be
+            # bound to a different (now closed) loop. Detect and avoid
+            # ``asyncio.wait`` on a foreign loop which raises "Event loop is closed".
+            try:
+                cur_loop = asyncio.get_running_loop()
+                task_loop = task.get_loop() if hasattr(task, "get_loop") else None
+                if task_loop is not None and task_loop is not cur_loop:
+                    try:
+                        task.cancel()
+                    except RuntimeError:
+                        pass
+                    self._active.pop(run_id, None)
+                    try:
+                        handle.event_broker.close()
+                    except Exception:
+                        pass
+                    if event_error is not None:
+                        raise event_error
+                    return
+            except RuntimeError:
+                pass
+            try:
+                task.cancel()
+            except RuntimeError:
+                # Task from a closed loop — just drop the handle.
+                self._active.pop(run_id, None)
+                try:
+                    handle.event_broker.close()
+                except Exception:
+                    pass
+                if event_error is not None:
+                    raise event_error
+                return
 
         timeout = max(0.0, float(self._config.get("api", {}).get("shutdown_timeout_seconds", 15)))
-        _, pending = await asyncio.wait({task}, timeout=timeout)
+        try:
+            _, pending = await asyncio.wait({task}, timeout=timeout)
+        except RuntimeError as exc:
+            # Cross-loop or closed-loop wait — treat as cancelled.
+            if "Event loop is closed" in str(exc) or "different loop" in str(exc).lower():
+                async with self._lifecycle_lock:
+                    self._active.pop(run_id, None)
+                try:
+                    handle.event_broker.close()
+                except Exception:
+                    pass
+                if event_error is not None:
+                    raise event_error
+                return
+            raise
         if pending:
             raise APIError("cancel_timeout", "Run cancellation timed out.", status_code=504)
         # A task cancelled before its first run (e.g. an immediate cancel after
@@ -685,7 +731,10 @@ class RunManager:
                 if handle is not None and handle.prep_task is not None and not handle.prep_task.done():
                     # In-flight preparation: stop it first so cancel_run's
                     # wait covers the right task.
-                    handle.prep_task.cancel()
+                    try:
+                        handle.prep_task.cancel()
+                    except RuntimeError:
+                        pass
                 try:
                     await self.cancel_run(run_id)
                 except Exception:  # noqa: BLE001 -- best-effort, one bad cancel never blocks the rest

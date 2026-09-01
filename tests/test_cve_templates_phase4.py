@@ -38,6 +38,7 @@ async def test_new_cve_templates_dispatch(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr(NVDClient, "search_sync", lambda self, q: [])
     monkeypatch.setattr(ExploitSearch, "search_web_exploit", lambda self, q: "no results")
+    monkeypatch.setattr(ExploitSearch, "cve_to_poc", lambda self, cve, nvd_refs=None: "NO_VERIFIED_POC_FOUND: mock")
 
     mcp = _make_server(tmp_path)
     cases = [
@@ -76,6 +77,7 @@ async def test_unknown_cve_falls_back_to_generic(tmp_path: Path, monkeypatch) ->
 
     monkeypatch.setattr(NVDClient, "search_sync", lambda self, q: [])
     monkeypatch.setattr(ExploitSearch, "search_web_exploit", lambda self, q: "no results")
+    monkeypatch.setattr(ExploitSearch, "cve_to_poc", lambda self, cve, nvd_refs=None: "NO_VERIFIED_POC_FOUND: mock")
 
     mcp = _make_server(tmp_path)
     res = await mcp.call_tool(
