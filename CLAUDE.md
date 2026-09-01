@@ -65,10 +65,10 @@ python main.py --target 10.0.0.50 --mode recon --recon-first
 python main.py --target 10.0.0.50 --mode attack --swarm --critic --reflection --adaptive-exploits
 ```
 
-### WebUI API daemon (--demon / --daemon / --web)
+### WebUI API daemon (--daemon (legacy alias: --demon) / --web)
 ```bash
-python main.py --demon                        # start the local WebUI API on http://127.0.0.1:8765
-python main.py --daemon --api-port 9000       # alias, custom port
+python main.py --daemon                       # start the local WebUI API on http://127.0.0.1:8765
+python main.py --daemon --api-port 9000       # custom port (legacy alias: --demon)
 python main.py --web                          # build webui/ if needed, serve it at /, open a browser
 # Interactive docs: http://127.0.0.1:8765/docs
 # OpenAPI schema:  http://127.0.0.1:8765/openapi.json
@@ -76,7 +76,7 @@ python main.py --web                          # build webui/ if needed, serve it
 # v1 is loopback-only; concurrent runs capped by api.max_concurrent_runs (default 3);
 # bundled WebUI served when api.serve_webui is true.
 ```
-`--web` is shorthand for: build `webui/dist/` if missing (runs `npm install && npm run build` in `webui/`), set `api.serve_webui: true` in memory (not written to `config.yaml`), start the daemon, and open `http://127.0.0.1:8765/` in a browser. The built UI is a Vite + React + TypeScript SPA under `webui/` that talks to the `/api/v1` REST + WebSocket surface. `--web` has the same mutual-exclusion constraints as `--demon`.
+`--web` is shorthand for: build `webui/dist/` if missing (runs `npm install && npm run build` in `webui/`), set `api.serve_webui: true` in memory (not written to `config.yaml`), start the daemon, and open `http://127.0.0.1:8765/` in a browser. The built UI is a Vite + React + TypeScript SPA under `webui/` that talks to the `/api/v1` REST + WebSocket surface. `--web` has the same mutual-exclusion constraints as `--daemon` (legacy alias: `--demon`).
 
 ### Legacy research CLI (writes to research_workspace/research.db)
 ```bash
@@ -141,7 +141,7 @@ Two control flows exist: **Flow A is the active engine**; **Flow B is frozen in 
 ### Flow A — Exploitation engine (modern, `main.py` / `app.py`)
 The "what the user actually runs" path. Async, MCP-based, multi-agent-capable.
 
-Both the CLI (`main.async_main`) and the WebUI API daemon (`--demon`/`--daemon`,
+Both the CLI (`main.async_main`) and the WebUI API daemon (`--daemon` (legacy alias: `--demon`),
 `app.py` → `tools/api/`) drive assessments through `AssessmentService`
 (`tools/run_service/service.py`), a transport-neutral preparation + execution
 service. The CLI supplies `TerminalDecisionProvider` / `TerminalEventSink` /

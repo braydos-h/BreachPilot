@@ -1,4 +1,4 @@
-"""Local WebUI API daemon (``--demon`` / ``--daemon``).
+"""Local WebUI API daemon (``--daemon`` (legacy alias: ``--demon``)).
 
 Exposes a versioned, loopback-only REST + WebSocket API so third-party WebUIs
 can drive assessments, answer decisions, stream live events, and invoke MCP

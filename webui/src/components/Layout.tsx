@@ -15,6 +15,7 @@ import { useTheme } from "@/lib/useTheme";
 import { useProviderStatus } from "@/components/ProviderSetup";
 import { clearStoredBaseline, useSessionTokens } from "@/lib/sessionTokens";
 import { formatTokens } from "@/lib/format";
+import { WindowsPerformanceWarning } from "@/components/WindowsPerformanceWarning";
 
 const NAV_ITEMS = [
   { to: "/", label: "Home", icon: Home, end: true },
@@ -287,6 +288,7 @@ export function Layout() {
       </Sheet>
 
       <main className="flex min-h-0 min-w-0 flex-1 flex-col xl:overflow-hidden">
+        <WindowsPerformanceWarning />
         {mode === "approve" && (
           <div
             className="flex items-center gap-2 border-b border-yellow-500/30 bg-yellow-500/10 px-4 py-1.5 text-xs text-yellow-300"

@@ -249,12 +249,18 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
         if (isCancelled?.()) return;
         const seeded = res.events ?? [];
         const latest = typeof res.latest_sequence === "number" ? res.latest_sequence : 0;
-        // Events older than the tail window still exist server-side; count them
-        // so the UI can say "N older events omitted" without implying deletion.
+        // The backend now reports omitted_before explicitly; use it directly.
+        // Fall back to the legacy has_more_before derivation only for
+        // compatibility with older servers.
         const older =
-          res.has_more_before && typeof res.oldest_sequence === "number"
-            ? res.oldest_sequence - 1
-            : 0;
+          typeof res.omitted_before === "number"
+            ? res.omitted_before
+            : res.has_more_before && typeof res.oldest_sequence === "number"
+              ? res.oldest_sequence - 1
+              : 0;
+        // `latest` remains the cursor for live reconnects — the tail window
+        // may have omitted thousands of older events, but new arrivals are
+        // always > latest and will be replayed via the WS `after` cursor.
         lastSeqRef.current = latest;
         eventStore.set(id, seeded, latest, older);
         eventsRef.current = seeded;

@@ -120,7 +120,9 @@ class RunEventBroker:
         """Paged replay with cursor metadata.
 
         Returns ``{"events": [...], "oldest_sequence": int|None,
-        "latest_sequence": int|None, "has_more_before": bool}``.
+        "latest_sequence": int|None, "has_more_before": bool,
+        "first_returned_sequence": int|None, "last_returned_sequence": int|None,
+        "omitted_before": int, "next_before": int|None}``.
 
         - ``tail=N``: newest N events, ascending by sequence.
         - ``before=X`` + ``limit=N``: up to N events with sequence < X,
@@ -136,24 +138,65 @@ class RunEventBroker:
             oldest = full[0]["sequence"] if full else None
             latest = full[-1]["sequence"] if full else None
 
+            first_returned: int | None = None
+            last_returned: int | None = None
+            omitted_before = 0
+            next_before: int | None = None
+            has_more_before = False
+
             if tail is not None:
-                events = full[-tail:]
-                has_more_before = oldest is not None and oldest > 1
+                if tail < len(full):
+                    events = full[-tail:]
+                else:
+                    events = list(full)
+                if events:
+                    first_returned = events[0]["sequence"]  # type: ignore[index]
+                    last_returned = events[-1]["sequence"]  # type: ignore[index]
+                    omitted_before = len(full) - len(events)
+                    has_more_before = omitted_before > 0
+                    next_before = first_returned if has_more_before else None
+                else:
+                    events = []
+                    has_more_before = False
+                    omitted_before = 0
             elif before is not None:
-                older = [e for e in full if e["sequence"] < before]
+                older_full = [e for e in full if e["sequence"] < before]  # type: ignore[index]
                 if limit is not None:
-                    older = older[-limit:]
+                    if limit < len(older_full):
+                        older = older_full[-limit:]
+                    else:
+                        older = list(older_full)
+                else:
+                    older = older_full
                 events = list(reversed(older))
-                has_more_before = bool(older) and older[0]["sequence"] > 1
+                if events:
+                    # older is ascending; events is descending.
+                    first_returned = older[0]["sequence"]  # oldest in page
+                    last_returned = older[-1]["sequence"]  # newest in page
+                    omitted_before = len(older_full) - len(older)
+                    has_more_before = omitted_before > 0
+                    next_before = first_returned if has_more_before else None
+                else:
+                    has_more_before = False
+                    omitted_before = 0
             else:
-                events = [e for e in full if e["sequence"] > after]
+                events = [e for e in full if e["sequence"] > after]  # type: ignore[index]
+                if events:
+                    first_returned = events[0]["sequence"]  # type: ignore[index]
+                    last_returned = events[-1]["sequence"]  # type: ignore[index]
                 has_more_before = False
+                omitted_before = 0
+                next_before = None
 
             return {
                 "events": events,
                 "oldest_sequence": oldest,
                 "latest_sequence": latest,
                 "has_more_before": has_more_before,
+                "first_returned_sequence": first_returned,
+                "last_returned_sequence": last_returned,
+                "omitted_before": omitted_before,
+                "next_before": next_before,
             }
 
     async def subscribe(self, after: int = 0) -> "EventSubscription":

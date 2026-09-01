@@ -802,6 +802,14 @@ export interface EventReplayResponse {
   oldest_sequence?: number | null;
   latest_sequence?: number | null;
   has_more_before?: boolean;
+  /** Oldest sequence in the returned page (null when page empty). */
+  first_returned_sequence?: number | null;
+  /** Newest sequence in the returned page (null when page empty). */
+  last_returned_sequence?: number | null;
+  /** Number of events that exist server-side before the returned page. */
+  omitted_before?: number;
+  /** Cursor to fetch the previous page (first_returned_sequence when has_more_before, else null). */
+  next_before?: number | null;
 }
 
 export interface DiagnosticsResponse {

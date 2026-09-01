@@ -749,7 +749,7 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "max_retries": 3,
         "backoff_seconds": 2.0,
     },
-    # Local WebUI API daemon (``--demon`` / ``--daemon``). V1 is loopback-only;
+    # Local WebUI API daemon (``--daemon`` (legacy alias: ``--demon``)). V1 is loopback-only;
     # there is no public-bind override. The bearer token is generated into
     # ``token_file`` (gitignored) on first boot, or overridden via
     # ``BREACHPILOT_API_TOKEN``. ``allowed_origins`` are extra loopback origins
