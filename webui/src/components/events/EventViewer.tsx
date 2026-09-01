@@ -382,7 +382,8 @@ export function EventViewer({
     );
   }
 
-  const bootVisible = filter === "all" && debouncedQuery.trim() === "";
+  const bootHasSteps = events.some((e) => e.type === "boot" || e.type === "ok");
+  const bootVisible = bootHasSteps && filter === "all" && debouncedQuery.trim() === "";
 
   return (
     <div className={cn("relative flex flex-col", className)}>
