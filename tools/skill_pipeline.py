@@ -63,7 +63,7 @@ def build_skill_selection_for_context(
     if skills_cfg.get("enabled", True) is False:
         return SkillSelection()
     if registry is None:
-        registry = get_registry({"skills": skills_cfg}, base_dir=Path.cwd())
+        registry = get_registry({"skills": skills_cfg})
     # Note: the embedder is NOT auto-resolved here. Resolving it would build a
     # SemanticMemoryManager and (when Ollama is up) embed the full catalog on
     # every call -- far too expensive for the test suite and for callers that

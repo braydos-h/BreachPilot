@@ -210,9 +210,10 @@ def test_state_event_in_default_filter():
 
 
 def test_event_broker_fires_plugin_subscribers(tmp_path, monkeypatch):
-    """RunEventBroker.emit() fires plugin event subscribers after JSONL write."""
-    from tools.api.event_broker import RunEventBroker
+    """RunEventBroker.emit() fires plugin event subscribers after JSONL write (via bounded dispatcher)."""
+    from tools.api.event_broker import RunEventBroker, _reset_plugin_dispatcher, wait_for_plugin_dispatcher_empty
 
+    _reset_plugin_dispatcher()
     reg = PluginRegistry()
     monkeypatch.setattr("tools.plugins.PLUGIN_REGISTRY", reg)
     seen: list[dict[str, Any]] = []
@@ -223,16 +224,20 @@ def test_event_broker_fires_plugin_subscribers(tmp_path, monkeypatch):
 
     async def _run():
         await broker.emit("finding", {"v": 1})
+        drained = await wait_for_plugin_dispatcher_empty(timeout=2.0)
+        assert drained
 
     asyncio.run(_run())
     assert len(seen) == 1
     assert seen[0]["type"] == "finding"
     assert seen[0]["run_id"] == "run-1"
+    _reset_plugin_dispatcher()
 
 
 def test_event_broker_subscriber_failure_does_not_break_emit(tmp_path, monkeypatch):
-    from tools.api.event_broker import RunEventBroker
+    from tools.api.event_broker import RunEventBroker, _reset_plugin_dispatcher, wait_for_plugin_dispatcher_empty
 
+    _reset_plugin_dispatcher()
     reg = PluginRegistry()
     monkeypatch.setattr("tools.plugins.PLUGIN_REGISTRY", reg)
     good: list[dict[str, Any]] = []
@@ -249,7 +254,10 @@ def test_event_broker_subscriber_failure_does_not_break_emit(tmp_path, monkeypat
     async def _run():
         evt = await broker.emit("finding", {"v": 1})
         assert evt["type"] == "finding"
+        drained = await wait_for_plugin_dispatcher_empty(timeout=2.0)
+        assert drained
 
     asyncio.run(_run())
-    # good subscriber still fired despite bad one raising
+    # good subscriber still fired despite bad one raising — per-subscriber try/except in dispatcher
     assert len(good) == 1
+    _reset_plugin_dispatcher()

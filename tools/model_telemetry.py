@@ -99,6 +99,13 @@ def _usage_field(usage: Any, *names: str) -> int | None:
 
 
 def _load_config(config_path: Path = Path("config.yaml")) -> dict[str, Any]:
+    if config_path == Path("config.yaml") and not config_path.exists():
+        try:
+            from tools.paths import load_effective_config
+
+            return load_effective_config(config_path)
+        except Exception:
+            return {}
     if yaml is None or not config_path.exists():
         return {}
     try:

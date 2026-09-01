@@ -19,10 +19,14 @@ Failure modes:
 - event filter empty → send nothing.
 - payload too large → cap at ``max_payload_chars``.
 
-The subscriber is synchronous and runs in the emit() call site's thread. The
-HTTP POST uses a short timeout + ``urllib`` (stdlib) so the plugin adds no new
-dependency. Retries are bounded (``max_retries``) so a permanently-down
-endpoint does not stall emit() indefinitely.
+The subscriber is synchronous (``urllib`` + ``time.sleep`` backoff) but is
+dispatched through the bounded ``tools.api.event_broker`` plugin queue and
+executed off the asyncio event-loop thread via ``asyncio.to_thread``. The
+HTTP POST uses a short timeout + ``urllib`` (stdlib) so the plugin adds no
+new dependency. Retries are bounded (``max_retries``) and the dispatcher
+bounds queue size / worker concurrency so a permanently-down endpoint never
+stalls ``emit()`` and never spawns unbounded threads; ``emit()`` only
+enqueues.
 """
 
 from __future__ import annotations

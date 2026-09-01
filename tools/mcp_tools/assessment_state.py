@@ -179,7 +179,7 @@ def register_assessment_state_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 try:
                     from tools.skill_registry_cache import get_registry
 
-                    registry = get_registry({"skills": _skills_config(config)}, base_dir=Path.cwd())
+                    registry = get_registry({"skills": _skills_config(config)})
                     skills = registry.list_skills()
                     lines.append(f"COUNT: {len(skills)}")
                     for skill in skills[:50]:
@@ -225,7 +225,7 @@ def register_assessment_state_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 try:
                     from tools.skill_registry_cache import get_registry
 
-                    registry = get_registry({"skills": _skills_config(config)}, base_dir=Path.cwd())
+                    registry = get_registry({"skills": _skills_config(config)})
                     skill = registry.get(name)
                 except Exception as exc:  # noqa: BLE001 -- best-effort lookup
                     return f"CAPABILITY_DETAILS: skill registry unavailable: {exc}"

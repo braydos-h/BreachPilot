@@ -597,7 +597,16 @@ def _collect_doctor_checks(config_path: Path) -> tuple[list[dict[str, Any]], dic
 
     config: dict[str, Any] = {}
     load_error: str | None = None
-    if config_path.exists():
+    use_effective = config_path == Path("config.yaml") and not config_path.exists()
+    if use_effective:
+        try:
+            from tools.paths import load_effective_config
+
+            config = load_effective_config(config_path)
+        except Exception as exc:
+            load_error = str(exc)
+            config = {}
+    elif config_path.exists():
         try:
             with config_path.open("r", encoding="utf-8") as handle:
                 config = yaml.safe_load(handle) or {}
@@ -721,9 +730,16 @@ def run_doctor(config_path: Path, json_output: bool = False) -> int:
     print("  BreachPilot - Self-Check (`--doctor`)")
     print("=" * 60)
 
-    # Load config first (other checks may need it)
+    # Load config first (other checks may need it) — hierarchy-aware for wheel-cwd
     config: dict[str, Any] = {}
-    if config_path.exists():
+    if config_path == Path("config.yaml") and not config_path.exists():
+        try:
+            from tools.paths import load_effective_config
+
+            config = load_effective_config(config_path)
+        except Exception as exc:
+            print(f"  [!] Could not load {config_path}: {exc}")
+    elif config_path.exists():
         try:
             with config_path.open("r", encoding="utf-8") as handle:
                 config = yaml.safe_load(handle) or {}

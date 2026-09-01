@@ -64,8 +64,17 @@ def create_mcp_server(
     skills_cfg = config.get("skills", {}) or {}
 
     if skill_roots is None:
-        skill_roots = list(skills_cfg.get("roots") or ["skills"])
-    registry = load_skill_registry(skill_roots)
+        # Use packaged-vs-explicit resolver so default catalog works from clean cwd / wheel
+        try:
+            from tools.paths import resolve_skill_roots
+
+            roots = resolve_skill_roots(config)
+            registry = load_skill_registry([str(p) for p in roots], base_dir=".")
+        except Exception:
+            skill_roots = list(skills_cfg.get("roots") or ["skills"])
+            registry = load_skill_registry(skill_roots)
+    else:
+        registry = load_skill_registry(skill_roots)
 
     if reports_dir is None:
         reports_dir = Path("reports")

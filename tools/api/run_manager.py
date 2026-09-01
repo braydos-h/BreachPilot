@@ -692,6 +692,17 @@ class RunManager:
                     pass
         finally:
             self._events.close_all()
+            # Bounded drain of pending webhook deliveries (outbound-only). The
+            # dispatcher queue is best-effort; shutdown waits at most 5 s then
+            # logs and discards any remainder so a down webhook (20+ s retry
+            # loop per event) never blocks daemon shutdown. See
+            # tools/api/event_broker.py module docstring for full semantics.
+            try:
+                from tools.api.event_broker import shutdown_plugin_dispatcher
+
+                await shutdown_plugin_dispatcher(drain_timeout=5.0)
+            except Exception:  # noqa: BLE001 -- shutdown must never block exit
+                pass
 
     def _require_active(self, run_id: str) -> RunHandle:
         handle = self._active.get(run_id)

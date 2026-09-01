@@ -86,7 +86,11 @@ py-modules = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["tools*", "legacy*"]
+include = ["tools*", "legacy*", "skills*"]
+
+[tool.setuptools.package-data]
+skills = ["**/*"]
+tools = ["mitre_technique_map.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

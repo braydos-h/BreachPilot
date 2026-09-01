@@ -21,7 +21,7 @@ def register_runtime_skill_tools(mcp: Any, *, ctx: ToolContext) -> None:
         # read the same registry instead of re-rglobbing the catalog per consumer.
         from tools.skill_registry_cache import get_registry
 
-        return get_registry({"skills": skills_cfg}, base_dir=Path.cwd())
+        return get_registry({"skills": skills_cfg})
 
     if _runtime_skills_enabled(config):
 
