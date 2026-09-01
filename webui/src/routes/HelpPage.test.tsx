@@ -34,7 +34,7 @@ describe("HelpPage renders", () => {
     expect(screen.getByRole("heading", { name: /How a run flows/i })).toBeInTheDocument();
     // permissions
     expect(screen.getByRole("heading", { name: /Permission modes/i })).toBeInTheDocument();
-    expect(screen.getByText(/The target-IP allowlist lock applies in every mode/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/The target-IP allowlist lock applies in every mode/i).length).toBeGreaterThan(0);
     // directory
     expect(screen.getByRole("heading", { name: /Where do I find/i })).toBeInTheDocument();
     // workflows
@@ -137,32 +137,35 @@ describe("HelpPage search", () => {
     const listbox = screen.getByRole("listbox");
     const btn = within(listbox).getAllByRole("option")[0];
     await user.click(btn);
-    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+    const called =
+      vi.mocked(window.HTMLElement.prototype.scrollIntoView).mock.calls.length > 0 ||
+      vi.mocked((window.Element.prototype as unknown as Record<string, unknown>).scrollIntoView as ReturnType<typeof vi.fn>).mock.calls.length > 0;
+    expect(called).toBe(true);
   });
 });
 
 describe("HelpPage links", () => {
   it("internal header CTAs use React Router links with correct routes", () => {
     renderHelp();
-    const newRun = screen.getByRole("link", { name: /Start a run/i });
-    expect(newRun).toHaveAttribute("href", "/runs/new");
-    const sessions = screen.getByRole("link", { name: /View sessions/i });
-    expect(sessions).toHaveAttribute("href", "/sessions");
+    const newRunLinks = screen.getAllByRole("link", { name: /Start a run/i });
+    expect(newRunLinks.some((a) => a.getAttribute("href") === "/runs/new")).toBe(true);
+    const sessionLinks = screen.getAllByRole("link", { name: /View sessions/i });
+    expect(sessionLinks.some((a) => a.getAttribute("href") === "/sessions")).toBe(true);
     // settings CTA in quick-start card
     expect(screen.getByRole("link", { name: /Open settings/i })).toHaveAttribute("href", "/system");
   });
 
   it("directory items link to correct global routes where they exist", () => {
     renderHelp();
-    expect(screen.getByRole("link", { name: /Runs \/ Sessions/ })).toHaveAttribute("href", "/sessions");
-    expect(screen.getByRole("link", { name: /^Goals/ })).toHaveAttribute("href", "/goals");
-    expect(screen.getByRole("link", { name: /Attack Modules/ })).toHaveAttribute("href", "/modules");
-    expect(screen.getByRole("link", { name: /^Skills$/ })).toHaveAttribute("href", "/skills");
-    expect(screen.getByRole("link", { name: /^Memory$/ })).toHaveAttribute("href", "/memory");
-    expect(screen.getByRole("link", { name: /^Stats$/ })).toHaveAttribute("href", "/stats");
-    // settings appears twice (directory + quick-start)
-    const settingsLinks = screen.getAllByRole("link", { name: /Settings/ });
-    expect(settingsLinks.some((a) => a.getAttribute("href") === "/system")).toBe(true);
+    const directory = screen.getByRole("heading", { name: /Where do I find/i }).closest("section")!;
+    expect(within(directory).getByRole("link", { name: /Runs \/ Sessions/ })).toHaveAttribute("href", "/sessions");
+    expect(within(directory).getByRole("link", { name: /^Goals/ })).toHaveAttribute("href", "/goals");
+    expect(within(directory).getByRole("link", { name: /Attack Modules/ })).toHaveAttribute("href", "/modules");
+    expect(within(directory).getByRole("link", { name: /^Skills$/ })).toHaveAttribute("href", "/skills");
+    expect(within(directory).getByRole("link", { name: /^Memory$/ })).toHaveAttribute("href", "/memory");
+    expect(within(directory).getByRole("link", { name: /^Stats$/ })).toHaveAttribute("href", "/stats");
+    const directorySettings = within(directory).getAllByRole("link", { name: /Settings/ });
+    expect(directorySettings.some((a) => a.getAttribute("href") === "/system")).toBe(true);
   });
 
   it("documentation links have correct external URLs and open in new tabs", () => {
@@ -173,15 +176,15 @@ describe("HelpPage links", () => {
       expect(a).toHaveAttribute("target", "_blank");
       expect(a.getAttribute("href")).toMatch(/^https:\/\/github\.com\/braydos-h\/BreachPilot\/blob\/main\/docs\/.+\.md$/);
     }
-    // retained original six still present
-    expect(screen.getByRole("link", { name: /Getting Started/ })).toHaveAttribute("href", expect.stringContaining("docs/getting-started.md"));
-    expect(screen.getByRole("link", { name: /Safety Model/ })).toHaveAttribute("href", expect.stringContaining("docs/safety-model.md"));
-    expect(screen.getByRole("link", { name: /Attack Modules/ })).toHaveAttribute("href", expect.stringContaining("docs/attack-modules.md"));
-    const webuiLinks = screen.getAllByRole("link", { name: "WebUI" });
+    // retained original six still present — scope to doc section to avoid directory duplicates
+    expect(within(docSection).getByRole("link", { name: /Getting Started/ })).toHaveAttribute("href", expect.stringContaining("docs/getting-started.md"));
+    expect(within(docSection).getByRole("link", { name: /Safety Model/ })).toHaveAttribute("href", expect.stringContaining("docs/safety-model.md"));
+    expect(within(docSection).getByRole("link", { name: /Attack Modules/ })).toHaveAttribute("href", expect.stringContaining("docs/attack-modules.md"));
+    const webuiLinks = within(docSection).getAllByRole("link", { name: "WebUI" });
     expect(webuiLinks.length).toBeGreaterThan(0);
     expect(webuiLinks.some((a) => a.getAttribute("href")?.includes("docs/webui.md"))).toBe(true);
-    expect(screen.getByRole("link", { name: /Model Providers/ })).toHaveAttribute("href", expect.stringContaining("docs/providers.md"));
-    expect(screen.getByRole("link", { name: /Troubleshooting/ })).toHaveAttribute("href", expect.stringContaining("docs/troubleshooting.md"));
+    expect(within(docSection).getByRole("link", { name: /Model Providers/ })).toHaveAttribute("href", expect.stringContaining("docs/providers.md"));
+    expect(within(docSection).getByRole("link", { name: /Troubleshooting/ })).toHaveAttribute("href", expect.stringContaining("docs/troubleshooting.md"));
   });
 
   it("anchor navigation links scroll cleanly", async () => {
@@ -190,7 +193,10 @@ describe("HelpPage links", () => {
     const onThisPageLinks = screen.getAllByRole("link", { name: /Start here|Run lifecycle|Permissions|Find a feature|Workflows|Troubleshooting|FAQ|Documentation/ });
     expect(onThisPageLinks.length).toBeGreaterThanOrEqual(8);
     await user.click(onThisPageLinks[0]);
-    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+    const called =
+      vi.mocked(window.HTMLElement.prototype.scrollIntoView).mock.calls.length > 0 ||
+      vi.mocked((window.Element.prototype as unknown as Record<string, unknown>).scrollIntoView as ReturnType<typeof vi.fn>).mock.calls.length > 0;
+    expect(called).toBe(true);
   });
 });
 
@@ -202,12 +208,12 @@ describe("HelpPage permission modes", () => {
     expect(badges.length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Approve/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Full access/i).length).toBeGreaterThan(0);
-    // matrix row example
-    expect(screen.getByText("Run start (start_confirm)")).toBeInTheDocument();
-    expect(screen.getByText("Destructive confirmations")).toBeInTheDocument();
-    expect(screen.getByText("Goal selection")).toBeInTheDocument();
+    // matrix row example — appears in both desktop table and mobile cards, so use getAll
+    expect(screen.getAllByText("Run start (start_confirm)").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Destructive confirmations").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Goal selection").length).toBeGreaterThan(0);
     // allowlist note
-    expect(screen.getByText(/The target-IP allowlist lock applies in every mode/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/The target-IP allowlist lock applies in every mode/i).length).toBeGreaterThan(0);
     // goal_select never auto-answered note
     expect(screen.getByText(/goal_select.*never auto-answered/i)).toBeInTheDocument();
   });

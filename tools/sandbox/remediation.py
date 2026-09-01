@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.sandbox import docker_backend as _db
+import threading
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
@@ -550,7 +551,7 @@ class Job:
 
 
 _JOBS: dict[str, Job] = {}
-_JOBS_LOCK = asyncio.Lock()  # protects _JOBS dict
+_JOBS_LOCK = threading.Lock()  # protects _JOBS dict (thread-safe for background jobs)
 
 
 def _job_to_dict(job: Job) -> dict[str, Any]:
@@ -586,7 +587,7 @@ def _job_to_dict(job: Job) -> dict[str, Any]:
     }
 
 
-async def create_job(config: dict[str, Any] | None = None) -> Job:
+def create_job_sync(config: dict[str, Any] | None = None) -> Job:
     plan = build_plan(config)
     job_id = uuid.uuid4().hex[:12]
     job = Job(
@@ -619,9 +620,13 @@ async def create_job(config: dict[str, Any] | None = None) -> Job:
         job.error = "Sandbox is intentionally disabled (sandbox.enabled: false). No fix is needed."
         for s in job.steps:
             s.status = "skipped"
-    async with _JOBS_LOCK:
+    with _JOBS_LOCK:
         _JOBS[job_id] = job
     return job
+
+
+async def create_job(config: dict[str, Any] | None = None) -> Job:
+    return create_job_sync(config)
 
 
 def get_job_sync(job_id: str) -> Job | None:
@@ -629,7 +634,12 @@ def get_job_sync(job_id: str) -> Job | None:
 
 
 async def get_job(job_id: str) -> Job | None:
-    async with _JOBS_LOCK:
+    with _JOBS_LOCK:
+        return _JOBS.get(job_id)
+
+
+def get_job_blocking(job_id: str) -> Job | None:
+    with _JOBS_LOCK:
         return _JOBS.get(job_id)
 
 
@@ -713,7 +723,7 @@ def _start_docker_for_platform(platform_name: str, method: str | None) -> tuple[
 
 async def _execute_job_async(job_id: str, config: dict[str, Any] | None) -> None:
     # Retrieve job
-    async with _JOBS_LOCK:
+    with _JOBS_LOCK:
         job = _JOBS.get(job_id)
         if not job:
             return
@@ -731,7 +741,7 @@ async def _execute_job_async(job_id: str, config: dict[str, Any] | None) -> None
         if step.status in ("succeeded", "failed", "skipped"):
             continue
         # Mark running
-        async with _JOBS_LOCK:
+        with _JOBS_LOCK:
             step.status = "running"
             job.updated_at = time.time()
 
@@ -740,7 +750,7 @@ async def _execute_job_async(job_id: str, config: dict[str, Any] | None) -> None
             # This is a guidance-only step that cannot be auto-fixed
             step.output = step.description
             step.error = "Manual installation required – see guidance."
-            async with _JOBS_LOCK:
+            with _JOBS_LOCK:
                 step.status = "failed"
                 job.status = "failed"
                 job.error = step.error
@@ -780,7 +790,7 @@ async def _execute_job_async(job_id: str, config: dict[str, Any] | None) -> None
                 else:
                     step.error = _sanitize(err or out or f"install failed rc={rc}", 1000)
                     step.status = "failed"
-                    async with _JOBS_LOCK:
+                    with _JOBS_LOCK:
                         job.status = "failed"
                         job.error = step.error
                         job.updated_at = time.time()
@@ -813,7 +823,7 @@ async def _execute_job_async(job_id: str, config: dict[str, Any] | None) -> None
                 if rc != 0:
                     step.error = _sanitize(err or out or f"start failed rc={rc}", 1000)
                     step.status = "failed"
-                    async with _JOBS_LOCK:
+                    with _JOBS_LOCK:
                         job.status = "failed"
                         job.error = step.error
                         job.updated_at = time.time()
@@ -828,7 +838,7 @@ async def _execute_job_async(job_id: str, config: dict[str, Any] | None) -> None
                     step.error = _sanitize(reason, 1000)
                     step.output += f"\nFailed: {reason}"
                     step.status = "failed"
-                    async with _JOBS_LOCK:
+                    with _JOBS_LOCK:
                         job.status = "failed"
                         job.error = step.error
                         job.updated_at = time.time()
@@ -850,7 +860,7 @@ async def _execute_job_async(job_id: str, config: dict[str, Any] | None) -> None
                     step.error = _sanitize(detail or reason, 1000)
                     step.output = _sanitize(detail or reason, 1000)
                     step.status = "failed"
-                    async with _JOBS_LOCK:
+                    with _JOBS_LOCK:
                         job.status = "failed"
                         job.error = step.error
                         job.updated_at = time.time()
@@ -881,7 +891,7 @@ async def _execute_job_async(job_id: str, config: dict[str, Any] | None) -> None
                     step.error = f"Dockerfile directory not found at {DOCKER_SANDBOX_DIR}"
                     step.output = step.error
                     step.status = "failed"
-                    async with _JOBS_LOCK:
+                    with _JOBS_LOCK:
                         job.status = "failed"
                         job.error = step.error
                         job.updated_at = time.time()
@@ -894,7 +904,7 @@ async def _execute_job_async(job_id: str, config: dict[str, Any] | None) -> None
                 else:
                     step.error = _sanitize(err or out or f"build failed rc={rc}", 1000)
                     step.status = "failed"
-                    async with _JOBS_LOCK:
+                    with _JOBS_LOCK:
                         job.status = "failed"
                         job.error = step.error
                         job.updated_at = time.time()
@@ -907,7 +917,7 @@ async def _execute_job_async(job_id: str, config: dict[str, Any] | None) -> None
                     step.error = _sanitize(reason, 1000)
                     step.output = _sanitize(reason, 1000)
                     step.status = "failed"
-                    async with _JOBS_LOCK:
+                    with _JOBS_LOCK:
                         job.status = "failed"
                         job.error = step.error
                         job.updated_at = time.time()
@@ -919,7 +929,7 @@ async def _execute_job_async(job_id: str, config: dict[str, Any] | None) -> None
                     step.error = _sanitize(str(exc), 1000)
                     step.output = step.error
                     step.status = "failed"
-                    async with _JOBS_LOCK:
+                    with _JOBS_LOCK:
                         job.status = "failed"
                         job.error = step.error
                         job.updated_at = time.time()
@@ -928,7 +938,7 @@ async def _execute_job_async(job_id: str, config: dict[str, Any] | None) -> None
                     step.error = f"Image {image} still not present after build."
                     step.output = step.error
                     step.status = "failed"
-                    async with _JOBS_LOCK:
+                    with _JOBS_LOCK:
                         job.status = "failed"
                         job.error = step.error
                         job.updated_at = time.time()
@@ -945,13 +955,13 @@ async def _execute_job_async(job_id: str, config: dict[str, Any] | None) -> None
             step.error = _sanitize(str(exc), 1000)
             step.output = step.error
             step.status = "failed"
-            async with _JOBS_LOCK:
+            with _JOBS_LOCK:
                 job.status = "failed"
                 job.error = step.error
                 job.updated_at = time.time()
             return
 
-        async with _JOBS_LOCK:
+        with _JOBS_LOCK:
             if step.status == "failed":
                 job.status = "failed"
                 job.error = step.error or step.output
@@ -964,7 +974,7 @@ async def _execute_job_async(job_id: str, config: dict[str, Any] | None) -> None
                 job.updated_at = time.time()
 
     # All steps succeeded
-    async with _JOBS_LOCK:
+    with _JOBS_LOCK:
         job.status = "succeeded"
         job.docker_ready = True
         job.requires_restart = True
@@ -972,19 +982,13 @@ async def _execute_job_async(job_id: str, config: dict[str, Any] | None) -> None
 
 
 def _start_background_job(job_id: str, config: dict[str, Any] | None) -> None:
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        # No running loop (sync test client) – run in new thread via asyncio.run
-        import threading
+    import threading
 
-        def _runner():
-            asyncio.run(_execute_job_async(job_id, config))
+    def _runner():
+        asyncio.run(_execute_job_async(job_id, config))
 
-        t = threading.Thread(target=_runner, daemon=True)
-        t.start()
-        return
-    loop.create_task(_execute_job_async(job_id, config))
+    t = threading.Thread(target=_runner, daemon=True)
+    t.start()
 
 
 # Public helpers for tests / routes

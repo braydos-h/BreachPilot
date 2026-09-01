@@ -578,6 +578,22 @@ class RunManager:
         _, pending = await asyncio.wait({task}, timeout=timeout)
         if pending:
             raise APIError("cancel_timeout", "Run cancellation timed out.", status_code=504)
+        # A task cancelled before its first run (e.g. an immediate cancel after
+        # create/confirm) ends cancelled WITHOUT executing its own
+        # CancelledError handler — settle the run here so ``cancelling`` never
+        # sticks and no zombie handle/broker survives.
+        if self._active.get(run_id) is handle:
+            async with self._lifecycle_lock:
+                if self._active.get(run_id) is handle:
+                    self._active.pop(run_id, None)
+                    try:
+                        self._persistence.update_run_state(run_id, RunState.CANCELLED.value)
+                        if event_error is None:
+                            await handle.event_broker.emit("state", {"state": RunState.CANCELLED.value})
+                    except Exception:  # noqa: BLE001 -- broker may already be closed
+                        pass
+                    finally:
+                        handle.event_broker.close()
         if event_error is not None:
             raise event_error
 

@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 _API_DB_NAME = "api_runtime.db"
 
 _DDL = """
@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS runs (
     resumed_from TEXT NOT NULL DEFAULT '',
     error TEXT NOT NULL DEFAULT '',
     cancelled_at TEXT NOT NULL DEFAULT '',
-    title TEXT NOT NULL DEFAULT ''
+    title TEXT NOT NULL DEFAULT '',
+    is_demo INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS decisions (
@@ -107,6 +108,13 @@ _MIGRATION_V3 = [
     "CREATE INDEX IF NOT EXISTS idx_annotations_run_id ON annotations(run_id)",
 ]
 
+# v4: demo session support — is_demo flag + tombstone app_state table.
+_MIGRATION_V4 = [
+    "ALTER TABLE runs ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0",
+    "CREATE TABLE IF NOT EXISTS app_state ("
+    "key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')",
+]
+
 # Sort clauses for list_runs. Keys map to the public ``sort`` query param.
 # All use index-backed columns or the small runs table's natural size; no
 # extra indexes needed at this scale.
@@ -173,6 +181,32 @@ class ApiPersistence:
                         "INSERT OR IGNORE INTO _migrations (version, applied_at) VALUES (?, ?)",
                         (3, _now_iso()),
                     )
+                # v4: is_demo column + app_state table
+                cols = {r["name"] for r in conn.execute("PRAGMA table_info(runs)").fetchall()}
+                has_is_demo = "is_demo" in cols
+                has_app_state = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='app_state'"
+                ).fetchone()
+                if not has_is_demo or not has_app_state:
+                    for stmt in _MIGRATION_V4:
+                        try:
+                            conn.execute(stmt)
+                        except sqlite3.OperationalError as exc:
+                            # duplicate column/table on re-run is safe
+                            if "duplicate column" not in str(exc).lower() and "already exists" not in str(
+                                exc
+                            ).lower():
+                                raise
+                    if 4 not in applied:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO _migrations (version, applied_at) VALUES (?, ?)",
+                            (4, _now_iso()),
+                        )
+                elif 4 not in applied:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO _migrations (version, applied_at) VALUES (?, ?)",
+                        (4, _now_iso()),
+                    )
                 conn.execute(
                     "INSERT OR IGNORE INTO _migrations (version, applied_at) VALUES (?, ?)",
                     (_SCHEMA_VERSION, _now_iso()),
@@ -190,24 +224,36 @@ class ApiPersistence:
         request: dict[str, Any],
         preview: dict[str, Any],
         state: str = "draft",
+        title: str = "",
+        is_demo: bool = False,
+        created_at: str | None = None,
     ) -> None:
+        now = created_at or _now_iso()
         with self._lock:
             conn = self._connect()
             try:
                 conn.execute(
                     "INSERT INTO runs "
-                    "(id, created_at, updated_at, state, request_json, preview_json, resumed_from) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "(id, created_at, updated_at, state, request_json, preview_json, resumed_from, title, is_demo) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         run_id,
-                        _now_iso(),
-                        _now_iso(),
+                        now,
+                        now,
                         state,
                         json.dumps(request, default=str),
                         json.dumps(preview, default=str),
                         str(request.get("resume_source", "")),
+                        title,
+                        1 if is_demo else 0,
                     ),
                 )
+                if is_demo:
+                    # Mark that demo has been seeded at least once (for tombstone logic).
+                    conn.execute(
+                        "INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)",
+                        ("demo_seed_version", "1"),
+                    )
                 conn.commit()
             finally:
                 conn.close()
@@ -319,11 +365,32 @@ class ApiPersistence:
         with self._lock:
             conn = self._connect()
             try:
-                rows = conn.execute(
-                    f"SELECT id, created_at, state, request_json, preview_json, title "
-                    f"FROM runs {where_sql} ORDER BY {order_by} LIMIT ? OFFSET ?",
-                    (*params, limit, offset),
-                ).fetchall()
+                # ``is_demo`` may be absent on a pre-migrated DB before _init_db
+                # ran; SELECT * would hide that, but the explicit column tolerates
+                # the migration race via a fallback query.
+                try:
+                    rows = conn.execute(
+                        f"SELECT id, created_at, state, request_json, preview_json, title, is_demo "
+                        f"FROM runs {where_sql} ORDER BY {order_by} LIMIT ? OFFSET ?",
+                        (*params, limit, offset),
+                    ).fetchall()
+                except sqlite3.OperationalError as exc:
+                    if "no such column: is_demo" in str(exc):
+                        rows = conn.execute(
+                            f"SELECT id, created_at, state, request_json, preview_json, title "
+                            f"FROM runs {where_sql} ORDER BY {order_by} LIMIT ? OFFSET ?",
+                            (*params, limit, offset),
+                        ).fetchall()
+                        # Backfill missing key so callers can rely on it.
+                        rows = [dict(r) | {"is_demo": 0} for r in rows]
+                        result = []
+                        for row in rows:
+                            d = dict(row)
+                            d["request_json"] = json.loads(d.get("request_json", "{}"))
+                            d["preview_json"] = json.loads(d.get("preview_json", "{}"))
+                            result.append(d)
+                        return result
+                    raise
                 result = []
                 for row in rows:
                     d = dict(row)
@@ -482,13 +549,90 @@ class ApiPersistence:
                 conn.close()
 
     def delete_run(self, run_id: str) -> bool:
-        """Delete a run and its decisions (cascade). Returns True if a row was removed."""
+        """Delete a run and its decisions (cascade). Returns True if a row was removed.
+
+        When the deleted run is the demo (is_demo=1) the durable tombstone
+        ``demo_deleted=1`` is set in ``app_state`` so the demo is NOT recreated
+        on the next restart/seed. Centralized here so every deletion path (UI,
+        API, direct) respects the tombstone without scattering checks.
+        """
         with self._lock:
             conn = self._connect()
             try:
+                # Detect demo before deleting so the tombstone survives the FK cascade.
+                is_demo_row = None
+                try:
+                    is_demo_row = conn.execute("SELECT is_demo FROM runs WHERE id=?", (run_id,)).fetchone()
+                except sqlite3.OperationalError:
+                    pass
+                is_demo = bool(is_demo_row and is_demo_row["is_demo"])
                 cur = conn.execute("DELETE FROM runs WHERE id=?", (run_id,))
+                if is_demo and cur.rowcount > 0:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)",
+                        ("demo_deleted", "1"),
+                    )
                 conn.commit()
                 return cur.rowcount > 0
+            finally:
+                conn.close()
+
+    def is_demo_tombstoned(self) -> bool:
+        """Return True when the demo was intentionally deleted (do not recreate)."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                try:
+                    row = conn.execute("SELECT value FROM app_state WHERE key='demo_deleted'").fetchone()
+                except sqlite3.OperationalError:
+                    return False
+                return bool(row and row["value"] == "1")
+            finally:
+                conn.close()
+
+    def set_demo_tombstone(self, deleted: bool) -> None:
+        """Explicitly set/clear the demo tombstone (for testing + restore path)."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                # Ensure app_state exists (old DBs migrated lazily).
+                conn.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')")
+                if deleted:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)",
+                        ("demo_deleted", "1"),
+                    )
+                else:
+                    conn.execute("DELETE FROM app_state WHERE key='demo_deleted'")
+                conn.commit()
+            finally:
+                conn.close()
+
+    def get_demo_tombstone(self) -> bool:
+        return self.is_demo_tombstoned()
+
+    def clear_demo_tombstone(self) -> None:
+        self.set_demo_tombstone(False)
+
+    def get_app_state(self, key: str) -> str | None:
+        with self._lock:
+            conn = self._connect()
+            try:
+                try:
+                    row = conn.execute("SELECT value FROM app_state WHERE key=?", (key,)).fetchone()
+                except sqlite3.OperationalError:
+                    return None
+                return str(row["value"]) if row else None
+            finally:
+                conn.close()
+
+    def set_app_state(self, key: str, value: str) -> None:
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')")
+                conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (key, value))
+                conn.commit()
             finally:
                 conn.close()
 

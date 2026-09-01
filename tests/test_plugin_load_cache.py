@@ -13,12 +13,24 @@ import textwrap
 import threading
 from pathlib import Path
 
+import pytest
+
 from tools.plugins import (
     PLUGIN_REGISTRY,
     get_plugin_registry,
     load_plugins,
     reset_plugin_load_cache,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_registry():
+    """Isolate every test from the module-level singleton + load cache."""
+    PLUGIN_REGISTRY.reset()
+    reset_plugin_load_cache()
+    yield
+    PLUGIN_REGISTRY.reset()
+    reset_plugin_load_cache()
 
 
 def _write_plugin(root: Path, name: str, *, enabled: bool = True, with_module: bool = True) -> None:
@@ -77,7 +89,9 @@ def test_repeat_load_with_same_config_does_not_duplicate_registrations(tmp_path)
 def test_cache_invalidated_when_plugin_config_changes(tmp_path):
     root = tmp_path / "p1"
     _write_plugin(root, "foo")
-    _write_plugin(root, "bar")
+    # Manifest default-off: only the config enabled-list decides (so this test
+    # exercises config invalidation, not manifest defaults).
+    _write_plugin(root, "bar", enabled=False)
     on = load_plugins(_config(root, enabled=["foo"]))
     assert [m.name for m in on] == ["foo"]
 
