@@ -14,7 +14,7 @@ status: maintained
 
 ## Purpose
 
-Creates the FastAPI ASGI app served by `main._run_daemon` (`--demon/--daemon/--web`). Wires bearer auth, persistence, event broker, run manager, routers, CORS, error handlers, lifespan, and optional bundled WebUI SPA. Stays thin — all orchestration lives in `tools/api/` and `tools/run_service/`.
+Creates the FastAPI ASGI app served by `main._run_daemon` (`--daemon` (legacy alias: `--demon`)/`--web`). Wires bearer auth, persistence, event broker, run manager, routers, CORS, error handlers, lifespan, and optional bundled WebUI SPA. Stays thin — all orchestration lives in `tools/api/` and `tools/run_service/`.
 
 ## Source Files
 
