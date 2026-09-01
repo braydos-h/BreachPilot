@@ -22,40 +22,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from tools.api.auth import BearerAuth
 from tools.api.persistence import ApiPersistence
 
-router = APIRouter(prefix="/api/v1", tags=["graph"])
-
-# Set by create_app.
-_AUTH: BearerAuth | None = None
-_PERSISTENCE: ApiPersistence | None = None
-_CONFIG: dict[str, Any] = {}
-_GRAPH_ROUTE_ENABLED: bool = False
-
-
-def configure(auth: BearerAuth, persistence: ApiPersistence, config: dict[str, Any]) -> None:
-    global _AUTH, _PERSISTENCE, _CONFIG, _GRAPH_ROUTE_ENABLED
-    _AUTH = auth
-    _PERSISTENCE = persistence
-    _CONFIG = config
-    api_cfg = config.get("api", {}) or {}
-    _GRAPH_ROUTE_ENABLED = bool(api_cfg.get("graph_route", False))
-
-
-async def _require_auth(request: Request) -> str:
-    if _AUTH is None:
-        raise RuntimeError("API auth not configured.")
-    return await _AUTH(request)
-
-
-def _run_dir(run_id: str) -> Path:
-    """Resolve reports/<run_id>/, refusing path escapes (mirrors runs.py)."""
-    if _PERSISTENCE is None:
-        raise RuntimeError("Persistence not configured.")
-    base = _PERSISTENCE.reports_dir.resolve()
-    candidate = (base / run_id).resolve()
-    if base not in candidate.parents and candidate != base:
-        raise HTTPException(status_code=400, detail="Invalid run id")
-    return candidate
-
 
 def _read_audit(run_dir: Path) -> list[dict[str, Any]]:
     """Read the run's exploit_audit.jsonl (tries two locations). Tolerant."""
@@ -164,23 +130,42 @@ def build_graph(records: list[dict[str, Any]], chains: list[dict[str, Any]]) -> 
     return {"nodes": list(nodes.values()), "edges": edges}
 
 
-@router.get("/runs/{run_id}/graph", response_model=None)
-async def get_run_graph(
-    run_id: str,
-    auth: str = Depends(_require_auth),
-) -> dict[str, Any]:
-    """Return the attack-path DAG for a run (nodes + edges).
+def create_router(auth: BearerAuth, persistence: ApiPersistence, config: dict[str, Any]) -> APIRouter:
+    """Create a graph router with isolated dependencies."""
+    router = APIRouter(prefix="/api/v1", tags=["graph"])
+    api_cfg = config.get("api", {}) or {}
+    graph_route_enabled = bool(api_cfg.get("graph_route", False))
 
-    Read-only. Default-off: returns 404 when ``api.graph_route`` is false. The
-    DAG is built from the run's exploit_audit.jsonl + enhanced_report.json
-    exploitation_chains when present. No target touch, no network.
-    """
-    if not _GRAPH_ROUTE_ENABLED:
-        raise HTTPException(status_code=404, detail="Graph route disabled (api.graph_route=false)")
-    if _PERSISTENCE is None or _PERSISTENCE.get_run(run_id) is None:
-        raise HTTPException(status_code=404, detail="Run not found")
-    run_dir = _run_dir(run_id)
-    records = _read_audit(run_dir)
-    chains = _read_enhanced_chains(run_dir)
-    graph = build_graph(records, chains)
-    return {"run_id": run_id, "nodes": graph["nodes"], "edges": graph["edges"]}
+    async def _require_auth(request: Request) -> str:
+        return await auth(request)
+
+    def _run_dir(run_id: str) -> Path:
+        """Resolve reports/<run_id>/, refusing path escapes (mirrors runs.py)."""
+        base = persistence.reports_dir.resolve()
+        candidate = (base / run_id).resolve()
+        if base not in candidate.parents and candidate != base:
+            raise HTTPException(status_code=400, detail="Invalid run id")
+        return candidate
+
+    @router.get("/runs/{run_id}/graph", response_model=None)
+    async def get_run_graph(
+        run_id: str,
+        auth: str = Depends(_require_auth),
+    ) -> dict[str, Any]:
+        """Return the attack-path DAG for a run (nodes + edges).
+
+        Read-only. Default-off: returns 404 when ``api.graph_route`` is false. The
+        DAG is built from the run's exploit_audit.jsonl + enhanced_report.json
+        exploitation_chains when present. No target touch, no network.
+        """
+        if not graph_route_enabled:
+            raise HTTPException(status_code=404, detail="Graph route disabled (api.graph_route=false)")
+        if persistence.get_run(run_id) is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        run_dir = _run_dir(run_id)
+        records = _read_audit(run_dir)
+        chains = _read_enhanced_chains(run_dir)
+        graph = build_graph(records, chains)
+        return {"run_id": run_id, "nodes": graph["nodes"], "edges": graph["edges"]}
+
+    return router

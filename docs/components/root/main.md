@@ -146,7 +146,7 @@ flowchart TD
 ## Invariants
 
 - `main.py` never calls Ollama directly; all LLM I/O through `build_router` / `run_exploit_session`.
-- `--demon/--web` mutually exclusive with `--target/--mode/--goal/--doctor/--self-test` (exit 2).
+- `--daemon` (legacy alias: `--demon`)/`--web` mutually exclusive with `--target/--mode/--goal/--doctor/--self-test` (exit 2).
 - Missing-key exploit permission falls back to `read_only` (via `tools/cli_exploit_settings`), never `full_access`.
 - Fast path always forces MCP transport to `http` so target-IP lock reaches server.
 

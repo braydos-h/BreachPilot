@@ -288,6 +288,18 @@ export function useSystemInfo() {
   });
 }
 
+export function useHostPlatform() {
+  return useQuery<HostPlatformResponse>({
+    queryKey: queryKeys.hostPlatform,
+    queryFn: () => apiFetch<HostPlatformResponse>("/system/platform"),
+    ...defaultQueryOptions,
+    staleTime: 5 * 60_000,
+    gcTime: 30 * 60_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+}
+
 export function useTelemetry() {
   return useQuery<TelemetryResponse>({
     queryKey: queryKeys.telemetry,
