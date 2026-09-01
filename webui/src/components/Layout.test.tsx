@@ -394,4 +394,42 @@ describe("Layout provider status (provider-aware)", () => {
     expect(screen.getByText("OpenCode Go")).toBeInTheDocument();
     expect(screen.queryByText("Ollama")).not.toBeInTheDocument();
   });
+
+  it("provider block is a link to Settings and shows provider error inline when unreachable", async () => {
+    providerStatusMock.mockReturnValue({
+      provider: "ollama",
+      label: "Ollama",
+      online: false,
+      source: "ollama",
+      liveCount: 0,
+      error: "Ollama daemon not reachable at http://127.0.0.1:11434",
+      status: "unreachable",
+      statusText: "Unreachable",
+      isChecking: false,
+    } as never);
+    sessionTokensMock.mockReturnValue({ sessionTokens: 0, totalTokens: 0, baseline: 0, isLoading: false, error: null } as never);
+    runsMock.mockReturnValue({ data: { runs: [], total: 0 }, isLoading: false, error: null } as never);
+    connectionsMock.mockReturnValue({ data: { active: 0, connections: [], total: 0, stale: 0, removed: 0, error: 0 }, isLoading: false, error: null } as never);
+    modelsMock.mockReturnValue({ data: { provider: "ollama" }, isLoading: false, error: null } as never);
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <Layout />
+      </MemoryRouter>,
+    );
+    const link = screen.getByRole("link", { name: /Provider: Ollama.*Unreachable/ });
+    expect(link).toHaveAttribute("href", "/system");
+    expect(link).toHaveAttribute("title", expect.stringContaining("Ollama daemon not reachable"));
+    // Inline error text should be visible beneath the status line
+    expect(screen.getByText("Ollama daemon not reachable at http://127.0.0.1:11434")).toBeInTheDocument();
+  });
+
+  it("clicking the provider block navigates to Settings", async () => {
+    const user = userEvent.setup();
+    setup();
+    const link = screen.getByRole("link", { name: /Provider:/ });
+    expect(link).toHaveAttribute("href", "/system");
+    await user.click(link);
+    // Navigation updates the active nav item
+    expect(screen.getByRole("link", { name: /^Settings/ })).toHaveAttribute("aria-current", "page");
+  });
 });
