@@ -50,7 +50,7 @@ dev = [
     "pytest-asyncio>=0.23.0",
     "coverage>=7.3.0",
     "ruff>=0.6.0",
-    "mypy>=1.0",
+    "mypy>=2.0",
     "build>=1.0",
     "twine>=5.0",
 ]
@@ -160,7 +160,7 @@ ignore = ["E501", "F405", "F403", "F841"]
 "tools/campaign/*.py" = ["E402", "F821", "I001"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 warn_return_any = false
 warn_unused_configs = true
 ignore_missing_imports = true
