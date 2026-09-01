@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { Activity, BarChart3, BookOpen, Brain, Cpu, Crosshair, Eye, FlaskConical, GitBranch, Github, HelpCircle, Home, List, Menu, Moon, PlugZap, Settings, ShieldAlert, Sparkles, Sun, Target, Terminal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -134,7 +134,7 @@ export function Layout() {
           ? "bg-amber-500"
           : "bg-amber-500/70";
   const sessionTokensFormatted = formatTokens(sessionTokens);
-  const providerStatusTitle = `${providerStatus.label} · ${providerStatus.statusText} · ${sessionTokensFormatted} tokens this session`;
+  const providerStatusTitle = `${providerStatus.label} · ${providerStatus.statusText} · ${sessionTokensFormatted} tokens this session${providerStatus.error ? ` — ${providerStatus.error}` : ""}`;
 
   const sidebarFooter = (
     <div className="space-y-2">
@@ -153,22 +153,28 @@ export function Layout() {
         </div>
         <PermissionControl mode={mode} onModeChange={setMode} />
       </div>
-      <div
-        className="rounded-md px-3 py-2"
-        aria-label={`Provider: ${providerStatus.label}, status: ${providerStatus.statusText}, ${sessionTokensFormatted} tokens this session`}
+      <Link
+        to="/system"
+        className="block rounded-md px-3 py-2 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring transition-colors"
+        aria-label={`Provider: ${providerStatus.label}, status: ${providerStatus.statusText}, ${sessionTokensFormatted} tokens this session — click to manage provider in Settings`}
         title={providerStatusTitle}
-        role="status"
       >
         <div className="flex items-center gap-2 text-sm font-medium leading-none">
           <span className="relative flex h-2 w-2 shrink-0" aria-hidden="true">
             <span className={cn("relative inline-flex h-2 w-2 rounded-full", providerDotClass)} />
           </span>
           <span className="truncate">{providerStatus.label}</span>
+          <Settings className="ml-auto h-3 w-3 shrink-0 text-muted-foreground/60" aria-hidden="true" />
         </div>
         <div className="ml-4 mt-1 text-xs text-muted-foreground">
           {providerStatus.statusText} · {sessionTokensFormatted} tokens this session
         </div>
-      </div>
+        {providerStatus.error && providerStatus.status === "unreachable" && (
+          <div className="ml-4 mt-1 truncate text-[11px] leading-none text-destructive" title={providerStatus.error}>
+            {providerStatus.error}
+          </div>
+        )}
+      </Link>
       <Button
         variant="ghost"
         size="sm"
