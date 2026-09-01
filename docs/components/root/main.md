@@ -33,7 +33,7 @@ Re-wrapped helpers (module-level re-exports for test patch points):
 
 ## Responsibilities
 
-- Define the full `argparse` surface (`main.py:334` `parse_args`): targeting (`--target/--mode/--goal`), API keys, output, swarm/reasoning, operational (`--doctor/--self-test/--eval/--ctf/--demo/--resume`), skills, plugins, WebUI (`--demon/--web`).
+- Define the full `argparse` surface (`main.py:334` `parse_args`): targeting (`--target/--mode/--goal`), API keys, output, swarm/reasoning, operational (`--doctor/--self-test/--eval/--ctf/--demo/--resume`), skills, plugins, WebUI (`--daemon` (legacy alias: `--demon`)/`--web`).
 - Start the WebUI API daemon (`main.py:708` `_run_daemon`) with loopback-only bind, optional WebUI build (`main.py:464` `_ensure_webui_build`), and bearer-token gate.
 - Ensure ChatGPT provider prerequisites (`main.py:551` `_ensure_chatgpt_runtime`): bun install, `oauth/` clone + `bun install` + `bun run build`.
 - Provide `async_main(args)` (`main.py:794`) — the CLI adapter that builds a `RunRequest`, calls `AssessmentService.prepare` → renders summary via `AttackUi` → asks ready-to-begin confirmation → calls `AssessmentService.execute`.
@@ -84,7 +84,7 @@ Re-wrapped helpers (module-level re-exports for test patch points):
 | Exit code | `int` | 0 success, 1 error, 2 bad args, 130 aborted |
 | Reports | `reports/<run_id>/` | Per-run artifacts via `AssessmentService` |
 | `llm_usage.jsonl` | JSONL | Model telemetry tail |
-| Daemon | `uvicorn` on `127.0.0.1:8765` | When `--demon/--web` |
+| Daemon | `uvicorn` on `127.0.0.1:8765` | When `--daemon` (legacy alias: `--demon`)/`--web` |
 
 ## State/Persistence
 
@@ -120,7 +120,7 @@ All behavior via `config.yaml` top-level keys (see README §Configuration):
 ```mermaid
 flowchart TD
     A[parse_args] --> B{flags?}
-    B -->|--web/--demon| C[_run_daemon -> create_app -> uvicorn]
+    B -->|--web/--daemon| C[_run_daemon -> create_app -> uvicorn]
     B -->|--doctor| D[tools/doctor.run_doctor]
     B -->|--self-test| E[tools/self_test.run_self_test]
     B -->|--eval/--ctf/--demo| F[specialist harness]

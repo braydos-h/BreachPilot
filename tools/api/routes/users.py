@@ -28,32 +28,6 @@ from pydantic import BaseModel, Field
 from tools.api.auth import BearerAuth, hash_password, verify_password
 from tools.api.persistence import ApiPersistence
 
-router = APIRouter(prefix="/api/v1", tags=["users"])
-
-# Module-level wiring set by ``configure()``. Keeps the route handlers thin
-# and testable without reaching into app state.
-_AUTH: BearerAuth | None = None
-_PERSISTENCE: ApiPersistence | None = None
-
-
-def configure(auth: BearerAuth, persistence: ApiPersistence) -> None:
-    global _AUTH, _PERSISTENCE
-    _AUTH = auth
-    _PERSISTENCE = persistence
-
-
-async def _require_auth(request: Request) -> str:
-    """FastAPI dependency: validate bearer token via BearerAuth.__call__."""
-    if _AUTH is None:
-        raise RuntimeError("API auth not configured.")
-    return await _AUTH(request)
-
-
-def _persistence() -> ApiPersistence:
-    if _PERSISTENCE is None:
-        raise HTTPException(status_code=500, detail="users routes not configured.")
-    return _PERSISTENCE
-
 
 # ── Request/response models ─────────────────────────────────────────────────
 
@@ -92,97 +66,102 @@ class AnnotationResponse(BaseModel):
     created_at: str
 
 
-# ── Routes ───────────────────────────────────────────────────────────────────
+def create_router(auth: BearerAuth, persistence: ApiPersistence) -> APIRouter:
+    """Create a users router with isolated dependencies."""
+    router = APIRouter(prefix="/api/v1", tags=["users"])
 
+    async def _require_auth(request: Request) -> str:
+        """FastAPI dependency: validate bearer token via BearerAuth.__call__."""
+        return await auth(request)
 
-@router.post("/users", response_model=UserResponse, status_code=201)
-def create_user(req: CreateUserRequest, auth: str = Depends(_require_auth)) -> UserResponse:
-    """Create a user account. Duplicate username → 409."""
-    persistence = _persistence()
-    existing = persistence.get_user_by_username(req.username)
-    if existing is not None:
-        raise HTTPException(status_code=409, detail="username already exists")
-    password_hash, password_salt = hash_password(req.password)
-    uid = persistence.create_user(req.username, password_hash, password_salt)
-    user = persistence.get_user(uid)
-    return UserResponse(
-        id=user["id"],
-        username=user["username"],
-        created_at=user["created_at"],
-        last_login=user.get("last_login", ""),
-    )
+    def _persistence() -> ApiPersistence:
+        return persistence
 
-
-@router.post("/users/login", response_model=UserResponse)
-def login(req: LoginRequest, auth: str = Depends(_require_auth)) -> UserResponse:
-    """Verify credentials. Returns the user record on success, 401 on mismatch."""
-    persistence = _persistence()
-    user = persistence.get_user_by_username(req.username)
-    if user is None:
-        raise HTTPException(status_code=401, detail="invalid username or password")
-    if not verify_password(req.password, user["password_hash"], user["password_salt"]):
-        raise HTTPException(status_code=401, detail="invalid username or password")
-    persistence.touch_user_login(user["id"])
-    return UserResponse(
-        id=user["id"],
-        username=user["username"],
-        created_at=user["created_at"],
-        last_login=user.get("last_login", ""),
-    )
-
-
-@router.get("/users", response_model=list[UserResponse])
-def list_users(auth: str = Depends(_require_auth)) -> list[UserResponse]:
-    """List users (no password hashes ever returned)."""
-    persistence = _persistence()
-    return [
-        UserResponse(
-            id=u["id"],
-            username=u["username"],
-            created_at=u["created_at"],
-            last_login=u.get("last_login", ""),
+    @router.post("/users", response_model=UserResponse, status_code=201)
+    def create_user(req: CreateUserRequest, auth: str = Depends(_require_auth)) -> UserResponse:
+        """Create a user account. Duplicate username → 409."""
+        p = _persistence()
+        existing = p.get_user_by_username(req.username)
+        if existing is not None:
+            raise HTTPException(status_code=409, detail="username already exists")
+        password_hash, password_salt = hash_password(req.password)
+        uid = p.create_user(req.username, password_hash, password_salt)
+        user = p.get_user(uid)
+        return UserResponse(
+            id=user["id"],
+            username=user["username"],
+            created_at=user["created_at"],
+            last_login=user.get("last_login", ""),
         )
-        for u in persistence.list_users()
-    ]
 
+    @router.post("/users/login", response_model=UserResponse)
+    def login(req: LoginRequest, auth: str = Depends(_require_auth)) -> UserResponse:
+        """Verify credentials. Returns the user record on success, 401 on mismatch."""
+        p = _persistence()
+        user = p.get_user_by_username(req.username)
+        if user is None:
+            raise HTTPException(status_code=401, detail="invalid username or password")
+        if not verify_password(req.password, user["password_hash"], user["password_salt"]):
+            raise HTTPException(status_code=401, detail="invalid username or password")
+        p.touch_user_login(user["id"])
+        return UserResponse(
+            id=user["id"],
+            username=user["username"],
+            created_at=user["created_at"],
+            last_login=user.get("last_login", ""),
+        )
 
-@router.post("/runs/{run_id}/annotations", response_model=AnnotationResponse, status_code=201)
-def add_annotation(
-    run_id: str,
-    req: AnnotationRequest,
-    auth: str = Depends(_require_auth),
-) -> AnnotationResponse:
-    """Attach an operator comment to a run's finding."""
-    persistence = _persistence()
-    if persistence.get_run(run_id) is None:
-        raise HTTPException(status_code=404, detail="run not found")
-    user = persistence.get_user(req.user_id)
-    if user is None:
-        raise HTTPException(status_code=404, detail="user not found")
-    aid = persistence.add_annotation(
-        run_id=run_id,
-        user_id=req.user_id,
-        username=req.username or user["username"],
-        body=req.body,
-        finding_ref=req.finding_ref,
-    )
-    anns = persistence.list_annotations(run_id)
-    ann = next((a for a in anns if a["id"] == aid), None)
-    if ann is None:
-        raise HTTPException(status_code=500, detail="annotation persistence failed")
-    return AnnotationResponse(**ann)
+    @router.get("/users", response_model=list[UserResponse])
+    def list_users(auth: str = Depends(_require_auth)) -> list[UserResponse]:
+        """List users (no password hashes ever returned)."""
+        p = _persistence()
+        return [
+            UserResponse(
+                id=u["id"],
+                username=u["username"],
+                created_at=u["created_at"],
+                last_login=u.get("last_login", ""),
+            )
+            for u in p.list_users()
+        ]
 
+    @router.post("/runs/{run_id}/annotations", response_model=AnnotationResponse, status_code=201)
+    def add_annotation(
+        run_id: str,
+        req: AnnotationRequest,
+        auth: str = Depends(_require_auth),
+    ) -> AnnotationResponse:
+        """Attach an operator comment to a run's finding."""
+        p = _persistence()
+        if p.get_run(run_id) is None:
+            raise HTTPException(status_code=404, detail="run not found")
+        user = p.get_user(req.user_id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="user not found")
+        aid = p.add_annotation(
+            run_id=run_id,
+            user_id=req.user_id,
+            username=req.username or user["username"],
+            body=req.body,
+            finding_ref=req.finding_ref,
+        )
+        anns = p.list_annotations(run_id)
+        ann = next((a for a in anns if a["id"] == aid), None)
+        if ann is None:
+            raise HTTPException(status_code=500, detail="annotation persistence failed")
+        return AnnotationResponse(**ann)
 
-@router.get("/runs/{run_id}/annotations", response_model=list[AnnotationResponse])
-def list_annotations(run_id: str, auth: str = Depends(_require_auth)) -> list[AnnotationResponse]:
-    persistence = _persistence()
-    if persistence.get_run(run_id) is None:
-        raise HTTPException(status_code=404, detail="run not found")
-    return [AnnotationResponse(**a) for a in persistence.list_annotations(run_id)]
+    @router.get("/runs/{run_id}/annotations", response_model=list[AnnotationResponse])
+    def list_annotations(run_id: str, auth: str = Depends(_require_auth)) -> list[AnnotationResponse]:
+        p = _persistence()
+        if p.get_run(run_id) is None:
+            raise HTTPException(status_code=404, detail="run not found")
+        return [AnnotationResponse(**a) for a in p.list_annotations(run_id)]
 
+    @router.delete("/annotations/{annotation_id}", status_code=204)
+    def delete_annotation(annotation_id: str, auth: str = Depends(_require_auth)):
+        p = _persistence()
+        if not p.delete_annotation(annotation_id):
+            raise HTTPException(status_code=404, detail="annotation not found")
 
-@router.delete("/annotations/{annotation_id}", status_code=204)
-def delete_annotation(annotation_id: str, auth: str = Depends(_require_auth)):
-    persistence = _persistence()
-    if not persistence.delete_annotation(annotation_id):
-        raise HTTPException(status_code=404, detail="annotation not found")
+    return router

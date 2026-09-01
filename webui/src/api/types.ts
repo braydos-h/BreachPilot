@@ -809,10 +809,18 @@ export interface DiagnosticsResponse {
   output: string;
 }
 
+export type HostPlatform = "windows" | "linux" | "darwin" | "unknown";
+
+export interface HostPlatformResponse {
+  platform: HostPlatform;
+}
+
 export interface SystemInfoResponse {
   hostname: string;
   platform: string;
   os: string;
+  /** Normalized host platform enum: windows | linux | darwin | unknown (WSL → linux). */
+  host_platform?: HostPlatform;
   python: string;
   local_ips: string[];
   public_ip: string | null;

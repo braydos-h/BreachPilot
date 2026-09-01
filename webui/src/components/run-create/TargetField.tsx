@@ -61,7 +61,7 @@ export function TargetField({ value, onChange, autoFocus }: TargetFieldProps) {
         )}
       </div>
       <p className="text-xs text-muted-foreground">
-        IPv4, IPv6, hostname or domain. Only scan systems you own or are explicitly authorized to test.
+        IPv4, IPv6, or domain name. Only scan systems you own or are explicitly authorized to test.
       </p>
       {state === "invalid" && (
         <p className={cn("text-xs", touched ? "text-destructive" : "text-amber-400")} role="alert">

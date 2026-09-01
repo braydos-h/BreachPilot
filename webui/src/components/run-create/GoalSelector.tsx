@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Lock, Search, X } from "lucide-react";
+import { Bookmark, Lock, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -7,7 +7,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SegmentedControl } from "@/components/ui/segmented";
-import type { GoalPreset, RiskTag, RunMode } from "@/api/types";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useGoals } from "@/api/hooks";
+import type { CustomGoal, GoalPreset, RiskTag, RunMode } from "@/api/types";
 
 const RISK_BADGE: Record<RiskTag, "success" | "warn" | "danger"> = {
   safe: "success",
@@ -28,8 +30,6 @@ interface GoalSelectorProps {
   goalGroups: Record<string, GoalPreset[]>;
 }
 
-/** Preset / custom goal selection. Presets render as a searchable goal browser
- *  showing name, description, risk badge and compatibility state. */
 export function GoalSelector({
   mode,
   goalMode,
@@ -42,6 +42,8 @@ export function GoalSelector({
 }: GoalSelectorProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const goalsQuery = useGoals();
+  const customGoals: CustomGoal[] = goalsQuery.data?.custom_goals ?? [];
 
   const selected = useMemo(
     () => RISK_ORDER.flatMap((risk) => goalGroups[risk] ?? []).find((g) => g.name === goal) ?? null,
@@ -201,20 +203,55 @@ export function GoalSelector({
           </PopoverContent>
         </Popover>
       ) : (
-        <div className="space-y-1.5">
-          <Textarea
-            value={customGoal}
-            onChange={(e) => setCustomGoal(e.target.value)}
-            placeholder={
-              "Describe the objective in your own words — e.g. “Obtain a verified foothold on " +
-              "the target, then attempt privilege escalation to a domain account.”"
-            }
-            aria-label="Custom goal"
-            className="min-h-[6.5rem]"
-          />
-          <p className="text-xs text-muted-foreground">
-            The agent plans around this objective instead of a preset outcome.
-          </p>
+        <div className="space-y-2.5">
+          {customGoals.length > 0 && (
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Saved goals</Label>
+              <Select
+                onValueChange={(val) => {
+                  const found = customGoals.find((g) => g.id === val);
+                  if (found) setCustomGoal(found.objective);
+                }}
+              >
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="Choose a saved custom goal to populate..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {customGoals.map((g) => (
+                    <SelectItem key={g.id} value={g.id}>
+                      <span className="flex items-center gap-1.5">
+                        <Bookmark className="h-3 w-3 text-violet-400" aria-hidden />
+                        <span className="font-mono text-xs">{g.name}</span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Selecting a saved goal fills the objective below — you can still edit it for this run without changing the saved copy.
+              </p>
+            </div>
+          )}
+          {customGoals.length === 0 && (
+            <p className="text-xs text-muted-foreground">
+              No saved custom goals yet. Create them on the Goals page with “Add custom goal”.
+            </p>
+          )}
+          <div className="space-y-1.5">
+            <Textarea
+              value={customGoal}
+              onChange={(e) => setCustomGoal(e.target.value)}
+              placeholder={
+                "Describe the objective in your own words — e.g. “Obtain a verified foothold on " +
+                "the target, then attempt privilege escalation to a domain account.”"
+              }
+              aria-label="Custom goal"
+              className="min-h-[6.5rem]"
+            />
+            <p className="text-xs text-muted-foreground">
+              The agent plans around this objective instead of a preset outcome.
+            </p>
+          </div>
         </div>
       )}
 

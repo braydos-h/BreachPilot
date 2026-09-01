@@ -36,7 +36,7 @@ Loopback-only REST + WebSocket daemon (`tools/api/`) that lets the bundled Vite/
 
 ## Factory & Lifecycle
 
-`app.py:create_app` (`app.py:42`) is the ASGI factory called by `main._run_daemon` (`--demon` / `--daemon` / `--web`).
+`app.py:create_app` (`app.py:42`) is the ASGI factory called by `main._run_daemon` (`--daemon` (legacy alias: `--demon`) / `--web`).
 
 ```
 main._run_daemon  -->  app.create_app(config_path, config, callables)

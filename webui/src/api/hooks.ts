@@ -28,8 +28,10 @@ import type {
   DecisionListRow,
   DecisionOut,
   DeleteRunResponse,
+  CustomGoal,
   DiagnosticsResponse,
   GoalPreset,
+  GoalsResponse,
   LiveModelsResponse,
   LogResponse,
   LootResponse,
@@ -56,6 +58,7 @@ import type {
   SkillSummary,
   SwarmStateResponse,
   SystemInfoResponse,
+  HostPlatformResponse,
   TelemetryResponse,
   ToolCallRequest,
   ToolCallResponse,
@@ -77,6 +80,7 @@ export const queryKeys = {
   memory: ["memory"] as const,
   plugins: ["plugins"] as const,
   goals: ["goals"] as const,
+  hostPlatform: ["system", "platform"] as const,
   skills: ["skills"] as const,
   skillsSearch: (q: string) => ["skills", "search", q] as const,
   skill: (name: string) => ["skills", name] as const,
@@ -506,11 +510,45 @@ export function useAttackModules() {
 }
 
 export function useGoals() {
-  return useQuery<{ goals: GoalPreset[] }>({
+  return useQuery<GoalsResponse>({
     queryKey: queryKeys.goals,
-    queryFn: () => apiFetch<{ goals: GoalPreset[] }>("/goals"),
+    queryFn: () => apiFetch<GoalsResponse>("/goals"),
     ...defaultQueryOptions,
     staleTime: Infinity,
+  });
+}
+
+export function useCreateGoal() {
+  const qc = useQueryClient();
+  return useMutation<CustomGoal, ApiError, { name: string; objective: string }>({
+    mutationFn: (body) => apiFetch<CustomGoal>("/goals", { method: "POST", body }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.goals });
+    },
+  });
+}
+
+export function useUpdateGoal() {
+  const qc = useQueryClient();
+  return useMutation<CustomGoal, ApiError, { id: string; name: string; objective: string }>({
+    mutationFn: ({ id, name, objective }) =>
+      apiFetch<CustomGoal>(`/goals/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: { name, objective },
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.goals });
+    },
+  });
+}
+
+export function useDeleteGoal() {
+  const qc = useQueryClient();
+  return useMutation<{ deleted: boolean; id: string }, ApiError, string>({
+    mutationFn: (id) => apiFetch<{ deleted: boolean; id: string }>(`/goals/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.goals });
+    },
   });
 }
 
