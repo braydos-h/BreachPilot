@@ -15,7 +15,6 @@ import {
   X,
   XCircle,
   Info,
-  Copy,
 } from "lucide-react";
 import { cn, formatRelative } from "@/lib/utils";
 import { ApiError } from "@/api/client";

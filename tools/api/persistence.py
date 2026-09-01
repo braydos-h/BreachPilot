@@ -800,3 +800,99 @@ class ApiPersistence:
                 return cur.rowcount > 0
             finally:
                 conn.close()
+
+    # ── Custom goals (persistent user-created goals) ──────────────────────
+
+    def list_custom_goals(self) -> list[dict[str, Any]]:
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    "SELECT id, name, objective, created_at, updated_at FROM custom_goals ORDER BY created_at"
+                ).fetchall()
+                return [dict(r) for r in rows]
+            finally:
+                conn.close()
+
+    def get_custom_goal(self, goal_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    "SELECT id, name, objective, created_at, updated_at FROM custom_goals WHERE id=?",
+                    (goal_id,),
+                ).fetchone()
+                return dict(row) if row else None
+            finally:
+                conn.close()
+
+    def get_custom_goal_by_name(self, name: str) -> dict[str, Any] | None:
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    "SELECT id, name, objective, created_at, updated_at FROM custom_goals WHERE name=? COLLATE NOCASE",
+                    (name,),
+                ).fetchone()
+                return dict(row) if row else None
+            finally:
+                conn.close()
+
+    def create_custom_goal(self, name: str, objective: str) -> dict[str, Any]:
+        gid = _new_id("goal")
+        now = _now_iso()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "INSERT INTO custom_goals (id, name, objective, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                    (gid, name, objective, now, now),
+                )
+                conn.commit()
+            except sqlite3.IntegrityError as exc:
+                # UNIQUE violation (case-insensitive) -> duplicate name
+                if "UNIQUE" in str(exc) or "unique" in str(exc).lower():
+                    raise ValueError(f"custom goal name {name!r} already exists") from exc
+                raise
+            finally:
+                conn.close()
+        return {"id": gid, "name": name, "objective": objective, "created_at": now, "updated_at": now}
+
+    def update_custom_goal(self, goal_id: str, name: str, objective: str) -> dict[str, Any] | None:
+        now = _now_iso()
+        with self._lock:
+            conn = self._connect()
+            try:
+                # Verify existence first
+                row = conn.execute("SELECT id FROM custom_goals WHERE id=?", (goal_id,)).fetchone()
+                if row is None:
+                    return None
+                try:
+                    cur = conn.execute(
+                        "UPDATE custom_goals SET name=?, objective=?, updated_at=? WHERE id=?",
+                        (name, objective, now, goal_id),
+                    )
+                    conn.commit()
+                    if cur.rowcount == 0:
+                        return None
+                except sqlite3.IntegrityError as exc:
+                    if "UNIQUE" in str(exc) or "unique" in str(exc).lower():
+                        raise ValueError(f"custom goal name {name!r} already exists") from exc
+                    raise
+                updated = conn.execute(
+                    "SELECT id, name, objective, created_at, updated_at FROM custom_goals WHERE id=?",
+                    (goal_id,),
+                ).fetchone()
+                return dict(updated) if updated else None
+            finally:
+                conn.close()
+
+    def delete_custom_goal(self, goal_id: str) -> bool:
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute("DELETE FROM custom_goals WHERE id=?", (goal_id,))
+                conn.commit()
+                return cur.rowcount > 0
+            finally:
+                conn.close()
