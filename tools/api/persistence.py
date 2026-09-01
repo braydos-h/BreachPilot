@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 5
 _API_DB_NAME = "api_runtime.db"
 
 _DDL = """
@@ -83,6 +83,16 @@ CREATE TABLE IF NOT EXISTS annotations (
 );
 
 CREATE INDEX IF NOT EXISTS idx_annotations_run_id ON annotations(run_id);
+
+CREATE TABLE IF NOT EXISTS custom_goals (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL COLLATE NOCASE,
+    objective TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(name)
+);
+CREATE INDEX IF NOT EXISTS idx_custom_goals_name ON custom_goals(name COLLATE NOCASE);
 """
 
 # v2: add ``title`` column to runs for AI-generated session titles.
@@ -112,6 +122,15 @@ _MIGRATION_V3 = [
 _MIGRATION_V4 = [
     "ALTER TABLE runs ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0",
     "CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')",
+]
+
+# v5: persistent user-created custom goals (Goals tab + RunWizard).
+_MIGRATION_V5 = [
+    "CREATE TABLE IF NOT EXISTS custom_goals ("
+    "id TEXT PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE, "
+    "objective TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, "
+    "UNIQUE(name))",
+    "CREATE INDEX IF NOT EXISTS idx_custom_goals_name ON custom_goals(name COLLATE NOCASE)",
 ]
 
 # Sort clauses for list_runs. Keys map to the public ``sort`` query param.
@@ -203,6 +222,27 @@ class ApiPersistence:
                     conn.execute(
                         "INSERT OR IGNORE INTO _migrations (version, applied_at) VALUES (?, ?)",
                         (4, _now_iso()),
+                    )
+                # v5: custom_goals table for persistent user-created goals
+                has_custom_goals = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='custom_goals'"
+                ).fetchone()
+                if not has_custom_goals:
+                    for stmt in _MIGRATION_V5:
+                        try:
+                            conn.execute(stmt)
+                        except sqlite3.OperationalError as exc:
+                            if "already exists" not in str(exc).lower():
+                                raise
+                    if 5 not in applied:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO _migrations (version, applied_at) VALUES (?, ?)",
+                            (5, _now_iso()),
+                        )
+                elif 5 not in applied:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO _migrations (version, applied_at) VALUES (?, ?)",
+                        (5, _now_iso()),
                     )
                 conn.execute(
                     "INSERT OR IGNORE INTO _migrations (version, applied_at) VALUES (?, ?)",
