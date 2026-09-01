@@ -243,7 +243,7 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
             status = "timed_out"
             output = f"{m} timed out after 120s"
             returncode = None
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             status = "error"
             output = str(exc)
             returncode = None
@@ -324,7 +324,7 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 status = "timed_out"
                 output = "secretsdump timed out after 300s"
                 returncode = None
-            except Exception as exc:
+            except Exception as exc:  # ponytail: bare except intentional
                 status = "error"
                 output = str(exc)
                 returncode = None
@@ -375,7 +375,7 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 status = "timed_out"
                 output = "dcsync timed out after 300s"
                 returncode = None
-            except Exception as exc:
+            except Exception as exc:  # ponytail: bare except intentional
                 status = "error"
                 output = str(exc)
                 returncode = None
@@ -403,7 +403,7 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 status = "timed_out"
                 output = "sam_local timed out after 120s"
                 returncode = None
-            except Exception as exc:
+            except Exception as exc:  # ponytail: bare except intentional
                 status = "error"
                 output = str(exc)
                 returncode = None
@@ -426,7 +426,7 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 status = "timed_out"
                 output = "mimikatz timed out after 120s"
                 returncode = None
-            except Exception as exc:
+            except Exception as exc:  # ponytail: bare except intentional
                 status = "error"
                 output = str(exc)
                 returncode = None
@@ -453,7 +453,7 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 status = "timed_out"
                 output = "lsass dump timed out after 120s"
                 returncode = None
-            except Exception as exc:
+            except Exception as exc:  # ponytail: bare except intentional
                 status = "error"
                 output = str(exc)
                 returncode = None
@@ -531,7 +531,7 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
             status = "timed_out"
             output = "GetUserSPNs timed out after 300s"
             returncode = None
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             status = "error"
             output = str(exc)
             returncode = None

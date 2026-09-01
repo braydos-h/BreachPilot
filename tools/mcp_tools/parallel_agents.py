@@ -150,7 +150,7 @@ class _SubagentManager:
                 result_dict["findings"] = agent_result.findings
                 result_dict["new_tasks"] = agent_result.new_tasks
                 result_dict["execution_time"] = time.monotonic() - start
-            except Exception as exc:  # noqa: BLE001 — never silently drop a sub-agent
+            except Exception as exc:  # noqa: BLE001 — never silently drop a sub-agent  # ponytail: bare except intentional
                 result_dict["status"] = "failed"
                 result_dict["error"] = f"subagent crashed: {exc}"
                 result_dict["execution_time"] = time.monotonic() - start
@@ -164,7 +164,7 @@ class _SubagentManager:
                     import os as _os
 
                     _os.replace(tmp, result_path)
-                except Exception:  # noqa: BLE001 — best-effort persist
+                except Exception:  # noqa: BLE001 — best-effort persist  # ponytail: bare except intentional
                     pass
                 async with self._lock:
                     self._results[subagent_id] = result_dict
@@ -212,7 +212,7 @@ class _SubagentManager:
                 "error": f"sub-agent did not finish within {timeout_seconds}s",
                 "partial": cached or {},
             }
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001  # ponytail: bare except intentional
             return {
                 "subagent_id": subagent_id,
                 "status": "failed",

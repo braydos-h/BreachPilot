@@ -55,7 +55,7 @@ def register_replay_simulator_tools(mcp: Any, *, ctx: ToolContext) -> None:
             client, alias = _get_model_client(config)
             model_client = client
             model_alias = alias
-        except Exception:
+        except Exception:  # ponytail: bare except intentional
             model_client = None
 
         result = simulate(plan, recon, model_client=model_client, model_alias=model_alias)

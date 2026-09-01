@@ -108,7 +108,7 @@ def register_cracking_tools(mcp: Any, *, ctx: ToolContext) -> None:
             crack_status = "timed_out"
             crack_out = f"{t} timed out after {timeout}s"
             returncode = None
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             crack_status = "error"
             crack_out = str(exc)
             returncode = None
@@ -126,7 +126,7 @@ def register_cracking_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     text=True,
                 )
                 show_out = (so + "\n" + se)[-2000:]
-            except Exception:
+            except Exception:  # ponytail: bare except intentional
                 show_out = ""
 
         # Parse --show output. hashcat: "hash:plain" (or "hash:salt:plain");

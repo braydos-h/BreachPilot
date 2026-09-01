@@ -44,7 +44,7 @@ def register_snapshot_tools(mcp: Any, *, ctx: ToolContext) -> None:
         resolved = _vm_id_for_target(vm_id.strip(), config)
         try:
             ref = manager.before_destructive(resolved, label.strip() or f"manual-{manager._now_fn()}")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001  # ponytail: bare except intentional
             return f"ERROR: snapshot_create failed: {exc}"
         if ref is None:
             return "BLOCKED: snapshots disabled or the snapshot failed (no ref returned)."
@@ -96,7 +96,7 @@ def register_snapshot_tools(mcp: Any, *, ctx: ToolContext) -> None:
         resolved = _vm_id_for_target(vm_id.strip(), config)
         try:
             refs = manager.list(resolved)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001  # ponytail: bare except intentional
             return f"ERROR: snapshot_list failed: {exc}"
         lines = [f"SNAPSHOT_LIST:\nVM_ID: {resolved}\nCOUNT: {len(refs)}"]
         for r in refs:

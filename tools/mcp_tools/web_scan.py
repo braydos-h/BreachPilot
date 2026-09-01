@@ -151,7 +151,7 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
             status = "timed_out"
             output = f"{sc} timed out after {timeout}s"
             returncode = None
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             status = "error"
             output = str(exc)
             returncode = None

@@ -100,7 +100,7 @@ def register_killchain_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return "BLOCKED: target is required."
         try:
             snap = machine.status(target.strip())
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001  # ponytail: bare except intentional
             return f"ERROR: killchain_status failed: {exc}"
         lines = [
             "KILLCHAIN_STATUS:",
@@ -162,7 +162,7 @@ def register_killchain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     result = pool.submit(asyncio.run, coro).result()
         except NotImplementedError as exc:
             return f"ERROR: killchain_attempt unavailable: {exc}"
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001  # ponytail: bare except intentional
             return f"ERROR: killchain_attempt failed: {exc}"
 
         header = "KILLCHAIN_TRANSITION:" if result.get("success") else "KILLCHAIN_FAILED:"
@@ -206,7 +206,7 @@ def register_killchain_tools(mcp: Any, *, ctx: ToolContext) -> None:
         try:
             path = machine.plan(target.strip(), goal)
             snap = machine.status(target.strip())
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001  # ponytail: bare except intentional
             return f"ERROR: killchain_plan failed: {exc}"
         lines = [
             "KILLCHAIN_PLAN:",

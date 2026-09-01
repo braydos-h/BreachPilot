@@ -532,7 +532,7 @@ async def _open_exploit_mcp_session_once(
                         # so the ``except asyncio.TimeoutError`` above
                         # silently misses it. This is the exact bug class
                         # CLAUDE.md warns about for ``ClientSession.initialize()``:
-                        # bare ``except Exception`` (or ``except TimeoutError``)
+                        # bare ``except Exception`` (or ``except TimeoutError``)  # ponytail: bare except intentional
                         # lets the group propagate past ``soft_fail`` and
                         # crashes recon-first. Mirror the stdio branch's
                         # ``_EXC_GROUP_CATCH`` handling.

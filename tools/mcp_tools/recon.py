@@ -78,13 +78,13 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
                                 s.settimeout(2)
                                 s.sendall(b"HEAD / HTTP/1.0\r\n\r\n")
                                 banner = s.recv(512).decode("utf-8", errors="replace").strip()[:200]
-                            except Exception:
+                            except Exception:  # ponytail: bare except intentional
                                 pass
                         else:
                             try:
                                 s.settimeout(2)
                                 banner = s.recv(256).decode("utf-8", errors="replace").strip()[:120]
-                            except Exception:
+                            except Exception:  # ponytail: bare except intentional
                                 pass
                         banner_texts[port] = banner
                         result_lines.append(f"  Port {port}/tcp: open - {banner if banner else '(no banner)'}")
@@ -98,7 +98,7 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         elif port in (111, 2049):
                             hints.append(f"Port {port}/tcp open - likely Linux/Unix")
                             linux_score += 1
-            except Exception:
+            except Exception:  # ponytail: bare except intentional
                 pass
 
         # --- Banner text heuristics ---
@@ -342,14 +342,14 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
                                 ssl_info["san"] = [s[1] for s in san if s[0] == "DNS"]
                                 ssl_info["not_after"] = cert.get("notAfter", "")
                             banner = tls_sock.recv(512).decode("utf-8", errors="replace").strip()[:200]
-                except Exception:
+                except Exception:  # ponytail: bare except intentional
                     # Not actually TLS or handshake failed Ã¢â‚¬â€ fall back to plain
                     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                         sock.settimeout(8)
                         sock.connect((target_ip, port))
                         try:
                             banner = sock.recv(512).decode("utf-8", errors="replace").strip()[:200]
-                        except Exception:
+                        except Exception:  # ponytail: bare except intentional
                             pass
             else:
                 # Plain TCP banner grab
@@ -361,7 +361,7 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         if port in (80, 8080, 8000, 3000, 5000):
                             sock.sendall(f"HEAD / HTTP/1.0\r\nHost: {target_ip}\r\n\r\n".encode())
                         banner = sock.recv(512).decode("utf-8", errors="replace").strip()[:200]
-                    except Exception:
+                    except Exception:  # ponytail: bare except intentional
                         pass
 
             # Service guess
@@ -413,7 +413,7 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return f"ERROR: Connection to {target_ip}:{port} timed out."
         except ConnectionRefusedError:
             return f"ERROR: Connection refused on {target_ip}:{port}."
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             return f"ERROR: Fingerprint failed Ã¢â‚¬â€ {exc}"
 
     # ======================================================================
@@ -562,5 +562,5 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 f"OS_CHANGED: {os_changed}",
             ]
             return "\n".join(lines)
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             return f"ERROR: recon diff failed - {exc}"

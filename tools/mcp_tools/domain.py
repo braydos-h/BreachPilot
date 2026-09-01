@@ -517,10 +517,10 @@ def _stdlib_fetch(
     except urllib.error.HTTPError as e:
         try:
             body = e.read(min(2000, max_bytes)).decode(errors="replace")
-        except Exception:
+        except Exception:  # ponytail: bare except intentional
             body = ""
         return e.code, dict(e.headers.items()) if e.headers else {}, body
-    except Exception:
+    except Exception:  # ponytail: bare except intentional
         return 0, {}, ""
 
 
@@ -618,7 +618,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 try:
                     answers = dns.resolver.resolve(d, rt)
                     return [str(r.to_text()) for r in answers]
-                except Exception:
+                except Exception:  # ponytail: bare except intentional
                     return []
 
             resolver_fn = _dnspython_resolver
@@ -706,7 +706,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                                 s = s.strip().lstrip("*.").strip().lower()
                                 if s and is_subdomain_of(s, dom) and s != dom and s not in subs:
                                     subs[s] = None
-                except Exception:
+                except Exception:  # ponytail: bare except intentional
                     pass
 
         # DNS bruteforce with the built-in wordlist. Run resolutions
@@ -742,7 +742,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         s = line.strip().lower()
                         if s and is_subdomain_of(s, dom) and s != dom and s not in subs:
                             subs[s] = None
-            except Exception:
+            except Exception:  # ponytail: bare except intentional
                 pass
 
         # amass (passive+active, if installed)
@@ -761,7 +761,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         s = line.strip().lower()
                         if s and is_subdomain_of(s, dom) and s != dom and s not in subs:
                             subs[s] = None
-            except Exception:
+            except Exception:  # ponytail: bare except intentional
                 pass
 
         # Resolve any subdomains found passively that don't have an IP yet,
@@ -787,7 +787,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     for r in answers:
                         cname_target = str(r.to_text()).rstrip(".")
                         break
-                except Exception:
+                except Exception:  # ponytail: bare except intentional
                     pass
                 if cname_target:
                     for svc, fp in _TAKEOVER_FINGERPRINTS.items():
@@ -926,12 +926,12 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 spf_answers = resolver.resolve(dom, "TXT")
                 spf = [str(r.to_text()) for r in spf_answers if "spf" in str(r.to_text()).lower()]
                 records["SPF"] = spf
-            except Exception:
+            except Exception:  # ponytail: bare except intentional
                 records["SPF"] = []
             try:
                 dmarc_answers = resolver.resolve(f"_dmarc.{dom}", "TXT")
                 records["DMARC"] = [str(r.to_text()) for r in dmarc_answers]
-            except Exception:
+            except Exception:  # ponytail: bare except intentional
                 records["DMARC"] = []
 
             # DNSSEC: presence of a DS record at the parent zone indicates a
@@ -944,7 +944,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 dnssec_status = "unsigned (no DS record)"
             except (dns.resolver.NXDOMAIN, dns.exception.DNSException):
                 dnssec_status = "unsigned"
-            except Exception:
+            except Exception:  # ponytail: bare except intentional
                 dnssec_status = "unknown"
 
             # NS version fingerprinting -- query version.bind in the CHAOS
@@ -961,7 +961,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         lifetime=5,
                     )
                     ns_version = " ".join(str(r.to_text()) for r in version_answers)
-                except Exception:
+                except Exception:  # ponytail: bare except intentional
                     ns_version = "(version.bind query failed / refused)"
 
             # AXFR zone transfer (opt-in)
@@ -984,7 +984,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     records["AXFR"] = zone_records[:200]  # cap for display
                 except dns.exception.FormError:
                     axfr_result = "AXFR_REFUSED: server refused zone transfer"
-                except Exception as e:
+                except Exception as e:  # ponytail: bare except intentional
                     # dns.xfr.TransferError (when importable) is a subclass of
                     # Exception, so this branch covers both transfer-refused
                     # and generic AXFR failures without needing to name the
@@ -1244,7 +1244,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 nameservers = [str(ns).rstrip(".").lower()]
         except ImportError:
             pass
-        except Exception:
+        except Exception:  # ponytail: bare except intentional
             pass
 
         # Fallback: shell to the whois binary
@@ -1279,7 +1279,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                             ns_val = line.split(":", 1)[1].strip().rstrip(".").lower()
                             if ns_val and ns_val not in nameservers:
                                 nameservers.append(ns_val)
-            except Exception:
+            except Exception:  # ponytail: bare except intentional
                 pass
 
         if not registrar and not shutil.which("whois"):

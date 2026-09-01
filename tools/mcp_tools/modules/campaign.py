@@ -189,7 +189,7 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     (campaign_dir / "state.json").write_text(
                         json.dumps(final_state, indent=2, default=str), encoding="utf-8"
                     )
-                except Exception as exc:
+                except Exception as exc:  # ponytail: bare except intentional
                     error_state = {
                         "campaign_id": campaign_id,
                         "target": target_ip,
@@ -229,7 +229,7 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 "NOTE: Campaign is running in background. Use get_campaign_status to monitor progress.",
             ]
             return "\n".join(lines)
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             return f"ERROR: Campaign start failed — {exc}"
 
     @mcp.tool()
@@ -288,7 +288,7 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 lines.append(f"\nLAST_ERROR: {last_error}")
 
             return "\n".join(lines)
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             return f"ERROR: Status retrieval failed — {exc}"
 
     @mcp.tool()
@@ -467,7 +467,7 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 lines.append(f"SCRIPT_PREVIEW:\n{result['script'][:300]}")
 
             return "\n".join(lines)
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             return f"ERROR: Campaign step failed — {exc}"
 
     # ───────────────────────────────────────────────────────────────────────

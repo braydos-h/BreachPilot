@@ -30,7 +30,6 @@ import type {
   DeleteRunResponse,
   CustomGoal,
   DiagnosticsResponse,
-  GoalPreset,
   GoalsResponse,
   LiveModelsResponse,
   LogResponse,

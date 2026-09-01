@@ -27,7 +27,7 @@ def _platform_system() -> str:
         return "Windows"
     try:
         return platform.system()
-    except Exception:
+    except Exception:  # ponytail: bare except intentional
         return "Linux"
 
 

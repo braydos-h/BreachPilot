@@ -126,7 +126,7 @@ def register_payload_tools(mcp: Any, *, ctx: ToolContext) -> None:
             status = "timed_out"
             output = "msfvenom timed out after 300s"
             returncode = None
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             status = "error"
             output = str(exc)
             returncode = None

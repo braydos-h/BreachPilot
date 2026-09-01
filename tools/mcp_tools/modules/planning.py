@@ -72,7 +72,7 @@ def register_planning_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     steps = parse_plan_json(content)
                     for step in steps:
                         plan.add_step(step)
-                except Exception:
+                except Exception:  # ponytail: bare except intentional
                     pass  # Fall through to save plan without AI-generated steps
 
             planner.save_plan(plan)
@@ -88,7 +88,7 @@ def register_planning_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 f"SAVED_TO: {plans_dir / (target_ip.replace('.', '_') + '_plan.json')}",
             ]
             return "\n".join(lines)
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             return f"ERROR: Plan creation failed — {exc}"
 
     @mcp.tool()
@@ -130,7 +130,7 @@ def register_planning_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 plan.generate_battle_log(),
             ]
             return "\n".join(lines)
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             return f"ERROR: Plan retrieval failed — {exc}"
 
     @mcp.tool()
@@ -185,7 +185,7 @@ def register_planning_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         plan.current_phase_index = len(plan.phases) - 1
                     elif step is not None:
                         plan.add_step(step)
-                except Exception:
+                except Exception:  # ponytail: bare except intentional
                     # Fallback: just advance to next phase
                     plan.next_phase()
 
@@ -200,7 +200,7 @@ def register_planning_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 plan.generate_battle_log(),
             ]
             return "\n".join(lines)
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             return f"ERROR: Replan failed — {exc}"
 
     # ───────────────────────────────────────────────────────────────────────

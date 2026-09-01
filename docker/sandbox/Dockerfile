@@ -70,6 +70,9 @@ RUN useradd --create-home --shell /bin/bash --uid 1000 sandbox
 RUN mkdir -p /workspace
 WORKDIR /workspace
 
-# No ENTRYPOINT: the manager always passes an explicit argv
-# (timeout ... bash -lc <command> / iptables-restore sidecar).
-CMD ["/bin/bash"]
+# No ENTRYPOINT: the manager always passes an explicit keepalive
+# (`sleep infinity`) for the worker and an explicit argv for sidecars
+# (`iptables-restore` / `timeout ... bash -lc <command>` via docker exec).
+# The default CMD is the keepalive fallback so a bare `docker run` also stays
+# alive for manual debugging.
+CMD ["sleep", "infinity"]

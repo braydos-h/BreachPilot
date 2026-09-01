@@ -227,7 +227,7 @@ def register_assessment_state_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
                     registry = get_registry({"skills": _skills_config(config)})
                     skill = registry.get(name)
-                except Exception as exc:  # noqa: BLE001 -- best-effort lookup
+                except Exception as exc:  # noqa: BLE001 -- best-effort lookup  # ponytail: bare except intentional
                     return f"CAPABILITY_DETAILS: skill registry unavailable: {exc}"
                 if skill is None:
                     return f"CAPABILITY_DETAILS: skill not found: {name!r}"

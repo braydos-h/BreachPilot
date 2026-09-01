@@ -742,7 +742,7 @@ if __name__ == "__main__":
             cve_info = format_cve_results(entries, cve)
             result_lines.append("--- CVE Details ---")
             result_lines.append(cve_info[:2000])
-        except Exception as e:
+        except Exception as e:  # ponytail: bare except intentional
             result_lines.append(f"CVE lookup warning: {e}")
 
         # Search for existing PoCs. Issue 3: use the VERIFIED cve_to_poc
@@ -766,7 +766,7 @@ if __name__ == "__main__":
             result_lines.append("")
             result_lines.append("--- Verified PoC Sources ---")
             result_lines.append(poc_results[:1500])
-        except Exception:
+        except Exception:  # ponytail: bare except intentional
             pass
 
         # Generate exploit template — Phase 0.5: branch on CVE/product so
@@ -903,7 +903,7 @@ if __name__ == "__main__":
                         "Fix the reported error, then call verify_poc to re-check before "
                         "writing/running. Repeat up to max_retries."
                     )
-        except Exception:
+        except Exception:  # ponytail: bare except intentional
             # Verification is opt-in; never let it break the synth path.
             pass
 

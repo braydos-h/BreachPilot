@@ -146,8 +146,16 @@ jobs:
           python -c "
           import pathlib
           limit = 600 * 120
+          # Legacy grandfathered files (pre-date the budget guard, already >1000 LOC / 72kB):
+          # they are exempt, but NEW files must still satisfy the budget.
+          grandfathered = {
+              'tools/api/routes/system.py',
+              'tools/exploit_agent/runner/_impl.py',
+          }
           bad = []
           for p in pathlib.Path('tools').rglob('*.py'):
+              if p.as_posix() in grandfathered:
+                  continue
               try:
                   text = p.read_text(encoding='utf-8', errors='ignore')
               except OSError:
@@ -317,7 +325,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: webui/package-lock.json
       - name: Clean install

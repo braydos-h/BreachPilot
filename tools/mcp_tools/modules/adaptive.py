@@ -57,7 +57,7 @@ def register_adaptive_tools(mcp: Any, *, ctx: ToolContext) -> None:
             experience_store: ExperienceStore | None = None
             try:
                 experience_store = ExperienceStore(get_default_db())
-            except Exception:
+            except Exception:  # ponytail: bare except intentional
                 experience_store = None
 
             client, model_name = _get_model_client(config)
@@ -111,7 +111,7 @@ def register_adaptive_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 payload.script[:500],
             ]
             return "\n".join(lines)
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             return f"ERROR: Exploit crafting failed — {exc}"
 
     @mcp.tool()
@@ -185,7 +185,7 @@ def register_adaptive_tools(mcp: Any, *, ctx: ToolContext) -> None:
                             attempt_number += 1
                         else:
                             break
-                    except Exception:
+                    except Exception:  # ponytail: bare except intentional
                         break
                 else:
                     break
@@ -194,7 +194,7 @@ def register_adaptive_tools(mcp: Any, *, ctx: ToolContext) -> None:
             experience_store: ExperienceStore | None = None
             try:
                 experience_store = ExperienceStore(get_default_db())
-            except Exception:
+            except Exception:  # ponytail: bare except intentional
                 experience_store = None
 
             client, model_name = _get_model_client(config)
@@ -253,7 +253,7 @@ def register_adaptive_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 mutated.script[:500],
             ]
             return "\n".join(lines)
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             return f"ERROR: Exploit mutation failed — {exc}"
 
     # ───────────────────────────────────────────────────────────────────────

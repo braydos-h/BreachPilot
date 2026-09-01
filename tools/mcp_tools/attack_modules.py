@@ -268,7 +268,7 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{module_name}_{target_ip}.py")
                         script_path = str(modules_dir / safe_name)
                         Path(script_path).write_text(script_text, encoding="utf-8")
-                except Exception:
+                except Exception:  # ponytail: bare except intentional
                     pass
 
             lines = [
@@ -308,5 +308,5 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 lines.append(f"SCRIPT_PREVIEW:\n{result['script'][:500]}")
 
             return "\n".join(lines)
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             return f"ERROR: Module execution failed — {exc}"

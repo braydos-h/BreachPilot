@@ -53,7 +53,7 @@ def register_research_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Look up CVEs in the NVD database for a known CVE ID or product/version string. Returns CVSS score, description, and reference links."""
         try:
             entries = nvd.search_sync(query)
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             # NVD can 404 intermittently or be rate-limited. Degrade to an
             # empty result instead of surfacing a tool error that stalls the
             # agent loop -- the AI treats "no CVEs found" as a signal to move

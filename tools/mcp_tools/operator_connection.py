@@ -116,7 +116,7 @@ def register_operator_connection_tools(mcp: Any, *, ctx: ToolContext) -> None:
         # the evidence marker.
         try:
             sanitized = preflight_command_check(command).get("sanitized_command", command)
-        except Exception:
+        except Exception:  # ponytail: bare except intentional
             sanitized = command
         return (
             f"RCE_EXEC_GATE: passed\n"
@@ -233,7 +233,7 @@ def register_operator_connection_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         listener_status = (
                             f"failed to start ({res.get('error', 'unknown')}) — start it manually via start_listener"
                         )
-            except Exception as exc:  # pragma: no cover — best-effort
+            except Exception as exc:  # pragma: no cover — best-effort  # ponytail: bare except intentional
                 listener_status = f"error starting listener: {exc}"
 
         # Create the operator-side ConnectionRecord.
@@ -252,7 +252,7 @@ def register_operator_connection_tools(mcp: Any, *, ctx: ToolContext) -> None:
             )
         except ValueError as exc:
             return f"BLOCKED: {exc}"
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             return f"ERROR: could not create connection record: {exc}"
 
         return (
@@ -289,7 +289,7 @@ def register_operator_connection_tools(mcp: Any, *, ctx: ToolContext) -> None:
         try:
             mgr = get_connection_manager(workspace)
             recs = mgr.list_connections(target_ip.strip() if target_ip else "")
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             return f"ERROR: could not list connections: {exc}"
         if not recs:
             who = f" for {target_ip}" if target_ip else ""
@@ -331,7 +331,7 @@ def register_operator_connection_tools(mcp: Any, *, ctx: ToolContext) -> None:
         try:
             mgr = get_connection_manager(workspace)
             conn_mgr_records = mgr.list_connections(target_ip)
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             return f"ERROR: could not load connections: {exc}"
 
         # Select which connections to check.
@@ -358,7 +358,7 @@ def register_operator_connection_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
             sess_mgr = get_session_manager(workspace)
             all_sessions = sess_mgr.list_all_sessions()
-        except Exception:
+        except Exception:  # ponytail: bare except intentional
             all_sessions = []
 
         lines = [f"CONNECTION_CHECK: {len(to_check)} channel(s) for {target_ip}", ""]
@@ -413,7 +413,7 @@ def register_operator_connection_tools(mcp: Any, *, ctx: ToolContext) -> None:
         try:
             mgr = get_connection_manager(workspace)
             all_for_target = mgr.list_connections(target_ip)
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             return f"ERROR: could not load connections: {exc}"
 
         if not all_for_target:
@@ -471,7 +471,7 @@ def register_operator_connection_tools(mcp: Any, *, ctx: ToolContext) -> None:
                             lines.append(f"    listener {rec.listener_name}: not running or already stopped")
                     else:
                         lines.append(f"    listener {rec.listener_name}: stopped")
-                except Exception as exc:
+                except Exception as exc:  # ponytail: bare except intentional
                     lines.append(f"    listener {rec.listener_name}: stop error: {exc}")
             else:
                 lines.append(f"    listener {rec.listener_name}: left running (pass stop_listener=True to stop it)")
@@ -522,7 +522,7 @@ def register_operator_connection_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
             mgr = get_session_manager(workspace)
             res = mgr.start_listener(lname, port, listener_type=ltype, protocol=protocol)
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             return f"LISTENER_ERROR: {exc}"
 
         if res.get("success"):

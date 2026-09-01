@@ -76,16 +76,22 @@ export function RunStartupProgress({ startup }: { startup: RunStartupState }) {
 
   const steps: { key: string; label: string; detail: string; state: "done" | "active" | "pending" }[] = [
     {
-      key: "received",
-      label: startup.phase === "sending" ? "Sending request…" : "Request received",
+      key: "sending",
+      label: "Sending request…",
       detail: "",
       state: startup.phase === "sending" ? "active" : "done",
+    },
+    {
+      key: "received",
+      label: "Request received",
+      detail: "",
+      state: startup.phase === "sending" ? "pending" : "done",
     },
     ...STAGE_GROUPS.map((group, index) => ({
       key: group.id,
       label: group.label,
       detail:
-        stepState(index, activeIndex, doneAll) === "active" && startup.message
+        stepState(index, activeIndex, doneAll) === "active" && startup.message && startup.message !== group.label
           ? startup.backendStage === "done"
             ? ""
             : startup.message

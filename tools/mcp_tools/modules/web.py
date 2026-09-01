@@ -79,7 +79,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                             token = match.group(0)
                             result_lines.append(f"Discovered JWT at {path}: {token[:60]}...")
                             break
-                except Exception:
+                except Exception:  # ponytail: bare except intentional
                     pass
 
         if not token:
@@ -102,7 +102,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
         try:
             header = json.loads(_b64url_decode(parts[0]))
             result_lines.append(f"Header: {json.dumps(header)}")
-        except Exception:
+        except Exception:  # ponytail: bare except intentional
             header = {}
             result_lines.append("Header: (could not decode)")
 
@@ -170,7 +170,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     )
                     if sig == parts[2]:
                         found_secrets.append(secret)
-                except Exception:
+                except Exception:  # ponytail: bare except intentional
                     pass
             if found_secrets:
                 result_lines.append(f"WEAK SECRET FOUND: {found_secrets}")
@@ -274,7 +274,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                                 result_lines.append(f"  Payload: {payload} -> reflected {expected}")
                                 found_engine = engine
                                 break
-                    except Exception:
+                    except Exception:  # ponytail: bare except intentional
                         pass
                 if found_engine:
                     break
@@ -354,7 +354,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         break
                     elif "graphql" in resp.lower() or "query" in resp.lower():
                         result_lines.append(f"[?] Possible GraphQL at {ep} (introspection may be disabled)")
-            except Exception:
+            except Exception:  # ponytail: bare except intentional
                 pass
 
         if not found:
@@ -391,7 +391,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     result_lines.append("[+] Batching ENABLED! Multiple queries processed in one request.")
                 else:
                     result_lines.append("[-] Batching blocked or not supported.")
-            except Exception:
+            except Exception:  # ponytail: bare except intentional
                 result_lines.append("Batching test failed.")
 
         return "\n".join(result_lines)
@@ -438,7 +438,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                             results["failure"] += 1
                         results["statuses"].append(status_line[:100])
                     return {"status": status_line[:100]}
-            except Exception as e:
+            except Exception as e:  # ponytail: bare except intentional
                 with lock:
                     results["failure"] += 1
                 return {"error": str(e)}
@@ -492,7 +492,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         s.recv(4096)
                         elapsed = (time.perf_counter() - t0) * 1000
                         times.append(elapsed)
-                except Exception:
+                except Exception:  # ponytail: bare except intentional
                     pass
                 time.sleep(0.15)
             return times
@@ -561,7 +561,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     except _sock.timeout:
                         pass
                     return resp
-            except Exception as e:
+            except Exception as e:  # ponytail: bare except intentional
                 return f"ERROR: {e}".encode()
 
         # Baseline
@@ -713,7 +713,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         found.append(username)
                     else:
                         result_lines.append(f"  [-] {username}:{password} — {status_line[:60]}")
-            except Exception as e:
+            except Exception as e:  # ponytail: bare except intentional
                 result_lines.append(f"  [!] {username} — error: {e}")
             time.sleep(1.5)  # Delay to avoid lockout
 

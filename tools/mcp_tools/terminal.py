@@ -51,7 +51,7 @@ def _opsec_advisory_block(sanitized_command: str, config: Any) -> str:
             f"- Suggested quieter rewrite: {alt_line}\n"
             f"- Pacing posture: {pacing}\n"
         )
-    except Exception:
+    except Exception:  # ponytail: bare except intentional
         return ""
 
 
@@ -118,7 +118,7 @@ def _require_sudo_or_pivot(tool_name: str, payload: str) -> str | None:
 
         if _can_passwordless_sudo():
             return None
-    except Exception:
+    except Exception:  # ponytail: bare except intentional
         # Could not determine sudo status -- do not block; let the existing
         # path run and surface whatever it surfaces (legacy behavior).
         return None
@@ -350,7 +350,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
             if not (is_windows and _bash_on_windows is None):
                 try:
                     out_bytes, _ = proc.communicate(timeout=5)
-                except Exception:
+                except Exception:  # ponytail: bare except intentional
                     out_bytes = out_bytes or b""
             exit_code = None
             status = "timed_out"
@@ -366,7 +366,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 text = out_bytes.decode("utf-8", errors="replace") if isinstance(out_bytes, bytes) else str(out_bytes)
                 log_path.write_text(header + text, encoding="utf-8", errors="replace")
                 output_tail = text[-4000:]
-            except Exception:
+            except Exception:  # ponytail: bare except intentional
                 pass
         elif log_path.exists():
             text = log_path.read_text(encoding="utf-8", errors="replace")
@@ -452,7 +452,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 from tools.exploit_search import url_exists as _url_exists_check
 
                 _ok, _reason = _url_exists_check(url, timeout=8)
-            except Exception:
+            except Exception:  # ponytail: bare except intentional
                 _ok, _reason = True, None  # import/probe failure -> don't block
             if not _ok:
                 preflight_note = (
@@ -598,7 +598,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         )
                         if proc2.returncode == 0 and proc2.stdout:
                             version = proc2.stdout.strip().split("\n")[0][:100]
-                except Exception:
+                except Exception:  # ponytail: bare except intentional
                     pass
                 result_lines.append(f"  [+] {tool}: {path}  ({version})")
             else:
@@ -618,7 +618,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 from tools.env_probe import _can_passwordless_sudo
 
                 _has_sudo = _can_passwordless_sudo()
-            except Exception:
+            except Exception:  # ponytail: bare except intentional
                 _has_sudo = True  # unknown; keep the legacy hint
             if _has_sudo:
                 result_lines.append(
@@ -777,7 +777,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
             )
             if proc.returncode != 0:
                 return f"DOWNLOAD_RESULT: failed\nURL: {url}\nERROR: curl failed: {proc.stderr[-1000:]}"
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             return f"DOWNLOAD_RESULT: error - {exc}"
 
         # Install based on type
@@ -809,7 +809,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 )
             except subprocess.TimeoutExpired:
                 return f"INSTALL_RESULT: timed_out\nTYPE: deb\nURL: {url}"
-            except Exception as exc:
+            except Exception as exc:  # ponytail: bare except intentional
                 return f"INSTALL_RESULT: error - {exc}"
 
         elif itype in ("tarball", "zip"):
@@ -839,7 +839,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         timeout=10,
                     )
                     listing = list_proc.stdout[:2000]
-                except Exception:
+                except Exception:  # ponytail: bare except intentional
                     pass
                 return (
                     f"INSTALL_RESULT: {status} (exit_code={rc})\n"
@@ -852,7 +852,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 )
             except subprocess.TimeoutExpired:
                 return f"INSTALL_RESULT: timed_out\nTYPE: {itype}\nURL: {url}"
-            except Exception as exc:
+            except Exception as exc:  # ponytail: bare except intentional
                 return f"INSTALL_RESULT: error - {exc}"
 
         else:  # binary
@@ -868,7 +868,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     f"PATH: {target_path}\n"
                     f"NOTE: Made executable at {target_path}"
                 )
-            except Exception:
+            except Exception:  # ponytail: bare except intentional
                 # Fallback: keep in workspace and make executable
                 download_path.chmod(0o755)
                 return (
@@ -895,7 +895,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
             )
             update_output = (proc.stdout + "\n" + proc.stderr)[-2000:]
             update_status = "completed" if proc.returncode == 0 else "failed"
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             return f"UPDATE_RESULT: error during apt update - {exc}"
 
         if not upgrade:
@@ -915,7 +915,7 @@ def register_terminal_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 f"UPDATE_OUTPUT:\n{update_output}\n"
                 f"UPGRADE_OUTPUT:\n{upgrade_output}"
             )
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             return (
                 f"UPDATE_RESULT: {update_status} (update) / error (upgrade)\n"
                 f"UPDATE_OUTPUT:\n{update_output}\n"

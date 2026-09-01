@@ -96,7 +96,7 @@ def _platform_system() -> str:
         return "Windows"
     try:
         return platform.system()
-    except Exception:
+    except Exception:  # ponytail: bare except intentional
         return "Linux"
 
 
@@ -183,7 +183,7 @@ def _get_model_router_impl(config: dict[str, Any] | None) -> Any | None:
             return _model_router_cache
         except ImportError:
             return None
-        except Exception:
+        except Exception:  # ponytail: bare except intentional
             return None
 
 
@@ -213,7 +213,7 @@ def _get_model_client(config: dict[str, Any] | None) -> tuple[Any | None, str]:
     try:
         client = router.get_client(default_alias)
         return client, default_alias
-    except Exception:
+    except Exception:  # ponytail: bare except intentional
         return None, ""
 
 
@@ -422,7 +422,7 @@ def _validate_mcp_tool_decorators() -> list[str]:
             continue
         try:
             tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
-        except Exception as exc:
+        except Exception as exc:  # ponytail: bare except intentional
             errors.append(f"{py.name}: failed to parse: {exc}")
             continue
         for node in ast.walk(tree):

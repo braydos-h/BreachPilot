@@ -266,6 +266,11 @@ def _build_create_args(spec: SandboxSpec, *, cap_raw: bool, read_only_rootfs: bo
     if read_only_rootfs:
         args.append("--read-only")
     args.append(image)
+    # Keepalive: the worker must stay alive for `docker exec` and netns firewall.
+    # The image's CMD is /bin/bash (exits immediately when not interactive), so
+    # the manager must override it with a long-lived process. `sleep infinity`
+    # is tiny, handles SIGTERM cleanly, and exists in the debian image.
+    args += ["sleep", "infinity"]
     return args
 
 
@@ -308,6 +313,22 @@ class DockerBackend:
         if rc2 != 0:
             docker_rm(container)
             raise SandboxUnavailableError(f"docker start failed: {err2.strip()[:300]}")
+        # The worker's keepalive (sleep infinity) must be observed as running
+        # before the caller joins its netns. Poll briefly; fail closed if it
+        # never reaches running (exited / dead).
+        import time
+
+        for _ in range(30):
+            state = docker_inspect_state(container)
+            if state == "running":
+                break
+            if state in ("exited", "dead"):
+                docker_rm(container)
+                raise SandboxUnavailableError(f"sandbox worker {container} exited immediately (state={state})")
+            time.sleep(0.1)
+        else:
+            docker_rm(container)
+            raise SandboxUnavailableError(f"sandbox worker {container} not running after start")
         return container
 
     def render_firewall(self, container_id: str, image: str, binary: str, rules_text: str) -> tuple[int, str, str]:
