@@ -190,16 +190,16 @@ async def test_snapshot_allowlist_no_duplicate(tmp_path):
 async def test_cancel_removes_from_active(tmp_path, monkeypatch):
     """Cancelling a run removes it from the active dict (slot frees up)."""
     manager = _make_manager(tmp_path, monkeypatch, max_concurrent_runs=2)
-    await manager.create_run(RunRequest(target="10.0.0.50"))
-    await manager.create_run(RunRequest(target="10.0.0.51"))
+    run_a, _, _ = await manager.create_run(RunRequest(target="10.0.0.50"))
+    run_b, _, _ = await manager.create_run(RunRequest(target="10.0.0.51"))
     assert len(manager.active_run_ids) == 2
-    await manager.cancel_run("run-10.0.0.50")
-    assert "run-10.0.0.50" not in manager.active_run_ids
+    await manager.cancel_run(run_a)
+    assert run_a not in manager.active_run_ids
     assert len(manager.active_run_ids) == 1
     # The freed slot now accepts a new run.
     await manager.create_run(RunRequest(target="10.0.0.52"))
     assert len(manager.active_run_ids) == 2
-    for rid in manager.active_run_ids:
+    for rid in list(manager.active_run_ids):
         await manager.cancel_run(rid)
 
 

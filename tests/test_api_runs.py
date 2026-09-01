@@ -43,7 +43,11 @@ def _make_client(tmp_path, monkeypatch, token="test-token"):
     from app import create_app
 
     app = create_app(config_path=config_path, callables=callables)
-    return TestClient(app)
+    # Use TestClient as a context manager to ensure lifespan (warmup + demo seed) runs correctly.
+    # Without `with`, the async lifespan isn't entered and background prepare tasks get cancelled.
+    client = TestClient(app)
+    client.__enter__()
+    return client
 
 
 def _auth_headers(token="test-token"):

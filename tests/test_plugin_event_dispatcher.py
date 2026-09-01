@@ -238,7 +238,7 @@ def test_queue_full_drops_deterministically_and_logs(tmp_path: Path, monkeypatch
     reg = _fresh_registry(monkeypatch)
 
     def slow(event: dict[str, Any]) -> None:
-        time.sleep(0.5)
+        time.sleep(0.2)
 
     reg.register_event_subscriber(slow)
     disp = _PluginEventDispatcher(max_queue_size=2, max_workers=1)
@@ -252,9 +252,10 @@ def test_queue_full_drops_deterministically_and_logs(tmp_path: Path, monkeypatch
         await broker.emit("finding", {"seq": 3})
         with caplog.at_level(logging.WARNING):
             await broker.emit("finding", {"seq": 99})
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.15)
         events = await broker.replay(after=0)
         assert len(events) == 4
+        await shutdown_plugin_dispatcher(drain_timeout=1.0)
 
     asyncio.run(_run())
     assert disp.dropped >= 1 or any("queue full" in r.message for r in caplog.records)

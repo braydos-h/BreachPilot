@@ -52,7 +52,9 @@ def _make_client(tmp_path, monkeypatch, token="test-token"):
     from app import create_app
 
     app = create_app(config_path=config_path, callables=callables)
-    return TestClient(app)
+    client = TestClient(app)
+    client.__enter__()
+    return client
 
 
 def _auth_headers(token="test-token"):
