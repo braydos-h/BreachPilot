@@ -126,19 +126,12 @@ class _FakePersistence:
 def _make_app(reports_dir: Path, runs: dict[str, dict[str, Any]], graph_enabled: bool):
     """Build a FastAPI app with only the graph route mounted + a fake auth."""
     app = FastAPI()
-    # No-auth: override _require_auth to return "test" unconditionally.
-    graph_routes.configure(
+    router = graph_routes.create_router(
         auth=_NoAuth(),
         persistence=_FakePersistence(reports_dir, runs),
         config={"api": {"graph_route": graph_enabled}},
     )
-
-    # Monkeypatch _require_auth to bypass bearer token.
-    async def _bypass_auth(request):
-        return "test"
-
-    graph_routes._require_auth = _bypass_auth  # type: ignore[assignment]
-    app.include_router(graph_routes.router)
+    app.include_router(router)
     return app
 
 

@@ -1,0 +1,1 @@
+# paths via bash

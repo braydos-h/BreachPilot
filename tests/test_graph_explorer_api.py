@@ -40,17 +40,12 @@ def _make_app(reports_dir: Path, runs: dict[str, dict[str, Any]], graph_enabled:
     """Standalone app with only the explorer route + real error handlers."""
     app = FastAPI()
     install_error_handlers(app)
-    graph_explorer_routes.configure(
+    router = graph_explorer_routes.create_router(
         auth=_NoAuth(),
         persistence=_FakePersistence(reports_dir, runs),
         config={"api": {"graph_route": graph_enabled}},
     )
-
-    async def _bypass_auth(request):
-        return "test"
-
-    graph_explorer_routes._require_auth = _bypass_auth  # type: ignore[assignment]
-    app.include_router(graph_explorer_routes.router)
+    app.include_router(router)
     return app
 
 

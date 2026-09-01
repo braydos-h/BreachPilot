@@ -1225,13 +1225,14 @@ def test_chatgpt_regression(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_list_models_includes_opencode_go_block():
-    import asyncio
+def test_list_models_includes_opencode_go_block(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
 
-    from tools.api.routes.system import _CONFIG, list_models
+    from app import create_app
 
-    # Simulate config with opencode_go provider
     test_cfg = {
+        "api": {"host": "127.0.0.1", "port": 8765},
+        "reports_dir": str(tmp_path / "reports"),
         "models": {"provider": "opencode_go", "registry": {}, "default_alias": "glm"},
         "opencode_go": {
             "base_url": "https://opencode.ai/zen/go/v1",
@@ -1243,31 +1244,30 @@ def test_list_models_includes_opencode_go_block():
         "ollama": {"host": "https://api.ollama.com"},
         "chatgpt": {"default_model": "gpt-5.2"},
     }
-    # Patch global _CONFIG temporarily
-    original = dict(_CONFIG)
-    try:
-        _CONFIG.clear()
-        _CONFIG.update(test_cfg)
-        result = asyncio.run(list_models(auth="test"))  # type: ignore[arg-type]
-        # list_models is async but we use asyncio.run for sync test
-        if asyncio.iscoroutine(result):
-            result = asyncio.run(result)  # fallback
-        assert result["provider"] == "opencode_go"
-        assert "opencode_go" in result
-        assert result["opencode_go"]["default_model"] == "muse-spark-1.2-contributor"
-        assert result["opencode_go"]["base_url"] == "https://opencode.ai/zen/go/v1"
-    finally:
-        _CONFIG.clear()
-        _CONFIG.update(original)
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-token")
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "config.yaml").write_text("api:\n  host: 127.0.0.1\n", encoding="utf-8")
+    app = create_app(config_path=tmp_path / "config.yaml", config=test_cfg)
+    client = TestClient(app)
+    resp = client.get("/api/v1/models", headers={"Authorization": "Bearer test-token"})
+    assert resp.status_code == 200
+    result = resp.json()
+    assert result["provider"] == "opencode_go"
+    assert "opencode_go" in result
+    assert result["opencode_go"]["default_model"] == "muse-spark-1.2-contributor"
+    assert result["opencode_go"]["base_url"] == "https://opencode.ai/zen/go/v1"
 
 
-def test_providers_includes_opencode_go(monkeypatch):
+def test_providers_includes_opencode_go(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENCODE_GO_API_KEY", "")
-    import asyncio
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-token")
+    from fastapi.testclient import TestClient
 
-    from tools.api.routes.system import _CONFIG, get_providers
+    from app import create_app
 
     test_cfg = {
+        "api": {"host": "127.0.0.1", "port": 8765},
+        "reports_dir": str(tmp_path / "reports"),
         "models": {"provider": "opencode_go"},
         "opencode_go": {
             "enabled": False,
@@ -1278,24 +1278,21 @@ def test_providers_includes_opencode_go(monkeypatch):
         },
         "chatgpt": {"enabled": False},
     }
-    original = dict(_CONFIG)
-    try:
-        _CONFIG.clear()
-        _CONFIG.update(test_cfg)
-        # Patch httpx for opencode status probe to avoid network
-        monkeypatch.setattr(og, "httpx", _FAKE_HTTPX)
-        _FAKE_HTTPX.set("GET", "/models", lambda url, headers=None: _FakeResponse({"data": []}))
-        result = asyncio.run(get_providers(auth="test"))  # type: ignore[arg-type]
-        if asyncio.iscoroutine(result):
-            result = asyncio.run(result)
-        assert "opencode_go" in result
-        assert "api_key_present" in result["opencode_go"]
-        assert result["opencode_go"]["base_url"] == "https://opencode.ai/zen/go/v1"
-        # Never leaks key
-        assert "OPENCODE_GO_API_KEY" not in json.dumps(result) or "hidden" not in json.dumps(result)
-    finally:
-        _CONFIG.clear()
-        _CONFIG.update(original)
+    (tmp_path / "config.yaml").write_text("api:\n  host: 127.0.0.1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    # Patch httpx for opencode status probe to avoid network
+    monkeypatch.setattr(og, "httpx", _FAKE_HTTPX)
+    _FAKE_HTTPX.set("GET", "/models", lambda url, headers=None: _FakeResponse({"data": []}))
+    app = create_app(config_path=tmp_path / "config.yaml", config=test_cfg)
+    client = TestClient(app)
+    resp = client.get("/api/v1/providers", headers={"Authorization": "Bearer test-token"})
+    assert resp.status_code == 200
+    result = resp.json()
+    assert "opencode_go" in result
+    assert "api_key_present" in result["opencode_go"]
+    assert result["opencode_go"]["base_url"] == "https://opencode.ai/zen/go/v1"
+    # Never leaks key
+    assert "OPENCODE_GO_API_KEY" not in json.dumps(result) or "hidden" not in json.dumps(result)
 
 
 def test_api_key_env_inclusion():
