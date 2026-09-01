@@ -139,6 +139,7 @@ export function EventViewer({
   const [older, setOlder] = useState<RunEvent[]>([]);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreOlder, setHasMoreOlder] = useState(false);
+  const [bootDismissed, setBootDismissed] = useState(false);
 
   const followRef = useRef(true);
   const pausedRef = useRef(false);
@@ -150,6 +151,10 @@ export function EventViewer({
     const t = setTimeout(() => setDebouncedQuery(query), 200);
     return () => clearTimeout(t);
   }, [query]);
+
+  useEffect(() => {
+    setBootDismissed(false);
+  }, [runId]);
 
   const rows = useMemo<Row[]>(() => {
     const merged = [...older, ...events];
@@ -462,11 +467,19 @@ export function EventViewer({
         </div>
       )}
 
-      {bootVisible && (
-        <BootChecklist
-          events={events}
-          className="mb-3 rounded-md border bg-card/40 p-3"
-        />
+      {bootVisible && !bootDismissed && (
+        <div className="relative mb-3 rounded-md border bg-card/40 p-3 pr-8">
+          <button
+            type="button"
+            onClick={() => setBootDismissed(true)}
+            aria-label="Hide boot checklist"
+            title="Hide"
+            className="absolute right-1.5 top-1.5 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+          <BootChecklist events={events} />
+        </div>
       )}
 
       <div className="relative flex-1 overflow-hidden rounded-md border bg-background/40 bg-grid-sm/20">
