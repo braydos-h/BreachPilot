@@ -652,9 +652,9 @@ async def start_sandbox_fix(auth: str = Depends(_require_auth)) -> dict[str, Any
     progress.
     """
     from tools.api.errors import APIError
+    from tools.sandbox import remediation as _rem
     from tools.sandbox.models import SandboxConfig
     from tools.sandbox.remediation import _job_to_dict, _start_background_job, create_job
-    from tools.sandbox import remediation as _rem
 
     # Do not treat disabled as success – refuse to "fix" an intentional choice.
     cfg = SandboxConfig.from_config(_CONFIG)

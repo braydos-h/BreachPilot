@@ -183,9 +183,9 @@ def test_create_run_state_is_awaiting_confirmation(tmp_path, monkeypatch):
         time.sleep(0.02)
     assert state == "awaiting_confirmation"
     decisions = client.get(f"/api/v1/runs/{run_id}/decisions", headers=_auth_headers()).json()["decisions"]
-    assert any(
-        d["kind"] == "start_confirm" and d["status"] == "pending" for d in decisions
-    ), "a start_confirm decision must be present for the review step"
+    assert any(d["kind"] == "start_confirm" and d["status"] == "pending" for d in decisions), (
+        "a start_confirm decision must be present for the review step"
+    )
 
 
 # ── Invalid IPv4 rejection (backend mirror of browser check) ─────────────────

@@ -238,7 +238,7 @@ function SandboxFixDialog({
               </div>
               <ul className="space-y-1.5">
                 {displaySteps.map((s) => {
-                  const status = (s as { status: string }).status;
+                  const status = (s as unknown as { status: string }).status;
                   let icon: ReactNode;
                   if (status === "succeeded") icon = <CheckCircle2 className="h-4 w-4 text-emerald-400" />;
                   else if (status === "running") icon = <Loader2 className="h-4 w-4 animate-spin text-blue-400" />;

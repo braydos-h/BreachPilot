@@ -63,7 +63,6 @@ def warm_runtime_caches(config: dict[str, Any] | None) -> dict[str, float]:
     # proxy) — construction stays on the create path for them.
     def _model_router() -> None:
         import tools.model_router  # noqa: F401 -- import cost paid at boot
-
         from tools.config.loader import get_ai_provider
 
         if get_ai_provider(config) != "ollama":

@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import asyncio
 import platform
-import re
 import shutil
 import subprocess
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -29,7 +29,6 @@ from pathlib import Path
 from typing import Any
 
 from tools.sandbox import docker_backend as _db
-import threading
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
@@ -223,7 +222,9 @@ def build_plan(config: dict[str, Any] | None = None) -> dict[str, Any]:
         else:
             image_present = None
     else:
-        docker_error = "Docker CLI not found on PATH. Install Docker Desktop (Windows/macOS) or docker.io/docker-ce (Linux)."
+        docker_error = (
+            "Docker CLI not found on PATH. Install Docker Desktop (Windows/macOS) or docker.io/docker-ce (Linux)."
+        )
         daemon_reason = docker_error
         image_present = False
 
@@ -297,7 +298,9 @@ def build_plan(config: dict[str, Any] | None = None) -> dict[str, Any]:
                     desc = f"Install Docker using {install_method} (requires administrator privileges)."
             elif platform_name == "windows":
                 preview = "winget install -e --id Docker.DockerDesktop"
-                desc = "Install Docker Desktop using winget (requires administrator privileges and may require a restart)."
+                desc = (
+                    "Install Docker Desktop using winget (requires administrator privileges and may require a restart)."
+                )
             elif platform_name == "darwin":
                 preview = "brew install --cask docker"
                 desc = "Install Docker Desktop using Homebrew (requires administrator privileges)."
@@ -383,7 +386,7 @@ def build_plan(config: dict[str, Any] | None = None) -> dict[str, Any]:
                 )
             )
         elif platform_name == "windows":
-            preview = 'powershell -Command "Start-Process \'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe\'"'
+            preview = "powershell -Command \"Start-Process 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe'\""
             desc = "Start Docker Desktop (BreachPilot will poll until the Docker daemon becomes available; this may take 30–60 seconds)."
             steps.append(
                 PlanStep(
@@ -518,6 +521,7 @@ def build_plan(config: dict[str, Any] | None = None) -> dict[str, Any]:
 
 
 # ── job management ────────────────────────────────────────────────────────────
+
 
 @dataclass
 class JobStepState:
@@ -683,7 +687,18 @@ def _install_docker_for_platform(platform_name: str, method: str | None) -> tupl
         return 1, "", f"Unsupported package manager {method} for linux"
     if platform_name == "windows":
         if method == "winget":
-            return _run(["winget", "install", "-e", "--id", "Docker.DockerDesktop", "--accept-package-agreements", "--accept-source-agreements"], timeout=600)
+            return _run(
+                [
+                    "winget",
+                    "install",
+                    "-e",
+                    "--id",
+                    "Docker.DockerDesktop",
+                    "--accept-package-agreements",
+                    "--accept-source-agreements",
+                ],
+                timeout=600,
+            )
         return 1, "", "winget not found"
     if platform_name == "darwin":
         if method == "brew":
@@ -896,7 +911,9 @@ async def _execute_job_async(job_id: str, config: dict[str, Any] | None) -> None
                         job.error = step.error
                         job.updated_at = time.time()
                     return
-                rc, out, err = await asyncio.to_thread(_run, ["docker", "build", "-t", image, "docker/sandbox"], timeout=BUILD_TIMEOUT, cwd=REPO_ROOT)
+                rc, out, err = await asyncio.to_thread(
+                    _run, ["docker", "build", "-t", image, "docker/sandbox"], timeout=BUILD_TIMEOUT, cwd=REPO_ROOT
+                )
                 combined = _sanitize((out or "")[-2000:] + "\n" + (err or "")[-2000:], MAX_OUTPUT)
                 step.output = combined.strip() or f"build exit {rc}"
                 if rc == 0:
@@ -1008,4 +1025,3 @@ __all__ = [
     "_detect_service_method",
     "_poll_docker_daemon",
 ]
-

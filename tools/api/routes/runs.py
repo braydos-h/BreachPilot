@@ -242,7 +242,8 @@ async def restore_demo(auth: str = Depends(_require_auth)) -> dict[str, Any]:
     present and returns the existing id. The tombstone ``demo_deleted`` is
     cleared so future restarts keep the demo.
     """
-    from tools.api.demo_seed import DEMO_RUN_ID, restore_demo as _restore
+    from tools.api.demo_seed import DEMO_RUN_ID
+    from tools.api.demo_seed import restore_demo as _restore
 
     persistence = _ps()
     reports_dir = persistence.reports_dir
@@ -307,7 +308,9 @@ async def get_run(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, 
     # Backfill for pre-migrated rows
     if not is_demo:
         preview_tmp = run.get("preview_json") or {}
-        if isinstance(preview_tmp, dict) and (preview_tmp.get("is_demo") is True or preview_tmp.get("source") == "demo"):
+        if isinstance(preview_tmp, dict) and (
+            preview_tmp.get("is_demo") is True or preview_tmp.get("source") == "demo"
+        ):
             is_demo = True
     return {
         "id": run["id"],

@@ -667,9 +667,7 @@ class PrepareMixin:
         if dns_timeout <= 0:
             dns_timeout = 5.0
         try:
-            resolved_ip, resolved_domain = _resolve_target_bounded(
-                original_target, timeout_seconds=dns_timeout
-            )
+            resolved_ip, resolved_domain = _resolve_target_bounded(original_target, timeout_seconds=dns_timeout)
         except TimeoutError as exc:
             raise ValueError(
                 f"Could not resolve target: {exc}. Check the hostname and your DNS settings, then try again."

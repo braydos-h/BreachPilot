@@ -37,9 +37,7 @@ def test_resolve_target_bounded_ip_literal_skips_dns():
 
 
 def test_resolve_target_bounded_resolves_domain():
-    ip, domain = resolve_target_bounded(
-        "example.test", timeout_seconds=2.0, resolver_fn=lambda host: ["93.184.216.34"]
-    )
+    ip, domain = resolve_target_bounded("example.test", timeout_seconds=2.0, resolver_fn=lambda host: ["93.184.216.34"])
     assert ip == "93.184.216.34"
     assert domain == "example.test"
 
@@ -135,9 +133,7 @@ def test_prepare_reports_stage_timings(tmp_path, monkeypatch):
 def test_prepare_emits_progress_stages(tmp_path, monkeypatch):
     service = _make_service(tmp_path, monkeypatch)
     stages: list[str] = []
-    asyncio.run(
-        service.prepare(_request(tmp_path), run_id="t-progress", progress=lambda s, m: stages.append(s))
-    )
+    asyncio.run(service.prepare(_request(tmp_path), run_id="t-progress", progress=lambda s, m: stages.append(s)))
     assert stages == [
         "config",
         "plugins",

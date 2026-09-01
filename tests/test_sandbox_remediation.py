@@ -127,7 +127,11 @@ def test_plan_requires_admin_true_when_install_needed(monkeypatch):
 def test_plan_handles_permission_denied(monkeypatch):
     monkeypatch.setattr(_rem, "_which", lambda cmd: "/usr/bin/docker")
     monkeypatch.setattr(_rem, "_platform", lambda: "linux")
-    monkeypatch.setattr(_db, "docker_version", lambda: (False, "Got permission denied while trying to connect to the Docker daemon socket"))
+    monkeypatch.setattr(
+        _db,
+        "docker_version",
+        lambda: (False, "Got permission denied while trying to connect to the Docker daemon socket"),
+    )
     monkeypatch.setattr(_rem, "_detect_service_method", lambda p: "systemctl")
     plan = _rem.build_plan(_cfg())
     assert "permission denied" in plan["reason"].lower()
@@ -149,7 +153,9 @@ def test_plan_unsupported_platform(monkeypatch):
 
 
 def test_plan_windows_winget(monkeypatch):
-    monkeypatch.setattr(_rem, "_which", lambda cmd: None if cmd == "docker" else ("/usr/bin/winget" if cmd == "winget" else None))
+    monkeypatch.setattr(
+        _rem, "_which", lambda cmd: None if cmd == "docker" else ("/usr/bin/winget" if cmd == "winget" else None)
+    )
     monkeypatch.setattr(_rem, "_platform", lambda: "windows")
     monkeypatch.setattr(_rem, "_detect_install_method", lambda p: "winget" if p == "windows" else None)
     plan = _rem.build_plan(_cfg())
@@ -158,7 +164,9 @@ def test_plan_windows_winget(monkeypatch):
 
 
 def test_plan_macos_brew(monkeypatch):
-    monkeypatch.setattr(_rem, "_which", lambda cmd: None if cmd == "docker" else ("/opt/homebrew/bin/brew" if cmd == "brew" else None))
+    monkeypatch.setattr(
+        _rem, "_which", lambda cmd: None if cmd == "docker" else ("/opt/homebrew/bin/brew" if cmd == "brew" else None)
+    )
     monkeypatch.setattr(_rem, "_platform", lambda: "darwin")
     monkeypatch.setattr(_rem, "_detect_install_method", lambda p: "brew" if p == "darwin" else None)
     plan = _rem.build_plan(_cfg())
@@ -186,6 +194,7 @@ def test_plan_never_uses_shell_true(monkeypatch):
 
 # ── job execution mocks ────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_job_execution_success_path(monkeypatch, tmp_path):
     """Mock all subprocesses to succeed; job should end succeeded with requires_restart."""
@@ -197,6 +206,7 @@ async def test_job_execution_success_path(monkeypatch, tmp_path):
     # Ensure DOCKER_SANDBOX_DIR exists for build step
     monkeypatch.setattr(_rem, "DOCKER_SANDBOX_DIR", tmp_path / "docker" / "sandbox")
     (tmp_path / "docker" / "sandbox").mkdir(parents=True, exist_ok=True)
+
     # Mock _run for build to succeed
     def fake_run(argv, timeout=30, cwd=None):
         # docker build
@@ -205,18 +215,21 @@ async def test_job_execution_success_path(monkeypatch, tmp_path):
         if argv == ["docker", "--version"]:
             return 0, "Docker version 27.0.3", ""
         return 0, "", ""
+
     monkeypatch.setattr(_rem, "_run", fake_run)
     # But docker_image_exists will be called twice; after build, we need it to return True on verify.
     # First call (in plan) returns False, second in execution's check_image also False, final verify should be True.
     # Mock sequence: first 2 calls False, then True
     calls = {"n": 0}
     orig_exists = _db.docker_image_exists
+
     def seq_exists(image):
         calls["n"] += 1
         # plan already called once; execution will call 2 more times; make last true
         if calls["n"] >= 3:
             return True
         return False
+
     monkeypatch.setattr(_db, "docker_image_exists", seq_exists)
     # Also need docker_version to stay True
     monkeypatch.setattr(_db, "docker_version", lambda: (True, "27.0.3"))
@@ -244,10 +257,12 @@ async def test_job_build_failure(monkeypatch, tmp_path):
     monkeypatch.setattr(_db, "docker_image_exists", lambda image: False)
     monkeypatch.setattr(_rem, "DOCKER_SANDBOX_DIR", tmp_path / "docker" / "sandbox")
     (tmp_path / "docker" / "sandbox").mkdir(parents=True, exist_ok=True)
+
     def fake_run(argv, timeout=30, cwd=None):
         if argv[:2] == ["docker", "build"]:
             return 1, "", "build failed: no space"
         return 0, "", ""
+
     monkeypatch.setattr(_rem, "_run", fake_run)
     monkeypatch.setattr(_rem, "_poll_docker_daemon", lambda timeout=60: (True, "27.0.3"))
     job = await _rem.create_job(_cfg())
@@ -260,7 +275,11 @@ async def test_job_build_failure(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_job_daemon_start_failure(monkeypatch):
-    monkeypatch.setattr(_rem, "_which", lambda cmd: "/usr/bin/docker" if cmd == "docker" else ("/usr/bin/systemctl" if cmd == "systemctl" else None))
+    monkeypatch.setattr(
+        _rem,
+        "_which",
+        lambda cmd: "/usr/bin/docker" if cmd == "docker" else ("/usr/bin/systemctl" if cmd == "systemctl" else None),
+    )
     monkeypatch.setattr(_rem, "_platform", lambda: "linux")
     monkeypatch.setattr(_db, "docker_version", lambda: (False, "daemon down"))
     monkeypatch.setattr(_rem, "_detect_service_method", lambda p: "systemctl")
@@ -277,7 +296,9 @@ async def test_job_daemon_start_failure(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_job_install_failure(monkeypatch):
-    monkeypatch.setattr(_rem, "_which", lambda cmd: None if cmd == "docker" else ("/usr/bin/apt-get" if cmd == "apt-get" else None))
+    monkeypatch.setattr(
+        _rem, "_which", lambda cmd: None if cmd == "docker" else ("/usr/bin/apt-get" if cmd == "apt-get" else None)
+    )
     monkeypatch.setattr(_rem, "_platform", lambda: "linux")
     monkeypatch.setattr(_rem, "_detect_install_method", lambda p: "apt-get")
     monkeypatch.setattr(_rem, "_run", lambda argv, timeout=30, cwd=None: (1, "", "apt-get failed: locked"))
@@ -289,6 +310,7 @@ async def test_job_install_failure(monkeypatch):
 
 
 # ── API tests ───────────────────────────────────────────────────────────────
+
 
 def _make_client(tmp_path, monkeypatch, token="test-token"):
     monkeypatch.setenv("BREACHPILOT_API_TOKEN", token)
@@ -303,28 +325,37 @@ def _make_client(tmp_path, monkeypatch, token="test-token"):
         encoding="utf-8",
     )
     from tools.run_service.service import Callables
-    from unittest.mock import MagicMock
+
     class _FakeRouter:
         _clients = {"glm": MagicMock()}
+
         def get_client(self, name):
             return self._clients[name]
+
     def _fake_build_router(*a, **kw):
         return _FakeRouter()
+
     async def _fake_run_session(**kwargs):
         return {"total_actions": 0, "workspace": str(tmp_path), "audit_path": ""}
+
     callables = Callables(build_router=_fake_build_router, run_session=_fake_run_session)
     from app import create_app
+
     app = create_app(config_path=config_path, callables=callables)
     from fastapi.testclient import TestClient
+
     return TestClient(app), config_path
+
 
 def _auth(token="test-token"):
     return {"Authorization": f"Bearer {token}"}
+
 
 def test_api_plan_requires_auth(tmp_path, monkeypatch):
     client, _ = _make_client(tmp_path, monkeypatch)
     resp = client.get("/api/v1/system/sandbox/fix/plan")
     assert resp.status_code == 401
+
 
 def test_api_plan_returns_steps(tmp_path, monkeypatch):
     client, _ = _make_client(tmp_path, monkeypatch)
@@ -339,38 +370,48 @@ def test_api_plan_returns_steps(tmp_path, monkeypatch):
     assert "steps" in data
     assert data["docker_cli_present"] is True
 
+
 def test_api_plan_disabled(tmp_path, monkeypatch):
     client, _ = _make_client(tmp_path, monkeypatch)
     # rewrite config to disabled
     import yaml
+
     path = tmp_path / "config.yaml"
     cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
     cfg["sandbox"]["enabled"] = False
     path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
     # create new client to pick up disabled config
     from tools.run_service.service import Callables
-    from unittest.mock import MagicMock
+
     class _FakeRouter:
         _clients = {"glm": MagicMock()}
+
         def get_client(self, name):
             return self._clients[name]
+
     def _fake_build_router(*a, **kw):
         return _FakeRouter()
+
     async def _fake_run_session(**kwargs):
         return {"total_actions": 0, "workspace": str(tmp_path), "audit_path": ""}
+
     callables = Callables(build_router=_fake_build_router, run_session=_fake_run_session)
     from app import create_app
+
     app = create_app(config_path=path, callables=callables)
     from fastapi.testclient import TestClient
+
     client2 = TestClient(app)
     resp = client2.get("/api/v1/system/sandbox/fix/plan", headers=_auth())
     assert resp.status_code == 200
     assert resp.json()["steps"] == []
 
+
 def test_api_fix_requires_auth(tmp_path, monkeypatch):
     client, _ = _make_client(tmp_path, monkeypatch)
     resp = client.post("/api/v1/system/sandbox/fix", json={})
     assert resp.status_code == 401
+
 
 def test_api_fix_start_and_poll(tmp_path, monkeypatch):
     client, _ = _make_client(tmp_path, monkeypatch)
@@ -387,6 +428,7 @@ def test_api_fix_start_and_poll(tmp_path, monkeypatch):
     assert job_id
     # Poll up to 5s
     import time
+
     for _ in range(50):
         r = client.get(f"/api/v1/system/sandbox/fix/{job_id}", headers=_auth())
         assert r.status_code == 200
@@ -401,6 +443,7 @@ def test_api_fix_start_and_poll(tmp_path, monkeypatch):
     assert isinstance(final["steps"], list)
     assert all("title" in s and "status" in s for s in final["steps"])
 
+
 def test_api_fix_rejects_arbitrary_body(tmp_path, monkeypatch):
     """Browser cannot inject arbitrary commands via body."""
     client, _ = _make_client(tmp_path, monkeypatch)
@@ -411,15 +454,17 @@ def test_api_fix_rejects_arbitrary_body(tmp_path, monkeypatch):
     monkeypatch.setattr(_rem, "_poll_docker_daemon", lambda timeout=60: (True, "27.0.3"))
     monkeypatch.setattr(_rem, "_run", lambda argv, timeout=30, cwd=None: (0, "ok", ""))
     # Try to inject commands via body – should be ignored, not executed
-    malicious = {"command": "rm -rf /", "argv": ["bash","-c","evil"], "image": "evil:latest", "path": "/etc/passwd"}
+    malicious = {"command": "rm -rf /", "argv": ["bash", "-c", "evil"], "image": "evil:latest", "path": "/etc/passwd"}
     resp = client.post("/api/v1/system/sandbox/fix", headers=_auth(), json=malicious)
     assert resp.status_code == 200
     job_id = resp.json()["job_id"]
-    import time, re
+    import re
+    import time
+
     for _ in range(10):
         time.sleep(0.05)
         r = client.get(f"/api/v1/system/sandbox/fix/{job_id}", headers=_auth()).json()
-        if r["status"] in ("succeeded","failed"):
+        if r["status"] in ("succeeded", "failed"):
             break
     # Verify no arbitrary image was used: plan's image is still from config
     plan = client.get("/api/v1/system/sandbox/fix/plan", headers=_auth()).json()
@@ -430,6 +475,7 @@ def test_api_fix_rejects_arbitrary_body(tmp_path, monkeypatch):
         assert "rm -rf" not in preview
         assert "evil" not in preview.lower()
 
+
 def test_api_fix_invalid_job_id(tmp_path, monkeypatch):
     client, _ = _make_client(tmp_path, monkeypatch)
     resp = client.get("/api/v1/system/sandbox/fix/../../etc/passwd", headers=_auth())
@@ -437,6 +483,7 @@ def test_api_fix_invalid_job_id(tmp_path, monkeypatch):
     assert resp.status_code == 404
     resp2 = client.get("/api/v1/system/sandbox/fix/not-a-hex-id!", headers=_auth())
     assert resp2.status_code == 404
+
 
 def test_api_fix_concurrent_conflict(tmp_path, monkeypatch):
     client, _ = _make_client(tmp_path, monkeypatch)
@@ -449,11 +496,13 @@ def test_api_fix_concurrent_conflict(tmp_path, monkeypatch):
     monkeypatch.setattr(_rem, "_poll_docker_daemon", lambda timeout=60: (True, "27.0.3"))
     # Make build take a moment via _run that sleeps
     import time as _time
+
     def slow_run(argv, timeout=30, cwd=None):
         if argv[:2] == ["docker", "build"]:
             _time.sleep(0.5)
             return 0, "ok", ""
         return 0, "ok", ""
+
     monkeypatch.setattr(_rem, "_run", slow_run)
     # Also need DOCKER_SANDBOX_DIR exists
     monkeypatch.setattr(_rem, "DOCKER_SANDBOX_DIR", tmp_path / "docker" / "sandbox")
@@ -463,23 +512,34 @@ def test_api_fix_concurrent_conflict(tmp_path, monkeypatch):
     resp2 = client.post("/api/v1/system/sandbox/fix", headers=_auth(), json={})
     assert resp2.status_code == 409
 
+
 def test_api_fix_disabled_returns_400(tmp_path, monkeypatch):
     import yaml
+
     client, path = _make_client(tmp_path, monkeypatch)
     cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
     cfg["sandbox"]["enabled"] = False
     path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
     from tools.run_service.service import Callables
-    from unittest.mock import MagicMock
+
     class _FakeRouter:
         _clients = {"glm": MagicMock()}
-        def get_client(self, name): return self._clients[name]
-    def _fake_build_router(*a, **kw): return _FakeRouter()
-    async def _fake_run_session(**kwargs): return {"total_actions": 0, "workspace": str(tmp_path), "audit_path": ""}
+
+        def get_client(self, name):
+            return self._clients[name]
+
+    def _fake_build_router(*a, **kw):
+        return _FakeRouter()
+
+    async def _fake_run_session(**kwargs):
+        return {"total_actions": 0, "workspace": str(tmp_path), "audit_path": ""}
+
     callables = Callables(build_router=_fake_build_router, run_session=_fake_run_session)
     from app import create_app
+
     app = create_app(config_path=path, callables=callables)
     from fastapi.testclient import TestClient
+
     client2 = TestClient(app)
     resp = client2.post("/api/v1/system/sandbox/fix", headers=_auth(), json={})
     assert resp.status_code == 400

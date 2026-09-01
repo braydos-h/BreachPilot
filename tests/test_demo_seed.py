@@ -51,9 +51,8 @@ def _auth(token="test-token"):
 
 
 def test_demo_seeded_fresh(tmp_path, monkeypatch):
-    from tools.api.demo_seed import DEMO_RUN_ID, DEMO_TITLE
+    from tools.api.demo_seed import DEMO_RUN_ID, DEMO_TITLE, ensure_demo_seed
     from tools.api.persistence import ApiPersistence
-    from tools.api.demo_seed import ensure_demo_seed
 
     p = ApiPersistence(tmp_path / "reports")
     assert p.get_run(DEMO_RUN_ID) is None
@@ -193,7 +192,9 @@ def test_demo_does_not_affect_real_runs(tmp_path, monkeypatch):
     with TestClient(app) as client:
         demo_before = client.get("/api/v1/runs", headers=_auth()).json()["total"]
         # create a real run
-        resp = client.post("/api/v1/runs", json={"target": "10.0.0.50", "mode": "attack", "goal": "recon_only"}, headers=_auth())
+        resp = client.post(
+            "/api/v1/runs", json={"target": "10.0.0.50", "mode": "attack", "goal": "recon_only"}, headers=_auth()
+        )
         assert resp.status_code == 201
         real_id = resp.json()["run_id"]
         runs = client.get("/api/v1/runs", headers=_auth()).json()

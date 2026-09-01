@@ -111,8 +111,7 @@ _MIGRATION_V3 = [
 # v4: demo session support — is_demo flag + tombstone app_state table.
 _MIGRATION_V4 = [
     "ALTER TABLE runs ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0",
-    "CREATE TABLE IF NOT EXISTS app_state ("
-    "key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')",
+    "CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')",
 ]
 
 # Sort clauses for list_runs. Keys map to the public ``sort`` query param.
@@ -193,9 +192,7 @@ class ApiPersistence:
                             conn.execute(stmt)
                         except sqlite3.OperationalError as exc:
                             # duplicate column/table on re-run is safe
-                            if "duplicate column" not in str(exc).lower() and "already exists" not in str(
-                                exc
-                            ).lower():
+                            if "duplicate column" not in str(exc).lower() and "already exists" not in str(exc).lower():
                                 raise
                     if 4 not in applied:
                         conn.execute(
@@ -596,7 +593,9 @@ class ApiPersistence:
             conn = self._connect()
             try:
                 # Ensure app_state exists (old DBs migrated lazily).
-                conn.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')")
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')"
+                )
                 if deleted:
                     conn.execute(
                         "INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)",
@@ -630,7 +629,9 @@ class ApiPersistence:
         with self._lock:
             conn = self._connect()
             try:
-                conn.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')")
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')"
+                )
                 conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (key, value))
                 conn.commit()
             finally:
