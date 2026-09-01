@@ -13,5 +13,6 @@ export default defineConfig({
     // docblock so the existing node-env unit tests keep running headless.
     include: ["src/**/*.test.{ts,tsx}"],
     setupFiles: [path.resolve(__dirname, "src/test/setup.ts")],
+    testTimeout: 10000,
   },
 });

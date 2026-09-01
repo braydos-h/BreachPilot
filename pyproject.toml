@@ -91,6 +91,10 @@ include = ["tools*", "legacy*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "live_llm: live-model evaluations requiring API keys/network (skipped in normal CI)",
+    "integration: integration tests requiring Docker or external services (skipped in normal CI when unavailable)",
+]
 
 [tool.coverage.run]
 # ponytail: bare module names, not "main.py". The ".py" suffix makes coverage

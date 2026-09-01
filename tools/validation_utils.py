@@ -468,7 +468,7 @@ def is_target_in_allowlist(target: str, allowed_assets: list[str]) -> bool:
 
     Supports exact IPs, CIDR ranges, domains, and wildcard domains.
     """
-    if not target or not allowed_assets:
+    if not isinstance(target, str) or not target or not allowed_assets:
         return False
 
     target_clean = target.strip().lower()
