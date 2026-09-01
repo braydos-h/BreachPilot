@@ -225,6 +225,16 @@ jobs:
           mypy --version
           python --version
           grep -A2 "python_version" pyproject.toml || true
+      - name: Mypy debug output
+        run: mypy --follow-imports=skip tools 2>&1 | tee mypy.log | head -n 200 || true
+      - name: Upload mypy log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mypy-log
+          path: mypy.log
+          if-no-files-found: warn
+          retention-days: 1
       - name: Mypy check (256 files, permissive)
         run: mypy --follow-imports=skip tools
       - name: Mypy strict hot files (zero disables)
