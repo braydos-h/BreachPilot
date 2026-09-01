@@ -49,11 +49,11 @@ Hold lock → `_replay_locked(after)`:
 Paged cursor for the WebUI timeline (`tools/api/routes/events.py:86`).
 
 - `full = list(ring)` when `ring[0].sequence==1` else `await to_thread(_read_jsonl_events)` (`tools/api/event_broker.py:94`).
-- `oldest/latest = full[0/-1]["sequence"]|None`. Cases:
-  - `tail=N` → `full[-tail:]`, `has_more_before = oldest>1`
-  - `before=X + limit=N` → older=`[e for e in full if sequence<X]`, take `[-limit:]`, reverse (newest-first), `has_more_before = older[0].sequence>1`
-  - else `after=X` → `sequence>after`, `has_more_before=False` (`uses oldest/latest already computed`)
-- Returns `{events, oldest_sequence, latest_sequence, has_more_before}` (`tools/api/event_broker.py:152`).
+- `oldest/latest = full[0/-1]["sequence"]|None` — bounds of the **entire** history. Cases:
+  - `tail=N` → `full[-tail:]` (ascending), `omitted_before = len(full)-len(page)`, `has_more_before = omitted_before>0`, `first/last = page[0/-1].sequence|None`, `next_before = first if has_more else None`
+  - `before=X + limit=N` → `older_full=[e for e in full if sequence<X]` (all older), `older=older_full[-limit:]`, `events=reversed(older)` (newest-first), `omitted_before = len(older_full)-len(older)` (events still before page), `has_more_before = omitted_before>0`, `first/last = older[0/-1].sequence` (oldest/newest in page), `next_before = first if has_more else None`
+  - else `after=X` → `sequence>after` ascending, `has_more_before=False`, `omitted_before=0`, `first/last = page[0/-1].sequence|None`, `next_before=None`
+- Returns `{events, oldest_sequence, latest_sequence, has_more_before, first_returned_sequence, last_returned_sequence, omitted_before, next_before}` (`tools/api/event_broker.py:152`). `oldest/latest` describe the full history; `first/last/omitted/next` describe the returned page. `has_more_before` is derived from `omitted_before>0`, not from `oldest>1`.
 
 ### `subscribe(after=0) -> EventSubscription` (`tools/api/event_broker.py:159`)
 

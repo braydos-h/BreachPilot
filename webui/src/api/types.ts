@@ -62,6 +62,23 @@ export interface GoalPreset {
   description: string;
   risk: RiskTag;
   compatible: boolean;
+  source?: GoalSource;
+}
+
+export type GoalSource = "preset" | "custom";
+
+export interface CustomGoal {
+  id: string;
+  name: string;
+  objective: string;
+  created_at: string;
+  updated_at: string;
+  source: GoalSource;
+}
+
+export interface GoalsResponse {
+  goals: GoalPreset[];
+  custom_goals: CustomGoal[];
 }
 
 export interface SuggestedGoal {

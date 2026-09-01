@@ -30,10 +30,10 @@ Query:
 | `before` | int | `null` | `≥0` |
 | `limit` | int | `null` | `1..1000` |
 
-- When any of `tail|before|limit` present → `broker.replay_page(after, tail, before, limit)` (`tools/api/event_broker.py:112`) and return `{run_id, ...page}` where page is `{events, oldest_sequence, latest_sequence, has_more_before}`.
-- Else → `broker.replay(after)` (`tools/api/event_broker.py:69`) and return `{run_id, events, oldest_sequence:None, latest_sequence:None, has_more_before:false}` (`tools/api/routes/events.py:88`).
+- When any of `tail|before|limit` present → `broker.replay_page(after, tail, before, limit)` (`tools/api/event_broker.py:112`) and return `{run_id, ...page}` where page is `{events, oldest_sequence, latest_sequence, has_more_before, first_returned_sequence, last_returned_sequence, omitted_before, next_before}`.
+- Else → `broker.replay(after)` (`tools/api/event_broker.py:69`) and return `{run_id, events, oldest_sequence:None, latest_sequence:None, has_more_before:false, first_returned_sequence, last_returned_sequence, omitted_before:0, next_before:None}` (`tools/api/routes/events.py:88`).
 
-Broker is `events.get_or_create(run_id)` which for completed runs reads from JSONL (`tools/api/event_broker.py:229`). Pagination detail: `tail=N` newest N ascending; `before=X + limit=N` up to N with `sequence<X` descending so client pages older (`tools/api/event_broker.py:142`).
+Broker is `events.get_or_create(run_id)` which for completed runs reads from JSONL (`tools/api/event_broker.py:229`). Pagination detail: `tail=N` newest N ascending with `omitted_before=len(full)-len(page)` and `next_before=first_returned`; `before=X + limit=N` up to N with `sequence<X` descending so client pages older (`tools/api/event_broker.py:142`) with `omitted_before=len(older_full)-len(page)` and `next_before=oldest_in_page`. `oldest/latest` are whole-history bounds; `first/last/omitted/next` describe the returned page (`has_more_before=omitted_before>0`).
 
 Error: `404 Run not found`, `503 Event service unavailable`.
 

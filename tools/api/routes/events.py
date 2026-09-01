@@ -74,6 +74,10 @@ def create_router(
             "oldest_sequence": None,
             "latest_sequence": None,
             "has_more_before": False,
+            "first_returned_sequence": evts[0]["sequence"] if evts else None,
+            "last_returned_sequence": evts[-1]["sequence"] if evts else None,
+            "omitted_before": 0,
+            "next_before": None,
         }
 
     @router.get("/runs/{run_id}/events/stream", response_model=None)

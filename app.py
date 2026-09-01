@@ -154,35 +154,30 @@ def create_app(
     install_error_handlers(app)
     install_middleware(app)
 
-    # Configure route modules.
-    system_routes.configure(auth, config, config_path)
-    system_routes.configure_run_manager(run_manager)
-    system_routes.configure_persistence(persistence)
-    runs_routes.configure(auth, persistence, run_manager)
-    decisions_routes.configure(auth, run_manager)
-    events_routes.configure(auth, event_registry, persistence, token, allowed_origins)
-    graph_routes.configure(auth, persistence, config)
-    graph_explorer_routes.configure(auth, persistence, config)
-    connections_routes.configure(auth, config, config_path)
-    benchmarks_routes.configure(auth, benchmark_service, benchmark_storage, config)
-
-    # D4: multi-operator user accounts + annotations (loopback-only; no roles).
-    # Only wired when ``api.multi_operator`` is true — default false restores
-    # the legacy single-token mode with no user-account surface.
+    # Build per-app routers via factories (no shared globals).
+    system_router = system_routes.create_router(auth, config, config_path, run_manager, persistence)
+    runs_router = runs_routes.create_router(auth, persistence, run_manager)
+    decisions_router = decisions_routes.create_router(auth, run_manager)
+    events_router = events_routes.create_router(auth, event_registry, persistence, token, allowed_origins)
+    graph_router = graph_routes.create_router(auth, persistence, config)
+    graph_explorer_router = graph_explorer_routes.create_router(auth, persistence, config)
+    connections_router = connections_routes.create_router(auth, config, config_path)
+    benchmarks_router = benchmarks_routes.create_router(auth, benchmark_service, benchmark_storage, config)
+    users_router = None
     if bool(api_cfg.get("multi_operator", False)):
-        users_routes.configure(auth, persistence)
+        users_router = users_routes.create_router(auth, persistence)
 
     # Mount routers.
-    app.include_router(system_routes.router)
-    app.include_router(runs_routes.router)
-    app.include_router(decisions_routes.router)
-    app.include_router(events_routes.router)
-    app.include_router(graph_routes.router)
-    app.include_router(graph_explorer_routes.router)
-    app.include_router(connections_routes.router)
-    app.include_router(benchmarks_routes.router)
-    if bool(api_cfg.get("multi_operator", False)):
-        app.include_router(users_routes.router)
+    app.include_router(system_router)
+    app.include_router(runs_router)
+    app.include_router(decisions_router)
+    app.include_router(events_router)
+    app.include_router(graph_router)
+    app.include_router(graph_explorer_router)
+    app.include_router(connections_router)
+    app.include_router(benchmarks_router)
+    if users_router is not None:
+        app.include_router(users_router)
 
     # Optional: serve the bundled WebUI from webui/dist/ when
     # ``api.serve_webui`` is true and the build exists. Mounted LAST so the

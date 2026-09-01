@@ -108,7 +108,7 @@ Generated from code — no invented routes. Handler names are the Python functio
 
 | Method | Route | Handler | Request | Response | Auth | Frontend consumer | Tests |
 |--------|-------|---------|---------|----------|------|-------------------|-------|
-| `GET` | `/api/v1/runs/{run_id}/events` | `get_events` (`events.py:66`) | `?after≥0&tail1..1000&before&limit1..1000` | `200 {run_id,events,oldest_sequence,latest_sequence,has_more_before}` `404|503` | bearer | `webui/src/api/hooks.ts:useEvents` | — |
+| `GET` | `/api/v1/runs/{run_id}/events` | `get_events` (`events.py:66`) | `?after≥0&tail1..1000&before&limit1..1000` | `200 {run_id,events,oldest_sequence,latest_sequence,has_more_before,first_returned_sequence,last_returned_sequence,omitted_before,next_before}` `404|503` | bearer | `webui/src/api/ws.ts:seedEvents` + `EventViewer` | `tests/test_api_events.py` |
 | `GET` | `/api/v1/runs/{run_id}/events/stream` | `stream_events` (`events.py:99`) | `?after≥0` | `200 StreamingResponse text/event-stream data: {json}\n\n` headers `no-cache,keep-alive,X-Accel-Buffering:no` | bearer header (never query) | `webui/src/api/sse.ts` fallback | — |
 | `WS` | `/ws/v1/runs/{run_id}` | `ws_run_events` (`events.py:146`) | first JSON `{"auth":"<token>","after":int≥0}` 5 s | streams `EventOut` JSON, heartbeats every 30 s | first-message bearer + `Origin` loopback (`tools/api/auth.py:128`) | `webui/src/api/ws.ts:useRunEvents` | — |
 

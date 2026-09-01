@@ -97,7 +97,7 @@ Detail in `docs/api/persistence.md`.
 
 - `emit(type, payload)`: assign monotonic `sequence`, `sanitize`, append JSONL, push ring, fan-out to subscribers (`tools/api/event_broker.py:39`). Fires plugin outbound subscribers best-effort after persistence (`tools/api/event_broker.py:66`, `tools/plugins.py`).
 - `replay(after)`: ring fast-path else JSONL scan (`tools/api/event_broker.py:69`).
-- `replay_page(after, tail, before, limit)`: paged cursor with `oldest_sequence` / `latest_sequence` / `has_more_before` (`tools/api/event_broker.py:112`).
+- `replay_page(after, tail, before, limit)`: paged cursor with `oldest_sequence` / `latest_sequence` (full history) + `first/last_returned_sequence`, `omitted_before`, `next_before`, `has_more_before=omitted_before>0` (`tools/api/event_broker.py:112`).
 - `subscribe(after)`: replays then live, 30 s heartbeat `{"type":"heartbeat"}` (`tools/api/event_broker.py:159`, `tools/api/event_broker.py:204`).
 - `EventBrokerRegistry` (`tools/api/event_broker.py:220`): `OrderedDict` of ≤`max_brokers` (10) per-run brokers, LRU eviction, `get_or_create` / `get` / `close_all`.
 
