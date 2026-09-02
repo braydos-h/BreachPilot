@@ -277,7 +277,7 @@ jobs:
           data = json.loads(pathlib.Path('$TMPDIR/doctor.json').read_text(encoding='utf-8'))
           assert 'checks' in data and 'is_valid' in data, 'doctor json shape'
           print('doctor checks:', [(c['name'], c['ok']) for c in data['checks']])
-          """))"
+          \"\"\"))"
           (cd "$TMPDIR" && python - <<'PY'
           import pathlib
           from tools.paths import get_packaged_skills_dir
