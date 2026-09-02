@@ -176,8 +176,6 @@ describe("SettingsPage", () => {
     expect(screen.getByText("Use privileged scanning")).toBeInTheDocument();
     // Technical fields like MCP HTTP port should not be in General
     expect(screen.queryByText("MCP HTTP port")).not.toBeInTheDocument();
-    // General is calm, shows Appearance
-    expect(screen.getByText("Appearance")).toBeInTheDocument();
   });
 
   it("shows Runs & Scanning with execution limits and scanning options", async () => {
@@ -283,9 +281,10 @@ describe("SettingsPage", () => {
     expect(screen.queryByText("api.port")).not.toBeInTheDocument();
   });
 
-  it("shows theme selector in General", () => {
+  it("does not show a theme selector in General (dark-only)", () => {
     setup();
-    expect(screen.getByLabelText("Theme")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Theme")).not.toBeInTheDocument();
+    expect(screen.queryByText("Appearance")).not.toBeInTheDocument();
   });
 
   it("header shows user-focused wording, not diagnostics", () => {
