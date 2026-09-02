@@ -168,9 +168,9 @@ def bootstrap_startup_api_keys(args: argparse.Namespace, *, prompt: bool = False
         force_prompt=bool(getattr(args, "setup_api_keys", False)),
     )
     if result.loaded:
-        ui.info(f"Loaded provider API key(s) from {result.store_path}: {', '.join(result.loaded)}")
+        print(f"  {ui._c('gray')}keys  {', '.join(result.loaded)} ({result.store_path}){ui._c('reset')}")
     if result.saved:
-        ui.info(f"Saved provider API key(s) to {result.store_path}: {', '.join(result.saved)}")
+        print(f"  {ui._c('gray')}keys saved  {', '.join(result.saved)} ({result.store_path}){ui._c('reset')}")
     if result.missing and (prompt or bool(getattr(args, "setup_api_keys", False))):
         ui.warning(
             "Missing provider API key(s): "

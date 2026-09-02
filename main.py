@@ -955,6 +955,97 @@ def _offer_daemon_kill() -> bool:
         return False
 
 
+def _copy_to_clipboard(text: str) -> bool:
+    """Best-effort copy ``text`` to the system clipboard. Returns True on success.
+
+    Tries, in order: 1) ``pyperclip`` if installed, 2) OS-native commands
+    (``clip``/PowerShell on Windows, ``pbcopy`` on macOS, ``wl-copy``/``xclip``/``xsel``
+    on Linux), 3) ``tkinter`` as a stdlib fallback. Never raises — a failure is
+    just ``False`` so the daemon can still print the token for manual copy.
+    """
+    clipped = text.strip()
+    if not clipped:
+        return False
+    # 1) Optional pyperclip dep (no hard requirement).
+    try:
+        import pyperclip  # type: ignore
+
+        pyperclip.copy(clipped)
+        return True
+    except Exception:
+        pass
+    # 2) Native OS commands (lightweight, no window).
+    try:
+        if sys.platform == "win32":
+            # clip.exe is built into Windows; PowerShell Set-Clipboard is the fallback
+            # that also works when clip is absent or stdin handling differs.
+            if shutil.which("clip"):
+                try:
+                    proc = subprocess.run(
+                        ["clip"], input=clipped, text=True, timeout=5, capture_output=True, check=False
+                    )
+                    if proc.returncode == 0:
+                        return True
+                except Exception:
+                    pass
+            if shutil.which("powershell") or shutil.which("pwsh"):
+                pwsh = shutil.which("pwsh") or shutil.which("powershell")
+                try:
+                    # Feed via stdin to avoid quoting issues: $input | Set-Clipboard
+                    proc = subprocess.run(
+                        [pwsh, "-NoProfile", "-Command", "$input | Set-Clipboard"],
+                        input=clipped,
+                        text=True,
+                        timeout=5,
+                        capture_output=True,
+                        check=False,
+                    )
+                    if proc.returncode == 0:
+                        return True
+                except Exception:
+                    pass
+        elif sys.platform == "darwin":
+            if shutil.which("pbcopy"):
+                try:
+                    proc = subprocess.run(
+                        ["pbcopy"], input=clipped, text=True, timeout=5, capture_output=True, check=False
+                    )
+                    return proc.returncode == 0
+                except Exception:
+                    pass
+        else:
+            for cmd in (
+                ["wl-copy"],
+                ["xclip", "-selection", "clipboard"],
+                ["xsel", "--clipboard", "--input"],
+            ):
+                if shutil.which(cmd[0]):
+                    try:
+                        proc = subprocess.run(
+                            cmd, input=clipped, text=True, timeout=5, capture_output=True, check=False
+                        )
+                        if proc.returncode == 0:
+                            return True
+                    except Exception:
+                        continue
+    except Exception:
+        pass
+    # 3) tkinter fallback (stdlib, but may need a display).
+    try:
+        import tkinter  # type: ignore
+
+        root = tkinter.Tk()
+        root.withdraw()
+        root.clipboard_clear()
+        root.clipboard_append(clipped)
+        root.update()
+        root.destroy()
+        return True
+    except Exception:
+        pass
+    return False
+
+
 def _auto_update_models(config: dict[str, Any], config_path: str) -> None:
     """Best-effort ``models.registry`` sync against the Ollama API (boot hook).
 
@@ -1033,12 +1124,11 @@ def _run_daemon(args: argparse.Namespace) -> int:
 
     ui.banner()
     base = f"http://{status_host}:{port}"
-    # Ready indicator in green, URLs in blue for clickability, labels muted
-    print(f"{ui._c('green')}[OK]{ui._c('reset')} WebUI API listening on {ui._c('blue')}{base}{ui._c('reset')}")
-    print(f"  {ui._c('gray')}{'docs':<7}{ui._c('reset')} {ui._c('blue')}{base}/docs{ui._c('reset')}")
-    print(f"  {ui._c('gray')}{'openapi':<7}{ui._c('reset')} {ui._c('blue')}{base}/openapi.json{ui._c('reset')}")
+    print(f"  {ui._c('green')}*{ui._c('reset')} API ready  {ui._c('blue')}{base}{ui._c('reset')}")
+    print(f"    {ui._c('gray')}{'docs':<7}{ui._c('reset')} {ui._c('blue')}{base}/docs{ui._c('reset')}")
+    print(f"    {ui._c('gray')}{'openapi':<7}{ui._c('reset')} {ui._c('blue')}{base}/openapi.json{ui._c('reset')}")
     if web_mode:
-        print(f"  {ui._c('gray')}{'webui':<7}{ui._c('reset')} {ui._c('blue')}{base}/{ui._c('reset')}")
+        print(f"    {ui._c('gray')}{'webui':<7}{ui._c('reset')} {ui._c('blue')}{base}/{ui._c('reset')}")
     print(f"  {ui._c('gray')}{'-' * 46}{ui._c('reset')}")
     # ponytail: print the bearer token here (create_app re-reads the same file;
     # one extra read beats threading the token back through the factory).
@@ -1048,19 +1138,19 @@ def _run_daemon(args: argparse.Namespace) -> int:
         api_cfg.get("token_file", ".webui_secret_key"),
         env_override=os.environ.get("BREACHPILOT_API_TOKEN", ""),
     )
-    # Gate the token reveal + browser launch on Enter presses so the
-    # user can copy the key before it scrolls away under request logs.
-    print(f"{ui._c('yellow')}API key required{ui._c('reset')} {ui._c('gray')}— press Enter to reveal{ui._c('reset')}")
+    # Single prompt — reveal token (and open browser in --web mode) so the
+    # user isn't hit with two sequential "press Enter" pauses.
+    if web_mode:
+        print(f"  {ui._c('gray')}Press Enter to reveal API token and open browser...{ui._c('reset')}")
+    else:
+        print(f"  {ui._c('gray')}Press Enter to reveal API token...{ui._c('reset')}")
     try:
         input(f"  {ui._c('gray')}>{ui._c('reset')} ")
     except (EOFError, KeyboardInterrupt):
         return 130
-    print(f"  {ui._c('gray')}{'token':<7}{ui._c('reset')} {token}")
-    if web_mode:
-        try:
-            input(f"{ui._c('gray')}Press Enter to open the WebUI in your browser...{ui._c('reset')}")
-        except (EOFError, KeyboardInterrupt):
-            return 130
+    print(f"  {ui._c('gray')}token{ui._c('reset')}   {token}")
+    if _copy_to_clipboard(token):
+        print(f"  {ui._c('green')}copied to clipboard{ui._c('reset')} {ui._c('gray')}(Ctrl+V to paste){ui._c('reset')}")
     app = create_app(config_path=args.config, config=config)
 
     if web_mode:
@@ -1071,9 +1161,8 @@ def _run_daemon(args: argparse.Namespace) -> int:
         )
         browser_thread.start()
 
-    print()
-    print(f"{ui._c('gray')}All AI responses, tool output, and logs will appear here.{ui._c('reset')}")
     print(f"  {ui._c('gray')}{'-' * 46}{ui._c('reset')}")
+    print(f"  {ui._c('gray')}Logs and agent output will stream here - leave this running.{ui._c('reset')}")
 
     uvicorn.run(
         app,

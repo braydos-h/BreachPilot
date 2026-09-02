@@ -193,15 +193,12 @@ class AttackUi:
             ver = f" v{_ver}"
         except Exception:
             ver = ""
-        # Premium minimal: bold name + muted version/tagline, thin rule
-        print()
         print(
             f"  {self._c('header')}{self._c('bold')}BreachPilot{self._c('reset')}"
-            f"{self._c('header')}{ver}{self._c('reset')} {self._c('gray')}— AI Target Exploitation Engine{self._c('reset')}"
+            f"{self._c('header')}{ver}{self._c('reset')} {self._c('gray')}- AI Target Exploitation Engine{self._c('reset')}"
         )
         print(f"  {self._c('gray')}Autonomous penetration testing AI{self._c('reset')}")
         print(f"  {self._c('gray')}{'-' * 46}{self._c('reset')}")
-        print()
 
     # ------------------------------------------------------------------
     # Bootup checklist helpers
