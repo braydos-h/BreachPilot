@@ -278,48 +278,66 @@ jobs:
           assert 'checks' in data and 'is_valid' in data, 'doctor json shape'
           print('doctor checks:', [(c['name'], c['ok']) for c in data['checks']])
           """))"
-          (cd "$TMPDIR" && python -c "import textwrap; exec(textwrap.dedent(r\"\"\"
+          (cd "$TMPDIR" && python - <<'PY'
           import pathlib
-          from tools.paths import get_packaged_skills_dir
+          import tempfile
+          import tempfile as tf2
+
+          import yaml
+
+          from tools.paths import get_packaged_skills_dir, load_effective_config
+          from tools.sandbox.models import SandboxConfig
+          from tools.skill_registry_cache import clear_cache, get_registry
+
           pkg = get_packaged_skills_dir()
           assert pkg.is_dir(), f'packaged skills dir missing: {pkg}'
-          assert any(pkg.rglob('SKILL.md')), f'no SKILL.md under {pkg}'
-          print(f'packaged skills ok: {pkg} ({len(list(pkg.rglob("SKILL.md")))} SKILL.md)')
-          from tools.paths import load_effective_config
+          skill_md_count = len(list(pkg.rglob('SKILL.md')))
+          assert skill_md_count > 0, f'no SKILL.md under {pkg}'
+          print(f'packaged skills ok: {pkg} ({skill_md_count} SKILL.md)')
+
           cfg = load_effective_config()
-          assert 'sandbox' in cfg and cfg['sandbox']['enabled'] is True, f'sandbox.enabled should be True by default, got {cfg.get("sandbox")}'
-          assert 'skills' in cfg and cfg['skills']['roots'] == ['skills'], f'skills.roots default {cfg.get("skills")}'
-          print(f'effective config defaults ok: sandbox.enabled={cfg["sandbox"]["enabled"]}')
-          from tools.skill_registry_cache import get_registry, clear_cache
+          assert 'sandbox' in cfg and cfg['sandbox']['enabled'] is True, (
+              f"sandbox.enabled should be True by default, got {cfg.get('sandbox')}"
+          )
+          assert 'skills' in cfg and cfg['skills']['roots'] == ['skills'], (
+              f"skills.roots default {cfg.get('skills')}"
+          )
+          print(f"effective config defaults ok: sandbox.enabled={cfg['sandbox']['enabled']}")
+
           clear_cache()
           reg = get_registry()
           assert len(reg.skills) > 100, f'expected >100 skills from packaged catalog, got {len(reg.skills)}'
           assert not any('root does not exist' in e for e in reg.errors), f'unexpected registry errors: {reg.errors[:3]}'
           print(f'skill registry ok: {len(reg.skills)} skills, {len(reg.errors)} errors')
-          from tools.sandbox.models import SandboxConfig
+
           scfg = SandboxConfig.from_config(cfg)
           assert scfg.enabled is True, 'SandboxConfig should be enabled with effective config'
           print(f'sandbox config ok: enabled={scfg.enabled}')
-          import tempfile, yaml, pathlib as pl
+
           with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as tf:
               yaml.safe_dump({'sandbox': {'enabled': False}}, tf)
               custom = tf.name
           cfg2 = load_effective_config(custom)
           assert cfg2['sandbox']['enabled'] is False, 'explicit custom config should override default'
           print(f'explicit --config override ok: {custom} -> sandbox.enabled=False')
-          pl.Path(custom).unlink(missing_ok=True)
-          import tempfile as tf2
+          pathlib.Path(custom).unlink(missing_ok=True)
+
           with tf2.TemporaryDirectory() as td:
               td_path = pathlib.Path(td)
               (td_path / 'my_skills' / 'demo').mkdir(parents=True)
-              (td_path / 'my_skills' / 'demo' / 'SKILL.md').write_text("---\nname: demo\ntags: [demo]\ndescription: demo\n---\n# Demo\n", encoding='utf-8')
+              (td_path / 'my_skills' / 'demo' / 'SKILL.md').write_text(
+                  '---\nname: demo\ntags: [demo]\ndescription: demo\n---\n# Demo\n',
+                  encoding='utf-8',
+              )
               custom_cfg = {'skills': {'roots': [str(td_path / 'my_skills')]}}
               clear_cache()
               reg2 = get_registry(custom_cfg)
               assert 'demo' in reg2.skills, f'custom skill root not loaded: {list(reg2.skills.keys())[:5]}'
               print(f'explicit skill root ok: {td_path}/my_skills -> demo found')
+
           print('all clean-CWD wheel checks passed')
-          """))"
+          PY
+          )
           rm -rf "$TMPDIR"
       - name: Upload dist
         uses: actions/upload-artifact@v4
