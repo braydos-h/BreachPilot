@@ -278,7 +278,7 @@ jobs:
           assert 'checks' in data and 'is_valid' in data, 'doctor json shape'
           print('doctor checks:', [(c['name'], c['ok']) for c in data['checks']])
           """))"
-          (cd "$TMPDIR" && python -c "import textwrap; exec(textwrap.dedent(r\"\"\"
+          (cd "$TMPDIR" && python - <<'PY'
           import pathlib
           from tools.paths import get_packaged_skills_dir
           pkg = get_packaged_skills_dir()
@@ -287,9 +287,9 @@ jobs:
           print(f'packaged skills ok: {pkg} ({len(list(pkg.rglob("SKILL.md")))} SKILL.md)')
           from tools.paths import load_effective_config
           cfg = load_effective_config()
-          assert 'sandbox' in cfg and cfg['sandbox']['enabled'] is True, f'sandbox.enabled should be True by default, got {cfg.get("sandbox")}'
-          assert 'skills' in cfg and cfg['skills']['roots'] == ['skills'], f'skills.roots default {cfg.get("skills")}'
-          print(f'effective config defaults ok: sandbox.enabled={cfg["sandbox"]["enabled"]}')
+          assert 'sandbox' in cfg and cfg['sandbox']['enabled'] is True, f"sandbox.enabled should be True by default, got {cfg.get('sandbox')}"
+          assert 'skills' in cfg and cfg['skills']['roots'] == ['skills'], f"skills.roots default {cfg.get('skills')}"
+          print(f"effective config defaults ok: sandbox.enabled={cfg['sandbox']['enabled']}")
           from tools.skill_registry_cache import get_registry, clear_cache
           clear_cache()
           reg = get_registry()
@@ -319,7 +319,8 @@ jobs:
               assert 'demo' in reg2.skills, f'custom skill root not loaded: {list(reg2.skills.keys())[:5]}'
               print(f'explicit skill root ok: {td_path}/my_skills -> demo found')
           print('all clean-CWD wheel checks passed')
-          """))"
+          PY
+          )
           rm -rf "$TMPDIR"
       - name: Upload dist
         uses: actions/upload-artifact@v4
