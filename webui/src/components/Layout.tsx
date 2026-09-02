@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
-import { Activity, BarChart3, BookOpen, Brain, Cpu, Crosshair, Eye, FlaskConical, GitBranch, Github, HelpCircle, Home, List, Menu, Moon, PlugZap, Settings, ShieldAlert, Sparkles, Sun, Target, Terminal, X } from "lucide-react";
+import { Activity, BarChart3, BookOpen, Brain, Cpu, Crosshair, Eye, FlaskConical, GitBranch, Github, HelpCircle, Home, List, Menu, PlugZap, Settings, ShieldAlert, Sparkles, Target, Terminal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -11,7 +11,6 @@ import { isActiveState, type DecisionListRow } from "@/api/types";
 import { clearStoredToken } from "@/api/client";
 import { useNavigate } from "react-router-dom";
 import { autoAnswerFor, usePermissionMode, type PermissionMode } from "@/lib/permissionMode";
-import { useTheme } from "@/lib/useTheme";
 import { useProviderStatus } from "@/components/ProviderSetup";
 import { clearStoredBaseline, useSessionTokens } from "@/lib/sessionTokens";
 import { formatTokens } from "@/lib/format";
@@ -62,7 +61,6 @@ export function Layout() {
   const providerStatus = useProviderStatus();
   const { sessionTokens } = useSessionTokens();
   const { mode, setMode } = usePermissionMode();
-  const { theme, toggle: toggleTheme } = useTheme();
   const activeRuns = runs.data?.runs.filter((r) => isActiveState(r.state)) ?? [];
   const activeConnections = connections.data?.active ?? 0;
   const [showHelp, setShowHelp] = useState(false);
@@ -185,16 +183,6 @@ export function Layout() {
         <Cpu className="h-4 w-4" />
         <span>Clear token</span>
       </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="w-full justify-start gap-2 text-muted-foreground"
-        onClick={toggleTheme}
-        aria-label="Toggle theme"
-      >
-        {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-        <span>{theme === "dark" ? "Light mode" : "Dark mode"}</span>
-      </Button>
     </div>
   );
 
@@ -253,14 +241,6 @@ export function Layout() {
             title={`Permission mode: ${mode}`}
           >
             {mode === "read_only" ? "R" : mode === "approve" ? "A" : "F"}
-          </button>
-          <button
-            type="button"
-            className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            onClick={toggleTheme}
-            aria-label="Toggle theme"
-          >
-            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </button>
         </div>
       </header>

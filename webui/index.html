@@ -3,16 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="color-scheme" content="dark light" />
+    <meta name="color-scheme" content="dark" />
     <meta name="referrer" content="no-referrer" />
     <title>BreachPilot — Mission Console</title>
-    <script>
-      try {
-        if (localStorage.getItem("breachpilot.theme") === "light") {
-          document.documentElement.classList.remove("dark");
-        }
-      } catch (e) {}
-    </script>
   </head>
   <body class="bg-background text-foreground">
     <div id="root"></div>
