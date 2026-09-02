@@ -2,6 +2,8 @@ import { useState } from "react";
 import { ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -10,7 +12,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { PermissionMode } from "@/lib/permissionMode";
+import {
+  setSuppressFullAccessConfirm,
+  shouldSuppressFullAccessConfirm,
+  SUPPRESS_FULL_ACCESS_KEY,
+  type PermissionMode,
+} from "@/lib/permissionMode";
+
+// Re-export for callers that imported from this module (back-compat).
+export function isFullAccessConfirmSuppressed(): boolean {
+  return shouldSuppressFullAccessConfirm();
+}
+
+export function setFullAccessConfirmSuppressed(suppressed: boolean): void {
+  setSuppressFullAccessConfirm(suppressed);
+}
+
+export { SUPPRESS_FULL_ACCESS_KEY };
 
 interface PermissionControlProps {
   mode: PermissionMode;
@@ -41,17 +59,24 @@ export function PermissionControl({ mode, onModeChange, className }: PermissionC
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string>("");
+  const [dontAskAgain, setDontAskAgain] = useState(false);
 
   const choose = (next: PermissionMode) => {
     setError("");
     if (next === "full_access") {
+      if (isFullAccessConfirmSuppressed()) {
+        void onModeChange(next);
+        return;
+      }
+      setDontAskAgain(false);
       setConfirmOpen(true);
       return;
     }
     void onModeChange(next);
   };
 
-  const confirmFullAccess = async () => {
+  const confirmFullAccess = async (suppress = dontAskAgain) => {
+    if (suppress) setFullAccessConfirmSuppressed(true);
     setApplying(true);
     setError("");
     try {
@@ -139,16 +164,39 @@ export function PermissionControl({ mode, onModeChange, className }: PermissionC
               still applies. Continue?
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
+          <div className="flex items-center gap-2 py-1">
+            <Checkbox
+              id="full-access-dont-ask"
+              checked={dontAskAgain}
+              onCheckedChange={(v) => setDontAskAgain(v === true)}
+              disabled={applying}
+              aria-label="Don't ask again for Full Access"
+            />
+            <Label
+              htmlFor="full-access-dont-ask"
+              className="cursor-pointer text-sm font-normal leading-none"
+            >
+              Don&apos;t ask again
+            </Label>
+          </div>
+          <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-end">
             <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={applying}>
               Cancel
             </Button>
             <Button
               variant="destructive"
-              onClick={() => void confirmFullAccess()}
+              onClick={() => void confirmFullAccess(dontAskAgain)}
               disabled={applying}
             >
               {applying ? "Enabling…" : "Enable Full Access"}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void confirmFullAccess(true)}
+              disabled={applying}
+              aria-label="Enable Full Access and don't ask again"
+            >
+              {applying ? "Enabling…" : "Enable & Don't ask again"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -6,6 +6,26 @@ export type PermissionMode = "read_only" | "approve" | "full_access";
 const STORAGE_KEY = "breachpilot.permissionMode.v1";
 const DEFAULT_MODE: PermissionMode = "read_only";
 
+/** When "1", the Full Access confirmation dialog is skipped and the mode is applied directly. */
+export const SUPPRESS_FULL_ACCESS_KEY = "breachpilot.permissionMode.suppressFullAccessConfirm.v1";
+
+export function shouldSuppressFullAccessConfirm(): boolean {
+  try {
+    return localStorage.getItem(SUPPRESS_FULL_ACCESS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function setSuppressFullAccessConfirm(suppress: boolean): void {
+  try {
+    if (suppress) localStorage.setItem(SUPPRESS_FULL_ACCESS_KEY, "1");
+    else localStorage.removeItem(SUPPRESS_FULL_ACCESS_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 function readStored(): PermissionMode {
   try {
     const v = sessionStorage.getItem(STORAGE_KEY);
