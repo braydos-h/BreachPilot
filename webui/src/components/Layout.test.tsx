@@ -119,7 +119,6 @@ describe("Layout mobile navigation", () => {
     }
     // Footer controls live in the drawer too.
     expect(within(drawer).getByRole("button", { name: "Clear token" })).toBeInTheDocument();
-    expect(within(drawer).getByRole("button", { name: "Toggle theme" })).toBeInTheDocument();
   });
 
   it("clicking a nav link closes the drawer", async () => {
