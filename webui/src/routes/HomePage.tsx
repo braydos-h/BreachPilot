@@ -23,8 +23,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/StatusBadge";
 import { SkeletonRows } from "@/components/Loading";
 import { useRuns, useSandboxStatus, useSandboxFixPlan, useSandboxFix, useSandboxFixStatus } from "@/api/hooks";
@@ -41,7 +39,6 @@ export const NOTICE_DISMISSED_KEY = "breachpilot.fullNotice.dismissed.v1";
 
 function FullAccessNotice() {
   const [open, setOpen] = useState(false);
-  const [dontShow, setDontShow] = useState(false);
 
   useEffect(() => {
     try {
@@ -55,13 +52,6 @@ function FullAccessNotice() {
   }, []);
 
   const handleGotIt = () => {
-    try {
-      if (dontShow) {
-        localStorage.setItem(NOTICE_DISMISSED_KEY, "1");
-      }
-    } catch {
-      // ignore
-    }
     setOpen(false);
   };
 
@@ -86,25 +76,13 @@ function FullAccessNotice() {
             The console defaults to <span className="text-yellow-300 font-medium">Read-only</span>. Every operator decision waits for you to answer it. Use the sidebar toggle to switch to Approve (auto-answers non-destructive decisions only).
           </DialogDescription>
         </DialogHeader>
-        <div className="flex items-center justify-between gap-2 pt-1">
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="fullNotice-dontShow"
-              checked={dontShow}
-              onCheckedChange={(v) => setDontShow(v === true)}
-            />
-            <Label htmlFor="fullNotice-dontShow" className="cursor-pointer text-xs font-normal text-muted-foreground">
-              Don&apos;t show again
-            </Label>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button type="button" variant="ghost" size="sm" onClick={handleDontShowAgain}>
-              Don&apos;t show again
-            </Button>
-            <Button type="button" size="sm" onClick={handleGotIt}>
-              Got it
-            </Button>
-          </div>
+        <div className="flex items-center justify-end gap-2 pt-1">
+          <Button type="button" variant="ghost" size="sm" onClick={handleDontShowAgain}>
+            Don&apos;t show again
+          </Button>
+          <Button type="button" size="sm" onClick={handleGotIt}>
+            Got it
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
