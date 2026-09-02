@@ -28,16 +28,12 @@ class MemoryStorage {
   }
 }
 
-// The theme store is module-level, so tests that exercise the initial value
-// re-import it fresh after seeding localStorage.
 async function importTheme() {
   return await import("@/lib/useTheme");
 }
 
 type ThemeModule = Awaited<ReturnType<typeof importTheme>>;
 
-// Both probes subscribe to the same module-level store instance, mirroring the
-// Layout + graph-canvas pairing in the real app.
 function makeHarness(mod: ThemeModule) {
   const Probe = ({ label }: { label: string }) => {
     const { theme, toggle } = mod.useTheme();
@@ -62,16 +58,7 @@ describe("useTheme shared store", () => {
     vi.unstubAllGlobals();
   });
 
-  it("reads the initial value from localStorage and applies the class at import time", async () => {
-    window.localStorage.setItem("breachpilot.theme", "light");
-    const mod = await importTheme();
-    expect(document.documentElement.classList.contains("dark")).toBe(false);
-    const Probe = makeHarness(mod);
-    render(<Probe label="a" />);
-    expect(screen.getByLabelText("a").textContent).toBe("a:light");
-  });
-
-  it("defaults to dark when storage is empty", async () => {
+  it("always returns dark and applies dark class", async () => {
     const mod = await importTheme();
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     const Probe = makeHarness(mod);
@@ -79,7 +66,16 @@ describe("useTheme shared store", () => {
     expect(screen.getByLabelText("a").textContent).toBe("a:dark");
   });
 
-  it("toggle persists the preference, flips the class, and keeps two readers in sync", async () => {
+  it("ignores stored light preference and stays dark", async () => {
+    window.localStorage.setItem("breachpilot.theme", "light");
+    const mod = await importTheme();
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    const Probe = makeHarness(mod);
+    render(<Probe label="a" />);
+    expect(screen.getByLabelText("a").textContent).toBe("a:dark");
+  });
+
+  it("toggle is a no-op and keeps both readers in sync on dark", async () => {
     const mod = await importTheme();
     const Probe = makeHarness(mod);
     const user = userEvent.setup();
@@ -96,19 +92,14 @@ describe("useTheme shared store", () => {
       await user.click(screen.getByLabelText("layout"));
     });
 
-    // Both consumers re-render from the same store — this is the regression
-    // that motivated the shared store (the graph canvas used to keep its own
-    // snapshot and go stale after a sidebar toggle).
-    expect(screen.getByLabelText("layout").textContent).toBe("layout:light");
-    expect(screen.getByLabelText("canvas").textContent).toBe("canvas:light");
-    expect(document.documentElement.classList.contains("dark")).toBe(false);
-    expect(window.localStorage.getItem("breachpilot.theme")).toBe("light");
+    expect(screen.getByLabelText("layout").textContent).toBe("layout:dark");
+    expect(screen.getByLabelText("canvas").textContent).toBe("canvas:dark");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
 
     await act(async () => {
       await user.click(screen.getByLabelText("canvas"));
     });
     expect(screen.getByLabelText("layout").textContent).toBe("layout:dark");
     expect(document.documentElement.classList.contains("dark")).toBe(true);
-    expect(window.localStorage.getItem("breachpilot.theme")).toBe("dark");
   });
 });
