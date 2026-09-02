@@ -1071,6 +1071,10 @@ def _run_daemon(args: argparse.Namespace) -> int:
         )
         browser_thread.start()
 
+    print()
+    print(f"{ui._c('gray')}All AI responses, tool output, and logs will appear here.{ui._c('reset')}")
+    print(f"  {ui._c('gray')}{'-' * 46}{ui._c('reset')}")
+
     uvicorn.run(
         app,
         host=host,
