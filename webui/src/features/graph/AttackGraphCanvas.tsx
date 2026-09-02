@@ -17,7 +17,6 @@ import ReactFlow, {
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { cn } from "@/lib/utils";
-import { useTheme } from "@/lib/useTheme";
 import { GraphFlowNode, type GraphFlowNodeData } from "@/features/graph/GraphNodeTypes";
 import { edgeMeta, nodeTypeMeta, toFlowEdges, toFlowNodes } from "@/features/graph/graphTransforms";
 import type { GraphExplorerEdge, GraphExplorerNode } from "@/features/graph/graphTypes";
@@ -57,7 +56,6 @@ export interface AttackGraphCanvasProps {
 
 function CanvasInner(props: AttackGraphCanvasProps) {
   const { fitView } = useReactFlow();
-  const { theme } = useTheme();
   const [flowNodes, setFlowNodes] = useState<Node[]>([]);
   const [flowEdges, setFlowEdges] = useState<Edge[]>([]);
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({});
@@ -332,7 +330,7 @@ function CanvasInner(props: AttackGraphCanvasProps) {
         variant={BackgroundVariant.Dots}
         gap={18}
         size={1}
-        color={theme === "dark" ? "rgba(148,163,184,0.4)" : "rgba(100,116,139,0.4)"}
+        color="rgba(148,163,184,0.4)"
       />
       <Controls showInteractive={false} />
       {props.showMinimap !== false && (
@@ -340,7 +338,7 @@ function CanvasInner(props: AttackGraphCanvasProps) {
           nodeColor={minimapNodeColor}
           nodeStrokeColor={minimapNodeColor}
           nodeBorderRadius={4}
-          maskColor={theme === "dark" ? "rgba(2,6,23,0.6)" : "rgba(2,6,23,0.3)"}
+          maskColor="rgba(2,6,23,0.6)"
           pannable
           zoomable
           ariaLabel="Graph minimap"
