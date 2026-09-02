@@ -152,19 +152,19 @@ export function PermissionControl({ mode, onModeChange, className }: PermissionC
           if (!applying) setConfirmOpen(open);
         }}
       >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ShieldAlert className="h-5 w-5 text-destructive" />
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader className="space-y-3">
+            <DialogTitle className="flex items-center gap-2.5 text-lg">
+              <ShieldAlert className="h-5 w-5 shrink-0 text-destructive" />
               Enable Full Access?
             </DialogTitle>
-            <DialogDescription className="text-sm">
+            <DialogDescription className="text-left text-sm leading-relaxed">
               Full access enables destructive operations and unrestricted run control through the
               WebUI. The backend remains the authorization boundary — the allowlist target lock
               still applies. Continue?
             </DialogDescription>
           </DialogHeader>
-          <div className="flex items-center gap-2 py-1">
+          <div className="flex items-center gap-2.5 rounded-md border bg-muted/30 px-3 py-3">
             <Checkbox
               id="full-access-dont-ask"
               checked={dontAskAgain}
@@ -174,29 +174,27 @@ export function PermissionControl({ mode, onModeChange, className }: PermissionC
             />
             <Label
               htmlFor="full-access-dont-ask"
-              className="cursor-pointer text-sm font-normal leading-none"
+              className="cursor-pointer text-sm font-normal leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
             >
               Don&apos;t ask again
             </Label>
           </div>
-          <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-end">
-            <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={applying}>
+          <DialogFooter className="gap-2 sm:gap-2 sm:space-x-0">
+            <Button
+              variant="outline"
+              onClick={() => setConfirmOpen(false)}
+              disabled={applying}
+              className="w-full sm:w-auto"
+            >
               Cancel
             </Button>
             <Button
               variant="destructive"
               onClick={() => void confirmFullAccess(dontAskAgain)}
               disabled={applying}
+              className="w-full sm:w-auto"
             >
               {applying ? "Enabling…" : "Enable Full Access"}
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => void confirmFullAccess(true)}
-              disabled={applying}
-              aria-label="Enable Full Access and don't ask again"
-            >
-              {applying ? "Enabling…" : "Enable & Don't ask again"}
             </Button>
           </DialogFooter>
         </DialogContent>
