@@ -1032,11 +1032,14 @@ def _run_daemon(args: argparse.Namespace) -> int:
     _auto_update_models(config, args.config)
 
     ui.banner()
-    ui.status(f"Starting WebUI API daemon on http://{status_host}:{port}")
-    ui.status(f"  Interactive docs: http://{status_host}:{port}/docs")
-    ui.status(f"  OpenAPI schema:    http://{status_host}:{port}/openapi.json")
+    base = f"http://{status_host}:{port}"
+    # Ready indicator in green, URLs in blue for clickability, labels muted
+    print(f"{ui._c('green')}[OK]{ui._c('reset')} WebUI API listening on {ui._c('blue')}{base}{ui._c('reset')}")
+    print(f"  {ui._c('gray')}{'docs':<7}{ui._c('reset')} {ui._c('blue')}{base}/docs{ui._c('reset')}")
+    print(f"  {ui._c('gray')}{'openapi':<7}{ui._c('reset')} {ui._c('blue')}{base}/openapi.json{ui._c('reset')}")
     if web_mode:
-        ui.status(f"  WebUI:             http://{status_host}:{port}/")
+        print(f"  {ui._c('gray')}{'webui':<7}{ui._c('reset')} {ui._c('blue')}{base}/{ui._c('reset')}")
+    print(f"  {ui._c('gray')}{'-' * 46}{ui._c('reset')}")
     # ponytail: print the bearer token here (create_app re-reads the same file;
     # one extra read beats threading the token back through the factory).
     from tools.api.auth import load_or_create_token
@@ -1047,16 +1050,15 @@ def _run_daemon(args: argparse.Namespace) -> int:
     )
     # Gate the token reveal + browser launch on Enter presses so the
     # user can copy the key before it scrolls away under request logs.
-    print()
-    print(f"{ui._c('yellow')}The WebUI requires an API key to use it.{ui._c('reset')}")
+    print(f"{ui._c('yellow')}API key required{ui._c('reset')} {ui._c('gray')}— press Enter to reveal{ui._c('reset')}")
     try:
-        input(f"{ui._c('gray')}Press Enter to show it...{ui._c('reset')}")
+        input(f"  {ui._c('gray')}>{ui._c('reset')} ")
     except (EOFError, KeyboardInterrupt):
         return 130
-    ui.status(f"  API token:         {token}")
+    print(f"  {ui._c('gray')}{'token':<7}{ui._c('reset')} {token}")
     if web_mode:
         try:
-            input(f"{ui._c('gray')}Press Enter to launch the WebUI in your default browser...{ui._c('reset')}")
+            input(f"{ui._c('gray')}Press Enter to open the WebUI in your browser...{ui._c('reset')}")
         except (EOFError, KeyboardInterrupt):
             return 130
     app = create_app(config_path=args.config, config=config)
@@ -1073,8 +1075,8 @@ def _run_daemon(args: argparse.Namespace) -> int:
         app,
         host=host,
         port=port,
-        log_level="info",
-        access_log=True,
+        log_level="warning" if not getattr(args, "debug", False) else "info",
+        access_log=bool(getattr(args, "debug", False)),
         timeout_graceful_shutdown=shutdown_timeout,
     )
     return 0

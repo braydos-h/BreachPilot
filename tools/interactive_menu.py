@@ -629,10 +629,9 @@ def _create_default_config(path: Path) -> None:
 
 BANNER = (
     "\n"
-    "============================================================\n"
     "  BreachPilot — AI Bug Bounty Research Agent\n"
     "  Authorized reconnaissance, research, evidence, reporting\n"
-    "============================================================\n"
+    "  ----------------------------------------------\n"
 )
 
 
@@ -640,10 +639,9 @@ def _show_banner() -> None:
     """Display a plain ASCII banner that renders reliably on Windows."""
     print(
         "\n"
-        "============================================================\n"
         "  BreachPilot — AI Bug Bounty Research Agent\n"
         "  Authorized reconnaissance, research, evidence, reporting\n"
-        "============================================================\n"
+        "  ----------------------------------------------\n"
     )
 
 
