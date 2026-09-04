@@ -23,7 +23,7 @@ BreachPilot is an open-source agentic operator that plans, discovers, reasons, c
 
 > [!WARNING]
 > **Authorized use only.** Only test systems you own or have explicit written permission to assess. Run on a throwaway operator box.
-> **Attack mode = `full_access`**: every in-scope action is auto-approved. The safeties are the **target-IP allowlist lock** (a destination guard, not a sandbox) and the **mission scope gate** (`exploit.forbidden_actions` / `disallowed_assets` deny with a `SCOPE_DENIED` audit row). Recon stays fully scope-gated. See [Safety model](#safety-model).
+> **Attack mode = `full_access`**: every in-scope action is auto-approved. The safeties are the **target-IP allowlist lock** (a destination guard, not a sandbox) and the **mission scope gate** (`exploit.forbidden_actions` / `disallowed_assets` deny with a `SCOPE_DENIED` audit row). Recon stays fully scope-gated. See [Safety model](#safety-model)
 
 ---
 
