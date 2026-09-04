@@ -257,8 +257,8 @@ if __name__ == "__main__":
     v = parse_kernel(rel)
     hits = []
     if v:
-        for lo, cve, name in KERNEL_CVE_MAP:
-            if in_range(v, lo, lo):  # exact-minor match (kernel .0 releases)
+        for (lo, hi), cve, name in KERNEL_CVE_MAP:
+            if in_range(v, lo, hi):
                 hits.append({{"cve": cve, "name": name, "kernel": rel}})
     # PwnKit is version-agnostic -- always suggest
     hits.append({{"cve": "CVE-2021-4034", "name": "PwnKit (polkit pkexec)", "kernel": rel}})
@@ -592,11 +592,12 @@ class IMDSExploit(AttackModule):
                 "module never auto-authorizes metadata endpoints. Extracted AWS keys "
                 "populate credentials_found and chain to CloudPrivesc / S3BucketTakeover."
             ),
-            "evidence": [f"IMDS credential extraction queued against {ctx.target_ip}"],
+            "evidence": [f"IMDS credential extraction queued against {ctx.target_ip} (not executed)"],
             "references": [
                 "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html",
             ],
-            "credentials_found": ["<aws: AKIA... : <redacted-secret> : <session-token>>"],
+            "confidence": 0.4,
+            "verdict": "inconclusive",
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
@@ -712,12 +713,12 @@ class DockerSockEscape(AttackModule):
                 "On host-root mount the orchestrator sets shell_type=sh, "
                 "privilege_level=root."
             ),
-            "evidence": [f"docker.sock escape queued against {ctx.target_ip}"],
+            "evidence": [f"docker.sock escape queued against {ctx.target_ip} (not executed)"],
             "references": [
                 "https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security-privilege-escalation",
             ],
-            "shell_type": "sh",
-            "privilege_level": "root",
+            "confidence": 0.4,
+            "verdict": "inconclusive",
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:

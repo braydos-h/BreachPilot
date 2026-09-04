@@ -66,12 +66,14 @@ class LinuxPersistence(AttackModule):
                 "Installs a cron-based persistence hook and attempts systemd unit + SSH "
                 "authorized_keys fallbacks. "
                 f"Callback host: {cb_host}:{cb_port} -- must be in exploit.allowed_targets "
-                "or the terminal target-lock blocks the reverse connection."
+                "or the terminal target-lock blocks the reverse connection. "
+                "Queued only — the PERSISTENCE_INSTALLED marker printed by the "
+                "executed script is the confirmation, never this recipe."
             ),
-            "shell_type": "reverse",
-            "privilege_level": "root",
+            "confidence": 0.4,
+            "verdict": "inconclusive",
             "evidence": [
-                f"cron/systemd/authorized_keys persistence queued against {ctx.target_ip}",
+                f"cron/systemd/authorized_keys persistence queued against {ctx.target_ip} (not executed)",
                 f"callback: {cb_host}:{cb_port}",
             ],
             "references": [
@@ -202,12 +204,14 @@ class WindowsPersistence(AttackModule):
                 "Installs a scheduled-task persistence hook and attempts registry Run key + "
                 "service fallbacks. "
                 f"Callback host: {cb_host}:{cb_port} -- must be in exploit.allowed_targets "
-                "or the terminal target-lock blocks the beacon connection."
+                "or the terminal target-lock blocks the beacon connection. "
+                "Queued only — the PERSISTENCE_INSTALLED marker printed by the "
+                "executed script is the confirmation, never this recipe."
             ),
-            "shell_type": "reverse",
-            "privilege_level": "system",
+            "confidence": 0.4,
+            "verdict": "inconclusive",
             "evidence": [
-                f"schtask/registry/service persistence queued against {ctx.target_ip}",
+                f"schtask/registry/service persistence queued against {ctx.target_ip} (not executed)",
                 f"callback: {cb_host}:{cb_port}",
             ],
             "references": [
@@ -302,10 +306,10 @@ class WebShellPersistence(AttackModule):
             "status": "script_generated",
             "module": self.name,
             "script": script,
-            "note": "Drops a web shell into common web roots (Apache/Nginx/IIS) for command execution persistence.",
-            "shell_type": "webshell",
-            "privilege_level": "user",
-            "evidence": [f"webshell persistence queued against {ctx.target_ip}"],
+            "note": "Drops a web shell into common web roots (Apache/Nginx/IIS) for command execution persistence. Queued only — the PERSISTENCE_INSTALLED marker printed by the executed script is the confirmation, never this recipe.",
+            "confidence": 0.4,
+            "verdict": "inconclusive",
+            "evidence": [f"webshell persistence queued against {ctx.target_ip} (not executed)"],
             "references": [
                 "https://attack.mitre.org/techniques/T1505/",
                 "https://attack.mitre.org/techniques/T1190/",
