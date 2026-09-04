@@ -63,7 +63,9 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return "BLOCKED: target_ip is required."
         if not validate_target_or_ip(target_ip):
             return "BLOCKED: target_ip must be a valid IP address or domain."
-        if not isinstance(port, int) or port < 1 or port > 65535:
+        if isinstance(port, str) and port.strip().isdigit():
+            port = int(port.strip())
+        if not isinstance(port, int) or isinstance(port, bool) or port < 1 or port > 65535:
             return "BLOCKED: port must be an integer between 1 and 65535."
         # Allowlist itself is enforced by @require_allowlist() on target_ip.
 

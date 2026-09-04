@@ -499,7 +499,9 @@ def register_operator_connection_tools(mcp: Any, *, ctx: ToolContext) -> None:
         beacons from victims must target a host:port in exploit.allowed_targets
         or the implant's beacon is blocked by the target-IP lock.
         """
-        if not isinstance(port, int) or port < 1 or port > 65535:
+        if isinstance(port, str) and port.strip().isdigit():
+            port = int(port.strip())
+        if not isinstance(port, int) or isinstance(port, bool) or port < 1 or port > 65535:
             return "BLOCKED: port must be 1-65535."
         ltype = (listener_type or "netcat").strip().lower()
         if ltype not in ("netcat", "socat", "http", "tls", "https-beacon"):

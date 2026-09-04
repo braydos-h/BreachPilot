@@ -204,7 +204,7 @@ def _audit_log(
         handle.write(_json.dumps(record, default=str) + "\n")
 
 
-_BLOCKED_RESULT_MARKERS = ("BLOCKED:", "TERMINAL_RESULT: BLOCKED", "ROOT_CMD_RESULT:", "ERROR:")
+_BLOCKED_RESULT_MARKERS = ("BLOCKED:", "TERMINAL_RESULT: BLOCKED", "ROOT_CMD_RESULT: BLOCKED")
 
 
 def _result_is_blocked(result: Any) -> bool:

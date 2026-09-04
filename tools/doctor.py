@@ -290,7 +290,7 @@ def _check_chatgpt(config: dict[str, Any] | None = None) -> dict[str, Any]:
     entry = repo / "packages" / "openai-oauth" / "src" / "cli.ts"
 
     sub: list[dict[str, Any]] = []
-    sub.append({"name": "provider_configured", "ok": bool(cfg.get("enabled")) or True})
+    sub.append({"name": "provider_configured", "ok": bool(cfg.get("enabled", False))})
     sub.append({"name": "openai_oauth_source", "ok": entry.exists(), "path": str(entry)})
     bun = _shutil.which("bun")
     node = _shutil.which("node")
@@ -361,7 +361,7 @@ def _check_opencode_go(config: dict[str, Any] | None = None) -> dict[str, Any]:
     default_model = str(cfg.get("default_model") or "muse-spark-1.2-contributor")
 
     sub: list[dict[str, Any]] = []
-    sub.append({"name": "provider_configured", "ok": bool(cfg.get("enabled")) or True})
+    sub.append({"name": "provider_configured", "ok": bool(cfg.get("enabled", False))})
     sub.append({"name": "base_url", "ok": bool(base_url), "value": base_url})
     sub.append({"name": "api_key_present", "ok": bool(api_key), "env": env_name})
     sub.append({"name": "default_model", "ok": bool(default_model), "value": default_model})

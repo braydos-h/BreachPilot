@@ -98,7 +98,7 @@ class Blackboard(dict):
         namespaced state (e.g. its discovered_services).
         """
         with self._lock:
-            bucket = self._buckets[target or _GLOBAL]
+            bucket = self._buckets.get(target or _GLOBAL, {})
             return bucket.get(key, default)
 
     # ── Atomic writes ───────────────────────────────────────────────────

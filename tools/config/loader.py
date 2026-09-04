@@ -119,8 +119,25 @@ def get_provider_config(config: dict[str, Any] | None = None, provider_id: str =
     pid = str(provider_id or "").strip().lower()
 
     providers_block = cfg.get("providers") if isinstance(cfg, dict) else None
-    if isinstance(providers_block, dict) and isinstance(providers_block.get(pid), dict):
-        return copy.deepcopy(providers_block[pid])
+    modern = providers_block.get(pid) if isinstance(providers_block, dict) else None
+    if isinstance(modern, dict):
+        if pid == "chatgpt":
+            base = get_chatgpt_config(cfg)
+        elif pid == "opencode_go":
+            base = get_opencode_go_config(cfg)
+        elif pid == "ollama":
+            base = copy.deepcopy(CONFIG_SCHEMA.get("ollama", {}))
+            overlay = cfg.get("ollama") if isinstance(cfg, dict) else None
+            if isinstance(overlay, dict):
+                for key, value in overlay.items():
+                    if value is not None:
+                        base[key] = value
+        else:
+            return copy.deepcopy(modern)
+        for key, value in modern.items():
+            if value is not None:
+                base[key] = value
+        return base
 
     if pid == "chatgpt":
         return get_chatgpt_config(cfg)

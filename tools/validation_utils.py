@@ -471,14 +471,14 @@ def is_target_in_allowlist(target: str, allowed_assets: list[str]) -> bool:
     if not isinstance(target, str) or not target or not allowed_assets:
         return False
 
-    target_clean = target.strip().lower()
+    target_clean = target.strip().lower().rstrip(".")
     # Parse the target once; a hostname (not an IP) skips the CIDR/IP checks.
     try:
         target_addr = ipaddress.ip_address(target_clean)
     except ValueError:
         target_addr = None
     for asset in allowed_assets:
-        asset_clean = asset.strip().lower()
+        asset_clean = asset.strip().lower().rstrip(".")
         if not asset_clean:
             continue
 

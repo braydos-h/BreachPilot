@@ -262,6 +262,11 @@ async def _open_exploit_mcp_session_once(
     # primary lock identity; ``EXPLOIT_TARGET_IP`` lets IP-based tools
     # (nmap/metasploit) target the resolved host; ``EXPLOIT_TARGET_DOMAIN``
     # lets web tools use the domain for Host headers / TLS SNI.
+    # Drop stale per-run keys inherited from the daemon environment so one
+    # run's resolved/discovered targets can't leak into the next boot.
+    env.pop("EXPLOIT_TARGET_IP", None)
+    env.pop("EXPLOIT_TARGET_DOMAIN", None)
+    env.pop("EXPLOIT_DISCOVERED_TARGETS", None)
     if original_target and resolved_ip:
         env["EXPLOIT_TARGET_IP"] = resolved_ip
         env["EXPLOIT_TARGET_DOMAIN"] = original_target

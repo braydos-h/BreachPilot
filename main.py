@@ -635,7 +635,7 @@ def _ensure_webui_build(ui: Any) -> int:
     if dist_index.exists():
         return 0
     npm_cmd = shutil.which("npm.cmd") or shutil.which("npm")
-    node_cmd = shutil.which("node") or shutil.which("node")
+    node_cmd = shutil.which("node") or shutil.which("nodejs")
     if not npm_cmd or not node_cmd:
         ui.error("Node/npm not found on PATH. Install Node.js, or build the WebUI manually:")
         ui.error(f"  cd {webui_dir} && npm install && npm run build")
@@ -1146,8 +1146,10 @@ def _run_daemon(args: argparse.Namespace) -> int:
         print(f"  {ui._c('gray')}Press Enter to reveal API token...{ui._c('reset')}")
     try:
         input(f"  {ui._c('gray')}>{ui._c('reset')} ")
-    except (EOFError, KeyboardInterrupt):
+    except KeyboardInterrupt:
         return 130
+    except EOFError:
+        pass
     print(f"  {ui._c('gray')}token{ui._c('reset')}   {token}")
     if _copy_to_clipboard(token):
         print(f"  {ui._c('green')}copied to clipboard{ui._c('reset')} {ui._c('gray')}(Ctrl+V to paste){ui._c('reset')}")
@@ -1424,14 +1426,14 @@ async def async_main(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     try:
-        args = parse_args(argv or sys.argv[1:])
+        args = parse_args(argv if argv is not None else sys.argv[1:])
 
         # Apply output flags to the shared UI instance. --quiet and --json both
         # suppress ANSI color (so logs/JSON pipelines stay clean); --plain does
         # the same explicitly. Done once here so every downstream call site
         # (ui.status, ui.error, ui.spinner, etc.) honors them.
         ui.plain = bool(args.plain or args.quiet or args.json)
-        raw_argv = argv or sys.argv[1:]
+        raw_argv = argv if argv is not None else sys.argv[1:]
         # ponytail: --eval is nargs="*" (default None), so a bare "--eval" is an
         # empty list — falsy. Every gate below that used to truthy-test --eval
         # now goes through _eval_active instead.
@@ -1636,7 +1638,7 @@ def main(argv: list[str] | None = None) -> int:
 
         # No arguments: launch the WebUI daemon (default interface). --menu
         # still forces the terminal menu; --demon/--daemon give the API alone.
-        if len(sys.argv) == 1 and not args.target.strip():
+        if len(raw_argv) == 0 and not args.target.strip():
             args.web = True
             return _run_daemon(args)
 

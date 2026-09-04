@@ -1083,7 +1083,9 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return "ERROR: target_ip is required."
         if not validate_target_or_ip(target_ip):
             return "ERROR: Invalid target (IP or domain)."
-        if not isinstance(port, int) or port < 1 or port > 65535:
+        if isinstance(port, str) and port.strip().isdigit():
+            port = int(port.strip())
+        if not isinstance(port, int) or isinstance(port, bool) or port < 1 or port > 65535:
             return "ERROR: port must be an integer between 1 and 65535."
         if not domain or not domain.strip():
             return "ERROR: domain is required (to build Host-header candidates)."
