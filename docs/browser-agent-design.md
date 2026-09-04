@@ -306,13 +306,18 @@ The backend NEVER touches the allowlist itself.
                                "read_only": true, "available": false}, ...]}}
 ```
 
-Status metadata only — there are NO browser endpoints, and `available` is
-False regardless of config (no endpoint pretends a browser works). The WebUI
-consumes the same `/capabilities` feature list it already does; no panels,
-buttons, or routes reference browser functionality in this build (dead
-navigation is forbidden). The `browser` field is typed additively: clients
-written before this change ignore unknown keys, clients written after it may
-render an "unavailable" browser panel from the same payload.
+Status metadata only — there are NO browser control endpoints, and `available`
+is real (enabled + registered + runnable; never pretended). The WebUI consumes
+the same `/capabilities` feature list it already does, plus a read-only
+`GET /api/v1/system/browser` health endpoint (config summary, SDK/Chromium
+probes, capability list — never launches). The System → Advanced page renders
+a "Browser agent" section (Ready/Not ready/Disabled badges, setup hints per
+missing piece, config stats, capability list) and the settings status overview
+carries a Browser chip (Off/Ready/Not ready); `browser.*` keys are editable
+under Advanced via the `browser` settings section. No run-page browser
+controls exist in this build — sessions are driven by the agent through MCP
+tools, and live sessions live in the MCP server process (not listed by the
+API). The `browser` field stays typed additively: older clients ignore it.
 
 ## 10. Benchmarks
 

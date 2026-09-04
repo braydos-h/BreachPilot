@@ -266,8 +266,23 @@ def _live_backend_or_skip() -> PlaywrightBackend:
     return PlaywrightBackend({"browser": {"enabled": True, "backend": "playwright"}})
 
 
+@pytest.fixture
+def _clean_engine_modules():
+    """Keep the import-hygiene contract order-independent.
+
+    Live tests legitimately import the Playwright SDK in-process; purge it
+    (and only it) afterwards so ``test_browser_backend_contract`` holds no
+    matter which test ran first. ``tools.browser`` itself never imports it.
+    """
+    yield
+    import sys as _sys
+
+    for name in [m for m in _sys.modules if m == "playwright" or m.startswith("playwright.")]:
+        del _sys.modules[name]
+
+
 @pytest.mark.integration
-def test_live_static_navigation_and_observation(local_app):
+def test_live_static_navigation_and_observation(local_app, _clean_engine_modules):
     backend = _live_backend_or_skip()
 
     async def _flow():
@@ -286,7 +301,7 @@ def test_live_static_navigation_and_observation(local_app):
 
 
 @pytest.mark.integration
-def test_live_js_render_xhr_storage_screenshot(local_app, tmp_path):
+def test_live_js_render_xhr_storage_screenshot(local_app, tmp_path, _clean_engine_modules):
     backend = PlaywrightBackend({"browser": {"enabled": True, "backend": "playwright", "artifact_dir": str(tmp_path)}})
     if not playwright_present() or not chromium_present():
         pytest.skip("live-Chromium test: SDK + runtime required (browser extra)")
@@ -312,7 +327,7 @@ def test_live_js_render_xhr_storage_screenshot(local_app, tmp_path):
 
 
 @pytest.mark.integration
-def test_live_out_of_scope_url_refused_by_backend_shape(local_app):
+def test_live_out_of_scope_url_refused_by_backend_shape(local_app, _clean_engine_modules):
     """The backend itself only allows http(s); the MCP allowlist owns scope."""
     backend = _live_backend_or_skip()
     from tools.browser.errors import BrowserNavigationFailed

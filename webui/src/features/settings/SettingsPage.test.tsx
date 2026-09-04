@@ -21,6 +21,7 @@ vi.mock("@/api/hooks", () => ({
   useAddModel: vi.fn(),
   useRemoveModel: vi.fn(),
   useSandboxStatus: vi.fn(),
+  useBrowserStatus: vi.fn(),
 }));
 vi.mock("@/components/ProviderSetup", () => ({
   useProviderStatus: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock("@/components/ProviderSetup", () => ({
 
 import {
   useAddModel,
+  useBrowserStatus,
   useConfig,
   useConfigSchema,
   useDiagnostics,
@@ -65,6 +67,7 @@ const resetMock = vi.mocked(useResetSystem);
 const addModelMock = vi.mocked(useAddModel);
 const removeModelMock = vi.mocked(useRemoveModel);
 const sandboxStatusMock = vi.mocked(useSandboxStatus);
+const browserStatusMock = vi.mocked(useBrowserStatus);
 const providerStatusMock = vi.mocked(useProviderStatus);
 const modelOptionsMock = vi.mocked(useModelOptions);
 
@@ -133,6 +136,7 @@ function setup() {
   addModelMock.mockReturnValue({ mutate: vi.fn(), isPending: false, error: null } as never);
   removeModelMock.mockReturnValue({ mutate: vi.fn(), isPending: false, error: null } as never);
   sandboxStatusMock.mockReturnValue({ data: null, isLoading: false, error: null, isFetching: false, refetch: vi.fn() } as never);
+  browserStatusMock.mockReturnValue({ data: null, isLoading: false, error: null, isFetching: false, refetch: vi.fn() } as never);
   providerStatusMock.mockReturnValue({
     provider: "ollama",
     label: "Ollama",

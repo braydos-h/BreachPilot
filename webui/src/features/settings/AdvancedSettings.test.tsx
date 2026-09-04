@@ -3,9 +3,10 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AdvancedSettings } from "@/features/settings/AdvancedSettings";
-import type { SandboxStatusResponse } from "@/api/hooks";
+import type { BrowserSystemStatus, SandboxStatusResponse } from "@/api/hooks";
 
 vi.mock("@/api/hooks", () => ({
+  useBrowserStatus: vi.fn(),
   useSandboxStatus: vi.fn(),
   useSystemInfo: vi.fn(),
   useTelemetry: vi.fn(),
@@ -20,8 +21,9 @@ vi.mock("@/api/hooks", () => ({
 vi.mock("@/features/settings/ConfigEditor", () => ({ ConfigEditor: () => <div>ConfigEditor</div> }));
 vi.mock("@/features/settings/DangerZone", () => ({ DangerZone: () => <div>DangerZone</div> }));
 
-import { useSandboxStatus, useSystemInfo, useTelemetry, useDiagnostics, useConfig, useConfigSchema, usePatchConfig, useResetSystem } from "@/api/hooks";
+import { useBrowserStatus, useSandboxStatus, useSystemInfo, useTelemetry, useDiagnostics, useConfig, useConfigSchema, usePatchConfig, useResetSystem } from "@/api/hooks";
 
+const browserStatusMock = vi.mocked(useBrowserStatus);
 const sandboxStatusMock = vi.mocked(useSandboxStatus);
 
 function sandboxData(overrides: Partial<SandboxStatusResponse> = {}): SandboxStatusResponse {
@@ -57,6 +59,13 @@ function sandboxData(overrides: Partial<SandboxStatusResponse> = {}): SandboxSta
 }
 
 function setup(data: SandboxStatusResponse | null) {
+  browserStatusMock.mockReturnValue({
+    data: null,
+    isLoading: false,
+    error: null,
+    isFetching: false,
+    refetch: vi.fn(),
+  } as never);
   sandboxStatusMock.mockReturnValue({
     data,
     isLoading: false,
@@ -140,5 +149,142 @@ describe("AdvancedSettings sandbox panel", () => {
     expect(
       within(section).getByText("sandbox disabled -- documented legacy host-execution mode"),
     ).toBeInTheDocument();
+  });
+});
+
+function browserData(overrides: Partial<BrowserSystemStatus> = {}): BrowserSystemStatus {
+  return {
+    enabled: true,
+    backend: "playwright",
+    available: true,
+    health: {
+      name: "browser_backend_playwright",
+      ok: true,
+      detail: "playwright 1.60.0 + chromium runtime present",
+      playwright_present: true,
+      playwright_version: "1.60.0",
+      chromium_present: true,
+    },
+    capabilities: [
+      { name: "browser.navigate", description: "Open URLs", read_only: false, available: true },
+      { name: "browser.dom.inspect", description: "DOM snapshots", read_only: true, available: true },
+    ],
+    config: {
+      headless: true,
+      max_sessions: 2,
+      allow_mutating_actions: false,
+      capture_screenshots: true,
+      capture_network: true,
+      capture_console: false,
+    },
+    ...overrides,
+  };
+}
+
+function setupBrowser(data: BrowserSystemStatus | null) {
+  browserStatusMock.mockReturnValue({
+    data,
+    isLoading: false,
+    error: null,
+    isFetching: false,
+    refetch: vi.fn(),
+  } as never);
+  sandboxStatusMock.mockReturnValue({
+    data: null,
+    isLoading: false,
+    error: null,
+    isFetching: false,
+    refetch: vi.fn(),
+  } as never);
+  vi.mocked(useSystemInfo).mockReturnValue({
+    data: { hostname: "test", public_ip: null, os: "win", python: "3.12", platform: "win32", local_ips: [] },
+    isLoading: false,
+    error: null,
+    isFetching: false,
+    refetch: vi.fn(),
+  } as never);
+  vi.mocked(useTelemetry).mockReturnValue({
+    data: { summary: null, recent: [] },
+    isLoading: false,
+    error: null,
+    isFetching: false,
+    refetch: vi.fn(),
+  } as never);
+  vi.mocked(useDiagnostics).mockReturnValue({ mutate: vi.fn(), isPending: false, error: null } as never);
+  vi.mocked(useConfig).mockReturnValue({ data: {}, isLoading: false, error: null } as never);
+  vi.mocked(useConfigSchema).mockReturnValue({ data: { schema: {} }, isLoading: false, error: null } as never);
+  vi.mocked(usePatchConfig).mockReturnValue({ mutate: vi.fn(), isPending: false, error: null } as never);
+  vi.mocked(useResetSystem).mockReturnValue({ mutate: vi.fn(), isPending: false, error: null } as never);
+  render(
+    <MemoryRouter>
+      <AdvancedSettings />
+    </MemoryRouter>,
+  );
+}
+
+function browserSection(): HTMLElement {
+  const heading = screen.getByRole("heading", { name: "Browser agent" });
+  const section = heading.closest("section");
+  expect(section).not.toBeNull();
+  return section as HTMLElement;
+}
+
+describe("AdvancedSettings browser panel", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("shows a ready backend with config detail and capabilities", () => {
+    setupBrowser(browserData());
+    const section = browserSection();
+    expect(within(section).getByText("Ready (playwright)")).toBeInTheDocument();
+    expect(within(section).getByText("playwright 1.60.0 + chromium runtime present")).toBeInTheDocument();
+    expect(within(section).getByText("browser.navigate")).toBeInTheDocument();
+    expect(within(section).getByText("browser.dom.inspect")).toBeInTheDocument();
+  });
+
+  it("marks the disabled state", () => {
+    setupBrowser(browserData({ enabled: false, available: false, capabilities: [] }));
+    const section = browserSection();
+    expect(within(section).getByText("Disabled")).toBeInTheDocument();
+  });
+
+  it("shows setup hints when enabled but the SDK is missing", () => {
+    setupBrowser(
+      browserData({
+        available: false,
+        capabilities: [],
+        health: {
+          name: "browser_backend_playwright",
+          ok: false,
+          detail: "playwright SDK not installed (optional 'browser' extra)",
+          playwright_present: false,
+          playwright_version: "",
+          chromium_present: false,
+        },
+      }),
+    );
+    const section = browserSection();
+    expect(within(section).getByText("Not ready")).toBeInTheDocument();
+    expect(within(section).getByText('python -m pip install -e ".[browser]"')).toBeInTheDocument();
+  });
+
+  it("shows the chromium hint when the SDK is present but the runtime is missing", () => {
+    setupBrowser(
+      browserData({
+        available: false,
+        capabilities: [],
+        health: {
+          name: "browser_backend_playwright",
+          ok: false,
+          detail: "playwright SDK present but no chromium runtime",
+          playwright_present: true,
+          playwright_version: "1.60.0",
+          chromium_present: false,
+        },
+      }),
+    );
+    const section = browserSection();
+    expect(within(section).getByText("python -m playwright install chromium")).toBeInTheDocument();
   });
 });
