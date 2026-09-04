@@ -261,23 +261,25 @@ def select_runtime_skills(
         from tools.skill_embeddings import semantic_rank
 
         sem_weight = _positive_int(cfg.get("semantic_skill_weight", 16), 16)
-        min_similarity = _bounded_float(cfg.get("semantic_min_similarity"), 0.35, 0.0, 1.0)
-        for skill, sim in semantic_rank(
-            text,
-            registry,
-            skill_embedder,
-            top_k=max_active * 3,
-            min_similarity=min_similarity,
-        ):
-            if mode != "attack" and _looks_attack_only(skill):
-                continue
-            add(
-                skill,
-                int(sim * sem_weight),
-                f"Semantic match (similarity={sim:.2f}).",
-                "semantic",
-                signals=[f"semantic:{sim:.2f}"],
-            )
+        # ponytail: weight 0 means semantic off — skip 138 embeds entirely.
+        if sem_weight > 0:
+            min_similarity = _bounded_float(cfg.get("semantic_min_similarity"), 0.35, 0.0, 1.0)
+            for skill, sim in semantic_rank(
+                text,
+                registry,
+                skill_embedder,
+                top_k=max_active * 3,
+                min_similarity=min_similarity,
+            ):
+                if mode != "attack" and _looks_attack_only(skill):
+                    continue
+                add(
+                    skill,
+                    int(sim * sem_weight),
+                    f"Semantic match (similarity={sim:.2f}).",
+                    "semantic",
+                    signals=[f"semantic:{sim:.2f}"],
+                )
 
     # Mid-run re-selection support: a small novelty bonus for skills not
     # already active so re-selection surfaces newly-relevant methodology
@@ -297,20 +299,42 @@ def select_runtime_skills(
     # not be hidden because it once underperformed). No-op without a store or
     # when feedback is disabled; tag matching remains the floor.
     if experience_store is not None and bool(cfg.get("feedback_enabled", True)):
-        from tools.skill_feedback import skill_observation_count, skill_prior
-
         fb_weight = _positive_int(cfg.get("feedback_skill_weight", 8), 8)
         fb_min_obs = max(1, _positive_int(cfg.get("feedback_min_observations", 3), 3))
-        for item in candidates.values():
-            if skill_observation_count(experience_store, item.skill.name) < fb_min_obs:
-                continue
-            prior = skill_prior(experience_store, item.skill.name)
-            if prior > 0.5:
+        # ponytail: one SELECT for all candidates — was 2 per candidate.
+        batch = None
+        try:
+            batch_fn = getattr(experience_store, "batch_skill_stats", None)
+            if callable(batch_fn):
+                batch = batch_fn([item.skill.name for item in candidates.values()])
+        except Exception:
+            batch = None
+        if batch:
+            for item in candidates.values():
+                entry = batch.get(item.skill.name)
+                if not entry:
+                    continue
+                count, prior = entry
+                if count < fb_min_obs or prior <= 0.5:
+                    continue
                 bump = int((prior - 0.5) * 2 * fb_weight)
                 if bump > 0:
                     item.score += bump
                     item.reasons.append(f"Cross-mission feedback boost (prior={prior:.2f}).")
                     item.signals.add("feedback:prior")
+        else:
+            from tools.skill_feedback import skill_observation_count, skill_prior
+
+            for item in candidates.values():
+                if skill_observation_count(experience_store, item.skill.name) < fb_min_obs:
+                    continue
+                prior = skill_prior(experience_store, item.skill.name)
+                if prior > 0.5:
+                    bump = int((prior - 0.5) * 2 * fb_weight)
+                    if bump > 0:
+                        item.score += bump
+                        item.reasons.append(f"Cross-mission feedback boost (prior={prior:.2f}).")
+                        item.signals.add("feedback:prior")
 
     diversity_penalty = _non_negative_int(cfg.get("diversity_penalty"), 12)
     ranked_all = _diversified_rank(candidates.values(), diversity_penalty)

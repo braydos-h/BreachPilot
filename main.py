@@ -413,7 +413,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     out.add_argument("--debug", action="store_true", help="Enable verbose debug output")
 
     swarm = parser.add_argument_group("swarm & reasoning")
-    swarm.add_argument("--swarm", action="store_true", help="Enable multi-agent swarm mode")
+    swarm.add_argument(
+        "--swarm",
+        action="store_true",
+        help="Enable multi-agent swarm mode: six specialists decompose a single target "
+        "(parallel recon + vuln research, critic pre-check, reflection). Without it, "
+        "attack mode runs the persistent autonomous campaign queue (resume + checkpoints). "
+        "Combine both on high-value targets. See docs/swarm.md.",
+    )
     swarm.add_argument(
         "--parallel-swarm",
         action="store_true",

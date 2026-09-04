@@ -350,3 +350,45 @@ class ExperienceStore:
                 "mutation_strategy": mutation_strategy,
             },
         )
+
+    def batch_skill_stats(self, skill_names: list[str]) -> dict[str, tuple[int, float]]:
+        """One-query count+prior for many skills (perf: was 2 SELECTs each)."""
+        # ponytail: skill selector did 2 SELECTs per candidate (40-60 total).
+        result: dict[str, tuple[int, float]] = {}
+        names = [str(n) for n in skill_names if str(n)]
+        if not names:
+            return result
+        try:
+            sigs = [f"skill:{n}" for n in names]
+            placeholders = ",".join("?" for _ in sigs)
+            with self._db.connection() as conn:
+                cur = conn.execute(
+                    "SELECT target_signature, outcome, created_at FROM lessons "
+                    f"WHERE target_signature IN ({placeholders}) AND action_type = 'skill' "
+                    "AND embedding_json = '[]'",
+                    tuple(sigs),
+                )
+                buckets: dict[str, list[tuple[str, str]]] = {}
+                for row in cur.fetchall():
+                    buckets.setdefault(row["target_signature"], []).append((row["outcome"], row["created_at"]))
+            for name, sig in zip(names, sigs):
+                rows = buckets.get(sig, [])
+                n = len(rows)
+                if n < self._min_samples:
+                    result[name] = (n, 0.5)
+                    continue
+                successes = failures = partials = 0.0
+                for outcome, created_at in rows:
+                    w = self._decay_weight(created_at)
+                    if outcome == "success":
+                        successes += w
+                    elif outcome == "failure":
+                        failures += w
+                    elif outcome == "partial":
+                        partials += 0.5 * w
+                alpha = 1.0 + successes + partials
+                beta = 1.0 + failures + partials
+                result[name] = (n, alpha / (alpha + beta))
+        except Exception:
+            return {}
+        return result

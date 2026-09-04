@@ -180,6 +180,22 @@ class HostReconResult:
         )
 
 
+def _concurrency_from_config(recon_cfg: dict) -> int:
+    """Resolve secondary-enumerator concurrency (default 3, same as before)."""
+    # ponytail: recon.max_concurrent_secondary wins, else recon.fast.service_concurrency.
+    raw = recon_cfg.get("max_concurrent_secondary", None)
+    if raw is None:
+        fast = recon_cfg.get("fast") or {}
+        if isinstance(fast, dict):
+            raw = fast.get("service_concurrency", 3)
+        else:
+            raw = 3
+    try:
+        return max(1, int(raw))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 3
+
+
 @dataclass
 class ReconConfig:
     nmap_path: str = "nmap"
@@ -274,6 +290,8 @@ class ReconConfig:
             max_retries=int(recon_cfg.get("max_retries", 2)),
             retry_delay=float(recon_cfg.get("retry_delay", 5.0)),
             timeout_seconds=int(recon_cfg.get("timeout_seconds", 300)),
+            # ponytail: honor operator-tuned concurrency — was hardcoded 3.
+            max_concurrent_secondary=_concurrency_from_config(recon_cfg),
             # Production opts into the Phase 3 additive enumerators by
             # default; ``recon.extended_enumerators: false`` disables them.
             extended_enumerators=bool(recon_cfg.get("extended_enumerators", True)),

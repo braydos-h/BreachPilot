@@ -7,14 +7,15 @@ critic pre-check with blackboard awareness, and reflection-driven strategy adapt
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
-import os
 import threading
-import time
 from pathlib import Path
 from typing import Any, Callable
 
+from tools.kernel.orchestration import safe_emit
+from tools.swarm import milestones as _milestones
+from tools.swarm import negotiation as _negotiation
+from tools.swarm import reflection_run as _reflection_run
+from tools.swarm import state_store as _state_store
 from tools.swarm.agents.critic_agent import CriticAgent
 from tools.swarm.agents.exploit_agent import ExploitAgent
 from tools.swarm.agents.post_exploit_agent import PostExploitAgent
@@ -46,6 +47,9 @@ class SwarmOrchestrator:
     - Reflection-driven strategy adaptation
     - Battle log accumulation for reflection agent
     """
+
+    # Negotiable critic keys — canonical set lives in tools/swarm/negotiation.py.
+    _NEGOTIABLE_KEYS = _negotiation._NEGOTIABLE_KEYS
 
     def __init__(
         self,
@@ -162,35 +166,6 @@ class SwarmOrchestrator:
             self._context.setdefault("skill_selection", None)
 
     # ── Public API ──────────────────────────────────────────────────────
-
-    def _ensure_role_clients(self) -> None:
-        """Resolve ``models.roles`` clients once, lazily (capability-upgrade §13).
-
-        Stashes ``critic_model_client`` in the shared context when the critic
-        role maps to a different model than the shared default client, so the
-        CriticAgent's LLM calls route to the configured role model. The
-        mission_config's ``models`` block (merged by the run-service task
-        builder / AgentLoop callers) is the source; resolution is best-effort —
-        any failure leaves the context untouched and the critic keeps using
-        the shared client, exactly the pre-role-routing behavior.
-        """
-        if self._role_clients_resolved:
-            return
-        self._role_clients_resolved = True
-        try:
-            cfg = self._context.get("config")
-            if not isinstance(cfg, dict) or not cfg.get("models"):
-                return
-            from tools.mcp_tools.registry import _get_model_router
-
-            router = _get_model_router(cfg)
-            if router is None:
-                return
-            client = router.get_client_for_role("critic", config=cfg)
-            if client is not None and client is not self._context.get("model_client"):
-                self._context["critic_model_client"] = client
-        except Exception:  # noqa: BLE001 — role routing must never break dispatch
-            pass
 
     def route(self, task: dict[str, Any]) -> AgentResult:
         """Route a single task to the appropriate agent (sequential).
@@ -437,42 +412,8 @@ class SwarmOrchestrator:
         return ordered
 
     def reflect(self, battle_log: list[dict[str, Any]], session_state: dict[str, Any]) -> AgentResult:
-        """Run the reflection agent on the current phase results.
-
-        The reflection agent analyzes the battle log, identifies patterns,
-        and recommends strategy shifts. Results are stored on the blackboard.
-        """
-        with self._lock:
-            if not self._reflection_enabled:
-                return AgentResult(
-                    agent_type="reflection",
-                    status=AgentStatus.IDLE,
-                    task_id="reflection-skip",
-                    output={},
-                )
-            agent = ReflectionAgent()
-            task = {
-                "task_id": f"reflect-{int(time.time())}",
-                "battle_log": battle_log,
-                "session_state": session_state,
-            }
-            result = agent.run(task, self._context)
-            self._results.append(result)
-            self._trim_history()
-            if result.output:
-                self._blackboard.set_scalar("last_reflection", result.output)
-                self._blackboard.set_scalar("strategy_shift", result.output.get("recommended_strategy_shift", ""))
-                self._emit(
-                    "reflection_output",
-                    {
-                        "task_id": task["task_id"],
-                        "recommended_strategy_shift": self._blackboard["strategy_shift"],
-                        "output_summary": str(result.output)[:500],
-                    },
-                )
-                self._persist_state()
-
-            return result
+        """Run the reflection agent on the current phase results (see tools/swarm/reflection_run.py)."""
+        return _reflection_run.reflect(self, battle_log, session_state)
 
     def get_blackboard(self) -> dict[str, Any]:
         """Return a snapshot of the global (legacy flat-dict) blackboard state.
@@ -508,211 +449,15 @@ class SwarmOrchestrator:
 
     # ── Event emission + state persistence ───────────────────────────────
 
-    def _mark_milestone(self, target: str, phase: str) -> None:
-        """Mark ``(target, phase)`` complete so dependent tasks can proceed.
-
-        Idempotent: creating the event and setting it are both no-ops if
-        already done. Called after every ``agent.run`` (even on failure) so a
-        failed recon doesn't wedge a waiting vuln task forever — the vuln
-        task will see an empty ``discovered_services`` and no-op, which is the
-        correct degraded behavior, rather than hanging the campaign.
-        """
-        key = (target, phase)
-        with self._lock:
-            event = self._milestone_events.get(key)
-            if event is None:
-                event = threading.Event()
-                self._milestone_events[key] = event
-        event.set()
-
-    def is_milestone_set(self, target: str, phase: str) -> bool:
-        """Check whether ``(target, phase)`` has completed (non-blocking).
-
-        Useful for a caller deciding whether to skip a redundant task, or for
-        the agent loop to avoid re-dispatching a phase that already ran.
-        """
-        with self._lock:
-            event = self._milestone_events.get((target, phase))
-        return event is not None and event.is_set()
-
-    def _await_milestone(self, target: str, phase: str, timeout: float | None = None) -> bool:
-        """Block until ``(target, phase)`` is marked complete. Returns True if
-        the event was set within timeout, False on timeout. Called from a
-        worker thread (route_parallel runs agents via run_in_executor); safe
-        to block here because only THIS task is waiting, not the whole loop.
-        """
-        with self._lock:
-            event = self._milestone_events.get((target, phase))
-            if event is None:
-                event = threading.Event()
-                self._milestone_events[(target, phase)] = event
-        return event.wait(timeout=timeout)
-
     def _emit(self, event_type: str, data: dict[str, Any]) -> None:
         """Emit an event to the registered callback, swallowing errors."""
-        if self._event_callback is None:
-            return
-        try:
-            self._event_callback(event_type, data)
-        except Exception:
-            pass
+        safe_emit(self._event_callback, event_type, data)
 
-    def _trim_history(self) -> None:
-        """Bound ``_results`` and ``_battle_log`` in memory.
+    # ── Critic negotiation (canonical code in tools/swarm/negotiation.py) ──
 
-        Both lists are read only for their length and a recent tail
-        (``_persist_state`` snapshots ``battle_log[-200:]``;
-        ``_distill_episode_summary`` rolls up win-counts over the log). The
-        full per-task outcome is persisted to ``swarm_state.json`` on every
-        event, so dropping old in-memory entries reclaims the memory a long
-        multi-cycle campaign would otherwise leak without losing any data a
-        consumer actually reads.
-        """
-        if len(self._results) > self._max_results:
-            del self._results[: len(self._results) - self._max_results]
-        if len(self._battle_log) > self._max_battle_log:
-            del self._battle_log[: len(self._battle_log) - self._max_battle_log]
-
-    def _persist_state(self, *, force: bool = False) -> None:
-        """Persist a snapshot of swarm state for resume and live CLI progress.
-
-        Throttled to at most one disk write per ``_state_persist_interval``
-        (5s) unless ``force=True`` — bursty event paths (route per task,
-        spawn per agent) otherwise fsync-spam a 200-cycle campaign. Resume
-        correctness is kept: ``route_parallel`` forces a write at batch end,
-        so the tail is never older than one batch.
-        """
-        if self._state_path is None:
-            return
-        if not force:
-            now = time.monotonic()
-            if now - self._last_persist < self._state_persist_interval:
-                return
-            self._last_persist = now
-        else:
-            self._last_persist = time.monotonic()
-        try:
-            self._state_path.parent.mkdir(parents=True, exist_ok=True)
-            snapshot = {
-                "agents": [
-                    {
-                        "agent_id": agent.agent_id,
-                        "agent_type": agent.agent_type,
-                        "status": agent.status.value,
-                        "task_id": getattr(agent, "_task_id", ""),
-                    }
-                    for agent in self._agents.values()
-                ],
-                # Persist the FULL namespaced snapshot (global + per-target
-                # buckets) so a resumed run restores per-host findings too,
-                # not just the legacy flat global view. ``Blackboard.snapshot``
-                # returns ``{__global__: {...}, "<target>": {...}, ...}``.
-                "blackboard": self._blackboard.snapshot(),
-                "blackboard_schema": "namespaced",
-                # 200 entries gives the WebUI battle-log card a useful history
-                # while keeping the snapshot bounded (_max_battle_log is 500).
-                "battle_log_tail": self._battle_log[-200:],
-                "results_count": len(self._results),
-                "last_reflection": self._blackboard.get("last_reflection", {}),
-                "strategy_shift": self._blackboard.get("strategy_shift", ""),
-                "updated_at": time.time(),
-            }
-            # Atomic write so progress and resume readers never see a partial file.
-            # ``os.replace`` atomically overwrites an existing target on both
-            # Windows and POSIX (``Path.rename`` raises ``FileExistsError`` on
-            # Windows when the target exists — the second+ persist would throw,
-            # be swallowed by the bare ``except``, and leave the stale first-
-            # write file on disk; that's why ``access_achieved`` never showed
-            # ``True`` on Windows even after the milestone block set it).
-            tmp = self._state_path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(snapshot, indent=2, default=str), encoding="utf-8")
-            os.replace(tmp, self._state_path)
-        except Exception:
-            pass
-
-    def load_state(self, path: Path | str | None = None) -> bool:
-        """Restore the shared blackboard from a persisted swarm_state.json.
-
-        Tier 1.3: ``_persist_state`` already writes the blackboard snapshot on
-        every event, but nothing originally read it back — so a
-        resumed swarm started with a fresh blackboard, losing every discovered
-        service / vulnerability hypothesis / credential / failed-module the
-        prior run had accumulated. This restores those keys so the resumed
-        swarm's agents (and critic, which is blackboard-aware) see the prior
-        run's findings and don't repeat already-tried-and-failed work.
-
-        Only the blackboard is restored (the agent list and battle-log tail are
-        per-run execution state, not resumable intelligence). Unknown/extra
-        keys in the file are ignored; missing keys keep their defaults. A
-        missing/corrupt file returns False (fresh start), never raises — so a
-        bad state file can't wedge the swarm.
-
-        Handles two on-disk shapes:
-
-        * **Namespaced** (current, ``blackboard_schema == "namespaced"`` or
-          detected by presence of a ``__global__`` key): the value is
-          ``{__global__: {...}, "<target>": {...}, ...}`` and is passed to
-          ``Blackboard.merge_snapshot`` which restores both the global bucket
-          and per-target buckets.
-        * **Flat** (legacy, pre-parallel-swarm): the value is a plain
-          ``{k: v}`` dict (the old ``dict(self._blackboard)`` global view).
-          Merged key-by-key into the global bucket to preserve the original
-          resume semantics — list values extended (order-preserving dedup),
-          scalars replaced.
-        """
-        state_path = Path(path) if path is not None else self._state_path
-        if state_path is None or not state_path.exists():
-            return False
-        try:
-            data = json.loads(state_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return False
-        if not isinstance(data, dict):
-            return False
-        bb = data.get("blackboard")
-        if not isinstance(bb, dict):
-            return False
-
-        # Namespaced shape (current): delegate to Blackboard.merge_snapshot.
-        if data.get("blackboard_schema") == "namespaced" or "__global__" in bb:
-            self._blackboard.merge_snapshot(bb)
-            return True
-
-        # Legacy flat shape: merge key-by-key into the global bucket. Keeps
-        # the original resume semantics (list extend w/ dedup, scalar replace)
-        # so a pre-parallel-swarm state file still resumes cleanly.
-        for key, value in bb.items():
-            current = self._blackboard.get(key)
-            if isinstance(current, list) and isinstance(value, list):
-                # Preserve ordering + dedup so resumed findings don't double up.
-                self._blackboard.extend_list(key, value)
-            else:
-                self._blackboard.set_scalar(key, value)
-        return True
-
-    # ── Critic negotiation ─────────────────────────────────────────────
-
-    # Keys the critic is allowed to modify during a negotiation. A ``modify``
-    # proposing a change to any key NOT in this set is treated as a scope
-    # expansion attempt and rejected (the modification is dropped, the
-    # negotiation stops, and the original task runs). The negotiation is about
-    # *how* to execute a planned action — never *what* target/scope to hit.
-    # ``target``/``phase``/``scope``/``allowed_tools``/``asset_type`` define
-    # WHAT the action touches, so they are off the table. The allowlist lock is
-    # untouched by this allowlist: it is enforced separately at the MCP tool
-    # layer regardless of what the critic proposes.
-    _NEGOTIABLE_KEYS: frozenset[str] = frozenset(
-        {
-            "risk_level",
-            "require_mutation",
-            "alternative_tool",
-            "rate_limit_seconds",
-            "delay_seconds",
-            "timeout_seconds",
-            "max_retries",
-            "mutation_strategy",
-        }
-    )
+    def _ensure_role_clients(self) -> None:
+        """Resolve ``models.roles`` clients lazily (see tools/swarm/negotiation.py)."""
+        return _negotiation._ensure_role_clients(self)
 
     def _negotiate(
         self,
@@ -722,57 +467,8 @@ class SwarmOrchestrator:
         target: str,
         agent: Agent,
     ) -> AgentResult | None:
-        """Run the bounded critic↔exploit negotiation and return a blocked
-        result on ``deny``, or ``None`` to let the route proceed.
-
-        Behavior by ``self._negotiation_rounds``:
-
-        - ``0`` (default, legacy one-shot): critic reviews once. ``deny``
-          blocks; ``modify`` is applied once and the task runs (no re-review).
-          Byte-for-byte the pre-negotiation behavior.
-        - ``N>0``: critic reviews; on ``modify`` the modifications are applied
-          and the critic re-reviews the modified task, up to ``N`` rounds. The
-          loop stops early on: ``approve`` (task runs), ``deny`` (blocked), a
-          scope-expanding modification (rejected + logged, original task runs),
-          or a repeated modification (deadlock — original task runs).
-
-        The negotiation never changes the target/scope: any modification
-        touching a key outside ``_NEGOTIABLE_KEYS`` is dropped and the loop
-        terminates with the pre-modification task. The allowlist lock is not
-        consulted here (it lives at the MCP tool layer); this guard only
-        prevents the critic from expanding WHAT the action touches.
-
-        Runs UNLOCKED — ``critic.run`` may call an LLM. All orchestrator state
-        mutations (``_results``/``_battle_log``) on the deny path happen under
-        ``self._lock``.
-        """
-        critic_task = {
-            "task_id": f"critic-{task_id}",
-            "proposed_action": task,
-        }
-        critic_result = critic.run(critic_task, self._context)
-        decision = critic_result.output.get("decision", "approve") if critic_result.output else "approve"
-        reasoning = critic_result.output.get("reasoning", "") if critic_result.output else ""
-
-        self._emit(
-            "critic_decision",
-            {"task_id": task_id, "target": target, "decision": decision, "reasoning": reasoning, "round": 0},
-        )
-
-        if decision == "deny":
-            return self._record_block(critic, task, task_id, target, agent, reasoning)
-
-        if decision == "modify":
-            modifications = critic_result.output.get("modifications", {}) or {}
-            # Legacy one-shot path: apply once, no re-review.
-            if self._negotiation_rounds <= 0:
-                safe = self._filter_modifications(modifications, task_id, target, round_idx=0)
-                task.update(safe)
-                return None
-            # Bounded loop: re-review the modified task up to N rounds.
-            return self._negotiation_loop(critic, task, task_id, target, agent, modifications)
-
-        return None
+        """Bounded critic↔exploit negotiation (see tools/swarm/negotiation.py)."""
+        return _negotiation._negotiate(self, critic, task, task_id, target, agent)
 
     def _negotiation_loop(
         self,
@@ -783,70 +479,8 @@ class SwarmOrchestrator:
         agent: Agent,
         first_modifications: dict[str, Any],
     ) -> AgentResult | None:
-        """Bounded re-review loop. ``first_modifications`` is the round-0
-        ``modify`` output already extracted by ``_negotiate``."""
-        # Track a hash of each round's proposed modifications so a repeated
-        # proposal (same bytes twice in a row) breaks the loop as a deadlock.
-        # ponytail: SHA256 of the JSON-sorted modifications dict — O(1) per
-        # round, detects the exact-repeat case. A smarter detector would diff
-        # semantic content; upgrade if a critic oscillates between two
-        # different but equivalent modifications.
-        last_hash = self._modifications_hash(first_modifications)
-        # Apply the round-0 modifications (filtered for scope safety).
-        safe = self._filter_modifications(first_modifications, task_id, target, round_idx=0)
-        task.update(safe)
-
-        for round_idx in range(1, self._negotiation_rounds + 1):
-            critic_task = {"task_id": f"critic-{task_id}", "proposed_action": task}
-            critic_result = critic.run(critic_task, self._context)
-            decision = critic_result.output.get("decision", "approve") if critic_result.output else "approve"
-            reasoning = critic_result.output.get("reasoning", "") if critic_result.output else ""
-
-            self._emit(
-                "critic_decision",
-                {
-                    "task_id": task_id,
-                    "target": target,
-                    "decision": decision,
-                    "reasoning": reasoning,
-                    "round": round_idx,
-                },
-            )
-
-            if decision == "deny":
-                return self._record_block(critic, task, task_id, target, agent, reasoning)
-            if decision == "approve":
-                return None
-            # decision == "modify": check for scope expansion + deadlock.
-            modifications = critic_result.output.get("modifications", {}) or {}
-            cur_hash = self._modifications_hash(modifications)
-            # If every proposed key is out-of-scope, the critic tried to expand
-            # scope — reject, stop negotiating, run the pre-modification task.
-            if not self._filter_modifications(modifications, task_id, target, round_idx=round_idx):
-                self._emit(
-                    "negotiation_scope_rejected",
-                    {"task_id": task_id, "target": target, "round": round_idx, "modifications": modifications},
-                )
-                return None
-            # Deadlock: same modification repeated twice in a row.
-            if cur_hash == last_hash:
-                self._emit(
-                    "negotiation_deadlock",
-                    {"task_id": task_id, "target": target, "round": round_idx},
-                )
-                return None
-            last_hash = cur_hash
-            safe = self._filter_modifications(modifications, task_id, target, round_idx=round_idx)
-            task.update(safe)
-
-        # Rounds exhausted without consensus: fall back to the current task
-        # state (the last accepted modifications) + log. The task runs with
-        # whatever modifications were applied in the final accepted round.
-        self._emit(
-            "negotiation_exhausted",
-            {"task_id": task_id, "target": target, "rounds": self._negotiation_rounds},
-        )
-        return None
+        """Bounded re-review loop (see tools/swarm/negotiation.py)."""
+        return _negotiation._negotiation_loop(self, critic, task, task_id, target, agent, first_modifications)
 
     def _filter_modifications(
         self,
@@ -856,32 +490,12 @@ class SwarmOrchestrator:
         *,
         round_idx: int,
     ) -> dict[str, Any]:
-        """Return only the keys in ``_NEGOTIABLE_KEYS``. Out-of-scope keys are
-        dropped silently (the caller emits a ``negotiation_scope_rejected``
-        event when the WHOLE modification is empty after filtering)."""
-        if not isinstance(modifications, dict):
-            return {}
-        safe: dict[str, Any] = {}
-        rejected: list[str] = []
-        for key, value in modifications.items():
-            if key in self._NEGOTIABLE_KEYS:
-                safe[key] = value
-            else:
-                rejected.append(key)
-        if rejected:
-            self._emit(
-                "negotiation_keys_rejected",
-                {"task_id": task_id, "target": target, "round": round_idx, "keys": rejected},
-            )
-        return safe
+        """Keep only negotiable critic keys (see tools/swarm/negotiation.py)."""
+        return _negotiation._filter_modifications(self, modifications, task_id, target, round_idx=round_idx)
 
-    @staticmethod
-    def _modifications_hash(modifications: dict[str, Any]) -> str:
-        """Stable hash of a modifications dict for deadlock detection."""
-        try:
-            return hashlib.sha256(json.dumps(modifications, sort_keys=True, default=str).encode("utf-8")).hexdigest()
-        except (TypeError, ValueError):
-            return ""
+    def _modifications_hash(self, modifications: dict[str, Any]) -> str:
+        """Stable hash of a modifications dict (see tools/swarm/negotiation.py)."""
+        return _negotiation._modifications_hash(self, modifications)
 
     def _record_block(
         self,
@@ -892,37 +506,36 @@ class SwarmOrchestrator:
         agent: Agent,
         reasoning: str,
     ) -> AgentResult:
-        """Record a critic ``deny`` as a blocked result + battle-log entry."""
-        with self._lock:
-            blocked_result = AgentResult(
-                agent_type=agent.agent_type,
-                status=AgentStatus.BLOCKED,
-                task_id=task_id,
-                error=f"Critic blocked: {reasoning}",
-            )
-            agent._set_status(AgentStatus.BLOCKED)
-            self._results.append(blocked_result)
-            self._battle_log.append(
-                {
-                    "task_id": task_id,
-                    "tool": task.get("tool", task.get("phase", "")),
-                    "target": target,
-                    "success": False,
-                    "error": f"Critic blocked: {reasoning}",
-                }
-            )
-            self._trim_history()
-        self._emit(
-            "agent_blocked",
-            {
-                "agent_id": agent.agent_id,
-                "agent_type": agent.agent_type,
-                "task_id": task_id,
-                "reason": f"Critic blocked: {reasoning}",
-            },
-        )
-        self._persist_state()
-        return blocked_result
+        """Record a critic ``deny`` (see tools/swarm/negotiation.py)."""
+        return _negotiation._record_block(self, critic, task, task_id, target, agent, reasoning)
+
+    # ── Milestones (canonical code in tools/swarm/milestones.py) ──
+
+    def _mark_milestone(self, target: str, phase: str) -> None:
+        """Mark ``(target, phase)`` complete (see tools/swarm/milestones.py)."""
+        return _milestones._mark_milestone(self, target, phase)
+
+    def is_milestone_set(self, target: str, phase: str) -> bool:
+        """Check whether ``(target, phase)`` completed (see tools/swarm/milestones.py)."""
+        return _milestones.is_milestone_set(self, target, phase)
+
+    def _await_milestone(self, target: str, phase: str, timeout: float | None = None) -> bool:
+        """Block until ``(target, phase)`` completes (see tools/swarm/milestones.py)."""
+        return _milestones._await_milestone(self, target, phase, timeout)
+
+    # ── State persistence (canonical code in tools/swarm/state_store.py) ──
+
+    def _trim_history(self) -> None:
+        """Bound ``_results`` and ``_battle_log`` (see tools/swarm/state_store.py)."""
+        return _state_store._trim_history(self)
+
+    def _persist_state(self, *, force: bool = False) -> None:
+        """Persist a swarm-state snapshot (see tools/swarm/state_store.py)."""
+        return _state_store._persist_state(self, force=force)
+
+    def load_state(self, path: Path | str | None = None) -> bool:
+        """Restore the blackboard from swarm_state.json (see tools/swarm/state_store.py)."""
+        return _state_store.load_state(self, path)
 
     # ── Internal ────────────────────────────────────────────────────────
 

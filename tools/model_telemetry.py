@@ -98,6 +98,10 @@ def _usage_field(usage: Any, *names: str) -> int | None:
     return None
 
 
+_CONFIG_CACHE: dict[str, Any] = {"mtime": 0.0, "size": -1, "config": {}}
+_CONFIG_CACHE_LOCK = threading.Lock()
+
+
 def _load_config(config_path: Path = Path("config.yaml")) -> dict[str, Any]:
     if config_path == Path("config.yaml") and not config_path.exists():
         try:
@@ -108,11 +112,25 @@ def _load_config(config_path: Path = Path("config.yaml")) -> dict[str, Any]:
             return {}
     if yaml is None or not config_path.exists():
         return {}
+    # ponytail: cache yaml parse by mtime+size — telemetry runs per LLM call.
     try:
+        stat = config_path.stat()
+        cache_key = (stat.st_mtime_ns, stat.st_size)
+        with _CONFIG_CACHE_LOCK:
+            if _CONFIG_CACHE.get("key") == cache_key:
+                cached = _CONFIG_CACHE.get("config", {})
+                return cached if isinstance(cached, dict) else {}
         loaded = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        if not isinstance(loaded, dict):
+            return {}
+        with _CONFIG_CACHE_LOCK:
+            _CONFIG_CACHE["key"] = cache_key
+            _CONFIG_CACHE["config"] = loaded
+        return loaded
     except Exception:
-        return {}
-    return loaded if isinstance(loaded, dict) else {}
+        with _CONFIG_CACHE_LOCK:
+            cached = _CONFIG_CACHE.get("config", {})
+        return cached if isinstance(cached, dict) else {}
 
 
 def workspace_root_from_sources(config_path: Path = Path("config.yaml")) -> Path:
@@ -120,13 +138,32 @@ def workspace_root_from_sources(config_path: Path = Path("config.yaml")) -> Path
     if env:
         return Path(env).resolve()
 
+    # ponytail: cache default root — Path.cwd().resolve() per LLM call is waste.
+    with _CONFIG_CACHE_LOCK:
+        cached_root = _CONFIG_CACHE.get("workspace_root")
+        cached_key = _CONFIG_CACHE.get("key")
+    # Reuse cached root only when config file unchanged (same mtime key).
+    try:
+        stat = config_path.stat() if config_path.exists() else None
+        current_key = (stat.st_mtime_ns, stat.st_size) if stat else None
+    except OSError:
+        current_key = None
+    if cached_root is not None and cached_key == current_key and current_key is not None:
+        return Path(cached_root)
+
     api_cfg = _load_config(config_path).get("api", {}) or {}
     if isinstance(api_cfg, Mapping):
         configured = str(api_cfg.get("workspace_root", "") or "").strip()
         if configured:
-            return Path(configured).resolve()
+            resolved = Path(configured).resolve()
+            with _CONFIG_CACHE_LOCK:
+                _CONFIG_CACHE["workspace_root"] = str(resolved)
+            return resolved
 
-    return (Path.cwd() / "research_workspace").resolve()
+    resolved = (Path.cwd() / "research_workspace").resolve()
+    with _CONFIG_CACHE_LOCK:
+        _CONFIG_CACHE["workspace_root"] = str(resolved)
+    return resolved
 
 
 def usage_log_path(workspace_root: Path | None = None) -> Path:
@@ -181,13 +218,23 @@ def infer_source() -> str:
         "post_exploit_agent.py": "swarm_post_exploit",
         "recon_agent.py": "swarm_recon",
     }
+    # ponytail: walk f_back instead of inspect.stack() — stack() builds full
+    # FrameInfo records per call; this is per-LLM-call hot path.
     try:
-        for frame in inspect.stack()[2:12]:
-            name = Path(frame.filename).name
+        frame = inspect.currentframe()
+        # skip infer_source + its caller (chat wrapper)
+        current = frame.f_back.f_back if frame and frame.f_back else None
+        depth = 0
+        while current is not None and depth < 10:
+            name = Path(current.f_code.co_filename).name
             if name in known:
                 return known[name]
+            current = current.f_back
+            depth += 1
     except Exception:
         return "unknown"
+    finally:
+        del frame
     return "unknown"
 
 

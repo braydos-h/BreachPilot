@@ -15,8 +15,12 @@ the main exploit agent via the `spawn_subagent` MCP tools.
 | `tools/swarm/__init__.py` | Package exports: `Agent`, `AgentResult`, `AgentStatus`, `SwarmOrchestrator` (`__init__.py:5-13`) |
 | `tools/swarm/base.py` | `AgentStatus` enum (`base.py:15-20`), `AgentResult` dataclass with findings/new-tasks/memory/graph/reflection fields (`base.py:23-38`), abstract `Agent` base (`base.py:41-71`) |
 | `tools/swarm/blackboard.py` | Thread-safe shared state: `dict` subclass with atomic writes + per-target namespacing (`blackboard.py:48-287`) |
+| `tools/swarm/negotiation.py` | Bounded critic↔exploit negotiation (`_negotiate`, `_NEGOTIABLE_KEYS`) + lazy `models.roles` critic-client resolution; bound onto `SwarmOrchestrator` |
+| `tools/swarm/milestones.py` | Per-(target, phase) completion events (`_mark_milestone`, `_await_milestone`); bound onto `SwarmOrchestrator` |
+| `tools/swarm/state_store.py` | History bounding + `swarm_state.json` persist/load via `tools/kernel/orchestration.py`; bound onto `SwarmOrchestrator` |
+| `tools/swarm/reflection_run.py` | `reflect()` dispatch over the battle log; bound onto `SwarmOrchestrator` |
 | `tools/swarm/bb_compat.py` | `bb_set`/`bb_append`/`bb_extend`/`bb_remove` bridging the atomic Blackboard API to plain-dict callers (`bb_compat.py:29-89`) |
-| `tools/swarm/orchestrator.py` | `SwarmOrchestrator`: task routing, critic pre-check, parallel dispatch with milestone gating, reflection, event emission, state persistence (`orchestrator.py:39-675`) |
+| `tools/swarm/orchestrator.py` | `SwarmOrchestrator`: task routing, parallel dispatch with milestone gating, battle log, event emission (`orchestrator.py`). Critic negotiation, milestones, state persistence, and reflection dispatch live in submodules and are bound onto the class (same pattern as `tools/campaign/phases.py`) |
 | `tools/swarm/skill_phase.py` | Phase → skill-tag mapping used by the advisory skill pipeline (`skill_phase.py:16-59`) |
 | `tools/swarm/agents/__init__.py` | Exports the six agents (`agents/__init__.py:5-19`) |
 | `tools/swarm/agents/recon_agent.py` | Scanning, tech fingerprinting, attack-surface scoring, downstream task generation |
@@ -400,3 +404,32 @@ are alternative execution paths within a run, never concurrent
 (`agent_loop.py:1113-1120`). `run_autonomous_campaign(resume=True)` reuses
 prior per-target recon and doesn't re-fire succeeded/failed modules
 (`:1156-1162`).
+
+## Swarm vs Campaign: When to Use Which
+
+`--swarm` and the autonomous campaign are alternative execution paths within
+a run (never concurrent). One decision rule:
+
+| Situation | Use |
+|---|---|
+| Single target, want specialist decomposition (parallel recon + vuln research, critic pre-check, reflection strategy shifts) | `--swarm` (add `--critic` / `--reflection`; `--parallel-swarm` for concurrent dispatch) |
+| One or many targets, want a persistent multi-phase attack queue (recon → exploit → privesc → lateral → validation) with adaptive aggression, resume, and checkpoints | Autonomous campaign — no `--swarm` (`start_autonomous_campaign` MCP tool or `AgentLoop.run_autonomous_campaign`) |
+| Single high-value target, want both breadth and persistence | Combined: a `--swarm` attack run whose `AgentLoop.run_autonomous_campaign` shares the swarm's live blackboard/critic/reflection into `AttackModuleExecutor` |
+
+Both are target-locked by the same MCP-layer allowlist; neither changes the
+permission model. Campaign-only knobs (`autonomous.*`, `max_pivot_depth`,
+`checkpoint_every`, `adaptive_replan`) have no effect on pure-swarm runs,
+and vice versa (`swarm.exploit_parallel`, `negotiation_rounds`).
+
+## Overlap Map: Swarm vs Campaign
+
+| Concern | Swarm (`tools/swarm/`) | Campaign (`tools/campaign/`) | Shared vocabulary |
+|---|---|---|---|
+| Work item | Task `dict` (`phase`/`target`/`tool`) — lightweight routing envelope | `AttackTask` dataclass (`state.py`) — durable queue item with status/retry/chain links + `to_dict` resume | Intentionally separate: dicts route, dataclasses persist |
+| Execution units | 6 agents (recon/vuln/exploit/post_exploit/critic/reflection) | Phases (`phases.py`: recon/exploit/privesc/lateral/validation/…) driving `attack_modules/*` | Attack modules are the shared payload: the swarm ExploitAgent and `AttackModuleExecutor` both dispatch them |
+| State | `Blackboard` — volatile cross-agent intel (global + per-target buckets, atomic writes) | `AttackState` per target — durable campaign state (phase/aggression/access/creds/timeline/recon) | Field names align (`access_achieved`, `credentials_found`, `pivot_targets`, `loot`, `failed_modules`); the campaign shares the LIVE blackboard via `share_blackboard()` |
+| Retry | Critic `deny`/`modify` + `negotiation_rounds`; reflection pivots after `MAX_MODULE_FAILURES` repeated patterns | `RetryEngine.should_retry` + per-task `max_retries` + campaign `_max_module_failures` cap | `tools/kernel/orchestration.py`: `MAX_MODULE_FAILURES` (3); failure taxonomy (`tools/failure_taxonomy.py`) |
+| Progress | `event_callback(event_type, data)` → `swarm_events.jsonl` | `_report_autonomous_progress` ContextVar hook | `tools/kernel/orchestration.py`: `safe_emit` (never-raises contract) |
+| Persistence | `swarm_state.json` (`state_path`; throttled, atomic) | `attack_states.json` (opt-in checkpoints + resume) | `tools/kernel/orchestration.py`: `atomic_write_json` |
+| Pre-execution gate | `CriticAgent` (scope → risk → policy → repeat-failure → LLM) | `AttackModuleExecutor` scope_gate + critic consult + aggression ceiling | Same critic agent class; the combined run reuses the swarm's live instances |
+| Destructive snapshot | `SwarmMcpBridge._snapshot_before_destructive` | `AttackModuleExecutor._snapshot_before_destructive` | `tools/snapshots.py`: `should_snapshot` + fail-open `SnapshotManager` |

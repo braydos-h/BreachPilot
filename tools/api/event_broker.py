@@ -447,6 +447,8 @@ class RunEventBroker:
 
     async def emit(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Emit an event: assign sequence, sanitize, write JSONL, notify subscribers."""
+        # ponytail: sanitize (CPU) outside the lock — was holding lock across it.
+        clean = sanitize(payload)
         async with self._lock:
             if self._closed:
                 raise RuntimeError("Event broker is closed.")
@@ -456,18 +458,21 @@ class RunEventBroker:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "run_id": self._run_id,
                 "type": event_type,
-                "payload": sanitize(payload),
+                "payload": clean,
             }
             self._events_path.parent.mkdir(parents=True, exist_ok=True)
             with self._events_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(event, default=str) + "\n")
             self._ring.append(event)
-            for queue in tuple(self._subscribers):
-                try:
-                    queue.put_nowait(event)
-                except asyncio.QueueFull:
-                    self._subscribers.remove(queue)
-                    self._stop_queue(queue)
+            subscribers = tuple(self._subscribers)
+        for queue in subscribers:
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                async with self._lock:
+                    if queue in self._subscribers:
+                        self._subscribers.remove(queue)
+                self._stop_queue(queue)
         # Bounded dispatch for outbound-only plugin subscribers (webhook/ticketing).
         # Enqueued AFTER JSONL persistence + WS fan-out so a slow/failed webhook
         # never blocks the run or drops the event. The dispatcher runs blocking

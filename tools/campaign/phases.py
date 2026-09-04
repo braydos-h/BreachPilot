@@ -865,3 +865,95 @@ async def _phase_killchain(self, state: AttackState) -> bool:
 
 
 # ── Task execution ───────────────────────────────────────────────────
+
+
+async def _attack_target(self, target: str, *, _depth: int = 0) -> dict[str, Any]:
+    """Run full attack lifecycle against a single target.
+
+    ``_depth`` tracks how many pivot hops from the operator's original
+    target (depth 0) this call is. ``_phase_lateral_movement`` caps further
+    recursion at ``self._max_pivot_depth`` so a chain of pivots can't run away.
+    """
+    if not self._running:
+        return {"status": "stopped", "state": self.get_state(target).to_dict()}
+    state = self.get_state(target)
+    logger.info(f"Starting attack lifecycle for {target} (pivot depth {_depth})")
+    state.add_timeline_event("campaign_start", f"Attack campaign started against {target}")
+
+    # Gap 2: local-target short-circuit. If the target is the operator's
+    # own host (loopback / a local interface), the network-brute-force
+    # phase would attack our own listeners -- recon, exploit, and lateral
+    # movement are all the wrong shape for "you are already on the box."
+    # Run the local-takeover playbook (filesystem reads + privesc) instead.
+    # The scope gate is NOT bypassed: _phase_privilege_escalation routes
+    # through AttackModuleExecutor.execute -> scope_gate.check_scope(
+    # asset=task.target) per CLAUDE.md -- the local shortcut only adds a
+    # locality branch before the existing phase calls.
+    if is_local_target(state.target):
+        await self._phase_local_takeover(state)
+        await self._phase_validation(state)
+        state.add_timeline_event("campaign_end", "Local-takeover campaign completed for local target")
+        return {"status": "complete", "state": state.to_dict()}
+
+    # Phase 1: Deep reconnaissance
+    await self._phase_reconnaissance(state)
+    if not state.recon_result or not state.recon_result.open_ports:
+        logger.warning(f"No open ports on {target}, ending campaign")
+        state.add_timeline_event("no_attack_surface", "No open ports found")
+        return {"status": "no_attack_surface", "state": state.to_dict()}
+
+    # Phase 2: Service enumeration (already done in recon pipeline)
+    state.current_phase = AttackPhase.ENUMERATION
+    _report_autonomous_progress(phase=state.current_phase.value, target=state.target)
+
+    # Phases 3-6. The default path is a single pass (exploit -> privesc ->
+    # lateral -> persistence -> validation). When ``adaptive_replan`` is on
+    # (Phase 2.4, opt-in) the exploit/privesc/lateral sequence runs as a
+    # bounded multi-round loop with pre-round replan and post-success
+    # vuln-chaining; persistence still runs once after the rounds converge.
+    # Kill-chain preference (design §killchain, opt-in): before either
+    # branch, attempt the verified edge path toward the configured goal
+    # state. A fully-verified path short-circuits free-form planning; the
+    # first unverified edge falls back to the normal phases unchanged.
+    if self._killchain_enabled and await self._phase_killchain(state):
+        pass  # verified edge path reached its goal (or progressed); keep the normal post-phases below
+    elif self._adaptive_replan:
+        await self._run_adaptive_rounds(state, _depth)
+    else:
+        # Phase 3: Exploitation - automatically select and run attack modules
+        await self._phase_exploitation(state)
+
+        # Phase 5: hard-target cutoff (single-pass path). _phase_exploitation
+        # escalates aggression and retries once internally, so after it
+        # returns with no access AND aggression already at the configured
+        # ceiling there is nothing left to escalate into -- skip privesc /
+        # lateral and let validation run. Opt-in (default off).
+        if not state.access_achieved and self._hard_target_max_rounds and state.aggression >= self._max_aggression:
+            logger.info(
+                f"[HARD] {state.target} at max aggression with no access "
+                f"-- giving up (hard_target_max_rounds={self._hard_target_max_rounds})"
+            )
+            state.add_timeline_event(
+                "hard_target_give_up",
+                f"Target {state.target} reached max aggression ({state.aggression.value}) with no access; giving up.",
+                {"aggression": state.aggression.value},
+            )
+
+        # Phase 4: Privilege escalation
+        if state.access_achieved and state.privilege_level not in ("system", "root", "admin"):
+            await self._phase_privilege_escalation(state)
+
+        # Phase 5: Lateral movement
+        if state.pivot_targets:
+            await self._phase_lateral_movement(state, _depth)
+
+    # Phase 5.5: Persistence (opt-in, Phase 2.2). Only after a foothold is
+    # established -- persisting on a host you do not yet control is a no-op.
+    if self._persistence_enabled and state.access_achieved:
+        await self._phase_persistence(state)
+
+    # Phase 6: Validation
+    await self._phase_validation(state)
+
+    state.add_timeline_event("campaign_end", f"Attack campaign completed for {target}")
+    return {"status": "complete", "state": state.to_dict()}

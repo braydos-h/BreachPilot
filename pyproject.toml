@@ -201,7 +201,6 @@ disable_error_code = [
     "no-untyped-def",
     "has-type",
     "str-unpack",
-    "call-overload",
 ]
 
 [[tool.mypy.overrides]]

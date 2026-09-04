@@ -199,12 +199,19 @@ def _audit_log(
         for key, value in extra.items():
             if value is not None:
                 record[key] = value
-    audit_path.parent.mkdir(parents=True, exist_ok=True)
+    # ponytail: mkdir per audit row (2x per tool call) stats the fs every time.
+    parent = audit_path.parent
+    if str(parent) not in _MKDIR_CACHE:
+        parent.mkdir(parents=True, exist_ok=True)
+        _MKDIR_CACHE.add(str(parent))
     with audit_path.open("a", encoding="utf-8") as handle:
         handle.write(_json.dumps(record, default=str) + "\n")
 
 
 _BLOCKED_RESULT_MARKERS = ("BLOCKED:", "TERMINAL_RESULT: BLOCKED", "ROOT_CMD_RESULT: BLOCKED", "ERROR:")
+
+# ponytail: cache mkdir'd parents — audit fires 2x per tool call.
+_MKDIR_CACHE: set[str] = set()
 
 
 def _result_is_blocked(result: Any) -> bool:

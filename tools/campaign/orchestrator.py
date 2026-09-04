@@ -9,32 +9,28 @@ to preserve ``self._phase_*`` call sites.
 from __future__ import annotations
 
 import asyncio
-import json
 import os
-import re
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from tools.attack_ui import get_ui
 from tools.logging_setup import get_logger
 from tools.recon_pipeline import ReconConfig, ReconPipeline
-from tools.validation_utils import is_local_target
 
+from tools.campaign import batch as _batch
+from tools.campaign import phases as _phases
+from tools.campaign import preflight as _preflight
+from tools.campaign import service_tasks as _service_tasks
+from tools.campaign import state_store as _state_store
 from tools.campaign.executor import AttackModuleExecutor
 from tools.campaign.state import (
     AggressionLevel,
-    AttackPhase,
     AttackState,
     AttackTask,
-    RetryEngine,
-    TaskStatus,
-    _report_autonomous_progress,
 )
+from tools.kernel.orchestration import MAX_MODULE_FAILURES
 
 logger = get_logger()
-ui = get_ui()
 
 # ---------------------------------------------------------------------------
 # Autonomous orchestrator
@@ -57,7 +53,9 @@ class AutonomousOrchestrator:
     # against a non-vulnerable target) gets retried indefinitely until the
     # aggression ceiling is hit. Drop a module from the retry set once it
     # has failed this many times total in state.failed_attempts[mod].
-    _max_module_failures: int = 3
+    _max_module_failures: int = MAX_MODULE_FAILURES
+    # Prerequisite-kind patterns — canonical table lives in tools/campaign/batch.py.
+    _PREREQ_KIND_PATTERNS = _batch._PREREQ_KIND_PATTERNS
 
     def __init__(
         self,
@@ -292,103 +290,6 @@ class AutonomousOrchestrator:
             self._states[target] = state
         return self._states[target]
 
-    # ── Campaign-entry preflight (Phase 5) ──────────────────────────────────────
-
-    def _preflight_targets(self, targets: list[str]) -> list[str]:
-        """Resolve, de-duplicate, scope-check and filter the campaign target list.
-
-        Runs before any scan is fired. Each filter is opt-in (default off), so
-        a single-IP campaign is byte-identical to before this method existed.
-
-        1. **Scope gate pre-check** -- every target must already be authorized
-           via the same matcher the MCP tool layer uses
-           (``_check_allowlist``). When ``exploit.require_explicit_allowlist``
-           is False this is a no-op. This is the "avoid stuff that can't be
-           attacked" lock applied one layer earlier: previously an unauthorized
-           target still got a full Nmap scan before the tool-layer gate ever
-           fired.
-        2. **Non-routable filter** -- drop RFC1918 / link-local / reserved
-           addresses that are not the operator's own host. Those are handled
-           by the local-takeover playbook (``is_local_target``), not by a
-           network campaign. ``169.254.169.254`` and ``0.0.0.0`` used to get
-           scanned for free.
-        3. **Dedup by resolved IP** -- collapse duplicate IPs, CIDR overlap,
-           and hosts resolving to the same IP. Domains that fail DNS are kept
-           (they may still be attackable via the hostname).
-
-        Returns the filtered list. Skips are recorded as timeline events on a
-        fresh ``AttackState`` so they survive into ``attack_states.json``.
-        """
-        if not targets:
-            return []
-
-        from tools.mcp_shared import _check_allowlist
-        from tools.validation_utils import (
-            is_local_target,
-            is_private_or_local_target,
-            resolve_target_to_ip,
-        )
-
-        seen_ips: set[str] = set()
-        kept: list[str] = []
-
-        for target in targets:
-            target = (target or "").strip()
-            if not target:
-                continue
-
-            # 1. Scope gate pre-check (no-op when allowlist is off). Uses the
-            # same matcher the MCP tool layer uses so the lock is applied one
-            # layer earlier: previously an unauthorized target still got a full
-            # Nmap scan before the tool-layer gate ever fired.
-            allowed, reason = _check_allowlist(target, self._mission)
-            if not allowed:
-                state = self.get_state(target)
-                state.add_timeline_event(
-                    "target_skipped_out_of_scope",
-                    f"Target {target} is not authorized: {reason}; skipping",
-                    {"target": target, "reason": reason},
-                )
-                logger.info(f"[PREFLIGHT] {target} out of scope -- skipping")
-                continue
-
-            # Resolve for classification / dedup. A domain that fails DNS is
-            # kept verbatim (don't drop it -- it may be attackable by name).
-            resolved = resolve_target_to_ip(target)
-            effective = resolved or target
-
-            # 2. Non-routable filter. The operator's own host is NOT skipped
-            # here -- it has its own local-takeover path in _attack_target.
-            if self._skip_non_routable and is_private_or_local_target(effective):
-                if not is_local_target(effective):
-                    state = self.get_state(target)
-                    state.add_timeline_event(
-                        "target_skipped_non_routable",
-                        f"Target {target} is non-routable ({effective}); skipping network campaign",
-                        {"target": target, "resolved_ip": effective or ""},
-                    )
-                    logger.info(f"[PREFLIGHT] {target} non-routable -- skipping")
-                    continue
-
-            # 3. Dedup by resolved IP (or the literal when resolution failed).
-            dedup_key = effective if resolved else target
-            if dedup_key in seen_ips:
-                state = self.get_state(target)
-                state.add_timeline_event(
-                    "target_dedup",
-                    f"Target {target} resolves to {dedup_key}; already scheduled -- skipping duplicate",
-                    {"target": target, "resolved_ip": dedup_key},
-                )
-                logger.info(f"[PREFLIGHT] {target} duplicate of {dedup_key} -- skipping")
-                continue
-            seen_ips.add(dedup_key)
-
-            kept.append(target)
-
-        if len(kept) != len(targets):
-            logger.info(f"[PREFLIGHT] {len(targets)} target(s) -> {len(kept)} after preflight")
-        return kept
-
     # ── Main campaign runner ─────────────────────────────────────────────
 
     async def run_autonomous_campaign(
@@ -507,177 +408,18 @@ class AutonomousOrchestrator:
         }
 
     async def _attack_target(self, target: str, *, _depth: int = 0) -> dict[str, Any]:
-        """Run full attack lifecycle against a single target.
+        """Run full attack lifecycle against a single target (see tools/campaign/phases.py)."""
+        return await _phases._attack_target(self, target, _depth=_depth)
 
-        ``_depth`` tracks how many pivot hops from the operator's original
-        target (depth 0) this call is. ``_phase_lateral_movement`` caps further
-        recursion at ``self._max_pivot_depth`` so a chain of pivots can't run away.
-        """
-        if not self._running:
-            return {"status": "stopped", "state": self.get_state(target).to_dict()}
-        state = self.get_state(target)
-        logger.info(f"Starting attack lifecycle for {target} (pivot depth {_depth})")
-        state.add_timeline_event("campaign_start", f"Attack campaign started against {target}")
-
-        # Gap 2: local-target short-circuit. If the target is the operator's
-        # own host (loopback / a local interface), the network-brute-force
-        # phase would attack our own listeners -- recon, exploit, and lateral
-        # movement are all the wrong shape for "you are already on the box."
-        # Run the local-takeover playbook (filesystem reads + privesc) instead.
-        # The scope gate is NOT bypassed: _phase_privilege_escalation routes
-        # through AttackModuleExecutor.execute -> scope_gate.check_scope(
-        # asset=task.target) per CLAUDE.md -- the local shortcut only adds a
-        # locality branch before the existing phase calls.
-        if is_local_target(state.target):
-            await self._phase_local_takeover(state)
-            await self._phase_validation(state)
-            state.add_timeline_event("campaign_end", "Local-takeover campaign completed for local target")
-            return {"status": "complete", "state": state.to_dict()}
-
-        # Phase 1: Deep reconnaissance
-        await self._phase_reconnaissance(state)
-        if not state.recon_result or not state.recon_result.open_ports:
-            logger.warning(f"No open ports on {target}, ending campaign")
-            state.add_timeline_event("no_attack_surface", "No open ports found")
-            return {"status": "no_attack_surface", "state": state.to_dict()}
-
-        # Phase 2: Service enumeration (already done in recon pipeline)
-        state.current_phase = AttackPhase.ENUMERATION
-        _report_autonomous_progress(phase=state.current_phase.value, target=state.target)
-
-        # Phases 3-6. The default path is a single pass (exploit -> privesc ->
-        # lateral -> persistence -> validation). When ``adaptive_replan`` is on
-        # (Phase 2.4, opt-in) the exploit/privesc/lateral sequence runs as a
-        # bounded multi-round loop with pre-round replan and post-success
-        # vuln-chaining; persistence still runs once after the rounds converge.
-        # Kill-chain preference (design §killchain, opt-in): before either
-        # branch, attempt the verified edge path toward the configured goal
-        # state. A fully-verified path short-circuits free-form planning; the
-        # first unverified edge falls back to the normal phases unchanged.
-        if self._killchain_enabled and await self._phase_killchain(state):
-            pass  # verified edge path reached its goal (or progressed); keep the normal post-phases below
-        elif self._adaptive_replan:
-            await self._run_adaptive_rounds(state, _depth)
-        else:
-            # Phase 3: Exploitation - automatically select and run attack modules
-            await self._phase_exploitation(state)
-
-            # Phase 5: hard-target cutoff (single-pass path). _phase_exploitation
-            # escalates aggression and retries once internally, so after it
-            # returns with no access AND aggression already at the configured
-            # ceiling there is nothing left to escalate into -- skip privesc /
-            # lateral and let validation run. Opt-in (default off).
-            if not state.access_achieved and self._hard_target_max_rounds and state.aggression >= self._max_aggression:
-                logger.info(
-                    f"[HARD] {state.target} at max aggression with no access "
-                    f"-- giving up (hard_target_max_rounds={self._hard_target_max_rounds})"
-                )
-                state.add_timeline_event(
-                    "hard_target_give_up",
-                    f"Target {state.target} reached max aggression "
-                    f"({state.aggression.value}) with no access; giving up.",
-                    {"aggression": state.aggression.value},
-                )
-
-            # Phase 4: Privilege escalation
-            if state.access_achieved and state.privilege_level not in ("system", "root", "admin"):
-                await self._phase_privilege_escalation(state)
-
-            # Phase 5: Lateral movement
-            if state.pivot_targets:
-                await self._phase_lateral_movement(state, _depth)
-
-        # Phase 5.5: Persistence (opt-in, Phase 2.2). Only after a foothold is
-        # established -- persisting on a host you do not yet control is a no-op.
-        if self._persistence_enabled and state.access_achieved:
-            await self._phase_persistence(state)
-
-        # Phase 6: Validation
-        await self._phase_validation(state)
-
-        state.add_timeline_event("campaign_end", f"Attack campaign completed for {target}")
-        return {"status": "complete", "state": state.to_dict()}
-
-    # ── Phase handlers ───────────────────────────────────────────────────
+    # ── Task batches + prerequisite recovery (see tools/campaign/batch.py) ──
 
     async def _execute_task_batch(self, tasks: list[AttackTask], state: AttackState) -> None:
-        """Execute a batch of tasks with concurrency control."""
-        semaphore = asyncio.Semaphore(3)  # Max 3 concurrent attacks
-        # Capability-upgrade (§9): per-batch guard so each failing task
-        # schedules at most one prerequisite-recovery task. Cleared per batch.
-        prereq_scheduled: set[str] = set()
+        """Execute a batch of tasks with concurrency control (see tools/campaign/batch.py)."""
+        return await _batch._execute_task_batch(self, tasks, state)
 
-        async def run_task(task: AttackTask) -> None:
-            # Bug #6: the retry used to recurse (``await run_task(task)``) from
-            # *inside* the ``async with semaphore`` block. The recursive call
-            # had to re-acquire the semaphore while the outer frame still held
-            # its slot, so with 3 concurrent failing retryable tasks every
-            # slot was occupied by an outer frame waiting on an inner frame
-            # that could never get a slot — a classic deadlock. The loop
-            # below releases the semaphore (the ``async with`` exits) before
-            # sleeping/retrying, so retries re-acquire a slot cleanly.
-            while True:
-                async with semaphore:
-                    result = await self._executor.execute(task, state)
-
-                # Handle retry logic — semaphore is released here, so other
-                # tasks can run during the backoff sleep.
-                if not result.get("success") and not result.get("blocked"):
-                    # Capability-upgrade (§9): prerequisite-driven composition.
-                    # If the failure classifies as PREREQUISITE_MISSING, look
-                    # up a producer module for the missing artifact and run it
-                    # inline before retrying the original. Bounded by the
-                    # per-batch set + the campaign-level ``_prereq_recovery_cap``.
-                    # Recovery tasks are themselves exempt from re-scheduling
-                    # (created_from tag) so a missing chain cannot recurse.
-                    if task.created_from != "recovery:prerequisite" and task.task_id not in prereq_scheduled:
-                        prereq_task = self._maybe_schedule_prereq(
-                            task,
-                            state,
-                            result.get("error", ""),
-                        )
-                        if prereq_task is not None:
-                            prereq_scheduled.add(task.task_id)
-                            await run_task(prereq_task)
-                    if RetryEngine.should_retry(
-                        task.module_name,
-                        result.get("error", ""),
-                        task.retry_count,
-                        task.max_retries,
-                    ):
-                        task.retry_count += 1
-                        task.parameters.update(RetryEngine.get_retry_parameters(task.module_name, task.retry_count))
-                        task.status = TaskStatus.RETRYING
-                        logger.info(
-                            f"Retrying {task.module_name} with modified parameters (attempt {task.retry_count})"
-                        )
-                        await asyncio.sleep(2**task.retry_count)  # Exponential backoff
-                        continue
-                return
-
-        await asyncio.gather(*[run_task(t) for t in tasks], return_exceptions=True)
-
-    # ── Prerequisite-driven composition (§9) ───────────────────────────────
-
-    # Maps a PREREQUISITE_MISSING error text to the candidate artifact kinds a
-    # producer module could supply. Ordered by specificity; the first kind
-    # with a producer wins. Kinds mirror the ``produces`` metadata modules
-    # actually declare (credentials/hash_artifact/foothold/shell/webshell/
-    # high_priv/admin_priv).
-    _PREREQ_KIND_PATTERNS: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
-        (re.compile(r"credential|creds|password|hash", re.IGNORECASE), ("credentials", "hash_artifact")),
-        (re.compile(r"foothold|session|\bshell\b|webshell", re.IGNORECASE), ("foothold", "shell", "webshell")),
-        (re.compile(r"admin|root|privilege|high_priv|admin_priv", re.IGNORECASE), ("high_priv", "admin_priv")),
-    )
-
-    @classmethod
-    def _prereq_artifact_kinds(cls, error: str) -> list[str]:
-        """Derive candidate artifact kinds from a PREREQUISITE_MISSING error."""
-        kinds: list[str] = []
-        for pat, ks in cls._PREREQ_KIND_PATTERNS:
-            if pat.search(error or ""):
-                kinds.extend(ks)
-        return kinds
+    def _prereq_artifact_kinds(self, error: str) -> list[str]:
+        """Candidate artifact kinds for a PREREQUISITE_MISSING error (see tools/campaign/batch.py)."""
+        return _batch._prereq_artifact_kinds(self, error)
 
     def _maybe_schedule_prereq(
         self,
@@ -685,328 +427,41 @@ class AutonomousOrchestrator:
         state: AttackState,
         error: str,
     ) -> AttackTask | None:
-        """Schedule a producer module for a missing prerequisite, if one exists.
-
-        Returns the new AttackTask (also registered in ``self._tasks``) or
-        None when the failure is not a missing-prerequisite signal, no
-        producer module is found, or the campaign-level recovery cap is hit.
-        Bounded: one prereq task per failing task (enforced by the caller's
-        ``prereq_scheduled`` set) and ``self._prereq_recovery_cap`` total.
-        """
-        try:
-            from tools.failure_taxonomy import FailureClass, classify_failure
-
-            fc = classify_failure(error)
-        except Exception:  # noqa: BLE001 -- taxonomy import must never break the batch
-            return None
-        if fc != FailureClass.PREREQUISITE_MISSING:
-            return None
-        kinds = self._prereq_artifact_kinds(error)
-        if not kinds:
-            return None
-        if self._prereq_tasks_added >= self._prereq_recovery_cap:
-            return None
-        # Candidates via the established seam (shim find_producers, which
-        # tests mock and plugins extend), ordered cheapest/read-only-first
-        # with ctx-satisfied prerequisites ahead (graph.rank_producers).
-        try:
-            import tools.autonomous_orchestrator as _ao_shim3  # type: ignore[import]
-
-            _find_producers = getattr(_ao_shim3, "find_producers", None)
-        except Exception:  # noqa: BLE001 -- seam lookup must never break recovery
-            _find_producers = None
-        if _find_producers is None:
-            from tools.attack_modules import find_producers as _find_producers  # type: ignore[import]
-
-        def _ranked(kind: str) -> list:
-            cands = [m for m in _find_producers(kind) if m.name != task.module_name]
-            try:
-                from tools.attack_modules.graph import rank_producers as _rank_producers
-
-                try:
-                    _ctx = self._module_context(state)  # type: ignore[attr-defined]
-                except Exception:  # noqa: BLE001
-                    _ctx = None
-                return _rank_producers(kind, _ctx, exclude=task.module_name, modules=cands)
-            except Exception:  # noqa: BLE001 -- ranking must never break recovery
-                return cands
-
-        for kind in kinds:
-            for mod in _ranked(kind):
-                if mod.name == task.module_name:
-                    continue  # don't recurse into the failing module
-                prereq_task = AttackTask(
-                    task_id=self._new_task_id(),
-                    phase=task.phase,
-                    module_name=mod.name,
-                    target=state.target,
-                    aggression=task.aggression,
-                    priority=min(100, task.priority + 10),
-                    created_from="recovery:prerequisite",
-                )
-                self._tasks[prereq_task.task_id] = prereq_task
-                self._prereq_tasks_added += 1
-                logger.info(
-                    f"[RECOVERY] Scheduled prerequisite producer {mod.name} "
-                    f"(produces {kind}) for failed {task.module_name} ({error!r})"
-                )
-                return prereq_task
-        return None
+        """Schedule a producer module for a missing prerequisite (see tools/campaign/batch.py)."""
+        return _batch._maybe_schedule_prereq(self, task, state, error)
 
     async def _retry_failed_modules(self, state: AttackState) -> None:
-        """Retry failed modules with escalated aggression."""
-        all_failed = set(state.failed_attempts.keys()) - set(state.successful_exploits)
-        # ponytail: drop modules over the campaign-level failure cap so a
-        # structurally-failing exploit (e.g. Log4jRCE vs a non-vulnerable
-        # target) doesn't get re-queued forever on every aggression step.
-        failed_modules = {m for m in all_failed if len(state.failed_attempts.get(m, [])) < self._max_module_failures}
-        dropped = all_failed - failed_modules
-        if dropped:
-            logger.info(
-                f"Not retrying {len(dropped)} module(s) at failure cap ({self._max_module_failures}): {sorted(dropped)}"
-            )
+        """Retry failed modules with escalated aggression (see tools/campaign/batch.py)."""
+        return await _batch._retry_failed_modules(self, state)
 
-        tasks: list[AttackTask] = []
-        for mod_name in failed_modules:
-            task = AttackTask(
-                task_id=self._new_task_id(),
-                phase=AttackPhase.EXPLOITATION,
-                module_name=mod_name,
-                target=state.target,
-                aggression=state.aggression,
-                priority=60,
-                max_retries=2,
-            )
-            tasks.append(task)
-            self._tasks[task.task_id] = task
-
-        if tasks:
-            logger.info(f"Retrying {len(tasks)} failed modules with {state.aggression.value} aggression")
-            await self._execute_task_batch(tasks, state)
-
-    # ── Service-specific task creation ─────────────────────────────────
+    # ── Service-specific tasks (see tools/campaign/service_tasks.py) ──
 
     def _create_service_specific_tasks(self, state: AttackState) -> list[AttackTask]:
-        """Create additional tasks based on discovered services."""
-        tasks: list[AttackTask] = []
-        if not state.recon_result:
-            return tasks
+        """Create additional tasks based on discovered services (see tools/campaign/service_tasks.py)."""
+        return _service_tasks._create_service_specific_tasks(self, state)
 
-        for svc in state.recon_result.services:
-            service = svc.service.lower()
-            port = svc.port
+    # ── Campaign-entry preflight (see tools/campaign/preflight.py) ──
 
-            # SSH tasks
-            if service == "ssh":
-                tasks.append(
-                    AttackTask(
-                        task_id=self._new_task_id(),
-                        phase=AttackPhase.EXPLOITATION,
-                        module_name="SSHBruteForce",
-                        target=state.target,
-                        parameters={"port": port, "version": svc.version},
-                        priority=75,
-                    )
-                )
-                if "CVE-2024-6387" in str(svc.scripts.get("openssh_cves", "")):
-                    tasks.append(
-                        AttackTask(
-                            task_id=self._new_task_id(),
-                            phase=AttackPhase.EXPLOITATION,
-                            module_name="RegreSSHion",
-                            target=state.target,
-                            parameters={"port": port},
-                            priority=95,
-                        )
-                    )
+    def _preflight_targets(self, targets: list[str]) -> list[str]:
+        """Resolve, de-duplicate, scope-check and filter targets (see tools/campaign/preflight.py)."""
+        return _preflight._preflight_targets(self, targets)
 
-            # SMB tasks
-            elif service in ("microsoft-ds", "smb", "netbios-ssn"):
-                tasks.append(
-                    AttackTask(
-                        task_id=self._new_task_id(),
-                        phase=AttackPhase.EXPLOITATION,
-                        module_name="SMBRelay",
-                        target=state.target,
-                        parameters={"port": port},
-                        priority=70,
-                    )
-                )
-                tasks.append(
-                    AttackTask(
-                        task_id=self._new_task_id(),
-                        phase=AttackPhase.EXPLOITATION,
-                        module_name="SMBNullSession",
-                        target=state.target,
-                        parameters={"port": port},
-                        priority=65,
-                    )
-                )
-
-            # HTTP/HTTPS tasks
-            elif service in ("http", "https", "http-proxy"):
-                tasks.append(
-                    AttackTask(
-                        task_id=self._new_task_id(),
-                        phase=AttackPhase.EXPLOITATION,
-                        module_name="WebShellUpload",
-                        target=state.target,
-                        parameters={"port": port, "scheme": service},
-                        priority=70,
-                    )
-                )
-                tasks.append(
-                    AttackTask(
-                        task_id=self._new_task_id(),
-                        phase=AttackPhase.EXPLOITATION,
-                        module_name="SQLInjection",
-                        target=state.target,
-                        parameters={"port": port, "scheme": service},
-                        priority=65,
-                    )
-                )
-
-            # FTP tasks
-            elif service == "ftp":
-                tasks.append(
-                    AttackTask(
-                        task_id=self._new_task_id(),
-                        phase=AttackPhase.EXPLOITATION,
-                        module_name="FTPAnonymous",
-                        target=state.target,
-                        parameters={"port": port},
-                        priority=60,
-                    )
-                )
-
-            # Redis tasks
-            elif service == "redis":
-                tasks.append(
-                    AttackTask(
-                        task_id=self._new_task_id(),
-                        phase=AttackPhase.EXPLOITATION,
-                        module_name="RedisExploit",
-                        target=state.target,
-                        parameters={"port": port},
-                        priority=75,
-                    )
-                )
-
-            # Docker/K8s tasks
-            elif port in (2375, 2376, 6443, 10250):
-                tasks.append(
-                    AttackTask(
-                        task_id=self._new_task_id(),
-                        phase=AttackPhase.EXPLOITATION,
-                        module_name="ContainerBreakout",
-                        target=state.target,
-                        parameters={"port": port},
-                        priority=80,
-                    )
-                )
-
-            # RDP tasks
-            elif service in ("ms-wbt-server", "rdp"):
-                tasks.append(
-                    AttackTask(
-                        task_id=self._new_task_id(),
-                        phase=AttackPhase.EXPLOITATION,
-                        module_name="RDPExploit",
-                        target=state.target,
-                        parameters={"port": port},
-                        priority=70,
-                    )
-                )
-
-        for task in tasks:
-            self._tasks[task.task_id] = task
-
-        return tasks
-
-    # ── Persistence ──────────────────────────────────────────────────────
+    # ── Persistence (see tools/campaign/state_store.py) ──
 
     def save_state(self, path: Path | None = None) -> Path:
-        """Save all attack states to disk."""
-        save_path = path or self._workspace / "attack_states.json"
-        data = {
-            "saved_at": datetime.now(timezone.utc).isoformat(),
-            "states": {t: s.to_dict() for t, s in self._states.items()},
-            "tasks": {tid: t.to_dict() for tid, t in self._tasks.items()},
-            # ponytail: without this, load_state leaves _task_counter at 0 and
-            # _new_task_id restarts at ATK-00001, colliding with restored task
-            # IDs and overwriting them (silent data loss on every resume).
-            "task_counter": self._task_counter,
-        }
-        save_path.write_text(json.dumps(data, indent=2, default=str))
-        logger.info(f"Attack state saved to {save_path}")
-        return save_path
+        """Save all attack states to disk (see tools/campaign/state_store.py)."""
+        return _state_store.save_state(self, path)
 
     def load_state(self, path: Path) -> bool:
-        """Load attack states from disk (Tier 1.3 — made real).
-
-        Reconstructs ``self._states`` (per-target AttackState, including the
-        embedded recon_result) and ``self._tasks`` (the task queue with
-        statuses/priorities/chain links intact) from a state file previously
-        written by ``save_state``. This is what lets a resumed campaign skip
-        already-completed recon and not re-fire succeeded/failed modules.
-
-        Returns True if state was loaded, False if the file is missing/empty/
-        unreadable (so callers can treat a missing file as a fresh start
-        rather than an error). Never raises on malformed content — a corrupt
-        state file logs a warning and is treated as no state, so a bad file
-        can't wedge the orchestrator out of starting.
-        """
-        if not path.exists():
-            logger.info(f"load_state: no state file at {path} (fresh start)")
-            return False
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
-            logger.warning(f"load_state: corrupt state file {path} ({exc}); starting fresh")
-            return False
-        if not isinstance(data, dict):
-            logger.warning(f"load_state: {path} is not a JSON object; starting fresh")
-            return False
-
-        states_data = data.get("states", {}) or {}
-        tasks_data = data.get("tasks", {}) or {}
-        # Restore the counter BEFORE any new task can be minted so resumed
-        # campaigns do not re-issue ATK-00001 and clobber loaded task records.
-        try:
-            self._task_counter = int(data.get("task_counter", 0))
-        except (TypeError, ValueError):
-            self._task_counter = 0
-        loaded_states = 0
-        loaded_tasks = 0
-        for target, sdict in states_data.items():
-            if not isinstance(sdict, dict):
-                continue
-            try:
-                self._states[str(target)] = AttackState.from_dict(sdict)
-                loaded_states += 1
-            except Exception as exc:  # defensive: one bad state shouldn't kill resume
-                logger.warning(f"load_state: skipping state for {target} ({exc})")
-        for tid, tdict in tasks_data.items():
-            if not isinstance(tdict, dict):
-                continue
-            try:
-                self._tasks[str(tid)] = AttackTask.from_dict(tdict)
-                loaded_tasks += 1
-            except Exception as exc:
-                logger.warning(f"load_state: skipping task {tid} ({exc})")
-
-        logger.info(f"Attack state loaded from {path} ({loaded_states} states, {loaded_tasks} tasks)")
-        return loaded_states > 0 or loaded_tasks > 0
+        """Load attack states from disk (see tools/campaign/state_store.py)."""
+        return _state_store.load_state(self, path)
 
     def stop(self) -> None:
-        """Gracefully stop the orchestrator."""
-        self._running = False
-        logger.info("Orchestrator stop signal received")
+        """Gracefully stop the orchestrator (see tools/campaign/state_store.py)."""
+        return _state_store.stop(self)
 
 
 # Bind phase handlers (preserve self._phase_* call sites without inheritance)
-import tools.campaign.phases as _phases  # noqa: E402
-
 AutonomousOrchestrator._phase_local_takeover = _phases._phase_local_takeover  # type: ignore[attr-defined]
 AutonomousOrchestrator._phase_reconnaissance = _phases._phase_reconnaissance  # type: ignore[attr-defined]
 AutonomousOrchestrator._phase_exploitation = _phases._phase_exploitation  # type: ignore[attr-defined]

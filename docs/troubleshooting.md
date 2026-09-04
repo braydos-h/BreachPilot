@@ -24,8 +24,8 @@ an exact fix. When in doubt, start with the diagnostics table below — the
 ### Python version too old
 
 - **Symptom:** `--doctor` reports `[FAIL] python_version`.
-- **Cause:** the doctor requires Python >= 3.11 (`tools/doctor.py:31`); the
-  project metadata targets 3.10+ but 3.11+ is recommended.
+- **Cause:** the doctor requires Python >= 3.11 (`tools/doctor.py:31`,
+  `pyproject.toml` `requires-python = ">=3.11"`, CI matrix 3.11–3.13).
 - **Check:** `python --version`
 - **Fix:** install Python >= 3.11 from https://www.python.org/downloads/ and
   recreate the venv:
@@ -335,7 +335,9 @@ an exact fix. When in doubt, start with the diagnostics table below — the
   `ignore = ["E501"]`.
 - **Check:** `ruff check .`
 - **Fix:** `ruff check . --fix` for auto-fixable issues; manually fix the
-  rest. No CI is configured — run it before a PR.
+  rest. CI enforces this on every push/PR (`.github/workflows/ci.yml`:
+  `ruff check .` + `ruff format --check .` + `mypy --follow-imports=skip tools`
+  + mocked pytest on 3.11–3.13) — run it before a PR.
 
 ## 5. WebUI issues
 
@@ -394,6 +396,38 @@ an exact fix. When in doubt, start with the diagnostics table below — the
   ```
   or delete `.webui_secret_key` to regenerate. The token is never logged or
   returned through the API.
+
+### Sandbox / execution failures (`SANDBOX_*`, fallback banner)
+
+- **Symptom:** tool results contain `SANDBOX_*` errors; WebUI home shows amber
+  "Sandbox unavailable"; results contain a `SANDBOX_FALLBACK:` line.
+- **Cause:** sandbox is default-on (`sandbox.enabled: true`). Mid-session
+  sandbox failures fail closed (offensive execution blocked, no host
+  fallback). At boot, an unusable Docker stack (CLI missing, daemon down,
+  image not built) degrades the whole session to legacy native mode when
+  `sandbox.fallback_native: true` (default) — warning + banner + per-result
+  `SANDBOX_FALLBACK:` line. See `docs/sandbox.md`, README §Safety model.
+- **Check:** `docker info`, `docker images | findstr breachpilot-sandbox`
+  (Windows) / `docker images | grep breachpilot-sandbox` (Linux);
+  `python main.py --doctor` verifies Docker + worker image when enabled.
+- **Fix:** `docker build -t breachpilot-sandbox:latest docker/sandbox` and
+  start the Docker daemon/Desktop. For strict fail-closed posture set
+  `sandbox.fallback_native: false` (executions denied until Docker works);
+  `sandbox.enabled: false` is the explicit uncontained opt-out.
+
+### Single-run conflict (409) / audit tamper warning / MCP boot timeout
+
+- **Symptom:** second run returns HTTP 409; audit verification warns of a
+  broken hash chain; MCP session fails after ~30s with a redacted
+  `mcp_exploit_server.log` tail.
+- **Cause:** only one run active at a time by default
+  (`api.max_concurrent_runs: 3`, legacy single-run = 409 in
+  `tools/api/run_manager.py`); tamper-evident audit chain detects edits;
+  MCP boot budget is 30s (`MCP_BOOT_TIMEOUT_SECONDS`, `tools/mcp_session.py`).
+- **Check:** WebUI runs page / `reports/<run_id>/activity.jsonl`;
+  `exploit_workspace/<target>/<attempt>/exploit_audit.jsonl`.
+- **Fix:** wait/cancel the active run or raise `api.max_concurrent_runs`;
+  never hand-edit audit JSONL; re-run `--doctor` for MCP boot causes.
 
 ## 6. Platform-specific
 

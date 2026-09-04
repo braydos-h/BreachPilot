@@ -81,6 +81,16 @@ class AttackMemoryStore:
         conn = sqlite3.connect(str(self._path))
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA busy_timeout=5000")
+        # ponytail: WAL + NORMAL keeps per-action writes from blocking readers;
+        # single-transaction batch in capture_tool_result cuts N connects to 1.
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.Error:
+            pass
+        try:
+            conn.execute("PRAGMA synchronous=NORMAL")
+        except sqlite3.Error:
+            pass
         try:
             yield conn
             conn.commit()
@@ -144,16 +154,24 @@ class AttackMemoryStore:
             records.append((category, key, value, merged))
 
         count = 0
-        for category, key, value, meta in records:
-            if self.capture_note(
-                category=category,
-                key=key,
-                value=value,
-                source_tool=source,
-                success=success,
-                metadata=meta,
-            ):
-                count += 1
+        if not records:
+            return 0
+        # ponytail: one transaction for all facts — was N connects/commits
+        # (one per capture_note) on every tool result.
+        now = _now_iso()
+        with self._connect() as conn:
+            for category, key, value, meta in records:
+                if self._upsert_note(
+                    conn,
+                    category=category,
+                    key=key,
+                    value=value,
+                    source_tool=source,
+                    success=success,
+                    metadata=meta,
+                    now=now,
+                ):
+                    count += 1
         return count
 
     def capture_note(
@@ -174,36 +192,59 @@ class AttackMemoryStore:
 
         now = _now_iso()
         with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO attack_memory_items(
-                    id, session_id, target_ip, category, item_key, item_value,
-                    source_tool, success, metadata_json, first_seen_at, last_seen_at,
-                    seen_count
-                )
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,1)
-                ON CONFLICT(session_id, target_ip, category, item_key, item_value)
-                DO UPDATE SET
-                    source_tool=excluded.source_tool,
-                    success=excluded.success,
-                    metadata_json=excluded.metadata_json,
-                    last_seen_at=excluded.last_seen_at,
-                    seen_count=attack_memory_items.seen_count + 1
-                """,
-                (
-                    _new_id(),
-                    self.session_id,
-                    self.target_ip,
-                    category,
-                    key,
-                    value,
-                    str(source_tool or ""),
-                    1 if success else 0,
-                    json.dumps(metadata or {}, default=str),
-                    now,
-                    now,
-                ),
+            return self._upsert_note(
+                conn,
+                category=category,
+                key=key,
+                value=value,
+                source_tool=source_tool,
+                success=success,
+                metadata=metadata,
+                now=now,
             )
+
+    def _upsert_note(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        category: str,
+        key: str,
+        value: str,
+        source_tool: str = "",
+        success: bool = True,
+        metadata: dict[str, Any] | None = None,
+        now: str = "",
+    ) -> bool:
+        conn.execute(
+            """
+            INSERT INTO attack_memory_items(
+                id, session_id, target_ip, category, item_key, item_value,
+                source_tool, success, metadata_json, first_seen_at, last_seen_at,
+                seen_count
+            )
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,1)
+            ON CONFLICT(session_id, target_ip, category, item_key, item_value)
+            DO UPDATE SET
+                source_tool=excluded.source_tool,
+                success=excluded.success,
+                metadata_json=excluded.metadata_json,
+                last_seen_at=excluded.last_seen_at,
+                seen_count=attack_memory_items.seen_count + 1
+            """,
+            (
+                _new_id(),
+                self.session_id,
+                self.target_ip,
+                category,
+                key,
+                value,
+                str(source_tool or ""),
+                1 if success else 0,
+                json.dumps(metadata or {}, default=str),
+                now,
+                now,
+            ),
+        )
         return True
 
     def list_items(self, category: str | None = None, limit: int = 200) -> list[AttackMemoryItem]:

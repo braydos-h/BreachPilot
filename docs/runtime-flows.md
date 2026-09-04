@@ -92,9 +92,9 @@ Use this path when working on target fingerprinting, goal suggestions, or first-
 ```text
 main.py
   -> load config
-  -> select model with tools.model_router (provider = models.provider: ollama|chatgpt)
+  -> select model with tools.model_router (provider = models.provider: ollama|opencode_go|chatgpt, default opencode_go)
   -> start/connect mcp_exploit_server.py
-  -> build tool list (OpenAI-shaped; forwarded unchanged to either provider)
+  -> build tool list (OpenAI-shaped; forwarded unchanged to any provider)
   -> tools.exploit_agent.run_exploit_agent
   -> optional consult_peer_models advisory calls when multi_model is enabled
   -> tools.model_router records metadata-only LLM usage telemetry (provider-attributed)
@@ -104,10 +104,11 @@ main.py
 ```
 
 The model client is built by `tools/model_router.py::_build_model_client`, the
-single provider seam: `provider: ollama` (default) constructs an
-`ollama.Client`; `provider: chatgpt` injects a `ChatGptProxyClient`
+single provider seam: `provider: ollama` constructs an
+`ollama.Client`; `provider: opencode_go` uses the OpenAI Responses API at
+opencode.ai (`OPENCODE_GO_API_KEY`); `provider: chatgpt` injects a `ChatGptProxyClient`
 (`tools/providers/chatgpt_provider.py`) that POSTs to the vendored
-openai-oauth loopback proxy at `127.0.0.1:10531/v1`. Both wrap into the same
+openai-oauth loopback proxy at `127.0.0.1:10531/v1`. All wrap into the same
 `ModelClient`/`ModelRouter` surface, so the rest of the flow is provider-agnostic.
 Embeddings stay on Ollama under either provider. See
 [docs/providers.md](providers.md).

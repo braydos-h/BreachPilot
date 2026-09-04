@@ -11,7 +11,7 @@ import asyncio
 import json
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -43,6 +43,13 @@ class BenchmarkRunRequest(BaseModel):
     check_regression: bool = Field(False, description="Compare against the saved baseline")
 
 
+class _SuiteCache(TypedDict):
+    """TTL cache for suite discovery (avoids re-parsing manifests on every poll)."""
+
+    expiry: float
+    data: list[dict[str, Any]] | None
+
+
 def create_router(
     auth: BearerAuth, service: BenchmarkService, storage: BenchmarkStorage, config: dict[str, Any]
 ) -> APIRouter:
@@ -50,7 +57,7 @@ def create_router(
     router = APIRouter(prefix="/api/v1/benchmarks", tags=["benchmarks"])
 
     # Lightweight TTL cache for suite discovery — per-router so apps don't share.
-    _suite_cache: dict[str, object] = {"expiry": 0.0, "data": None}
+    _suite_cache: _SuiteCache = {"expiry": 0.0, "data": None}
     _suite_ttl_s = 15.0
 
     async def _require_auth(request: Request) -> str:
@@ -73,9 +80,9 @@ def create_router(
 
     def _suite_list() -> list[dict[str, Any]]:
         # Serve from TTL cache when fresh — avoids re-parsing manifests on every overview poll.
-        cached_expiry = float(_suite_cache.get("expiry", 0.0) or 0.0)
+        cached_expiry = _suite_cache.get("expiry", 0.0) or 0.0
         if time.monotonic() < cached_expiry and _suite_cache.get("data") is not None:
-            return list(_suite_cache["data"] or [])  # type: ignore[return-value]
+            return list(_suite_cache["data"] or [])
         from tools.benchmark import register_default_providers
         from tools.benchmark.registry import list_suites as registry_suites
 

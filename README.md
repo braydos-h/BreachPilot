@@ -162,6 +162,8 @@ Categories include network penetration testing, web/API, auth/JWT/OAuth, deseria
 
 Orchestrated via `tools/swarm/orchestrator.py` with a shared blackboard, battle log, parallel dispatch, and phase-aware skill hints. See [docs/swarm.md](docs/swarm.md).
 
+**Swarm vs campaign:** `--swarm` decomposes a *single target* across the six specialists (parallel recon + vuln research, critic pre-check, reflection shifts). Without `--swarm`, the autonomous campaign drives a persistent multi-phase queue (recon → exploit → privesc → lateral → validation) with adaptive aggression, resume, and checkpoints across one or many targets. Combine both on high-value targets. Same target-IP lock and permission model either way.
+
 ### MCP tool suite: 120+ tools across 29 families
 
 | Family | Capability |
@@ -436,9 +438,11 @@ operator ──► main.py / app.py (WebUI @ :8765)
                 ├─ run_exploit_session() ──► tools/exploit_agent/ (runner loop + policy + prompt)
                 │     120+ MCP tools, 140+ skills, 15 attack module families
                │
-               ├─ SwarmOrchestrator (6 agents, shared blackboard, parallel dispatch)
-               │
-               └─ AutonomousOrchestrator (persistent campaigns, adaptive aggression, vuln chaining)
+                ├─ SwarmOrchestrator (6 agents, shared blackboard, parallel dispatch)
+                │     `--swarm`: single-target specialist decomposition
+                │
+                └─ AutonomousOrchestrator (persistent campaigns, adaptive aggression, vuln chaining)
+                      default (no `--swarm`): multi-phase queue, resume + checkpoints
 ```
 
 Two flows: Flow A (modern: `main.py` → `tools/exploit_agent`, `tools/mcp_tools`, `tools/swarm`) is what you run. Flow B (legacy, frozen in `legacy/`) is the SQLite research loop, still tested but frozen. See [docs/architecture.md](docs/architecture.md) and [docs/runtime-flows.md](docs/runtime-flows.md).

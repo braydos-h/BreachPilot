@@ -52,7 +52,7 @@ argument group in `main.parse_args`, so references survive line drift.
 
 | Flag | Description | Group |
 |------|-------------|------|
-| `--swarm` | Enable multi-agent swarm mode | swarm & reasoning |
+| `--swarm` | Multi-agent swarm mode: six specialists decompose a single target (parallel recon + vuln research, critic pre-check, reflection). Without it, attack mode runs the persistent autonomous campaign queue (recon → exploit → privesc → lateral → validation, resume + checkpoints). Combine both on high-value targets. See `docs/swarm.md` ("Swarm vs Campaign") | swarm & reasoning |
 | `--parallel-swarm` | Parallel sub-agents (recon + vuln-research parallelize; exploit/post_exploit stay sequential unless `swarm.exploit_parallel`) | swarm & reasoning |
 | `--critic` | Critic agent pre-approval (requires `--swarm`) | swarm & reasoning |
 | `--reflection` | Reflection agent (requires `--swarm`) | swarm & reasoning |
@@ -83,8 +83,18 @@ argument group in `main.parse_args`, so references survive line drift.
 |------|-------------|------|
 | `--eval [TARGET ...]` | With target ids: run the graded eval suite (oracle v2) against those `eval_targets/*.oracle.json` targets. Bare `--eval`: all oracle targets. With `--target <ip>`: the legacy single-target benchmark instead, writing `reports/eval/<run_id>/` (`tools/eval_harness.py`) | eval & regression |
 | `--eval-list` | Print the graded-eval oracle targets (id + flag count) and exit | eval & regression |
-| `--save-baseline` | With `--eval`: persist the graded report as the regression baseline (`eval.baseline_path`, default `reports/eval/baseline.json`) | eval & regression |
-| `--check-regression` | With `--eval`: exit 1 when a target's score drops below the baseline minus `eval.regression_tolerance` (default 0.05); fails closed on a missing baseline | eval & regression |
+| `--save-baseline` | With `--eval` or `--benchmark`: persist the report as the regression baseline (`eval.baseline_path` / `benchmark.baseline_path`) | eval & regression |
+| `--check-regression` | With `--eval` or `--benchmark`: exit 1 when score drops beyond tolerance (`eval.regression_tolerance` / `benchmark` tolerances); fails closed on a missing baseline | eval & regression |
+
+### Benchmark suite flags (`--benchmark`, `tools/benchmark/`)
+
+| Flag | Description | Group |
+|------|-------------|------|
+| `--benchmark [SUITE ...]` | Run a benchmark suite (bare `--benchmark` = `xben`). Repeatable filters via `--scenario`/`--tag`, repeated trials via `--trials`. Results under `reports/benchmarks/<suite>/<run_id>/`. See `docs/benchmarks.md` | benchmark suite |
+| `--benchmark-list` | List registered benchmark suites (id, scenario count, tags) and exit | benchmark suite |
+| `--scenario <ID>` | With `--benchmark`: restrict to specific scenario ids (repeatable) | benchmark suite |
+| `--tag <TAG>` | With `--benchmark`: restrict to scenarios carrying a tag (repeatable) | benchmark suite |
+| `--trials <N>` | With `--benchmark`: repeated trials per scenario (default `benchmark.trials`, 1-20) | benchmark suite |
 
 ### API keys / config
 

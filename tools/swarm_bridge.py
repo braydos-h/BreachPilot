@@ -35,6 +35,27 @@ class SwarmMcpBridge:
     ``ClientSession`` ``run_exploit_session`` opens (the BaseExceptionGroup
     helpers in ``tools/exceptions.py`` depend on that single session's
     lifecycle), it does not open a second one.
+
+    Thread/loop contract (load-bearing — do not "simplify"):
+
+    * The MCP ``ClientSession`` is bound to the main event loop owned by
+      ``run_exploit_session``. ``dispatch`` MUST be called from a worker
+      thread (the swarm runs via ``asyncio.to_thread`` / ``run_in_executor``);
+      it hops via ``asyncio.run_coroutine_threadsafe`` onto the bound loop.
+    * Calling ``dispatch`` (or ``_run_async``) ON the bound loop raises
+      ``RuntimeError`` immediately instead of deadlocking — ``dispatch``
+      surfaces that as ``TOOL_EXECUTION_ERROR`` (it never raises to the
+      agent; every session-bound call is wrapped in ``_EXC_GROUP_CATCH``).
+    * ``attach`` must capture the main loop: pass ``loop`` explicitly when
+      available, else ``attach`` itself must run on the main loop (it falls
+      back to ``asyncio.get_running_loop()``).
+
+    Single-session invariant: this bridge NEVER opens its own MCP session.
+    ``attach`` may be called again (run_service re-attaches per run) to
+    REPLACE the session/policy/loop/config quadruple, but at most one
+    session is ever referenced. ``ready()`` is False until session+policy+
+    loop are all set; ``dispatch`` before that returns ``BLOCKED`` without
+    touching the network.
     """
 
     def __init__(self) -> None:

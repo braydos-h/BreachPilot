@@ -37,6 +37,11 @@ These docs are the fastest path into this codebase for new contributors. The roo
 - [Tutorial](tutorial.md): hands-on walkthrough — setup, `--self-test`, recon-first run, exploit session, swarm mission, WebUI, demo/eval.
 - [Glossary](glossary.md): alphabetized domain vocabulary with `file:line` pointers.
 - [Prompts](prompts.md): inventory of every AI prompt in the codebase and where to edit them.
+- [Sandbox](sandbox.md): disposable Docker worker — architecture, network containment, fail-closed posture.
+- [Benchmarks](benchmarks.md): reproducible benchmark suite, oracles, regression gates (`--benchmark` flags).
+- [Provider Development](provider-development.md): adding a 4th AI provider (adapter + registry + config + tests).
+- [Browser Agent](browser-agent-design.md): sandboxed Playwright agent (off by default, target-locked).
+- [Configuration](configuration/): generated config/API reference · [MCP](mcp/): servers, registration, families · [Components](components/): subsystem deep-dives · [Reference](reference/): generated CLI dump.
 
 ## Mental Model
 

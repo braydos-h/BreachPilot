@@ -567,7 +567,8 @@ class SecondaryEnumerator:
             logger.warning(f"Skipping Redis enumeration: invalid target {result.target_ip!r}")
             return result
 
-        for svc in services:
+        # ponytail: per-service fan-out — was serial `for svc` (10s each).
+        async def _one(svc: ServiceInfo) -> None:
             port = svc.port
 
             try:
@@ -583,17 +584,17 @@ class SecondaryEnumerator:
                 )
             except FileNotFoundError as exc:
                 logger.warning(f"nc not available for Redis enumeration on port {port}: {exc}")
-                continue
+                return
 
             try:
                 stdout_bytes, _ = await asyncio.wait_for(proc.communicate(input=b"INFO\n"), timeout=10)
             except asyncio.TimeoutError:
                 await _kill_process(proc)
-                continue
+                return
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning(f"Redis enumeration failed on port {port}: {exc}")
                 await _kill_process(proc)
-                continue
+                return
 
             stdout2 = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
             if "redis_version" in stdout2:
@@ -601,13 +602,15 @@ class SecondaryEnumerator:
                 result.evidence_refs.append(f"redis_info:{port}")
                 result.warnings.append(f"Redis unauthenticated access on {result.target_ip}:{port}")
 
+        await asyncio.gather(*(_one(svc) for svc in services))
         return result
 
     async def _enumerate_elasticsearch(self, result: HostReconResult, services: list[ServiceInfo]) -> HostReconResult:
         """Enumerate Elasticsearch: cluster info, indices."""
         logger.info(f"Starting Elasticsearch enumeration on {result.target_ip}")
 
-        for svc in services:
+        # ponytail: per-service fan-out — was serial (2x15s per port).
+        async def _one(svc: ServiceInfo) -> None:
             port = svc.port
             base_url = f"http://{result.target_ip}:{port}"
 
@@ -648,13 +651,15 @@ class SecondaryEnumerator:
                     if stdout.strip():
                         result.warnings.append(f"Elasticsearch indices exposed on {result.target_ip}:{port}")
 
+        await asyncio.gather(*(_one(svc) for svc in services))
         return result
 
     async def _enumerate_docker_k8s(self, result: HostReconResult, services: list[ServiceInfo]) -> HostReconResult:
         """Enumerate Docker and Kubernetes exposed APIs."""
         logger.info(f"Starting Docker/K8s enumeration on {result.target_ip}")
 
-        for svc in services:
+        # ponytail: per-service fan-out — was serial (15s per port).
+        async def _one(svc: ServiceInfo) -> None:
             port = svc.port
 
             if port == 2375 or port == 2376:
@@ -720,13 +725,15 @@ class SecondaryEnumerator:
                         result.evidence_refs.append(f"kubelet:{port}")
                         result.warnings.append(f"Kubelet API exposed pods on {result.target_ip}:{port}")
 
+        await asyncio.gather(*(_one(svc) for svc in services))
         return result
 
     async def _enumerate_rdp(self, result: HostReconResult, services: list[ServiceInfo]) -> HostReconResult:
         """Enumerate RDP services: NLA check, encryption level."""
         logger.info(f"Starting RDP enumeration on {result.target_ip}")
 
-        for svc in services:
+        # ponytail: per-service fan-out — was serial (60s per port).
+        async def _one(svc: ServiceInfo) -> None:
             port = svc.port
 
             if ToolAvailability.check(self._config.nmap_path):
@@ -750,6 +757,7 @@ class SecondaryEnumerator:
                     if "NLA: Disabled" in stdout:
                         result.warnings.append(f"RDP NLA disabled on {result.target_ip}:{port}")
 
+        await asyncio.gather(*(_one(svc) for svc in services))
         return result
 
     # -----------------------------------------------------------------------
@@ -770,10 +778,12 @@ class SecondaryEnumerator:
         from tools.recon_enrichers import parse_tls_info
 
         logger.info(f"Starting TLS enumeration on {result.target_ip}")
-        for svc in services:
+
+        # ponytail: per-service fan-out — was serial (60s per port).
+        async def _one(svc: ServiceInfo) -> None:
             port = svc.port
             if not ToolAvailability.check(self._config.nmap_path):
-                continue
+                return
             cmd = [
                 self._config.nmap_path,
                 "-p",
@@ -791,11 +801,13 @@ class SecondaryEnumerator:
                 )
             except Exception as exc:
                 result.warnings.append(f"TLS enum failed on port {port}: {exc}")
-                continue
+                return
             if success and stdout:
                 svc.ssl_info = parse_tls_info(stdout)
                 svc.scripts["ssl_cert"] = stdout[:3000]
                 result.evidence_refs.append(f"ssl_cert:{port}")
+
+        await asyncio.gather(*(_one(svc) for svc in services))
         return result
 
     async def _enumerate_smtp(self, result: HostReconResult, services: list[ServiceInfo]) -> HostReconResult:
@@ -808,7 +820,9 @@ class SecondaryEnumerator:
         from tools.recon_enrichers import parse_smtp_banner
 
         logger.info(f"Starting SMTP enumeration on {result.target_ip}")
-        for svc in services:
+
+        # ponytail: per-service fan-out — was serial (60s per port).
+        async def _one(svc: ServiceInfo) -> None:
             port = svc.port
             banner_text = ""
             if ToolAvailability.check(self._config.nmap_path):
@@ -829,13 +843,15 @@ class SecondaryEnumerator:
                     )
                 except Exception as exc:
                     result.warnings.append(f"SMTP enum failed on port {port}: {exc}")
-                    continue
+                    return
                 if success and stdout:
                     banner_text = stdout
                     svc.scripts["smtp_commands"] = stdout[:3000]
                     result.evidence_refs.append(f"smtp_commands:{port}")
             if banner_text:
                 svc.smtp_info = parse_smtp_banner(banner_text)
+
+        await asyncio.gather(*(_one(svc) for svc in services))
         return result
 
     async def _enumerate_db(self, result: HostReconResult, services: list[ServiceInfo]) -> HostReconResult:
@@ -848,7 +864,9 @@ class SecondaryEnumerator:
         from tools.recon_enrichers import parse_db_banner
 
         logger.info(f"Starting DB enumeration on {result.target_ip}")
-        for svc in services:
+
+        # ponytail: per-service fan-out — was serial (60s per port).
+        async def _one(svc: ServiceInfo) -> None:
             port = svc.port
             banner_text = ""
             if ToolAvailability.check(self._config.nmap_path):
@@ -869,13 +887,15 @@ class SecondaryEnumerator:
                     )
                 except Exception as exc:
                     result.warnings.append(f"DB enum failed on port {port}: {exc}")
-                    continue
+                    return
                 if success and stdout:
                     banner_text = stdout
                     svc.scripts["db_banner"] = stdout[:3000]
                     result.evidence_refs.append(f"db_banner:{port}")
             if banner_text:
                 svc.db_info = parse_db_banner(banner_text, service=svc.service)
+
+        await asyncio.gather(*(_one(svc) for svc in services))
         return result
 
     async def _enumerate_web_spider(self, result: HostReconResult, services: list[ServiceInfo]) -> HostReconResult:
@@ -890,17 +910,22 @@ class SecondaryEnumerator:
         from tools.recon_enrichers import http_spider
 
         logger.info(f"Starting web spider on {result.target_ip}")
-        for svc in services:
+
+        # ponytail: http_spider is blocking — run per-service in threads
+        # concurrently instead of serially.
+        async def _one(svc: ServiceInfo) -> None:
             port = svc.port
             scheme = "https" if svc.service.lower() == "https" or port in (443, 8443) else "http"
             try:
-                spider = http_spider(result.target_ip, port, scheme=scheme, max_pages=20)
+                spider = await asyncio.to_thread(http_spider, result.target_ip, port, scheme=scheme, max_pages=20)
             except Exception as exc:
                 result.warnings.append(f"Web spider failed on port {port}: {exc}")
-                continue
+                return
             if isinstance(spider, dict):
                 result.spider_results.append(spider)
                 result.evidence_refs.append(f"spider:{port}")
+
+        await asyncio.gather(*(_one(svc) for svc in services))
         return result
 
     async def _enumerate_osint(self, result: HostReconResult, services: list[ServiceInfo]) -> HostReconResult:

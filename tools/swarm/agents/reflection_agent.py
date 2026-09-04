@@ -16,6 +16,7 @@ from typing import Any
 
 from tools.exceptions import _EXC_GROUP_CATCH
 from tools.failure_taxonomy import FailureClass
+from tools.kernel.orchestration import MAX_MODULE_FAILURES
 from tools.swarm.base import Agent, AgentResult, AgentStatus
 from tools.swarm.bb_compat import bb_extend, bb_remove, bb_set
 
@@ -203,19 +204,19 @@ class ReflectionAgent(Agent):
                 tool = e.get("tool", "unknown")
                 failure_tools[tool] = failure_tools.get(tool, 0) + 1
             for tool, count in failure_tools.items():
-                if count >= 3:
+                if count >= MAX_MODULE_FAILURES:
                     patterns.append(f"Tool '{tool}' failed {count} times — likely incompatible or blocked.")
 
             # Connection refused pattern
             refused_count = sum(1 for e in failures if "refused" in str(e.get("error", "")).lower())
-            if refused_count >= 3:
+            if refused_count >= MAX_MODULE_FAILURES:
                 patterns.append(
                     f"Connection refused {refused_count} times — target may have firewall or service is down."
                 )
 
             # Timeout pattern
             timeout_count = sum(1 for e in failures if "timeout" in str(e.get("error", "")).lower())
-            if timeout_count >= 3:
+            if timeout_count >= MAX_MODULE_FAILURES:
                 patterns.append(f"Timeout on {timeout_count} attempts — target may be slow, firewalled, or blocking.")
 
             # Success pattern

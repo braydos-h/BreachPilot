@@ -148,6 +148,31 @@ where the term is defined or primarily used.
 - **`--doctor`** — Environment check (Python/nmap/Ollama/config)
   (`tools/doctor.py`).
 - **`--self-test`** — Safe localhost smoke test (`tools/self_test.py`).
+- **Sandbox** — Disposable per-run Docker worker (`tools/sandbox/`,
+  default-on). Network containment via netns firewall over the effective
+  allowlist; mid-session failures = `SANDBOX_*` fail-closed blocks; boot
+  fallback = `sandbox.fallback_native` degrade-to-native + `SANDBOX_FALLBACK:` lines. See [sandbox.md](sandbox.md).
+- **Loot / vault / credential_store** — Captured creds/loot per run
+  (encrypted at rest via `tools/credential_store.py`); surfaced in WebUI
+  Loot & Credentials page.
+- **Beacon / listener** — Persistent RCE callback (`tools/operator_connection/`,
+  `operator_connection` config; `default_callback_port: 4444`).
+- **AttackPlan / DAG** — Prerequisite graph (`tools/attack_planner.py`:
+  `ready_steps()` / `blocked_steps()` / `graph_summary()`); rendered in WebUI Attack Graph.
+- **Killchain** — Opt-in stage machine (`killchain.enabled`, `tools/killchain/`;
+  `killchain_status`/`attempt`/`plan` tools; verification-gated advances).
+- **Snapshots** — Opt-in rollback (`snapshots.enabled`, `tools/snapshots.py`;
+  `snapshot_create`/`revert`/`list`; `PROXMOX_API_TOKEN` env-only; fail-open).
+- **GoalEngine** — Preset/custom goal resolution + risk gating (SAFE/GATED/HIGH)
+  (`tools/goal_engine.py`).
+- **`--long-session`** — Multi-hour mode: raises context/timeout/round budgets + checkpointed resume.
+- **`secr.json`** — Gitignored local key file written by `--setup-api-keys` (never auto-loads `.env`).
+- **`api_runtime.db` / decision_log / battle-log** — API persistence
+  (`tools/api/persistence.py`) / per-run decision trail (`decision_log.jsonl`) /
+  swarm cross-agent log.
+- **TokenGate / bearer** — Loopback WebUI auth (`.webui_secret_key` or
+  `BREACHPILOT_API_TOKEN`; WS `{"auth":…}` → 4401 on failure).
+- **`@require_allowlist`** — Target-touching gate (IP/domain/`*.wildcard`/CIDR via `is_target_in_allowlist`).
 - **Demo mode** — Scripted safe demonstration runs (`tools/demo_mode.py`).
 - **Eval harness / benchmark** — Offline evaluation: legacy self-scored
   `tools/eval_harness.py` vs oracle-backed `tools/eval_benchmark.py`
@@ -160,7 +185,7 @@ where the term is defined or primarily used.
 - **Workspace dirs** — Gitignored runtime state: `reports/`,
   `exploit_workspace/`, `research_workspace/`, `swarm_workspace/`,
   `webui/dist/`.
-- **`opencode.json`** — Editor-local config for the opencode editor's own
+- **`opencode.jsonc`** — Editor-local config for the opencode editor's own
   model provider, gitignored; NOT application config (AGENTS.md rule 5).
   App config lives in `config.yaml` — see
   [config-reference.md](config-reference.md).

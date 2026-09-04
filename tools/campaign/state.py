@@ -17,6 +17,7 @@ from enum import Enum
 from typing import Any, Callable, Iterator
 
 from tools.attack_ui import get_ui
+from tools.kernel.orchestration import MAX_MODULE_FAILURES, safe_emit
 from tools.logging_setup import get_logger
 from tools.recon_pipeline import HostReconResult
 
@@ -42,12 +43,7 @@ def observe_autonomous_progress(
 
 
 def _report_autonomous_progress(**payload: Any) -> None:
-    callback = _AUTONOMOUS_PROGRESS.get()
-    if callback is not None:
-        try:
-            callback(payload)
-        except Exception:  # noqa: BLE001 -- observability must never stop a campaign
-            pass
+    safe_emit(_AUTONOMOUS_PROGRESS.get(), payload)
 
 
 class AggressionLevel(Enum):
@@ -89,7 +85,7 @@ class AttackTask:
     aggression: AggressionLevel = AggressionLevel.NORMAL
     priority: int = 50
     retry_count: int = 0
-    max_retries: int = 3
+    max_retries: int = MAX_MODULE_FAILURES
     created_at: float = field(default_factory=time.monotonic)
     started_at: float | None = None
     completed_at: float | None = None
@@ -156,7 +152,7 @@ class AttackTask:
             aggression=_enum(AggressionLevel, data.get("aggression"), AggressionLevel.NORMAL),
             priority=int(data.get("priority", 50) or 50),
             retry_count=int(data.get("retry_count", 0) or 0),
-            max_retries=int(data.get("max_retries", 3) or 3),
+            max_retries=int(data.get("max_retries", MAX_MODULE_FAILURES) or MAX_MODULE_FAILURES),
             created_at=float(data.get("created_at", 0) or 0),
             started_at=float(data["started_at"]) if data.get("started_at") is not None else None,
             completed_at=float(data["completed_at"]) if data.get("completed_at") is not None else None,

@@ -4,7 +4,7 @@ Runtime source of truth for all engine behavior. This file documents every
 top-level section and key, where each is consumed, and which CLI flags / env
 vars can override it.
 
-> **`opencode.json` is NOT app config.** It is editor-local config (gitignored)
+> **`opencode.jsonc` is NOT app config.** It is editor-local config (gitignored)
 > for the opencode.ai editor's own model provider. Application config lives
 > only in `config.yaml` (AGENTS.md rule 5). `mission.yaml` is Flow B's mission
 > scope file — the exploit engine reads its scope rules from
@@ -69,6 +69,10 @@ reachability, model registry, port conflicts) and `python main.py --self-test`
 | `EXPLOIT_DISCOVERED_TARGETS` | — | Comma-separated subdomains/IPs auto-authorized mid-run | `add_discovered_target` mcp_shared.py:537-555 | mcp_shared.py:528-533 |
 | `EXPLOIT_WORKSPACE` | `exploit_workspace` | Exploit workspace root override | set by mcp_session.py:256 | cve_lookup.py:171 (KEV cache), tools/kernel/workspace.py:139 |
 | `BREACHPILOT_API_TOKEN` | token file | WebUI daemon bearer token override (never logged) | `api.token_file` | app.py:71, tools/api/auth.py:46 |
+| `OPENCODE_GO_API_KEY` | — | OpenCode Go provider key (Responses API at opencode.ai) | `providers.opencode_go.api_key_env` | tools/providers/opencode_go_provider.py, api_key_store.py |
+| `CALDERA_API_KEY` | — | Caldera server API key (env-only, never config) | `caldera.api_key_env` | plugins/caldera/plugin.py:42 |
+| `TICKETING_TOKEN` | — | Jira/GitHub ticketing token (env-only) | `ticketing.token_env` | tools/ticketing.py:33 |
+| `PROXMOX_API_TOKEN` | — | Proxmox snapshot provider token (env-only, never logged) | — (provider `proxmox`) | tools/snapshots.py ProxmoxProvider |
 | `MCP_HTTP_TOKEN` | — | Optional bearer auth for MCP HTTP transport | — | mcp_shared.run_mcp_http_server, mcp_engine_server.py:27 |
 | `MCP_ALLOW_PUBLIC_BIND` | — | Second half of the two-person rule for non-loopback MCP binds | — | mcp_shared.run_mcp_http_server |
 | `AI_NMAP_ACTIVE_MODEL_ALIAS` | — | Active model alias threaded into the MCP server subprocess | set by mcp_session.py:270 | tools/mcp_tools/registry.py:201, peer_models.py:80 |
@@ -90,7 +94,7 @@ reachability, model registry, port conflicts) and `python main.py --self-test`
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `provider` | enum | `ollama` | Active chat/generate provider; validated against the provider **registry** (built-ins: `ollama`\|`opencode_go`\|`chatgpt`, via `tools.config_manager.resolve_known_provider_ids`) — adding provider #4 extends the whitelist automatically. Absent = `ollama`. | `tools/config/loader.py` `get_ai_provider`, `tools/providers/registry.py`, `tools/model_router.py` `build_router`/`build_model_client_for_provider`, run_service/service.py, doctor.py, api/routes/system.py |
+| `provider` | enum | `opencode_go` (lab config.yaml) / `ollama` (schema fallback; absent = `ollama`) | Active chat/generate provider; validated against the provider **registry** (built-ins: `ollama`\|`opencode_go`\|`chatgpt`, via `tools.config_manager.resolve_known_provider_ids`) — adding provider #4 extends the whitelist automatically. | `tools/config/loader.py` `get_ai_provider`, `tools/providers/registry.py`, `tools/model_router.py` `build_router`/`build_model_client_for_provider`, run_service/service.py, doctor.py, api/routes/system.py |
 | `registry` | map[alias→model id] | kimi/deepseek/deepseek_flash/glm/minimax | Alias → concrete cloud model mapping (Ollama path) | `tools/config/schema.py`, `tools/doctor.py`, `tools/run_service/service.py`, `tools/mcp_tools/registry.py` |
 | `default_alias` | str | `glm` | Active model alias (Ollama path; ChatGPT path uses `chatgpt.default_model`) | `tools/config/schema.py`, `tools/run_service/service.py`, `tools/eval_harness.py`, `legacy/agent_loop.py` |
 | `auto_update` | bool | `true` | Auto-update `registry` against the live Ollama API (`GET /api/tags`): at daemon boot each alias is bumped to the newest same-family version (e.g. `glm-5.2:cloud` → `glm-5.3:cloud`). No pulls (cloud pull = pointer only); `models.info` stays operator-managed. On demand: `POST /api/v1/models/refresh` | `tools/ollama_models.py` (`auto_refresh_on_startup`, `refresh_model_registry`), `main.py` `_auto_update_models`, `api/routes/system.py` `refresh_models` |
@@ -427,7 +431,7 @@ Enabled by `--long-session` (main.py:374-376) or `enabled: true`.
 | `confirmation_threshold` / `refutation_threshold` | float | `0.75` | Evidence thresholds (0.5-1.0) | `tools/config/validator.py` |
 | `min_evidence_references` | int | `1` | Min evidence refs for a verdict | `tools/config/validator.py` |
 | `flow_a` | bool | `true` (config.yaml) / `false` (schema) | Wire OutcomeJudge into Flow A exploit loop (overrides shallow exit-code success) | cli_exploit_settings.py:154, eval_benchmark.py:231 |
-| `peer_review` | bool | `false` | D3: cross-model outcome grading (`peer_review_outcome` MCP tool — one alias plans, a different alias grades evidence; advisory-only, deterministic judge stays authority) | mcp_tools/peer_models.py:162 |
+| `peer_review` | bool | `true` (config.yaml lab) / `false` (schema) | D3: cross-model outcome grading (`peer_review_outcome` MCP tool — one alias plans, a different alias grades evidence; advisory-only, deterministic judge stays authority) | mcp_tools/peer_models.py:162 |
 
 ### `poc_verification:` (config.yaml:264-271) — self-healing PoC verification (Killer Feature #3)
 
@@ -438,7 +442,7 @@ operator box — this is a compile/import gate, not a sandbox guarantee.
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `enabled` | bool | `false` | Master toggle (inline synth check + Docker compile path) | mcp_tools/attack_modules.py (cve_to_exploit_synth), mcp_tools/poc_verifier.py |
+| `enabled` | bool | `true` (config.yaml lab) / `false` (schema) | Master toggle (inline synth check + Docker compile path) | mcp_tools/attack_modules.py (cve_to_exploit_synth), mcp_tools/poc_verifier.py |
 | `docker_image` | str | `python:3.11-slim` | Image for the compile/import container | tools/poc_verifier.py:docker_check |
 | `compile_timeout_seconds` | int | `30` | Container run timeout | tools/poc_verifier.py:docker_check |
 | `max_retries` | int | `3` | Self-heal loop cap (synth → verify → LLM fix → re-verify) | mcp_tools/attack_modules.py (agent-driven) |
@@ -687,6 +691,18 @@ reflection by `swarm.reflection_enabled`.
 | `multi_operator` | bool | `true` | D4: user accounts + annotations (loopback-only) | tools/api/auth.py:60 |
 | `graph_route` | bool | `true` | Attack-path DAG API route | tools/api/routes/graph_explorer.py:30 |
 
+### `operator_connection:` (config.yaml:514-521) — persistent RCE beacons / operator callbacks
+
+| Key | Type | Default | Controls | Consumed at |
+|-----|------|---------|----------|-------------|
+| `enabled` | bool | `true` | Master switch for beacon/listener management | `tools/operator_connection/manager.py`, `tools/mcp_tools/operator_connection.py` |
+| `auto_start_listener` | bool | `true` | Auto-start callback listener | operator_connection/manager.py |
+| `default_callback_port` | int | `4444` | Default callback port | operator_connection/manager.py |
+| `default_listener_type` | str | `netcat` | Default listener type | operator_connection/manager.py |
+| `beacon_interval_seconds` | int | `300` | Beacon callback interval | operator_connection/manager.py |
+| `health_check_interval_seconds` | int | `60` | Beacon health-check interval | operator_connection/manager.py |
+| `workspace_dir` | str | `exploit_workspace` | Callback workspace root | operator_connection/manager.py |
+
 ### `sandbox:` (config.yaml:541-566) — disposable execution sandbox (isolation boundary)
 
 Every attack command (terminal commands, generated Python, nmap, Metasploit,
@@ -700,6 +716,7 @@ never an automatic fallback. Full architecture + threat model:
 | `enabled` | bool | `true` | Master switch; `false` = explicit legacy host-execution opt-out (uncontained) | `tools/sandbox/manager.py:resolve_manager` |
 | `backend` | str | `docker` | Execution backend | `tools/sandbox/models.py` |
 | `image` | str | `breachpilot-sandbox:latest` | Worker image (build: `docker build -t <image> docker/sandbox`) | `tools/sandbox/docker_backend.py` |
+| `fallback_native` | bool | `true` | Boot-time degrade: unusable Docker (CLI missing, daemon down, image not built) degrades the whole session to legacy uncontained native mode with warning + WebUI banner + `SANDBOX_FALLBACK:` lines; `false` = strict fail-closed (executions denied until Docker works) | `tools/sandbox/manager.py:resolve_manager_with_fallback`, docs/sandbox.md |
 | `user` | str | `sandbox` | Container user (non-root default) | `tools/sandbox/docker_backend.py:_build_create_args` |
 | `read_only_rootfs` | bool | `true` | Read-only container rootfs; `/workspace` + tmpfs stay writable | `_build_create_args` |
 | `env_passthrough` | list[str] | `[]` | Extra host env var names the worker may receive (allowlist; never the whole env) | `tools/sandbox/manager.py:_build_env` |
@@ -786,7 +803,7 @@ Explicit CLI flags win over config values; config wins over schema defaults:
 | `long_session.enabled` | `--long-session` (cli_exploit_settings.py:43,75) |
 | `swarm.parallel_enabled` | `--parallel-swarm` |
 | `multi_model.enabled` | `--multi-model-consult` / `--no-multi-model-consult` |
-| `exploit.attack_max_commands/rounds` | `--max-commands` / `--max-rounds` (cli_exploit_settings.py:119-124,167-168) |
+| `exploit.attack_max_commands/rounds` | `agent.max_actions` (`0` = sentinel → legacy budgets apply) + `--long-session` raises budgets (cli_exploit_settings.py, `ExploitSettings.effective_max_commands`) |
 | `skills.*` | `--skills on\|off\|hints\|lookup`, `--skills-include`, `--skills-exclude`, `--no-skills-reselect` (tools/skills_cli.py) |
 | `api.host` / `api.port` | `--api-host` / `--api-port` |
 | `mcp.default_transport` | `--mcp-transport` (ignored on the run path — always `http`) |

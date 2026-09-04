@@ -49,8 +49,8 @@ Sandbox failures fail closed as structured `SANDBOX_*` blocks; see
 The main launcher. **With no arguments it starts the WebUI daemon** (builds
 `webui/dist/` if needed, serves it at `http://127.0.0.1:8765/`, opens a
 browser). It also handles direct recon/attack runs, `--menu` (the legacy
-questionary terminal menu), doctor, self-test, eval, demo, resume, CTF
-autopilot, swarm, and model selection flows. It loads `config.yaml`, starts or connects to MCP transport, routes model calls through the configured provider (`models.provider: ollama` default, or `chatgpt` via the vendored `oauth/` loopback proxy — see [providers.md](providers.md)), and runs recon/attack sessions.
+questionary terminal menu), doctor, self-test, eval, benchmark, demo, resume, CTF
+autopilot, swarm, and model selection flows. It loads `config.yaml`, starts or connects to MCP transport, routes model calls through the configured provider (`models.provider: opencode_go` default — built-ins `ollama`|`opencode_go`|`chatgpt` via `tools/providers/registry.py` — see [providers.md](providers.md)), and runs recon/attack sessions.
 
 ### `app.py` / the WebUI API daemon
 
@@ -59,7 +59,7 @@ autopilot, swarm, and model selection flows. It loads `config.yaml`, starts or c
 plus the bundled SPA when `api.serve_webui` is true. See `docs/api/` for the
 endpoint reference.
 
-Important functions (`main.py:342-430` `parse_args`; `tools/config_cli.py:30` `load_config`; `tools/mcp_session.py:117` `open_exploit_mcp_session`; `tools/mcp_session.py:609` `start_exploit_http_server`; `tools/exploit_session.py:70` `run_exploit_session`; `tools/safety_review_cli.py` `run_safety_review`; `tools/recon_assessment_cli.py` `run_recon_assessment`; `main.py:566` `async_main`):
+Important functions (`main.py:342-635` `parse_args`; `tools/config_cli.py:30` `load_config`; `tools/mcp_session.py:117` `open_exploit_mcp_session`; `tools/mcp_session.py:609` `start_exploit_http_server`; `tools/exploit_session.py:70` `run_exploit_session`; `tools/safety_review_cli.py` `run_safety_review`; `tools/recon_assessment_cli.py` `run_recon_assessment`; `main.py:566` `async_main`):
 
 Note: `open_exploit_mcp_session` and several of the functions above are re-wrapped/imported from the Flow A CLI orchestration layer — a set of top-level `tools/*.py` modules (`config_cli.py`, `cli_exploit_settings.py`, `exploit_session.py`, `mcp_session.py`, `recon_assessment_cli.py`, `resume_state.py`, `safety_review_cli.py`, `skills_cli.py`, `swarm_bridge.py`) extracted from `main.py` during the cleanup. See "## Flow A CLI Orchestration Layer" below.
 
@@ -86,7 +86,7 @@ Commands:
 - `mcp_server.py` (`mcp_server.py:346-349` HTTP `8000`): defensive scanner surface. Tools are scope-aware and focused on nmap, limited terminal commands, and vulnerability intelligence.
 - `mcp_exploit_server.py` (`mcp_exploit_server.py:76-184` wiring `create_mcp_server`; `206-208` default `8001`): thin exploit MCP wiring layer. It parses CLI args, loads config, creates shared services and the `FastMCP` instance, registers every tool family via `tools/mcp_tools/registry.py:collect_tools()` (pkgutil auto-discovery of `register_*_tools` + AST decorator validation), and runs the server.
 - `mcp_engine_server.py` (`mcp_engine_server.py:200-203` HTTP `8002`): advisory engine server for foreign assistants (`search_skills`, `get_skill`, `cve_lookup`, `list_runs`, `get_run`).
-- `tools/mcp_tools/` (27 families — 20 in `tools/mcp_tools/*.py` + 7 in `tools/mcp_tools/modules/*.py`: web, synthesis, planning, hash, campaign, adaptive, etc. — `mcp_exploit_server.py:40-64` imports): terminal/workspace, research, runtime skills, peer models, Metasploit, credentials, payloads, recon, attack modules, sessions, domain, cracking, web_scan, assessment_state, parallel_agents, poc_verifier, replay_simulator, mitre, ad. `registry.py:104-112` `ToolContext` wiring + `registry.py:478-495` shared helpers.
+- `tools/mcp_tools/` (~30 families auto-discovered via `tools/mcp_tools/registry.py:collect_tools()` — terminal, workspace, recon, research, attack_modules, metasploit, payloads, web_scan, cracking, credentials, sessions, domain, runtime_skills, peer_models, killchain/snapshots (opt-in), browser, mitre, operator_connection, etc.). `registry.py` `ToolContext` wiring + shared helpers.
 
 The exploit server intentionally says its tools are gated at the policy layer, not in the server itself. Treat `tools.exploit_agent.ExploitPolicy` as the control point for tool approval. Tool modules must still keep their existing defense-in-depth gates such as allowlist checks, audit logging, command preflight, workspace containment, credential redaction, and research API-key gating.
 

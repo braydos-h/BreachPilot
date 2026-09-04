@@ -2,10 +2,17 @@
 
 ## Prerequisites
 
-- **Python 3.11+** (`pyproject.toml:11` `requires-python = ">=3.11"`; `tools/doctor.py:31` rejects <3.11, CI matrix 3.11–3.13).
-- `nmap` on `PATH` (or set `nmap.path` in `config.yaml`).
-- An Ollama endpoint: **cloud is the default** (`https://api.ollama.com`, needs `OLLAMA_API_KEY`) or a local daemon (`ollama.host: http://localhost:11434`). Embeddings stay local via `ollama.embed_host` (`http://localhost:11434`).
-- Optional external tools depending on feature area: Metasploit, `searchsploit`, `tmux`/session tooling on Unix-like systems, and package managers used by install tools.
+| Need | Minimum | Notes |
+|------|---------|-------|
+| Python | 3.11+ (`pyproject.toml` `requires-python = ">=3.11"`; `tools/doctor.py:31` rejects older; CI 3.11–3.13) | `python --version` |
+| Docker | Docker Desktop (Win/macOS) or Engine (Linux) + image `breachpilot-sandbox:latest` | Sandbox is default-on; without it attacks degrade to native (`sandbox.fallback_native: true`) or block (`false`). Build: `docker build -t breachpilot-sandbox:latest docker/sandbox` |
+| Node.js + npm | Node 18+ | Only for first WebUI build (`webui/dist/` auto-built, ~600s timeout) |
+| nmap | On `PATH` or `nmap.path` in `config.yaml` | Linux `-O`/`-sS` need root (`nmap.sudo: true` with `sudo -n`) or `nmap.priv_fallback` auto-downgrade |
+| Ollama endpoint | Cloud default (`https://api.ollama.com` + `OLLAMA_API_KEY`) or local (`http://localhost:11434`) | Embeddings stay local via `ollama.embed_host`. Alt providers: `opencode_go` (`OPENCODE_GO_API_KEY`), `chatgpt` (browser OAuth, tokens in `~/.codex/auth.json` — never config) |
+| Disk / rights | ~4GB free, admin for `install.bat`/winget (Win) or apt (Linux) | Git required for clone |
+| Optional | Metasploit, `searchsploit`, `tmux`, impacket/hydra (Linux Kali arsenal; Windows = Python-only exploits) | Probed at boot (`tools/env_probe.py`); agent pivots to Python fallbacks |
+
+> **Auth trifecta (don't conflate):** (a) model keys → `secr.json`/env (`OLLAMA_API_KEY`, `OPENCODE_GO_API_KEY`, `NVD_API_KEY`, `GITHUB_TOKEN`, `SERPAPI_API_KEY` — app never auto-loads `.env`); (b) WebUI bearer → `.webui_secret_key`/`BREACHPILOT_API_TOKEN` + WS `{"auth":…}` (HTTP 401 vs WS 4401); (c) scope → `allowed_targets`/`EXPLOIT_TARGET` (`BLOCKED` = off-allowlist destination vs `SCOPE_DENIED` = `forbidden_actions`/`disallowed_assets` vs `SANDBOX_*` = execution containment).
 
 ## Setup
 
@@ -56,13 +63,14 @@ python -m pip install -e ".[dev]"
 
 ## First Commands
 
-Run environment checks:
+Run environment checks (expected: all `[OK]`, exit 0; failures name the subsystem + hint):
 
 ```bash
 python main.py --doctor
 ```
 
-Run the safe localhost smoke test:
+Run the safe localhost smoke test (localhost-only, `read_only`, writes
+`reports/self_test_<run_id>/self_test_report.{json,md}`):
 
 ```bash
 python main.py --self-test
@@ -86,6 +94,21 @@ Run recon against an explicitly allowed target:
 ```bash
 python main.py --target 127.0.0.1 --mode recon --goal initial_access --yes
 ```
+
+### Lab target for your first exploit (copy-paste victim)
+
+Never scan a host you don't own. For a local victim:
+
+```bash
+docker run --rm -p 8080:80 vulnerables/web-dvwa   # DVWA on http://127.0.0.1:8080
+# or: python main.py --demo   # Docker DVWA on 127.0.0.1:8081, synthetic HTTP fallback, writes reports/demo/
+```
+
+Then allowlist it (`config.yaml` `exploit.allowed_targets: [127.0.0.1]` covers
+loopback; add LAN IPs explicitly) and run:
+`python main.py --target 127.0.0.1 --mode attack --goal initial_access`.
+Expect `quick_scan` output → goal suggestion → `ALLOW <target>` gate (in
+`approve_only`) → milestones under `reports/<run_id>/` + `exploit_audit.jsonl`.
 
 Run the workflow CLI:
 

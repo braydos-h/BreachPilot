@@ -23,6 +23,7 @@ import { ReconAssessmentCard } from "@/components/ReconAssessmentCard";
 import { GoalSuggestionCard } from "@/components/GoalSuggestionCard";
 import { apiFetch } from "@/api/client";
 import { formatElapsed, formatTokens, safeStringify } from "@/lib/format";
+import { buildEventRows, type EventRowDef, type EventRowFilter } from "@/components/events/eventRows";
 import type { EventReplayResponse, RunEvent, SuggestedGoal, ReconAssessment } from "@/api/types";
 import type { DecisionListRow } from "@/api/types";
 import type { WsStatus } from "@/api/ws";
@@ -55,66 +56,11 @@ const FILTERS = [
 
 type FilterKey = (typeof FILTERS)[number]["key"];
 
-function matchesFilter(type: string, filter: FilterKey): boolean {
-  switch (filter) {
-    case "all":
-      return true;
-    case "tools":
-      return type === "tool_request" || type === "tool_start" || type === "tool_result";
-    case "assistant":
-      return type === "assistant";
-    case "decisions":
-      return type === "approval";
-    case "errors":
-      return type === "error";
-    case "progress":
-      return type === "progress";
-  }
-}
-
-interface ToolGroup {
-  correlationId: string;
-  toolName: string;
-  started: boolean;
-  completed: boolean;
-  result?: string;
-  error?: string;
-  arguments?: unknown;
-  timestamp?: string;
-  searchText: string;
-}
-
-function corrIdOf(event: RunEvent): string {
-  const payload = event.payload ?? {};
-  // The backend emits a stable `action` counter per tool call across
-  // tool_request/tool_start/tool_result (tools/exploit_agent/loop.py).
-  // Prefer it over name-sequence which differs per event stage.
-  if (typeof payload.action === "number" && payload.action > 0) {
-    return `action-${payload.action}`;
-  }
-  const candidate =
-    payload.correlation_id ?? payload.call_id ?? payload.tool_call_id ?? payload.request_id;
-  if (typeof candidate === "string" && candidate) return candidate;
-  if (typeof payload.name === "string" && payload.name) return `${payload.name}-${event.sequence}`;
-  return `tool-${event.sequence}`;
-}
-
-function payloadText(event: RunEvent): string {
-  try {
-    return `${event.type} ${JSON.stringify(event.payload ?? {})} ${event.timestamp ?? ""}`.toLowerCase();
-  } catch {
-    return event.type;
-  }
-}
-
-interface Row {
-  key: string;
-  node: React.ReactNode;
-  /** Lowercased searchable text for the free-text filter. */
-  searchText: string;
-}
-
 const NEAR_BOTTOM_PX = 40;
+
+// ponytail: cap the client-side older-events window so "load older" paging
+// can't grow the rows scan unbounded on 10k+ event runs (history stays server-side).
+const MAX_OLDER_EVENTS = 2000;
 
 export function EventViewer({
   events,
@@ -156,120 +102,53 @@ export function EventViewer({
     setBootDismissed(false);
   }, [runId]);
 
-  const rows = useMemo<Row[]>(() => {
-    const merged = [...older, ...events];
-    const q = debouncedQuery.trim().toLowerCase();
+  const decisionsById = useMemo(() => new Map(decisions.map((d) => [d.id, d])), [decisions]);
+  const goalSelectAnswered = useMemo(
+    () => decisions.some((d) => d.kind === "goal_select" && d.status !== "pending"),
+    [decisions],
+  );
 
-    const toolGroups = new Map<string, ToolGroup>();
-    const decisionIds = new Set<string>();
+  // ponytail: light data rows here; React nodes are created lazily per visible
+  // row in renderRow so each live batch costs one cheap scan, not N elements.
+  const rows = useMemo<EventRowDef[]>(
+    () =>
+      buildEventRows({
+        older,
+        events,
+        decisionsById,
+        goalSelectAnswered,
+        filter: filter as EventRowFilter,
+        query: debouncedQuery,
+      }),
+    [older, events, decisionsById, goalSelectAnswered, filter, debouncedQuery],
+  );
 
-    for (const event of merged) {
-      if (event.type === "tool_request" || event.type === "tool_start" || event.type === "tool_result") {
-        const id = corrIdOf(event);
-        const existing = toolGroups.get(id);
-        const name =
-          (event.payload.name as string | undefined) ?? existing?.toolName ?? `tool-${event.sequence}`;
-        if (!existing) {
-          toolGroups.set(id, {
-            correlationId: id,
-            toolName: name,
-            started: event.type === "tool_start",
-            completed: false,
-            arguments: event.type === "tool_request" ? event.payload.arguments : undefined,
-            timestamp: event.timestamp,
-            searchText: "",
-          });
-        } else {
-          if (event.type === "tool_start") existing.started = true;
-          if (event.type === "tool_request" && event.payload.arguments !== undefined) {
-            existing.arguments = event.payload.arguments;
-          }
-          if (event.type === "tool_result") {
-            existing.completed = true;
-            existing.result = typeof event.payload.result === "string" ? event.payload.result : undefined;
-            const success = event.payload.success;
-            const errStr = typeof event.payload.error === "string" ? event.payload.error : undefined;
-            existing.error = success === false ? (errStr ?? "tool failed") : errStr;
-          }
-        }
-        if (existing) {
-          existing.searchText = payloadText(event);
-        }
-        continue;
+  const renderRow = useCallback(
+    (row: EventRowDef): React.ReactNode => {
+      if (row.kind === "tool") {
+        const g = row.group;
+        return (
+          <ToolCallCard
+            toolName={g.toolName}
+            arguments={g.arguments}
+            result={g.result}
+            error={g.error}
+            started={g.started}
+            completed={g.completed}
+            timestamp={g.timestamp}
+            className="mb-2"
+          />
+        );
       }
-      if (event.type === "approval") {
-        const decisionId = event.payload.decision_id;
-        if (typeof decisionId === "string") decisionIds.add(decisionId);
+      if (row.kind === "approval") {
+        const decision = decisionsById.get(row.decisionId);
+        if (!decision || decision.status !== "pending") return null;
+        return <DecisionCard key={`approval-${row.decisionId}`} decision={decision} runId={runId} className="mb-2" />;
       }
-    }
-
-    const out: Row[] = [];
-    const goalSelectAnswered = decisions.some(
-      (d) => d.kind === "goal_select" && d.status !== "pending",
-    );
-
-    const maybePush = (row: Row) => {
-      if (q && !row.searchText.includes(q)) return;
-      out.push(row);
-    };
-
-    for (const event of merged) {
-      if (event.type === "boot" || event.type === "ok") continue;
-      if (event.type === "tool_request" || event.type === "tool_start" || event.type === "tool_result") {
-        if (filter !== "all" && filter !== "tools") continue;
-        if (event.type !== "tool_request") continue;
-        const id = corrIdOf(event);
-        const group = toolGroups.get(id);
-        if (!group) continue;
-        group.searchText += ` ${group.toolName} ${safeStringify(group.arguments)} ${group.result ?? ""} ${group.error ?? ""}`.toLowerCase();
-        maybePush({
-          key: `tool-${id}`,
-          searchText: group.searchText,
-          node: (
-            <ToolCallCard
-              toolName={group.toolName}
-              arguments={group.arguments}
-              result={group.result}
-              error={group.error}
-              started={group.started}
-              completed={group.completed}
-              timestamp={group.timestamp}
-              className="mb-2"
-            />
-          ),
-        });
-        continue;
-      }
-      if (event.type === "approval") {
-        if (filter !== "all" && filter !== "decisions") continue;
-        const decisionId = event.payload.decision_id;
-        if (typeof decisionId !== "string") continue;
-        const decision = decisions.find((d) => d.id === decisionId);
-        if (!decision || decision.status !== "pending") continue;
-        maybePush({
-          key: `approval-${decisionId}`,
-          searchText: `${decision.kind} ${decision.required_text ?? ""} ${decision.options?.map((o) => (o as { name?: string }).name).join(" ") ?? ""}`.toLowerCase(),
-          node: (
-            <DecisionCard
-              key={`approval-${decisionId}`}
-              decision={decision}
-              runId={runId}
-              className="mb-2"
-            />
-          ),
-        });
-        continue;
-      }
-      if (event.type === "goal_suggestions" && goalSelectAnswered) continue;
-      if (!matchesFilter(event.type, filter)) continue;
-      maybePush({
-        key: `evt-${event.sequence}`,
-        searchText: payloadText(event),
-        node: renderSimpleEvent(event, `evt-${event.sequence}`),
-      });
-    }
-    return out;
-  }, [older, events, decisions, runId, filter, debouncedQuery]);
+      return renderSimpleEvent(row.event, row.key);
+    },
+    [decisionsById, runId],
+  );
 
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
@@ -343,7 +222,10 @@ export function EventViewer({
         `/runs/${encodeURIComponent(runId)}/events?before=${firstSeq}&limit=500`,
       );
       const prev = res.events ?? []; // newest-first per the backend
-      setOlder((o) => [...prev.slice().reverse(), ...o]);
+      setOlder((o) => {
+        const next = [...prev.slice().reverse(), ...o];
+        return next.length > MAX_OLDER_EVENTS ? next.slice(next.length - MAX_OLDER_EVENTS) : next;
+      });
       setHasMoreOlder(!!res.has_more_before);
     } catch {
       // Leave the window as-is; the banner already notes history is preserved.
@@ -506,7 +388,7 @@ export function EventViewer({
                     className="absolute left-0 top-0 w-full px-3 pt-1.5"
                     style={{ transform: `translateY(${virtualRow.start}px)` }}
                   >
-                    {row.node}
+                    {renderRow(row)}
                   </div>
                 );
               })}
