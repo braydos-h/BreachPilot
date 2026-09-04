@@ -110,15 +110,24 @@ async def run_self_test(args: Any) -> int:
     # tools.doctor._check_models docstring.
     configured_models = list(models_cfg.values())
     mcp_http = int(config.get("mcp", {}).get("http_port", 8001))
+    # Only probe Ollama when it is actually selected (chat or embeddings) --
+    # a zero-Ollama install on another provider must not fail self-test.
+    try:
+        from tools.config_manager import get_ai_provider
+
+        _active_provider = get_ai_provider(config)
+    except Exception:
+        _active_provider = "ollama"
+    _embeddings_provider = str((config.get("embeddings", {}) or {}).get("provider") or "none").lower()
+    _needs_ollama = _active_provider == "ollama" or _embeddings_provider == "ollama"
 
     env_checks = [
         _check_python(),
-        _check_imports(),
+        _check_imports(config),
         _check_nmap(),
         _check_workspace(Path("reports")),
         _check_config(config_path),
-        _check_ollama(ollama_host),
-        _check_models(ollama_host, configured_models),
+        *([_check_ollama(ollama_host), _check_models(ollama_host, configured_models)] if _needs_ollama else []),
         _check_port("127.0.0.1", mcp_http),
         _check_port("127.0.0.1", 8000),
     ]
