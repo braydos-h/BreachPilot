@@ -13,6 +13,7 @@ import type {
   ArtifactListResponse,
   AttackModulesResponse,
   AuditResponse,
+  BrowserCapabilityRecord,
   Capabilities,
   ChatgptLoginResponse,
   ChatgptProxyResponse,
@@ -361,6 +362,42 @@ export function useSandboxStatus() {
   return useQuery<SandboxStatusResponse>({
     queryKey: ["system", "sandbox"],
     queryFn: () => apiFetch<SandboxStatusResponse>("/system/sandbox"),
+    ...defaultQueryOptions,
+    staleTime: 30_000,
+  });
+}
+
+export interface BrowserHealth {
+  name: string;
+  ok: boolean;
+  detail: string;
+  playwright_present: boolean;
+  playwright_version: string;
+  chromium_present: boolean;
+}
+
+/** Playwright browser-agent status (System UI). Read-only; never launches. */
+export interface BrowserSystemStatus {
+  enabled: boolean;
+  backend: string;
+  available: boolean;
+  health: BrowserHealth;
+  capabilities: BrowserCapabilityRecord[];
+  config: {
+    headless: boolean;
+    max_sessions: number;
+    allow_mutating_actions: boolean;
+    capture_screenshots: boolean;
+    capture_network: boolean;
+    capture_console: boolean;
+  };
+}
+
+/** Browser-agent status (Advanced settings + status overview). Read-only. */
+export function useBrowserStatus() {
+  return useQuery<BrowserSystemStatus>({
+    queryKey: ["system", "browser"],
+    queryFn: () => apiFetch<BrowserSystemStatus>("/system/browser"),
     ...defaultQueryOptions,
     staleTime: 30_000,
   });

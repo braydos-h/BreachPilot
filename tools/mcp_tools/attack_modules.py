@@ -177,7 +177,9 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
             module_name: Name of the attack module (e.g., 'SSHBruteForce', 'Log4jRCE').
                          Use list_attack_modules to see all available modules.
             target_ip: IPv4 address of the target host.
-            options: Optional key=value pairs separated by spaces for module parameters.
+            options: Optional key=value pairs separated by spaces for module parameters
+                (e.g. "callback_host=10.0.0.5 timeout=30"). Parsed into the module
+                context parameters; unknown keys are ignored by modules that do not read them.
 
         Returns:
             Structured result: applicability score, success/failure, output summary,
@@ -226,23 +228,63 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     except (json.JSONDecodeError, KeyError):
                         pass
 
+            # Parse `options` ("k=v k=v", shlex) into ctx.parameters so
+            # parameterized modules (callback hosts, ports, wordlists) can
+            # read them. Unknown/malformed pairs are ignored, never fatal.
+            parameters: dict[str, str] = {}
+            if options and options.strip():
+                try:
+                    import shlex as _shlex
+
+                    for pair in _shlex.split(options):
+                        if "=" in pair:
+                            k, v = pair.split("=", 1)
+                            if k.strip():
+                                parameters[k.strip()] = v
+                except Exception:  # noqa: BLE001 -- options parse is best-effort
+                    parameters = {}
+
+            # Thread recovered credentials for this target so cred-gated
+            # modules (PassTheHash, DCSyncAttack, LateralMovement, ...) score
+            # and behave differently when creds exist. Best-effort: a vault
+            # read failure leaves credentials empty, never breaks the call.
+            credentials: list[dict[str, str]] = []
+            try:
+                from tools.credential_store import CredentialStore
+
+                store = CredentialStore(workspace)
+                for rec in store.credentials_for_host(target_ip):
+                    entry: dict[str, str] = {"username": rec.username}
+                    if rec.password:
+                        entry["password"] = rec.password
+                    credentials.append(entry)
+            except Exception:  # noqa: BLE001
+                credentials = []
+
             ctx = ModuleContext(
                 target_ip=target_ip,
                 target_os=target_os,
                 services=services,
                 cves=cves,
                 workspace=workspace,
+                credentials=credentials,
+                parameters=parameters,
             )
 
             # Check applicability
             score = module.applicability(ctx)
             if score == 0:
+                try:
+                    report = module.applicability_explain(ctx)
+                    why = "; ".join(report.penalties) or "no match"
+                except Exception:  # noqa: BLE001
+                    why = "Module does not match any known services or CVEs on this target."
                 return (
                     f"MODULE_RESULT: not_applicable\n"
                     f"MODULE: {module_name}\n"
                     f"TARGET: {target_ip}\n"
                     f"APPLICABILITY_SCORE: 0\n"
-                    f"REASON: Module does not match any known services or CVEs on this target."
+                    f"REASON: {why}"
                 )
 
             # Execute module
@@ -302,6 +344,24 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 lines.append(f"EVIDENCE: {'; '.join(str(e) for e in result['evidence'])}")
             if result.get("references"):
                 lines.append(f"REFERENCES: {'; '.join(str(r) for r in result['references'])}")
+            if result.get("confidence") is not None:
+                lines.append(f"CONFIDENCE: {result['confidence']}")
+            if result.get("verdict") not in (None, "", "inconclusive"):
+                lines.append(f"VERDICT: {result['verdict']}")
+            # Advisory extras previously invisible to MCP callers (workflow /
+            # techniques / prompt carriers / produced artifacts / follow-ups).
+            if result.get("workflow"):
+                steps = result["workflow"]
+                steps_txt = "; ".join(str(s) for s in steps) if isinstance(steps, list) else str(steps)
+                lines.append(f"WORKFLOW: {steps_txt[:2000]}")
+            if result.get("techniques"):
+                lines.append(f"TECHNIQUES: {str(result['techniques'])[:2000]}")
+            if result.get("produced_artifacts"):
+                lines.append(f"PRODUCED_ARTIFACTS: {'; '.join(str(a) for a in result['produced_artifacts'])}")
+            if result.get("follow_ups"):
+                lines.append(f"FOLLOW_UPS: {'; '.join(str(f) for f in result['follow_ups'])}")
+            if result.get("prompt_template"):
+                lines.append(f"PROMPT_TEMPLATE:\n{str(result['prompt_template'])[:2000]}")
             if script_path:
                 lines.append(f"SCRIPT_SAVED: {script_path}")
             if result.get("script"):

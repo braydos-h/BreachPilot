@@ -3,14 +3,15 @@
 // Zone at the very bottom.
 
 import { useState } from "react";
-import { Loader2, RefreshCw, ShieldCheck, Stethoscope, Wrench } from "lucide-react";
+import { Globe, Loader2, RefreshCw, ShieldCheck, Stethoscope, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SettingsSection } from "./SettingsSection";
 import { ConfigEditor } from "./ConfigEditor";
 import { DangerZone } from "./DangerZone";
-import { useDiagnostics, useSandboxStatus, useSystemInfo, useTelemetry } from "@/api/hooks";
+import { useBrowserStatus, useDiagnostics, useSandboxStatus, useSystemInfo, useTelemetry } from "@/api/hooks";
+import type { BrowserHealth } from "@/api/hooks";
 import { ApiError } from "@/api/client";
 import { formatRelative } from "@/lib/utils";
 import { SkeletonRows } from "@/components/Loading";
@@ -31,6 +32,12 @@ export function AdvancedSettings() {
         description="Disposable Docker worker that contains every attack command. Read-only status; no Docker controls."
       >
         <SandboxPanel />
+      </SettingsSection>
+      <SettingsSection
+        title="Browser agent"
+        description="Sandboxed Chromium for JS-heavy web targets. Read-only status; enable via browser.enabled in config."
+      >
+        <BrowserPanel />
       </SettingsSection>
       <SettingsSection title="Diagnostics" description="Run the doctor or self-test.">
         <Diagnostics />
@@ -123,6 +130,95 @@ function SandboxPanel() {
           {data.note && <p className="text-xs text-muted-foreground">{data.note}</p>}
         </>
       )}
+    </div>
+  );
+}
+
+function BrowserPanel() {
+  const browser = useBrowserStatus();
+  const data = browser.data;
+
+  return (
+    <div className="space-y-3 py-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Playwright Chromium</span>
+        <Button size="sm" variant="ghost" onClick={() => browser.refetch()} disabled={browser.isFetching}>
+          <RefreshCw className={cn("h-3.5 w-3.5", browser.isFetching && "animate-spin")} />
+        </Button>
+      </div>
+      {browser.isLoading && <SkeletonRows count={4} className="p-2" />}
+      {browser.error && <div className="text-sm text-destructive">Failed to load browser status.</div>}
+      {data && (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            {!data.enabled ? (
+              <Badge variant="warn">Disabled</Badge>
+            ) : data.available ? (
+              <Badge variant="success">
+                <Globe className="mr-1 h-3 w-3" />
+                Ready ({data.backend})
+              </Badge>
+            ) : (
+              <Badge variant="danger">Not ready</Badge>
+            )}
+            <span className="text-xs text-muted-foreground">{data.health?.detail || ""}</span>
+          </div>
+          {data.enabled && !data.available && <BrowserSetupHints health={data.health} />}
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <Stat label="Backend" value={data.backend || "—"} />
+            <Stat label="Headless" value={data.config.headless ? "yes" : "no"} />
+            <Stat label="Max sessions" value={String(data.config.max_sessions)} />
+            <Stat label="Mutating JS" value={data.config.allow_mutating_actions ? "allowed (lab)" : "blocked"} />
+            <Stat label="Screenshots" value={data.config.capture_screenshots ? "on" : "off"} />
+            <Stat label="Network capture" value={data.config.capture_network ? "on" : "off"} />
+            <Stat label="SDK" value={data.health?.playwright_present ? (data.health.playwright_version || "installed") : "missing"} />
+            <Stat label="Chromium" value={data.health?.chromium_present ? "installed" : "missing"} />
+          </div>
+          {data.capabilities.length > 0 && (
+            <div>
+              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Capabilities</span>
+              <ul className="mt-1.5 grid gap-1 sm:grid-cols-2">
+                {data.capabilities.map((cap) => (
+                  <li key={cap.name} className="flex items-start gap-1.5 text-xs">
+                    <span
+                      aria-hidden
+                      className={cn(
+                        "mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full",
+                        cap.available ? "bg-emerald-400" : "bg-muted-foreground/40",
+                      )}
+                    />
+                    <span>
+                      <span className="font-mono">{cap.name}</span>
+                      <span className="text-muted-foreground"> — {cap.description}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function BrowserSetupHints({ health }: { health: BrowserHealth | undefined }) {
+  const hints: string[] = [];
+  if (health && !health.playwright_present) hints.push('python -m pip install -e ".[browser]"');
+  if (health && health.playwright_present && !health.chromium_present)
+    hints.push("python -m playwright install chromium");
+  if (hints.length === 0)
+    hints.push(
+      "docker build -t breachpilot-sandbox:browser -f docker/sandbox/Dockerfile.browser docker/sandbox",
+    );
+  return (
+    <div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 p-2 text-xs">
+      <p>The browser backend is enabled but not runnable — tools stay unregistered (fail closed).</p>
+      {hints.map((hint) => (
+        <pre key={hint} className="mt-1 overflow-x-auto font-mono text-xs scrollbar-thin">
+          {hint}
+        </pre>
+      ))}
     </div>
   );
 }

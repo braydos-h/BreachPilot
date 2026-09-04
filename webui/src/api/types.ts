@@ -55,6 +55,22 @@ export interface Capabilities {
     kinds: RunKind[];
     flags: string[];
   };
+  /** Browser-agent capability block (absent on older daemons). */
+  browser?: BrowserCapabilitiesStatus;
+}
+
+export interface BrowserCapabilityRecord {
+  name: string;
+  description: string;
+  read_only: boolean;
+  available: boolean;
+}
+
+export interface BrowserCapabilitiesStatus {
+  enabled: boolean;
+  backend: string;
+  available: boolean;
+  capabilities: BrowserCapabilityRecord[];
 }
 
 export interface GoalPreset {
