@@ -149,6 +149,7 @@ without any Docker probing.
 | Impacket / SMB tooling | sandbox |
 | hashcat / john | sandbox when the worker image provides them (GPU passthrough is out of scope; document CPU-only runs) |
 | Exploit scripts / general terminal commands | sandbox |
+| Browser ops (`browser_*`: navigate/observe/screenshot/JS) | sandbox browser worker (`breachpilot-sandbox:browser`: base worker + Playwright/Chromium; one Chromium op per docker exec, strict fail-closed — never host fallback, never the native fallback) |
 | Recon pipeline (host-side, no agent-generated code execution) | host (unchanged, scope-gated) |
 | PoC verifier (`poc_verifier`) compile gate | host docker (isolated, network `none` — pre-existing separate mechanism) |
 
@@ -159,14 +160,20 @@ mission-specific tooling. Do not add host fallbacks.
 ### Planned families
 
 `tools/sandbox/family_audit.py` also carries `PLANNED_FAMILIES` — tool
-families whose architecture exists but whose execution is not implemented.
-The future **browser** family is registered there with the pre-committed
-containment contract: when a browser backend lands it MUST be registered as
-`sandboxed` (or a documented host exception) and MUST execute inside an
-isolated browser worker obeying the effective target allowlist — no host
-fallback. Planned families emit no audit rows and never count as audit
-problems (see `tests/test_browser_sandbox_family.py`). Design:
-[docs/browser-agent-design.md §8](browser-agent-design.md).
+families whose architecture exists but whose execution is not implemented
+(empty today: the **browser** family graduated to `SANDBOXED_FAMILIES` when
+the Playwright backend landed — Chromium runs one op per docker exec inside
+the worker netns via `SandboxPlaywrightLauncher`, obeying the effective
+target allowlist with no host fallback). Planned families emit no audit rows
+and never count as audit problems (see `tests/test_browser_sandbox_family.py`).
+Design: [docs/browser-agent-design.md §8](browser-agent-design.md).
+
+To run the browser agent contained, point the worker at the browser variant
+(a strict superset of the base image, so terminal/Python execution is unchanged):
+
+```bash
+docker build -t breachpilot-sandbox:browser -f docker/sandbox/Dockerfile.browser docker/sandbox
+```
 
 ## Worker image
 

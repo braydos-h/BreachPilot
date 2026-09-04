@@ -80,8 +80,7 @@ def _session_for(manager: Any, session_id: str, target: str) -> tuple[Any, str]:
         return None, f"ERROR: unknown browser session {session_id!r}."
     if target and session.target_ip and session.target_ip != target:
         return None, (
-            f"BLOCKED: browser session {session_id!r} is locked to target {session.target_ip} "
-            f"(not {target})."
+            f"BLOCKED: browser session {session_id!r} is locked to target {session.target_ip} (not {target})."
         )
     return session, ""
 
@@ -90,7 +89,7 @@ def _url_host_allowed(url: str, config: Any) -> str:
     """Return a BLOCKED reason when the URL's host is outside the allowlist."""
     try:
         host = urllib.parse.urlparse((url or "").strip()).hostname or ""
-    except Exception:  # noqa: BLE001 — unparsable URL is a denial, not a crash
+    except Exception:  # noqa: BLE001 — unparsable URL is a denial, not a crash  # ponytail: bare except intentional
         return f"BLOCKED: could not parse URL {url!r}."
     if not host:
         return f"BLOCKED: URL {url!r} has no host."
@@ -103,7 +102,6 @@ def _url_host_allowed(url: str, config: Any) -> str:
 def _browser_error_text(exc: Exception, *, tool_name: str = "") -> str:
     """Render a typed browser failure as a model-readable result string."""
     from tools.browser.errors import BrowserBackendError, browser_error_from_exception
-
     from tools.sandbox.exceptions import SandboxError
 
     if isinstance(exc, SandboxError):
@@ -158,7 +156,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
             import asyncio as _asyncio
 
             session = _asyncio.run(manager.start_session_async(target_ip=target, run_id=run_id, headless=headless))
-        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result
+        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result  # ponytail: bare except intentional
             return _browser_error_text(exc, tool_name="browser_start")
         return (
             f"SESSION_STARTED: {session.session_id}\n"
@@ -190,11 +188,14 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
             result = _asyncio.run(
                 manager.run_op(
-                    _session.session_id, "navigate", run_id=_session.run_id,
-                    url=url.strip(), timeout_seconds=timeout_seconds,
+                    _session.session_id,
+                    "navigate",
+                    run_id=_session.run_id,
+                    url=url.strip(),
+                    timeout_seconds=timeout_seconds,
                 )
             )
-        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result
+        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result  # ponytail: bare except intentional
             return _browser_error_text(exc, tool_name="browser_navigate")
         meta = result.metadata or {}
         chain = meta.get("redirect_chain") or [url]
@@ -232,11 +233,14 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
             observation = _asyncio.run(
                 manager.run_op(
-                    _session.session_id, "observe", run_id=_session.run_id,
-                    include_forms=include_forms, include_endpoints=include_endpoints,
+                    _session.session_id,
+                    "observe",
+                    run_id=_session.run_id,
+                    include_forms=include_forms,
+                    include_endpoints=include_endpoints,
                 )
             )
-        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result
+        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result  # ponytail: bare except intentional
             return _browser_error_text(exc, tool_name="browser_observe")
         payload = dict(observation.payload or {})
         lines = [
@@ -281,7 +285,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
             import asyncio as _asyncio
 
             state = _asyncio.run(manager.run_op(_session.session_id, "get_page_state", run_id=_session.run_id))
-        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result
+        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result  # ponytail: bare except intentional
             return _browser_error_text(exc, tool_name="browser_page_state")
         return (
             f"PAGE: {state.final_url or state.url}\n"
@@ -310,11 +314,14 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
             events = _asyncio.run(
                 manager.run_op(
-                    _session.session_id, "get_network_events", run_id=_session.run_id,
-                    limit=limit, after_id=after_id,
+                    _session.session_id,
+                    "get_network_events",
+                    run_id=_session.run_id,
+                    limit=limit,
+                    after_id=after_id,
                 )
             )
-        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result
+        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result  # ponytail: bare except intentional
             return _browser_error_text(exc, tool_name="browser_network_events")
         lines = [f"NETWORK_EVENTS: {len(events)}"]
         for event in events[-50:]:
@@ -348,7 +355,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
             snapshot = _asyncio.run(
                 manager.run_op(_session.session_id, "get_storage", run_id=_session.run_id, origin=origin)
             )
-        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result
+        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result  # ponytail: bare except intentional
             return _browser_error_text(exc, tool_name="browser_storage")
         redacted = snapshot.to_dict()
         lines = [f"STORAGE: origin={redacted['origin']} entries={len(redacted['entries'])}"]
@@ -383,7 +390,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     _session.session_id, "capture_screenshot", run_id=_session.run_id, artifact_path=artifact_path
                 )
             )
-        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result
+        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result  # ponytail: bare except intentional
             return _browser_error_text(exc, tool_name="browser_screenshot")
         return (
             f"SCREENSHOT: {artifact.path}\nSHA256: {artifact.sha256}\nBYTES: {artifact.size_bytes}\n"
@@ -428,7 +435,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
             result = _asyncio.run(
                 manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=action)
             )
-        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result
+        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result  # ponytail: bare except intentional
             return _browser_error_text(exc, tool_name="browser_execute_js")
         if not result.success:
             return _browser_error_text(
@@ -468,7 +475,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
             result = _asyncio.run(
                 manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=action)
             )
-        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result
+        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result  # ponytail: bare except intentional
             return _browser_error_text(exc, tool_name="browser_discover_forms")
         forms = (result.metadata or {}).get("forms") or []
         lines = [f"FORMS: {len(forms)}"]
@@ -504,7 +511,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
             result = _asyncio.run(
                 manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=action)
             )
-        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result
+        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result  # ponytail: bare except intentional
             return _browser_error_text(exc, tool_name="browser_discover_endpoints")
         meta = result.metadata or {}
         endpoints = meta.get("endpoints") or []

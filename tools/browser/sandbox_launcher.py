@@ -21,7 +21,6 @@ This module never imports ``playwright`` itself (worker-side only).
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import logging
 import uuid
@@ -251,7 +250,9 @@ class SandboxPlaywrightLauncher:
         self._states[token] = {"last_url": "", "cookies": [], "storage_seed": {}, "pending_net": []}
         return token
 
-    async def _exec(self, payload: dict[str, Any], *, timeout_s: float, target_ip: str, tool_name: str) -> dict[str, Any]:
+    async def _exec(
+        self, payload: dict[str, Any], *, timeout_s: float, target_ip: str, tool_name: str
+    ) -> dict[str, Any]:
         import json as _json
 
         argv = ["python3", "-c", self._script, _json.dumps(payload, default=str)]
@@ -395,7 +396,9 @@ class SandboxPlaywrightLauncher:
         except Exception as exc:
             raise BrowserCrashed(f"browser worker returned corrupt screenshot bytes: {exc}") from exc
 
-    async def take_network(self, token: str, *, body_sample_max_bytes: int = 4096, target_ip: str = "") -> list[dict[str, Any]]:  # noqa: ARG002
+    async def take_network(
+        self, token: str, *, body_sample_max_bytes: int = 4096, target_ip: str = ""
+    ) -> list[dict[str, Any]]:  # noqa: ARG002
         state = self._state(token)
         pending = list(state["pending_net"])
         state["pending_net"].clear()

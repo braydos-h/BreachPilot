@@ -831,6 +831,8 @@ class S3BucketTakeover(AttackModule):
     target_ports = [80, 443, 8080, 8443, 3000, 5000]
     required_cves: list[str] = []
     # Capability metadata: post-foothold S3 bucket takeover (active, writes marker).
+    # (Kept foothold-gated per the privesc-family contract
+    # tests/test_module_capability_metadata_b.py; the allowlist gates hosts.)
     requires = ["foothold"]
     produces = ["credentials", "high_priv"]
     read_only = False

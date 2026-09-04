@@ -58,36 +58,67 @@ def playwright_version() -> str:
         return ""
 
 
-def _browsers_dir() -> Path:
-    """Playwright browser-download root (respects PLAYWRIGHT_BROWSERS_PATH)."""
+def _browsers_dirs() -> list[Path]:
+    """Candidate Playwright browser-download roots (platform-aware).
+
+    Respects ``PLAYWRIGHT_BROWSERS_PATH`` first, then the per-OS defaults
+    (Windows ``%LOCALAPPDATA%/ms-playwright``, macOS
+    ``~/Library/Caches/ms-playwright``, Linux ``~/.cache/ms-playwright``).
+    """
+    dirs: list[Path] = []
     override = (os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "") or "").strip()
     if override:
-        return Path(override)
-    return Path.home() / ".cache" / "ms-playwright"
+        dirs.append(Path(override))
+    local_app_data = (os.environ.get("LOCALAPPDATA", "") or "").strip()
+    if local_app_data:
+        dirs.append(Path(local_app_data) / "ms-playwright")
+    home = Path.home()
+    dirs.append(home / "AppData" / "Local" / "ms-playwright")  # Windows fallback
+    dirs.append(home / "Library" / "Caches" / "ms-playwright")  # macOS
+    dirs.append(home / ".cache" / "ms-playwright")  # Linux
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for candidate in dirs:
+        key = str(candidate).lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(candidate)
+    return unique
+
+
+#: Executable layouts that count as a usable Chromium runtime (full Chromium
+#: on every OS plus the headless shell, which is sufficient for headless use).
+_CHROMIUM_EXECUTABLE_GLOBS = (
+    "chromium-*/chrome-linux/chrome",
+    "chromium-*/chrome-win/chrome.exe",
+    "chromium-*/chrome-win64/chrome.exe",
+    "chromium-*/chrome-mac/Chromium.app/Contents/MacOS/Chromium",
+    "chromium_headless_shell-*/chrome-linux/headless_shell",
+    "chromium_headless_shell-*/chrome-win/headless_shell.exe",
+    "chromium_headless_shell-*/chrome-win64/headless_shell.exe",
+)
 
 
 def chromium_present(*, executable_path: str = "") -> bool:
     """Whether a Chromium runtime looks installed (file probe, no launch).
 
     Checks an explicit ``browser.executable_path`` override first, then the
-    standard Playwright download layout (``chromium-*/chrome-linux/chrome``).
-    A missing SDK always reports absent — the heuristic only runs when the
-    package that owns the layout is installed.
+    standard Playwright download layouts on every OS. A missing SDK always
+    reports absent — the heuristic only runs when the package that owns the
+    layout is installed.
     """
     try:
         if executable_path.strip() and Path(executable_path.strip()).is_file():
             return True
         if not playwright_present():
             return False
-        root = _browsers_dir()
-        if not root.is_dir():
-            return False
-        for candidate in sorted(root.glob("chromium-*/chrome-linux/chrome")):
-            if candidate.is_file():
-                return True
-        for candidate in sorted(root.glob("chromium-*/chrome-win/chrome.exe")):
-            if candidate.is_file():
-                return True
+        for root in _browsers_dirs():
+            if not root.is_dir():
+                continue
+            for pattern in _CHROMIUM_EXECUTABLE_GLOBS:
+                for candidate in sorted(root.glob(pattern)):
+                    if candidate.is_file():
+                        return True
         return False
     except Exception:  # noqa: BLE001 — probe must never raise
         return False

@@ -98,8 +98,9 @@ class SMBRelay(AttackModule):
     target_services = ["microsoft-ds", "smb", "netbios-ssn"]
     target_ports = [445, 139]
     required_cves = []
-    # Capability metadata: SMB relay captures hashes (no foothold needed to start).
-    requires = []
+    # Capability metadata: SMB relay captures hashes (no foothold needed to
+    # start, but the signing_posture artifact must confirm signing is off).
+    requires = ["signing_posture"]
     produces = ["hash_artifact", "credentials"]
     read_only = False
     cost = "medium"
@@ -146,11 +147,14 @@ class SMBNullSession(AttackModule):
             "status": "script_generated",
             "module": self.name,
             "script": script,
-            "note": "Attempts null session enumeration of shares, users, and groups.",
-            # Phase 3: on a successful null session the anonymous bind is a
-            # credential finding -- record it so record_success surfaces it.
-            "credentials_found": ["anonymous:"],
-            "evidence": [f"null session enumeration against {ctx.target_ip}"],
+            "note": (
+                "Attempts null session enumeration of shares, users, and groups. "
+                "Queued only — an anonymous bind is recorded only from the "
+                "executed script's output, never this recipe."
+            ),
+            "confidence": 0.4,
+            "verdict": "inconclusive",
+            "evidence": [f"null session enumeration queued against {ctx.target_ip} (not executed)"],
             "references": [
                 "https://www.thehacker.recipes/a-d/movement/smb/null-session",
                 "https://book.hacktricks.wiki/en/network-services-pentesting/pentesting-smb.html",

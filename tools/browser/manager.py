@@ -219,9 +219,7 @@ class BrowserManager:
     def _check_owner(self, session: BrowserSession, run_id: str) -> None:
         """Deny cross-run session use (scope_blocked, never a silent share)."""
         if run_id and session.run_id and session.run_id != run_id:
-            raise BrowserScopeBlocked(
-                f"browser session {session.session_id!r} is owned by run {session.run_id!r}"
-            )
+            raise BrowserScopeBlocked(f"browser session {session.session_id!r} is owned by run {session.run_id!r}")
 
     def _op_lock(self, session_id: str) -> asyncio.Lock:
         lock = self._locks.get(session_id)
@@ -254,7 +252,10 @@ class BrowserManager:
         try:
             record = await asyncio.wait_for(
                 self._backend.start_session(
-                    target=target_ip, run_id=run_id, session_id=session_id, headless=headless,
+                    target=target_ip,
+                    run_id=run_id,
+                    session_id=session_id,
+                    headless=headless,
                     metadata=metadata,
                 ),
                 timeout=self._session_timeout_seconds,
@@ -278,7 +279,9 @@ class BrowserManager:
         self._last_active[session_id] = time.monotonic()
         return self.mark_ready(session_id)
 
-    async def run_op(self, session_id: str, op: str, *, run_id: str = "", timeout_seconds: float | None = None, **kwargs: Any) -> Any:
+    async def run_op(
+        self, session_id: str, op: str, *, run_id: str = "", timeout_seconds: float | None = None, **kwargs: Any
+    ) -> Any:
         """Run one backend op under ownership/state guards; returns its result.
 
         ``op`` names a :class:`BrowserBackend` coroutine (``navigate``,
@@ -369,9 +372,7 @@ class BrowserManager:
         self._last_active.pop(session_id, None)
         self._locks.pop(session_id, None)
         try:
-            return self.transition(
-                session_id, BrowserSessionState.FAILED if crashed else BrowserSessionState.CLOSED
-            )
+            return self.transition(session_id, BrowserSessionState.FAILED if crashed else BrowserSessionState.CLOSED)
         except BrowserTransitionError:
             return session
 

@@ -66,6 +66,47 @@ jobs:
             tests/test_sandbox_mcp_exec.py \
             tests/test_sandbox_integration.py -v
 
+  browser:
+    name: Browser integration (Playwright + Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+      - name: Install project + dev + browser dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,browser]"
+      - name: Cache Playwright Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+      - name: Install Chromium runtime
+        run: python -m playwright install --with-deps chromium
+      - name: Build sandbox browser worker image
+        run: docker build -t breachpilot-sandbox:browser -f docker/sandbox/Dockerfile.browser docker/sandbox
+      - name: Browser unit + mocked tests (no Chromium needed)
+        run: |
+          python -m pytest tests/test_browser_playwright_backend.py \
+            tests/test_browser_manager_async.py \
+            tests/test_browser_mcp_tools.py \
+            tests/test_browser_integration.py \
+            tests/test_no_playwright_regression.py \
+            tests/test_doctor_browser.py \
+            tests/test_browser_capabilities.py \
+            tests/test_api_capabilities_browser.py -v
+      - name: Browser live-Chromium integration (loopback only)
+        run: python -m pytest tests/test_browser_integration.py -v -m integration
+
   coverage:
     name: Coverage report
     runs-on: ubuntu-latest
@@ -356,7 +397,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [tests, sandbox, coverage, lint, types, package, webui]
+    needs: [tests, sandbox, browser, coverage, lint, types, package, webui]
     steps:
       - name: Check all jobs passed
         run: |

@@ -147,7 +147,7 @@ class LateralMovement(AttackModule):
     target_ports: list[int] = []
     required_cves: list[str] = []
     # Capability metadata: lateral movement needs a foothold + recovered creds.
-    requires = ["foothold"]
+    requires = ["foothold", "credentials"]
     produces = ["foothold"]
     read_only = False
     cost = "medium"

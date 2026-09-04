@@ -331,9 +331,7 @@ class InProcessPlaywrightLauncher:
                         "content_type": str(headers.get("content-type", "") or ""),
                         "req_headers": dict(getattr(req, "headers", {}) or {}) if req is not None else {},
                         "resp_headers": headers,
-                        "resource_type": str(getattr(req, "resource_type", "") or "")
-                        if req is not None
-                        else "",
+                        "resource_type": str(getattr(req, "resource_type", "") or "") if req is not None else "",
                         "timing_ms": timing_ms,
                         "observed_at": _utcnow(),
                         "_resp": resp,
@@ -495,8 +493,14 @@ class InProcessPlaywrightLauncher:
                     except (TypeError, ValueError):
                         declared = -1
                     textish = content_type.startswith(
-                        ("text/", "application/json", "application/javascript", "application/xml",
-                         "application/x-www-form-urlencoded", "image/svg")
+                        (
+                            "text/",
+                            "application/json",
+                            "application/javascript",
+                            "application/xml",
+                            "application/x-www-form-urlencoded",
+                            "image/svg",
+                        )
                     )
                     if textish and (declared < 0 or declared <= 1024 * 1024):
                         payload = await asyncio.wait_for(resp.body(), timeout=5.0)
@@ -659,13 +663,17 @@ class PlaywrightBackend(BrowserBackend):
     def _convert_network(self, session: _PlaywrightSession, raw: dict[str, Any]) -> BrowserNetworkEvent:
         session.net_seq += 1
         direction = (
-            BrowserEventDirection.RESPONSE if str(raw.get("direction", "")) == "response" else BrowserEventDirection.REQUEST
+            BrowserEventDirection.RESPONSE
+            if str(raw.get("direction", "")) == "response"
+            else BrowserEventDirection.REQUEST
         )
         body = str(raw.get("body", "") or "")
         digest = hashlib.sha256(body.encode("utf-8", errors="replace")).hexdigest() if body else ""
         size = raw.get("body_size")
         try:
-            size_int = int(size) if size is not None else (len(body.encode("utf-8", errors="replace")) if body else None)
+            size_int = (
+                int(size) if size is not None else (len(body.encode("utf-8", errors="replace")) if body else None)
+            )
         except (TypeError, ValueError):
             size_int = None
         return BrowserNetworkEvent(
@@ -718,14 +726,18 @@ class PlaywrightBackend(BrowserBackend):
     ) -> BrowserPageState:
         cfg = self._cfg()
         dom_cap = _int_cfg(cfg, "dom_summary_max_chars", _DOM_SUMMARY_MAX_CHARS)
-        scripts = [str(s) for s in (snap.get("scripts") or []) if s][: _MAX_SCRIPTS]
+        scripts = [str(s) for s in (snap.get("scripts") or []) if s][:_MAX_SCRIPTS]
         forms: list[dict[str, Any]] = []
         for form in (snap.get("forms") or [])[:_MAX_FORMS]:
             if not isinstance(form, dict):
                 continue
-            inputs = [i for i in (form.get("inputs") or []) if isinstance(i, dict)][: _MAX_FORM_FIELDS]
+            inputs = [i for i in (form.get("inputs") or []) if isinstance(i, dict)][:_MAX_FORM_FIELDS]
             forms.append(
-                {"action": str(form.get("action", "") or ""), "method": str(form.get("method", "") or ""), "inputs": inputs}
+                {
+                    "action": str(form.get("action", "") or ""),
+                    "method": str(form.get("method", "") or ""),
+                    "inputs": inputs,
+                }
             )
         endpoints: list[dict[str, Any]] = []
         graphql: list[str] = []
@@ -811,9 +823,7 @@ class PlaywrightBackend(BrowserBackend):
         try:
             session = self._live_session(session_id)
         except BrowserSessionNotFound:
-            return BrowserResult(
-                success=True, session_id=session_id, follow_ups=[], metadata={"already_closed": True}
-            )
+            return BrowserResult(success=True, session_id=session_id, follow_ups=[], metadata={"already_closed": True})
         try:
             await self._guard(self._launcher.close(session.token), timeout_s=30.0, op="stop", session=session)
         except BrowserBackendError:
@@ -855,7 +865,9 @@ class PlaywrightBackend(BrowserBackend):
             metadata=metadata,
         )
 
-    async def observe(self, session_id: str, *, include_forms: bool = True, include_endpoints: bool = True) -> BrowserObservation:
+    async def observe(
+        self, session_id: str, *, include_forms: bool = True, include_endpoints: bool = True
+    ) -> BrowserObservation:
         session = self._live_session(session_id)
         timeout_s = self._nav_timeout(None)
         async with self._session_lock(session_id):
@@ -910,10 +922,16 @@ class PlaywrightBackend(BrowserBackend):
                 follow_ups=["browser_observe"],
             )
         if kind is BrowserActionKind.NAVIGATE:
-            result = await self.navigate(session_id, str(params.get("url", "") or ""), timeout_seconds=action.timeout_seconds)
+            result = await self.navigate(
+                session_id, str(params.get("url", "") or ""), timeout_seconds=action.timeout_seconds
+            )
             result.action_id = action.action_id
             return result
-        if kind is BrowserActionKind.OBSERVE or kind is BrowserActionKind.DISCOVER_FORMS or kind is BrowserActionKind.DISCOVER_ENDPOINTS:
+        if (
+            kind is BrowserActionKind.OBSERVE
+            or kind is BrowserActionKind.DISCOVER_FORMS
+            or kind is BrowserActionKind.DISCOVER_ENDPOINTS
+        ):
             observation = await self.observe(session_id)
             payload = dict(observation.payload)
             metadata: dict[str, Any] = {
@@ -929,7 +947,10 @@ class PlaywrightBackend(BrowserBackend):
             else:
                 metadata["page_state_keys"] = sorted(payload.keys())
             result = BrowserResult(
-                success=True, action_id=action.action_id, session_id=session_id, metadata=metadata,
+                success=True,
+                action_id=action.action_id,
+                session_id=session_id,
+                metadata=metadata,
                 follow_ups=["browser_observe", "browser_discover_endpoints"],
             )
             return result
@@ -970,7 +991,9 @@ class PlaywrightBackend(BrowserBackend):
                 follow_ups=["browser_observe"],
             )
         if kind is BrowserActionKind.SCREENSHOT:
-            artifact = await self.capture_screenshot(session_id, artifact_path=str(params.get("artifact_path", "") or ""))
+            artifact = await self.capture_screenshot(
+                session_id, artifact_path=str(params.get("artifact_path", "") or "")
+            )
             return BrowserResult(
                 success=True,
                 action_id=action.action_id,
@@ -1063,7 +1086,9 @@ class PlaywrightBackend(BrowserBackend):
             metadata={"url": session.last_url},
         )
 
-    async def get_network_events(self, session_id: str, *, limit: int = 100, after_id: str = "") -> list[BrowserNetworkEvent]:
+    async def get_network_events(
+        self, session_id: str, *, limit: int = 100, after_id: str = ""
+    ) -> list[BrowserNetworkEvent]:
         session = self._live_session(session_id)
         async with self._session_lock(session_id):
             await self._drain_network(session, session_id)

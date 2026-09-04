@@ -3,8 +3,11 @@
 from tools.attack_modules.modules.ad import (
     ADCSEnum,
     BloodHoundCollect,
+    ESCChain,
     GoldenTicket,
+    RBCDAttack,
     ResponderRelay,
+    ShadowCredentials,
     SMBSigningCheck,
 )
 from tools.attack_modules.modules.auth_creds import (
@@ -194,4 +197,7 @@ __all__ = [
     "ResponderRelay",
     "GoldenTicket",
     "SMBSigningCheck",
+    "RBCDAttack",
+    "ShadowCredentials",
+    "ESCChain",
 ]

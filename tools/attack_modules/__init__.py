@@ -6,10 +6,12 @@ from scratch.
 """
 
 from tools.attack_modules.base import (
+    ApplicabilityEvidence,
     ApplicabilityReport,
     AttackModule,
     ModuleContext,
     ModuleResult,
+    canonical_service,
     port_of,
 )
 
@@ -33,7 +35,9 @@ __all__ = [
     "ModuleContext",
     "ModuleResult",
     "ApplicabilityReport",
+    "ApplicabilityEvidence",
     "port_of",
+    "canonical_service",
     "list_modules",
     "find_modules",
     "find_producers",

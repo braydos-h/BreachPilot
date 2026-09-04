@@ -67,9 +67,7 @@ class FakeLauncher:
         self._maybe_fail("snapshot")
         url = self.tokens[token]["url"] or "http://10.0.0.50/"
         big_text = "lorem ipsum dolor sit amet " * 2000
-        forms = [
-            {"action": f"/f{i}", "method": "post", "inputs": [{"name": "u", "type": "text"}]} for i in range(60)
-        ]
+        forms = [{"action": f"/f{i}", "method": "post", "inputs": [{"name": "u", "type": "text"}]} for i in range(60)]
         return {
             "url": url,
             "title": "Login — target app",
@@ -230,8 +228,9 @@ def test_no_playwright_types_leak():
             await backend.get_storage(sid),
         ]
         results.extend(await backend.get_network_events(sid))
-        action = BrowserAction(action_id="a-1", session_id=sid, kind=BrowserActionKind.EXECUTE_JS,
-                               parameters={"expression": "1+1"})
+        action = BrowserAction(
+            action_id="a-1", session_id=sid, kind=BrowserActionKind.EXECUTE_JS, parameters={"expression": "1+1"}
+        )
         results.append(await backend.execute_action(sid, action))
         return results
 
@@ -270,13 +269,18 @@ def test_invalid_url_scheme_is_rejected():
 def test_js_expression_cap_and_preview_redaction():
     backend = _backend()
     sid = asyncio.run(_started(backend))
-    big = BrowserAction(action_id="a-big", session_id=sid, kind=BrowserActionKind.EXECUTE_JS,
-                        parameters={"expression": "x" * 9000})
+    big = BrowserAction(
+        action_id="a-big", session_id=sid, kind=BrowserActionKind.EXECUTE_JS, parameters={"expression": "x" * 9000}
+    )
     capped = asyncio.run(backend.execute_action(sid, big))
     assert capped.success is False
     assert capped.failure_class is BrowserFailureClass.SCRIPT_ERROR
-    small = BrowserAction(action_id="a-ok", session_id=sid, kind=BrowserActionKind.EXECUTE_JS,
-                          parameters={"expression": "document.cookie"})
+    small = BrowserAction(
+        action_id="a-ok",
+        session_id=sid,
+        kind=BrowserActionKind.EXECUTE_JS,
+        parameters={"expression": "document.cookie"},
+    )
     ok_result = asyncio.run(backend.execute_action(sid, small))
     assert ok_result.success is True
     assert "CANARY-SESSION-TOKEN" not in str(ok_result.metadata.get("return_preview", ""))

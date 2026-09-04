@@ -1,20 +1,23 @@
 # Browser-Native Web Agent — Architecture & Integration Design
 
-> **Status: architecture prepared, execution deferred.** This change adds the
-> typed domain models, the backend seam, the manager boundary, capability
-> metadata, config, audit/evidence rules, and tests — and deliberately adds
-> ZERO browser-execution capability. Nothing in this build launches a browser,
-> opens a socket to a browser endpoint, executes JavaScript, submits a form, or
-> mutates a request. Playwright/Chromium are NOT dependencies and no browser
-> package is imported anywhere in `tools/browser/` (enforced by test).
+> **Status: implemented (Phase 1 read-only).** The Playwright backend behind the
+> prepared interfaces is live: `tools/browser/playwright_backend.py` (Chromium via
+> the optional `browser` extra), `tools/browser/sandbox_launcher.py` (one Chromium
+> op per docker exec inside the worker netns — no host fallback), the async
+> `BrowserManager` funnel, conditional `tools/mcp_tools/browser.py` tools, gated
+> planner briefings, and doctor/API/config plumbing. Request replay
+> (`browser_replay`) and form submission (`browser_submit`) stay **deferred to
+> Phase 2** (registered but always `BLOCKED`). Playwright is importable only
+> inside the engine boundary (enforced by `tests/test_no_playwright_regression.py`).
 
-This document is the contract for the future implementation PR:
-
-> **"Implement Playwright BrowserBackend behind the prepared browser interfaces"**
-
-Everything below is written so that PR can add a real engine without touching
-the domain vocabulary, the manager, the capability names, the config schema,
-or the audit shape defined here.
+This document is the contract the implementation followed (originally written
+for the PR *"Implement Playwright BrowserBackend behind the prepared browser
+interfaces"*): the engine landed without replacing the domain vocabulary, the
+manager boundary, the capability names, or the audit shape. Two deliberate
+deviations from the §11 sketch: the backend lives at
+`tools/browser/playwright_backend.py` (flat, per repo layout — not
+`tools/browser/backends/`), and availability additionally accepts a configured
+sandbox worker as a runnable home (host SDK not required when contained).
 
 ---
 

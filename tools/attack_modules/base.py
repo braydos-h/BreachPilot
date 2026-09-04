@@ -73,19 +73,67 @@ def port_of(svc: dict[str, Any]) -> int:
 
 
 def _artifact_present(kind: str, ctx: ModuleContext) -> bool:
-    """Best-effort prerequisite check: is artifact ``kind`` available in ctx?"""
-    kind = kind.lower()
-    if kind in {"credentials", "creds", "password", "hash"}:
-        return bool(ctx.credentials)
-    if kind in _ARTIFACT_KINDS_FOOTHOLD:
-        return bool(ctx.access_achieved or ctx.sessions)
-    if kind in _ARTIFACT_KINDS_PRIV:
-        return ctx.privilege_level.lower() in {"admin", "administrator", "system", "root"}
-    if kind == "user_list":
-        return any("user" in c for c in ctx.credentials)
-    # Unknown artifact kinds cannot be verified from state; treat as present so
-    # a typo in a module's requires list never hides the module from ranking.
-    return True
+    """Best-effort prerequisite check: is artifact ``kind`` available in ctx?
+
+    Closed-world since the artifact-vocabulary freeze: unknown kinds are
+    absent (fail closed) instead of present. Delegates to
+    :mod:`tools.attack_modules.artifacts`; kept as the import site
+    ``registry.missing_prerequisites`` and older callers use.
+    """
+    try:
+        from tools.attack_modules.artifacts import is_satisfied
+    except Exception:  # noqa: BLE001 -- artifacts module must never break scoring
+        return True
+    try:
+        return bool(is_satisfied(kind, ctx))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+# Service-name equivalence classes for scoring. Names inside one set match
+# each other (recon reports whichever string the scanner emitted:
+# nmap says ``ms-wbt-server``, humans write ``rdp``). http/https/api are
+# deliberately NOT aliased — scheme matters to web payloads; fix the
+# module's target_services instead (cf. JWTTamper + api).
+_SERVICE_ALIASES: tuple[frozenset[str], ...] = (
+    frozenset({"ms-wbt-server", "rdp"}),
+    frozenset({"microsoft-ds", "smb", "cifs", "netbios-ssn"}),
+    frozenset({"ldap", "ldaps"}),
+    frozenset({"ssh", "openssh"}),
+)
+
+
+def canonical_service(name: str) -> str:
+    """Map a service name to its equivalence-class representative (lowercased)."""
+    n = (name or "").strip().lower()
+    for group in _SERVICE_ALIASES:
+        if n in group:
+            return sorted(group)[0]
+    return n
+
+
+@dataclass
+class ApplicabilityEvidence:
+    """Structured inputs to the applicability score (one source of truth).
+
+    ``applicability()`` is a pure function of this object, and
+    ``applicability_explain()`` renders from it — subclass overrides should
+    extend :meth:`AttackModule.applicability_evidence`, never the integer.
+    """
+
+    matched_services: list[str] = field(default_factory=list)
+    matched_ports: list[int] = field(default_factory=list)
+    matched_cves: list[str] = field(default_factory=list)
+    version_match: bool | None = None  # None = no version info to judge
+    os_match: bool | None = None  # None = no OS hint / no ctx OS
+    missing_prereqs: list[str] = field(default_factory=list)
+    # Veto/penalty signals (negative evidence):
+    # NOTE: a version-mismatch penalty is deliberately absent — the pinned
+    # contract (tests/test_version_aware_ranking.py) requires a non-matching
+    # version to score identically to an empty version. Negative version
+    # evidence arrives via the CVE-absent cap + OS veto instead.
+    os_contradicted: bool = False  # OS hint declared, ctx OS set, no match
+    cve_unconfirmed: bool = False  # required_cves declared, none present
 
 
 @dataclass
@@ -308,114 +356,148 @@ class AttackModule(ABC):
     cost: str = "medium"  # low|medium|high -- planning hint only
     phase_hint: str = ""  # recon|enumerate|exploit|escalate|loot|pivot|... advisory
 
-    def applicability(self, ctx: ModuleContext) -> int:
-        """Return 0-100 score indicating how applicable this module is.
-        Higher = more confident this module fits the target."""
-        # Phase 1: ICS destructive-write hard gate. Done before any
-        # service/port scoring so an unarmed write module never appears in
-        # find_modules even if its target service/port match. The live
-        # run() also re-checks via _ics_write_allowed() for defense in depth.
-        if self.destructive_ics:
-            try:
-                from tools.attack_modules.modules.ics_iot import _ics_write_allowed
+    def _ics_gate_closed(self) -> bool:
+        """True when the destructive-ICS gate hides this module."""
+        if not self.destructive_ics:
+            return False
+        try:
+            from tools.attack_modules.modules.ics_iot import _ics_write_allowed
 
-                if not _ics_write_allowed():
-                    return 0
-            except Exception:  # noqa: BLE001 -- best-effort gate
-                return 0
-        score = 0
-        svc_names = {s.get("service", "").lower() for s in ctx.services}
+            return not _ics_write_allowed()
+        except Exception:  # noqa: BLE001 -- best-effort gate
+            return True
+
+    def applicability_evidence(self, ctx: ModuleContext) -> ApplicabilityEvidence:
+        """Compute the structured evidence the score derives from.
+
+        Override this (not :meth:`applicability`) to change what a module
+        matches on. Service matching uses :func:`canonical_service` aliases;
+        version lookup resolves declared keys through the same aliases.
+        """
+        svc_names = {canonical_service(s.get("service", "")) for s in ctx.services}
         svc_ports = {port_of(s) for s in ctx.services} - {0}
         cve_upper = {c.upper() for c in ctx.cves}
 
-        for svc in self.target_services:
-            if svc.lower() in svc_names:
-                score += 30
-        for port in self.target_ports:
-            if port in svc_ports:
-                score += 20
-        for cve in self.required_cves:
-            if cve.upper() in cve_upper:
-                score += 40
+        matched_services = [s for s in self.target_services if canonical_service(s) in svc_names]
+        matched_ports = [p for p in self.target_ports if p in svc_ports]
+        matched_cves = [c for c in self.required_cves if c.upper() in cve_upper]
 
-        # Version-aware bonus (Phase 4): if this module declares known-vulnerable
-        # version patterns and ANY service present in ctx.services matches one of
-        # them (case-insensitive substring), add a single flat +25. Empty
-        # target_versions (the default) short-circuits and changes nothing.
+        version_match: bool | None = None
         if self.target_versions:
-            version_bonus = False
+            # Bonus-only (pinned contract): a match adds +25 once; a
+            # non-match scores exactly like an empty version (no penalty).
+            hit = False
             for s in ctx.services:
-                svc = s.get("service", "").lower()
-                patterns = self.target_versions.get(svc)
+                key = canonical_service(s.get("service", ""))
+                patterns: list[str] | None = None
+                for declared, pats in self.target_versions.items():
+                    if canonical_service(declared) == key:
+                        patterns = pats
+                        break
                 if not patterns:
                     continue
-                version = (s.get("version", "") or "").lower()
-                if any(p.lower() in version for p in patterns):
-                    version_bonus = True
+                version = (s.get("version", "") or "").strip()
+                if not version:
+                    continue
+                if any(p.lower() in version.lower() for p in patterns):
+                    hit = True
                     break
-            if version_bonus:
-                score += 25
+            # version_match stays None when no versioned service was judged
+            # (indistinguishable from "no info" by design).
+            version_match = True if hit else None
 
-        # Phase 1: OS-hint applicability for post-foothold modules. When a
-        # module declares target_os_hint (e.g. ["linux"], ["windows"]) and
-        # ctx.target_os matches, add +30 so privesc/persistence/detection
-        # modules can score >0 without coupling to a network service. Empty
-        # target_os_hint (default) short-circuits and changes nothing.
-        if self.target_os_hint and ctx.target_os:
-            ctx_os = ctx.target_os.lower()
-            if any(h.lower() in ctx_os or ctx_os in h.lower() for h in self.target_os_hint):
-                score += 30
+        os_match: bool | None = None
+        os_contradicted = False
+        if self.target_os_hint:
+            if ctx.target_os:
+                ctx_os = ctx.target_os.lower()
+                hit = any(h.lower() in ctx_os or ctx_os in h.lower() for h in self.target_os_hint)
+                os_match = hit
+                os_contradicted = not hit
+            # No ctx OS: None (no signal either way).
 
-        return min(score, 100)
+        missing = [r for r in self.requires if not _artifact_present(r, ctx)]
+        return ApplicabilityEvidence(
+            matched_services=matched_services,
+            matched_ports=matched_ports,
+            matched_cves=matched_cves,
+            version_match=version_match,
+            os_match=os_match,
+            missing_prereqs=missing,
+            os_contradicted=os_contradicted,
+            cve_unconfirmed=bool(self.required_cves and not matched_cves),
+        )
+
+    @staticmethod
+    def score_evidence(ev: ApplicabilityEvidence) -> int:
+        """Pure score function: bonuses minus negative-evidence adjustments."""
+        score = 30 * len(ev.matched_services) + 20 * len(ev.matched_ports) + 40 * len(ev.matched_cves)
+        if ev.version_match:
+            score += 25
+        if ev.os_match:
+            score += 30
+        # Negative evidence (never below the floor logic in applicability()):
+        if ev.cve_unconfirmed:
+            score = min(score, 30)  # CVE-gated exploit without the CVE: probe at best
+        if ev.missing_prereqs:
+            score -= 15 * len(ev.missing_prereqs)
+        return max(0, min(score, 100))
+
+    def applicability(self, ctx: ModuleContext) -> int:
+        """Return 0-100 score indicating how applicable this module is.
+        Higher = more confident this module fits the target."""
+        # ICS destructive-write hard gate (unchanged): unarmed write modules
+        # never appear in find_modules. The live run() re-checks for defense
+        # in depth.
+        if self._ics_gate_closed():
+            return 0
+        ev = self.applicability_evidence(ctx)
+        # OS contradiction is a hard veto: an OS-gated module never fits the
+        # wrong OS, no matter which ports are open.
+        if ev.os_contradicted:
+            return 0
+        score = self.score_evidence(ev)
+        # Missing prerequisites demote but never fully hide a service-matched
+        # module (floor 5 keeps the recovery path visible to the planner).
+        if ev.missing_prereqs and score == 0 and (ev.matched_services or ev.matched_ports):
+            score = 5
+        return score
 
     def applicability_explain(self, ctx: ModuleContext) -> "ApplicabilityReport":
         """Structured explanation of the applicability score.
 
-        The score itself delegates to ``applicability()`` so subclass overrides
-        (e.g. the fixed-score detection modules, the ICS gate) stay the single
-        source of truth; this method derives the human/AI-readable reasons and
-        penalties from the same metadata conditionals. The planner and the
-        capability MCP tools expose these so the model can see WHY a module
-        ranks where it does instead of trusting a bare number.
+        Renders from the same :class:`ApplicabilityEvidence` the score
+        derives from, so reasons/penalties can never drift from the number.
+        Subclass ``applicability()`` overrides (fixed-score detection
+        modules, the ICS gate) stay authoritative for their own score; their
+        evidence still renders the underlying match signals.
         """
-        score = self.applicability(ctx)
+        try:
+            ev = self.applicability_evidence(ctx)
+            score = self.applicability(ctx)
+        except Exception:  # noqa: BLE001 -- explain must never raise
+            return ApplicabilityReport(score=0, reasons=[], penalties=["evidence computation failed"])
         reasons: list[str] = []
         penalties: list[str] = []
-
-        svc_names = {s.get("service", "").lower() for s in ctx.services}
-        svc_ports = {port_of(s) for s in ctx.services} - {0}
-        cve_upper = {c.upper() for c in ctx.cves}
-
-        # ponytail: descriptive labels mirror applicability()'s conditionals by
-        # contract; the weights live only in applicability(). If a new scoring
-        # input is added there, add its label here.
-        matched_services = [s for s in self.target_services if s.lower() in svc_names]
-        if matched_services:
-            reasons.append(f"service matched: {', '.join(matched_services)}")
-        matched_ports = [p for p in self.target_ports if p in svc_ports]
-        if matched_ports:
-            reasons.append(f"port matched: {', '.join(str(p) for p in matched_ports)}")
-        matched_cves = [c for c in self.required_cves if c.upper() in cve_upper]
-        if matched_cves:
-            reasons.append(f"CVE matched: {', '.join(matched_cves)}")
-        if self.target_versions:
-            for s in ctx.services:
-                patterns = self.target_versions.get(s.get("service", "").lower())
-                version = (s.get("version", "") or "").lower()
-                if patterns and any(p.lower() in version for p in patterns):
-                    reasons.append(f"vulnerable version matched: {s.get('service')} {s.get('version')}")
-                    break
-        if self.target_os_hint and ctx.target_os:
-            ctx_os = ctx.target_os.lower()
-            if any(h.lower() in ctx_os or ctx_os in h.lower() for h in self.target_os_hint):
-                reasons.append(f"target OS matched: {ctx.target_os}")
-        # Prerequisite satisfaction (advisory signal — never changes the score).
-        missing = [r for r in self.requires if not _artifact_present(r, ctx)]
+        if ev.matched_services:
+            reasons.append(f"service matched: {', '.join(ev.matched_services)}")
+        if ev.matched_ports:
+            reasons.append(f"port matched: {', '.join(str(p) for p in ev.matched_ports)}")
+        if ev.matched_cves:
+            reasons.append(f"CVE matched: {', '.join(ev.matched_cves)}")
+        if ev.version_match:
+            reasons.append("vulnerable version matched")
+        if ev.os_match:
+            reasons.append(f"target OS matched: {ctx.target_os}")
         for r in self.requires:
-            if r not in missing:
+            if r not in ev.missing_prereqs:
                 reasons.append(f"prerequisite available: {r}")
-        for r in missing:
-            penalties.append(f"prerequisite missing: {r}")
+        if ev.cve_unconfirmed:
+            penalties.append("required CVE unconfirmed — capped at probe-level (30)")
+        if ev.os_contradicted:
+            penalties.append(f"target OS contradicts hint {self.target_os_hint} (veto)")
+        for r in ev.missing_prereqs:
+            penalties.append(f"prerequisite missing: {r} (-15)")
         if self.destructive_ics and score == 0:
             penalties.append("ICS destructive-write gates not armed (ics.allow_write + ics.destructive_ics)")
         if score == 0 and not reasons and not penalties:

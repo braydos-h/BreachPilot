@@ -70,13 +70,14 @@ class FTPAnonymous(AttackModule):
             ctx,
             note=(
                 "Attempts anonymous FTP login and lists accessible files. "
-                "On success, credentials_found records the anonymous bind and "
-                "downloaded files should be scanned for secrets (ArtifactExposure)."
+                "Queued only — the anonymous bind is recorded only when the "
+                "check actually succeeds, never by this recipe. Downloaded "
+                "files should be scanned for secrets (ArtifactExposure)."
             ),
-            evidence=[f"anonymous FTP check against {ctx.target_ip}:21"],
+            evidence=[f"anonymous FTP check queued against {ctx.target_ip}:21 (not executed)"],
             references=["https://owasp.org/www-community/attacks/Default_credentials"],
             suggested_command=f"python -c \"import ftplib; f=ftplib.FTP('{ctx.target_ip}'); f.login('anonymous','anonymous@'); print(f.nlst())\"",
-            credentials_found=["anonymous:anonymous@"],
+            confidence=0.4,
         )
 
 

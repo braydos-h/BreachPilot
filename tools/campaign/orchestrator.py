@@ -673,17 +673,33 @@ class AutonomousOrchestrator:
             return None
         if self._prereq_tasks_added >= self._prereq_recovery_cap:
             return None
-        for kind in kinds:
-            # shim-aware find_producers
-            try:
-                import tools.autonomous_orchestrator as _ao_shim3  # type: ignore[import]
+        # Candidates via the established seam (shim find_producers, which
+        # tests mock and plugins extend), ordered cheapest/read-only-first
+        # with ctx-satisfied prerequisites ahead (graph.rank_producers).
+        try:
+            import tools.autonomous_orchestrator as _ao_shim3  # type: ignore[import]
 
-                _find_producers = getattr(_ao_shim3, "find_producers", None)
-            except Exception:
-                _find_producers = None
-            if _find_producers is None:
-                from tools.attack_modules import find_producers as _find_producers  # type: ignore[import]
-            for mod in _find_producers(kind):
+            _find_producers = getattr(_ao_shim3, "find_producers", None)
+        except Exception:  # noqa: BLE001 -- seam lookup must never break recovery
+            _find_producers = None
+        if _find_producers is None:
+            from tools.attack_modules import find_producers as _find_producers  # type: ignore[import]
+
+        def _ranked(kind: str) -> list:
+            cands = [m for m in _find_producers(kind) if m.name != task.module_name]
+            try:
+                from tools.attack_modules.graph import rank_producers as _rank_producers
+
+                try:
+                    _ctx = self._module_context(state)  # type: ignore[attr-defined]
+                except Exception:  # noqa: BLE001
+                    _ctx = None
+                return _rank_producers(kind, _ctx, exclude=task.module_name, modules=cands)
+            except Exception:  # noqa: BLE001 -- ranking must never break recovery
+                return cands
+
+        for kind in kinds:
+            for mod in _ranked(kind):
                 if mod.name == task.module_name:
                     continue  # don't recurse into the failing module
                 prereq_task = AttackTask(

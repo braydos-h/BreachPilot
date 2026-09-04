@@ -523,6 +523,38 @@ snapshot at all when `snapshots.enabled` is false. With
 snapshot is auto-reverted and the mutated payload retries against the clean
 state; both outcomes land in `final_result["counterfactual"]`.
 
+### Browser — `tools/mcp_tools/browser.py` (cfg: `browser.enabled` + `backend: playwright`, Phase 1 read-only)
+
+Conditional family (the killchain/snapshots precedent): nothing registers
+unless browser execution is actually runnable (host Playwright SDK or a
+configured sandbox worker). Every target-touching tool takes `target` first
+(`@require_allowlist("target")` + `@audit_tool`) and cross-checks the session's
+target lock; URL hosts are re-checked against the allowlist per navigation.
+Chromium runs one op per docker exec inside the browser worker netns
+(`SandboxPlaywrightLauncher`) — strict fail-closed, never host fallback.
+
+| Tool | Params | Target | Lock |
+|---|---|---|---|
+| `browser_start` | `target`, `run_id` (optional), `headless` (default true) | yes | allowlist + audit |
+| `browser_navigate` | `target`, `session_id`, `url`, `timeout_seconds` (optional) | yes | allowlist + audit (URL host re-checked) |
+| `browser_observe` | `target`, `session_id`, `include_forms`/`include_endpoints` | yes | allowlist + audit |
+| `browser_page_state` | `target`, `session_id` | yes | allowlist + audit |
+| `browser_network_events` | `target`, `session_id`, `limit`, `after_id` | yes | allowlist + audit |
+| `browser_storage` | `target`, `session_id`, `origin` (optional) | yes | allowlist + audit (values redacted) |
+| `browser_screenshot` | `target`, `session_id` | yes | allowlist + audit |
+| `browser_execute_js` | `target`, `session_id`, `expression` | yes | allowlist + audit + `browser.allow_mutating_actions` |
+| `browser_discover_forms` | `target`, `session_id` | yes | allowlist + audit |
+| `browser_discover_endpoints` | `target`, `session_id` | yes | allowlist + audit |
+| `browser_close` | `target`, `session_id` | yes | allowlist + audit |
+| `browser_replay` / `browser_submit` | — | — | always `BLOCKED` (deferred to Phase 2) |
+
+Returned blocks: `SESSION_STARTED:` / `NAVIGATED:` / `OBSERVED:` / `NETWORK_EVENTS:` /
+`STORAGE:` / `SCREENSHOT:` / `JS_RESULT:` / `SESSION_CLOSED:`, plus `SANDBOX_*`
+fail-closed blocks when the worker is unavailable. Storage values are redacted;
+persist useful credentials via `cred_store_add` explicitly. The one-shot
+`browser_attack_navigate` lives in the `browser_attack` plugin (separate opt-in,
+separate name — no collision by construction).
+
 ## Adding a New Exploit MCP Tool (checklist)
 
 Matches AGENTS.md rule 4 and `mcp_exploit_server.py:153-177` (27 families — 20 in `tools/mcp_tools/*.py` + 7 in `tools/mcp_tools/modules/*.py` via `collect_tools()`).

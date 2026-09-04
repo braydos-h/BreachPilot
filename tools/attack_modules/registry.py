@@ -211,6 +211,43 @@ def _module_target_signature(mod: AttackModule, ctx: ModuleContext) -> str | Non
     return f"{primary}:{version or ''}:{os_hint}"
 
 
+def explain_modules(
+    ctx: ModuleContext, experience_store: Any | None = None
+) -> list[dict[str, Any]]:
+    """Per-module score breakdowns for observability (parallel to find_modules).
+
+    Returns one dict per applicable module (same gate + ordering as
+    :func:`find_modules`): ``{name, static, confidence, composite, reasons,
+    penalties, missing_prereqs, blocked}``. Never raises — a module whose
+    evidence computation fails is reported with ``static=0`` context.
+    """
+    out: list[dict[str, Any]] = []
+    for score, mod in find_modules(ctx, experience_store):
+        try:
+            report = mod.applicability_explain(ctx)
+            reasons, penalties = list(report.reasons), list(report.penalties)
+            static = report.score
+        except Exception:  # noqa: BLE001 -- explain must never break callers
+            reasons, penalties, static = [], ["explanation failed"], 0
+        try:
+            confidence = _module_experience_confidence(mod, ctx, experience_store)
+        except Exception:  # noqa: BLE001
+            confidence = 0.5
+        out.append(
+            {
+                "name": mod.name,
+                "static": static,
+                "confidence": confidence,
+                "composite": score,
+                "reasons": reasons,
+                "penalties": penalties,
+                "missing_prereqs": list(missing_prerequisites(mod, ctx)),
+                "blocked": bool(missing_prerequisites(mod, ctx)),
+            }
+        )
+    return out
+
+
 def _module_experience_confidence(mod: AttackModule, ctx: ModuleContext, experience_store: Any | None) -> float:
     """Return the module's mean Bayesian confidence across all mutation
     strategies tried against its target signature, or 0.5 (neutral) when

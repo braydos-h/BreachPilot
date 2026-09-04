@@ -719,28 +719,35 @@ never an automatic fallback. Full architecture + threat model:
 | `cleanup.remove_stale_on_startup` | bool | `true` | Sweep exited labeled containers / empty networks at startup (running concurrent-session workers kept) | `tools/sandbox/manager.py:cleanup_stale` |
 | `multi_net_raw` | bool | `true` | Grant NET_RAW for raw-packet scanning (nmap -sS); NET_ADMIN is never granted to the worker | `tools/sandbox/manager.py:resolve_manager` |
 
-### `browser:` (top-level) — browser-native web agent (architecture prep, default OFF)
+### `browser:` (top-level) — browser-native web agent (Playwright, default OFF)
 
-Prepared seam for a future browser-driven web agent. **Architecture only** in
-this build: `tools/browser/` holds provider-neutral domain models, the
-`BrowserBackend` ABC, and the fail-closed `BrowserManager` — nothing launches
-a browser, no Playwright/Chromium dependency exists, and every `browser.*`
-capability reports `available: false` until a backend is both configured and
-registered. Full design + future-implementation checklist:
+Sandboxed Chromium agent behind the prepared seam. `tools/browser/` holds the
+`BrowserBackend` ABC, the Playwright adapter (`playwright_backend.py`), the
+sandbox launcher (one Chromium op per docker exec, no host fallback), and the
+fail-closed `BrowserManager`. Capabilities report available only when enabled +
+registered + runnable (host SDK or sandbox worker). Full design:
 [docs/browser-agent-design.md](browser-agent-design.md).
 
 | Key | Type | Default | Controls |
 |-----|------|---------|----------|
 | `enabled` | bool | `false` | Master switch; stock installs never enable |
-| `backend` | str | `none` | `none`, or a future backend id (requires a `BACKEND_REGISTRY` entry — declared ≠ available) |
-| `headless` | bool | `true` | Future sessions run headless by default |
+| `backend` | str | `none` | `none` or `playwright` (requires a `BACKEND_REGISTRY` entry — declared ≠ available) |
+| `headless` | bool | `true` | Sessions run headless (headed refused in the sandbox worker) |
 | `max_sessions` | int | `2` | Concurrent session cap (manager-enforced) |
-| `session_timeout_seconds` | int | `300` | Session idle budget |
+| `session_timeout_seconds` | int | `300` | Session idle budget (reaper closes idle sessions) |
 | `navigation_timeout_seconds` | int | `30` | Per-navigation budget |
 | `capture_screenshots` | bool | `true` | Persist screenshots as hashed artifacts |
 | `capture_network` | bool | `true` | Capture request/response records (redacted at serialization) |
 | `capture_console` | bool | `false` | Console capture (opt-in) |
 | `persist_storage` | bool | `false` | Storage harvest goes to the credential store, never plaintext logs |
+| `allow_mutating_actions` | bool | `false` | Lab opt-in for `browser_execute_js` (read-only otherwise) |
+| `console_max_events` | int | `200` | Console ring-buffer cap per session |
+| `network_max_events` | int | `500` | Converted network-event history cap per session |
+| `body_sample_max_bytes` | int | `4096` | Truncated body sample cap per event |
+| `dom_summary_max_chars` | int | `8000` | DOM text summary cap (huge pages truncate) |
+| `artifact_dir` | str | `""` | Screenshot dir override (`""` = `<workspace>/browser/<session>/`) |
+| `executable_path` | str | `""` | Explicit Chromium binary (`""` = Playwright default) |
+| `worker_image` | str | `""` | Browser worker image override (`""` = `breachpilot-sandbox:browser`) |
 
 
 ## Other consumed keys

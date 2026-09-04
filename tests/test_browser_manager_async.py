@@ -68,8 +68,13 @@ class WorkingBackend(BrowserBackend):
 
     async def start_session(self, *, target, run_id="", session_id="", headless=True, metadata=None):
         self._record("start_session", (), {"target": target, "session_id": session_id})
-        return BrowserSession(session_id=session_id or "bs-stub", state=BrowserSessionState.STARTING,
-                              run_id=run_id, target_ip=target, backend_id=self.backend_id)
+        return BrowserSession(
+            session_id=session_id or "bs-stub",
+            state=BrowserSessionState.STARTING,
+            run_id=run_id,
+            target_ip=target,
+            backend_id=self.backend_id,
+        )
 
     async def stop_session(self, session_id):
         self._record("stop_session", (session_id,), {})
@@ -77,14 +82,17 @@ class WorkingBackend(BrowserBackend):
 
     async def navigate(self, session_id, url, *, timeout_seconds=None):
         self._record("navigate", (session_id, url), {"timeout_seconds": timeout_seconds})
-        return BrowserResult(success=True, session_id=session_id,
-                             metadata={"final_url": url, "status_code": 200})
+        return BrowserResult(success=True, session_id=session_id, metadata={"final_url": url, "status_code": 200})
 
     async def observe(self, session_id, *, include_forms=True, include_endpoints=True):
         self._record("observe", (session_id,), {})
-        return BrowserObservation(observation_id="obs-1", session_id=session_id,
-                                  kind=BrowserObservationKind.PAGE_STATE, url="http://10.0.0.50/",
-                                  payload={"title": "t"})
+        return BrowserObservation(
+            observation_id="obs-1",
+            session_id=session_id,
+            kind=BrowserObservationKind.PAGE_STATE,
+            url="http://10.0.0.50/",
+            payload={"title": "t"},
+        )
 
     async def execute_action(self, session_id, action):
         self._record("execute_action", (session_id,), {})

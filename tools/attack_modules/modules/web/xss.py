@@ -202,15 +202,19 @@ class GraphQLIntrospect(AttackModule):
             '    print(f"  [-] Introspection disabled or blocked: {json.dumps(intro_result)[:200]}")\n'
             "\n"
             'print("\\n[2] Query Depth Attack...")\n'
-            "depth = 50\n"
-            'nested = "\\n  ".join(f"level{i}: __typename {{ level{i+1}: __typename" for i in range(depth))\n'
-            'nested += "\\n  " + "}" * depth\n'
-            'depth_query = DEPTH_ATTACK_QUERY.replace("{nested}", nested)\n'
+            "# Depth via introspection nesting (valid against any GraphQL server --\n"
+            "# __typename is a leaf and cannot take subselections, so the old\n"
+            "# level{i}: __typename { ... } builder always errored and the error\n"
+            "# heuristic then misreported 'limit enforced' on every target).\n"
+            'depth_query = "query DeepQuery { __schema { types { fields { type { ofType { name kind ofType { name kind } } } } } } }"\n'
             "depth_result = graphql_request(found_endpoint, depth_query)\n"
-            'if "error" in str(depth_result).lower() or "depth" in str(depth_result).lower():\n'
-            '    print(f"  [+] Depth limit enforced: {json.dumps(depth_result)[:300]}")\n'
+            'depth_blob = json.dumps(depth_result).lower()\n'
+            'if any(k in depth_blob for k in ("max depth", "depth limit", "too deep", "complexity", "exceeds")):\n'
+            '    print(f"  [+] Depth/complexity limit enforced: {json.dumps(depth_result)[:300]}")\n'
+            'elif "data" in depth_result and depth_result.get("data"):\n'
+            '    print(f"  [!] No depth limit detected (deep introspection accepted)")\n'
             "else:\n"
-            '    print(f"  [!] No depth limit detected ({depth} levels accepted)")\n'
+            '    print(f"  [?] Depth probe rejected (inspect -- may or may not be a limit): {json.dumps(depth_result)[:300]}")\n'
             "\n"
             'print("\\n[3] Batching Attack (10 queries in one request)...")\n'
             "batch_result = graphql_request(found_endpoint, BATCH_ATTACK)\n"
@@ -299,7 +303,9 @@ def measure_request(url: str, method: str = "POST", data: bytes = b"", headers: 
 def analyze_timing(name: str, times_a: list[float], times_b: list[float]) -> dict:
     """Compare two timing distributions."""
     if len(times_a) < 3 or len(times_b) < 3:
-        return {{"significant": False, "reason": "insufficient samples"}}
+        return {{"name": name, "significant": False, "reason": "insufficient samples",
+                 "mean_a_ms": 0.0, "mean_b_ms": 0.0, "diff_ms": 0.0,
+                 "stdev_a": 0.0, "stdev_b": 0.0}}
 
     mean_a = statistics.mean(times_a)
     mean_b = statistics.mean(times_b)

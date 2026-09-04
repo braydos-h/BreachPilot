@@ -343,7 +343,7 @@ Switching providers (Ollama ↔ OpenCode Go ↔ ChatGPT), models, skills, swarm,
 - Sandbox: per-run disposable execution worker (`sandbox.*` keys — image, resource limits, network enforcement, DNS mode, `fallback_native` boot-time degrade-to-native, cleanup); see [docs/sandbox.md](docs/sandbox.md)
 - API: concurrent runs (default 3), multi-operator, graph route, loopback auth
 - Benchmark suite: `benchmark.*` keys — output dir, default trials, per-trial timeout, `sandbox_required`, baseline path, regression tolerances, telemetry toggles; see [docs/benchmarks.md](docs/benchmarks.md)
-- Browser agent (prepared, OFF): `browser.*` keys exist with `enabled: false` / `backend: none` — architecture seam only, no browser execution in this build; see [docs/browser-agent-design.md](docs/browser-agent-design.md)
+- Browser agent (Playwright, OFF by default): `browser.enabled: true` + `backend: playwright` enables the sandboxed Chromium agent (navigate/observe/discover/screenshot + gated JS execution; replay/submit deferred) — contained in the browser worker image, target-locked, fail-closed when unconfigured; see [docs/browser-agent-design.md](docs/browser-agent-design.md)
 
 ---
 

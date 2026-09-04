@@ -58,8 +58,10 @@ class _AppHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/spa":
             self._send(
-                ("<html><head><title>SPA</title></head><body><div id='app'>loading</div>"
-                 f"<script>{APP_JS}</script></body></html>").encode()
+                (
+                    "<html><head><title>SPA</title></head><body><div id='app'>loading</div>"
+                    f"<script>{APP_JS}</script></body></html>"
+                ).encode()
             )
             return
         if self.path == "/api/data":
@@ -116,32 +118,57 @@ class _HttpTransportLauncher:
         final, status, _body = await asyncio.to_thread(self._get, url)
         self.tokens[token]["url"] = final
         self.net[token].append(
-            {"direction": "response", "method": "GET", "url": final, "status": status,
-             "content_type": "text/html", "req_headers": {}, "resp_headers": {},
-             "body": "", "body_size": 0, "observed_at": ""}
+            {
+                "direction": "response",
+                "method": "GET",
+                "url": final,
+                "status": status,
+                "content_type": "text/html",
+                "req_headers": {},
+                "resp_headers": {},
+                "body": "",
+                "body_size": 0,
+                "observed_at": "",
+            }
         )
-        return {"url": url, "final_url": final, "status": status,
-                "redirect_chain": [url] if final == url else [url, final], "blocked_popups": 0}
+        return {
+            "url": url,
+            "final_url": final,
+            "status": status,
+            "redirect_chain": [url] if final == url else [url, final],
+            "blocked_popups": 0,
+        }
 
     async def snapshot(self, token: str, timeout_ms: int, *, target_ip: str = "") -> dict[str, Any]:
         del timeout_ms, target_ip
         url = self.tokens[token]["url"]
         _final, _status, body = await asyncio.to_thread(self._get, url)
         text = body.replace("<", " <")
-        return {"url": url, "title": "local", "text": text, "forms": [], "scripts": [],
-                "head": "", "cookies": [], "local_storage": {"seed": "v"}, "session_storage": {}}
+        return {
+            "url": url,
+            "title": "local",
+            "text": text,
+            "forms": [],
+            "scripts": [],
+            "head": "",
+            "cookies": [],
+            "local_storage": {"seed": "v"},
+            "session_storage": {},
+        }
 
     async def evaluate(self, token: str, expression: str, timeout_ms: int, *, target_ip: str = "") -> dict[str, Any]:
         del token, timeout_ms, target_ip
         return {"ok": True, "value": json.dumps({"len": len(expression)}), "truncated": False}
 
-    async def screenshot(self, token: str, *, full_page: bool = False, timeout_ms: int = 30000,
-                         target_ip: str = "") -> bytes:
+    async def screenshot(
+        self, token: str, *, full_page: bool = False, timeout_ms: int = 30000, target_ip: str = ""
+    ) -> bytes:
         del token, full_page, timeout_ms, target_ip
         return b"\x89PNG\r\n\x1a\nfake"
 
-    async def take_network(self, token: str, *, body_sample_max_bytes: int = 4096,
-                           target_ip: str = "") -> list[dict[str, Any]]:
+    async def take_network(
+        self, token: str, *, body_sample_max_bytes: int = 4096, target_ip: str = ""
+    ) -> list[dict[str, Any]]:
         del body_sample_max_bytes, target_ip
         pending, self.net[token] = self.net[token], []
         return pending
