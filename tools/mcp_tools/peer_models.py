@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import os
 import re
 import sys
@@ -121,19 +122,34 @@ def register_peer_model_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
             consulted: list[str] = []
             sections: list[str] = []
-            for alias in selected:
+
+            def _chat_one(alias: str) -> tuple[str, str | None, str | None]:
+                # Returns (alias, answer, error). Never raises: the caller
+                # maps errors to skipped entries so one dead peer can't fail
+                # the batch.
                 try:
                     peer = router.get_client(alias)
                     response = peer.chat(alias, messages=messages, tools=None, stream=False)
                     answer = _truncate_text(_chat_content(response), max_answer_chars).strip()
-                    if not answer:
-                        answer = "(empty response)"
-                    consulted.append(alias)
-                    sections.append(f"[{alias}]\n{answer}")
+                    return alias, (answer or "(empty response)"), None
                 except _EXC_GROUP_CATCH as exc:  # ponytail: peer.chat may raise BaseExceptionGroup via anyio
                     if _is_exception_group(exc):
                         _log_nested_exceptions(exc)
-                    skipped.append(f"{alias}: {exc}")
+                    return alias, None, str(exc)
+
+            # ponytail: ThreadPool fan-out (sync MCP tool, no event loop here).
+            # 5 peers x 10-60s serial -> ~1 peer latency. Order restored by
+            # mapping back onto `selected` so output stays deterministic.
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(selected))) as _pool:
+                _answers = list(_pool.map(_chat_one, selected))
+            results = dict(zip(selected, _answers))
+            for alias in selected:
+                _alias, answer, error = results[alias]
+                if error is not None:
+                    skipped.append(f"{alias}: {error}")
+                else:
+                    consulted.append(alias)
+                    sections.append(f"[{alias}]\n{answer}")
 
             return (
                 "PEER_MODEL_CONSULTATION: COMPLETED\n"
@@ -231,22 +247,35 @@ def register_peer_model_tools(mcp: Any, *, ctx: ToolContext) -> None:
             consulted: list[str] = []
             sections: list[str] = []
             disagreements: list[str] = []
-            for alias in graders:
+
+            def _grade_one(alias: str) -> tuple[str, str | None, str | None]:
+                # Returns (alias, answer, error). Never raises.
                 try:
                     peer = router.get_client(alias)
                     response = peer.chat(alias, messages=messages, tools=None, stream=False)
                     answer = _truncate_text(_chat_content(response), max_answer).strip()
-                    if not answer:
-                        answer = "(empty response)"
-                    consulted.append(alias)
-                    sections.append(f"[{alias}]\n{answer}")
-                    # Track disagreement for the summary line.
-                    if '"agree": false' in answer.lower() or '"agree":false' in answer.lower():
-                        disagreements.append(alias)
+                    return alias, (answer or "(empty response)"), None
                 except _EXC_GROUP_CATCH as exc:  # ponytail: peer.chat may raise BaseExceptionGroup via anyio
                     if _is_exception_group(exc):
                         _log_nested_exceptions(exc)
-                    sections.append(f"[{alias}]\n(skipped: {exc})")
+                    return alias, None, str(exc)
+
+            # ponytail: ThreadPool fan-out (sync MCP tool). Order restored via
+            # `graders` so output stays deterministic.
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(graders))) as _pool:
+                _graded = list(_pool.map(_grade_one, graders))
+            graded = dict(zip(graders, _graded))
+            for alias in graders:
+                _alias, answer, error = graded[alias]
+                if error is not None:
+                    sections.append(f"[{alias}]\n(skipped: {error})")
+                    continue
+                assert answer is not None
+                consulted.append(alias)
+                sections.append(f"[{alias}]\n{answer}")
+                # Track disagreement for the summary line.
+                if '"agree": false' in answer.lower() or '"agree":false' in answer.lower():
+                    disagreements.append(alias)
 
             disagreement_flag = "DISAGREEMENT: yes" if disagreements else "DISAGREEMENT: no"
             return (

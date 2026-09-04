@@ -53,6 +53,7 @@ dev = [
     "ollama>=0.6.1",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
+    "pytest-xdist>=3.0.0",
     "coverage>=7.3.0",
     "ruff>=0.6.0",
     "mypy>=2.0",
@@ -161,6 +162,10 @@ ignore = ["E501", "F405", "F403", "F841"]
 "main.py" = ["E402"]
 "tools/exploit_agent/loop.py" = ["E402"]
 "tools/exploit_agent/runner.py" = ["E402"]
+# PEP 562 lazy questionary (attack_ui) + lazy numpy annotations (semantic_memory):
+# names resolve via module __getattr__ / function-level imports, invisible to static F821
+"tools/attack_ui.py" = ["F821"]
+"tools/semantic_memory.py" = ["F821"]
 "tools/exploit_agent/phase_tracker.py" = ["E402"]
 "tools/campaign/*.py" = ["E402", "F821", "I001"]
 

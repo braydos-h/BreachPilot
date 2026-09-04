@@ -3,9 +3,19 @@
 from __future__ import annotations
 
 import subprocess
+import threading
+import time
 
 from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
 from tools.mcp_tools.registry import *
+
+# ponytail: short-TTL cache for get_service_fingerprint results. A planning
+# loop re-fingerprints the same (ip, port) every cycle at ~8s socket+TLS per
+# call; banners don't change minute-to-minute. 300s matches the FastRecon
+# disk-cache precedent (tools/fast_recon.py).
+_FINGERPRINT_TTL_S = 300.0
+_FINGERPRINT_CACHE: dict[tuple[str, int], tuple[float, str]] = {}
+_fingerprint_lock = threading.Lock()
 
 
 def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
@@ -67,39 +77,51 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
         common_ports = [21, 22, 80, 111, 135, 139, 443, 445, 2049, 3389, 5900, 5985, 8080]
         banner_texts: dict[int, str] = {}
 
-        for port in common_ports:
+        def _probe_os_port(port: int) -> tuple[int, str] | None:
+            # Returns (port, banner) for open ports, None for closed. Never
+            # raises: one filtered port must not fail the batch.
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     s.settimeout(2)
-                    if s.connect_ex((target_ip, port)) == 0:
-                        banner = ""
+                    if s.connect_ex((target_ip, port)) != 0:
+                        return None
+                    banner = ""
+                    try:
+                        s.settimeout(2)
                         if port in (80, 443, 8080):
-                            try:
-                                s.settimeout(2)
-                                s.sendall(b"HEAD / HTTP/1.0\r\n\r\n")
-                                banner = s.recv(512).decode("utf-8", errors="replace").strip()[:200]
-                            except Exception:  # ponytail: bare except intentional
-                                pass
+                            s.sendall(b"HEAD / HTTP/1.0\r\n\r\n")
+                            banner = s.recv(512).decode("utf-8", errors="replace").strip()[:200]
                         else:
-                            try:
-                                s.settimeout(2)
-                                banner = s.recv(256).decode("utf-8", errors="replace").strip()[:120]
-                            except Exception:  # ponytail: bare except intentional
-                                pass
-                        banner_texts[port] = banner
-                        result_lines.append(f"  Port {port}/tcp: open - {banner if banner else '(no banner)'}")
-
-                        if port == 22:
-                            hints.append("Port 22/tcp open - likely Linux/Unix (SSH)")
-                            linux_score += 1
-                        elif port in (135, 139, 445, 3389, 5985):
-                            hints.append(f"Port {port}/tcp open - likely Windows")
-                            windows_score += 1
-                        elif port in (111, 2049):
-                            hints.append(f"Port {port}/tcp open - likely Linux/Unix")
-                            linux_score += 1
+                            banner = s.recv(256).decode("utf-8", errors="replace").strip()[:120]
+                    except Exception:  # ponytail: bare except intentional
+                        pass
+                    return port, banner
             except Exception:  # ponytail: bare except intentional
-                pass
+                return None
+
+        # ponytail: ThreadPool fan-out (sync MCP tool). 13 ports x 2-4s serial
+        # (~26s worst case) becomes ~1 port latency. Results mapped back in
+        # port order so output stays deterministic.
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(common_ports)) as _pool:
+            _probed = list(_pool.map(_probe_os_port, common_ports))
+        for _hit in _probed:
+            if _hit is None:
+                continue
+            port, banner = _hit
+            banner_texts[port] = banner
+            result_lines.append(f"  Port {port}/tcp: open - {banner if banner else '(no banner)'}")
+
+            if port == 22:
+                hints.append("Port 22/tcp open - likely Linux/Unix (SSH)")
+                linux_score += 1
+            elif port in (135, 139, 445, 3389, 5985):
+                hints.append(f"Port {port}/tcp open - likely Windows")
+                windows_score += 1
+            elif port in (111, 2049):
+                hints.append(f"Port {port}/tcp open - likely Linux/Unix")
+                linux_score += 1
 
         # --- Banner text heuristics ---
         windows_banner_keywords = ["windows", "win32", "microsoft", "iis", "winrm"]
@@ -313,6 +335,12 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if not isinstance(port, int) or isinstance(port, bool) or port < 1 or port > 65535:
             return "ERROR: Port must be an integer between 1 and 65535."
 
+        _fp_key = (target_ip, port)
+        with _fingerprint_lock:
+            _fp_hit = _FINGERPRINT_CACHE.get(_fp_key)
+            if _fp_hit is not None and time.monotonic() - _fp_hit[0] < _FINGERPRINT_TTL_S:
+                return _fp_hit[1]
+
         try:
             lines = [f"SERVICE_FINGERPRINT: {target_ip}:{port}", ""]
             banner = ""
@@ -410,7 +438,10 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 if ssl_info.get("not_after"):
                     lines.append(f"  Valid Until: {ssl_info['not_after']}")
 
-            return "\n".join(lines)
+            _rendered = "\n".join(lines)
+            with _fingerprint_lock:
+                _FINGERPRINT_CACHE[_fp_key] = (time.monotonic(), _rendered)
+            return _rendered
         except socket.timeout:
             return f"ERROR: Connection to {target_ip}:{port} timed out."
         except ConnectionRefusedError:

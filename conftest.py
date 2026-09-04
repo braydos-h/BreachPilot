@@ -61,7 +61,23 @@ def _isolate_exploit_target_env():
     writes ``os.environ["EXPLOIT_DISCOVERED_TARGETS"] = "..."`` directly cannot
     leak it into a later test (which broke the empty-allowlist tests, the
     invalid-target rejection tests, and the ollama-unreachable fallback test).
+
+    Also clears the ``resolve_target_to_ip`` DNS cache: tests patch
+    ``socket.getaddrinfo`` with different fake records per test, and a cached
+    entry from an earlier test would shadow the mock.
     """
+    try:
+        from tools.validation_utils import _RESOLVE_CACHE
+
+        _RESOLVE_CACHE.clear()
+    except Exception:
+        pass
+    try:
+        from tools.mcp_tools.recon import _FINGERPRINT_CACHE
+
+        _FINGERPRINT_CACHE.clear()
+    except Exception:
+        pass
     snapshot = {k: os.environ.get(k) for k in _EXPLOIT_ENV_VARS}
     yield
     for k in _EXPLOIT_ENV_VARS:
@@ -70,3 +86,15 @@ def _isolate_exploit_target_env():
             os.environ.pop(k, None)
         else:
             os.environ[k] = original
+    try:
+        from tools.validation_utils import _RESOLVE_CACHE
+
+        _RESOLVE_CACHE.clear()
+    except Exception:
+        pass
+    try:
+        from tools.mcp_tools.recon import _FINGERPRINT_CACHE
+
+        _FINGERPRINT_CACHE.clear()
+    except Exception:
+        pass

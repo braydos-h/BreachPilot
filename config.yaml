@@ -195,6 +195,7 @@ autonomous:
   persistence_phase: false
   checkpoint_every: 0
   adaptive_replan: false
+  max_parallel_targets: 1
   max_cycles: 100
   max_pivot_depth: 0
   dedup_targets: false

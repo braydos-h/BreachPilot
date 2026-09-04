@@ -12,6 +12,7 @@ operator box where SYN/OS scans would fail.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import socket
 
 # A conservative common-ports list used by the recon pipeline's final
@@ -111,8 +112,15 @@ def _probe_port(target: str, port: int, timeout: float = 3.0) -> dict:
 
 
 def socket_scan_sync(target: str, ports: list[int], timeout: float = 3.0) -> list[dict]:
-    """Synchronous multi-port scan (used by the sync ``quick_scan`` MCP tool)."""
-    return [_probe_port(target, p, timeout) for p in ports]
+    """Synchronous multi-port scan (used by the sync ``quick_scan`` MCP tool).
+
+    Probes run concurrently in a thread pool: 24 ports x 6s worst-case serial
+    becomes ~1 port latency. Order matches ``ports`` so output is stable.
+    """
+    if not ports:
+        return []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(64, len(ports))) as pool:
+        return list(pool.map(lambda p: _probe_port(target, p, timeout), ports))
 
 
 # ponytail: errno -> reachability verdict. ECONNREFUSED/EHOSTUNREACH/
@@ -182,12 +190,11 @@ async def probe_reachable(
     """
     if not ports:
         ports = [80, 443]
-    statuses: list[str] = []
-    for port in ports:
-        status = await asyncio.to_thread(_connect_status, target, port, timeout)
-        statuses.append(status)
-        if status == "open":
-            return True
+    # ponytail: gather, not serial to_thread — one slow/filtered port must not
+    # stall the rest of the probe set.
+    statuses = await asyncio.gather(*[asyncio.to_thread(_connect_status, target, port, timeout) for port in ports])
+    if "open" in statuses:
+        return True
     # No port answered. If every probe was definitively refused, the host is
     # up-but-closed on the probe set -> treat as unreachable for preflight
     # purposes (a full scan would only confirm the same thing). If anything

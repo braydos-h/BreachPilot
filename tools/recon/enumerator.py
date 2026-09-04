@@ -177,11 +177,20 @@ class SecondaryEnumerator:
         """Enumerate HTTP/HTTPS services with multiple tools."""
         logger.info(f"Starting HTTP enumeration on {result.target_ip}")
 
-        for svc in services:
-            port = svc.port
-            scheme = "https" if svc.service.lower() == "https" or port in (443, 8443) else "http"
-            base_url = f"{scheme}://{result.target_ip}:{port}"
+        # ponytail: per-service fan-out + intra-service tool fan-out. Nikto /
+        # feroxbuster / nuclei / curl are independent read-only probes; running
+        # them serially costs up to 300s x 3 per service. Mutations touch
+        # distinct svc.scripts keys; evidence/warning appends are
+        # single-threaded asyncio appends (no true races).
+        await asyncio.gather(*(self._enumerate_http_service(result, svc) for svc in services))
+        return result
 
+    async def _enumerate_http_service(self, result: HostReconResult, svc: ServiceInfo) -> None:
+        port = svc.port
+        scheme = "https" if svc.service.lower() == "https" or port in (443, 8443) else "http"
+        base_url = f"{scheme}://{result.target_ip}:{port}"
+
+        async def _nikto() -> None:
             # 1. Nikto scan
             if ToolAvailability.check(self._config.nikto_path):
                 cmd = [
@@ -204,6 +213,7 @@ class SecondaryEnumerator:
                 else:
                     result.warnings.append(f"Nikto failed on port {port}: {stderr[:200]}")
 
+        async def _dirbuster() -> None:
             # 2. Feroxbuster directory enumeration
             if ToolAvailability.check(self._config.feroxbuster_path):
                 cmd = [
@@ -246,6 +256,7 @@ class SecondaryEnumerator:
                     svc.scripts["gobuster"] = stdout[:5000]
                     result.evidence_refs.append(f"gobuster:{port}")
 
+        async def _nuclei() -> None:
             # 4. Nuclei scan
             if ToolAvailability.check(self._config.nuclei_path):
                 cmd = [
@@ -266,6 +277,7 @@ class SecondaryEnumerator:
                     svc.scripts["nuclei"] = stdout[:5000]
                     result.evidence_refs.append(f"nuclei:{port}")
 
+        async def _headers() -> None:
             # 5. Technology fingerprinting with curl
             if ToolAvailability.check(self._config.curl_path):
                 cmd = [
@@ -289,62 +301,69 @@ class SecondaryEnumerator:
                     techs = self._extract_technologies(stdout)
                     svc.technologies = techs
 
-        return result
+        await asyncio.gather(_nikto(), _dirbuster(), _nuclei(), _headers())
 
     async def _enumerate_ssh(self, result: HostReconResult, services: list[ServiceInfo]) -> HostReconResult:
         """Enumerate SSH services: version, weak ciphers, CVE checks."""
         logger.info(f"Starting SSH enumeration on {result.target_ip}")
 
-        for svc in services:
-            port = svc.port
-
-            # 1. SSH version and cipher enumeration
-            if ToolAvailability.check(self._config.nmap_path):
-                cmd = [
-                    self._config.nmap_path,
-                    "-p",
-                    str(port),
-                    "--script",
-                    "ssh2-enum-algos,ssh-hostkey,ssh-auth-methods",
-                    result.target_ip,
-                ]
-                success, stdout, stderr, _ = await run_command(
-                    cmd,
-                    timeout=60,
-                    max_retries=1,
-                )
-                if success:
-                    svc.scripts["ssh_enum"] = stdout[:3000]
-                    result.evidence_refs.append(f"ssh_enum:{port}")
-
-                    # Check for weak algorithms
-                    weak_ciphers = ["arcfour", "3des-cbc", "blowfish-cbc", "cast128-cbc", "rc4"]
-                    for cipher in weak_ciphers:
-                        if cipher in stdout.lower():
-                            result.warnings.append(f"Weak SSH cipher detected on port {port}: {cipher}")
-
-            # 2. Check for default credentials with Hydra (only if explicitly enabled)
-            # Note: This is gated by risk profile, we'll add the script but not auto-run
-            svc.scripts["hydra_ready"] = (
-                f"hydra -t 4 -V -f -L users.txt -P passwords.txt ssh://{result.target_ip}:{port}"
-            )
-
-            # 3. Map OpenSSH version to known CVEs
-            version = svc.version.lower()
-            cves = self._map_openssh_cves(version)
-            if cves:
-                svc.scripts["openssh_cves"] = json.dumps(cves)
-                result.warnings.append(f"OpenSSH {svc.version} may be vulnerable to: {', '.join(cves)}")
-
+        # ponytail: per-service fan-out; the nmap probe is the only slow
+        # subprocess here, the rest is local computation.
+        await asyncio.gather(*(self._enumerate_ssh_service(result, svc) for svc in services))
         return result
+
+    async def _enumerate_ssh_service(self, result: HostReconResult, svc: ServiceInfo) -> None:
+        port = svc.port
+
+        # 1. SSH version and cipher enumeration
+        if ToolAvailability.check(self._config.nmap_path):
+            cmd = [
+                self._config.nmap_path,
+                "-p",
+                str(port),
+                "--script",
+                "ssh2-enum-algos,ssh-hostkey,ssh-auth-methods",
+                result.target_ip,
+            ]
+            success, stdout, stderr, _ = await run_command(
+                cmd,
+                timeout=60,
+                max_retries=1,
+            )
+            if success:
+                svc.scripts["ssh_enum"] = stdout[:3000]
+                result.evidence_refs.append(f"ssh_enum:{port}")
+
+                # Check for weak algorithms
+                weak_ciphers = ["arcfour", "3des-cbc", "blowfish-cbc", "cast128-cbc", "rc4"]
+                for cipher in weak_ciphers:
+                    if cipher in stdout.lower():
+                        result.warnings.append(f"Weak SSH cipher detected on port {port}: {cipher}")
+
+        # 2. Check for default credentials with Hydra (only if explicitly enabled)
+        # Note: This is gated by risk profile, we'll add the script but not auto-run
+        svc.scripts["hydra_ready"] = f"hydra -t 4 -V -f -L users.txt -P passwords.txt ssh://{result.target_ip}:{port}"
+
+        # 3. Map OpenSSH version to known CVEs
+        version = svc.version.lower()
+        cves = self._map_openssh_cves(version)
+        if cves:
+            svc.scripts["openssh_cves"] = json.dumps(cves)
+            result.warnings.append(f"OpenSSH {svc.version} may be vulnerable to: {', '.join(cves)}")
 
     async def _enumerate_smb(self, result: HostReconResult, services: list[ServiceInfo]) -> HostReconResult:
         """Enumerate SMB services: shares, users, null sessions."""
         logger.info(f"Starting SMB enumeration on {result.target_ip}")
 
-        for svc in services:
-            port = svc.port
+        # ponytail: per-service fan-out + intra-service tool fan-out
+        # (enum4linux 120s + smbclient 30s + nmap 120s serial -> ~max).
+        await asyncio.gather(*(self._enumerate_smb_service(result, svc) for svc in services))
+        return result
 
+    async def _enumerate_smb_service(self, result: HostReconResult, svc: ServiceInfo) -> None:
+        port = svc.port
+
+        async def _enum4linux() -> None:
             # 1. enum4linux
             if ToolAvailability.check(self._config.enum4linux_path):
                 cmd = [
@@ -365,6 +384,7 @@ class SecondaryEnumerator:
                     if "null session" in stdout.lower() or "mapping: ok" in stdout.lower():
                         result.warnings.append(f"SMB null session possible on {result.target_ip}:{port}")
 
+        async def _shares() -> None:
             # 2. smbclient share enumeration
             if ToolAvailability.check(self._config.smbclient_path):
                 cmd = [
@@ -391,6 +411,7 @@ class SecondaryEnumerator:
                                 f"Accessible SMB shares on {result.target_ip}:{port}: {', '.join(shares[:5])}"
                             )
 
+        async def _nmap_smb() -> None:
             # 3. Nmap SMB scripts
             if ToolAvailability.check(self._config.nmap_path):
                 cmd = [
@@ -410,17 +431,21 @@ class SecondaryEnumerator:
                     svc.scripts["nmap_smb"] = stdout[:5000]
                     result.evidence_refs.append(f"nmap_smb:{port}")
 
-        return result
+        await asyncio.gather(_enum4linux(), _shares(), _nmap_smb())
 
     async def _enumerate_ldap(self, result: HostReconResult, services: list[ServiceInfo]) -> HostReconResult:
         """Enumerate LDAP services: anonymous bind, directory extraction."""
         logger.info(f"Starting LDAP enumeration on {result.target_ip}")
 
-        for svc in services:
-            port = svc.port
-            protocol = "ldaps" if port == 636 or svc.service.lower() == "ldaps" else "ldap"
+        # ponytail: per-service fan-out + intra-service tool fan-out.
+        await asyncio.gather(*(self._enumerate_ldap_service(result, svc) for svc in services))
+        return result
 
-            # 1. Anonymous bind test with ldapsearch
+    async def _enumerate_ldap_service(self, result: HostReconResult, svc: ServiceInfo) -> None:
+        port = svc.port
+        protocol = "ldaps" if port == 636 or svc.service.lower() == "ldaps" else "ldap"
+
+        async def _anon_bind() -> None:
             if ToolAvailability.check(self._config.ldapsearch_path):
                 cmd = [
                     self._config.ldapsearch_path,
@@ -446,6 +471,7 @@ class SecondaryEnumerator:
                     # Other errors might indicate interesting behavior
                     svc.scripts["ldap_error"] = stderr[:1000]
 
+        async def _nmap_ldap() -> None:
             # 2. Nmap LDAP scripts
             if ToolAvailability.check(self._config.nmap_path):
                 cmd = [
@@ -465,15 +491,20 @@ class SecondaryEnumerator:
                     svc.scripts["nmap_ldap"] = stdout[:3000]
                     result.evidence_refs.append(f"nmap_ldap:{port}")
 
-        return result
+        await asyncio.gather(_anon_bind(), _nmap_ldap())
 
     async def _enumerate_ftp(self, result: HostReconResult, services: list[ServiceInfo]) -> HostReconResult:
         """Enumerate FTP services: anonymous login, version checks."""
         logger.info(f"Starting FTP enumeration on {result.target_ip}")
 
-        for svc in services:
-            port = svc.port
+        # ponytail: per-service fan-out + intra-service tool fan-out.
+        await asyncio.gather(*(self._enumerate_ftp_service(result, svc) for svc in services))
+        return result
 
+    async def _enumerate_ftp_service(self, result: HostReconResult, svc: ServiceInfo) -> None:
+        port = svc.port
+
+        async def _anon_login() -> None:
             # Test anonymous login with curl
             if ToolAvailability.check(self._config.curl_path):
                 cmd = [
@@ -495,6 +526,7 @@ class SecondaryEnumerator:
                 else:
                     svc.scripts["ftp_anonymous"] = f"Anonymous login failed: {stderr[:500]}"
 
+        async def _nmap_ftp() -> None:
             # Nmap FTP scripts
             if ToolAvailability.check(self._config.nmap_path):
                 cmd = [
@@ -514,7 +546,7 @@ class SecondaryEnumerator:
                     svc.scripts["nmap_ftp"] = stdout[:3000]
                     result.evidence_refs.append(f"nmap_ftp:{port}")
 
-        return result
+        await asyncio.gather(_anon_login(), _nmap_ftp())
 
     async def _enumerate_redis(self, result: HostReconResult, services: list[ServiceInfo]) -> HostReconResult:
         """Enumerate Redis services: unauth check, info extraction.

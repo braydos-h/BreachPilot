@@ -13,6 +13,7 @@ import re
 import shutil
 import socket
 import threading
+import time
 from collections.abc import Callable, Sequence
 from typing import TypedDict
 
@@ -183,6 +184,11 @@ def resolve_target_to_ip(
     (``AF_INET`` for IPv4 by default, ``AF_INET6`` for IPv6). Returns
     ``None`` on any error -- never raises -- so callers can fall back to
     the hostname. If ``host`` is already an IP literal it is returned as-is.
+
+    The system-resolver path is cached for ``_RESOLVE_TTL_S`` seconds: the
+    campaign preflight resolves every target (plus dedup lookups), and a
+    planning loop re-resolves the same domain each cycle. Injected
+    ``resolver_fn`` calls bypass the cache so tests stay deterministic.
     """
     if not host or not isinstance(host, str):
         return None
@@ -197,12 +203,37 @@ def resolve_target_to_ip(
         pass
     if not is_fqdn(host):
         return None
+    if resolver_fn is None:
+        _now = time.monotonic()
+        _key = (host, family)
+        with _resolve_lock:
+            _hit = _RESOLVE_CACHE.get(_key)
+            if _hit is not None and _now - _hit[0] < _RESOLVE_TTL_S:
+                return _hit[1]
+        resolved = _resolve_via_system(host, family)
+        with _resolve_lock:
+            _RESOLVE_CACHE[_key] = (_now, resolved)
+        return resolved
     try:
-        if resolver_fn is not None:
-            addrs = resolver_fn(host)
-            if addrs:
-                return str(addrs[0])
-            return None
+        addrs = resolver_fn(host)
+        if addrs:
+            return str(addrs[0])
+        return None
+    except (OSError, socket.gaierror, ValueError):
+        return None
+
+
+# ponytail: short-TTL DNS cache for the system-resolver path above. Dict +
+# lock, not lru_cache, so entries expire (a stale IP must not outlive 5 min)
+# and failures (None) also cache — a dead domain shouldn't cost a DNS
+# timeout on every planning cycle.
+_RESOLVE_TTL_S = 300.0
+_RESOLVE_CACHE: dict[tuple[str, int], tuple[float, str | None]] = {}
+_resolve_lock = threading.Lock()
+
+
+def _resolve_via_system(host: str, family: int) -> str | None:
+    try:
         infos = socket.getaddrinfo(host, None, family, socket.SOCK_STREAM)
         for info in infos:
             try:

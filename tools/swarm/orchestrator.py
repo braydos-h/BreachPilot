@@ -110,6 +110,13 @@ class SwarmOrchestrator:
         # outcome is already persisted to swarm_state.json on every event.
         self._max_results = 500
         self._max_battle_log = 500
+        # ponytail: persist throttle. _persist_state does a full json.dumps +
+        # mkdir + atomic replace; at 200 cycles x several events per cycle the
+        # disk writes dominate the orchestrator's own CPU. Throttled to at most
+        # one write per interval; route_parallel forces a final write so resume
+        # never loses the batch tail.
+        self._state_persist_interval = 5.0
+        self._last_persist = 0.0
 
         # ── Shared blackboard for inter-agent state ──
         # ``Blackboard`` (tools/swarm/blackboard.py) is a dict subclass with
@@ -306,7 +313,9 @@ class SwarmOrchestrator:
         # failed recon shouldn't wedge the whole campaign forever).
         self._mark_milestone(target, phase)
 
-        self._persist_state()
+        # Forced: task completion (results + blackboard deltas) is the
+        # resume-meaningful event. Spawn/block/reflect persists stay throttled.
+        self._persist_state(force=True)
 
         # ── Auto-reflect after exploitation phases ──
         if self._reflection_enabled and phase in ("exploit", "post_exploit"):
@@ -391,10 +400,12 @@ class SwarmOrchestrator:
 
         # Sequential tasks (exploit/post_exploit in recon-first mode) run
         # via route() one at a time, after the parallel batch finishes, so a
-        # vuln result feeds the next exploit cycle cleanly.
+        # vuln result feeds the next exploit cycle cleanly. Each still runs in
+        # the executor (not blocking the event loop) but awaits one-by-one so
+        # the serial safety semantics are unchanged.
         sequential_results: list[AgentResult] = []
         for t in sequential_tasks:
-            sequential_results.append(self.route(t))
+            sequential_results.append(await _run_one(t))
 
         # Preserve input order: return results in the same order as ``tasks``.
         # gather preserves order for parallel_tasks; the sequential loop
@@ -420,6 +431,9 @@ class SwarmOrchestrator:
                     error="route_parallel: no result produced for task",
                 )
             )
+        # Batch-end forced write: throttled per-task persists above may have
+        # skipped the tail; resume must see the completed batch.
+        self._persist_state(force=True)
         return ordered
 
     def reflect(self, battle_log: list[dict[str, Any]], session_state: dict[str, Any]) -> AgentResult:
@@ -559,10 +573,24 @@ class SwarmOrchestrator:
         if len(self._battle_log) > self._max_battle_log:
             del self._battle_log[: len(self._battle_log) - self._max_battle_log]
 
-    def _persist_state(self) -> None:
-        """Persist a snapshot of swarm state for resume and live CLI progress."""
+    def _persist_state(self, *, force: bool = False) -> None:
+        """Persist a snapshot of swarm state for resume and live CLI progress.
+
+        Throttled to at most one disk write per ``_state_persist_interval``
+        (5s) unless ``force=True`` — bursty event paths (route per task,
+        spawn per agent) otherwise fsync-spam a 200-cycle campaign. Resume
+        correctness is kept: ``route_parallel`` forces a write at batch end,
+        so the tail is never older than one batch.
+        """
         if self._state_path is None:
             return
+        if not force:
+            now = time.monotonic()
+            if now - self._last_persist < self._state_persist_interval:
+                return
+            self._last_persist = now
+        else:
+            self._last_persist = time.monotonic()
         try:
             self._state_path.parent.mkdir(parents=True, exist_ok=True)
             snapshot = {

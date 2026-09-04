@@ -13,8 +13,9 @@ import json
 import logging
 from typing import Any
 
-import numpy as np
-
+# ponytail: numpy imports lazily inside the similarity methods. This module is
+# imported on paths (e.g. `main --help`) that never compute a cosine; the
+# C-extension import cost is only paid when recall actually runs.
 from db import DatabaseManager, _new_id, _now_iso
 from tools.providers.embeddings import OllamaEmbeddingProvider
 
@@ -151,6 +152,8 @@ class SemanticMemoryManager:
         if query_emb is None:
             return []
 
+        import numpy as np  # ponytail: lazy — see module header note
+
         query_vec = np.array(query_emb, dtype=np.float32)
 
         # Tier 1.1: skip zero-length embeddings. ``record_outcome`` (ExperienceStore)
@@ -220,6 +223,8 @@ class SemanticMemoryManager:
         query_emb = self._generate_embedding(text)
         if query_emb is None:
             return []
+
+        import numpy as np  # ponytail: lazy — see module header note
 
         query_vec = np.array(query_emb, dtype=np.float32)
 
@@ -352,7 +357,7 @@ class SemanticMemoryManager:
     # ── Helpers ─────────────────────────────────────────────────────────
 
     @staticmethod
-    def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:  # type: ignore[name-defined]  # ponytail: np imported lazily below
         """Compute cosine similarity between two vectors.
 
         Defensive guards return 0.0 for: shape mismatch (different embedding
@@ -361,6 +366,8 @@ class SemanticMemoryManager:
         treats as a non-match, so a bad row degrades recall gracefully rather
         than crashing the whole similarity scan.
         """
+        import numpy as np  # ponytail: lazy — see module header note
+
         if a.shape != b.shape:
             return 0.0
         if not (np.isfinite(a).all() and np.isfinite(b).all()):

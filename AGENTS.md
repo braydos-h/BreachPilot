@@ -27,6 +27,7 @@ python main.py                   # WebUI daemon + browser (default no-args); --m
 
 # Tests (~250 files in tests/, all mock subprocess/network — no live Nmap)
 python -m pytest tests/ -v                                            # full suite
+python -m pytest tests/ -q -n auto                                     # full suite, parallel (needs pytest-xdist from .[dev])
 python -m pytest tests/test_scope_gate.py -v                          # one file
 python -m pytest tests/test_recon_pipeline.py::TestClass::test_method # one test
 python -m pytest tests/ -v -k "scope"                                 # by keyword

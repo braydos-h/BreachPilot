@@ -35,6 +35,10 @@ eval:
 test:
 	$(BIN)/python -m pytest tests/ -v
 
+# Parallel suite (~4x faster locally; needs pip install -e ".[dev]" for pytest-xdist)
+test-fast:
+	$(BIN)/python -m pytest tests/ -q -n auto
+
 # Run a focused file, e.g. `make test-one F=tests/test_scope_gate.py`
 test-one:
 	$(BIN)/python -m pytest $(F) -v

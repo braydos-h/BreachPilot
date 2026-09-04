@@ -223,6 +223,13 @@ class AutonomousOrchestrator:
         self._persistence_enabled = bool(mission_config.get("persistence_phase", False))
         self._checkpoint_every = max(0, int(mission_config.get("checkpoint_every", 0) or 0))
         self._adaptive_replan = bool(mission_config.get("adaptive_replan", False))
+        # ponytail: opt-in per-target parallelism (default 1 = serial,
+        # byte-identical). Set ``max_parallel_targets: N`` to attack N
+        # targets concurrently under a semaphore.
+        try:
+            self._max_parallel_targets = max(1, int(mission_config.get("max_parallel_targets", 1) or 1))
+        except (TypeError, ValueError):
+            self._max_parallel_targets = 1
         # Kill-chain state machine (design §killchain). Opt-in (default off):
         # when enabled, _attack_target prefers verified kill-chain edges over
         # free-form module planning and falls back on the first unverified
@@ -434,32 +441,58 @@ class AutonomousOrchestrator:
         # are opt-in (default off) so a single-IP campaign is byte-identical.
         targets = self._preflight_targets(targets)
 
-        for target in targets:
-            if not self._running:
-                break
+        # ponytail: bounded per-target fan-out. max_parallel_targets=1 (default)
+        # keeps the original serial loop verbatim — including checkpoint
+        # interleaving (a checkpoint at completed==2 captures exactly 2
+        # targets' states). N>1 runs targets concurrently under a semaphore;
+        # checkpoints then fire as results complete (a checkpoint may capture
+        # more states than its count — inherent to concurrent completion).
+        async def _run_guarded(target: str) -> tuple[str, dict[str, Any]]:
             # Phase 2.3: crash-bounded per-target dispatch. A single target's
             # unexpected exception must NOT abort the whole campaign -- record
             # the failure and continue so the operator still gets results for
             # the remaining targets (and a checkpoint preserves progress).
             try:
-                result = await self._attack_target(target)
+                return target, await self._attack_target(target)
             except Exception as exc:  # noqa: BLE001 -- crash-bounded: one target shouldn't kill the campaign
                 logger.exception(f"Crash-bounded: _attack_target({target}) raised {exc}")
                 state = self.get_state(target)
                 state.add_timeline_event("target_crash", f"Target {target} aborted: {exc}", {"error": str(exc)})
-                result = {"status": "crashed", "error": str(exc), "state": state.to_dict()}
-            results[target] = result
-            completed += 1
-            # Phase 2.3: periodic checkpoint. Every ``checkpoint_every`` completed
-            # targets (opt-in, 0 = off), persist attack_states.json so a crashed
-            # run resumes with real progress. The save itself is best-effort --
-            # a checkpoint failure never aborts the campaign.
+                return target, {"status": "crashed", "error": str(exc), "state": state.to_dict()}
+
+        def _checkpoint() -> None:
+            # Phase 2.3: periodic checkpoint. Every ``checkpoint_every``
+            # completed targets (opt-in, 0 = off), persist attack_states.json
+            # so a crashed run resumes with real progress. Best-effort — a
+            # checkpoint failure never aborts the campaign.
             if self._checkpoint_every > 0 and completed % self._checkpoint_every == 0:
                 try:
                     self.save_state()
                     logger.info(f"[CHECKPOINT] Saved attack state after {completed} target(s)")
                 except Exception as exc:  # noqa: BLE001 -- checkpoint failure is non-fatal
                     logger.warning(f"[CHECKPOINT] Save failed (non-fatal): {exc}")
+
+        if self._max_parallel_targets <= 1:
+            for target in targets:
+                if not self._running:
+                    break
+                _, result = await _run_guarded(target)
+                results[target] = result
+                completed += 1
+                _checkpoint()
+        else:
+            _sema = asyncio.Semaphore(self._max_parallel_targets)
+
+            async def _run_one(target: str) -> tuple[str, dict[str, Any]]:
+                async with _sema:
+                    if not self._running:
+                        return target, {"status": "aborted", "error": "campaign stopped"}
+                    return await _run_guarded(target)
+
+            for target, result in await asyncio.gather(*(_run_one(t) for t in targets)):
+                results[target] = result
+                completed += 1
+                _checkpoint()
 
         campaign_duration = time.monotonic() - campaign_start
         logger.info(f"Campaign complete in {campaign_duration:.1f}s")

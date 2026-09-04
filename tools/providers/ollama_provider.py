@@ -306,7 +306,11 @@ def auto_refresh_on_startup(
 
     Skips silently (returns ``None``) for non-Ollama providers, when
     ``models.auto_update`` is false, or on any error — startup must never
-    fail because the model catalog was unreachable.
+    fail because the model catalog was unreachable. Also skips when a
+    refresh for the same config file succeeded within
+    ``_AUTO_REFRESH_MIN_INTERVAL_S``: every daemon restart was paying a
+    blocking ``/api/tags`` round-trip (5s timeout) for a registry that only
+    changes when Ollama Cloud ships a new same-family model.
     """
     try:
         from tools.config_manager import get_ai_provider
@@ -320,6 +324,11 @@ def auto_refresh_on_startup(
         logger.warning("Model auto-update skipped: %s: %s", type(exc).__name__, exc)
         return None
     try:
+        if _refresh_stamp_fresh(config_path):
+            return None
+    except Exception:  # noqa: BLE001 -- stamp check is advisory; a broken stamp must not skip the refresh
+        pass
+    try:
         result = refresh_model_registry(config, config_path=config_path, persist=True, timeout=5.0)
     except Exception as exc:  # noqa: BLE001 -- advisory only
         logger.warning("Model auto-update failed: %s: %s", type(exc).__name__, exc)
@@ -331,7 +340,48 @@ def auto_refresh_on_startup(
         reg = (config.get("models") or {}).setdefault("registry", {})
         for alias, upd in result["updates"].items():
             reg[alias] = upd["new"]
+    try:
+        _write_refresh_stamp(config_path)
+    except Exception:  # noqa: BLE001 -- stamp write is advisory
+        pass
     return result
+
+
+# ponytail: throttle file for the boot refresh above. Keyed by sha1 of the
+# absolute config path (tests use distinct tmp configs, so no cross-test
+# interference); lives in the OS temp dir so no repo/workspace pollution.
+_AUTO_REFRESH_MIN_INTERVAL_S = 3600.0
+
+
+def _refresh_stamp_path(config_path: str | os.PathLike[str]) -> Any:
+    import hashlib
+    import tempfile
+    from pathlib import Path
+
+    digest = hashlib.sha1(os.path.abspath(os.fspath(config_path)).encode()).hexdigest()[:16]
+    return Path(tempfile.gettempdir()) / f"breachpilot-model-refresh-{digest}.stamp"
+
+
+def _refresh_stamp_fresh(config_path: str | os.PathLike[str]) -> bool:
+    import time
+
+    stamp = _refresh_stamp_path(config_path)
+    try:
+        age = time.time() - stamp.stat().st_mtime
+    except OSError:
+        return False
+    return age < _AUTO_REFRESH_MIN_INTERVAL_S
+
+
+def _write_refresh_stamp(config_path: str | os.PathLike[str]) -> None:
+    import time
+
+    stamp = _refresh_stamp_path(config_path)
+    stamp.touch(exist_ok=True)
+    try:
+        os.utime(stamp, (time.time(), time.time()))
+    except OSError:
+        pass
 
 
 # ---------------------------------------------------------------------------

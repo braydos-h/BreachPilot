@@ -19,8 +19,8 @@ import math
 import threading
 from typing import Any
 
-import numpy as np
-
+# ponytail: numpy imports lazily inside _cosine (its only use). Importing this
+# module must stay cheap for --help/--doctor paths that never rank skills.
 from tools.skill_registry import LoadedSkill, normalized_skill_tags
 
 _WARNED_NO_EMBEDDER = False
@@ -47,6 +47,8 @@ def _embed_search_text(skill: LoadedSkill) -> str:
 def _cosine(a: list[float] | tuple[float, ...], b: list[float] | tuple[float, ...]) -> float:
     if not a or not b or len(a) != len(b):
         return 0.0
+    import numpy as np  # ponytail: lazy — see module docstring note
+
     av = np.asarray(a, dtype=np.float64)
     bv = np.asarray(b, dtype=np.float64)
     na = float(np.dot(av, av))

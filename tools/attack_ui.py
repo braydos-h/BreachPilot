@@ -20,31 +20,6 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-try:
-    import questionary
-    from questionary import Choice, Style
-
-    _CUSTOM_STYLE = Style(
-        [
-            ("qmark", "fg:cyan bold"),
-            ("question", "fg:white bold"),
-            ("answer", "fg:green bold"),
-            ("pointer", "fg:cyan bold"),
-            ("highlighted", "fg:cyan bold"),
-            ("selected", "fg:green bold"),
-            ("separator", "fg:gray"),
-            ("instruction", "fg:gray italic"),
-            ("text", ""),
-            ("disabled", "fg:gray italic"),
-        ]
-    )
-    _HAS_QUESTIONARY = True
-except Exception:
-    _HAS_QUESTIONARY = False
-    Choice = None  # type: ignore
-    Style = None  # type: ignore
-    _CUSTOM_STYLE = None  # type: ignore
-
 
 class _FallbackChoice:
     """Minimal fallback when questionary is not installed."""
@@ -55,8 +30,61 @@ class _FallbackChoice:
         self.checked = checked
 
 
-if Choice is None:
-    Choice = _FallbackChoice  # type: ignore
+# ponytail: questionary (prompt_toolkit) is only needed by the --menu path,
+# but importing it at module top taxes EVERY process (main --help, --doctor,
+# MCP server boot). PEP 562 lazy attrs: these names are deliberately ABSENT
+# from module globals, so the first access (``if _HAS_QUESTIONARY:``,
+# ``Choice(...)``, ``questionary.select``) falls through to ``__getattr__``,
+# which imports once and caches in globals. Every existing call site and
+# ``from tools.attack_ui import Choice`` keeps working unchanged.
+_questionary_mod: Any = None
+_questionary_tried = False
+
+_STYLE_DEFS = [
+    ("qmark", "fg:cyan bold"),
+    ("question", "fg:white bold"),
+    ("answer", "fg:green bold"),
+    ("pointer", "fg:cyan bold"),
+    ("highlighted", "fg:cyan bold"),
+    ("selected", "fg:green bold"),
+    ("separator", "fg:gray"),
+    ("instruction", "fg:gray italic"),
+    ("text", ""),
+    ("disabled", "fg:gray italic"),
+]
+
+_LAZY_QUESTIONARY_ATTRS = frozenset({"questionary", "Choice", "Style", "_CUSTOM_STYLE", "_HAS_QUESTIONARY"})
+
+
+def _ensure_questionary() -> bool:
+    """Import questionary on first need; True when the real prompts exist."""
+    global _questionary_mod, _questionary_tried
+    if not _questionary_tried:
+        _questionary_tried = True
+        try:
+            import questionary as _q
+            from questionary import Choice as _Choice
+            from questionary import Style as _Style
+
+            globals()["questionary"] = _q
+            globals()["Choice"] = _Choice
+            globals()["Style"] = _Style
+            globals()["_CUSTOM_STYLE"] = _Style(_STYLE_DEFS)
+            globals()["_HAS_QUESTIONARY"] = True
+        except Exception:
+            globals()["questionary"] = None
+            globals()["Choice"] = _FallbackChoice
+            globals()["Style"] = None
+            globals()["_CUSTOM_STYLE"] = None
+            globals()["_HAS_QUESTIONARY"] = False
+    return bool(globals()["_HAS_QUESTIONARY"])
+
+
+def __getattr__(name: str) -> Any:
+    if name in _LAZY_QUESTIONARY_ATTRS:
+        _ensure_questionary()
+        return globals()[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class _SpinnerState:
@@ -893,7 +921,7 @@ class AttackUi:
     # ------------------------------------------------------------------
 
     async def _qselect(self, question: str, choices: list[Any], default: Any = None) -> Any:
-        if _HAS_QUESTIONARY:
+        if _ensure_questionary():
             kwargs: dict[str, Any] = {"style": _CUSTOM_STYLE}
             if default is not None:
                 kwargs["default"] = default
@@ -934,7 +962,7 @@ class AttackUi:
         ``Choice`` / ``_FallbackChoice`` items with ``checked`` pre-set to
         the current arg value so the user's existing selection is the default.
         """
-        if _HAS_QUESTIONARY:
+        if _ensure_questionary():
             return await questionary.checkbox(question, choices=choices, style=_CUSTOM_STYLE).unsafe_ask_async()
         print(f"\n{self._c('bold')}{question}{self._c('reset')} (comma-separated numbers, Enter to accept defaults)")
         for i, c in enumerate(choices, 1):
@@ -956,7 +984,7 @@ class AttackUi:
         return selected
 
     async def _qconfirm(self, question: str, default: bool = False) -> bool:
-        if _HAS_QUESTIONARY:
+        if _ensure_questionary():
             return await questionary.confirm(question, default=default, style=_CUSTOM_STYLE).unsafe_ask_async()
         print(f"\n{self._c('bold')}{question}{self._c('reset')} (y/n, default={'yes' if default else 'no'})")
         try:
@@ -970,7 +998,7 @@ class AttackUi:
         return default
 
     async def _qtext(self, question: str, default: str = "", validate: Any = None) -> str:
-        if _HAS_QUESTIONARY:
+        if _ensure_questionary():
             kwargs: dict[str, Any] = {"style": _CUSTOM_STYLE, "default": default}
             if validate:
                 kwargs["validate"] = validate
@@ -985,6 +1013,7 @@ class AttackUi:
             return default
 
     async def ask_model(self, router: Any, default: str = "glm") -> str:
+        _ensure_questionary()
         clients = getattr(router, "_clients", {}) or {}
         aliases = [str(alias) for alias in clients.keys()]
         registry: dict[str, str] = {}
@@ -1035,6 +1064,7 @@ class AttackUi:
         return await self._qselect("Select model alias:", choices, default=default)
 
     async def ask_mcp_transport(self, default: str = "stdio") -> str:
+        _ensure_questionary()
         choices = [
             Choice("stdio (default, single process)", value="stdio", checked=(default == "stdio")),
             Choice("http  (localhost MCP server)", value="http", checked=(default == "http")),
@@ -1068,6 +1098,7 @@ class AttackUi:
         return await self._qconfirm("Use DNS-over-HTTPS?", default=default)
 
     async def ask_model_strategy(self, default: str = "default") -> str:
+        _ensure_questionary()
         choices = [
             Choice("default     - use selected model", value="default", checked=(default == "default")),
             Choice("round-robin - cycle through models", value="round-robin", checked=(default == "round-robin")),
@@ -1084,6 +1115,7 @@ class AttackUi:
 
     async def ask_goal(self, presets: list[tuple[str, str]]) -> tuple[str, str]:
         """Returns (goal_name, custom_text). custom_text is non-empty if user chose custom."""
+        _ensure_questionary()
         choices: list[Any] = []
         for key, desc in presets:
             choices.append(Choice(title=f"{key}: {desc}", value=key))
@@ -1224,6 +1256,7 @@ class AttackUi:
         ``--resume`` (a path, belongs on the main menu) and
         ``--skills-include/exclude`` (niche; leave as CLI flags).
         """
+        _ensure_questionary()
         flags = [
             ("swarm", "Swarm mode (--swarm)"),
             ("critic", "Critic agent (--critic, needs --swarm)"),
@@ -1242,6 +1275,7 @@ class AttackUi:
 
     async def ask_recon_first(self, args: Any) -> None:
         """--recon-first as on/off/ask. Mutates ``args.recon_first`` in place."""
+        _ensure_questionary()
         current = bool(getattr(args, "recon_first", False))
         choices = [
             Choice("on  - run recon, then attack", value=True, checked=current),
@@ -1251,6 +1285,7 @@ class AttackUi:
 
     async def ask_observer_mode(self, args: Any) -> None:
         """--observer-mode as a single-select. Mutates ``args.observer_mode``."""
+        _ensure_questionary()
         current = str(getattr(args, "observer_mode", "heuristic") or "heuristic")
         choices = [
             Choice("heuristic - cheap rule-based gating", value="heuristic", checked=(current == "heuristic")),
