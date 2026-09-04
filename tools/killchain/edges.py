@@ -189,6 +189,23 @@ EDGES: dict[str, Edge] = {
         ],
         "evidence_type": "webshell",
     },
+    # -- privilege escalation ----------------------------------------------
+    # Non-interactive sudo probe: fails closed where sudo is absent (Windows)
+    # or password-gated — the machine only commits on a uid=0( verify.
+    "privesc_sudo_to_root": {
+        "edge_id": "privesc_sudo_to_root",
+        "from_state": AttackState.SHELL_AS_USER.value,
+        "to_state": AttackState.SHELL_AS_ROOT.value,
+        "description": "Privilege escalation via non-interactive sudo, verified by uid=0 probe",
+        "playbook": [
+            {
+                "tool": "run_exploit_terminal",
+                "args": {"command": "sudo -n id"},
+            }
+        ],
+        "verify": [{"id": "privesc_uid_probe", "type": "shell_command", "exec": "id", "expect_stdout": "uid=0("}],
+        "evidence_type": "privilege_escalation",
+    },
     # -- domain transitions -----------------------------------------------
     # Feeder: a credential that authenticates to domain services promotes
     # creds_in_hand -> domain_creds. Verify is an independent NetExec domain

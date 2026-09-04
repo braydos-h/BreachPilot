@@ -254,6 +254,8 @@ def test_can_transition_truth_table(tmp_path: Path) -> None:
     # domain path is live: creds -> domain_creds -> da
     assert machine.can_transition("creds_in_hand", "domain_creds") is True
     assert machine.can_transition("domain_creds", "da") is True
+    # privesc path is live: user shell -> root shell (default goal reachable)
+    assert machine.can_transition("shell_as_user", "shell_as_root") is True
 
 
 def test_bfs_plan_shortest_path(tmp_path: Path) -> None:
@@ -275,6 +277,27 @@ def test_bfs_plan_shortest_path(tmp_path: Path) -> None:
     assert machine.plan("10.0.0.50", "creds_in_hand") == []
     # unknown goal -> no path
     assert machine.plan("10.0.0.50", "warp") == []
+    # default goal is reachable from a user shell via the privesc edge
+    machine.graph_store.upsert_node(
+        GraphNode(
+            node_id="h2",
+            node_type=NodeType.HOST,
+            value="10.0.0.51",
+            scope="target:10.0.0.51",
+            properties={"attack_state": "shell_as_user"},
+        )
+    )
+    assert machine.plan("10.0.0.51", "shell_as_root") == ["privesc_sudo_to_root"]
+
+
+@pytest.mark.asyncio
+async def test_privesc_edge_verifies_end_to_end(tmp_path: Path) -> None:
+    """shell_as_user -> shell_as_root commits only on a uid=0( verify."""
+    machine = _machine(tmp_path, tool_executor=FakeToolExecutor(), check_executor=FakeCheckExecutor())
+    result = await machine.attempt_transition("10.0.0.50", "shell_as_user", "shell_as_root")
+    assert result["success"] is True
+    assert result["edge_id"] == "privesc_sudo_to_root"
+    assert machine.status("10.0.0.50")["state"] == "shell_as_root"
 
 
 # ---------------------------------------------------------------------------
