@@ -1,7 +1,7 @@
-﻿// Subtle status overview — muted, text-xs, not a dashboard. Five items:
-// AI, Models, Secrets, Plugins, Sandbox with small colored dots.
+﻿// Subtle status overview — muted, text-xs, not a dashboard. Six items:
+// AI, Models, Secrets, Plugins, Sandbox, Browser with small colored dots.
 
-import { useModels, usePlugins, useSandboxStatus, useSecrets } from "@/api/hooks";
+import { useBrowserStatus, useModels, usePlugins, useSandboxStatus, useSecrets } from "@/api/hooks";
 import { useProviderStatus } from "@/components/ProviderSetup";
 import { cn } from "@/lib/utils";
 
@@ -11,6 +11,7 @@ export function StatusOverview() {
   const secrets = useSecrets();
   const plugins = usePlugins();
   const sandbox = useSandboxStatus();
+  const browser = useBrowserStatus();
 
   const secretEntries = Object.entries(secrets.data?.keys ?? {});
   const configured = secretEntries.filter(([, s]) => s === "configured").length;
@@ -32,6 +33,10 @@ export function StatusOverview() {
   const secretsTone: "ok" | "warn" | "bad" =
     secretEntries.length === 0 ? "warn" : configured === secretEntries.length ? "ok" : "warn";
 
+  const browserEnabled = browser.data?.enabled ?? false;
+  const browserTone: "ok" | "warn" | "bad" = !browserEnabled ? "warn" : browser.data?.available ? "ok" : "bad";
+  const browserValue = !browserEnabled ? "Off" : browser.data?.available ? "Ready" : "Not ready";
+
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
       <StatusItem
@@ -43,6 +48,7 @@ export function StatusOverview() {
       <StatusItem tone={secretsTone} label="Secrets" value={secretsValue} />
       <StatusItem tone="ok" label="Plugins" value={`${loaded}/${total}`} />
       <StatusItem tone={sandboxTone} label="Sandbox" value={sandboxValue} />
+      <StatusItem tone={browserTone} label="Browser" value={browserValue} />
     </div>
   );
 }

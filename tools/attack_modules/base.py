@@ -430,8 +430,18 @@ class AttackModule(ABC):
 
     @staticmethod
     def score_evidence(ev: ApplicabilityEvidence) -> int:
-        """Pure score function: bonuses minus negative-evidence adjustments."""
-        score = 30 * len(ev.matched_services) + 20 * len(ev.matched_ports) + 40 * len(ev.matched_cves)
+        """Pure score function: bonuses minus negative-evidence adjustments.
+
+        Services count by DISTINCT canonical family (alias members like
+        microsoft-ds/smb/netbios-ssn collapse to one +30 for a single
+        observed service — otherwise multi-name modules triple-count).
+        """
+        distinct_services = {canonical_service(s) for s in ev.matched_services}
+        score = (
+            30 * len(distinct_services)
+            + 20 * len(set(ev.matched_ports))
+            + 40 * len({c.upper() for c in ev.matched_cves})
+        )
         if ev.version_match:
             score += 25
         if ev.os_match:
