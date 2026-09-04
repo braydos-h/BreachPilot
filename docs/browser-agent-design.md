@@ -57,16 +57,16 @@ observe → optionally act) on top of structured scanning.
 | Benchmark `requires_capabilities` scenario metadata | **Added** — schema + detection only | `tools/benchmark/models.py`, `tools/benchmark/xben/manifest.py` |
 | Sandbox family audit — browser registered as **planned** | **Added** | `tools/sandbox/family_audit.py` (`PLANNED_FAMILIES`) |
 | Secret-redaction rules for browser material | **Added** — redacted-by-default serialization | `tools/browser/models.py` |
-| Any browser subprocess / launch / navigation / JS execution | **Deferred** — structural impossibility (no backend exists) | — |
-| Backend registry entry | **Deferred** — `BACKEND_REGISTRY` is `{}`; only a backend PR fills it | `tools/browser/capabilities.py` |
-| Playwright dependency, browser worker sandboxing, WebSocket/CDP transport | **Future backend** | future PR |
-| Async session-start funnel (manager ↔ backend composition), planner prompt sections, ModuleContext surfacing, WebUI panels, benchmark skip-path classification | **Deferred** (see §11 checklist) | — |
+| Any browser subprocess / launch / navigation / JS execution | **Added** — Playwright backend, fail-closed when unconfigured | `tools/browser/playwright_backend.py`, `tools/browser/manager.py` |
+| Backend registry entry | **Added** — `BACKEND_REGISTRY` + `register_playwright_backend` (call-time, never import-time) | `tools/browser/capabilities.py` |
+| Playwright dependency, browser worker sandboxing, WebSocket/CDP transport | **Added** — optional `browser` extra + sandboxed launcher (one Chromium op per docker exec, no host fallback) | `tools/browser/sandbox_launcher.py` |
+| Async session-start funnel (manager ↔ backend composition), planner prompt sections, ModuleContext surfacing, WebUI panels, benchmark skip-path classification | **Added** — funnel + briefings + MCP tools + capability block + scenario metadata | `tools/browser/manager.py`, `tools/mcp_tools/browser.py`, `tools/benchmark/models.py` |
 
-> Note: the table above records the preparation-PR state. The backend,
-> execution funnel, MCP tools, sandbox registration, and mutating ops
+> Note: the table above is current — the backend, execution funnel, MCP tools
+> (`tools/mcp_tools/browser.py`), sandbox registration, and mutating ops
 > (`browser_submit` / `browser_replay` / `browser_execute_js` behind
-> `browser.allow_mutating_actions`) have since landed — see the Status
-> header and `docs/mcp-tools.md` §Browser.
+> `browser.allow_mutating_actions`) have landed; see the Status header and
+> `docs/mcp-tools.md` §Browser.
 
 ## 3. Domain models (`tools/browser/models.py`)
 

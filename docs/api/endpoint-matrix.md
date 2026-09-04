@@ -9,6 +9,7 @@ sources:
   - tools/api/routes/graph_explorer.py
   - tools/api/routes/users.py
   - tools/api/routes/benchmarks.py
+  - tools/api/routes/ops.py
   - app.py
 tests:
   - tests/test_api_auth.py
@@ -46,7 +47,7 @@ Generated from code — no invented routes. Handler names are the Python functio
 | `GET` | `/api/v1/models` | `list_models` (`system.py:261`) | — | `200 {provider, default_alias, registry, info, chatgpt?}` | bearer | `webui/src/api/hooks.ts:useModels` | `tests/test_api_frontend.py` |
 | `POST` | `/api/v1/models` | `add_model` (`system.py:284`) | `{alias:str, model:str}` | `200 {status:"ok", alias, model, registry}` | bearer | — | — |
 | `DELETE` | `/api/v1/models/{alias}` | `remove_model` (`system.py:302`) | — | `200 {status:"ok", alias, deleted:true}` | bearer | — | — |
-| `POST` | `/api/v1/models/provider` | `set_model_provider` (`system.py:323`) | `{provider:"ollama|chatgpt"}` | `200 {status:"ok", provider}` | bearer | `webui/src/features/settings/SettingsPage.tsx` | — |
+| `POST` | `/api/v1/models/provider` | `set_model_provider` (`system.py:323`) | `{provider:"ollama|opencode_go|chatgpt"}` | `200 {status:"ok", provider}` | bearer | `webui/src/features/settings/SettingsPage.tsx` | — |
 | `POST` | `/api/v1/models/refresh` | `refresh_models` (`system.py`) | — | `200 {ok, host, available_count, updates:{alias:{old,new}}, registry, persisted}` or `503 {ok:false, error}` / `400 invalid_provider` | bearer | `webui/src/api/hooks.ts:useSyncModels` | `tests/test_api_models.py:test_refresh_models_*` |
 | `GET` | `/api/v1/system/info` | `get_system_info` (`system.py:338`) | — | `200 {hostname, platform, os, python, local_ips, public_ip}` | bearer | `webui/src/features/settings/SystemInfo` | — |
 | `GET` | `/api/v1/system/telemetry` | `get_telemetry` (`system.py:380`) | — | `200 {summary, recent:[50]}` | bearer | `webui/src/routes/StatsPage.tsx` | — |
@@ -148,6 +149,12 @@ All below additionally gated `api.graph_route` → `404 graph_disabled` (`graph_
 | `GET` | `/api/v1/benchmarks/baseline` | `get_baseline` (`benchmarks.py:254`) | — | `200 BaselineMeta` | bearer | same `fetchBaseline` | same |
 | `POST` | `/api/v1/benchmarks/baseline` | `save_baseline_route` (`benchmarks.py:259`) | `{run_id}` | `200 {saved,path,run_id}` `404/409` | bearer | same `saveBaseline` | same |
 | `GET` | `/api/v1/benchmarks/compare` | `compare_runs` (`benchmarks.py:276`) | `?run_a&run_b` | `200 RunComparison{run_a,run_b,comparison:{metrics,scenarios,categories}}` `404/409` | bearer | same `compareRuns` (`ComparisonView`) | same |
+
+## Ops — `tools/api/routes/ops.py` (`APIRouter(prefix="/api/v1/ops", tags=["ops"])`) — `app.py` (wired unconditionally; read-only rollup)
+
+| Method | Route | Handler | Request | Response | Auth | Frontend consumer | Tests |
+|--------|-------|---------|---------|----------|------|-------------------|-------|
+| `GET` | `/api/v1/ops/summary` | `ops_summary` (`ops.py`) | — | `200 {killchain:{enabled,goal_state,require_verification},snapshots:{enabled,provider,counterfactual},eval:{enabled,baseline_path,baseline_exists},browser:{enabled,backend},provider:{active}}` | bearer | `webui/src/routes/OpsPage.tsx` | `tests/test_ops_summary.py` |
 
 ## Users/annotations — `tools/api/routes/users.py` (`APIRouter(prefix="/api/v1", tags=["users"])`) — `app.py:154` only when `api.multi_operator:true`
 

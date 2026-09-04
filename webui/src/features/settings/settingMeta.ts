@@ -277,7 +277,7 @@ export const SETTING_META: Record<string, SettingMeta> = {
     category: "ai",
     group: "Registry",
     order: 18,
-    options: ["ollama", "chatgpt"],
+    options: ["ollama", "opencode_go", "chatgpt"],
   },
   "models.registry.deepseek": {
     label: "Registry.deepseek",

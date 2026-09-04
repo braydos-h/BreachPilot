@@ -68,7 +68,7 @@ Give it `example.com` and the platform resolves and expands the attack surface (
 <td width="33%" valign="top">
 
 ### Knowledge base
-140+ skills, 90+ tools, and 15 attack families covering network penetration testing, AD CS ESC1, JWT confusion, SSTI, GraphQL, XXE, BloodHound, EternalBlue, Zerologon, and noPac. Skill selection is deterministic and semantic, re-evaluated as new services and CVEs emerge.
+140+ skills, 120+ tools, and 15 attack families covering network penetration testing, AD CS ESC1, JWT confusion, SSTI, GraphQL, XXE, BloodHound, EternalBlue, Zerologon, and noPac. Skill selection is deterministic and semantic, re-evaluated as new services and CVEs emerge.
 
 </td>
 </tr>
@@ -128,6 +128,12 @@ The WebUI serves at `http://127.0.0.1:8765`. It is loopback-only, bearer-token a
 | Attack Graph | Interactive DAG (ReactFlow) with pan, zoom, filtering, path finding, and evidence inspection. Backed by `AttackPlan` (`ready_steps()` / `blocked_steps()` / `graph_summary()`). |
 | Artifacts & Audit | Reports, raw Nmap output, findings, and the SHA-256 audit chain, all tamper-evident. |
 | Loot & Credentials | Captured credentials and loot per run, encrypted at rest. |
+| Skills | Browse the advisory skill catalog and per-run skill selection. |
+| Modules | Attack module families, applicability scores, and run history. |
+| Goals | Goal presets, risk gating (SAFE/GATED/HIGH), and custom goals. |
+| Benchmarks | Oracle-verified benchmark suites, live progress, and run comparison. |
+| Memory | Cross-mission semantic memory and experience-store lessons. |
+| Connections | Operator connections, listeners, and beacon health. |
 | System | Configuration, secrets, models and providers, skills, plugins, and diagnostics. No manual YAML editing required. |
 
 The UI is a Vite + React + TypeScript SPA (`webui/`) with TanStack Query, Radix UI, and Tailwind CSS. The production bundle is built automatically on first launch when Node.js is available.
@@ -353,7 +359,7 @@ Switching providers (Ollama ↔ OpenCode Go ↔ ChatGPT), models, skills, swarm,
 
 Managed in `tools/plugins.py`. A plugin can add attack modules, MCP tools, skills, and config. Enable via `config.yaml` `plugins.enabled`. Reference example: `plugins/example_recon_report/`.
 
-Shipped (enabled in the lab build; each requires its API key to actually run):
+Shipped (each requires its API key to actually run; the lab build enables all except `snmp`):
 
 | Plugin | What it adds |
 |--------|-------------|
@@ -370,6 +376,7 @@ Shipped (enabled in the lab build; each requires its API key to actually run):
 | `atomic_red_team` | Atomic Red Team emulation |
 | `caldera` | MITRE Caldera adversary emulation |
 | `firmware_analysis` | Firmware extraction & analysis |
+| `snmp` | SNMP enumeration via snmpwalk (opt-in — not enabled in the lab build) |
 
 See [docs/plugin-development.md](docs/plugin-development.md).
 
@@ -388,12 +395,14 @@ See [docs/plugin-development.md](docs/plugin-development.md).
 | [Architecture](docs/architecture.md) | System shape, Flow A/B, persistence |
 | [Skills](docs/skills.md) | 140-skill advisory pipeline |
 | [Attack Modules](docs/attack-modules.md) | Pre-packaged exploit logic |
-| [MCP Tools](docs/mcp-tools.md) | 90+ MCP tool reference |
+| [MCP Tools](docs/mcp-tools.md) | 120+ MCP tool reference |
 | [Swarm](docs/swarm.md) | 6-agent blackboard architecture |
 | [Plugin Development](docs/plugin-development.md) | Out-of-tree extensions |
 | [Config Reference](docs/config-reference.md) | Every `config.yaml` key |
 | [Evaluation](docs/evaluation.md) | Metrics & eval harness |
 | [Benchmarks](docs/benchmarks.md) | Reproducible benchmark suite, oracles, regression gates |
+
+Full index (36 guides): [docs/README.md](docs/README.md).
 
 ---
 

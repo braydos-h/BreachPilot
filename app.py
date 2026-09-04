@@ -35,6 +35,7 @@ from tools.api.routes import decisions as decisions_routes
 from tools.api.routes import events as events_routes
 from tools.api.routes import graph as graph_routes
 from tools.api.routes import graph_explorer as graph_explorer_routes
+from tools.api.routes import ops as ops_routes
 from tools.api.routes import runs as runs_routes
 from tools.api.routes import system as system_routes
 from tools.api.routes import users as users_routes
@@ -163,6 +164,7 @@ def create_app(
     graph_explorer_router = graph_explorer_routes.create_router(auth, persistence, config)
     connections_router = connections_routes.create_router(auth, config, config_path)
     benchmarks_router = benchmarks_routes.create_router(auth, benchmark_service, benchmark_storage, config)
+    ops_router = ops_routes.create_router(auth, config)
     users_router = None
     if bool(api_cfg.get("multi_operator", False)):
         users_router = users_routes.create_router(auth, persistence)
@@ -176,6 +178,7 @@ def create_app(
     app.include_router(graph_explorer_router)
     app.include_router(connections_router)
     app.include_router(benchmarks_router)
+    app.include_router(ops_router)
     if users_router is not None:
         app.include_router(users_router)
 

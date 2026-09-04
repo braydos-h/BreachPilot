@@ -24,6 +24,7 @@ const NAV_ITEMS = [
   { to: "/goals", label: "Goals", icon: Target, end: false },
   { to: "/graph", label: "Attack Graph", icon: GitBranch, end: false },
   { to: "/benchmarks", label: "Benchmarks", icon: FlaskConical, end: false },
+  { to: "/ops", label: "Operations", icon: ShieldAlert, end: false },
   { to: "/stats", label: "Stats", icon: BarChart3, end: false },
   { to: "/skills", label: "Skills", icon: Sparkles, end: false },
   { to: "/memory", label: "Memory", icon: Brain, end: false },

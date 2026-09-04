@@ -356,6 +356,7 @@ def create_router(
                 # Each name keys a WebUI panel off capabilities.features so a disabled
                 # backend feature renders an empty state, not a 404 loop.
                 "graph_route",
+                "ops_summary",
                 "poc_verification",
                 "replay_simulator",
                 "peer_review",

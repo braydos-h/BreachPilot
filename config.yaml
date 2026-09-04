@@ -290,8 +290,8 @@ killchain:
   require_verification: true
   graph_db: ''
 browser:
-  enabled: false
-  backend: none
+  enabled: true
+  backend: playwright
   headless: true
   max_sessions: 2
   session_timeout_seconds: 300
@@ -520,7 +520,7 @@ operator_connection:
   health_check_interval_seconds: 60
   workspace_dir: exploit_workspace
 sandbox:
-  enabled: true
+  enabled: false
   backend: docker
   image: breachpilot-sandbox:latest
   fallback_native: true
