@@ -44,6 +44,11 @@ dependencies = [
 # Ollama provider support (also pulled in by `dev`). `pip install -e ".[ollama]"`
 # restores the pre-provider-era behavior of a plain `pip install -e .`.
 ollama = ["ollama>=0.6.1"]
+# Playwright browser-agent support (optional). `pip install -e ".[browser]"`
+# adds the Playwright Python SDK for host-side dev/tests; real execution runs
+# inside the sandbox browser worker (docker/sandbox/Dockerfile.browser), which
+# installs the SDK + Chromium itself. Stock installs without it keep working.
+browser = ["playwright>=1.44"]
 dev = [
     "ollama>=0.6.1",
     "pytest>=8.0.0",

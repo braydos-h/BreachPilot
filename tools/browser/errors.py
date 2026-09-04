@@ -17,6 +17,11 @@ __all__ = [
     "BrowserBackendError",
     "BrowserBackendUnavailable",
     "BrowserBackendNotImplemented",
+    "BrowserCrashed",
+    "BrowserNavigationFailed",
+    "BrowserScopeBlocked",
+    "BrowserScriptError",
+    "BrowserTimeout",
     "BrowserTransitionError",
     "BrowserSessionNotFound",
     "browser_error_from_exception",
@@ -72,6 +77,36 @@ class BrowserSessionNotFound(BrowserBackendError):
     code = "session_not_found"
 
 
+class BrowserTimeout(BrowserBackendError):
+    """A browser operation exceeded its time budget (retryable)."""
+
+    code = "timeout"
+
+
+class BrowserNavigationFailed(BrowserBackendError):
+    """Navigation could not load the URL (DNS/TLS/refused/invalid URL)."""
+
+    code = "navigation_failed"
+
+
+class BrowserCrashed(BrowserBackendError):
+    """The browser worker/session died mid-operation (session is FAILED)."""
+
+    code = "transport_error"
+
+
+class BrowserScopeBlocked(BrowserBackendError):
+    """The browser action names a target outside the operator allowlist."""
+
+    code = "scope_blocked"
+
+
+class BrowserScriptError(BrowserBackendError):
+    """JavaScript evaluation in the page failed (throw / syntax / timeout)."""
+
+    code = "script_error"
+
+
 def browser_error_from_exception(exc: BaseException) -> tuple[str, str]:
     """Map an exception onto ``(failure_class_value, message)`` for results.
 
@@ -83,6 +118,17 @@ def browser_error_from_exception(exc: BaseException) -> tuple[str, str]:
 
     if isinstance(exc, _BBE):
         return exc.code, str(exc)
+    # Playwright maps without importing it: the SDK is optional, so match on
+    # the exception type NAME (TimeoutError / playwright TimeoutError).
+    name = type(exc).__name__
+    try:
+        message = str(exc)
+    except Exception:  # noqa: BLE001 — even str() may raise; never mask the caller
+        return "unknown", "<unprintable browser exception>"
+    if isinstance(exc, TimeoutError) or "Timeout" in name or "timed out" in message.lower():
+        return "timeout", message
+    if "TargetClosed" in name or "BrowserClosed" in name or "ConnectionClosed" in name:
+        return "transport_error", message
     try:
         from tools.failure_taxonomy import classify_failure
 

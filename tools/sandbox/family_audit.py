@@ -69,6 +69,11 @@ _SANDBOX_FAMILY_NOTES: dict[str, list[str]] = {
         "start_background_job/list_processes manage host-side long-running jobs; "
         "run_python_file funnels through run_argv_in_sandbox"
     ],
+    "browser": [
+        "Playwright backend (tools/browser/playwright_backend.py) executes one Chromium op "
+        "per docker exec inside the sandbox worker netns via SandboxPlaywrightLauncher "
+        "(tools/browser/sandbox_launcher.py); strict fail-closed, never host fallback"
+    ],
 }
 SANDBOXED_FAMILIES: dict[str, FamilyStatus] = {
     name: FamilyStatus(
@@ -82,6 +87,7 @@ SANDBOXED_FAMILIES: dict[str, FamilyStatus] = {
         "web_scan",  # nikto/nuclei/sqlmap/... argv funnel
         "metasploit",  # msf module execution argv funnel
         "workspace",  # run_python_file argv funnel (sandbox path)
+        "browser",  # Playwright ops via SandboxPlaywrightLauncher (sandboxed path)
     )
 }
 
@@ -178,34 +184,11 @@ HOST_EXCEPTIONS: dict[str, FamilyStatus] = {
 
 
 #: Future families whose tooling is PLANNED but not yet implemented. These
-#: have no module file today (nothing to audit) and no active capability:
-#: the entries are the pre-committed containment contract — when the family
-#: lands it MUST be registered as sandboxed here (or a documented host
-#: exception), and its execution must run inside the sandbox worker with the
-#: same effective target allowlist as other offensive tooling.
+#: have no module file today (nothing to audit) and no active capability.
+#: (The browser family graduated from here to SANDBOXED_FAMILIES when the
+#: Playwright backend landed — see tools/browser/.)
 #: Design: docs/browser-agent-design.md §sandbox requirements.
-PLANNED_FAMILIES: dict[str, FamilyStatus] = {
-    "browser": FamilyStatus(
-        module="browser",
-        status="planned",
-        reason=(
-            "Browser-native web agent is architecture-only (tools/browser/, "
-            "docs/browser-agent-design.md): not yet implemented, no subprocess and "
-            "no network capability is active, and NOTHING launches a browser. The "
-            "future browser backend MUST execute inside an isolated sandbox worker, "
-            "obey the effective target allowlist, and funnel its containment status "
-            "through this registry as either 'sandboxed' or a documented exception."
-        ),
-        target_touching=True,
-        notes=[
-            "planned family: browser backend (tools/browser/interfaces.py::BrowserBackend) — "
-            "no backend is registered (tools/browser/capabilities.py:BACKEND_REGISTRY is empty)",
-            "future implementation must be sandboxed: isolated browser worker, "
-            "allowlist-aware network policy, no host fallback",
-            "this entry is metadata only: audit_families() does not emit rows for families without module files",
-        ],
-    ),
-}
+PLANNED_FAMILIES: dict[str, FamilyStatus] = {}
 
 
 def _module_key(path: Path) -> str:

