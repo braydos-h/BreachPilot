@@ -30,10 +30,11 @@ class WebShellUpload(AttackModule):
                 "Attempts to upload web shells with various extensions and bypasses. "
                 "On WEBSHELL_CONFIRMED the orchestrator sets shell_type=webshell."
             ),
-            # Phase 3: a successful upload is a real foothold path.
-            "shell_type": "webshell",
-            "privilege_level": "user",
-            "evidence": [f"webshell upload attempts queued against {ctx.target_ip}"],
+            # Recipe only queues upload attempts -- shell/privilege are set by
+            # the dispatch classifier on a confirmed upload, never here.
+            "confidence": 0.4,
+            "verdict": "inconclusive",
+            "evidence": [f"webshell upload attempts queued against {ctx.target_ip} (not executed)"],
             "references": [
                 "https://owasp.org/www-community/attacks/Unrestricted_File_Upload",
                 "https://book.hacktricks.wiki/en/pentesting-web/file-upload.html",
@@ -108,7 +109,24 @@ class Log4jRCE(AttackModule):
             "log4j 2.14",
             "log4j 2.15",
         ],
-        "https": ["log4j 2.0", "log4j 2.14", "log4j 2.15"],
+        "https": [
+            "log4j 2.0",
+            "log4j 2.1",
+            "log4j 2.2",
+            "log4j 2.3",
+            "log4j 2.4",
+            "log4j 2.5",
+            "log4j 2.6",
+            "log4j 2.7",
+            "log4j 2.8",
+            "log4j 2.9",
+            "log4j 2.10",
+            "log4j 2.11",
+            "log4j 2.12",
+            "log4j 2.13",
+            "log4j 2.14",
+            "log4j 2.15",
+        ],
     }
     # Capability metadata: remote RCE primitive -- a confirmed JNDI callback is
     # a reverse shell + foothold. No prerequisites (works against any vulnerable
@@ -130,12 +148,11 @@ class Log4jRCE(AttackModule):
                 "parameter. Callback host must be in exploit.allowed_targets. "
                 "On callback confirmation the orchestrator sets shell_type=reverse."
             ),
-            # Phase 3: this recipe represents a real compromise path -- declare
-            # the intent signals so record_success can act on a confirmed
-            # callback (the dispatch classifier fills evidence).
-            "shell_type": "reverse",
-            "privilege_level": "user",
-            "evidence": [f"Log4j JNDI payloads queued against {ctx.target_ip}"],
+            # Recipe only queues payloads -- shell/privilege are set by the
+            # dispatch classifier on a confirmed callback, never here.
+            "confidence": 0.4,
+            "verdict": "inconclusive",
+            "evidence": [f"Log4j JNDI payloads queued against {ctx.target_ip} (not executed)"],
             "references": [
                 "https://nvd.nist.gov/vuln/detail/CVE-2021-44228",
                 "https://www.lunasec.io/docs/blog/log4j-zero-day/",

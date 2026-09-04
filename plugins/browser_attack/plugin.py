@@ -103,9 +103,12 @@ def _register_browser_tools(mcp: Any, ctx: Any) -> None:
 
     @mcp.tool()
     @require_allowlist(target_param="target_ip", audit=True)
-    def browser_navigate(target_ip: str, url: str, screenshot: bool = False) -> str:
+    def browser_attack_navigate(target_ip: str, url: str, screenshot: bool = False) -> str:
         """Navigate a headless browser to a URL on the target and return page metadata.
 
+        One-shot plugin navigation (no session). The session-based
+        ``browser_navigate`` (tools/mcp_tools/browser.py, needs
+        ``browser.enabled``) owns that name so the two surfaces never collide.
         Requires the Playwright + Chromium stack (``pip install playwright &&
         playwright install chromium``). The target_ip is allowlist-gated; the
         URL's host must resolve to an allowlisted IP.

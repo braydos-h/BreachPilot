@@ -100,7 +100,7 @@ def test_mcp_factory_registers_four_tools():
     mcp = FakeMcp()
     ctx = FakeCtx()
     factory(mcp, ctx)
-    assert "browser_navigate" in mcp.tools
+    assert "browser_attack_navigate" in mcp.tools
     assert "browser_dom_xss_probe" in mcp.tools
     assert "browser_xss_callbacks" in mcp.tools
     assert "browser_xss_record_callback" in mcp.tools
@@ -146,7 +146,7 @@ def test_navigate_rejects_missing_url(tmp_path):
     ctx = FakeCtx(workspace=tmp_path, config={"browser_attack": {"enabled": True}})
     factory(mcp, ctx)
 
-    out = mcp.tools["browser_navigate"](target_ip="10.0.0.50", url="")
+    out = mcp.tools["browser_attack_navigate"](target_ip="10.0.0.50", url="")
     assert "BLOCKED" in out
 
 
@@ -161,7 +161,7 @@ def test_navigate_rejects_when_plugin_disabled(tmp_path):
     ctx = FakeCtx(workspace=tmp_path, config={})
     factory(mcp, ctx)
 
-    out = mcp.tools["browser_navigate"](target_ip="10.0.0.50", url="http://10.0.0.50/")
+    out = mcp.tools["browser_attack_navigate"](target_ip="10.0.0.50", url="http://10.0.0.50/")
     assert "BLOCKED" in out
     assert "not enabled" in out
 
@@ -183,7 +183,7 @@ def test_navigate_rejects_when_playwright_missing(monkeypatch, tmp_path):
     ctx = FakeCtx(workspace=tmp_path, config={"browser_attack": {"enabled": True}})
     factory(mcp, ctx)
 
-    out = mcp.tools["browser_navigate"](target_ip="10.0.0.50", url="http://10.0.0.50/")
+    out = mcp.tools["browser_attack_navigate"](target_ip="10.0.0.50", url="http://10.0.0.50/")
     assert "playwright not installed" in out or "BLOCKED" in out
 
 

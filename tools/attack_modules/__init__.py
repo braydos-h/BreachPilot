@@ -10,6 +10,7 @@ from tools.attack_modules.base import (
     AttackModule,
     ModuleContext,
     ModuleResult,
+    port_of,
 )
 
 # Re-export module classes for tests that import them by name
@@ -32,6 +33,7 @@ __all__ = [
     "ModuleContext",
     "ModuleResult",
     "ApplicabilityReport",
+    "port_of",
     "list_modules",
     "find_modules",
     "find_producers",
