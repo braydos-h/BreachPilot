@@ -1,7 +1,7 @@
 """Browser MCP tool tests (fake launcher — no Chromium, no Docker).
 
 Pins single-source registration (conditional on real availability), the
-target-IP lock at the tool layer, the mutating-action gate, deferred
+target-IP lock at the tool layer, the mutating-action gate, gated
 replay/submit, headed-sandbox refusal, and the strict no-host-fallback rule.
 """
 
@@ -97,6 +97,27 @@ class FakeLauncher:
         del token, full_page, timeout_ms, target_ip
         return b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 
+    async def fill_submit(
+        self, token: str, form_index: int, field_values: dict, timeout_ms: int, *, target_ip: str = ""
+    ) -> dict:
+        del token, timeout_ms, target_ip
+        if form_index != 0:
+            raise Exception(f"no such form index {form_index}")
+        return {
+            "final_url": "http://10.0.0.50/welcome",
+            "status": 302,
+            "action": "/login",
+            "method": "post",
+            "filled": len(field_values),
+            "redirect_chain": ["http://10.0.0.50/", "http://10.0.0.50/welcome"],
+        }
+
+    async def replay(
+        self, token: str, method: str, url: str, headers: dict, body: str, timeout_ms: int, *, target_ip: str = ""
+    ) -> dict:
+        del token, headers, body, timeout_ms, target_ip
+        return {"url": url, "method": method, "status": 200, "headers": {}, "body": '{"ok": true}'}
+
     async def take_network(self, token: str, *, body_sample_max_bytes: int = 4096, target_ip: str = "") -> list[dict]:
         del token, body_sample_max_bytes, target_ip
         return []
@@ -116,10 +137,12 @@ def _clean_browser_state():
     BACKEND_REGISTRY.pop("playwright", None)
     browser_mod._MANAGERS.clear()
     browser_mod._BACKENDS.clear()
+    browser_mod._LAUNCHERS.clear()
     yield
     BACKEND_REGISTRY.pop("playwright", None)
     browser_mod._MANAGERS.clear()
     browser_mod._BACKENDS.clear()
+    browser_mod._LAUNCHERS.clear()
 
 
 def _register(config: dict[str, Any], workspace: Path, **ctx_kwargs: Any) -> tuple[FakeMCP, FakeCtx]:
@@ -247,13 +270,185 @@ def test_execute_js_allowed_with_opt_in(tmp_path, monkeypatch):
     assert mcp.tools["browser_execute_js"]("10.0.0.50", session_id, "1+1").startswith("JS_RESULT: ")
 
 
-def test_replay_and_submit_always_deferred(tmp_path, monkeypatch):
+def test_submit_and_replay_gated_by_default(tmp_path, monkeypatch):
+    import tools.browser.sandbox_launcher as _launcher_mod
+
+    monkeypatch.setattr(_launcher_mod, "resolve_browser_launcher", lambda ctx, config: (FakeLauncher(), ""))
     from tools.browser import playwright_backend as _mod
 
     monkeypatch.setattr(_mod, "playwright_present", lambda: True)
     mcp, _ctx = _register(ALLOW_CONFIG, tmp_path)
-    assert "deferred" in mcp.tools["browser_replay"]().lower()
-    assert "deferred" in mcp.tools["browser_submit"]().lower()
+    started = mcp.tools["browser_start"]("10.0.0.50")
+    session_id = started.split("SESSION_STARTED: ")[1].splitlines()[0].strip()
+    assert "allow_mutating_actions" in mcp.tools["browser_submit"]("10.0.0.50", session_id)
+    assert "allow_mutating_actions" in mcp.tools["browser_replay"]("10.0.0.50", session_id, url="http://10.0.0.50/")
+
+
+def _opt_in_config():
+    import copy
+
+    config = copy.deepcopy(ALLOW_CONFIG)
+    config["browser"]["allow_mutating_actions"] = True
+    return config
+
+
+def _started_session(mcp, target="10.0.0.50"):
+    started = mcp.tools["browser_start"](target)
+    session_id = started.split("SESSION_STARTED: ")[1].splitlines()[0].strip()
+    mcp.tools["browser_navigate"](target, session_id, f"http://{target}/login")
+    return session_id
+
+
+def test_submit_success_with_opt_in(tmp_path, monkeypatch):
+    import tools.browser.sandbox_launcher as _launcher_mod
+
+    monkeypatch.setattr(_launcher_mod, "resolve_browser_launcher", lambda ctx, config: (FakeLauncher(), ""))
+    from tools.browser import playwright_backend as _mod
+
+    monkeypatch.setattr(_mod, "playwright_present", lambda: True)
+    mcp, _ctx = _register(_opt_in_config(), tmp_path)
+    session_id = _started_session(mcp)
+    out = mcp.tools["browser_submit"]("10.0.0.50", session_id, 0, {"user": "admin"})
+    assert out.startswith("SUBMITTED: http://10.0.0.50/welcome")
+    assert "STATUS: 302" in out
+    assert "FILLED: 1 fields" in out
+
+
+def test_submit_rejects_bad_index_and_off_target_action(tmp_path, monkeypatch):
+    import tools.browser.sandbox_launcher as _launcher_mod
+
+    monkeypatch.setattr(_launcher_mod, "resolve_browser_launcher", lambda ctx, config: (FakeLauncher(), ""))
+    from tools.browser import playwright_backend as _mod
+
+    monkeypatch.setattr(_mod, "playwright_present", lambda: True)
+    mcp, _ctx = _register(_opt_in_config(), tmp_path)
+    session_id = _started_session(mcp)
+    oob = mcp.tools["browser_submit"]("10.0.0.50", session_id, 5)
+    assert oob.startswith("BLOCKED:")
+    assert "out of range" in oob
+
+
+def test_submit_blocks_off_target_form_action(tmp_path, monkeypatch):
+    class EvilFormLauncher(FakeLauncher):
+        async def snapshot(self, token: str, timeout_ms: int, *, target_ip: str = "") -> dict:
+            snap = await super().snapshot(token, timeout_ms, target_ip=target_ip)
+            snap["forms"] = [
+                {
+                    "action": "http://evil.example.com/collect",
+                    "method": "post",
+                    "inputs": [{"name": "u", "type": "text"}],
+                }
+            ]
+            return snap
+
+    import tools.browser.sandbox_launcher as _launcher_mod
+
+    monkeypatch.setattr(_launcher_mod, "resolve_browser_launcher", lambda ctx, config: (EvilFormLauncher(), ""))
+    from tools.browser import playwright_backend as _mod
+
+    monkeypatch.setattr(_mod, "playwright_present", lambda: True)
+    mcp, _ctx = _register(_opt_in_config(), tmp_path)
+    session_id = _started_session(mcp)
+    assert mcp.tools["browser_submit"]("10.0.0.50", session_id, 0).startswith("BLOCKED:")
+
+
+def test_replay_success_with_opt_in(tmp_path, monkeypatch):
+    import tools.browser.sandbox_launcher as _launcher_mod
+
+    monkeypatch.setattr(_launcher_mod, "resolve_browser_launcher", lambda ctx, config: (FakeLauncher(), ""))
+    from tools.browser import playwright_backend as _mod
+
+    monkeypatch.setattr(_mod, "playwright_present", lambda: True)
+    mcp, _ctx = _register(_opt_in_config(), tmp_path)
+    session_id = _started_session(mcp)
+    out = mcp.tools["browser_replay"](
+        "10.0.0.50", session_id, url="http://10.0.0.50/api/echo", method="post", body="ping"
+    )
+    assert out.startswith("REPLAYED: POST http://10.0.0.50/api/echo")
+    assert "STATUS: 200" in out
+    assert "SHA256: " in out
+
+
+def test_replay_by_event_id_and_rejections(tmp_path, monkeypatch):
+    class NetLauncher(FakeLauncher):
+        def __init__(self) -> None:
+            super().__init__()
+            self._armed = True
+
+        async def take_network(self, token: str, *, body_sample_max_bytes: int = 4096, target_ip: str = "") -> list:
+            del token, body_sample_max_bytes, target_ip
+            if not self._armed:
+                return []
+            self._armed = False
+            return [
+                {
+                    "direction": "request",
+                    "method": "POST",
+                    "url": "http://10.0.0.50/api/login",
+                    "req_headers": {"Content-Type": "application/json"},
+                    "resource_type": "xhr",
+                    "observed_at": "2026-01-01T00:00:00+00:00",
+                }
+            ]
+
+    import tools.browser.sandbox_launcher as _launcher_mod
+
+    monkeypatch.setattr(_launcher_mod, "resolve_browser_launcher", lambda ctx, config: (NetLauncher(), ""))
+    from tools.browser import playwright_backend as _mod
+
+    monkeypatch.setattr(_mod, "playwright_present", lambda: True)
+    mcp, _ctx = _register(_opt_in_config(), tmp_path)
+    session_id = _started_session(mcp)
+    listed = mcp.tools["browser_network_events"]("10.0.0.50", session_id)
+    event_id = (
+        [line for line in listed.splitlines() if "POST http://10.0.0.50/api/login" in line][0].split()[1].strip("[]")
+    )
+    by_event = mcp.tools["browser_replay"]("10.0.0.50", session_id, event_id=event_id, body="retry")
+    assert by_event.startswith("REPLAYED: POST http://10.0.0.50/api/login")
+
+    unknown = mcp.tools["browser_replay"]("10.0.0.50", session_id, event_id="evt-999999")
+    assert unknown.startswith("ERROR: unknown network event")
+
+    off_target = mcp.tools["browser_replay"]("10.0.0.50", session_id, url="http://evil.example.com/")
+    assert off_target.startswith("BLOCKED:")
+
+    bad_json = mcp.tools["browser_replay"]("10.0.0.50", session_id, url="http://10.0.0.50/", headers_json="{not-json")
+    assert bad_json.startswith("BLOCKED:")
+
+    missing = mcp.tools["browser_replay"]("10.0.0.50", session_id)
+    assert missing.startswith("BLOCKED:")
+
+
+def test_launcher_state_survives_across_tool_calls(tmp_path, monkeypatch):
+    """Engine tokens live in launcher instances: the stack must reuse the
+    launcher across calls, or every session orphans after its first call."""
+
+    class StrictLauncher(FakeLauncher):
+        async def navigate(self, token: str, url: str, timeout_ms: int, *, target_ip: str = "") -> dict:
+            if token not in self.tokens:
+                raise Exception(f"unknown engine token {token!r}")
+            return await super().navigate(token, url, timeout_ms, target_ip=target_ip)
+
+        async def snapshot(self, token: str, timeout_ms: int, *, target_ip: str = "") -> dict:
+            if token not in self.tokens:
+                raise Exception(f"unknown engine token {token!r}")
+            return await super().snapshot(token, timeout_ms, target_ip=target_ip)
+
+    import tools.browser.sandbox_launcher as _launcher_mod
+
+    # Fresh instance per resolution — the stack cache (not the factory) must
+    # provide continuity, exactly like production's stateful launchers.
+    monkeypatch.setattr(_launcher_mod, "resolve_browser_launcher", lambda ctx, config: (StrictLauncher(), ""))
+    from tools.browser import playwright_backend as _mod
+
+    monkeypatch.setattr(_mod, "playwright_present", lambda: True)
+    mcp, _ctx = _register(ALLOW_CONFIG, tmp_path)
+    started = mcp.tools["browser_start"]("10.0.0.50")
+    session_id = started.split("SESSION_STARTED: ")[1].splitlines()[0].strip()
+    navigated = mcp.tools["browser_navigate"]("10.0.0.50", session_id, "http://10.0.0.50/login")
+    assert navigated.startswith("NAVIGATED: http://10.0.0.50/login")
+    observed = mcp.tools["browser_observe"]("10.0.0.50", session_id)
+    assert "Target App" in observed
 
 
 def test_headed_refused_in_sandbox(tmp_path, monkeypatch):

@@ -1,13 +1,16 @@
 # Browser-Native Web Agent — Architecture & Integration Design
 
-> **Status: implemented (Phase 1 read-only).** The Playwright backend behind the
+> **Status: implemented (Phase 1 read-only + Phase 2 mutating).** The Playwright backend behind the
 > prepared interfaces is live: `tools/browser/playwright_backend.py` (Chromium via
 > the optional `browser` extra), `tools/browser/sandbox_launcher.py` (one Chromium
 > op per docker exec inside the worker netns — no host fallback), the async
 > `BrowserManager` funnel, conditional `tools/mcp_tools/browser.py` tools, gated
 > planner briefings, and doctor/API/config plumbing. Request replay
-> (`browser_replay`) and form submission (`browser_submit`) stay **deferred to
-> Phase 2** (registered but always `BLOCKED`). Playwright is importable only
+> (`browser_replay`: captured `event_id` as base, explicit url/method/headers/body
+> overrides, final URL host re-checked) and form submission (`browser_submit`:
+> fill by field name + submit, form-action host re-checked) are live behind the
+> explicit lab opt-in `browser.allow_mutating_actions` (default off — without it
+> both return `BLOCKED`). Playwright is importable only
 > inside the engine boundary (enforced by `tests/test_no_playwright_regression.py`).
 
 This document is the contract the implementation followed (originally written
@@ -58,6 +61,12 @@ observe → optionally act) on top of structured scanning.
 | Backend registry entry | **Deferred** — `BACKEND_REGISTRY` is `{}`; only a backend PR fills it | `tools/browser/capabilities.py` |
 | Playwright dependency, browser worker sandboxing, WebSocket/CDP transport | **Future backend** | future PR |
 | Async session-start funnel (manager ↔ backend composition), planner prompt sections, ModuleContext surfacing, WebUI panels, benchmark skip-path classification | **Deferred** (see §11 checklist) | — |
+
+> Note: the table above records the preparation-PR state. The backend,
+> execution funnel, MCP tools, sandbox registration, and mutating ops
+> (`browser_submit` / `browser_replay` / `browser_execute_js` behind
+> `browser.allow_mutating_actions`) have since landed — see the Status
+> header and `docs/mcp-tools.md` §Browser.
 
 ## 3. Domain models (`tools/browser/models.py`)
 
@@ -197,10 +206,10 @@ audit rows may reference them verbatim from day one):
 
 ```
 browser.navigate          browser.form.inspect
-browser.dom.inspect       browser.form.submit        (deferred)
+browser.dom.inspect       browser.form.submit        (mutating: allow_mutating_actions)
 browser.javascript.execute
 browser.network.observe   browser.screenshot
-browser.network.replay    (deferred)                 browser.endpoint.discover
+browser.network.replay    (mutating: allow_mutating_actions) browser.endpoint.discover
 browser.storage.read
 ```
 

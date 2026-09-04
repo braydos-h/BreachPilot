@@ -93,6 +93,39 @@ class FakeLauncher:
         self._maybe_fail("screenshot")
         return b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
 
+    async def fill_submit(
+        self, token: str, form_index: int, field_values: dict, timeout_ms: int, *, target_ip: str = ""
+    ) -> dict:
+        del timeout_ms, target_ip
+        self._maybe_fail("fill_submit")
+        if form_index != 0:
+            from tools.browser.errors import BrowserBackendError
+
+            raise BrowserBackendError(f"browser form submit failed: no such form index {form_index} (1 forms)")
+        url = self.tokens[token]["url"] or "http://10.0.0.50/"
+        final = "http://10.0.0.50/welcome"
+        return {
+            "final_url": final,
+            "status": 302,
+            "action": "/login",
+            "method": "post",
+            "filled": len(field_values),
+            "redirect_chain": [url, final],
+        }
+
+    async def replay(
+        self, token: str, method: str, url: str, headers: dict, body: str, timeout_ms: int, *, target_ip: str = ""
+    ) -> dict:
+        del token, headers, body, timeout_ms, target_ip
+        self._maybe_fail("replay")
+        return {
+            "url": url,
+            "method": method,
+            "status": 200,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"token": SECRET, "ok": True}),
+        }
+
     async def take_network(
         self, token: str, *, body_sample_max_bytes: int = 4096, target_ip: str = ""
     ) -> list[dict[str, Any]]:
@@ -286,15 +319,81 @@ def test_js_expression_cap_and_preview_redaction():
     assert "CANARY-SESSION-TOKEN" not in str(ok_result.metadata.get("return_preview", ""))
 
 
-def test_replay_and_submit_are_deferred():
+def test_submit_fills_and_syncs_last_url():
     backend = _backend()
     sid = asyncio.run(_started(backend))
-    for kind in (BrowserActionKind.REPLAY_REQUEST, BrowserActionKind.SUBMIT_FORM):
-        action = BrowserAction(action_id="a-def", session_id=sid, kind=kind)
-        result = asyncio.run(backend.execute_action(sid, action))
-        assert result.success is False
-        assert result.failure_class is BrowserFailureClass.UNSUPPORTED_ACTION
-        assert result.retryable is False
+    action = BrowserAction(
+        action_id="a-sub",
+        session_id=sid,
+        kind=BrowserActionKind.SUBMIT_FORM,
+        parameters={"form_index": 0, "field_values": {"u": "admin"}},
+    )
+    result = asyncio.run(backend.execute_action(sid, action))
+    assert result.success is True
+    assert result.metadata["final_url"] == "http://10.0.0.50/welcome"
+    assert result.metadata["status_code"] == 302
+    assert result.metadata["filled_fields"] == 1
+    assert result.metadata["captured_events"] == 2  # submit drains the armed login pair
+    assert backend._test_sessions[sid].last_url == "http://10.0.0.50/welcome"
+    assert "browser_observe" in result.follow_ups
+
+
+def test_submit_rejects_bad_input():
+    backend = _backend()
+    sid = asyncio.run(_started(backend))
+    bad_index = BrowserAction(
+        action_id="a-bad", session_id=sid, kind=BrowserActionKind.SUBMIT_FORM, parameters={"form_index": -1}
+    )
+    capped = asyncio.run(backend.execute_action(sid, bad_index))
+    assert capped.success is False
+    assert capped.failure_class is BrowserFailureClass.UNEXPECTED_OUTPUT
+    assert capped.retryable is False
+    bad_fields = BrowserAction(
+        action_id="a-badf",
+        session_id=sid,
+        kind=BrowserActionKind.SUBMIT_FORM,
+        parameters={"form_index": 0, "field_values": ["u"]},
+    )
+    capped_fields = asyncio.run(backend.execute_action(sid, bad_fields))
+    assert capped_fields.success is False
+    assert capped_fields.failure_class is BrowserFailureClass.UNEXPECTED_OUTPUT
+
+
+def test_replay_masks_preview_and_digests_body():
+    import hashlib as _hashlib
+
+    backend = _backend()
+    sid = asyncio.run(_started(backend))
+    action = BrowserAction(
+        action_id="a-rep",
+        session_id=sid,
+        kind=BrowserActionKind.REPLAY_REQUEST,
+        parameters={"url": "http://10.0.0.50/api/login", "method": "post", "headers": {"X-Test": "1"}, "body": ""},
+    )
+    result = asyncio.run(backend.execute_action(sid, action))
+    assert result.success is True
+    assert result.metadata["status_code"] == 200
+    assert result.metadata["method"] == "POST"
+    assert "CANARY-SESSION-TOKEN" not in str(result.metadata.get("body_preview", ""))
+    assert (
+        result.metadata["body_sha256"]
+        == _hashlib.sha256(json.dumps({"token": SECRET, "ok": True}).encode()).hexdigest()
+    )
+
+
+def test_replay_rejects_non_http_scheme():
+    backend = _backend()
+    sid = asyncio.run(_started(backend))
+    action = BrowserAction(
+        action_id="a-repbad",
+        session_id=sid,
+        kind=BrowserActionKind.REPLAY_REQUEST,
+        parameters={"url": "file:///etc/passwd"},
+    )
+    result = asyncio.run(backend.execute_action(sid, action))
+    assert result.success is False
+    assert result.failure_class is BrowserFailureClass.NAVIGATION_FAILED
+    assert result.retryable is False
 
 
 def test_network_pagination_bounds():

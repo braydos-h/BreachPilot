@@ -159,9 +159,10 @@ def test_edge_registry_accessors() -> None:
     assert edge["to_state"] == "shell_as_user"
     from_states = {e["from_state"] for e in edges_from("creds_in_hand")}
     assert from_states == {"creds_in_hand"}
-    # stubs excluded by default, included on request
-    assert "kerberoast_to_da" not in {e["edge_id"] for e in all_edges()}
+    # no stubs ship: every registered edge has a working verify story
+    assert "kerberoast_to_da" in {e["edge_id"] for e in all_edges()}
     assert "kerberoast_to_da" in {e["edge_id"] for e in all_edges(include_stubs=True)}
+    assert "domain_login_validate" in {e["edge_id"] for e in all_edges()}
     # unparseable states are tolerant
     assert edges_from("bogus") == []
 
@@ -250,8 +251,9 @@ def test_can_transition_truth_table(tmp_path: Path) -> None:
     assert machine.can_transition("creds_in_hand", "shell_as_user") is True
     assert machine.can_transition("discovered", "da") is False
     assert machine.can_transition("bogus", "reachable") is False
-    # stub edge is not a legal transition
-    assert machine.can_transition("domain_creds", "da") is False
+    # domain path is live: creds -> domain_creds -> da
+    assert machine.can_transition("creds_in_hand", "domain_creds") is True
+    assert machine.can_transition("domain_creds", "da") is True
 
 
 def test_bfs_plan_shortest_path(tmp_path: Path) -> None:
@@ -526,3 +528,105 @@ def _plan_pairs(plan: list[str]) -> list[tuple[str, str, str]]:
     from tools.killchain import get_edge
 
     return [(e["from_state"], e["to_state"], e["edge_id"]) for e in (get_edge(eid) for eid in plan) if e is not None]
+
+
+# ---------------------------------------------------------------------------
+# Domain path: creds_in_hand -> domain_creds -> da
+# ---------------------------------------------------------------------------
+
+
+def test_bfs_plan_reaches_da_from_creds(tmp_path: Path) -> None:
+    machine = _machine(tmp_path)
+    from tools.intelligence.graph.types import GraphNode, NodeType
+
+    machine.graph_store.upsert_node(
+        GraphNode(
+            node_id="h",
+            node_type=NodeType.HOST,
+            value="10.0.0.50",
+            scope="target:10.0.0.50",
+            properties={"attack_state": "creds_in_hand"},
+        )
+    )
+    assert machine.plan("10.0.0.50", "da") == ["domain_login_validate", "kerberoast_to_da"]
+
+
+@pytest.mark.asyncio
+async def test_domain_path_verifies_end_to_end(tmp_path: Path) -> None:
+    """creds -> domain_creds -> da driven purely by verified transitions."""
+    executor = FakeToolExecutor(
+        outputs={
+            "lateral_exec": "LATERAL_EXEC_RESULT: completed\nOUTPUT:\nCORP\\admin",
+            "kerberoast": "KERBEROAST_RESULT: completed\nTICKETS_SIZE: 1234 bytes",
+        }
+    )
+    machine = _machine(tmp_path, tool_executor=executor, check_executor=FakeCheckExecutor())
+    ctx: dict[str, Any] = {"user": "admin", "password": "pw", "domain": "CORP"}
+    first = await machine.attempt_transition("10.0.0.50", "creds_in_hand", "domain_creds", context=ctx)
+    assert first["success"], first
+    assert first["edge_id"] == "domain_login_validate"
+    second = await machine.attempt_transition(
+        "10.0.0.50", "domain_creds", "da", edge_id="kerberoast_to_da", context=ctx
+    )
+    assert second["success"], second
+    assert machine.status("10.0.0.50")["state"] == "da"
+    tools_called = [name for name, _ in executor.calls]
+    assert tools_called == ["lateral_exec", "kerberoast"]
+    # placeholders resolved from context (no visible {token} leaks into calls)
+    assert executor.calls[1][1]["domain"] == "CORP"
+
+
+def test_killchain_attempt_succeeds_when_shell_probe_passes(tmp_path: Path) -> None:
+    """MCP wiring: shell_command verifies run through in-process dispatch."""
+    from tools.intelligence.graph.store import AttackGraphStore
+    from tools.intelligence.graph.types import GraphNode, NodeType
+    from tools.mcp_tools.killchain import register_killchain_tools
+
+    mcp = _StubMCP()
+    register_killchain_tools(mcp, ctx=_build_ctx(tmp_path))
+    mcp.tools["run_exploit_terminal"] = lambda command: f"OUTPUT:\nuid=0(root) via {command}"
+    db = tmp_path / "killchain_graph.db"
+    store = AttackGraphStore(db)
+    store.upsert_node(
+        GraphNode(
+            node_id="h",
+            node_type=NodeType.HOST,
+            value="10.0.0.50",
+            scope="target:10.0.0.50",
+            properties={"attack_state": "creds_in_hand"},
+        )
+    )
+    store.close()
+    out = mcp.tools["killchain_attempt"](
+        target="10.0.0.50",
+        from_state="creds_in_hand",
+        to_state="shell_as_user",
+        context_json=json.dumps({"user": "root", "password": "pw"}),
+    )
+    assert out.startswith("KILLCHAIN_TRANSITION:")
+    assert "EVIDENCE:" in out
+
+
+def test_killchain_context_parses_credential_shapes() -> None:
+    from types import SimpleNamespace
+
+    from tools.campaign.phases import _killchain_context
+
+    assert _killchain_context(SimpleNamespace(credentials_found=[])) == {
+        "user": "",
+        "password": "",
+        "domain": "",
+        "port": "",
+    }
+    state = SimpleNamespace(
+        credentials_found=[{"username": "admin", "password": "pw", "domain": "CORP"}],
+    )
+    assert _killchain_context(state) == {"user": "admin", "password": "pw", "domain": "CORP", "port": ""}
+    flat = SimpleNamespace(credentials_found=["user=svc password=s3cr3t"])
+    assert _killchain_context(flat)["user"] == "svc"
+    assert _killchain_context(flat)["password"] == "s3cr3t"
+    # unusable entries are skipped, freshest usable wins
+    mixed = SimpleNamespace(
+        credentials_found=[{"username": "old", "password": "x"}, {"username": "", "password": ""}],
+    )
+    assert _killchain_context(mixed)["user"] == "old"

@@ -1,9 +1,9 @@
 """Browser-native web agent MCP tools (Playwright backend, sandboxed).
 
 Read-only Phase 1 surface: start/navigate/observe/page-state/network/storage/
-screenshot/discover/close, plus ``browser_execute_js`` behind the explicit lab
-opt-in ``browser.allow_mutating_actions``. ``browser_replay`` and
-``browser_submit`` register but return ``BLOCKED: deferred`` (Phase 2).
+screenshot/discover/close, plus the mutating Phase 2 surface (``browser_submit``,
+``browser_replay``) behind the explicit lab opt-in
+``browser.allow_mutating_actions`` (``browser_execute_js`` shares the gate).
 
 Containment: every target-touching tool carries ``@require_allowlist`` (the
 target-IP lock) and funnels Chromium execution through ``BrowserManager`` +
@@ -20,6 +20,7 @@ is actually available (host SDK or a configured sandbox worker).
 
 from __future__ import annotations
 
+import json
 import urllib.parse
 from typing import Any
 
@@ -28,6 +29,12 @@ from tools.mcp_tools.sandbox_exec import sandbox_error_block
 
 _MANAGERS: dict[str, Any] = {}
 _BACKENDS: dict[str, Any] = {}
+# Launchers are cached per workspace alongside managers/backends: engine
+# tokens (Chromium pages, worker cookie jars) live in launcher instances, so
+# re-resolving per call would orphan every session after the call that
+# created it. Only successful resolutions are cached — a SANDBOX_* block is
+# returned uncached so the next call re-probes sandbox health.
+_LAUNCHERS: dict[str, Any] = {}
 
 
 def _browser_cfg(config: dict[str, Any] | None) -> dict[str, Any]:
@@ -38,8 +45,9 @@ def _get_stack(ctx: Any) -> tuple[Any, Any, Any, str]:
     """Resolve (manager, backend, launcher, block) for one tool call.
 
     ``block`` non-empty means the tool must return it verbatim (fail closed).
-    Managers/backends are cached per workspace so sessions survive across
-    calls; the launcher is re-resolved per call so sandbox state is fresh.
+    Managers/backends/launchers are cached per workspace so sessions survive
+    across calls; a failed sandbox resolution is never cached, so the next
+    call re-probes instead of sticking on a stale block.
     """
     from tools.browser.capabilities import get_backend, register_playwright_backend
     from tools.browser.manager import BrowserManager
@@ -48,9 +56,12 @@ def _get_stack(ctx: Any) -> tuple[Any, Any, Any, str]:
 
     config = ctx.config
     key = str(getattr(ctx, "workspace", "default") or "default")
-    launcher, block = resolve_browser_launcher(ctx, config)
-    if block:
-        return None, None, None, block
+    launcher = _LAUNCHERS.get(key)
+    if launcher is None:
+        launcher, block = resolve_browser_launcher(ctx, config)
+        if block:
+            return None, None, None, block
+        _LAUNCHERS[key] = launcher
     backend = _BACKENDS.get(key)
     if backend is None:
         register_playwright_backend(config)
@@ -114,6 +125,16 @@ def _browser_error_text(exc: Exception, *, tool_name: str = "") -> str:
             lines.append(f"TOOL: {tool_name}")
         return "\n".join(lines)
     return f"ERROR: browser operation failed: {exc}"
+
+
+def _browser_result_error(result: Any, tool_name: str) -> str:
+    """Render an unsuccessful BrowserResult as a model-readable result string."""
+    err = getattr(result, "error", None)
+    message = str(getattr(err, "message", "") or "browser operation failed")
+    failure = getattr(err, "failure_class", None)
+    code = str(getattr(failure, "value", "") or "unknown")
+    prefix = "BLOCKED" if code in ("scope_blocked", "tool_unavailable") else "ERROR"
+    return f"{prefix}: {message}\nFAILURE_CLASS: {code}\nTOOL: {tool_name}"
 
 
 def _artifact_path(ctx: Any, session_id: str, name: str) -> str:
@@ -547,26 +568,186 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
         return f"SESSION_CLOSED: {_session.session_id}"
 
     # ------------------------------------------------------------------
-    # 12/13. deferred mutating ops (registered, explicitly BLOCKED)
+    # 12. browser_submit (mutating: explicit lab opt-in)
     # ------------------------------------------------------------------
     @mcp.tool()
-    @audit_tool
-    def browser_replay(session_id: str = "", event_id: str = "") -> str:
-        """Replay/mutate a captured request (DEFERRED to Phase 2 — always BLOCKED in this build)."""
-        del session_id, event_id
+    @require_allowlist("target")
+    def browser_submit(
+        target: str, session_id: str, form_index: int = 0, field_values: dict[str, str] | None = None
+    ) -> str:
+        """Fill one live-page form by field name and submit it. The form's action host must be allowlisted. Requires browser.allow_mutating_actions."""
+        if not validate_target_or_ip(target):
+            return "BLOCKED: invalid target (IP or domain)."
+        if not bool(_browser_cfg(config).get("allow_mutating_actions", False)):
+            return (
+                "BLOCKED: browser_submit requires the explicit lab opt-in "
+                "browser.allow_mutating_actions: true (form submission mutates target state)."
+            )
+        if field_values is not None and not isinstance(field_values, dict):
+            return "BLOCKED: field_values must be a {name: value} mapping."
+        manager, _backend, _launcher, block = _get_stack(ctx)
+        if block:
+            return block
+        _session, problem = _session_for(manager, session_id, target)
+        if problem:
+            return problem
+        try:
+            import asyncio as _asyncio
+
+            from tools.browser.models import BrowserAction, BrowserActionKind
+
+            discover = BrowserAction(
+                action_id=f"a-{_session.session_id[-8:]}-df",
+                session_id=_session.session_id,
+                kind=BrowserActionKind.DISCOVER_FORMS,
+                run_id=_session.run_id,
+                target_ip=target,
+            )
+            found = _asyncio.run(
+                manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=discover)
+            )
+        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result
+            return _browser_error_text(exc, tool_name="browser_submit")
+        forms = (found.metadata or {}).get("forms") or []
+        try:
+            index = int(form_index)
+        except (TypeError, ValueError):
+            return f"BLOCKED: form_index must be an integer, got {form_index!r}."
+        if index < 0 or index >= len(forms):
+            return (
+                f"BLOCKED: form index {index} out of range ({len(forms)} forms discovered). "
+                "Discover forms via browser_discover_forms first."
+            )
+        page_url = str((found.metadata or {}).get("url", "") or "")
+        action_url = urllib.parse.urljoin(page_url, str(forms[index].get("action", "") or ""))
+        denied = _url_host_allowed(action_url, config)
+        if denied:
+            return denied
+        try:
+            import asyncio as _asyncio
+
+            from tools.browser.models import BrowserAction, BrowserActionKind
+
+            submit = BrowserAction(
+                action_id=f"a-{_session.session_id[-8:]}-sub",
+                session_id=_session.session_id,
+                kind=BrowserActionKind.SUBMIT_FORM,
+                parameters={"form_index": index, "field_values": dict(field_values or {})},
+                run_id=_session.run_id,
+                target_ip=target,
+            )
+            result = _asyncio.run(
+                manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=submit)
+            )
+        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result
+            return _browser_error_text(exc, tool_name="browser_submit")
+        if not result.success:
+            return _browser_result_error(result, "browser_submit")
+        meta = result.metadata or {}
         return (
-            "BLOCKED: browser_replay is deferred to Phase 2 (explicit lab opt-in + replay "
-            "idempotency review). Read-only capture via browser_network_events only."
+            f"SUBMITTED: {meta.get('final_url', '')}\n"
+            f"STATUS: {meta.get('status_code')}\n"
+            f"FORM: {str(meta.get('form_method', '')).upper()} {meta.get('form_action', '')}\n"
+            f"FILLED: {meta.get('filled_fields', 0)} fields\n"
+            f"NETWORK_EVENTS: {meta.get('captured_events', 0)} captured\n"
+            "NEXT: browser_observe to harvest the result page."
         )
 
+    # ------------------------------------------------------------------
+    # 13. browser_replay (mutating: explicit lab opt-in)
+    # ------------------------------------------------------------------
     @mcp.tool()
-    @audit_tool
-    def browser_submit(session_id: str = "", form_index: int = 0) -> str:
-        """Submit a live-page form (DEFERRED to Phase 2 — always BLOCKED in this build)."""
-        del session_id, form_index
+    @require_allowlist("target")
+    def browser_replay(
+        target: str,
+        session_id: str,
+        url: str = "",
+        event_id: str = "",
+        method: str = "",
+        headers_json: str = "",
+        body: str = "",
+    ) -> str:
+        """Replay one HTTP request through the session (captured event_id as base, explicit url/method/headers/body override). The final URL host must be allowlisted. Requires browser.allow_mutating_actions."""
+        if not validate_target_or_ip(target):
+            return "BLOCKED: invalid target (IP or domain)."
+        if not bool(_browser_cfg(config).get("allow_mutating_actions", False)):
+            return (
+                "BLOCKED: browser_replay requires the explicit lab opt-in "
+                "browser.allow_mutating_actions: true (request replay mutates target state)."
+            )
+        try:
+            extra_headers = json.loads(headers_json) if (headers_json or "").strip() else {}
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return "BLOCKED: headers_json must be a JSON object."
+        if not isinstance(extra_headers, dict):
+            return "BLOCKED: headers_json must be a JSON object."
+        manager, _backend, _launcher, block = _get_stack(ctx)
+        if block:
+            return block
+        _session, problem = _session_for(manager, session_id, target)
+        if problem:
+            return problem
+        base_url, base_method, base_headers = "", "", {}
+        if (event_id or "").strip():
+            try:
+                import asyncio as _asyncio
+
+                events = _asyncio.run(
+                    manager.run_op(
+                        _session.session_id, "get_network_events", run_id=_session.run_id, limit=500, after_id=""
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 — fail closed with a readable result
+                return _browser_error_text(exc, tool_name="browser_replay")
+            match = next((e for e in (events or []) if e.event_id == event_id.strip()), None)
+            if match is None:
+                return (
+                    f"ERROR: unknown network event {event_id.strip()!r} for this session. "
+                    "List events via browser_network_events first."
+                )
+            base_url = match.url
+            base_method = match.method or "GET"
+            base_headers = dict(match.request_headers or {})
+        final_url = (url or "").strip() or base_url
+        if not final_url:
+            return "BLOCKED: url or a captured event_id is required."
+        denied = _url_host_allowed(final_url, config)
+        if denied:
+            return denied
+        headers = dict(base_headers)
+        headers.update({str(k): str(v) for k, v in extra_headers.items()})
+        try:
+            import asyncio as _asyncio
+
+            from tools.browser.models import BrowserAction, BrowserActionKind
+
+            replay = BrowserAction(
+                action_id=f"a-{_session.session_id[-8:]}-rep",
+                session_id=_session.session_id,
+                kind=BrowserActionKind.REPLAY_REQUEST,
+                parameters={
+                    "url": final_url,
+                    "method": (method or "").strip() or base_method or "GET",
+                    "headers": headers,
+                    "body": body or "",
+                },
+                run_id=_session.run_id,
+                target_ip=target,
+            )
+            result = _asyncio.run(
+                manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=replay)
+            )
+        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result
+            return _browser_error_text(exc, tool_name="browser_replay")
+        if not result.success:
+            return _browser_result_error(result, "browser_replay")
+        meta = result.metadata or {}
         return (
-            "BLOCKED: browser_submit is deferred to Phase 2 (explicit lab opt-in + ScopeGate "
-            "form-action mapping). Discover forms via browser_discover_forms only."
+            f"REPLAYED: {meta.get('method', '')} {meta.get('url', '')}\n"
+            f"STATUS: {meta.get('status_code')}\n"
+            f"SHA256: {meta.get('body_sha256', '')}\n"
+            f"PREVIEW: {meta.get('body_preview', '')}\n"
+            f"TRUNCATED: {meta.get('truncated', False)}"
         )
 
 

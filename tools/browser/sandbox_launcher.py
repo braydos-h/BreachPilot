@@ -56,7 +56,7 @@ def browser_worker_image(config: dict[str, Any] | None = None) -> str:
     return override or BROWSER_WORKER_IMAGE
 
 
-def _bootstrap_script(dom_js: str, storage_js: str) -> str:
+def _bootstrap_script(dom_js: str, storage_js: str, fill_js: str) -> str:
     """Assemble the one-shot worker script (JS extractors embedded as JSON)."""
     return (
         "import json, sys\n"
@@ -64,6 +64,7 @@ def _bootstrap_script(dom_js: str, storage_js: str) -> str:
         "    print(json.dumps(payload, default=str))\n"
         f"DOM_JS = {json.dumps(dom_js)}\n"
         f"STORAGE_JS = {json.dumps(storage_js)}\n"
+        f"FILL_SUBMIT_JS = {json.dumps(fill_js)}\n"
         "def main():\n"
         "    try:\n"
         "        req = json.loads(sys.argv[1])\n"
@@ -151,7 +152,9 @@ def _bootstrap_script(dom_js: str, storage_js: str) -> str:
         "                kind = 'timeout'\n"
         "            elif 'has been closed' in text or 'Closed' in name:\n"
         "                kind = 'crash'\n"
-        "            elif op == 'navigate' or 'net::' in text or 'ERR_' in text:\n"
+        "            elif op == 'replay':\n"
+        "                kind = 'error'\n"
+        "            elif op in ('navigate', 'fill_submit') or 'net::' in text or 'ERR_' in text:\n"
         "                kind = 'navigation'\n"
         "            elif op == 'evaluate':\n"
         "                kind = 'script'\n"
@@ -195,6 +198,61 @@ def _bootstrap_script(dom_js: str, storage_js: str) -> str:
         "        import base64 as _b64\n"
         "        raw = page.screenshot(full_page=bool(req.get('full_page', False)), timeout=timeout_ms)\n"
         "        return {'png_base64': _b64.b64encode(bytes(raw)).decode('ascii')}\n"
+        "    if op == 'fill_submit':\n"
+        "        idx = int(req.get('form_index', 0))\n"
+        "        fields = req.get('field_values') or {}\n"
+        "        if not url:\n"
+        "            raise ValueError('navigate first: no page loaded')\n"
+        "        page.goto(url, wait_until='domcontentloaded', timeout=timeout_ms)\n"
+        "        try:\n"
+        "            page.wait_for_load_state('networkidle', timeout=min(timeout_ms // 2, 10000))\n"
+        "        except Exception:\n"
+        "            pass\n"
+        "        info = page.evaluate(FILL_SUBMIT_JS, [idx, fields])\n"
+        "        if not isinstance(info, dict) or not info.get('ok'):\n"
+        "            err = info.get('error', 'unknown') if isinstance(info, dict) else info\n"
+        "            raise ValueError(f'form submit failed: {err}')\n"
+        "        try:\n"
+        "            page.wait_for_url(lambda u: u != url, timeout=5000)\n"
+        "        except Exception:\n"
+        "            pass  # same-document submit; settle below instead\n"
+        "        try:\n"
+        "            page.wait_for_load_state('networkidle', timeout=min(timeout_ms // 2, 10000))\n"
+        "        except Exception:\n"
+        "            pass\n"
+        "        final = page.url or url\n"
+        "        status = None\n"
+        "        for evt in reversed(net):\n"
+        "            if evt.get('direction') == 'response' and evt.get('status') is not None:\n"
+        "                status = evt.get('status')\n"
+        "                break\n"
+        "        return {'final_url': final, 'status': status,\n"
+        "                'action': str(info.get('action', '') or ''),\n"
+        "                'method': str(info.get('method', 'get') or 'get'),\n"
+        "                'filled': int(info.get('filled', 0) or 0),\n"
+        "                'redirect_chain': ([url] if final == url else [url, final])}\n"
+        "    if op == 'replay':\n"
+        "        method = str(req.get('method', 'GET') or 'GET').upper()\n"
+        "        target_url = req.get('url', '') or ''\n"
+        "        headers = req.get('headers') or {}\n"
+        "        body = req.get('body', '') or ''\n"
+        "        rctx = pw.request.new_context()\n"
+        "        try:\n"
+        "            kwargs = {'method': method, 'headers': dict(headers), 'timeout': timeout_ms}\n"
+        "            if body:\n"
+        "                kwargs['data'] = body\n"
+        "            resp = rctx.fetch(target_url, **kwargs)\n"
+        "            try:\n"
+        "                text = resp.text()\n"
+        "            except Exception:\n"
+        "                text = ''\n"
+        "            return {'url': target_url, 'method': method, 'status': resp.status,\n"
+        "                    'headers': dict(resp.headers or {}), 'body': text[:4096]}\n"
+        "        finally:\n"
+        "            try:\n"
+        "                rctx.dispose()\n"
+        "            except Exception:\n"
+        "                pass\n"
         "    raise ValueError(f'unknown op {op!r}')\n"
         "def _collect(page):\n"
         "    data = page.evaluate(DOM_JS) or {}\n"
@@ -235,9 +293,9 @@ class SandboxPlaywrightLauncher:
         self._manager = manager
         self._config = dict(config or {})
         self._states: dict[str, dict[str, Any]] = {}
-        from tools.browser.playwright_backend import DOM_EXTRACT_JS, STORAGE_DUMP_JS
+        from tools.browser.playwright_backend import DOM_EXTRACT_JS, FORM_FILL_SUBMIT_JS, STORAGE_DUMP_JS
 
-        self._script = _bootstrap_script(DOM_EXTRACT_JS, STORAGE_DUMP_JS)
+        self._script = _bootstrap_script(DOM_EXTRACT_JS, STORAGE_DUMP_JS, FORM_FILL_SUBMIT_JS)
 
     def _state(self, token: str) -> dict[str, Any]:
         try:
@@ -395,6 +453,60 @@ class SandboxPlaywrightLauncher:
             return _b64.b64decode(raw) if raw else b""
         except Exception as exc:
             raise BrowserCrashed(f"browser worker returned corrupt screenshot bytes: {exc}") from exc
+
+    async def fill_submit(
+        self, token: str, form_index: int, field_values: dict[str, str], timeout_ms: int, *, target_ip: str = ""
+    ) -> dict[str, Any]:
+        """Fill + submit one form inside the worker (re-navigates to last_url first)."""
+        state = self._state(token)
+        if not state["last_url"]:
+            raise BrowserNavigationFailed("navigate first: no page loaded in this session")
+        envelope = await self._exec(
+            {
+                "op": "fill_submit",
+                "url": state["last_url"],
+                "form_index": form_index,
+                "field_values": field_values,
+                "cookies": state["cookies"],
+                "storage_seed": state["storage_seed"],
+                "timeout_ms": timeout_ms,
+            },
+            timeout_s=timeout_ms / 1000.0 + 60.0,
+            target_ip=target_ip,
+            tool_name="browser_submit",
+        )
+        data = _raise_for_worker_result(envelope, "fill_submit")
+        self._absorb(state, envelope)
+        payload = dict(data.get("data") or {})
+        state["last_url"] = str(payload.get("final_url", "") or state["last_url"])
+        return payload
+
+    async def replay(
+        self,
+        token: str,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: str,
+        timeout_ms: int,
+        *,
+        target_ip: str = "",
+    ) -> dict[str, Any]:
+        """Replay one HTTP request from inside the worker netns.
+
+        Auth rides on the caller-supplied headers (captured live request
+        headers) — the one-shot worker mints a fresh request context per op,
+        so no cookie jar is shared here by design.
+        """
+        self._state(token)  # unknown-token check only; replay is session-scoped, not page-scoped
+        envelope = await self._exec(
+            {"op": "replay", "url": url, "method": method, "headers": headers, "body": body, "timeout_ms": timeout_ms},
+            timeout_s=timeout_ms / 1000.0 + 60.0,
+            target_ip=target_ip,
+            tool_name="browser_replay",
+        )
+        data = _raise_for_worker_result(envelope, "replay")
+        return dict(data.get("data") or {"url": url, "method": method, "status": None, "body": ""})
 
     async def take_network(
         self, token: str, *, body_sample_max_bytes: int = 4096, target_ip: str = ""

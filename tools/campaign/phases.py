@@ -737,6 +737,31 @@ def _schedule_vuln_chain(self, state: AttackState) -> None:
 # ── Kill-chain state machine (design §killchain) ─────────────────────
 
 
+def _killchain_context(state: AttackState) -> dict[str, Any]:
+    """Playbook placeholders from the freshest usable credential.
+
+    Entries may be dicts ({username, password/ntlm_hash, domain?}) or
+    flattened "user=.. password=.." strings (ModuleResult.to_dict shape).
+    Missing pieces stay "" so resolve_placeholders leaves a visible
+    {token} instead of silently injecting structure.
+    """
+    ctx: dict[str, Any] = {"user": "", "password": "", "domain": "", "port": ""}
+    for entry in reversed(list(getattr(state, "credentials_found", None) or [])):
+        parts: dict[str, str] = {}
+        if isinstance(entry, dict):
+            parts = {str(k): str(v) for k, v in entry.items()}
+        elif isinstance(entry, str):
+            parts = dict(kv.split("=", 1) for kv in entry.split() if "=" in kv)
+        user = parts.get("username") or parts.get("user", "")
+        secret = parts.get("password") or parts.get("ntlm_hash", "")
+        if user and secret:
+            ctx["user"] = user
+            ctx["password"] = secret
+            ctx["domain"] = parts.get("domain", "")
+            break
+    return ctx
+
+
 def _get_killchain_machine(self, state: AttackState) -> Any | None:
     """Build (once) the campaign's kill-chain machine, or None when off/unavailable.
 
@@ -766,11 +791,25 @@ def _get_killchain_machine(self, state: AttackState) -> Any | None:
         async def _executor(tool_name: str, args: dict[str, Any]) -> str:
             return await asyncio.to_thread(_sync_exec, tool_name, args)
 
+        # shell_command verifies route through the same campaign tool layer
+        # (sync callable shape); unwired -> UNVERIFIED fail-closed as before.
+        _check_executor: Any | None = None
+        if self._tool_executor is not None:
+            from tools.eval_checks import default_check_executor
+
+            _exec = self._tool_executor
+
+            def _shell_call(tool_name: str, args: dict[str, Any]) -> str:
+                return str(_exec(tool_name, args))
+
+            _check_executor = default_check_executor(session=_shell_call, workspace=self._workspace)
+
         self._killchain_machine = KillChainMachine(
             graph_store=AttackGraphStore(db_path, scope=f"target:{state.target}"),
             workspace=self._workspace,
             config=self._mission,
             tool_executor=_executor,
+            check_executor=_check_executor,
             run_dir=self._workspace,
             decision_log_enabled=bool(
                 (((self._mission or {}).get("agent", {}) or {}).get("decision_log_enabled", True))
@@ -827,10 +866,7 @@ async def _phase_killchain(self, state: AttackState) -> bool:
             return False
         result: dict[str, Any] = {}
         for _attempt in range(2):  # design: fall back after verification fails twice
-            context = {
-                "user": (state.credentials_found[-1] if state.credentials_found else ""),
-                "port": "",
-            }
+            context = _killchain_context(state)
             result = await machine.attempt_transition(
                 state.target,
                 edge["from_state"],

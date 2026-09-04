@@ -78,6 +78,17 @@ class _AppHandler(BaseHTTPRequestHandler):
             return
         self._send(b"<html><head><title>Index</title></head><body>index</body></html>")
 
+    def do_POST(self) -> None:
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        raw = self.rfile.read(length) if length > 0 else b""
+        if self.path == "/submit":
+            self._send(b"<html><body>submitted:" + raw + b"</body></html>")
+            return
+        if self.path == "/api/echo":
+            self._send(raw or b"{}", content_type="application/json")
+            return
+        self._send(b"not found", status=404)
+
 
 @pytest.fixture(scope="module")
 def local_app() -> str:
@@ -224,12 +235,14 @@ def test_storage_and_observation_shapes(local_app):
 
 
 def test_worker_bootstrap_script_compiles():
-    from tools.browser.playwright_backend import DOM_EXTRACT_JS, STORAGE_DUMP_JS
+    from tools.browser.playwright_backend import DOM_EXTRACT_JS, FORM_FILL_SUBMIT_JS, STORAGE_DUMP_JS
 
-    script = _bootstrap_script(DOM_EXTRACT_JS, STORAGE_DUMP_JS)
+    script = _bootstrap_script(DOM_EXTRACT_JS, STORAGE_DUMP_JS, FORM_FILL_SUBMIT_JS)
     compile(script, "<pw_worker>", "exec")
     assert "sync_playwright" in script
     assert "png_base64" in script
+    assert "fill_submit" in script
+    assert "request.new_context" in script  # replay path
 
 
 def test_worker_envelope_maps_onto_typed_errors():
@@ -337,6 +350,50 @@ def test_live_out_of_scope_url_refused_by_backend_shape(local_app, _clean_engine
         try:
             with pytest.raises(BrowserNavigationFailed):
                 await backend.navigate(session.session_id, "file:///etc/passwd")
+        finally:
+            await backend.close(session.session_id)
+
+    asyncio.run(_flow())
+
+
+@pytest.mark.integration
+def test_live_submit_and_replay(local_app, _clean_engine_modules):
+    """End-to-end mutating ops against the deterministic local app."""
+    from tools.browser.models import BrowserAction, BrowserActionKind
+
+    backend = _live_backend_or_skip()
+
+    async def _flow():
+        session = await backend.start_session(target="127.0.0.1", run_id="run-live")
+        try:
+            await backend.navigate(session.session_id, f"{local_app}/form")
+            submit = BrowserAction(
+                action_id="a-live-sub",
+                session_id=session.session_id,
+                kind=BrowserActionKind.SUBMIT_FORM,
+                parameters={"form_index": 0, "field_values": {"user": "admin", "pw": "s3cret"}},
+            )
+            result = await backend.execute_action(session.session_id, submit)
+            assert result.success is True
+            assert result.metadata["filled_fields"] == 2
+            assert result.metadata["final_url"] == f"{local_app}/submit"
+            observation = await backend.observe(session.session_id)
+            assert "submitted:" in observation.payload["dom_summary"]
+            replay = BrowserAction(
+                action_id="a-live-rep",
+                session_id=session.session_id,
+                kind=BrowserActionKind.REPLAY_REQUEST,
+                parameters={
+                    "url": f"{local_app}/api/echo",
+                    "method": "POST",
+                    "headers": {"Content-Type": "application/json"},
+                    "body": '{"ping": 1}',
+                },
+            )
+            replayed = await backend.execute_action(session.session_id, replay)
+            assert replayed.success is True
+            assert replayed.metadata["status_code"] == 200
+            assert "ping" in replayed.metadata["body_preview"]
         finally:
             await backend.close(session.session_id)
 

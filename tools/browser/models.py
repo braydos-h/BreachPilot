@@ -181,11 +181,12 @@ class BrowserSessionState(str, enum.Enum):
 
 
 class BrowserActionKind(str, enum.Enum):
-    """What a future browser action does. Schema-only for now.
+    """What a browser action does.
 
-    No code in this change can execute any of these — they name the actions
-    the future backend will implement so capability metadata, audit rows and
-    planner records are stable from day one.
+    Names are stable contracts so capability metadata, audit rows and planner
+    records stay stable; the Playwright backend implements every kind, with
+    the mutating kinds (``EXECUTE_JS`` / ``REPLAY_REQUEST`` / ``SUBMIT_FORM``)
+    additionally gated at the MCP layer by ``browser.allow_mutating_actions``.
     """
 
     NAVIGATE = "navigate"
@@ -196,8 +197,8 @@ class BrowserActionKind(str, enum.Enum):
     GET_STORAGE = "get_storage"
     DISCOVER_FORMS = "discover_forms"
     DISCOVER_ENDPOINTS = "discover_endpoints"
-    REPLAY_REQUEST = "replay_request"  # request replay/mutation — deferred
-    SUBMIT_FORM = "submit_form"  # deferred: never executed by preparation work
+    REPLAY_REQUEST = "replay_request"  # request replay/mutation (gated by browser.allow_mutating_actions)
+    SUBMIT_FORM = "submit_form"  # form fill + submit (gated by browser.allow_mutating_actions)
     WAIT = "wait"
     CLOSE = "close"
 
@@ -621,7 +622,7 @@ class BrowserNetworkEvent:
     body_size: int | None = None
     body_sha256: str = ""
     body_sample: str = ""  # optional truncated body — treat as sensitive
-    replayable: bool = False  # future: whether the request can be replayed/mutated
+    replayable: bool = False  # whether the request can be replayed/mutated via browser_replay
     timing_ms: float | None = None
     observed_at: str = ""
 

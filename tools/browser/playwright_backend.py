@@ -72,6 +72,7 @@ __all__ = [
     "BROWSER_WORKER_IMAGE",
     "DOM_EXTRACT_JS",
     "STORAGE_DUMP_JS",
+    "FORM_FILL_SUBMIT_JS",
 ]
 
 #: Default sandbox browser-worker image (variant of the base worker + Playwright/Chromium).
@@ -90,6 +91,11 @@ _MAX_STORAGE_ENTRIES = 200
 _STORAGE_VALUE_MAX_CHARS = 2048
 _JS_MAX_CHARS = 8192
 _JS_PREVIEW_MAX_CHARS = 500
+_MAX_SUBMIT_FIELDS = 20
+_SUBMIT_VALUE_MAX_CHARS = 2000
+_REPLAY_BODY_MAX_BYTES = 4096
+_REPLAY_PREVIEW_MAX_CHARS = 2000
+_REPLAY_MAX_HEADERS = 20
 _LAUNCH_TIMEOUT_SECONDS = 60.0
 _MAX_WAIT_SECONDS = 30.0
 
@@ -129,6 +135,40 @@ STORAGE_DUMP_JS = """(area) => {
     }
   } catch (e) { out.__error__ = (e && e.message) || "unavailable"; }
   return out;
+}"""
+
+#: Fill one form's fields by name, then submit it. Fills + submits in a single
+#: evaluate() so the returned info resolves before navigation commits; the
+#: caller settles + harvests (final URL, status) afterwards. Returns
+#: JSON-serializable data only.
+FORM_FILL_SUBMIT_JS = """([idx, fields]) => {
+  const f = document.forms[idx];
+  if (!f) return {ok: false, error: "no such form index " + idx + " (" + document.forms.length + " forms)"};
+  let filled = 0;
+  for (const entry of Object.entries(fields || {})) {
+    const name = entry[0] + "", value = entry[1] + "";
+    const el = f.elements.namedItem(name);
+    if (!el) continue;
+    try {
+      const targets = (typeof RadioNodeList !== "undefined" && el instanceof RadioNodeList)
+        ? Array.prototype.slice.call(el) : [el];
+      for (const t of targets) {
+        const type = ((t.type || "text") + "").toLowerCase();
+        if (type === "checkbox") t.checked = !(value === "" || value === "0" || value.toLowerCase() === "false");
+        else if (type === "radio") t.checked = ((t.value || "on") + "" === value);
+        else t.value = value;
+        t.dispatchEvent(new Event("input", {bubbles: true}));
+        t.dispatchEvent(new Event("change", {bubbles: true}));
+      }
+      filled++;
+    } catch (e) {}
+  }
+  const info = {ok: true, action: f.getAttribute("action") || "",
+    method: ((f.getAttribute("method") || "get") + ""), filled: filled,
+    form_count: document.forms.length};
+  try { if (f.requestSubmit) f.requestSubmit(); else f.submit(); }
+  catch (e) { return {ok: false, error: "submit failed: " + ((e && e.message) || e)}; }
+  return info;
 }"""
 
 _INDICATOR_MARKERS: tuple[tuple[str, str], ...] = (
@@ -470,6 +510,92 @@ class InProcessPlaywrightLauncher:
             raise _map_op_error(exc, "screenshot") from exc
         return bytes(data)
 
+    async def fill_submit(
+        self, token: str, form_index: int, field_values: dict[str, str], timeout_ms: int, *, target_ip: str = ""
+    ) -> dict[str, Any]:
+        """Fill one live-page form by field name, submit it, settle, harvest."""
+        del target_ip  # in-process pages are already session-bound; policy lives above
+        state = self._state(token)
+        page = state["page"]
+        try:
+            before = str(page.url or "")
+        except Exception:  # noqa: BLE001 — page may be gone
+            before = ""
+        try:
+            info = await page.evaluate(FORM_FILL_SUBMIT_JS, [form_index, dict(field_values or {})])
+        except Exception as exc:
+            raise _map_op_error(exc, "fill_submit") from exc
+        if not isinstance(info, dict) or not info.get("ok"):
+            reason = info.get("error", "unexpected form result") if isinstance(info, dict) else "unexpected form result"
+            raise BrowserBackendError(f"browser form submit failed: {reason}")
+        try:
+            # The submit navigation commits asynchronously after evaluate()
+            # resolves; wait_for_load_state alone can observe the
+            # pre-navigation document and return immediately, so wait for the
+            # URL to move first (same-document submits simply time this out).
+            await page.wait_for_url(lambda u: u != before, timeout=5000)
+        except Exception as exc:  # noqa: BLE001 — timeout here means same-page submit
+            if "Timeout" not in type(exc).__name__ and "timeout" not in str(exc).lower():
+                raise _map_op_error(exc, "fill_submit") from exc
+        try:  # best-effort post-submit settle; never fails the submit itself
+            await page.wait_for_load_state("networkidle", timeout=min(timeout_ms // 2, 10000))
+        except Exception:  # noqa: BLE001 — settle is advisory
+            pass
+        status: int | None = None
+        for raw in reversed(state["net"]):
+            if raw.get("direction") == "response" and raw.get("status") is not None:
+                try:
+                    status = int(raw["status"])
+                except (TypeError, ValueError):
+                    status = None
+                break
+        try:
+            final_url = str(page.url or "")
+        except Exception:  # noqa: BLE001 — page may be gone
+            final_url = ""
+        chain = [final_url or before] if not before or before == final_url else [before, final_url]
+        return {
+            "final_url": final_url or before,
+            "status": status,
+            "action": str(info.get("action", "") or ""),
+            "method": str(info.get("method", "get") or "get"),
+            "filled": int(info.get("filled", 0) or 0),
+            "redirect_chain": chain,
+        }
+
+    async def replay(
+        self,
+        token: str,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: str,
+        timeout_ms: int,
+        *,
+        target_ip: str = "",
+    ) -> dict[str, Any]:
+        """Replay one HTTP request through the page's context (cookies shared)."""
+        del target_ip  # context-bound replay; policy lives above
+        state = self._state(token)
+        try:
+            kwargs: dict[str, Any] = {"method": method, "headers": dict(headers or {}), "timeout": timeout_ms}
+            if body:
+                kwargs["data"] = body
+            resp = await state["page"].request.fetch(url, **kwargs)
+            try:
+                text = await resp.text()
+            except Exception:  # noqa: BLE001 — body sampling is best-effort
+                text = ""
+            return {
+                "url": url,
+                "method": method,
+                "status": resp.status,
+                "headers": dict(resp.headers or {}),
+                "body": text[:_REPLAY_BODY_MAX_BYTES],
+            }
+        except Exception as exc:
+            raise _map_op_error(exc, "replay") from exc
+
     async def take_network(
         self, token: str, *, body_sample_max_bytes: int = _BODY_SAMPLE_MAX_BYTES, target_ip: str = ""
     ) -> list[dict[str, Any]]:
@@ -565,8 +691,10 @@ class PlaywrightBackend(BrowserBackend):
         "browser.dom.inspect",
         "browser.javascript.execute",
         "browser.network.observe",
+        "browser.network.replay",
         "browser.storage.read",
         "browser.form.inspect",
+        "browser.form.submit",
         "browser.screenshot",
         "browser.endpoint.discover",
     )
@@ -667,6 +795,11 @@ class PlaywrightBackend(BrowserBackend):
             if str(raw.get("direction", "")) == "response"
             else BrowserEventDirection.REQUEST
         )
+        url = str(raw.get("url", "") or "")
+        try:
+            scheme = urllib.parse.urlparse(url).scheme.lower()
+        except Exception:  # noqa: BLE001 — unparsable URL is simply not replayable
+            scheme = ""
         body = str(raw.get("body", "") or "")
         digest = hashlib.sha256(body.encode("utf-8", errors="replace")).hexdigest() if body else ""
         size = raw.get("body_size")
@@ -689,7 +822,7 @@ class PlaywrightBackend(BrowserBackend):
             body_size=size_int,
             body_sha256=digest,
             body_sample=body,
-            replayable=False,
+            replayable=scheme in ("http", "https"),
             timing_ms=raw.get("timing_ms"),
             observed_at=str(raw.get("observed_at", "") or _utcnow()),
         )
@@ -906,21 +1039,10 @@ class PlaywrightBackend(BrowserBackend):
     async def execute_action(self, session_id: str, action: BrowserAction) -> BrowserResult:
         kind = action.kind
         params = dict(action.parameters or {})
-        if kind is BrowserActionKind.REPLAY_REQUEST or kind is BrowserActionKind.SUBMIT_FORM:
-            return BrowserResult(
-                success=False,
-                failure_class=BrowserFailureClass.UNSUPPORTED_ACTION,
-                retryable=False,
-                action_id=action.action_id,
-                session_id=session_id,
-                error=BrowserError(
-                    failure_class=BrowserFailureClass.UNSUPPORTED_ACTION,
-                    message=f"{kind.value} is deferred to Phase 2 (explicit lab opt-in); read-only browser work only",
-                    source="backend",
-                    retryable=False,
-                ),
-                follow_ups=["browser_observe"],
-            )
+        if kind is BrowserActionKind.SUBMIT_FORM:
+            return await self._submit_form(session_id, action)
+        if kind is BrowserActionKind.REPLAY_REQUEST:
+            return await self._replay_request(session_id, action)
         if kind is BrowserActionKind.NAVIGATE:
             result = await self.navigate(
                 session_id, str(params.get("url", "") or ""), timeout_seconds=action.timeout_seconds
@@ -1044,6 +1166,129 @@ class PlaywrightBackend(BrowserBackend):
                 source="backend",
                 retryable=False,
             ),
+        )
+
+    @staticmethod
+    def _invalid(
+        action: BrowserAction,
+        session_id: str,
+        message: str,
+        failure_class: BrowserFailureClass = BrowserFailureClass.UNEXPECTED_OUTPUT,
+    ) -> BrowserResult:
+        """Malformed mutating-action input (never dispatched, never retried)."""
+        return BrowserResult(
+            success=False,
+            failure_class=failure_class,
+            retryable=False,
+            action_id=action.action_id,
+            session_id=session_id,
+            error=BrowserError(
+                failure_class=failure_class,
+                message=message,
+                source="backend",
+                retryable=False,
+            ),
+        )
+
+    async def _submit_form(self, session_id: str, action: BrowserAction) -> BrowserResult:
+        """Fill one live-page form by field name and submit it (mutating)."""
+        params = dict(action.parameters or {})
+        try:
+            form_index = int(params.get("form_index", 0))
+        except (TypeError, ValueError):
+            form_index = -1
+        fields = params.get("field_values") or {}
+        if not isinstance(fields, dict):
+            return self._invalid(action, session_id, "submit field_values must be a {name: value} mapping")
+        bounded = {str(k): str(v)[:_SUBMIT_VALUE_MAX_CHARS] for k, v in list(fields.items())[:_MAX_SUBMIT_FIELDS]}
+        if form_index < 0:
+            return self._invalid(action, session_id, f"invalid form_index {params.get('form_index')!r}")
+        session = self._live_session(session_id)
+        timeout_s = self._nav_timeout(action.timeout_seconds)
+        async with self._session_lock(session_id):
+            raw = await self._guard(
+                self._launcher.fill_submit(
+                    session.token, form_index, bounded, int(timeout_s * 1000), target_ip=session.target
+                ),
+                timeout_s=timeout_s + 15.0,
+                op="submit",
+                session=session,
+            )
+            if not isinstance(raw, dict):
+                raw = {}
+            fresh = await self._drain_network(session, session_id)
+            final_url = str(raw.get("final_url", "") or session.last_url)
+            session.last_url = final_url or session.last_url
+        return BrowserResult(
+            success=True,
+            action_id=action.action_id,
+            session_id=session_id,
+            metadata={
+                "final_url": final_url,
+                "status_code": raw.get("status"),
+                "form_action": str(raw.get("action", "") or ""),
+                "form_method": str(raw.get("method", "get") or "get"),
+                "filled_fields": int(raw.get("filled", 0) or 0),
+                "redirect_chain": list(raw.get("redirect_chain") or [final_url]),
+                "captured_events": len(fresh),
+            },
+            follow_ups=["browser_observe", "browser_network_events"],
+        )
+
+    async def _replay_request(self, session_id: str, action: BrowserAction) -> BrowserResult:
+        """Replay one HTTP request through the session context (mutating)."""
+        params = dict(action.parameters or {})
+        url = str(params.get("url", "") or "").strip()
+        parsed = urllib.parse.urlparse(url)
+        if not url or parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
+            return self._invalid(
+                action,
+                session_id,
+                f"refusing non-http(s) replay target: {url!r}",
+                BrowserFailureClass.NAVIGATION_FAILED,
+            )
+        method = re.sub(r"[^A-Z]", "", str(params.get("method", "GET") or "GET").upper())[:16]
+        if not method:
+            return self._invalid(action, session_id, "replay method must be a valid HTTP token")
+        headers = params.get("headers") or {}
+        if not isinstance(headers, dict):
+            return self._invalid(action, session_id, "replay headers must be a {name: value} mapping")
+        bounded_headers = {str(k)[:256]: str(v)[:4096] for k, v in list(headers.items())[:_REPLAY_MAX_HEADERS]}
+        body = str(params.get("body", "") or "")[:_REPLAY_BODY_MAX_BYTES]
+        session = self._live_session(session_id)
+        timeout_s = self._nav_timeout(action.timeout_seconds)
+        async with self._session_lock(session_id):
+            raw = await self._guard(
+                self._launcher.replay(
+                    session.token,
+                    method,
+                    url,
+                    bounded_headers,
+                    body,
+                    int(timeout_s * 1000),
+                    target_ip=session.target,
+                ),
+                timeout_s=timeout_s + 15.0,
+                op="replay",
+                session=session,
+            )
+            if not isinstance(raw, dict):
+                raw = {}
+        text = str(raw.get("body", "") or "")
+        digest = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest() if text else ""
+        return BrowserResult(
+            success=True,
+            action_id=action.action_id,
+            session_id=session_id,
+            metadata={
+                "url": url,
+                "method": method,
+                "status_code": raw.get("status"),
+                "body_preview": _mask_body(text[:_REPLAY_PREVIEW_MAX_CHARS]),
+                "truncated": len(text) > _REPLAY_PREVIEW_MAX_CHARS,
+                "body_sha256": digest,
+            },
+            follow_ups=["browser_network_events", "browser_observe"],
         )
 
     async def capture_screenshot(self, session_id: str, *, artifact_path: str = "") -> BrowserArtifact:

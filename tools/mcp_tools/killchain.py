@@ -60,6 +60,30 @@ def _in_process_tool_executor(mcp: Any):
     return _executor
 
 
+def _in_process_shell_session(mcp: Any) -> Any:
+    """Sync ``(tool_name, args) -> str`` session for ``shell_command`` verifies.
+
+    Routes ``run_exploit_terminal`` through the same in-process dispatch as
+    playbooks, so verify probes honor the allowlist + audit trail. Dispatch
+    failures raise (``eval_checks`` degrades them to UNVERIFIED, never a pass).
+    Safe from any thread: hops to a fresh loop when the caller sits in one.
+    """
+    _dispatch = _in_process_tool_executor(mcp)
+
+    def _call(tool_name: str, args: dict[str, Any]) -> str:
+        coro = _dispatch(tool_name, args)
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return str(asyncio.run(coro))
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return str(pool.submit(asyncio.run, coro).result())
+
+    return _call
+
+
 def register_killchain_tools(mcp: Any, *, ctx: ToolContext) -> None:
     config = ctx.config
     audit_tool = ctx.audit_tool
@@ -71,6 +95,7 @@ def register_killchain_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
     graph_db = Path(str(kc_cfg.get("graph_db") or (workspace / "killchain_graph.db")))
     graph_db.parent.mkdir(parents=True, exist_ok=True)
+    from tools.eval_checks import default_check_executor
     from tools.intelligence.graph.store import AttackGraphStore
 
     store = AttackGraphStore(graph_db, scope="")
@@ -79,6 +104,7 @@ def register_killchain_tools(mcp: Any, *, ctx: ToolContext) -> None:
         workspace=workspace,
         config=config,
         tool_executor=_in_process_tool_executor(mcp),
+        check_executor=default_check_executor(session=_in_process_shell_session(mcp), workspace=workspace),
         run_dir=workspace,
         decision_log_enabled=bool(((config or {}).get("agent", {}) or {}).get("decision_log_enabled", True)),
     )

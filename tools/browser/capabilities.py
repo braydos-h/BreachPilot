@@ -101,7 +101,7 @@ BROWSER_CAPABILITIES: dict[str, BrowserCapability] = {
         ),
         BrowserCapability(
             "browser.form.submit",
-            "Submit forms (deferred: requires the action-execution backend).",
+            "Submit forms (mutating: requires browser.allow_mutating_actions + target lock).",
             read_only=False,
         ),
         BrowserCapability(
