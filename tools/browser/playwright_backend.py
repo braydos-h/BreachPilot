@@ -60,8 +60,8 @@ from tools.browser.models import (
     BrowserSessionState,
     BrowserStorageKind,
     BrowserStorageSnapshot,
+    _mask_body,
     new_session_id,
-    redact_value,
 )
 
 logger = logging.getLogger(__name__)
@@ -141,6 +141,7 @@ _INDICATOR_MARKERS: tuple[tuple[str, str], ...] = (
     ("ng-version", "angular"),
     ("angular", "angular"),
     ("svelte", "svelte"),
+    ("wordpress", "wordpress"),
     ("wp-content", "wordpress"),
     ("wp-json", "wordpress"),
     ("wp-includes", "wordpress"),
@@ -958,11 +959,14 @@ class PlaywrightBackend(BrowserBackend):
                     session=session,
                 )
             value = str((raw or {}).get("value", "") or "") if isinstance(raw, dict) else ""
+            # Body-sample-grade masking: JS return values are the highest-risk
+            # string surface (tokens/cookies dumped by page scripts).
+            preview = _mask_body(value[:_JS_PREVIEW_MAX_CHARS])
             return BrowserResult(
                 success=True,
                 action_id=action.action_id,
                 session_id=session_id,
-                metadata={"return_preview": redact_value(value[:_JS_PREVIEW_MAX_CHARS]), "truncated": bool((raw or {}).get("truncated"))},
+                metadata={"return_preview": preview, "truncated": bool((raw or {}).get("truncated"))},
                 follow_ups=["browser_observe"],
             )
         if kind is BrowserActionKind.SCREENSHOT:

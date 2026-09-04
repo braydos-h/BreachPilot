@@ -443,14 +443,33 @@ class ConfigValidator:
                     result.warnings.append("browser.backend must be a string.")
                 if enabled is True and not (browser.get("backend") or "none").strip():
                     result.warnings.append("browser.enabled is true but browser.backend is empty ('none' disables).")
-                for key in ("max_sessions", "session_timeout_seconds", "navigation_timeout_seconds"):
+                for key in (
+                    "max_sessions",
+                    "session_timeout_seconds",
+                    "navigation_timeout_seconds",
+                    "console_max_events",
+                    "network_max_events",
+                    "body_sample_max_bytes",
+                    "dom_summary_max_chars",
+                ):
                     value = browser.get(key)
                     if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 1):
                         result.warnings.append(f"browser.{key} must be a positive integer.")
-                for key in ("capture_screenshots", "capture_network", "capture_console", "persist_storage", "headless"):
+                for key in (
+                    "capture_screenshots",
+                    "capture_network",
+                    "capture_console",
+                    "persist_storage",
+                    "headless",
+                    "allow_mutating_actions",
+                ):
                     value = browser.get(key)
                     if value is not None and not isinstance(value, bool):
                         result.warnings.append(f"browser.{key} must be a boolean.")
+                for key in ("artifact_dir", "executable_path", "worker_image"):
+                    value = browser.get(key)
+                    if value is not None and not isinstance(value, str):
+                        result.warnings.append(f"browser.{key} must be a string.")
 
         # Validate runtime skill system section
         if "skills" in self._config:

@@ -308,17 +308,23 @@ def create_router(
         state, never a 404 loop).
         """
         api_cfg = config.get("api", {}) or {}
-        # Browser status is advertised so the WebUI (and API clients) can detect
-        # that browser capabilities exist but are unavailable — capability-status
-        # metadata only; there are no browser endpoints to pretend otherwise.
-        # See docs/browser-agent-design.md §WebUI event model.
+        # Browser status is advertised so the WebUI (and API clients) can gate
+        # the browser panel: metadata always, ``available`` only when browser
+        # execution is actually runnable (enabled + registered backend + host
+        # SDK or sandbox worker). See docs/browser-agent-design.md.
         browser_cfg = config.get("browser", {}) or {}
+        try:
+            from tools.browser.capabilities import browser_available as _browser_available
+
+            browser_is_available = bool(_browser_available(config))
+        except Exception:  # noqa: BLE001 — status metadata is best-effort, never breaks the route
+            browser_is_available = False
         return {
             "api_version": "v1",
             "browser": {
                 "enabled": bool(browser_cfg.get("enabled", False)),
                 "backend": str(browser_cfg.get("backend", "none") or "none"),
-                "available": False,
+                "available": browser_is_available,
                 "capabilities": browser_capability_status(config),
             },
             "features": [
@@ -843,6 +849,48 @@ def create_router(
         from tools.sandbox import status_report
 
         return await asyncio.to_thread(status_report, config)
+
+    @router.get("/system/browser")
+    async def get_browser_status(auth: str = Depends(_require_auth)) -> dict[str, Any]:
+        """Browser-agent status for the System UI (read-only, never launches).
+
+        Reports config (enabled/backend/bounds), the runtime availability
+        verdict, and the Playwright SDK/Chromium probes with distinct detail
+        strings so the UI can tell "disabled" from "SDK missing" from
+        "chromium missing" from "ready". Live sessions live in the MCP server
+        process and are intentionally not listed here.
+        """
+        from tools.browser._pw_probe import browser_health
+        from tools.browser.capabilities import browser_capabilities, browser_runtime_available
+
+        browser_cfg = config.get("browser", {}) or {}
+        try:
+            available = bool(browser_runtime_available(config))
+        except Exception:  # noqa: BLE001 — status metadata is best-effort
+            available = False
+        try:
+            health = browser_health(config)
+        except Exception:  # noqa: BLE001 — status metadata is best-effort
+            health = {"name": "browser_backend_playwright", "ok": False, "detail": "probe failed"}
+        try:
+            capabilities = browser_capabilities(config)
+        except Exception:  # noqa: BLE001 — status metadata is best-effort
+            capabilities = []
+        return {
+            "enabled": bool(browser_cfg.get("enabled", False)),
+            "backend": str(browser_cfg.get("backend", "none") or "none"),
+            "available": available,
+            "health": health,
+            "capabilities": capabilities,
+            "config": {
+                "headless": bool(browser_cfg.get("headless", True)),
+                "max_sessions": browser_cfg.get("max_sessions", 2),
+                "allow_mutating_actions": bool(browser_cfg.get("allow_mutating_actions", False)),
+                "capture_screenshots": bool(browser_cfg.get("capture_screenshots", True)),
+                "capture_network": bool(browser_cfg.get("capture_network", True)),
+                "capture_console": bool(browser_cfg.get("capture_console", False)),
+            },
+        }
 
     @router.get("/system/sandbox/fix/plan")
     async def get_sandbox_fix_plan(auth: str = Depends(_require_auth)) -> dict[str, Any]:

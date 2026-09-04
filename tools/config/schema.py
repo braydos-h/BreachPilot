@@ -532,18 +532,18 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "require_verification": True,  # reporting verbosity only — verification is always enforced
         "graph_db": "",  # kill-chain graph store path; "" = <workspace>/killchain_graph.db
     },
-    # Browser-native web agent (architecture preparation, default OFF).
+    # Browser-native web agent (Playwright backend, default OFF).
     # ``enabled: false`` + ``backend: "none"`` = zero behavior change: no
-    # browser code runs, no dependency is required, and every browser.*
-    # capability reports unavailable (tools/browser/capabilities.py). A real
-    # backend (e.g. playwright) registers itself in
-    # tools/browser/capabilities.py:BACKEND_REGISTRY in a later change; until
-    # then even an installed-looking backend name reports unavailable (fail
-    # closed). Playwright/Chromium are NOT dependencies — do not add them in
-    # this block's consumption path. See docs/browser-agent-design.md.
+    # browser code runs and every browser.* capability reports unavailable
+    # (tools/browser/capabilities.py). Enable with ``enabled: true`` +
+    # ``backend: playwright`` (requires the optional ``browser`` extra for
+    # host-side dev, or the sandbox browser worker for contained runs — see
+    # docs/browser-agent-design.md). ``allow_mutating_actions`` gates
+    # browser_execute_js + the Phase-2 replay/submit surface (default OFF:
+    # read-only browsing only). Bounds keep huge pages out of model prompts.
     "browser": {
         "enabled": False,
-        "backend": "none",  # none | future: playwright (requires the backend registry entry)
+        "backend": "none",  # none | playwright (requires a BACKEND_REGISTRY entry — declared ≠ available)
         "headless": True,
         "max_sessions": 2,
         "session_timeout_seconds": 300,
@@ -552,6 +552,14 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "capture_network": True,
         "capture_console": False,
         "persist_storage": False,  # storage harvest goes to the credential store, never plaintext logs
+        "allow_mutating_actions": False,  # browser_execute_js + replay/submit (Phase 2); default read-only
+        "console_max_events": 200,
+        "network_max_events": 500,
+        "body_sample_max_bytes": 4096,
+        "dom_summary_max_chars": 8000,
+        "artifact_dir": "",  # screenshot/artifact dir; "" = <workspace>/browser/<session>/
+        "executable_path": "",  # explicit Chromium binary override; "" = Playwright default
+        "worker_image": "",  # sandbox browser-worker image override; "" = breachpilot-sandbox:browser
     },
     # Long-session mode (opt-in). Absent/false = current behavior; the keys here
     # are the defaults applied when --long-session is passed or enabled: true.

@@ -32,7 +32,14 @@ MISSING_DEP_MSG = (
 
 
 def playwright_present() -> bool:
-    """Whether the Playwright Python SDK is importable (no launch)."""
+    """Whether the Playwright Python SDK is importable (no launch).
+
+    ``find_spec``-based (never executes package code, never touches
+    ``sys.modules``): importing ``tools.browser`` must not load a browser
+    package (``tests/test_browser_backend_contract.py``). The no-SDK
+    subprocess tests additionally stub this finder, mirroring the
+    ``test_no_ollama_regression`` import hook.
+    """
     try:
         import importlib.util
 

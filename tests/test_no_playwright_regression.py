@@ -58,6 +58,15 @@ def _blocked(name, *args, **kwargs):
     return _real(name, *args, **kwargs)
 builtins.__import__ = _blocked
 sys.modules.pop("playwright", None)
+# The availability probe uses importlib finders (no sys.modules pollution),
+# so stub the finder too — stock-install behavior with zero playwright trace.
+import importlib.util as _ilu
+_orig_find_spec = _ilu.find_spec
+def _no_pw_find_spec(name, *args, **kwargs):
+    if name == "playwright" or str(name).startswith("playwright."):
+        return None
+    return _orig_find_spec(name, *args, **kwargs)
+_ilu.find_spec = _no_pw_find_spec
 """
 
 

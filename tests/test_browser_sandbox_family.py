@@ -1,59 +1,71 @@
-"""Sandbox family-audit registration for the FUTURE browser family.
+"""Sandbox family-audit registration for the browser family (implemented).
 
-Design contract (docs/browser-agent-design.md §sandbox requirements): the
-browser family is registered in the sandbox containment audit as
-``planned`` — architecture exists (tools/browser/), implementation does not,
-and NOTHING launches a browser today. The pre-committed containment terms:
-when the backend lands it MUST be registered as sandboxed (or a documented
-host exception), and its execution must run inside the sandbox worker with
-the same effective target allowlist as other offensive tooling.
+Contract (docs/browser-agent-design.md §sandbox requirements): the browser
+family is registered as ``sandboxed`` — Chromium executes one op per docker
+exec inside the sandbox worker netns (``SandboxPlaywrightLauncher``), obeys
+the effective target allowlist, and never falls back to host execution.
 """
 
 from __future__ import annotations
+
+import ast
+from pathlib import Path
 
 from tools.sandbox.family_audit import (
     HOST_EXCEPTIONS,
     PLANNED_FAMILIES,
     SANDBOXED_FAMILIES,
-    audit_families,
     describe_family_audit,
 )
 
 
-def test_browser_is_registered_as_a_planned_family():
-    assert "browser" in PLANNED_FAMILIES
-    entry = PLANNED_FAMILIES["browser"]
-    assert entry.status == "planned"
+def test_browser_is_registered_as_sandboxed():
+    assert "browser" in SANDBOXED_FAMILIES
+    entry = SANDBOXED_FAMILIES["browser"]
+    assert entry.status == "sandboxed"
     assert entry.target_touching is True
-    # The contract must be written down: future backend must be sandboxed +
-    # target-allowlisted — no host fallback, no weakening of the audit tests.
-    assert "sandbox" in entry.reason
-    assert "allowlist" in entry.reason
+    assert any("sandbox" in note.lower() for note in entry.notes)
+    assert any("fallback" in note.lower() for note in entry.notes)
 
 
-def test_planned_family_is_not_active_capability():
-    """Planned = no module file, no subprocess, no network capability today."""
-    assert PLANNED_FAMILIES["browser"].status not in ("sandboxed", "host_exception")
+def test_browser_graduated_from_planned():
+    """The pre-committed contract is fulfilled — nothing stays planned."""
+    assert "browser" not in PLANNED_FAMILIES
 
 
-def test_planned_families_never_appear_as_audit_rows():
-    """Rows describe real module files only; planned entries are metadata."""
-    rows = audit_families()
-    assert rows, "the audit must still cover the real subprocess-using families"
-    assert not [r for r in rows if r["module"] == "browser"]
-    # Planned entries are additive metadata, never audit coverage regressions.
-    assert not [r for r in rows if r.get("status") == "planned"]
+def test_browser_mcp_module_uses_the_sandbox_seam():
+    """tools/mcp_tools/browser.py must funnel through the sandbox seam."""
+    path = Path("tools/mcp_tools/browser.py")
+    assert path.exists(), "browser MCP family module is missing"
+    tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                imported.add(alias.asname or alias.name)
+    seam_symbols = {"run_command_in_sandbox", "run_argv_in_sandbox", "manager_from_ctx", "sandbox_error_block"}
+    assert imported & seam_symbols, "browser family is sandboxed but never imports the funnel"
 
 
-def test_planned_families_do_not_count_as_problems():
+def test_browser_never_imports_host_subprocess():
+    """Contained execution goes through the manager — no direct host Popen."""
+    path = Path("tools/mcp_tools/browser.py")
+    tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            assert all(alias.name != "subprocess" for alias in node.names), "browser MCP must not use host subprocess"
+        elif isinstance(node, ast.ImportFrom):
+            assert node.module != "subprocess", "browser MCP must not use host subprocess"
+
+
+def test_audit_summary_has_no_problems():
     summary = describe_family_audit()
     assert summary["unregistered"] == 0
     assert summary["problems"] == []
-    assert [p["module"] for p in summary.get("planned", [])] == ["browser"]
 
 
 def test_registry_split_still_separates_real_statuses():
-    """The real registries remain untouched by the planned-family addition."""
+    """The real registries keep their exact guarantees after the move."""
     for entry in HOST_EXCEPTIONS.values():
         assert entry.status == "host_exception"
     for entry in SANDBOXED_FAMILIES.values():

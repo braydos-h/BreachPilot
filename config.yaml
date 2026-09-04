@@ -299,6 +299,14 @@ browser:
   capture_network: true
   capture_console: false
   persist_storage: false
+  allow_mutating_actions: false
+  console_max_events: 200
+  network_max_events: 500
+  body_sample_max_bytes: 4096
+  dom_summary_max_chars: 8000
+  artifact_dir: ''
+  executable_path: ''
+  worker_image: ''
 long_session:
   enabled: true
   request_timeout_seconds: 600

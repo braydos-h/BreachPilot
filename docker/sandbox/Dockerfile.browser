@@ -1,0 +1,54 @@
+# BreachPilot disposable sandbox BROWSER worker image (superset of the base worker).
+#
+# Build:  docker build -t breachpilot-sandbox:browser -f docker/sandbox/Dockerfile.browser docker/sandbox
+#
+# SECURITY CONTRACT (see docs/sandbox.md + docs/browser-agent-design.md):
+# - Same hardening as the base worker (cap-drop, non-root, no-new-privileges,
+#   read-only rootfs, dedicated bridge netns with a default-DROP egress
+#   firewall authorizing ONLY the effective target allowlist).
+# - Chromium runs headless with --no-sandbox: the nested Chromium sandbox is
+#   unsupported under --cap-drop ALL, so containment comes from Docker + the
+#   netns firewall, not from Chromium's own sandbox. Never run headed here.
+# - No secrets, API keys, repo credentials, or user configuration are baked in.
+# - Point sandbox.image at this tag when browser.enabled is true (the variant
+#   is a strict superset of breachpilot-sandbox:latest, so terminal/Python
+#   execution keeps working unchanged).
+
+FROM breachpilot-sandbox:latest
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+USER root
+
+# Playwright SDK + Chromium runtime (+ OS deps for headless Chromium).
+# Pinned major line via requirements-style floor; refresh with the base image.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      libnss3 \
+      libnspr4 \
+      libatk1.0-0 \
+      libatk-bridge2.0-0 \
+      libcups2 \
+      libdrm2 \
+      libxkbcommon0 \
+      libxcomposite1 \
+      libxdamage1 \
+      libxfixes3 \
+      libxrandr2 \
+      libgbm1 \
+      libasound2 \
+      libpango-1.0-0 \
+      libcairo2 \
+    ; \
+    rm -rf /var/lib/apt/lists/*; \
+    python3 -m pip install --no-cache-dir "playwright>=1.44"; \
+    python3 -m playwright install --with-deps chromium; \
+    rm -rf /root/.cache/pip
+
+# Back to the unprivileged worker account (mirrors the base image contract).
+USER sandbox
+
+WORKDIR /workspace
+
+CMD ["sleep", "infinity"]

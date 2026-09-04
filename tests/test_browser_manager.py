@@ -169,18 +169,18 @@ def test_max_sessions_cap_enforced():
     assert manager.start_session(target_ip="10.0.0.50") is not None
 
 
-# ── The structural no-execution guarantee ─────────────────────────────────
+# ── Delegation is async-only (the run_op funnel) ───────────────────────────
 
 
-def test_delegate_to_backend_always_raises_in_this_build():
-    """Even with a backend injected, delegation is a deferred implementation."""
+def test_delegate_to_backend_points_at_the_async_funnel():
+    """The sync shim fails closed and directs callers to run_op()."""
     manager = BrowserManager(
         {**STOCK_CONFIG, "browser": {**STOCK_CONFIG["browser"], "enabled": True}}, backend=_stub_backend()
     )
     session = manager.start_session(target_ip="10.0.0.50")
     manager.transition(session.session_id, BrowserSessionState.STARTING)
     manager.mark_ready(session.session_id)
-    with pytest.raises(BrowserBackendError, match="deferred implementation"):
+    with pytest.raises(BrowserBackendError, match="async-only"):
         manager.delegate_to_backend(
             session.session_id, "navigate", BrowserAction(action_id="a-1", session_id=session.session_id)
         )

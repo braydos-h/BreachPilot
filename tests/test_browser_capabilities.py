@@ -95,5 +95,78 @@ def test_unknown_capability_names_are_always_unmet():
 
 
 def test_registry_has_no_builtin_backends():
-    """Only future backend modules register here — the ONLY route to available."""
+    """Only backend modules register here — the ONLY route to available."""
     assert BACKEND_REGISTRY == {}
+
+
+@pytest.fixture
+def _clean_registry():
+    BACKEND_REGISTRY.pop("fake", None)
+    BACKEND_REGISTRY.pop("playwright", None)
+    yield
+    BACKEND_REGISTRY.pop("fake", None)
+    BACKEND_REGISTRY.pop("playwright", None)
+
+
+def test_registered_configured_backend_becomes_available(_clean_registry):
+    """Enabled + registered + configured = available (declared ≠ available)."""
+    from tools.browser.capabilities import browser_runtime_available
+    from tools.browser.interfaces import BrowserBackend
+
+    class _Fake(BrowserBackend):
+        backend_id = "fake"
+
+        def is_configured(self, config=None):
+            return True
+
+        async def start_session(self, **kwargs):
+            raise AssertionError("no launch in this test")
+
+        async def stop_session(self, session_id):
+            raise AssertionError("no launch in this test")
+
+        async def navigate(self, session_id, url, **kwargs):
+            raise AssertionError("no launch in this test")
+
+        async def observe(self, session_id, **kwargs):
+            raise AssertionError("no launch in this test")
+
+        async def execute_action(self, session_id, action):
+            raise AssertionError("no launch in this test")
+
+        async def capture_screenshot(self, session_id, **kwargs):
+            raise AssertionError("no launch in this test")
+
+        async def get_network_events(self, session_id, **kwargs):
+            raise AssertionError("no launch in this test")
+
+        async def get_storage(self, session_id, **kwargs):
+            raise AssertionError("no launch in this test")
+
+        async def get_page_state(self, session_id):
+            raise AssertionError("no launch in this test")
+
+        async def close(self, session_id):
+            raise AssertionError("no launch in this test")
+
+    BACKEND_REGISTRY["fake"] = _Fake()
+    cfg = {"browser": {"enabled": True, "backend": "fake"}}
+    assert browser_runtime_available(cfg) is True
+    assert browser_available(cfg) is True
+    assert all(c["available"] is True for c in browser_capabilities(cfg))
+    assert unmet_requirements(["browser.navigate", "browser.teleport"], cfg) == ["browser.teleport"]
+
+
+def test_playwright_registers_and_gates_on_sdk(_clean_registry, monkeypatch):
+    """register_playwright_backend is call-time; SDK presence gates availability."""
+    from tools.browser import playwright_backend as _mod
+    from tools.browser.capabilities import browser_runtime_available, register_playwright_backend
+
+    assert register_playwright_backend({}) is True
+    assert "playwright" in BACKEND_REGISTRY
+    cfg = {"browser": {"enabled": True, "backend": "playwright"}}
+    monkeypatch.setattr(_mod, "playwright_present", lambda: False)
+    # No host SDK and no sandbox configured: still unavailable (fail closed).
+    assert browser_runtime_available(cfg) is False
+    monkeypatch.setattr(_mod, "playwright_present", lambda: True)
+    assert browser_runtime_available(cfg) is True

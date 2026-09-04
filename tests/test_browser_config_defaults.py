@@ -20,6 +20,14 @@ BROWSER_DEFAULTS = {
     "capture_network": True,
     "capture_console": False,
     "persist_storage": False,
+    "allow_mutating_actions": False,
+    "console_max_events": 200,
+    "network_max_events": 500,
+    "body_sample_max_bytes": 4096,
+    "dom_summary_max_chars": 8000,
+    "artifact_dir": "",
+    "executable_path": "",
+    "worker_image": "",
 }
 
 
@@ -36,8 +44,10 @@ def test_browser_defaults_are_disabled():
 
 
 def test_ollama_provider_untouched_by_browser_block():
-    """The browser block adds no new provider/dep requirements anywhere else."""
-    assert "playwright" not in str(CONFIG_SCHEMA.get("browser"))
+    """The browser block adds no hard dependency — Playwright stays optional."""
+    block = str(CONFIG_SCHEMA.get("browser"))
+    assert "playwright>=" not in block
+    assert "pip install" not in block
 
 
 # ── Load-time behavior ────────────────────────────────────────────────────
@@ -65,7 +75,8 @@ def test_validator_warns_on_bad_browser_values(tmp_path):
 
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        'browser:\n  enabled: "yes-please"\n  backend: 7\n  max_sessions: -3\n  capture_screenshots: "sure"\n',
+        'browser:\n  enabled: "yes-please"\n  backend: 7\n  max_sessions: -3\n  capture_screenshots: "sure"\n'
+        '  allow_mutating_actions: "maybe"\n  network_max_events: 0\n  artifact_dir: 7\n',
         encoding="utf-8",
     )
     result = validate_config_file(config_path)
@@ -74,6 +85,9 @@ def test_validator_warns_on_bad_browser_values(tmp_path):
     assert "browser.backend must be a string." in joined
     assert "browser.max_sessions must be a positive integer." in joined
     assert "browser.capture_screenshots must be a boolean." in joined
+    assert "browser.allow_mutating_actions must be a boolean." in joined
+    assert "browser.network_max_events must be a positive integer." in joined
+    assert "browser.artifact_dir must be a string." in joined
     assert result.is_valid  # warnings, not errors — never breaks existing installs
 
 

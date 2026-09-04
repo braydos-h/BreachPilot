@@ -610,6 +610,92 @@ def _check_sandbox(config: dict[str, Any] | None = None) -> dict[str, Any]:
     return result
 
 
+def _check_browser(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Browser-agent readiness: config, SDK, Chromium, worker image.
+
+    Never launches a browser or touches a target — SDK/Chromium presence are
+    file probes and the worker image is a Docker metadata lookup. When
+    ``browser.enabled`` is false this is an informational pass (stock installs
+    stay green). Distinguishes: disabled / backend none / unknown backend /
+    SDK missing / Chromium missing / worker image missing / ready.
+    """
+    browser_cfg = (config or {}).get("browser", {}) or {}
+    enabled = bool(browser_cfg.get("enabled", False))
+    backend = str(browser_cfg.get("backend", "none") or "none")
+    result: dict[str, Any] = {"name": "browser", "enabled": enabled, "backend": backend}
+    if not enabled:
+        result["ok"] = True
+        result["note"] = "browser disabled -- no browser capability (enable with browser.enabled: true)"
+        return result
+    if backend in ("", "none"):
+        result["ok"] = False
+        result["error"] = "browser.enabled is true but browser.backend is 'none'"
+        result["hint"] = "Set browser.backend: playwright (and install the optional browser extra)."
+        return result
+    if backend != "playwright":
+        result["ok"] = False
+        result["error"] = f"unknown browser backend {backend!r} (expected 'playwright' or 'none')"
+        result["hint"] = "Set browser.backend: playwright, or disable with browser.enabled: false."
+        return result
+    try:
+        from tools.browser._pw_probe import browser_health, chromium_present, playwright_present
+    except Exception as exc:  # noqa: BLE001 -- doctor must never crash on import
+        result["ok"] = False
+        result["error"] = f"browser subsystem import failed: {exc}"
+        return result
+    sdk_ok = bool(playwright_present())
+    chromium_ok = bool(chromium_present(executable_path=str(browser_cfg.get("executable_path") or "")))
+    health = browser_health(config)
+    subchecks: list[dict[str, Any]] = [
+        {"name": "playwright_sdk", "ok": sdk_ok},
+        {"name": "chromium_runtime", "ok": chromium_ok},
+    ]
+    sandbox_cfg = (config or {}).get("sandbox", {}) or {}
+    sandbox_enabled = bool(sandbox_cfg.get("enabled", False))
+    worker_image: str | None = None
+    worker_ok: bool | None = None
+    if sandbox_enabled:
+        from tools.browser.sandbox_launcher import browser_worker_image
+
+        worker_image = browser_worker_image(config)
+        try:
+            from tools.sandbox.docker_backend import docker_image_exists, docker_version
+
+            daemon_ok, _reason = docker_version()
+            if daemon_ok:
+                worker_ok = bool(docker_image_exists(worker_image))
+            else:
+                worker_ok = False
+        except Exception:  # noqa: BLE001 -- image probe failure is a real failure
+            worker_ok = False
+        subchecks.append({"name": "browser_worker_image", "ok": bool(worker_ok), "value": worker_image or ""})
+    result["subchecks"] = subchecks
+    result["health"] = health.get("detail", "")
+    host_ready = bool(sdk_ok and chromium_ok)
+    contained_ready = bool(sandbox_enabled and worker_ok)
+    if host_ready or contained_ready:
+        result["ok"] = True
+        result["value"] = worker_image or "host playwright + chromium"
+        if contained_ready and not host_ready:
+            result["note"] = "host SDK/chromium absent — browser runs contained in the sandbox worker"
+        return result
+    result["ok"] = False
+    if not sdk_ok:
+        result["error"] = "Playwright SDK not installed"
+        result["hint"] = 'Install the optional extra: python -m pip install -e ".[browser]"'
+    elif not chromium_ok:
+        result["error"] = "Chromium runtime missing"
+        result["hint"] = "Install it: python -m playwright install chromium"
+    elif sandbox_enabled and not worker_ok:
+        result["error"] = f"browser worker image {worker_image!r} not built"
+        result["hint"] = f"Build it: docker build -t {worker_image} -f docker/sandbox/Dockerfile.browser docker/sandbox"
+    else:  # pragma: no cover - defensive; subchecks above cover the real cases
+        result["error"] = "browser backend not ready"
+        result["hint"] = str(health.get("detail", ""))
+    result["value"] = worker_image or ""
+    return result
+
+
 def _collect_doctor_checks(config_path: Path) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
     """Collect all doctor checks and config for JSON or human output."""
     import yaml
@@ -656,6 +742,7 @@ def _collect_doctor_checks(config_path: Path) -> tuple[list[dict[str, Any]], dic
         checks.append(_check_linux_privilege())
         checks.append(_check_optional_tools(config))
     checks.append(_check_sandbox(config))
+    checks.append(_check_browser(config))
 
     # Self-heal missing cloud models: ping each via /api/generate
     for c in checks:
@@ -793,6 +880,7 @@ def run_doctor(config_path: Path, json_output: bool = False) -> int:
         checks.append(_check_linux_privilege())
         checks.append(_check_optional_tools(config))
     checks.append(_check_sandbox(config))
+    checks.append(_check_browser(config))
 
     failed = 0
 
@@ -856,6 +944,13 @@ def run_doctor(config_path: Path, json_output: bool = False) -> int:
                 print(f"        -> {c['note']}")
             elif c.get("ok"):
                 print(f"        -> worker image ready: {c.get('image', '')} (attack commands run contained)")
+        if name == "browser":
+            if c.get("note"):
+                print(f"        -> {c['note']}")
+            for s in c.get("subchecks") or []:
+                sstatus = "OK" if s.get("ok") else "FAIL"
+                extra = s.get("value") or ""
+                print(f"        -> [{sstatus}] {s['name']}{' ' + str(extra) if extra else ''}")
         # Informational drill-downs (these checks never fail)
         if name == "linux_privilege" and c.get("note"):
             print(f"        -> {c['note']}")

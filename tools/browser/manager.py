@@ -32,6 +32,7 @@ import time
 from typing import Any
 
 from tools.browser.errors import (
+    BrowserBackendError,
     BrowserBackendUnavailable,
     BrowserScopeBlocked,
     BrowserSessionNotFound,
