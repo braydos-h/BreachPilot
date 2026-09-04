@@ -20,7 +20,9 @@ is actually available (host SDK or a configured sandbox worker).
 
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 import urllib.parse
 from typing import Any
 
@@ -35,6 +37,32 @@ _BACKENDS: dict[str, Any] = {}
 # created it. Only successful resolutions are cached — a SANDBOX_* block is
 # returned uncached so the next call re-probes sandbox health.
 _LAUNCHERS: dict[str, Any] = {}
+
+_browser_loop: asyncio.AbstractEventLoop | None = None
+_browser_loop_guard = threading.Lock()
+
+
+def _get_browser_loop() -> asyncio.AbstractEventLoop:
+    """One private event loop for every browser coroutine (host-mode fix).
+
+    Playwright connections bind to the loop that created them; an
+    ``asyncio.run(...)``-per-tool pattern gives every call a fresh loop, so any
+    op after ``browser_start`` dies with ``'NoneType' object has no attribute
+    'send'``. Every browser coroutine hops onto this single daemon-thread loop
+    instead (the swarm_bridge / exploit_agent precedent).
+    """
+    global _browser_loop
+    with _browser_loop_guard:
+        if _browser_loop is None or _browser_loop.is_closed():
+            _browser_loop = asyncio.new_event_loop()
+            thread = threading.Thread(target=_browser_loop.run_forever, name="browser-loop", daemon=True)
+            thread.start()
+        return _browser_loop
+
+
+def _run(awaitable: Any) -> Any:
+    """Block the calling (MCP worker) thread until the browser coroutine finishes."""
+    return asyncio.run_coroutine_threadsafe(awaitable, _get_browser_loop()).result()
 
 
 def _browser_cfg(config: dict[str, Any] | None) -> dict[str, Any]:
@@ -174,9 +202,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if getattr(launcher, "kind", "") == "sandbox_worker" and not headless:
             return "BLOCKED: headed Chromium needs a display; the sandbox worker is headless-only."
         try:
-            import asyncio as _asyncio
-
-            session = _asyncio.run(manager.start_session_async(target_ip=target, run_id=run_id, headless=headless))
+            session = _run(manager.start_session_async(target_ip=target, run_id=run_id, headless=headless))
         except Exception as exc:  # noqa: BLE001 — fail closed with a readable result  # ponytail: bare except intentional
             return _browser_error_text(exc, tool_name="browser_start")
         return (
@@ -205,9 +231,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if problem:
             return problem
         try:
-            import asyncio as _asyncio
-
-            result = _asyncio.run(
+            result = _run(
                 manager.run_op(
                     _session.session_id,
                     "navigate",
@@ -250,9 +274,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if problem:
             return problem
         try:
-            import asyncio as _asyncio
-
-            observation = _asyncio.run(
+            observation = _run(
                 manager.run_op(
                     _session.session_id,
                     "observe",
@@ -303,9 +325,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if problem:
             return problem
         try:
-            import asyncio as _asyncio
-
-            state = _asyncio.run(manager.run_op(_session.session_id, "get_page_state", run_id=_session.run_id))
+            state = _run(manager.run_op(_session.session_id, "get_page_state", run_id=_session.run_id))
         except Exception as exc:  # noqa: BLE001 — fail closed with a readable result  # ponytail: bare except intentional
             return _browser_error_text(exc, tool_name="browser_page_state")
         return (
@@ -331,9 +351,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if problem:
             return problem
         try:
-            import asyncio as _asyncio
-
-            events = _asyncio.run(
+            events = _run(
                 manager.run_op(
                     _session.session_id,
                     "get_network_events",
@@ -371,9 +389,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if problem:
             return problem
         try:
-            import asyncio as _asyncio
-
-            snapshot = _asyncio.run(
+            snapshot = _run(
                 manager.run_op(_session.session_id, "get_storage", run_id=_session.run_id, origin=origin)
             )
         except Exception as exc:  # noqa: BLE001 — fail closed with a readable result  # ponytail: bare except intentional
@@ -404,9 +420,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
         artifact_path = _artifact_path(ctx, _session.session_id, f"screenshot-{_uuid.uuid4().hex[:8]}.png")
         try:
-            import asyncio as _asyncio
-
-            artifact = _asyncio.run(
+            artifact = _run(
                 manager.run_op(
                     _session.session_id, "capture_screenshot", run_id=_session.run_id, artifact_path=artifact_path
                 )
@@ -441,8 +455,6 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if problem:
             return problem
         try:
-            import asyncio as _asyncio
-
             from tools.browser.models import BrowserAction, BrowserActionKind
 
             action = BrowserAction(
@@ -453,7 +465,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 run_id=_session.run_id,
                 target_ip=target,
             )
-            result = _asyncio.run(
+            result = _run(
                 manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=action)
             )
         except Exception as exc:  # noqa: BLE001 — fail closed with a readable result  # ponytail: bare except intentional
@@ -482,8 +494,6 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if problem:
             return problem
         try:
-            import asyncio as _asyncio
-
             from tools.browser.models import BrowserAction, BrowserActionKind
 
             action = BrowserAction(
@@ -493,7 +503,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 run_id=_session.run_id,
                 target_ip=target,
             )
-            result = _asyncio.run(
+            result = _run(
                 manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=action)
             )
         except Exception as exc:  # noqa: BLE001 — fail closed with a readable result  # ponytail: bare except intentional
@@ -518,8 +528,6 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if problem:
             return problem
         try:
-            import asyncio as _asyncio
-
             from tools.browser.models import BrowserAction, BrowserActionKind
 
             action = BrowserAction(
@@ -529,7 +537,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 run_id=_session.run_id,
                 target_ip=target,
             )
-            result = _asyncio.run(
+            result = _run(
                 manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=action)
             )
         except Exception as exc:  # noqa: BLE001 — fail closed with a readable result  # ponytail: bare except intentional
@@ -559,10 +567,8 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if problem:
             return problem
         try:
-            import asyncio as _asyncio
-
             awaitable = manager.close_session_async(_session.session_id, run_id=_session.run_id)
-            _asyncio.run(awaitable)
+            _run(awaitable)
         except Exception as exc:  # noqa: BLE001 — close never fails the run
             return _browser_error_text(exc, tool_name="browser_close")
         return f"SESSION_CLOSED: {_session.session_id}"
@@ -592,8 +598,6 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if problem:
             return problem
         try:
-            import asyncio as _asyncio
-
             from tools.browser.models import BrowserAction, BrowserActionKind
 
             discover = BrowserAction(
@@ -603,7 +607,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 run_id=_session.run_id,
                 target_ip=target,
             )
-            found = _asyncio.run(
+            found = _run(
                 manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=discover)
             )
         except Exception as exc:  # noqa: BLE001 — fail closed with a readable result
@@ -624,8 +628,6 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if denied:
             return denied
         try:
-            import asyncio as _asyncio
-
             from tools.browser.models import BrowserAction, BrowserActionKind
 
             submit = BrowserAction(
@@ -636,7 +638,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 run_id=_session.run_id,
                 target_ip=target,
             )
-            result = _asyncio.run(
+            result = _run(
                 manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=submit)
             )
         except Exception as exc:  # noqa: BLE001 — fail closed with a readable result
@@ -690,9 +692,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
         base_url, base_method, base_headers = "", "", {}
         if (event_id or "").strip():
             try:
-                import asyncio as _asyncio
-
-                events = _asyncio.run(
+                    events = _run(
                     manager.run_op(
                         _session.session_id, "get_network_events", run_id=_session.run_id, limit=500, after_id=""
                     )
@@ -717,8 +717,6 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
         headers = dict(base_headers)
         headers.update({str(k): str(v) for k, v in extra_headers.items()})
         try:
-            import asyncio as _asyncio
-
             from tools.browser.models import BrowserAction, BrowserActionKind
 
             replay = BrowserAction(
@@ -734,7 +732,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 run_id=_session.run_id,
                 target_ip=target,
             )
-            result = _asyncio.run(
+            result = _run(
                 manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=replay)
             )
         except Exception as exc:  # noqa: BLE001 — fail closed with a readable result
