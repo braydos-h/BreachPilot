@@ -132,9 +132,7 @@ def test_http_https_not_aliased() -> None:
 def test_int_str_slashed_ports_identical() -> None:
     mod = get_module("SSHBruteForce")
     assert mod is not None
-    scores = {
-        mod.applicability(_ctx([{"service": "ssh", "port": p}])) for p in ("22/tcp", "22", 22)
-    }
+    scores = {mod.applicability(_ctx([{"service": "ssh", "port": p}])) for p in ("22/tcp", "22", 22)}
     assert len(scores) == 1 and next(iter(scores)) > 0
 
 

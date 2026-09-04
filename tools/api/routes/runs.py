@@ -51,6 +51,14 @@ _CONTENT_TYPES = {
     ".log": "text/plain; charset=utf-8",
     ".txt": "text/plain; charset=utf-8",
     ".csv": "text/csv; charset=utf-8",
+    # Browser-agent screenshots (workspace/browser/<session>/*.png) must render
+    # inline in the WebUI Browser tab — octet-stream would force a download.
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
 }
 
 

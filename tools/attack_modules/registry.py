@@ -211,9 +211,7 @@ def _module_target_signature(mod: AttackModule, ctx: ModuleContext) -> str | Non
     return f"{primary}:{version or ''}:{os_hint}"
 
 
-def explain_modules(
-    ctx: ModuleContext, experience_store: Any | None = None
-) -> list[dict[str, Any]]:
+def explain_modules(ctx: ModuleContext, experience_store: Any | None = None) -> list[dict[str, Any]]:
     """Per-module score breakdowns for observability (parallel to find_modules).
 
     Returns one dict per applicable module (same gate + ordering as

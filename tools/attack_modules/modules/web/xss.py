@@ -208,7 +208,7 @@ class GraphQLIntrospect(AttackModule):
             "# heuristic then misreported 'limit enforced' on every target).\n"
             'depth_query = "query DeepQuery { __schema { types { fields { type { ofType { name kind ofType { name kind } } } } } } }"\n'
             "depth_result = graphql_request(found_endpoint, depth_query)\n"
-            'depth_blob = json.dumps(depth_result).lower()\n'
+            "depth_blob = json.dumps(depth_result).lower()\n"
             'if any(k in depth_blob for k in ("max depth", "depth limit", "too deep", "complexity", "exceeds")):\n'
             '    print(f"  [+] Depth/complexity limit enforced: {json.dumps(depth_result)[:300]}")\n'
             'elif "data" in depth_result and depth_result.get("data"):\n'

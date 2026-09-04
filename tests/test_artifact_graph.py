@@ -87,8 +87,7 @@ def test_rank_producers_prefers_satisfied() -> None:
     ranked = rank_producers("hash_artifact", ctx)
     assert ranked
     assert not missing_prerequisites(ranked[0], ctx), (
-        f"satisfiable producer should rank first, got {ranked[0].name} "
-        f"missing {missing_prerequisites(ranked[0], ctx)}"
+        f"satisfiable producer should rank first, got {ranked[0].name} missing {missing_prerequisites(ranked[0], ctx)}"
     )
     # In a bare ctx every hash_artifact producer is honestly gated.
     bare = _ctx()

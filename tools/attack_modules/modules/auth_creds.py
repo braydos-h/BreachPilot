@@ -187,9 +187,7 @@ class HashCrack(AttackModule):
             ),
             evidence=["hash-crack recipe queued (no hash supplied, not executed)"],
             references=["https://hashcat.net/wiki/doku.php?id=example_hashes"],
-            suggested_command=(
-                "run_hash_crack(hash_value='<hash>', tool='hashcat')  # auto-identifies mode"
-            ),
+            suggested_command=("run_hash_crack(hash_value='<hash>', tool='hashcat')  # auto-identifies mode"),
             confidence=0.4,
             hash_modes={
                 "0": "MD5",

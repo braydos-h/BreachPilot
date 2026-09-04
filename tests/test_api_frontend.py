@@ -677,3 +677,35 @@ def test_replay_jsonl_after_close():
         assert len(replayed) == 2
 
     asyncio.run(_run())
+
+
+# ── Browser screenshots served inline (WebUI Browser tab) ─────────────────
+
+
+def test_workspace_serves_browser_screenshots_inline(tmp_path, monkeypatch):
+    """PNG artifacts under browser/<session>/ list and serve as image/png."""
+    client = _make_client(tmp_path, monkeypatch)
+    created = _create_run(client)
+    shot_dir = Path("reports") / created["run_id"] / "exploit_workspace" / "browser" / "bs-0001-abc"
+    shot_dir.mkdir(parents=True, exist_ok=True)
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+    (shot_dir / "screenshot-1.png").write_bytes(png)
+
+    listed = client.get(f"/api/v1/runs/{created['run_id']}/workspace", headers=_auth())
+    assert listed.status_code == 200
+    paths = [f["path"] for f in listed.json()["files"]]
+    assert "browser/bs-0001-abc/screenshot-1.png" in paths
+
+    resp = client.get(
+        f"/api/v1/runs/{created['run_id']}/workspace/browser/bs-0001-abc/screenshot-1.png", headers=_auth()
+    )
+    assert resp.status_code == 200
+    assert resp.headers.get("content-type", "").startswith("image/png")
+    assert resp.content == png
+
+
+def test_workspace_rejects_traversal_outside_run(tmp_path, monkeypatch):
+    client = _make_client(tmp_path, monkeypatch)
+    created = _create_run(client)
+    resp = client.get(f"/api/v1/runs/{created['run_id']}/workspace/../api_runtime.db", headers=_auth())
+    assert resp.status_code in (400, 404)
