@@ -20,6 +20,7 @@ deliberately.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 from typing import Any
 
@@ -37,8 +38,27 @@ __all__ = [
 ]
 
 # Explicitly dropped (redundant with default-DROP, but the DROP appears in
-# audits and survives rule-order mistakes):
+# audits and survives rule-order mistakes). Mixed families by design: each
+# builder filters to its own family (iptables-restore rejects IPv6 literals
+# and vice versa -- see _ip_version).
 COMMON_BLOCKED_NETS = ["169.254.169.254", "169.254.0.0/16", "fd00:ec2::254", "100.100.100.200"]
+
+# IPv6 link-local always denied in the v6 ruleset (not in COMMON_BLOCKED_NETS,
+# which policy.py also surfaces for v4-side audits).
+_IPV6_EXTRA_BLOCKED = ("fe80::/10",)
+
+
+def _ip_version(token: str) -> int | None:
+    """4 / 6 for an IP or CIDR literal, None when unparsable.
+
+    Unparsable tokens are fail-closed: callers skip them instead of emitting
+    them into a ruleset (an invalid ACCEPT would be a hole; an invalid DROP
+    would break iptables-restore and fail the whole install).
+    """
+    try:
+        return ipaddress.ip_network(token, strict=False).version
+    except ValueError:
+        return None
 
 
 def _accept_rule(destination: str) -> str:
@@ -63,8 +83,10 @@ def build_ipv4_rules(policy: NetworkPolicy, *, gateway: str = "") -> list[str]:
         "-A NAI-OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT",
     ]
     for blocked in COMMON_BLOCKED_NETS:
+        if _ip_version(blocked) != 4:
+            continue
         lines.append(f"-A NAI-OUTPUT -d {blocked} -j DROP")
-    if not policy.allow_gateway and gateway:
+    if not policy.allow_gateway and gateway and _ip_version(gateway) == 4:
         # Block the Docker bridge gateway (a path to host-published services
         # and to the Docker daemon). The rest of the bridge subnet is handled
         # by the terminating default-DROP.
@@ -76,7 +98,12 @@ def build_ipv4_rules(policy: NetworkPolicy, *, gateway: str = "") -> list[str]:
         lines.append("-A NAI-OUTPUT -p tcp --dport 53 -j REJECT")
     # RFC1918 is NOT blanket-blocked: lab targets are usually RFC1918, so the
     # authorization set (which may contain private CIDRs) is the boundary.
+    # Family-filtered: an IPv6 authorized destination must never reach
+    # iptables-restore (it would abort the whole install); v6 ACCEPTs live
+    # in build_ipv6_rules. Unparsable entries are skipped (fail closed).
     for dest in policy.authorized_destinations:
+        if _ip_version(dest) != 4:
+            continue
         lines.append(_accept_rule(dest))
     lines.append("-A NAI-OUTPUT -j DROP")
     lines.append("COMMIT")
@@ -95,17 +122,13 @@ def build_ipv6_rules(policy: NetworkPolicy, *, gateway: str = "") -> list[str]:
         "-A NAI-OUTPUT -o lo -j ACCEPT",
         "-A NAI-OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT",
     ]
-    for blocked in ("fe80::/10", "fd00:ec2::254"):
+    for blocked in (*_IPV6_EXTRA_BLOCKED, *(b for b in COMMON_BLOCKED_NETS if _ip_version(b) == 6)):
         lines.append(f"-A NAI-OUTPUT -d {blocked} -j DROP")
-    import ipaddress as _ipaddress
 
     for dest in policy.authorized_destinations:
-        try:
-            network = _ipaddress.ip_network(dest, strict=False)
-        except ValueError:
+        if _ip_version(dest) != 6:
             continue
-        if network.version == 6:
-            lines.append(_accept_rule(dest))
+        lines.append(_accept_rule(dest))
     lines.append("-A NAI-OUTPUT -j DROP")
     lines.append("COMMIT")
     return lines

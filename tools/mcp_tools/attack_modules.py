@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
 from tools.mcp_tools.registry import *
 
 
@@ -241,7 +242,7 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
                             k, v = pair.split("=", 1)
                             if k.strip():
                                 parameters[k.strip()] = v
-                except Exception:  # noqa: BLE001 -- options parse is best-effort
+                except ValueError:  # shlex.split on a malformed options string; ignore, never fatal
                     parameters = {}
 
             # Thread recovered credentials for this target so cred-gated
@@ -258,7 +259,7 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     if rec.password:
                         entry["password"] = rec.password
                     credentials.append(entry)
-            except Exception:  # noqa: BLE001
+            except (OSError, ValueError, TypeError, KeyError):  # vault read failure leaves creds empty
                 credentials = []
 
             ctx = ModuleContext(
@@ -277,7 +278,7 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 try:
                     report = module.applicability_explain(ctx)
                     why = "; ".join(report.penalties) or "no match"
-                except Exception:  # noqa: BLE001
+                except _EXC_GROUP_CATCH:  # arbitrary plugin code; explain must never break the call
                     why = "Module does not match any known services or CVEs on this target."
                 return (
                     f"MODULE_RESULT: not_applicable\n"

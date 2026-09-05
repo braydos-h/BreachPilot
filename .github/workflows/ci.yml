@@ -92,6 +92,8 @@ jobs:
             playwright-${{ runner.os }}-
       - name: Install Chromium runtime
         run: python -m playwright install --with-deps chromium
+      - name: Build sandbox base worker image (browser FROM dependency)
+        run: docker build -t breachpilot-sandbox:latest docker/sandbox
       - name: Build sandbox browser worker image
         run: docker build -t breachpilot-sandbox:browser -f docker/sandbox/Dockerfile.browser docker/sandbox
       - name: Browser unit + mocked tests (no Chromium needed)

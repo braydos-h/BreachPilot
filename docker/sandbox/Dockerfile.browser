@@ -1,6 +1,7 @@
 # BreachPilot disposable sandbox BROWSER worker image (superset of the base worker).
 #
-# Build:  docker build -t breachpilot-sandbox:browser -f docker/sandbox/Dockerfile.browser docker/sandbox
+# Build:  docker build -t breachpilot-sandbox:latest docker/sandbox  # base first (FROM below)
+#         docker build -t breachpilot-sandbox:browser -f docker/sandbox/Dockerfile.browser docker/sandbox
 #
 # SECURITY CONTRACT (see docs/sandbox.md + docs/browser-agent-design.md):
 # - Same hardening as the base worker (cap-drop, non-root, no-new-privileges,

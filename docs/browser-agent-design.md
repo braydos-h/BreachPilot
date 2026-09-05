@@ -282,6 +282,42 @@ The validator warns (never errors) on bad value types and errors only when
 exact defaults above. Nothing else in the engine reads this block in the
 preparation build.
 
+### Enablement (operator)
+
+```bash
+python -m pip install -e ".[browser]"   # Playwright SDK (host-side)
+python -m playwright install chromium   # browser runtime
+```
+
+```yaml
+browser:
+  enabled: true
+  backend: playwright
+```
+
+Then `python main.py --doctor` must show the `browser` check green
+(`host playwright + chromium`, or the browser worker image when contained).
+Availability rule (`tools/browser/capabilities.py:browser_runtime_available`):
+enabled + registered + runnable — host SDK present **or** a sandbox worker
+configured. `backend: playwright` alone never flips it (fail closed).
+
+Execution homes, in order:
+
+1. **Contained (default posture):** `sandbox.enabled: true` + browser worker
+   image built (`docker build -t breachpilot-sandbox:browser -f
+   docker/sandbox/Dockerfile.browser docker/sandbox`). One Chromium op per
+   docker exec inside the worker netns; no host fallback — sandbox
+   enabled-but-unusable returns `SANDBOX_*` blocks.
+2. **Host (explicit opt-out):** `sandbox.enabled: false` runs Chromium
+   in-process. Lab-only. All browser coroutines hop onto one private
+   daemon-thread loop (`tools/mcp_tools/browser.py:_get_browser_loop`) —
+   Playwright connections bind to their creating loop, so a fresh loop per
+   tool call breaks every op after `browser_start`.
+
+`browser.allow_mutating_actions: false` (default) keeps `browser_execute_js`,
+`browser_submit`, and `browser_replay` returning `BLOCKED`; set it `true` only
+as an explicit lab opt-in.
+
 ## 8. MCP / sandbox / policy integration
 
 The package deliberately sits at `tools/browser/`, NOT under

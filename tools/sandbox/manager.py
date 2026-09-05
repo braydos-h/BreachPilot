@@ -135,7 +135,7 @@ def _record_boot_state(config: dict[str, Any] | None, mode: str, reason: str = "
             json.dumps({"mode": mode, "reason": reason, "recorded_at": time.time()}),
             encoding="utf-8",
         )
-    except Exception:  # noqa: BLE001 -- status bookkeeping must never affect the attack path
+    except (OSError, ValueError, TypeError):  # noqa: BLE001 -- status bookkeeping must never affect the attack path
         logger.warning("sandbox boot-state record failed", exc_info=True)
 
 
@@ -144,7 +144,7 @@ def read_boot_state(config: dict[str, Any] | None) -> dict[str, Any] | None:
     try:
         state = json.loads(boot_state_path(config).read_text(encoding="utf-8"))
         return state if state.get("mode") in _VALID_BOOT_MODES else None
-    except Exception:  # noqa: BLE001 -- absence is a normal first-run state
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):  # noqa: BLE001 -- absence is a normal first-run state
         return None
 
 

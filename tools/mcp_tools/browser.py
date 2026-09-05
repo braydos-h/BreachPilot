@@ -26,6 +26,7 @@ import threading
 import urllib.parse
 from typing import Any
 
+from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
 from tools.mcp_tools.registry import *
 from tools.mcp_tools.sandbox_exec import sandbox_error_block
 
@@ -39,6 +40,7 @@ _BACKENDS: dict[str, Any] = {}
 _LAUNCHERS: dict[str, Any] = {}
 
 _browser_loop: asyncio.AbstractEventLoop | None = None
+_browser_thread: threading.Thread | None = None
 _browser_loop_guard = threading.Lock()
 
 
@@ -49,14 +51,16 @@ def _get_browser_loop() -> asyncio.AbstractEventLoop:
     ``asyncio.run(...)``-per-tool pattern gives every call a fresh loop, so any
     op after ``browser_start`` dies with ``'NoneType' object has no attribute
     'send'``. Every browser coroutine hops onto this single daemon-thread loop
-    instead (the swarm_bridge / exploit_agent precedent).
+    instead (the swarm_bridge / exploit_agent precedent). A dead loop thread
+    (stopped/closed loop) is replaced, never reused.
     """
-    global _browser_loop
+    global _browser_loop, _browser_thread
     with _browser_loop_guard:
-        if _browser_loop is None or _browser_loop.is_closed():
+        thread_dead = _browser_thread is not None and not _browser_thread.is_alive()
+        if _browser_loop is None or _browser_loop.is_closed() or thread_dead:
             _browser_loop = asyncio.new_event_loop()
-            thread = threading.Thread(target=_browser_loop.run_forever, name="browser-loop", daemon=True)
-            thread.start()
+            _browser_thread = threading.Thread(target=_browser_loop.run_forever, name="browser-loop", daemon=True)
+            _browser_thread.start()
         return _browser_loop
 
 
@@ -138,7 +142,7 @@ def _url_host_allowed(url: str, config: Any) -> str:
     return ""
 
 
-def _browser_error_text(exc: Exception, *, tool_name: str = "") -> str:
+def _browser_error_text(exc: BaseException, *, tool_name: str = "") -> str:
     """Render a typed browser failure as a model-readable result string."""
     from tools.browser.errors import BrowserBackendError, browser_error_from_exception
     from tools.sandbox.exceptions import SandboxError
@@ -152,7 +156,10 @@ def _browser_error_text(exc: Exception, *, tool_name: str = "") -> str:
         if tool_name:
             lines.append(f"TOOL: {tool_name}")
         return "\n".join(lines)
-    return f"ERROR: browser operation failed: {exc}"
+    text = f"ERROR: browser operation failed: {exc}"
+    if tool_name:
+        text += f"\nTOOL: {tool_name}"
+    return text
 
 
 def _browser_result_error(result: Any, tool_name: str) -> str:
@@ -389,9 +396,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if problem:
             return problem
         try:
-            snapshot = _run(
-                manager.run_op(_session.session_id, "get_storage", run_id=_session.run_id, origin=origin)
-            )
+            snapshot = _run(manager.run_op(_session.session_id, "get_storage", run_id=_session.run_id, origin=origin))
         except Exception as exc:  # noqa: BLE001 — fail closed with a readable result  # ponytail: bare except intentional
             return _browser_error_text(exc, tool_name="browser_storage")
         redacted = snapshot.to_dict()
@@ -465,9 +470,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 run_id=_session.run_id,
                 target_ip=target,
             )
-            result = _run(
-                manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=action)
-            )
+            result = _run(manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=action))
         except Exception as exc:  # noqa: BLE001 — fail closed with a readable result  # ponytail: bare except intentional
             return _browser_error_text(exc, tool_name="browser_execute_js")
         if not result.success:
@@ -503,9 +506,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 run_id=_session.run_id,
                 target_ip=target,
             )
-            result = _run(
-                manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=action)
-            )
+            result = _run(manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=action))
         except Exception as exc:  # noqa: BLE001 — fail closed with a readable result  # ponytail: bare except intentional
             return _browser_error_text(exc, tool_name="browser_discover_forms")
         forms = (result.metadata or {}).get("forms") or []
@@ -537,9 +538,7 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 run_id=_session.run_id,
                 target_ip=target,
             )
-            result = _run(
-                manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=action)
-            )
+            result = _run(manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=action))
         except Exception as exc:  # noqa: BLE001 — fail closed with a readable result  # ponytail: bare except intentional
             return _browser_error_text(exc, tool_name="browser_discover_endpoints")
         meta = result.metadata or {}
@@ -569,7 +568,8 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
         try:
             awaitable = manager.close_session_async(_session.session_id, run_id=_session.run_id)
             _run(awaitable)
-        except Exception as exc:  # noqa: BLE001 — close never fails the run
+        except _EXC_GROUP_CATCH as exc:  # noqa: BLE001 — close never fails the run
+            _log_nested_exceptions(exc)
             return _browser_error_text(exc, tool_name="browser_close")
         return f"SESSION_CLOSED: {_session.session_id}"
 
@@ -607,10 +607,9 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 run_id=_session.run_id,
                 target_ip=target,
             )
-            found = _run(
-                manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=discover)
-            )
-        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result
+            found = _run(manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=discover))
+        except _EXC_GROUP_CATCH as exc:  # noqa: BLE001 — fail closed with a readable result
+            _log_nested_exceptions(exc)
             return _browser_error_text(exc, tool_name="browser_submit")
         forms = (found.metadata or {}).get("forms") or []
         try:
@@ -638,10 +637,9 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 run_id=_session.run_id,
                 target_ip=target,
             )
-            result = _run(
-                manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=submit)
-            )
-        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result
+            result = _run(manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=submit))
+        except _EXC_GROUP_CATCH as exc:  # noqa: BLE001 — fail closed with a readable result
+            _log_nested_exceptions(exc)
             return _browser_error_text(exc, tool_name="browser_submit")
         if not result.success:
             return _browser_result_error(result, "browser_submit")
@@ -692,12 +690,13 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
         base_url, base_method, base_headers = "", "", {}
         if (event_id or "").strip():
             try:
-                    events = _run(
+                events = _run(
                     manager.run_op(
                         _session.session_id, "get_network_events", run_id=_session.run_id, limit=500, after_id=""
                     )
                 )
-            except Exception as exc:  # noqa: BLE001 — fail closed with a readable result
+            except _EXC_GROUP_CATCH as exc:  # noqa: BLE001 — fail closed with a readable result
+                _log_nested_exceptions(exc)
                 return _browser_error_text(exc, tool_name="browser_replay")
             match = next((e for e in (events or []) if e.event_id == event_id.strip()), None)
             if match is None:
@@ -732,10 +731,9 @@ def register_browser_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 run_id=_session.run_id,
                 target_ip=target,
             )
-            result = _run(
-                manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=replay)
-            )
-        except Exception as exc:  # noqa: BLE001 — fail closed with a readable result
+            result = _run(manager.run_op(_session.session_id, "execute_action", run_id=_session.run_id, action=replay))
+        except _EXC_GROUP_CATCH as exc:  # noqa: BLE001 — fail closed with a readable result
+            _log_nested_exceptions(exc)
             return _browser_error_text(exc, tool_name="browser_replay")
         if not result.success:
             return _browser_result_error(result, "browser_replay")

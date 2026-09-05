@@ -465,6 +465,21 @@ def test_headed_refused_in_sandbox(tmp_path, monkeypatch):
     assert "headless" in mcp.tools["browser_start"]("10.0.0.50", headless=False).lower()
 
 
+def test_browser_error_text_survives_exception_group():
+    # Regression: tool wrappers catch _EXC_GROUP_CATCH (anyio task groups
+    # raise BaseExceptionGroup, not Exception). The renderer must turn a
+    # group into a readable fail-closed string, never raise.
+    from tools.exceptions import _EXC_GROUP_CATCH
+    from tools.mcp_tools.browser import _browser_error_text
+
+    try:
+        raise BaseExceptionGroup("worker died", [RuntimeError("boom")])
+    except _EXC_GROUP_CATCH as exc:
+        text = _browser_error_text(exc, tool_name="browser_close")
+    assert text.startswith("ERROR:")
+    assert "browser_close" in text
+
+
 def test_strict_no_host_fallback_when_sandbox_unusable(tmp_path):
     """Sandbox enabled but no manager attached: SANDBOX_* block, never host Chromium."""
     import copy

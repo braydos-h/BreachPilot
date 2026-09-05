@@ -288,6 +288,20 @@ def test_sandbox_fallback_notice_line_from_ctx() -> None:
     assert "docker daemon down" in line
 
 
+def test_read_boot_state_never_raises_on_corrupt_file(_hermetic_boot_state: Path) -> None:
+    # Regression for the narrowed catches in read_boot_state: garbage,
+    # wrong-shaped JSON, and unreadable files all mean "no state" (None),
+    # never an exception on the attack path.
+    _hermetic_boot_state.write_text("{not json", encoding="utf-8")
+    assert read_boot_state(_cfg()) is None
+    _hermetic_boot_state.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+    assert read_boot_state(_cfg()) is None
+    _hermetic_boot_state.write_text(json.dumps({"mode": "bogus"}), encoding="utf-8")
+    assert read_boot_state(_cfg()) is None
+    _hermetic_boot_state.unlink()
+    assert read_boot_state(_cfg()) is None
+
+
 def test_sandbox_fallback_notice_empty_for_configured_host_mode() -> None:
     from tools.mcp_tools.sandbox_exec import sandbox_fallback_notice
 
