@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 
 def _make_client(tmp_path, monkeypatch, *, browser_block: dict | None = None) -> TestClient:
-    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-token")
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-token-0123456789abcdef01234567")
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -36,7 +36,7 @@ def _make_client(tmp_path, monkeypatch, *, browser_block: dict | None = None) ->
 
 
 def _capabilities_headers():
-    return {"Authorization": "Bearer test-token"}
+    return {"Authorization": "Bearer test-token-0123456789abcdef01234567"}
 
 
 def test_capabilities_reports_browser_unavailable(tmp_path, monkeypatch):

@@ -58,6 +58,17 @@ async def _execute_task_batch(self, tasks: list[AttackTask], state: AttackState)
                     if prereq_task is not None:
                         prereq_scheduled.add(task.task_id)
                         await run_task(prereq_task)
+                        # ponytail: producer outcome gates the retry — a failed
+                        # producer means the prerequisite is still missing, so
+                        # fail fast with no sleep/retry instead of burning the
+                        # retry budget on a task that cannot succeed yet.
+                        if prereq_task.status != TaskStatus.COMPLETED:
+                            task.status = TaskStatus.FAILED
+                            task.error = (
+                                f"Prerequisite producer {prereq_task.module_name} "
+                                f"failed: {prereq_task.error or prereq_task.status.value}"
+                            )
+                            return
                 if RetryEngine.should_retry(
                     task.module_name,
                     result.get("error", ""),

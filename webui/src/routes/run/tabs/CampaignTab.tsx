@@ -80,8 +80,8 @@ function CampaignControls({ runId, target }: { runId: string; target: string }) 
     setErrorText("");
     setLastResult(`[${tool}] ${data.result || "(no output)"}`);
     if (tool === "start_autonomous_campaign") {
-      const match = /^CAMPAIGN_STARTED:\s*(\S+)/m.exec(data.result);
-      if (match) setCampaignId(match[1]);
+      const startedId = /^CAMPAIGN_STARTED:\s*(\S+)/m.exec(data.result)?.[1];
+      if (startedId) setCampaignId(startedId);
     }
     // Campaign state changes server-side on start/step/stop.
     void qc.invalidateQueries({ queryKey: queryKeys.runCampaign(runId) });

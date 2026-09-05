@@ -43,8 +43,13 @@ _ALIASES: dict[str, str] = {
     "system_priv": "admin_priv",
 }
 
+# Typed ctx-field keys (lowercased) that count as a user identity / hash
+# artifact. Substring-matching whole findings (e.g. "user" in str(f)) matched
+# near-everything; only structured keys count now.
 _FOOTHOLD_KINDS = {"foothold", "shell", "session"}
 _PRIV_KINDS = {"admin_priv", "high_priv"}
+_USER_KEYS = frozenset({"user", "username", "login", "account", "samaccountname", "upn"})
+_HASH_KEYS = frozenset({"hash", "ntlm", "nthash", "lmhash", "lthash", "asrep", "tgs", "tgt", "kerberos", "hashcat"})
 
 # Artifacts that are terminal findings (no consumer expected).
 # high_priv: escalation outcome, end of chain (admin_priv is the plannable
@@ -83,11 +88,12 @@ def is_satisfied(kind: str, ctx: Any) -> bool:
     if k == "credentials":
         return bool(getattr(ctx, "credentials", None))
     if k == "hash_artifact":
-        creds = getattr(ctx, "credentials", None) or []
-        if creds:
+        if getattr(ctx, "credentials", None):
             return True
-        findings = getattr(ctx, "findings", None) or []
-        return any("hash" in str(f).lower() for f in findings)
+        for f in getattr(ctx, "findings", None) or []:
+            if isinstance(f, dict) and _HASH_KEYS & {str(key).lower() for key in f}:
+                return True
+        return False
     if k in _FOOTHOLD_KINDS or k == "webshell":
         return bool(getattr(ctx, "access_achieved", False) or getattr(ctx, "sessions", None))
     if k in _PRIV_KINDS:
@@ -99,13 +105,21 @@ def is_satisfied(kind: str, ctx: Any) -> bool:
             "high",
         }
     if k == "user_list":
-        creds = getattr(ctx, "credentials", None) or []
-        if any("user" in str(c).lower() for c in creds):
-            return True
-        findings = getattr(ctx, "findings", None) or []
-        return any("user" in str(f).lower() for f in findings)
-    # State-backed artifacts with no ctx field yet (signing_posture,
+        for source in (getattr(ctx, "credentials", None) or [], getattr(ctx, "findings", None) or []):
+            for entry in source:
+                if isinstance(entry, dict) and any(
+                    str(key).lower() in _USER_KEYS and str(val).strip() for key, val in entry.items()
+                ):
+                    return True
+        return False
+    # State-backed artifacts with no dedicated ctx field (signing_posture,
     # git_config_leak, vuln_confirmed, lpe_candidates, k8s_sa_token,
-    # web_tech, auth_scheme): satisfiable only via explicit findings refs.
-    findings = getattr(ctx, "findings", None) or []
-    return any(k in str(f).lower() for f in findings)
+    # web_tech, auth_scheme): satisfied only by a structured finding — a dict
+    # key / kind / type naming the kind, or an exact-kind string ref.
+    for f in getattr(ctx, "findings", None) or []:
+        if isinstance(f, dict):
+            if k in {str(key).lower() for key in f} or f.get("kind") == k or f.get("type") == k:
+                return True
+        elif isinstance(f, str) and f.strip().lower() == k:
+            return True
+    return any(isinstance(ref, str) and ref.strip().lower() == k for ref in (getattr(ctx, "evidence_refs", None) or []))

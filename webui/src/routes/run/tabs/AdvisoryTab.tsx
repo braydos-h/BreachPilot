@@ -165,7 +165,7 @@ function PocVerifyResult({ result }: { result: string }) {
 
 function ReplaySimResult({ result }: { result: string }) {
   const m = result.match(/confidence[:\s]*([0-9.]+)/i);
-  const conf = m ? parseFloat(m[1]) : null;
+  const conf = m ? parseFloat(m[1] ?? "") : null;
   return (
     <div className="space-y-2 rounded-md border bg-muted/40 p-3 text-xs">
       {conf != null && (

@@ -16,19 +16,9 @@ from tools.recon.scanner import PrimaryReconScanner, _kill_process, run_command 
 # Patching the shim (e.g. in tests) must propagate to the real implementation
 # modules, otherwise ``from tools.recon.scanner import run_command`` keeps the
 # old object and mocks have no effect (Windows nmap-not-found vs Linux).
-_CANONICAL_MAP: dict[str, tuple[ModuleType, ...]] = {
-    "HostReconResult": (_cfg,),
-    "ReconConfig": (_cfg,),
-    "ServiceInfo": (_cfg,),
-    "ToolAvailability": (_cfg,),
-    "SecondaryEnumerator": (_enum,),
-    "ReconPipeline": (_pipe,),
-    "PrimaryReconScanner": (_scan,),
-    "_kill_process": (_scan,),
-    "run_command": (_scan, _enum),
-    "os": (_scan,),
-    "signal": (_scan,),
-}
+# ponytail: generic propagation -- every canonical module holding that name is
+# updated, so no per-name map to keep in sync when helpers move modules.
+_CANONICAL_MODULES: tuple[ModuleType, ...] = (_cfg, _enum, _pipe, _scan)
 
 
 class _ReconPipelineProxy(ModuleType):
@@ -36,15 +26,16 @@ class _ReconPipelineProxy(ModuleType):
 
     def __setattr__(self, name: str, value) -> None:  # type: ignore[override]
         object.__setattr__(self, name, value)
-        for mod in _CANONICAL_MAP.get(name, ()):
-            try:
-                setattr(mod, name, value)
-            except Exception:
-                pass
+        for mod in _CANONICAL_MODULES:
+            if name in mod.__dict__:
+                try:
+                    setattr(mod, name, value)
+                except Exception:
+                    pass
 
     def __getattr__(self, name: str):  # type: ignore[override]
-        for mod in (_cfg, _enum, _pipe, _scan):
-            if hasattr(mod, name):
+        for mod in _CANONICAL_MODULES:
+            if name in mod.__dict__:
                 return getattr(mod, name)
         raise AttributeError(name)
 

@@ -72,7 +72,10 @@ export function SettingsSearch({ onSelect }: SettingsSearchProps) {
         onFocus={() => setOpen(true)}
         onKeyDown={(e) => {
           if (e.key === "Escape") setOpen(false);
-          if (e.key === "Enter" && hits.length > 0) select(hits[0]);
+          if (e.key === "Enter") {
+            const first = hits[0];
+            if (first) select(first);
+          }
         }}
         placeholder="Search settings"
         aria-label="Search settings"

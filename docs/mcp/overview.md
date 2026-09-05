@@ -32,7 +32,7 @@ Three MCP servers share one lifecycle, one transport hardening layer, and one se
 | Server | File | FastMCP name | Role | Tools | Default HTTP port |
 |--------|------|--------------|------|-------|-------------------|
 | Defensive (legacy) | `mcp_server.py` | `ai-nmap-defensive` | Scope-enforced Nmap scanning against `research.allowed_assets` | 8 Nmap/intel tools | `8000` (`mcp_server.py:346-349`) |
-| Exploit | `mcp_exploit_server.py` | `AI Exploitation Tools` | Permissive exploitation surface for the exploit agent / recon-first paths; ~120 tools across 20 families | 20 families in `tools/mcp_tools/` | `8001` (`mcp_exploit_server.py:206-208`) |
+| Exploit | `mcp_exploit_server.py` | `AI Exploitation Tools` | Permissive exploitation surface for the exploit agent / recon-first paths; ~120 tools across 30 families | 30 families in `tools/mcp_tools/` (24 top-level incl. `terminal/` + 6 in `modules/`) | `8001` (`mcp_exploit_server.py:206-208`) |
 | Engine | `mcp_engine_server.py` | `breachpilot-engine` | Read-only advisory + history for foreign assistants (Claude Desktop, Cursor) | 5 tools | `8002` (`mcp_engine_server.py:200-203`) |
 
 All three call `tools.mcp_shared.run_mcp_http_server` (`tools/mcp_shared.py:384-405`) for HTTP: `mcp.streamable_http_app()` + `uvicorn.run` with loopback gate and optional `MCP_HTTP_TOKEN` bearer auth.
@@ -58,7 +58,7 @@ graph TD
     B -->|http startup fail| H[stdio fallback\nStdioServerParameters]
     H --> I[stdio_client + initialize 30s]
     I --> G
-    G --> J[mcp_exploit_server FastMCP\ncollect_tools 20 families]
+    G --> J[mcp_exploit_server FastMCP\ncollect_tools 30 families]
     J --> K[ToolContext workspace/config/search/nvd/researcher/audit/allowlist]
     K --> L[tool handler\naudit + allowlist gate]
     L --> M[allowlist union checks\nhost validation]

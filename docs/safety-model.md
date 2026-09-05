@@ -85,13 +85,13 @@ explicitly authorized to test, on a throwaway operator box. An explicit
 
 - `full_access` (config + schema default): the lab posture.
   `ExploitPolicy.approve_action` auto-approves after consulting the mission
-  ScopeGate threaded onto the policy (`_enforce_mission_scope`): a tool mapped
-  to a category in `exploit.forbidden_actions` (`_TOOL_ACTION_CATEGORY`), or an
+  ScopeGate threaded onto the policy (`_enforce_mission_scope`, fail closed): a tool mapped
+  to a category in `exploit.forbidden_actions` (`_TOOL_ACTION_CATEGORY`), an
   action naming an asset outside the gate's allow rules / inside
-  `exploit.disallowed_assets`, is denied with a `SCOPE_DENIED` audit row. A
-  gate verdict of `requires_human_approval` still auto-approves (full_access is
-  the explicit lab grant — this check is not a blanket deny), and
-  `scope_gate=None` (swarm without a mission gate) stays permissive. Command
+  `exploit.disallowed_assets`, or a gate verdict of `requires_human_approval`
+  under a non-`high_authorized_testing` profile is denied with a `SCOPE_DENIED` audit row
+  (`high_authorized_testing` is the sole exception and still auto-approves).
+  `scope_gate=None` denies (the gate is required on full_access). Command
   *content* is not inspected — destructive commands, egress, reverse shells,
   credential dumping, Metasploit, and Python write/run are all allowed against
   authorized targets. The former `_check_command_safety` / `_gate_pivot_and_count`
@@ -215,7 +215,7 @@ Evidence and auditability are part of the safety model:
 
 ## OPSEC (Advisory Layer)
 
-`tools/opsec.py` provides `OpsecProfile` / `OpsecManager` with `resolve_for_target(ip)` that forces the profile OFF for private/local target IPs (RFC1918/loopback/link-local) and ON for public routable targets, matching the `opsec` config block in CLAUDE.md. It is advisory-only on the attack path: `is_quiet_blocked` / `noise_budget` stay **dormant** and must NOT become attack-path gates — the command always executes. The AI-facing surfaces (`build_opsec_briefing` in `tools/exploit_agent/prompt.py`, `_opsec_advisory_block` in `tools/mcp_tools/terminal/allowlist.py`) render advisory context (noise score, suggested quieter rewrite, pacing posture) only; they never gate execution.
+`tools/opsec.py` provides `OpsecProfile` / `OpsecManager` with `resolve_for_target(ip)` that forces the profile OFF for private/local target IPs (RFC1918/loopback/link-local) and ON for public routable targets, matching the `opsec` config block in CLAUDE.md. It is advisory-only on the attack path: the canonical API is `suggest_quiet_avoidance` / `suggested_noise_budget` (advisory hints only) and must NOT become attack-path gates — the command always executes (`is_quiet_blocked` is a deprecated advisory alias; `noise_budget` is stored but never enforced). The AI-facing surfaces (`build_opsec_briefing` in `tools/exploit_agent/prompt.py`, `_opsec_advisory_block` in `tools/mcp_tools/terminal/allowlist.py`) render advisory context (noise score, suggested quieter rewrite, pacing posture) only; they never gate execution.
 
 ## Plugin Safety
 

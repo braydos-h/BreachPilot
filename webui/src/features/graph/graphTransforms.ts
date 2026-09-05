@@ -196,19 +196,31 @@ interface FlowNodeData {
   node: GraphExplorerNode;
 }
 
+// ponytail: virtualization caps — the canvas only renders this many.
+export const MAX_FLOW_NODES = 400;
+export const MAX_FLOW_EDGES = 800;
+
 export function toFlowNodes(nodes: GraphExplorerNode[]): Node<FlowNodeData>[] {
-  // Deterministic column-per-type grid. Fine up to the backend's 500-node
-  // ceiling; reactflow handles pan/zoom/drag on top.
+  // Deterministic wrapped grid (6 per row, not one column per type — the old
+  // col*250 sprawled to ~5k px wide). Capped so reactflow never mounts
+  // thousands of DOM nodes.
+  const COLS = 6;
+  const X_GAP = 220;
+  const Y_GAP = 88;
   const counts: Record<string, number> = {};
-  const colOf = NODE_TYPE_ORDER.reduce((acc, t, i) => ({ ...acc, [t]: i }), {} as Record<string, number>);
-  const xOf = (t: string) => (colOf[t] ?? NODE_TYPE_ORDER.length) * 250;
-  return nodes.map((n) => {
-    const y = (counts[n.node_type] ?? 0) * 86;
-    counts[n.node_type] = (counts[n.node_type] ?? 0) + 1;
+  const colOf: Record<string, number> = {};
+  for (let i = 0; i < NODE_TYPE_ORDER.length; i += 1) {
+    const t = NODE_TYPE_ORDER[i];
+    if (t !== undefined) colOf[t] = i;
+  }
+  return nodes.slice(0, MAX_FLOW_NODES).map((n) => {
+    const col = colOf[n.node_type] ?? NODE_TYPE_ORDER.length;
+    const count = counts[n.node_type] ?? 0;
+    counts[n.node_type] = count + 1;
     return {
       id: n.node_id,
       data: { label: n.value, node: n },
-      position: { x: xOf(n.node_type), y },
+      position: { x: (col % COLS) * X_GAP, y: Math.floor(col / COLS) * 720 + (count % 24) * Y_GAP },
       style: { minWidth: 150, maxWidth: 240 },
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
@@ -221,7 +233,7 @@ interface FlowEdgeData {
 }
 
 export function toFlowEdges(edges: GraphExplorerEdge[]): Edge<FlowEdgeData>[] {
-  return edges.map((e) => {
+  return edges.slice(0, MAX_FLOW_EDGES).map((e) => {
     const meta = edgeMeta(e.edge_type);
     return {
       id: e.edge_id,

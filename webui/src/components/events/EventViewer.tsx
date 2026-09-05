@@ -214,7 +214,7 @@ export function EventViewer({
     (filter !== "all" ? 1 : 0) + (debouncedQuery.trim() ? 1 : 0);
 
   const loadOlder = useCallback(async () => {
-    const firstSeq = older.length > 0 ? older[0].sequence : events[0]?.sequence;
+    const firstSeq = older.length > 0 ? older[0]?.sequence : events[0]?.sequence;
     if (!firstSeq || loadingOlder) return;
     setLoadingOlder(true);
     try {
@@ -380,6 +380,7 @@ export function EventViewer({
             <div className="relative" style={{ height: rowVirtualizer.getTotalSize() }}>
               {rowVirtualizer.getVirtualItems().map((virtualRow) => {
                 const row = rows[virtualRow.index];
+                if (!row) return null;
                 return (
                   <div
                     key={row.key}

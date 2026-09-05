@@ -119,6 +119,9 @@ omit = [
     "*/.venv/*",
 ]
 
+[tool.coverage.report]
+fail_under = 80
+
 [tool.ruff]
 line-length = 120
 # ponytail: exclude generated/runtime dirs + non-Python webui/oauth so `ruff check .` passes (0 errors)

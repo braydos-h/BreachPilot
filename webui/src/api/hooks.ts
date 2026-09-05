@@ -216,7 +216,8 @@ export function useLiveModels() {
         return await apiFetch<LiveModelsResponse>("/models/live", { raw: false });
       } catch (error) {
         if (error instanceof ApiError && error.status === 503 && error.raw) {
-          return error.raw as LiveModelsResponse;
+          const fallback: LiveModelsResponse = error.raw;
+          return fallback;
         }
         throw error;
       }
@@ -1002,14 +1003,7 @@ export function useWorkspace(runId: string | null | undefined) {
   });
 }
 
-export function useWorkspaceFileUrl(runId: string): (path: string) => string {
-  return useCallback(
-    (path: string) =>
-      `/api/v1/runs/${encodeURIComponent(runId)}/workspace/${path.split("/").map(encodeURIComponent).join("/")}`,
-    [runId],
-  );
-}
-
+// ponytail: no bare href builders (never ?token=) — use the Bearer blob fetchers below.
 export function useFetchWorkspaceFile(runId: string) {
   return useMutation<Blob, ApiError, string>({
     mutationFn: (path) =>
@@ -1018,13 +1012,6 @@ export function useFetchWorkspaceFile(runId: string) {
         { raw: true },
       ),
   });
-}
-
-export function useArtifactUrl(runId: string): (name: string) => string {
-  return useCallback(
-    (name: string) => `/api/v1/runs/${encodeURIComponent(runId)}/artifacts/${name.split("/").map(encodeURIComponent).join("/")}`,
-    [runId],
-  );
 }
 
 export function useFetchArtifactBlob(runId: string) {

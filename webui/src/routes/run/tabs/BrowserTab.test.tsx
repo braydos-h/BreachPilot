@@ -66,8 +66,8 @@ describe("groupBrowserActivity", () => {
     const live = sessions.find((s) => s.sessionId === "bs-0001-abc");
     expect(adhoc?.actions).toHaveLength(1);
     expect(live?.actions).toHaveLength(2); // pair collapsed, blocked kept
-    expect(live?.actions[0].detail).toBe("http://10.0.0.50/login");
-    expect(live?.actions[1].status).toBe("blocked");
+    expect(live?.actions[0]!.detail).toBe("http://10.0.0.50/login");
+    expect(live?.actions[1]!.status).toBe("blocked");
     expect(live?.target).toBe("10.0.0.50");
   });
 });

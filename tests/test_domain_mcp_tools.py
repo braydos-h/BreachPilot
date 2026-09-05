@@ -142,8 +142,8 @@ async def test_enumerate_subdomains_crt_sh(tmp_path: Path, monkeypatch):
             ),
         ),
         patch(
-            "tools.mcp_tools.domain.resolve_target_to_ip",
-            side_effect=lambda h: {
+            "tools.validation_utils.resolve_target_to_ip",
+            side_effect=lambda h, *a, **k: {
                 "www.example.com": "1.1.1.1",
                 "api.example.com": "2.2.2.2",
             }.get(h),
@@ -344,7 +344,7 @@ async def test_enumerate_subdomains_passes_allowlist_when_domain_authorized(tmp_
     mcp = _make_server(tmp_path, require_allowlist=True, allowed_targets=["example.com"])
     with (
         patch("tools.mcp_tools.domain._stdlib_fetch", return_value=(200, {}, "[]")),
-        patch("tools.mcp_tools.domain.resolve_target_to_ip", return_value=None),
+        patch("tools.validation_utils.resolve_target_to_ip", return_value=None),
     ):
         text = _text(
             await mcp.call_tool(
@@ -435,7 +435,7 @@ async def test_takeover_confirmed_when_body_matches_marker(tmp_path: Path):
     dns_mod.resolver = _FakeResolver
     with (
         patch("tools.mcp_tools.domain._stdlib_fetch", side_effect=fake_fetch),
-        patch("tools.mcp_tools.domain.resolve_target_to_ip", return_value=None),
+        patch("tools.validation_utils.resolve_target_to_ip", return_value=None),
         patch.dict("sys.modules", {"dns": dns_mod, "dns.resolver": _FakeResolver}),
     ):
         text = _text(
@@ -480,7 +480,7 @@ async def test_takeover_likely_when_body_does_not_match(tmp_path: Path):
     dns_mod.resolver = _FakeResolver
     with (
         patch("tools.mcp_tools.domain._stdlib_fetch", side_effect=fake_fetch),
-        patch("tools.mcp_tools.domain.resolve_target_to_ip", return_value=None),
+        patch("tools.validation_utils.resolve_target_to_ip", return_value=None),
         patch.dict("sys.modules", {"dns": dns_mod, "dns.resolver": _FakeResolver}),
     ):
         text = _text(
@@ -532,7 +532,7 @@ async def test_crt_sh_large_response_not_truncated(tmp_path: Path):
     resolvable = {f"sub{i}.example.com": f"10.0.0.{i}" for i in range(5)}
     with (
         patch("tools.mcp_tools.domain._stdlib_fetch", return_value=(200, {}, big_json)),
-        patch("tools.mcp_tools.domain.resolve_target_to_ip", side_effect=lambda h: resolvable.get(h)),
+        patch("tools.validation_utils.resolve_target_to_ip", side_effect=lambda h, *a, **k: resolvable.get(h)),
     ):
         text = _text(
             await mcp.call_tool(

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from tools.mcp_tools.registry import *
+from typing import Any
+
+from tools.mcp_shared import check_targets_allowlist
+from tools.mcp_tools.registry import ToolContext
 from tools.mcp_tools.terminal import _target_lock_block
+from tools.persistent_session_manager import PersistentSessionManager, get_session_manager
 
 
 def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:

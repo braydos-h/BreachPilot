@@ -844,34 +844,9 @@ async def run_eval_suite(
             try:
                 report = json.loads(report_files[0].read_text(encoding="utf-8"))
                 metrics_dict = report
-                # ponytail: the eval report's records/messages are the raw
-                # audit trail; extract candidate findings heuristically. A
-                # real implementation would parse structured records; this
-                # lenient extractor counts service/CVE/vuln mentions so the
-                # scoring path is testable without a live run.
-                haystack = json.dumps(report).lower()
-                for svc in (oracle.get("expected_findings", {}) or {}).get("services", []) or []:
-                    if str(svc).lower() in haystack:
-                        findings.append({"type": "service", "value": str(svc).lower()})
-                for cve in (oracle.get("expected_findings", {}) or {}).get("known_cves", []) or []:
-                    if str(cve).lower() in haystack:
-                        findings.append({"type": "cve", "value": str(cve)})
-                for v in (oracle.get("expected_findings", {}) or {}).get("vulnerabilities", []) or []:
-                    if str(v).lower() in haystack:
-                        findings.append({"type": "vulnerability", "value": str(v).lower()})
-                for m in (oracle.get("expected_findings", {}) or {}).get("misconfigurations", []) or []:
-                    if str(m).lower() in haystack:
-                        findings.append({"type": "misconfiguration", "value": str(m).lower()})
-                for c in (oracle.get("expected_findings", {}) or {}).get("weak_credentials", []) or []:
-                    if str(c.get("user", "")).lower() in haystack or str(c.get("password", "")).lower() in haystack:
-                        findings.append(
-                            {
-                                "type": "credential",
-                                "value": str(c.get("user", "")),
-                                "user": c.get("user", ""),
-                                "password": c.get("password", ""),
-                            }
-                        )
+                # Fail closed: no self-confirming substring extraction. Findings
+                # count only when confirmed by verifier flags (graded eval path);
+                # unvalidated report text never yields true positives.
             except (json.JSONDecodeError, OSError):
                 pass
 

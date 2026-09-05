@@ -18,7 +18,7 @@ export function WorkspaceViewer({ runId, path, className }: WorkspaceViewerProps
 
   const ext = useMemo(() => {
     const match = path.match(/\.([a-z0-9]+)$/i);
-    return match ? match[1].toLowerCase() : "";
+    return match ? (match[1] ?? "").toLowerCase() : "";
   }, [path]);
 
   const { blob, text, error, isLoading, objectUrl } = useBlobText(fetchBlob, path, ext, "Failed to load file.");

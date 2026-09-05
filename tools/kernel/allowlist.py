@@ -178,14 +178,25 @@ def _check_allowlist(target_ip: str, config: dict[str, Any] | None) -> tuple[boo
 
 
 def _extract_msf_rhosts(text: str) -> list[str]:
-    """Extract RHOSTS/RHOST + pivot hosts from msfconsole text (verbatim move)."""
+    """Extract RHOSTS/RHOST + pivot hosts from msfconsole text (verbatim move).
+
+    Comma/whitespace-separated lists (``RHOSTS a,b`` / ``RHOSTS a b``) are
+    split into individual hosts; ``file:`` indirection (``RHOSTS file:/tmp/h``)
+    is denied outright (never expanded, never returned).
+    """
     if not text:
         return []
     out: list[str] = []
     for m in _MSF_RHOSTS_RE.findall(text):
         tok = next((g for g in m if g), "").strip().strip("\"';")
-        if tok and tok not in out:
-            out.append(tok)
+        if not tok or tok.lower().startswith("file:"):
+            continue
+        for part in re.split(r"[,\s]+", tok):
+            part = part.strip().strip("\"';")
+            if not part or part.lower().startswith("file:"):
+                continue
+            if part not in out:
+                out.append(part)
     for m in _MSF_PIVOT_RE.finditer(text):
         for g in m.groups():
             if g:

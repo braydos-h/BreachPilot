@@ -203,7 +203,7 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
         signal: controller.signal,
         onEvent: (msg) => {
           try {
-            const event = JSON.parse(msg.data ?? "") as RunEvent;
+            const event: RunEvent = JSON.parse(msg.data ?? "");
             handleEvent(event);
           } catch {
             // Ignore malformed frames; keep the stream alive.
@@ -309,7 +309,7 @@ export function useRunEvents(runId: string | null | undefined, options: UseRunEv
 
       socket.onmessage = (message) => {
         try {
-          const event = JSON.parse(message.data) as RunEvent;
+          const event: RunEvent = JSON.parse(message.data);
           handleEvent(event);
         } catch {
           // Ignore malformed frames.

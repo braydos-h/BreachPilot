@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 
 def _make_client(tmp_path, monkeypatch) -> TestClient:
-    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-token")
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-token-0123456789abcdef01234567")
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -25,7 +25,7 @@ def _make_client(tmp_path, monkeypatch) -> TestClient:
 
 
 def _headers():
-    return {"Authorization": "Bearer test-token"}
+    return {"Authorization": "Bearer test-token-0123456789abcdef01234567"}
 
 
 def test_ops_summary_requires_auth(tmp_path, monkeypatch):

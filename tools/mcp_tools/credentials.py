@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
+import time
+from pathlib import Path
+from typing import Any
 
-from tools.mcp_tools.registry import *
+from tools.credential_store import CredentialRecord, CredentialStore
+from tools.mcp_shared import _attempt_dir, check_targets_allowlist
+from tools.mcp_tools.registry import ToolContext, _run_with_pgrp_timeout
+from tools.validation_utils import validate_target_or_ip
 
 
 def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:

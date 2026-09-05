@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import re
+from typing import Any
+
 # Reuse synthesis entrypoints — single source is tools.attack_modules.modules.synthesis
 from tools.attack_modules.modules.synthesis import CVEToExploit as CVEToExploitModule
+from tools.cve_lookup import format_cve_results
 from tools.mcp_tools.attack_modules import _identify_hash_modes
-from tools.mcp_tools.registry import *
+from tools.mcp_tools.registry import ToolContext
+from tools.validation_utils import validate_target_or_ip
 
 
 def register_synthesis_tools(mcp: Any, *, ctx: ToolContext) -> None:

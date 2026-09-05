@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import re
+import time
+from typing import Any
+
 from tools.attack_modules.modules.auth_creds import PasswordSpray as PasswordSprayModule
 from tools.attack_modules.modules.crypto_jwt import JWTTamper as JWTTamperModule
 
@@ -21,7 +26,7 @@ from tools.attack_modules.modules.web import (
 from tools.attack_modules.modules.web import (
     TimingOracle as TimingOracleModule,
 )
-from tools.mcp_tools.registry import *
+from tools.mcp_tools.registry import ToolContext
 
 
 def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:

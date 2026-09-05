@@ -47,13 +47,16 @@ class DecisionBroker:
             )
         return did
 
-    async def await_answer(self, decision_id: str) -> str:
-        """Block until the decision is answered or cancelled."""
+    async def await_answer(self, decision_id: str, timeout: float = 3600.0) -> str:
+        """Block until answered/cancelled; fail-closed ("") on timeout."""
         fut = self._pending.get(decision_id)
         if fut is None:
             return ""
         try:
-            return await fut
+            return await asyncio.wait_for(fut, timeout)
+        except asyncio.TimeoutError:
+            self._persistence.expire_pending_decisions(self._run_id)
+            return ""
         finally:
             self._pending.pop(decision_id, None)
 

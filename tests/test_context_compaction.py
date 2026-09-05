@@ -245,7 +245,8 @@ def test_compaction_includes_durable_current_attack_memory(tmp_path: Path) -> No
     )
 
     assert ATTACK_MEMORY_MARKER in compacted[1]["content"]
-    assert "password: exact-secret" in compacted[1]["content"]
+    assert "exact-secret" not in compacted[1]["content"]
+    assert "[redacted]" in compacted[1]["content"]
     assert "C:\\work\\evidence\\attempt-1.txt" in compacted[1]["content"]
     assert "CURRENT ATTACK MEMORY" in compacted[2]["content"]
     assert "22/tcp" in compacted[2]["content"]

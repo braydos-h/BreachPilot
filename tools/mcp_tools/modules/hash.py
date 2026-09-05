@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from tools.mcp_tools.registry import *
+import re
+from typing import Any
+
+from tools.mcp_tools.registry import ToolContext
 
 
 def _identify_hash_modes(h: str) -> list[tuple[str, str, str]]:

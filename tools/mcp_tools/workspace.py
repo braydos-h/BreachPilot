@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64 as _base64
-import datetime
 import hashlib
 import os
 import re
@@ -11,10 +10,15 @@ import signal
 import subprocess
 import sys
 import time
+from datetime import datetime
+from pathlib import Path
+from typing import Any
 
+from tools.kernel.workspace import read_workspace
 from tools.mcp_shared import _attempt_dir, _resolve_workspace_file
-from tools.mcp_tools.registry import *
+from tools.mcp_tools.registry import ToolContext, _platform_system, ps_quote
 from tools.mcp_tools.terminal import _target_lock_block
+from tools.validation_utils import validate_target_or_ip
 
 
 def register_workspace_tools(mcp: Any, *, ctx: ToolContext) -> None:
@@ -123,7 +127,7 @@ def register_workspace_tools(mcp: Any, *, ctx: ToolContext) -> None:
             _body = script_path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             _body = ""
-        _block = _target_lock_block(_body, config)
+        _block = _target_lock_block(_body, config, allow_empty=True)
         if _block:
             return f"BLOCKED: {_block}\nTOOL: run_python_file\nSCRIPT: {cleaned}"
 
@@ -268,7 +272,7 @@ def register_workspace_tools(mcp: Any, *, ctx: ToolContext) -> None:
     @mcp.tool()
     @audit_tool
     def read_workspace_file(filename: str) -> str:
-        """Read any file on the operator box by path (LAB BUILD: operator-box filesystem is unrestricted). Helpful for reviewing script output, logs, /etc/hosts, downloaded artifacts, or anything else the AI needs to inspect."""
+        """Read a file inside the run workspace by path. Absolute paths escaping the workspace are refused (fail closed); relative names resolve under the workspace."""
         return read_workspace(workspace, filename)
 
     @mcp.tool()

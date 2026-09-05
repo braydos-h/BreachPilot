@@ -67,11 +67,11 @@ _MASK_U_FLAG_RE = re.compile(
     re.IGNORECASE,
 )
 _MASK_LONG_PW_RE = re.compile(
-    r"((?<![\w-])(?:--password|--passwd|--passphrase|--pass|--pwd|-pass)\s+)[^\s]+",
+    r"((?<![\w-])(?:--password|--passwd|--passphrase|--pass|--pwd|-pass|-password|-passwd)\s+)[^\s]+",
     re.IGNORECASE,
 )
 _MASK_HYDRA_P_RE = re.compile(
-    r"(\b(?:hydra|medusa|crackmapexec|netexec|cme|evil-winrm)\b[^\n]*?(?<![\w-])-p\s+)[^\s]+",
+    r"(\b(?:hydra|medusa|crackmapexec|netexec|cme|evil-winrm)\b[^\n]*?(?<![\w-])-[pP]\s+)[^\s]+",
     re.IGNORECASE,
 )
 _MASK_MSF_SET_RE = re.compile(
@@ -103,6 +103,18 @@ _MASK_PY_AUTH_TUPLE_RE = re.compile(
     r"(\bauth\s*=\s*\(\s*)[\"'][^\"']+[\"']\s*,\s*[\"'][^\"']+[\"'](\s*\))",
     re.IGNORECASE,
 )
+# `password: hunter2` / `"password": "hunter2"` colon forms (YAML/JSON/tool
+# output) -- the `=`-only KV mask above misses them.
+_MASK_KV_COLON_RE = re.compile(
+    r"\b((?:PASSWORD|PASSWD|PASSPHRASE|SECRET|TOKEN|API[_-]?KEY|PRIVATE[_-]?KEY)\s*:\s*[\"']?)[^\s,\"']+",
+    re.IGNORECASE,
+)
+# PEM blocks pasted into commands/logs (heredoc'd keys) -- the whole block is
+# key material.
+_MASK_PEM_RE = re.compile(
+    r"-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----",
+    re.IGNORECASE,
+)
 
 _MASK_RES = (
     _MASK_URL_AUTH_RE,
@@ -113,6 +125,8 @@ _MASK_RES = (
     _MASK_HASHES_RE,
     _MASK_NTLM_FLAG_RE,
     _MASK_KV_SECRET_RE,
+    _MASK_KV_COLON_RE,
+    _MASK_PEM_RE,
     _MASK_AUTH_HDR_RE,
     _MASK_PY_AUTH_TUPLE_RE,
 )
@@ -125,7 +139,7 @@ def _mask_secret_content(value: Any) -> Any:
         return value
     out = value
     for rx in _MASK_RES:
-        if rx is _MASK_URL_AUTH_RE:
+        if rx is _MASK_URL_AUTH_RE or rx is _MASK_PEM_RE:
             out = rx.sub(_REDACTED, out)
         elif rx is _MASK_PY_AUTH_TUPLE_RE:
             out = rx.sub(rf"\1{_REDACTED}\2", out)

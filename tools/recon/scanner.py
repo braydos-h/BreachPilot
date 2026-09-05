@@ -639,10 +639,15 @@ class PrimaryReconScanner:
                 state_elem = port.find("state")
                 state = state_elem.get("state", "") if state_elem is not None else ""
 
+                # ponytail: membership guard, not blind append -- follow-up
+                # scans (rustscan/masscan + nmap) pre-seed open_ports, and a
+                # re-parse must never duplicate entries.
                 if state == "open":
-                    result.open_ports.append(port_id)
+                    if port_id not in result.open_ports:
+                        result.open_ports.append(port_id)
                 elif state == "filtered":
-                    result.filtered_ports.append(port_id)
+                    if port_id not in result.filtered_ports:
+                        result.filtered_ports.append(port_id)
 
                 service_elem = port.find("service")
                 svc = ServiceInfo(port=port_id, protocol=protocol)
@@ -666,12 +671,17 @@ class PrimaryReconScanner:
                 if state == "open":
                     result.services.append(svc)
 
-            # Host scripts
+            # Host scripts are host-level findings, not per-service ones --
+            # copying every hostscript onto every service duplicated them N x M
+            # times. Store once under result.extended instead.
+            host_scripts: dict[str, str] = {}
             for script in host.findall("hostscript/script"):
                 script_id = script.get("id", "")
                 script_output = script.get("output", "")
-                for svc in result.services:
-                    svc.scripts[script_id] = script_output
+                if script_id and script_id not in host_scripts:
+                    host_scripts[script_id] = script_output
+            if host_scripts:
+                result.extended.setdefault("hostscripts", {}).update(host_scripts)
 
         return result
 

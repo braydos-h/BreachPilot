@@ -215,3 +215,32 @@ def test_is_privilege_error_false(stderr):
 def test_is_privilege_error_case_insensitive():
     assert is_privilege_error("REQUIRES ROOT") is True
     assert is_privilege_error("Permission Denied") is True
+
+
+# ── -sU unprivileged downgrade ──────────────────────────────────────────────
+
+
+def test_downgrade_strips_udp_scan_flag():
+    """-sU needs raw sockets: unprivileged downgrade strips it instead of
+    letting scanner.py re-run the identical failing -sU command."""
+    assert "-sU" in nmap_priv._NMAP_ROOT_FLAGS
+    args = ["-sU", "-sV", "-Pn", "--top-ports", "100", "10.0.0.5"]
+    out, note = _downgrade_unprivileged_args(args)
+    assert "-sU" not in out
+    assert "-sU" in note
+    # non-privileged args preserved
+    for tok in ("-sV", "-Pn", "--top-ports", "100", "10.0.0.5"):
+        assert tok in out
+    assert "-sT" not in out  # no SYN flag, so no connect-scan replacement
+
+
+def test_apply_unprivileged_udp_downgrades_up_front(monkeypatch):
+    """The UDP retry path (scanner.py _run_nmap_udp) must not re-run -sU:
+    with the flag stripped up-front the downgrade note is set, so the
+    `and not note` retry guard skips the second identical -sU attempt."""
+    monkeypatch.setattr(nmap_priv, "_is_privileged", lambda: False)
+    monkeypatch.setattr(os, "name", "posix", raising=False)
+    argv = ["nmap", "-sU", "-sV", "-Pn", "--top-ports", "100", "10.0.0.5"]
+    out, note = apply_nmap_privilege(argv, sudo=False, priv_fallback=True)
+    assert "-sU" not in out
+    assert note != ""

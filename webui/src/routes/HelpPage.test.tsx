@@ -122,7 +122,7 @@ describe("HelpPage search", () => {
     const input = screen.getByPlaceholderText(/What do you need help with/i);
     await user.type(input, "attack graph");
     const listbox = screen.getByRole("listbox");
-    const btn = within(listbox).getAllByRole("option")[0];
+    const btn = within(listbox).getAllByRole("option")[0]!;
     await user.click(btn);
     // document should still contain the help page and click should not throw
     expect(document.getElementById("directory") || document.getElementById("docs") || document.body).toBeInTheDocument();

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 
 
-def _make_client(tmp_path, monkeypatch, token="test-token"):
+def _make_client(tmp_path, monkeypatch, token="test-token-0123456789abcdef01234567"):
     """Create a TestClient with a known token + minimal config (no Ollama needed)."""
     monkeypatch.setenv("BREACHPILOT_API_TOKEN", token)
     monkeypatch.chdir(tmp_path)
@@ -43,7 +43,7 @@ def _make_client(tmp_path, monkeypatch, token="test-token"):
     return TestClient(app)
 
 
-def _auth_headers(token="test-token"):
+def _auth_headers(token="test-token-0123456789abcdef01234567"):
     return {"Authorization": f"Bearer {token}"}
 
 

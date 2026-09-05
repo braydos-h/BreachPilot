@@ -360,3 +360,27 @@ def test_generate_embedding_returns_none_for_nonfinite(temp_db, monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: FakeResp())
     result = mgr._generate_embedding("anything")
     assert result is None
+
+
+def test_find_similar_scores_full_table(temp_db):
+    """Determinism: recall scores the full filtered table (no LIMIT sampling)."""
+    mgr = SemanticMemoryManager(temp_db)
+    mgr._generate_embedding = lambda text: [1.0, 0.0, 0.0] if text == "query" else [0.0, 1.0, 0.0]
+    for i in range(120):
+        mgr.store_embedding("memories", f"MEM-{i:03d}", "filler", mission_id="M-001")
+    mgr._generate_embedding = lambda text: [1.0, 0.0, 0.0]
+    mgr.store_embedding("memories", "MEM-BEST", "query match", mission_id="M-001")
+    similar = mgr.find_similar("query", source_table="memories", top_k=3, mission_id="M-001")
+    assert similar[0]["source_id"] == "MEM-BEST"
+
+
+def test_find_similar_lessons_scores_full_table(temp_db):
+    """Determinism: lesson recall scores the full filtered table."""
+    mgr = SemanticMemoryManager(temp_db)
+    mgr._generate_embedding = lambda text: [0.0, 1.0, 0.0]
+    for i in range(110):
+        mgr.store_lesson(f"sig-{i}", "Mod", "success", f"filler {i}", confidence=0.5)
+    mgr._generate_embedding = lambda text: [1.0, 0.0, 0.0]
+    mgr.store_lesson("sig-best", "Mod", "success", "best lesson", confidence=0.9)
+    lessons = mgr.find_similar_lessons("best lesson", top_k=3)
+    assert lessons[0]["target_signature"] == "sig-best"

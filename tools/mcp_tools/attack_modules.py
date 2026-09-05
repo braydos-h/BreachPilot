@@ -2,8 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import re
+from pathlib import Path
+from typing import Any
+
+from tools.attack_modules import ModuleContext, get_module, list_modules
 from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
-from tools.mcp_tools.registry import *
+from tools.mcp_tools.registry import ToolContext
+from tools.validation_utils import validate_target_or_ip
 
 
 def _identify_hash_modes(h: str) -> list[tuple[str, str, str]]:

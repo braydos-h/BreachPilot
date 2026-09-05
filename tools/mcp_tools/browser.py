@@ -24,11 +24,14 @@ import asyncio
 import json
 import threading
 import urllib.parse
+from pathlib import Path
 from typing import Any
 
 from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
-from tools.mcp_tools.registry import *
+from tools.mcp_shared import check_targets_allowlist
+from tools.mcp_tools.registry import ToolContext
 from tools.mcp_tools.sandbox_exec import sandbox_error_block
+from tools.validation_utils import validate_target_or_ip
 
 _MANAGERS: dict[str, Any] = {}
 _BACKENDS: dict[str, Any] = {}

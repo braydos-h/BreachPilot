@@ -9,8 +9,8 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    // Component tests opt into jsdom per-file with a `@vitest-environment jsdom`
-    // docblock so the existing node-env unit tests keep running headless.
+    // ponytail: tsx component tests get jsdom by glob; plain ts unit tests stay node.
+    environmentMatchGlobs: [["src/**/*.test.tsx", "jsdom"]],
     include: ["src/**/*.test.{ts,tsx}"],
     setupFiles: [path.resolve(__dirname, "src/test/setup.ts")],
     testTimeout: 10000,

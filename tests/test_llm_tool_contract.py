@@ -155,10 +155,14 @@ class TestBasicInvocation:
         raw = {"function": {"name": "lookup_service", "arguments": '{"target_ip":"127.0.0.1"}'}}
         norm = _normalize_tool_call(raw)
         assert norm["function"]["arguments"] == {"target_ip": "127.0.0.1"}
-        # Malformed JSON string → {}
+        # Malformed JSON string -> kept raw so validation rejects it as a
+        # recoverable schema error (never executed with empty args).
         raw_bad = {"function": {"name": "lookup_service", "arguments": '{"bad json'}}
         norm_bad = _normalize_tool_call(raw_bad)
-        assert norm_bad["function"]["arguments"] == {}
+        assert norm_bad["function"]["arguments"] == '{"bad json'
+        valid, invalid = _filter_and_validate_tool_calls([norm_bad], all_tools=[])
+        assert valid == []
+        assert invalid and invalid[0]["recoverable"] is True
 
 
 # ---------------------------------------------------------------------------

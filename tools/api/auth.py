@@ -52,6 +52,8 @@ def load_or_create_token(token_file: Path | str, *, env_override: str = "") -> s
     """
     env_token = (env_override or os.environ.get("BREACHPILOT_API_TOKEN", "")).strip()
     if env_token:
+        if len(env_token) < 32:
+            raise ValueError("BREACHPILOT_API_TOKEN must be at least 32 characters.")
         return env_token
     path = Path(token_file)
     if path.exists():
@@ -139,6 +141,16 @@ async def authenticate_websocket(
     if not is_loopback_origin(origin, allowed_origins):
         await ws.close(code=4403, reason="Origin not allowed")
         return None
+    # Header fast-path: token checked BEFORE accept (non-browser clients).
+    header = ws.headers.get("authorization", "")
+    if header[:7].lower() == "bearer " and header[7:].strip():
+        if hmac.compare_digest(header[7:].strip(), token):
+            await ws.accept()
+            return {"auth": "***", "after": 0}
+        await ws.close(code=4401, reason="Invalid auth token")
+        return None
+    # Legacy first-message auth: ASGI requires accept before receive, so this
+    # accept is the latest possible point; no state changes precede auth.
     await ws.accept()
     try:
         first = await asyncio.wait_for(ws.receive_json(), timeout=5.0)

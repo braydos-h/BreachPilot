@@ -31,6 +31,11 @@ ui = get_ui()
 # hardware, and a hung subprocess is exactly what we want to detect here.
 MCP_BOOT_TIMEOUT_SECONDS: float = 30.0
 MCP_HTTP_RETRY_INITIAL_SECONDS: float = 0.2
+# Single total boot budget for the HTTP path: the readiness probe and the
+# session initialize() used to stack 30s + 30s (≈60s worst case, ≈90s with the
+# transport connect timeout). Both phases now share one deadline so a hung
+# boot can never exceed this total.
+MCP_BOOT_TOTAL_BUDGET_SECONDS: float = 30.0
 
 
 class _RunHeartbeat:
@@ -407,6 +412,13 @@ async def _open_exploit_mcp_session_once(
 
     _http_start_label = f"Starting MCP HTTP server on port {exploit_port}"
     _boot_step(_http_start_label, ok=False)
+    # The readiness probe + initialize() below share this single deadline (see
+    # MCP_BOOT_TOTAL_BUDGET_SECONDS) instead of each taking a full 30s.
+    _boot_deadline = time.monotonic() + MCP_BOOT_TOTAL_BUDGET_SECONDS
+
+    def _boot_remaining() -> float:
+        return max(1.0, min(MCP_BOOT_TIMEOUT_SECONDS, _boot_deadline - time.monotonic()))
+
     with ui.spinner(
         f"Starting MCP HTTP server on port {exploit_port}...",
         soft_fail=startup_soft_fail,
@@ -459,7 +471,7 @@ async def _open_exploit_mcp_session_once(
                 # incorrectly reject an otherwise healthy server.
                 await wait_for_mcp_http_ready(
                     f"http://127.0.0.1:{exploit_port}/mcp",
-                    timeout_seconds=MCP_BOOT_TIMEOUT_SECONDS,
+                    timeout_seconds=_boot_remaining(),
                     process=process,
                     log_path=http_log_path,
                     secret_values=http_log_secrets,
@@ -507,7 +519,7 @@ async def _open_exploit_mcp_session_once(
                     try:
                         await asyncio.wait_for(
                             session.initialize(),
-                            timeout=MCP_BOOT_TIMEOUT_SECONDS,
+                            timeout=_boot_remaining(),
                         )
                         _boot_step(_http_init_label, ok=True)
                     except asyncio.TimeoutError as exc:

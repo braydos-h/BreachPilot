@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import json
+import re
+import socket
+import ssl as _ssl_module
 import subprocess
 import threading
 import time
+from typing import Any
 
 from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
-from tools.mcp_tools.registry import *
+from tools.mcp_shared import _attempt_dir
+from tools.mcp_tools.registry import ToolContext, _platform_system
+from tools.recon_pipeline import HostReconResult, ReconConfig, ReconPipeline
+from tools.validation_utils import validate_target_or_ip
 
 # ponytail: short-TTL cache for get_service_fingerprint results. A planning
 # loop re-fingerprints the same (ip, port) every cycle at ~8s socket+TLS per

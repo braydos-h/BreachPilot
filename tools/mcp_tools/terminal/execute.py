@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
+from tools.kernel.audit import _mask_secret_content
 from tools.mcp_shared import _is_inside_workspace
 from tools.mcp_tools.registry import ToolContext, _attempt_dir, _run_with_pgrp_timeout
 from tools.mcp_tools.sandbox_exec import (
@@ -129,9 +130,14 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     f"{sandbox_error_block(exc, tool_name='run_exploit_terminal')}"
                 )
             _sstatus, _output_tail, _exit_code, _elapsed = _sandbox_terminal_ok(result)
+            # Persisted logs are redacted: raw stdout may carry dumped hashes,
+            # tokens, or key material that must not sit on disk in the clear.
+            # (The live OUTPUT below stays verbatim -- cracking workflows need
+            # the recovered plaintext.)
+            _logged = _mask_secret_content((result.stdout or "") + ("\n" + result.stderr if result.stderr else ""))
             log_path.write_text(
-                f"{'=' * 60}\nCOMMAND: {sanitized_command}\n{'=' * 60}\n"
-                + ((result.stdout or "") + ("\n" + result.stderr if result.stderr else ""))
+                f"{'=' * 60}\nCOMMAND: {_mask_secret_content(sanitized_command)}\n{'=' * 60}\n"
+                + _logged
                 + f"\nEXIT_CODE: {_exit_code if _exit_code is not None else 'timed_out'}\n",
                 encoding="utf-8",
                 errors="replace",
@@ -150,7 +156,7 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
         start = time.monotonic()
         is_windows = _platform_system() == "Windows"
-        header = f"{'=' * 60}\nCOMMAND: {sanitized_command}\n{'=' * 60}\n"
+        header = f"{'=' * 60}\nCOMMAND: {_mask_secret_content(sanitized_command)}\n{'=' * 60}\n"
         log_path.write_text(header, encoding="utf-8", errors="replace")
 
         _bash_on_windows = _find_windows_bash(config) if is_windows else None
@@ -228,7 +234,7 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if out_bytes is not None:
             try:
                 text = out_bytes.decode("utf-8", errors="replace") if isinstance(out_bytes, bytes) else str(out_bytes)
-                log_path.write_text(header + text, encoding="utf-8", errors="replace")
+                log_path.write_text(header + _mask_secret_content(text), encoding="utf-8", errors="replace")
                 output_tail = text[-4000:]
             except _EXC_GROUP_CATCH:
                 pass

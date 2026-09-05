@@ -60,28 +60,58 @@ def test_multi_app_auth_isolation(tmp_path, monkeypatch):
     (dir_a / "config.yaml").write_text("api:\n  host: 127.0.0.1\n", encoding="utf-8")
     (dir_b / "config.yaml").write_text("api:\n  host: 127.0.0.1\n", encoding="utf-8")
 
-    config_a = _make_config(dir_a, "token-a")
-    config_b = _make_config(dir_b, "token-b")
+    config_a = _make_config(dir_a, "token-a-0123456789abcdef01234567")
+    config_b = _make_config(dir_b, "token-b-0123456789abcdef01234567")
 
-    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "token-a")
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "token-a-0123456789abcdef01234567")
     app_a = create_app(config_path=dir_a / "config.yaml", config=config_a, callables=_fake_callables(dir_a))
     # Do not destroy app_a; keep it alive while creating app_b
-    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "token-b")
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "token-b-0123456789abcdef01234567")
     app_b = create_app(config_path=dir_b / "config.yaml", config=config_b, callables=_fake_callables(dir_b))
 
     client_a = TestClient(app_a)
     client_b = TestClient(app_b)
 
     # Token A works only for app A
-    assert client_a.get("/api/v1/capabilities", headers={"Authorization": "Bearer token-a"}).status_code == 200
-    assert client_a.get("/api/v1/capabilities", headers={"Authorization": "Bearer token-b"}).status_code == 401
+    assert (
+        client_a.get(
+            "/api/v1/capabilities", headers={"Authorization": "Bearer token-a-0123456789abcdef01234567"}
+        ).status_code
+        == 200
+    )
+    assert (
+        client_a.get(
+            "/api/v1/capabilities", headers={"Authorization": "Bearer token-b-0123456789abcdef01234567"}
+        ).status_code
+        == 401
+    )
     # Token B works only for app B
-    assert client_b.get("/api/v1/capabilities", headers={"Authorization": "Bearer token-b"}).status_code == 200
-    assert client_b.get("/api/v1/capabilities", headers={"Authorization": "Bearer token-a"}).status_code == 401
+    assert (
+        client_b.get(
+            "/api/v1/capabilities", headers={"Authorization": "Bearer token-b-0123456789abcdef01234567"}
+        ).status_code
+        == 200
+    )
+    assert (
+        client_b.get(
+            "/api/v1/capabilities", headers={"Authorization": "Bearer token-a-0123456789abcdef01234567"}
+        ).status_code
+        == 401
+    )
 
     # Creating app_b must not have altered app_a's auth: re-check
-    assert client_a.get("/api/v1/capabilities", headers={"Authorization": "Bearer token-a"}).status_code == 200
-    assert client_a.get("/api/v1/capabilities", headers={"Authorization": "Bearer token-b"}).status_code == 401
+    assert (
+        client_a.get(
+            "/api/v1/capabilities", headers={"Authorization": "Bearer token-a-0123456789abcdef01234567"}
+        ).status_code
+        == 200
+    )
+    assert (
+        client_a.get(
+            "/api/v1/capabilities", headers={"Authorization": "Bearer token-b-0123456789abcdef01234567"}
+        ).status_code
+        == 401
+    )
 
 
 def test_multi_app_persistence_isolation(tmp_path, monkeypatch):
@@ -94,12 +124,12 @@ def test_multi_app_persistence_isolation(tmp_path, monkeypatch):
     (dir_a / "config.yaml").write_text("api:\n  host: 127.0.0.1\n", encoding="utf-8")
     (dir_b / "config.yaml").write_text("api:\n  host: 127.0.0.1\n", encoding="utf-8")
 
-    config_a = _make_config(dir_a, "token-a")
-    config_b = _make_config(dir_b, "token-b")
+    config_a = _make_config(dir_a, "token-a-0123456789abcdef01234567")
+    config_b = _make_config(dir_b, "token-b-0123456789abcdef01234567")
 
-    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "token-a")
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "token-a-0123456789abcdef01234567")
     app_a = create_app(config_path=dir_a / "config.yaml", config=config_a, callables=_fake_callables(dir_a))
-    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "token-b")
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "token-b-0123456789abcdef01234567")
     app_b = create_app(config_path=dir_b / "config.yaml", config=config_b, callables=_fake_callables(dir_b))
 
     client_a = TestClient(app_a)
@@ -109,18 +139,28 @@ def test_multi_app_persistence_isolation(tmp_path, monkeypatch):
     resp_a = client_a.post(
         "/api/v1/runs",
         json={"target": "10.0.0.50", "mode": "attack", "goal": "recon_only"},
-        headers={"Authorization": "Bearer token-a"},
+        headers={"Authorization": "Bearer token-a-0123456789abcdef01234567"},
     )
     assert resp_a.status_code == 201
     run_id_a = resp_a.json()["run_id"]
 
     # It should be visible via app_a but not via app_b
-    assert client_a.get(f"/api/v1/runs/{run_id_a}", headers={"Authorization": "Bearer token-a"}).status_code == 200
-    assert client_b.get(f"/api/v1/runs/{run_id_a}", headers={"Authorization": "Bearer token-b"}).status_code == 404
+    assert (
+        client_a.get(
+            f"/api/v1/runs/{run_id_a}", headers={"Authorization": "Bearer token-a-0123456789abcdef01234567"}
+        ).status_code
+        == 200
+    )
+    assert (
+        client_b.get(
+            f"/api/v1/runs/{run_id_a}", headers={"Authorization": "Bearer token-b-0123456789abcdef01234567"}
+        ).status_code
+        == 404
+    )
 
     # List runs: app_a has 1, app_b has 0
-    list_a = client_a.get("/api/v1/runs", headers={"Authorization": "Bearer token-a"}).json()
-    list_b = client_b.get("/api/v1/runs", headers={"Authorization": "Bearer token-b"}).json()
+    list_a = client_a.get("/api/v1/runs", headers={"Authorization": "Bearer token-a-0123456789abcdef01234567"}).json()
+    list_b = client_b.get("/api/v1/runs", headers={"Authorization": "Bearer token-b-0123456789abcdef01234567"}).json()
     assert any(r["id"] == run_id_a for r in list_a["runs"])
     assert not any(r["id"] == run_id_a for r in list_b["runs"])
 
@@ -128,12 +168,22 @@ def test_multi_app_persistence_isolation(tmp_path, monkeypatch):
     resp_b = client_b.post(
         "/api/v1/runs",
         json={"target": "10.0.0.51", "mode": "attack", "goal": "recon_only"},
-        headers={"Authorization": "Bearer token-b"},
+        headers={"Authorization": "Bearer token-b-0123456789abcdef01234567"},
     )
     assert resp_b.status_code == 201
     run_id_b = resp_b.json()["run_id"]
-    assert client_b.get(f"/api/v1/runs/{run_id_b}", headers={"Authorization": "Bearer token-b"}).status_code == 200
-    assert client_a.get(f"/api/v1/runs/{run_id_b}", headers={"Authorization": "Bearer token-a"}).status_code == 404
+    assert (
+        client_b.get(
+            f"/api/v1/runs/{run_id_b}", headers={"Authorization": "Bearer token-b-0123456789abcdef01234567"}
+        ).status_code
+        == 200
+    )
+    assert (
+        client_a.get(
+            f"/api/v1/runs/{run_id_b}", headers={"Authorization": "Bearer token-a-0123456789abcdef01234567"}
+        ).status_code
+        == 404
+    )
 
 
 def test_multi_app_simultaneous_liveness(tmp_path, monkeypatch):
@@ -147,12 +197,12 @@ def test_multi_app_simultaneous_liveness(tmp_path, monkeypatch):
     (dir_a / "config.yaml").write_text("api:\n  host: 127.0.0.1\n", encoding="utf-8")
     (dir_b / "config.yaml").write_text("api:\n  host: 127.0.0.1\n", encoding="utf-8")
 
-    config_a = _make_config(dir_a, "token-a")
-    config_b = _make_config(dir_b, "token-b")
+    config_a = _make_config(dir_a, "token-a-0123456789abcdef01234567")
+    config_b = _make_config(dir_b, "token-b-0123456789abcdef01234567")
 
-    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "token-a")
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "token-a-0123456789abcdef01234567")
     app_a = create_app(config_path=dir_a / "config.yaml", config=config_a, callables=_fake_callables(dir_a))
-    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "token-b")
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "token-b-0123456789abcdef01234567")
     app_b = create_app(config_path=dir_b / "config.yaml", config=config_b, callables=_fake_callables(dir_b))
 
     client_a = TestClient(app_a)
@@ -160,7 +210,27 @@ def test_multi_app_simultaneous_liveness(tmp_path, monkeypatch):
 
     # Interleaved requests to prove no cross-talk
     for _ in range(3):
-        assert client_a.get("/api/v1/capabilities", headers={"Authorization": "Bearer token-a"}).status_code == 200
-        assert client_b.get("/api/v1/capabilities", headers={"Authorization": "Bearer token-b"}).status_code == 200
-        assert client_a.get("/api/v1/capabilities", headers={"Authorization": "Bearer token-b"}).status_code == 401
-        assert client_b.get("/api/v1/capabilities", headers={"Authorization": "Bearer token-a"}).status_code == 401
+        assert (
+            client_a.get(
+                "/api/v1/capabilities", headers={"Authorization": "Bearer token-a-0123456789abcdef01234567"}
+            ).status_code
+            == 200
+        )
+        assert (
+            client_b.get(
+                "/api/v1/capabilities", headers={"Authorization": "Bearer token-b-0123456789abcdef01234567"}
+            ).status_code
+            == 200
+        )
+        assert (
+            client_a.get(
+                "/api/v1/capabilities", headers={"Authorization": "Bearer token-b-0123456789abcdef01234567"}
+            ).status_code
+            == 401
+        )
+        assert (
+            client_b.get(
+                "/api/v1/capabilities", headers={"Authorization": "Bearer token-a-0123456789abcdef01234567"}
+            ).status_code
+            == 401
+        )

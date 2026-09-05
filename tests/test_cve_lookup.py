@@ -389,3 +389,106 @@ def test_build_cve_search_limiter_is_process_wide_singleton():
     c3 = build_cve_search({"cve_lookup": {"search_rate_limit_per_minute": 40}})
     assert c1._rate_limiter is c2._rate_limiter  # same rate -> shared singleton
     assert c1._rate_limiter is not c3._rate_limiter  # different rate -> separate
+
+
+# ── Sync throttle + cache parity (search_sync / search_by_cpe_sync) ─────────
+
+
+def test_search_sync_throttled_and_cached():
+    """search_sync enforces the NVD rate gap between fetches and serves the
+    second identical query from cache (no second fetch)."""
+    import time as _time
+
+    client = NVDClient(CVESearchSettings(rate_limit_seconds=0.05, cache_ttl_seconds=3600))
+    calls: list[str] = []
+    with patch.object(client, "_fetch_sync", side_effect=lambda q: (calls.append(q), [CVEEntry(cve_id="CVE-X")])[1]):
+        t0 = _time.monotonic()
+        first = client.search_sync("nginx 1.18.0")
+        second = client.search_sync("nginx 1.18.0")  # cache hit
+        third = client.search_sync("apache 2.4.49")  # miss -> throttled fetch
+        elapsed = _time.monotonic() - t0
+    assert [e.cve_id for e in first] == ["CVE-X"]
+    assert second == first
+    assert calls == ["nginx 1.18.0", "apache 2.4.49"], "cached query must not re-fetch"
+    assert elapsed >= 0.04, "back-to-back fetches must observe the rate gap"
+
+
+def test_search_by_cpe_sync_uses_throttle_cache_breaker():
+    """search_by_cpe_sync shares the sync throttle timestamp, the LRU cache
+    (under a cpe:-namespaced key), and the circuit breaker with search_sync."""
+    import time as _time
+
+    client = NVDClient(CVESearchSettings(rate_limit_seconds=0.0, circuit_failure_threshold=5))
+    calls: list[dict] = []
+    with patch.object(
+        client,
+        "_fetch_by_params",
+        side_effect=lambda params: (calls.append(params), [CVEEntry(cve_id="CVE-CPE")])[1],
+    ):
+        assert client._last_request_time == 0.0
+        first = client.search_by_cpe_sync("cpe:2.3:a:apache:http_server:2.4.49:*:*:*:*:*:*:*")
+        assert client._last_request_time > 0.0, "CPE search must advance the shared throttle timestamp"
+        second = client.search_by_cpe_sync("cpe:2.3:a:apache:http_server:2.4.49:*:*:*:*:*:*:*")
+        assert second == first
+        assert len(calls) == 1, "second identical CPE search must be a cache hit"
+        assert calls[0]["cpeName"].startswith("cpe:2.3:a:apache")
+        # Cache namespaces do not collide with keyword search.
+        client.search_sync("cpe:2.3:a:apache:http_server:2.4.49:*:*:*:*:*:*:*")
+        assert len(calls) == 2, "keyword search must not hit the cpe:-namespaced entry"
+
+
+def test_search_by_cpe_sync_breaker_opens():
+    """Consecutive CPE fetch failures open the breaker; then it degrades to []."""
+    client = NVDClient(CVESearchSettings(rate_limit_seconds=0.0, circuit_failure_threshold=1))
+    with patch.object(client, "_fetch_by_params", side_effect=RuntimeError("NVD down")):
+        with pytest.raises(RuntimeError):
+            client.search_by_cpe_sync("cpe:2.3:a:x:y:1.0:*:*:*:*:*:*:*")
+        assert client.search_by_cpe_sync("cpe:2.3:a:x:y:1.0:*:*:*:*:*:*:*") == []
+
+
+class _FakeNVDResp:
+    def read(self):
+        return b'{"vulnerabilities": []}'
+
+
+def test_fetch_by_params_url_api_key_timeout_mapping(monkeypatch):
+    """Mocked urlopen: spaces encoded as %20 (not +), API key sent as a query
+    param, and the configured timeout forwarded."""
+    import urllib.request
+
+    captured: dict = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["timeout"] = timeout
+        captured["headers"] = {k.lower(): v for k, v in req.header_items()}
+        return _FakeNVDResp()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("NVD_API_KEY", "sekret-key")
+
+    client = NVDClient(CVESearchSettings(timeout_seconds=11, max_results=5))
+    assert client._fetch_by_params({"keywordSearch": "open ssh"}) == []
+    url = captured["url"]
+    assert "keywordSearch=open%20ssh" in url, f"spaces must be %20-encoded: {url}"
+    assert "apiKey=sekret-key" in url
+    assert captured["timeout"] == 11
+    assert "breachpilot" in captured["headers"].get("user-agent", "")
+
+
+def test_fetch_by_params_no_api_key_param_when_unset(monkeypatch):
+    """Without NVD_API_KEY no apiKey param is sent (unauth NVD budget)."""
+    import urllib.request
+
+    captured: dict = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        return _FakeNVDResp()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.delenv("NVD_API_KEY", raising=False)
+
+    client = NVDClient(CVESearchSettings())
+    client._fetch_by_params({"keywordSearch": "nginx"})
+    assert "apiKey" not in captured["url"]

@@ -15,7 +15,7 @@ from tools.logging_setup import get_logger
 from tools.recon.config import HostReconResult, ReconConfig
 from tools.recon.enumerator import SecondaryEnumerator
 from tools.recon.scanner import PrimaryReconScanner
-from tools.socket_scan import probe_reachable
+from tools.socket_scan import COMMON_PORTS, probe_reachable
 
 logger = get_logger()
 
@@ -39,11 +39,13 @@ class ReconPipeline:
         start = time.monotonic()
 
         # Pre-flight reachability probe (Phase 5, opt-in). Runs a couple of
-        # bare TCP connects *before* the expensive Nmap -p- scan. A host whose
-        # probe ports are all definitively refused would only confirm the same
-        # thing after a full 65535-port scan, so skip it now. Ambiguous results
-        # (timeout/filtered) fall through -- a firewalled host can still be
-        # attackable on a port the probe didn't cover, and this path can only
+        # bare TCP connects *before* the expensive Nmap -p- scan. Refused means
+        # the host is UP (an RST is an answer), so an all-refused verdict on a
+        # small probe set (default [80, 443]) only proves those ports are
+        # closed -- the host may still be attackable on an off-default port.
+        # Skip the full scan ONLY when every port of a COMMON_PORTS-sized
+        # sample was refused. Ambiguous results (timeout/filtered) and
+        # small-sample refused verdicts fall through -- this path can only
         # skip work, never add it.
         if self._config.preflight_probe:
             reachable = await probe_reachable(
@@ -52,14 +54,21 @@ class ReconPipeline:
                 timeout=self._config.preflight_timeout_ms / 1000.0,
             )
             if reachable is False:
-                logger.warning(
-                    f"Preflight probe: {target} refused on all probe ports "
-                    f"{self._config.preflight_ports} -- skipping full scan"
+                if len(list(self._config.preflight_ports)) >= len(COMMON_PORTS):
+                    logger.warning(
+                        f"Preflight probe: {target} refused on all probe ports "
+                        f"{self._config.preflight_ports} -- skipping full scan"
+                    )
+                    result = HostReconResult(target_ip=target)
+                    result.errors.append(
+                        f"target unreachable (preflight probe refused on {self._config.preflight_ports})"
+                    )
+                    result.scan_duration = max(time.monotonic() - start, 0.0001)
+                    return result
+                logger.info(
+                    f"Preflight probe: {target} refused on small probe set "
+                    f"{self._config.preflight_ports} -- proceeding with full scan (refused = host up)"
                 )
-                result = HostReconResult(target_ip=target)
-                result.errors.append(f"target unreachable (preflight probe refused on {self._config.preflight_ports})")
-                result.scan_duration = max(time.monotonic() - start, 0.0001)
-                return result
             elif reachable is None:
                 logger.info(f"Preflight probe: {target} ambiguous (timeout/filtered) -- proceeding with full scan")
 

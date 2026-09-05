@@ -64,11 +64,8 @@ _MAX_COMMENT_CHARS = 200
 _MAX_TECHNIQUES = 500
 _NAVIGATOR_LAYER_VERSION = "4.5"
 
-# ponytail: global technique-map cache, rebuilt if the file mtime changes.
-# Per-run cache would be cleaner, but the file is read once per export call and
-# the map is small (<20 entries); upgrade to mtime-keyed cache if exports run in
-# a hot loop.
-_MAP_CACHE: tuple[str, dict[str, str]] | None = None
+# Technique-map cache keyed on (path, mtime) so edits invalidate.
+_MAP_CACHE: tuple[tuple[str, float], dict[str, str]] | None = None
 
 
 def load_technique_map(map_path: str | Path | None) -> dict[str, str]:
@@ -83,7 +80,9 @@ def load_technique_map(map_path: str | Path | None) -> dict[str, str]:
         return dict(_DEFAULT_MAP)
     p = Path(map_path)
     try:
-        key = str(p.resolve())
+        key_path = str(p.resolve())
+        mtime = p.stat().st_mtime if p.is_file() else -1.0
+        key = (key_path, float(mtime))
     except OSError:
         return dict(_DEFAULT_MAP)
     if _MAP_CACHE is not None and _MAP_CACHE[0] == key:

@@ -14,11 +14,19 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from tools.campaign.state import AttackState, AttackTask
+from tools.campaign.state import AttackState, AttackTask, TaskStatus
 from tools.kernel.orchestration import atomic_write_json
 from tools.logging_setup import get_logger
 
 logger = get_logger()
+
+# Phase-machine adapter (do NOT merge the two machines): AttackTask.phase uses
+# tools/campaign/state.py::AttackPhase (RECONNAISSANCE/ENUMERATION/EXPLOITATION/
+# ...) while tools/attack_planner.py::AttackPhase is a separate planner-DAG
+# vocabulary (RECON/ENUMERATE/EXPLOIT/ESCALATE/LOOT/PIVOT/DONE). The persisted
+# "phase" value below is always the campaign enum's .value; planners map at
+# their own boundary. Keep them distinct — merging would couple the planner
+# DAG to the executor lifecycle.
 
 
 def save_state(self, path: Path | None = None) -> Path:
@@ -32,6 +40,7 @@ def save_state(self, path: Path | None = None) -> Path:
         # _new_task_id restarts at ATK-00001, colliding with restored task
         # IDs and overwriting them (silent data loss on every resume).
         "task_counter": self._task_counter,
+        "prereq_tasks_added": self._prereq_tasks_added,
     }
     atomic_write_json(save_path, data)
     logger.info(f"Attack state saved to {save_path}")
@@ -73,6 +82,10 @@ def load_state(self, path: Path) -> bool:
         self._task_counter = int(data.get("task_counter", 0))
     except (TypeError, ValueError):
         self._task_counter = 0
+    try:
+        self._prereq_tasks_added = int(data.get("prereq_tasks_added", 0))
+    except (TypeError, ValueError):
+        self._prereq_tasks_added = 0
     loaded_states = 0
     loaded_tasks = 0
     for target, sdict in states_data.items():
@@ -91,6 +104,12 @@ def load_state(self, path: Path) -> bool:
             loaded_tasks += 1
         except Exception as exc:
             logger.warning(f"load_state: skipping task {tid} ({exc})")
+
+    # Belt-and-braces with from_dict's own demotion: stale in-flight tasks
+    # re-queue as PENDING so resume retries them instead of wedging.
+    for t in self._tasks.values():
+        if t.status in (TaskStatus.RUNNING, TaskStatus.RETRYING):
+            t.status = TaskStatus.PENDING
 
     logger.info(f"Attack state loaded from {path} ({loaded_states} states, {loaded_tasks} tasks)")
     return loaded_states > 0 or loaded_tasks > 0

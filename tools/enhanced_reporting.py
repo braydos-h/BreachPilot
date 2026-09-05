@@ -1364,9 +1364,9 @@ def _confidence_from_verdict(verdict: str | None) -> float:
         return 0.95
     if verdict == "refuted":
         return 0.2
-    if verdict == "inconclusive":
+    if verdict in ("inconclusive", "exhausted", "open"):
         return 0.5
-    return 0.9  # no verdict -> existing default
+    return 0.5
 
 
 def _resolve_verdict(

@@ -42,6 +42,7 @@ export function deriveCurrentPhase(events: RunEvent[]): string {
   let phase = "starting";
   for (let i = 0; i < events.length; i++) {
     const ev = events[i];
+    if (!ev) continue;
     if (ev.type === "phase" && typeof ev.payload.phase === "string" && ev.payload.phase) {
       phase = ev.payload.phase;
     } else if (ev.type === "progress" && typeof ev.payload.phase === "string" && ev.payload.phase) {
@@ -154,6 +155,7 @@ export function deriveRunState(events: RunEvent[]): DerivedRun {
 
   for (let i = 0; i < events.length; i++) {
     const ev = events[i];
+    if (!ev) continue;
     const p = ev.payload ?? {};
     lastEventType = ev.type;
     if (ev.type !== "heartbeat") lastMeaningfulAt = ev.timestamp ?? lastMeaningfulAt;
@@ -297,8 +299,10 @@ export function deriveRunState(events: RunEvent[]): DerivedRun {
 
   let eventsPerMin: number | null = null;
   if (events.length >= 2) {
-    const first = events[0].timestamp ? Date.parse(events[0].timestamp) : NaN;
-    const last = events[events.length - 1].timestamp ? Date.parse(events[events.length - 1].timestamp) : NaN;
+    const firstTs = events[0]?.timestamp;
+    const lastTs = events[events.length - 1]?.timestamp;
+    const first = firstTs ? Date.parse(firstTs) : NaN;
+    const last = lastTs ? Date.parse(lastTs) : NaN;
     if (Number.isFinite(first) && Number.isFinite(last) && last > first) {
       const mins = (last - first) / 60000;
       eventsPerMin = mins > 0 ? Math.round(events.length / mins) : null;

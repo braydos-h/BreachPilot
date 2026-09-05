@@ -95,7 +95,8 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ValueError)
     async def _value_exc_handler(request: Request, exc: ValueError) -> JSONResponse:
         rid = getattr(request.state, "request_id", "")
-        return _error_response("value_error", str(exc), 400, rid)
+        # ponytail: never echo str(exc) — paths/ internals leak to the UI.
+        return _error_response("value_error", "Invalid request", 400, rid)
 
     @app.exception_handler(Exception)
     async def _unhandled_exc_handler(request: Request, exc: Exception) -> JSONResponse:

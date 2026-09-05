@@ -136,19 +136,25 @@ class AttackModuleExecutor:
             {"attempt": task.retry_count + 1, "aggression": task.aggression.value},
         )
 
-        # Scope check
-        if self._scope_gate:
-            scope_result = self._scope_gate.check_scope(
-                asset=task.target,
-                action_type=task.phase.value,
-                tool_name=task.module_name,
-                risk_level="high" if task.aggression == AggressionLevel.MAXIMUM else "medium",
-            )
-            if not scope_result.allowed:
-                task.status = TaskStatus.BLOCKED
-                task.error = f"Scope blocked: {scope_result.reason}"
-                state.add_timeline_event("blocked", task.error)
-                return {"success": False, "error": task.error, "blocked": True}
+        # Scope check — fail closed: with no gate wired there is no authorized
+        # attack step, so block rather than run ungated (NEVER add a host
+        # fallback or permissive path here).
+        if self._scope_gate is None:
+            task.status = TaskStatus.BLOCKED
+            task.error = "Scope blocked: no scope gate wired (fail-closed)"
+            state.add_timeline_event("blocked", task.error)
+            return {"success": False, "error": task.error, "blocked": True}
+        scope_result = self._scope_gate.check_scope(
+            asset=task.target,
+            action_type=task.phase.value,
+            tool_name=task.module_name,
+            risk_level="high" if task.aggression == AggressionLevel.MAXIMUM else "medium",
+        )
+        if not scope_result.allowed:
+            task.status = TaskStatus.BLOCKED
+            task.error = f"Scope blocked: {scope_result.reason}"
+            state.add_timeline_event("blocked", task.error)
+            return {"success": False, "error": task.error, "blocked": True}
 
         # Risk check
         if self._risk_controller:
@@ -511,6 +517,19 @@ class AttackModuleExecutor:
         # as the MCP loop. A failure only logs — never blocks the dispatch.
         await self._snapshot_before_destructive(task, state, command)
 
+        # ── Fail-closed target lock before dispatch ─────────────────────────
+        # No scope gate, a missed/failed scope check, or an off-allowlist
+        # command blocks the dispatch (fail closed; NEVER a host-execution
+        # fallback). A failure classification makes the caller mark FAILED.
+        block_reason = self._dispatch_block_reason(command, task)
+        if block_reason is not None:
+            state.add_timeline_event(
+                "dispatch_blocked",
+                f"{module.name} dispatch blocked: {block_reason}",
+                {"command": command[:200]},
+            )
+            return "", {"outcome": "failure", "shell_type": "", "privilege_level": "", "evidence": [block_reason]}
+
         try:
             output = await asyncio.to_thread(executor, command, {"target": task.target})
         except Exception as exc:  # noqa: BLE001 -- best-effort dispatch
@@ -540,6 +559,32 @@ class AttackModuleExecutor:
             classification = {"outcome": "unknown", "shell_type": "", "privilege_level": "", "evidence": []}
 
         return output_text, classification
+
+    def _dispatch_block_reason(self, command: str, task: AttackTask) -> str | None:
+        """Fail-closed gate for artifact dispatch (None = proceed).
+
+        Blocks when no scope gate is wired, the scope check misses/fails, or
+        the existing ``_target_lock_block`` flags an off-allowlist destination.
+        """
+        if self._scope_gate is None:
+            return "no scope gate wired (fail-closed)"
+        try:
+            scope_result = self._scope_gate.check_scope(
+                asset=task.target,
+                action_type=task.phase.value,
+                tool_name=task.module_name,
+                risk_level="high" if task.aggression == AggressionLevel.MAXIMUM else "medium",
+            )
+        except Exception as exc:  # noqa: BLE001 -- a broken gate blocks, never passes
+            return f"scope check raised: {exc}"
+        if not scope_result.allowed:
+            return f"Scope blocked: {scope_result.reason}"
+        try:
+            from tools.mcp_tools.terminal import _target_lock_block
+
+            return _target_lock_block(command, self._mission_config)
+        except Exception as exc:  # noqa: BLE001 -- a broken lock blocks, never passes
+            return f"target-lock check raised: {exc}"
 
     async def _snapshot_before_destructive(
         self,
@@ -596,10 +641,9 @@ class AttackModuleExecutor:
         scope/risk checks above apply). A returned dict carries
         decision/reasoning/modifications. The critic performs its OWN
         scope/risk checks, so this is defense-in-depth, not a substitute for
-        the inline checks. Critic exceptions are swallowed and logged -- we
-        fail OPEN here because the inline checks already enforced scope/risk,
-        so a critic crash cannot widen scope; it can only lose the extra
-        reasoning layer.
+        the inline checks. A critic EXCEPTION denies (fail closed): unlike the
+        inline checks it is the last reasoning layer before module code runs,
+        so a crashed critic must not silently green-light the run.
         """
         if self._critic is None:
             return None
@@ -625,12 +669,13 @@ class AttackModuleExecutor:
             )
             if result and result.output:
                 return dict(result.output)
-        except Exception as exc:  # fail open -- see docstring
+        except Exception as exc:  # fail closed -- see docstring
             logger.warning(
-                "Critic pre-check raised for %s (failing open): %r",
+                "Critic pre-check raised for %s (denying): %r",
                 task.module_name,
                 exc,
             )
+            return {"decision": "deny", "reasoning": f"critic error (fail-closed): {exc}"}
         return None
 
     def _apply_critic_modifications(self, task: AttackTask, modifications: dict[str, Any]) -> None:

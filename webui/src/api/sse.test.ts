@@ -45,8 +45,8 @@ describe("SseParser", () => {
   it("parses a single event", () => {
     const msgs = messagesFrom('data: {"a":1}\n\n');
     expect(msgs).toHaveLength(1);
-    expect(msgs[0].data).toBe('{"a":1}');
-    expect(msgs[0].event).toBe("message");
+    expect(msgs[0]!.data).toBe('{"a":1}');
+    expect(msgs[0]!.event).toBe("message");
   });
 
   it("parses multiple events in one chunk", () => {
@@ -57,45 +57,45 @@ describe("SseParser", () => {
   it("parses one event split across multiple chunks", () => {
     const msgs = messagesFrom('data: hel', 'lo\n\n');
     expect(msgs).toHaveLength(1);
-    expect(msgs[0].data).toBe("hello");
+    expect(msgs[0]!.data).toBe("hello");
   });
 
   it("splits a single line across several chunks", () => {
     const msgs = messagesFrom("data: 12", "345", "6789\n\n");
     expect(msgs).toHaveLength(1);
-    expect(msgs[0].data).toBe("123456789");
+    expect(msgs[0]!.data).toBe("123456789");
   });
 
   it("joins multiline data with newlines", () => {
     const msgs = messagesFrom("data: line1\ndata: line2\ndata: line3\n\n");
     expect(msgs).toHaveLength(1);
-    expect(msgs[0].data).toBe("line1\nline2\nline3");
+    expect(msgs[0]!.data).toBe("line1\nline2\nline3");
   });
 
   it("ignores keepalive comments starting with colon", () => {
     const msgs = messagesFrom(": heartbeat\n: still here\n\ndata: real\n\n");
     expect(msgs).toHaveLength(1);
-    expect(msgs[0].data).toBe("real");
+    expect(msgs[0]!.data).toBe("real");
   });
 
   it("handles event: and id: fields", () => {
     const msgs = messagesFrom('id: 42\nevent: status\ndata: ok\n\n');
     expect(msgs).toHaveLength(1);
-    expect(msgs[0].id).toBe("42");
-    expect(msgs[0].event).toBe("status");
-    expect(msgs[0].data).toBe("ok");
+    expect(msgs[0]!.id).toBe("42");
+    expect(msgs[0]!.event).toBe("status");
+    expect(msgs[0]!.data).toBe("ok");
   });
 
   it("handles CRLF line endings", () => {
     const msgs = messagesFrom("data: hello\r\n\r\n");
     expect(msgs).toHaveLength(1);
-    expect(msgs[0].data).toBe("hello");
+    expect(msgs[0]!.data).toBe("hello");
   });
 
   it("emits an unterminated trailing event on finish", () => {
     const msgs = messagesFrom("data: trailing");
     expect(msgs).toHaveLength(1);
-    expect(msgs[0].data).toBe("trailing");
+    expect(msgs[0]!.data).toBe("trailing");
   });
 
   it("handles a blank line with no pending data without emitting", () => {
@@ -127,7 +127,7 @@ describe("streamSSE", () => {
     await waitFor(() => expect(events).toEqual(['{"seq":1}']));
     handle.close();
 
-    const [url, init] = fetchMock.mock.calls[0];
+    const [url, init] = fetchMock.mock.calls[0]!;
     expect(String(url)).not.toContain("super-secret-token");
     expect(String(url)).not.toContain("token=");
     const headers = init?.headers as Record<string, string> | undefined;
@@ -155,7 +155,7 @@ describe("streamSSE", () => {
     controller.abort();
 
     expect(fatal).toHaveBeenCalledTimes(1);
-    expect(fatal.mock.calls[0][0].authError).toBe(true);
+    expect(fatal.mock.calls[0]![0]!.authError).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(statuses.filter((s) => s === "reconnecting")).toHaveLength(0);
   });

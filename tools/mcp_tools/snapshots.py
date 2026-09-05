@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from tools.mcp_tools.registry import *
+from tools.mcp_tools.registry import ToolContext
 
 
 def register_snapshot_tools(mcp: Any, *, ctx: ToolContext) -> None:

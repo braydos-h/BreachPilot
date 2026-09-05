@@ -162,9 +162,12 @@ def test_get_provider_config_falls_back_to_legacy_block():
 
 
 def test_get_provider_config_unknown_id_is_empty():
+    import pytest
+
     from tools.config.loader import get_provider_config
 
-    assert get_provider_config({}, "nope") == {}
+    with pytest.raises(ValueError, match="Unknown model provider"):
+        get_provider_config({}, "nope")
 
 
 def test_get_model_host_ollama_only():

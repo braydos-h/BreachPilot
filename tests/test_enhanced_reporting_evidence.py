@@ -165,8 +165,9 @@ def test_explicit_state_evidence_refs_take_precedence(generator, evidence_store)
         ("confirmed", 0.95),
         ("refuted", 0.2),
         ("inconclusive", 0.5),
-        ("open", 0.9),
-        (None, 0.9),
+        ("open", 0.5),
+        ("exhausted", 0.5),
+        (None, 0.5),
     ],
 )
 def test_confidence_reflects_verdict(generator, verdict, expected):
@@ -209,8 +210,9 @@ def test_resolve_verdict_helpers():
     assert _confidence_from_verdict("confirmed") == 0.95
     assert _confidence_from_verdict("refuted") == 0.2
     assert _confidence_from_verdict("inconclusive") == 0.5
-    assert _confidence_from_verdict(None) == 0.9
-    assert _confidence_from_verdict("exhausted") == 0.9
+    assert _confidence_from_verdict(None) == 0.5
+    assert _confidence_from_verdict("exhausted") == 0.5
+    assert _confidence_from_verdict("open") == 0.5
 
 
 # ── Chain timestamps ──────────────────────────────────────────────────────

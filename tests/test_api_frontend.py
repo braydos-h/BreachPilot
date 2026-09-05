@@ -16,7 +16,9 @@ from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 
 
-def _make_client(tmp_path, monkeypatch, token="test-token", ollama_host="http://localhost:11434"):
+def _make_client(
+    tmp_path, monkeypatch, token="test-token-0123456789abcdef01234567", ollama_host="http://localhost:11434"
+):
     """Create a TestClient with a known token + minimal config (no Ollama needed).
 
     ``ollama_host`` lets a test point the live-models route at an unreachable
@@ -54,7 +56,7 @@ def _make_client(tmp_path, monkeypatch, token="test-token", ollama_host="http://
     return TestClient(app)
 
 
-def _auth(token="test-token"):
+def _auth(token="test-token-0123456789abcdef01234567"):
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -154,7 +156,7 @@ def test_models_live_falls_back_when_ollama_unreachable(tmp_path, monkeypatch):
     assert "glm-5.2:cloud" in data["models"]
 
 
-def _make_chatgpt_client(tmp_path, monkeypatch, token="test-token"):
+def _make_chatgpt_client(tmp_path, monkeypatch, token="test-token-0123456789abcdef01234567"):
     """Like _make_client but with provider=chatgpt + a chatgpt block pointing at a
     closed port so the /v1/models probe fails deterministically."""
     monkeypatch.setenv("BREACHPILOT_API_TOKEN", token)
@@ -611,7 +613,7 @@ def test_sse_rejects_token_in_query_string(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
     created = _create_run(client)
     resp = client.get(
-        f"/api/v1/runs/{created['run_id']}/events/stream?after=0&token=test-token",
+        f"/api/v1/runs/{created['run_id']}/events/stream?after=0&token=test-token-0123456789abcdef01234567",
     )
     assert resp.status_code == 401
 
@@ -709,3 +711,26 @@ def test_workspace_rejects_traversal_outside_run(tmp_path, monkeypatch):
     created = _create_run(client)
     resp = client.get(f"/api/v1/runs/{created['run_id']}/workspace/../api_runtime.db", headers=_auth())
     assert resp.status_code in (400, 404)
+
+
+def test_openapi_covers_frontend_routes(tmp_path, monkeypatch):
+    """Contract: every route the WebUI apiFetch layer calls must exist in /openapi.json."""
+    client = _make_client(tmp_path, monkeypatch)
+    spec = client.get("/openapi.json")
+    assert spec.status_code == 200
+    paths = set(spec.json().get("paths", {}))
+    required = [
+        "/api/v1/runs",
+        "/api/v1/runs/{run_id}",
+        "/api/v1/runs/{run_id}/events",
+        "/api/v1/runs/{run_id}/decisions",
+        "/api/v1/runs/{run_id}/artifacts",
+        "/api/v1/runs/{run_id}/workspace",
+        "/api/v1/runs/{run_id}/audit",
+        "/api/v1/runs/{run_id}/credentials",
+        "/api/v1/runs/{run_id}/loot",
+        "/api/v1/models/live",
+        "/api/v1/config",
+    ]
+    missing = [p for p in required if not any(q == p or q.startswith(p + "/") for q in paths)]
+    assert not missing, f"frontend routes missing from OpenAPI: {missing}"

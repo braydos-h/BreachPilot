@@ -43,11 +43,12 @@ describe("buildEventRows", () => {
     ]);
     const tools = rows.filter((r) => r.kind === "tool");
     expect(tools).toHaveLength(1);
-    expect(tools[0].key).toBe("tool-action-1");
-    if (tools[0].kind === "tool") {
-      expect(tools[0].group.toolName).toBe("nmap");
-      expect(tools[0].group.completed).toBe(true);
-      expect(tools[0].group.result).toBe("port 80 open");
+    const first = tools[0];
+    expect(first?.key).toBe("tool-action-1");
+    if (first?.kind === "tool") {
+      expect(first.group.toolName).toBe("nmap");
+      expect(first.group.completed).toBe(true);
+      expect(first.group.result).toBe("port 80 open");
     }
   });
 
@@ -58,8 +59,8 @@ describe("buildEventRows", () => {
     ]);
     expect(rows).toHaveLength(1);
     const row = rows[0];
-    expect(row.kind).toBe("tool");
-    if (row.kind === "tool") expect(row.group.error).toBe("connection refused");
+    expect(row?.kind).toBe("tool");
+    if (row?.kind === "tool") expect(row.group.error).toBe("connection refused");
   });
 
   it("skips boot/ok and renders only pending approvals with a known decision", () => {

@@ -25,6 +25,7 @@ Design rules:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -609,7 +610,9 @@ class SnapshotManager:
             return None
         try:
             ref = self.provider.create(vm_id, label)
-        except Exception:  # noqa: BLE001 -- fail-open, never break the attack
+        except Exception as exc:  # noqa: BLE001 -- fail-open, never break the attack
+            # ponytail: fail-open contract kept — only a warning log is added.
+            logging.getLogger(__name__).warning("snapshot before %s failed (continuing): %s", label, exc)
             return None
         self._record(ref)
         self._enforce_cap(vm_id)

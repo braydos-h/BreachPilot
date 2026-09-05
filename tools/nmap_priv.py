@@ -18,8 +18,9 @@ import os
 import re
 
 # nmap flags that require root / CAP_NET_RAW on Linux. Connect-scan + service
-# detection do not; SYN/Xmas/Null/FIN/ACK/Maimon + OS detection (``-O``) do.
-_NMAP_ROOT_FLAGS: set[str] = {"-O", "-sS", "-sX", "-sN", "-sF", "-sA", "-sM"}
+# detection do not; SYN/Xmas/Null/FIN/ACK/Maimon + UDP (-sU) + OS detection
+# (``-O``) do.
+_NMAP_ROOT_FLAGS: set[str] = {"-O", "-sS", "-sU", "-sX", "-sN", "-sF", "-sA", "-sM"}
 
 
 def _is_privileged() -> bool:

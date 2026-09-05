@@ -182,7 +182,8 @@ class ApiPersistence:
         except sqlite3.Error:
             pass
         try:
-            conn.execute("PRAGMA synchronous=NORMAL")
+            # ponytail: FULL (not NORMAL) so a crash can't lose the WAL tail.
+            conn.execute("PRAGMA synchronous=FULL")
         except sqlite3.Error:
             pass
         return conn

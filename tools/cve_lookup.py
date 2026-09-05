@@ -226,6 +226,10 @@ class NVDClient:
         self.settings = settings
         self._last_request_time: float = 0.0
         self._lock = asyncio.Lock()
+        # Sync-path throttle lock: search_sync/search_by_cpe_sync may run on
+        # threads without a running loop, so the gap check + timestamp update
+        # on _last_request_time must hold this instead of the asyncio lock.
+        self._throttle_lock = threading.Lock()
         self._cache: OrderedDict[str, tuple[float, list[CVEEntry]]] = OrderedDict()
         # M23: the LRU cache is shared between the sync and async search paths
         # (and across threads when search_sync is called concurrently), so all
@@ -309,6 +313,18 @@ class NVDClient:
                 self._cache.popitem(last=False)
         return entries
 
+    def _throttle_sync(self) -> None:
+        """Sync-path NVD rate-limit gap (shared limiter or locked timestamp)."""
+        if self._rate_limiter is not None:
+            # Tier 1.8: shared limiter path (sync variant).
+            self._rate_limiter.acquire_sync("nvd")
+        else:
+            with self._throttle_lock:
+                elapsed = time.monotonic() - self._last_request_time
+                if elapsed < self.settings.rate_limit_seconds:
+                    time.sleep(self.settings.rate_limit_seconds - elapsed)
+                self._last_request_time = time.monotonic()
+
     def search_sync(self, query: str) -> list[CVEEntry]:
         """Synchronous wrapper that reuses the same fetching/caching logic."""
         if not self.settings.enabled:
@@ -332,14 +348,7 @@ class NVDClient:
         if not self._breaker.can_execute():
             return []
 
-        if self._rate_limiter is not None:
-            # Tier 1.8: shared limiter path (sync variant).
-            self._rate_limiter.acquire_sync("nvd")
-        else:
-            elapsed = time.monotonic() - self._last_request_time
-            if elapsed < self.settings.rate_limit_seconds:
-                time.sleep(self.settings.rate_limit_seconds - elapsed)
-            self._last_request_time = time.monotonic()
+        self._throttle_sync()
 
         try:
             entries = self._fetch_sync(clean_query)
@@ -434,15 +443,56 @@ class NVDClient:
 
     # Phase 2: NVD CPE-name search (vuln-intel by product configuration).
     def search_by_cpe_sync(self, cpe: str) -> list[CVEEntry]:
-        """Synchronous NVD search by CPE name (cpeName parameter)."""
+        """Synchronous NVD search by CPE name (cpeName parameter).
+
+        Same acquire/breaker/cache discipline as :meth:`search_sync` (shared
+        rate-limit budget, circuit-breaker degradation, LRU cache) so CPE
+        lookups cannot bypass the NVD throttle.
+        """
         if not self.settings.enabled or not cpe:
             return []
-        return self._fetch_by_params(
-            {
-                "cpeName": cpe,
-                "resultsPerPage": str(self.settings.max_results),
-            }
-        )
+        clean_cpe = " ".join(str(cpe).strip().split())
+        if not clean_cpe:
+            return []
+
+        cache_key = "cpe:" + clean_cpe.lower()
+        now = time.monotonic()
+        with self._cache_lock:
+            if cache_key in self._cache:
+                cached_at, entries = self._cache[cache_key]
+                if now - cached_at < self.settings.cache_ttl_seconds:
+                    self._cache.move_to_end(cache_key)
+                    return entries
+                else:
+                    del self._cache[cache_key]
+
+        if not self._breaker.can_execute():
+            return []
+
+        self._throttle_sync()
+
+        try:
+            entries = self._fetch_by_params(
+                {
+                    "cpeName": clean_cpe,
+                    "resultsPerPage": str(self.settings.max_results),
+                }
+            )
+        except NVDHTTPError as exc:
+            if 400 <= exc.code < 500:
+                self._breaker.record_success()
+            else:
+                self._breaker.record_failure()
+            raise
+        except Exception:
+            self._breaker.record_failure()
+            raise
+        self._breaker.record_success()
+        with self._cache_lock:
+            self._cache[cache_key] = (time.monotonic(), entries)
+            if len(self._cache) > self.settings.cache_max_entries:
+                self._cache.popitem(last=False)
+        return entries
 
     async def search_by_cpe(self, cpe: str) -> list[CVEEntry]:
         loop = asyncio.get_running_loop()

@@ -7,7 +7,7 @@ import sqlite3
 from fastapi.testclient import TestClient
 
 
-def _make_client(tmp_path, monkeypatch, token="test-token"):
+def _make_client(tmp_path, monkeypatch, token="test-token-0123456789abcdef01234567"):
     monkeypatch.setenv("BREACHPILOT_API_TOKEN", token)
     monkeypatch.setenv("RESEARCH_WORKSPACE", str(tmp_path / "research_workspace"))
     monkeypatch.chdir(tmp_path)
@@ -28,7 +28,7 @@ def _make_client(tmp_path, monkeypatch, token="test-token"):
     return TestClient(create_app(config_path=config_path))
 
 
-def _auth(token="test-token"):
+def _auth(token="test-token-0123456789abcdef01234567"):
     return {"Authorization": f"Bearer {token}"}
 
 

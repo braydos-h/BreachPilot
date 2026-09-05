@@ -20,7 +20,7 @@ export function KillChain({ className }: { className?: string }) {
     >
       {NODES.slice(0, -1).map((n, i) => {
         const x1 = n.x + R;
-        const x2 = NODES[i + 1].x - R;
+        const x2 = (NODES[i + 1]?.x ?? n.x) - R;
         return (
           <g key={n.label}>
             <path

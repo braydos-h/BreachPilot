@@ -122,9 +122,9 @@ export function groupBrowserScreenshots(files: Array<{ path: string }>): Map<str
   for (const file of files) {
     const segments = file.path.split("/");
     if (segments[0] !== "browser" || segments.length < 2) continue;
-    const ext = (segments[segments.length - 1].split(".").pop() ?? "").toLowerCase();
+    const ext = ((segments[segments.length - 1] ?? "").split(".").pop() ?? "").toLowerCase();
     if (!IMAGE_EXTS.has(ext)) continue;
-    const sessionId = segments[1];
+    const sessionId = segments[1] ?? "";
     const list = grouped.get(sessionId) ?? [];
     list.push(file.path);
     grouped.set(sessionId, list);

@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import os
+import re
+import signal
 import subprocess
+import time
+from typing import Any
 
-from tools.mcp_tools.registry import *
-from tools.metasploit_bridge import MSF_RECIPES, get_msf_recipe
+from tools.mcp_shared import _attempt_dir, _extract_msf_rhosts, check_targets_allowlist
+from tools.mcp_tools.registry import ToolContext, _platform_system
+from tools.metasploit_bridge import MSF_RECIPES, MetasploitBridge, get_metasploit_bridge, get_msf_recipe
+from tools.validation_utils import validate_target_or_ip
 
 
 def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:

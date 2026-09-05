@@ -25,7 +25,8 @@ def test_capture_tool_result_extracts_current_attack_facts(tmp_path):
     context = store.format_context()
     assert "22/tcp" in context
     assert "CVE-2026-0001" in context
-    assert "password: SuperSecret!" in context
+    assert "SuperSecret!" not in context
+    assert "[redacted]" in context
     assert "Meterpreter session 1 opened" in context
     assert "C:\\work\\evidence\\attempt-1.txt" in context
 

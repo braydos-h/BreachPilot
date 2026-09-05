@@ -425,13 +425,10 @@ class OllamaProvider(BaseProvider):
         del provider_config  # ollama reads its block via provider_config
         registry = dict((config or {}).get("models", {}).get("registry") or {}) or dict(DEFAULT_MODEL_REGISTRY)
         router = ModelRouter()
-        host = self.default_host(config)
-        for alias, model_name in registry.items():
+        for alias in registry:
             router.register(
                 str(alias),
-                self.build_client(
-                    config, str(model_name), alias=str(alias), request_timeout_seconds=request_timeout_seconds
-                ),
+                self.build_client(config, str(alias), request_timeout_seconds=request_timeout_seconds),
             )
         return router
 
@@ -444,10 +441,16 @@ class OllamaProvider(BaseProvider):
     ) -> ModelClient:
         from tools.model_router import _build_model_client
 
+        registry = dict((config or {}).get("models", {}).get("registry") or {}) or dict(DEFAULT_MODEL_REGISTRY)
+        key = str(alias or "").strip()
+        if not key:
+            models_cfg = (config or {}).get("models") or {}
+            key = str(models_cfg.get("default_alias", "") or "").strip() or next(iter(registry), "")
+        concrete = str(registry.get(key, key) or key)
         return _build_model_client(
-            alias,
+            concrete,
             host=self.default_host(config),
-            alias=alias,
+            alias=key or concrete,
             request_timeout_seconds=request_timeout_seconds,
         )
 

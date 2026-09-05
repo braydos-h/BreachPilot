@@ -50,7 +50,7 @@ def _opsec_advisory_block(sanitized_command: str, config: Any) -> str:
         return ""
 
 
-def _target_lock_block(command: str, config: Any) -> str | None:
+def _target_lock_block(command: str, config: Any, *, allow_empty: bool = False) -> str | None:
     """Return a block reason if ``command`` touches a host outside the target
     allowlist, else None.
 
@@ -61,6 +61,13 @@ def _target_lock_block(command: str, config: Any) -> str | None:
     destination endpoint (URL authorities, /dev/tcp hosts, LHOST/RHOST, scanner
     verb targets, bare IPs) must be in that allowlist. Operator-authorized
     callback/C2 hosts are added via ``exploit.allowed_targets`` in config.yaml.
+
+    Fail closed on empty: a target-touching free-text command that names no
+    checkable destination (variable indirection, ``curl $URL``) cannot prove it
+    stays inside the allowlist, so it is denied. ``allow_empty=True`` is only
+    for static literal scans (e.g. a Python script body) where the absence of
+    literals means no literal pivot -- and where the tool's structured
+    ``target_ip`` gate already denies an empty target.
     """
     exploit_cfg = (config or {}).get("exploit", {})
     if not exploit_cfg.get("require_explicit_allowlist", False):
@@ -78,6 +85,16 @@ def _target_lock_block(command: str, config: Any) -> str | None:
     for _tok in _extract_scanner_targets(command):
         if _tok not in _dest_tokens:
             _dest_tokens.append(_tok)
+    if not _dest_tokens and not allow_empty:
+        # Fail closed: a target-touching free-text command that names no
+        # destination cannot prove it stays inside the allowlist (bare
+        # `curl $URL`, variable indirection, DNS-resolved hosts). Name the
+        # target literally.
+        return (
+            "No allowlisted target found in command. Target-touching tools must "
+            "name their destination literally so it can be checked against "
+            "exploit.allowed_targets."
+        )
     for _tok in _dest_tokens:
         _decoded = _cmd_endpoint_ips(_tok)
         _targets = _decoded if _decoded else [_tok]

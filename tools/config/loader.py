@@ -151,7 +151,9 @@ def get_provider_config(config: dict[str, Any] | None = None, provider_id: str =
                 if value is not None:
                     ollama[key] = value
         return ollama
-    return {}
+    if not pid:
+        return {}
+    raise ValueError(f"Unknown model provider '{provider_id}'. Expected one of: ollama, chatgpt, opencode_go.")
 
 
 def get_embeddings_config(config: dict[str, Any] | None = None) -> dict[str, Any]:

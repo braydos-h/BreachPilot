@@ -19,9 +19,11 @@ Gates:
 from __future__ import annotations
 
 import json
+from typing import Any
 
+from tools.attack_modules import get_module
 from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
-from tools.mcp_tools.registry import *
+from tools.mcp_tools.registry import ToolContext, _positive_int, _skills_config, _truncate_text
 
 
 # ponytail: sync introspection of FastMCP's tool registry. ``mcp.list_tools()``

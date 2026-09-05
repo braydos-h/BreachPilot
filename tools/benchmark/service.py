@@ -33,6 +33,12 @@ class BenchmarkService:
         self._cancel_event: asyncio.Event | None = None
         self._subscribers: set[asyncio.Queue[dict[str, Any] | None]] = set()
         self._status: dict[str, Any] = {"run_id": None, "state": "idle", "error": ""}
+        # ponytail: bound by app.create_app so runs count toward the cap.
+        self._run_manager: Any = None
+
+    def is_active(self) -> bool:
+        """True while a benchmark run is live."""
+        return self._active_task is not None and not self._active_task.done()
 
     # ------------------------------------------------------------------ state
 
@@ -51,8 +57,14 @@ class BenchmarkService:
         ``request`` keys: suite, scenarios, tags, trials, model, sandbox_required,
         timeout_seconds, save_baseline, check_regression.
         """
-        if self._active_task is not None and not self._active_task.done():
+        if self.is_active():
             return {"error": "a benchmark run is already active", "run_id": self._active_run_id}
+        # ponytail: single global cap — active API runs occupy benchmark slots.
+        if self._run_manager is not None:
+            cap = int(((self.config.get("api", {}) or {}).get("max_concurrent_runs", 1)) or 1)
+            busy = len(getattr(self._run_manager, "active_run_ids", []))
+            if busy >= max(cap, 1):
+                return {"error": f"{cap} run(s) already active. Cancel one first (api.max_concurrent_runs)."}
 
         suite = str(request.get("suite", "") or "").strip()
         if not suite:

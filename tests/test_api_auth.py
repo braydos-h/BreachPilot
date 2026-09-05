@@ -29,9 +29,9 @@ def test_non_loopback_refused(host):
 
 
 def test_token_env_override(monkeypatch):
-    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-token-123")
-    token = load_or_create_token(".webui_secret_key", env_override="test-token-123")
-    assert token == "test-token-123"
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-token-0123456789abcdef01234567-123")
+    token = load_or_create_token(".webui_secret_key", env_override="test-token-0123456789abcdef01234567-123")
+    assert token == "test-token-0123456789abcdef01234567-123"
 
 
 def test_token_generated_when_no_env_no_file(tmp_path):
@@ -84,7 +84,7 @@ def test_explicit_allowed_origin():
 
 def _make_client(tmp_path, monkeypatch):
     """Create a TestClient with a known token."""
-    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-bearer-token")
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-bearer-token-0123456789abcdef")
     monkeypatch.chdir(tmp_path)
     from app import create_app
 
@@ -113,7 +113,7 @@ def test_protected_route_with_wrong_token(tmp_path, monkeypatch):
 
 def test_protected_route_with_valid_token(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
-    resp = client.get("/api/v1/capabilities", headers={"Authorization": "Bearer test-bearer-token"})
+    resp = client.get("/api/v1/capabilities", headers={"Authorization": "Bearer test-bearer-token-0123456789abcdef"})
     assert resp.status_code == 200
     data = resp.json()
     assert "features" in data
@@ -130,13 +130,13 @@ def test_config_redacts_secrets(tmp_path, monkeypatch):
         "cve_lookup:\n  api_key_env: NVD_API_KEY\n",
         encoding="utf-8",
     )
-    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-token")
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-token-0123456789abcdef01234567")
     monkeypatch.chdir(tmp_path)
     from app import create_app
 
     app = create_app(config_path=config_path)
     client = TestClient(app)
-    resp = client.get("/api/v1/config", headers={"Authorization": "Bearer test-token"})
+    resp = client.get("/api/v1/config", headers={"Authorization": "Bearer test-token-0123456789abcdef01234567"})
     assert resp.status_code == 200
     # The response should be redacted.
     body = resp.json()
@@ -148,7 +148,7 @@ def test_secret_write_rejects_unknown_names(tmp_path, monkeypatch):
     response = client.put(
         "/api/v1/secrets",
         json={"secrets": {"NOT_A_CONFIGURED_KEY": "secret"}},
-        headers={"Authorization": "Bearer test-bearer-token"},
+        headers={"Authorization": "Bearer test-bearer-token-0123456789abcdef"},
     )
     assert response.status_code == 400
 
@@ -160,7 +160,47 @@ def test_secret_write_uses_configured_store(tmp_path, monkeypatch):
     response = client.put(
         "/api/v1/secrets",
         json={"secrets": {"NVD_API_KEY": "secret"}},
-        headers={"Authorization": "Bearer test-bearer-token"},
+        headers={"Authorization": "Bearer test-bearer-token-0123456789abcdef"},
     )
     assert response.status_code == 200
     assert '"NVD_API_KEY": "secret"' in store.read_text(encoding="utf-8")
+
+
+# ── Short-token rejection + event/WS auth ──────────────────────────────────
+
+
+def test_short_env_token_rejected(tmp_path):
+    with pytest.raises(ValueError, match="32"):
+        load_or_create_token(tmp_path / ".tok", env_override="short")
+
+
+def test_events_no_token_401(tmp_path, monkeypatch):
+    client = _make_client(tmp_path, monkeypatch)
+    assert client.get("/api/v1/runs/nope/events").status_code == 401
+
+
+def test_events_bad_token_401(tmp_path, monkeypatch):
+    client = _make_client(tmp_path, monkeypatch)
+    resp = client.get("/api/v1/runs/nope/events", headers={"Authorization": "Bearer wrong-token"})
+    assert resp.status_code == 401
+
+
+def _ws_disconnect_code(client, message):
+    """Connect with loopback origin, send one auth message, return close code."""
+    from starlette.websockets import WebSocketDisconnect
+
+    with pytest.raises(WebSocketDisconnect) as exc_info:
+        with client.websocket_connect("/api/v1/ws/v1/runs/nope", headers={"origin": "http://localhost:3000"}) as ws:
+            ws.send_json(message)
+            ws.receive_json()
+    return exc_info.value.code
+
+
+def test_ws_bad_token_4401(tmp_path, monkeypatch):
+    client = _make_client(tmp_path, monkeypatch)
+    assert _ws_disconnect_code(client, {"auth": "wrong-token", "after": 0}) == 4401
+
+
+def test_ws_no_auth_4401(tmp_path, monkeypatch):
+    client = _make_client(tmp_path, monkeypatch)
+    assert _ws_disconnect_code(client, {}) == 4401

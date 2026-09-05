@@ -232,7 +232,7 @@ describe("RunWizard", () => {
     await user.click(screen.getByRole("button", { name: /Launch Attack/i }));
 
     expect(mutate).toHaveBeenCalledTimes(1);
-    expect(mutate.mock.calls[0][0]).toMatchObject({
+    expect(mutate.mock.calls[0]![0]).toMatchObject({
       target: "10.0.0.5",
       mode: "attack",
       goal: "",
@@ -395,7 +395,7 @@ describe("RunWizard", () => {
     await user.click(screen.getByRole("button", { name: /Confirm & start/i }));
 
     expect(answerMutate).toHaveBeenCalledTimes(1);
-    expect(answerMutate.mock.calls[0][0]).toEqual({ decisionId: "d1", answer: "ALLOW 10.0.0.5" });
+    expect(answerMutate.mock.calls[0]![0]).toEqual({ decisionId: "d1", answer: "ALLOW 10.0.0.5" });
   });
 
   it("toggling a power-up manually flips the profile to Custom; swarm gates its dependents", async () => {

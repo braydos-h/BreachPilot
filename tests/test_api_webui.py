@@ -29,7 +29,7 @@ skip_if_no_build = pytest.mark.skipif(
 
 def _make_client(tmp_path, monkeypatch, *, serve_webui: bool, callables=None):
     """Create a TestClient with a known token and an in-memory serve_webui flag."""
-    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-token")
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-token-0123456789abcdef01234567")
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(

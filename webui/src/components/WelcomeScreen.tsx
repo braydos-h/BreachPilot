@@ -171,6 +171,8 @@ function Tour({ onExit }: { onExit: () => void }) {
     }
   };
 
+  if (!step) return null;
+
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden bg-background text-foreground">
       <div className="absolute inset-0 bg-grid-sm bg-radial-fade" aria-hidden />

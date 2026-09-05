@@ -18,7 +18,7 @@ import ReactFlow, {
 import "reactflow/dist/style.css";
 import { cn } from "@/lib/utils";
 import { GraphFlowNode, type GraphFlowNodeData } from "@/features/graph/GraphNodeTypes";
-import { edgeMeta, nodeTypeMeta, toFlowEdges, toFlowNodes } from "@/features/graph/graphTransforms";
+import { MAX_FLOW_EDGES, MAX_FLOW_NODES, edgeMeta, nodeTypeMeta, toFlowEdges, toFlowNodes } from "@/features/graph/graphTransforms";
 import type { GraphExplorerEdge, GraphExplorerNode } from "@/features/graph/graphTypes";
 
 const nodeTypes = { graph: GraphFlowNode };
@@ -299,10 +299,15 @@ function CanvasInner(props: AttackGraphCanvasProps) {
     return nodeTypeMeta(data.node.node_type).color;
   }, []);
 
+  // ponytail: virtualization cap — memoized slices so reactflow never mounts
+  // more DOM nodes than the transform ceiling (drag state stays in flowNodes).
+  const displayNodes = useMemo(() => flowNodes.slice(0, MAX_FLOW_NODES), [flowNodes]);
+  const displayEdges = useMemo(() => flowEdges.slice(0, MAX_FLOW_EDGES), [flowEdges]);
+
   return (
     <ReactFlow
-      nodes={flowNodes}
-      edges={flowEdges}
+      nodes={displayNodes}
+      edges={displayEdges}
       nodeTypes={nodeTypes}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}

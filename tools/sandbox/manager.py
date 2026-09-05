@@ -55,6 +55,14 @@ __all__ = [
 
 CONTAINER_WORKSPACE = "/workspace"
 
+# Hot-path bound: per-command docker-inspect + policy rebuilds are skipped for
+# this long after a verified ensure (execute() is the hot path; a cold
+# docker-inspect + DNS-touching policy rebuild on EVERY command added seconds
+# per call). A vanished worker inside the window surfaces as a fail-closed
+# backend.exec SandboxError (safe direction); dynamically authorized targets
+# apply at most one window late.
+_HOT_PATH_TTL_S = 30.0
+
 # Environment the worker may receive: fixed sandbox markers, run-context keys
 # the MCP tool layer injects, and operator-configured ``env_passthrough`` names.
 # NEVER a copy of the host environment.
@@ -229,6 +237,8 @@ class SandboxManager:
         self.network_name: str = ""
         self.gateway: str = ""
         self._policy: NetworkPolicy | None = None
+        self._ensure_valid_until: float = 0.0
+        self._policy_valid_until: float = 0.0
         self._destroyed = False
         atexit.register(self._atexit_destroy)
 
@@ -240,11 +250,17 @@ class SandboxManager:
         A mid-run vanished worker is recreated fresh (never reused). Any
         failure destroys partial resources and raises ``SandboxError`` -- the
         caller must block execution; there is no host fallback.
+
+        Hot path: a recently verified worker is returned from a time-bound
+        cache instead of re-probing docker-inspect on every command.
         """
+        if self.container_id and time.monotonic() < self._ensure_valid_until:
+            return self.container_id
         if self.container_id:
             state = self._container_state()
             if state == "running":
                 self._apply_policy()
+                self._ensure_valid_until = time.monotonic() + _HOT_PATH_TTL_S
                 return self.container_id
             logger.warning("sandbox worker %s vanished (state=%r); recreating", self.container_id, state)
             self._destroy_resources()
@@ -276,6 +292,7 @@ class SandboxManager:
             self._apply_policy(force=True)
             if self._container_state() != "running":
                 raise SandboxUnavailableError("sandbox worker is not running after start")
+            self._ensure_valid_until = time.monotonic() + _HOT_PATH_TTL_S
         except SandboxError:
             self._destroy_resources()
             raise
@@ -305,12 +322,19 @@ class SandboxManager:
     def _apply_policy(self, *, force: bool = False) -> NetworkPolicy:
         """Derive the egress policy; install firewall rules when it changed.
 
-        Re-derivation happens at every command boundary so dynamically
-        authorized targets (allowlist-validated resolved domains + discovered
-        subdomains) are picked up deliberately -- never automatic DNS egress.
+        Re-derivation happens per command boundary so dynamically authorized
+        targets (allowlist-validated resolved domains + discovered subdomains)
+        are picked up deliberately -- never automatic DNS egress. Within one
+        hot window (``_HOT_PATH_TTL_S``) the last installed policy is reused
+        without rebuilding, so the hot execute() path stays cheap; a forced
+        apply (fresh worker) always rebuilds.
         """
+        now = time.monotonic()
+        if not force and self._policy is not None and now < self._policy_valid_until:
+            return self._policy
         pol = _policy.build_network_policy(self.config_dict, gateway=self.gateway)
         if not force and self._policy is not None and pol.fingerprint() == self._policy.fingerprint():
+            self._policy_valid_until = now + _HOT_PATH_TTL_S
             return pol
         if self.cfg.network_enforce:
             apply_network_policy(pol, container_id=self.container_id, image=self.cfg.image, gateway=self.gateway)
@@ -320,6 +344,7 @@ class SandboxManager:
                 "(Docker bridge isolation only -- this is NOT containment)"
             )
         self._policy = pol
+        self._policy_valid_until = time.monotonic() + _HOT_PATH_TTL_S
         return pol
 
     def ensure_network_policy(self) -> NetworkPolicy:
@@ -484,9 +509,9 @@ class SandboxManager:
         less command has zero reachable destinations).
 
         An empty ``target_ip`` (no destinations could be associated with the
-        execution) is enforced by the firewall layer instead -- a target-less
-        command cannot touch the target, and the netns policy authorizes only
-        the (possibly empty) allowlist.
+        execution) is denied: an execution that cannot name its target cannot
+        prove it stays inside the allowlist (variable indirection), so it
+        fail-closes here instead of relying on the firewall layer alone.
         """
         from tools.kernel.allowlist import _check_allowlist
 
@@ -494,7 +519,11 @@ class SandboxManager:
         if not require:
             return
         if not target_ip:
-            return
+            raise SandboxScopeError(
+                "sandbox scope gate: execution names no target (empty target_ip) "
+                "while exploit.require_explicit_allowlist is true -- name the "
+                "destination literally so it can be checked against the allowlist"
+            )
         allowed, reason = _check_allowlist(target_ip, self.config_dict)
         if not allowed and self.cfg.allow_research_hosts and self._is_research_host(target_ip):
             # Pinned exploit-research egress (github/gitlab) is authorized by
@@ -599,6 +628,8 @@ class SandboxManager:
             results["network_removed"] = bool(_db.docker_network_rm(self.network_name))
         self.container_id = ""
         self.network_name = ""
+        self._ensure_valid_until = 0.0
+        self._policy_valid_until = 0.0
         return results
 
     def _atexit_destroy(self) -> None:

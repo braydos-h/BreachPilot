@@ -39,8 +39,8 @@ function toFlowNodes(nodes: GraphNode[]): Node[] {
   const byType: Record<string, number> = { tool: 0, step: 0, target: 0 };
   const xFor: Record<string, number> = { tool: 0, step: 280, target: 560 };
   return nodes.map((n) => {
-    const y = byType[n.type] * 90;
-    byType[n.type] += 1;
+    const y = (byType[n.type] ?? 0) * 90;
+    byType[n.type] = (byType[n.type] ?? 0) + 1;
     const style = NODE_STYLE[n.type] ?? NODE_STYLE.tool;
     return {
       id: n.id,

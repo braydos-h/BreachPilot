@@ -279,6 +279,44 @@ class TestNmapParsing:
         assert len(parsed.open_ports) == 3
         assert parsed.open_ports == [22, 80, 443]
 
+    def test_parse_nmap_xml_no_duplicates_on_reseed(self, sample_nmap_xml: str) -> None:
+        """Re-parsing onto a result whose open_ports are pre-seeded (the
+        rustscan/masscan + nmap follow-up path) must not duplicate ports."""
+        scanner = PrimaryReconScanner(ReconConfig())
+        result = HostReconResult(target_ip="10.0.0.50")
+        result.open_ports = [22, 80, 443]
+        parsed = scanner._parse_nmap_xml(sample_nmap_xml, result)
+
+        assert sorted(parsed.open_ports) == [22, 80, 443]
+        assert len(parsed.services) == 3
+
+    def test_parse_nmap_xml_hostscripts_stored_once(self) -> None:
+        """Host-level scripts must NOT be copied onto every service (N x M
+        duplication) -- they are stored once under result.extended."""
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<nmaprun scanner="nmap" version="7.94">
+  <host><status state="up" reason="syn-ack"/>
+    <address addr="10.0.0.50" addrtype="ipv4"/>
+    <ports>
+      <port protocol="tcp" portid="22"><state state="open"/>
+        <service name="ssh" product="OpenSSH" version="8.5p1"/></port>
+      <port protocol="tcp" portid="80"><state state="open"/>
+        <service name="http" product="Apache" version="2.4.41"/></port>
+    </ports>
+    <hostscript>
+      <script id="whois-ip" output="Record found"/>
+      <script id="dns-brute" output="2 records"/>
+    </hostscript>
+  </host>
+</nmaprun>"""
+        scanner = PrimaryReconScanner(ReconConfig())
+        parsed = scanner._parse_nmap_xml(xml, HostReconResult(target_ip="10.0.0.50"))
+
+        assert parsed.extended["hostscripts"] == {"whois-ip": "Record found", "dns-brute": "2 records"}
+        for svc in parsed.services:
+            assert "whois-ip" not in svc.scripts
+            assert "dns-brute" not in svc.scripts
+
     def test_ttl_to_os_family(self) -> None:
         scanner = PrimaryReconScanner(ReconConfig())
         assert scanner._ttl_to_os_family(64) == "Linux/Unix"

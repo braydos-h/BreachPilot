@@ -21,11 +21,13 @@ so the target-IP allowlist lock and the JSONL audit trail apply unchanged.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any
 
 from tools.killchain import KillChainMachine, all_edges, get_edge
 from tools.killchain.states import AttackState
-from tools.mcp_tools.registry import *
+from tools.mcp_tools.registry import ToolContext
+from tools.validation_utils import validate_target_or_ip
 
 
 def _in_process_tool_executor(mcp: Any):

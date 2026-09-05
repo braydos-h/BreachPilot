@@ -268,13 +268,12 @@ async def test_run_eval_suite_scores_against_oracles(tmp_path, monkeypatch):
     monkeypatch.setattr("tools.eval_harness.docker_suite_down", lambda *a, **k: 0)
 
     async def _fake_run_eval(args):
-        # Write a synthetic eval report that mentions expected tokens so the
-        # heuristic finding extractor picks them up.
+        # Write a synthetic eval report. Fail closed: unvalidated report text
+        # never yields true positives (verifier flags only).
         import json as _json
 
         eval_dir = Path("reports/eval") / f"run-{args.target}"
         eval_dir.mkdir(parents=True, exist_ok=True)
-        # Mention ssh + http + CVE-2021-44228 for target 127.0.0.1 (oracle a).
         report = {
             "target": args.target,
             "outcome_summary": "ssh http CVE-2021-44228 detected",
@@ -295,6 +294,5 @@ async def test_run_eval_suite_scores_against_oracles(tmp_path, monkeypatch):
     assert "aggregate" in report
     assert "a" in report["targets"]
     assert "b" in report["targets"]
-    # Oracle a had ssh + http + CVE mentioned → ≥3 TPs → success.
-    assert report["targets"]["a"]["true_positives"] >= 2
+    assert report["targets"]["a"]["true_positives"] == 0
     assert report["aggregate"]["targets_run"] == 2

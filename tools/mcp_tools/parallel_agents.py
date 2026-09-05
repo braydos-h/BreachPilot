@@ -43,7 +43,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from tools.mcp_tools.registry import *
+from tools.mcp_shared import check_targets_allowlist
+from tools.mcp_tools.registry import ToolContext
 from tools.validation_utils import validate_target_or_ip
 
 # ── SubagentManager (process-singleton, lifecycle tied to the MCP server) ──

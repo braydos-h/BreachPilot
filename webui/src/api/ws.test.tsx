@@ -22,7 +22,7 @@ class FakeWebSocket {
     this.instances = [];
   }
   static last(): FakeWebSocket {
-    return this.instances[this.instances.length - 1];
+    return this.instances[this.instances.length - 1]!;
   }
   url: string;
   readyState = 0;
@@ -105,7 +105,7 @@ describe("useRunEvents silence watchdog", () => {
     act(() => ws.serverOpen());
     expect(result.current.status).toBe("open");
     expect(result.current.transport).toBe("websocket");
-    const authFrame = JSON.parse(ws.sent[0]) as { auth: string; after: number };
+    const authFrame = JSON.parse(ws.sent[0]!) as { auth: string; after: number };
     expect(authFrame.auth).toBe("tok-123");
   });
 
@@ -262,14 +262,14 @@ describe("useRunEvents pagination seed", () => {
     });
     expect(result.current.dropped).toBe(4000);
     expect(result.current.events).toHaveLength(3);
-    expect(result.current.events[0].sequence).toBe(4001);
+    expect(result.current.events[0]!.sequence).toBe(4001);
     // cursor must be latest, not first_returned — otherwise live events would be skipped
     expect(result.current.lastSeq.current).toBe(5000);
     // WS auth frame must carry after=latest
     expect(FakeWebSocket.instances).toHaveLength(1);
     const ws = FakeWebSocket.last();
     act(() => ws.serverOpen());
-    const frame = JSON.parse(ws.sent[0]) as { after: number };
+    const frame = JSON.parse(ws.sent[0]!) as { after: number };
     expect(frame.after).toBe(5000);
     // Live event after the tail window is accepted
     act(() => ws.serverEvent(ev(5001, runId)));

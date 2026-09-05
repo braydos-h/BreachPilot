@@ -317,8 +317,8 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
             raise HTTPException(status_code=404, detail=f"{filename} not found")
         try:
             return json.loads(state_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            raise HTTPException(status_code=500, detail=f"Could not parse {filename}: {exc}")
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=500, detail=f"Could not parse {filename}")
 
     # ── Routes ──────────────────────────────────────────────────────────────────
 
@@ -780,8 +780,8 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
                     out.append(data)
                     idx += 1
             return {"credentials": out}
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Could not read credentials: {exc}")
+        except Exception:
+            raise HTTPException(status_code=500, detail="Could not read credentials")
 
     @router.post("/runs/{run_id}/credentials/{index}/reveal")
     async def reveal_credential(
@@ -806,8 +806,8 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
                 for rec in store.all_credentials():
                     records.append(rec)
                     store_paths.append(store_path)
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Could not read credentials: {exc}")
+        except Exception:
+            raise HTTPException(status_code=500, detail="Could not read credentials")
         if index < 0 or index >= len(records):
             raise HTTPException(status_code=404, detail="Credential index out of range")
         rec = records[index]
@@ -855,8 +855,8 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
                 for rec in store.all_credentials():
                     records.append(rec)
                     store_paths.append(store_path)
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Could not read credentials: {exc}")
+        except Exception:
+            raise HTTPException(status_code=500, detail="Could not read credentials")
         if index < 0 or index >= len(records):
             raise HTTPException(status_code=404, detail="Credential index out of range")
         rec = records[index]
@@ -902,8 +902,8 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
 
                     store = LootStore(cand)
                     return {"loot": [item.to_json() for item in store._items]}
-                except Exception as exc:
-                    raise HTTPException(status_code=500, detail=f"Could not read loot: {exc}")
+                except Exception:
+                    raise HTTPException(status_code=500, detail="Could not read loot")
         return {"loot": []}
 
     # ── DELETE run history (D1) ─────────────────────────────────────────────────
@@ -919,7 +919,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
         """
         if _ps().get_run(run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
-        if _rm().has_active and _rm().active and _rm().active.run_id == run_id:
+        if _rm().active_for(run_id) is not None:
             raise APIError("conflict", "Cannot delete an active run.", status_code=409)
         purged = False
         if purge:

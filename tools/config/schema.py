@@ -829,9 +829,9 @@ CONFIG_SCHEMA: dict[str, Any] = {
     # failure DURING a session blocks offensive execution (fail closed -- host
     # execution is never a per-command fallback). The one sanctioned fallback
     # is the boot-time decision: when the Docker probe fails at server boot
-    # and ``fallback_native`` is true (default), the whole server process
+    # and ``fallback_native`` is true (explicit opt-in), the whole server process
     # degrades to the legacy uncontained host-execution mode with a warning;
-    # ``fallback_native: false`` fails closed instead. ``enabled: false`` is
+    # ``fallback_native: false`` (default) fails closed instead. ``enabled: false`` is
     # the explicit opt-out that always uses the legacy mode. See
     # docs/sandbox.md and docs/safety-model.md.
     "sandbox": {
@@ -842,8 +842,9 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "read_only_rootfs": True,
         # Degrade to the legacy host-execution mode when the boot-time Docker
         # probe (CLI / daemon / worker image) fails, instead of blocking every
-        # execution. The WebUI home screen surfaces the degraded state.
-        "fallback_native": True,
+        # execution. Explicit opt-in only (default false = fail closed). The
+        # WebUI home screen surfaces the degraded state.
+        "fallback_native": False,
         # Host env vars the worker MAY receive (allowlist; never the whole env).
         "env_passthrough": [],
         "resources": {

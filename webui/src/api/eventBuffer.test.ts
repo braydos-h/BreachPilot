@@ -22,11 +22,11 @@ describe("appendBounded", () => {
   it("preserves chronological order and keeps the newest events", () => {
     const base = Array.from({ length: MAX_EVENTS_PER_RUN }, (_, i) => ev(i + 1));
     const result = appendBounded(base, [ev(1001), ev(1002)]);
-    expect(result.events[0].sequence).toBe(3);
-    expect(result.events[result.events.length - 1].sequence).toBe(1002);
+    expect(result.events[0]!.sequence).toBe(3);
+    expect(result.events[result.events.length - 1]!.sequence).toBe(1002);
     // Fully ascending.
     for (let i = 1; i < result.events.length; i++) {
-      expect(result.events[i].sequence).toBe(result.events[i - 1].sequence + 1);
+      expect(result.events[i]!.sequence).toBe(result.events[i - 1]!.sequence + 1);
     }
   });
 
@@ -34,7 +34,7 @@ describe("appendBounded", () => {
     const base = Array.from({ length: MAX_EVENTS_PER_RUN }, (_, i) => ev(i + 1));
     const result = appendBounded(base, [ev(1001), ev(1002), ev(1003)]);
     expect(result.dropped).toBe(3);
-    expect(result.events[0].sequence).toBe(4);
+    expect(result.events[0]!.sequence).toBe(4);
   });
 
   it("reports zero dropped when the window has headroom", () => {
@@ -47,8 +47,8 @@ describe("appendBounded", () => {
     const batch = Array.from({ length: MAX_EVENTS_PER_RUN + 50 }, (_, i) => ev(i + 1));
     const result = appendBounded([ev(9999)], batch);
     expect(result.events.length).toBe(MAX_EVENTS_PER_RUN);
-    expect(result.events[0].sequence).toBe(51);
-    expect(result.events[result.events.length - 1].sequence).toBe(MAX_EVENTS_PER_RUN + 50);
+    expect(result.events[0]!.sequence).toBe(51);
+    expect(result.events[result.events.length - 1]!.sequence).toBe(MAX_EVENTS_PER_RUN + 50);
     expect(result.dropped).toBe(51); // 1 (headroom consumer) + 50 batch overflow
   });
 

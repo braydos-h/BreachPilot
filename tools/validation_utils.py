@@ -50,6 +50,11 @@ _EMBEDDED_IPV4_RE = re.compile(
     r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"
 )
 
+# Shell metacharacters that chain/substitute extra commands onto an allowlisted
+# invocation (e.g. ``nmap -sV 10.0.0.5; evil``). The defensive server only ever
+# runs a single nmap argv, so any of these is a rejection, not a warning.
+_SHELL_METACHAR_RE = re.compile(r"[;|&`$<>\n\r]")
+
 
 class TargetCorrection(TypedDict):
     """One sanitized IP correction found in a shell command."""
@@ -451,8 +456,17 @@ def is_tool_installed(tool_name: str) -> bool:
     return shutil.which(tool_name) is not None
 
 
-def preflight_command_check(command: str) -> PreflightResult:
+def preflight_command_check(command: str, *, reject_shell_metachars: bool = False) -> PreflightResult:
     """Run pre-flight checks on a terminal command before execution.
+
+    Args:
+        command: the shell command to check.
+        reject_shell_metachars: when True, ``; | & $ ` < >`` and newlines are
+            rejected outright (the defensive nmap server only ever runs a
+            single nmap argv). Defaults to False because attack-mode tools
+            (``run_exploit_terminal``) legitimately chain/pipe/redirect
+            commands -- their one safety is the target-IP allowlist lock, not
+            command-content inspection.
 
     Returns a dict with:
         - valid: bool
@@ -473,6 +487,21 @@ def preflight_command_check(command: str) -> PreflightResult:
         }
 
     sanitized, corrections = sanitize_target_in_command(command)
+
+    # Shell metacharacters chain extra commands onto the allowlisted shape
+    # (e.g. ``nmap -sV 10.0.0.5; curl evil``). Opt-in only (see docstring) --
+    # previously this check returned valid=True unconditionally. Match the raw
+    # command: the sanitizer below strips some metachars as IP "trailing
+    # garbage" (``10.0.0.5;`` -> ``10.0.0.5``), which would hide the chaining.
+    if reject_shell_metachars and _SHELL_METACHAR_RE.search(command):
+        return {
+            "valid": False,
+            "original_command": command,
+            "sanitized_command": sanitized,
+            "corrections": corrections,
+            "missing_tools": [],
+            "blocked_reason": "Shell metacharacters (;, |, &, $, `, <, >) are not allowed.",
+        }
 
     # Detect tools used in the command for preflight warnings.
     common_tools = ["nmap", "rustscan", "masscan", "curl", "nc", "ncat", "python", "python3"]

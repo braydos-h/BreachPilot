@@ -261,16 +261,18 @@ class Blackboard(dict):
             return dict(self._buckets[_GLOBAL])
 
     def keys(self) -> Any:  # type: ignore[override]
+        # ponytail: list() snapshot under lock — a live view would race with
+        # concurrent writers once the caller's lock scope exits.
         with self._lock:
-            return self._buckets[_GLOBAL].keys()
+            return list(self._buckets[_GLOBAL].keys())
 
     def values(self) -> Any:  # type: ignore[override]
         with self._lock:
-            return self._buckets[_GLOBAL].values()
+            return list(self._buckets[_GLOBAL].values())
 
     def items(self) -> Any:  # type: ignore[override]
         with self._lock:
-            return self._buckets[_GLOBAL].items()
+            return list(self._buckets[_GLOBAL].items())
 
     def update(self, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
         """Dict-style update into the global bucket (atomic overwrite)."""

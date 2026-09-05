@@ -177,12 +177,15 @@ async def probe_reachable(
 
     Returns:
         ``True``   -- at least one probe port connected. The host answers.
-        ``False``  -- every probe port was definitively refused (RST / no route).
-                     The host exists but has nothing open on the probe set.
-        ``None``   -- every probe timed out / was filtered. Ambiguous; the host
-                     may be up behind a silent firewall, so the caller must
-                     NOT skip it (a firewalled host can still be attackable on
-                     a port the probe didn't cover).
+        ``False``  -- every probe port was definitively refused (RST / no route)
+                      over a COMMON_PORTS-sized sample. Only a broad sample
+                      justifies skipping the full scan.
+        ``None``   -- every probe timed out / was filtered (ambiguous), OR all
+                      ports were refused on a SMALL probe set (e.g. the default
+                      ``[80, 443]``). Refused means the host is UP (an RST is an
+                      answer); a host can refuse 80/443 yet be attackable on an
+                      off-default port, so the caller must NOT skip it -- a
+                      small-sample refused verdict falls through like a timeout.
 
     Cheap by design: a handful of bare ``connect_ex`` calls, no banner grab,
     no SYN scan, no privileges. This is the "is this thing even worth a full
@@ -195,11 +198,11 @@ async def probe_reachable(
     statuses = await asyncio.gather(*[asyncio.to_thread(_connect_status, target, port, timeout) for port in ports])
     if "open" in statuses:
         return True
-    # No port answered. If every probe was definitively refused, the host is
-    # up-but-closed on the probe set -> treat as unreachable for preflight
-    # purposes (a full scan would only confirm the same thing). If anything
-    # timed out, stay ambiguous and let the caller proceed.
-    if statuses and all(s == "refused" for s in statuses):
+    # No port answered. An all-refused verdict over a COMMON_PORTS-sized sample
+    # means the host is up-but-closed widely enough that a full scan would only
+    # confirm the same thing. Anything smaller (e.g. refused on just 80/443)
+    # stays ambiguous and lets the caller proceed -- refused = host UP.
+    if statuses and all(s == "refused" for s in statuses) and len(ports) >= len(COMMON_PORTS):
         return False
     return None
 

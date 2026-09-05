@@ -8,11 +8,12 @@ interface SparklineProps {
 /** Minimal inline sparkline (pure SVG, no chart lib). */
 export function Sparkline({ label, values, format, className }: SparklineProps) {
   if (values.length < 2) return null;
-  let min = values[0];
-  let max = values[0];
+  let min = values[0] ?? 0;
+  let max = values[0] ?? 0;
   for (let i = 1; i < values.length; i++) {
-    if (values[i] < min) min = values[i];
-    if (values[i] > max) max = values[i];
+    const v = values[i] ?? 0;
+    if (v < min) min = v;
+    if (v > max) max = v;
   }
   const span = max - min || 1;
   const W = 120;
@@ -29,7 +30,7 @@ export function Sparkline({ label, values, format, className }: SparklineProps) 
       <div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-muted-foreground">
         <span>{label}</span>
         <span className="tabular-nums text-foreground">
-          {format ? format(values[values.length - 1]) : values[values.length - 1].toLocaleString()}
+          {format ? format(values[values.length - 1] ?? 0) : (values[values.length - 1] ?? 0).toLocaleString()}
         </span>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="h-7 w-full" role="img" aria-label={`${label} over time`}>

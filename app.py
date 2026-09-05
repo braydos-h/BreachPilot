@@ -108,6 +108,9 @@ def create_app(
         str(benchmark_cfg.get("output_dir", "reports/benchmarks") or "reports/benchmarks")
     )
     benchmark_service = BenchmarkService(config, config_path)
+    # ponytail: single global cap — runs + benchmarks share max_concurrent_runs.
+    run_manager._benchmark_service = benchmark_service
+    benchmark_service._run_manager = run_manager
 
     # Lifespan: recover interrupted runs on startup; cancel active run on shutdown.
     @asynccontextmanager

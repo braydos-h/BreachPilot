@@ -18,7 +18,7 @@ export function ArtifactViewer({ runId, name, className }: ArtifactViewerProps) 
 
   const ext = useMemo(() => {
     const match = name.match(/\.([a-z0-9]+)$/i);
-    return match ? match[1].toLowerCase() : "";
+    return match ? (match[1] ?? "").toLowerCase() : "";
   }, [name]);
 
   const { blob, text, error, isLoading, objectUrl } = useBlobText(fetchBlob, name, ext, "Failed to load artifact.");
@@ -85,7 +85,7 @@ export function isTextExt(ext: string): boolean {
 function CsvTable({ text, name }: { text: string; name: string }) {
   const rows = useMemo(() => parseCsv(text), [text]);
   if (!rows.length) return <pre className="p-3 font-mono text-xs">{text}</pre>;
-  const headers = rows[0];
+  const headers = rows[0] ?? [];
   const body = rows.slice(1);
   return (
     <div className="max-h-[70vh] overflow-auto scrollbar-thin">

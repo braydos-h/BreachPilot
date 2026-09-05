@@ -223,7 +223,7 @@ describe("SettingsPage", () => {
     expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Save changes" }));
     expect(mutate).toHaveBeenCalledTimes(1);
-    expect(mutate.mock.calls[0][0]).toEqual({ api: { max_concurrent_runs: 5 } });
+    expect(mutate.mock.calls[0]![0]).toEqual({ api: { max_concurrent_runs: 5 } });
   });
 
   it("consolidates provider status, default model, and secrets under AI & Models", async () => {

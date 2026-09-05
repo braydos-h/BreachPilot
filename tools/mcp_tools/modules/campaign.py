@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
+from datetime import datetime, timezone
+from typing import Any
 
-from tools.mcp_tools.registry import *
+from tools.attack_modules import ModuleContext
+from tools.autonomous_orchestrator import AggressionLevel, AutonomousOrchestrator, TaskStatus
+from tools.autonomous_orchestrator import AttackPhase as OrchAttackPhase
+from tools.mcp_shared import check_targets_allowlist
+from tools.mcp_tools.registry import ToolContext
+from tools.recon_pipeline import ReconConfig, ReconPipeline
+from tools.validation_utils import is_fqdn, resolve_target_to_ip, validate_target_or_ip
 
 # Strong references to background campaign tasks. CPython's event loop holds
 # only a weak ref to a task, so an unreferenced asyncio.create_task() can be

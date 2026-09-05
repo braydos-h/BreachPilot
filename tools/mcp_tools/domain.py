@@ -25,13 +25,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 import socket
 import subprocess
 import urllib.request
+from typing import Any
 
 from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
-from tools.mcp_tools.registry import *
+from tools.mcp_shared import _attempt_dir, add_discovered_target
+from tools.mcp_tools.registry import ToolContext, _run_with_pgrp_timeout
+from tools.validation_utils import (
+    is_fqdn,
+    is_subdomain_of,
+    resolve_target_bounded,
+    validate_target_or_ip,
+)
 
 # Built-in subdomain wordlist for DNS bruteforce (reused from
 # recon_pipeline._enumerate_vhosts + common additions). ~200 prefixes.
@@ -709,19 +718,24 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 except Exception:  # ponytail: bare except intentional
                     pass
 
-        # DNS bruteforce with the built-in wordlist. Run resolutions
-        # concurrently (32 workers) so ~200 candidates don't block for minutes
-        # on a slow resolver. The GIL doesn't matter here -- getaddrinfo
-        # releases it during the syscall.
+        # DNS bruteforce with the built-in wordlist. Resolutions run on a
+        # bounded worker pool with a 5s per-query timeout (socket.getaddrinfo
+        # has no timeout of its own -- an unbounded resolve stalled callers
+        # for minutes on a dead resolver). The halved fan-out rate-limits the
+        # query burst against the system resolver.
         if "dns_bruteforce" in srcs:
             from concurrent.futures import ThreadPoolExecutor
 
             candidates = [f"{prefix}.{dom}" for prefix in _SUBDOMAIN_WORDLIST if f"{prefix}.{dom}" not in subs]
 
             def _resolve_one(cand: str) -> tuple[str, str | None]:
-                return cand, resolve_target_to_ip(cand)
+                try:
+                    ip, _domain = resolve_target_bounded(cand, timeout_seconds=5.0)
+                except (TimeoutError, OSError):
+                    return cand, None
+                return cand, ip
 
-            with ThreadPoolExecutor(max_workers=32) as pool:
+            with ThreadPoolExecutor(max_workers=16) as pool:
                 for cand, ip in pool.map(_resolve_one, candidates):
                     if ip:
                         subs[cand] = ip
@@ -771,7 +785,10 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
         for sub in sorted(subs.keys())[:max_results]:
             ip = subs[sub]
             if ip is None:
-                ip = resolve_target_to_ip(sub)
+                try:
+                    ip, _domain = resolve_target_bounded(sub, timeout_seconds=5.0)
+                except (TimeoutError, OSError):
+                    ip = None
             if ip:
                 resolved_pairs.append((sub, ip))
                 add_discovered_target(sub, ip)
@@ -1088,7 +1105,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if not isinstance(port, int) or isinstance(port, bool) or port < 1 or port > 65535:
             return "ERROR: port must be an integer between 1 and 65535."
         if not domain or not domain.strip():
-            return "ERROR: domain is required (to build Host-header candidates)."
+            return "ERROR: domain is required."
         dom = domain.strip().lower()
         if not is_fqdn(dom):
             return f"ERROR: {dom!r} is not a valid domain."
@@ -1127,7 +1144,20 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
             "assets",
         ]
         if wordlist and wordlist.strip():
-            words.extend([w.strip().lower() for w in wordlist.split(",") if w.strip()])
+            # Attacker-controlled: keep only DNS-label-safe tokens (a raw
+            # "\r\n" here would inject headers via the Host: value) and cap
+            # the extras so the probe loop stays bounded.
+            extras = [w.strip().lower() for w in wordlist.split(",") if w.strip()]
+            extras = [w for w in extras if re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", w)]
+            words.extend(extras[:100])
+
+        # Attacker-controlled budget: clamp so a huge timeout cannot inflate
+        # the probe loop (each probe gets a 10s per-request timeout).
+        try:
+            timeout = int(timeout)
+        except (TypeError, ValueError):
+            timeout = 300
+        timeout = max(10, min(timeout, 300))
 
         # Cap the wordlist so the total probe time stays within the budget
         # (each probe gets a 10s per-request timeout). At least one probe.

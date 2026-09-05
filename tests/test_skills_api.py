@@ -23,7 +23,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 
-def _make_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str = "test-token") -> TestClient:
+def _make_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str = "test-token-0123456789abcdef01234567"
+) -> TestClient:
     """Create a TestClient whose skills.roots points at tmp_path/skills."""
     monkeypatch.setenv("BREACHPILOT_API_TOKEN", token)
     monkeypatch.chdir(tmp_path)
@@ -44,7 +46,7 @@ def _make_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str = "
     return TestClient(app)
 
 
-def _auth(token: str = "test-token") -> dict[str, str]:
+def _auth(token: str = "test-token-0123456789abcdef01234567") -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 

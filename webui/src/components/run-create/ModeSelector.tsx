@@ -41,7 +41,7 @@ export function ModeSelector({ value, onChange }: ModeSelectorProps) {
 
   const move = (from: number, dir: number) => {
     const next = (from + dir + MODE_OPTIONS.length) % MODE_OPTIONS.length;
-    onChange(MODE_OPTIONS[next].value);
+    onChange(MODE_OPTIONS[next]?.value ?? value);
     refs.current[next]?.focus();
   };
 
@@ -70,11 +70,11 @@ export function ModeSelector({ value, onChange }: ModeSelectorProps) {
                 move(i, 1);
               } else if (e.key === "Home") {
                 e.preventDefault();
-                onChange(MODE_OPTIONS[0].value);
+                onChange(MODE_OPTIONS[0]?.value ?? value);
                 refs.current[0]?.focus();
               } else if (e.key === "End") {
                 e.preventDefault();
-                onChange(MODE_OPTIONS[MODE_OPTIONS.length - 1].value);
+                onChange(MODE_OPTIONS[MODE_OPTIONS.length - 1]?.value ?? value);
                 refs.current[MODE_OPTIONS.length - 1]?.focus();
               }
             }}

@@ -49,7 +49,7 @@ describe("parseCheckpointOptions", () => {
     ]);
     expect(opts).toHaveLength(4);
     expect(opts[0]).toEqual({ action: "privesc", label: "Escalate privileges", goals: undefined });
-    expect(opts[1].goals).toEqual([{ name: "backdoor", description: "d1" }, { name: "custom", description: "Type your own goal" }]);
+    expect(opts[1]!.goals).toEqual([{ name: "backdoor", description: "d1" }, { name: "custom", description: "Type your own goal" }]);
   });
 
   it("drops malformed/empty rows", () => {
@@ -61,14 +61,14 @@ describe("parseCheckpointOptions", () => {
       "not-an-object",
     ]);
     expect(opts).toHaveLength(1);
-    expect(opts[0].action).toBe("finish");
+    expect(opts[0]!.action).toBe("finish");
   });
 
   it("filters nested goals without a name", () => {
     const opts = parseCheckpointOptions([
       { action: "change_goal", label: "x", goals: [{ name: "ok", description: "d" }, { description: "no name" }] },
     ]);
-    expect(opts[0].goals).toEqual([{ name: "ok", description: "d" }]);
+    expect(opts[0]!.goals).toEqual([{ name: "ok", description: "d" }]);
   });
 
   it("returns [] on non-array input", () => {

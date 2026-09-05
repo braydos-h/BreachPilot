@@ -48,6 +48,9 @@ from typing import Any
 
 from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
 from tools.goal_suggester import ReconAssessment, build_assessment_from_mcp_results
+from tools.recon.config import HostReconResult, ServiceInfo
+from tools.recon_assessment_cli import _cve_query_from_banner, _extract_tool_text
+from tools.validation_utils import parse_service_banners
 
 # ---------------------------------------------------------------------------
 # Config
@@ -143,47 +146,49 @@ class FastReconResult:
     def to_assessment(self) -> ReconAssessment | None:
         return self.assessment
 
+    def to_host_recon_result(self) -> HostReconResult:
+        """Bridge to the canonical recon type for downstream consumers.
+
+        The coordinator schedules MCP tools and keeps a compact dict-shaped
+        bundle; this converts it to ``tools.recon.config.HostReconResult``
+        (``ServiceInfo`` entries) so attack modules reuse one type instead of
+        a second parallel schema.
+        """
+        result = HostReconResult(
+            target_ip=self.target,
+            open_ports=list(self.open_ports),
+            udp_ports=list(self.udp_ports),
+            scan_tool="fast-recon",
+            scan_duration=self.duration_seconds,
+            warnings=list(self.warnings),
+            errors=list(self.errors),
+        )
+        for svc in self.services:
+            try:
+                port = int(svc.get("port", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if port <= 0:
+                continue
+            result.services.append(
+                ServiceInfo(
+                    port=port,
+                    protocol=str(svc.get("protocol", "tcp") or "tcp"),
+                    service=str(svc.get("service", "unknown") or "unknown"),
+                    banner=str(svc.get("banner", "") or ""),
+                )
+            )
+        return result
+
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Helpers (thin shims over canonical parsers -- no local regex dialects)
 # ---------------------------------------------------------------------------
 
-_GENERIC_SERVICE_NAMES = frozenset({"dns", "ftp", "http", "https", "imap", "pop3", "smtp", "ssh", "telnet"})
-
-
-def _cve_query_from_banner(banner: str) -> tuple[str, str] | None:
-    if not banner:
-        return None
-    m = re.search(r"\b(?P<product>OpenSSH)[_\s/-]*v?(?P<version>\d+(?:\.\d+)+(?:p\d+)?)", banner, re.IGNORECASE)
-    if m:
-        return "OpenSSH", m.group("version")
-    for match in re.finditer(
-        r"\b(?P<product>[A-Za-z][A-Za-z0-9_.+-]*)[\s/_-]+v?(?P<version>\d+(?:\.\d+)+(?:[A-Za-z0-9._+-]*)?)", banner
-    ):
-        product = match.group("product")
-        if product.lower() not in _GENERIC_SERVICE_NAMES:
-            return product, match.group("version")
-    return None
-
-
-def _extract_tool_text(raw: Any) -> str:
-    if isinstance(raw, str):
-        return raw
-    if hasattr(raw, "content"):
-        content = raw.content
-        if isinstance(content, list):
-            parts: list[str] = []
-            for item in content:
-                if hasattr(item, "text"):
-                    parts.append(item.text)
-                elif isinstance(item, dict) and "text" in item:
-                    parts.append(item["text"])
-                elif isinstance(item, str):
-                    parts.append(item)
-            return "\n".join(parts)
-        if isinstance(content, str):
-            return content
-    return str(raw)
+# ponytail: _cve_query_from_banner + _extract_tool_text live in
+# tools.recon_assessment_cli (imported above) -- this module used to carry
+# byte-identical copies. _parse_scan_ports delegates to the canonical
+# validation_utils.parse_service_banners for the same reason.
 
 
 def _parse_os_result(text: str) -> dict[str, Any]:
@@ -199,19 +204,14 @@ def _parse_os_result(text: str) -> dict[str, Any]:
 
 
 def _parse_scan_ports(text: str) -> tuple[list[int], list[dict[str, Any]]]:
+    """Parse quick_scan text via the canonical banner parser (no local regex)."""
     open_ports: list[int] = []
     services: list[dict[str, Any]] = []
-    for line in text.splitlines():
-        pm = re.match(r"\s*Port\s+(\d+)/(tcp|udp)\s+OPEN\s*\((\w*)\)\s*-\s*(.*)", line)
-        if pm:
-            port = int(pm.group(1))
-            proto = pm.group(2)
-            service = pm.group(3) or "unknown"
-            banner = pm.group(4).strip()
-            if banner == "(no banner)":
-                banner = ""
-            open_ports.append(port)
-            services.append({"port": port, "protocol": proto, "service": service, "banner": banner})
+    for rec in parse_service_banners(text or ""):
+        open_ports.append(rec["port"])
+        services.append(
+            {"port": rec["port"], "protocol": rec["protocol"], "service": rec["service"], "banner": rec["raw_banner"]}
+        )
     return open_ports, services
 
 

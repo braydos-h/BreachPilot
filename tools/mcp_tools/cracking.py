@@ -8,11 +8,15 @@ no target touch -- so it is ``@audit_tool`` only (no allowlist gate).
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
+import time
+from typing import Any
 
+from tools.mcp_shared import _attempt_dir
 from tools.mcp_tools.attack_modules import _identify_hash_modes
-from tools.mcp_tools.registry import *
+from tools.mcp_tools.registry import ToolContext, _run_with_pgrp_timeout
 
 
 def register_cracking_tools(mcp: Any, *, ctx: ToolContext) -> None:

@@ -9,10 +9,15 @@ path already has (``_extract_scanner_targets`` already recognizes these verbs).
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
+import time
+from typing import Any
 
-from tools.mcp_tools.registry import *
+from tools.mcp_shared import _attempt_dir
+from tools.mcp_tools.registry import ToolContext, _run_with_pgrp_timeout
+from tools.validation_utils import validate_target_or_ip
 
 
 def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:

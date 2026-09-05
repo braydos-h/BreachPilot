@@ -41,7 +41,7 @@ export function ArtifactsPage() {
       const match = name.match(/^exploit_workspace\/(?:(?<ip>[^/]+)\/)?(?<attempt>[^/]+)\//);
       if (match && match.groups) {
         const ip = match.groups.ip ?? "_root_";
-        const attempt = match.groups.attempt;
+        const attempt = match.groups.attempt ?? "";
         const key = `${ip}|${attempt}`;
         if (!seen.has(key)) {
           seen.add(key);
@@ -215,7 +215,7 @@ interface LogsPanelProps {
 }
 
 function LogsPanel({ runId, attemptCandidates }: LogsPanelProps) {
-  const [name, setName] = useState<string>(RUN_LOGS[0]);
+  const [name, setName] = useState<string>(RUN_LOGS[0] ?? "");
   const [tail, setTail] = useState<number>(200);
   const [attempt, setAttempt] = useState<string>(attemptCandidates[0]?.attempt ?? "");
   const [target, setTarget] = useState<string>(attemptCandidates[0]?.target ?? "");

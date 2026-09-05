@@ -205,7 +205,7 @@ describe("ConnectionsPage", () => {
     const user = userEvent.setup();
     // Mobile and desktop rows both rendered; pick first
     const rows = screen.getAllByRole("button", { name: /Open details for 10.0.0.15/ });
-    await user.click(rows[0]);
+    await user.click(rows[0]!);
     expect(await screen.findByText("Connection Details")).toBeInTheDocument();
     expect(screen.getAllByText(c.connection_id).length).toBeGreaterThanOrEqual(1);
   });
@@ -235,11 +235,11 @@ describe("ConnectionsPage", () => {
     renderPage();
     const user = userEvent.setup();
     const rows = screen.getAllByRole("button", { name: /Open details for 10.0.0.15/ });
-    await user.click(rows[0]);
+    await user.click(rows[0]!);
     await screen.findByText("Connection Details");
     // There may be multiple Remove buttons (drawer + dialog trigger) - pick first drawer one
     const removeBtns = screen.getAllByRole("button", { name: /Remove connection/ });
-    await user.click(removeBtns[0]);
+    await user.click(removeBtns[0]!);
     expect(await screen.findByText("Remove connection?")).toBeInTheDocument();
     expect(screen.getByText(/Target:/)).toBeInTheDocument();
   });

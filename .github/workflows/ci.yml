@@ -129,7 +129,7 @@ jobs:
       - name: Run tests with coverage
         run: python -m coverage run -m pytest tests/
       - name: Terminal coverage report
-        run: python -m coverage report
+        run: python -m coverage report --fail-under=80
       - name: XML coverage report
         run: python -m coverage xml
       - name: Upload coverage XML

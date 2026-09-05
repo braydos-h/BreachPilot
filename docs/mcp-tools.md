@@ -202,7 +202,7 @@ an `Exception` subclass — so bare `except Exception` around
 
 Registration requirement (AGENTS.md rule 4): every exploit MCP tool is
 decorated (`@mcp.tool()` + `@audit_tool` or `@require_allowlist(...)`) inside
-its family module — single-source via `tools/mcp_tools/registry.py:collect_tools()` (pkgutil + AST validation, fails CI if decorator missing); no manual list edit in `mcp_exploit_server.py` (27 families — 20 in `tools/mcp_tools/*.py` + 7 in `tools/mcp_tools/modules/*.py`).
+its family module — single-source via `tools/mcp_tools/registry.py:collect_tools()` (pkgutil + AST validation, fails CI if decorator missing); no manual list edit in `mcp_exploit_server.py` (30 families — 24 in `tools/mcp_tools/` (23 modules + the `terminal/` package) + 6 in `tools/mcp_tools/modules/*.py`).
 
 Legend: **Lock** = `@require_allowlist` (structured `target_ip`/`domain` param
 gated by the allowlist), `audit` = `@audit_tool`, `targets` = manual
@@ -560,7 +560,7 @@ separate name — no collision by construction).
 
 ## Adding a New Exploit MCP Tool (checklist)
 
-Matches AGENTS.md rule 4 and `mcp_exploit_server.py:153-177` (27 families — 20 in `tools/mcp_tools/*.py` + 7 in `tools/mcp_tools/modules/*.py` via `collect_tools()`).
+Matches AGENTS.md rule 4 and `mcp_exploit_server.py:153-177` (30 families — 24 in `tools/mcp_tools/` + 6 in `tools/mcp_tools/modules/*.py` via `collect_tools()`).
 
 1. **Add the tool in its family module** (`tools/mcp_tools/<family>.py`) as a
    function nested inside `register_<family>_tools(mcp, *, ctx)` with

@@ -142,13 +142,20 @@ class AttackTask:
             except (ValueError, KeyError, TypeError):
                 return default
 
+        # ponytail: resume demotion — a persisted RUNNING/RETRYING task was
+        # mid-flight at crash; re-queue as PENDING so the next run retries it
+        # instead of wedging on a stale in-flight status.
+        _status = _enum(TaskStatus, data.get("status"), TaskStatus.PENDING)
+        if _status in (TaskStatus.RUNNING, TaskStatus.RETRYING):
+            _status = TaskStatus.PENDING
+
         return cls(
             task_id=str(data.get("task_id", "")),
             phase=_enum(AttackPhase, data.get("phase"), AttackPhase.RECONNAISSANCE),
             module_name=str(data.get("module_name", "")),
             target=str(data.get("target", "")),
             parameters=dict(data.get("parameters", {}) or {}),
-            status=_enum(TaskStatus, data.get("status"), TaskStatus.PENDING),
+            status=_status,
             aggression=_enum(AggressionLevel, data.get("aggression"), AggressionLevel.NORMAL),
             priority=int(data.get("priority", 50) or 50),
             retry_count=int(data.get("retry_count", 0) or 0),

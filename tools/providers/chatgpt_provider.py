@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator, Mapping
 
 from .base import BaseProvider, make_model_client
-from .types import ModelInfo, ProviderCapabilities, ProviderDiscoveryError, ProviderHealth
+from .types import ModelInfo, ProviderCapabilities, ProviderDiscoveryError, ProviderHealth, usage_report
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from tools.model_router import ModelRouter
@@ -97,6 +97,17 @@ def _coalesce(cfg: Mapping[str, Any] | None) -> dict[str, Any]:
             if value is not None:
                 merged[key] = value
     return merged
+
+
+def _normalize_usage(raw: Any) -> dict[str, Any]:
+    """Normalize an OpenAI usage payload via ``usage_report``."""
+    if not isinstance(raw, dict) or not raw:
+        return {}
+    return usage_report(
+        raw.get("prompt_tokens", raw.get("input_tokens")),
+        raw.get("completion_tokens", raw.get("output_tokens")),
+        raw.get("total_tokens"),
+    )
 
 
 def _root_url(cfg: Mapping[str, Any]) -> str:
@@ -228,7 +239,7 @@ class ChatGptProxyClient:
                 "thinking": "",
                 "tool_calls": tool_calls,
             },
-            "usage": data.get("usage") or {},
+            "usage": _normalize_usage(data.get("usage")),
         }
 
     def _stream(self, url: str, payload: dict[str, Any], timeout: float) -> Iterator[dict[str, Any]]:
@@ -260,6 +271,7 @@ class ChatGptProxyClient:
                     usage = chunk.get("usage")
                     if usage:
                         final_usage = usage
+                    model = chunk.get("model") or payload.get("model")
                     choices = chunk.get("choices") or []
                     if not choices:
                         # Final usage-only chunk (openai-oauth emits
@@ -285,22 +297,24 @@ class ChatGptProxyClient:
                         if fn.get("arguments") is not None:
                             slot["function"]["arguments"] = slot["function"]["arguments"] + fn["arguments"]
                     yield {
+                        "model": model,
                         "message": {
                             "role": "assistant",
                             "content": content,
                             "thinking": "",
-                        }
+                        },
                     }
 
         assembled = [tool_accum[i] for i in sorted(tool_accum)]
         yield {
+            "model": payload.get("model"),
             "message": {
                 "role": "assistant",
                 "content": "",
                 "thinking": "",
                 "tool_calls": assembled,
             },
-            "usage": final_usage,
+            "usage": _normalize_usage(final_usage),
         }
 
 

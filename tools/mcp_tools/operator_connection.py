@@ -36,8 +36,11 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
+from typing import Any
 
-from tools.mcp_tools.registry import *
+from tools.mcp_shared import _attempt_dir, check_targets_allowlist
+from tools.mcp_tools.registry import ToolContext
 from tools.mcp_tools.terminal import _target_lock_block
 from tools.operator_connection.implants import (
     IMPLANT_METHODS,
@@ -45,6 +48,7 @@ from tools.operator_connection.implants import (
     render_implant,
 )
 from tools.operator_connection.manager import get_connection_manager
+from tools.validation_utils import preflight_command_check, validate_target_or_ip
 
 
 def _resolve_callback_host(config: Any, explicit: str) -> str:

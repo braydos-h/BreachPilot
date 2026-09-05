@@ -65,8 +65,8 @@ class OpsecProfile:
     min_gap_seconds: float = 0.0  # pacing: base min gap between actions
     jitter_seconds: float = 0.0  # +/- random jitter added to the gap
     rate_per_minute: int = 0  # 0 = no token-bucket cap
-    quiet_command_patterns: tuple[str, ...] = ()  # substrings to refuse when enabled
-    noise_budget: int = 0  # max noisy commands allowed (0 = unlimited)
+    quiet_command_patterns: tuple[str, ...] = ()  # advisory hints, never a gate
+    noise_budget: int = 0  # advisory only (0 = unlimited); never enforced
     # Target-aware OPSEC (Phase 6.2+). When ``local_targets_off`` is true (the
     # default), resolving the profile against a private/local target IP yields a
     # fully-disabled profile -- the operator owns the box and wants the AI to
@@ -103,6 +103,11 @@ class OpsecProfile:
             local_cidrs=tuple(block.get("local_cidrs", []) or []),
             public_autonomy=bool(block.get("public_autonomy", True)),
         )
+
+    @property
+    def suggested_noise_budget(self) -> int:
+        """Advisory-only alias for ``noise_budget`` (never enforced)."""
+        return self.noise_budget
 
     def to_dict(self) -> dict:
         """Return a plain-dict representation (round-trips via ``from_config``
@@ -354,15 +359,23 @@ class OpsecManager:
         score = len(reasons)
         return {"score": score, "reasons": reasons, "noisy": score > 0}
 
-    def is_quiet_blocked(self, command: str) -> bool:
-        """True iff OPSEC is enabled and any ``quiet_command_pattern`` is a
-        case-insensitive substring of ``command``."""
+    def suggest_quiet_avoidance(self, command: str) -> bool:
+        """Advisory-only hint: True iff OPSEC is enabled and any
+        ``quiet_command_pattern`` is a case-insensitive substring of
+        ``command``. Never gates execution -- the caller decides."""
         if not self.profile.enabled:
             return False
         if not command or not self.profile.quiet_command_patterns:
             return False
         lowered = command.lower()
         return any(p.lower() in lowered for p in self.profile.quiet_command_patterns)
+
+    def is_quiet_blocked(self, command: str) -> bool:
+        """Deprecated advisory alias for :meth:`suggest_quiet_avoidance`.
+
+        Kept for backward compat; never a gate. Prefer ``suggest_*``.
+        """
+        return self.suggest_quiet_avoidance(command)
 
     def suggest_low_noise_alternative(self, command: str) -> Optional[str]:
         """Heuristic rewrite of a noisy command into a quieter equivalent.

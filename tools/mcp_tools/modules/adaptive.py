@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
-from tools.mcp_tools.registry import *
+import json
+from datetime import datetime, timezone
+from typing import Any
+
+from db import get_default_db
+from tools.experience_store import ExperienceStore
+from tools.exploit_mutator import ExploitMutator
+from tools.mcp_tools.registry import ToolContext, _get_model_client
+from tools.payload_crafter import CraftedPayload
+from tools.validation_utils import validate_target_or_ip
 
 
 def register_adaptive_tools(mcp: Any, *, ctx: ToolContext) -> None:

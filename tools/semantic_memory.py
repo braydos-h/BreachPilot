@@ -161,9 +161,7 @@ class SemanticMemoryManager:
         # those rows have no vector and would tie at cosine 0.0, polluting recall.
         # The same guard on the embeddings table is defensive (store_embedding only
         # ever writes a real vector or skips, but never trust that across flows).
-        # ponytail: LIMIT avoids loading the entire embeddings table into memory
-        # just to score and sort. top_k*10 gives enough candidates for a good top-k
-        # after cosine similarity ranking; if the table is smaller, LIMIT is a no-op.
+        # Determinism: score the full filtered table (no LIMIT sampling).
         sql = (
             "SELECT id, mission_id, source_table, source_id, embedding_json "
             "FROM embeddings WHERE embedding_json != '[]'"
@@ -175,8 +173,6 @@ class SemanticMemoryManager:
         if mission_id:
             sql += " AND mission_id = ?"
             params.append(mission_id)
-        sql += " LIMIT ?"
-        params.append(max(top_k * 10, 100))
 
         candidates: list[dict[str, Any]] = []
         with self._db.connection() as conn:
@@ -232,6 +228,7 @@ class SemanticMemoryManager:
         # embedding_json='[]' (it has no text to embed); without this filter those
         # rows would load as np.array([]), score cosine 0.0, and tie at the bottom
         # of every recall — defeating the whole point of wiring find_similar_lessons.
+        # Determinism: score the full filtered table (no LIMIT sampling).
         sql = (
             "SELECT id, pattern_hash, target_signature, action_type, outcome, "
             "confidence, embedding_json, metadata_json, text "
@@ -244,8 +241,6 @@ class SemanticMemoryManager:
         if outcome:
             sql += " AND outcome = ?"
             params.append(outcome)
-        sql += " LIMIT ?"
-        params.append(max(top_k * 10, 100))
 
         candidates: list[dict[str, Any]] = []
         with self._db.connection() as conn:

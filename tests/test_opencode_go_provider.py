@@ -1250,12 +1250,12 @@ def test_list_models_includes_opencode_go_block(tmp_path, monkeypatch):
         "ollama": {"host": "https://api.ollama.com"},
         "chatgpt": {"default_model": "gpt-5.2"},
     }
-    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-token")
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-token-0123456789abcdef01234567")
     monkeypatch.chdir(tmp_path)
     (tmp_path / "config.yaml").write_text("api:\n  host: 127.0.0.1\n", encoding="utf-8")
     app = create_app(config_path=tmp_path / "config.yaml", config=test_cfg)
     client = TestClient(app)
-    resp = client.get("/api/v1/models", headers={"Authorization": "Bearer test-token"})
+    resp = client.get("/api/v1/models", headers={"Authorization": "Bearer test-token-0123456789abcdef01234567"})
     assert resp.status_code == 200
     result = resp.json()
     assert result["provider"] == "opencode_go"
@@ -1266,7 +1266,7 @@ def test_list_models_includes_opencode_go_block(tmp_path, monkeypatch):
 
 def test_providers_includes_opencode_go(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENCODE_GO_API_KEY", "")
-    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-token")
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-token-0123456789abcdef01234567")
     from fastapi.testclient import TestClient
 
     from app import create_app
@@ -1291,7 +1291,7 @@ def test_providers_includes_opencode_go(tmp_path, monkeypatch):
     _FAKE_HTTPX.set("GET", "/models", lambda url, headers=None: _FakeResponse({"data": []}))
     app = create_app(config_path=tmp_path / "config.yaml", config=test_cfg)
     client = TestClient(app)
-    resp = client.get("/api/v1/providers", headers={"Authorization": "Bearer test-token"})
+    resp = client.get("/api/v1/providers", headers={"Authorization": "Bearer test-token-0123456789abcdef01234567"})
     assert resp.status_code == 200
     result = resp.json()
     assert "opencode_go" in result

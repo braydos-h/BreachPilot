@@ -8,7 +8,9 @@ gate. See ``tools/mitre_export.py`` for the mapping logic.
 
 from __future__ import annotations
 
-from tools.mcp_tools.registry import *
+from typing import Any
+
+from tools.mcp_tools.registry import ToolContext
 from tools.mitre_export import export_attack_navigator as _export_attack_navigator
 
 

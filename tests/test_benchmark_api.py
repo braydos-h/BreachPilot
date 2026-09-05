@@ -13,7 +13,7 @@ from tools.benchmark.agent_runner import MissionResult, TrialTelemetry
 from tools.benchmark.metrics import compute_run_summary
 from tools.benchmark.models import BenchmarkScenario, TrialResult, TrialStatus
 
-TOKEN = "test-token"
+TOKEN = "test-token-0123456789abcdef01234567"
 
 
 def _scenario(scenario_id: str = "s1") -> BenchmarkScenario:

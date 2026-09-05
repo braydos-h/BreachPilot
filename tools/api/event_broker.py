@@ -50,6 +50,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import threading
 from collections import OrderedDict, deque
 from datetime import datetime, timezone
@@ -463,6 +464,8 @@ class RunEventBroker:
             self._events_path.parent.mkdir(parents=True, exist_ok=True)
             with self._events_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(event, default=str) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
             self._ring.append(event)
             subscribers = tuple(self._subscribers)
         for queue in subscribers:

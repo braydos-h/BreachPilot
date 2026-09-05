@@ -312,7 +312,7 @@ async def test_job_install_failure(monkeypatch):
 # ── API tests ───────────────────────────────────────────────────────────────
 
 
-def _make_client(tmp_path, monkeypatch, token="test-token"):
+def _make_client(tmp_path, monkeypatch, token="test-token-0123456789abcdef01234567"):
     monkeypatch.setenv("BREACHPILOT_API_TOKEN", token)
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
@@ -347,7 +347,7 @@ def _make_client(tmp_path, monkeypatch, token="test-token"):
     return TestClient(app), config_path
 
 
-def _auth(token="test-token"):
+def _auth(token="test-token-0123456789abcdef01234567"):
     return {"Authorization": f"Bearer {token}"}
 
 

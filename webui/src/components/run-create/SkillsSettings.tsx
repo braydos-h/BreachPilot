@@ -41,7 +41,7 @@ export function SkillsSettings({
         onChange={(v) => setSkillsMode(v as SkillsMode)}
         options={SKILLS_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
       />
-      <p className="text-xs text-muted-foreground">{current.body}</p>
+      <p className="text-xs text-muted-foreground">{current?.body ?? ""}</p>
       {open && (
         <div className="grid gap-3 sm:grid-cols-2">
           <SkillMultiSelect

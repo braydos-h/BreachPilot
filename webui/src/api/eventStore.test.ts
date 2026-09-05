@@ -62,8 +62,8 @@ describe("eventStore", () => {
     eventStore.set(id, events, 1500);
     const entry = eventStore.get(id);
     expect(entry?.events.length).toBe(1000);
-    expect(entry?.events[0].sequence).toBe(501);
-    expect(entry?.events[999].sequence).toBe(1500);
+    expect(entry?.events[0]!.sequence).toBe(501);
+    expect(entry?.events[999]!.sequence).toBe(1500);
   });
 
   it("bounds history to 1000 events on append", () => {
@@ -72,15 +72,15 @@ describe("eventStore", () => {
     eventStore.append(id, ev(1001, id));
     const entry = eventStore.get(id);
     expect(entry?.events.length).toBe(1000);
-    expect(entry?.events[0].sequence).toBe(2);
-    expect(entry?.events[999].sequence).toBe(1001);
+    expect(entry?.events[0]!.sequence).toBe(2);
+    expect(entry?.events[999]!.sequence).toBe(1001);
   });
 
   it("evicts the oldest run when an 11th run is added", () => {
     const ids = Array.from({ length: 11 }, () => rid("lru"));
     ids.forEach((id) => eventStore.set(id, [ev(1, id)], 1));
-    expect(eventStore.get(ids[0])).toBeUndefined();
-    expect(eventStore.get(ids[10])).toBeDefined();
+    expect(eventStore.get(ids[0]!)).toBeUndefined();
+    expect(eventStore.get(ids[10]!)).toBeDefined();
   });
 
   it("transitions from a seeded tail to live appends without gaps or dupes", () => {
@@ -111,7 +111,7 @@ describe("eventStore", () => {
     eventStore.set(id, Array.from({ length: 1000 }, (_, i) => ev(i + 3428, id)), 4427, 3427);
     const entry = eventStore.get(id);
     expect(entry?.dropped).toBe(3427);
-    expect(entry?.events[0].sequence).toBe(3428);
+    expect(entry?.events[0]!.sequence).toBe(3428);
   });
 
   it("increments dropped as live appends overflow the window", () => {
@@ -123,8 +123,8 @@ describe("eventStore", () => {
     eventStore.append(id, ev(1002, id));
     const entry = eventStore.get(id);
     expect(entry?.events.length).toBe(1000);
-    expect(entry?.events[0].sequence).toBe(3);
-    expect(entry?.events[999].sequence).toBe(1002);
+    expect(entry?.events[0]!.sequence).toBe(3);
+    expect(entry?.events[999]!.sequence).toBe(1002);
     expect(entry?.dropped).toBe(2);
   });
 

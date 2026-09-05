@@ -180,12 +180,13 @@ class ExperienceStore:
                 (target_signature, action_type),
             )
             for row in cur.fetchall():
-                n += 1
                 w = self._decay_weight(row["created_at"])
                 outcome = row["outcome"]
                 if outcome == "success":
+                    n += 1
                     successes += w
                 elif outcome == "failure":
+                    n += 1
                     failures += w
                 elif outcome == "partial":
                     partials += 0.5 * w
@@ -203,20 +204,21 @@ class ExperienceStore:
         target_signature: str,
         action_type: str,
     ) -> int:
-        """Return the total number of recorded outcomes for a pair.
+        """Return the total number of decisive outcomes for a pair.
 
         Unlike ``get_confidence`` (which gates on ``min_samples`` and returns a
-        posterior), this is the raw row count used by callers that need their
-        own sample-size gate -- e.g. the runtime-skill feedback loop applies a
+        posterior), this is the row count used by callers that need their own
+        sample-size gate -- e.g. the runtime-skill feedback loop applies a
         separate ``feedback_min_observations`` threshold before trusting a
-        ``skill_prior``. Counts every row regardless of outcome value.
+        ``skill_prior``. Counts only ``success``/``failure`` rows; neutral
+        ``partial`` observations (skill loads) never satisfy a min-samples gate.
         """
         try:
             with self._db.connection() as conn:
                 cur = conn.execute(
                     "SELECT COUNT(*) AS n FROM lessons "
                     "WHERE target_signature = ? AND action_type = ? "
-                    "AND embedding_json = '[]'",
+                    "AND embedding_json = '[]' AND outcome IN ('success','failure')",
                     (target_signature, action_type),
                 )
                 row = cur.fetchone()
@@ -263,12 +265,13 @@ class ExperienceStore:
             for row in cur.fetchall():
                 action = row["action_type"]
                 bucket = agg.setdefault(action, {"success": 0.0, "failure": 0.0, "partial": 0.0, "n": 0.0})
-                bucket["n"] += 1
                 w = self._decay_weight(row["created_at"])
                 outcome = row["outcome"]
                 if outcome == "success":
+                    bucket["n"] += 1
                     bucket["success"] += w
                 elif outcome == "failure":
+                    bucket["n"] += 1
                     bucket["failure"] += w
                 elif outcome == "partial":
                     bucket["partial"] += 0.5 * w
@@ -373,7 +376,7 @@ class ExperienceStore:
                     buckets.setdefault(row["target_signature"], []).append((row["outcome"], row["created_at"]))
             for name, sig in zip(names, sigs):
                 rows = buckets.get(sig, [])
-                n = len(rows)
+                n = sum(1 for outcome, _ in rows if outcome in ("success", "failure"))
                 if n < self._min_samples:
                     result[name] = (n, 0.5)
                     continue

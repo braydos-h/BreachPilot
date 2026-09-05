@@ -127,6 +127,12 @@ class ApplicabilityEvidence:
     version_match: bool | None = None  # None = no version info to judge
     os_match: bool | None = None  # None = no OS hint / no ctx OS
     missing_prereqs: list[str] = field(default_factory=list)
+    optional_missing: list[str] = field(default_factory=list)
+    # Advisory baseline for always-selectable planning modules (detection
+    # coverage / OPSEC posture): the fixed score lives here as data so the
+    # base evidence path (vetoes, gates, prereq penalties) still applies,
+    # instead of an applicability() override bypassing it. 0 = no baseline.
+    baseline: int = 0
     # Veto/penalty signals (negative evidence):
     # NOTE: a version-mismatch penalty is deliberately absent — the pinned
     # contract (tests/test_version_aware_ranking.py) requires a non-matching
@@ -351,7 +357,15 @@ class AttackModule(ABC):
     # ...) so the planner can discover module composition dynamically instead
     # of hard-coding chains. read_only = does not change target state.
     requires: list[str] = []
+    # ponytail: nice-to-have inputs (e.g. user_list for spraying — the built-in
+    # wordlist suffices alone). Never penalize the score, never block; surfaced
+    # in evidence/explain only so the planner can prefer the enriched path.
+    optional_requires: list[str] = []
     produces: list[str] = []
+    # Advisory baseline for always-on planning modules (detection coverage,
+    # OPSEC posture): added to the score as data so no applicability()
+    # override is needed. 0 (default) = purely evidence-driven scoring.
+    baseline_score: int = 0
     read_only: bool = False
     cost: str = "medium"  # low|medium|high -- planning hint only
     phase_hint: str = ""  # recon|enumerate|exploit|escalate|loot|pivot|... advisory
@@ -417,6 +431,7 @@ class AttackModule(ABC):
             # No ctx OS: None (no signal either way).
 
         missing = [r for r in self.requires if not _artifact_present(r, ctx)]
+        optional_missing = [r for r in self.optional_requires if not _artifact_present(r, ctx)]
         return ApplicabilityEvidence(
             matched_services=matched_services,
             matched_ports=matched_ports,
@@ -424,6 +439,8 @@ class AttackModule(ABC):
             version_match=version_match,
             os_match=os_match,
             missing_prereqs=missing,
+            optional_missing=optional_missing,
+            baseline=int(self.baseline_score or 0),
             os_contradicted=os_contradicted,
             cve_unconfirmed=bool(self.required_cves and not matched_cves),
         )
@@ -438,7 +455,8 @@ class AttackModule(ABC):
         """
         distinct_services = {canonical_service(s) for s in ev.matched_services}
         score = (
-            30 * len(distinct_services)
+            int(ev.baseline or 0)
+            + 30 * len(distinct_services)
             + 20 * len(set(ev.matched_ports))
             + 40 * len({c.upper() for c in ev.matched_cves})
         )
@@ -446,7 +464,8 @@ class AttackModule(ABC):
             score += 25
         if ev.os_match:
             score += 30
-        # Negative evidence (never below the floor logic in applicability()):
+        # Negative evidence (clamped at 0; genuinely-missing required prereqs
+        # may hide a service-matched module until recovery produces them).
         if ev.cve_unconfirmed:
             score = min(score, 30)  # CVE-gated exploit without the CVE: probe at best
         if ev.missing_prereqs:
@@ -466,12 +485,7 @@ class AttackModule(ABC):
         # wrong OS, no matter which ports are open.
         if ev.os_contradicted:
             return 0
-        score = self.score_evidence(ev)
-        # Missing prerequisites demote but never fully hide a service-matched
-        # module (floor 5 keeps the recovery path visible to the planner).
-        if ev.missing_prereqs and score == 0 and (ev.matched_services or ev.matched_ports):
-            score = 5
-        return score
+        return self.score_evidence(ev)
 
     def applicability_explain(self, ctx: ModuleContext) -> "ApplicabilityReport":
         """Structured explanation of the applicability score.
@@ -489,6 +503,8 @@ class AttackModule(ABC):
             return ApplicabilityReport(score=0, reasons=[], penalties=["evidence computation failed"])
         reasons: list[str] = []
         penalties: list[str] = []
+        if ev.baseline:
+            reasons.append(f"advisory baseline: +{ev.baseline}")
         if ev.matched_services:
             reasons.append(f"service matched: {', '.join(ev.matched_services)}")
         if ev.matched_ports:
@@ -508,6 +524,8 @@ class AttackModule(ABC):
             penalties.append(f"target OS contradicts hint {self.target_os_hint} (veto)")
         for r in ev.missing_prereqs:
             penalties.append(f"prerequisite missing: {r} (-15)")
+        for r in ev.optional_missing:
+            reasons.append(f"optional prerequisite missing (no penalty): {r}")
         if self.destructive_ics and score == 0:
             penalties.append("ICS destructive-write gates not armed (ics.allow_write + ics.destructive_ics)")
         if score == 0 and not reasons and not penalties:
@@ -530,6 +548,7 @@ class AttackModule(ABC):
             "target_os_hint": list(self.target_os_hint),
             "destructive_ics": bool(self.destructive_ics),
             "requires": list(self.requires),
+            "optional_requires": list(self.optional_requires),
             "produces": list(self.produces),
             "read_only": bool(self.read_only),
             "cost": self.cost,

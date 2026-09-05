@@ -47,8 +47,9 @@ export function RunBenchmarkPanel({ suites, active, defaultModel }: RunBenchmark
   // (e.g. rendered directly on the "New run" sub-page) — pick the first suite
   // once suites arrive so the user never sees a stuck "Select suite…" default.
   useEffect(() => {
-    if (!suite && suites.length > 0) {
-      setSuite(suites[0].suite_id);
+    const first = suites[0];
+    if (!suite && first) {
+      setSuite(first.suite_id);
     }
   }, [suite, suites]);
 

@@ -45,6 +45,15 @@ export default defineConfig(({ mode }) => {
       outDir: "dist",
       sourcemap: false,
       target: "es2020",
+      // ponytail: split the two heavy graphs so the entry chunk stays small.
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            "react-vendor": ["react", "react-dom", "react-router-dom"],
+            flow: ["reactflow"],
+          },
+        },
+      },
     },
   };
 });

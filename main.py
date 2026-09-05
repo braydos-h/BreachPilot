@@ -568,8 +568,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--ctf-root-shell",
         dest="ctf_root_shell",
         action="store_true",
-        default=True,
-        help="CTF goal: treat uid=0 in any output as goal-met (default True)",
+        default=False,
+        help="CTF goal: treat uid=0 in any output as goal-met (default False)",
     )
     ctf.add_argument(
         "--ctf-port", dest="ctf_port", type=int, default=0, help="CTF goal: port to probe for the known-string marker"
@@ -1245,10 +1245,10 @@ async def async_main(args: argparse.Namespace) -> int:
             ui.error("Aborted.")
             return 1
 
-    # Build the RunRequest from args.
+    # Build the RunRequest from args. ponytail: default recon — attack needs explicit --mode attack.
     request = RunRequest(
         target=args.target.strip(),
-        mode=getattr(args, "mode", "").strip().lower() or "attack",
+        mode=getattr(args, "mode", "").strip().lower() or "recon",
         goal_name=getattr(args, "goal", "").strip().lower(),
         custom_goal=getattr(args, "custom_goal", "").strip(),
         recon_first=getattr(args, "recon_first", None),
@@ -1370,8 +1370,8 @@ async def async_main(args: argparse.Namespace) -> int:
             ui.warning(f"  - {err}")
     ui.divider()
 
-    # Ready-to-begin gate.
-    if not getattr(args, "yes", False):
+    # Ready-to-begin gate. ponytail: --yes never skips typed ALLOW on destructive runs.
+    if (not getattr(args, "yes", False)) or preview.destructive:
         decision_provider = TerminalDecisionProvider(ui)
         from tools.run_service.models import Decision, DecisionKind
 

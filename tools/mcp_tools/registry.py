@@ -3,88 +3,29 @@
 
 from __future__ import annotations
 
-import asyncio
-import ipaddress
-import json
 import os
 import platform
-import re
-import shlex
-import signal
-import socket
-import ssl as _ssl_module
 import subprocess
 import sys
 import threading
-import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from db import DatabaseManager, get_default_db
-from tools.api_key_store import (
-    DEFAULT_API_KEY_FILE,
-    disabled_research_tools_message,
-    load_api_keys_into_env,
-    research_api_keys_available,
-)
-from tools.attack_modules import ModuleContext, get_module, list_modules
-from tools.attack_planner import (
-    AttackPlanner,
-    build_planning_prompt,
-    build_replanning_prompt,
-    parse_plan_json,
-    parse_replan_json,
-)
-from tools.autonomous_orchestrator import (
-    AggressionLevel,
-    AutonomousOrchestrator,
-    TaskStatus,
-)
-from tools.autonomous_orchestrator import (
-    AttackPhase as OrchAttackPhase,
-)
+from db import get_default_db
 from tools.config_manager import CONFIG_SCHEMA
-from tools.credential_store import CredentialRecord, CredentialStore
-from tools.cve_lookup import NVDClient, format_cve_results
+from tools.cve_lookup import NVDClient
 from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
-from tools.experience_store import ExperienceStore
-from tools.exploit_mutator import ExploitMutator
 from tools.exploit_search import ExploitSearch
 from tools.kernel.allowlist import _extract_scanner_targets
 from tools.kernel.workspace import read_workspace
 from tools.mcp_shared import (
     _attempt_dir,
-    _extract_msf_rhosts,
-    add_discovered_target,
-    build_cve_search,
-    build_researcher,
-    build_search,
-    check_targets_allowlist,
-    load_config,
     make_audit_tool,
     make_require_allowlist,
 )
 from tools.mcp_shared import (
     _run_with_pgrp_timeout as _shared_run_with_pgrp_timeout,
-)
-from tools.metasploit_bridge import MetasploitBridge, get_metasploit_bridge
-from tools.payload_crafter import CraftedPayload
-from tools.persistent_session_manager import PersistentSessionManager, get_session_manager
-from tools.recon_pipeline import HostReconResult, ReconConfig, ReconPipeline
-from tools.skill_registry import load_skill_registry, render_skill_context
-from tools.validation_utils import (
-    extract_ips_from_command,
-    is_fqdn,
-    is_subdomain_of,
-    is_target_in_allowlist,
-    preflight_command_check,
-    resolve_target,
-    resolve_target_to_ip,
-    validate_ipv4,
-    validate_target,
-    validate_target_or_ip,
 )
 from tools.web_researcher import WebResearcher
 
@@ -115,7 +56,7 @@ class ToolContext:
     sandbox: Any | None = None
     # Non-empty when the server degraded to legacy host-execution via the
     # boot-time native fallback (sandbox enabled, Docker unusable,
-    # sandbox.fallback_native=true): tools embed this in results so the agent
+    # sandbox.fallback_native=true as explicit opt-in): tools embed this in results so the agent
     # (and the audit trail) knows execution is UNCONTAINED. "" otherwise.
     sandbox_notice: str = ""
 
@@ -336,52 +277,30 @@ def register_tool_family(fn: Any) -> Any:
 def _discover_tool_registrars() -> list[Any]:
     """Auto-discover ``register_*_tools`` callables in ``tools.mcp_tools``.
 
-    Walks ``tools.mcp_tools`` submodules, imports each, and collects callables
-    named ``register_*_tools``. Result is cached in ``_TOOL_REGISTRARS`` after
-    first call. Explicit ``@register_tool_family`` entries are merged in.
+    Walks top-level family modules AND every subpackage (``modules/``,
+    ``terminal/``, ...) through one uniform branch: each module or
+    ``<subpkg>.<module>`` contributing a callable named ``register_*_tools``.
+    Re-walks on every call -- no stale cache (a newly added family is picked
+    up without a restart); ``sys.modules`` makes the re-import cheap and
+    already-seen callables are never duplicated. Explicit
+    ``@register_tool_family`` entries are merged in.
     """
     import importlib
     import pkgutil
 
-    # Return cached if already populated via decorator or prior discovery
-    if _TOOL_REGISTRARS:
-        return list(_TOOL_REGISTRARS)
     try:
         import tools.mcp_tools as _pkg
     except ImportError:
-        return []
+        return list(_TOOL_REGISTRARS)
+
+    def _collect(mod: Any) -> None:
+        for attr in dir(mod):
+            if attr.startswith("register_") and attr.endswith("_tools"):
+                fn = getattr(mod, attr, None)
+                if callable(fn) and fn not in _TOOL_REGISTRARS:
+                    _TOOL_REGISTRARS.append(fn)
+
     for _, modname, ispkg in pkgutil.iter_modules(_pkg.__path__):
-        if ispkg:
-            if modname == "modules":
-                try:
-                    import tools.mcp_tools.modules as _subpkg
-                except ImportError:
-                    continue
-                for _, subname, sub_is_pkg in pkgutil.iter_modules(_subpkg.__path__):
-                    if sub_is_pkg:
-                        continue
-                    try:
-                        mod = importlib.import_module(f"tools.mcp_tools.modules.{subname}")
-                    except _EXC_GROUP_CATCH as exc:
-                        _log_nested_exceptions(exc)
-                        continue
-                    for attr in dir(mod):
-                        if attr.startswith("register_") and attr.endswith("_tools"):
-                            fn = getattr(mod, attr, None)
-                            if callable(fn) and fn not in _TOOL_REGISTRARS:
-                                _TOOL_REGISTRARS.append(fn)
-            elif modname == "terminal":
-                try:
-                    mod = importlib.import_module("tools.mcp_tools.terminal")
-                except _EXC_GROUP_CATCH as exc:
-                    _log_nested_exceptions(exc)
-                    continue
-                for attr in dir(mod):
-                    if attr.startswith("register_") and attr.endswith("_tools"):
-                        fn = getattr(mod, attr, None)
-                        if callable(fn) and fn not in _TOOL_REGISTRARS:
-                            _TOOL_REGISTRARS.append(fn)
-            continue
         if modname == "registry":
             continue
         try:
@@ -389,15 +308,29 @@ def _discover_tool_registrars() -> list[Any]:
         except _EXC_GROUP_CATCH as exc:
             _log_nested_exceptions(exc)
             continue
-        for attr in dir(mod):
-            if attr.startswith("register_") and attr.endswith("_tools"):
-                fn = getattr(mod, attr, None)
-                if callable(fn) and fn not in _TOOL_REGISTRARS:
-                    _TOOL_REGISTRARS.append(fn)
+        if not ispkg:
+            _collect(mod)
+            continue
+        # Package itself may define the registrar (e.g. terminal/__init__.py
+        # aggregates execute + privilege + package submodules).
+        _collect(mod)
+        try:
+            submodules = list(pkgutil.iter_modules(mod.__path__))
+        except AttributeError:
+            continue
+        for _, subname, sub_is_pkg in submodules:
+            if sub_is_pkg:
+                continue
+            try:
+                sub = importlib.import_module(f"tools.mcp_tools.{modname}.{subname}")
+            except _EXC_GROUP_CATCH as exc:
+                _log_nested_exceptions(exc)
+                continue
+            _collect(sub)
     return list(_TOOL_REGISTRARS)
 
 
-def _validate_mcp_tool_decorators() -> list[str]:
+def _validate_mcp_tool_decorators(_files: list[Any] | None = None) -> list[str]:
     """Static check: every ``@mcp.tool`` in ``tools/mcp_tools/*.py`` must have audit allowlist.
 
     Parses each ``tools/mcp_tools/<family>.py`` file with ``ast`` and verifies
@@ -405,6 +338,7 @@ def _validate_mcp_tool_decorators() -> list[str]:
     ``@audit_tool`` or ``@require_allowlist`` (including ``ctx.audit_tool``,
     ``ctx.require_allowlist``, ``make_audit_tool`` variants). Returns a list of
     error messages (empty = all good). Used by ``collect_tools()`` to fail CI.
+    ``_files`` overrides the scanned set (hermetic unit tests only).
     """
     import ast
     import pathlib
@@ -413,7 +347,9 @@ def _validate_mcp_tool_decorators() -> list[str]:
     pkg_dir = pathlib.Path(__file__).parent
     # Check top-level, modules subpackage, and terminal subpackage (split god-file)
     files = (
-        list(pkg_dir.glob("*.py"))
+        list(_files)
+        if _files is not None
+        else list(pkg_dir.glob("*.py"))
         + list((pkg_dir / "modules").glob("*.py"))
         + list((pkg_dir / "terminal").glob("*.py"))
     )
@@ -434,18 +370,22 @@ def _validate_mcp_tool_decorators() -> list[str]:
             # need to detect @mcp.tool() among decorators
             has_mcp_tool = False
             has_audit = False
+            broken_deco = False
             for d in decos:
                 try:
                     src = ast.unparse(d)
                 except _EXC_GROUP_CATCH as exc:
                     _log_nested_exceptions(exc)
-                    src = ""
+                    broken_deco = True
+                    continue
                 low = src.lower()
                 if "mcp.tool" in low or ".tool(" in low:
                     has_mcp_tool = True
                 if "audit_tool" in low or "require_allowlist" in low:
                     has_audit = True
-            if has_mcp_tool and not has_audit:
+            if broken_deco:
+                errors.append(f"{py.name}:{node.lineno} {node.name} has an unparseable decorator (fail closed)")
+            elif has_mcp_tool and not has_audit:
                 errors.append(
                     f"{py.name}:{node.lineno} {node.name} has @mcp.tool but lacks @audit_tool/@require_allowlist"
                 )
@@ -484,93 +424,24 @@ def ps_quote(value: str) -> str:
 # re-export for backwards compat (from tools.mcp_tools.registry import _extract_scanner_targets still works).
 # See tools/kernel/allowlist.py
 
+# -- Public surface: ToolContext + discovery/validation + the small set of
+# helpers other modules import explicitly (terminal/*, mcp_exploit_server,
+# swarm, tests). Family modules import everything else from its true origin;
+# the old ~70-symbol star re-export is gone.
 __all__ = [
-    "AggressionLevel",
-    "AttackPlanner",
-    "AutonomousOrchestrator",
-    "CONFIG_SCHEMA",
-    "CraftedPayload",
-    "CredentialRecord",
-    "CredentialStore",
-    "DEFAULT_API_KEY_FILE",
-    "DatabaseManager",
-    "ExperienceStore",
-    "ExploitMutator",
-    "ExploitSearch",
-    "HostReconResult",
-    "MetasploitBridge",
-    "ModuleContext",
-    "NVDClient",
-    "OrchAttackPhase",
-    "PersistentSessionManager",
-    "ReconConfig",
-    "ReconPipeline",
-    "TaskStatus",
     "ToolContext",
-    "WebResearcher",
-    "add_discovered_target",
-    "build_cve_search",
-    "build_planning_prompt",
-    "build_replanning_prompt",
-    "build_researcher",
-    "build_search",
-    "check_targets_allowlist",
-    "disabled_research_tools_message",
-    "extract_ips_from_command",
-    "format_cve_results",
+    "_TOOL_REGISTRARS",
+    "_attempt_dir",
+    "_discover_tool_registrars",
+    "_ensure_workspace_dirs",
+    "_extract_scanner_targets",
+    "_get_model_router",
+    "_run_with_pgrp_timeout",
+    "_validate_mcp_tool_decorators",
+    "collect_tools",
     "get_default_db",
-    "get_metasploit_bridge",
-    "get_module",
-    "get_session_manager",
-    "is_target_in_allowlist",
-    "is_subdomain_of",
-    "list_modules",
-    "load_api_keys_into_env",
-    "load_config",
-    "load_skill_registry",
     "make_audit_tool",
     "make_require_allowlist",
-    "parse_plan_json",
-    "parse_replan_json",
-    "preflight_command_check",
-    "ps_quote",
     "read_workspace",
-    "render_skill_context",
-    "research_api_keys_available",
-    "validate_ipv4",
-    "validate_target",
-    "validate_target_or_ip",
-    "is_fqdn",
-    "resolve_target_to_ip",
-    "resolve_target",
-    # ponytail: underscore-prefixed helpers used by runtime_skills.py via import *
-    "_get_model_client",
-    "_positive_int",
-    "_runtime_skills_enabled",
-    "_skills_config",
-    "_truncate_text",
-    # ponytail: stdlib modules and helpers used by terminal.py / metasploit.py / workspace.py / recon.py via import *
-    "asyncio",
-    "datetime",
-    "json",
-    "os",
-    "Path",
-    "re",
-    "signal",
-    "socket",
-    "time",
-    "timezone",
-    "_ssl_module",
-    "_attempt_dir",
-    "_extract_msf_rhosts",
-    "_platform_system",
-    "_run_with_pgrp_timeout",
-    "_extract_scanner_targets",
-    # ponytail: Phase 2 collapsed registration — single source via _discover_tool_registrars
-    "_TOOL_REGISTRARS",
     "register_tool_family",
-    "_discover_tool_registrars",
-    "collect_tools",
-    "_validate_mcp_tool_decorators",
-    "Any",
 ]

@@ -25,6 +25,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from tools.attack_modules.base import AttackModule, ModuleContext
+from tools.attack_modules.registry import register_attack_module
 from tools.persistent_session_manager import PersistentSessionManager, get_session_manager
 
 _LOG = logging.getLogger(__name__)
@@ -950,60 +952,178 @@ def reset_metasploit_bridge() -> None:
 # Phase 3: MSF recipe catalog
 # ---------------------------------------------------------------------------
 
-# Pure data literal: curated MSF module + option presets the AI can dispatch by
-# name via ``MetasploitBridge.run_recipe`` / the ``msf_run_recipe`` MCP tool. Each
-# entry: ``module`` (full msf path), ``kind`` (exploit|auxiliary|post|handler),
-# optional ``payload`` (exploit/handler kinds), optional ``options`` preset, and
-# a human ``description``. Plain data so it serializes and is trivially testable;
-# no new deps. Add a recipe here and it is immediately callable by name.
-MSF_RECIPES: dict[str, dict[str, Any]] = {
-    "smb_version": {
-        "module": "auxiliary/scanner/smb/smb_version",
-        "kind": "auxiliary",
-        "description": "SMB version + OS fingerprint via anonymous session.",
-    },
-    "bluekeep": {
-        # Phase 2: the module path was a typo mixing EternalBlue's directory
-        # with BlueKeep's name (exploit/windows/smb/ms17_010_bluekeep does not
-        # exist in msfconsole). The real module is the RDP one.
-        "module": "exploit/windows/rdp/cve_2019_0708_bluekeep_rce",
-        "kind": "exploit",
-        "payload": "windows/x64/meterpreter/reverse_tcp",
-        "description": "BlueKeep (CVE-2019-0708) RDP RCE.",
-    },
-    "psexec": {
-        "module": "exploit/windows/smb/psexec",
-        "kind": "exploit",
-        "payload": "windows/meterpreter/reverse_tcp",
-        "description": "PsExec-style SMB exec with supplied creds (SMBUser/SMBPass).",
-    },
-    "cred_gather_win": {
-        "module": "post/windows/gather/credentials/credential_collector",
-        "kind": "post",
-        "description": "Gather Windows credentials from a session.",
-    },
-    "local_exploit_suggester": {
-        "module": "post/multi/recon/local_exploit_suggester",
-        "kind": "post",
-        "description": "Suggest local privesc exploits for the active session.",
-    },
-    "hashdump": {
-        "module": "post/windows/gather/hashdump",
-        "kind": "post",
-        "description": "Dump SAM hashes from a Windows session.",
-    },
-    "getsystem": {
-        "module": "post/windows/escalate/getsystem",
-        "kind": "post",
-        "description": "Attempt SYSTEM on a Windows meterpreter session.",
-    },
-    "handler": {
-        "module": "exploit/multi/handler",
-        "kind": "handler",
-        "payload": "windows/meterpreter/reverse_tcp",
-        "description": "Generic multi/handler catch for a generated payload.",
-    },
-}
+# ---------------------------------------------------------------------------
+# Phase 3: MSF recipe catalog — AttackModule subclasses (single source)
+# ---------------------------------------------------------------------------
+
+# ponytail: recipes used to live in a parallel MSF_RECIPES dict invisible to
+# find_modules/the planner. Each recipe is now an AttackModule subclass below
+# (explicitly registered — auto-discovery only scans attack_modules/modules/),
+# and MSF_RECIPES is a derived view, not a second source.
+
+
+class _MsfRecipeModule(AttackModule):
+    """Base for curated MSF module+option presets dispatchable by name.
+
+    The recipe never executes here — run() returns an advisory info result
+    pointing at the ``msf_run_recipe`` MCP tool, which allowlist-gates and
+    dispatches via ``MetasploitBridge.run_recipe``. The scoring metadata is
+    what makes recipes visible to find_modules/the planner.
+    """
+
+    msf_module: str = ""
+    msf_kind: str = "auxiliary"  # exploit|auxiliary|post|handler
+    msf_payload: str = ""
+    msf_options: dict[str, str] = {}
+    read_only = True
+    cost = "medium"
+    phase_hint = "exploit"
+
+    @classmethod
+    def recipe_dict(cls) -> dict[str, Any]:
+        """The MSF_RECIPES entry shape (fresh dict per call)."""
+        d: dict[str, Any] = {"module": cls.msf_module, "kind": cls.msf_kind, "description": cls.description}
+        if cls.msf_payload:
+            d["payload"] = cls.msf_payload
+        if cls.msf_options:
+            d["options"] = dict(cls.msf_options)
+        return d
+
+    def run(self, ctx: ModuleContext) -> dict[str, Any]:
+        return self._info_result(
+            ctx,
+            note=(
+                f"MSF recipe '{self.name}' ({self.msf_module}). Dispatch via "
+                f"msf_run_recipe(name='{self.name}', ...) — allowlist-gated at the MCP tool layer."
+            ),
+            evidence=[f"MSF recipe queued: {self.msf_module} ({self.msf_kind})"],
+            references=["https://docs.metasploit.com/"],
+            suggested_msf=self.msf_module,
+            confidence=0.4,
+        )
+
+
+class SmbVersionRecipe(_MsfRecipeModule):
+    name = "smb_version"
+    description = "SMB version + OS fingerprint via anonymous session."
+    target_services = ["smb", "microsoft-ds"]
+    target_ports = [445]
+    msf_module = "auxiliary/scanner/smb/smb_version"
+    msf_kind = "auxiliary"
+    read_only = True
+    cost = "low"
+    phase_hint = "enumerate"
+
+
+class BluekeepRecipe(_MsfRecipeModule):
+    # Phase 2: the module path was a typo mixing EternalBlue's directory
+    # with BlueKeep's name (exploit/windows/smb/ms17_010_bluekeep does not
+    # exist in msfconsole). The real module is the RDP one.
+    name = "bluekeep"
+    description = "BlueKeep (CVE-2019-0708) RDP RCE."
+    target_services = ["rdp", "ms-wbt-server"]
+    target_ports = [3389]
+    required_cves = ["CVE-2019-0708"]
+    msf_module = "exploit/windows/rdp/cve_2019_0708_bluekeep_rce"
+    msf_kind = "exploit"
+    msf_payload = "windows/x64/meterpreter/reverse_tcp"
+    read_only = False
+    cost = "high"
+
+
+class PsexecRecipe(_MsfRecipeModule):
+    name = "psexec"
+    description = "PsExec-style SMB exec with supplied creds (SMBUser/SMBPass)."
+    target_services = ["smb", "microsoft-ds"]
+    target_ports = [445]
+    requires = ["credentials"]
+    msf_module = "exploit/windows/smb/psexec"
+    msf_kind = "exploit"
+    msf_payload = "windows/meterpreter/reverse_tcp"
+    read_only = False
+    cost = "high"
+
+
+class CredGatherWinRecipe(_MsfRecipeModule):
+    name = "cred_gather_win"
+    description = "Gather Windows credentials from a session."
+    target_os_hint = ["windows"]
+    requires = ["foothold"]
+    produces = ["credentials"]
+    msf_module = "post/windows/gather/credentials/credential_collector"
+    msf_kind = "post"
+    read_only = False
+    cost = "medium"
+    phase_hint = "loot"
+
+
+class LocalExploitSuggesterRecipe(_MsfRecipeModule):
+    name = "local_exploit_suggester"
+    description = "Suggest local privesc exploits for the active session."
+    target_os_hint = ["windows", "linux"]
+    requires = ["foothold"]
+    msf_module = "post/multi/recon/local_exploit_suggester"
+    msf_kind = "post"
+    read_only = True
+    cost = "low"
+    phase_hint = "escalate"
+
+
+class HashdumpRecipe(_MsfRecipeModule):
+    name = "hashdump"
+    description = "Dump SAM hashes from a Windows session."
+    target_os_hint = ["windows"]
+    requires = ["foothold"]
+    produces = ["hash_artifact"]
+    msf_module = "post/windows/gather/hashdump"
+    msf_kind = "post"
+    read_only = False
+    cost = "medium"
+    phase_hint = "loot"
+
+
+class GetsystemRecipe(_MsfRecipeModule):
+    name = "getsystem"
+    description = "Attempt SYSTEM on a Windows meterpreter session."
+    target_os_hint = ["windows"]
+    requires = ["foothold"]
+    produces = ["admin_priv"]
+    msf_module = "post/windows/escalate/getsystem"
+    msf_kind = "post"
+    read_only = False
+    cost = "medium"
+    phase_hint = "escalate"
+
+
+class HandlerRecipe(_MsfRecipeModule):
+    name = "handler"
+    description = "Generic multi/handler catch for a generated payload."
+    msf_module = "exploit/multi/handler"
+    msf_kind = "handler"
+    msf_payload = "windows/meterpreter/reverse_tcp"
+    read_only = True
+    cost = "low"
+
+
+_MSF_RECIPE_CLASSES: tuple[type[_MsfRecipeModule], ...] = (
+    SmbVersionRecipe,
+    BluekeepRecipe,
+    PsexecRecipe,
+    CredGatherWinRecipe,
+    LocalExploitSuggesterRecipe,
+    HashdumpRecipe,
+    GetsystemRecipe,
+    HandlerRecipe,
+)
+
+for _recipe_cls in _MSF_RECIPE_CLASSES:
+    register_attack_module(_recipe_cls)
+del _recipe_cls
+
+# Derived view of the registered recipe classes (not a source — edit the
+# classes above). Kept as a plain dict so run_recipe / get_msf_recipe / the
+# msf_run_recipe MCP tool keep their existing shape.
+MSF_RECIPES: dict[str, dict[str, Any]] = {c.name: c.recipe_dict() for c in _MSF_RECIPE_CLASSES}
 
 
 def get_msf_recipe(name: str) -> dict[str, Any] | None:

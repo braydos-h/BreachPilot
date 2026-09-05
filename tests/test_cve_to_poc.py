@@ -136,3 +136,73 @@ def test_mcp_instructions_forbid_url_guessing():
     assert "cve_to_poc" in src
     assert "NEVER fabricate or guess" in src
     assert "NO_VERIFIED_POC_FOUND" in src
+
+
+def test_cve_to_poc_result_cached(monkeypatch):
+    """A repeated cve_to_poc for the same CVE must not touch the network again
+    (per-CVE cache, including the negative result)."""
+    import time
+
+    s = _make_search()
+    gh_payload = json.dumps(
+        {
+            "items": [
+                {
+                    "html_url": "https://github.com/o/real-poc",
+                    "full_name": "o/real-poc",
+                    "stargazers_count": 7,
+                    "description": "real",
+                }
+            ]
+        }
+    ).encode()
+    seen: list[str] = []
+
+    def fake_urlopen(req, timeout=None):
+        seen.append(req.full_url if hasattr(req, "full_url") else str(req))
+        return _FakeResp(gh_payload, 200)
+
+    def fake_run(cmd, **kw):
+        raise FileNotFoundError("no searchsploit")
+
+    monkeypatch.setattr("tools.exploit_search.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("tools.exploit_search.subprocess.run", fake_run)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    # Age out any unauth throttle so the first call exercises GitHub.
+    s._last_gh_unauth_search = time.monotonic() - 3600.0
+
+    out1 = s.cve_to_poc("CVE-2024-6387")
+    assert out1.startswith("CVE_TO_POC_RESULTS:")
+    first_round_trips = len(seen)
+    assert first_round_trips > 0
+
+    out2 = s.cve_to_poc("CVE-2024-6387")
+    assert out2 == out1
+    assert len(seen) == first_round_trips, "cached CVE must not re-hit the network"
+
+
+def test_cve_to_poc_unauth_github_throttled(monkeypatch):
+    """Without GITHUB_TOKEN a recent unauth GitHub search skips the GitHub
+    source (60 req/hr/IP budget) while other sources still resolve."""
+    import time
+
+    s = _make_search()
+    seen: list[str] = []
+
+    def fake_urlopen(req, timeout=None):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        seen.append(url)
+        return _FakeResp(b"", 200)  # every existence check verifies
+
+    def fake_run(cmd, **kw):
+        raise FileNotFoundError("no searchsploit")
+
+    monkeypatch.setattr("tools.exploit_search.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("tools.exploit_search.subprocess.run", fake_run)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    s._last_gh_unauth_search = time.monotonic()  # just searched unauth
+
+    out = s.cve_to_poc("CVE-2024-6387", nvd_refs=["https://github.com/o/nvd-poc"])
+    assert not any("api.github.com/search" in u for u in seen), "unauth GitHub search must be skipped"
+    assert out.startswith("CVE_TO_POC_RESULTS:")
+    assert "https://github.com/o/nvd-poc" in out

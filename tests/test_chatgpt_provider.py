@@ -752,7 +752,7 @@ def test_build_model_client_for_provider_ollama(monkeypatch):
         {"ollama": {"host": "https://api.ollama.com"}, "models": {"provider": "ollama"}},
         "glm",
     )
-    assert client.model_id == "glm"
+    assert client.model_id == "glm-5.2:cloud"
     assert client.chat(messages=[])["message"]["content"] == "o"
 
 

@@ -29,7 +29,11 @@ _FENCE_ROLE_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 _ROLE_DIRECTIVE_LINE_RE = re.compile(
-    r"^\s*#{0,6}\s*(system|instruction|instructions|assistant|ignore|disregard|override|new\s+instructions|important\s+override)\b.*$",
+    r"(system|assistant)\s*:"
+    r"|(ignore|disregard)\s+(previous|prior|above|all|the)\b.*instructions?\b"
+    r"|\b(new\s+instructions|important\s+override)\b"
+    r"|\boverride\s+(safety|scope|permission|audit)\b"
+    r"|\binstructions?\s*:\s*(ignore|disregard|override)\b",
     re.IGNORECASE,
 )
 _ROLE_TOKEN_LINE_RE = re.compile(
@@ -480,7 +484,7 @@ def _sanitize_skill_body(text: str) -> str:
     out: list[str] = []
     prev_hr = False
     for line in text.splitlines():
-        if _ROLE_DIRECTIVE_LINE_RE.match(line):
+        if _ROLE_DIRECTIVE_LINE_RE.search(line):
             continue
         if _ROLE_TOKEN_LINE_RE.match(line):
             continue

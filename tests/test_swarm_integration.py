@@ -16,6 +16,7 @@ from tools.experience_store import ExperienceStore
 from tools.exploit_mutator import ExploitMutator
 from tools.payload_crafter import PayloadCrafter
 from tools.semantic_memory import SemanticMemoryManager
+from tools.swarm.base import AgentStatus
 from tools.swarm.orchestrator import SwarmOrchestrator
 
 
@@ -65,6 +66,12 @@ def test_agent_loop_with_swarm_and_semantic_memory(temp_db, mock_executor, tmp_p
     assert loop._swarm is not None
     assert loop._semantic_memory is not None
     assert loop._experience is not None
+    # Drive one route+execute through the wired swarm (report phase: heuristic
+    # reflection, no network/LLM) — proves the path runs end to end, not just
+    # that the flags are set.
+    result = loop._swarm.route({"task_id": "T-INT-1", "phase": "report", "target": "127.0.0.1"})
+    assert result.status == AgentStatus.COMPLETE
+    assert loop._swarm.is_milestone_set("127.0.0.1", "report")
 
 
 def test_swarm_orchestrator_routes_all_agent_types():

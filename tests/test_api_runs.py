@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 
 
-def _make_client(tmp_path, monkeypatch, token="test-token"):
+def _make_client(tmp_path, monkeypatch, token="test-token-0123456789abcdef01234567"):
     """Create a TestClient with a known token + minimal config (no Ollama needed)."""
     monkeypatch.setenv("BREACHPILOT_API_TOKEN", token)
     monkeypatch.chdir(tmp_path)
@@ -50,7 +50,7 @@ def _make_client(tmp_path, monkeypatch, token="test-token"):
     return client
 
 
-def _auth_headers(token="test-token"):
+def _auth_headers(token="test-token-0123456789abcdef01234567"):
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -445,3 +445,77 @@ def test_concurrent_create_keeps_one_active_run(tmp_path, monkeypatch):
         await manager.cancel_run(manager.active.run_id)
 
     asyncio.run(_run())
+
+
+def test_prepare_raise_marks_failed_and_error_event(tmp_path, monkeypatch):
+    """prepare() raising (e.g. DNS) must mark the run failed with an error event."""
+    client = _make_client(tmp_path, monkeypatch)
+
+    class _Boom:
+        def __init__(self, **kwargs):
+            pass
+
+        async def prepare(self, *args, **kwargs):
+            raise ValueError("Could not resolve domain: nonexistent.invalid")
+
+    monkeypatch.setattr("tools.run_service.AssessmentService", _Boom)
+    run_id = client.post(
+        "/api/v1/runs",
+        json={"target": "10.0.0.50", "mode": "attack", "goal": "recon_only"},
+        headers=_auth_headers(),
+    ).json()["run_id"]
+    run = _wait_state(client, run_id, {"failed"})
+    assert "Could not resolve" in (run.get("error") or "")
+    events = client.get(f"/api/v1/runs/{run_id}/events?after=0", headers=_auth_headers()).json()["events"]
+    assert any(e["type"] == "error" for e in events)
+
+
+def test_run_session_raise_marks_failed_and_error_event(tmp_path, monkeypatch):
+    """A failing _fake_run_session must mark the run failed with an error event."""
+    monkeypatch.setenv("BREACHPILOT_API_TOKEN", "test-token-0123456789abcdef01234567")
+    monkeypatch.chdir(tmp_path)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "ollama:\n  host: http://localhost:11434\n"
+        "models:\n  default_alias: glm\n  registry:\n    glm: glm-5.2:cloud\n"
+        "exploit:\n  permission: read_only\n"
+        "api:\n  host: 127.0.0.1\n  port: 8765\n",
+        encoding="utf-8",
+    )
+    from tools.run_service.service import Callables
+
+    class _FakeRouter:
+        _clients = {"glm": MagicMock()}
+
+        def get_client(self, name):
+            return self._clients[name]
+
+    async def _boom_session(**kwargs):
+        raise RuntimeError("session exploded")
+
+    callables = Callables(
+        build_router=lambda *a, **kw: _FakeRouter(),
+        run_session=_boom_session,
+    )
+    from app import create_app
+
+    app = create_app(config_path=config_path, callables=callables)
+    client = TestClient(app)
+    client.__enter__()
+    run_id = client.post(
+        "/api/v1/runs",
+        json={"target": "10.0.0.50", "mode": "attack", "goal": "recon_only"},
+        headers=_auth_headers(),
+    ).json()["run_id"]
+    _wait_state(client, run_id, {"awaiting_confirmation"})
+    decision_id = _wait_decision(client, run_id)["id"]
+    resp = client.post(
+        f"/api/v1/runs/{run_id}/decisions/{decision_id}",
+        json={"answer": "yes"},
+        headers=_auth_headers(),
+    )
+    assert resp.status_code == 200
+    run = _wait_state(client, run_id, {"failed", "completed"})
+    assert run["state"] == "failed"
+    events = client.get(f"/api/v1/runs/{run_id}/events?after=0", headers=_auth_headers()).json()["events"]
+    assert any(e["type"] == "error" for e in events)

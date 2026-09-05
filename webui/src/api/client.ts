@@ -62,7 +62,8 @@ export class ApiError extends Error {
   code: string;
   details: Record<string, unknown>;
   requestId: string;
-  raw: unknown;
+  // ponytail: any (not unknown) so 503 fallbacks assign without `as` casts.
+  raw: any;
 
   constructor(shape: ApiErrorShape) {
     super(shape.message || `API error ${shape.status}`);

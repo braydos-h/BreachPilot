@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from tools.mcp_tools.registry import *
+from tools.mcp_tools.registry import ToolContext
 from tools.poc_verifier import (
     poc_verification_config,
     render_verify_result,

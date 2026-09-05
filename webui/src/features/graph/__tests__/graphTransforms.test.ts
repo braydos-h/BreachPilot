@@ -58,28 +58,28 @@ describe("toFlowNodes", () => {
     ];
     const flow = toFlowNodes(nodes);
     expect(flow).toHaveLength(2);
-    expect(flow[0].id).toBe("ip1");
-    expect(flow[0].data.node.value).toBe("10.0.0.5");
+    expect(flow[0]!.id).toBe("ip1");
+    expect(flow[0]!.data.node.value).toBe("10.0.0.5");
     // different node types land in different columns
-    expect(flow[0].position.x).not.toBe(flow[1].position.x);
+    expect(flow[0]!.position.x).not.toBe(flow[1]!.position.x);
   });
 
   it("assigns unique stacking offsets within a type", () => {
     const nodes = [node({ node_id: "a", node_type: "finding" }), node({ node_id: "b", node_type: "finding" })];
     const flow = toFlowNodes(nodes);
-    expect(flow[0].position.y).not.toBe(flow[1].position.y);
+    expect(flow[0]!.position.y).not.toBe(flow[1]!.position.y);
   });
 
   it("caps node width so the deterministic layout stays dense", () => {
     const flow = toFlowNodes([node({ node_type: "bogus" as GraphExplorerNode["node_type"] })]);
-    expect(flow[0].style?.minWidth).toBe(150);
-    expect(flow[0].style?.maxWidth).toBe(240);
+    expect(flow[0]!.style?.minWidth).toBe(150);
+    expect(flow[0]!.style?.maxWidth).toBe(240);
   });
 });
 
 describe("toFlowEdges", () => {
   it("maps source/target/edge_type onto a labeled reactflow edge", () => {
-    const e = toFlowEdges([edge()])[0];
+    const e = toFlowEdges([edge()])[0]!;
     expect(e.source).toBe(edge().source_node_id);
     expect(e.target).toBe(edge().target_node_id);
     expect(e.label).toBe("observed_on");

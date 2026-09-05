@@ -523,7 +523,7 @@ sandbox:
   enabled: false
   backend: docker
   image: breachpilot-sandbox:latest
-  fallback_native: true
+  fallback_native: false
   user: sandbox
   read_only_rootfs: true
   env_passthrough: []

@@ -167,6 +167,8 @@ class RunManager:
         # key every caller already has.
         self._active: dict[str, RunHandle] = {}
         self._lifecycle_lock = asyncio.Lock()
+        # ponytail: bound by app.create_app so benchmarks count toward the cap.
+        self._benchmark_service: Any = None
 
     @property
     def max_concurrent_runs(self) -> int:
@@ -219,7 +221,11 @@ class RunManager:
         with an actionable error.
         """
         async with self._lifecycle_lock:
-            if len(self._active) >= self.max_concurrent_runs:
+            # ponytail: single global cap — an active benchmark occupies a slot.
+            bench_busy = bool(
+                self._benchmark_service is not None and getattr(self._benchmark_service, "is_active", lambda: False)()
+            )
+            if len(self._active) + (1 if bench_busy else 0) >= self.max_concurrent_runs:
                 raise APIError(
                     "conflict",
                     f"{self.max_concurrent_runs} run(s) already active. Cancel one first (api.max_concurrent_runs).",

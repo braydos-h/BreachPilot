@@ -62,10 +62,10 @@ class SandboxConfig:
     user: str
     read_only_rootfs: bool
     # When the boot-time Docker probe fails (CLI/daemon/image missing), a
-    # server with fallback_native=true degrades to the documented legacy
-    # host-execution mode for the whole session instead of failing every
-    # execution closed. false restores the strict fail-closed contract.
-    fallback_native: bool = True
+    # server with fallback_native=true (explicit opt-in only) degrades to the
+    # documented legacy host-execution mode for the whole session instead of
+    # failing every execution closed. The default is false: fail closed.
+    fallback_native: bool = False
     env_passthrough: list[str] = field(default_factory=list)
     memory_mb: int = 4096
     cpus: float = 2.0
@@ -115,7 +115,7 @@ class SandboxConfig:
             image=str(sec.get("image", "breachpilot-sandbox:latest") or "").strip(),
             user=str(sec.get("user", "sandbox") or "sandbox").strip(),
             read_only_rootfs=_as_bool(sec.get("read_only_rootfs"), True),
-            fallback_native=_as_bool(sec.get("fallback_native"), True),
+            fallback_native=_as_bool(sec.get("fallback_native"), False),
             env_passthrough=passthrough,
             memory_mb=_as_int(resources.get("memory_mb"), 4096, minimum=256),
             cpus=_as_float(resources.get("cpus"), 2.0, minimum=0.1),

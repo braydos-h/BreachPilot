@@ -55,10 +55,9 @@ def _registry(tmp_path: Path):
 def test_record_skill_loaded_round_trip(store):
     rid = record_skill_loaded(store, "alpha-skill", metadata={"run": 1})
     assert rid is not None
-    # A load is a neutral partial -- counts as an observation but the prior
-    # stays at 0.5 with a single observation (min_samples=1 -> 1 row is enough,
-    # but Beta(1+0.5, 1+0.5)=0.5).
-    assert skill_observation_count(store, "alpha-skill") == 1
+    # A load is a neutral partial -- never counts toward min_samples, prior
+    # stays neutral.
+    assert skill_observation_count(store, "alpha-skill") == 0
     assert skill_prior(store, "alpha-skill") == pytest.approx(0.5)
 
 
@@ -221,10 +220,22 @@ def test_selector_feedback_disabled_skips_boost(tmp_path, store):
 
 
 def test_observation_count_method_on_store(skill_db):
-    """ExperienceStore.observation_count is the raw row count the feedback
-    loop gates on (separate from the Beta posterior)."""
+    """ExperienceStore.observation_count counts decisive outcomes only."""
     store = ExperienceStore(skill_db, min_samples=1)
     assert store.observation_count("skill:alpha", "skill") == 0
     record_skill_loaded(store, "alpha")
     record_skill_outcome(store, "alpha", success=True)
-    assert store.observation_count("skill:alpha", "skill") == 2
+    assert store.observation_count("skill:alpha", "skill") == 1
+
+
+def test_partial_loads_do_not_satisfy_min_samples(skill_db):
+    """Loads (partial) never satisfy a min-samples gate."""
+    store = ExperienceStore(skill_db, min_samples=3)
+    for _ in range(5):
+        record_skill_loaded(store, "alpha-skill")
+    assert skill_observation_count(store, "alpha-skill") == 0
+    assert skill_prior(store, "alpha-skill") == pytest.approx(0.5)
+    for _ in range(3):
+        record_skill_outcome(store, "alpha-skill", success=True)
+    assert skill_observation_count(store, "alpha-skill") == 3
+    assert skill_prior(store, "alpha-skill") > 0.5

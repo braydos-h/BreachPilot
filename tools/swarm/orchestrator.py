@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 
@@ -219,7 +220,18 @@ class SwarmOrchestrator:
         # isolate filesystem writes. The orchestrator's own state
         # (_results, _battle_log, _agents) is touched only in the locked
         # blocks below.
-        result = agent.run(task, self._context)
+        # ponytail: fault isolation at the single choke point — a raising
+        # agent becomes a FAILED result, so one bad agent can't kill the batch;
+        # milestone marking + persist below still run.
+        try:
+            result = agent.run(task, self._context)
+        except Exception as exc:  # noqa: BLE001 -- isolation, never propagate
+            result = AgentResult(
+                agent_type=agent.agent_type,
+                status=AgentStatus.FAILED,
+                task_id=task_id,
+                error=f"agent.run raised: {exc}",
+            )
         agent._set_status(result.status)
 
         with self._lock:
@@ -371,7 +383,21 @@ class SwarmOrchestrator:
 
         parallel_results: list[AgentResult] = []
         if parallel_tasks:
-            parallel_results = list(await asyncio.gather(*[_run_one(t) for t in parallel_tasks]))
+            # ponytail: return_exceptions=True + map strays to FAILED, so one
+            # raising worker can't cancel the batch (fault isolation).
+            raw: list[Any] = list(await asyncio.gather(*[_run_one(t) for t in parallel_tasks], return_exceptions=True))
+            for t, r in zip(parallel_tasks, raw):
+                if isinstance(r, AgentResult):
+                    parallel_results.append(r)
+                elif isinstance(r, BaseException):
+                    parallel_results.append(
+                        AgentResult(
+                            agent_type="unknown",
+                            status=AgentStatus.FAILED,
+                            task_id=t.get("task_id", t.get("id", "")),
+                            error=f"route_parallel worker raised: {r!r}",
+                        )
+                    )
 
         # Sequential tasks (exploit/post_exploit in recon-first mode) run
         # via route() one at a time, after the parallel batch finishes, so a
@@ -386,30 +412,38 @@ class SwarmOrchestrator:
         # gather preserves order for parallel_tasks; the sequential loop
         # preserves order for sequential_tasks; we interleave by matching
         # task_id back to the original input position.
+        # ponytail: empty/duplicate task_ids mint a fresh id — never overwrite
+        # an earlier result under the same key.
         result_by_task_id: dict[str, AgentResult] = {}
         for r in parallel_results + sequential_results:
-            result_by_task_id[r.task_id] = r
-        ordered: list[AgentResult] = []
-        for t in tasks:
-            tid = t.get("task_id", t.get("id", ""))
-            r = result_by_task_id.get(tid)
-            if r is not None:
-                ordered.append(r)
-        # Any task that didn't produce a result (shouldn't happen) falls back
-        # to a failed placeholder so the caller gets exactly len(tasks) items.
-        while len(ordered) < len(tasks):
-            ordered.append(
-                AgentResult(
-                    agent_type="unknown",
-                    status=AgentStatus.FAILED,
-                    task_id="",
-                    error="route_parallel: no result produced for task",
+            key = r.task_id or f"orphan-{uuid.uuid4().hex[:8]}"
+            while key in result_by_task_id:
+                key = f"{r.task_id or 'orphan'}-{uuid.uuid4().hex[:4]}"
+            result_by_task_id[key] = r
+        try:
+            ordered: list[AgentResult] = []
+            for t in tasks:
+                tid = t.get("task_id", t.get("id", ""))
+                r = result_by_task_id.get(tid)
+                if r is not None:
+                    ordered.append(r)
+            # Any task that didn't produce a result (shouldn't happen) falls back
+            # to a failed placeholder so the caller gets exactly len(tasks) items.
+            while len(ordered) < len(tasks):
+                ordered.append(
+                    AgentResult(
+                        agent_type="unknown",
+                        status=AgentStatus.FAILED,
+                        task_id="",
+                        error="route_parallel: no result produced for task",
+                    )
                 )
-            )
-        # Batch-end forced write: throttled per-task persists above may have
-        # skipped the tail; resume must see the completed batch.
-        self._persist_state(force=True)
-        return ordered
+            return ordered
+        finally:
+            # Batch-end forced write: throttled per-task persists above may have
+            # skipped the tail; resume must see the completed batch. In finally
+            # so it runs even when ordering above raises.
+            self._persist_state(force=True)
 
     def reflect(self, battle_log: list[dict[str, Any]], session_state: dict[str, Any]) -> AgentResult:
         """Run the reflection agent on the current phase results (see tools/swarm/reflection_run.py)."""

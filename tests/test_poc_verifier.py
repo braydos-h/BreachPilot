@@ -209,18 +209,15 @@ async def test_verify_poc_tool_syntax_error(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_cve_to_exploit_synth_inlines_syntax_check_when_enabled(tmp_path: Path) -> None:
+async def test_cve_to_exploit_synth_inlines_syntax_check_when_enabled(tmp_path: Path, monkeypatch) -> None:
     mcp = _server(tmp_path, {"poc_verification": {"enabled": True}})
     # The target IP must be in the allowlist for the @require_allowlist gate.
-    import os
-
-    os.environ["EXPLOIT_TARGET"] = "10.0.0.50"
-    try:
-        result = await mcp.call_tool(
-            "cve_to_exploit_synth",
-            {"target_ip": "10.0.0.50", "cve_id": "CVE-2021-44228"},
-        )
-        text = result.content[0].text if hasattr(result, "content") else str(result)
-        assert "PoC Verification" in text or "SYNTAX_OK" in text
-    finally:
-        del os.environ["EXPLOIT_TARGET"]
+    # monkeypatch restores the var afterwards (direct os.environ writes leak
+    # across the session and break unrelated empty-allowlist tests).
+    monkeypatch.setenv("EXPLOIT_TARGET", "10.0.0.50")
+    result = await mcp.call_tool(
+        "cve_to_exploit_synth",
+        {"target_ip": "10.0.0.50", "cve_id": "CVE-2021-44228"},
+    )
+    text = result.content[0].text if hasattr(result, "content") else str(result)
+    assert "PoC Verification" in text or "SYNTAX_OK" in text

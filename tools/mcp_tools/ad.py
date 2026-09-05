@@ -13,12 +13,15 @@ one exception is ``smb_signing_check`` (detection-only), which defaults ON.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
+from typing import Any
 
 from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
-from tools.mcp_shared import _allowed_target_list
-from tools.mcp_tools.registry import *
+from tools.mcp_shared import _allowed_target_list, _attempt_dir, check_targets_allowlist
+from tools.mcp_tools.registry import ToolContext, _run_with_pgrp_timeout
+from tools.validation_utils import validate_ipv4, validate_target_or_ip
 
 
 def _ad_cfg(config: dict[str, Any] | None) -> dict[str, Any]:

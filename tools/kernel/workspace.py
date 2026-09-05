@@ -107,24 +107,31 @@ def _attempt_dir(workspace: Path) -> tuple[Path, str]:
 
 
 def read_workspace(workspace: Path, filename: str) -> str:
-    """Read any file on the operator box by path (Phase 3 kernel move).
+    """Read a file inside the run workspace by path (Phase 3 kernel move).
 
-    LAB BUILD: operator-box filesystem is unrestricted — verbatim move from
-    ``tools.mcp_tools.registry.read_workspace``. See that function for
-    full docstring. Re-exported from ``tools.mcp_shared`` / ``registry`` for
-    backwards compat.
+    Workspace-contained only: absolute paths escaping the workspace (and
+    unreadable/missing files) are refused. Previously this read any
+    operator-box path, letting a prompt-injected filename exfiltrate
+    /etc/shadow, cloud credentials, or OAuth tokens into the model context.
     """
     raw = str(filename or "").strip()
     if not raw:
         return "BLOCKED: empty filename."
+    workspace.mkdir(parents=True, exist_ok=True)
+    root = workspace.resolve()
     target = Path(raw)
     if not target.is_absolute():
-        workspace.mkdir(parents=True, exist_ok=True)
-        target = workspace / raw
-    if not target.exists() or not target.is_file():
+        target = root / raw
+    try:
+        resolved = target.resolve()
+    except OSError as exc:
+        return f"BLOCKED: could not read {Path(filename).name!r}: {exc}"
+    if not _is_inside_workspace(root, resolved):
+        return f"BLOCKED: {Path(filename).name!r} is outside the workspace."
+    if not resolved.exists() or not resolved.is_file():
         return f"FILE_NOT_FOUND: {Path(filename).name}"
     try:
-        text = target.read_text(encoding="utf-8", errors="replace")
+        text = resolved.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         return f"BLOCKED: could not read {filename!r}: {exc}"
     if len(text) > 120_000:

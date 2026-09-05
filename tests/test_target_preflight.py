@@ -5,9 +5,11 @@ All three capabilities are opt-in (default off), so the default single-IP
 campaign is byte-identical to before. These tests pin the opt-in behavior:
 
 1. ``probe_reachable`` (tools/socket_scan.py) — tri-state verdict: True when
-   any probe port connects, False when every probe port is definitively
-   refused, None when ambiguous (timeout/filtered). The None case must NOT
-   skip a host (a firewalled host can still be attackable on an unprobed port).
+    any probe port connects, False ONLY when every probe port is definitively
+    refused over a COMMON_PORTS-sized sample, None when ambiguous
+    (timeout/filtered) OR all-refused on a small probe set (e.g. [80, 443]).
+    Refused means the host is UP, so a small-sample refused verdict must NOT
+    skip a host (it can still be attackable on an unprobed port).
 2. ``_preflight_targets`` (tools/autonomous_orchestrator.py) — drops
    out-of-scope targets, non-routable targets (except the operator's own
    host), and duplicates by resolved IP; records each skip as a timeline event.
@@ -72,13 +74,29 @@ async def test_probe_reachable_open_port(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 @pytest.mark.asyncio
-async def test_probe_reachable_all_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every probe port definitively refused -> False (host up but closed)."""
+async def test_probe_reachable_all_refused_small_sample_falls_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    """All-refused on a 2-port probe set -> None (NOT False).
+
+    Refused means the host is UP (an RST is an answer) -- 80/443 closed says
+    nothing about port 22. Only a COMMON_PORTS-sized all-refused sample may
+    skip the full scan."""
     monkeypatch.setattr(
         "tools.socket_scan._connect_status",
         lambda target, port, timeout: "refused",
     )
-    assert await probe_reachable("10.0.0.5", [80, 443]) is False
+    assert await probe_reachable("10.0.0.5", [80, 443]) is None
+
+
+@pytest.mark.asyncio
+async def test_probe_reachable_all_refused_full_sample_skips(monkeypatch: pytest.MonkeyPatch) -> None:
+    """All-refused over a COMMON_PORTS-sized sample -> False (skip justified)."""
+    from tools.socket_scan import COMMON_PORTS
+
+    monkeypatch.setattr(
+        "tools.socket_scan._connect_status",
+        lambda target, port, timeout: "refused",
+    )
+    assert await probe_reachable("10.0.0.5", list(COMMON_PORTS)) is False
 
 
 @pytest.mark.asyncio
@@ -257,3 +275,63 @@ async def test_hard_target_cutoff_off_by_default(tmp_path: Path) -> None:
 
     assert "hard_target_give_up" not in _timeline_types(state)
     assert "adaptive_stop" in _timeline_types(state)
+
+
+# ── 4. Pipeline preflight skip discipline ────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_pipeline_refused_on_two_ports_still_full_scans(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Refused on the default [80, 443] probe set must NOT skip the full scan.
+
+    Even when the probe reports False outright, the pipeline only honors the
+    skip for a COMMON_PORTS-sized sample -- refused = host UP."""
+    from tools.recon.config import ReconConfig
+    from tools.recon.pipeline import ReconPipeline
+
+    async def fake_probe(target, ports=None, timeout=1.0):
+        return False
+
+    monkeypatch.setattr("tools.recon.pipeline.probe_reachable", fake_probe)
+
+    scanned: list[str] = []
+
+    async def fake_scan(target):
+        scanned.append(target)
+        result = HostReconResult(target_ip=target)
+        result.open_ports = [22]
+        return result
+
+    async def fake_enumerate(result):
+        return result
+
+    pipe = ReconPipeline(ReconConfig(preflight_probe=True))  # default ports [80, 443]
+    monkeypatch.setattr(pipe._primary, "scan_host", fake_scan)
+    monkeypatch.setattr(pipe._secondary, "enumerate_host", fake_enumerate)
+
+    result = await pipe.recon_host("10.0.0.5")
+    assert scanned == ["10.0.0.5"], "small-sample refused verdict must fall through to the full scan"
+    assert result.open_ports == [22]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_refused_full_sample_skips_scan(monkeypatch: pytest.MonkeyPatch) -> None:
+    """All-refused over a COMMON_PORTS-sized sample DOES skip the full scan."""
+    from tools.recon.config import ReconConfig
+    from tools.recon.pipeline import ReconPipeline
+    from tools.socket_scan import COMMON_PORTS
+
+    async def fake_probe(target, ports=None, timeout=1.0):
+        return False
+
+    monkeypatch.setattr("tools.recon.pipeline.probe_reachable", fake_probe)
+
+    async def fake_scan(target):  # pragma: no cover - must not run
+        raise AssertionError("full scan must be skipped")
+
+    pipe = ReconPipeline(ReconConfig(preflight_probe=True, preflight_ports=list(COMMON_PORTS)))
+    monkeypatch.setattr(pipe._primary, "scan_host", fake_scan)
+
+    result = await pipe.recon_host("10.0.0.5")
+    assert result.open_ports == []
+    assert any("preflight" in e for e in result.errors)

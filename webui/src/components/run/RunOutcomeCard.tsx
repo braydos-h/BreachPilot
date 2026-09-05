@@ -43,7 +43,7 @@ export const RunOutcomeCard = memo(function RunOutcomeCard({
   const finalCalls = finalTel?.calls ?? null;
   const reachedPhase =
     derived.lastReachedIndex >= 1
-      ? phaseInfo(PHASE_ORDER[derived.lastReachedIndex]).label
+      ? phaseInfo(PHASE_ORDER[derived.lastReachedIndex] ?? "").label
       : null;
 
   return (

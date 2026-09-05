@@ -1330,12 +1330,7 @@ class AttackUi:
         # Plain output
         args.plain = await self.ask_plain(default=getattr(args, "plain", False))
 
-        # Stealth
-        args.stealth = await self.ask_stealth(default=getattr(args, "stealth", False))
-        if args.stealth:
-            args.rotate_ua = await self.ask_rotate_ua(default=getattr(args, "rotate_ua", False))
-            args.doh = await self.ask_doh(default=getattr(args, "doh", False))
-
+        # ponytail: legacy stealth flags were inert (canonical is opsec.*) — dropped.
         # Power-ups: the boolean run-shaping flags the wizard previously
         # omitted despite its "ALL CLI flags" docstring claim.
         await self.ask_power_ups(args)

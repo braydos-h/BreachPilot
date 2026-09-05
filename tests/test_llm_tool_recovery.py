@@ -218,11 +218,20 @@ class TestHallucinationMatrix:
 
         assert FailureCategory.FALSE_POSITIVE.value == "FALSE_POSITIVE"
 
-    def test_malformed_tool_arguments_string_falls_back_to_empty_dict(self):
-        from tools.exploit_agent.tool_calls import _normalize_tool_call
+    def test_malformed_tool_arguments_string_is_recoverable_not_empty_dict(self):
+        from tools.exploit_agent.tool_calls import (
+            _filter_and_validate_tool_calls,
+            _normalize_tool_call,
+        )
 
         bad = {"function": {"name": "run_exploit_terminal", "arguments": "{bad json"}}
-        assert _normalize_tool_call(bad)["function"]["arguments"] == {}
+        normalized = _normalize_tool_call(bad)
+        # Must not coerce to {} (would execute with empty args); keep raw so
+        # validation rejects it as a recoverable schema error.
+        assert normalized["function"]["arguments"] == "{bad json"
+        valid, invalid = _filter_and_validate_tool_calls([normalized], all_tools=[])
+        assert valid == []
+        assert invalid and invalid[0]["recoverable"] is True
 
     def test_unknown_tool_name_creates_recoverable_error(self):
         from tools.exploit_agent.tool_calls import _filter_and_validate_tool_calls

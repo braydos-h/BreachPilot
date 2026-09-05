@@ -123,7 +123,7 @@ exploit:
 
 
 def test_check_config_unknown_keys_are_advisory_not_errors(tmp_path: Path):
-    """Unknown top-level keys are warnings, not failures."""
+    """Unknown top-level keys fail hard (typo safety)."""
     from tools.doctor import _check_config
 
     path = _write_config(
@@ -143,9 +143,9 @@ experimental_plugin:
 """,
     )
     result = _check_config(path)
-    assert result["ok"] is True
+    assert result["ok"] is False
     assert "experimental_plugin" in result["unknown_keys"]
-    assert result["errors"] == []
+    assert result["errors"] != []
 
 
 def test_check_config_malformed_yaml_fails(tmp_path: Path):

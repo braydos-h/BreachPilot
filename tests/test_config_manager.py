@@ -705,7 +705,7 @@ def test_plugin_sections_remain_warnings(tmp_path: Path):
         )
         validator2 = ConfigValidator(cfg_path2)
         _, result2 = validator2.load_and_validate()
-        assert result2.is_valid, "unknown top-level non-strict should be warning not error"
+        assert not result2.is_valid, "unknown top-level keys fail hard"
         assert "totally_unknown_top" in result2.unknown_keys
     finally:
         PLUGIN_REGISTRY._config_sections.pop("fake_plugin_section", None)

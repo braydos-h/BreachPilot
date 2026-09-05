@@ -100,7 +100,7 @@ describe("RunBenchmarkPanel", () => {
     await waitFor(() => {
       expect(startBenchmarkRun).toHaveBeenCalledTimes(1);
     });
-    const body = startBenchmarkRun.mock.calls[0][0] as Record<string, unknown>;
+    const body = startBenchmarkRun.mock.calls[0]![0] as Record<string, unknown>;
     expect(body).toEqual(expect.objectContaining({ suite: "xben", scenarios: ["xben-dvwa"], trials: 1 }));
     // Tag chips are view filters only — they must never leak into the request.
     expect("tags" in body).toBe(false);

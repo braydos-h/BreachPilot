@@ -18,6 +18,7 @@ Verifies the two headline behaviors of the re-enabled ``route_parallel``:
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -152,29 +153,45 @@ async def test_depends_on_waits_for_milestone():
 
 @pytest.mark.asyncio
 async def test_parallel_recon_runs_concurrently_not_sequentially():
-    """3 recon tasks on 3 targets, each sleeping 0.5s. If they run
-    sequentially (the old route() RLock behavior) total time ≈ 1.5s. If they
-    run in parallel (the Phase 3 fix) total time ≈ 0.5s. Assert < 1.2s to
-    prove real concurrency while leaving headroom for scheduler jitter."""
-    _SleepReconAgent.DELAY = 0.5
+    """3 recon tasks prove real concurrency with a Barrier + max_active counter
+    (deterministic — no wall-clock thresholds). All 3 agents must be inside
+    run() together; a serialized dispatch would trip the barrier timeout and
+    fail the run instead."""
+    barrier = threading.Barrier(3, timeout=5)
+    active = 0
+    max_active = 0
+    lock = threading.Lock()
+
+    class _BarrierRecon(Agent):
+        def run(self, task, context):
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            try:
+                barrier.wait()
+            finally:
+                with lock:
+                    active -= 1
+            return AgentResult(
+                agent_type=self.agent_type,
+                status=AgentStatus.COMPLETE,
+                task_id=task.get("task_id", task.get("id", "")),
+                output={},
+            )
+
     orch = SwarmOrchestrator(
         {"config": {}},
-        agent_registry={"recon": _SleepReconAgent},
+        agent_registry={"recon": _BarrierRecon},
         critic_enabled=False,
         max_parallel=3,
     )
     tasks = [{"task_id": f"R-{ip}", "phase": "recon", "target": ip} for ip in ("10.0.0.5", "10.0.0.6", "10.0.0.7")]
-    start = time.monotonic()
     results = await orch.route_parallel(tasks)
-    elapsed = time.monotonic() - start
 
     assert len(results) == 3
     assert all(r.status == AgentStatus.COMPLETE for r in results)
-    # The headline assertion: parallel, not sequential. 3 × 0.5s sequential =
-    # 1.5s; parallel ≈ 0.5s. Allow generous headroom (scheduler, lock contention
-    # on the short metadata critical sections) but well under 3× the single
-    # delay, which only sequential dispatch could hit.
-    assert elapsed < 1.2, f"recon ran sequentially (took {elapsed:.2f}s, expected < 1.2s)"
+    assert max_active == 3, f"recon ran sequentially (max concurrent agents: {max_active}, expected 3)"
 
 
 @pytest.mark.asyncio
@@ -211,15 +228,25 @@ async def test_parallel_recon_keeps_all_targets_findings():
 @pytest.mark.asyncio
 async def test_exploit_tasks_run_sequentially_by_default():
     """Recon-first: exploit tasks passed to route_parallel run sequentially
-    (deferred to the sequential path), NOT in parallel. We verify by giving
-    two exploit tasks each a 0.4s sleep and asserting total >= 0.7s (roughly
-    2× one task, i.e. sequential)."""
+    (deferred to the sequential path), NOT in parallel. Proven with a
+    max_active counter — sequential dispatch never overlaps, so max_active
+    stays 1 (deterministic, no wall-clock thresholds)."""
 
-    class _SleepExploit(Agent):
-        DELAY = 0.4
+    active = 0
+    max_active = 0
+    lock = threading.Lock()
 
+    class _CountedExploit(Agent):
         def run(self, task, context):
-            time.sleep(self.DELAY)
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            try:
+                time.sleep(0.2)
+            finally:
+                with lock:
+                    active -= 1
             bb = context.get("blackboard", {})
             from tools.swarm.bb_compat import bb_set
 
@@ -233,7 +260,7 @@ async def test_exploit_tasks_run_sequentially_by_default():
 
     orch = SwarmOrchestrator(
         {"config": {}},
-        agent_registry={"exploit": _SleepExploit},
+        agent_registry={"exploit": _CountedExploit},
         critic_enabled=False,
         max_parallel=3,
     )
@@ -241,25 +268,33 @@ async def test_exploit_tasks_run_sequentially_by_default():
         {"task_id": "E-1", "phase": "exploit", "target": "10.0.0.5"},
         {"task_id": "E-2", "phase": "exploit", "target": "10.0.0.5"},
     ]
-    start = time.monotonic()
     results = await orch.route_parallel(tasks)
-    elapsed = time.monotonic() - start
     assert len(results) == 2
-    # Sequential: 2 × 0.4s = 0.8s. Assert >= 0.7s (allow tiny scheduler slack).
-    # If they ran in parallel it'd be ~0.4s, which would fail this assertion.
-    assert elapsed >= 0.7, f"exploit ran in parallel (took {elapsed:.2f}s, expected >= 0.7s)"
+    assert all(r.status == AgentStatus.COMPLETE for r in results)
+    assert max_active == 1, f"exploit ran in parallel (max concurrent agents: {max_active}, expected 1)"
 
 
 @pytest.mark.asyncio
 async def test_force_parallel_overrides_recon_first_policy():
     """A task with ``force_parallel: True`` bypasses the recon-first filter
-    and runs in the parallel batch even if its phase is exploit."""
+    and runs in the parallel batch even if its phase is exploit — proven with
+    a Barrier + max_active counter (deterministic)."""
+    barrier = threading.Barrier(2, timeout=5)
+    active = 0
+    max_active = 0
+    lock = threading.Lock()
 
-    class _SleepExploit(Agent):
-        DELAY = 0.3
-
+    class _BarrierExploit(Agent):
         def run(self, task, context):
-            time.sleep(self.DELAY)
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            try:
+                barrier.wait()
+            finally:
+                with lock:
+                    active -= 1
             return AgentResult(
                 agent_type=self.agent_type,
                 status=AgentStatus.COMPLETE,
@@ -269,7 +304,7 @@ async def test_force_parallel_overrides_recon_first_policy():
 
     orch = SwarmOrchestrator(
         {"config": {}},
-        agent_registry={"exploit": _SleepExploit},
+        agent_registry={"exploit": _BarrierExploit},
         critic_enabled=False,
         max_parallel=3,
     )
@@ -277,12 +312,10 @@ async def test_force_parallel_overrides_recon_first_policy():
         {"task_id": "E-1", "phase": "exploit", "target": "10.0.0.5", "force_parallel": True},
         {"task_id": "E-2", "phase": "exploit", "target": "10.0.0.6", "force_parallel": True},
     ]
-    start = time.monotonic()
     results = await orch.route_parallel(tasks)
-    elapsed = time.monotonic() - start
     assert len(results) == 2
-    # Parallel: 2 × 0.3s sequential = 0.6s; parallel ≈ 0.3s. Assert < 0.55s.
-    assert elapsed < 0.55, f"force_parallel exploit ran sequentially (took {elapsed:.2f}s)"
+    assert all(r.status == AgentStatus.COMPLETE for r in results)
+    assert max_active == 2, f"force_parallel exploit ran sequentially (max concurrent: {max_active}, expected 2)"
 
 
 # ── Order preservation ───────────────────────────────────────────────────

@@ -5,6 +5,8 @@ Tests are written to PASS (see Windows pytest 9.0.3 PosixPath INTERNALERROR
 note in the task brief — a failing test crashes pytest before naming itself).
 """
 
+import pytest
+
 from tools.recon_enrichers import (
     http_spider,
     parse_db_banner,
@@ -255,8 +257,8 @@ def test_http_spider_basic_links_and_visited():
     assert "/" in result["urls_visited"]
     assert "/about" in result["links"]
     assert "/login" in result["links"]
-    # BFS should have crawled /about and /login too
-    assert "/about" in result["urls_visited"] or "/login" in result["urls_visited"]
+    # BFS must have crawled BOTH linked pages (not just one of them).
+    assert {"/about", "/login"} <= set(result["urls_visited"])
     assert result["status_codes"]["/"] == 200
 
 
@@ -352,3 +354,76 @@ def test_http_spider_default_args_run_without_network_when_mocked():
     result = http_spider("10.0.0.5", 80, fetch_fn=lambda u: (200, ""))
     assert result["port"] == 80
     assert result["urls_visited"] == ["/"]
+
+
+# ---------------------------------------------------------------------------
+# SecondaryEnumerator service dispatch oracle (ldap / ftp / redis / es)
+# ---------------------------------------------------------------------------
+
+
+def _dispatch_result(*services):
+    from tools.recon.config import HostReconResult, ServiceInfo
+
+    return HostReconResult(
+        target_ip="10.0.0.5",
+        open_ports=[s[0] for s in services],
+        services=[ServiceInfo(port=s[0], service=s[1]) for s in services],
+    )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_oracle_ldap_ftp_redis_es():
+    """Each service name dispatches to exactly its own enumerator with exactly
+    its own services -- no cross-talk, no drops."""
+    from tools.recon.config import ReconConfig
+    from tools.recon.enumerator import SecondaryEnumerator
+
+    enum = SecondaryEnumerator(ReconConfig())  # extended enumerators OFF
+    calls: dict[str, list] = {}
+    for name in (
+        "_enumerate_http",
+        "_enumerate_ssh",
+        "_enumerate_smb",
+        "_enumerate_ldap",
+        "_enumerate_ftp",
+        "_enumerate_redis",
+        "_enumerate_elasticsearch",
+        "_enumerate_docker_k8s",
+        "_enumerate_rdp",
+    ):
+        calls[name] = []
+
+        async def _rec(result, services, _name=name):
+            calls[_name].extend(s.port for s in services)
+            return result
+
+        setattr(enum, name, _rec)
+
+    result = _dispatch_result((389, "ldap"), (21, "ftp"), (6379, "redis"), (9200, "elasticsearch"))
+    await enum.enumerate_host(result)
+
+    assert sorted(calls["_enumerate_ldap"]) == [389]
+    assert sorted(calls["_enumerate_ftp"]) == [21]
+    assert sorted(calls["_enumerate_redis"]) == [6379]
+    assert sorted(calls["_enumerate_elasticsearch"]) == [9200]
+    for name in ("_enumerate_http", "_enumerate_ssh", "_enumerate_smb", "_enumerate_docker_k8s", "_enumerate_rdp"):
+        assert calls[name] == [], f"{name} must not fire for ldap/ftp/redis/es"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_oracle_unknown_service_fires_none_of_the_four():
+    from tools.recon.config import ReconConfig
+    from tools.recon.enumerator import SecondaryEnumerator
+
+    enum = SecondaryEnumerator(ReconConfig())
+    fired: list[str] = []
+    for name in ("_enumerate_ldap", "_enumerate_ftp", "_enumerate_redis", "_enumerate_elasticsearch"):
+
+        async def _rec(result, services, _name=name):
+            fired.append(_name)
+            return result
+
+        setattr(enum, name, _rec)
+
+    await enum.enumerate_host(_dispatch_result((1234, "unknownsvc")))
+    assert fired == []

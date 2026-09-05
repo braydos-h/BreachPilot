@@ -49,13 +49,14 @@ export function HistoryChart({ runs, extract, format, label }: ChartProps) {
     );
   }
   const { points, min, max } = computePath(values);
-  const latest = values[values.length - 1];
+  const latest = values[values.length - 1] ?? 0;
+  const first = values[0] ?? 0;
   // Flat series are padded by ±1 for the line path — never show that
   // synthetic padding as a numeric range ("$-0.99 – $1.01" for two $0.01
   // costs would be nonsense).
   const flat = values.every((v) => v === values[0]);
   const range = flat
-    ? (format ? format(values[0]) : values[0].toLocaleString())
+    ? (format ? format(first) : first.toLocaleString())
     : `${format ? format(min) : min.toLocaleString()} – ${format ? format(max) : max.toLocaleString()}`;
   return (
     <div className="rounded-lg border p-4" data-testid={`history-${label}`}>
@@ -77,7 +78,7 @@ export function HistoryChart({ runs, extract, format, label }: ChartProps) {
       </svg>
       <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
         <span>
-          {ordered.length} runs · latest {formatRelative(ordered[ordered.length - 1].timestamp)}
+          {ordered.length} runs · latest {formatRelative(ordered[ordered.length - 1]?.timestamp ?? "")}
         </span>
         <span className="tabular-nums">{range}</span>
       </div>

@@ -155,7 +155,7 @@ describe("AttackGraph timeline + failure analysis", () => {
     expect(screen.getByText(/Attack path report is generated when the run completes/)).toBeInTheDocument();
     expect(fetchMock.mock.results.length).toBeGreaterThan(0);
     // mutate never fired — the component skipped the artifact fetch entirely.
-    expect(vi.mocked(fetchMock.mock.results[0].value as { mutate: () => void }).mutate).not.toHaveBeenCalled();
+    expect(vi.mocked(fetchMock.mock.results[0]!.value as { mutate: () => void }).mutate).not.toHaveBeenCalled();
   });
 
   it("shows the generic error branch for non-404 failures", async () => {

@@ -58,13 +58,12 @@ class DetectionCoverageProbe(AttackModule):
     # Capability metadata: read-only detection coverage planning.
     requires = []
     produces = []
+    # ponytail: baseline via data, not an applicability() override, so the
+    # base evidence path (vetoes/gates) stays authoritative.
+    baseline_score = 15
     read_only = True
     cost = "low"
     phase_hint = "recon"
-
-    def applicability(self, ctx: ModuleContext) -> int:
-        # Always selectable but low-priority vs real exploit modules.
-        return 15
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         # Lazy import to avoid import cycles with the detection coverage helpers.
@@ -174,13 +173,11 @@ class OPSECPostureReport(AttackModule):
     # Capability metadata: read-only OPSEC posture reporting.
     requires = []
     produces = []
+    # ponytail: baseline via data, not an applicability() override (see above).
+    baseline_score = 10
     read_only = True
     cost = "low"
     phase_hint = "recon"
-
-    def applicability(self, ctx: ModuleContext) -> int:
-        # Baseline low-priority; always selectable.
-        return 10
 
     def run(self, ctx: ModuleContext) -> dict[str, Any]:
         from tools.detection_coverage import footprint_summary

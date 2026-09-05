@@ -12,7 +12,7 @@ Storage shape (advisory data only -- never execution authority):
 - ``target_signature`` = ``"skill:<name>"``
 - ``action_type``      = ``"skill"``
 - ``outcome``          = ``"partial"`` for a *load* (a neutral observation
-  that increments the sample count without skewing the posterior), or
+  that never satisfies a min-samples gate, without skewing the posterior), or
   ``"success``/``failure`` for a phase-end *outcome*.
 
 Advisory invariant: outcomes only ever *boost* a skill in the selector; a

@@ -251,7 +251,8 @@ export function RunWizard({ onCreated }: RunWizardProps) {
   const preparingEvent = useMemo(() => {
     const events = runEvents.events;
     for (let i = events.length - 1; i >= 0; i--) {
-      if (events[i].type === "preparing") return events[i];
+      const ev = events[i];
+      if (ev?.type === "preparing") return ev;
     }
     return null;
   }, [runEvents.events]);

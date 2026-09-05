@@ -16,7 +16,8 @@ class CredentialSpray(AttackModule):
     # Capability metadata: spraying yields credentials; benefits from a
     # pre-gathered user list (ADLDAPEnum / SMBNullSession) but does not require
     # it (built-in wordlist).
-    requires: list[str] = ["user_list"]
+    requires: list[str] = []
+    optional_requires: list[str] = ["user_list"]
     produces: list[str] = ["credentials"]
     read_only = False
     cost = "high"
@@ -55,7 +56,8 @@ class PasswordSpray(AttackModule):
     required_cves = []
     # Capability metadata: a successful spray yields credentials; benefits
     # from a user list (ADLDAPEnum) but the built-in wordlist stands alone.
-    requires: list[str] = ["user_list"]
+    requires: list[str] = []
+    optional_requires: list[str] = ["user_list"]
     produces: list[str] = ["credentials"]
     read_only = False
     cost = "medium"

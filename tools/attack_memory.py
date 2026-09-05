@@ -289,7 +289,10 @@ class AttackMemoryStore:
                 if emitted >= max_items:
                     break
                 seen = f" x{item.seen_count}" if item.seen_count > 1 else ""
-                value = _one_line(item.item_value, max_chars=500)
+                if category == "credentials":
+                    value = "[redacted]"
+                else:
+                    value = _one_line(item.item_value, max_chars=500)
                 lines.append(f"- {item.item_key}: {value}{seen}")
                 emitted += 1
 

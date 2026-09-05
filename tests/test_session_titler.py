@@ -209,7 +209,7 @@ def test_list_runs_unknown_sort_falls_back(tmp_path):
 # ── Route: POST /runs/{id}/title ──────────────────────────────────────────
 
 
-def _make_client(tmp_path, monkeypatch, token="test-token"):
+def _make_client(tmp_path, monkeypatch, token="test-token-0123456789abcdef01234567"):
     monkeypatch.setenv("BREACHPILOT_API_TOKEN", token)
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.yaml"
@@ -238,7 +238,7 @@ def _make_client(tmp_path, monkeypatch, token="test-token"):
     return TestClient(app)
 
 
-def _auth(token="test-token"):
+def _auth(token="test-token-0123456789abcdef01234567"):
     return {"Authorization": f"Bearer {token}"}
 
 
