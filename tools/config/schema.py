@@ -819,6 +819,14 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "max_retries_per_task": 2,
         "max_actions": 0,
         "generated_code_repair_attempts": 3,
+        # Attack-focus branch controller (tools/exploit_agent/branch.py).
+        # Master switch + budgets for per-service branch pursuit. Consumers
+        # read defensively (cfg.get("agent", {}).get(key, default)).
+        "attack_focus_enabled": True,
+        "branch_max_actions": 25,
+        "no_progress_action_limit": 5,
+        "branch_switch_priority_margin": 0.25,
+        "max_active_hypotheses": 5,
     },
     "caldera": {
         "enabled": False,
