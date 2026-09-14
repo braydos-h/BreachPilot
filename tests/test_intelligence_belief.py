@@ -181,3 +181,30 @@ def test_belief_store_basics():
     assert store.list_by_status(HypothesisStatus.CONFIRMED) == [bs]
     store.delete("m-1")
     assert len(store) == 0
+
+
+# ── Epistemic kinds (#70) ─────────────────────────────────────────────────
+
+
+def test_claim_defaults_to_unverified():
+    from tools.intelligence.belief import Claim, EpistemicKind
+
+    claim = Claim(statement="sqli in login form", subject="10.0.0.5")
+    assert claim.kind is EpistemicKind.CLAIM
+    assert claim.oracle_ref == ""
+
+
+def test_verified_requires_oracle_reference():
+    import pytest
+
+    from tools.intelligence.belief import Claim, EpistemicKind, promote_to_verified
+
+    with pytest.raises(ValueError):
+        Claim(statement="x", kind=EpistemicKind.VERIFIED)
+    with pytest.raises(ValueError):
+        promote_to_verified("x", oracle_ref="")
+    with pytest.raises(ValueError):
+        promote_to_verified("x", oracle_ref="   ")
+    verified = promote_to_verified("x", oracle_ref="sqli_not_exploitable", subject="10.0.0.5")
+    assert verified.kind is EpistemicKind.VERIFIED
+    assert verified.oracle_ref == "sqli_not_exploitable"

@@ -124,14 +124,14 @@ the sandbox scope gate, and the empty netns policy simultaneously).
 
 The ONE sanctioned host-execution fallback is the boot-time decision in
 `tools/sandbox/manager.py::resolve_manager_with_fallback`: with
-`sandbox.fallback_native: true` (the default), a server whose Docker stack is
+`sandbox.fallback_native: true` (explicit opt-in, default `false`), a server whose Docker stack is
 unusable at boot (CLI missing, daemon down, **worker image not built**) wholly
 degrades to the legacy uncontained host-execution mode BEFORE any tool
 exists — loudly: a `SANDBOX FALLBACK:` boot-log warning, an amber
 "Sandbox unavailable — running natively" card on the WebUI home screen, and a
 `SANDBOX_FALLBACK:` line in every legacy-path tool result (and its audit
 chain). No session ever switches between contained and native execution
-mid-stream. Set `sandbox.fallback_native: false` to restore the strict
+mid-stream. Keep `sandbox.fallback_native: false` (default) for the strict
 fail-closed posture (executions denied until Docker works). `sandbox.enabled:
 false` remains the explicit operator opt-out for the legacy uncontained mode,
 without any Docker probing.
@@ -247,8 +247,8 @@ exec/remove controls; sandbox lifecycle belongs to the run engine.
 
 `python main.py --doctor` adds a `sandbox` check when `sandbox.enabled: true`:
 Docker CLI present, daemon reachable, worker image present. With
-`sandbox.fallback_native: false` a failed check fails the doctor (because
-attack execution would be blocked); with the default `fallback_native: true`
+`sandbox.fallback_native: false` (default) a failed check fails the doctor (because
+attack execution would be blocked); with opt-in `fallback_native: true`
 the doctor still flags the check but the session would degrade to native
 execution instead of blocking.
 
@@ -256,12 +256,14 @@ execution instead of blocking.
 
 ```yaml
 sandbox:
-  enabled: true                # false = explicit legacy host-execution opt-out
+  enabled: true                # false = developer-only legacy host-execution opt-out
+                               # (also requires BREACHPILOT_ALLOW_NATIVE_EXECUTION env consent)
   backend: docker
   image: breachpilot-sandbox:latest
-  fallback_native: true        # boot-time Docker down/image missing => degrade to
+  fallback_native: false       # boot-time Docker down/image missing => degrade to
                                # uncontained native execution (loud warning) instead
-                               # of fail-closed blocks; false = strict fail-closed
+                               # of fail-closed blocks ONLY when true (explicit opt-in
+                               # + env consent); false (default) = strict fail-closed
   user: sandbox
   read_only_rootfs: true
   env_passthrough: []          # extra host env var names the worker may receive

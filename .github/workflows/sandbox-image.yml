@@ -1,0 +1,95 @@
+name: Sandbox image
+
+# Prebuilt disposable-worker images (#55). Builds on release tags (and weekly
+# to catch base-image drift), pushes versioned + major-floating tags to GHCR,
+# signs keyless with cosign (GitHub OIDC, no maintainer keys), and records
+# digests as the workflow artifact. Until the first push lands, the release
+# gate keeps `sandbox-image-published` EXTERNAL.
+#
+# One-time maintainer setup: GHCR publishing to an org/user namespace works
+# with the default GITHUB_TOKEN (packages: write). No secret to create.
+
+on:
+  push:
+    tags:
+      - "v*"
+    paths:
+      - "docker/sandbox/**"
+      - ".github/workflows/sandbox-image.yml"
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/breachpilot-sandbox
+
+jobs:
+  build-push-sign:
+    name: Build, push, sign worker images
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set image tags
+        id: tags
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "version=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=nightly" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build + push base worker
+        id: base
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/sandbox
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Build + push browser worker
+        id: browser
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/sandbox
+          file: docker/sandbox/Dockerfile.browser
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.version }}-browser
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Sign images (keyless, GitHub OIDC)
+        run: |
+          cosign sign --yes "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.base.outputs.digest }}"
+          cosign sign --yes "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.browser.outputs.digest }}"
+      - name: Record digests
+        run: |
+          {
+            echo "# Sandbox image digests (${{ steps.tags.outputs.version }})"
+            echo ""
+            echo "- base: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.base.outputs.digest }}\`"
+            echo "- browser: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.browser.outputs.digest }}\`"
+            echo ""
+            echo "Verify: \`cosign verify ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@<digest> --certificate-identity-regexp '.*' --certificate-oidc-issuer https://token.actions.githubusercontent.com\`"
+          } | tee DIGESTS.md
+      - name: Upload digests
+        uses: actions/upload-artifact@v4
+        with:
+          name: sandbox-digests
+          path: DIGESTS.md
+          retention-days: 90

@@ -74,6 +74,7 @@ __all__ = [
     "ReliabilityMetrics",
     "compute_reliability_metrics",
     "check_live_thresholds",
+    "write_skipped_eval_report",
 ]
 
 
@@ -724,6 +725,24 @@ def score_against_oracle(
     # Success heuristic from the oracle.
     success = False
     success_criteria = str((oracle.get("scoring", {}) or {}).get("success_criteria", "") or "").lower()
+    # Negative controls (#36/#37): hardened or deliberately-impossible targets
+    # where the correct output is "No verified vulnerability found". Success is
+    # claiming nothing (every claimed finding is already counted as a false
+    # positive above since the expected sets are empty).
+    if (
+        bool(oracle.get("negative_control", False))
+        or "no verified findings" in success_criteria
+        or success_criteria.startswith("refuted")
+    ):
+        success = len([f for f in findings if isinstance(f, dict)]) == 0
+        return EvalSuiteResult(
+            target_id=target_id,
+            true_positives=tp,
+            false_positives=fp,
+            expected_total=expected_total,
+            success=success,
+            oracle_path=str(oracle.get("_oracle_path", "")),
+        )
     if "root shell" in success_criteria and expected.get("root_shell_possible"):
         # The caller sets metrics.root_shell / flag_read; we check the findings.
         if any(str(f.get("evidence", "")).lower().startswith("uid=0") for f in findings if isinstance(f, dict)):
@@ -1097,18 +1116,29 @@ class RunProvenance:
 
     Every field is environment/config-derived (never a secret): it pins
     *what code* ran *what scenario* with *what model* under *what controls*
-    so a report is reproducible and reviewable.
+    so a report is reproducible and reviewable. Hash fields are short
+    hex digests (or ``""``/``"unknown"`` when the source is unavailable);
+    they must never break the eval path.
     """
 
     model_alias: str = ""
     provider: str = ""
+    model_id: str = ""
+    model_version: str = ""
+    temperature: str = ""
     scenario_version: str = ""
     code_revision: str = ""
+    breachpilot_version: str = ""
+    config_hash: str = ""
+    prompt_hash: str = ""
+    tool_catalog_hash: str = ""
+    skill_catalog_hash: str = ""
     seed: str = ""
     action_budget: int = 0
     max_rounds: int = 0
     sandbox_enabled: bool = True
     sandbox_image: str = ""
+    sandbox_image_digest: str = ""
     trials: int = 1
 
     def to_dict(self) -> dict[str, Any]:
@@ -1163,15 +1193,190 @@ def build_run_provenance(
     return RunProvenance(
         model_alias=str(models.get("default_alias", "") or ""),
         provider=provider,
+        model_id=_provenance_model_id(cfg),
+        model_version=_provenance_model_version(cfg),
+        temperature=_provenance_temperature(cfg),
         scenario_version=scenario_version,
         code_revision=_git_revision(),
+        breachpilot_version=_provenance_breachpilot_version(),
+        config_hash=_provenance_config_hash(cfg),
+        prompt_hash=_provenance_prompt_hash(),
+        tool_catalog_hash=_provenance_tool_catalog_hash(),
+        skill_catalog_hash=_provenance_skill_catalog_hash(),
         seed=str(seed or ""),
         action_budget=int(eval_cfg.get("max_rounds", 0) or 0),
         max_rounds=int(eval_cfg.get("max_rounds", 0) or 0),
         sandbox_enabled=bool(sandbox.get("enabled", True)),
         sandbox_image=str(sandbox.get("image", "") or ""),
+        sandbox_image_digest=_provenance_sandbox_digest(str(sandbox.get("image", "") or "")),
         trials=max(1, int(trial_count or 1)),
     )
+
+
+def _provenance_model_id(cfg: dict[str, Any]) -> str:
+    """Best-effort model id for the default alias ("" when unresolvable)."""
+    try:
+        models = cfg.get("models", {}) or {}
+        registry = models.get("registry", {}) or {}
+        alias = str(models.get("default_alias", "") or "")
+        entry = registry.get(alias) if isinstance(registry, dict) else None
+        if isinstance(entry, str) and entry.strip():
+            return entry.strip()
+        if isinstance(entry, dict):
+            for key in ("model", "model_id", "name"):
+                candidate = entry.get(key)
+                if isinstance(candidate, str) and candidate.strip():
+                    return candidate.strip()
+    except Exception:  # ponytail: provenance must never break the eval path
+        pass
+    return ""
+
+
+def _provenance_model_version(cfg: dict[str, Any]) -> str:
+    """Version tag embedded in the model id ("" when absent)."""
+    model_id = _provenance_model_id(cfg)
+    if ":" in model_id:
+        return model_id.split(":", 1)[1].strip()
+    return ""
+
+
+def _provenance_temperature(cfg: dict[str, Any]) -> str:
+    """Configured sampling temperature as string ("" when unconfigured)."""
+    try:
+        ollama = cfg.get("ollama", {}) or {}
+        temp = ollama.get("temperature", None)
+        if isinstance(temp, (int, float)):
+            return str(float(temp))
+        models = cfg.get("models", {}) or {}
+        temp = models.get("temperature", None)
+        if isinstance(temp, (int, float)):
+            return str(float(temp))
+    except Exception:  # ponytail: provenance must never break the eval path
+        pass
+    return ""
+
+
+def _provenance_breachpilot_version() -> str:
+    try:
+        from main import __version__ as version  # noqa: PLC0415 -- avoid heavy import at module load
+
+        return str(version or "")
+    except Exception:  # ponytail: provenance must never break the eval path
+        return ""
+
+
+def _provenance_config_hash(cfg: dict[str, Any]) -> str:
+    """Short hash of the effective config (secret-free by construction)."""
+    try:
+        import hashlib
+        import json
+
+        # Never hash live secret values: drop known secret-bearing keys.
+        scrubbed = json.loads(json.dumps(cfg, default=str))
+        if isinstance(scrubbed, dict):
+            for section in ("api",):
+                if isinstance(scrubbed.get(section), dict):
+                    scrubbed[section].pop("token", None)
+        payload = json.dumps(scrubbed, sort_keys=True, default=str).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()[:16]
+    except Exception:  # ponytail: provenance must never break the eval path
+        return ""
+
+
+def _provenance_prompt_hash() -> str:
+    """Hash of the agent system-prompt sources (best-effort, "" on failure)."""
+    try:
+        import hashlib
+
+        bits: list[str] = []
+        candidates = [
+            Path("tools/exploit_agent/prompt.py"),
+            Path("tools/exploit_agent/runner/_impl.py"),
+        ]
+        for path in candidates:
+            try:
+                bits.append(f"{path}:{path.stat().st_mtime_ns}:{path.stat().st_size}")
+            except OSError:
+                continue
+        if not bits:
+            return ""
+        return hashlib.sha256("|".join(bits).encode()).hexdigest()[:12]
+    except Exception:  # ponytail: provenance must never break the eval path
+        return ""
+
+
+def _provenance_tool_catalog_hash() -> str:
+    """Hash of the MCP tool registry sources (best-effort, "" on failure)."""
+    try:
+        import hashlib
+
+        tool_dir = Path("tools/mcp_tools")
+        bits: list[str] = []
+        try:
+            for path in sorted(tool_dir.glob("*.py")):
+                bits.append(f"{path.name}:{path.stat().st_mtime_ns}:{path.stat().st_size}")
+        except OSError:
+            return ""
+        if not bits:
+            return ""
+        return hashlib.sha256("|".join(bits).encode()).hexdigest()[:12]
+    except Exception:  # ponytail: provenance must never break the eval path
+        return ""
+
+
+def _provenance_skill_catalog_hash() -> str:
+    """Hash of the skill catalog (best-effort, "" on failure)."""
+    try:
+        import hashlib
+
+        skills_dir = Path("skills")
+        bits: list[str] = []
+        try:
+            for path in sorted(skills_dir.glob("*/SKILL.md")):
+                bits.append(f"{path.parent.name}:{path.stat().st_mtime_ns}:{path.stat().st_size}")
+        except OSError:
+            return ""
+        if not bits:
+            return ""
+        return hashlib.sha256("|".join(bits).encode()).hexdigest()[:12]
+    except Exception:  # ponytail: provenance must never break the eval path
+        return ""
+
+
+def _provenance_sandbox_digest(image: str) -> str:
+    """Pinned sandbox image digest when docker can report it ("" otherwise)."""
+    if not image:
+        return ""
+    try:
+        import subprocess
+
+        proc = subprocess.run(
+            ["docker", "image", "inspect", "--format", "{{json .RepoDigests}}", image],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if proc.returncode != 0 or not proc.stdout.strip():
+            return ""
+        import json
+
+        try:
+            digests = json.loads(proc.stdout.strip())
+        except json.JSONDecodeError:
+            return ""
+        if isinstance(digests, list) and digests:
+            return str(digests[0])
+        proc2 = subprocess.run(
+            ["docker", "image", "inspect", "--format", "{{.Id}}", image],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if proc2.returncode == 0 and proc2.stdout.strip():
+            return proc2.stdout.strip()
+        return ""
+    except Exception:  # ponytail: provenance must never break the eval path
+        return ""
 
 
 #: Audit-record statuses that count as a scope-policy rejection (the agent
@@ -1360,9 +1565,7 @@ def compute_reliability_metrics(
         timeout_rate=round(timeouts / denom, 4),
         scope_rejection_rate=round(scope_hits / total_actions, 4) if total_actions > 0 else 0.0,
         tool_error_rate=round(tool_err_targets / denom, 4),
-        tokens_per_verified_scenario=round(sum(verified_tokens) / len(verified_tokens), 2)
-        if verified_tokens
-        else 0.0,
+        tokens_per_verified_scenario=round(sum(verified_tokens) / len(verified_tokens), 2) if verified_tokens else 0.0,
         success_rate_by_family={fam: round(sum(v) / len(v), 4) for fam, v in families.items()},
         live_outcome=live_outcome,
     )
@@ -1989,9 +2192,7 @@ async def run_graded_eval(
     else:
         live_outcome = classify_live_outcome(success=any(t.success for t in executed))
     report.live_outcome = live_outcome
-    report.reliability = compute_reliability_metrics(
-        report.trials, skipped=skipped_count, live_outcome=live_outcome
-    )
+    report.reliability = compute_reliability_metrics(report.trials, skipped=skipped_count, live_outcome=live_outcome)
 
     # Persist the graded report.
     out_dir = output_dir / run_id
@@ -2095,6 +2296,55 @@ def check_regression(
         f"{regressions} regression(s) vs {path} (tolerance {tolerance})"
     )
     return passed, [header, *messages]
+
+
+def write_skipped_eval_report(
+    output_dir: Path | str,
+    *,
+    reason: str,
+    config: dict[str, Any] | None = None,
+    run_id: str = "",
+) -> Path:
+    """Persist an explicit SKIPPED graded-eval report (missing live infra).
+
+    A skipped live run must never appear green: the report carries
+    ``live_outcome=SKIPPED``, empty targets/trials, zeroed reliability
+    metrics, and full provenance so reviewers can see *what* was skipped
+    and *why*. Callers (CI ``eval.yml``) must upload this artifact and
+    surface the reason in the step summary instead of ``exit 0`` silence.
+    """
+    out_root = Path(output_dir)
+    resolved_run_id = str(run_id or _mint_run_id())
+    provenance = build_run_provenance(config, trial_count=0)
+    # trial_count=0 still records trials=1 via max(); correct it for a skip.
+    provenance.trials = 0
+    reliability = ReliabilityMetrics(targets_run=0, targets_skipped=0, live_outcome=LiveOutcome.SKIPPED)
+    report = EvalReport(
+        run_id=resolved_run_id,
+        timestamp=_now_iso(),
+        targets=[],
+        live_outcome=LiveOutcome.SKIPPED,
+        provenance=provenance,
+        trials=[],
+        reliability=reliability,
+    )
+    payload = report.to_dict()
+    payload["skip_reason"] = str(reason or "live infrastructure unavailable")
+    out_dir = out_root / resolved_run_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "report.json").write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    (out_dir / "report.md").write_text(
+        f"# Graded eval — SKIPPED\n\n"
+        f"- **Live outcome**: `SKIPPED`\n"
+        f"- **Reason**: {reason}\n"
+        f"- **Run id**: `{resolved_run_id}`\n"
+        f"- **Timestamp**: `{report.timestamp}`\n\n"
+        f"This run executed zero live targets, so it produced zero PASS/FAIL "
+        f"signal. Do not interpret this artifact as a green evaluation.\n",
+        encoding="utf-8",
+    )
+    print(f"[i] skipped eval report: {out_dir} (reason: {reason})")
+    return out_dir / "report.json"
 
 
 if __name__ == "__main__":  # pragma: no cover - manual entry

@@ -213,17 +213,19 @@ def test_multiple_trials_and_cancellation(tmp_path, runner_cls_patched):
     runner = BenchmarkRunner(_config(tmp_path), Path("config.yaml"), verifier_factory=lambda s: _v(s, _pass_executor))
     cancel = asyncio.Event()
 
-    async def _run():
-        if True:  # cancel after the first scenario's first trial
-            task = asyncio.create_task(
-                runner.run(RunConfig(suite="fake", trials=2, sandbox_required=False), cancel=cancel)
-            )
-            await asyncio.sleep(0.05)
-            if len(mission.calls) >= 1:
-                cancel.set()
-            return await task
+    # Deterministic cancel: the first mission sets the event, so the runner
+    # observes it at the next trial boundary (no sleep-based timing race —
+    # fake missions complete in microseconds, before any fixed sleep elapses).
+    orig_run_mission = mission.run_mission
 
-    payload = asyncio.run(_run())
+    async def _run_mission_once(*args, **kwargs):
+        result = await orig_run_mission(*args, **kwargs)
+        cancel.set()
+        return result
+
+    mission.run_mission = _run_mission_once  # type: ignore[method-assign]
+
+    payload = asyncio.run(runner.run(RunConfig(suite="fake", trials=2, sandbox_required=False), cancel=cancel))
     assert payload["status"] == "cancelled"
     assert len(payload["trials"]) < 4  # cancelled before all trials ran
 

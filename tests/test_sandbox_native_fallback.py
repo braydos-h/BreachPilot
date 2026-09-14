@@ -36,12 +36,20 @@ import pytest
 from tools.sandbox import docker_backend as _db
 from tools.sandbox import manager as _mgr
 from tools.sandbox.manager import (
+    NATIVE_CONSENT_ENV,
+    NATIVE_CONSENT_VALUE,
+    native_execution_consent,
     native_fallback_notice,
     read_boot_state,
     resolve_manager_with_fallback,
     status_report,
 )
 from tools.sandbox.models import SandboxConfig
+
+
+def _consent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Explicitly consent to native execution (developer-only path)."""
+    monkeypatch.setenv(NATIVE_CONSENT_ENV, NATIVE_CONSENT_VALUE)
 
 
 def _cfg(**overrides: Any) -> dict[str, Any]:
@@ -97,6 +105,7 @@ def test_docker_ok_image_ok_returns_manager(tmp_path: Path, monkeypatch: pytest.
 
 
 def test_docker_ok_image_missing_opt_in_falls_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _consent(monkeypatch)
     monkeypatch.setattr(_db, "docker_image_exists", lambda image: False)
     manager, notice = resolve_manager_with_fallback(tmp_path, _cfg(fallback_native=True), probe=_probe(True, ""))
     assert manager is None
@@ -114,13 +123,25 @@ def test_docker_ok_image_missing_strict_returns_manager(tmp_path: Path, monkeypa
     assert read_boot_state(_cfg())["mode"] == "blocked"
 
 
-def test_docker_down_opt_in_falls_back(tmp_path: Path) -> None:
+def test_docker_down_opt_in_falls_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _consent(monkeypatch)
     manager, notice = resolve_manager_with_fallback(
         tmp_path, _cfg(fallback_native=True), probe=_probe(False, "docker daemon down")
     )
     assert manager is None
     assert "docker daemon down" in notice
     assert read_boot_state(_cfg())["mode"] == "native_fallback"
+
+
+def test_opt_in_without_consent_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#07: fallback_native=true without env consent blocks instead of going native."""
+    monkeypatch.delenv(NATIVE_CONSENT_ENV, raising=False)
+    manager, notice = resolve_manager_with_fallback(
+        tmp_path, _cfg(fallback_native=True), probe=_probe(False, "docker daemon down")
+    )
+    assert manager is not None
+    assert notice == ""
+    assert read_boot_state(_cfg())["mode"] == "blocked"
 
 
 def test_docker_down_strict_returns_manager(tmp_path: Path) -> None:
@@ -154,11 +175,36 @@ def test_image_probe_generic_exception_degrades_not_crashes(tmp_path: Path, monk
     assert read_boot_state(_cfg())["mode"] == "blocked"
 
 
-def test_disabled_returns_none_no_notice(tmp_path: Path) -> None:
+def test_disabled_returns_none_no_notice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _consent(monkeypatch)
     manager, notice = resolve_manager_with_fallback(tmp_path, {"sandbox": {"enabled": False}}, probe=_probe(False, "x"))
     assert manager is None
     assert notice == ""
-    assert read_boot_state({"sandbox": {"enabled": False}}) is None
+    assert read_boot_state({"sandbox": {"enabled": False}})["mode"] == "disabled"
+
+
+def test_disabled_without_consent_is_blocked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#07: sandbox.enabled=false without env consent fail-closes (blocked manager)."""
+    monkeypatch.delenv(NATIVE_CONSENT_ENV, raising=False)
+    manager, notice = resolve_manager_with_fallback(tmp_path, {"sandbox": {"enabled": False}}, probe=_probe(False, "x"))
+    assert manager is not None
+    assert read_boot_state({"sandbox": {"enabled": False}}) is not None
+    assert read_boot_state({"sandbox": {"enabled": False}})["mode"] == "blocked"
+
+
+def test_native_execution_consent_matrix(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#07 consent gate: contained needs nothing; native needs the exact value."""
+    monkeypatch.delenv(NATIVE_CONSENT_ENV, raising=False)
+    assert native_execution_consent(_cfg())[0] is True  # contained: no consent needed
+    assert native_execution_consent({})[0] is True  # missing section: no explicit request
+    assert native_execution_consent({"sandbox": {"enabled": False}})[0] is False
+    assert native_execution_consent(_cfg(fallback_native=True))[0] is False
+    assert NATIVE_CONSENT_ENV in native_execution_consent(_cfg(fallback_native=True))[1]
+    monkeypatch.setenv(NATIVE_CONSENT_ENV, "yes")
+    assert native_execution_consent(_cfg(fallback_native=True))[0] is False  # wrong value
+    _consent(monkeypatch)
+    assert native_execution_consent({"sandbox": {"enabled": False}})[0] is True
+    assert native_execution_consent(_cfg(fallback_native=True))[0] is True
 
 
 def test_notice_is_actionable() -> None:

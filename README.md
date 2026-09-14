@@ -18,7 +18,7 @@ Open-source agentic operator for authorized testing — plans, verifies, and rep
 
 Open source · Apache 2.0 · Local-first
 
-**Plan · Recon · Exploit · Verify · Report** — 139 skills, 153 MCP tools across 33 tool families, 15 attack families, 6 swarm agents.
+**Plan · Recon · Exploit · Verify · Report** — oracle-verified findings with `PASS`/`FAIL`/`SKIPPED`/`INFRA_ERROR` evaluation, target-locked and audited. Capability catalogs: [167 MCP tools](docs/mcp/tool-catalog-generated.md) · [146 skills](docs/skills/catalog.md). Reliability contract: [docs/reliability-metrics.md](docs/reliability-metrics.md).
 
 🌐 **[Try the live site](https://breachpilot-site.vercel.app/)** · [Quick start](#quick-start-in-60-seconds) · [WebUI](#webui-mission-control) · [Safety model](#safety-model) · [Docs](#documentation)
 
@@ -277,10 +277,10 @@ destroyed afterward:
   the open internet are unreachable regardless of what the command says.
 - **Fail closed**: `sandbox.fallback_native` defaults to `false` (schema +
   lab config) — sandbox failures deny execution with a structured
-  `SANDBOX_*` error until Docker works. Set it `true` to opt into the loud
-  whole-session degrade-to-native mode (warning + amber WebUI banner +
-  `SANDBOX_FALLBACK:` lines). `sandbox.enabled: false` is the explicit
-  operator opt-out for legacy uncontained mode.
+  `SANDBOX_*` error until Docker works. Native execution is developer-only:
+  `sandbox.enabled: false` or `sandbox.fallback_native: true` additionally
+  requires `BREACHPILOT_ALLOW_NATIVE_EXECUTION=I_UNDERSTAND_THIS_RUNS_ON_THE_HOST`
+  — without it, boot fail-closes to `blocked` instead of going native.
 
 Build the worker image once (Linux is the primary hardened target; Windows/macOS
 work via Docker Desktop):
@@ -334,7 +334,7 @@ and tracks privilege-escalation chains. Every decision is recorded in
 
 ### Adaptive intelligence
 
-- 139 advisory skills: a YAML + markdown prompt-context layer, scored by deterministic tags + lexical search + cross-mission Bayesian feedback + semantic cosine similarity over `nomic-embed-text` embeddings. Mid-run re-selection as new CVEs surface.
+- 146 advisory skills (generated catalog: [docs/skills/catalog.md](docs/skills/catalog.md)): a YAML + markdown prompt-context layer, scored by deterministic tags + lexical search + cross-mission Bayesian feedback + semantic cosine similarity over `nomic-embed-text` embeddings. Mid-run re-selection as new CVEs surface.
 - Semantic memory: cross-mission learning via `SemanticMemoryManager` + `ExperienceStore`. The orchestrator stores lessons on every confirmed win.
 - Attack memory: per-attempt context window management (6K chars), compaction every 50 rounds, persistent campaign state.
 - Model telemetry: token counts, context utilization, duration, and tokens/sec for every LLM call.
@@ -361,9 +361,9 @@ and tracks privilege-escalation chains. Every decision is recorded in
 
 ## Skills, agents, and memory
 
-### 139 advisory skills
+### 146 advisory skills
 
-Each skill is a curated `SKILL.md` under `skills/`, such as `conducting-network-penetration-test`, `executing-red-team-engagement-planning`, `exploiting-jwt-algorithm-confusion-attack`, `exploiting-ssti`, `exploiting-nopac-cve-2021-42278-42287`, and `attacking-domains-end-to-end`. The engine deterministically selects the top six for the current context, re-evaluates mid-run, and supports semantic matching via embeddings.
+Each skill is a curated `SKILL.md` under `skills/` (generated catalog: [docs/skills/catalog.md](docs/skills/catalog.md)), such as `conducting-network-penetration-test`, `executing-red-team-engagement-planning`, `exploiting-jwt-algorithm-confusion-attack`, `exploiting-ssti`, `exploiting-nopac-cve-2021-42278-42287`, and `attacking-domains-end-to-end`. The engine deterministically selects the top six for the current context, re-evaluates mid-run, and supports semantic matching via embeddings.
 
 Categories include network penetration testing, web/API, auth/JWT/OAuth, deserialization, AD/BloodHound, SMB/network, privilege escalation, cryptography, supply chain, detection, persistence, and ICS/IoT. See [docs/skills.md](docs/skills.md) and [docs/skill-authoring.md](docs/skill-authoring.md).
 
@@ -568,8 +568,8 @@ operator ──► main.py / app.py (WebUI @ :8765)
                │
                ├─ GoalEngine ──► resolves preset/custom goals, risk-gated (SAFE/GATED/HIGH)
                │
-                ├─ run_exploit_session() ──► tools/exploit_agent/ (runner loop + policy + prompt)
-                │     153 MCP tools, 139 skills, 15 attack module families
+                 ├─ run_exploit_session() ──► tools/exploit_agent/ (runner loop + policy + prompt)
+                │     catalogs: [167 MCP tools](docs/mcp/tool-catalog-generated.md), [146 skills](docs/skills/catalog.md), 15 attack module families
                │
                 ├─ SwarmOrchestrator (6 agents, shared blackboard, parallel dispatch)
                 │     `--swarm`: single-target specialist decomposition

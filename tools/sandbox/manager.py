@@ -47,11 +47,59 @@ __all__ = [
     "SandboxManager",
     "resolve_manager",
     "status_report",
+    "NATIVE_CONSENT_ENV",
+    "NATIVE_CONSENT_VALUE",
+    "native_execution_consent",
     "CONTAINER_WORKSPACE",
     "BOOT_STATE_FILE",
     "boot_state_path",
     "read_boot_state",
 ]
+
+#: Env gate that keeps native (host) execution developer-only (#07). Normal
+#: product UX is sandbox-required: setting ``sandbox.enabled: false`` or
+#: ``sandbox.fallback_native: true`` additionally requires this exact value,
+#: so the operator can never silently drift toward host execution via config
+#: alone. CI/tests set it explicitly when they intend native mode.
+NATIVE_CONSENT_ENV = "BREACHPILOT_ALLOW_NATIVE_EXECUTION"
+NATIVE_CONSENT_VALUE = "I_UNDERSTAND_THIS_RUNS_ON_THE_HOST"
+
+
+def native_execution_consent(config: dict[str, Any] | None = None) -> tuple[bool, str]:
+    """Check whether host (native) execution is explicitly consented.
+
+    Returns ``(True, "")`` when the effective config does not request native
+    execution (sandbox enabled with ``fallback_native: false`` — the normal
+    contained path needs no consent), or when the consent env var carries the
+    exact acknowledgement value. Returns ``(False, reason)`` when the config
+    requests native execution (``sandbox.enabled: false`` or
+    ``sandbox.fallback_native: true``) without that env consent, with a
+    remediation message naming the env var. Never raises; never logs secrets.
+    """
+    import os
+
+    cfg = config if isinstance(config, dict) else {}
+    sandbox = cfg.get("sandbox", {}) if isinstance(cfg.get("sandbox"), dict) else {}
+    enabled = sandbox.get("enabled", True)
+    # A missing sandbox section (or missing enabled key) means contained
+    # defaults — no consent needed.
+    if isinstance(enabled, bool) and enabled is False:
+        wants_native = True
+        why = "sandbox.enabled: false"
+    elif bool(sandbox.get("fallback_native", False)):
+        wants_native = True
+        why = "sandbox.fallback_native: true"
+    else:
+        return True, ""
+    if os.environ.get(NATIVE_CONSENT_ENV, "") == NATIVE_CONSENT_VALUE:
+        return True, ""
+    return False, (
+        f"native execution requested ({why}) but {NATIVE_CONSENT_ENV} is not set to "
+        f"the acknowledgement value; host execution is developer-only. To proceed "
+        f"explicitly, export {NATIVE_CONSENT_ENV}={NATIVE_CONSENT_VALUE} — otherwise "
+        f"keep the sandbox contained (sandbox.enabled: true, fallback_native: false)."
+    )
+
 
 CONTAINER_WORKSPACE = "/workspace"
 
@@ -201,6 +249,11 @@ def resolve_manager_with_fallback(
     """
     cfg = SandboxConfig.from_config(config)
     if not cfg.enabled:
+        allowed, reason = native_execution_consent(config if isinstance(config, dict) else {})
+        if not allowed:
+            _record_boot_state(config, "blocked", reason)
+            return _build_manager(cfg, workspace, config), ""
+        _record_boot_state(config, "disabled", "explicit native-execution opt-out with env consent")
         return None, ""
     from tools.sandbox.docker_lifecycle import DockerLifecycle
 
@@ -221,11 +274,19 @@ def resolve_manager_with_fallback(
         if not cfg.fallback_native:
             _record_boot_state(config, "blocked", reason)
             return _build_manager(cfg, workspace, config), ""
+        allowed, consent_reason = native_execution_consent(config if isinstance(config, dict) else {})
+        if not allowed:
+            _record_boot_state(config, "blocked", f"{reason}; {consent_reason}")
+            return _build_manager(cfg, workspace, config), ""
         reason = native_fallback_notice(reason)
         _record_boot_state(config, "native_fallback", reason)
         return None, reason
     if not cfg.fallback_native:
         _record_boot_state(config, "blocked", reason)
+        return _build_manager(cfg, workspace, config), ""
+    allowed, consent_reason = native_execution_consent(config if isinstance(config, dict) else {})
+    if not allowed:
+        _record_boot_state(config, "blocked", f"{reason}; {consent_reason}")
         return _build_manager(cfg, workspace, config), ""
     reason = native_fallback_notice(reason)
     _record_boot_state(config, "native_fallback", reason)

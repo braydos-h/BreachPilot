@@ -6,7 +6,7 @@ blocks. Host execution is NEVER a per-command fallback -- a
 sandbox/daemon/policy failure blocks the execution instead. The single
 sanctioned fallback is the boot-time decision in
 ``tools/sandbox/manager.py::resolve_manager_with_fallback``: with
-``sandbox.fallback_native`` true (default), a server whose Docker stack is
+``sandbox.fallback_native`` true (explicit opt-in; default false), a server whose Docker stack is
 unusable degrades wholly to the documented legacy host-execution mode (with a
 warning) BEFORE any tool exists, so no in-session command ever silently
 switches between contained and native execution. See

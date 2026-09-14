@@ -250,6 +250,62 @@ def test_build_run_provenance_tolerates_empty_config():
     assert prov.trials == 1
 
 
+def test_build_run_provenance_records_reproducibility_metadata():
+    from tools.eval_harness import build_run_provenance
+
+    prov = build_run_provenance(
+        {
+            "models": {
+                "default_alias": "glm",
+                "registry": {"glm": "glm-5.2:cloud"},
+            },
+            "ollama": {"temperature": 0.2},
+            "eval": {"max_rounds": 30},
+            "sandbox": {"enabled": True, "image": "breachpilot-sandbox:latest"},
+        }
+    )
+    assert prov.model_id == "glm-5.2:cloud"
+    assert prov.model_version == "cloud"
+    assert prov.temperature == "0.2"
+    assert prov.config_hash != ""
+    # Prompt/tool/skill hashes are best-effort but must exist as keys and
+    # never leak secrets.
+    blob = json.dumps(prov.to_dict())
+    for key in (
+        "prompt_hash",
+        "tool_catalog_hash",
+        "skill_catalog_hash",
+        "sandbox_image_digest",
+        "breachpilot_version",
+        "code_revision",
+        "scenario_version",
+    ):
+        assert key in prov.to_dict()
+    assert "OLLAMA_API_KEY" not in blob
+
+
+def test_write_skipped_eval_report_is_never_green(tmp_path):
+    from tools.eval_harness import LiveOutcome, write_skipped_eval_report
+
+    report_path = write_skipped_eval_report(
+        tmp_path / "eval",
+        reason="no backend",
+        config={"models": {"default_alias": "glm"}},
+    )
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    assert payload["live_outcome"] == LiveOutcome.SKIPPED
+    assert payload["skip_reason"] == "no backend"
+    assert payload["targets"] == []
+    assert payload["trials"] == []
+    assert payload["reliability"]["live_outcome"] == LiveOutcome.SKIPPED
+    assert payload["reliability"]["targets_run"] == 0
+    assert "provenance" in payload
+    # Markdown twin must say SKIPPED, never PASS.
+    md = (report_path.parent / "report.md").read_text(encoding="utf-8")
+    assert "SKIPPED" in md
+    assert "Do not interpret this artifact as a green evaluation" in md
+
+
 # ── run_graded_eval wiring ───────────────────────────────────────────────
 
 
@@ -298,7 +354,7 @@ async def test_run_graded_eval_collects_telemetry_and_classifies_fail(tmp_path, 
 
     monkeypatch.setattr(mod, "docker_suite_up", lambda *a, **k: 0)
     monkeypatch.setattr(mod, "docker_suite_down", lambda *a, **k: 0)
-    monkeypatch.setattr(mod, "default_check_executor", lambda **kwargs: (lambda check: (False, "nope")))
+    monkeypatch.setattr(mod, "default_check_executor", lambda **kwargs: lambda check: (False, "nope"))
 
     async def fake_open(host, cfg):
         return _FakeCtx(None), None, None

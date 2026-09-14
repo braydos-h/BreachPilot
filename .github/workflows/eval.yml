@@ -3,7 +3,8 @@ name: Eval
 # Graded eval loop (oracle v2). The unit-test job is fully mocked and runs on
 # push/PR touching eval code; the live nightly-eval job needs real targets
 # (docker compose suite) + a model backend (Ollama Cloud), so it only runs on
-# schedule or manual dispatch and skips gracefully when OLLAMA_API_KEY is absent.
+# schedule or manual dispatch. A missing backend is recorded as an explicit
+# SKIPPED report (live_outcome=SKIPPED) — never as a green PASS.
 
 on:
   schedule:
@@ -63,11 +64,19 @@ jobs:
           cache-dependency-path: |
             pyproject.toml
             requirements.txt
-      - name: Graceful skip without OLLAMA_API_KEY
+      - name: Record explicit SKIPPED report without OLLAMA_API_KEY
         if: env.OLLAMA_API_KEY == ''
         run: |
-          echo "OLLAMA_API_KEY not set; skipping live graded eval (graceful skip)."
-          exit 0
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -c "from tools.eval_harness import write_skipped_eval_report; print(write_skipped_eval_report('reports/eval', reason='OLLAMA_API_KEY not set; live graded eval skipped with zero live signal'))"
+          {
+            echo "## Nightly graded eval — SKIPPED"
+            echo ""
+            echo "Live outcome: \`SKIPPED\` (OLLAMA_API_KEY not set; zero live targets executed)."
+            echo "This is not a green evaluation — no PASS/FAIL signal was produced."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "OLLAMA_API_KEY not set; wrote SKIPPED eval report (see artifact)."
       - name: Install project + dev dependencies
         if: env.OLLAMA_API_KEY != ''
         run: |
@@ -80,7 +89,7 @@ jobs:
         if: env.OLLAMA_API_KEY != ''
         run: python main.py --eval --save-baseline
       - name: Stop eval target suite
-        if: always()
+        if: always() && env.OLLAMA_API_KEY != ''
         run: docker compose -f eval_targets/docker-compose.yml down
       - name: Upload eval reports
         if: always()
@@ -88,5 +97,5 @@ jobs:
         with:
           name: eval-reports
           path: reports/eval/
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 14

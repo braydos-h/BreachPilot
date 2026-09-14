@@ -404,8 +404,8 @@ an exact fix. When in doubt, start with the diagnostics table below — the
 - **Cause:** sandbox is default-on (`sandbox.enabled: true`). Mid-session
   sandbox failures fail closed (offensive execution blocked, no host
   fallback). At boot, an unusable Docker stack (CLI missing, daemon down,
-  image not built) degrades the whole session to legacy native mode when
-  `sandbox.fallback_native: true` (default) — warning + banner + per-result
+  image not built) degrades the whole session to legacy native mode only when
+  `sandbox.fallback_native: true` (explicit opt-in, default `false`) — warning + banner + per-result
   `SANDBOX_FALLBACK:` line. See `docs/sandbox.md`, README §Safety model.
 - **Check:** `docker info`, `docker images | findstr breachpilot-sandbox`
   (Windows) / `docker images | grep breachpilot-sandbox` (Linux);
@@ -560,7 +560,7 @@ an exact fix. When in doubt, start with the diagnostics table below — the
   `SANDBOX_FALLBACK:` lines (`tools/sandbox/manager.py:108`,
   `tools/mcp_tools/sandbox_exec.py:187`).
 - **Cause:** Docker CLI missing, daemon down, or the worker image not built,
-  with `sandbox.fallback_native: true` degrading the whole session to native
+  with opt-in `sandbox.fallback_native: true` (default `false`) degrading the whole session to native
   mode (decision in `tools/sandbox/__init__.py:18`; notice text in
   `tools/sandbox/manager.py:104`).
 - **Check:**

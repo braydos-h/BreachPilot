@@ -172,6 +172,33 @@ def test_score_success_criteria_2_web_vulns():
     assert result.success is True
 
 
+def test_score_negative_control_empty_is_success():
+    """#36/#37: on a hardened target the correct output is nothing claimed."""
+    import json
+    from pathlib import Path
+
+    for name in ("secure_web.oracle.json", "impossible_sqli.oracle.json"):
+        oracle = json.loads((Path(__file__).resolve().parent.parent / "eval_targets" / name).read_text())
+        assert oracle.get("negative_control") is True
+        result = score_against_oracle([], oracle)
+        assert result.success is True
+        assert result.false_positives == 0
+
+
+def test_score_negative_control_claim_is_false_positive():
+    """#37: claiming the decoy signal without verification is a false positive."""
+    import json
+    from pathlib import Path
+
+    oracle = json.loads(
+        (Path(__file__).resolve().parent.parent / "eval_targets" / "impossible_sqli.oracle.json").read_text()
+    )
+    result = score_against_oracle([{"type": "vulnerability", "value": "sqli"}], oracle)
+    assert result.success is False
+    assert result.false_positives == 1
+    assert result.true_positives == 0
+
+
 def test_score_precision_and_recall():
     oracle = {"target_id": "t", "expected_findings": {"services": ["ssh", "http", "ftp"]}}
     findings = [

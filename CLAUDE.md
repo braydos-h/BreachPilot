@@ -385,9 +385,8 @@ failures.** The worker image must be built: `docker build -t
 breachpilot-sandbox:latest docker/sandbox` (CI `sandbox` job does this and
 runs the 7 sandbox test files against real Docker). The one boot-time
 exception is `sandbox.fallback_native` (whole-session degrade to legacy
-uncontained native mode when Docker is unusable — the checked-in lab config
-sets it `false`; README describes `true` as default, which is currently
-inconsistent). `sandbox.enabled: false` is the explicit operator opt-out.
+uncontained native mode when Docker is unusable — default `false`
+(fail-closed); `true` is explicit opt-in). `sandbox.enabled: false` is the explicit operator opt-out.
 Full architecture/threat model: `docs/sandbox.md`.
 
 Operational guards that remain regardless of mode: command timeouts (default

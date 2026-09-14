@@ -29,6 +29,53 @@ class EvidencePolarity(str, Enum):
     NEUTRAL = "neutral"
 
 
+class EpistemicKind(str, Enum):
+    """What a statement IS, epistemically (#70).
+
+    FACT: deterministic tool output (banner, open port, file hash).
+    INFERENCE: derived from facts by deterministic rules (service guess).
+    HYPOTHESIS: candidate under test (belief-state tracked).
+    CLAIM: agent-asserted but unverified — never presented as truth.
+    VERIFIED: an independent oracle check confirmed it. ONLY reachable via
+    :func:`promote_to_verified` with a non-empty oracle reference: the LLM
+    may propose hypotheses and actions, but cannot define verified facts.
+    """
+
+    FACT = "fact"
+    INFERENCE = "inference"
+    HYPOTHESIS = "hypothesis"
+    CLAIM = "claim"
+    VERIFIED = "verified"
+
+
+@dataclass(slots=True)
+class Claim:
+    """A statement with its epistemic kind attached."""
+
+    statement: str
+    kind: EpistemicKind = EpistemicKind.CLAIM
+    subject: str = ""
+    oracle_ref: str = ""
+    timestamp: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.timestamp:
+            self.timestamp = _now_iso()
+        if self.kind is EpistemicKind.VERIFIED and not self.oracle_ref:
+            raise ValueError("VERIFIED claims require an oracle reference (construct via promote_to_verified)")
+
+
+def promote_to_verified(statement: str, *, oracle_ref: str, subject: str = "") -> Claim:
+    """Promote a statement to VERIFIED on independent oracle evidence.
+
+    ``oracle_ref`` is the id of the passed check (flag id, verifier probe);
+    empty refs raise — agent assertions alone can never verify.
+    """
+    if not str(oracle_ref or "").strip():
+        raise ValueError("promotion to VERIFIED requires a non-empty oracle reference")
+    return Claim(statement=statement, kind=EpistemicKind.VERIFIED, subject=subject, oracle_ref=str(oracle_ref).strip())
+
+
 @dataclass(slots=True)
 class EvidenceObservation:
     """A single piece of evidence gathered about a hypothesis.

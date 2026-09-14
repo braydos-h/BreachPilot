@@ -1,0 +1,120 @@
+name: Release
+
+# 0.69 beta gate (#80): runs on tags. The gate script decides GO/NO-GO;
+# NOTHING publishes on NO-GO. SBOMs + attestations cover #42/#43; digest
+# recording covers #44; the image build feeds #55.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+  packages: write
+
+jobs:
+  gate:
+    name: Beta release gate (GO/NO-GO)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      verdict: ${{ steps.gate.outputs.verdict }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+            constraints-dev.txt
+      - name: Install project + dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -c constraints-dev.txt -e ".[dev]"
+      - name: Run release gate
+        id: gate
+        run: |
+          python scripts/release_gate.py | tee gate.txt
+          verdict=$(python scripts/release_gate.py --json | python -c "import json,sys; print(json.load(sys.stdin)['verdict'])")
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+          test "$verdict" = "GO"
+      - name: Upload gate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-gate
+          path: gate.txt
+          retention-days: 90
+
+  build:
+    name: Build + SBOM + attest
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [gate]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+            constraints-dev.txt
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine cyclonedx-bom
+      - name: Build sdist + wheel
+        run: python -m build
+      - name: SHA256SUMS
+        run: (cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS)
+      - name: SBOM (Python, CycloneDX)
+        run: python -m cyclonedx_py environment --output-format JSON --output-file sbom-python.json
+      - name: SBOM (WebUI, npm)
+        working-directory: webui
+        run: npm ci && npm sbom --omit=dev --sbom-format=cyclonedx > ../sbom-webui.json
+      - name: Resolve sandbox base digest (#44)
+        run: docker buildx imagetools inspect debian:12-slim --format '{{json .Manifest}}' | python -c "import json,sys; print(json.load(sys.stdin).get('digest','unknown'))" | tee base-digest.txt
+      - name: Build sandbox worker image
+        run: docker build -t breachpilot-sandbox:${{ github.ref_name }} docker/sandbox
+      - name: Record worker image digest
+        run: docker image inspect --format '{{json .RepoDigests}}' breachpilot-sandbox:${{ github.ref_name }} | tee worker-digests.txt
+      - name: SBOM (sandbox image, syft)
+        uses: anchore/sbom-action@v0
+        with:
+          image: breachpilot-sandbox:${{ github.ref_name }}
+          format: cyclonedx-json
+          output-file: sbom-sandbox.json
+      - name: Scan image (Trivy, HIGH/CRITICAL fail gate)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: breachpilot-sandbox:${{ github.ref_name }}
+          format: sarif
+          output: trivy.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - name: Attest build provenance (#42)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*, sbom-python.json, sbom-webui.json, sbom-sandbox.json
+      - name: Upload release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: |
+            dist/*
+            SHA256SUMS
+            sbom-python.json
+            sbom-webui.json
+            sbom-sandbox.json
+            base-digest.txt
+            worker-digests.txt
+            trivy.sarif
+          retention-days: 90

@@ -20,10 +20,13 @@ from .confidence import (
 )
 from .state import (
     BeliefState,
+    Claim,
+    EpistemicKind,
     EvidenceObservation,
     EvidencePolarity,
     HypothesisState,
     HypothesisStatus,
+    promote_to_verified,
 )
 from .store import BeliefStore
 
@@ -41,9 +44,12 @@ __all__ = [
     "TaggedConfidence",
     "compute_status",
     "BeliefState",
+    "Claim",
+    "EpistemicKind",
     "EvidenceObservation",
     "EvidencePolarity",
     "HypothesisState",
     "HypothesisStatus",
+    "promote_to_verified",
     "BeliefStore",
 ]

@@ -23,7 +23,7 @@ _REMEDIATION = {
     SANDBOX_UNAVAILABLE: (
         "Ensure Docker Desktop (Windows/macOS) or docker.io/docker-ce (Linux) is installed "
         "and running; build the sandbox image: docker build -t breachpilot-sandbox:latest docker/sandbox. "
-        "With sandbox.fallback_native: true (default) the server degrades to the legacy "
+        "With sandbox.fallback_native: true (explicit opt-in; default false) the server degrades to the legacy "
         "UNCONTAINED host-execution mode at boot when the Docker probe fails -- this "
         "in-session block means Docker died (or was unavailable) AFTER boot "
         "(fallback happens once, at boot, never mid-session). Set sandbox.fallback_native: "
