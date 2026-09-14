@@ -69,3 +69,29 @@
   admin, mark blocked), then packet 07 (documentation truth, independent),
   then packet 05 (type debt: stale comments, grouping, trend), keeping one
   commit per packet and never running banned pytest invocations.
+
+---
+
+## Packet 03 — repository governance (2026-09-14, local tasks complete)
+
+- Verified read-only: NO rulesets (`[]`), `main` NOT branch-protected (404),
+  only default labels, no packet tracking issues. Dependabot operates
+  (weekly + open PRs); Dependency Review runs on `pull_request`; CodeQL runs
+  on `push` + `pull_request` + weekly (py + js) — coverage supports required
+  checks.
+- Local deliverables: new `SECURITY.md` (0.68.x supported; private GitHub
+  Security Advisory path, no invented email; lab-only scope notes);
+  `CONTRIBUTING.md` §11b merge + emergency-fix process (PR + green checks +
+  evidence, zero required approvals; direct pushes only to restore a broken
+  PR flow with immediate follow-up PR).
+- Packet file updated with owner, checkbox states, proposed ruleset spec
+  (`CI success` + CodeQL py/js + dependency-review; 0 approvals; no bypass;
+  block force push), proposed label spec (p0/p1/p2, evaluation, benchmark,
+  ci, architecture, release, security; reuse `documentation`), and the nine
+  issue titles.
+- BLOCKED on human (external changes, no authorization): create the ruleset,
+  create labels, create nine tracking issues + link numbers back, confirm
+  private advisories enabled.
+- Verification: no Python changed (no pytest needed); markdown-only.
+- Precise next action: commit packet 03, then packet 07 (documentation
+  truth, independent).

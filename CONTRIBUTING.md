@@ -240,6 +240,23 @@ Before requesting review, confirm:
 - `reports/`, `exploit_workspace/`, `research_workspace/`, `swarm_workspace/`, `webui/dist/`, `oauth/` are runtime/generated — never commit.
 - GitHub workflows: `.github/workflows/ci.yml`, `codeql.yml`, `dependency-review` — PRs must keep them green.
 
+## 11b. Merge and emergency-fix process (solo maintainer)
+
+`main` is protected by a ruleset (see `todo/03-p1-repository-governance.md`):
+every change lands via pull request, and the aggregate `CI success` check
+plus CodeQL and Dependency Review must be green before merge. No
+self-approval ceremony is required — the PR checklist (§10) with posted
+evidence (focused test output, `ruff`, `mypy`, debt gate) **is** the review.
+
+- Normal change: branch → PR (fill in §10 evidence + rollback notes) →
+  green checks → squash-merge → delete the branch. Never force-push `main`.
+- Emergency fix (red `main`, active security issue, broken release): use the
+  same PR flow — CI runs in minutes and is the fastest honest signal. Direct
+  pushes to `main` are reserved for restoring a broken PR flow itself, and
+  must be followed immediately by a PR that re-verifies everything plus a
+  note explaining why the bypass was used. Never use the emergency path for
+  features or refactors.
+
 ## 12. License
 
 By contributing, you agree that your contributions will be licensed under the **Apache License 2.0** (`LICENSE`). You retain copyright; you grant the project a perpetual license to use your contribution under the same terms.
