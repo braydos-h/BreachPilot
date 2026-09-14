@@ -21,6 +21,13 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 USER root
 
+# Image-local virtual environment for the Playwright SDK (Debian 12 enforces
+# PEP 668: system-Python `pip install` refuses outside a venv, and the
+# bypass flag must never be used). The venv binaries stay on PATH for the worker.
+ENV VIRTUAL_ENV=/opt/bp-browser-venv
+ENV PATH="/opt/bp-browser-venv/bin:$PATH"
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+
 # Playwright SDK + Chromium runtime (+ OS deps for headless Chromium).
 # Pinned major line via requirements-style floor; refresh with the base image.
 RUN set -eux; \
@@ -43,8 +50,11 @@ RUN set -eux; \
       libcairo2 \
     ; \
     rm -rf /var/lib/apt/lists/*; \
-    python3 -m pip install --no-cache-dir "playwright>=1.44"; \
-    python3 -m playwright install --with-deps chromium; \
+    python3 -m venv /opt/bp-browser-venv; \
+    /opt/bp-browser-venv/bin/pip install --no-cache-dir "playwright>=1.44"; \
+    mkdir -p /opt/ms-playwright; \
+    /opt/bp-browser-venv/bin/playwright install --with-deps chromium; \
+    chmod -R a+rX /opt/bp-browser-venv /opt/ms-playwright; \
     rm -rf /root/.cache/pip
 
 # Back to the unprivileged worker account (mirrors the base image contract).

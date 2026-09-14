@@ -55,7 +55,7 @@ from tools.mcp_tools.sandbox_exec import (
 from tools.mcp_tools.terminal.allowlist import _extract_lock_targets, _opsec_advisory_block, _target_lock_block
 from tools.mcp_tools.terminal.privilege import _find_windows_bash, _require_sudo_or_pivot
 from tools.sandbox.exceptions import SandboxError
-from tools.validation_utils import preflight_command_check
+from tools.validation_utils import TargetCorrection, preflight_command_check
 
 __all__ = ["_register_execute_tools"]
 
@@ -255,7 +255,7 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return f"BLOCKED: batch exceeds the {_MAX_COMMAND_CHARS}-byte anti-fill cap; split the batch."
         sanitized_parts: list[str] = []
         shown_parts: list[str] = []
-        corrections: list[dict[str, Any]] = []
+        corrections: list[TargetCorrection] = []
         for index, raw in enumerate(commands):
             if not isinstance(raw, str) or not raw.strip():
                 return f"BLOCKED: batch command #{index} is empty."

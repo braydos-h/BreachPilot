@@ -32,6 +32,7 @@ __all__ = [
     "RESEARCH_HOSTS",
     "build_network_policy",
     "authorize_destinations",
+    "is_pure_local_computation",
 ]
 
 # Cloud-metadata / link-local destinations always denied. Implicit in the
@@ -65,7 +66,12 @@ RESEARCH_HOSTS = (
 )
 
 
-def build_network_policy(config: dict[str, Any] | None, *, gateway: str = "") -> NetworkPolicy:
+def build_network_policy(
+    config: dict[str, Any] | None,
+    *,
+    gateway: str = "",
+    resolver_fn: Any | None = None,
+) -> NetworkPolicy:
     """Derive the concrete egress allowlist from the effective target allowlist.
 
     Every allowlist entry is one of: IP, CIDR, FQDN (resolved host-side here),
@@ -77,6 +83,12 @@ def build_network_policy(config: dict[str, Any] | None, *, gateway: str = "") ->
 
     Raises ValueError for targets the policy cannot express safely (``0.0.0.0/0``
     etc.) so the caller fail-closes instead of authorizing the internet.
+
+    ``resolver_fn(host) -> list[str]`` is the single injectable DNS seam used
+    by both production and tests (threaded to
+    :func:`tools.validation_utils.resolve_all_addresses`). ``None`` uses the
+    system resolver; tests pass a fake to stay hermetic instead of mocking a
+    resolver production no longer calls.
     """
     from tools.config.schema import CONFIG_SCHEMA
 
@@ -137,7 +149,7 @@ def build_network_policy(config: dict[str, Any] | None, *, gateway: str = "") ->
         # the provenance (hostname, addresses, timestamp, source) is recorded
         # for the audit trail — never as bare reusable entries.
         if is_fqdn(tok):
-            resolved = _resolve_authorized(tok, config)
+            resolved = _resolve_authorized(tok, config, resolver_fn=resolver_fn)
             for ip in resolved:
                 _append_unique(authorized, ip)
             if resolved:
@@ -163,7 +175,7 @@ def build_network_policy(config: dict[str, Any] | None, *, gateway: str = "") ->
 
     if bool(network_cfg.get("allow_research_hosts", True)):
         for host in RESEARCH_HOSTS:
-            ips = _resolve_authorized(host, config, _skip_allowlist=True)
+            ips = _resolve_authorized(host, config, _skip_allowlist=True, resolver_fn=resolver_fn)
             for ip in ips:
                 _append_unique(authorized, ip)
             if ips:
@@ -195,13 +207,24 @@ def _append_unique(lst: list[str], value: str) -> None:
         lst.append(value)
 
 
-def _resolve_authorized(domain: str, config: dict[str, Any] | None, *, _skip_allowlist: bool = False) -> list[str]:
+def _resolve_authorized(
+    domain: str,
+    config: dict[str, Any] | None,
+    *,
+    _skip_allowlist: bool = False,
+    resolver_fn: Any | None = None,
+) -> list[str]:
     """Resolve a domain host-side and return ALL its allowed IPs (A+AAAA).
 
     Uses :func:`tools.validation_utils.resolve_all_addresses` (system
     resolver, never raises) so every current address of an authorized
     hostname is considered — a single first-A-record lookup would silently
     drop IPv6 / round-robin siblings.
+
+    ``resolver_fn(host) -> list[str]`` is the injectable seam (passed through
+    to ``resolve_all_addresses``); tests inject a fake so they exercise this
+    production interface instead of mocking ``resolve_target_to_ip``, which
+    this path no longer calls.
 
     Callers only pass operator-authorized hostnames here: union tokens from
     :func:`_allowed_target_list` (config ``allowed_targets`` + runtime
@@ -218,7 +241,7 @@ def _resolve_authorized(domain: str, config: dict[str, Any] | None, *, _skip_all
     from tools.kernel.discovered import record_discovered_host
     from tools.validation_utils import resolve_all_addresses
 
-    addrs = resolve_all_addresses(domain)
+    addrs = resolve_all_addresses(domain, resolver_fn=resolver_fn)
     if not addrs:
         return []
     record_discovered_host(domain, addrs, source="sandbox:policy")
@@ -236,6 +259,157 @@ def authorize_destinations(destinations: list[str], config: dict[str, Any] | Non
     from tools.kernel.allowlist import check_targets_allowlist
 
     return check_targets_allowlist(destinations, config)
+
+
+# ── Local-computation classifier ──────────────────────────────────────────
+# Distinguishes provably-local shell work (e.g. plain ``python -c 'print(1)'``,
+# ``true``, ``id``) from network-capable, target-touching execution. The
+# sandbox scope gate allows an empty target ONLY for the former; everything
+# else with no named target fail-closes (variable indirection could hide the
+# real destination). Allowlist-based (default deny): only explicitly
+# known-local shapes pass, so the gate is never weakened globally.
+
+_SIMPLE_LOCAL_BINARIES = frozenset(
+    {
+        "true",
+        "false",
+        ":",
+        "id",
+        "whoami",
+        "hostname",
+        "uname",
+        "arch",
+        "echo",
+        "printf",
+        "test",
+        "[",
+        "touch",
+        "mkdir",
+        "ls",
+        "pwd",
+        "cat",
+        "head",
+        "tail",
+        "wc",
+        "cut",
+        "sort",
+        "uniq",
+        "tr",
+        "grep",
+        "awk",
+        "sed",
+        "find",
+        "stat",
+        "file",
+        "du",
+        "df",
+        "ps",
+        "env",
+        "printenv",
+    }
+)
+
+# Substrings proving network capability even when no literal destination is
+# visible (obfuscated IPs, hidden imports, file indirection). Matched
+# case-insensitively against the full command text.
+_HIDDEN_NETWORK_TOKENS = (
+    "socket",
+    "urllib",
+    "requests",
+    "http.client",
+    "httpconnection",
+    "create_connection",
+    "getaddrinfo",
+    "gethostbyname",
+    "/dev/tcp",
+    "/dev/udp",
+    "http://",
+    "https://",
+    "lhost",
+    "rhost",
+    "pip install",
+    "apt-get",
+    "git clone",
+)
+
+# Shell metacharacters that make a command compound (multiple programs,
+# redirection, substitution). Compound commands with an empty target
+# fail-closed for P0 (callers pass an explicit target_ip instead); only
+# single simple commands qualify as pure-local.
+
+
+def _has_visible_destinations(command: str) -> bool:
+    """True when the shared extractor union finds any destination tokens."""
+    from tools.command_analyzer import _extract_destinations as _cmd_extract
+    from tools.validation_utils import extract_ips_from_command
+
+    try:
+        if list(_cmd_extract(command)):
+            return True
+    except Exception:  # ponytail: classifier never raises -- fail closed below
+        return True
+    try:
+        if extract_ips_from_command(command):
+            return True
+    except Exception:  # ponytail: classifier never raises -- fail closed below
+        return True
+    try:
+        from tools.kernel.allowlist import _extract_scanner_targets
+
+        if _extract_scanner_targets(command):
+            return True
+    except Exception:  # ponytail: extractor set must never break execution
+        pass
+    return False
+
+
+def is_pure_local_computation(command: str) -> bool:
+    """True only for provably-local shell work with no network capability.
+
+    Allowlist-based (default False): ``python -c`` with clean inline code,
+    or a single simple binary from ``_SIMPLE_LOCAL_BINARIES`` with no visible
+    destinations, no hidden network tokens, and no compound shell syntax.
+    Everything else (script-file execution, compound pipelines, unknown
+    binaries, any network hint) returns False so the scope gate fail-closes
+    instead of relying on the firewall layer alone.
+    """
+    import shlex as _shlex
+
+    if not isinstance(command, str) or not command.strip():
+        return False
+    text = command.strip()
+    low = text.lower()
+    # Compound shell syntax (pipelines, chains, redirection, substitution,
+    # newlines) disqualifies: each segment would need its own proof.
+    if any(s in text for s in (";", "&&", "||", "|", "`", "$(", ">", "<", "\n")):
+        # `test -S ... && echo ...` style local chains are common, but for P0
+        # they run with an explicit target_ip (integration _run does); empty
+        # targets stay single-command-only so the proof stays reviewable.
+        return False
+    # Any visible destination (IP, URL authority, scanner target, ...) means
+    # target-touching, never pure-local.
+    if _has_visible_destinations(text):
+        return False
+    # Hidden network capability with no visible destination (obfuscated IP in
+    # `python -c`, /dev/tcp, imports) disqualifies.
+    if any(tok in low for tok in _HIDDEN_NETWORK_TOKENS):
+        return False
+    try:
+        parts = _shlex.split(text, posix=True)
+    except ValueError:
+        return False
+    if not parts:
+        return False
+    prog = parts[0].replace("\\", "/").split("/")[-1].lower()
+    if prog in ("python", "python3"):
+        # Inline code only (`-c`); file execution (`script.py`) has unseen
+        # contents and fail-closes. `--version`/`--help` are local probes.
+        if "--version" in parts or "-V" in parts or "--help" in parts:
+            return True
+        if "-c" not in parts:
+            return False
+        return True
+    return prog in _SIMPLE_LOCAL_BINARIES
 
 
 def audit_policy_payload(policy: NetworkPolicy) -> dict[str, Any]:

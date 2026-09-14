@@ -82,6 +82,23 @@ _RUN_ENV_ALLOWLIST = {
 }
 
 
+def _scope_command_from_argv(argv: list[str]) -> str:
+    """Best-effort shell text for the scope gate when no audit command exists.
+
+    The argv path (structured tools) carries no shell string; the timeout
+    wrapper (``timeout -k <grace> <inner> ...``) is stripped and the remainder
+    joined so ``is_pure_local_computation`` can proof pure-local argv like
+    ``["ls"]``. Never raises; "" fail-closes in the caller.
+    """
+    try:
+        items = list(argv or [])
+        if len(items) >= 4 and items[0] == "timeout" and items[1] == "-k":
+            items = items[4:]
+        return " ".join(str(a) for a in items if isinstance(a, str))
+    except Exception:  # ponytail: classifier input must never raise
+        return ""
+
+
 def _build_manager(cfg: SandboxConfig, workspace: Path, config: dict[str, Any] | None) -> SandboxManager:
     # cap_raw honors sandbox.multi_net_raw: NET_RAW is the ONLY capability the
     # worker may receive (raw packet scanning); NET_ADMIN is never granted.
@@ -420,7 +437,8 @@ class SandboxManager:
         tool_name: str,
         audit_command: str,
     ) -> SandboxResult:
-        self._enforce_scope(target_ip)
+        scope_command = audit_command or _scope_command_from_argv(argv)
+        self._enforce_scope(target_ip, command=scope_command)
         self._validate_workspace()
         container = self.ensure_sandbox()
         pol = self._apply_policy()
@@ -490,7 +508,7 @@ class SandboxManager:
 
     # ------------------------------------------------------------ scope gate
 
-    def _enforce_scope(self, target_ip: str) -> None:
+    def _enforce_scope(self, target_ip: str, *, command: str = "") -> None:
         """Unauthorized-target fail-closed gate.
 
         The invariant, enforced independently at this layer (on top of the MCP
@@ -503,10 +521,14 @@ class SandboxManager:
         destinations).
 
         An empty ``target_ip`` (no destinations could be associated with the
-        execution) is denied when the union is non-empty: an execution that
-        cannot name its target cannot prove it stays inside the allowlist
-        (variable indirection), so it fail-closes here instead of relying on
-        the firewall layer alone.
+        execution) is denied when the union is non-empty -- UNLESS ``command``
+        is provably-local computation per
+        :func:`tools.sandbox.policy.is_pure_local_computation` (e.g. plain
+        ``python -c 'print(1)'``, ``true``, ``id``): local work names no
+        target because it touches none. Anything network-capable with no
+        named target cannot prove it stays inside the allowlist (variable
+        indirection), so it fail-closes here instead of relying on the
+        firewall layer alone.
         """
         from tools.kernel.allowlist import _allowed_target_list, _check_allowlist
 
@@ -516,6 +538,13 @@ class SandboxManager:
             # nothing to enforce (the netns policy authorizes nothing).
             return
         if not target_ip:
+            try:
+                from tools.sandbox.policy import is_pure_local_computation
+
+                if command and is_pure_local_computation(command):
+                    return
+            except Exception:  # ponytail: classifier failure fail-closes below
+                pass
             raise SandboxScopeError(
                 "sandbox scope gate: execution names no target (empty target_ip) "
                 "while the allowlist is enforced -- name the "

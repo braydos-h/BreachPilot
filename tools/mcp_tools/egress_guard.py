@@ -67,7 +67,7 @@ def _bp_allowed(_host):
                 except ValueError:
                     pass
         return False
-    except Exception:
+    except Exception:  # ponytail: bare except intentional -- allowlist parse fail-closes to deny
         return False
 _orig_connect = _socket.socket.connect
 _orig_create_connection = _socket.create_connection

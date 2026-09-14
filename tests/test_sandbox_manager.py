@@ -175,6 +175,54 @@ class TestExecutionFunnel:
         assert result.status == "completed"
         mgr.destroy()
 
+    def test_pure_local_python_c_allowed_with_empty_target(self, tmp_path, fake_backend):
+        # Local computation names no target because it touches none: plain
+        # `python -c` with clean inline code passes the scope gate even when
+        # the allowlist is enforced (no host fallback -- still runs inside
+        # the sandbox worker).
+        mgr = _manager(
+            tmp_path, fake_backend, exploit={"require_explicit_allowlist": True, "allowed_targets": ["192.0.2.5"]}
+        )
+        result = mgr.execute("python -c 'print(1)'", target_ip="")
+        assert result.status == "completed"
+        assert fake_backend.exec_calls, "local computation must still run inside the sandbox"
+        mgr.destroy()
+
+    def test_pure_local_true_allowed_with_empty_target(self, tmp_path, fake_backend):
+        mgr = _manager(
+            tmp_path, fake_backend, exploit={"require_explicit_allowlist": True, "allowed_targets": ["192.0.2.5"]}
+        )
+        result = mgr.execute("true", target_ip="")
+        assert result.status == "completed"
+        mgr.destroy()
+
+    def test_network_python_c_blocked_with_empty_target(self, tmp_path, fake_backend):
+        # Network-capable inline code with no named target fail-closes (hidden
+        # destination could be obfuscated) -- must name the destination.
+        mgr = _manager(
+            tmp_path, fake_backend, exploit={"require_explicit_allowlist": True, "allowed_targets": ["192.0.2.5"]}
+        )
+        with pytest.raises(SandboxScopeError, match="no target"):
+            mgr.execute("python3 -c \"import socket;socket.create_connection(('192.0.2.9',80),3)\"", target_ip="")
+        assert not fake_backend.exec_calls
+
+    def test_script_file_blocked_with_empty_target(self, tmp_path, fake_backend):
+        # Script-file execution has unseen contents -- never pure-local.
+        mgr = _manager(
+            tmp_path, fake_backend, exploit={"require_explicit_allowlist": True, "allowed_targets": ["192.0.2.5"]}
+        )
+        with pytest.raises(SandboxScopeError, match="no target"):
+            mgr.execute("python3 /workspace/egress.py", target_ip="")
+        assert not fake_backend.exec_calls
+
+    def test_unscoped_network_blocked_with_empty_target(self, tmp_path, fake_backend):
+        mgr = _manager(
+            tmp_path, fake_backend, exploit={"require_explicit_allowlist": True, "allowed_targets": ["192.0.2.5"]}
+        )
+        with pytest.raises(SandboxScopeError, match="no target"):
+            mgr.execute("curl http://203.0.113.9/", target_ip="")
+        assert not fake_backend.exec_calls
+
     def test_research_hosts_exempt_from_target_allowlist(self, tmp_path, fake_backend):
         # Pinned research egress (github/gitlab) is authorized by the fixed set.
         mgr = _manager(

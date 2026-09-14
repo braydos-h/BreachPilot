@@ -98,19 +98,31 @@ class TestBuildNetworkPolicy:
         assert pol.authorized_destinations == []
         assert any("*.example.com" in u for u in pol.unresolved_targets)
 
-    def test_fqdn_resolved_host_side_and_validated(self, monkeypatch):
-        monkeypatch.setattr("tools.validation_utils.resolve_target_to_ip", lambda d: "192.0.2.77")
-        pol = build_network_policy(_cfg(["example.com"]))
+    def test_fqdn_resolved_host_side_and_validated(self):
+        # Production seam: inject via resolver_fn (threaded to
+        # resolve_all_addresses), not by mocking resolve_target_to_ip which
+        # this path no longer calls.
+        pol = build_network_policy(_cfg(["example.com"]), resolver_fn=lambda h: ["192.0.2.77"])
         assert "192.0.2.77" in pol.authorized_destinations
         assert pol.resolved_domains.get("example.com") == "192.0.2.77"
 
-    def test_resolution_validation_rejects_unallowlisted_domain(self, monkeypatch):
-        # The validation helper is the gate for dynamically discovered targets:
-        # a domain that is NOT in the effective allowlist contributes nothing,
-        # no matter what it resolves to (prevents DNS-driven scope widening).
-        monkeypatch.setattr("tools.validation_utils.resolve_target_to_ip", lambda d: "198.51.100.9")
-        resolved = sandbox_policy._resolve_authorized("evil.example.net", _cfg(["192.0.2.5"]))
-        assert resolved == []
+    def test_mixed_scope_ip_and_domain_both_authorized(self):
+        # Mixed-scope allowlist (bare IP + domain) resolves through the same
+        # production seam: the IP normalizes to /32, the domain contributes
+        # its injected addresses.
+        pol = build_network_policy(_cfg(["192.0.2.5", "example.com"]), resolver_fn=lambda h: ["192.0.2.77"])
+        assert "192.0.2.5/32" in pol.authorized_destinations
+        assert "192.0.2.77" in pol.authorized_destinations
+        assert pol.resolved_domains.get("example.com") == "192.0.2.77"
+
+    def test_resolution_validation_rejects_unallowlisted_domain(self):
+        # An unlisted domain contributes nothing via the production path:
+        # build_network_policy only resolves tokens in the effective
+        # allowlist, so even a resolver that would return an IP for the evil
+        # host cannot widen the lock.
+        pol = build_network_policy(_cfg(["192.0.2.5"]), resolver_fn=lambda h: ["198.51.100.9"])
+        assert "198.51.100.9" not in pol.authorized_destinations
+        assert pol.resolved_domains.get("evil.example.net") is None
 
     def test_localhost_does_not_authorize_host_loopback(self):
         pol = build_network_policy(_cfg(["127.0.0.1"]))
@@ -178,3 +190,41 @@ class TestAuthorizeDestinations:
         ok, reason = sandbox_policy.authorize_destinations(["203.0.113.9"], cfg)
         assert ok is False
         assert "203.0.113.9" in reason
+
+
+class TestPureLocalComputation:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "python -c 'print(1)'",
+            'python3 -c "print(1)"',
+            "true",
+            "id",
+            "id -u",
+            "echo hello",
+            "touch /workspace/ok.txt",
+            "ls /workspace",
+            "cat /workspace/out.txt",
+            "python --version",
+        ],
+    )
+    def test_allowed_local_computation(self, command):
+        assert sandbox_policy.is_pure_local_computation(command) is True
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "python3 -c \"import socket;socket.create_connection(('192.0.2.9',80),3)\"",
+            "python3 /workspace/egress.py",
+            "curl http://203.0.113.9/",
+            "nmap -sV 192.0.2.9",
+            "echo hi && echo bye",
+            "bash script.sh",
+            "./exploit",
+            "",
+            "python script.py",
+            "timeout 8 bash -c 'echo > /dev/tcp/192.0.2.9/80'",
+        ],
+    )
+    def test_blocked_network_or_compound(self, command):
+        assert sandbox_policy.is_pure_local_computation(command) is False

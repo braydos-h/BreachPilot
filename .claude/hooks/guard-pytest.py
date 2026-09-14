@@ -33,9 +33,7 @@ def _pytest_segments(command):
     """Split a shell command into segments that invoke pytest."""
     segments = []
     for chunk in re.split(r"[|;&]+", command):
-        if re.match(r"^\s*(?:[\w./-]*bin/)?python\d?\s+-m\s+pytest\b", chunk) or re.match(
-            r"^\s*pytest\b", chunk
-        ):
+        if re.match(r"^\s*(?:[\w./-]*bin/)?python\d?\s+-m\s+pytest\b", chunk) or re.match(r"^\s*pytest\b", chunk):
             segments.append(chunk)
     return segments
 
@@ -46,11 +44,7 @@ def _test_file_count(segment, cwd):
         tokens = shlex.split(segment, posix=True)
     except ValueError:
         return 0
-    paths = [
-        t
-        for t in tokens
-        if t.startswith("tests/") and not t.startswith("-") and "=" not in t.split("/")[-1][:1]
-    ]
+    paths = [t for t in tokens if t.startswith("tests/") and not t.startswith("-") and "=" not in t.split("/")[-1][:1]]
     paths = [t.split("::")[0] for t in paths]
     if not paths or any(p in ("tests", "tests/") for p in paths):
         return 10**9  # bare suite dir = everything
@@ -83,16 +77,10 @@ def check(command, cwd):
         if m:
             val = m.group(1)
             if val == "auto" or (val.isdigit() and int(val) > MAX_WORKERS):
-                return (
-                    f"Blocked: `-n {val}` oversubscribes this machine. "
-                    "Use `-n 0` (serial) or `-n 2` max."
-                )
+                return f"Blocked: `-n {val}` oversubscribes this machine. Use `-n 0` (serial) or `-n 2` max."
         workers = os.environ.get("PYTEST_XDIST_AUTO_NUM_WORKERS", "")
         if workers.isdigit() and int(workers) > MAX_WORKERS:
-            return (
-                f"Blocked: PYTEST_XDIST_AUTO_NUM_WORKERS={workers} exceeds the max of 2. "
-                "Unset it or set it to 2."
-            )
+            return f"Blocked: PYTEST_XDIST_AUTO_NUM_WORKERS={workers} exceeds the max of 2. Unset it or set it to 2."
         mflag = _MFLAG_RE.search(seg)
         try:
             file_args = [

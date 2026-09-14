@@ -298,7 +298,7 @@ def _container_path_for_caller(manager: Any, cwd_host: Any, *, tool_name: str) -
         return manager.container_path(cwd_host)
     except SandboxError as exc:
         raise SandboxWorkspaceError(f"{tool_name}: {exc}") from exc
-    except Exception as exc:  # fail closed: a mapping failure blocks, never runs uncontained
+    except Exception as exc:  # ponytail: bare except intentional -- mapping failure blocks, never uncontained
         raise SandboxWorkspaceError(f"{tool_name}: workspace path mapping failed: {exc}") from exc
 
 

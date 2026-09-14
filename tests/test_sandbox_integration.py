@@ -150,7 +150,13 @@ def it_env(tmp_path_factory) -> dict[str, Any]:
 
 
 def _run(it_env: dict, command: str, timeout: int = 40) -> Any:
-    return it_env["mgr"].execute(command, timeout=timeout, target_ip="")
+    # Firewall tests run with the AUTHORIZED target_ip so the scope gate
+    # passes and the netns firewall is what decides (BLOCKED vs REACH_OK).
+    # Scope-gate behavior (empty target, unlisted target) is pinned by the
+    # mocked unit tests (test_sandbox_manager / test_sandbox_mcp_exec), not
+    # here -- direct manager.execute only checks this single target_ip, so
+    # hidden destinations (egress.py) still reach the firewall.
+    return it_env["mgr"].execute(command, timeout=timeout, target_ip=it_env["target_ip"])
 
 
 class TestNetworkBoundary:
