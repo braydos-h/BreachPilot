@@ -48,7 +48,13 @@ config/MCP failure, 0 on success (`eval_harness.py:362-367, 452-467, 522-524`).
 
 The nightly `.github/workflows/eval.yml` runs the mocked eval unit tests on
 push/PR (no API key needed) and the live graded suite on schedule/manual
-dispatch — skipped gracefully when `OLLAMA_API_KEY` is not configured.
+dispatch. When `OLLAMA_API_KEY` is not configured the live job exits 0
+without running anything: that green check means **SKIPPED — no live signal**,
+not a pass. Only a completed run that uploads the `eval-reports` artifact
+(`reports/eval/`) counts as live evidence. Splitting mocked checks from live
+execution with distinct `PASS` / `SKIPPED` live statuses is live-evaluation
+work (packet 01); until then, never read a green nightly check as proof
+that autonomous exploitation ran.
 
 The `eval:` block in `config.yaml` (lines 305-310) gates the harness defaults:
 `enabled`, `output_dir` (default `reports/eval`), `max_rounds` (default 30,

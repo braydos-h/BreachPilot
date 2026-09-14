@@ -45,7 +45,7 @@ Re-wrapped helpers (module-level re-exports for test patch points):
 
 | Symbol | Location | Notes |
 |--------|----------|-------|
-| `__version__` | `main.py:11` | `"0.49.12"` |
+| `__version__` | `main.py:13` | `"0.68.4"` |
 | `MCP_BOOT_TIMEOUT_SECONDS` | `main.py:98` | Re-export of `tools.mcp_session.MCP_BOOT_TIMEOUT_SECONDS` |
 | `ui` | `main.py:46` | `tools.attack_ui.get_ui()` singleton |
 

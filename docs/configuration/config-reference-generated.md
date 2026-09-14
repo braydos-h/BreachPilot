@@ -3,7 +3,7 @@ title: Config Reference (Generated)
 description: Machine-readable table for every config.yaml leaf key — type, defaults, allowed values, source location, consumers, effect, env override, restart, subsystem and tests. Verified against config.yaml + CONFIG_SCHEMA.
 source: [config.yaml, tools/config_manager.py]
 generated_from: [config.yaml, tools/config_manager.py]
-verify: every key listed exists in config.yaml at time of generation (2026-09-07); schema defaults shown where present.
+verify: every key listed exists in config.yaml at time of generation (2026-09-14); schema defaults shown where present.
 ---
 
 # Config Reference (Generated)
@@ -13,18 +13,23 @@ verify: every key listed exists in config.yaml at time of generation (2026-09-07
 Source locations use `config.yaml:<top-level-line>` + `tools/config_manager.py:CONFIG_SCHEMA` path. Consumers are primary `file:line` citations; full call graph is in `docs/module-guide.md`.
 
 
-_Generated 2026-09-07 from `config.yaml` (439 leaf keys, 46 top-level blocks). Lab-only keys (not in `CONFIG_SCHEMA`) are marked._
+_Generated 2026-09-14 from `config.yaml` (444 leaf keys, 46 top-level blocks). Lab-only keys (not in `CONFIG_SCHEMA`) are marked._
 
 | Key | Type | Default (schema → lab) | Allowed | Source | Consumer(s) | Effect | Env override | Restart | Subsystem | Tests |
 |-----|------|----------------------|---------|--------|-------------|--------|--------------|---------|-----------|-------|
 | `adaptive_exploits.enabled` | `bool` | `True` | — | `config.yaml:381` + `CONFIG_SCHEMA['adaptive_exploits'].enabled` | cli_exploit_settings.py, mcp_tools/attack_modules.py | Mutation engine | — | no | exploit | tests/test_mutator.py |
 | `adaptive_exploits.max_mutations` | `int` | `5` | — | `config.yaml:381` + `CONFIG_SCHEMA['adaptive_exploits'].max_mutations` | cli_exploit_settings.py, mcp_tools/attack_modules.py | Mutation engine | — | no | exploit | tests/test_mutator.py |
 | `adaptive_exploits.mutation_strategies` | `list[str]` | `['parameter_tweak', 'encoding_change', 'delivery_swap', 'context_aware']` | — | `config.yaml:381` + `CONFIG_SCHEMA['adaptive_exploits'].mutation_strategies` | cli_exploit_settings.py, mcp_tools/attack_modules.py | Mutation engine | — | no | exploit | tests/test_mutator.py |
+| `agent.attack_focus_enabled` | `bool` | `True` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].attack_focus_enabled` |  | — | — | no | agent | — |
+| `agent.branch_max_actions` | `int` | `25` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].branch_max_actions` |  | — | — | no | agent | — |
+| `agent.branch_switch_priority_margin` | `float` | `0.25` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].branch_switch_priority_margin` |  | — | — | no | agent | — |
 | `agent.capability_discovery_enabled` | `bool` | `True` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].capability_discovery_enabled` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
 | `agent.decision_log_enabled` | `bool` | `True` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].decision_log_enabled` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
 | `agent.generated_code_repair_attempts` | `int` | `3` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].generated_code_repair_attempts` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
 | `agent.max_actions` | `int` | `0` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].max_actions` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
+| `agent.max_active_hypotheses` | `int` | `5` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].max_active_hypotheses` |  | — | — | no | agent | — |
 | `agent.max_retries_per_task` | `int` | `2` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].max_retries_per_task` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
+| `agent.no_progress_action_limit` | `int` | `5` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].no_progress_action_limit` |  | — | — | no | agent | — |
 | `agent.planner_hints_enabled` | `bool` | `True` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].planner_hints_enabled` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
 | `agent.reflection_enabled` | `bool` | `True` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].reflection_enabled` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
 | `agent.state_tools_enabled` | `bool` | `True` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].state_tools_enabled` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
@@ -85,7 +90,7 @@ _Generated 2026-09-07 from `config.yaml` (439 leaf keys, 46 top-level blocks). L
 | `caldera.api_key_env` | `str` | `'CALDERA_API_KEY'` | — | `config.yaml:509` + `CONFIG_SCHEMA['caldera'].api_key_env` | plugins/caldera/plugin.py | Caldera emulation | `CALDERA_API_KEY` | no | ad |  |
 | `caldera.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:509` + `CONFIG_SCHEMA['caldera'].enabled` | plugins/caldera/plugin.py | Caldera emulation | — | no | ad |  |
 | `caldera.url` | `str` | `''` | — | `config.yaml:509` + `CONFIG_SCHEMA['caldera'].url` | plugins/caldera/plugin.py | Caldera emulation | — | no | ad |  |
-| `chatgpt.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:561` + `CONFIG_SCHEMA['chatgpt'].enabled` | providers/chatgpt_provider.py, model_router.py, doctor.py | ChatGPT proxy | — | yes | providers | tests/test_chatgpt*.py |
+| `chatgpt.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:568` + `CONFIG_SCHEMA['chatgpt'].enabled` | providers/chatgpt_provider.py, model_router.py, doctor.py | ChatGPT proxy | — | yes | providers | tests/test_chatgpt*.py |
 | `cve_lookup.api_key_env` | `str` | `'NVD_API_KEY'` | — | `config.yaml:112` + `CONFIG_SCHEMA['cve_lookup'].api_key_env` | mcp_shared, cve_lookup.py | NVD + KEV/EPSS | `NVD_API_KEY` | no | research/cve | tests/test_cve_lookup.py |
 | `cve_lookup.cache_max_entries` | `int` | `100` | — | `config.yaml:112` + `CONFIG_SCHEMA['cve_lookup'].cache_max_entries` | mcp_shared, cve_lookup.py | NVD + KEV/EPSS | — | no | research/cve | tests/test_cve_lookup.py |
 | `cve_lookup.cache_ttl_seconds` | `int` | `3600` | — | `config.yaml:112` + `CONFIG_SCHEMA['cve_lookup'].cache_ttl_seconds` | mcp_shared, cve_lookup.py | NVD + KEV/EPSS | — | no | research/cve | tests/test_cve_lookup.py |
@@ -227,14 +232,14 @@ _Generated 2026-09-07 from `config.yaml` (439 leaf keys, 46 top-level blocks). L
 | `ollama.embed_host` | `str` | `'http://localhost:11434'` | — | `config.yaml:1` + `CONFIG_SCHEMA['ollama'].embed_host` | config_manager.py, tools/exploit_agent/runner/_impl.py | Embedding host fallback | — | yes | memory/embeddings | tests/test_config_manager.py |
 | `ollama.host` | `str` | `'https://api.ollama.com'` | — | `config.yaml:1` + `CONFIG_SCHEMA['ollama'].host` | model_router.py, doctor.py | Ollama endpoint for chat/generate | — | yes | models/provider | tests/test_config_manager.py |
 | `ollama.model` | `str` | `'glm-5.2:cloud'` | — | `config.yaml:1` + `CONFIG_SCHEMA['ollama'].model` | config_manager.py, interactive_menu.py | Default concrete model id | — | yes | models | tests/test_config_manager.py |
-| `opencode_go.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:563` + `CONFIG_SCHEMA['opencode_go'].enabled` |  | — | — | yes | providers | — |
-| `operator_connection.auto_start_listener` | `bool` | `True` | — | `config.yaml:523` + `CONFIG_SCHEMA['operator_connection'].auto_start_listener` |  | — | — | no | operator | — |
-| `operator_connection.beacon_interval_seconds` | `int` | `300` | — | `config.yaml:523` + `CONFIG_SCHEMA['operator_connection'].beacon_interval_seconds` |  | — | — | no | operator | — |
-| `operator_connection.default_callback_port` | `int` | `4444` | — | `config.yaml:523` + `CONFIG_SCHEMA['operator_connection'].default_callback_port` |  | — | — | no | operator | — |
-| `operator_connection.default_listener_type` | `str` | `'netcat'` | — | `config.yaml:523` + `CONFIG_SCHEMA['operator_connection'].default_listener_type` |  | — | — | no | operator | — |
-| `operator_connection.enabled` | `bool` | `True` | — | `config.yaml:523` + `CONFIG_SCHEMA['operator_connection'].enabled` |  | — | — | no | operator | — |
-| `operator_connection.health_check_interval_seconds` | `int` | `60` | — | `config.yaml:523` + `CONFIG_SCHEMA['operator_connection'].health_check_interval_seconds` |  | — | — | no | operator | — |
-| `operator_connection.workspace_dir` | `str` | `'exploit_workspace'` | — | `config.yaml:523` + `CONFIG_SCHEMA['operator_connection'].workspace_dir` |  | — | — | no | operator | — |
+| `opencode_go.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:570` + `CONFIG_SCHEMA['opencode_go'].enabled` |  | — | — | yes | providers | — |
+| `operator_connection.auto_start_listener` | `bool` | `True` | — | `config.yaml:530` + `CONFIG_SCHEMA['operator_connection'].auto_start_listener` |  | — | — | no | operator | — |
+| `operator_connection.beacon_interval_seconds` | `int` | `300` | — | `config.yaml:530` + `CONFIG_SCHEMA['operator_connection'].beacon_interval_seconds` |  | — | — | no | operator | — |
+| `operator_connection.default_callback_port` | `int` | `4444` | — | `config.yaml:530` + `CONFIG_SCHEMA['operator_connection'].default_callback_port` |  | — | — | no | operator | — |
+| `operator_connection.default_listener_type` | `str` | `'netcat'` | — | `config.yaml:530` + `CONFIG_SCHEMA['operator_connection'].default_listener_type` |  | — | — | no | operator | — |
+| `operator_connection.enabled` | `bool` | `True` | — | `config.yaml:530` + `CONFIG_SCHEMA['operator_connection'].enabled` |  | — | — | no | operator | — |
+| `operator_connection.health_check_interval_seconds` | `int` | `60` | — | `config.yaml:530` + `CONFIG_SCHEMA['operator_connection'].health_check_interval_seconds` |  | — | — | no | operator | — |
+| `operator_connection.workspace_dir` | `str` | `'exploit_workspace'` | — | `config.yaml:530` + `CONFIG_SCHEMA['operator_connection'].workspace_dir` |  | — | — | no | operator | — |
 | `opsec.doh` | `bool` | `False` | — | `config.yaml:255` + `CONFIG_SCHEMA['opsec'].doh` | opsec.py, validation_utils.is_private_or_local_target | OPSEC hardening | — | no | opsec | tests/test_opsec.py |
 | `opsec.doh_provider` | `str` | `'cloudflare'` | `cloudflare` \| `google` | `config.yaml:255` + `CONFIG_SCHEMA['opsec'].doh_provider` | opsec.py, validation_utils.is_private_or_local_target | OPSEC hardening | — | no | opsec | tests/test_opsec.py |
 | `opsec.enabled` | `bool` | `False` | — | `config.yaml:255` + `CONFIG_SCHEMA['opsec'].enabled` | opsec.py, validation_utils.is_private_or_local_target | OPSEC hardening | — | no | opsec | tests/test_opsec.py |
@@ -347,32 +352,32 @@ _Generated 2026-09-07 from `config.yaml` (439 leaf keys, 46 top-level blocks). L
 | `research.serpapi.engine` | `str` | `'duckduckgo'` | — | `config.yaml:141` + `CONFIG_SCHEMA['research'].serpapi.engine` | mcp_shared, web_researcher.py, api_key_store.py | Web research + cache | — | no | research | tests/test_research.py |
 | `research.serpapi.region` | `str` | `'us-en'` | — | `config.yaml:141` + `CONFIG_SCHEMA['research'].serpapi.region` | mcp_shared, web_researcher.py, api_key_store.py | Web research + cache | — | no | research | tests/test_research.py |
 | `research.timeout_seconds` | `int` | `15` | — | `config.yaml:141` + `CONFIG_SCHEMA['research'].timeout_seconds` | mcp_shared, web_researcher.py, api_key_store.py | Web research + cache | — | no | research | tests/test_research.py |
-| `sandbox.auto_manage_docker` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].auto_manage_docker` |  | — | — | no | sandbox | — |
-| `sandbox.backend` | `str` | `'docker'` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].backend` |  | — | — | no | sandbox | — |
-| `sandbox.cleanup.remove_on_exit` | `bool` | `True` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].cleanup.remove_on_exit` |  | — | — | no | sandbox | — |
-| `sandbox.cleanup.remove_stale_on_startup` | `bool` | `True` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].cleanup.remove_stale_on_startup` |  | — | — | no | sandbox | — |
-| `sandbox.docker_start_timeout_seconds` | `int` | `60` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].docker_start_timeout_seconds` |  | — | — | no | sandbox | — |
-| `sandbox.docker_stop_timeout_seconds` | `int` | `30` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].docker_stop_timeout_seconds` |  | — | — | no | sandbox | — |
-| `sandbox.enabled` | `bool` | `True` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].enabled` |  | — | — | no | sandbox | — |
-| `sandbox.env_passthrough` | `list` | `[]` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].env_passthrough` |  | — | — | no | sandbox | — |
-| `sandbox.fallback_native` | `bool` | `False` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].fallback_native` |  | — | — | no | sandbox | — |
-| `sandbox.image` | `str` | `'breachpilot-sandbox:latest'` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].image` |  | — | — | no | sandbox | — |
-| `sandbox.multi_net_raw` | `bool` | `True` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].multi_net_raw` |  | — | — | no | sandbox | — |
-| `sandbox.network.allow_dns` | `str` | `'controlled'` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].network.allow_dns` |  | — | — | no | sandbox | — |
-| `sandbox.network.allow_gateway` | `bool` | `False` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].network.allow_gateway` |  | — | — | no | sandbox | — |
-| `sandbox.network.allow_research_hosts` | `bool` | `True` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].network.allow_research_hosts` |  | — | — | no | sandbox | — |
-| `sandbox.network.enforce` | `bool` | `True` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].network.enforce` |  | — | — | no | sandbox | — |
-| `sandbox.network.extra_allow_cidrs` | `list` | `[]` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].network.extra_allow_cidrs` |  | — | — | no | sandbox | — |
-| `sandbox.network.fail_closed` | `bool` | `True` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].network.fail_closed` |  | — | — | no | sandbox | — |
-| `sandbox.network.map_host_loopback` | `bool` | `False` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].network.map_host_loopback` |  | — | — | no | sandbox | — |
-| `sandbox.read_only_rootfs` | `bool` | `True` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].read_only_rootfs` |  | — | — | no | sandbox | — |
-| `sandbox.resources.cpus` | `int` | `2` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].resources.cpus` |  | — | — | no | sandbox | — |
-| `sandbox.resources.memory_mb` | `int` | `4096` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].resources.memory_mb` |  | — | — | no | sandbox | — |
-| `sandbox.resources.output_max_bytes` | `int` | `2000000` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].resources.output_max_bytes` |  | — | — | no | sandbox | — |
-| `sandbox.resources.pids` | `int` | `512` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].resources.pids` |  | — | — | no | sandbox | — |
-| `sandbox.resources.timeout_seconds` | `int` | `300` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].resources.timeout_seconds` |  | — | — | no | sandbox | — |
-| `sandbox.resources.tmpfs_size_mb` | `int` | `256` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].resources.tmpfs_size_mb` |  | — | — | no | sandbox | — |
-| `sandbox.user` | `str` | `'sandbox'` | — | `config.yaml:531` + `CONFIG_SCHEMA['sandbox'].user` |  | — | — | no | sandbox | — |
+| `sandbox.auto_manage_docker` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].auto_manage_docker` |  | — | — | no | sandbox | — |
+| `sandbox.backend` | `str` | `'docker'` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].backend` |  | — | — | no | sandbox | — |
+| `sandbox.cleanup.remove_on_exit` | `bool` | `True` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].cleanup.remove_on_exit` |  | — | — | no | sandbox | — |
+| `sandbox.cleanup.remove_stale_on_startup` | `bool` | `True` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].cleanup.remove_stale_on_startup` |  | — | — | no | sandbox | — |
+| `sandbox.docker_start_timeout_seconds` | `int` | `60` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].docker_start_timeout_seconds` |  | — | — | no | sandbox | — |
+| `sandbox.docker_stop_timeout_seconds` | `int` | `30` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].docker_stop_timeout_seconds` |  | — | — | no | sandbox | — |
+| `sandbox.enabled` | `bool` | `True` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].enabled` |  | — | — | no | sandbox | — |
+| `sandbox.env_passthrough` | `list` | `[]` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].env_passthrough` |  | — | — | no | sandbox | — |
+| `sandbox.fallback_native` | `bool` | `False` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].fallback_native` |  | — | — | no | sandbox | — |
+| `sandbox.image` | `str` | `'breachpilot-sandbox:latest'` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].image` |  | — | — | no | sandbox | — |
+| `sandbox.multi_net_raw` | `bool` | `True` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].multi_net_raw` |  | — | — | no | sandbox | — |
+| `sandbox.network.allow_dns` | `str` | `'controlled'` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].network.allow_dns` |  | — | — | no | sandbox | — |
+| `sandbox.network.allow_gateway` | `bool` | `False` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].network.allow_gateway` |  | — | — | no | sandbox | — |
+| `sandbox.network.allow_research_hosts` | `bool` | `True` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].network.allow_research_hosts` |  | — | — | no | sandbox | — |
+| `sandbox.network.enforce` | `bool` | `True` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].network.enforce` |  | — | — | no | sandbox | — |
+| `sandbox.network.extra_allow_cidrs` | `list` | `[]` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].network.extra_allow_cidrs` |  | — | — | no | sandbox | — |
+| `sandbox.network.fail_closed` | `bool` | `True` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].network.fail_closed` |  | — | — | no | sandbox | — |
+| `sandbox.network.map_host_loopback` | `bool` | `False` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].network.map_host_loopback` |  | — | — | no | sandbox | — |
+| `sandbox.read_only_rootfs` | `bool` | `True` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].read_only_rootfs` |  | — | — | no | sandbox | — |
+| `sandbox.resources.cpus` | `int` | `2` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].resources.cpus` |  | — | — | no | sandbox | — |
+| `sandbox.resources.memory_mb` | `int` | `4096` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].resources.memory_mb` |  | — | — | no | sandbox | — |
+| `sandbox.resources.output_max_bytes` | `int` | `2000000` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].resources.output_max_bytes` |  | — | — | no | sandbox | — |
+| `sandbox.resources.pids` | `int` | `512` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].resources.pids` |  | — | — | no | sandbox | — |
+| `sandbox.resources.timeout_seconds` | `int` | `300` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].resources.timeout_seconds` |  | — | — | no | sandbox | — |
+| `sandbox.resources.tmpfs_size_mb` | `int` | `256` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].resources.tmpfs_size_mb` |  | — | — | no | sandbox | — |
+| `sandbox.user` | `str` | `'sandbox'` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].user` |  | — | — | no | sandbox | — |
 | `skills.allow_model_lookup` | `bool` | `True` | — | `config.yaml:400` + `CONFIG_SCHEMA['skills'].allow_model_lookup` | skill_selector.py, skill_pipeline.py, exploit_agent/skills.py | Runtime skills | — | no | skills | tests/test_skills*.py |
 | `skills.allow_reference_listing` | `bool` | `True` | — | `config.yaml:400` + `CONFIG_SCHEMA['skills'].allow_reference_listing` | skill_selector.py, skill_pipeline.py, exploit_agent/skills.py | Runtime skills | — | no | skills | tests/test_skills*.py |
 | `skills.context_skill_weight` | `int` | `24` | — | `config.yaml:400` + `CONFIG_SCHEMA['skills'].context_skill_weight` | skill_selector.py, skill_pipeline.py, exploit_agent/skills.py | Runtime skills | — | no | skills | tests/test_skills*.py |

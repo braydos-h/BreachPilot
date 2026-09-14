@@ -35,7 +35,7 @@ subsystem: webui
 ```ts
 DEFAULT_API = "http://127.0.0.1:8765"
 pkg = JSON.parse(readFileSync(package.json))
-define.__APP_VERSION__ = pkg.version // "0.49.12"
+define.__APP_VERSION__ = pkg.version // "0.68.4"
 plugins:[react()], resolve.alias["@"]=src
 server{port:5173, strictPort, proxy{"/api":{target, changeOrigin, ws:true, secure:false}}}
 preview{same proxy}, build{outDir:"dist", sourcemap:false, target:"es2020"}

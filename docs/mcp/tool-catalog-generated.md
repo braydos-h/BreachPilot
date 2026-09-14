@@ -3,7 +3,7 @@ title: MCP Tool Catalog (Generated)
 description: Machine-readable table for every MCP tool — gates, purpose, source location. Verified against tools/mcp_tools/ + mcp_server.py + mcp_engine_server.py.
 source: [tools/mcp_tools/ad.py, tools/mcp_tools/assessment_state.py, tools/mcp_tools/attack_modules.py, tools/mcp_tools/browser.py, tools/mcp_tools/cracking.py, tools/mcp_tools/credentials.py, tools/mcp_tools/domain.py, tools/mcp_tools/egress_guard.py, tools/mcp_tools/hitl.py, tools/mcp_tools/killchain.py, tools/mcp_tools/metasploit.py, tools/mcp_tools/mitre.py, tools/mcp_tools/operator_connection.py, tools/mcp_tools/parallel_agents.py, tools/mcp_tools/payloads.py, tools/mcp_tools/peer_models.py, tools/mcp_tools/poc_verifier.py, tools/mcp_tools/recon.py, tools/mcp_tools/registry.py, tools/mcp_tools/replay_simulator.py, tools/mcp_tools/research.py, tools/mcp_tools/retest.py, tools/mcp_tools/runtime_skills.py, tools/mcp_tools/sandbox_exec.py, tools/mcp_tools/sessions.py, tools/mcp_tools/snapshots.py, tools/mcp_tools/verify.py, tools/mcp_tools/web_scan.py, tools/mcp_tools/workspace.py, tools/mcp_tools/terminal/allowlist.py, tools/mcp_tools/terminal/execute.py, tools/mcp_tools/terminal/package.py, tools/mcp_tools/terminal/privilege.py, tools/mcp_tools/modules/adaptive.py, tools/mcp_tools/modules/campaign.py, tools/mcp_tools/modules/hash.py, tools/mcp_tools/modules/planning.py, tools/mcp_tools/modules/synthesis.py, tools/mcp_tools/modules/web.py, mcp_server.py, mcp_engine_server.py]
 generated_from: [tools/mcp_tools/ad.py, tools/mcp_tools/assessment_state.py, tools/mcp_tools/attack_modules.py, tools/mcp_tools/browser.py, tools/mcp_tools/cracking.py, tools/mcp_tools/credentials.py, tools/mcp_tools/domain.py, tools/mcp_tools/egress_guard.py, tools/mcp_tools/hitl.py, tools/mcp_tools/killchain.py, tools/mcp_tools/metasploit.py, tools/mcp_tools/mitre.py, tools/mcp_tools/operator_connection.py, tools/mcp_tools/parallel_agents.py, tools/mcp_tools/payloads.py, tools/mcp_tools/peer_models.py, tools/mcp_tools/poc_verifier.py, tools/mcp_tools/recon.py, tools/mcp_tools/registry.py, tools/mcp_tools/replay_simulator.py, tools/mcp_tools/research.py, tools/mcp_tools/retest.py, tools/mcp_tools/runtime_skills.py, tools/mcp_tools/sandbox_exec.py, tools/mcp_tools/sessions.py, tools/mcp_tools/snapshots.py, tools/mcp_tools/verify.py, tools/mcp_tools/web_scan.py, tools/mcp_tools/workspace.py, tools/mcp_tools/terminal/allowlist.py, tools/mcp_tools/terminal/execute.py, tools/mcp_tools/terminal/package.py, tools/mcp_tools/terminal/privilege.py, tools/mcp_tools/modules/adaptive.py, tools/mcp_tools/modules/campaign.py, tools/mcp_tools/modules/hash.py, tools/mcp_tools/modules/planning.py, tools/mcp_tools/modules/synthesis.py, tools/mcp_tools/modules/web.py, mcp_server.py, mcp_engine_server.py]
-verify: every tool listed exists as an @mcp.tool def at time of generation (2026-09-07).
+verify: every tool listed exists as an @mcp.tool def at time of generation (2026-09-14).
 ---
 
 # MCP Tool Catalog (Generated)
@@ -13,7 +13,7 @@ verify: every tool listed exists as an @mcp.tool def at time of generation (2026
 Source locations use `<file>:<line>` relative to the repo root. Registration functions (`register_*_tools`) are auto-discovered via `tools/mcp_tools/registry.py:collect_tools()`; no manual list edit is needed.
 
 
-_Generated 2026-09-07 from `41 source files` (166 tools across 37 families)._
+_Generated 2026-09-14 from `41 source files` (167 tools across 37 families)._
 
 ## engine (`mcp_engine_server.py`) (5)
 
@@ -150,7 +150,7 @@ _Generated 2026-09-07 from `41 source files` (166 tools across 37 families)._
 |------|-------|---------|--------|
 | `killchain_status` | `@audit_tool` | Read-only kill-chain snapshot for a target: current state, applicable edges, and the shortest verified-edge path to the configured goal state. No target touch -- reads the kill-chain graph only. | `tools/mcp_tools/killchain.py:125` |
 | `killchain_attempt` | `@require_allowlist("target")` | Attempt a verified kill-chain transition (e.g. creds_in_hand -> shell_as_user). The machine runs the edge's playbook through the normal MCP tool layer (allowlist + audit apply) and then independently verifies success via check probes; the s… | `tools/mcp_tools/killchain.py:148` |
-| `killchain_plan` | `@audit_tool` | Compute the shortest kill-chain path (BFS over verified edges) from the target's current state to a goal state. Read-only planning -- executes nothing. ``goal_state`` defaults to the configured ``killchain.goal_state`` (fallback ``shell_as_… | `tools/mcp_tools/killchain.py:225` |
+| `killchain_plan` | `@audit_tool` | Compute the shortest kill-chain path (BFS over verified edges) from the target's current state to a goal state. Read-only planning -- executes nothing. ``goal_state`` defaults to the configured ``killchain.goal_state`` (fallback ``shell_as_… | `tools/mcp_tools/killchain.py:233` |
 
 ## `tools/mcp_tools/metasploit.py` (19)
 
@@ -193,7 +193,7 @@ _Generated 2026-09-07 from `41 source files` (166 tools across 37 families)._
 | Tool | Gates | Purpose | Source |
 |------|-------|---------|--------|
 | `craft_exploit` | `@require_allowlist()` | Generate a custom exploit script tailored to a specific target service. | `tools/mcp_tools/modules/adaptive.py:28` |
-| `mutate_exploit` | `@audit_tool` | Mutate a previously generated exploit script based on failure feedback. | `tools/mcp_tools/modules/adaptive.py:128` |
+| `mutate_exploit` | `@audit_tool` | Mutate a previously generated exploit script based on failure feedback. | `tools/mcp_tools/modules/adaptive.py:130` |
 
 ## `tools/mcp_tools/modules/campaign.py` (4)
 
@@ -221,8 +221,8 @@ _Generated 2026-09-07 from `41 source files` (166 tools across 37 families)._
 | Tool | Gates | Purpose | Source |
 |------|-------|---------|--------|
 | `create_attack_plan` | `@require_allowlist()` | Create a structured attack plan for a target IP. | `tools/mcp_tools/modules/planning.py:29` |
-| `get_current_plan` | `@require_allowlist()` | Retrieve the current attack plan for a target IP. | `tools/mcp_tools/modules/planning.py:106` |
-| `replan` | `@require_allowlist()` | Adapt the current attack plan based on a failure or new information. | `tools/mcp_tools/modules/planning.py:148` |
+| `get_current_plan` | `@require_allowlist()` | Retrieve the current attack plan for a target IP. | `tools/mcp_tools/modules/planning.py:107` |
+| `replan` | `@require_allowlist()` | Adapt the current attack plan based on a failure or new information. | `tools/mcp_tools/modules/planning.py:149` |
 
 ## `tools/mcp_tools/modules/synthesis.py` (1)
 
@@ -380,15 +380,16 @@ _Generated 2026-09-07 from `41 source files` (166 tools across 37 families)._
 | `snapshot_revert` | `@require_allowlist("vm_id")` | Roll an allowlisted target's backing VM/container back to a snapshot (empty ref = latest recorded). Infrastructure-touching: refused unless snapshots.enabled AND the target is allowlisted. Returns SNAPSHOT_REVERTED: on success, ERROR:/BLOCK… | `tools/mcp_tools/snapshots.py:65` |
 | `snapshot_list` | `@audit_tool` + `@require_allowlist("vm_id")` | List recorded snapshots for an allowlisted target (read-only; no target touch). Returns a SNAPSHOT_LIST: block. | `tools/mcp_tools/snapshots.py:92` |
 
-## `tools/mcp_tools/terminal/execute.py` (3)
+## `tools/mcp_tools/terminal/execute.py` (4)
 
-- **Registration:** `_register_execute_tools()` (`tools/mcp_tools/terminal/execute.py:187`) — auto-discovered; no edit to `mcp_exploit_server.py`.
+- **Registration:** `_register_execute_tools()` (`tools/mcp_tools/terminal/execute.py:193`) — auto-discovered; no edit to `mcp_exploit_server.py`.
 
 | Tool | Gates | Purpose | Source |
 |------|-------|---------|--------|
-| `run_exploit_terminal` | `@audit_tool` | Run any shell command in a dedicated visible terminal window. The command executes synchronously; output is captured and RETURNED in the result under an OUTPUT: section. Use for running Kali tools, nmap, curl, netcat, searchsploit, etc. IMP… | `tools/mcp_tools/terminal/execute.py:210` |
-| `run_as_root` | `@audit_tool` | Run ANY command with sudo (root privileges). Use for commands that require root: tcpdump, iptables, systemctl, writing to /etc, raw socket operations, etc. The command runs synchronously and output is captured. | `tools/mcp_tools/terminal/execute.py:457` |
-| `git_clone` | `@audit_tool` | Clone a Git repository (GitHub exploit/PoC/tool) into the workspace. Provide the full repo URL (e.g., 'https://github.com/user/repo.git'). Optional target_dir for a custom folder name. | `tools/mcp_tools/terminal/execute.py:544` |
+| `run_exploit_terminals` | `@audit_tool` | Run several short shell probes as ONE sandbox round-trip. | `tools/mcp_tools/terminal/execute.py:217` |
+| `run_exploit_terminal` | `@audit_tool` | Run any shell command in a dedicated visible terminal window. The command executes synchronously; output is captured and RETURNED in the result under an OUTPUT: section. Use for running Kali tools, nmap, curl, netcat, searchsploit, etc. IMP… | `tools/mcp_tools/terminal/execute.py:448` |
+| `run_as_root` | `@audit_tool` | Run ANY command with sudo (root privileges). Use for commands that require root: tcpdump, iptables, systemctl, writing to /etc, raw socket operations, etc. The command runs synchronously and output is captured. | `tools/mcp_tools/terminal/execute.py:703` |
+| `git_clone` | `@audit_tool` | Clone a Git repository (GitHub exploit/PoC/tool) into the workspace. Provide the full repo URL (e.g., 'https://github.com/user/repo.git'). Optional target_dir for a custom folder name. | `tools/mcp_tools/terminal/execute.py:797` |
 
 ## `tools/mcp_tools/terminal/package.py` (5)
 
@@ -442,11 +443,11 @@ _Generated 2026-09-07 from `41 source files` (166 tools across 37 families)._
 
 ## Totals
 
-- **Tools:** 166 across 37 families.
+- **Tools:** 167 across 37 families.
 
 | Gates | Count |
 |-------|-------|
-| `@audit_tool` | 81 |
+| `@audit_tool` | 82 |
 | `@require_allowlist()` | 50 |
 | `@require_allowlist("target")` | 14 |
 | `—` | 13 |

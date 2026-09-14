@@ -249,6 +249,8 @@ jobs:
             exit 1
           fi
           echo "Docs truth guard (no-args startup): OK"
+      - name: Docs truth audit (links + versions)
+        run: python scripts/docs_truth_audit.py
 
   types:
     name: Type check (mypy)

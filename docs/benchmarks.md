@@ -196,6 +196,8 @@ links. Historical runs survive restarts (everything is on disk).
   mission, fake verifier, fake docker seams) — no model API keys, no live
   targets, plus the deterministic `fake` suite smoke path
   (`.github/workflows/benchmark.yml`).
-- **Live benchmarks** run only via explicit/manual or scheduled jobs with
-  secrets and the lab target suite up. `--check-regression` exits non-zero on
+- **Live benchmarks** run only via manual dispatch (`workflow_dispatch`) with
+  secrets and the lab target suite up — no schedule trigger is configured
+  (`.github/workflows/benchmark.yml` has none; adding one is benchmark-gating
+  work). `--check-regression` exits non-zero on
   hard regressions so it can gate CI.

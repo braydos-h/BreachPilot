@@ -9,7 +9,7 @@ guidance, and a production hardening checklist.
 > Attack mode ships as `full_access` (auto-approve, no content/scope
 > inspection) with an unrestricted operator-box filesystem. Deploy only on a
 > **throwaway lab VM** against targets you own or are explicitly authorized to
-> test. See [`README.md`](../README.md#-safety-model) and
+> test. See [`README.md`](../README.md#safety-model) and
 > [`docs/safety-model.md`](safety-model.md).
 
 ## Supported platforms

@@ -32,7 +32,7 @@ Vite + React 18 + TypeScript SPA under `webui/src/`. Loopback-only; all authorit
 | HTML entry | `webui/index.html:2` | `<html class="dark">`, theme toggle script (`breachpilot.theme`), `#root` mount |
 | React root | `webui/src/main.tsx:8` | `ReactDOM.createRoot` → `<ErrorBoundary>` → `<App />` |
 | CSS | `webui/src/index.css:1` | Tailwind base/components/utilities, HSL CSS vars (`:root`/`.dark`), custom utilities (`bg-grid`, `glow-primary`, `animate-scan`, etc.) |
-| Version inject | `webui/vite.config.ts:13` | `define.__APP_VERSION__` from `package.json:version` (`0.49.12`) |
+| Version inject | `webui/vite.config.ts:13` | `define.__APP_VERSION__` from `package.json:version` (`0.68.4`) |
 
 `index.css` defines light `:root` + dark `.dark` HSL vars (`--background`, `--primary`, etc.). Default is dark via `index.html`.
 

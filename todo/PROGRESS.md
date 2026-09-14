@@ -95,3 +95,23 @@
 - Verification: no Python changed (no pytest needed); markdown-only.
 - Precise next action: commit packet 03, then packet 07 (documentation
   truth, independent).
+
+---
+
+## Packet 07 — documentation truth (2026-09-14, local tasks complete)
+
+- New guard `scripts/docs_truth_audit.py` (`links`: 163 files, GitHub slugs
+  with code-span/underscore/dupe handling; `versions`: triple-source
+  equality + stale `0.49.12`/`netcheck` scan) wired into the CI `lint` job
+  (aggregate signal); new `tests/test_docs_truth_audit.py` (9 passed).
+- Fixes: phase-audit refs (replace/remove), api.md ToC anchors ×7, deployment
+  README anchor, stale versions ×3 → `0.68.4`, eval SKIPPED-not-pass wording,
+  benchmark manual-only wording. Regenerated tool catalog (166→167) + config
+  ref (439→444) from source; date-only churn elsewhere reverted.
+- Claims spot-check: providers 3/3, flags 61/61, skills 146 unchanged.
+  No behavior changes (workflows untouched for packets 01/02).
+- Verification: audit green; `ruff check`/`format` green; docs-truth + no-args
+  guards green; focused test file green.
+- BLOCKED only on CI confirmation via the packet-00 PR (no separate
+  authorization); GitHub-side release metadata itself is packet-08 scope.
+- Precise next action: commit packet 07, then packet 05 (type debt).

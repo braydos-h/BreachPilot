@@ -1,7 +1,6 @@
 # Capability Upgrade — Architecture Design (Phase 2 output)
 
-Status: approved-by-author / implemented incrementally. Companion to the audit
-reports in `docs/phase1-audit/`.
+Status: approved-by-author / implemented incrementally.
 
 The capability model described here (declared vs available, capability
 records, requires/produces composition) is also the substrate the future
