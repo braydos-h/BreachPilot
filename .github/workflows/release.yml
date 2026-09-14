@@ -24,8 +24,8 @@ jobs:
     outputs:
       verdict: ${{ steps.gate.outputs.verdict }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -46,7 +46,7 @@ jobs:
           test "$verdict" = "GO"
       - name: Upload gate report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-gate
           path: gate.txt
@@ -58,8 +58,8 @@ jobs:
     timeout-minutes: 30
     needs: [gate]
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -93,7 +93,7 @@ jobs:
           format: cyclonedx-json
           output-file: sbom-sandbox.json
       - name: Scan image (Trivy, HIGH/CRITICAL fail gate)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: breachpilot-sandbox:${{ github.ref_name }}
           format: sarif
@@ -101,11 +101,11 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
       - name: Attest build provenance (#42)
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/*, sbom-python.json, sbom-webui.json, sbom-sandbox.json
       - name: Upload release assets
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-assets
           path: |
