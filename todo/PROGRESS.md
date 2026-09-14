@@ -157,3 +157,29 @@
   live-eval safety net. Debt unchanged (276).
 - Precise next action: commit packet 04 part 1, then final sweep (board
   statuses, PROGRESS, remaining blocked packets noted) and summarize.
+
+---
+
+## Session close (2026-09-14) — 6 packets advanced, 4 remain blocked
+
+Commits on `main` (no pushes; remote updates are the human's job):
+- `5b51d43` P0 local fixes (CI/PR verification blocked).
+- `0248002` Packet 03 local (ruleset/labels/issues blocked on admin).
+- docs-truth commit Packet 07 (CI confirmation rides the P0 PR).
+- `12587df` Packet 05 batch 1, 278 → 276.
+- `657613e` Packet 04 part 1, inventory + characterization (extractions blocked).
+
+Still blocked (no safe local work left; packet files already state this):
+- 01 live eval — needs green-main CI + a real model backend with
+  environment-only credentials ( human provisions `OLLAMA_API_KEY`/backend).
+- 02 benchmarks — needs green-main CI + schedule/infra decisions.
+- 06 Flow B retirement — needs reliable Flow A live eval + migration evidence.
+- 08 0.69 beta — needs packets 1–3 + governance readiness + release authority.
+- Cross-cutting human actions: open the PR from `5b51d43` onward and confirm
+  full CI; apply the packet-03 ruleset/labels/issues; enable private
+  vulnerability reporting; resolve the unrelated `tools/eval_harness.py`
+  worktree edit (packet-01 `__all__` names currently undefined — left
+  untouched; repo-wide `ruff check` red solely from it until packet-01 lands).
+- Precise next action for the operator: push nothing yet — review the five
+  local commits, open ONE PR containing them, watch CI, then unblock
+  01/02/06/08 in dependency order.
