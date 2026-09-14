@@ -111,7 +111,24 @@ def write_baseline(counts: dict[str, int]) -> None:
     BASELINE_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def print_trend() -> int:
+    """Short debt-concentration summary for CI logs (never fails).
+
+    Reads only the committed ``mypy-baseline.txt`` (no mypy run), so it is
+    cheap enough to run on every types job: total, file count, and the top
+    debt holders maintainers should target next.
+    """
+    base_counts, base_total = load_baseline()
+    top = sorted(base_counts.items(), key=lambda item: (-item[1], item[0]))[:5]
+    print(f"type-debt trend: {base_total} errors in {len(base_counts)} files")
+    for path, count in top:
+        print(f"  - {path}: {count}")
+    return 0
+
+
 def main(argv: list[str]) -> int:
+    if "--trend" in argv:
+        return print_trend()
     counts, total, _raw = run_mypy()
     if "--update" in argv:
         write_baseline(counts)

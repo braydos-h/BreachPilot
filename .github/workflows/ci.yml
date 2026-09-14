@@ -300,6 +300,8 @@ jobs:
         run: mypy --follow-imports=skip tools/kernel tools/sandbox
       - name: Mypy type-debt gate (no new debt vs baseline)
         run: python scripts/mypy_debt.py
+      - name: Mypy debt trend summary
+        run: python scripts/mypy_debt.py --trend
 
   package:
     name: Package build

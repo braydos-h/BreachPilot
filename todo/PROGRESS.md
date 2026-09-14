@@ -115,3 +115,26 @@
 - BLOCKED only on CI confirmation via the packet-00 PR (no separate
   authorization); GitHub-side release metadata itself is packet-08 scope.
 - Precise next action: commit packet 07, then packet 05 (type debt).
+
+---
+
+## Packet 05 — type debt, batch 1 (2026-09-14, complete: 278 → 276)
+
+- Assignment-time debt: 278 (packet-00 spike already repaired). Grouped:
+  codes topped by `union-attr` 57 / `attr-defined` 51 / `arg-type` 39
+  (Optional/shape thesis holds); subsystems topped by `exploit_agent` 47,
+  `api` 45, `mcp_tools` 29, `run_service` 27. Next target: `run_manager.py`
+  (35, largest single file; coordinate with packet 04).
+- Batch 1: `TYPE_CHECKING` `ScopeGate` import in `policy.py` (2 errors,
+  explicit optional-boundary type, runtime import-free). Tests:
+  `test_exploit_scope_gate` 9 + `test_exploit_permission` 7 passed.
+- Stale counts → non-numeric wording (`pyproject.toml`, `AGENTS.md`,
+  `CLAUDE.md` ×2, `CONTRIBUTING.md` ×2). New `mypy_debt.py --trend` +
+  CI `types`-job trend step (informational). Baseline `--update`d 278→276.
+- Unrelated `tools/eval_harness.py` working-tree edit (packet-01 `__all__`
+  names, undefined) LEFT UNTOUCHED; repo-wide `ruff check` red solely from
+  its 9 `F822`s — packet-01 scope to resolve. Test-count staleness (~250 /
+  ~340 vs actual 353) noted as docs follow-up (out of packet scope).
+- Precise next action: commit packet 05 (excluding `eval_harness.py`), then
+  packet 04 (runner split — inventory + characterization first, prefers the
+  live-eval safety net) or packet 01/02/06/08 per unblock order.

@@ -38,7 +38,7 @@ python3 -m pytest tests/test_recon_pipeline.py::TestClass::test_method -n 0  # o
 python3 -m pip install -e ".[dev]"   # ruff + pytest + coverage + mypy + build + twine
 ruff check .                         # must pass (0 errors; per-file-ignores document intentional patterns)
 ruff format --check .                # must pass (0 diffs)
-mypy --follow-imports=skip tools     # must pass (256 files; disables documented in pyproject.toml [tool.mypy])
+mypy --follow-imports=skip tools     # must pass (disables documented in pyproject.toml [tool.mypy])
 ```
 
 `./install.sh` is the full bootstrap (OS prereqs + Ollama + venv + WebUI +

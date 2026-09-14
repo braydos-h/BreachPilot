@@ -116,7 +116,7 @@ The HTTP transport refuses to bind to non-loopback interfaces unless `--allow-pu
 python3 -m pip install -e ".[dev]"   # includes ruff
 ruff check .                         # must pass (0 errors)
 ruff format --check .                # must pass (0 diffs)
-mypy --follow-imports=skip tools     # must pass (~335 files)
+mypy --follow-imports=skip tools     # must pass (whole tools tree)
 python3 -m coverage run -m pytest tests/ && python3 -m coverage report --fail-under=80   # coverage (CI command; pytest-cov is not installed)
 ```
 
@@ -409,7 +409,7 @@ searchsploit/metasploit/hydra/crackmapexec/impacket; Windows attacker = Python-o
 - **~340** test files in `tests/` (verify via `python3 -c "import pathlib; print(len(list(pathlib.Path('tests').glob('test_*.py'))))"`, all mock subprocess/network except `-m integration` files). No fixtures for live Nmap; everything mocks subprocess / network.
 - New safety-relevant code needs regression tests in `test_scope_gate.py`, `test_safety_reviewer.py`, `test_validate_target.py` (or a new file if the surface is new).
 - `pyproject.toml` configures pytest with `asyncio_mode = "auto"` and `testpaths = ["tests"]`. Coverage is configured in `[tool.coverage.run]` with `source = ["tools", "main", "cli", "legacy"]`; run it the way CI does — `python3 -m coverage run -m pytest tests/` then `python3 -m coverage report` (pytest-cov is NOT a dependency, so `pytest --cov` fails).
-- Lint / type-check are CI-enforced repo-wide: `ruff check .` (0 errors) + `ruff format --check .` (0 diffs) and `mypy --follow-imports=skip tools` (~335 files, 0 errors with current `disable_error_code` masks; see `.github/workflows/ci.yml`). `pyproject.toml` has `ruff` line-length 120 `select = ["E","F","W","I"]` (`pyproject.toml:127-174`, with `ignore` + per-file-ignores documenting intentional patterns) and `mypy` configs with strict zero-disable tiers (`validation_utils`, `exceptions`, `mcp_shared`, `kernel.*`, `sandbox.*`). Keep security-sensitive diffs readable.
+- Lint / type-check are CI-enforced repo-wide: `ruff check .` (0 errors) + `ruff format --check .` (0 diffs) and `mypy --follow-imports=skip tools` (whole tools tree, 0 errors with current `disable_error_code` masks; see `.github/workflows/ci.yml`). `pyproject.toml` has `ruff` line-length 120 `select = ["E","F","W","I"]` (`pyproject.toml:127-174`, with `ignore` + per-file-ignores documenting intentional patterns) and `mypy` configs with strict zero-disable tiers (`validation_utils`, `exceptions`, `mcp_shared`, `kernel.*`, `sandbox.*`). Keep security-sensitive diffs readable.
 
 ## TEST-RUN RULES (operator hardware constraint — follow exactly)
 

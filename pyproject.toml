@@ -183,9 +183,10 @@ python_version = "3.12"
 warn_return_any = false
 warn_unused_configs = true
 ignore_missing_imports = true
-# ponytail: `mypy --follow-imports=skip tools` passes (335 files) with these disables.
-# Without disables: 301 errors in 65 files — see mypy-baseline.txt, enforced by
-# `python scripts/mypy_debt.py` (CI types job fails on ANY increase).
+# ponytail: `mypy --follow-imports=skip tools` passes with these disables.
+# Without disables the raw count is tracked in mypy-baseline.txt (total +
+# per-file), enforced by `python scripts/mypy_debt.py` (CI types job fails
+# on ANY increase).
 # Strict tiers (zero disables): tools/validation_utils.py, tools/exceptions.py,
 # tools/mcp_shared.py, tools/kernel/*, tools/sandbox/*. Migration order and
 # graduation procedure: docs/type-checking.md. No `Any` in new code; use
