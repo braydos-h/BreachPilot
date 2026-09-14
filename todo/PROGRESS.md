@@ -138,3 +138,22 @@
 - Precise next action: commit packet 05 (excluding `eval_harness.py`), then
   packet 04 (runner split — inventory + characterization first, prefers the
   live-eval safety net) or packet 01/02/06/08 per unblock order.
+
+---
+
+## Packet 04 — runner split, part 1 (2026-09-14: inventory + characterization; extractions blocked)
+
+- `_impl.py` now 3,208 lines (was 2,637 at assessment); one 2,696-line
+  `run_exploit_agent` + 25 small helpers; boundary 2 already extracted
+  (`branch.py` + `branch_knowledge.py`). Full responsibility/state/seam map
+  + extraction order recorded in the packet file. NO production code moved.
+- New `tests/test_runner_characterization.py` (3 passed): unknown-tool
+  refusal, command-budget cap, empty-reply termination (focus disabled to
+  isolate loop behavior; focus covered by its own tests).
+- Existing loop coverage confirmed: time-budget/retry/checkpoint/exception
+  (`test_exploit_engine_core`), branch/duplicate/verify (`test_attack_focus_
+  loop`), transport/parse (`test_tool_call_parse_split`).
+- Extractions + trace comparisons + docs updates BLOCKED on the packet-01
+  live-eval safety net. Debt unchanged (276).
+- Precise next action: commit packet 04 part 1, then final sweep (board
+  statuses, PROGRESS, remaining blocked packets noted) and summarize.
