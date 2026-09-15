@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ChevronLeft, ChevronRight, Loader2, Plus, RotateCw, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -23,6 +23,9 @@ import {
 import { StatusBadge } from "@/components/StatusBadge";
 import { CopyButton } from "@/components/CopyButton";
 import { DemoBadge } from "@/components/DemoBadge";
+import { EmptyState } from "@/components/EmptyState";
+import { humanizeEnum, RUN_MODE_LABELS } from "@/lib/enumLabels";
+import { humanizeStatus } from "@/lib/status";
 import { useCapabilities, useDeleteRun, useRestoreDemo, useResumeRun, useRetitleRun, useRuns } from "@/api/hooks";
 import { ApiError } from "@/api/client";
 import { SkeletonRows } from "@/components/Loading";
@@ -64,11 +67,19 @@ function loadSortKey(): RunSortKey {
 }
 
 export function RunListPage() {
-  const [sortKey, setSortKey] = useState<RunSortKey>(loadSortKey);
-  const [q, setQ] = useState("");
-  const [debouncedQ, setDebouncedQ] = useState("");
-  const [stateFilter, setStateFilter] = useState("");
-  const [page, setPage] = useState(0);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [sortKey, setSortKey] = useState<RunSortKey>(() => {
+    const qp = searchParams.get("sort") as RunSortKey | null;
+    if (qp && RUN_SORT_OPTIONS.some((o) => o.value === qp)) return qp;
+    return loadSortKey();
+  });
+  const [q, setQ] = useState(searchParams.get("q") ?? "");
+  const [debouncedQ, setDebouncedQ] = useState(searchParams.get("q") ?? "");
+  const [stateFilter, setStateFilter] = useState(searchParams.get("state") ?? "");
+  const [page, setPage] = useState(Number(searchParams.get("page") ?? 0) || 0);
+  const [detailed, setDetailed] = useState(() => {
+    try { return localStorage.getItem("breachpilot.runs.detailed") === "1"; } catch { return false; }
+  });
   const runs = useRuns(PAGE_SIZE, page * PAGE_SIZE, sortKey, debouncedQ, stateFilter);
   const capabilities = useCapabilities();
   const maxConcurrent = capabilities.data?.constraints.max_concurrent_runs ?? 1;
@@ -83,9 +94,19 @@ export function RunListPage() {
   const [retitling, setRetitling] = useState<string | null>(null);
 
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedQ(q), 300);
+    const t = setTimeout(() => {
+      setDebouncedQ(q);
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        if (!q) next.delete("q"); else next.set("q", q);
+        if (!stateFilter) next.delete("state"); else next.set("state", stateFilter);
+        next.set("sort", sortKey);
+        if (page === 0) next.delete("page"); else next.set("page", String(page));
+        return next;
+      }, { replace: true });
+    }, 300);
     return () => clearTimeout(t);
-  }, [q]);
+  }, [q, stateFilter, sortKey, page, setSearchParams]);
 
   useEffect(() => {
     setPage(0);
@@ -102,6 +123,13 @@ export function RunListPage() {
     setSortKey(next);
     setPage(0);
     try { localStorage.setItem(SORT_KEY_STORAGE, next); } catch { /* ignore */ }
+  };
+
+  const toggleDetailed = () => {
+    setDetailed((d) => {
+      try { localStorage.setItem("breachpilot.runs.detailed", d ? "0" : "1"); } catch { /* ignore */ }
+      return !d;
+    });
   };
 
   const onFilterChange = (nextQ: string, nextState: string) => {
@@ -137,8 +165,11 @@ export function RunListPage() {
   return (
     <div className="space-y-4 p-4 md:p-6">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h1 className="text-lg font-semibold">Sessions</h1>
+          <h1 className="text-lg font-semibold">Runs</h1>
           <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={toggleDetailed} aria-pressed={detailed}>
+              {detailed ? "Simple view" : "Detailed view"}
+            </Button>
             {atCapacity ? (
               <Button size="sm" disabled title={`${maxConcurrent} run(s) already active (api.max_concurrent_runs)`}>
                 <Plus className="h-4 w-4" />
@@ -160,25 +191,25 @@ export function RunListPage() {
           placeholder="Search title, target, mode, goal..."
           value={q}
           onChange={(e) => onFilterChange(e.target.value, stateFilter)}
-          className="h-8 max-w-xs text-xs"
+          className="h-9 max-w-xs text-[13px]"
         />
         <select
           value={stateFilter}
           onChange={(e) => onFilterChange(q, e.target.value)}
-          className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+          className="h-9 rounded-md border border-input bg-background px-2 text-[13px]"
           aria-label="Filter by state"
         >
           {STATE_FILTER_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
+            <option key={o.value} value={o.value}>{o.value ? humanizeStatus(o.value) : o.label}</option>
           ))}
         </select>
         <Select value={sortKey} onValueChange={onSortChange}>
-          <SelectTrigger className="h-8 w-[10rem] text-xs" aria-label="Sort sessions">
+          <SelectTrigger className="h-9 w-[10rem] text-[13px]" aria-label="Sort runs">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             {RUN_SORT_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value} className="text-xs">
+              <SelectItem key={o.value} value={o.value} className="text-[13px]">
                 {o.label}
               </SelectItem>
             ))}
@@ -220,37 +251,49 @@ export function RunListPage() {
       )}
 
       {!runs.isLoading && rows.length === 0 && activeRuns.length === 0 && (
-        <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
-          <div>No past sessions yet.{" "}<Link to="/" className="text-foreground underline-offset-4 hover:underline">Start one from home.</Link></div>
-          <div className="mt-4">
+        <EmptyState
+          title="No runs yet"
+          reason="Start with the safe localhost self-test, explore a demo run, or create your first authorized assessment."
+          actionLabel="Run local self-test"
+          actionTo="/system"
+        >
+          <div className="mt-2 flex gap-2">
             <Button
               size="sm"
               variant="outline"
               onClick={() => restoreDemo.mutate(undefined)}
               disabled={restoreDemo.isPending}
             >
-              {restoreDemo.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
-              Restore Demo Session
+              {restoreDemo.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5" /> : null}
+              Explore a demo run
             </Button>
-            <p className="mt-1 text-xs">Re-create the synthetic Meridian Finance Lab demo.</p>
+            <Button size="sm" asChild>
+              <Link to="/runs/new">New run</Link>
+            </Button>
           </div>
-        </div>
+          <p className="mt-1 text-[13px] text-muted-foreground">Demo data is synthetic — no real target. Re-creates the Meridian Finance Lab demo.</p>
+        </EmptyState>
       )}
 
       {rows.length > 0 && (
         <div className="overflow-x-auto rounded-md border">
           <table className="w-full border-collapse text-sm">
-            <caption className="sr-only">Sessions</caption>
+            <caption className="sr-only">Runs</caption>
             <thead>
               <tr>
-                <th scope="col">ID</th>
-                <th scope="col">Title</th>
+                {detailed && <th scope="col">ID</th>}
+                <th scope="col">Target / Title</th>
                 <th scope="col">State</th>
-                <th scope="col">Target</th>
-                <th scope="col">Mode</th>
-                <th scope="col">Goal</th>
-                <th scope="col">Model</th>
-                <th scope="col">Created</th>
+                <th scope="col">Outcome</th>
+                <th scope="col">Updated</th>
+                {detailed && (
+                  <>
+                    <th scope="col">Mode</th>
+                    <th scope="col">Goal</th>
+                    <th scope="col">Model</th>
+                    <th scope="col">Created</th>
+                  </>
+                )}
                 <th scope="col" className="text-right">Actions</th>
               </tr>
             </thead>
@@ -262,33 +305,37 @@ export function RunListPage() {
                 const demo = isDemoRun(row);
                 return (
                   <tr key={row.id} className={demo ? "bg-[rgba(99,102,241,0.04)]" : undefined}>
-                    <td>
-                      <div className="flex items-center gap-1.5">
-                        <Link to={`/runs/${row.id}`} className="font-mono text-xs hover:underline" title={row.id}>
-                          {truncateId(row.id)}
-                        </Link>
-                        <CopyButton value={row.id} size="icon" label="Copy ID" />
-                        {demo && <DemoBadge />}
-                      </div>
-                    </td>
-                    <td className="max-w-[18rem]">
-                      <div className="flex items-center gap-1.5">
-                        {title ? (
-                          <Link to={`/runs/${row.id}`} className="block truncate text-xs hover:underline" title={title}>
-                            {title}
+                    {detailed && (
+                      <td>
+                        <div className="flex items-center gap-1.5">
+                          <Link to={`/runs/${row.id}`} className="font-mono text-[13px] hover:underline" title={row.id}>
+                            {truncateId(row.id)}
                           </Link>
-                        ) : (
-                          <span className="text-xs text-muted-foreground italic">untitled</span>
-                        )}
+                          <CopyButton value={row.id} size="icon" label="Copy ID" />
+                          {demo && <DemoBadge />}
+                        </div>
+                      </td>
+                    )}
+                    <td className="max-w-[18rem]">
+                      <div className="flex flex-col">
+                        <Link to={`/runs/${row.id}`} className="block truncate text-sm font-medium hover:underline" title={row.target || title}>
+                          {row.target || row.target_ip || title || "—"}
+                        </Link>
+                        {title && <span className="truncate text-[13px] text-muted-foreground">{title}</span>}
                         {demo && <DemoBadge />}
                       </div>
                     </td>
                     <td><StatusBadge state={row.state} /></td>
-                    <td className="font-mono text-xs">{row.target || row.target_ip || "\u2014"}</td>
-                    <td className="text-xs">{row.mode}</td>
-                    <td className="text-xs">{row.goal_name || "\u2014"}</td>
-                    <td className="font-mono text-xs">{row.model_alias || "\u2014"}</td>
-                    <td className="text-xs text-muted-foreground" title={row.created_at}>{formatRelative(row.created_at)}</td>
+                    <td className="text-[13px]">{terminal ? humanizeStatus(row.state) : "—"}</td>
+                    <td className="text-[13px] text-muted-foreground" title={row.created_at}>{formatRelative(row.created_at)}</td>
+                    {detailed && (
+                      <>
+                        <td className="text-[13px]">{humanizeEnum(row.mode, RUN_MODE_LABELS)}</td>
+                        <td className="text-[13px]">{row.goal_name || "—"}</td>
+                        <td className="font-mono text-[13px]">{row.model_alias || "—"}</td>
+                        <td className="text-[13px] text-muted-foreground" title={row.created_at}>{formatRelative(row.created_at)}</td>
+                      </>
+                    )}
                     <td className="text-right">
                       <div className="inline-flex items-center gap-1">
                         <Button asChild size="sm" variant="ghost">
@@ -337,9 +384,9 @@ export function RunListPage() {
       )}
 
       {total > PAGE_SIZE && (
-        <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        <div className="flex items-center justify-between gap-2 text-[13px] text-muted-foreground">
           <span>
-            {total} session{total === 1 ? "" : "s"} · page {page + 1} of {totalPages}
+            {total} run{total === 1 ? "" : "s"} · page {page + 1} of {totalPages}
           </span>
           <div className="flex items-center gap-1">
             <Button size="sm" variant="outline" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0}>

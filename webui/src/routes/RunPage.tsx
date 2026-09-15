@@ -1,11 +1,13 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ClipboardList, FileCheck, Flag, FlaskConical, Globe, Loader2, Network, ScanSearch, ScrollText, Share2, ShieldCheck, Square, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { EventViewer } from "@/components/events/EventViewer";
+import { NarrativeFeed } from "@/components/NarrativeFeed";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LiveRunSummary } from "@/components/LiveRunSummary";
 import { PhaseTracker } from "@/components/PhaseTracker";
 import { Skeleton, SkeletonCards } from "@/components/Loading";
@@ -56,7 +58,20 @@ import { DecisionHistoryCard } from "@/routes/run/DecisionHistoryCard";
 export function RunPage() {
   const { runId } = useParams<{ runId: string }>();
   const navigate = useNavigate();
-  const [tab, setTab] = useState("recon");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTab = searchParams.get("tab") ?? "overview";
+  const [tab, setTabState] = useState(initialTab);
+  const setTab = (v: string) => {
+    setTabState(v);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (v === "overview") next.delete("tab");
+      else next.set("tab", v);
+      return next;
+    }, { replace: true });
+  };
+  const [showRawEvents, setShowRawEvents] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const events = useRunEvents(runId ?? null);
   // WS drives run state and decisions live; while it is connected the
   // interval polls below drop to slow backstops so they only catch missed
@@ -92,7 +107,8 @@ export function RunPage() {
   // Reset per-run UI state so the previous run's tab/tool results never
   // render against the new run's data.
   useEffect(() => {
-    setTab("recon");
+    const t = new URLSearchParams(window.location.search).get("tab") ?? "overview";
+    setTabState(t);
     setSelectedTool("");
     setToolArgs("{}");
     setToolResult("");
@@ -212,7 +228,7 @@ export function RunPage() {
         <div className="text-destructive">{notFound ? "Run not found." : "Failed to load run."}</div>
         <div className="flex gap-2">
           <Button asChild variant="outline" size="sm">
-            <Link to="/sessions">Back to runs</Link>
+            <Link to="/runs">Back to runs</Link>
           </Button>
           <Button size="sm" onClick={() => run.refetch()}>Retry</Button>
         </div>
@@ -221,11 +237,13 @@ export function RunPage() {
   }
 
   const runData = run.data;
-  const gotoSummary = () => setTab("summary");
+  const gotoSummary = () => setTab("overview");
   const resumeRun = () => resume.mutate(runData.id, { onSuccess: (data) => navigate(`/runs/${data.run_id}`) });
+  const isAdvancedTab = ["tools", "advisory", "audit", "sandbox", "browser", "swarm", "campaign"].includes(tab);
 
   return (
     <div className="flex min-h-0 flex-col gap-2 p-2 xl:h-full xl:flex-1 xl:overflow-hidden">
+      <Breadcrumbs pathname={`/runs/${runData.id}`} runTitle={runData.title || runData.request?.target || "Run"} runId={runData.id} />
       <RunCommandHeader run={runData} state={currentState as RunState} active={active} terminal={terminal} transportLabel={transportLabel} eventsStatus={events.status} derived={derived} onCancelRequest={() => setShowCancel(true)} cancelPending={cancel.isPending} onResume={resumeRun} resumePending={resume.isPending} />
       <RunAttentionBanner authError={events.authError} pendingCount={pendingDecisions.length} active={active} eventsStatus={events.status} stale={events.stale} errorCount={derived.errorEvents} />
       {(runData.request?.mode === "fast" || runData.preview?.mode === "fast" || (runData as unknown as Record<string, unknown>).mode === "fast") && <FastReconProgress events={events.events} />}
@@ -246,30 +264,51 @@ export function RunPage() {
             {terminal ? <RunOutcomeCard run={runData} state={currentState as RunState} derived={derived} onShowSummary={gotoSummary} onResume={resumeRun} resumePending={resume.isPending} /> : <RunNowCard derived={derived} active={active} state={currentState as RunState} />}
           </div>
           <div className="flex min-h-0 flex-1 flex-col gap-2 xl:overflow-hidden">
-            <EventViewer events={events.events} decisions={mergedDecisions} runId={runData.id} status={events.status} transport={events.transport} authError={events.authError} stale={events.stale} dropped={events.dropped} terminal={terminal} className="flex min-h-[280px] flex-col overflow-hidden xl:min-h-0 xl:flex-[1.35] xl:h-full" />
+            <div className="rounded-md border bg-card/30 p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h2 className="text-sm font-semibold">What BreachPilot is doing now</h2>
+                <button type="button" onClick={() => setShowRawEvents((v) => !v)} aria-expanded={showRawEvents} className="text-[13px] text-muted-foreground hover:text-foreground hover:underline">
+                  {showRawEvents ? "Show narrative" : "Show raw events"}
+                </button>
+              </div>
+              {!showRawEvents ? (
+                <NarrativeFeed events={events.events} />
+              ) : (
+                <EventViewer events={events.events} decisions={mergedDecisions} runId={runData.id} status={events.status} transport={events.transport} authError={events.authError} stale={events.stale} dropped={events.dropped} terminal={terminal} className="flex min-h-[280px] flex-col overflow-hidden xl:min-h-0 xl:flex-[1.35] xl:h-full" />
+              )}
+            </div>
+            {showRawEvents && null}
             <Tabs value={tab} onValueChange={setTab} className="flex min-h-[200px] flex-col overflow-hidden rounded-md border bg-card/30 xl:min-h-0 xl:flex-1 xl:max-h-[44%]">
               <div className="shrink-0 border-b bg-muted/30">
                 <ScrollArea type="scroll" className="w-full">
                   <TabsList className="h-7 bg-transparent p-0.5">
-                    <TabsTrigger value="recon" className="h-6 px-2 py-0 text-xs"><ScanSearch className="mr-1 h-3 w-3" />Recon</TabsTrigger>
-                    <TabsTrigger value="graph" className="h-6 px-2 py-0 text-xs"><Network className="mr-1 h-3 w-3" />Attack Path</TabsTrigger>
-                    <TabsTrigger value="summary" className="h-6 px-2 py-0 text-xs"><ClipboardList className="mr-1 h-3 w-3" />Summary</TabsTrigger>
+                    <TabsTrigger value="overview" className="h-6 px-2 py-0 text-[13px]"><ClipboardList className="mr-1 h-3 w-3" />Overview</TabsTrigger>
+                    <TabsTrigger value="evidence" className="h-6 px-2 py-0 text-[13px]"><FileCheck className="mr-1 h-3 w-3" />Evidence</TabsTrigger>
+                    <TabsTrigger value="recon" className="h-6 px-2 py-0 text-[13px]"><ScanSearch className="mr-1 h-3 w-3" />Recon</TabsTrigger>
+                    <TabsTrigger value="graph" className="h-6 px-2 py-0 text-[13px]"><Network className="mr-1 h-3 w-3" />Attack Path</TabsTrigger>
                     <span aria-hidden className="mx-1 hidden h-5 w-px bg-border sm:block" />
-                    <TabsTrigger value="tools" className="h-6 px-2 py-0 text-xs"><Wrench className="mr-1 h-3 w-3" />Tools</TabsTrigger>
-                    <TabsTrigger value="advisory" className="h-6 px-2 py-0 text-xs"><FlaskConical className="mr-1 h-3 w-3" />Advisory</TabsTrigger>
-                    <TabsTrigger value="audit" className="h-6 px-2 py-0 text-xs"><ScrollText className="mr-1 h-3 w-3" />Audit</TabsTrigger>
-                    <TabsTrigger value="sandbox" className="h-6 px-2 py-0 text-xs"><ShieldCheck className="mr-1 h-3 w-3" />Sandbox</TabsTrigger>
-                    <TabsTrigger value="browser" className="h-6 px-2 py-0 text-xs"><Globe className="mr-1 h-3 w-3" />Browser</TabsTrigger>
-                    <TabsTrigger value="swarm" className="h-6 px-2 py-0 text-xs"><Share2 className="mr-1 h-3 w-3" />Swarm</TabsTrigger>
-                    <TabsTrigger value="campaign" className="h-6 px-2 py-0 text-xs"><Flag className="mr-1 h-3 w-3" />Campaign</TabsTrigger>
-                    <TabsTrigger value="evidence" className="h-6 px-2 py-0 text-xs"><FileCheck className="mr-1 h-3 w-3" />Evidence</TabsTrigger>
+                    <button type="button" onClick={() => setShowAdvanced((v) => !v)} aria-expanded={showAdvanced || isAdvancedTab} className="h-6 rounded px-2 py-0 text-[13px] text-muted-foreground hover:bg-accent">
+                      Advanced {showAdvanced || isAdvancedTab ? "▾" : "▸"}
+                    </button>
+                    {(showAdvanced || isAdvancedTab) && (
+                      <>
+                        <TabsTrigger value="tools" className="h-6 px-2 py-0 text-[13px]"><Wrench className="mr-1 h-3 w-3" />Tools</TabsTrigger>
+                        <TabsTrigger value="advisory" className="h-6 px-2 py-0 text-[13px]"><FlaskConical className="mr-1 h-3 w-3" />Advisory</TabsTrigger>
+                        <TabsTrigger value="audit" className="h-6 px-2 py-0 text-[13px]"><ScrollText className="mr-1 h-3 w-3" />Audit</TabsTrigger>
+                        <TabsTrigger value="sandbox" className="h-6 px-2 py-0 text-[13px]"><ShieldCheck className="mr-1 h-3 w-3" />Sandbox</TabsTrigger>
+                        <TabsTrigger value="browser" className="h-6 px-2 py-0 text-[13px]"><Globe className="mr-1 h-3 w-3" />Browser</TabsTrigger>
+                        <TabsTrigger value="swarm" className="h-6 px-2 py-0 text-[13px]"><Share2 className="mr-1 h-3 w-3" />Swarm</TabsTrigger>
+                        <TabsTrigger value="campaign" className="h-6 px-2 py-0 text-[13px]"><Flag className="mr-1 h-3 w-3" />Campaign</TabsTrigger>
+                      </>
+                    )}
                   </TabsList>
                 </ScrollArea>
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2 scrollbar-thin">
+                <TabsContent value="overview" className="mt-0 space-y-2"><SummaryTab result={(runData.result ?? {}) as RunResult} title={runData.title} /></TabsContent>
+                <TabsContent value="summary" className="mt-0 space-y-2"><SummaryTab result={(runData.result ?? {}) as RunResult} title={runData.title} /></TabsContent>
                 <TabsContent value="recon" className="mt-0 space-y-2"><ReconTab fetchArtifact={fetchArtifact} ready={artifactReady("recon_assessment.json")} /></TabsContent>
                 <TabsContent value="graph" className="mt-0 space-y-2"><GraphTab runId={runData.id} ready={artifactReady("enhanced/enhanced_report.json")} /></TabsContent>
-                <TabsContent value="summary" className="mt-0 space-y-2"><SummaryTab result={(runData.result ?? {}) as RunResult} title={runData.title} /></TabsContent>
                 <TabsContent value="tools" className="mt-0 space-y-2">
                   <ManualToolPanel runId={runData.id} tools={tools.data?.tools ?? []} isLoading={tools.isLoading} toolsError={tools.error} onRetryTools={() => tools.refetch()} selectedTool={selectedTool} onSelect={setSelectedTool} args={toolArgs} onArgs={setToolArgs} result={toolResult} onResult={setToolResult} onCall={(name: string, parsedArgs: Record<string, unknown>) => callTool.mutate({ tool: name, arguments: parsedArgs }, { onSuccess: (data) => setToolResult(data.result || "(no output)"), onError: (err) => setToolResult(err instanceof ApiError ? err.message : "Tool call failed.") })} calling={callTool.isPending} />
                 </TabsContent>

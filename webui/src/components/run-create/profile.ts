@@ -19,9 +19,9 @@ export interface ExecutionProfileMeta {
 }
 
 export const EXECUTION_PROFILES: ExecutionProfileMeta[] = [
-  { id: "standard", label: "Standard", description: "Balanced default configuration." },
-  { id: "fast", label: "Fast", description: "Lower overhead, minimal optional reasoning features." },
-  { id: "deep", label: "Deep", description: "More analysis and reasoning features enabled." },
+  { id: "standard", label: "Standard", description: "Balanced depth · medium speed · baseline cost · quiet. Default for most runs." },
+  { id: "fast", label: "Fast", description: "Shallow depth · fastest · lowest cost · quietest. Quick triage." },
+  { id: "deep", label: "Deep", description: "Deepest analysis · slowest · highest cost · noisier. Full reasoning + swarm where available." },
   { id: "custom", label: "Custom", description: "Manually configure every option." },
 ];
 

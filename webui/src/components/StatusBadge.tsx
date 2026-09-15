@@ -2,6 +2,7 @@ import { CheckCircle2, Loader2, PauseCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { stateCategory, type RunState } from "@/api/types";
+import { humanizeStatus } from "@/lib/status";
 
 const CATEGORY_VARIANT: Record<"pending" | "active" | "done", BadgeProps["variant"]> = {
   pending: "muted",
@@ -28,7 +29,7 @@ export function StatusBadge({ state, className }: StatusBadgeProps) {
   return (
     <Badge variant={variant} className={cn("gap-1 tabular-nums", className)}>
       <Icon className="h-3 w-3" aria-hidden />
-      {state}
+      {humanizeStatus(state)}
     </Badge>
   );
 }

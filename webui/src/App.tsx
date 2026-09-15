@@ -60,7 +60,8 @@ export default function App() {
                 <Routes>
                   <Route element={<RouteErrorBoundary><Layout /></RouteErrorBoundary>}>
                     <Route path="/" element={<HomePage />} />
-                    <Route path="/sessions" element={<RunListPage />} />
+                    <Route path="/runs" element={<RunListPage />} />
+                    <Route path="/sessions" element={<Navigate to="/runs" replace />} />
                     <Route path="/runs/new" element={<NewRunPage />} />
                     <Route path="/runs/:runId" element={<RunPage />} />
                     <Route path="/runs/:runId/artifacts" element={<ArtifactsPage />} />
@@ -80,7 +81,7 @@ export default function App() {
                     <Route path="/help" element={<HelpPage />} />
                     <Route path="/memory" element={<MemoryPage />} />
                     <Route path="/system" element={<SystemPage />} />
-                    <Route path="*" element={<Navigate to="/sessions" replace />} />
+                    <Route path="*" element={<Navigate to="/runs" replace />} />
                   </Route>
                 </Routes>
               </Suspense>

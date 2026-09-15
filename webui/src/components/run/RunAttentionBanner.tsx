@@ -49,11 +49,11 @@ export const RunAttentionBanner = memo(function RunAttentionBanner({
     return (
       <div
         role="alert"
-        className="flex flex-wrap items-center gap-2 rounded-md border border-yellow-500/40 bg-yellow-500/10 px-3 py-2.5 text-sm text-yellow-200"
+        className="flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-100"
       >
-        <AlertTriangle className="h-4 w-4 shrink-0 animate-pulse" aria-hidden />
+        <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
         <span className="min-w-0">
-          The run is waiting on operator input —{" "}
+          Needs attention —{" "}
           <span className="font-semibold">
             {pendingCount} pending decision{pendingCount === 1 ? "" : "s"}
           </span>
@@ -63,7 +63,7 @@ export const RunAttentionBanner = memo(function RunAttentionBanner({
           type="button"
           size="sm"
           variant="outline"
-          className="ml-auto h-8 gap-1.5 border-yellow-500/40 text-xs"
+          className="ml-auto h-8 gap-1.5 border-amber-500/40 text-[13px]"
           onClick={scrollToPending}
         >
           <ArrowDown className="h-3.5 w-3.5" aria-hidden />
@@ -82,7 +82,7 @@ export const RunAttentionBanner = memo(function RunAttentionBanner({
         role="alert"
         className="flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-red-200"
       >
-        <AlertTriangle className="h-4 w-4 shrink-0 animate-pulse" aria-hidden />
+        <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
         <span>
           Run is logging errors —{" "}
           <span className="font-semibold">
@@ -103,11 +103,19 @@ export const RunAttentionBanner = memo(function RunAttentionBanner({
         <WifiOff className="h-4 w-4 shrink-0" aria-hidden />
         <span>
           {eventsStatus === "reconnecting"
-            ? "Live connection lost — reconnecting…"
+            ? "Run continues on server; live updates reconnecting…"
             : eventsStatus === "closed"
-              ? "Live connection offline. Data shown is the last received snapshot."
-              : "No live data for a while — connection may be stale."}
+              ? `Run continues on server; live updates disconnected. Data shown is the last snapshot.`
+              : "Run continues on server; no live data for a while — connection may be stale."}
         </span>
+      </div>
+    );
+  }
+
+  if (active) {
+    return (
+      <div role="status" className="rounded-md border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-[13px] text-emerald-200">
+        BreachPilot is working — no action required.
       </div>
     );
   }

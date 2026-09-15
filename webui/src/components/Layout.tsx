@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
-import { Activity, BarChart3, BookOpen, Brain, Cpu, Crosshair, Eye, FlaskConical, GitBranch, Github, HelpCircle, Home, List, Menu, PlugZap, Settings, ShieldAlert, Sparkles, Target, Terminal, X } from "lucide-react";
+import { Activity, Cpu, Eye, Github, HelpCircle, Menu, Settings, ShieldAlert, Terminal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -100,6 +100,20 @@ export function Layout() {
     return () => window.removeEventListener("keydown", onKey);
   }, [navigate]);
 
+  // Attention roll-up (todo 37): approvals, active runs, provider/connection health.
+  const attentionItems: AttentionItem[] = [
+    ...activeRuns.map((r) => ({
+      id: `run-${r.id}`,
+      kind: "approval" as const,
+      title: `Active run: ${r.target || r.id.slice(0, 8)}`,
+      detail: "Open the run to review pending decisions.",
+      to: `/runs/${r.id}`,
+    })),
+    ...(providerStatus.status === "unreachable"
+      ? [{ id: "provider", kind: "provider" as const, title: "Provider offline", detail: providerStatus.error ?? "Provider unreachable.", to: "/system", fixKey: "provider_offline" }]
+      : []),
+  ];
+
   // Backend OS for the sidebar badge (same source as WindowsPerformanceWarning:
   // platform.system(), never the browser UA). Falls back to "Local" while
   // loading or when the query is unavailable.
@@ -127,7 +141,7 @@ export function Layout() {
   // Shared by the desktop <aside> and the mobile drawer — one source of truth
   // for nav links, active-run rows, and the footer controls. Grouped per
   // productRoutes registry (todos 04/05/20); mobile follows the same hierarchy.
-  const renderNavLink = (to: string, label: string, Icon: React.ComponentType<{ className?: string }>, end?: boolean) => {
+  const renderNavLink = (to: string, label: string, Icon: ComponentType<{ className?: string }>, end?: boolean) => {
     const isConnections = to === "/connections";
     return (
       <NavLink
@@ -345,13 +359,26 @@ export function Layout() {
 
       <main className="flex min-h-0 min-w-0 flex-1 flex-col xl:overflow-hidden">
         <WindowsPerformanceWarning />
+        <div className="flex items-center gap-2 border-b px-4 py-1.5">
+          <div className="ml-auto flex items-center gap-1">
+            <AttentionCentre items={attentionItems} />
+            <button
+              type="button"
+              onClick={() => setPaletteOpen(true)}
+              className="hidden h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground md:inline-flex"
+              aria-label="Global search (Ctrl+K)"
+            >
+              Search… <kbd className="rounded border px-1 text-xs">Ctrl K</kbd>
+            </button>
+          </div>
+        </div>
         {mode === "approve" && permBannerDismissed !== "approve" && (
           <div
-            className="flex items-center gap-2 border-b border-yellow-500/30 bg-yellow-500/10 px-4 py-1.5 text-xs text-yellow-300"
+            className="flex items-center gap-2 border-b border-yellow-500/30 bg-yellow-500/10 px-4 py-1.5 text-[13px] text-yellow-200"
             role="status"
           >
             <ShieldAlert className="h-3.5 w-3.5" />
-            <span>Approve mode: non-destructive decisions auto-answered.</span>
+            <span>Auto-safe approvals: safe decisions auto-handled. Destructive, goals, and campaign checkpoints still wait for you.</span>
             <button
               type="button"
               onClick={() => setPermBannerDismissed("approve")}
@@ -364,11 +391,11 @@ export function Layout() {
         )}
         {mode === "full_access" && permBannerDismissed !== "full_access" && (
           <div
-            className="flex items-center gap-2 border-b border-destructive/40 bg-destructive/10 px-4 py-1.5 text-xs text-red-200"
+            className="flex items-center gap-2 border-b border-destructive/40 bg-destructive/10 px-4 py-1.5 text-[13px] text-red-200"
             role="status"
           >
             <ShieldAlert className="h-3.5 w-3.5" />
-            <span>Full access mode: ALL decisions auto-answered, including destructive confirmations.</span>
+            <span>Autonomous within scope: start/tool approvals auto-handled, including destructive confirmations. Goals and campaign checkpoints still wait for you.</span>
             <button
               type="button"
               onClick={() => setPermBannerDismissed("full_access")}
@@ -380,9 +407,8 @@ export function Layout() {
           </div>
         )}
         {activeRuns.length > 0 && (
-          <div className="relative flex flex-wrap items-center gap-2 overflow-hidden border-b border-yellow-500/30 bg-yellow-500/10 px-4 py-2 text-sm text-yellow-300">
-            <span className="absolute inset-y-0 left-0 w-px animate-scan bg-gradient-to-b from-transparent via-yellow-400/60 to-transparent" aria-hidden />
-            <Activity className="h-4 w-4 animate-pulse" />
+          <div className="relative flex flex-wrap items-center gap-2 overflow-hidden border-b border-yellow-500/30 bg-yellow-500/10 px-4 py-2 text-sm text-yellow-200">
+            <Activity className="h-4 w-4" aria-hidden />
             <span className="truncate">{activeRuns.length === 1 ? "An active run is in progress." : `${activeRuns.length} active runs in progress.`}</span>
             {activeRuns.slice(0, 3).map((r) => (
               <NavLink key={r.id} to={`/runs/${r.id}`} className="underline-offset-4 hover:underline">
@@ -390,17 +416,17 @@ export function Layout() {
               </NavLink>
             ))}
             {activeRuns.length > 3 && (
-              <NavLink to="/sessions" className="underline-offset-4 hover:underline">+{activeRuns.length - 3} more</NavLink>
+              <NavLink to="/runs" className="underline-offset-4 hover:underline">+{activeRuns.length - 3} more</NavLink>
             )}
           </div>
         )}
         {/* No key on the route wrapper: keying by pathname remounts the
             whole subtree (losing tab state, refetching) on every navigation.
             The entrance animation plays once on mount. */}
-        <div className="flex min-h-0 flex-1 flex-col overflow-auto min-w-0 animate-fade-in-up">
+        <div className="flex min-h-0 flex-1 flex-col overflow-auto min-w-0">
           <Outlet />
         </div>
-        <footer className="flex items-center justify-between gap-2 border-t px-4 py-2 text-xs text-muted-foreground">
+        <footer className="flex items-center justify-between gap-2 border-t px-4 py-2 text-[13px] text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
             <Eye className="h-3 w-3" />
             Loopback-only · Authorized use only — operate exclusively against owned or explicitly authorized assets.
@@ -422,10 +448,10 @@ export function Layout() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <ShieldAlert className="h-4 w-4 text-primary" />
-              Permission mode
+              Approval policy
             </DialogTitle>
             <DialogDescription className="text-sm">
-              Controls how you answer the agent&apos;s decisions when you&apos;re not watching.
+              When should BreachPilot ask you before acting? One policy — permission mode + launch confirmation mapped internally.
             </DialogDescription>
           </DialogHeader>
           <PermissionControl mode={mode} onModeChange={setMode} />
@@ -437,10 +463,10 @@ export function Layout() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-xl">
               <ShieldAlert className="h-5 w-5 text-primary" />
-              Permission mode
+              Approval policy
             </DialogTitle>
             <DialogDescription className="text-sm">
-              Controls how the agent answers operator decisions when you're not watching. Three levels, one lock.
+              When should BreachPilot ask you before acting? Three levels, one allowlist lock.
             </DialogDescription>
           </DialogHeader>
 
@@ -457,52 +483,51 @@ export function Layout() {
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-semibold">{MODE_TITLES[m]}</span>
                     {mode === m && (
-                      <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary">
+                      <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-primary">
                         active
                       </span>
                     )}
                   </div>
-                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{MODE_BLURB[m]}</p>
+                  <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">{MODE_BLURB[m]}</p>
                 </div>
               ))}
             </div>
 
             <div>
-              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <div className="mb-2 text-[13px] font-medium uppercase tracking-wide text-muted-foreground">
                 Demo — what the agent sends for each decision kind
               </div>
               <div className="overflow-hidden rounded-lg border">
                 <table className="w-full text-left text-sm">
-                  <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+                  <thead className="bg-muted/40 text-[13px] uppercase tracking-wide text-muted-foreground">
                     <tr>
                       <th className="px-3 py-2.5 font-medium">Decision</th>
-                      <th className="px-3 py-2.5 font-medium">Read-only</th>
-                      <th className="px-3 py-2.5 font-medium">Approve</th>
-                      <th className="px-3 py-2.5 font-medium">Full access</th>
+                      <th className="px-3 py-2.5 font-medium">Manual approvals</th>
+                      <th className="px-3 py-2.5 font-medium">Auto-safe approvals</th>
+                      <th className="px-3 py-2.5 font-medium">Autonomous within scope</th>
                     </tr>
                   </thead>
                   <tbody>
                     {DEMO_DECISIONS.map((d) => (
                       <tr key={d.kind} className="border-t">
-                        <td className="px-3 py-2.5 font-mono text-foreground">{d.kind}</td>
+                        <td className="px-3 py-2.5 text-foreground">{humanizeEnum(d.kind, DECISION_KIND_LABELS)}</td>
                         <td className="px-3 py-2.5 text-muted-foreground">{demoAnswer(d, "read_only")}</td>
-                        <td className="px-3 py-2.5 text-yellow-300">{demoAnswer(d, "approve")}</td>
+                        <td className="px-3 py-2.5 text-yellow-200">{demoAnswer(d, "approve")}</td>
                         <td className="px-3 py-2.5 text-red-300">{demoAnswer(d, "full_access")}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                <span className="text-yellow-300">Approve</span> leaves the destructive
-                <span className="font-mono"> tool_approval</span> to you.
-                <span className="text-red-300"> Full access</span> auto-submits the exact
-                <span className="font-mono"> required_text</span> for destructive confirmations.
+              <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">
+                <span className="text-yellow-200">Auto-safe approvals</span> leaves destructive confirmations, goals, and campaign checkpoints to you.
+                <span className="text-red-300"> Autonomous within scope</span> auto-submits the exact
+                <span className="font-mono"> required_text</span> for destructive confirmations. Goals and campaign checkpoints still wait for you.
               </p>
             </div>
 
             <DialogDescription asChild>
-              <p className="text-xs leading-relaxed text-muted-foreground">
+              <p className="text-[13px] leading-relaxed text-muted-foreground">
                 The target-IP allowlist lock still applies in every mode — nothing here escapes the allowlist configured for
                 this run.
               </p>
@@ -510,6 +535,7 @@ export function Layout() {
           </div>
         </DialogContent>
       </Dialog>
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </div>
   );
 }

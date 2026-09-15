@@ -13,24 +13,28 @@ const MODE_OPTIONS: Array<{
   icon: typeof Swords;
   title: string;
   blurb: string;
+  impact: string;
 }> = [
   {
     value: "recon",
     icon: ScanSearch,
     title: "Recon",
     blurb: "Map services, technologies and attack surface before exploitation.",
+    impact: "Read-only · minutes · quiet · delivers recon report + attack surface.",
   },
   {
     value: "attack",
     icon: Swords,
     title: "Attack",
     blurb: "Run the autonomous offensive workflow against the selected target.",
+    impact: "Can change target systems · longer · noisier · delivers verified findings. Only against authorized targets.",
   },
   {
     value: "fast",
     icon: Zap,
     title: "Fast",
     blurb: "Run optimized parallel recon first, then give the complete recon context to the AI agent.",
+    impact: "Read-only recon first · fastest · quiet · delivers quick recon + prioritized next steps.",
   },
 ];
 
@@ -109,6 +113,7 @@ export function ModeSelector({ value, onChange }: ModeSelectorProps) {
               )}
             </span>
             <span className="text-xs leading-relaxed text-muted-foreground">{m.blurb}</span>
+            <span className="text-xs leading-relaxed text-muted-foreground/80">{m.impact}</span>
           </button>
         );
       })}
