@@ -18,6 +18,7 @@ from tools.attack_ui import get_ui
 from tools.exceptions import _EXC_GROUP_CATCH
 from tools.failure_taxonomy import classify_failure
 from tools.logging_setup import get_logger
+from tools.scope_verdict import ScopeVerdict, verdict_for
 
 from tools.campaign.state import (
     AggressionLevel,
@@ -170,11 +171,27 @@ class AttackModuleExecutor:
             tool_name=task.module_name,
             risk_level="high" if task.aggression == AggressionLevel.MAXIMUM else "medium",
         )
-        if not scope_result.allowed:
+        # Three-state verdict: DENY and REQUIRES_APPROVAL both block. The
+        # campaign path has no mid-run operator-approval funnel, so a gated
+        # action is an explicit approval request, never a silent allow.
+        scope_verdict = verdict_for(scope_result)
+        if scope_verdict is not ScopeVerdict.ALLOW:
             task.status = TaskStatus.BLOCKED
-            task.error = f"Scope blocked: {scope_result.reason}"
+            if scope_verdict is ScopeVerdict.REQUIRES_APPROVAL:
+                task.error = (
+                    "Scope approval required: "
+                    f"{scope_result.reason} (no mid-run approval funnel -- "
+                    "request explicit operator approval before proceeding)"
+                )
+            else:
+                task.error = f"Scope blocked: {scope_result.reason}"
             state.add_timeline_event("blocked", task.error)
-            return {"success": False, "error": task.error, "blocked": True}
+            return {
+                "success": False,
+                "error": task.error,
+                "blocked": True,
+                "approval_required": scope_verdict is ScopeVerdict.REQUIRES_APPROVAL,
+            }
 
         # Risk check
         if self._risk_controller:
@@ -676,8 +693,15 @@ class AttackModuleExecutor:
             )
         except Exception as exc:  # noqa: BLE001 -- a broken gate blocks, never passes
             return f"scope check raised: {exc}"
-        if not scope_result.allowed:
+        scope_verdict = verdict_for(scope_result)
+        if scope_verdict is ScopeVerdict.DENY:
             return f"Scope blocked: {scope_result.reason}"
+        if scope_verdict is ScopeVerdict.REQUIRES_APPROVAL:
+            return (
+                "Scope approval required: "
+                f"{scope_result.reason} (no mid-run approval funnel -- "
+                "request explicit operator approval before proceeding)"
+            )
         try:
             from tools.mcp_tools.terminal import _target_lock_block
 

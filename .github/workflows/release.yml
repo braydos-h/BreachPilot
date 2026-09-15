@@ -24,8 +24,8 @@ jobs:
     outputs:
       verdict: ${{ steps.gate.outputs.verdict }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
           cache: pip
@@ -46,7 +46,7 @@ jobs:
           test "$verdict" = "GO"
       - name: Upload gate report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-gate
           path: gate.txt
@@ -58,8 +58,8 @@ jobs:
     timeout-minutes: 30
     needs: [gate]
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
           cache: pip
@@ -87,13 +87,13 @@ jobs:
       - name: Record worker image digest
         run: docker image inspect --format '{{json .RepoDigests}}' breachpilot-sandbox:${{ github.ref_name }} | tee worker-digests.txt
       - name: SBOM (sandbox image, syft)
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
           image: breachpilot-sandbox:${{ github.ref_name }}
           format: cyclonedx-json
           output-file: sbom-sandbox.json
       - name: Scan image (Trivy, HIGH/CRITICAL fail gate)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
         with:
           image-ref: breachpilot-sandbox:${{ github.ref_name }}
           format: sarif
@@ -101,11 +101,11 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
       - name: Attest build provenance (#42)
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45 # v2
         with:
           subject-path: dist/*, sbom-python.json, sbom-webui.json, sbom-sandbox.json
       - name: Upload release assets
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-assets
           path: |

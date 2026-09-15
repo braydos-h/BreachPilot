@@ -560,7 +560,7 @@ sandbox:
     map_host_loopback: false
     extra_allow_cidrs: []
     allow_gateway: false
-    allow_research_hosts: true
+    allow_research_hosts: false
   cleanup:
     remove_on_exit: true
     remove_stale_on_startup: true

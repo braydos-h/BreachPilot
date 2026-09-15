@@ -742,7 +742,7 @@ never an automatic fallback. Full architecture + threat model:
 | `network.map_host_loopback` | bool | `false` | Dev-only mapping of sandbox loopback targets to the host gateway; never enable for production runs | `tools/sandbox/policy.py` |
 | `network.extra_allow_cidrs` | list[str] | `[]` | Operator-authorized extra CIDRs | `tools/sandbox/policy.py` |
 | `network.allow_gateway` | bool | `false` | Authorize the Docker bridge gateway (path to host services + Docker daemon) — keep false | `tools/sandbox/network.py` |
-| `network.allow_research_hosts` | bool | `true` | Pinned exploit-research egress (github.com et al., host-resolved + audited) | `tools/sandbox/policy.py` |
+| `network.allow_research_hosts` | bool | `false` | Pinned exploit-research egress (github.com et al., host-resolved + audited), opt-in only | `tools/sandbox/policy.py` |
 | `cleanup.remove_on_exit` | bool | `true` | Destroy worker + network after the run | `tools/sandbox/manager.py:destroy` |
 | `cleanup.remove_stale_on_startup` | bool | `true` | Sweep exited labeled containers / empty networks at startup (running concurrent-session workers kept) | `tools/sandbox/manager.py:cleanup_stale` |
 | `multi_net_raw` | bool | `true` | Grant NET_RAW for raw-packet scanning (nmap -sS); NET_ADMIN is never granted to the worker | `tools/sandbox/manager.py:resolve_manager` |

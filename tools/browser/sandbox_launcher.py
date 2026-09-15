@@ -3,7 +3,7 @@
 Contained runs never launch Chromium on the operator host. Instead each
 browser op is executed inside the sandbox worker via ``SandboxManager`` +
 ``docker exec`` (``python3 -c <one-shot script>``), inside the worker netns
-whose egress firewall authorizes only the effective target allowlist. The
+whose egress firewall authorizes only the effective target allowlist (plus pinned research hosts only when `allow_research_hosts` is explicitly enabled; default off). The
 one-shot worker script is stdlib-only + the Playwright sync API (installed in
 the browser worker image); translation into ``models.*`` stays host-side in
 :mod:`tools.browser.playwright_backend`, so there is exactly one translation

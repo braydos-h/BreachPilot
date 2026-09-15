@@ -857,7 +857,9 @@ CONFIG_SCHEMA: dict[str, Any] = {
     # inside a hardened, per-run Docker worker instead of on the operator host.
     # The worker is cap-dropped (NET_RAW at most, never NET_ADMIN), non-root,
     # no-new-privileges, resource-bounded, and gets a default-DROP netns
-    # firewall authorizing ONLY the effective target allowlist. ANY sandbox
+    # firewall authorizing ONLY the effective target allowlist (plus pinned
+    # research hosts only when ``allow_research_hosts`` is explicitly enabled;
+    # default off). ANY sandbox
     # failure DURING a session blocks offensive execution (fail closed -- host
     # execution is never a per-command fallback). The one sanctioned fallback
     # is the boot-time decision: when the Docker probe fails at server boot
@@ -909,7 +911,8 @@ CONFIG_SCHEMA: dict[str, Any] = {
             # false: the gateway is also the path to the Docker daemon.
             "allow_gateway": False,
             # Pinned exploit-research egress (github.com etc., host-resolved).
-            "allow_research_hosts": True,
+            # Default OFF: target-only egress out of the box (opt-in only).
+            "allow_research_hosts": False,
         },
         "cleanup": {
             "remove_on_exit": True,

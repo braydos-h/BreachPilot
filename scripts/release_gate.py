@@ -288,6 +288,17 @@ def check_docs_contract(root: Path) -> GateResult:
     return _ok("docs-contract", "reliability + pyramid + branch-protection + release + SECURITY present")
 
 
+def check_js_scan(root: Path) -> GateResult:
+    """npm audit gate present in CI (parity with pip-audit); missing/soft scan fails."""
+    try:
+        text = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    except OSError as exc:
+        return _fail("js-scan", f"cannot read ci.yml: {exc}")
+    if "npm audit" not in text:
+        return _fail("js-scan", "ci.yml has no npm audit step (JS vuln gate missing)")
+    return _ok("js-scan", "npm audit gate present in CI audit job")
+
+
 def check_external(root: Path) -> list[GateResult]:
     """Boxes no agent run can satisfy — listed EXTERNAL, never green."""
     _ = root
@@ -313,6 +324,7 @@ def run_gate(root: Path) -> GateReport:
         check_provenance_fields(root),
         check_native_consent_gate(root),
         check_docs_contract(root),
+        check_js_scan(root),
         *check_external(root),
     ]
     return report

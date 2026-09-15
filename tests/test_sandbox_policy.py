@@ -153,6 +153,43 @@ class TestBuildNetworkPolicy:
         assert pol.allow_dns == "none"
         assert pol.dns_servers == []
 
+    def test_research_hosts_denied_by_default(self, monkeypatch):
+        # Default-deny: no explicit flag => research hosts add nothing, and
+        # target-only traffic still works. Overrides the file's autouse
+        # no-resolution stub so the deny is proven against resolving hosts.
+        monkeypatch.setattr(
+            sandbox_policy,
+            "_resolve_authorized",
+            lambda domain, config, **kwargs: (
+                ["203.0.113.9"] if domain in sandbox_policy.RESEARCH_HOSTS else []
+            ),
+        )
+        pol = build_network_policy(
+            {
+                "exploit": {"allowed_targets": ["192.0.2.5"]},
+                "sandbox": {"enabled": True, "network": {}},
+            }
+        )
+        assert pol.authorized_destinations == ["192.0.2.5/32"]
+        assert "203.0.113.9" not in pol.authorized_destinations
+
+    def test_research_hosts_authorized_only_on_explicit_opt_in(self, monkeypatch):
+        monkeypatch.setattr(
+            sandbox_policy,
+            "_resolve_authorized",
+            lambda domain, config, **kwargs: (
+                ["203.0.113.9"] if domain in sandbox_policy.RESEARCH_HOSTS else []
+            ),
+        )
+        pol = build_network_policy(
+            {
+                "exploit": {"allowed_targets": ["192.0.2.5"]},
+                "sandbox": {"enabled": True, "network": {"allow_research_hosts": True}},
+            }
+        )
+        assert "203.0.113.9" in pol.authorized_destinations
+        assert "192.0.2.5/32" in pol.authorized_destinations
+
 
 class TestAuditPolicyPayload:
     def test_payload_is_secret_free_and_fingerprinted(self):

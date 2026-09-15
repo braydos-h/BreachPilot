@@ -51,7 +51,7 @@ _AUTHORIZE_ALL_TOKENS = {"0.0.0.0/0", "::/0", "*", "any", "all"}
 
 # Pinned exploit-research egress: the exploit workflow depends on pulling PoC/
 # tool repos and reading public advisories. When ``network.allow_research_hosts``
-# is true (default) these DOMAINS are resolved HOST-SIDE (through the same
+# is explicitly true (default false) these DOMAINS are resolved HOST-SIDE (through the same
 # controlled-DNS machinery) and their resolved IPs are added to the firewall
 # authorization. It is a fixed, auditable list -- never a hostname wildcard,
 # never user data. If resolution yields nothing, the host simply is not
@@ -173,7 +173,7 @@ def build_network_policy(
     if map_loopback and loopback_hits and gateway:
         _append_unique(authorized, gateway)
 
-    if bool(network_cfg.get("allow_research_hosts", True)):
+    if bool(network_cfg.get("allow_research_hosts", False)):
         for host in RESEARCH_HOSTS:
             ips = _resolve_authorized(host, config, _skip_allowlist=True, resolver_fn=resolver_fn)
             for ip in ips:

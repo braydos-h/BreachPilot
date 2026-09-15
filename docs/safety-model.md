@@ -89,8 +89,10 @@ explicitly authorized to test, on a throwaway operator box. An explicit
   to a category in `exploit.forbidden_actions` (`_TOOL_ACTION_CATEGORY`), an
   action naming an asset outside the gate's allow rules / inside
   `exploit.disallowed_assets`, or a gate verdict of `requires_human_approval`
+  (`REQUIRES_APPROVAL` in `tools/scope_verdict.py`)
   under a non-`high_authorized_testing` profile is denied with a `SCOPE_DENIED` audit row
-  (`high_authorized_testing` is the sole exception and still auto-approves).
+  (`high_authorized_testing` is the sole exception and still auto-approves via
+  the auditable `LabAutoApprovalPolicy` adapter).
   `scope_gate=None` denies (the gate is required on full_access). Command
   *content* is not inspected — destructive commands, egress, reverse shells,
   credential dumping, Metasploit, and Python write/run are all allowed against

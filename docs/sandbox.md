@@ -34,8 +34,9 @@ One worker per attack run/session (`tools/sandbox/manager.py`):
    `run_id=<id>`)
 2. **configure network policy** — an ephemeral `NET_ADMIN` sidecar sharing the
    worker's network namespace installs a default-DROP `iptables`/`ip6tables`
-   ruleset authorizing ONLY the effective target allowlist (before the first
-   agent command)
+   ruleset authorizing ONLY the effective target allowlist (plus pinned research
+   hosts only when `allow_research_hosts` is explicitly enabled; default off)
+   (before the first agent command)
 3. **mount run workspace** — `exploit_workspace/<run>/` binds at `/workspace`
    (the only host path the worker can see)
 4. **execute** — all attack tools run inside the worker
@@ -281,7 +282,7 @@ sandbox:
     map_host_loopback: false   # dev-only host-loopback mapping
     extra_allow_cidrs: []      # operator-authorized extra CIDRs
     allow_gateway: false       # keep false (gateway = path to Docker daemon)
-    allow_research_hosts: true # pinned github/gitlab egress, host-resolved
+    allow_research_hosts: false # pinned github/gitlab egress, opt-in only (default deny)
   cleanup:
     remove_on_exit: true
     remove_stale_on_startup: true
@@ -318,9 +319,9 @@ The worker's `/tmp` is a tmpfs sized by `sandbox.resources.tmpfs_size_mb` (defau
   the host gateway — dev/lab only.
 - **`network.enforce: false`** removes the netns firewall and leaves only
   Docker bridge isolation — explicitly NOT containment; audits record it.
-- **`allow_research_hosts: true`** (default) authorizes pinned research
-  egress (github.com et al.) — a fixed, auditable list; set false for
-  air-gapped missions.
+- **`allow_research_hosts: true`** (opt-in only, default false) authorizes pinned research
+  egress (github.com et al.) — a fixed, auditable list; leave false for
+  target-only/air-gapped missions.
 - **`extra_allow_cidrs`** widens the boundary by configuration; operator
   responsibility.
 - **RAW sockets (NET_RAW)** enable packet spoofing *toward authorized

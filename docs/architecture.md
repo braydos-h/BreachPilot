@@ -38,7 +38,7 @@ The sandbox (`tools/sandbox/`, default-on) sits between the MCP tool layer and
 the network: the MCP tool registrations call `run_command_in_sandbox` /
 `run_argv_in_sandbox`, the `SandboxManager` owns one hardened worker container
 per run (cap-dropped, non-root, read-only rootfs, bounded resources), and a
-default-DROP netns firewall authorizes only the effective target allowlist.
+default-DROP netns firewall authorizes only the effective target allowlist (plus pinned research hosts only when `allow_research_hosts` is explicitly enabled; default off).
 Sandbox failures fail closed as structured `SANDBOX_*` blocks; see
 [sandbox.md](sandbox.md).
 

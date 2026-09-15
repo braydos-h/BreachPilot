@@ -110,7 +110,7 @@ def apply_network_policy(policy: NetworkPolicy, *, container_id: str, image: str
 | `localhost` / `127.0.0.1` / `::1` | Sandbox loopback only, unless `map_host_loopback` plus a gateway explicitly maps the dev host loopback |
 | `0.0.0.0/0`, `::/0`, `*`, `any`, `all` | `ValueError` — the policy refuses to express "everywhere", caller fail-closes |
 
-Always denied: `METADATA_DESTINATIONS` (`169.254.169.254`, `169.254.0.0/16`, `fd00:ec2::254`, `100.100.100.200`, `fe80::/10`) plus the Docker bridge gateway unless `allow_gateway` is set. `RESEARCH_HOSTS` (`github.com`, `api.github.com`, `codeload.github.com`, `objects.githubusercontent.com`, `raw.githubusercontent.com`, `gitlab.com`) are resolved host-side and authorized when `allow_research_hosts` is true. `allow_dns: controlled` keeps the container resolver (`127.0.0.11`); `none` adds explicit port-53 REJECTs.
+Always denied: `METADATA_DESTINATIONS` (`169.254.169.254`, `169.254.0.0/16`, `fd00:ec2::254`, `100.100.100.200`, `fe80::/10`) plus the Docker bridge gateway unless `allow_gateway` is set. `RESEARCH_HOSTS` (`github.com`, `api.github.com`, `codeload.github.com`, `objects.githubusercontent.com`, `raw.githubusercontent.com`, `gitlab.com`) are resolved host-side and authorized only when `allow_research_hosts` is explicitly true (default false). `allow_dns: controlled` keeps the container resolver (`127.0.0.11`); `none` adds explicit port-53 REJECTs.
 
 `network.py` renders default-DROP `iptables-restore` / `ip6tables-restore` rulesets installed by the ephemeral `--rm` sidecar sharing the worker netns (`run_netns_sidecar`). Re-application happens at each command boundary only when `NetworkPolicy.fingerprint()` changes, so dynamic targets are picked up deliberately. With `network.enforce: false` no firewall is installed — Docker bridge isolation only, explicitly not containment, and logged as such.
 
@@ -155,7 +155,7 @@ Implementation note: `docs/sandbox.md` describes `fallback_native: true` as "the
 | `sandbox.network.map_host_loopback` | `false` | Dev-only host-loopback mapping |
 | `sandbox.network.extra_allow_cidrs` | `[]` | Operator-authorized extra CIDRs; invalid entries warn and skip |
 | `sandbox.network.allow_gateway` | `false` | Keep false; gateway reaches host-published services and the daemon |
-| `sandbox.network.allow_research_hosts` | `true` | Pinned github/gitlab egress, host-resolved |
+| `sandbox.network.allow_research_hosts` | `false` | Pinned github/gitlab egress, host-resolved, opt-in only |
 | `sandbox.cleanup.remove_on_exit` / `remove_stale_on_startup` | `true` / `true` | Destroy worker/network on exit; sweep stale labeled resources at boot |
 | `sandbox.multi_net_raw` | `true` | `NET_RAW` for raw packet scanning; `false` drops even that |
 

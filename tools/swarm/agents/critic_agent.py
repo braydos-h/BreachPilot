@@ -15,6 +15,7 @@ import time
 from typing import Any
 
 from tools.exceptions import _EXC_GROUP_CATCH
+from tools.scope_verdict import ScopeVerdict, verdict_for
 from tools.swarm.base import Agent, AgentResult, AgentStatus
 
 _CRITIC_SYSTEM_PROMPT = """You are a SAFETY & POLICY CRITIC agent in an autonomous penetration testing swarm.
@@ -106,7 +107,7 @@ class CriticAgent(Agent):
         error = ""
 
         try:
-            # ── Layer 1: Scope check ──
+            # ── Layer 1: Scope check (three-state verdict) ──
             if scope_gate:
                 scope_result = scope_gate.check_scope(
                     asset=proposed_action.get("target", ""),
@@ -114,9 +115,19 @@ class CriticAgent(Agent):
                     tool_name=proposed_action.get("tool", ""),
                     risk_level=proposed_action.get("risk_level", "low"),
                 )
-                if not scope_result.allowed:
+                scope_verdict = verdict_for(scope_result)
+                if scope_verdict is not ScopeVerdict.ALLOW:
+                    # DENY and REQUIRES_APPROVAL both block here: the swarm
+                    # has no mid-run operator-approval funnel, so a gated
+                    # action must be an explicit deny, never a silent allow.
                     output["decision"] = "deny"
-                    output["reasoning"] = f"SCOPE BLOCKED: {scope_result.reason}"
+                    if scope_verdict is ScopeVerdict.REQUIRES_APPROVAL:
+                        output["reasoning"] = (
+                            "SCOPE REQUIRES OPERATOR APPROVAL: "
+                            f"{scope_result.reason} (no approval funnel mid-run -- denied)"
+                        )
+                    else:
+                        output["reasoning"] = f"SCOPE BLOCKED: {scope_result.reason}"
                     self._set_status(AgentStatus.BLOCKED)
                     return self._make_result(task_id, output, error, start)
 

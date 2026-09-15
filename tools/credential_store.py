@@ -27,10 +27,14 @@ file on disk holds ciphertext. The key is resolved, in priority order, from:
      in-workspace ``.vault_key`` is adopted once (moved, not copied) so
      existing stores keep decrypting.
 
-If the ``cryptography`` package is not importable, encryption is disabled and
-the store falls back to **plaintext**, emitting a one-time loud WARNING (never
-silent). Legacy plaintext files still load: a value that does not decrypt under
-the current key is treated as plaintext, so existing stores are never bricked.
+If the ``cryptography`` package is not importable (or no vault key can be
+established), the store **refuses to write** rather than persisting secrets in
+plaintext: ``save()``/``add()`` raise ``RuntimeError`` naming the cause.
+Explicit opt-in to insecure storage is available via
+``BREACHPILOT_ALLOW_PLAINTEXT_VAULT=1`` (warns loudly, never silent).
+Legacy plaintext files still *load*: a value that does not decrypt under
+the current key is treated as plaintext, so existing stores are never bricked
+-- the fail-closed gate is on writes only.
 
 ``confirmed`` gating
 ---------------------
@@ -164,13 +168,27 @@ def _vault_key_path(store_dir: Path) -> Path:
     return keys_dir / f"{digest}.key"
 
 
+#: Explicit opt-in for insecure plaintext vault storage. Default is fail-closed:
+#: when secure storage is unavailable, writes are refused instead of persisted
+#: in cleartext.
+PLAINTEXT_VAULT_ENV = "BREACHPILOT_ALLOW_PLAINTEXT_VAULT"
+
+
+def _plaintext_vault_allowed() -> bool:
+    """True only when the operator explicitly opts into plaintext vault storage."""
+    return os.environ.get(PLAINTEXT_VAULT_ENV) == "1"
+
+
 class _Vault:
     """Fernet-based at-rest encryption for the credential store's secret field.
 
     See the module docstring for the key resolution order and threat model.
-    ``enabled`` is False (plaintext fallback) when ``cryptography`` is missing or
-    a usable key cannot be established; the fallback is loud (one-time WARNING),
-    never silent.
+    ``enabled`` is False when ``cryptography`` is missing or a usable key cannot
+    be established. By default that state is fail-closed: ``save()``/``add()``
+    raise ``RuntimeError`` (via :meth:`assert_writable`) instead of persisting
+    secrets in cleartext. Setting ``BREACHPILOT_ALLOW_PLAINTEXT_VAULT=1`` opts
+    back into the legacy loud plaintext fallback (one-time WARNING, never
+    silent). Reads stay fail-open either way so legacy stores never brick.
     """
 
     _plaintext_warned = False
@@ -184,6 +202,7 @@ class _Vault:
         self.enabled = False
         self._fernet = None
         self._key_material: bytes | None = None
+        self._refusal: str | None = None
         self._store_dir = Path(workspace)
         self._legacy_keyfile = self._store_dir / ".vault_key"
         self._keyfile = _vault_key_path(self._store_dir)
@@ -192,23 +211,51 @@ class _Vault:
 
             self._Fernet = Fernet
         except ImportError:
-            self._warn_plaintext_fallback(
-                "cryptography package not installed -- credential store will be "
-                "written in PLAINTEXT. Install 'cryptography' to enable at-rest "
-                "Fernet encryption."
+            self._refuse_or_warn(
+                "cryptography package not installed -- install 'cryptography' to enable at-rest Fernet encryption."
             )
             return
         key = os.environ.get("AI_NMAP_VAULT_KEY") or self._load_or_create_key()
         if not key:
-            self._warn_plaintext_fallback("no vault key could be established")
+            self._refuse_or_warn("no vault key could be established")
             return
         try:
             key_bytes = key if isinstance(key, bytes) else key.encode()
             self._fernet = Fernet(key_bytes)
             self._key_material = key_bytes
             self.enabled = True
-        except Exception as exc:  # invalid key material -> fail safe to plaintext
-            self._warn_plaintext_fallback(f"invalid vault key ({exc!r})")
+        except Exception as exc:  # invalid key material -> fail closed
+            self._refuse_or_warn(f"invalid vault key ({exc!r})")
+
+    def _refuse_or_warn(self, detail: str) -> None:
+        """Fail closed on secure-storage failure unless explicitly opted in.
+
+        Default: record the refusal so ``assert_writable`` raises on any write
+        attempt -- secrets are never persisted in cleartext silently. With
+        ``BREACHPILOT_ALLOW_PLAINTEXT_VAULT=1`` the legacy loud plaintext
+        fallback applies (one-time WARNING, writes proceed).
+        """
+        if _plaintext_vault_allowed():
+            self._warn_plaintext_fallback(
+                f"{detail} -- proceeding in PLAINTEXT because {PLAINTEXT_VAULT_ENV}=1 is set."
+            )
+            return
+        self._refusal = detail
+        _LOG.error(
+            "Credential-store secure storage unavailable: %s -- refusing "
+            "plaintext writes (set %s=1 to explicitly allow insecure storage).",
+            detail,
+            PLAINTEXT_VAULT_ENV,
+        )
+
+    def assert_writable(self) -> None:
+        """Raise RuntimeError when writes would persist secrets in plaintext."""
+        if self.enabled or _plaintext_vault_allowed():
+            return
+        raise RuntimeError(
+            f"credential-store secure storage unavailable ({self._refusal or 'unknown cause'}) -- "
+            f"refusing plaintext write (set {PLAINTEXT_VAULT_ENV}=1 to explicitly allow insecure storage)"
+        )
 
     @property
     def signing_key(self) -> bytes | None:
@@ -390,6 +437,8 @@ class CredentialStore:
             self._records.append(rec)
 
     def save(self) -> None:
+        # Fail closed: never persist secrets in cleartext unless explicitly opted in.
+        self._vault.assert_writable()
         # Atomic write: serialize to a sibling temp file in the same directory
         # (same filesystem, so os.replace is atomic) then rename over the store.
         # A plain ``open("w")`` truncates first -- a crash mid-write would leave
@@ -431,6 +480,9 @@ class CredentialStore:
                 and existing.credential_type == record.credential_type
             ):
                 return
+        # Fail closed before appending: a refused write must leave neither
+        # memory nor disk holding a secret that cannot be persisted safely.
+        self._vault.assert_writable()
         self._records.append(record)
         with self._store_path.open("a", encoding="utf-8") as handle:
             payload = record.to_json()
@@ -501,6 +553,10 @@ class CredentialStore:
     @property
     def encryption_enabled(self) -> bool:
         return self._vault.enabled
+
+    def assert_writable(self) -> None:
+        """Raise RuntimeError when a write would persist secrets in plaintext."""
+        self._vault.assert_writable()
 
     @property
     def store_path(self) -> Path:

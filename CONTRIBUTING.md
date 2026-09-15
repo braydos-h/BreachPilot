@@ -93,6 +93,9 @@ ChatGPT provider (`models.provider: chatgpt`) uses browser OAuth tokens at `~/.c
 | **Package** | `python -m build` + `python -m twine check dist/*` | |
 | **WebUI** | `npm ci` + `npm run build` (tsc + vite) + `npm run test` (vitest) | `webui/` |
 | + CodeQL (Python + JS/TS), dependency-review, Dependabot (pip / Actions / npm weekly) | | |
+| **Action pinning** | grep `uses:` must show only full 40-char SHAs | All third-party Actions pinned `action@<sha> # <version>`; Dependabot `github-actions:/` weekly proposes SHA updates |
+
+**Action pinning policy:** new workflow `uses:` entries must be SHA-pinned (`uses: owner/action@<40-char-sha> # vX`) — never a mutable major tag. Resolve the SHA via `gh api repos/<owner>/<repo>/git/ref/tags/<tag> --jq .object.sha`.
 
 ### Run the same checks locally before opening a PR
 

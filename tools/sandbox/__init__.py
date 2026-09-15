@@ -11,7 +11,7 @@ defense-in-depth. The worker is a disposable Docker container per attack
 session: cap-dropped (NET_RAW at most, never NET_ADMIN), non-root,
 no-new-privileges, bounded resources, read-only rootfs, the run workspace bound
 at ``/workspace`` only, and a default-DROP netns firewall installed by an
-ephemeral NET_ADMIN sidecar that authorizes ONLY the target allowlist. Any
+ephemeral NET_ADMIN sidecar that authorizes ONLY the target allowlist (plus pinned research hosts only when `allow_research_hosts` is explicitly enabled; default off). Any
 sandbox failure DURING a session FAILS CLOSED: ``SandboxError`` subclasses
 surface as ``SANDBOX_*`` result blocks and host execution is never a
 per-command fallback. The single sanctioned fallback is the boot-time

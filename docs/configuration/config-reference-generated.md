@@ -365,7 +365,7 @@ _Generated 2026-09-14 from `config.yaml` (444 leaf keys, 46 top-level blocks). L
 | `sandbox.multi_net_raw` | `bool` | `True` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].multi_net_raw` |  | — | — | no | sandbox | — |
 | `sandbox.network.allow_dns` | `str` | `'controlled'` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].network.allow_dns` |  | — | — | no | sandbox | — |
 | `sandbox.network.allow_gateway` | `bool` | `False` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].network.allow_gateway` |  | — | — | no | sandbox | — |
-| `sandbox.network.allow_research_hosts` | `bool` | `True` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].network.allow_research_hosts` |  | — | — | no | sandbox | — |
+| `sandbox.network.allow_research_hosts` | `bool` | `False` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].network.allow_research_hosts` |  | — | — | no | sandbox | — |
 | `sandbox.network.enforce` | `bool` | `True` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].network.enforce` |  | — | — | no | sandbox | — |
 | `sandbox.network.extra_allow_cidrs` | `list` | `[]` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].network.extra_allow_cidrs` |  | — | — | no | sandbox | — |
 | `sandbox.network.fail_closed` | `bool` | `True` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].network.fail_closed` |  | — | — | no | sandbox | — |

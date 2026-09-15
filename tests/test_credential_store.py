@@ -101,8 +101,10 @@ def test_vault_legacy_in_workspace_keyfile_adopted(monkeypatch, tmp_path):
 
 
 def test_vault_plaintext_fallback_when_cryptography_missing(monkeypatch, tmp_path):
-    """When cryptography can't import, the vault disables loudly and stores plaintext."""
+    """When cryptography can't import, writes are refused by default (fail closed);
+    BREACHPILOT_ALLOW_PLAINTEXT_VAULT=1 opts back into the loud plaintext fallback."""
     monkeypatch.delenv("AI_NMAP_VAULT_KEY", raising=False)
+    monkeypatch.delenv("BREACHPILOT_ALLOW_PLAINTEXT_VAULT", raising=False)
     _Vault._plaintext_warned = False  # reset the one-time warning gate
     # Force `from cryptography.fernet import Fernet` inside _Vault.__init__ to fail.
     real = sys.modules.get("cryptography.fernet")
@@ -110,14 +112,49 @@ def test_vault_plaintext_fallback_when_cryptography_missing(monkeypatch, tmp_pat
     try:
         v = _Vault(tmp_path)
         assert v.enabled is False
+        with pytest.raises(RuntimeError, match="refusing plaintext write"):
+            v.assert_writable()
+        # reads stay fail-open so legacy stores never brick
         assert v.encrypt(_CLEARTEXT) == _CLEARTEXT  # passthrough
         assert v.decrypt("anything") == "anything"  # passthrough
+        # explicit opt-in restores the legacy loud plaintext fallback
+        monkeypatch.setenv("BREACHPILOT_ALLOW_PLAINTEXT_VAULT", "1")
+        v2 = _Vault(tmp_path)
+        assert v2.enabled is False
+        v2.assert_writable()  # no raise under opt-in
+        assert v2.encrypt(_CLEARTEXT) == _CLEARTEXT
     finally:
         if real is None:
             sys.modules.pop("cryptography.fernet", None)
         else:
             sys.modules["cryptography.fernet"] = real
     assert _Vault._plaintext_warned is True
+
+
+def test_store_refuses_plaintext_write_by_default(monkeypatch, tmp_path):
+    """CredentialStore.add/save raise and write nothing when secure storage is
+    unavailable, unless BREACHPILOT_ALLOW_PLAINTEXT_VAULT=1 is set."""
+    monkeypatch.delenv("AI_NMAP_VAULT_KEY", raising=False)
+    monkeypatch.delenv("BREACHPILOT_ALLOW_PLAINTEXT_VAULT", raising=False)
+    _Vault._plaintext_warned = False
+    real = sys.modules.get("cryptography.fernet")
+    sys.modules["cryptography.fernet"] = None
+    try:
+        store = CredentialStore(tmp_path)
+        assert store.encryption_enabled is False
+        with pytest.raises(RuntimeError, match="refusing plaintext write"):
+            store.add(_rec(username="admin"))
+        assert not (tmp_path / "credentials.jsonl").exists()  # nothing persisted
+        # opt-in allows the insecure write (loudly)
+        monkeypatch.setenv("BREACHPILOT_ALLOW_PLAINTEXT_VAULT", "1")
+        store2 = CredentialStore(tmp_path)
+        store2.add(_rec(username="admin"))
+        assert (tmp_path / "credentials.jsonl").exists()
+    finally:
+        if real is None:
+            sys.modules.pop("cryptography.fernet", None)
+        else:
+            sys.modules["cryptography.fernet"] = real
 
 
 def test_vault_decrypt_failopen_on_wrong_key(monkeypatch, tmp_path):
@@ -479,7 +516,9 @@ def test_hmac_foreign_workspace_confirmed_downgraded(monkeypatch, tmp_path):
 def test_plaintext_fallback_confirmed_never_trusted_from_disk(monkeypatch, tmp_path):
     """In plaintext-fallback mode no HMAC can be produced, so a confirmed=True on
     disk is never trusted and is downgraded on reload -- only a SIGNED confirmed
-    survives. (The in-memory confirm still works; the gate is the reload.)"""
+    survives. (The in-memory confirm still works; the gate is the reload.)
+    Requires the explicit plaintext opt-in since writes are fail-closed by default."""
+    monkeypatch.setenv("BREACHPILOT_ALLOW_PLAINTEXT_VAULT", "1")
     _Vault._plaintext_warned = False
     real = sys.modules.get("cryptography.fernet")
     sys.modules["cryptography.fernet"] = None  # force ImportError inside _Vault

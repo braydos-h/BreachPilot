@@ -58,6 +58,10 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return "BLOCKED: password/secret is required (use credential_type='hash' with an NTLM/Kerberos hash if that is what you have)."
 
         store = CredentialStore(_cred_store_dir(target_ip))
+        try:
+            store.assert_writable()
+        except RuntimeError as exc:
+            return f"CRED_STORE_ADD: REFUSED -- {exc}"
         before = len(store.all_credentials())
         rec = CredentialRecord(
             timestamp=time.time(),
@@ -176,7 +180,12 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 f"lateral_exec/dump_credentials). Unvalidated credentials are "
                 f"never auto-confirmed."
             )
-        ok = store.confirm_credential(username=username.strip(), target_host=th, credential_type=ctype, validated=True)
+        try:
+            ok = store.confirm_credential(
+                username=username.strip(), target_host=th, credential_type=ctype, validated=True
+            )
+        except RuntimeError as exc:
+            return f"CRED_STORE_CONFIRM: REFUSED -- {exc}"
         suffix = f" type={ctype}" if ctype else ""
         if ok:
             return f"CRED_STORE_CONFIRM: confirmed=True for username={username.strip()} target_host={th}{suffix}"

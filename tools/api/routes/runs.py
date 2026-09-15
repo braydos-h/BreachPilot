@@ -972,12 +972,15 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
             raise HTTPException(status_code=404, detail="Credential index out of range")
         rec = records[index]
         store = CredentialStore(store_paths[index].parent)
-        changed = store.confirm_credential(
-            username=rec.username,
-            target_host=rec.target_host,
-            credential_type=rec.credential_type,
-            validated=True,
-        )
+        try:
+            changed = store.confirm_credential(
+                username=rec.username,
+                target_host=rec.target_host,
+                credential_type=rec.credential_type,
+                validated=True,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=f"Vault refused write: {exc}")
         access_entry = {
             "run_id": run_id,
             "index": index,

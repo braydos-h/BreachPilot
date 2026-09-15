@@ -80,7 +80,7 @@ class SandboxConfig:
     map_host_loopback: bool = False  # explicit dev mapping; never silent
     extra_allow_cidrs: list[str] = field(default_factory=list)
     allow_gateway: bool = False
-    allow_research_hosts: bool = True  # pinned exploit-research egress (github/gitlab)
+    allow_research_hosts: bool = False  # pinned exploit-research egress (github/gitlab), opt-in only
     remove_on_exit: bool = True
     remove_stale_on_startup: bool = True
     multi_net_raw: bool = True  # NET_RAW for raw packet scanning (nmap -sS)
@@ -132,7 +132,7 @@ class SandboxConfig:
             map_host_loopback=_as_bool(network.get("map_host_loopback"), False),
             extra_allow_cidrs=extra_cidrs,
             allow_gateway=_as_bool(network.get("allow_gateway"), False),
-            allow_research_hosts=_as_bool(network.get("allow_research_hosts"), True),
+            allow_research_hosts=_as_bool(network.get("allow_research_hosts"), False),
             remove_on_exit=_as_bool(cleanup.get("remove_on_exit"), True),
             remove_stale_on_startup=_as_bool(cleanup.get("remove_stale_on_startup"), True),
             multi_net_raw=_as_bool(sec.get("multi_net_raw"), True),

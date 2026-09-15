@@ -273,8 +273,10 @@ destroyed afterward:
   installs a default-DROP firewall inside the worker's network namespace that
   authorizes ONLY the effective target allowlist — the same list the
   application layer enforces, resolved host-side for domains and recorded in
-  the audit trail. Cloud metadata, the Docker gateway, host LAN devices, and
-  the open internet are unreachable regardless of what the command says.
+  the audit trail (plus pinned research hosts only when `allow_research_hosts`
+  is explicitly enabled; default off). Cloud metadata, the Docker gateway, host
+  LAN devices, and the open internet are unreachable regardless of what the
+  command says.
 - **Fail closed**: `sandbox.fallback_native` defaults to `false` (schema +
   lab config) — sandbox failures deny execution with a structured
   `SANDBOX_*` error until Docker works. Native execution is developer-only:

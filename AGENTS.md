@@ -95,7 +95,7 @@ targets don't run there — use the `python`/`python -m` equivalents above.
    via `config.yaml sandbox.enabled: true`). `run_exploit_terminal`,
    `run_as_root`, `git_clone`, `run_python_file`, Metasploit, and the scanners
    funnel through `tools/mcp_tools/sandbox_exec.py` into a disposable worker
-   container whose netns firewall authorizes only the effective allowlist.
+   container whose netns firewall authorizes only the effective allowlist (plus pinned research hosts only when `allow_research_hosts` is explicitly enabled; default off).
    NEVER run agent-generated commands via host `subprocess` on new paths, and
    NEVER add a host-execution fallback for sandbox failures — convert
    `SandboxError` into `SANDBOX_*` blocks (fail closed). The worker image must
