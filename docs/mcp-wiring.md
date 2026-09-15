@@ -4,6 +4,29 @@ How the three MCP servers are launched, how clients connect over stdio and
 streamable HTTP, how the exploit agent's tool-call layer dispatches into a
 live `ClientSession`, and what happens when the MCP subprocess dies.
 
+## MCP 2.x migration (deliberate, not a routine bump — TODO 014)
+
+Status: **deferred until after the 0.69 trust freeze** (TODO 022). Pin stays
+`mcp>=1.27.0,<2.0.0` (`pyproject.toml:32` + `requirements.txt:16`).
+Owner: `MCP_2X_OWNER` (release manager assigns before the 2.x branch).
+Dependabot 2.x PR stays open but unmerged until the seam matrix below is
+green on a `mcp-2x` branch.
+
+Seam matrix (must all pass on `pip install "mcp>=2,<3"` before the pin moves):
+tool-schema conversion, `stdio_client`/`streamable_http_client`/
+`ClientSession.initialize()` exception groups (`tools/exceptions.py`
+`_EXC_GROUP_CATCH` — anyio raises `BaseExceptionGroup`, never bare
+`except Exception`), streaming, server transports, `sandbox_exec.py` bridge,
+swarm MCP bridge, browser tools, `collect_tools()` AST validation
+(`tools/mcp_tools/registry.py`).
+
+Verification: one-file-at-a-time pytest slices per `AGENTS.md`
+(`-n 0/2` max), focusing on `tests/test_mcp*`, `test_*sandbox*`,
+`test_*swarm*`, `test_*browser*`, `test_*exception*`, plus
+`ruff check .` + `ruff format --check .` + `mypy --follow-imports=skip tools`.
+Pin update touches `pyproject.toml` + `requirements.txt` +
+`constraints-dev.txt` together; deferral retries quarterly.
+
 Companion docs: `docs/mcp-tools.md` (tool registration, decorators, audit
 trail), `docs/architecture.md` (system shape), `docs/troubleshooting.md`
 (symptom → fix), `CLAUDE.md` (boot sequence, permission model).

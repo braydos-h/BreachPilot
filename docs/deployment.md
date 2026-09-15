@@ -37,6 +37,21 @@ Python-only exploits, Linux attackers get the full Kali toolkit
 
 ## Install (step by step)
 
+Release bootstrap (recommended): pinned installer asset + checksum +
+attestation from the GitHub release page (`install-<version>.sh` +
+`.sha256` + Sigstore attestation). Verify before executing:
+
+```bash
+curl -fsSLO https://github.com/braydos-h/BreachPilot/releases/download/v0.69.0/install-v0.69.0.sh
+curl -fsSLO https://github.com/braydos-h/BreachPilot/releases/download/v0.69.0/install-v0.69.0.sh.sha256
+bash scripts/verify-installer.sh install-v0.69.0.sh install-v0.69.0.sh.sha256
+less install-v0.69.0.sh && bash install-v0.69.0.sh
+```
+
+Dev path (`main|bash`) is dev-only with a warning — the easy path must be the
+pinned release, not mutable `main`. Windows `install.ps1`/`install.bat` get
+the same checksum treatment per release.
+
 ### Windows (one-click)
 
 This repo's primary dev platform. **New users: double-click `install.bat` in
