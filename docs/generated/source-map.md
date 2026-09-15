@@ -35,6 +35,7 @@ generated: 2026-09-15
 | `tools.kernel.config` | `tools.kernel.config` | Strict-tier canonical (new code here) | n/a |
 | `tools.kernel.discovered` | `tools.kernel.discovered` | Strict-tier canonical (new code here) | n/a |
 | `tools.kernel.finding_lifecycle` | `tools.kernel.finding_lifecycle` | Strict-tier canonical (new code here) | n/a |
+| `tools.kernel.hypothesis` | `tools.kernel.hypothesis` | Strict-tier canonical (new code here) | n/a |
 | `tools.kernel.observation` | `tools.kernel.observation` | Strict-tier canonical (new code here) | n/a |
 | `tools.kernel.orchestration` | `tools.kernel.orchestration` | Strict-tier canonical (new code here) | n/a |
 | `tools.kernel.parse` | `tools.kernel.parse` | Strict-tier canonical (new code here) | n/a |
