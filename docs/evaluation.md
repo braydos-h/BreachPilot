@@ -1,5 +1,19 @@
 # Evaluation & Benchmarking Guide
 
+## Live-eval backend (TODO 001)
+
+Provision local Docker targets, no prod:
+
+```bash
+docker compose -f eval_targets/docker-compose.yml up -d   # DVWA / Juice Shop / Metasploitable2 + secure_web + impossible_sqli
+bp --benchmark --trials 5   # 5–10× per scenario; captures 16-field RunProvenance
+```
+
+Artifacts land in `reports/eval/<date>/` + JSON summary, surfaced in WebUI
+Benchmarks and `docs/benchmarks.md` baseline table (95% CI, median
+actions/duration, tokens, cost, failed IDs). See `docs/benchmarks.md`
+repeated-baseline section for the protocol.
+
 ## Overview
 
 Two evaluation layers exist for the Flow A exploit engine:
@@ -114,6 +128,17 @@ external dependencies (`eval_harness.py:259-321`).
 
 Because the harness self-scores, treat any non-`error` verdict as a smoke
 signal only — use the oracle-backed benchmark for defensible numbers.
+
+## Provenance contract (TODO 018, 16 fields)
+
+Every `bp --eval` / `bp --benchmark` artifact carries a `provenance` object
+with all `RunProvenance` fields (gate `provenance` box fails on missing
+fields): model alias/provider/ID/version, temperature, scenario version,
+code revision, BreachPilot version, config/prompt/tool-catalog/skill-catalog
+hashes, sandbox image+digest, plus `orchestration_mode` (agent/swarm/campaign)
+and `provider_adapter_version`. `write_skipped_eval_report` preserves the
+schema with `SKIPPED` reason so missing infra is visible, never silent green.
+Provenance feeds the Run Manifest (TODO 007) and XBEN reports (TODO 017).
 
 ## Oracle-Backed Benchmark (`tools/eval_benchmark.py`)
 

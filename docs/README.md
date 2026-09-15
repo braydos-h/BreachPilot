@@ -1,5 +1,7 @@
 # Docs
 
+Auditable, evidence-driven autonomous security testing — scope → containment → verification → provenance → operator graph. See [positioning](positioning.md) and [reliability metrics](reliability-metrics.md).
+
 These docs are the fastest path into this codebase for new contributors. The root `README.md` is the product and usage guide; this folder is the engineering guide.
 
 ## Start Here

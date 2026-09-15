@@ -1140,6 +1140,8 @@ class RunProvenance:
     sandbox_image: str = ""
     sandbox_image_digest: str = ""
     trials: int = 1
+    orchestration_mode: str = ""
+    provider_adapter_version: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -1190,6 +1192,18 @@ def build_run_provenance(
     import hashlib
 
     scenario_version = hashlib.sha256("|".join(scenario_bits).encode()).hexdigest()[:12] if scenario_bits else ""
+    # New dimensions (TODO 018): orchestration mode + provider adapter version
+    # ride along as provenance fields so new agent/sandbox/prompt dimensions
+    # never slip in silently.
+    swarm_on = bool((cfg.get("swarm", {}) or {}).get("enabled", False)) if isinstance(cfg.get("swarm"), dict) else False
+    campaign_on = (
+        bool((cfg.get("campaign", {}) or {}).get("enabled", False)) if isinstance(cfg.get("campaign"), dict) else False
+    )
+    orchestration_mode = "campaign" if campaign_on else ("swarm" if swarm_on else "agent")
+    try:
+        from tools.providers.registry import ADAPTER_VERSION as _adapter_version  # type: ignore
+    except Exception:
+        _adapter_version = ""
     return RunProvenance(
         model_alias=str(models.get("default_alias", "") or ""),
         provider=provider,
@@ -1210,6 +1224,8 @@ def build_run_provenance(
         sandbox_image=str(sandbox.get("image", "") or ""),
         sandbox_image_digest=_provenance_sandbox_digest(str(sandbox.get("image", "") or "")),
         trials=max(1, int(trial_count or 1)),
+        orchestration_mode=orchestration_mode,
+        provider_adapter_version=str(_adapter_version or ""),
     )
 
 

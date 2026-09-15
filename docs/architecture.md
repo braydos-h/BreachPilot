@@ -60,6 +60,16 @@ decision/audit logs, evidence index, findings). `bp --export-run <run_id>`
 produces a portable zip bundle; import reverses it. Details:
 [run-logs.md](run-logs.md).
 
+## Namespace migration (breachpilot.* plan)
+
+Target layout (TODO 020, phased after the 0.69 freeze — no big-bang rename):
+`breachpilot/api|agents|campaign|sandbox|providers|persistence/...` for new
+development; pilot is `tools/kernel` strict-tier. Generated map:
+[generated/source-map.md](generated/source-map.md)
+(`scripts/generate_source_map.py`). `pyproject.toml py-modules` shrinks per
+release; one-release compat imports kept. Riemannian: `ruff`/`mypy` configs
+follow new paths (`mypy --follow-imports=skip tools` extended).
+
 ## Entry Points
 
 ### `main.py`

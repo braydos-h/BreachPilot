@@ -24,11 +24,13 @@ Linux is the primary platform (full tool arsenal). Windows is installer-supporte
 
 ## Why BreachPilot?
 
+Auditable, evidence-driven autonomous security testing — scope → containment → verification → provenance → operator graph. See [positioning](docs/positioning.md) and [reliability metrics](docs/reliability-metrics.md) (baseline in progress — methodology here).
+
 - **Full lifecycle, not just scanning.** Recon → exploit → post-exploitation → verified findings → MITRE-mapped reports, in one run.
 - **Evidence decides, not agent claims.** Findings are independently re-proven with stored probes (`VERIFIED` / `HOLDING` / `INCONCLUSIVE`). Execution success and evidential success are tracked separately.
 - **Contained by default.** Target allowlist plus mission scope gate plus disposable Docker worker with default-DROP network containment. Fail-closed: sandbox failures block execution, never fall back silently.
 - **Multi-agent when it helps.** A six-specialist swarm for single high-value targets, and a persistent campaign orchestrator for multi-target, multi-phase operations.
-- **Extensible without forking.** Auto-discovered MCP tools, advisory skills, attack modules, and a plugin system with a reference example.
+- **Extensible without forking.** Auto-discovered MCP tools, advisory skills, attack modules, and a plugin system with a reference example. Inventory counts live in the generated appendix (`docs/generated/capability-counts.json`), never the headline.
 
 ## Quick start
 

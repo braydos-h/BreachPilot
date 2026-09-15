@@ -160,9 +160,7 @@ class TestBuildNetworkPolicy:
         monkeypatch.setattr(
             sandbox_policy,
             "_resolve_authorized",
-            lambda domain, config, **kwargs: (
-                ["203.0.113.9"] if domain in sandbox_policy.RESEARCH_HOSTS else []
-            ),
+            lambda domain, config, **kwargs: ["203.0.113.9"] if domain in sandbox_policy.RESEARCH_HOSTS else [],
         )
         pol = build_network_policy(
             {
@@ -177,9 +175,7 @@ class TestBuildNetworkPolicy:
         monkeypatch.setattr(
             sandbox_policy,
             "_resolve_authorized",
-            lambda domain, config, **kwargs: (
-                ["203.0.113.9"] if domain in sandbox_policy.RESEARCH_HOSTS else []
-            ),
+            lambda domain, config, **kwargs: ["203.0.113.9"] if domain in sandbox_policy.RESEARCH_HOSTS else [],
         )
         pol = build_network_policy(
             {

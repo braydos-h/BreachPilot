@@ -120,6 +120,8 @@ def _valid_provenance(trials: int = 5) -> dict:
         "skill_catalog_hash": "s" * 12,
         "sandbox_image": "breachpilot-sandbox:latest",
         "sandbox_image_digest": "sha256:" + "a" * 64,
+        "orchestration_mode": "agent",
+        "provider_adapter_version": "1",
         "trials": trials,
     }
 

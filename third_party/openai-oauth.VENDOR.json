@@ -1,0 +1,12 @@
+{
+  "package": "openai-oauth",
+  "upstream": "https://github.com/EvanZhouDev/openai-oauth.git",
+  "tag": "v2.0.0",
+  "commit": "4be9c04ccfcaa8fc0982044d17a29a82cb131374",
+  "vendored_path": "oauth/ (gitignored local clone, not in repo)",
+  "vendored_date": "2026-09-15",
+  "pins_source": "tools/chatgpt_bootstrap.py OPENAI_OAUTH_REPO/TAG/COMMIT",
+  "local_patches": [],
+  "patch_dir": "third_party/patches/openai-oauth/",
+  "notes": "No local modifications: HEAD must equal commit or bootstrap fails closed. Local patches, if ever needed, land as files in patch_dir and are listed here."
+}

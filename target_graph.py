@@ -1,14 +1,19 @@
 """Target Graph — models the attack surface as a structured graph.
 
+Canonical path (TODO 023): Host → Service → Hypothesis → Evidence → Finding,
+with Credential → Authenticated access and Pivot → Host edges.
+
 Node types:
   program, asset, host, domain, ip, service, web_app, api, endpoint,
   parameter, identity, role, session, object, permission_boundary,
-  technology, evidence, finding
+  technology, hypothesis, evidence, finding, credential, access, pivot
 
 Edge types:
   owns, exposes, resolves_to, serves, requires_auth, accepts_parameter,
   returns_object, belongs_to_user, accessible_by, tested_by,
-  produced_evidence, indicates, blocked_by_scope, related_to
+  hypothesizes, produced_evidence, indicates, supports, refutes,
+  uses_credential, grants_access, pivots_to,
+  blocked_by_scope, related_to
 
 Backed by SQLite graph_nodes / graph_edges tables via DatabaseManager.
 """
@@ -40,8 +45,12 @@ NODE_TYPES = frozenset(
         "object",
         "permission_boundary",
         "technology",
+        "hypothesis",
         "evidence",
         "finding",
+        "credential",
+        "access",
+        "pivot",
     }
 )
 
@@ -57,8 +66,14 @@ EDGE_TYPES = frozenset(
         "belongs_to_user",
         "accessible_by",
         "tested_by",
+        "hypothesizes",
         "produced_evidence",
         "indicates",
+        "supports",
+        "refutes",
+        "uses_credential",
+        "grants_access",
+        "pivots_to",
         "blocked_by_scope",
         "related_to",
     }

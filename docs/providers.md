@@ -304,6 +304,12 @@ the third-party pins:
 To refresh the pins, update the constants in `tools/chatgpt_bootstrap.py`,
 verify the new tag contains `packages/openai-oauth/src/cli.ts` and a
 `bun.lock`, and run `pytest tests/test_chatgpt_bootstrap.py`.
+Machine-verifiable provenance: `third_party/openai-oauth.VENDOR.json`
+(upstream URL + tag + commit + local patches[]) mirrors the bootstrap pins;
+CI (`tests/test_oauth_vendoring.py`) fails on drift. Lifecycle is
+loopback-only with `--detach`/`stop` and `_we_started` (never stop a proxy
+we didn't start); `is_authenticated()` checks file existence only, never
+reads tokens.
 
 ### Model discovery
 

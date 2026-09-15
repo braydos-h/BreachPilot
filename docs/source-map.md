@@ -1,8 +1,8 @@
 # Source map (generated stub for TODO 011; full generator in TODO 020)
 
-> Public import → canonical implementation → compatibility status → removal version.
-> Full AST generator lands in TODO 020 (`scripts/generate_source_map.py`).
-> This table is the interim manual map so TODO 011 CI can enforce expiry.
+> Canonical generated map: [generated/source-map.md](generated/source-map.md)
+> (`python scripts/generate_source_map.py --check` fails CI on drift).
+> This file is the interim manual map; the generated file is authoritative.
 
 | Public import | Canonical | Status | Removal |
 |---|---|---|---|

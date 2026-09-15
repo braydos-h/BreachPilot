@@ -25,6 +25,9 @@ from typing import TYPE_CHECKING, Any, Mapping
 from .base import BaseProvider
 from .types import ModelClient, ModelInfo, ProviderCapabilities, ProviderError, ProviderHealth  # noqa: F401
 
+#: Provider-adapter contract version, pinned into RunProvenance (TODO 018).
+ADAPTER_VERSION = "1"
+
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from tools.model_router import ModelRouter  # noqa: F401 -- annotates provider docstrings
 

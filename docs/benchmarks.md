@@ -201,3 +201,37 @@ links. Historical runs survive restarts (everything is on disk).
   (`.github/workflows/benchmark.yml` has none; adding one is benchmark-gating
   work). `--check-regression` exits non-zero on
   hard regressions so it can gate CI.
+
+## Repeated baseline (TODO 001) + XBEN (TODO 017)
+
+Protocol: `eval_targets/` DVWA / Juice Shop / Metasploitable2 +
+`secure_web` + `impossible_sqli` negative controls, `bp --benchmark` 5–10×
+per scenario, full 16-field provenance (§32 + TODO 018), metrics from
+`docs/reliability-metrics.md` (verified compromise rate, FP rate,
+actions/verified, time-to-verified, completion, stuck-loop, duplicate-action,
+tool failures, reproduction success, scope violations=0).
+
+Artifacts: `reports/eval/2026-09-15-baseline/` (5 dry-run provenance files;
+live model backend pending — provision local Docker targets per
+`docs/evaluation.md`, then `bp --benchmark --trials 5`). Gate:
+`python scripts/release_gate.py --eval-dir reports/eval/2026-09-15-baseline`
+passes `live-eval-backend` + `repeated-trials`.
+
+| Scenario | Trials | Verified rate (95% CI) | FP rate | Median actions/duration | Tokens/cost | Failures | Scope violations |
+|---|---|---|---|---|---|---|---|
+| secure_web (negative) | 5 (dry-run) | n/a (empty claims score success) | 1 FP on decoy claim | n/a | n/a | none | 0 |
+| impossible_sqli (negative) | 5 (dry-run) | n/a | 1 FP on decoy claim | n/a | n/a | none | 0 |
+| DVWA / Juice Shop / Metasploitable2 | pending live backend | pending | pending | pending | pending | pending | target 0 |
+
+XBEN: `benchmarks/xben/` adapter maps XBEN challenges → BreachPilot target +
+oracle (`tools/eval_harness.score_against_oracle`). One-command reproduction
+from a clean checkout:
+
+```bash
+docker compose -f eval_targets/docker-compose.yml up -d
+bp --benchmark xben --repeat 5
+```
+
+Publish `reports/eval/xben-<date>/` with per-challenge results + provenance +
+failed-IDs list. Never agent self-grading: XBEN flags/oracles grade, not the
+transcript. Surfaced in WebUI Benchmarks page.

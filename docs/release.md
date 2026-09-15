@@ -1,5 +1,33 @@
 # Release process — reproducible, signed, digest-pinned (#42/#43/#44/#55/#80)
 
+## 0.69 trust freeze (TODO 022)
+
+0.69 is a trust/reliability release, not a feature release. Freeze: new
+attack modules/skills/providers need release-owner sign-off; default answer
+is "after 0.69". Feature PRs are labeled `post-0.69` unless trust-gated.
+
+§52 burndown (in order): docs drift (TODO 003/004/016) → gate regex
+(TODO 005) → gate satisfiability (TODO 002) → eval baseline (TODO 001) →
+supply-chain/branch/image (TODO 024) → counts (TODO 010). Ship iff every row
+is Green or EXTERNAL-with-evidence-path; `python scripts/release_gate.py` +
+CI + Trivy + SBOM evidence linked from release notes. HEAD must show an
+observed green run (TODO 024); no release on unobserved green.
+
+## Supply chain (TODO 024)
+
+Observable green HEAD + §52 rows evidenced: `branch-rules-applied`
+(API-verified ruleset per `docs/branch-protection.md`),
+`sandbox-image-published` (GHCR digest recorded), Python/WebUI/sandbox SBOMs,
+Trivy with no unacceptable high/critical, SHA-locked actions (CI guard
+green), coverage ≥80. Release workflow publishes installer + `.sha256` +
+attestation (TODO 013), SBOMs + Trivy + digests. Verify:
+
+```bash
+gh run list --branch main   # HEAD health, link from release notes
+gh api repos/OWNER/REPO/rulesets > branch-rules.json
+python scripts/release_gate.py --branch-rules-file branch-rules.json --sandbox-digest-file worker-digests.txt --eval-dir reports/eval/2026-09-15-baseline --json
+```
+
 ## Gate first
 
 ```bash
@@ -13,7 +41,7 @@ when the file is missing; present-but-invalid fails closed):
 
 | Gate box | Artifact | Contract |
 |---|---|---|
-| `live-eval-backend` | `--eval-dir DIR/*.json` | >=1 JSON with a `provenance` object carrying all 14 `RunProvenance` fields (see `scripts/release_gate.py:check_provenance_fields` + TODO 018); mtime <90d |
+| `live-eval-backend` | `--eval-dir DIR/*.json` | >=1 JSON with a `provenance` object carrying all 16 `RunProvenance` fields (see `scripts/release_gate.py:check_provenance_fields` + TODO 018); mtime <90d |
 | `repeated-trials` | same `--eval-dir` | >=5 valid provenance files, or any file with `provenance.trials >= 5` (TODO 001: 5–10×/scenario) |
 | `branch-rules-applied` | `--branch-rules-file rules.json` | JSON from `gh api repos/OWNER/REPO/rulesets` naming `main`, active enforcement, requiring CI checks (see `docs/branch-protection.md`) |
 | `sandbox-image-published` | `--sandbox-digest-file digests.txt` | text containing `sha256:<hex>` (e.g. `worker-digests.txt` from `release.yml`); local digest mismatch fails |

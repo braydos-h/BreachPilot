@@ -101,6 +101,14 @@ oracle-only) + `scope_verdict` + `evidence_refs` + `finding_ids` +
 `tests/test_action_result_contract.py`. Rule: tool exited 0 ≠ exploit worked
 ≠ finding evidenced.
 
+## Belief vs execution vs evidence (TODO 021)
+
+Three distinct concepts, never conflated:
+
+- **Execution status** — did the tool run? (`operational_status`)
+- **Evidential status** — is the finding proven by an independent oracle? (`VERIFIED`/`HOLDING`/`INCONCLUSIVE`)
+- **Belief state** — what do we believe about the hypothesis? (`tools/kernel/hypothesis.py:Hypothesis`: open/confirmed/refuted/inconclusive/exhausted + confidence + checks + evidence refs + belief transitions, with sibling-invalidation preserved from Flow B).
+
 ## The Evidence Model
 
 ### What counts as evidence

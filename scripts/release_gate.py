@@ -242,6 +242,8 @@ def check_provenance_fields(root: Path) -> GateResult:
             "skill_catalog_hash",
             "sandbox_image",
             "sandbox_image_digest",
+            "orchestration_mode",
+            "provider_adapter_version",
         }
         missing = required - set(RunProvenance.__dataclass_fields__)
         if missing:
@@ -330,6 +332,8 @@ def _required_provenance_fields() -> set[str]:
         "skill_catalog_hash",
         "sandbox_image",
         "sandbox_image_digest",
+        "orchestration_mode",
+        "provider_adapter_version",
     }
 
 
