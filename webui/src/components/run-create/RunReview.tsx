@@ -175,11 +175,18 @@ export function RunReview({
           )}
 
           {createError && !startup && (
-            <div className="mt-3 flex items-center justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-red-200">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-red-200">
               <span>{createError}</span>
-              <Button type="button" size="sm" variant="outline" onClick={onRetry}>
-                Retry
-              </Button>
+              <span className="flex gap-2">
+                {/scope|allowlist|resolve|target/i.test(createError) && (
+                  <Button type="button" size="sm" variant="ghost" onClick={() => onEdit("target")}>
+                    Edit target
+                  </Button>
+                )}
+                <Button type="button" size="sm" variant="outline" onClick={onRetry}>
+                  Retry
+                </Button>
+              </span>
             </div>
           )}
         </CardContent>
@@ -189,9 +196,9 @@ export function RunReview({
 
       {!startup && !runDetail && (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs text-muted-foreground">
+          <p className="text-[13px] text-muted-foreground">
             {yes
-              ? "Launch confirmation is skipped — the run starts immediately."
+              ? "Approval policy skips launch confirmation — the run starts immediately."
               : "The run pauses at a ready-to-begin confirmation before execution."}
           </p>
           <Button

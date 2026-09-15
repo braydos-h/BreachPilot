@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, ArrowRight, Compass, ShieldCheck, Terminal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { appVersionLabel } from "@/lib/version";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { KillChain } from "@/components/welcome/KillChain";
@@ -72,11 +73,11 @@ function Hero({ onStart, onSkip }: { onStart: () => void; onSkip: () => void }) 
       </div>
 
       <div className="relative flex w-full max-w-3xl flex-col items-center gap-6 text-center">
-        <div className="flex items-center gap-2 animate-fade-in-up">
+        <div className="flex items-center gap-2">
           <Terminal className="h-5 w-5 text-primary" />
-          <Badge variant="outline" className="gap-1.5 text-[10px]">
-            <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
-            v{__APP_VERSION__} beta
+          <Badge variant="outline" className="gap-1.5 text-xs">
+            <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+            {appVersionLabel()}
           </Badge>
         </div>
 

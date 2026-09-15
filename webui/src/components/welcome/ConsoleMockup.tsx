@@ -3,6 +3,7 @@
 
 import { Home, List, Play, Settings, ShieldCheck, Sparkles, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { APP_VERSION } from "@/lib/version";
 import { KillChain } from "@/components/welcome/KillChain";
 import type { MockupKey, TourStep } from "@/components/welcome/steps";
 
@@ -41,7 +42,7 @@ export function ConsoleMockup({ step }: { step: TourStep }) {
         <div className="flex-1 text-center text-[10px] text-muted-foreground">
           BreachPilot · Local console
         </div>
-        <div className="text-[9px] text-muted-foreground">v{__APP_VERSION__}</div>
+        <div className="text-xs text-muted-foreground">v{APP_VERSION}</div>
       </div>
 
       <div className="flex">
