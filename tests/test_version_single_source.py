@@ -31,13 +31,11 @@ def test_source_versions_match():
     main_py = (ROOT / "main.py").read_text()
     m = re.search(r'__version__\s*=\s*"([^"]+)"', main_py)
     assert m, "main.py __version__ not found"
-    assert m.group(1) == pyproject_version, (
-        f"main.py {m.group(1)} != pyproject.toml {pyproject_version}"
-    )
+    assert m.group(1) == pyproject_version, f"main.py {m.group(1)} != pyproject.toml {pyproject_version}"
 
 
 def test_webui_uses_version_module():
     # All surfaces must render via lib/version.ts, not hardcoded strings.
     layout = (ROOT / "webui" / "src" / "components" / "Layout.tsx").read_text()
     assert "APP_VERSION" in layout, "Layout must render via APP_VERSION from lib/version"
-    assert 'v{__APP_VERSION__}' not in layout, "Layout must not interpolate __APP_VERSION__ directly"
+    assert "v{__APP_VERSION__}" not in layout, "Layout must not interpolate __APP_VERSION__ directly"

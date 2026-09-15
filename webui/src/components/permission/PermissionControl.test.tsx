@@ -15,9 +15,9 @@ describe("PermissionControl", () => {
   it("renders all three modes as radios with the current one checked", () => {
     setup("approve");
     expect(screen.getAllByRole("radio")).toHaveLength(3);
-    expect(screen.getByRole("radio", { name: /Approve/ })).toBeChecked();
-    expect(screen.getByRole("radio", { name: /Read-only/ })).not.toBeChecked();
-    expect(screen.getByRole("radio", { name: /Full access/ })).not.toBeChecked();
+    expect(screen.getByRole("radio", { name: /Auto-safe approvals/ })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /Manual approvals/ })).not.toBeChecked();
+    expect(screen.getByRole("radio", { name: /Autonomous within scope/ })).not.toBeChecked();
   });
 
   it("applies read-only and approve immediately without a confirmation dialog", async () => {
@@ -25,13 +25,13 @@ describe("PermissionControl", () => {
     const onModeChange = vi.fn();
     const { rerender } = render(<PermissionControl mode="read_only" onModeChange={onModeChange} />);
 
-    await user.click(screen.getByRole("radio", { name: /Approve/ }));
+    await user.click(screen.getByRole("radio", { name: /Auto-safe approvals/ }));
     expect(onModeChange).toHaveBeenCalledWith("approve");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
     // Parent adopts the new mode; the control is fully controlled.
     rerender(<PermissionControl mode="approve" onModeChange={onModeChange} />);
-    await user.click(screen.getByRole("radio", { name: /Read-only/ }));
+    await user.click(screen.getByRole("radio", { name: /Manual approvals/ }));
     expect(onModeChange).toHaveBeenCalledWith("read_only");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
@@ -39,7 +39,7 @@ describe("PermissionControl", () => {
   it("opens a confirmation dialog when full access is selected and does not change mode yet", async () => {
     const user = userEvent.setup();
     const { onModeChange } = setup("read_only");
-    await user.click(screen.getByRole("radio", { name: /Full access/ }));
+    await user.click(screen.getByRole("radio", { name: /Autonomous within scope/ }));
 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByText(/Enable Full Access\?/i)).toBeInTheDocument();
@@ -49,17 +49,17 @@ describe("PermissionControl", () => {
   it("cancelling the dialog leaves the mode unchanged", async () => {
     const user = userEvent.setup();
     const { onModeChange } = setup("read_only");
-    await user.click(screen.getByRole("radio", { name: /Full access/ }));
+    await user.click(screen.getByRole("radio", { name: /Autonomous within scope/ }));
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(onModeChange).not.toHaveBeenCalled();
-    expect(screen.getByRole("radio", { name: /Read-only/ })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /Manual approvals/ })).toBeChecked();
   });
 
   it("applies full access only after the operator confirms", async () => {
     const user = userEvent.setup();
     const { onModeChange } = setup("read_only");
-    await user.click(screen.getByRole("radio", { name: /Full access/ }));
+    await user.click(screen.getByRole("radio", { name: /Autonomous within scope/ }));
     await user.click(screen.getByRole("button", { name: "Enable Full Access" }));
     expect(onModeChange).toHaveBeenCalledTimes(1);
     expect(onModeChange).toHaveBeenCalledWith("full_access");
@@ -72,12 +72,12 @@ describe("PermissionControl", () => {
     });
     render(<PermissionControl mode="approve" onModeChange={onModeChange} />);
 
-    await user.click(screen.getByRole("radio", { name: /Full access/ }));
+    await user.click(screen.getByRole("radio", { name: /Autonomous within scope/ }));
     await user.click(screen.getByRole("button", { name: "Enable Full Access" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Server rejected the permission change");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     // Displayed state is still the old one — full access was not adopted.
-    expect(screen.getByRole("radio", { name: /Approve/ })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /Auto-safe approvals/ })).toBeChecked();
   });
 });
