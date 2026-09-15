@@ -141,18 +141,18 @@ export function RunReview({
         <CardContent>
           <dl className="divide-y divide-border/60">
             <Row label="Target" value={target || NONE} editTo="target" onEdit={onEdit} />
-            <Row label="Mode" value={isFast ? "Fast" : isAttack ? "Attack" : "Recon"} editTo="settings" onEdit={onEdit} />
-            <Row label="Goal" value={goalValue} editTo="settings" onEdit={onEdit} />
-            <Row label="Model" value={model || NONE} editTo="settings" onEdit={onEdit} />
+            <Row label="Mode" value={isFast ? "Fast" : isAttack ? "Attack" : "Recon"} editTo="intent" onEdit={onEdit} />
+            <Row label="Goal" value={goalValue} editTo="intent" onEdit={onEdit} />
+            <Row label="Model" value={model || NONE} editTo="intent" onEdit={onEdit} />
             <Row
               label="Execution"
               value={`${executionProfileLabel(profile)} · ${powerUpCount} power-ups`}
-              editTo="settings"
+              editTo="intent"
               onEdit={onEdit}
             />
-            <Row label="Skills" value={skillsLabel} editTo="settings" onEdit={onEdit} />
-            <Row label="Observer" value={observerLabel} editTo="settings" onEdit={onEdit} />
-            <Row label="Recon first" value={reconLabel} editTo="settings" onEdit={onEdit} />
+            <Row label="Skills" value={skillsLabel} editTo="intent" onEdit={onEdit} />
+            <Row label="Observer" value={observerLabel} editTo="intent" onEdit={onEdit} />
+            <Row label="Recon first" value={reconLabel} editTo="intent" onEdit={onEdit} />
           </dl>
 
           {isAttack && (

@@ -16,32 +16,25 @@ import { clearStoredBaseline, useSessionTokens } from "@/lib/sessionTokens";
 import { formatTokens } from "@/lib/format";
 import { WindowsPerformanceWarning } from "@/components/WindowsPerformanceWarning";
 
-const NAV_ITEMS = [
-  { to: "/", label: "Home", icon: Home, end: true },
-  { to: "/sessions", label: "Sessions", icon: List, end: false },
-  { to: "/connections", label: "Connections", icon: PlugZap, end: false },
-  { to: "/modules", label: "Modules", icon: Crosshair, end: false },
-  { to: "/goals", label: "Goals", icon: Target, end: false },
-  { to: "/graph", label: "Attack Graph", icon: GitBranch, end: false },
-  { to: "/benchmarks", label: "Benchmarks", icon: FlaskConical, end: false },
-  { to: "/ops", label: "Operations", icon: ShieldAlert, end: false },
-  { to: "/stats", label: "Stats", icon: BarChart3, end: false },
-  { to: "/skills", label: "Skills", icon: Sparkles, end: false },
-  { to: "/memory", label: "Memory", icon: Brain, end: false },
-  { to: "/system", label: "Settings", icon: Settings, end: false },
-  { to: "/help", label: "Help", icon: BookOpen, end: false },
-];
+import { PRODUCT_ROUTES, NAV_GROUPS, type NavGroup } from "@/lib/productRoutes";
+import { APP_VERSION } from "@/lib/version";
+import { CommandPalette } from "@/components/CommandPalette";
+import { AttentionCentre, type AttentionItem } from "@/components/AttentionCentre";
+import { humanizeEnum, DECISION_KIND_LABELS } from "@/lib/enumLabels";
+
+// Sidebar is task-oriented (todos 04/05): Operate primary, Knowledge/Evaluate/System collapsed by default.
+// Runs is canonical (todo 06); Operations lives under System (todo 39); Benchmarks under Evaluate (todo 40).
 
 const MODE_TITLES: Record<PermissionMode, string> = {
-  read_only: "Read-only",
-  approve: "Approve",
-  full_access: "Full access",
+  read_only: "Manual approvals",
+  approve: "Auto-safe approvals",
+  full_access: "Autonomous within scope",
 };
 
 const MODE_BLURB: Record<PermissionMode, string> = {
-  read_only: "Every decision waits for the operator. Nothing is auto-answered. Safest — you drive.",
-  approve: "Non-destructive decisions (start, safe tool calls) are auto-answered with \u201cyes\u201d. Goal selection and destructive confirmations still wait for you.",
-  full_access: "Every start_confirm and tool_approval is auto-answered, including destructive confirmations (the exact required_text is submitted). Goal selection still waits for you. The target-IP allowlist lock still applies.",
+  read_only: "Every decision waits for you. Nothing is auto-approved. Safest — you drive.",
+  approve: "Automatically handles safe start and tool approvals. Destructive confirmations, goals, and campaign checkpoints still wait for you.",
+  full_access: "Automatically handles start/tool approvals, including destructive confirmations. Goals and campaign checkpoints still wait for you. The target-IP allowlist lock still applies.",
 };
 
 const DEMO_DECISIONS: Array<{ kind: string; status: "pending"; required_text?: string; options?: Array<{ name: string; compatible: boolean }> }> = [
@@ -80,9 +73,32 @@ export function Layout() {
   const [showHelp, setShowHelp] = useState(false);
   const [permOpen, setPermOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState<Record<NavGroup, boolean>>({ operate: false, knowledge: true, evaluate: true, system: true });
   // Per-session banner dismissal: hides the notice without touching the
   // permission mode (the X must never silently downgrade to read_only).
   const [permBannerDismissed, setPermBannerDismissed] = useState<string | null>(null);
+
+  // Global shortcuts (todo 52): Cmd/Ctrl+K palette, N new run, G R/H, ? help. Disabled in inputs.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      const inInput = !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable || el.tagName === "SELECT");
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen(true);
+        return;
+      }
+      if (inInput) return;
+      if (e.key === "n" || e.key === "N") {
+        navigate("/runs/new");
+      } else if (e.key === "?") {
+        navigate("/help");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navigate]);
 
   // Backend OS for the sidebar badge (same source as WindowsPerformanceWarning:
   // platform.system(), never the browser UA). Falls back to "Local" while
@@ -109,46 +125,68 @@ export function Layout() {
   };
 
   // Shared by the desktop <aside> and the mobile drawer — one source of truth
-  // for nav links, active-run rows, and the footer controls.
+  // for nav links, active-run rows, and the footer controls. Grouped per
+  // productRoutes registry (todos 04/05/20); mobile follows the same hierarchy.
+  const renderNavLink = (to: string, label: string, Icon: React.ComponentType<{ className?: string }>, end?: boolean) => {
+    const isConnections = to === "/connections";
+    return (
+      <NavLink
+        key={to}
+        to={to}
+        end={end}
+        className={({ isActive }) =>
+          cn(
+            "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
+            isActive
+              ? "bg-primary/10 text-primary"
+              : "text-muted-foreground hover:bg-accent hover:text-foreground",
+          )
+        }
+      >
+        <Icon className="h-4 w-4" />
+        <span className="flex-1">{label}</span>
+        {isConnections && activeConnections > 0 && (
+          <span className="flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-emerald-500/15 px-1.5 text-xs font-semibold tabular-nums text-emerald-600 dark:text-emerald-300" aria-label={`${activeConnections} active connections`}>
+            {activeConnections}
+          </span>
+        )}
+      </NavLink>
+    );
+  };
   const navItems = (
     <>
-      {NAV_ITEMS.map((item) => {
-        const Icon = item.icon;
-        const isConnections = item.to === "/connections";
+      {NAV_GROUPS.map((g) => {
+        const routes = PRODUCT_ROUTES.filter((r) => r.group === g.id);
+        const isCollapsed = collapsed[g.id];
         return (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.end}
-            className={({ isActive }) =>
-              cn(
-                "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
-                isActive
-                  ? "bg-primary/10 text-primary"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
-              )
-            }
-          >
-            <Icon className="h-4 w-4" />
-            <span className="flex-1">{item.label}</span>
-            {isConnections && activeConnections > 0 && (
-              <span className="flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-emerald-500/15 px-1.5 text-[10px] font-semibold tabular-nums text-emerald-600 dark:text-emerald-300" aria-label={`${activeConnections} active connections`}>
-                {activeConnections}
-              </span>
+          <div key={g.id} className="space-y-1">
+            <button
+              type="button"
+              onClick={() => setCollapsed((p) => ({ ...p, [g.id]: !p[g.id] }))}
+              aria-expanded={!isCollapsed}
+              className="flex w-full items-center justify-between px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground hover:text-foreground"
+            >
+              <span>{g.label}</span>
+              <span aria-hidden>{isCollapsed ? "+" : "–"}</span>
+            </button>
+            {!isCollapsed && routes.map((item) => renderNavLink(item.path, item.label, item.icon, item.end))}
+            {g.id === "operate" && activeRuns.length > 0 && (
+              <div className="space-y-1 pt-1" aria-label="Needs attention">
+                {activeRuns.map((r) => (
+                  <NavLink
+                    key={r.id}
+                    to={`/runs/${r.id}`}
+                    className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200 transition-colors hover:bg-amber-500/20"
+                  >
+                    <Activity className="h-4 w-4" aria-hidden />
+                    <span className="truncate">{r.target || r.id.slice(0, 8)}</span>
+                  </NavLink>
+                ))}
+              </div>
             )}
-          </NavLink>
+          </div>
         );
       })}
-      {activeRuns.length > 0 && activeRuns.map((r) => (
-        <NavLink
-          key={r.id}
-          to={`/runs/${r.id}`}
-          className="flex items-center gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-300 transition-colors hover:bg-yellow-500/20"
-        >
-          <Activity className="h-4 w-4 animate-pulse" />
-          <span className="truncate">{r.target || r.id.slice(0, 8)}</span>
-        </NavLink>
-      ))}
     </>
   );
 
@@ -166,13 +204,13 @@ export function Layout() {
   const sidebarFooter = (
     <div className="space-y-2">
       <div className="space-y-1.5 px-1">
-        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
           <ShieldAlert className="h-3 w-3" />
-          <span>Permission mode</span>
+          <span>Approval policy</span>
           <button
             type="button"
             onClick={() => setShowHelp(true)}
-            aria-label="What does Permission mode do?"
+            aria-label="What does Approval policy do?"
             className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-muted-foreground/50 text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
           >
             <HelpCircle className="h-3 w-3" />
@@ -197,7 +235,7 @@ export function Layout() {
           {providerStatus.statusText} · {sessionTokensFormatted} tokens this session
         </div>
         {providerStatus.error && providerStatus.status === "unreachable" && (
-          <div className="ml-4 mt-1 truncate text-[11px] leading-none text-destructive" title={providerStatus.error}>
+          <div className="ml-4 mt-1 truncate text-xs leading-none text-destructive" title={providerStatus.error}>
             {providerStatus.error}
           </div>
         )}

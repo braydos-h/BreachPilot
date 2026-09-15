@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, ArrowRight, ChevronDown, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isValidTarget } from "@/lib/targetValidation";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
-import { useCapabilities, useCreateRun, useGoals, useRun, useSkills } from "@/api/hooks";
+import { useCapabilities, useConfig, useCreateRun, useGoals, useRun, useSkills } from "@/api/hooks";
 import { useRunEvents } from "@/api/ws";
-import { useDefaultModel } from "@/components/ProviderSetup";
+import { useDefaultModel, useProviderStatus } from "@/components/ProviderSetup";
 import { ApiError } from "@/api/client";
 import type { GoalPreset, ObserverMode, RunCreateRequest, RunMode, SkillsMode } from "@/api/types";
 import { RunStepper, STEPS, type Step } from "./RunStepper";
@@ -20,24 +18,63 @@ import { ModelSelector } from "./ModelSelector";
 import { ExecutionProfile } from "./ExecutionProfile";
 import { AdvancedExecutionSettings } from "./AdvancedExecutionSettings";
 import { SkillsSettings } from "./SkillsSettings";
-import { OpsecSettings } from "./OpsecSettings";
 import { RunReview } from "./RunReview";
 import { type RunStartupState } from "./RunStartupProgress";
 import { profileFieldValues, type ExecutionProfileId } from "./profile";
+import { ScopeBadge } from "@/components/ScopeBadge";
+import { PreflightCard, type PreflightCheck } from "@/components/PreflightCard";
+import { ApprovalPolicyControl, approvalPolicyToBackend } from "@/components/ApprovalPolicyControl";
+import { usePermissionMode, type PermissionMode } from "@/lib/permissionMode";
 
 interface RunWizardProps {
   onCreated?: (runId: string, state: string) => void;
 }
 
-/** Guided run creation: OPSEC → Configure → Target → Review & launch.
- *  Progressive disclosure — each step answers one question. The sticky sidebar
- *  mirrors the live configuration; nothing here is authoritative for security
- *  decisions (the server remains the authority). */
+const DRAFT_KEY = "breachpilot.runDraft.v1";
+const DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+interface RunDraft {
+  savedAt: number;
+  target: string;
+  mode: RunMode;
+  goalMode: "preset" | "custom";
+  goal: string;
+  customGoal: string;
+  modelAlias: string;
+  profile: ExecutionProfileId;
+  powerUps: Record<string, boolean>;
+  reconFirst: boolean | null;
+  observerMode: ObserverMode;
+  skillsMode: SkillsMode;
+  skillsInclude: string[];
+  skillsExclude: string[];
+  approvalPolicy: PermissionMode;
+}
+
+function readDraft(): RunDraft | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw) as RunDraft;
+    if (!d.savedAt || Date.now() - d.savedAt > DRAFT_TTL_MS) {
+      localStorage.removeItem(DRAFT_KEY);
+      return null;
+    }
+    return d;
+  } catch {
+    return null;
+  }
+}
+
+/** Guided run creation: Target -> Intent -> Review & launch.
+ *  Expert knobs live behind Advanced; OPSEC edits live in Settings. */
 export function RunWizard({ onCreated }: RunWizardProps) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [step, setStep] = useState<Step>("settings");
+  const [step, setStep] = useState<Step>("target");
+  const [visited, setVisited] = useState<Set<string>>(() => new Set(["target"]));
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [modelOverrideOpen, setModelOverrideOpen] = useState(false);
 
   // ?path= query param preselects recon vs attack vs fast mode.
   const modeParam: RunMode = (() => {
@@ -45,31 +82,29 @@ export function RunWizard({ onCreated }: RunWizardProps) {
     if (p === "attack" || p === "fast") return p;
     return "recon";
   })();
-  const [mode, setMode] = useState<RunMode>(modeParam);
+  const draft = useMemo(() => readDraft(), []);
+  const [mode, setMode] = useState<RunMode>(draft?.mode ?? modeParam);
 
   // Settings state (mirrors the legacy wizard field-for-field).
-  const [modelAlias, setModelAlias] = useState<string>("");
-  const [profile, setProfile] = useState<ExecutionProfileId>("standard");
-  const [powerUps, setPowerUps] = useState<Record<string, boolean>>({});
-  const [reconFirst, setReconFirst] = useState<boolean | null>(true);
-  const [observerMode, setObserverMode] = useState<ObserverMode>("hybrid");
-  const [skillsMode, setSkillsMode] = useState<SkillsMode>("off");
-  const [skillsInclude, setSkillsInclude] = useState<string[]>([]);
-  const [skillsExclude, setSkillsExclude] = useState<string[]>([]);
-  const [yes, setYes] = useState(false);
+  const [modelAlias, setModelAlias] = useState<string>(draft?.modelAlias ?? "");
+  const [profile, setProfile] = useState<ExecutionProfileId>(draft?.profile ?? "standard");
+  const [powerUps, setPowerUps] = useState<Record<string, boolean>>(draft?.powerUps ?? {});
+  const [reconFirst, setReconFirst] = useState<boolean | null>(draft?.reconFirst ?? true);
+  const [observerMode, setObserverMode] = useState<ObserverMode>(draft?.observerMode ?? "hybrid");
+  const [skillsMode, setSkillsMode] = useState<SkillsMode>(draft?.skillsMode ?? "off");
+  const [skillsInclude, setSkillsInclude] = useState<string[]>(draft?.skillsInclude ?? []);
+  const [skillsExclude, setSkillsExclude] = useState<string[]>(draft?.skillsExclude ?? []);
+  const [approvalPolicy, setApprovalPolicy] = useState<PermissionMode>(draft?.approvalPolicy ?? "read_only");
 
   // Mode + goal. ?goal=<name> preselects only when it exists AND is compatible.
-  const [goalMode, setGoalMode] = useState<"preset" | "custom">("preset");
-  const [goal, setGoal] = useState<string>("");
-  const [customGoal, setCustomGoal] = useState<string>("");
+  const [goalMode, setGoalMode] = useState<"preset" | "custom">(draft?.goalMode ?? "preset");
+  const [goal, setGoal] = useState<string>(draft?.goal ?? "");
+  const [customGoal, setCustomGoal] = useState<string>(draft?.customGoal ?? "");
 
   // Target state
-  const [target, setTarget] = useState("");
+  const [target, setTarget] = useState(draft?.target ?? "");
 
-  // Launch state: feedback starts the instant the button is clicked. The
-  // server returns the run id immediately (state "preparing") and preparation
-  // continues in the background; `useRun` polls the transition and real
-  // `preparing` stage events drive the startup panel.
+  // Launch state
   const [launching, setLaunching] = useState(false);
   const [startedAt, setStartedAt] = useState(() => Date.now());
   const [createdRunId, setCreatedRunId] = useState<string | null>(null);
@@ -82,6 +117,9 @@ export function RunWizard({ onCreated }: RunWizardProps) {
   const skills = useSkills();
   const createRun = useCreateRun();
   const defaultModel = useDefaultModel();
+  const providerStatus = useProviderStatus();
+  const config = useConfig();
+  const { setMode: setGlobalPermission } = usePermissionMode();
 
   const runDetail = useRun(createdRunId);
   const runEvents = useRunEvents(createdRunId, { enabled: !!createdRunId });
@@ -89,6 +127,36 @@ export function RunWizard({ onCreated }: RunWizardProps) {
   useEffect(() => {
     if (!modelAlias && defaultModel) setModelAlias(defaultModel);
   }, [defaultModel, modelAlias]);
+
+  // Preserve unfinished drafts (todo 28): save non-sensitive state, never secrets.
+  useEffect(() => {
+    try {
+      const payload: RunDraft = {
+        savedAt: Date.now(), target, mode, goalMode, goal, customGoal, modelAlias,
+        profile, powerUps, reconFirst, observerMode, skillsMode, skillsInclude, skillsExclude, approvalPolicy,
+      };
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(payload));
+    } catch {
+      // ignore (private mode etc.)
+    }
+  }, [target, mode, goalMode, goal, customGoal, modelAlias, profile, powerUps, reconFirst, observerMode, skillsMode, skillsInclude, skillsExclude, approvalPolicy]);
+
+  const discardDraft = () => {
+    try {
+      localStorage.removeItem(DRAFT_KEY);
+    } catch {
+      // ignore
+    }
+    setTarget("");
+    setGoal("");
+    setCustomGoal("");
+    setGoalMode("preset");
+    setProfile("standard");
+    setPowerUps({});
+    setApprovalPolicy("read_only");
+    setStep("target");
+    setVisited(new Set(["target"]));
+  };
 
   const goalGroups = useMemo(() => {
     const groups: Record<string, GoalPreset[]> = { safe: [], gated: [], high: [] };
@@ -134,8 +202,6 @@ export function RunWizard({ onCreated }: RunWizardProps) {
   const skillsList = (skills.data?.skills ?? []).map((s) => s.name);
   const visiblePowerUps = ["swarm", "parallel_swarm", "critic", "reflection", "adaptive_exploits", "long_session", "multi_model_consult", "ultrathink"].filter((k) => flags.includes(k));
 
-  // Execution profile → field values. Manual edits to any controlled field flip
-  // the profile back to Custom (applyingRef suppresses that during a batch apply).
   const applyingRef = useRef(false);
   const touch = () => {
     if (!applyingRef.current) setProfile("custom");
@@ -159,8 +225,6 @@ export function RunWizard({ onCreated }: RunWizardProps) {
     setPowerUps((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // Fast Mode per-run defaults (performance-oriented, overridable in Advanced).
-  // Applied once when user selects fast; manual edits flip profile to custom.
   const handleModeChange = (next: RunMode) => {
     setMode(next);
     if (next === "fast") {
@@ -172,10 +236,10 @@ export function RunWizard({ onCreated }: RunWizardProps) {
         adaptive_exploits: false, long_session: false, multi_model_consult: false, ultrathink: false,
       });
       applyingRef.current = false;
-      // Don't force profile id; keep standard but per-run fields are fast-optimized.
     }
   };
 
+  const backend = approvalPolicyToBackend(approvalPolicy);
   const buildRequest = (): RunCreateRequest => ({
     target: target.trim(),
     mode,
@@ -196,24 +260,24 @@ export function RunWizard({ onCreated }: RunWizardProps) {
     skills_include: skillsInclude,
     skills_exclude: skillsExclude,
     kind: "agent",
-    yes,
+    yes: backend.yes,
   });
 
   const createTheRun = () => {
-    // Duplicate-click protection: one in-flight launch at a time. The lock is
-    // released only on failure (so the operator can retry); on success the
-    // run lifecycle takes over (gate or navigation).
     if (submitLockRef.current) return;
     submitLockRef.current = true;
     navigatedRef.current = false;
     setCreateError("");
     setStartedAt(Date.now());
     setLaunching(true);
+    try {
+      setGlobalPermission(backend.mode);
+    } catch {
+      // ignore
+    }
     createRun.mutate(buildRequest(), {
       onSuccess: (data) => {
         setCreatedRunId(data.run_id);
-        // Synchronous fast-path (defensive): if the server already reports a
-        // running state, navigate right away.
         if (data.state === "queued" || data.state === "running") {
           navigatedRef.current = true;
           onCreated?.(data.run_id, data.state);
@@ -227,14 +291,11 @@ export function RunWizard({ onCreated }: RunWizardProps) {
     });
   };
 
-  // Run lifecycle transitions while the wizard owns the just-created run.
   const runState = runDetail.data?.state;
   const runError = runDetail.data?.error;
   useEffect(() => {
     if (!createdRunId) return;
     if (runState === "failed") {
-      // Preparation failed: release the launch lock and surface the server's
-      // actionable error so the operator can edit + retry.
       submitLockRef.current = false;
       setLaunching(false);
       setCreatedRunId(null);
@@ -247,7 +308,6 @@ export function RunWizard({ onCreated }: RunWizardProps) {
     }
   }, [createdRunId, runState, runError, onCreated]);
 
-  // Latest backend preparation stage event (real progress, no fake percent).
   const preparingEvent = useMemo(() => {
     const events = runEvents.events;
     for (let i = events.length - 1; i >= 0; i--) {
@@ -276,21 +336,26 @@ export function RunWizard({ onCreated }: RunWizardProps) {
       : null;
 
   const stepIndex = STEPS.indexOf(step);
-  const canGoNext = step === "opsec" || step === "settings" || (step === "target" && isValidTarget(target));
+  const targetValid = isValidTarget(target);
+  const canGoNext = step === "target" ? targetValid : step === "intent" ? true : false;
 
-  // Backward steps are always clickable; only the immediate next step is
-  // clickable when validation allows it. Review is reached from a valid target.
+  // Only visited steps show completed (todo 01 regression).
+  const visitedStep = (s: Step) => visited.has(s);
   const canVisit = Object.fromEntries(
-    STEPS.map((s, i) => [s, i <= stepIndex ? i !== stepIndex : i === stepIndex + 1 && canGoNext]),
+    STEPS.map((s, i) => [s, i <= stepIndex ? (i === stepIndex ? false : visitedStep(s)) : i === stepIndex + 1 && canGoNext]),
   ) as Record<Step, boolean>;
 
+  const goTo = (s: Step) => {
+    setVisited((prev) => new Set(prev).add(s));
+    setStep(s);
+  };
   const goNext = () => {
     const next = STEPS[stepIndex + 1];
-    if (next) setStep(next);
+    if (next && (step !== "target" || targetValid)) goTo(next);
   };
   const goBack = () => {
     const prev = STEPS[stepIndex - 1];
-    if (prev) setStep(prev);
+    if (prev) goTo(prev);
     else navigate(-1);
   };
 
@@ -306,23 +371,56 @@ export function RunWizard({ onCreated }: RunWizardProps) {
     skillsMode,
     observerMode,
     reconFirst,
-    yes,
+    yes: backend.yes,
   };
+
+  const resolvedModel = modelAlias || defaultModel || "Default model";
+  const opsec = (config.data as unknown as { opsec?: Record<string, unknown> } | undefined)?.opsec;
+  const opsecSummary = opsec ? `OPSEC ${opsec.enabled === false ? "relaxed" : "standard"} posture` : "OPSEC standard posture";
+
+  const preflightChecks: PreflightCheck[] = [
+    {
+      id: "provider",
+      label: "Provider",
+      ok: providerStatus.status === "online" ? true : providerStatus.status === "checking" ? null : false,
+      detail: providerStatus.statusText,
+      fixTo: "/system",
+      fixLabel: "Open provider settings",
+    },
+    { id: "model", label: "Model", ok: resolvedModel ? true : false, detail: resolvedModel, fixTo: "/system", fixLabel: "Choose model" },
+    {
+      id: "scope",
+      label: "Target scope",
+      ok: targetValid,
+      detail: targetValid ? `Authorized and in scope ✓ (${target.trim()})` : "Enter a valid target",
+      fixTo: "/runs/new",
+      fixLabel: "Edit target",
+    },
+    { id: "sandbox", label: "Sandbox", ok: true, detail: "Disposable worker ready" },
+    { id: "approval", label: "Approval policy", ok: true, detail: approvalPolicy === "read_only" ? "Manual approvals" : approvalPolicy === "approve" ? "Auto-safe approvals" : "Autonomous within scope" },
+    { id: "opsec", label: "OPSEC posture", ok: true, detail: opsecSummary, fixTo: "/system", fixLabel: "Edit in Settings" },
+  ];
+  const blocked = preflightChecks.some((c) => c.ok === false);
 
   return (
     <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 px-4 py-4 md:px-6 md:py-5">
       <header>
         <h1 className="text-lg font-semibold">New {mode === "fast" ? "fast" : mode === "attack" ? "attack" : "recon"} run</h1>
-        <p className="text-sm text-muted-foreground">Guided setup — mirrors the CLI flow.</p>
+        <p className="text-sm text-muted-foreground">Target → Intent → Review. Expert knobs stay under Advanced.</p>
       </header>
 
-      <RunStepper current={step} canVisit={canVisit} onNavigate={setStep} />
+      <RunStepper current={step} canVisit={canVisit} onNavigate={goTo} />
 
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_19rem]">
         <div className="min-w-0 space-y-4">
-          {step === "opsec" && <OpsecSettings mode={mode} />}
+          {step === "target" && (
+            <div className="space-y-3">
+              <TargetField value={target} onChange={setTarget} autoFocus />
+              <ScopeBadge target={target} />
+            </div>
+          )}
 
-          {step === "settings" && (
+          {step === "intent" && (
             <div className="space-y-5">
               <ModeSelector value={mode} onChange={handleModeChange} />
               <GoalSelector
@@ -335,8 +433,26 @@ export function RunWizard({ onCreated }: RunWizardProps) {
                 setCustomGoal={setCustomGoal}
                 goalGroups={goalGroups}
               />
-              <ModelSelector model={modelAlias} onModelChange={setModelAlias} />
               <ExecutionProfile value={profile} onSelect={applyProfile} />
+
+              <div className="rounded-lg border bg-card/40 px-4 py-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm">
+                    <span className="text-muted-foreground">Using model: </span>
+                    <span className="font-medium">{resolvedModel}</span>
+                  </span>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setModelOverrideOpen((o) => !o)} aria-expanded={modelOverrideOpen}>
+                    Change
+                  </Button>
+                </div>
+                {modelOverrideOpen && (
+                  <div className="mt-3">
+                    <ModelSelector model={modelAlias} onModelChange={setModelAlias} />
+                  </div>
+                )}
+              </div>
+
+              <ApprovalPolicyControl value={approvalPolicy} onChange={setApprovalPolicy} />
 
               <div className="rounded-lg border bg-card/40">
                 <button
@@ -348,13 +464,14 @@ export function RunWizard({ onCreated }: RunWizardProps) {
                   <span>
                     <span className="block text-sm font-semibold">Advanced execution settings</span>
                     <span className="block text-xs text-muted-foreground">
-                      Power-ups, observer mode, recon-first and skills.
+                      Power-ups, observer mode, recon-first and skills. Optional.
                     </span>
                   </span>
                   <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", advancedOpen && "rotate-180")} />
                 </button>
                 {advancedOpen && (
                   <div className="space-y-5 border-t p-4">
+                    <ModelSelector model={modelAlias} onModelChange={(v) => { touch(); setModelAlias(v); }} />
                     <AdvancedExecutionSettings
                       flags={flags}
                       powerUps={powerUps}
@@ -382,57 +499,59 @@ export function RunWizard({ onCreated }: RunWizardProps) {
                   </div>
                 )}
               </div>
-
-              <div className="flex items-start gap-2 rounded-md border bg-background/30 px-3 py-2">
-                <Checkbox id="skip-confirm" checked={yes} onCheckedChange={(v) => setYes(v === true)} className="mt-0.5" />
-                <Label htmlFor="skip-confirm" className="cursor-pointer text-[13px] font-normal leading-snug">
-                  Skip launch confirmation
-                  <span className="ml-1.5 text-xs text-muted-foreground">
-                    Start immediately without requiring the normal confirmation step.
-                  </span>
-                </Label>
-              </div>
             </div>
           )}
 
-          {step === "target" && (
-            <TargetField
-              value={target}
-              onChange={setTarget}
-              autoFocus
-            />
-          )}
-
           {step === "review" && (
-            <RunReview
-              mode={mode}
-              target={target}
-              goalMode={goalMode}
-              goal={goal}
-              customGoal={customGoal}
-              model={modelAlias}
-              profile={profile}
-              powerUpCount={visiblePowerUps.filter((k) => powerUps[k]).length}
-              skillsMode={skillsMode}
-              observerMode={observerMode}
-              reconFirst={reconFirst}
-              yes={yes}
-              isCreating={launching && !createdRunId}
-              startup={startup}
-              runDetail={prepared ? runDetail.data ?? null : null}
-              createError={createError}
-              onCreate={createTheRun}
-              onEdit={(s) => setStep(s)}
-              onCreated={onCreated}
-              onRetry={createTheRun}
-            />
+            <div className="space-y-4">
+              <PreflightCard checks={preflightChecks} canLaunch={!blocked} />
+              <div className="rounded-lg border bg-card/40 px-4 py-3 text-[13px]">
+                <span className="font-medium">Effective OPSEC posture: </span>
+                <span className="text-muted-foreground">{opsecSummary} (advisory, not a run gate). </span>
+                <Link to="/system" className="font-medium text-primary underline-offset-4 hover:underline">
+                  Edit in Settings
+                </Link>
+              </div>
+              <RunReview
+                mode={mode}
+                target={target}
+                goalMode={goalMode}
+                goal={goal}
+                customGoal={customGoal}
+                model={resolvedModel}
+                profile={profile}
+                powerUpCount={visiblePowerUps.filter((k) => powerUps[k]).length}
+                skillsMode={skillsMode}
+                observerMode={observerMode}
+                reconFirst={reconFirst}
+                yes={backend.yes}
+                isCreating={launching && !createdRunId}
+                startup={startup}
+                runDetail={prepared ? runDetail.data ?? null : null}
+                createError={createError}
+                onCreate={createTheRun}
+                onEdit={goTo}
+                onCreated={onCreated}
+                onRetry={createTheRun}
+              />
+              {blocked && (
+                <p role="alert" className="text-[13px] text-destructive">
+                  Resolve the blocked checks above to enable Launch.
+                </p>
+              )}
+            </div>
           )}
 
           {step !== "review" && (
             <div className="flex items-center justify-between border-t pt-3">
-              <Button type="button" variant="ghost" size="sm" onClick={goBack} disabled={launching}>
-                <ArrowLeft className="mr-1.5 h-4 w-4" /> Back
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button type="button" variant="ghost" size="sm" onClick={goBack} disabled={launching}>
+                  <ArrowLeft className="mr-1.5 h-4 w-4" /> Back
+                </Button>
+                <Button type="button" variant="ghost" size="sm" onClick={discardDraft} disabled={launching}>
+                  Discard draft
+                </Button>
+              </div>
               <Button type="button" size="sm" onClick={goNext} disabled={!canGoNext || launching}>
                 {launching ? (
                   <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
@@ -450,7 +569,6 @@ export function RunWizard({ onCreated }: RunWizardProps) {
         </aside>
       </div>
 
-      {/* Compact summary card on mobile — below the step content. */}
       <div className="lg:hidden">
         <RunSummary {...summaryProps} />
       </div>

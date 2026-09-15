@@ -1,13 +1,21 @@
-import { Check, ClipboardCheck, Settings2, ShieldCheck, Target } from "lucide-react";
+import { Check, ClipboardCheck, Settings2, Target } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export const STEPS = ["opsec", "settings", "target", "review"] as const;
+// Target-first flow (todos 01/02/03): Target -> Intent -> Review.
+// OPSEC editing moved to Settings; Review shows an effective-posture summary.
+export const STEPS = ["target", "intent", "review"] as const;
 export type Step = (typeof STEPS)[number];
 
+/** Back-compat aliases for callers/tests still referencing old step ids. */
+export type LegacyStep = Step | "opsec" | "settings";
+export function normalizeStep(s: LegacyStep): Step {
+  if (s === "opsec" || s === "settings") return "intent";
+  return s;
+}
+
 export const STEP_META: Array<{ key: Step; label: string; icon: typeof Target }> = [
-  { key: "opsec", label: "OPSEC", icon: ShieldCheck },
-  { key: "settings", label: "Configure", icon: Settings2 },
   { key: "target", label: "Target", icon: Target },
+  { key: "intent", label: "Intent", icon: Settings2 },
   { key: "review", label: "Review & launch", icon: ClipboardCheck },
 ];
 

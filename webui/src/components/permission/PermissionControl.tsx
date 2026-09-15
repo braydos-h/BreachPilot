@@ -38,12 +38,12 @@ interface PermissionControlProps {
 }
 
 const OPTIONS: Array<{ value: PermissionMode; label: string; hint: string }> = [
-  { value: "read_only", label: "Read-only", hint: "Every decision waits for the operator." },
-  { value: "approve", label: "Approve", hint: "Auto-answers non-destructive decisions." },
+  { value: "read_only", label: "Manual approvals", hint: "Every decision waits for you. Nothing is auto-approved." },
+  { value: "approve", label: "Auto-safe approvals", hint: "Auto-handles safe approvals. Destructive, goals, and campaign checkpoints still wait for you." },
   {
     value: "full_access",
-    label: "Full access",
-    hint: "Auto-answers ALL decisions, incl. destructive confirmations.",
+    label: "Autonomous within scope",
+    hint: "Automatically handles start/tool approvals, including destructive confirmations. Goals and campaign checkpoints still wait for you.",
   },
 ];
 
