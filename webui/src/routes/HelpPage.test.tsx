@@ -143,7 +143,7 @@ describe("HelpPage links", () => {
   it("directory items link to correct global routes where they exist", () => {
     renderHelp();
     const directory = screen.getByRole("heading", { level: 2, name: /Where do I find/i }).closest("section")!;
-    expect(within(directory).getByRole("link", { name: /^Runs$/ })).toHaveAttribute("href", "/runs");
+    expect(within(directory).getByRole("link", { name: /Runs.*Paginated run list/ })).toHaveAttribute("href", "/runs");
     expect(within(directory).getByRole("link", { name: /Goals/ })).toHaveAttribute("href", "/goals");
     expect(within(directory).getByRole("link", { name: /Attack Modules/ })).toHaveAttribute("href", "/modules");
     expect(within(directory).getByRole("link", { name: /Skills/ })).toHaveAttribute("href", "/skills");
