@@ -263,8 +263,8 @@ export function Layout() {
               <span className="text-gradient-primary">BreachPilot</span>
               <span className="text-foreground">AI</span>
             </span>
-            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-              v{__APP_VERSION__} beta · {consoleLabel}
+            <span className="text-xs uppercase tracking-wide text-muted-foreground">
+              {APP_VERSION} beta · {consoleLabel}
             </span>
           </div>
         </div>
