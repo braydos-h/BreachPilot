@@ -759,3 +759,44 @@ async def test_list_workspace_shows_credentials_via_link_alias_lab(monkeypatch, 
     assert "credentials" in low
     assert ".vault_key" not in listed  # keyfile names are never listed
     assert "credentials.jsonl" not in listed
+
+
+def test_vault_canonical_env_key_roundtrip(monkeypatch, tmp_path):
+    """TODO 012: BREACHPILOT_VAULT_KEY is canonical and warns nothing."""
+    import warnings
+
+    key = Fernet.generate_key().decode()
+    monkeypatch.setenv("BREACHPILOT_VAULT_KEY", key)
+    monkeypatch.delenv("AI_NMAP_VAULT_KEY", raising=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        v = _Vault(tmp_path)
+    assert v.enabled is True
+    assert v.decrypt(v.encrypt(_CLEARTEXT)) == _CLEARTEXT
+
+
+def test_vault_legacy_alias_warns(monkeypatch, tmp_path):
+    """TODO 012: AI_NMAP_VAULT_KEY still works but warns."""
+    import warnings
+
+    key = Fernet.generate_key().decode()
+    monkeypatch.delenv("BREACHPILOT_VAULT_KEY", raising=False)
+    monkeypatch.setenv("AI_NMAP_VAULT_KEY", key)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", DeprecationWarning)
+        v = _Vault(tmp_path)
+    assert v.enabled is True
+    assert any("AI_NMAP_VAULT_KEY is deprecated" in str(w.message) for w in caught)
+
+
+def test_vault_canonical_wins_when_both_set(monkeypatch, tmp_path):
+    """TODO 012: both set -> canonical wins."""
+    key_canonical = Fernet.generate_key().decode()
+    key_legacy = Fernet.generate_key().decode()
+    assert key_canonical != key_legacy
+    monkeypatch.setenv("BREACHPILOT_VAULT_KEY", key_canonical)
+    monkeypatch.setenv("AI_NMAP_VAULT_KEY", key_legacy)
+    v = _Vault(tmp_path)
+    assert v.enabled is True
+    # Canonical key material is the signing key.
+    assert v.signing_key == key_canonical.encode()
