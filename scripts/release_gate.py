@@ -359,7 +359,10 @@ def _verify_eval_dir(eval_dir: Path | None) -> tuple[GateResult, GateResult]:
     try:
         files = sorted(eval_dir.glob("*.json"))
     except OSError as exc:
-        return (_fail("live-eval-backend", f"cannot read --eval-dir: {exc}"), _fail("repeated-trials", f"cannot read --eval-dir: {exc}"))
+        return (
+            _fail("live-eval-backend", f"cannot read --eval-dir: {exc}"),
+            _fail("repeated-trials", f"cannot read --eval-dir: {exc}"),
+        )
     if not files:
         return (
             _external("live-eval-backend", f"--eval-dir {eval_dir} has no JSON artifacts"),
@@ -453,9 +456,7 @@ def _verify_sandbox_digest(path: Path | None) -> GateResult:
     is a FAIL, not silent green).
     """
     if path is None:
-        return _external(
-            "sandbox-image-published", "prebuilt image not yet pushed to GHCR; see sandbox-image.yml"
-        )
+        return _external("sandbox-image-published", "prebuilt image not yet pushed to GHCR; see sandbox-image.yml")
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -522,9 +523,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="0.69 beta release gate (GO/NO-GO).")
     parser.add_argument("--root", default=".", help="repository root")
     parser.add_argument("--json", action="store_true", help="emit JSON report")
-    parser.add_argument("--eval-dir", default=None, help="dir of eval JSON reports with provenance (satisfies live-eval + repeated-trials)")
-    parser.add_argument("--sandbox-digest-file", default=None, help="file containing published sandbox image sha256 digest")
-    parser.add_argument("--branch-rules-file", default=None, help="gh api rulesets JSON output (satisfies branch-rules-applied)")
+    parser.add_argument(
+        "--eval-dir",
+        default=None,
+        help="dir of eval JSON reports with provenance (satisfies live-eval + repeated-trials)",
+    )
+    parser.add_argument(
+        "--sandbox-digest-file", default=None, help="file containing published sandbox image sha256 digest"
+    )
+    parser.add_argument(
+        "--branch-rules-file", default=None, help="gh api rulesets JSON output (satisfies branch-rules-applied)"
+    )
     args = parser.parse_args(argv)
     root = Path(args.root).resolve()
 

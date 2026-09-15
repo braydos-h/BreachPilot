@@ -440,14 +440,21 @@ enabling it. `load_plugins(config)` runs once during boot, before the MCP
 exploit server is created, so plugin attack modules and MCP tool factories are
 registered in time to be picked up.
 
-## 9. Safety checklist for plugin authors
+## 9. Safety checklist for plugin authors (normative)
 
-Before publishing a plugin, confirm every item:
+Before publishing a plugin, confirm every item. The loader enforces the
+manifest + wrapper rows fail-closed (missing manifest or wrapper refuses
+load with a clear error; see `tools/plugins.py:validate_plugin_manifest` /
+`validate_plugin_mcp_wrappers`).
 
+- [ ] **Capability manifest declared.** `plugin.yaml` declares `needs_host_fs`,
+      `needs_net`, `target_touching`, and `provides_mcp_tools[]`. Loader
+      refuses undeclared capabilities (fail closed).
 - [ ] **MCP tools use the safety decorators.** Every `@mcp.tool()` handler is
       also wrapped with `@ctx.require_allowlist()` (target-touching) or
       `@ctx.audit_tool` (free-text command tools), stacked in the
-      `tools/mcp_tools/recon.py` order (`@mcp.tool()` outermost).
+      `tools/mcp_tools/recon.py` order (`@mcp.tool()` outermost). Load-time
+      AST check enforces this (mirror of `tools/mcp_tools/registry.py`).
 - [ ] **Target-locked.** Target-touching tools only ever contact the single
       authorized target IP (the one in `EXPLOIT_TARGET` / `exploit.allowed_targets`).
       Attack modules operate on `ctx.target_ip` only.

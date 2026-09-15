@@ -151,7 +151,12 @@ def test_external_valid_evidence_passes(tmp_path):
                     "name": "main-protected",
                     "enforcement": "active",
                     "conditions": {"ref_name": {"include": ["refs/heads/main"]}},
-                    "rules": [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "CI success"}]}}],
+                    "rules": [
+                        {
+                            "type": "required_status_checks",
+                            "parameters": {"required_status_checks": [{"context": "CI success"}]},
+                        }
+                    ],
                 }
             ]
         ),
@@ -159,9 +164,7 @@ def test_external_valid_evidence_passes(tmp_path):
     )
     results = {
         r.name: r
-        for r in mod.check_external(
-            tmp_path, eval_dir=eval_dir, sandbox_digest_file=digest, branch_rules_file=rules
-        )
+        for r in mod.check_external(tmp_path, eval_dir=eval_dir, sandbox_digest_file=digest, branch_rules_file=rules)
     }
     assert results["live-eval-backend"].passed and not results["live-eval-backend"].external
     assert results["repeated-trials"].passed and not results["repeated-trials"].external

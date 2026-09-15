@@ -203,7 +203,13 @@ def _parse_manifest_yaml(text: str) -> dict[str, Any]:
 
 @dataclass
 class PluginManifest:
-    """Declares a plugin's identity, capabilities, and enablement default."""
+    """Declares a plugin's identity, capabilities, and enablement default.
+
+    Capability manifest (TODO 009, enforced at load time): privileged
+    capabilities must be declared or the plugin fails to load (fail closed).
+    ``needs_host_fs`` / ``needs_net`` / ``target_touching`` gate host-side
+    trust; ``provides_mcp_tools`` lists every MCP tool the plugin registers.
+    """
 
     name: str
     version: str = "0.0.1"
@@ -212,6 +218,10 @@ class PluginManifest:
     capabilities: tuple[str, ...] = ()
     enabled: bool = False  # manifest default; config plugins.enabled overrides
     config_section: dict[str, Any] | None = None
+    needs_host_fs: bool = False
+    needs_net: bool = False
+    target_touching: bool = False
+    provides_mcp_tools: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, d: dict[str, Any] | None) -> PluginManifest:
@@ -232,6 +242,11 @@ class PluginManifest:
         if config_section is not None and not isinstance(config_section, dict):
             log.warning("plugin %s: config_section is not a mapping, ignoring", d.get("name", "?"))
             config_section = None
+        provides = d.get("provides_mcp_tools") or ()
+        if isinstance(provides, str):
+            provides = (provides,)
+        else:
+            provides = tuple(str(x) for x in provides)
         return cls(
             name=str(d.get("name", "")),
             version=str(d.get("version", "0.0.1")),
@@ -240,6 +255,10 @@ class PluginManifest:
             capabilities=caps,
             enabled=bool(d.get("enabled", False)),
             config_section=config_section,
+            needs_host_fs=bool(d.get("needs_host_fs", False)),
+            needs_net=bool(d.get("needs_net", False)),
+            target_touching=bool(d.get("target_touching", False)),
+            provides_mcp_tools=provides,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -251,7 +270,53 @@ class PluginManifest:
             "capabilities": list(self.capabilities),
             "enabled": self.enabled,
             "config_section": self.config_section,
+            "needs_host_fs": self.needs_host_fs,
+            "needs_net": self.needs_net,
+            "target_touching": self.target_touching,
+            "provides_mcp_tools": list(self.provides_mcp_tools),
         }
+
+
+def validate_plugin_manifest(manifest: PluginManifest, *, plugin_py_exists: bool = False) -> list[str]:
+    """Fail-closed manifest check: undeclared privileged capabilities refuse load."""
+    problems: list[str] = []
+    if not manifest.name:
+        problems.append("manifest missing name")
+    if "mcp_tool" in manifest.capabilities and not manifest.provides_mcp_tools and plugin_py_exists:
+        problems.append(f"plugin {manifest.name}: declares mcp_tool but lists no provides_mcp_tools[]")
+    if manifest.target_touching and "mcp_tool" not in manifest.capabilities:
+        problems.append(f"plugin {manifest.name}: target_touching requires mcp_tool capability")
+    return problems
+
+
+def validate_plugin_mcp_wrappers(plugin_py: Path) -> list[str]:
+    """AST check: every @mcp.tool def must carry @require_allowlist/@audit_tool.
+
+    Mirrors tools/mcp_tools/registry.py decorator validation. Returns offender
+    strings (empty = clean). Unparseable decorators fail closed.
+    """
+    import ast
+
+    try:
+        tree = ast.parse(Path(plugin_py).read_text(encoding="utf-8"))
+    except (OSError, SyntaxError) as exc:
+        return [f"{plugin_py}: unparseable ({exc})"]
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        texts: list[str] = []
+        for deco in node.decorator_list:
+            try:
+                texts.append(ast.unparse(deco))
+            except Exception:
+                offenders.append(f"{plugin_py}:{node.lineno} {node.name} has an unparseable decorator")
+                texts = []
+                break
+        if any("mcp.tool" in t for t in texts):
+            if not any("require_allowlist" in t or "audit_tool" in t for t in texts):
+                offenders.append(f"{plugin_py}:{node.lineno} {node.name} has @mcp.tool but lacks wrapper")
+    return offenders
 
 
 # ─── Plugin base class ────────────────────────────────────────────────────────
@@ -299,6 +364,29 @@ class PluginRegistry:
         self._config_sections: dict[str, dict[str, Any]] = {}
         self._loaded_plugins: dict[str, PluginManifest] = {}
         self._event_subscribers: list[Callable[[dict[str, Any]], None]] = []
+        self._plugin_audit: list[dict[str, Any]] = []
+
+    def audit_plugin_event(self, event: str, manifest: PluginManifest, detail: str = "") -> None:
+        """Record plugin load/unload + capability grants (audit trail, test-visible)."""
+        import hashlib
+        import time
+
+        prev = self._plugin_audit[-1].get("chain", "") if self._plugin_audit else ""
+        body = f"{prev}|{event}|{manifest.name}|{','.join(manifest.capabilities)}|{detail}"
+        chain = hashlib.sha256(body.encode()).hexdigest()[:16]
+        self._plugin_audit.append(
+            {
+                "ts": time.time(),
+                "event": event,
+                "plugin": manifest.name,
+                "capabilities": list(manifest.capabilities),
+                "provides_mcp_tools": list(manifest.provides_mcp_tools),
+                "target_touching": manifest.target_touching,
+                "detail": detail,
+                "chain": chain,
+            }
+        )
+        log.info("plugin %s: %s (%s)", manifest.name, event, detail or ",".join(manifest.capabilities))
 
     def register_attack_module(self, cls: type) -> None:
         """Append an AttackModule subclass to the extra-modules list."""
@@ -477,7 +565,20 @@ class PluginManager:
             manifest.name = plugin_dir.name
         plugin_py = plugin_dir / "plugin.py"
         if not plugin_py.is_file():
+            problems = validate_plugin_manifest(manifest, plugin_py_exists=False)
+            if problems:
+                log.warning("plugin %s refused: %s", manifest.name, "; ".join(problems))
+                return None
             return _ManifestOnlyPlugin(manifest)
+        # Fail-closed wrapper check before import: undeclared/unwrapped tools refuse load.
+        offenders = validate_plugin_mcp_wrappers(plugin_py)
+        if offenders:
+            log.warning("plugin %s refused (missing wrapper): %s", manifest.name, "; ".join(offenders[:3]))
+            return None
+        problems = validate_plugin_manifest(manifest, plugin_py_exists=True)
+        if problems:
+            log.warning("plugin %s refused: %s", manifest.name, "; ".join(problems))
+            return None
         try:
             module = self._load_module_from_file(plugin_py, plugin_dir.name)
         except Exception as exc:  # noqa: BLE001
@@ -631,6 +732,7 @@ class PluginManager:
                 log.warning("plugin %s: register() failed: %s", manifest.name, exc)
                 continue
             self._registry.mark_plugin_loaded(manifest)
+            self._registry.audit_plugin_event("load", manifest, f"caps={','.join(manifest.capabilities)}")
             loaded.append(manifest)
         return loaded
 

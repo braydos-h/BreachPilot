@@ -134,6 +134,28 @@ class ExecuteMixin:
         except OSError:
             pass
 
+        # Unified run manifest (TODO 007): versioned index linking all stores.
+        try:
+            from tools.eval_harness import build_run_provenance
+            from tools.kernel.run_manifest import build_manifest, write_manifest
+
+            _prov = build_run_provenance(config, trial_count=1)
+            _manifest = build_manifest(
+                run_id=run_id,
+                reports_dir=reports_dir,
+                config=config,
+                model={"alias": str(getattr(preview, "model_alias", "") or ""), "provider": str(_prov.provider or "")},
+                sandbox={
+                    "image": str(_prov.sandbox_image or ""),
+                    "digest": str(_prov.sandbox_image_digest or ""),
+                    "enabled": str(bool((config.get("sandbox", {}) or {}).get("enabled", True))),
+                },
+                eval_provenance=_prov.to_dict(),
+            )
+            write_manifest(reports_dir, _manifest)
+        except Exception:
+            pass
+
         # Build/refresh model client if not supplied.
         if model_client is None:
             _long_cfg = config.get("long_session", {}) or {}

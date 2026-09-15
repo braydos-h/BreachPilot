@@ -5,3 +5,8 @@ author: BreachPilot
 capabilities: [attack_module, mcp_tool]
 # opt-in: plugins default to disabled; enable via config plugins.enabled list
 enabled: false
+# Capability manifest (TODO 009, fail-closed): undeclared privileged use refuses load.
+needs_host_fs: false
+needs_net: false
+target_touching: true
+provides_mcp_tools: [plugin_info]

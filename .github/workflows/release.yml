@@ -128,6 +128,16 @@ jobs:
         uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45 # v2
         with:
           subject-path: dist/*, sbom-python.json, sbom-webui.json, sbom-sandbox.json
+      - name: Freeze versioned installer (TODO 013)
+        run: |
+          cp install.sh install-${{ github.ref_name }}.sh
+          cp install.ps1 install-${{ github.ref_name }}.ps1 2>/dev/null || true
+          sha256sum install-${{ github.ref_name }}.sh > install-${{ github.ref_name }}.sh.sha256
+          cat install-${{ github.ref_name }}.sh.sha256
+      - name: Attest installer provenance (TODO 013)
+        uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45 # v2
+        with:
+          subject-path: install-${{ github.ref_name }}.sh
       - name: Upload release assets
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -141,4 +151,6 @@ jobs:
             base-digest.txt
             worker-digests.txt
             trivy.sarif
+            install-*.sh
+            install-*.sh.sha256
           retention-days: 90

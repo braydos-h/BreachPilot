@@ -87,6 +87,20 @@ the same layer:
 same tightened `ActionResult` classification into the judge so it can never
 re-classify via the loose legacy path (outcome_adapter.py:412-432).
 
+## Canonical contract (one outcome vocabulary)
+
+`tools/kernel/action_result.py:CanonicalActionResult` is the single type all
+orchestration layers emit (TODO 006): `operational_status` (did the call
+complete?) × `exploit_outcome` (did the action achieve compromise?) ×
+`evidential_status` (`VERIFIED`/`HOLDING`/`INCONCLUSIVE`/`REFUTED`/`PROPOSED`,
+oracle-only) + `scope_verdict` + `evidence_refs` + `finding_ids` +
+`hypothesis_id`. Adapters: `action_from_exploit_result` (exploit agent),
+`action_from_swarm_result` (swarm, never self-grades to `VERIFIED`),
+`action_from_campaign_result` (campaign `status` dict),
+`action_from_flowb_finding` (Flow B terminal states). Contract tests:
+`tests/test_action_result_contract.py`. Rule: tool exited 0 ≠ exploit worked
+≠ finding evidenced.
+
 ## The Evidence Model
 
 ### What counts as evidence

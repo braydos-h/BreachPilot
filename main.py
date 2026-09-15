@@ -492,6 +492,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     ops.add_argument("--doctor", action="store_true", help="Run a self-check (Python, nmap, Ollama, config) and exit")
     ops.add_argument("--demo", action="store_true", help="Run against a local sandbox target (DVWA-style)")
     ops.add_argument("--resume", type=str, default="", help="Resume a prior run by run_id or session_id")
+    ops.add_argument(
+        "--export-run",
+        type=str,
+        default="",
+        metavar="RUN_ID",
+        help="Export reports/<RUN_ID>/ + run_manifest.json into a portable zip bundle and exit",
+    )
     ops.add_argument("--yes", action="store_true", help="Skip the ready-to-begin confirmation gate (use with caution)")
     ops.add_argument(
         "--self-test", action="store_true", help="Run a safe localhost smoke test against 127.0.0.1 and exit"
@@ -1405,6 +1412,14 @@ def main(argv: list[str] | None = None) -> int:
             from tools.doctor import run_doctor
 
             return run_doctor(args.config, json_output=bool(getattr(args, "json", False)))
+
+        # --export-run: bundle reports/<RUN_ID>/ + run_manifest.json and exit.
+        if getattr(args, "export_run", ""):
+            from tools.kernel.run_manifest import export_run_bundle
+
+            bundle = export_run_bundle(Path("reports"), str(args.export_run), Path(f"{args.export_run}.zip"))
+            print(f"exported {args.export_run} -> {bundle}")
+            return 0
 
         # --self-test: run a safe localhost smoke test and exit.
         if getattr(args, "self_test", False):

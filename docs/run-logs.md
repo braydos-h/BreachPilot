@@ -8,6 +8,7 @@ Each run writes three complementary logs under `reports/<run_id>/`, plus session
 
 | File | Writer | Contents |
 |---|---|---|
+| `run_manifest.json` | `tools/kernel/run_manifest.py` via `tools/run_service/execute.py` (TODO 007) | Versioned index: run/mission ids, config/model/sandbox identity (RunProvenance), store paths, decision/audit logs, evidence index, findings |
 | `run.log` | `RunLog.attach(reports_dir)` (`tools/run_log.py`) | Tee of all console output plus every logging record in the process |
 | `activity.jsonl` | `ActivityLog(reports_dir, ...)` (`tools/activity_log.py`) | Operator-facing audit trail, one JSON object per line |
 | `decision_log.jsonl` | `log_decision(reports_dir, ...)` (`tools/decision_log.py`) | Compact decision events, one JSON object per line |

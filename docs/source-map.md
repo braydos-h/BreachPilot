@@ -1,0 +1,29 @@
+# Source map (generated stub for TODO 011; full generator in TODO 020)
+
+> Public import → canonical implementation → compatibility status → removal version.
+> Full AST generator lands in TODO 020 (`scripts/generate_source_map.py`).
+> This table is the interim manual map so TODO 011 CI can enforce expiry.
+
+| Public import | Canonical | Status | Removal |
+|---|---|---|---|
+| `agent_loop` | `legacy.agent_loop` | Deprecated since 0.68 | remove in 0.71 |
+| `cli` | `legacy.cli` | Deprecated since 0.68 | remove in 0.71 |
+| `mission` | `legacy.mission` | Deprecated since 0.68 (root `mission.py` is shim) | remove in 0.71 |
+| `tool_router` | `legacy.tool_router` | Deprecated since 0.68 | remove in 0.71 |
+| `executor` | `legacy.executor` | Deprecated since 0.68 | remove in 0.71 |
+| `planner` | `legacy.planner` | Deprecated since 0.68 | remove in 0.71 |
+| `observer` | `legacy.observer` | Deprecated since 0.68 | remove in 0.71 |
+| `task_queue` | `legacy.task_queue` | Deprecated since 0.68 | remove in 0.71 |
+| `evidence` | `legacy.evidence` | Deprecated since 0.68 | remove in 0.71 |
+| `memory` | `legacy.memory` | Deprecated since 0.68 | remove in 0.71 |
+| `finding_verifier` | `legacy.finding_verifier` | Deprecated since 0.68 | remove in 0.71 |
+| `report_generator` | `legacy.report_generator` | Deprecated since 0.68 | remove in 0.71 |
+| `risk_controller` | `legacy.risk_controller` | Deprecated since 0.68 | remove in 0.71 |
+| `tools.autonomous_orchestrator` | `tools.campaign.*` | Facade (canonical, not deprecated) | n/a — patch-seam contract |
+| `tools.config_manager` | `tools.config.*` | Re-export shim (canonical) | n/a |
+| `db.py`, `scope_gate.py` | shared kernel (dual-homed) | Frozen, not a shim | n/a |
+
+`pyproject.toml py-modules` still lists the root shims for one release so the
+~250-file test suite keeps importing; shrink toward `breachpilot.*` in TODO 020
+after the 0.69 freeze. Lowest-risk removal batch for 0.71: `evidence`,
+`memory`, `observer`, `planner` (pure re-exports, no logic).

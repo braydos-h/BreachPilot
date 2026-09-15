@@ -42,6 +42,24 @@ default-DROP netns firewall authorizes only the effective target allowlist (plus
 Sandbox failures fail closed as structured `SANDBOX_*` blocks; see
 [sandbox.md](sandbox.md).
 
+## Canonical outcome contract
+
+One action contract, one outcome contract, one event vocabulary (TODO 006):
+`tools/kernel/action_result.py:CanonicalActionResult` — `operational_status`
+× `exploit_outcome` × `evidential_status` (`VERIFIED`/`HOLDING`/`INCONCLUSIVE`/
+`REFUTED`/`PROPOSED`) + `scope_verdict` + `evidence_refs` + provenance hooks.
+Exploit agent, swarm, campaign, and Flow B adapters all emit it; UI/telemetry
+consume one vocabulary. Details: [outcome-evidence.md](outcome-evidence.md).
+
+## Unified run manifest
+
+One index over fragmented state (TODO 007): `tools/kernel/run_manifest.py`
+writes versioned `reports/<run_id>/run_manifest.json` on run start (run/mission
+ids, config/model/sandbox identity from `RunProvenance`, store paths,
+decision/audit logs, evidence index, findings). `bp --export-run <run_id>`
+produces a portable zip bundle; import reverses it. Details:
+[run-logs.md](run-logs.md).
+
 ## Entry Points
 
 ### `main.py`
@@ -247,6 +265,27 @@ This mirrors CLAUDE.md's "Flow A CLI orchestration layer" bullet list.
 - `critic_agent.py`: pre-execution scope, risk, and policy review.
 - `reflection_agent.py`: strategy review and lessons learned.
 - `orchestrator.py`: task routing, parallel dispatch, reflection, state persistence.
+
+## Orchestration ownership (campaign > worker > swarm)
+
+No 5th orchestration layer (TODO 008). New code chooses an owner; the table
+is normative. Event vocabulary is `tools/kernel/action_result.py`
+(TODO 006); retry budgets thread campaign → worker → swarm without
+multiplication (model retry × task retry × campaign retry is bounded).
+
+| Concern | Owner | Others |
+|---|---|---|
+| Persistent multi-target queue, resume, aggression | Campaign (`tools/campaign/`, facade `tools/autonomous_orchestrator.py`) | Worker/swarm never persist queues |
+| Single-target LLM reasoning loop | Exploit-agent worker (`tools/exploit_agent/`) | Campaign schedules; swarm delegates |
+| Specialist fan-out, critic-gated | Swarm (`tools/swarm/`, optional under worker) | Never top-level on multi-target runs |
+| Retries/state/findings/policy/memory/planning/persistence/stopping | Owner per row above; campaign owns budgets, worker owns per-action retry, swarm owns delegation retry | No layer re-implements another's budget |
+| Legacy Flow B execution | Retired; hypothesis/evidence model preserved via `tools/kernel/action_result.py` + TODO 021 | `legacy/` importable one release, removal in 0.71 |
+
+Retry interaction: `campaign.max_cycles` bounds outer loops; `RetryEngine`
+bounds task retries; model-level retries are inside the worker's tool budget.
+Documented interaction tested in `tests/test_campaign_retry_bounds.py` (outer ×
+inner never unbounded). Legacy execution emits `DeprecationWarning` and
+delegates to the canonical layer.
 
 ## ADR-001: Flow B Freeze (Phase 2)
 
