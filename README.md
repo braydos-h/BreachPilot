@@ -50,6 +50,8 @@ bp --doctor
 bp   # opens the WebUI at http://127.0.0.1:8765
 ```
 
+After an update (`git pull`), refresh the built interface with `bp --rebuild` (combine with `bp --web` to rebuild before serving).
+
 Dev path (mutable `main`, dev-only with warning):
 
 ```bash

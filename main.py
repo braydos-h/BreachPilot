@@ -367,6 +367,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "  python main.py --doctor                                  environment self-check\n"
             "  python main.py --self-test                                safe localhost smoke test\n"
             "  python main.py --web                                     WebUI + API daemon\n"
+            "  python main.py --rebuild                                 force-rebuild webui/dist/ and exit\n"
             "  python main.py --resume <run_id>                          resume a prior run\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -646,17 +647,25 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Build the WebUI if needed, serve it from the daemon at /, and open a browser",
     )
+    webui.add_argument(
+        "--rebuild",
+        "-rebuild",
+        dest="rebuild",
+        action="store_true",
+        help="Force a clean rebuild of the WebUI (npm install + npm run build) for updates; "
+        "with --web/--daemon rebuilds before serving, otherwise rebuilds and exits",
+    )
     webui.add_argument("--api-host", default=None, help="API daemon bind host (loopback only; default 127.0.0.1)")
     webui.add_argument("--api-port", type=int, default=None, help="API daemon port (default 8765)")
     parsed = parser.parse_args(argv)
     return parsed
 
 
-def _ensure_webui_build(ui: Any) -> int:
-    """Build webui/dist/ if missing. Returns 0 on success, non-zero on failure."""
+def _ensure_webui_build(ui: Any, *, force: bool = False) -> int:
+    """Build webui/dist/ if missing (or always, when ``force`` is set). Returns 0 on success, non-zero on failure."""
     webui_dir = Path(__file__).resolve().parent / "webui"
     dist_index = webui_dir / "dist" / "index.html"
-    if dist_index.exists():
+    if dist_index.exists() and not force:
         return 0
     npm_cmd = shutil.which("npm.cmd") or shutil.which("npm")
     node_cmd = shutil.which("node") or shutil.which("nodejs")
@@ -664,7 +673,7 @@ def _ensure_webui_build(ui: Any) -> int:
         ui.error("Node/npm not found on PATH. Install Node.js, or build the WebUI manually:")
         ui.error(f"  cd {webui_dir} && npm install && npm run build")
         return 1
-    ui.status("Building the WebUI (first run only)...")
+    ui.status("Rebuilding the WebUI..." if force else "Building the WebUI (first run only)...")
     for step in (("install", [npm_cmd, "install", "--no-audit", "--no-fund"]), ("build", [npm_cmd, "run", "build"])):
         label, argv = step
         ui.status(f"  npm {label}...")
@@ -687,6 +696,14 @@ def _ensure_webui_build(ui: Any) -> int:
         return 1
     ui.status("WebUI build complete.")
     return 0
+
+
+def _rebuild_webui(ui: Any) -> int:
+    """Force a clean rebuild of the WebUI (``npm install`` + ``npm run build``), even when dist/ exists.
+
+    Used by ``--rebuild`` to pick up WebUI updates after a ``git pull``. Returns 0 on success.
+    """
+    return _ensure_webui_build(ui, force=True)
 
 
 def _install_bun(ui: Any) -> bool:
@@ -999,11 +1016,17 @@ def _run_daemon(args: argparse.Namespace) -> int:
         return 1
 
     if web_mode:
-        build_rc = _ensure_webui_build(ui)
+        build_rc = _ensure_webui_build(ui, force=bool(getattr(args, "rebuild", False)))
         if build_rc != 0:
             return build_rc
         # In-memory override only; never persisted to config.yaml.
         api_cfg["serve_webui"] = True
+    elif getattr(args, "rebuild", False):
+        # --daemon --rebuild: the API daemon doesn't serve the SPA, but honor
+        # the explicit rebuild request before starting.
+        rebuild_rc = _rebuild_webui(ui)
+        if rebuild_rc != 0:
+            return rebuild_rc
 
     # Auto-update the model registry against the live Ollama API before the
     # app factory snapshots the config (models.auto_update, default true).
@@ -1352,6 +1375,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.demo,
                 getattr(args, "daemon", False),
                 getattr(args, "web", False),
+                getattr(args, "rebuild", False),
             ]
         )
         if setup_only:
@@ -1370,6 +1394,34 @@ def main(argv: list[str] | None = None) -> int:
             rc = _ensure_chatgpt_runtime(args)
             if rc != 0:
                 return rc
+
+        # --rebuild: force a clean rebuild of the WebUI for updates and exit.
+        # With --daemon/--web it rebuilds before serving instead (handled in
+        # _run_daemon via the mutual-exclusion gate below falling through).
+        if getattr(args, "rebuild", False) and not getattr(args, "daemon", False) and not getattr(args, "web", False):
+            _conflicting = []
+            for flag in ("target", "mode", "goal", "custom_goal"):
+                if getattr(args, flag, "").strip():
+                    _conflicting.append(f"--{flag.replace('_', '-')}")
+            for flag in (
+                "menu",
+                "doctor",
+                "demo",
+                "self_test",
+                "skills_list",
+                "list_plugins",
+                "setup_api_keys",
+            ):
+                if getattr(args, flag, False):
+                    _conflicting.append(f"--{flag.replace('_', '-')}")
+            if _eval_active:
+                _conflicting.append("--eval")
+            if _benchmark_active:
+                _conflicting.append("--benchmark")
+            if _conflicting:
+                ui.error("--rebuild cannot be combined with: " + ", ".join(_conflicting))
+                return 2
+            return _rebuild_webui(ui)
 
         # --demon / --daemon / --web: start the local WebUI API server and exit.
         # Checked BEFORE --doctor/--self-test/etc. so the mutual-exclusion

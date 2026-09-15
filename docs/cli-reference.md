@@ -130,6 +130,7 @@ daemon default and direct runs load keys without prompting.
 |------|-------------|------|
 | `--demon`, `--daemon` | Start the local WebUI API server instead of the terminal menu (`main._run_daemon`) | webui |
 | `--web` | Daemon mode plus: build `webui/dist/` if needed, serve it at `/`, open a browser (`main._ensure_webui_build`) | webui |
+| `--rebuild`, `-rebuild` | Force a clean rebuild of `webui/dist/` (`npm install` + `npm run build`) for updates; with `--web`/`--daemon` rebuilds before serving, otherwise rebuilds and exits (`main._rebuild_webui`) | webui |
 | `--api-host <host>` | Daemon bind host — **loopback only** (`127.0.0.1`/`localhost`/`::1`); any other host exits with code 2 | webui |
 | `--api-port <n>` | Daemon port (default 8765) | webui |
 
@@ -228,6 +229,9 @@ python main.py --target 10.0.0.50 --mode attack --long-session
 
 # WebUI: build, serve, and open the SPA
 python main.py --web
+
+# After `git pull`: force-rebuild the WebUI to pick up updates, then exit
+python main.py --rebuild
 
 # API daemon only (no SPA build)
 python main.py --daemon --api-port 9000
