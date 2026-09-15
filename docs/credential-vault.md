@@ -8,11 +8,12 @@ Resolution order is fixed in `_Vault.__init__` (`tools/credential_store.py`):
 
 | Priority | Source | Notes |
 |---|---|---|
-| 1 | `AI_NMAP_VAULT_KEY` environment variable | Operator-carried urlsafe-base64 32-byte Fernet key. When set, no keyfile is read or created. |
+| 1 | `BREACHPILOT_VAULT_KEY` environment variable | Operator-carried urlsafe-base64 32-byte Fernet key. When set, no keyfile is read or created. `AI_NMAP_VAULT_KEY` honored as deprecated alias until 0.71 (canonical wins when both set, with warning). |
 | 2 | Per-store keyfile from `_vault_key_path(store_dir)` | Auto-generated on first use via `Fernet.generate_key()`. One key per store directory. |
 
 ```python
-key = os.environ.get("AI_NMAP_VAULT_KEY") or self._load_or_create_key()
+key = _resolve_vault_key_env() or self._load_or_create_key()
+# _resolve_vault_key_env(): BREACHPILOT_VAULT_KEY first, AI_NMAP_VAULT_KEY alias with DeprecationWarning
 ```
 
 The per-store keyfile name is derived from the store path so each workspace gets its own key:
@@ -48,9 +49,17 @@ A legacy in-workspace `.vault_key` (`<store_dir>/.vault_key`) is adopted once, i
 
 If the out-of-tree keyfile already exists, it wins and the legacy file is left alone by this path (no adoption needed).
 
-## Plaintext fallback
+## Plaintext fallback (fail-closed by default)
 
-If the `cryptography` package is not importable, or no usable key can be established (empty keyfile, invalid key material, keyfile I/O error), `_Vault.enabled` stays `False` and the store falls back to plaintext. The fallback is loud, never silent:
+Writes fail closed by default. If the `cryptography` package is not importable, or no usable key can be established (empty keyfile, invalid key material, keyfile I/O error), `_Vault.enabled` stays `False` and `save()`/`add()` raise `RuntimeError` naming the cause instead of persisting secrets in cleartext. Reads stay fail-open so legacy stores never brick: a value that does not decrypt is treated as plaintext on load.
+
+Plaintext writes are only possible with explicit opt-in:
+
+```bash
+export BREACHPILOT_ALLOW_PLAINTEXT_VAULT=1
+```
+
+With the opt-in set, the legacy loud-but-allowed fallback applies:
 
 ```python
 _LOG = logging.getLogger("ai_bug_bounty.creds")
@@ -61,7 +70,7 @@ _Vault._warn_plaintext_fallback("cryptography package not installed -- ...")
 - `encrypt` returns the input unchanged when disabled; `decrypt` returns its input unchanged when disabled or when the token is not valid ciphertext under the current key.
 - Legacy plaintext files still load: a value that does not decrypt is treated as plaintext, so existing stores are never bricked. A wrong-key read surfaces *something* (possibly garbage) instead of losing the record — crypto errors never drop a record.
 
-In plaintext-fallback mode no HMAC signature is possible, so on-disk `confirmed=True` is never trusted (see next section).
+In plaintext-fallback mode no HMAC signature is possible, so on-disk `confirmed=True` is never trusted (see next section) — it is downgraded to `confirmed=False` with a `WARNING` on load.
 
 ## Record integrity: `confirm_credential` plus HMAC downgrade
 

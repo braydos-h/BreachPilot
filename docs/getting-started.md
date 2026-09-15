@@ -5,7 +5,7 @@
 | Need | Minimum | Notes |
 |------|---------|-------|
 | Python | 3.11+ (`pyproject.toml` `requires-python = ">=3.11"`; `tools/doctor.py:31` rejects older; CI 3.11–3.13) | `python --version` |
-| Docker | Docker Desktop (Win/macOS) or Engine (Linux) + image `breachpilot-sandbox:latest` | Sandbox is default-on; without it attacks degrade to native (`sandbox.fallback_native: true`) or block (`false`). Build: `docker build -t breachpilot-sandbox:latest docker/sandbox` |
+| Docker | Docker Desktop (Win/macOS) or Engine (Linux) + image `breachpilot-sandbox:latest` | Sandbox is default-on (`sandbox.fallback_native: false` default, fail-closed); without Docker attacks block, unless explicit opt-in `sandbox.fallback_native: true` degrades to native. Build: `docker build -t breachpilot-sandbox:latest docker/sandbox` |
 | Node.js + npm | Node 18+ | Only for first WebUI build (`webui/dist/` auto-built, ~600s timeout) |
 | nmap | On `PATH` or `nmap.path` in `config.yaml` | Linux `-O`/`-sS` need root (`nmap.sudo: true` with `sudo -n`) or `nmap.priv_fallback` auto-downgrade |
 | Ollama endpoint | Cloud default (`https://api.ollama.com` + `OLLAMA_API_KEY`) or local (`http://localhost:11434`) | Embeddings stay local via `ollama.embed_host`. Alt providers: `opencode_go` (`OPENCODE_GO_API_KEY`), `chatgpt` (browser OAuth, tokens in `~/.codex/auth.json` — never config) |

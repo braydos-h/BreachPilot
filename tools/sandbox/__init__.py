@@ -16,9 +16,9 @@ sandbox failure DURING a session FAILS CLOSED: ``SandboxError`` subclasses
 surface as ``SANDBOX_*`` result blocks and host execution is never a
 per-command fallback. The single sanctioned fallback is the boot-time
 decision in ``resolve_manager_with_fallback``: with ``sandbox.fallback_native``
-true (default) a server whose Docker stack is unusable degrades wholly to the
+true (explicit opt-in; default false, fail-closed) a server whose Docker stack is unusable degrades wholly to the
 documented legacy host-execution mode with a warning (surfaced by the WebUI
-home screen); ``fallback_native: false`` fails closed instead.
+home screen); ``fallback_native: false`` (default, fail-closed) fails closed instead.
 
 Docker access is seam-mediated (house convention from ``tools/snapshots.py``):
 tests monkeypatch the named wrappers in ``tools.sandbox.docker_backend``,

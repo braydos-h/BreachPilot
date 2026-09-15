@@ -16,9 +16,15 @@ This project can run powerful security tooling. The codebase relies on layered c
 
 Two different things protect the operator, and both stay active:
 
+> Commands are scope-checked at the application layer, while the sandbox network boundary independently enforces the effective destination allowlist.
+
 - **Application controls** (ScopeGate, MCP `@require_allowlist` decorators,
   destination parsing, mission policy) decide *what may be attempted*. They
-  inspect command strings and targets and remain defense-in-depth.
+  inspect command strings and targets and remain defense-in-depth. Static
+  command-string inspection is best-effort: dynamically constructed,
+  DNS-resolved, or sub-interpreter destinations may not be visible to the
+  application layer, which is why the sandbox boundary below is the
+  containment authority — not the parser.
 - **Isolation boundary** (disposable worker container, host filesystem
   isolation, resource limits, network-layer egress allowlist) decides *what
   can physically be reached or damaged*. Docker alone does not make
@@ -202,12 +208,15 @@ Evidence and auditability are part of the safety model:
   sandbox failures (fail closed with `SANDBOX_*` blocks). The ONE sanctioned
   fallback is the boot-time decision in
   `tools/sandbox/manager.py::resolve_manager_with_fallback`: with
-  `sandbox.fallback_native: true` (default), an unusable Docker stack degrades
+  `sandbox.fallback_native: true` (explicit opt-in; default `false`), an unusable Docker stack degrades
   the WHOLE server process to the legacy host-execution mode before any tool
   exists — surfacing as a boot-log warning, an amber WebUI home-screen banner,
   and a `SANDBOX_FALLBACK:` line in every legacy-path tool result. Never
   switch a session between contained and native execution mid-stream, and keep
-  `sandbox.fallback_native: false` fail-closed (`SANDBOX_UNAVAILABLE` blocks).
+  `sandbox.fallback_native: false` (default, fail-closed) (`SANDBOX_UNAVAILABLE` blocks).
+  See [sandbox.md](sandbox.md) for the full fail-closed contract and
+  [generated/safety-defaults.md](generated/safety-defaults.md) for the
+  schema-generated default table.
 - Keep output sanitization and secret redaction near the boundary where output enters logs, model context, or reports.
 - Keep evidential status separate from execution status. New outcome rules may
   reduce/reprioritize activity only; they must remain downstream of the

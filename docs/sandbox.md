@@ -14,9 +14,11 @@ to, lists the exact security invariants, and documents residual risks.
 
 ## The two layers
 
+> Commands are scope-checked at the application layer, while the sandbox network boundary independently enforces the effective destination allowlist.
+
 | Layer | Controls | Role |
 |---|---|---|
-| **Application controls** (defense-in-depth) | ScopeGate, `@require_allowlist` decorators, destination parsing (`command_analyzer`, `_target_lock_block`), mission policy, `exploit.forbidden_actions` | Decide *what may be attempted*, inspect command strings and targets |
+| **Application controls** (defense-in-depth) | ScopeGate, `@require_allowlist` decorators, destination parsing (`command_analyzer`, `_target_lock_block`), mission policy, `exploit.forbidden_actions` | Decide *what may be attempted*, inspect command strings and targets (best-effort: shell is too expressive for exhaustive static extraction) |
 | **Isolation boundary** (containment) | Disposable worker container, cap-drop + no-new-privileges, read-only rootfs, resource limits, netns egress firewall, host filesystem isolation | Decide *what can physically be reached or damaged* |
 
 **Docker alone does not make exploitation safe.** The application layer can be
@@ -254,6 +256,8 @@ the doctor still flags the check but the session would degrade to native
 execution instead of blocking.
 
 ## Configuration
+
+Canonical defaults are generated from `CONFIG_SCHEMA`: see [generated/safety-defaults.md](generated/safety-defaults.md) (via `scripts/generate_safety_defaults.py`). The yaml below echoes those values — do not hand-edit defaults here without updating the schema.
 
 ```yaml
 sandbox:

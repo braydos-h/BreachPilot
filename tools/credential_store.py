@@ -14,8 +14,9 @@ every record before it touches disk and decrypts it on load, so the in-memory
 records stay plaintext (callers see ``record.password`` as before) while the
 file on disk holds ciphertext. The key is resolved, in priority order, from:
 
-  1. the ``AI_NMAP_VAULT_KEY`` environment variable (a urlsafe-base64 32-byte
-     Fernet key the operator carries out-of-band), else
+  1. the ``BREACHPILOT_VAULT_KEY`` environment variable (a urlsafe-base64 32-byte
+     Fernet key the operator carries out-of-band; ``AI_NMAP_VAULT_KEY`` honored
+     as a deprecated alias until 0.71), else
   2. a 0600 keyfile OUTSIDE the workspace tree at
      ``$BREACHPILOT_VAULT_DIR/<sha256-of-store-dir>.key`` (default
      ``~/.breachpilot/vault_keys/``), auto-generated on first use
@@ -168,6 +169,46 @@ def _vault_key_path(store_dir: Path) -> Path:
     return keys_dir / f"{digest}.key"
 
 
+#: Canonical vault-key env var. ``AI_NMAP_VAULT_KEY`` is honored as a
+#: deprecated alias for one release (TODO 011/012, remove in 0.71).
+VAULT_KEY_ENV = "BREACHPILOT_VAULT_KEY"
+VAULT_KEY_ENV_LEGACY = "AI_NMAP_VAULT_KEY"
+
+
+def _resolve_vault_key_env() -> str | None:
+    """Return the vault key from env, preferring the canonical name.
+
+    Reads ``BREACHPILOT_VAULT_KEY`` first; falls back to ``AI_NMAP_VAULT_KEY``
+    with a ``DeprecationWarning`` + log line. When both are set, canonical wins.
+    """
+    import warnings
+
+    canonical = os.environ.get(VAULT_KEY_ENV, "").strip() or None
+    legacy = os.environ.get(VAULT_KEY_ENV_LEGACY, "").strip() or None
+    if canonical:
+        if legacy:
+            _LOG.warning(
+                "Both %s and deprecated %s are set -- using %s.",
+                VAULT_KEY_ENV,
+                VAULT_KEY_ENV_LEGACY,
+                VAULT_KEY_ENV,
+            )
+        return canonical
+    if legacy:
+        warnings.warn(
+            f"{VAULT_KEY_ENV_LEGACY} is deprecated; use {VAULT_KEY_ENV} (removal in 0.71).",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        _LOG.warning(
+            "Using deprecated %s; migrate to %s (removal in 0.71).",
+            VAULT_KEY_ENV_LEGACY,
+            VAULT_KEY_ENV,
+        )
+        return legacy
+    return None
+
+
 #: Explicit opt-in for insecure plaintext vault storage. Default is fail-closed:
 #: when secure storage is unavailable, writes are refused instead of persisted
 #: in cleartext.
@@ -215,7 +256,7 @@ class _Vault:
                 "cryptography package not installed -- install 'cryptography' to enable at-rest Fernet encryption."
             )
             return
-        key = os.environ.get("AI_NMAP_VAULT_KEY") or self._load_or_create_key()
+        key = _resolve_vault_key_env() or self._load_or_create_key()
         if not key:
             self._refuse_or_warn("no vault key could be established")
             return

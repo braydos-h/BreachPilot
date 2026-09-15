@@ -1,0 +1,16 @@
+{
+  "generated": "2026-09-15",
+  "git_sha": "da2d1c7",
+  "tools": 167,
+  "tool_families": 37,
+  "skills": 146,
+  "skills_top_level": 139,
+  "skills_maybe": 7,
+  "modules": 86,
+  "module_families": 14,
+  "sources": {
+    "tools": "docs/mcp/tool-catalog-generated.md",
+    "skills": "skills/**/SKILL.md",
+    "modules": "tools.attack_modules.registry.list_modules()"
+  }
+}

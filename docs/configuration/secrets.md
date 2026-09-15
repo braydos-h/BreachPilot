@@ -89,7 +89,7 @@ Vendored `oauth/` checkout (`EvanZhouDev/openai-oauth`) + loopback proxy `127.0.
 
 ### Credential vault (attack-found creds, not provider keys)
 
-`tools/credential_store.py` — encrypted at-rest creds discovered during attack, keyed by `AI_NMAP_VAULT_KEY` env or auto-generated. Access via MCP `cred_store_add/get/list/confirm`. Separate from `secr.json`.
+`tools/credential_store.py` — encrypted at-rest creds discovered during attack, keyed by `BREACHPILOT_VAULT_KEY` env (`AI_NMAP_VAULT_KEY` deprecated alias until 0.71) or auto-generated. Writes fail closed by default (no plaintext writes without `BREACHPILOT_ALLOW_PLAINTEXT_VAULT=1`); on-disk `confirmed=True` without a valid HMAC is downgraded. Access via MCP `cred_store_add/get/list/confirm`. Separate from `secr.json`.
 
 ## Permissions
 
@@ -108,7 +108,7 @@ All three are gitignored. Verify `.gitignore` covers `secr.json`, `.webui_secret
 | `OLLAMA_API_KEY` / `SERPAPI_API_KEY` / `NVD_API_KEY` / `GITHUB_TOKEN` | Edit `secr.json`, delete + `export NEW=…`, or `python main.py --setup-api-keys` then restart; next `load_api_keys_into_env` on boot picks new value (or env override immediately) | Ollama Cloud dashboard / SerpAPI / NVD / GitHub token settings |
 | `.webui_secret_key` | `rm .webui_secret_key` + restart daemon, or `export BREACHPILOT_API_TOKEN=new` | — (local daemon only; old WS connections drop at `run_manager.shutdown()`) |
 | `~/.codex/auth.json` | Re-run `Sign in with ChatGPT` from menu / `python main.py --doctor` then login | ChatGPT account settings |
-| `AI_NMAP_VAULT_KEY` | `export AI_NMAP_VAULT_KEY=new` + migrate store | — |
+| `BREACHPILOT_VAULT_KEY` (`AI_NMAP_VAULT_KEY` alias until 0.71) | `export BREACHPILOT_VAULT_KEY=new` + migrate store | — |
 
 No migration tool — old `secr.json` entries not yet overlaid by new env remain until overwritten.
 

@@ -79,7 +79,7 @@ python main.py --eval --check-regression
 
 ## Capability catalogs (generated, not headline)
 
-- Tools: `docs/mcp/tool-catalog-generated.md` (167 tools across 37 families as of 2026-09-14)
-- Skills: `docs/skills/catalog.md` (146 skills: 139 top-level + 7 `maybe/` tier)
+- Tools: `docs/mcp/tool-catalog-generated.md` (see `docs/generated/capability-counts.json` for live counts — 167 tools across 37 families as of 2026-09-14)
+- Skills: `docs/skills/catalog.md` (146 skills: 139 top-level + 7 `maybe/` tier; see `docs/generated/capability-counts.json`)
 - These files are generated from source; headline copy must link to them,
-  never hardcode a count that will rot.
+  never hardcode a count that will rot. `python scripts/generate_capability_counts.py --check` fails CI on drift.

@@ -139,13 +139,28 @@ def check_safety_defaults(root: Path) -> GateResult:
         except ValueError:
             pass
     bad = []
+    # Both word orders must be caught: `fallback_native ... default ... true`
+    # and `fallback_native: true (default)`. Order-independent fallback: any
+    # line mentioning fallback_native + default + true without a nearby false
+    # is stale. Code fences are stripped above so explicit `true` yaml examples
+    # do not flag.
+    stale_patterns = [
+        r"fallback_native[^.\n]{0,80}default[^.\n]{0,20}true",
+        r"fallback_native[^.\n]{0,80}true[^.\n]{0,20}default",
+        r"default[^.\n]{0,20}fallback_native[^.\n]{0,20}true",
+    ]
     for path in [root / "README.md", root / "CLAUDE.md", *(root / "docs").rglob("*.md")]:
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
             continue
         nofence = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
-        if re.search(r"fallback_native[^.\n]{0,80}default[^.\n]{0,20}true", nofence, re.IGNORECASE):
+        matched = False
+        for pat in stale_patterns:
+            if re.search(pat, nofence, re.IGNORECASE):
+                matched = True
+                break
+        if matched:
             snippet = nofence[max(0, nofence.lower().find("fallback_native") - 60) :]
             if not re.search(r"default\s*[`'\"]?\s*false", snippet, re.IGNORECASE):
                 bad.append(str(path.relative_to(root)))

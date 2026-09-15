@@ -7,7 +7,7 @@ Open-source autonomous security-testing operator for authorized environments. Pl
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)
 [![Release](https://img.shields.io/github/v/release/braydos-h/BreachPilot?style=flat-square)](https://github.com/braydos-h/BreachPilot/releases)
 
-**[Quick start](#quick-start) · [Documentation](docs/README.md) · [Architecture](#how-it-works) · [Safety model](#safety-and-containment) · [Live demo](https://breachpilot-site.vercel.app/)**
+**[Quick start](#quick-start) · [Documentation](docs/README.md) · [Architecture](#how-it-works) · [Safety model](#safety-and-containment) · [Reliability metrics](docs/reliability-metrics.md) · [Live demo](https://breachpilot-site.vercel.app/)**
 
 ![BreachPilot WebUI](docs/assets/breachpilot-webui.png)
 
@@ -146,7 +146,9 @@ Execution is **autonomous within configured authorization boundaries**, while fi
 
 ## Safety and containment
 
-- **Authorized targets only.** The allowlist is the scope authority: anything not explicitly allowed is `BLOCKED` at the tool layer, regardless of what a command or prompt says.
+> Commands are scope-checked at the application layer, while the sandbox network boundary independently enforces the effective destination allowlist.
+
+- **Authorized targets only.** The allowlist is the scope authority: anything not explicitly allowed is `BLOCKED` at the tool layer, regardless of what a command or prompt says. Static command-string inspection is best-effort (dynamically constructed, DNS-resolved, or sub-interpreter destinations may not be visible) — the sandbox egress firewall below is the containment authority.
 - **Mission scope gate.** `forbidden_actions` / `disallowed_assets` deny with an auditable `SCOPE_DENIED` row. Recon stays scope-gated even in attack mode.
 - **Disposable worker.** Attack commands run in a per-run Docker container (non-root, capability-dropped, read-only rootfs, resource limits), destroyed afterward. Build it once: `docker build -t breachpilot-sandbox:latest docker/sandbox`.
 - **Network containment, fail closed.** An ephemeral firewall in the worker's network namespace authorizes only the effective allowlist. Sandbox failures deny execution with structured `SANDBOX_*` errors — native host execution requires explicit, separate opt-in and is developer-only.

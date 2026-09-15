@@ -291,7 +291,7 @@ Keys are loaded from the `--api-key-file` JSON into `os.environ` when not alread
 | `AI_NMAP_ACTIVE_MODEL_ALIAS` | Active model alias override for MCP registry/peer tools | `tools/mcp_tools/registry.py:201` |
 | `AI_NMAP_MULTI_MODEL_ENABLED` | Force multi-model enablement for the MCP server | `tools/mcp_tools/registry.py:220` |
 | `AI_NMAP_AUDIT_VERIFY_VERBOSE` | Verbose audit verification output | `tools/exploit_agent/policy.py:340` |
-| `AI_NMAP_VAULT_KEY` | Credential-store vault key (else auto-generated) | `tools/credential_store.py:149` |
+| `BREACHPILOT_VAULT_KEY` (`AI_NMAP_VAULT_KEY` alias until 0.71) | Credential-store vault key (else auto-generated); writes fail closed without `BREACHPILOT_ALLOW_PLAINTEXT_VAULT=1` | `tools/credential_store.py:149` |
 | `MCP_ALLOW_PUBLIC_BIND` | Allow MCP HTTP servers to bind non-loopback | `tools/mcp_shared.py:1022` |
 | `MCP_HTTP_TOKEN` | Bearer token for MCP HTTP transport | `tools/mcp_shared.py:1081` |
 | `RESEARCH_WORKSPACE` | Flow B workspace root (default `research_workspace`) | `cli.py:39-43`; `tools/logging_setup.py:18` |

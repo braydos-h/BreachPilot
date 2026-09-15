@@ -121,3 +121,24 @@ def test_readme_headline_leads_with_reliability_not_stale_counts():
     assert "tool-catalog-generated" in text
     assert "docs/reliability-metrics.md" in text
     assert (REPO / "docs/reliability-metrics.md").exists()
+
+
+def test_two_layer_scope_sandbox_claim_present():
+    """TODO 016: canonical two-layer statement must exist in README + safety docs."""
+    canonical = (
+        "Commands are scope-checked at the application layer, "
+        "while the sandbox network boundary independently enforces "
+        "the effective destination allowlist."
+    )
+    for rel in ("README.md", "docs/safety-model.md", "docs/sandbox.md"):
+        text = (REPO / rel).read_text(encoding="utf-8")
+        assert canonical in text, f"{rel} missing two-layer scope+sandbox sentence"
+
+
+def test_credential_vault_docs_fail_closed():
+    """TODO 004: vault docs must state fail-closed default + opt-in env + HMAC downgrade."""
+    text = (REPO / "docs" / "credential-vault.md").read_text(encoding="utf-8")
+    assert "fail closed" in text.lower(), "vault docs must state fail-closed default"
+    assert "BREACHPILOT_ALLOW_PLAINTEXT_VAULT" in text
+    assert "confirmed=True" in text and "downgrad" in text.lower()
+    assert "silent" not in text.lower() or "never silent" in text.lower() or "fail" in text.lower()

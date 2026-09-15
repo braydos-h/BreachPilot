@@ -57,3 +57,48 @@ def test_version_mismatch_fails(monkeypatch, tmp_path):
     (tmp_path / "webui" / "package.json").write_text('{"version": "0.0.1"}', encoding="utf-8")
     result = mod.check_versions(tmp_path)
     assert result.passed is False
+
+
+def _make_safety_root(tmp_path: Path, doc_text: str) -> Path:
+    """Minimal repo layout for check_safety_defaults: schema-matching config + one doc."""
+    import shutil
+
+    (tmp_path / "docs").mkdir(exist_ok=True)
+    shutil.copy(REPO / "config.yaml", tmp_path / "config.yaml")
+    (tmp_path / "README.md").write_text("safe readme\n", encoding="utf-8")
+    (tmp_path / "CLAUDE.md").write_text("safe claude\n", encoding="utf-8")
+    (tmp_path / "docs" / "probe.md").write_text(doc_text, encoding="utf-8")
+    return tmp_path
+
+
+def test_safety_defaults_catches_true_before_default_order(tmp_path):
+    mod = _load()
+    root = _make_safety_root(tmp_path, "`sandbox.fallback_native: true` (default)\n")
+    result = mod.check_safety_defaults(root)
+    assert result.passed is False, f"true-before-default must fail: {result.detail}"
+    assert "probe.md" in result.detail
+
+
+def test_safety_defaults_catches_default_before_true_order(tmp_path):
+    mod = _load()
+    root = _make_safety_root(tmp_path, "fallback_native default is true\n")
+    result = mod.check_safety_defaults(root)
+    assert result.passed is False, f"default-before-true must fail: {result.detail}"
+
+
+def test_safety_defaults_allows_fail_closed_wording(tmp_path):
+    mod = _load()
+    root = _make_safety_root(
+        tmp_path,
+        "with `sandbox.fallback_native: true` (explicit opt-in; default `false`), "
+        "fail-closed. Keep `sandbox.fallback_native: false` (default, fail-closed).\n",
+    )
+    result = mod.check_safety_defaults(root)
+    assert result.passed, f"correct fail-closed wording must pass: {result.detail}"
+
+
+def test_safety_defaults_generated_table_exists():
+    assert (REPO / "docs" / "generated" / "safety-defaults.md").exists()
+    text = (REPO / "docs" / "generated" / "safety-defaults.md").read_text(encoding="utf-8")
+    assert "fallback_native" in text
+    assert "`False`" in text or "`false`" in text

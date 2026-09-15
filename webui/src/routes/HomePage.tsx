@@ -442,7 +442,7 @@ function SandboxFixDialog({
  * - contained: quiet green line (worker container active).
  * - disabled: quiet muted line (legacy host mode as configured).
  * - native_fallback: amber card — Docker was unusable at boot, the session
- *   degraded to uncontained native execution (fallback_native=true default).
+ *   degraded to uncontained native execution (fallback_native=true explicit opt-in; default false, fail-closed).
  * - blocked: red card — strict fail-closed mode, executions will be denied.
  */
 export function SandboxBanner() {

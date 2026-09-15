@@ -91,7 +91,7 @@ Allowlist check is `tools/validation_utils.is_target_in_allowlist` — supports 
 | `AI_NMAP_ACTIVE_MODEL_ALIAS` | Active model alias threaded into MCP server | `mcp_session.py:270` | `tools/mcp_tools/registry.py:201`, `peer_models.py:80` |
 | `AI_NMAP_MULTI_MODEL_ENABLED` | Force multi-model enablement in MCP server | — | `tools/mcp_tools/registry.py:220` |
 | `AI_NMAP_AUDIT_VERIFY_VERBOSE` | Verbose audit verification | — | `exploit_agent/policy.py:340` |
-| `AI_NMAP_VAULT_KEY` | Credential-store vault key (else auto-generated) | — | `credential_store.py:149` |
+| `BREACHPILOT_VAULT_KEY` (`AI_NMAP_VAULT_KEY` deprecated alias until 0.71) | Credential-store vault key (else auto-generated); writes fail closed without `BREACHPILOT_ALLOW_PLAINTEXT_VAULT=1` | — | `credential_store.py:149` |
 | `RESEARCH_WORKSPACE` | Flow B workspace root | — | `cli.py:39`, `logging_setup.py:18` |
 | `CODEX_HOME` | ChatGPT auth file dir override (`$CODEX_HOME/auth.json`) | user | `chatgpt_provider.py is_authenticated`, `doctor._check_chatgpt` |
 

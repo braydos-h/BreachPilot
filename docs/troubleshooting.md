@@ -601,24 +601,24 @@ an exact fix. When in doubt, start with the diagnostics table below — the
 
 ### `.vault_key` plaintext fallback warning
 
-- **Symptoms:** a loud one-time WARNING that the credential store will be
+- **Symptoms:** by default a `RuntimeError` refusing plaintext writes, or (with `BREACHPILOT_ALLOW_PLAINTEXT_VAULT=1`) a loud one-time WARNING that the credential store will be
   written in PLAINTEXT (`tools/credential_store.py:167`, warnings at
   `:195`).
-- **Cause:** the `_Vault` falls back to plaintext when `cryptography` is not
-  installed, no usable key is found (`AI_NMAP_VAULT_KEY` env, then
+- **Cause:** secure storage unavailable — `cryptography` is not
+  installed, no usable key is found (`BREACHPILOT_VAULT_KEY` env, `AI_NMAP_VAULT_KEY` deprecated alias, then
   `~/.breachpilot/vault_keys/`, then the legacy in-workspace `.vault_key`
   adopted once), or the key material is invalid (`tools/credential_store.py:17`,
-  `:195`). Legacy plaintext values still load so existing stores never brick
-  (`:32`).
+  `:195`). Writes fail closed unless `BREACHPILOT_ALLOW_PLAINTEXT_VAULT=1` is set. Legacy plaintext values still load so existing stores never brick
+  (`:32`). On-disk `confirmed=True` without a valid HMAC is downgraded to `False`.
 - **Check:**
   ```bash
   python -c "import cryptography; print(cryptography.__version__)"
-  python -c "import os; print('vault key set:', bool(os.environ.get('AI_NMAP_VAULT_KEY')))"
+  python -c "import os; print('vault key set:', bool(os.environ.get('BREACHPILOT_VAULT_KEY') or os.environ.get('AI_NMAP_VAULT_KEY')))"
   ```
 - **Fix:** install the dependency and set a persistent key:
   ```bash
   python -m pip install cryptography
-  export AI_NMAP_VAULT_KEY="$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")"
+  export BREACHPILOT_VAULT_KEY="$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")"
   ```
   Never commit keyfiles — the `.vault_key` basename is deny-listed from
   workspace reads (`tools/credential_store.py:181`).

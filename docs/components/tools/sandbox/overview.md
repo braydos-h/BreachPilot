@@ -134,7 +134,9 @@ Always denied: `METADATA_DESTINATIONS` (`169.254.169.254`, `169.254.0.0/16`, `fd
 
 The decision is recorded to `sandbox_boot_state.json` under the exploit workspace dir; `read_boot_state` / `status_report` report that recorded mode (`disabled` / `contained` / `native_fallback` / `blocked`), not a live probe that could drift mid-run.
 
-Implementation note: `docs/sandbox.md` describes `fallback_native: true` as "the default" in two places, but `tools/config/schema.py:871` sets `False` and the shipped lab `config.yaml` sets `fallback_native: false`. The schema plus lab config are the operative defaults.
+> Commands are scope-checked at the application layer, while the sandbox network boundary independently enforces the effective destination allowlist.
+
+Historical note (fixed 2026-09-15): `docs/sandbox.md` previously misstated this default in two places. The schema plus lab config are the operative defaults and all docs now agree (fail-closed, `false`).
 
 ## Config keys
 
