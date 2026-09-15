@@ -36,20 +36,22 @@ Requires Python 3.11+, Docker Engine, and nmap. `bp --doctor` verifies everythin
 
 ### Linux (primary)
 
-Inspect, then run — do not pipe unreviewed scripts to `bash`:
+Release path (recommended, pinned + verified):
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/braydos-h/BreachPilot/main/install.sh
-less install.sh
-bash install.sh
+curl -fsSLO https://github.com/braydos-h/BreachPilot/releases/download/v0.69.0/install-v0.69.0.sh
+curl -fsSLO https://github.com/braydos-h/BreachPilot/releases/download/v0.69.0/install-v0.69.0.sh.sha256
+bash scripts/verify-installer.sh install-v0.69.0.sh install-v0.69.0.sh.sha256
+less install-v0.69.0.sh
+bash install-v0.69.0.sh
 bp --doctor
 bp   # opens the WebUI at http://127.0.0.1:8765
 ```
 
-One-line convenience (same script, less inspection):
+Dev path (mutable `main`, dev-only with warning):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/braydos-h/BreachPilot/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/braydos-h/BreachPilot/main/install.sh | bash  # dev-only
 ```
 
 From an existing checkout: `./install.sh`, or `make install && make doctor && make run`. Full options: `docs/deployment.md`.
