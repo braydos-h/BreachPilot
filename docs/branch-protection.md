@@ -44,3 +44,16 @@ JSON
 Verify: `gh api repos/OWNER/REPO/rulesets --jq '.[].name'`, then confirm the
 release gate box `branch-rules-applied` flips from EXTERNAL to satisfied and
 record the ruleset ID + date in `todo/04-runtime-governance-and-ci/41-*.md`.
+
+## Satisfying the release gate (admin)
+
+```bash
+gh api repos/OWNER/REPO/rulesets > branch-rules.json
+python scripts/release_gate.py --branch-rules-file branch-rules.json
+```
+
+The gate passes `branch-rules-applied` when the JSON names `main`, shows
+active enforcement, and requires CI checks. Commit the file as a release
+artifact (or pass it between `release.yml` jobs); missing file stays
+EXTERNAL, malformed file FAILs. See `docs/release.md` for the full
+artifact table.

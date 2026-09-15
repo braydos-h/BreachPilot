@@ -37,11 +37,35 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -c constraints-dev.txt -e ".[dev]"
+      - name: Download eval artifacts (if published by eval workflow)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a62840a355165ad09d724 # v4
+        continue-on-error: true
+        with:
+          name: eval-artifacts
+          path: eval-artifacts
+      - name: Download sandbox digests (if published by sandbox-image workflow)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a62840a355165ad09d724 # v4
+        continue-on-error: true
+        with:
+          name: sandbox-digests
+          path: .
+      - name: Fetch branch ruleset (admin-applied; EXTERNAL when absent)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api repos/${{ github.repository }}/rulesets > branch-rules.json || rm -f branch-rules.json
+          ls -la branch-rules.json worker-digests.txt eval-artifacts 2>&1 || true
       - name: Run release gate
         id: gate
         run: |
-          python scripts/release_gate.py | tee gate.txt
-          verdict=$(python scripts/release_gate.py --json | python -c "import json,sys; print(json.load(sys.stdin)['verdict'])")
+          FLAGS=""
+          [ -d eval-artifacts ] && FLAGS="$FLAGS --eval-dir eval-artifacts"
+          [ -f worker-digests.txt ] && FLAGS="$FLAGS --sandbox-digest-file worker-digests.txt"
+          [ -f branch-rules.json ] && FLAGS="$FLAGS --branch-rules-file branch-rules.json"
+          echo "gate flags:$FLAGS"
+          python scripts/release_gate.py $FLAGS | tee gate.txt
+          verdict=$(python scripts/release_gate.py $FLAGS --json | python -c "import json,sys; print(json.load(sys.stdin)['verdict'])")
           echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
           test "$verdict" = "GO"
       - name: Upload gate report

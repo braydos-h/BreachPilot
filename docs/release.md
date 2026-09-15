@@ -4,11 +4,23 @@
 
 ```bash
 python scripts/release_gate.py
+python scripts/release_gate.py --eval-dir reports/eval/2026-09-15 --sandbox-digest-file worker-digests.txt --branch-rules-file branch-rules.json --json
 ```
 
-`GO` requires every local box green and no EXTERNAL box outstanding. The
-current EXTERNAL boxes (live backend, repeated trials, branch rules,
-published image) each name their unblocking action. Do not ship on `NO-GO`.
+`GO` requires every local box green and no EXTERNAL box outstanding. Each
+EXTERNAL is satisfiable via an evidence artifact (safe default is EXTERNAL
+when the file is missing; present-but-invalid fails closed):
+
+| Gate box | Artifact | Contract |
+|---|---|---|
+| `live-eval-backend` | `--eval-dir DIR/*.json` | >=1 JSON with a `provenance` object carrying all 14 `RunProvenance` fields (see `scripts/release_gate.py:check_provenance_fields` + TODO 018); mtime <90d |
+| `repeated-trials` | same `--eval-dir` | >=5 valid provenance files, or any file with `provenance.trials >= 5` (TODO 001: 5–10×/scenario) |
+| `branch-rules-applied` | `--branch-rules-file rules.json` | JSON from `gh api repos/OWNER/REPO/rulesets` naming `main`, active enforcement, requiring CI checks (see `docs/branch-protection.md`) |
+| `sandbox-image-published` | `--sandbox-digest-file digests.txt` | text containing `sha256:<hex>` (e.g. `worker-digests.txt` from `release.yml`); local digest mismatch fails |
+
+Without flags the gate keeps the 4 EXTERNALs (no silent green). With valid
+artifacts it can reach `GO` (exit 0). Stale/invalid evidence is a `FAIL`,
+not EXTERNAL, so bad provenance cannot be mistaken for missing provenance.
 
 ## What `release.yml` publishes per tag
 

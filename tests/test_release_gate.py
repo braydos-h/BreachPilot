@@ -102,3 +102,109 @@ def test_safety_defaults_generated_table_exists():
     text = (REPO / "docs" / "generated" / "safety-defaults.md").read_text(encoding="utf-8")
     assert "fallback_native" in text
     assert "`False`" in text or "`false`" in text
+
+
+def _valid_provenance(trials: int = 5) -> dict:
+    return {
+        "model_alias": "glm",
+        "provider": "ollama",
+        "model_id": "glm-5.2:cloud",
+        "model_version": "test",
+        "temperature": "0.1",
+        "scenario_version": "abc123",
+        "code_revision": "da2d1c7",
+        "breachpilot_version": "0.68.4",
+        "config_hash": "c" * 12,
+        "prompt_hash": "p" * 12,
+        "tool_catalog_hash": "t" * 12,
+        "skill_catalog_hash": "s" * 12,
+        "sandbox_image": "breachpilot-sandbox:latest",
+        "sandbox_image_digest": "sha256:" + "a" * 64,
+        "trials": trials,
+    }
+
+
+def test_external_missing_evidence_stays_external(tmp_path):
+    mod = _load()
+    results = {r.name: r for r in mod.check_external(tmp_path)}
+    for name in ("live-eval-backend", "repeated-trials", "branch-rules-applied", "sandbox-image-published"):
+        assert results[name].external, f"{name} must be EXTERNAL when evidence missing"
+
+
+def test_external_valid_evidence_passes(tmp_path):
+    import json
+
+    mod = _load()
+    eval_dir = tmp_path / "eval"
+    eval_dir.mkdir()
+    for i in range(5):
+        (eval_dir / f"trial-{i}.json").write_text(
+            json.dumps({"provenance": _valid_provenance(trials=5)}), encoding="utf-8"
+        )
+    digest = tmp_path / "digests.txt"
+    digest.write_text("breachpilot-sandbox@sha256:" + "b" * 64, encoding="utf-8")
+    rules = tmp_path / "rules.json"
+    rules.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "main-protected",
+                    "enforcement": "active",
+                    "conditions": {"ref_name": {"include": ["refs/heads/main"]}},
+                    "rules": [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "CI success"}]}}],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    results = {
+        r.name: r
+        for r in mod.check_external(
+            tmp_path, eval_dir=eval_dir, sandbox_digest_file=digest, branch_rules_file=rules
+        )
+    }
+    assert results["live-eval-backend"].passed and not results["live-eval-backend"].external
+    assert results["repeated-trials"].passed and not results["repeated-trials"].external
+    assert results["branch-rules-applied"].passed
+    assert results["sandbox-image-published"].passed
+
+
+def test_external_stale_evidence_fails(tmp_path):
+    import json
+    import os
+    import time
+
+    mod = _load()
+    eval_dir = tmp_path / "eval"
+    eval_dir.mkdir()
+    bad = _valid_provenance()
+    del bad["config_hash"]
+    (eval_dir / "bad.json").write_text(json.dumps({"provenance": bad}), encoding="utf-8")
+    live, repeated = mod._verify_eval_dir(eval_dir)
+    assert live.passed is False and live.external is False
+    # Stale mtime (>90d) fails even when fields are valid.
+    good = eval_dir / "good.json"
+    good.write_text(json.dumps({"provenance": _valid_provenance()}), encoding="utf-8")
+    old = time.time() - 100 * 86400
+    os.utime(good, (old, old))
+    (eval_dir / "bad.json").unlink()
+    live2, _ = mod._verify_eval_dir(eval_dir)
+    assert live2.passed is False and live2.external is False
+    # Malformed digest fails.
+    digest = tmp_path / "digests.txt"
+    digest.write_text("no digest here", encoding="utf-8")
+    assert mod._verify_sandbox_digest(digest).passed is False
+    # Ruleset without main fails.
+    rules = tmp_path / "rules.json"
+    rules.write_text(json.dumps([{"name": "other", "enforcement": "active"}]), encoding="utf-8")
+    assert mod._verify_branch_rules(rules).passed is False
+
+
+def test_no_unconditional_external_without_verification():
+    import inspect
+
+    mod = _load()
+    src = inspect.getsource(mod.check_external)
+    assert "eval_dir" in src and "sandbox_digest" in src and "branch_rules" in src
+    assert "_external(" in src  # safe default preserved
+    assert "_verify_eval_dir" in src

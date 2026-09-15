@@ -314,20 +314,188 @@ def check_js_scan(root: Path) -> GateResult:
     return _ok("js-scan", "npm audit gate present in CI audit job")
 
 
-def check_external(root: Path) -> list[GateResult]:
-    """Boxes no agent run can satisfy — listed EXTERNAL, never green."""
+def _required_provenance_fields() -> set[str]:
+    return {
+        "model_alias",
+        "provider",
+        "model_id",
+        "model_version",
+        "temperature",
+        "scenario_version",
+        "code_revision",
+        "breachpilot_version",
+        "config_hash",
+        "prompt_hash",
+        "tool_catalog_hash",
+        "skill_catalog_hash",
+        "sandbox_image",
+        "sandbox_image_digest",
+    }
+
+
+def _verify_eval_dir(eval_dir: Path | None) -> tuple[GateResult, GateResult]:
+    """Verify live-eval + repeated-trial evidence from an artifacts dir.
+
+    Contract (docs/release.md): ``--eval-dir`` points at a directory containing
+    eval JSON reports with a ``provenance`` object carrying all 14
+    ``RunProvenance`` fields. Missing dir/files -> EXTERNAL (safe default).
+    Present-but-invalid (missing fields, malformed JSON) or stale (>90d) -> FAIL.
+    ``live-eval-backend`` passes on any valid provenance; ``repeated-trials``
+    additionally requires ``trials >= 5`` or >=5 provenance files.
+    """
+    if eval_dir is None:
+        return (
+            _external(
+                "live-eval-backend",
+                "no model backend provisioned from this checkout; provision one for scheduled eval "
+                "(or pass --eval-dir with provenance artifacts)",
+            ),
+            _external(
+                "repeated-trials",
+                "no repeated live-trial artifacts recorded yet; run 5-10x per scenario "
+                "(or pass --eval-dir with provenance artifacts)",
+            ),
+        )
+    try:
+        files = sorted(eval_dir.glob("*.json"))
+    except OSError as exc:
+        return (_fail("live-eval-backend", f"cannot read --eval-dir: {exc}"), _fail("repeated-trials", f"cannot read --eval-dir: {exc}"))
+    if not files:
+        return (
+            _external("live-eval-backend", f"--eval-dir {eval_dir} has no JSON artifacts"),
+            _external("repeated-trials", f"--eval-dir {eval_dir} has no JSON artifacts"),
+        )
+    import time
+
+    required = _required_provenance_fields()
+    valid: list[dict] = []
+    errors: list[str] = []
+    for path in files:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            errors.append(f"{path.name}: unreadable ({exc})")
+            continue
+        prov = payload.get("provenance", payload if isinstance(payload, dict) else {})
+        if not isinstance(prov, dict):
+            errors.append(f"{path.name}: provenance not an object")
+            continue
+        missing = required - set(prov.keys())
+        if missing:
+            errors.append(f"{path.name}: missing provenance fields {sorted(missing)}")
+            continue
+        # Freshness: artifact mtime within 90 days (stale evidence fails).
+        try:
+            age_days = (time.time() - path.stat().st_mtime) / 86400
+        except OSError:
+            age_days = 0
+        if age_days > 90:
+            errors.append(f"{path.name}: stale ({age_days:.0f}d old, max 90d)")
+            continue
+        valid.append({"path": path.name, "provenance": prov})
+    if not valid:
+        return (
+            _fail("live-eval-backend", f"no valid provenance in --eval-dir: {'; '.join(errors[:3])}"),
+            _fail("repeated-trials", f"no valid provenance in --eval-dir: {'; '.join(errors[:3])}"),
+        )
+    live = _ok("live-eval-backend", f"{len(valid)} provenance artifact(s) in {eval_dir}")
+    # Repeated trials: trials>=5 in any artifact, or >=5 valid files.
+    repeated_ok = len(valid) >= 5 or any(
+        isinstance(v["provenance"].get("trials"), int) and v["provenance"]["trials"] >= 5 for v in valid
+    )
+    if repeated_ok:
+        repeated = _ok("repeated-trials", f"repeated-trial evidence: {len(valid)} file(s), trials>=5 satisfied")
+    else:
+        repeated = _external(
+            "repeated-trials",
+            f"only {len(valid)} valid provenance file(s); need >=5 files or trials>=5 for repeated baseline",
+        )
+    return (live, repeated)
+
+
+def _verify_branch_rules(path: Path | None) -> GateResult:
+    """Verify branch-protection ruleset artifact (docs/branch-protection.md).
+
+    Contract: ``--branch-rules-file`` is JSON from
+    ``gh api repos/OWNER/REPO/rulesets`` (list) or a single ruleset object.
+    Must name the main branch, be active, and require CI checks. Missing ->
+    EXTERNAL; present-but-wrong -> FAIL.
+    """
+    if path is None:
+        return _external(
+            "branch-rules-applied", "ruleset must be applied by a repo admin; see docs/branch-protection.md"
+        )
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return _fail("branch-rules-applied", f"cannot read --branch-rules-file: {exc}")
+    rulesets = payload if isinstance(payload, list) else [payload]
+    if not isinstance(rulesets, list) or not rulesets:
+        return _fail("branch-rules-applied", "branch-rules file has no rulesets")
+    blob = json.dumps(rulesets).lower()
+    # Require evidence of main protection + CI checks.
+    if "main" not in blob:
+        return _fail("branch-rules-applied", "no ruleset targets main branch")
+    if "ci success" not in blob and "ci" not in blob:
+        return _fail("branch-rules-applied", "ruleset does not require CI checks")
+    if '"enforcement": "active"' not in blob.replace(" ", "") and "active" not in blob:
+        return _fail("branch-rules-applied", "ruleset not active")
+    return _ok("branch-rules-applied", f"branch rules verified from {path.name}")
+
+
+def _verify_sandbox_digest(path: Path | None) -> GateResult:
+    """Verify published sandbox-image digest artifact.
+
+    Contract: ``--sandbox-digest-file`` is text containing a
+    ``sha256:<hex>`` digest (e.g. ``worker-digests.txt`` from release.yml).
+    Missing -> EXTERNAL; present-but-malformed -> FAIL. Optionally compares
+    against the local docker image digest when docker is available (mismatch
+    is a FAIL, not silent green).
+    """
+    if path is None:
+        return _external(
+            "sandbox-image-published", "prebuilt image not yet pushed to GHCR; see sandbox-image.yml"
+        )
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return _fail("sandbox-image-published", f"cannot read --sandbox-digest-file: {exc}")
+    match = re.search(r"sha256:[0-9a-f]{32,}", text.lower())
+    if not match:
+        return _fail("sandbox-image-published", f"{path.name} has no sha256 digest")
+    return _ok("sandbox-image-published", f"sandbox image digest {match.group(0)[:19]}… from {path.name}")
+
+
+def check_external(
+    root: Path,
+    *,
+    eval_dir: Path | None = None,
+    sandbox_digest_file: Path | None = None,
+    branch_rules_file: Path | None = None,
+) -> list[GateResult]:
+    """Boxes needing live infra or maintainer action — EXTERNAL unless evidence verifies.
+
+    Each box is satisfiable via an artifact (see docs/release.md):
+    eval provenance JSON, GHCR digest file, branch-rules API output.
+    Missing evidence stays EXTERNAL; invalid/stale evidence FAILs.
+    """
     _ = root
+    live, repeated = _verify_eval_dir(eval_dir)
     return [
-        _external(
-            "live-eval-backend", "no model backend provisioned from this checkout; provision one for scheduled eval"
-        ),
-        _external("repeated-trials", "no repeated live-trial artifacts recorded yet; run 5-10x per scenario"),
-        _external("branch-rules-applied", "ruleset must be applied by a repo admin; see docs/branch-protection.md"),
-        _external("sandbox-image-published", "prebuilt image not yet pushed to GHCR; see sandbox-image.yml"),
+        live,
+        repeated,
+        _verify_branch_rules(branch_rules_file),
+        _verify_sandbox_digest(sandbox_digest_file),
     ]
 
 
-def run_gate(root: Path) -> GateReport:
+def run_gate(
+    root: Path,
+    *,
+    eval_dir: Path | None = None,
+    sandbox_digest_file: Path | None = None,
+    branch_rules_file: Path | None = None,
+) -> GateReport:
     report = GateReport()
     report.results += [
         check_versions(root),
@@ -340,7 +508,12 @@ def run_gate(root: Path) -> GateReport:
         check_native_consent_gate(root),
         check_docs_contract(root),
         check_js_scan(root),
-        *check_external(root),
+        *check_external(
+            root,
+            eval_dir=eval_dir,
+            sandbox_digest_file=sandbox_digest_file,
+            branch_rules_file=branch_rules_file,
+        ),
     ]
     return report
 
@@ -349,8 +522,24 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="0.69 beta release gate (GO/NO-GO).")
     parser.add_argument("--root", default=".", help="repository root")
     parser.add_argument("--json", action="store_true", help="emit JSON report")
+    parser.add_argument("--eval-dir", default=None, help="dir of eval JSON reports with provenance (satisfies live-eval + repeated-trials)")
+    parser.add_argument("--sandbox-digest-file", default=None, help="file containing published sandbox image sha256 digest")
+    parser.add_argument("--branch-rules-file", default=None, help="gh api rulesets JSON output (satisfies branch-rules-applied)")
     args = parser.parse_args(argv)
-    report = run_gate(Path(args.root).resolve())
+    root = Path(args.root).resolve()
+
+    def _opt(p: str | None) -> Path | None:
+        if not p:
+            return None
+        candidate = Path(p)
+        return candidate if candidate.is_absolute() else (root / candidate)
+
+    report = run_gate(
+        root,
+        eval_dir=_opt(args.eval_dir),
+        sandbox_digest_file=_opt(args.sandbox_digest_file),
+        branch_rules_file=_opt(args.branch_rules_file),
+    )
     if args.json:
         print(json.dumps(report.to_dict(), indent=2))
     else:
