@@ -295,7 +295,7 @@ export function Layout() {
           <button
             type="button"
             className={cn(
-              "flex h-9 items-center justify-center rounded-md px-2 text-[10px] font-medium uppercase tracking-wide transition-colors",
+              "flex h-9 items-center justify-center rounded-md px-2 text-xs font-medium uppercase tracking-wide transition-colors",
               mode === "read_only"
                 ? "bg-muted/40 text-muted-foreground"
                 : mode === "approve"
@@ -303,10 +303,20 @@ export function Layout() {
                   : "bg-destructive/15 text-red-200",
             )}
             onClick={() => setPermOpen(true)}
-            aria-label={`Permission mode: ${mode}`}
-            title={`Permission mode: ${mode}`}
+            aria-label={`Approval policy: ${MODE_TITLES[mode]}`}
+            title={`Approval policy: ${MODE_TITLES[mode]}`}
           >
-            {mode === "read_only" ? "R" : mode === "approve" ? "A" : "F"}
+            {mode === "read_only" ? "Manual" : mode === "approve" ? "Auto-safe" : "Autonomous"}
+          </button>
+          <AttentionCentre items={attentionItems} />
+          <button
+            type="button"
+            onClick={() => setPaletteOpen(true)}
+            aria-label="Global search (Ctrl+K)"
+            title="Global search (Ctrl+K)"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <span aria-hidden className="text-sm">⌘K</span>
           </button>
         </div>
       </header>
@@ -321,8 +331,8 @@ export function Layout() {
                 <span className="text-gradient-primary">BreachPilot</span>
                 <span className="text-foreground">AI</span>
               </SheetTitle>
-              <SheetDescription className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                v{__APP_VERSION__} beta · {consoleLabel}
+              <SheetDescription className="text-xs uppercase tracking-wide text-muted-foreground">
+                {APP_VERSION} beta · {consoleLabel}
               </SheetDescription>
             </div>
           </SheetHeader>
