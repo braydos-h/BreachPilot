@@ -134,8 +134,8 @@ describe("HelpPage links", () => {
     renderHelp();
     const newRunLinks = screen.getAllByRole("link", { name: /Start a run/i });
     expect(newRunLinks.some((a) => a.getAttribute("href") === "/runs/new")).toBe(true);
-    const sessionLinks = screen.getAllByRole("link", { name: /View sessions/i });
-    expect(sessionLinks.some((a) => a.getAttribute("href") === "/sessions")).toBe(true);
+    const sessionLinks = screen.getAllByRole("link", { name: /View runs/i });
+    expect(sessionLinks.some((a) => a.getAttribute("href") === "/runs")).toBe(true);
     const openSettingsLinks = screen.getAllByRole("link", { name: /Open settings/i });
     expect(openSettingsLinks.some((a) => a.getAttribute("href") === "/system")).toBe(true);
   });
@@ -143,7 +143,7 @@ describe("HelpPage links", () => {
   it("directory items link to correct global routes where they exist", () => {
     renderHelp();
     const directory = screen.getByRole("heading", { level: 2, name: /Where do I find/i }).closest("section")!;
-    expect(within(directory).getByRole("link", { name: /Runs \/ Sessions/ })).toHaveAttribute("href", "/sessions");
+    expect(within(directory).getByRole("link", { name: /^Runs$/ })).toHaveAttribute("href", "/runs");
     expect(within(directory).getByRole("link", { name: /Goals/ })).toHaveAttribute("href", "/goals");
     expect(within(directory).getByRole("link", { name: /Attack Modules/ })).toHaveAttribute("href", "/modules");
     expect(within(directory).getByRole("link", { name: /Skills/ })).toHaveAttribute("href", "/skills");

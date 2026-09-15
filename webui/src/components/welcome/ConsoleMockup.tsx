@@ -8,9 +8,9 @@ import type { MockupKey, TourStep } from "@/components/welcome/steps";
 
 const NAV = [
   { label: "Home", icon: Home },
-  { label: "Sessions", icon: List },
+  { label: "Runs", icon: List },
   { label: "Skills", icon: Sparkles },
-  { label: "System", icon: Settings },
+  { label: "Settings", icon: Settings },
 ];
 
 // Which sidebar item is highlighted per mockup (-1 = none).

@@ -203,7 +203,7 @@ export function EvidenceTab({ runId }: EvidenceTabProps) {
             onClick={() => setLifecycle(l)}
             className={`rounded-full border px-2.5 py-1 text-[13px] ${lifecycle === l ? "border-primary/50 bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent"}`}
           >
-            {l === "all" ? "All" : l === "awaiting" ? "Awaiting review" : l[0].toUpperCase() + l.slice(1)}
+            {l === "all" ? "All" : l === "awaiting" ? "Awaiting review" : `${l[0]?.toUpperCase()}${l.slice(1)}`}
           </button>
         ))}
       </div>

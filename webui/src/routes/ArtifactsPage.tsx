@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { ChevronLeft, FileText, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,7 +23,8 @@ const ATTEMPT_LOGS = ["terminal.log", "python_run.log", "msf_output.log", "run_a
 
 export function ArtifactsPage() {
   const { runId } = useParams<{ runId: string }>();
-  const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   // Deep-link support: /runs/:id/artifacts?log=session_error.log opens the
   // Logs tab with that log preselected (used by the failed-run card).
   const deepLog = searchParams.get("log") ?? "";
@@ -61,6 +63,7 @@ export function ArtifactsPage() {
 
   return (
     <div className="space-y-4 p-4 md:p-6">
+      <Breadcrumbs pathname={location.pathname} runId={runId} />
       <div className="flex items-center gap-2">
         <Button asChild size="sm" variant="ghost">
           <Link to={`/runs/${runId}`}><ChevronLeft className="h-4 w-4" />Back to run</Link>
@@ -71,7 +74,7 @@ export function ArtifactsPage() {
         </Button>
       </div>
 
-      <Tabs value={tab} onValueChange={setTab}>
+      <Tabs value={tab} onValueChange={(v) => { setTab(v); setSearchParams((p) => { const n = new URLSearchParams(p); n.set("view", v); return n; }, { replace: true }); }}>
         <ScrollArea type="scroll" className="w-full">
           <TabsList>
             <TabsTrigger value="artifacts">Artifacts</TabsTrigger>

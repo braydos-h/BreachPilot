@@ -57,6 +57,6 @@ export function humanizeStatus(state: string | undefined | null): string {
   // Fallback: Title Case snake_case instead of leaking raw enums.
   return s
     .split("_")
-    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .map((w) => (w ? `${w[0]?.toUpperCase()}${w.slice(1)}` : w))
     .join(" ");
 }

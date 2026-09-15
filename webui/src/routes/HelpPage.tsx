@@ -185,9 +185,9 @@ export function HelpPage() {
                 <Rocket className="h-3.5 w-3.5" /> Start a run
               </Link>
             </Button>
-            <Button asChild size="sm" variant="outline" className="h-8 gap-1.5 text-xs">
-              <Link to="/sessions">
-                <List className="h-3.5 w-3.5" /> View sessions
+            <Button asChild size="sm" variant="outline" className="h-8 gap-1.5 text-[13px]">
+              <Link to="/runs">
+                <List className="h-3.5 w-3.5" /> View runs
               </Link>
             </Button>
             <Button asChild size="sm" variant="outline" className="h-8 gap-1.5 text-xs">
@@ -834,13 +834,13 @@ export function HelpPage() {
               <div className="space-y-1.5">
                 <div className="text-xs font-medium">Quick links</div>
                 <div className="grid gap-1">
-                  <Link to="/runs/new" className="inline-flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-1.5 text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <Link to="/runs/new" className="inline-flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-1.5 text-[13px] hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     <Rocket className="h-3 w-3" /> New run
                   </Link>
-                  <Link to="/sessions" className="inline-flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-1.5 text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    <List className="h-3 w-3" /> Sessions
+                  <Link to="/runs" className="inline-flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-1.5 text-[13px] hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <List className="h-3 w-3" /> Runs
                   </Link>
-                  <Link to="/system" className="inline-flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-1.5 text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <Link to="/system" className="inline-flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-1.5 text-[13px] hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     <Settings className="h-3 w-3" /> Settings
                   </Link>
                 </div>
@@ -860,21 +860,34 @@ export function HelpPage() {
             </div>
 
             <div className="rounded-lg border bg-card/40 p-3">
-              <div className="text-xs font-medium">Keyboard</div>
-              <ul className="mt-1.5 space-y-1 text-xs text-muted-foreground">
+              <div className="text-[13px] font-medium">Keyboard</div>
+              <ul className="mt-1.5 space-y-1 text-[13px] text-muted-foreground">
+                <li className="flex items-center justify-between gap-2">
+                  <span>Global search</span>
+                  <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-xs">Ctrl/⌘ K</kbd>
+                </li>
+                <li className="flex items-center justify-between gap-2">
+                  <span>New run</span>
+                  <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-xs">N</kbd>
+                </li>
                 <li className="flex items-center justify-between gap-2">
                   <span>Focus search</span>
-                  <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">/</kbd>
+                  <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-xs">/</kbd>
                 </li>
                 <li className="flex items-center justify-between gap-2">
                   <span>Clear / unfocus</span>
-                  <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">Esc</kbd>
+                  <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-xs">Esc</kbd>
+                </li>
+                <li className="flex items-center justify-between gap-2">
+                  <span>Help / shortcuts</span>
+                  <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-xs">?</kbd>
                 </li>
                 <li className="flex items-center justify-between gap-2">
                   <span>Jump to section</span>
-                  <span className="font-mono text-[10px]">#hash</span>
+                  <span className="font-mono text-xs">#hash</span>
                 </li>
               </ul>
+              <p className="mt-2 text-xs text-muted-foreground">Dark-only theme. Bearer token is memory-held — refresh signs out.</p>
             </div>
           </div>
         </aside>

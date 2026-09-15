@@ -110,13 +110,20 @@ describe("Layout mobile navigation", () => {
     await user.click(screen.getByRole("button", { name: "Open navigation" }));
 
     const drawer = screen.getByRole("dialog");
+    // Secondary groups start collapsed — expand them to reveal all destinations.
+    for (const g of ["Knowledge", "Evaluate", "System"]) {
+      const btn = within(drawer).queryByRole("button", { name: new RegExp(g) });
+      if (btn && btn.getAttribute("aria-expanded") === "false") await user.click(btn);
+    }
     for (const label of [
       "Home",
-      "Sessions",
+      "Runs",
       "Connections",
       "Modules",
       "Goals",
       "Attack Graph",
+      "Benchmarks",
+      "Operations",
       "Stats",
       "Skills",
       "Memory",
@@ -134,7 +141,7 @@ describe("Layout mobile navigation", () => {
     setup();
     await user.click(screen.getByRole("button", { name: "Open navigation" }));
     const drawer = screen.getByRole("dialog");
-    await user.click(within(drawer).getByRole("link", { name: /^Sessions/ }));
+    await user.click(within(drawer).getByRole("link", { name: /^Runs/ }));
     // Route change closes the drawer; Radix unmounts after the exit transition.
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
@@ -436,8 +443,12 @@ describe("Layout provider status (provider-aware)", () => {
     const link = screen.getByRole("link", { name: /Provider:/ });
     expect(link).toHaveAttribute("href", "/system");
     await user.click(link);
-    // Navigation updates the active nav item
-    expect(screen.getByRole("link", { name: /^Settings/ })).toHaveAttribute("aria-current", "page");
+    // Settings lives under the collapsed System group — expand it, then it is active.
+    const sysBtn = screen.getByRole("button", { name: /System/ });
+    if (sysBtn.getAttribute("aria-expanded") === "false") await user.click(sysBtn);
+    const settings = screen.getByRole("link", { name: /^Settings/ });
+    expect(settings).toHaveAttribute("href", "/system");
+    await waitFor(() => expect(settings).toHaveAttribute("aria-current", "page"));
   });
 });
 describe("Layout platform console label", () => {

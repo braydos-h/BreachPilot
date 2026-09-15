@@ -1,7 +1,9 @@
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { ChevronLeft, Expand, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { EmptyState } from "@/components/EmptyState";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CredentialTable } from "@/components/CredentialTable";
 import { SkeletonCards } from "@/components/Loading";
@@ -11,6 +13,7 @@ import { useState } from "react";
 
 export function LootPage() {
   const { runId } = useParams<{ runId: string }>();
+  const location = useLocation();
   const loot = useLoot(runId ?? null);
   // Keyed by the stable loot key (timestamp/type/host), not the list index,
   // so a refetch that reorders rows can't flip which card is expanded.
@@ -18,6 +21,7 @@ export function LootPage() {
 
   return (
     <div className="space-y-4 p-4 md:p-6">
+      <Breadcrumbs pathname={location.pathname} runId={runId} />
       <div className="flex items-center gap-2">
         <Button asChild size="sm" variant="ghost">
           <Link to={`/runs/${runId}`}><ChevronLeft className="h-4 w-4" />Back to run</Link>
@@ -43,7 +47,7 @@ export function LootPage() {
           </div>
         )}
         {!loot.isLoading && (loot.data?.loot.length ?? 0) === 0 && (
-          <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">No loot captured.</div>
+          <EmptyState title="No credentials captured" reason="This run has not captured loot yet. Findings with proof appear under Evidence." actionLabel="Open evidence" actionTo={`/runs/${runId}?tab=evidence`} />
         )}
         {(loot.data?.loot.length ?? 0) > 0 && (
           <div className="space-y-2">

@@ -974,7 +974,7 @@ function ConnectionDetailsDrawer({
                 <div className="space-y-5 p-5">
                   {/* Identity */}
                   <section className="space-y-3">
-                    <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Identity</h3>
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Identity</h3>
                     <div className="grid gap-px overflow-hidden rounded-lg border bg-border">
                       <DetailRow label="Target" value={conn.target_ip} mono copyValue={conn.target_ip} />
                       <DetailRow label="Connection" value={conn.connection_id} mono copyValue={conn.connection_id} />
@@ -983,6 +983,28 @@ function ConnectionDetailsDrawer({
                       <DetailRow label="MITRE Technique" value={conn.mitre_technique || "—"} mono={!!conn.mitre_technique} />
                       <DetailRow label="Implant Path" value={conn.implant_path || "—"} mono copyValue={conn.implant_path || undefined} />
                       {conn.notes && <DetailRow label="Notes" value={conn.notes} />}
+                    </div>
+                  </section>
+
+                  {/* Provenance (todo 38): link back to run/finding where known. */}
+                  <section className="space-y-3">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Provenance</h3>
+                    <div className="rounded-lg border bg-card/40 p-3 text-[13px]">
+                      {(() => {
+                        const hay = `${conn.notes ?? ""} ${conn.implant_path ?? ""}`;
+                        const m = hay.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{8,}/i);
+                        if (m) {
+                          const runId = m[0];
+                          return (
+                            <span>
+                              Created by run <Link to={`/runs/${runId}`} className="font-mono text-primary hover:underline">{runId.slice(0, 8)}</Link>
+                              {" · "}
+                              <Link to={`/runs/${runId}?tab=evidence`} className="text-primary hover:underline">Open findings</Link>
+                            </span>
+                          );
+                        }
+                        return <span className="text-muted-foreground">Provenance not recorded — created outside a linked run. See <Link to="/runs" className="text-primary hover:underline">Runs</Link>.</span>;
+                      })()}
                     </div>
                   </section>
 

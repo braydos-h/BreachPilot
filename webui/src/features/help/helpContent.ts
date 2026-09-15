@@ -187,19 +187,24 @@ export const PERMISSION_ROWS: PermissionRow[] = [
 ];
 
 export const DIRECTORY_ITEMS: DirectoryItem[] = [
-  { id: "sessions", label: "Runs / Sessions", desc: "Paginated run list, create, resume, delete. One active run at a time.", icon: "List", to: "/sessions" },
+  { id: "runs", label: "Runs", desc: "Paginated run list, create, resume, delete. One active run at a time.", icon: "List", to: "/runs" },
   { id: "goals", label: "Goals", desc: "Preset objectives grouped by risk (safe / gated / high). Compatibility checked.", icon: "Target", to: "/goals" },
   { id: "modules", label: "Attack Modules", desc: "Exploit recipes by family — web, SMB, SSH, AD, privesc, ICS/IoT, etc.", icon: "Crosshair", to: "/modules" },
   { id: "skills", label: "Skills", desc: "Advisory methodologies loaded as prompt context, never execution authority.", icon: "Sparkles", to: "/skills" },
   { id: "memory", label: "Memory", desc: "Semantic and attack memory: lessons, confidence, and retained facts.", icon: "Brain", to: "/memory" },
   { id: "stats", label: "Stats", desc: "Telemetry, token usage, model performance and recent activity.", icon: "BarChart3", to: "/stats" },
   { id: "graph", label: "Attack Graph", desc: "Interactive graph of findings, hosts, services and confirmed paths.", icon: "GitBranch", to: "/graph" },
-  { id: "connections", label: "Connections", desc: "Active operator connections and their health.", icon: "PlugZap", to: "/connections" },
-  { id: "benchmarks", label: "Benchmarks", desc: "Reproducible eval suites, verified success rate and regression checks.", icon: "FlaskConical", to: "/benchmarks" },
-  { id: "system", label: "Settings / System", desc: "Providers, run defaults, integrations, features, diagnostics.", icon: "Settings", to: "/system" },
+  { id: "connections", label: "Connections", desc: "Persisted access channels with run/finding provenance and health.", icon: "PlugZap", to: "/connections" },
+  { id: "benchmarks", label: "Benchmarks", desc: "Evaluation workspace: reproducible eval suites, history, comparisons.", icon: "FlaskConical", to: "/benchmarks" },
+  { id: "ops", label: "Operations", desc: "System status rollup (read-only). Lives under System.", icon: "ShieldAlert", to: "/ops" },
+  { id: "system", label: "Settings", desc: "Providers, run defaults, integrations, features, diagnostics. Dark-only theme; bearer token is memory-held.", icon: "Settings", to: "/system" },
+  { id: "run-detail", label: "Run detail", desc: "Overview, Evidence, Recon, Attack Path first; Tools/Advisory/Audit/Sandbox/Browser/Swarm/Campaign under Advanced.", icon: "Activity", to: "/runs" },
   { id: "artifacts", label: "Run Artifacts", desc: "Per-run files: reports, events.jsonl, enhanced_report.json. From the run header.", icon: "Files", note: "Inside a run" },
   { id: "loot", label: "Loot & Credentials", desc: "Captured loot and HMAC-signed credential store; reveal is audited.", icon: "KeyRound", note: "Inside a run" },
   { id: "audit", label: "Audit & Logs", desc: "Hash-chained audit trail and tail-view of mcp_exploit_server.log etc.", icon: "ScrollText", note: "Inside a run" },
+  { id: "evidence", label: "Evidence", desc: "Finding lifecycle: Pending → Approved → Verified/Holding/Inconclusive → Retested/Fixed/Rejected with proof capsules.", icon: "FileCheck", note: "Inside a run" },
+  { id: "browser", label: "Browser", desc: "Browser automation evidence and screenshots for web flows.", icon: "Globe", note: "Inside a run" },
+  { id: "sandbox", label: "Sandbox", desc: "Disposable worker status and fix workflow.", icon: "ShieldCheck", note: "Inside a run" },
 ];
 
 export const WORKFLOWS: Workflow[] = [

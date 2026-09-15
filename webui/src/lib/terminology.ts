@@ -21,7 +21,8 @@ export const DEPRECATED_ALIASES: Record<string, string> = (() => {
   const out: Record<string, string> = {};
   for (const term of Object.values(CANONICAL_TERMS)) {
     const canon = (term as { canonical: string }).canonical;
-    for (const alias of (term as { aliases: string[] }).aliases ?? []) {
+    const aliases = (term as unknown as { aliases: readonly string[] }).aliases ?? [];
+    for (const alias of aliases) {
       out[alias.toLowerCase()] = canon;
     }
   }

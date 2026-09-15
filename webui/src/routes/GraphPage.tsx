@@ -1,6 +1,7 @@
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { AttackGraphDag } from "@/components/AttackGraphDag";
 import { AttackGraph } from "@/components/AttackGraph";
 import { useArtifacts, useRunGraph } from "@/api/hooks";
@@ -11,6 +12,7 @@ const DAG_HEIGHT = Math.min(640, Math.max(320, (typeof window !== "undefined" ? 
 
 export function GraphPage() {
   const { runId } = useParams<{ runId: string }>();
+  const location = useLocation();
   const artifacts = useArtifacts(runId ?? null);
   const artifactNames = artifacts.data?.artifacts.map((a) => a.name) ?? [];
   const enhancedReady = artifactNames.includes("enhanced/enhanced_report.json");
@@ -23,6 +25,7 @@ export function GraphPage() {
 
   return (
     <div className="space-y-4 p-4 md:p-6">
+      <Breadcrumbs pathname={location.pathname} runId={runId} />
       <div className="flex items-center gap-2">
         <Button asChild size="sm" variant="ghost">
           <Link to={`/runs/${runId}`}><ChevronLeft className="h-4 w-4" />Back to run</Link>

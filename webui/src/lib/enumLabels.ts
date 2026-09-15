@@ -30,16 +30,16 @@ export const EXECUTION_PROFILE_LABELS: Record<string, string> = {
 export function humanizeEnum(value: string | undefined | null, map?: Record<string, string>): string {
   if (!value) return "Not set";
   const v = String(value);
-  if (map && v in map) return map[v];
+  if (map && v in map) return map[v] as string;
   const flat: Record<string, string> = {
     ...DECISION_KIND_LABELS,
     ...OBSERVER_MODE_LABELS,
     ...RUN_MODE_LABELS,
     ...EXECUTION_PROFILE_LABELS,
   };
-  if (v in flat) return flat[v];
+  if (v in flat) return flat[v] as string;
   return v
     .split("_")
-    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .map((w) => (w ? `${w[0]?.toUpperCase()}${w.slice(1)}` : w))
     .join(" ");
 }

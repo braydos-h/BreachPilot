@@ -110,7 +110,7 @@ export const RunOutcomeCard = memo(function RunOutcomeCard({
 
         <div className="grid grid-cols-5 gap-1 font-mono text-xs">
           <OutcomeStat
-            label={TELEMETRY_LABELS.findings ?? "Findings"}
+            label="Findings"
             value={String((result as Record<string, unknown>).findings_count ?? derived.artifacts ?? "—")}
           />
           <OutcomeStat

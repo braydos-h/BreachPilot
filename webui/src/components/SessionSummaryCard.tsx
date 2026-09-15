@@ -31,7 +31,7 @@ export function SessionSummaryCard({ result, title, className }: SessionSummaryC
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-sm">
           <Activity className="h-4 w-4" />
-          Session summary
+          Run summary
           {hasError ? (
             <Badge variant="danger">failed</Badge>
           ) : (

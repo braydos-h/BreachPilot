@@ -164,7 +164,14 @@ async function goToReview(user: ReturnType<typeof userEvent.setup>, path = "atta
   if (path) {
     // Fast path: render with ?path= so the mode is preselected.
   }
+  // Target step -> Intent step -> Review step.
+  await user.type(screen.getByLabelText(/^Target$/), "10.0.0.5");
   await user.click(screen.getByRole("button", { name: "Next" }));
+  // Intent step: leave defaults (approval stays Manual unless test changes it).
+  await user.click(screen.getByRole("button", { name: "Next" }));
+}
+
+async function goToIntent(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(/^Target$/), "10.0.0.5");
   await user.click(screen.getByRole("button", { name: "Next" }));
 }
@@ -172,50 +179,56 @@ async function goToReview(user: ReturnType<typeof userEvent.setup>, path = "atta
 describe("RunWizard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
   });
 
-  it("starts on the Configure step with OPSEC marked done", () => {
+  it("starts on the Target step with no step completed before visit", () => {
     setup();
-    expect(screen.getByRole("button", { name: /Configure/ })).toHaveAttribute("aria-current", "step");
-    expect(screen.getByRole("button", { name: /OPSEC/ })).toHaveTextContent("completed");
+    expect(screen.getByRole("button", { name: /Target/ })).toHaveAttribute("aria-current", "step");
+    // No completed markers before visiting Intent/Review.
+    expect(screen.queryByText("(completed)")).not.toBeInTheDocument();
   });
 
-  it("preselects Attack mode from ?path=attack", () => {
-    setup({ path: "attack" });
+  it("preselects Attack mode from ?path=attack", async () => {
+    const { user } = setup({ path: "attack" });
     expect(screen.getByText("New attack run")).toBeInTheDocument();
+    await goToIntent(user);
     expect(screen.getByRole("radio", { name: /Attack/ })).toHaveAttribute("aria-checked", "true");
   });
 
-  it("preselects Recon mode from ?path=recon", () => {
-    setup({ path: "recon" });
+  it("preselects Recon mode from ?path=recon", async () => {
+    const { user } = setup({ path: "recon" });
     expect(screen.getByText("New recon run")).toBeInTheDocument();
+    await goToIntent(user);
     expect(screen.getByRole("radio", { name: /Recon/ })).toHaveAttribute("aria-checked", "true");
   });
 
-  it("preselects a compatible ?goal= and renders it in the trigger", () => {
-    setup({
+  it("preselects a compatible ?goal= and renders it in the trigger", async () => {
+    const { user } = setup({
       goalParam: "enumerate-then-report",
       goals: [
         { name: "enumerate-then-report", description: "Map and report.", risk: "safe", compatible: true },
       ],
     });
+    await goToIntent(user);
     // The goal appears in the GoalSelector trigger and the live sidebar summary.
     expect(screen.getAllByText("enumerate-then-report").length).toBeGreaterThan(0);
   });
 
-  it("does not preselect an incompatible ?goal=", () => {
-    setup({
+  it("does not preselect an incompatible ?goal=", async () => {
+    const { user } = setup({
       goalParam: "backdoor",
       goals: [{ name: "backdoor", description: "Install a backdoor.", risk: "high", compatible: false }],
     });
+    await goToIntent(user);
     expect(screen.getByText("Select a preset goal")).toBeInTheDocument();
   });
 
   it("blocks advancing past an invalid target and allows a valid one", async () => {
     const { user } = setup();
-    await user.click(screen.getByRole("button", { name: "Next" }));
-
     const next = screen.getByRole("button", { name: "Next" });
+    expect(next).toBeDisabled();
+
     await user.type(screen.getByLabelText(/^Target$/), "not a target");
     expect(next).toBeDisabled();
 
@@ -224,15 +237,16 @@ describe("RunWizard", () => {
     expect(next).toBeEnabled();
   });
 
-  it("sends the expected request body (critic gated on swarm, yes flag) on launch", async () => {
+  it("sends the expected request body (critic gated on swarm, yes flag via approval policy) on launch", async () => {
     const { user } = setup({ path: "attack" });
     const mutate = vi.fn();
     createRunMock.mockReturnValue({ mutate, isPending: false, error: null } as never);
 
-    // Skip-launch-confirmation lives on the Configure step — set it before moving on.
-    await user.click(screen.getByRole("checkbox", { name: /Skip launch confirmation/i }));
-
-    await goToReview(user);
+    // Target first, then Intent: choose Autonomous approval policy (maps to yes=true).
+    await user.type(screen.getByLabelText(/^Target$/), "10.0.0.5");
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("radio", { name: /Autonomous within scope/ }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
 
     await user.click(screen.getByRole("button", { name: /Launch Attack/i }));
 
@@ -405,6 +419,8 @@ describe("RunWizard", () => {
 
   it("toggling a power-up manually flips the profile to Custom; swarm gates its dependents", async () => {
     const { user } = setup({ path: "attack" });
+    await user.type(screen.getByLabelText(/^Target$/), "10.0.0.5");
+    await user.click(screen.getByRole("button", { name: "Next" }));
 
     // Scoped to the Execution profile radiogroup — the Goal selector also has
     // a "Custom" radio.
@@ -427,6 +443,8 @@ describe("RunWizard", () => {
 
   it("hides power-ups whose backend flag is absent", async () => {
     const { user } = setup({ path: "attack", flags: ["swarm"] });
+    await user.type(screen.getByLabelText(/^Target$/), "10.0.0.5");
+    await user.click(screen.getByRole("button", { name: "Next" }));
     await user.click(screen.getByRole("button", { name: /Advanced execution settings/ }));
     expect(screen.getByRole("switch", { name: "Swarm" })).toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: "Ultrathink" })).not.toBeInTheDocument();

@@ -609,10 +609,10 @@ export function HomePage() {
                 asChild
                 size="sm"
                 variant="outline"
-                className="border-yellow-500/40 text-yellow-300 hover:bg-yellow-500/10"
+                className="border-amber-500/40 text-amber-100 hover:bg-amber-500/10"
               >
                 <Link to={`/runs/${activeRun.id}`}>
-                  <Activity className="h-4 w-4 animate-pulse" />
+                  <Activity className="h-4 w-4" aria-hidden />
                   Resume active
                 </Link>
               </Button>
@@ -660,11 +660,11 @@ export function HomePage() {
 
       {/* Active run banner */}
       {activeRun && (
-        <Card className="border-yellow-500/40 bg-yellow-500/5">
+        <Card className="border-amber-500/40 bg-amber-500/5">
           <CardContent className="flex flex-wrap items-center gap-2 p-3 text-sm">
-            <Activity className="h-4 w-4 animate-pulse text-yellow-300" />
+            <Activity className="h-4 w-4 text-amber-100" aria-hidden />
             <Badge variant="warn">Active</Badge>
-            <span className="truncate font-mono text-xs">{activeRun.target}</span>
+            <span className="truncate font-mono text-[13px]">{activeRun.target}</span>
             <StatusBadge state={activeRun.state} />
             <Button asChild size="sm" variant="outline" className="ml-auto">
               <Link to={`/runs/${activeRun.id}`}>Open run</Link>
@@ -672,6 +672,52 @@ export function HomePage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Operator launchpad (todo 34): Resume / Needs attention / New run / Self-test-or-Demo first, stats secondary. */}
+      <section aria-label="Operator launchpad" className="grid gap-3 sm:grid-cols-2">
+        {activeRun ? (
+          <Card className="border-amber-500/40 bg-amber-500/5">
+            <CardContent className="flex flex-wrap items-center gap-2 p-3 text-sm">
+              <Activity className="h-4 w-4 text-amber-200" aria-hidden />
+              <Badge variant="warn">Needs attention</Badge>
+              <span className="truncate font-mono text-[13px]">{activeRun.target}</span>
+              <StatusBadge state={activeRun.state} />
+              <Button asChild size="sm" variant="outline" className="ml-auto">
+                <Link to={`/runs/${activeRun.id}`}>Resume active</Link>
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardContent className="p-3 text-sm">
+              <div className="font-medium">No active runs</div>
+              <p className="mt-0.5 text-[13px] text-muted-foreground">Start a new assessment or verify readiness first.</p>
+              <div className="mt-2 flex gap-2">
+                <Button asChild size="sm">
+                  <Link to="/runs/new">New run</Link>
+                </Button>
+                <Button asChild size="sm" variant="outline">
+                  <Link to="/system">Run local self-test</Link>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+        <Card>
+          <CardContent className="p-3 text-sm">
+            <div className="font-medium">Explore without a target</div>
+            <p className="mt-0.5 text-[13px] text-muted-foreground">Demo data is synthetic — no real target. Ideal first look.</p>
+            <div className="mt-2 flex gap-2">
+              <Button asChild size="sm" variant="outline">
+                <Link to="/runs">Explore a demo run</Link>
+              </Button>
+              <Button asChild size="sm" variant="ghost">
+                <Link to="/runs/new">Start a real run</Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
 
       {/* Action cards */}
       <section className="grid gap-3 sm:grid-cols-2 animate-fade-in-up" style={{ animationDelay: "0.1s" }}>
@@ -691,20 +737,20 @@ export function HomePage() {
         />
       </section>
 
-      {/* Recent sessions */}
-      <section className="rounded-xl border bg-card/30 animate-fade-in-up" style={{ animationDelay: "0.2s" }}>
+      {/* Recent runs */}
+      <section className="rounded-xl border bg-card/30">
         <header className="flex items-center justify-between gap-2 border-b px-4 py-2.5">
           <div className="flex items-center gap-2">
             <History className="h-4 w-4 text-muted-foreground" />
             <div>
-              <div className="text-sm font-medium">Recent sessions</div>
-              <p className="text-xs text-muted-foreground">
+              <div className="text-sm font-medium">Recent runs</div>
+              <p className="text-[13px] text-muted-foreground">
                 Latest {recent.length || 0} of {rows.length || 0} runs.
               </p>
             </div>
           </div>
           <Button asChild size="sm" variant="outline" className="gap-1.5">
-            <Link to="/sessions">
+            <Link to="/runs">
               <ListFilter className="h-3.5 w-3.5" />
               View all
             </Link>
@@ -713,15 +759,26 @@ export function HomePage() {
 
         {runs.error && (
           <div className="flex items-center gap-2 p-4 text-sm text-destructive">
-            <span>Failed to load recent sessions.</span>
+            <span>Failed to load recent runs.</span>
             <Button size="sm" variant="outline" onClick={() => runs.refetch()}>Retry</Button>
+            <Button size="sm" variant="ghost" asChild>
+              <Link to="/system">Open provider settings</Link>
+            </Button>
           </div>
         )}
 
         {recent.length === 0 && !runs.isLoading && !runs.error && (
           <div className="flex flex-col items-center gap-2 p-6 text-center text-sm text-muted-foreground">
             <Target className="h-7 w-7 opacity-40" />
-            <span>No past sessions yet. Start one above.</span>
+            <span>No runs yet. Run the local self-test or explore a demo run above.</span>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" asChild>
+                <Link to="/system">Run local self-test</Link>
+              </Button>
+              <Button size="sm" asChild>
+                <Link to="/runs/new">New run</Link>
+              </Button>
+            </div>
           </div>
         )}
 
@@ -739,7 +796,7 @@ export function HomePage() {
       </section>
 
       {/* Safety footer */}
-      <p className="flex items-center justify-center gap-1.5 text-center text-[11px] tracking-wide text-muted-foreground">
+      <p className="flex items-center justify-center gap-1.5 text-center text-[13px] tracking-wide text-muted-foreground">
         <span className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
         Authorized use only — operate exclusively against assets you own or are explicitly authorized to test.
       </p>

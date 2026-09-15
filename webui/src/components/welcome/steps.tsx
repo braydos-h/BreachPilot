@@ -63,7 +63,7 @@ export const STEPS: TourStep[] = [
     id: "sessions",
     eyebrow: "History",
     title: "Complete run history, searchable",
-    body: "The Sessions view lists all runs with state, target, mode, goal, and model. Review completed assessments, regenerate titles, or remove runs as needed.",
+    body: "The Runs view lists all runs with state, target, mode, goal, and model. Review completed assessments, regenerate titles, or remove runs as needed.",
     mockup: "sessions",
   },
   {
