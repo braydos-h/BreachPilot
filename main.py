@@ -10,26 +10,30 @@ Usage:
 # BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 from __future__ import annotations
 
-__version__ = "0.68.4"
-
 import argparse
 import asyncio
 import contextlib
 import ipaddress
 import os
-import re
-import shutil
-import subprocess
+import shutil  # noqa: F401 -- retained so tests can patch main.shutil
+import subprocess  # noqa: F401 -- retained so tests can patch main.subprocess
 import sys
-import threading
-import time
 import traceback
-import webbrowser
+from inspect import getattr_static
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable
 
-from tools.api_key_store import DEFAULT_API_KEY_FILE
+from tools import daemon_lifecycle as _daemon_lifecycle
+from tools import webui_boot as _webui_boot
 from tools.attack_ui import get_ui
+from tools.cli_args import __version__, parse_args  # noqa: F401 -- __version__ re-exported for lazy consumers
+from tools.daemon_lifecycle import (  # noqa: F401 -- back-compat re-exports; canonical home is tools.daemon_lifecycle
+    _api_daemon_ready,
+    _copy_to_clipboard,
+    _find_port_listener_pid,
+    _offer_daemon_kill,
+    _stop_running_daemon,
+)
 from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group
 from tools.exploit_agent import (
     ExploitSettings,
@@ -41,6 +45,11 @@ from tools.model_router import build_router
 from tools.model_telemetry import usage_log_path, workspace_root_from_sources
 from tools.safety_reviewer import SafetyReview
 from tools.swarm_bridge import SwarmMcpBridge as SwarmMcpBridge  # noqa: F401 - re-export for tests/back-compat
+from tools.webui_boot import (  # noqa: F401 -- back-compat re-exports; canonical home is tools.webui_boot
+    _ensure_webui_build,
+    _install_bun,
+    _open_browser_when_ready,
+)
 
 # ---------------------------------------------------------------------------
 # UI
@@ -349,742 +358,92 @@ def _extract_tool_text(raw: Any) -> str:
     return _recon_assessment_cli._extract_tool_text(raw)
 
 
-def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        prog="main.py",
-        description=(
-            "BreachPilot — autonomous penetration testing AI. Run with no arguments "
-            "to start the WebUI daemon (http://127.0.0.1:8765); use --menu for the "
-            "legacy interactive terminal menu."
-        ),
-        epilog=(
-            "examples:\n"
-            "  python main.py                                          WebUI daemon + browser (default)\n"
-            "  python main.py --menu                                   legacy interactive terminal menu\n"
-            "  python main.py --target 10.0.0.50 --mode attack --goal backdoor\n"
-            "  python main.py --target 10.0.0.50 --mode recon --goal initial_access\n"
-            "  python main.py --target 10.0.0.50 --ctf --ctf-flag-path /root/flag.txt\n"
-            "  python main.py --doctor                                  environment self-check\n"
-            "  python main.py --self-test                                safe localhost smoke test\n"
-            "  python main.py --web                                     WebUI + API daemon\n"
-            "  python main.py --rebuild                                 force-rebuild webui/dist/ and exit\n"
-            "  python main.py --resume <run_id>                          resume a prior run\n"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    parser.add_argument("--version", action="version", version=f"BreachPilot {__version__}")
+# ---------------------------------------------------------------------------
+# Entry splits (p2-03) — canonical implementations live in tools.cli_args
+# (parse_args, re-exported above), tools.daemon_lifecycle, and
+# tools.webui_boot. Leaf helpers are plain re-export aliases (top-of-file
+# imports); the four wrappers below sync main-namespace monkeypatches into
+# the impl modules before delegating, so the existing ``main.*`` patch seams
+# keep working (same idea as tools.exploit_agent._sync_patchable_symbols).
+# ---------------------------------------------------------------------------
 
-    core = parser.add_argument_group("targeting")
-    core.add_argument("--target", default="", help="Target IP address or domain to attack or recon")
-    core.add_argument(
-        "--mode",
-        choices=("recon", "attack", "fast"),
-        default="",
-        help="recon = gather intel, attack = full exploitation, fast = parallel recon preset then attack",
-    )
-    core.add_argument(
-        "--goal", default="", help="Preset goal name (e.g. backdoor, initial_access, privilege_escalation)"
-    )
-    core.add_argument("--custom-goal", default="", help="Custom goal description")
-    core.add_argument("--config", type=Path, default=Path("config.yaml"), help="Config file (default: config.yaml)")
-    core.add_argument(
-        "--model", default=None, help="Override default model alias (glm/kimi/deepseek/deepseek_flash/minimax)"
-    )
-    core.add_argument(
-        "--model-strategy",
-        choices=("default", "round-robin", "random", "specific"),
-        default="default",
-        help="How to pick model across targets",
-    )
-    core.add_argument(
-        "--mcp-transport",
-        choices=("stdio", "http"),
-        default=None,
-        help="MCP transport (ignored on the run path: always forced to http so the target-IP lock reaches the server)",
-    )
-    core.add_argument("--http-port", type=int, default=None, help="MCP HTTP port")
-    core.add_argument(
-        "--reports-dir", type=Path, default=Path("reports"), help="Where run artifacts are written (default: reports/)"
-    )
-
-    keys = parser.add_argument_group("api keys")
-    keys.add_argument(
-        "--setup-api-keys", action="store_true", help="Prompt for provider API keys and save them to secr.json"
-    )
-    keys.add_argument(
-        "--api-key-file", type=Path, default=DEFAULT_API_KEY_FILE, help="Local JSON file for saved provider API keys"
-    )
-    keys.add_argument("--no-api-key-prompt", action="store_true", help="Skip the interactive startup API-key prompt")
-
-    out = parser.add_argument_group("output")
-    out.add_argument("--plain", action="store_true", help="Disable color output")
-    out.add_argument("--menu", action="store_true", help="Force interactive menu mode even with other args")
-    out.add_argument("--json", action="store_true", help="Emit machine-readable JSON to stdout where supported")
-    out.add_argument("--quiet", action="store_true", help="Reduce output to warnings/errors only")
-    out.add_argument("--debug", action="store_true", help="Enable verbose debug output")
-
-    swarm = parser.add_argument_group("swarm & reasoning")
-    swarm.add_argument(
-        "--swarm",
-        action="store_true",
-        help="Enable multi-agent swarm mode: six specialists decompose a single target "
-        "(parallel recon + vuln research, critic pre-check, reflection). Without it, "
-        "attack mode runs the persistent autonomous campaign queue (resume + checkpoints). "
-        "Combine both on high-value targets. See docs/swarm.md.",
-    )
-    swarm.add_argument(
-        "--parallel-swarm",
-        action="store_true",
-        help="Enable parallel sub-agents (route_parallel + spawn_subagent MCP tool). "
-        "Off by default; flips swarm.parallel_enabled to true. Recon-first: "
-        "recon + vuln-research parallelize; exploit/post_exploit stay sequential "
-        "unless swarm.exploit_parallel is also true.",
-    )
-    swarm.add_argument("--critic", action="store_true", help="Enable critic agent pre-approval (requires --swarm)")
-    swarm.add_argument("--reflection", action="store_true", help="Enable reflection agent (requires --swarm)")
-    swarm.add_argument(
-        "--adaptive-exploits", action="store_true", help="Enable adaptive exploit generation with mutation"
-    )
-    swarm.add_argument(
-        "--long-session",
-        dest="long_session",
-        action="store_true",
-        help="Raise context window (num_ctx), LLM call timeout, round/command/duration budgets, "
-        "and the swarm cap for a multi-hour attack run; checkpoints compacted messages for crash-safe resume",
-    )
-    swarm.add_argument(
-        "--multi-model-consult",
-        dest="multi_model_consult",
-        action="store_true",
-        default=None,
-        help="Allow the agent to ask configured peer models for advisory help",
-    )
-    swarm.add_argument(
-        "--no-multi-model-consult",
-        dest="multi_model_consult",
-        action="store_false",
-        help="Disable peer-model consultation for this run",
-    )
-    swarm.add_argument(
-        "--observer-mode",
-        choices=("heuristic", "llm", "hybrid"),
-        default="hybrid",
-        help="Observer mode for fact extraction",
-    )
-    swarm.add_argument(
-        "--recon-first",
-        action="store_true",
-        default=None,
-        help="Force recon-first mode: scan target, suggest rated goals, then ask for goal selection",
-    )
-    swarm.add_argument(
-        "--no-recon-first",
-        action="store_false",
-        dest="recon_first",
-        help="Skip recon-first mode; go directly to goal selection",
-    )
-    swarm.add_argument(
-        "--ultrathink",
-        action="store_true",
-        help="Enable deep reasoning mode: verbose chain-of-thought and frequent reflection",
-    )
-
-    ops = parser.add_argument_group("operational")
-    ops.add_argument("--doctor", action="store_true", help="Run a self-check (Python, nmap, Ollama, config) and exit")
-    ops.add_argument("--demo", action="store_true", help="Run against a local sandbox target (DVWA-style)")
-    ops.add_argument("--resume", type=str, default="", help="Resume a prior run by run_id or session_id")
-    ops.add_argument(
-        "--export-run",
-        type=str,
-        default="",
-        metavar="RUN_ID",
-        help="Export reports/<RUN_ID>/ + run_manifest.json into a portable zip bundle and exit",
-    )
-    ops.add_argument("--yes", action="store_true", help="Skip the ready-to-begin confirmation gate (use with caution)")
-    ops.add_argument(
-        "--self-test", action="store_true", help="Run a safe localhost smoke test against 127.0.0.1 and exit"
-    )
-    evalgrp = parser.add_argument_group("eval & regression")
-    evalgrp.add_argument(
-        "--eval",
-        nargs="*",
-        default=None,
-        metavar="TARGET",
-        help="Run the graded eval suite (oracle v2) against eval_targets/ — no target ids = all "
-        "targets, or pass specific ids (e.g. --eval dvwa juice_shop). With --target <ip>, runs the "
-        "legacy single-target benchmark instead and writes reports/eval/<run_id>/",
-    )
-    evalgrp.add_argument(
-        "--eval-list",
-        dest="eval_list",
-        action="store_true",
-        help="List graded-eval oracle targets (id + flag count) and exit",
-    )
-    evalgrp.add_argument(
-        "--save-baseline",
-        dest="save_baseline",
-        action="store_true",
-        help="With --eval: persist the graded report as the regression baseline (eval.baseline_path)",
-    )
-    evalgrp.add_argument(
-        "--check-regression",
-        dest="check_regression",
-        action="store_true",
-        help="With --eval/--benchmark: exit 1 on hard regressions vs the saved baseline",
-    )
-    benchgrp = parser.add_argument_group("benchmark suite")
-    benchgrp.add_argument(
-        "--benchmark",
-        nargs="*",
-        default=None,
-        metavar="SUITE",
-        help="Run a benchmark suite (e.g. --benchmark xben). With --trials N runs repeated trials; "
-        "filters via --scenario/--tag. Use --save-baseline/--check-regression for baseline workflows.",
-    )
-    benchgrp.add_argument(
-        "--benchmark-list",
-        dest="benchmark_list",
-        action="store_true",
-        help="List registered benchmark suites (id, scenario count, tags) and exit",
-    )
-    benchgrp.add_argument(
-        "--scenario",
-        action="append",
-        default=None,
-        metavar="ID",
-        help="With --benchmark: restrict to specific scenario ids (repeatable)",
-    )
-    benchgrp.add_argument(
-        "--tag",
-        action="append",
-        default=None,
-        metavar="TAG",
-        help="With --benchmark: restrict to scenarios carrying a tag (repeatable)",
-    )
-    benchgrp.add_argument(
-        "--trials",
-        type=int,
-        default=None,
-        metavar="N",
-        help="With --benchmark: repeated trials per scenario (default benchmark.trials, 1-20)",
-    )
-
-    ctf = parser.add_argument_group("ctf autopilot")
-    ctf.add_argument(
-        "--ctf",
-        action="store_true",
-        help="CTF autopilot: run against --target and stop when the goal is heuristically met "
-        "(flag marker / uid=0 / port-marker). Target-locked via the normal allowlist.",
-    )
-    ctf.add_argument(
-        "--ctf-flag-path",
-        dest="ctf_flag_path",
-        default="",
-        help="CTF goal: flag file path on the target (e.g. /root/flag.txt)",
-    )
-    ctf.add_argument(
-        "--ctf-root-shell",
-        dest="ctf_root_shell",
-        action="store_true",
-        default=False,
-        help="CTF goal: treat uid=0 in any output as goal-met (default False)",
-    )
-    ctf.add_argument(
-        "--ctf-port", dest="ctf_port", type=int, default=0, help="CTF goal: port to probe for the known-string marker"
-    )
-    ctf.add_argument(
-        "--ctf-marker", dest="ctf_marker", default="", help="CTF goal: known-string marker expected from --ctf-port"
-    )
-
-    skills = parser.add_argument_group("runtime skills")
-    skills.add_argument(
-        "--skills",
-        choices=("on", "off", "hints", "lookup"),
-        default=None,
-        help="Override runtime-skills behavior for this run: on=startup context injected, "
-        "hints=hints only (default), lookup=MCP tools only, off=skills disabled",
-    )
-    skills.add_argument(
-        "--skills-list", action="store_true", help="Print the runtime-skill catalog and exit (read-only)"
-    )
-    skills.add_argument(
-        "--skills-include",
-        action="append",
-        default=None,
-        metavar="NAME",
-        help="Force-include a skill by name for this run (sticky across re-selection). Repeatable.",
-    )
-    skills.add_argument(
-        "--skills-exclude",
-        action="append",
-        default=None,
-        metavar="NAME",
-        help="Exclude a skill by name for this run. Repeatable.",
-    )
-    skills.add_argument(
-        "--no-skills-reselect", action="store_true", help="Disable mid-run skill re-selection for this run"
-    )
-
-    plugins = parser.add_argument_group("plugins")
-    plugins.add_argument(
-        "--list-plugins",
-        dest="list_plugins",
-        action="store_true",
-        help="Print discovered plugins (name/version/capabilities/loaded) and exit",
-    )
-
-    webui = parser.add_argument_group("webui")
-    webui.add_argument(
-        "--demon",
-        "--daemon",
-        dest="daemon",
-        action="store_true",
-        help="Start the local WebUI API server instead of the terminal menu",
-    )
-    webui.add_argument(
-        "--web",
-        dest="web",
-        action="store_true",
-        help="Build the WebUI if needed, serve it from the daemon at /, and open a browser",
-    )
-    webui.add_argument(
-        "--rebuild",
-        "-rebuild",
-        dest="rebuild",
-        action="store_true",
-        help="Force a clean rebuild of the WebUI (npm install + npm run build) for updates; "
-        "with --web/--daemon rebuilds before serving, otherwise rebuilds and exits",
-    )
-    webui.add_argument("--api-host", default=None, help="API daemon bind host (loopback only; default 127.0.0.1)")
-    webui.add_argument("--api-port", type=int, default=None, help="API daemon port (default 8765)")
-    parsed = parser.parse_args(argv)
-    return parsed
+_BOOT_SYNC_TARGETS: tuple[tuple[str, tuple[object, ...]], ...] = (
+    ("ui", (_daemon_lifecycle, _webui_boot)),
+    ("load_config", (_daemon_lifecycle, _webui_boot)),
+    ("_api_daemon_ready", (_daemon_lifecycle,)),
+    ("_find_port_listener_pid", (_daemon_lifecycle,)),
+    ("_stop_running_daemon", (_daemon_lifecycle,)),
+    ("_offer_daemon_kill", (_daemon_lifecycle,)),
+    ("_copy_to_clipboard", (_daemon_lifecycle,)),
+    ("_ensure_webui_build", (_webui_boot,)),
+    ("_rebuild_webui", (_webui_boot,)),
+    ("_install_bun", (_webui_boot,)),
+    ("_open_browser_when_ready", (_webui_boot,)),
+    ("_auto_update_models", (_webui_boot,)),
+    ("_ensure_chatgpt_runtime", (_webui_boot,)),
+)
 
 
-def _ensure_webui_build(ui: Any, *, force: bool = False) -> int:
-    """Build webui/dist/ if missing (or always, when ``force`` is set). Returns 0 on success, non-zero on failure."""
-    webui_dir = Path(__file__).resolve().parent / "webui"
-    dist_index = webui_dir / "dist" / "index.html"
-    if dist_index.exists() and not force:
-        return 0
-    npm_cmd = shutil.which("npm.cmd") or shutil.which("npm")
-    node_cmd = shutil.which("node") or shutil.which("nodejs")
-    if not npm_cmd or not node_cmd:
-        ui.error("Node/npm not found on PATH. Install Node.js, or build the WebUI manually:")
-        ui.error(f"  cd {webui_dir} && npm install && npm run build")
-        return 1
-    ui.status("Rebuilding the WebUI..." if force else "Building the WebUI (first run only)...")
-    for step in (("install", [npm_cmd, "install", "--no-audit", "--no-fund"]), ("build", [npm_cmd, "run", "build"])):
-        label, argv = step
-        ui.status(f"  npm {label}...")
-        try:
-            result = subprocess.run(argv, cwd=str(webui_dir), capture_output=True, text=True, timeout=600)
-        except subprocess.TimeoutExpired:
-            ui.error(f"npm {label} timed out.")
-            return 1
-        except OSError as exc:
-            ui.error(f"npm {label} failed: {exc}")
-            return 1
-        if result.returncode != 0:
-            ui.error(f"npm {label} exited {result.returncode}.")
-            stderr_tail = (result.stderr or "")[-1500:]
-            if stderr_tail:
-                ui.error(stderr_tail)
-            return 1
-    if not dist_index.exists():
-        ui.error(f"Build finished but {dist_index} was not produced.")
-        return 1
-    ui.status("WebUI build complete.")
-    return 0
+@contextlib.contextmanager
+def _synced_boot_symbols() -> Any:
+    """Temporarily propagate main-namespace overrides into the impl modules.
 
-
-def _rebuild_webui(ui: Any) -> int:
-    """Force a clean rebuild of the WebUI (``npm install`` + ``npm run build``), even when dist/ exists.
-
-    Used by ``--rebuild`` to pick up WebUI updates after a ``git pull``. Returns 0 on success.
+    The sync mutates impl-module globals; without a restore, a fake synced
+    for one call would leak into later calls made after the test's
+    ``monkeypatch`` teardown reverted ``main.*``. Every wrapper delegates
+    inside this context so impl modules are always left as found.
     """
-    return _ensure_webui_build(ui, force=True)
-
-
-def _install_bun(ui: Any) -> bool:
-    """Install the pinned bun release (ChatGPT provider). Returns True on success.
-
-    Thin back-compat wrapper around :mod:`tools.chatgpt_bootstrap` — see
-    that module for the pinned ``BUN_VERSION`` and the safety rationale (no
-    remote-script piping, pinned npm package only, actionable manual
-    message when automatic install is unavailable).
-    """
-    from tools.chatgpt_bootstrap import install_bun
-
-    return install_bun(ui)
-
-
-def _ensure_chatgpt_runtime(args: argparse.Namespace) -> int:
-    """Ensure the ChatGPT (openai-oauth) provider is runnable.
-
-    Thin back-compat wrapper around
-    :func:`tools.chatgpt_bootstrap.ensure_chatgpt_runtime` — see that module
-    for the pinned ``BUN_VERSION`` / ``OPENAI_OAUTH_*`` revisions and the
-    safety rationale (no remote-script piping, HEAD verified before anything
-    runs, ``--frozen-lockfile``, no ``shell=True``).
-
-    Returns 0 on success or when the ChatGPT provider is not active; non-zero
-    only when a required step fails AND the operator is about to use the
-    ChatGPT provider.
-    """
-    from tools.chatgpt_bootstrap import ensure_chatgpt_runtime
-    from tools.config_manager import get_ai_provider, get_chatgpt_config
-
+    public = sys.modules[__name__]
+    saved: list[tuple[Any, str, Any]] = []
     try:
-        config = load_config(args.config)
-    except Exception as exc:  # noqa: BLE001 -- corrupt config must not crash the provider probe; fall through as non-chatgpt
-        ui.warning(f"Could not read config ({args.config}): {exc} — skipping ChatGPT runtime setup.")
-        config = {}
-    if get_ai_provider(config) != "chatgpt":
-        return 0
-
-    chatgpt_cfg = get_chatgpt_config(config)
-    return ensure_chatgpt_runtime(
-        provider="chatgpt",
-        local_repo=str(chatgpt_cfg.get("local_repo") or "./oauth"),
-        ui=ui,
-    )
-
-
-def _open_browser_when_ready(host: str, port: int, ui: Any) -> None:
-    """Poll the health endpoint, then open the browser. Daemon thread."""
-    import urllib.request
-
-    base = f"http://{host}:{port}/" if host != "::1" else f"http://[::1]:{port}/"
-    health_url = f"{base}api/v1/health"
-    deadline = time.monotonic() + 30.0
-    while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen(health_url, timeout=2) as resp:  # noqa: S310 -- loopback only
-                if resp.status == 200:
-                    break
-        except OSError:
-            time.sleep(0.5)
-    else:
-        ui.warning("Could not confirm the API was ready; open the browser manually.")
-        return
-    try:
-        webbrowser.open(base)
-    except Exception as exc:  # noqa: BLE001 -- headless/text browsers
-        ui.warning(f"Could not open the browser automatically: {exc}")
-        ui.status(f"  Open {base} manually.")
-
-
-def _api_daemon_ready(host: str, port: int) -> bool:
-    """Return whether a BreachPilot API daemon already owns this endpoint."""
-    import urllib.request
-
-    base = f"http://{host}:{port}/" if host != "::1" else f"http://[{host}]:{port}/"
-    try:
-        with urllib.request.urlopen(f"{base}api/v1/health", timeout=1) as response:  # noqa: S310 -- loopback only
-            return response.status == 200
-    except OSError:
-        return False
-
-
-def _find_port_listener_pid(port: int) -> int | None:
-    """Best-effort PID of the process listening on TCP ``port`` (None if unknown)."""
-    if sys.platform == "win32":
-        try:
-            proc = subprocess.run(
-                ["netstat", "-ano", "-p", "tcp"], capture_output=True, text=True, timeout=10, check=False
-            )
-        except (OSError, subprocess.SubprocessError):
-            return None
-        for line in proc.stdout.splitlines():
-            # TCP    127.0.0.1:8765    0.0.0.0:0    LISTENING    <pid>
-            fields = line.split()
-            if len(fields) >= 5 and fields[3].upper() == "LISTENING" and fields[1].endswith(f":{port}"):
-                try:
-                    return int(fields[4])
-                except ValueError:
-                    return None
-        return None
-    for cmd in (["lsof", "-nP", f"-tiTCP:{port}", "-sTCP:LISTEN"], ["ss", "-ltnp"]):
-        try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10, check=False)
-        except (OSError, subprocess.SubprocessError):
-            continue
-        if proc.returncode != 0:
-            continue
-        for line in proc.stdout.splitlines():
-            if cmd[0] == "lsof":
-                try:
-                    return int(line.strip().split()[0])
-                except (IndexError, ValueError):
-                    continue
-            fields = line.split()
-            if len(fields) >= 4 and fields[0] == "LISTEN" and fields[3].endswith(f":{port}"):
-                match = re.search(r"pid=(\d+)", line)
-                if match:
-                    return int(match.group(1))
-    return None
-
-
-def _stop_running_daemon(host: str, port: int) -> bool:
-    """Terminate the process owning ``port``; True once the endpoint stops answering."""
-    pid = _find_port_listener_pid(port)
-    if pid is None:
-        return False
-    cmd = ["taskkill", "/F", "/PID", str(pid)] if sys.platform == "win32" else ["kill", str(pid)]
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10, check=False)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    if proc.returncode != 0:
-        return False
-    deadline = time.monotonic() + 20.0
-    while time.monotonic() < deadline:
-        if not _api_daemon_ready(host, port):
-            return True
-        time.sleep(0.3)
-    return False
-
-
-def _offer_daemon_kill() -> bool:
-    """TTY-only prompt for the already-running-daemon case. Returns True on K."""
-    try:
-        if not sys.stdin.isatty():
-            return False
-    except (AttributeError, ValueError):
-        return False
-    try:
-        return input("  Press K to kill it and start fresh, or Enter to keep it: ").strip().lower() == "k"
-    except (EOFError, KeyboardInterrupt):
-        return False
-
-
-def _copy_to_clipboard(text: str) -> bool:
-    """Best-effort copy ``text`` to the system clipboard. Returns True on success.
-
-    Tries, in order: 1) ``pyperclip`` if installed, 2) OS-native commands
-    (``clip``/PowerShell on Windows, ``pbcopy`` on macOS, ``wl-copy``/``xclip``/``xsel``
-    on Linux), 3) ``tkinter`` as a stdlib fallback. Never raises — a failure is
-    just ``False`` so the daemon can still print the token for manual copy.
-    """
-    clipped = text.strip()
-    if not clipped:
-        return False
-    # 1) Optional pyperclip dep (no hard requirement).
-    try:
-        import pyperclip  # type: ignore
-
-        pyperclip.copy(clipped)
-        return True
-    except Exception:
-        pass
-    # 2) Native OS commands (lightweight, no window).
-    try:
-        if sys.platform == "win32":
-            # clip.exe is built into Windows; PowerShell Set-Clipboard is the fallback
-            # that also works when clip is absent or stdin handling differs.
-            if shutil.which("clip"):
-                try:
-                    proc = subprocess.run(
-                        ["clip"], input=clipped, text=True, timeout=5, capture_output=True, check=False
-                    )
-                    if proc.returncode == 0:
-                        return True
-                except Exception:
-                    pass
-            if shutil.which("powershell") or shutil.which("pwsh"):
-                pwsh = shutil.which("pwsh") or shutil.which("powershell")
-                try:
-                    # Feed via stdin to avoid quoting issues: $input | Set-Clipboard
-                    proc = subprocess.run(
-                        [pwsh, "-NoProfile", "-Command", "$input | Set-Clipboard"],
-                        input=clipped,
-                        text=True,
-                        timeout=5,
-                        capture_output=True,
-                        check=False,
-                    )
-                    if proc.returncode == 0:
-                        return True
-                except Exception:
-                    pass
-        elif sys.platform == "darwin":
-            if shutil.which("pbcopy"):
-                try:
-                    proc = subprocess.run(
-                        ["pbcopy"], input=clipped, text=True, timeout=5, capture_output=True, check=False
-                    )
-                    return proc.returncode == 0
-                except Exception:
-                    pass
-        else:
-            for cmd in (
-                ["wl-copy"],
-                ["xclip", "-selection", "clipboard"],
-                ["xsel", "--clipboard", "--input"],
-            ):
-                if shutil.which(cmd[0]):
-                    try:
-                        proc = subprocess.run(
-                            cmd, input=clipped, text=True, timeout=5, capture_output=True, check=False
-                        )
-                        if proc.returncode == 0:
-                            return True
-                    except Exception:
-                        continue
-    except Exception:
-        pass
-    # 3) tkinter fallback (stdlib, but may need a display).
-    try:
-        import tkinter  # type: ignore
-
-        root = tkinter.Tk()
-        root.withdraw()
-        root.clipboard_clear()
-        root.clipboard_append(clipped)
-        root.update()
-        root.destroy()
-        return True
-    except Exception:
-        pass
-    return False
-
-
-def _auto_update_models(config: dict[str, Any], config_path: str) -> None:
-    """Best-effort ``models.registry`` sync against the Ollama API (boot hook).
-
-    Gated by ``models.auto_update`` (default true, ollama provider only); never
-    raises. Bumps each registry alias to the newest same-family version the
-    Ollama host lists (``glm-5.2:cloud`` -> ``glm-5.3:cloud``) — no pulls, the
-    registry stores ids. See ``tools/ollama_models.py``.
-    """
-    try:
-        from tools.ollama_models import auto_refresh_on_startup
-
-        result = auto_refresh_on_startup(config, config_path=config_path)
-    except Exception as exc:  # noqa: BLE001 -- advisory only, never blocks the daemon
-        ui.warning(f"Model auto-update skipped: {type(exc).__name__}: {exc}")
-        return
-    if not result:
-        return
-    updates = result.get("updates") or {}
-    if updates:
-        ui.status("Model auto-update: " + ", ".join(f"{a}: {u['old']} -> {u['new']}" for a, u in updates.items()))
-    else:
-        ui.status(
-            f"Model registry current ({result.get('available_count', 0)} models on {result.get('host', 'Ollama')})."
-        )
+        for _name, _modules in _BOOT_SYNC_TARGETS:
+            _value = getattr(public, _name, None)
+            if _value is None or getattr_static(_value, "_breachpilot_boot_wrapper", False):
+                continue
+            for _mod in _modules:
+                if hasattr(_mod, _name):
+                    saved.append((_mod, _name, getattr(_mod, _name)))
+                    setattr(_mod, _name, _value)
+        yield
+    finally:
+        for _mod, _name, _old in reversed(saved):
+            setattr(_mod, _name, _old)
 
 
 def _run_daemon(args: argparse.Namespace) -> int:
-    """Start the local WebUI API server (``--demon`` / ``--daemon`` / ``--web``)."""
-    config = load_config(args.config)
-    api_cfg = config.setdefault("api", {})
-    host = args.api_host or api_cfg.get("host", "127.0.0.1")
-    port = int(args.api_port or api_cfg.get("port", 8765))
-    shutdown_timeout = int(api_cfg.get("shutdown_timeout_seconds", 15))
-    # v1: loopback-only. Refuse any non-loopback bind (no public override).
-    if host not in ("127.0.0.1", "localhost", "::1"):
-        ui.error(
-            f"--api-host must be loopback (127.0.0.1/localhost/::1); got {host!r}. Public binds are not supported in v1."
-        )
-        return 2
-    status_host = f"[{host}]" if host == "::1" else host
-    web_mode = getattr(args, "web", False)
-    if _api_daemon_ready(host, port):
-        ui.status(f"WebUI API daemon is already running on http://{status_host}:{port}")
-        restarted = False
-        if _offer_daemon_kill():
-            if _stop_running_daemon(host, port):
-                ui.status("Stopped the previous WebUI API daemon; starting a fresh one.")
-                restarted = True
-            else:
-                ui.error("Could not stop the running daemon; keeping it.")
-        if not restarted:
-            if web_mode:
-                threading.Thread(target=_open_browser_when_ready, args=(host, port, ui), daemon=True).start()
-            return 0
-    try:
-        import uvicorn  # noqa: F401 -- import gate
-    except ImportError:
-        ui.error("uvicorn is not installed. Run: python -m pip install -r requirements.txt")
-        return 1
-    try:
-        from app import create_app
-    except ImportError as exc:
-        ui.error(f"Could not import the ASGI app factory (app.py): {exc}")
-        return 1
+    """Start the local WebUI API server. Canonical implementation: tools.daemon_lifecycle."""
+    with _synced_boot_symbols():
+        return _daemon_lifecycle._run_daemon(args)
 
-    if web_mode:
-        build_rc = _ensure_webui_build(ui, force=bool(getattr(args, "rebuild", False)))
-        if build_rc != 0:
-            return build_rc
-        # In-memory override only; never persisted to config.yaml.
-        api_cfg["serve_webui"] = True
-    elif getattr(args, "rebuild", False):
-        # --daemon --rebuild: the API daemon doesn't serve the SPA, but honor
-        # the explicit rebuild request before starting.
-        rebuild_rc = _rebuild_webui(ui)
-        if rebuild_rc != 0:
-            return rebuild_rc
 
-    # Auto-update the model registry against the live Ollama API before the
-    # app factory snapshots the config (models.auto_update, default true).
-    _auto_update_models(config, args.config)
+_run_daemon._breachpilot_boot_wrapper = True
 
-    ui.banner()
-    base = f"http://{status_host}:{port}"
-    print(f"  {ui._c('green')}*{ui._c('reset')} API ready  {ui._c('blue')}{base}{ui._c('reset')}")
-    print(f"    {ui._c('gray')}{'docs':<7}{ui._c('reset')} {ui._c('blue')}{base}/docs{ui._c('reset')}")
-    print(f"    {ui._c('gray')}{'openapi':<7}{ui._c('reset')} {ui._c('blue')}{base}/openapi.json{ui._c('reset')}")
-    if web_mode:
-        print(f"    {ui._c('gray')}{'webui':<7}{ui._c('reset')} {ui._c('blue')}{base}/{ui._c('reset')}")
-    print(f"  {ui._c('gray')}{'-' * 46}{ui._c('reset')}")
-    # ponytail: print the bearer token here (create_app re-reads the same file;
-    # one extra read beats threading the token back through the factory).
-    from tools.api.auth import load_or_create_token
 
-    token = load_or_create_token(
-        api_cfg.get("token_file", ".webui_secret_key"),
-        env_override=os.environ.get("BREACHPILOT_API_TOKEN", ""),
-    )
-    # Single prompt — reveal token (and open browser in --web mode) so the
-    # user isn't hit with two sequential "press Enter" pauses.
-    if web_mode:
-        print(f"  {ui._c('gray')}Press Enter to reveal API token and open browser...{ui._c('reset')}")
-    else:
-        print(f"  {ui._c('gray')}Press Enter to reveal API token...{ui._c('reset')}")
-    try:
-        input(f"  {ui._c('gray')}>{ui._c('reset')} ")
-    except KeyboardInterrupt:
-        return 130
-    except EOFError:
-        pass
-    print(f"  {ui._c('gray')}token{ui._c('reset')}   {token}")
-    if _copy_to_clipboard(token):
-        print(f"  {ui._c('green')}copied to clipboard{ui._c('reset')} {ui._c('gray')}(Ctrl+V to paste){ui._c('reset')}")
-    app = create_app(config_path=args.config, config=config)
+def _rebuild_webui(ui: Any) -> int:
+    """Force a clean rebuild of the WebUI. Canonical implementation: tools.webui_boot."""
+    with _synced_boot_symbols():
+        return _webui_boot._rebuild_webui(ui)
 
-    if web_mode:
-        browser_thread = threading.Thread(
-            target=_open_browser_when_ready,
-            args=(host, port, ui),
-            daemon=True,
-        )
-        browser_thread.start()
 
-    print(f"  {ui._c('gray')}{'-' * 46}{ui._c('reset')}")
-    print(f"  {ui._c('gray')}Logs and agent output will stream here - leave this running.{ui._c('reset')}")
+_rebuild_webui._breachpilot_boot_wrapper = True
 
-    uvicorn.run(
-        app,
-        host=host,
-        port=port,
-        log_level="warning" if not getattr(args, "debug", False) else "info",
-        access_log=bool(getattr(args, "debug", False)),
-        timeout_graceful_shutdown=shutdown_timeout,
-    )
-    return 0
+
+def _auto_update_models(config: dict[str, Any], config_path: str) -> None:
+    """Best-effort models.registry sync. Canonical implementation: tools.webui_boot."""
+    with _synced_boot_symbols():
+        return _webui_boot._auto_update_models(config, config_path)
+
+
+_auto_update_models._breachpilot_boot_wrapper = True
+
+
+def _ensure_chatgpt_runtime(args: argparse.Namespace) -> int:
+    """Ensure the ChatGPT provider is runnable. Canonical implementation: tools.webui_boot."""
+    with _synced_boot_symbols():
+        return _webui_boot._ensure_chatgpt_runtime(args)
+
+
+_ensure_chatgpt_runtime._breachpilot_boot_wrapper = True
 
 
 async def async_main(args: argparse.Namespace) -> int:

@@ -37,13 +37,12 @@ from typing import Any, Callable
 
 from tools.exploit_agent.outcome_truth import ExploitOutcome, classify_exploit_outcome
 
-# Canonical lifecycle vocabulary (single definition in
-# tools.kernel.finding_lifecycle; re-exported here so engine-internal and
+# Canonical lifecycle vocabulary — the ONLY definition lives in
+# tools.kernel.finding_lifecycle (re-exported here so engine-internal and
 # test ``from tools.verify_oracle import VERIFIED`` paths keep working).
+# No per-lane frozenset is duplicated here.
 from tools.kernel.finding_lifecycle import HOLDING, INCONCLUSIVE, VERIFIED
 from tools.mcp_tools.retest import _INCONCLUSIVE_MARKERS
-
-VERIFY_VERDICTS = frozenset({VERIFIED, HOLDING, INCONCLUSIVE})
 
 # Outcome_truth verdicts that count as machine proof of the finding.
 _PROOF_OUTCOMES = frozenset({ExploitOutcome.COMPROMISE, ExploitOutcome.CRED_DUMP})
@@ -196,7 +195,6 @@ __all__ = [
     "HOLDING",
     "INCONCLUSIVE",
     "VERIFIED",
-    "VERIFY_VERDICTS",
     "ProofCapsule",
     "VerifyOracle",
     "VerifyOutcome",

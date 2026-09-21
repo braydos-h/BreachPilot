@@ -383,7 +383,152 @@ export function ProviderSetup() {
   return (
     <div className="space-y-3">
       <ProviderPicker />
+      <ProviderPrivacyNotice />
       {body}
+    </div>
+  );
+}
+
+// ── Provider privacy boundary (p2-08) ────────────────────────────────────
+// Badge + one-line egress notice rendered purely from the registry metadata
+// row (data_residency / egress_target) — zero per-provider UI branching.
+// The acknowledge gate below fires only when the active provider resolves
+// to cloud, and re-prompts whenever the provider or its egress target
+// changes (local→cloud switch included).
+
+export type DataResidency = "local" | "cloud";
+
+export interface ProviderPrivacy {
+  providerId: string;
+  label: string;
+  residency: DataResidency;
+  egressTarget: string;
+  isCloud: boolean;
+  isLoading: boolean;
+}
+
+/** Privacy boundary for the active provider, from GET /providers metadata. */
+export function useProviderPrivacy(): ProviderPrivacy {
+  const status = useProviderStatus();
+  const providers = useProviders();
+  const rows = providers.data?.providers ?? [];
+  const activeId = providers.data?.provider ?? providers.data?.active ?? status.provider;
+  const row = rows.find((r) => r.id === activeId);
+  // Unknown (old backend / still loading metadata) resolves to cloud — never
+  // claim "local" without an explicit loopback verdict from the backend.
+  const residency: DataResidency = row?.data_residency === "local" ? "local" : "cloud";
+  return {
+    providerId: activeId ?? "",
+    label: status.label,
+    residency,
+    egressTarget: row?.egress_target ?? "",
+    isCloud: residency === "cloud",
+    isLoading: providers.isLoading || !providers.data,
+  };
+}
+
+/** One-line egress notice text, derived from metadata only (no branching). */
+export function privacyNoticeText(residency: DataResidency, egressTarget: string): string {
+  if (residency === "local") return "Stays on this host — prompts never leave this machine.";
+  if (egressTarget) return `Sends prompts to ${egressTarget}.`;
+  return "Sends prompts off this host.";
+}
+
+/** Badge + one-line egress notice for the active provider. */
+export function ProviderPrivacyNotice() {
+  const privacy = useProviderPrivacy();
+  if (privacy.isLoading) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="provider-privacy-notice">
+      <Badge variant={privacy.isCloud ? "warn" : "success"} data-testid="provider-privacy-badge">
+        {privacy.isCloud ? "Cloud" : "Local"}
+      </Badge>
+      <span className="text-muted-foreground">{privacyNoticeText(privacy.residency, privacy.egressTarget)}</span>
+    </div>
+  );
+}
+
+const PRIVACY_ACK_KEY = "breachpilot.providerPrivacyAck.v1";
+
+/** Ack identity: provider + egress target, so any route change re-prompts. */
+export function privacyAckKeyFor(providerId: string, egressTarget: string): string {
+  return `${providerId}|${egressTarget}`;
+}
+
+export function readPrivacyAck(): string | null {
+  try {
+    return localStorage.getItem(PRIVACY_ACK_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writePrivacyAck(key: string) {
+  try {
+    localStorage.setItem(PRIVACY_ACK_KEY, key);
+  } catch {
+    // ignore (private mode etc.)
+  }
+}
+
+interface ProviderPrivacyGateProps {
+  children: React.ReactNode;
+}
+
+/** First-run acknowledge gate: blocks the app until the operator explicitly
+ *  confirms a cloud provider route. Local providers never trigger it, and
+ *  any provider/target change re-prompts (the ack key covers both). */
+export function ProviderPrivacyGate({ children }: ProviderPrivacyGateProps) {
+  const privacy = useProviderPrivacy();
+  const [ack, setAck] = useState<string | null>(() => readPrivacyAck());
+  const [confirmed, setConfirmed] = useState(false);
+  const currentKey = privacyAckKeyFor(privacy.providerId, privacy.egressTarget);
+  const needsAck = !privacy.isLoading && privacy.isCloud && ack !== currentKey;
+
+  if (!needsAck) return <>{children}</>;
+
+  const canConfirm = confirmed;
+  const onConfirm = () => {
+    writePrivacyAck(currentKey);
+    setAck(currentKey);
+  };
+
+  return (
+    <div className="flex min-h-dvh items-center justify-center bg-background px-4 py-10" data-testid="provider-privacy-gate">
+      <div className="w-full max-w-lg rounded-lg border bg-card p-6 shadow-sm">
+        <div className="space-y-2">
+          <h1 className="text-xl font-semibold">Cloud provider route</h1>
+          <p className="text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">{privacy.label}</span> sends your prompts and target data{" "}
+            {privacy.egressTarget ? (
+              <>to <span className="font-mono text-foreground">{privacy.egressTarget}</span></>
+            ) : (
+              "off this host"
+            )}
+            . Confirm you understand before continuing.
+          </p>
+        </div>
+        <div className="mt-4">
+          <ProviderPrivacyNotice />
+        </div>
+        <label className="mt-4 flex cursor-pointer items-start gap-2 text-sm" htmlFor="privacy-ack-check">
+          <input
+            id="privacy-ack-check"
+            type="checkbox"
+            className="mt-0.5 h-4 w-4"
+            checked={confirmed}
+            onChange={(e) => setConfirmed(e.target.checked)}
+          />
+          <span>
+            I understand prompts leave this machine on the <span className="font-medium">{privacy.label}</span> route.
+          </span>
+        </label>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button type="button" size="sm" disabled={!canConfirm} onClick={onConfirm}>
+            Acknowledge &amp; continue
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

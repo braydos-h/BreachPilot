@@ -585,6 +585,15 @@ class ExecuteMixin:
                 )
             except _EXC_GROUP_CATCH:
                 pass
+            # Run manifest (p2-06): finalize once at run end even on the error
+            # path so the bundle/export index reflects the crashed run.
+            # Best-effort — teardown must never raise into the result path.
+            try:
+                from tools.kernel.run_manifest import finalize_manifest
+
+                finalize_manifest(reports_dir, run_id)
+            except Exception:  # noqa: BLE001 -- teardown only, never gates
+                pass
             return RunResult(
                 run_id=run_id,
                 target_ip=target_ip,
@@ -796,6 +805,16 @@ class ExecuteMixin:
             cancelled=_cancelled_by_operator,
             objective_transitions=list(_objective_transitions),
         )
+        # Run manifest (p2-06): finalize once at run end — refreshes
+        # finished_at / state_stores / evidence_index / findings and recomputes
+        # manifest_hash so export/resume read a single fresh index.
+        # Best-effort — teardown must never raise into the result path.
+        try:
+            from tools.kernel.run_manifest import finalize_manifest
+
+            finalize_manifest(reports_dir, run_id)
+        except Exception:  # noqa: BLE001 -- teardown only, never gates
+            pass
         RunLog.detach()
         return _final_run_result
 

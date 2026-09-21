@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from observer import Observation
+from legacy.observer import Observation
 from tools.intelligence.belief.state import EvidenceObservation, EvidencePolarity
 from tools.intelligence.fingerprint.tracker import is_permanent_failure
 

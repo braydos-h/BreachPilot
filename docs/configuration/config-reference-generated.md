@@ -3,7 +3,7 @@ title: Config Reference (Generated)
 description: Machine-readable table for every config.yaml leaf key — type, defaults, allowed values, source location, consumers, effect, env override, restart, subsystem and tests. Verified against config.yaml + CONFIG_SCHEMA.
 source: [config.yaml, tools/config_manager.py]
 generated_from: [config.yaml, tools/config_manager.py]
-verify: every key listed exists in config.yaml at time of generation (2026-09-14); schema defaults shown where present.
+verify: every key listed exists in config.yaml at time of generation (2026-09-21); schema defaults shown where present.
 ---
 
 # Config Reference (Generated)
@@ -13,27 +13,27 @@ verify: every key listed exists in config.yaml at time of generation (2026-09-14
 Source locations use `config.yaml:<top-level-line>` + `tools/config_manager.py:CONFIG_SCHEMA` path. Consumers are primary `file:line` citations; full call graph is in `docs/module-guide.md`.
 
 
-_Generated 2026-09-14 from `config.yaml` (444 leaf keys, 46 top-level blocks). Lab-only keys (not in `CONFIG_SCHEMA`) are marked._
+_Generated 2026-09-21 from `config.yaml` (444 leaf keys, 46 top-level blocks). Lab-only keys (not in `CONFIG_SCHEMA`) are marked._
 
 | Key | Type | Default (schema → lab) | Allowed | Source | Consumer(s) | Effect | Env override | Restart | Subsystem | Tests |
 |-----|------|----------------------|---------|--------|-------------|--------|--------------|---------|-----------|-------|
 | `adaptive_exploits.enabled` | `bool` | `True` | — | `config.yaml:381` + `CONFIG_SCHEMA['adaptive_exploits'].enabled` | cli_exploit_settings.py, mcp_tools/attack_modules.py | Mutation engine | — | no | exploit | tests/test_mutator.py |
 | `adaptive_exploits.max_mutations` | `int` | `5` | — | `config.yaml:381` + `CONFIG_SCHEMA['adaptive_exploits'].max_mutations` | cli_exploit_settings.py, mcp_tools/attack_modules.py | Mutation engine | — | no | exploit | tests/test_mutator.py |
 | `adaptive_exploits.mutation_strategies` | `list[str]` | `['parameter_tweak', 'encoding_change', 'delivery_swap', 'context_aware']` | — | `config.yaml:381` + `CONFIG_SCHEMA['adaptive_exploits'].mutation_strategies` | cli_exploit_settings.py, mcp_tools/attack_modules.py | Mutation engine | — | no | exploit | tests/test_mutator.py |
-| `agent.attack_focus_enabled` | `bool` | `True` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].attack_focus_enabled` |  | — | — | no | agent | — |
-| `agent.branch_max_actions` | `int` | `25` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].branch_max_actions` |  | — | — | no | agent | — |
-| `agent.branch_switch_priority_margin` | `float` | `0.25` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].branch_switch_priority_margin` |  | — | — | no | agent | — |
-| `agent.capability_discovery_enabled` | `bool` | `True` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].capability_discovery_enabled` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
-| `agent.decision_log_enabled` | `bool` | `True` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].decision_log_enabled` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
-| `agent.generated_code_repair_attempts` | `int` | `3` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].generated_code_repair_attempts` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
-| `agent.max_actions` | `int` | `0` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].max_actions` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
-| `agent.max_active_hypotheses` | `int` | `5` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].max_active_hypotheses` |  | — | — | no | agent | — |
-| `agent.max_retries_per_task` | `int` | `2` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].max_retries_per_task` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
-| `agent.no_progress_action_limit` | `int` | `5` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].no_progress_action_limit` |  | — | — | no | agent | — |
-| `agent.planner_hints_enabled` | `bool` | `True` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].planner_hints_enabled` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
-| `agent.reflection_enabled` | `bool` | `True` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].reflection_enabled` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
-| `agent.state_tools_enabled` | `bool` | `True` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].state_tools_enabled` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
-| `agent.task_graph_enabled` | `bool` | `True` | — | `config.yaml:513` + `CONFIG_SCHEMA['agent'].task_graph_enabled` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
+| `agent.attack_focus_enabled` | `bool` | `True` | — | `config.yaml:503` + `CONFIG_SCHEMA['agent'].attack_focus_enabled` |  | — | — | no | agent | — |
+| `agent.branch_max_actions` | `int` | `25` | — | `config.yaml:503` + `CONFIG_SCHEMA['agent'].branch_max_actions` |  | — | — | no | agent | — |
+| `agent.branch_switch_priority_margin` | `float` | `0.25` | — | `config.yaml:503` + `CONFIG_SCHEMA['agent'].branch_switch_priority_margin` |  | — | — | no | agent | — |
+| `agent.capability_discovery_enabled` | `bool` | `True` | — | `config.yaml:503` + `CONFIG_SCHEMA['agent'].capability_discovery_enabled` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
+| `agent.decision_log_enabled` | `bool` | `True` | — | `config.yaml:503` + `CONFIG_SCHEMA['agent'].decision_log_enabled` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
+| `agent.generated_code_repair_attempts` | `int` | `3` | — | `config.yaml:503` + `CONFIG_SCHEMA['agent'].generated_code_repair_attempts` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
+| `agent.max_actions` | `int` | `0` | — | `config.yaml:503` + `CONFIG_SCHEMA['agent'].max_actions` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
+| `agent.max_active_hypotheses` | `int` | `5` | — | `config.yaml:503` + `CONFIG_SCHEMA['agent'].max_active_hypotheses` |  | — | — | no | agent | — |
+| `agent.max_retries_per_task` | `int` | `2` | — | `config.yaml:503` + `CONFIG_SCHEMA['agent'].max_retries_per_task` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
+| `agent.no_progress_action_limit` | `int` | `5` | — | `config.yaml:503` + `CONFIG_SCHEMA['agent'].no_progress_action_limit` |  | — | — | no | agent | — |
+| `agent.planner_hints_enabled` | `bool` | `True` | — | `config.yaml:503` + `CONFIG_SCHEMA['agent'].planner_hints_enabled` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
+| `agent.reflection_enabled` | `bool` | `True` | — | `config.yaml:503` + `CONFIG_SCHEMA['agent'].reflection_enabled` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
+| `agent.state_tools_enabled` | `bool` | `True` | — | `config.yaml:503` + `CONFIG_SCHEMA['agent'].state_tools_enabled` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
+| `agent.task_graph_enabled` | `bool` | `True` | — | `config.yaml:503` + `CONFIG_SCHEMA['agent'].task_graph_enabled` | attack_planner.py, decision_log.py | Task graph | — | no | agent | tests/test_agent*.py |
 | `api.allowed_origins` | `list` | `[]` | — | `config.yaml:438` + `CONFIG_SCHEMA['api'].allowed_origins` | app.py, api/*, doctor.py | WebUI daemon | — | yes | api/webui | tests/test_api*.py |
 | `api.enabled` | `bool` | `True` | — | `config.yaml:438` + `CONFIG_SCHEMA['api'].enabled` | app.py, api/*, doctor.py | WebUI daemon | — | yes | api/webui | tests/test_api*.py |
 | `api.event_buffer_size` | `int` | `256` | — | `config.yaml:438` + `CONFIG_SCHEMA['api'].event_buffer_size` | app.py, api/*, doctor.py | WebUI daemon | — | yes | api/webui | tests/test_api*.py |
@@ -87,10 +87,10 @@ _Generated 2026-09-14 from `config.yaml` (444 leaf keys, 46 top-level blocks). L
 | `browser.persist_storage` | `bool` | `False` | — | `config.yaml:299` + `CONFIG_SCHEMA['browser'].persist_storage` |  | — | — | no | browser | — |
 | `browser.session_timeout_seconds` | `int` | `300` | — | `config.yaml:299` + `CONFIG_SCHEMA['browser'].session_timeout_seconds` |  | — | — | no | browser | — |
 | `browser.worker_image` | `str` | `''` | — | `config.yaml:299` + `CONFIG_SCHEMA['browser'].worker_image` |  | — | — | no | browser | — |
-| `caldera.api_key_env` | `str` | `'CALDERA_API_KEY'` | — | `config.yaml:509` + `CONFIG_SCHEMA['caldera'].api_key_env` | plugins/caldera/plugin.py | Caldera emulation | `CALDERA_API_KEY` | no | ad |  |
-| `caldera.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:509` + `CONFIG_SCHEMA['caldera'].enabled` | plugins/caldera/plugin.py | Caldera emulation | — | no | ad |  |
-| `caldera.url` | `str` | `''` | — | `config.yaml:509` + `CONFIG_SCHEMA['caldera'].url` | plugins/caldera/plugin.py | Caldera emulation | — | no | ad |  |
-| `chatgpt.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:568` + `CONFIG_SCHEMA['chatgpt'].enabled` | providers/chatgpt_provider.py, model_router.py, doctor.py | ChatGPT proxy | — | yes | providers | tests/test_chatgpt*.py |
+| `caldera.api_key_env` | `str` | `'CALDERA_API_KEY'` | — | `config.yaml:499` + `CONFIG_SCHEMA['caldera'].api_key_env` | plugins/caldera/plugin.py | Caldera emulation | `CALDERA_API_KEY` | no | ad |  |
+| `caldera.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:499` + `CONFIG_SCHEMA['caldera'].enabled` | plugins/caldera/plugin.py | Caldera emulation | — | no | ad |  |
+| `caldera.url` | `str` | `''` | — | `config.yaml:499` + `CONFIG_SCHEMA['caldera'].url` | plugins/caldera/plugin.py | Caldera emulation | — | no | ad |  |
+| `chatgpt.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:562` + `CONFIG_SCHEMA['chatgpt'].enabled` | providers/chatgpt_provider.py, model_router.py, doctor.py | ChatGPT proxy | — | yes | providers | tests/test_chatgpt*.py |
 | `cve_lookup.api_key_env` | `str` | `'NVD_API_KEY'` | — | `config.yaml:112` + `CONFIG_SCHEMA['cve_lookup'].api_key_env` | mcp_shared, cve_lookup.py | NVD + KEV/EPSS | `NVD_API_KEY` | no | research/cve | tests/test_cve_lookup.py |
 | `cve_lookup.cache_max_entries` | `int` | `100` | — | `config.yaml:112` + `CONFIG_SCHEMA['cve_lookup'].cache_max_entries` | mcp_shared, cve_lookup.py | NVD + KEV/EPSS | — | no | research/cve | tests/test_cve_lookup.py |
 | `cve_lookup.cache_ttl_seconds` | `int` | `3600` | — | `config.yaml:112` + `CONFIG_SCHEMA['cve_lookup'].cache_ttl_seconds` | mcp_shared, cve_lookup.py | NVD + KEV/EPSS | — | no | research/cve | tests/test_cve_lookup.py |
@@ -106,7 +106,7 @@ _Generated 2026-09-14 from `config.yaml` (444 leaf keys, 46 top-level blocks). L
 | `cve_lookup.rate_limit_seconds` | `float` | `6.0` | — | `config.yaml:112` + `CONFIG_SCHEMA['cve_lookup'].rate_limit_seconds` | mcp_shared, cve_lookup.py | NVD + KEV/EPSS | — | no | research/cve | tests/test_cve_lookup.py |
 | `cve_lookup.search_rate_limit_per_minute` | `int` | `10` | — | `config.yaml:112` + `CONFIG_SCHEMA['cve_lookup'].search_rate_limit_per_minute` | mcp_shared, cve_lookup.py | NVD + KEV/EPSS | — | no | research/cve | tests/test_cve_lookup.py |
 | `cve_lookup.timeout_seconds` | `int` | `30` | — | `config.yaml:112` + `CONFIG_SCHEMA['cve_lookup'].timeout_seconds` | mcp_shared, cve_lookup.py | NVD + KEV/EPSS | — | no | research/cve | tests/test_cve_lookup.py |
-| `embeddings.provider` | `str` | `'ollama' (schema) → 'none' (lab)` | — | `config.yaml:507` + `CONFIG_SCHEMA['embeddings'].provider` |  | — | — | yes | embeddings | — |
+| `embeddings.provider` | `str` | `'ollama' (schema) → 'none' (lab)` | — | `config.yaml:497` + `CONFIG_SCHEMA['embeddings'].provider` |  | — | — | yes | embeddings | — |
 | `engine_mcp.enabled` | `bool` | `True` | — | `config.yaml:53` + `CONFIG_SCHEMA['engine_mcp'].enabled` | mcp_engine_server.py | Advisory MCP enable | — | yes | mcp/engine |  |
 | `engine_mcp.host` | `str` | `'127.0.0.1'` | — | `config.yaml:53` + `CONFIG_SCHEMA['engine_mcp'].host` | mcp_engine_server.py | Loopback bind | — | yes | mcp/engine |  |
 | `engine_mcp.port` | `int` | `8002` | — | `config.yaml:53` + `CONFIG_SCHEMA['engine_mcp'].port` | mcp_engine_server.py | HTTP port | — | yes | mcp/engine |  |
@@ -183,10 +183,10 @@ _Generated 2026-09-14 from `config.yaml` (444 leaf keys, 46 top-level blocks). L
 | `memory.experience_min_samples` | `int` | `3` | — | `config.yaml:335` + `CONFIG_SCHEMA['memory'].experience_min_samples` | tools/exploit_agent/runner/_impl.py, semantic_memory.py | Cross-mission memory | — | no | memory | tests/test_memory.py |
 | `memory.experience_time_decay_days` | `int` | `90` | — | `config.yaml:335` + `CONFIG_SCHEMA['memory'].experience_time_decay_days` | tools/exploit_agent/runner/_impl.py, semantic_memory.py | Cross-mission memory | — | no | memory | tests/test_memory.py |
 | `memory.semantic_enabled` | `bool` | `True` | — | `config.yaml:335` + `CONFIG_SCHEMA['memory'].semantic_enabled` | tools/exploit_agent/runner/_impl.py, semantic_memory.py | Cross-mission memory | — | no | memory | tests/test_memory.py |
-| `mitre.enabled` | `bool` | `True` | — | `config.yaml:482` + `CONFIG_SCHEMA['mitre'].enabled` | mitre_export.py | ATT&CK export | — | no | mitre |  |
-| `mitre.include_skill_tags` | `bool` | `True` | — | `config.yaml:482` + `CONFIG_SCHEMA['mitre'].include_skill_tags` | mitre_export.py | ATT&CK export | — | no | mitre |  |
-| `mitre.navigator_output_dir` | `str` | `'reports/mitre'` | — | `config.yaml:482` + `CONFIG_SCHEMA['mitre'].navigator_output_dir` | mitre_export.py | ATT&CK export | — | no | mitre |  |
-| `mitre.technique_map` | `str` | `'tools/mitre_technique_map.json'` | — | `config.yaml:482` + `CONFIG_SCHEMA['mitre'].technique_map` | mitre_export.py | ATT&CK export | — | no | mitre |  |
+| `mitre.enabled` | `bool` | `True` | — | `config.yaml:472` + `CONFIG_SCHEMA['mitre'].enabled` | mitre_export.py | ATT&CK export | — | no | mitre |  |
+| `mitre.include_skill_tags` | `bool` | `True` | — | `config.yaml:472` + `CONFIG_SCHEMA['mitre'].include_skill_tags` | mitre_export.py | ATT&CK export | — | no | mitre |  |
+| `mitre.navigator_output_dir` | `str` | `'reports/mitre'` | — | `config.yaml:472` + `CONFIG_SCHEMA['mitre'].navigator_output_dir` | mitre_export.py | ATT&CK export | — | no | mitre |  |
+| `mitre.technique_map` | `str` | `'tools/mitre_technique_map.json'` | — | `config.yaml:472` + `CONFIG_SCHEMA['mitre'].technique_map` | mitre_export.py | ATT&CK export | — | no | mitre |  |
 | `models.auto_update` | `bool` | `True` | — | `config.yaml:6` + `CONFIG_SCHEMA['models'].auto_update` |  | — | — | yes | models | — |
 | `models.default_alias` | `str` | `'glm'` | — | `config.yaml:6` + `CONFIG_SCHEMA['models'].default_alias` | config_manager, run_service/service.py | Active alias | — | yes | models | tests/test_config_manager.py |
 | `models.info.deepseek.context_window` | `int` | `1000000` | — | `config.yaml:6` + `CONFIG_SCHEMA['models'].info.deepseek.context_window` | model_router, exploit_agent/context | Context windows | — | yes | memory/context | tests/test_config_manager.py |
@@ -232,14 +232,14 @@ _Generated 2026-09-14 from `config.yaml` (444 leaf keys, 46 top-level blocks). L
 | `ollama.embed_host` | `str` | `'http://localhost:11434'` | — | `config.yaml:1` + `CONFIG_SCHEMA['ollama'].embed_host` | config_manager.py, tools/exploit_agent/runner/_impl.py | Embedding host fallback | — | yes | memory/embeddings | tests/test_config_manager.py |
 | `ollama.host` | `str` | `'https://api.ollama.com'` | — | `config.yaml:1` + `CONFIG_SCHEMA['ollama'].host` | model_router.py, doctor.py | Ollama endpoint for chat/generate | — | yes | models/provider | tests/test_config_manager.py |
 | `ollama.model` | `str` | `'glm-5.2:cloud'` | — | `config.yaml:1` + `CONFIG_SCHEMA['ollama'].model` | config_manager.py, interactive_menu.py | Default concrete model id | — | yes | models | tests/test_config_manager.py |
-| `opencode_go.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:570` + `CONFIG_SCHEMA['opencode_go'].enabled` |  | — | — | yes | providers | — |
-| `operator_connection.auto_start_listener` | `bool` | `True` | — | `config.yaml:530` + `CONFIG_SCHEMA['operator_connection'].auto_start_listener` |  | — | — | no | operator | — |
-| `operator_connection.beacon_interval_seconds` | `int` | `300` | — | `config.yaml:530` + `CONFIG_SCHEMA['operator_connection'].beacon_interval_seconds` |  | — | — | no | operator | — |
-| `operator_connection.default_callback_port` | `int` | `4444` | — | `config.yaml:530` + `CONFIG_SCHEMA['operator_connection'].default_callback_port` |  | — | — | no | operator | — |
-| `operator_connection.default_listener_type` | `str` | `'netcat'` | — | `config.yaml:530` + `CONFIG_SCHEMA['operator_connection'].default_listener_type` |  | — | — | no | operator | — |
-| `operator_connection.enabled` | `bool` | `True` | — | `config.yaml:530` + `CONFIG_SCHEMA['operator_connection'].enabled` |  | — | — | no | operator | — |
-| `operator_connection.health_check_interval_seconds` | `int` | `60` | — | `config.yaml:530` + `CONFIG_SCHEMA['operator_connection'].health_check_interval_seconds` |  | — | — | no | operator | — |
-| `operator_connection.workspace_dir` | `str` | `'exploit_workspace'` | — | `config.yaml:530` + `CONFIG_SCHEMA['operator_connection'].workspace_dir` |  | — | — | no | operator | — |
+| `opencode_go.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:564` + `CONFIG_SCHEMA['opencode_go'].enabled` |  | — | — | yes | providers | — |
+| `operator_connection.auto_start_listener` | `bool` | `True` | — | `config.yaml:520` + `CONFIG_SCHEMA['operator_connection'].auto_start_listener` |  | — | — | no | operator | — |
+| `operator_connection.beacon_interval_seconds` | `int` | `300` | — | `config.yaml:520` + `CONFIG_SCHEMA['operator_connection'].beacon_interval_seconds` |  | — | — | no | operator | — |
+| `operator_connection.default_callback_port` | `int` | `4444` | — | `config.yaml:520` + `CONFIG_SCHEMA['operator_connection'].default_callback_port` |  | — | — | no | operator | — |
+| `operator_connection.default_listener_type` | `str` | `'netcat'` | — | `config.yaml:520` + `CONFIG_SCHEMA['operator_connection'].default_listener_type` |  | — | — | no | operator | — |
+| `operator_connection.enabled` | `bool` | `True` | — | `config.yaml:520` + `CONFIG_SCHEMA['operator_connection'].enabled` |  | — | — | no | operator | — |
+| `operator_connection.health_check_interval_seconds` | `int` | `60` | — | `config.yaml:520` + `CONFIG_SCHEMA['operator_connection'].health_check_interval_seconds` |  | — | — | no | operator | — |
+| `operator_connection.workspace_dir` | `str` | `'exploit_workspace'` | — | `config.yaml:520` + `CONFIG_SCHEMA['operator_connection'].workspace_dir` |  | — | — | no | operator | — |
 | `opsec.doh` | `bool` | `False` | — | `config.yaml:255` + `CONFIG_SCHEMA['opsec'].doh` | opsec.py, validation_utils.is_private_or_local_target | OPSEC hardening | — | no | opsec | tests/test_opsec.py |
 | `opsec.doh_provider` | `str` | `'cloudflare'` | `cloudflare` \| `google` | `config.yaml:255` + `CONFIG_SCHEMA['opsec'].doh_provider` | opsec.py, validation_utils.is_private_or_local_target | OPSEC hardening | — | no | opsec | tests/test_opsec.py |
 | `opsec.enabled` | `bool` | `False` | — | `config.yaml:255` + `CONFIG_SCHEMA['opsec'].enabled` | opsec.py, validation_utils.is_private_or_local_target | OPSEC hardening | — | no | opsec | tests/test_opsec.py |
@@ -260,7 +260,7 @@ _Generated 2026-09-14 from `config.yaml` (444 leaf keys, 46 top-level blocks). L
 | `outcome_judgment.peer_review` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:343` + `CONFIG_SCHEMA['outcome_judgment'].peer_review` | cli_exploit_settings.py, outcome_judge.py | Evidence verdicts | — | no | eval | tests/test_outcome*.py |
 | `outcome_judgment.refutation_threshold` | `float` | `0.75` | — | `config.yaml:343` + `CONFIG_SCHEMA['outcome_judgment'].refutation_threshold` | cli_exploit_settings.py, outcome_judge.py | Evidence verdicts | — | no | eval | tests/test_outcome*.py |
 | `plugins.disabled` | `list` | `[]` | — | `config.yaml:453` + `CONFIG_SCHEMA['plugins'].disabled` | plugins.py | Plugin discovery | — | no | plugins | tests/test_plugins*.py |
-| `plugins.enabled` | `list[str]` | `[] (schema) → ['shodan_recon', 'github_dorks', 'webhook_notify', 'sliver_c2', 'bloodhound_ce', 'zap_scan', 'browser_attack', 'mobile_attack', 'wireless', 'spiderfoot', 'atomic_red_team', 'caldera', 'firmware_analysis'] (lab)` | — | `config.yaml:453` + `CONFIG_SCHEMA['plugins'].enabled` | plugins.py | Plugin discovery | — | no | plugins | tests/test_plugins*.py |
+| `plugins.enabled` | `list` | `[]` | — | `config.yaml:453` + `CONFIG_SCHEMA['plugins'].enabled` | plugins.py | Plugin discovery | — | no | plugins | tests/test_plugins*.py |
 | `plugins.entry_points` | `bool` | `True` | — | `config.yaml:453` + `CONFIG_SCHEMA['plugins'].entry_points` | plugins.py | Plugin discovery | — | no | plugins | tests/test_plugins*.py |
 | `plugins.search_paths` | `list[str]` | `['plugins']` | — | `config.yaml:453` + `CONFIG_SCHEMA['plugins'].search_paths` | plugins.py | Plugin discovery | — | no | plugins | tests/test_plugins*.py |
 | `poc_verification.compile_timeout_seconds` | `int` | `30` | — | `config.yaml:350` + `CONFIG_SCHEMA['poc_verification'].compile_timeout_seconds` | poc_verifier.py, mcp_tools/attack_modules.py | PoC compile gate | — | no | poc | tests/test_poc*.py |
@@ -270,15 +270,15 @@ _Generated 2026-09-14 from `config.yaml` (444 leaf keys, 46 top-level blocks). L
 | `poc_verification.docker_read_only` | `bool` | `True` | — | `config.yaml:350` + `CONFIG_SCHEMA['poc_verification'].docker_read_only` | poc_verifier.py, mcp_tools/attack_modules.py | PoC compile gate | — | no | poc | tests/test_poc*.py |
 | `poc_verification.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:350` + `CONFIG_SCHEMA['poc_verification'].enabled` | poc_verifier.py, mcp_tools/attack_modules.py | PoC compile gate | — | no | poc | tests/test_poc*.py |
 | `poc_verification.max_retries` | `int` | `3` | — | `config.yaml:350` + `CONFIG_SCHEMA['poc_verification'].max_retries` | poc_verifier.py, mcp_tools/attack_modules.py | PoC compile gate | — | no | poc | tests/test_poc*.py |
-| `providers.chatgpt.enabled` | `bool` | `True (lab-only, not in CONFIG_SCHEMA)` | — | `config.yaml:495` (lab extra) |  | — | — | yes | providers | — |
-| `providers.opencode_go.api_key_env` | `str` | `'OPENCODE_GO_API_KEY' (lab-only, not in CONFIG_SCHEMA)` | — | `config.yaml:495` (lab extra) |  | — | — | yes | providers | — |
-| `providers.opencode_go.base_url` | `str` | `'https://opencode.ai/zen/go/v1' (lab-only, not in CONFIG_SCHEMA)` | — | `config.yaml:495` (lab extra) |  | — | — | yes | providers | — |
-| `providers.opencode_go.context_window` | `int` | `128000 (lab-only, not in CONFIG_SCHEMA)` | — | `config.yaml:495` (lab extra) |  | — | — | yes | providers | — |
-| `providers.opencode_go.default_model` | `str` | `'muse-spark-1.2-contributor' (lab-only, not in CONFIG_SCHEMA)` | — | `config.yaml:495` (lab extra) |  | — | — | yes | providers | — |
-| `providers.opencode_go.discover_cache_seconds` | `int` | `300 (lab-only, not in CONFIG_SCHEMA)` | — | `config.yaml:495` (lab extra) |  | — | — | yes | providers | — |
-| `providers.opencode_go.enabled` | `bool` | `True (lab-only, not in CONFIG_SCHEMA)` | — | `config.yaml:495` (lab extra) |  | — | — | yes | providers | — |
-| `providers.opencode_go.models` | `list` | `[] (lab-only, not in CONFIG_SCHEMA)` | — | `config.yaml:495` (lab extra) |  | — | — | yes | providers | — |
-| `providers.opencode_go.request_timeout_seconds` | `int` | `300 (lab-only, not in CONFIG_SCHEMA)` | — | `config.yaml:495` (lab extra) |  | — | — | yes | providers | — |
+| `providers.chatgpt.enabled` | `bool` | `True (lab-only, not in CONFIG_SCHEMA)` | — | `config.yaml:485` (lab extra) |  | — | — | yes | providers | — |
+| `providers.opencode_go.api_key_env` | `str` | `'OPENCODE_GO_API_KEY' (lab-only, not in CONFIG_SCHEMA)` | — | `config.yaml:485` (lab extra) |  | — | — | yes | providers | — |
+| `providers.opencode_go.base_url` | `str` | `'https://opencode.ai/zen/go/v1' (lab-only, not in CONFIG_SCHEMA)` | — | `config.yaml:485` (lab extra) |  | — | — | yes | providers | — |
+| `providers.opencode_go.context_window` | `int` | `128000 (lab-only, not in CONFIG_SCHEMA)` | — | `config.yaml:485` (lab extra) |  | — | — | yes | providers | — |
+| `providers.opencode_go.default_model` | `str` | `'muse-spark-1.2-contributor' (lab-only, not in CONFIG_SCHEMA)` | — | `config.yaml:485` (lab extra) |  | — | — | yes | providers | — |
+| `providers.opencode_go.discover_cache_seconds` | `int` | `300 (lab-only, not in CONFIG_SCHEMA)` | — | `config.yaml:485` (lab extra) |  | — | — | yes | providers | — |
+| `providers.opencode_go.enabled` | `bool` | `True (lab-only, not in CONFIG_SCHEMA)` | — | `config.yaml:485` (lab extra) |  | — | — | yes | providers | — |
+| `providers.opencode_go.models` | `list` | `[] (lab-only, not in CONFIG_SCHEMA)` | — | `config.yaml:485` (lab extra) |  | — | — | yes | providers | — |
+| `providers.opencode_go.request_timeout_seconds` | `int` | `300 (lab-only, not in CONFIG_SCHEMA)` | — | `config.yaml:485` (lab extra) |  | — | — | yes | providers | — |
 | `reasoning.chain_of_thought` | `bool` | `True` | — | `config.yaml:326` + `CONFIG_SCHEMA['reasoning'].chain_of_thought` | cli_exploit_settings.py, tools/exploit_agent/runner/_impl.py | CoT / reflection | — | no | reasoning | tests/test_reasoning.py |
 | `reasoning.critic_enabled` | `bool` | `True` | — | `config.yaml:326` + `CONFIG_SCHEMA['reasoning'].critic_enabled` | cli_exploit_settings.py, tools/exploit_agent/runner/_impl.py | CoT / reflection | — | no | reasoning | tests/test_reasoning.py |
 | `reasoning.llm_reflection` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:326` + `CONFIG_SCHEMA['reasoning'].llm_reflection` | cli_exploit_settings.py, tools/exploit_agent/runner/_impl.py | CoT / reflection | — | no | reasoning | tests/test_reasoning.py |
@@ -352,32 +352,32 @@ _Generated 2026-09-14 from `config.yaml` (444 leaf keys, 46 top-level blocks). L
 | `research.serpapi.engine` | `str` | `'duckduckgo'` | — | `config.yaml:141` + `CONFIG_SCHEMA['research'].serpapi.engine` | mcp_shared, web_researcher.py, api_key_store.py | Web research + cache | — | no | research | tests/test_research.py |
 | `research.serpapi.region` | `str` | `'us-en'` | — | `config.yaml:141` + `CONFIG_SCHEMA['research'].serpapi.region` | mcp_shared, web_researcher.py, api_key_store.py | Web research + cache | — | no | research | tests/test_research.py |
 | `research.timeout_seconds` | `int` | `15` | — | `config.yaml:141` + `CONFIG_SCHEMA['research'].timeout_seconds` | mcp_shared, web_researcher.py, api_key_store.py | Web research + cache | — | no | research | tests/test_research.py |
-| `sandbox.auto_manage_docker` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].auto_manage_docker` |  | — | — | no | sandbox | — |
-| `sandbox.backend` | `str` | `'docker'` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].backend` |  | — | — | no | sandbox | — |
-| `sandbox.cleanup.remove_on_exit` | `bool` | `True` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].cleanup.remove_on_exit` |  | — | — | no | sandbox | — |
-| `sandbox.cleanup.remove_stale_on_startup` | `bool` | `True` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].cleanup.remove_stale_on_startup` |  | — | — | no | sandbox | — |
-| `sandbox.docker_start_timeout_seconds` | `int` | `60` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].docker_start_timeout_seconds` |  | — | — | no | sandbox | — |
-| `sandbox.docker_stop_timeout_seconds` | `int` | `30` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].docker_stop_timeout_seconds` |  | — | — | no | sandbox | — |
-| `sandbox.enabled` | `bool` | `True` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].enabled` |  | — | — | no | sandbox | — |
-| `sandbox.env_passthrough` | `list` | `[]` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].env_passthrough` |  | — | — | no | sandbox | — |
-| `sandbox.fallback_native` | `bool` | `False` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].fallback_native` |  | — | — | no | sandbox | — |
-| `sandbox.image` | `str` | `'breachpilot-sandbox:latest'` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].image` |  | — | — | no | sandbox | — |
-| `sandbox.multi_net_raw` | `bool` | `True` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].multi_net_raw` |  | — | — | no | sandbox | — |
-| `sandbox.network.allow_dns` | `str` | `'controlled'` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].network.allow_dns` |  | — | — | no | sandbox | — |
-| `sandbox.network.allow_gateway` | `bool` | `False` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].network.allow_gateway` |  | — | — | no | sandbox | — |
-| `sandbox.network.allow_research_hosts` | `bool` | `False` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].network.allow_research_hosts` |  | — | — | no | sandbox | — |
-| `sandbox.network.enforce` | `bool` | `True` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].network.enforce` |  | — | — | no | sandbox | — |
-| `sandbox.network.extra_allow_cidrs` | `list` | `[]` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].network.extra_allow_cidrs` |  | — | — | no | sandbox | — |
-| `sandbox.network.fail_closed` | `bool` | `True` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].network.fail_closed` |  | — | — | no | sandbox | — |
-| `sandbox.network.map_host_loopback` | `bool` | `False` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].network.map_host_loopback` |  | — | — | no | sandbox | — |
-| `sandbox.read_only_rootfs` | `bool` | `True` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].read_only_rootfs` |  | — | — | no | sandbox | — |
-| `sandbox.resources.cpus` | `int` | `2` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].resources.cpus` |  | — | — | no | sandbox | — |
-| `sandbox.resources.memory_mb` | `int` | `4096` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].resources.memory_mb` |  | — | — | no | sandbox | — |
-| `sandbox.resources.output_max_bytes` | `int` | `2000000` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].resources.output_max_bytes` |  | — | — | no | sandbox | — |
-| `sandbox.resources.pids` | `int` | `512` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].resources.pids` |  | — | — | no | sandbox | — |
-| `sandbox.resources.timeout_seconds` | `int` | `300` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].resources.timeout_seconds` |  | — | — | no | sandbox | — |
-| `sandbox.resources.tmpfs_size_mb` | `int` | `256` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].resources.tmpfs_size_mb` |  | — | — | no | sandbox | — |
-| `sandbox.user` | `str` | `'sandbox'` | — | `config.yaml:538` + `CONFIG_SCHEMA['sandbox'].user` |  | — | — | no | sandbox | — |
+| `sandbox.auto_manage_docker` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].auto_manage_docker` |  | — | — | no | sandbox | — |
+| `sandbox.backend` | `str` | `'docker'` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].backend` |  | — | — | no | sandbox | — |
+| `sandbox.cleanup.remove_on_exit` | `bool` | `True` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].cleanup.remove_on_exit` |  | — | — | no | sandbox | — |
+| `sandbox.cleanup.remove_stale_on_startup` | `bool` | `True` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].cleanup.remove_stale_on_startup` |  | — | — | no | sandbox | — |
+| `sandbox.docker_start_timeout_seconds` | `int` | `60` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].docker_start_timeout_seconds` |  | — | — | no | sandbox | — |
+| `sandbox.docker_stop_timeout_seconds` | `int` | `30` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].docker_stop_timeout_seconds` |  | — | — | no | sandbox | — |
+| `sandbox.enabled` | `bool` | `True` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].enabled` |  | — | — | no | sandbox | — |
+| `sandbox.env_passthrough` | `list` | `[]` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].env_passthrough` |  | — | — | no | sandbox | — |
+| `sandbox.fallback_native` | `bool` | `False` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].fallback_native` |  | — | — | no | sandbox | — |
+| `sandbox.image` | `str` | `'breachpilot-sandbox:latest'` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].image` |  | — | — | no | sandbox | — |
+| `sandbox.multi_net_raw` | `bool` | `True` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].multi_net_raw` |  | — | — | no | sandbox | — |
+| `sandbox.network.allow_dns` | `str` | `'controlled'` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].network.allow_dns` |  | — | — | no | sandbox | — |
+| `sandbox.network.allow_gateway` | `bool` | `False` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].network.allow_gateway` |  | — | — | no | sandbox | — |
+| `sandbox.network.allow_research_hosts` | `bool` | `False` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].network.allow_research_hosts` |  | — | — | no | sandbox | — |
+| `sandbox.network.enforce` | `bool` | `True` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].network.enforce` |  | — | — | no | sandbox | — |
+| `sandbox.network.extra_allow_cidrs` | `list` | `[]` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].network.extra_allow_cidrs` |  | — | — | no | sandbox | — |
+| `sandbox.network.fail_closed` | `bool` | `True` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].network.fail_closed` |  | — | — | no | sandbox | — |
+| `sandbox.network.map_host_loopback` | `bool` | `False` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].network.map_host_loopback` |  | — | — | no | sandbox | — |
+| `sandbox.read_only_rootfs` | `bool` | `True` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].read_only_rootfs` |  | — | — | no | sandbox | — |
+| `sandbox.resources.cpus` | `int` | `2` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].resources.cpus` |  | — | — | no | sandbox | — |
+| `sandbox.resources.memory_mb` | `int` | `4096` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].resources.memory_mb` |  | — | — | no | sandbox | — |
+| `sandbox.resources.output_max_bytes` | `int` | `2000000` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].resources.output_max_bytes` |  | — | — | no | sandbox | — |
+| `sandbox.resources.pids` | `int` | `512` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].resources.pids` |  | — | — | no | sandbox | — |
+| `sandbox.resources.timeout_seconds` | `int` | `300` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].resources.timeout_seconds` |  | — | — | no | sandbox | — |
+| `sandbox.resources.tmpfs_size_mb` | `int` | `256` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].resources.tmpfs_size_mb` |  | — | — | no | sandbox | — |
+| `sandbox.user` | `str` | `'sandbox'` | — | `config.yaml:528` + `CONFIG_SCHEMA['sandbox'].user` |  | — | — | no | sandbox | — |
 | `skills.allow_model_lookup` | `bool` | `True` | — | `config.yaml:400` + `CONFIG_SCHEMA['skills'].allow_model_lookup` | skill_selector.py, skill_pipeline.py, exploit_agent/skills.py | Runtime skills | — | no | skills | tests/test_skills*.py |
 | `skills.allow_reference_listing` | `bool` | `True` | — | `config.yaml:400` + `CONFIG_SCHEMA['skills'].allow_reference_listing` | skill_selector.py, skill_pipeline.py, exploit_agent/skills.py | Runtime skills | — | no | skills | tests/test_skills*.py |
 | `skills.context_skill_weight` | `int` | `24` | — | `config.yaml:400` + `CONFIG_SCHEMA['skills'].context_skill_weight` | skill_selector.py, skill_pipeline.py, exploit_agent/skills.py | Runtime skills | — | no | skills | tests/test_skills*.py |
@@ -440,20 +440,20 @@ _Generated 2026-09-14 from `config.yaml` (444 leaf keys, 46 top-level blocks). L
 | `threat_intel.sources.kev` | `bool` | `True` | — | `config.yaml:129` + `CONFIG_SCHEMA['threat_intel'].sources.kev` | threat_intel.py, mcp_tools/research.py | OSV/GHSA/KEV | — | no | threat_intel | tests/test_threat*.py |
 | `threat_intel.sources.osv` | `bool` | `True` | — | `config.yaml:129` + `CONFIG_SCHEMA['threat_intel'].sources.osv` | threat_intel.py, mcp_tools/research.py | OSV/GHSA/KEV | — | no | threat_intel | tests/test_threat*.py |
 | `threat_intel.timeout_seconds` | `int` | `30` | — | `config.yaml:129` + `CONFIG_SCHEMA['threat_intel'].timeout_seconds` | threat_intel.py, mcp_tools/research.py | OSV/GHSA/KEV | — | no | threat_intel | tests/test_threat*.py |
-| `ticketing.backoff_seconds` | `float` | `2.0` | — | `config.yaml:487` + `CONFIG_SCHEMA['ticketing'].backoff_seconds` | ticketing.py | Jira/GitHub tickets | — | no | ticketing |  |
-| `ticketing.base_url` | `str` | `''` | — | `config.yaml:487` + `CONFIG_SCHEMA['ticketing'].base_url` | ticketing.py | Jira/GitHub tickets | — | no | ticketing |  |
-| `ticketing.enabled` | `bool` | `True` | — | `config.yaml:487` + `CONFIG_SCHEMA['ticketing'].enabled` | ticketing.py | Jira/GitHub tickets | — | no | ticketing |  |
-| `ticketing.max_retries` | `int` | `3` | — | `config.yaml:487` + `CONFIG_SCHEMA['ticketing'].max_retries` | ticketing.py | Jira/GitHub tickets | — | no | ticketing |  |
-| `ticketing.project_key` | `str` | `''` | — | `config.yaml:487` + `CONFIG_SCHEMA['ticketing'].project_key` | ticketing.py | Jira/GitHub tickets | — | no | ticketing |  |
-| `ticketing.provider` | `str` | `''` | — | `config.yaml:487` + `CONFIG_SCHEMA['ticketing'].provider` | ticketing.py | Jira/GitHub tickets | — | no | ticketing |  |
-| `ticketing.token_env` | `str` | `'TICKETING_TOKEN'` | — | `config.yaml:487` + `CONFIG_SCHEMA['ticketing'].token_env` | ticketing.py | Jira/GitHub tickets | `TICKETING_TOKEN` | no | ticketing |  |
-| `webhook_notify.backoff_seconds` | `float` | `2.0` | — | `config.yaml:472` + `CONFIG_SCHEMA['webhook_notify'].backoff_seconds` | plugins/webhook_notify.py | Slack/Discord webhook | — | no | plugins |  |
-| `webhook_notify.enabled` | `bool` | `True` | — | `config.yaml:472` + `CONFIG_SCHEMA['webhook_notify'].enabled` | plugins/webhook_notify.py | Slack/Discord webhook | — | no | plugins |  |
-| `webhook_notify.events` | `list[str]` | `['finding', 'state']` | — | `config.yaml:472` + `CONFIG_SCHEMA['webhook_notify'].events` | plugins/webhook_notify.py | Slack/Discord webhook | — | no | plugins |  |
-| `webhook_notify.max_payload_chars` | `int` | `8192` | — | `config.yaml:472` + `CONFIG_SCHEMA['webhook_notify'].max_payload_chars` | plugins/webhook_notify.py | Slack/Discord webhook | — | no | plugins |  |
-| `webhook_notify.max_retries` | `int` | `3` | — | `config.yaml:472` + `CONFIG_SCHEMA['webhook_notify'].max_retries` | plugins/webhook_notify.py | Slack/Discord webhook | — | no | plugins |  |
-| `webhook_notify.timeout_seconds` | `int` | `5` | — | `config.yaml:472` + `CONFIG_SCHEMA['webhook_notify'].timeout_seconds` | plugins/webhook_notify.py | Slack/Discord webhook | — | no | plugins |  |
-| `webhook_notify.url` | `str` | `''` | — | `config.yaml:472` + `CONFIG_SCHEMA['webhook_notify'].url` | plugins/webhook_notify.py | Slack/Discord webhook | — | no | plugins |  |
+| `ticketing.backoff_seconds` | `float` | `2.0` | — | `config.yaml:477` + `CONFIG_SCHEMA['ticketing'].backoff_seconds` | ticketing.py | Jira/GitHub tickets | — | no | ticketing |  |
+| `ticketing.base_url` | `str` | `''` | — | `config.yaml:477` + `CONFIG_SCHEMA['ticketing'].base_url` | ticketing.py | Jira/GitHub tickets | — | no | ticketing |  |
+| `ticketing.enabled` | `bool` | `True` | — | `config.yaml:477` + `CONFIG_SCHEMA['ticketing'].enabled` | ticketing.py | Jira/GitHub tickets | — | no | ticketing |  |
+| `ticketing.max_retries` | `int` | `3` | — | `config.yaml:477` + `CONFIG_SCHEMA['ticketing'].max_retries` | ticketing.py | Jira/GitHub tickets | — | no | ticketing |  |
+| `ticketing.project_key` | `str` | `''` | — | `config.yaml:477` + `CONFIG_SCHEMA['ticketing'].project_key` | ticketing.py | Jira/GitHub tickets | — | no | ticketing |  |
+| `ticketing.provider` | `str` | `''` | — | `config.yaml:477` + `CONFIG_SCHEMA['ticketing'].provider` | ticketing.py | Jira/GitHub tickets | — | no | ticketing |  |
+| `ticketing.token_env` | `str` | `'TICKETING_TOKEN'` | — | `config.yaml:477` + `CONFIG_SCHEMA['ticketing'].token_env` | ticketing.py | Jira/GitHub tickets | `TICKETING_TOKEN` | no | ticketing |  |
+| `webhook_notify.backoff_seconds` | `float` | `2.0` | — | `config.yaml:462` + `CONFIG_SCHEMA['webhook_notify'].backoff_seconds` | plugins/webhook_notify.py | Slack/Discord webhook | — | no | plugins |  |
+| `webhook_notify.enabled` | `bool` | `True` | — | `config.yaml:462` + `CONFIG_SCHEMA['webhook_notify'].enabled` | plugins/webhook_notify.py | Slack/Discord webhook | — | no | plugins |  |
+| `webhook_notify.events` | `list[str]` | `['finding', 'state']` | — | `config.yaml:462` + `CONFIG_SCHEMA['webhook_notify'].events` | plugins/webhook_notify.py | Slack/Discord webhook | — | no | plugins |  |
+| `webhook_notify.max_payload_chars` | `int` | `8192` | — | `config.yaml:462` + `CONFIG_SCHEMA['webhook_notify'].max_payload_chars` | plugins/webhook_notify.py | Slack/Discord webhook | — | no | plugins |  |
+| `webhook_notify.max_retries` | `int` | `3` | — | `config.yaml:462` + `CONFIG_SCHEMA['webhook_notify'].max_retries` | plugins/webhook_notify.py | Slack/Discord webhook | — | no | plugins |  |
+| `webhook_notify.timeout_seconds` | `int` | `5` | — | `config.yaml:462` + `CONFIG_SCHEMA['webhook_notify'].timeout_seconds` | plugins/webhook_notify.py | Slack/Discord webhook | — | no | plugins |  |
+| `webhook_notify.url` | `str` | `''` | — | `config.yaml:462` + `CONFIG_SCHEMA['webhook_notify'].url` | plugins/webhook_notify.py | Slack/Discord webhook | — | no | plugins |  |
 | `witness.dos_failure_threshold` | `int` | `8` | — | `config.yaml:190` + `CONFIG_SCHEMA['witness'].dos_failure_threshold` | swarm/agents/witness_agent.py | Audit watcher | — | no | witness | tests/test_witness.py |
 | `witness.dos_failure_window_seconds` | `float` | `60.0` | — | `config.yaml:190` + `CONFIG_SCHEMA['witness'].dos_failure_window_seconds` | swarm/agents/witness_agent.py | Audit watcher | — | no | witness | tests/test_witness.py |
 | `witness.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:190` + `CONFIG_SCHEMA['witness'].enabled` | run_service/execute.py (per-run side task) + swarm/agents/witness_agent.py | Audit watcher (advisory) | — | no | witness | tests/test_witness_wiring.py, tests/test_witness.py |

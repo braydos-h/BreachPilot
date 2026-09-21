@@ -129,7 +129,8 @@ def _call(mcp: FakeMCP, **kwargs: Any) -> str:
 
 
 def test_still_open_when_poc_lands(tmp_path: Path) -> None:
-    path = _write_report(tmp_path, "run1", [_finding()])
+    # Retest only accepts VERIFIED findings (lifecycle-enforced) — start there.
+    path = _write_report(tmp_path, "run1", [_verified_finding()])
     mcp, _ctx = _register(tmp_path, "exploit ok\nuid=0(root) gid=0(root)")
     out = _call(mcp, target_ip=TARGET, finding_id=FINDING_ID)
     assert f"VERDICT: {STILL_OPEN}" in out
@@ -159,12 +160,14 @@ def _write_full_report(root: Path, run_id: str) -> tuple[Path, str]:
         }
     }
     data = gen._build_report_data(campaign)
-    # HITL gate: retest operates on human-approved findings — approve the
-    # campaign-built candidate (the Evidence-tab review precedes retest).
+    # HITL gate: retest operates on verified findings — walk the legal path
+    # (propose -> approve -> verify) before retesting.
     from tools.mcp_tools.hitl import record_hitl_decision
+    from tools.mcp_tools.verify import record_verify
 
     for finding in data["technical_findings"]:
         record_hitl_decision(finding, "APPROVED", "reviewed", actor="human")
+        record_verify(finding, "VERIFIED", "probe output: uid=0(root)")
     finding_id = data["technical_findings"][0]["finding_id"]
     assert data["technical_findings"][0]["verification_probe"] == PROBE
     enhanced = run_dir / "enhanced"
@@ -183,9 +186,11 @@ def test_fixed_when_poc_fails(tmp_path: Path) -> None:
     assert f"VERDICT: {FIXED}" in out
     saved = json.loads(path.read_text(encoding="utf-8"))["technical_findings"][0]
     assert saved["retest_status"] == FIXED
-    # Sibling Markdown + HTML reports regenerate with the verdict.
-    assert FIXED in (path.parent / "enhanced_report.md").read_text(encoding="utf-8")
-    assert FIXED in (path.parent / "enhanced_report.html").read_text(encoding="utf-8")
+    assert saved["retest_history"][-1]["verdict"] == FIXED
+    # Lifecycle gate: FIXED is terminal — the regenerated siblings hide the
+    # finding (JSON artifact retains the verdict + history for audit).
+    assert "run_exploit_terminal on 10.0.0.50" not in (path.parent / "enhanced_report.md").read_text(encoding="utf-8")
+    assert "run_exploit_terminal on 10.0.0.50" not in (path.parent / "enhanced_report.html").read_text(encoding="utf-8")
 
 
 def test_inconclusive_on_ambiguous_output(tmp_path: Path) -> None:
@@ -261,7 +266,7 @@ def test_missing_finding_errors(tmp_path: Path) -> None:
 
 def test_run_id_defaults_to_latest_containing_run(tmp_path: Path) -> None:
     old = _write_report(tmp_path, "run_old", [_finding(retest_status=FIXED)])
-    new = _write_report(tmp_path, "run_new", [_finding()])
+    new = _write_report(tmp_path, "run_new", [_verified_finding()])
     os.utime(old, (time.time() - 100, time.time() - 100))
     mcp, _ctx = _register(tmp_path, "uid=0(root)")
     out = _call(mcp, target_ip=TARGET, finding_id=FINDING_ID)
@@ -299,13 +304,17 @@ def test_resolve_probe_rejects_empty() -> None:
 
 
 def test_record_retest_appends_history() -> None:
-    finding = _finding()
-    record_retest(finding, FIXED, "ev1", now="2026-01-01T00:00:00+00:00")
-    record_retest(finding, STILL_OPEN, "ev2", now="2026-01-02T00:00:00+00:00")
-    assert finding["retest_status"] == STILL_OPEN
-    assert [h["verdict"] for h in finding["retest_history"]] == [FIXED, STILL_OPEN]
+    # Legal retest order: VERIFIED -> STILL_OPEN -> FIXED (terminal).
+    finding = _verified_finding()
+    record_retest(finding, STILL_OPEN, "ev1", now="2026-01-01T00:00:00+00:00")
+    record_retest(finding, FIXED, "ev2", now="2026-01-02T00:00:00+00:00")
+    assert finding["retest_status"] == FIXED
+    assert [h["verdict"] for h in finding["retest_history"]] == [STILL_OPEN, FIXED]
     with pytest.raises(ValueError):
         record_retest(finding, "BOGUS", "ev")
+    # Terminal FIXED accepts no further transition (cannot revive to STILL_OPEN).
+    with pytest.raises(ValueError):
+        record_retest(finding, STILL_OPEN, "ev3")
 
 
 def test_locate_finding_missing_run(tmp_path: Path) -> None:
@@ -316,12 +325,14 @@ def test_locate_finding_missing_run(tmp_path: Path) -> None:
 
 
 def test_persist_retest_roundtrip(tmp_path: Path) -> None:
-    path = _write_report(tmp_path, "run1", [_finding()])
-    finding = persist_retest(path, FINDING_ID, FIXED, "ev", now="2026-01-01T00:00:00+00:00")
-    assert finding["retest_status"] == FIXED
-    assert finding["retest_history"] == [{"timestamp": "2026-01-01T00:00:00+00:00", "verdict": FIXED, "evidence": "ev"}]
+    path = _write_report(tmp_path, "run1", [_verified_finding()])
+    finding = persist_retest(path, FINDING_ID, STILL_OPEN, "ev", now="2026-01-01T00:00:00+00:00")
+    assert finding["retest_status"] == STILL_OPEN
+    assert finding["retest_history"] == [
+        {"timestamp": "2026-01-01T00:00:00+00:00", "verdict": STILL_OPEN, "evidence": "ev"}
+    ]
     with pytest.raises(LookupError):
-        persist_retest(path, "F-nope", FIXED, "ev")
+        persist_retest(path, "F-nope", STILL_OPEN, "ev")
 
 
 # ── report + probe wiring ──────────────────────────────────────────────────
@@ -347,11 +358,14 @@ def test_finding_schema_and_report_rendering() -> None:
     assert data["retest_history"] == []
 
     gen = EnhancedReportGenerator(db=None, mission_id="m", workspace=Path("."))
-    record_retest(data, FIXED, "ev")
-    # HITL gate: only APPROVED findings render — approve before rendering.
+    # Walk the legal lifecycle path (approve -> verify -> retest) so the
+    # retest verdict is enforceable; STILL_OPEN still surfaces in the report.
     from tools.mcp_tools.hitl import record_hitl_decision
+    from tools.mcp_tools.verify import record_verify
 
     record_hitl_decision(data, "APPROVED", "reviewed", actor="human")
+    record_verify(data, "VERIFIED", "probe output: uid=0(root)")
+    record_retest(data, STILL_OPEN, "ev")
     md = gen._generate_markdown(
         {
             "report_metadata": {"mission_id": "m", "generated_at": "t", "total_targets": 1},
@@ -362,9 +376,9 @@ def test_finding_schema_and_report_rendering() -> None:
             "failure_analysis": [],
         }
     )
-    assert FIXED in md
+    assert STILL_OPEN in md
     html = gen._generate_findings_html([data])
-    assert FIXED in html
+    assert STILL_OPEN in html
 
 
 def test_prepare_captures_exploit_probes() -> None:

@@ -25,6 +25,14 @@ from pathlib import Path
 from typing import Any
 
 from tools.enhanced_reporting import EnhancedReportGenerator
+
+# Canonical lifecycle vocabulary — the ONLY definition lives in
+# tools.kernel.finding_lifecycle (re-exported here so engine-internal and
+# test ``from tools.mcp_tools.verify import VERIFIED`` paths keep working).
+# No per-lane frozenset is duplicated here: record_verify validates against
+# the canonical (VERIFIED, HOLDING, INCONCLUSIVE) triple imported below and
+# every transition goes through check_transition.
+from tools.kernel.finding_lifecycle import HOLDING, INCONCLUSIVE, VERIFIED
 from tools.mcp_tools.registry import ToolContext
 from tools.mcp_tools.retest import (
     _find_in_report,
@@ -35,13 +43,7 @@ from tools.mcp_tools.retest import (
     resolve_exec,
     resolve_probe,
 )
-# Canonical lifecycle vocabulary (single definition in
-# tools.kernel.finding_lifecycle; tools.verify_oracle re-exports the same
-# names so engine-internal imports keep working).
-from tools.kernel.finding_lifecycle import HOLDING, INCONCLUSIVE, VERIFIED
 from tools.verify_oracle import VerifyOracle
-
-VERIFY_VERDICTS = frozenset({VERIFIED, HOLDING, INCONCLUSIVE})
 
 
 def _now_iso() -> str:
@@ -67,7 +69,7 @@ def record_verify(
     ``INCONCLUSIVE`` never transitions (it records an attempt, not a state
     change) so it stamps from any state, terminal included.
     """
-    if verdict not in VERIFY_VERDICTS:
+    if verdict not in (VERIFIED, HOLDING, INCONCLUSIVE):
         raise ValueError(f"unknown verify verdict {verdict!r}")
     from tools.kernel.finding_lifecycle import INCONCLUSIVE as _L_INCONCLUSIVE
     from tools.kernel.finding_lifecycle import check_transition, current_state
@@ -238,7 +240,6 @@ __all__ = [
     "HOLDING",
     "INCONCLUSIVE",
     "VERIFIED",
-    "VERIFY_VERDICTS",
     "format_verify_block",
     "persist_verify",
     "record_verify",

@@ -193,6 +193,16 @@ class AutonomousOrchestrator:
         # introduced.
         self._prereq_tasks_added = 0
         self._prereq_recovery_cap = max(1, int(self._max_module_failures))
+        # p2-09: campaign-level retry budget. ``max_campaign_retries`` bounds
+        # total batch retries across the whole campaign; when spent, failing
+        # tasks go to BLOCKED instead of retrying (see tools/campaign/batch.py).
+        # 0 (default) = unbounded, byte-identical to previous behavior. The
+        # spent counter persists across resume via save_state/load_state.
+        try:
+            self._max_campaign_retries = max(0, int((mission_config or {}).get("max_campaign_retries", 0) or 0))
+        except (TypeError, ValueError):
+            self._max_campaign_retries = 0
+        self._campaign_retries_used = 0
         # Pivot-depth cap (Tier 0 item 0.6a): the lateral-movement phase recurses
         # into each discovered pivot target via _attack_target, which previously
         # had NO depth bound -- unbounded pivoting is a safety hole. Depth 0 is
@@ -397,6 +407,17 @@ class AutonomousOrchestrator:
 
         campaign_duration = time.monotonic() - campaign_start
         logger.info(f"Campaign complete in {campaign_duration:.1f}s")
+
+        # Run manifest (p2-06): campaign teardown refreshes the manifest when
+        # the campaign workspace IS a run dir (carries run_manifest.json).
+        # Best-effort — a campaign without a manifest (plain workspace) skips.
+        try:
+            from tools.kernel.run_manifest import MANIFEST_FILENAME, update_manifest
+
+            if (self._workspace / MANIFEST_FILENAME).is_file():
+                update_manifest(self._workspace)
+        except Exception:  # noqa: BLE001 -- teardown only, never gates
+            pass
 
         return {
             "targets": targets,

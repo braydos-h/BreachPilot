@@ -91,7 +91,7 @@ function FullAccessNotice() {
 
 const FALLBACK_HINT = "Start Docker and build the sandbox image (docker build -t breachpilot-sandbox:latest docker/sandbox) to contain execution — until then commands run directly on this machine.";
 
-function SandboxFixDialog({
+export function SandboxFixDialog({
   open,
   onOpenChange,
   sandboxReason,

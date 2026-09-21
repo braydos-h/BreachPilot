@@ -301,25 +301,16 @@ def test_persist_verify_roundtrip(tmp_path: Path) -> None:
         persist_verify(path, "F-nope", VERIFIED, "ev")
 
 
-# ── require_signoff gate ─────────────────────────────────────────────────
+# ── lifecycle read-surface gate ──────────────────────────────────────────
 
 
-def test_signoff_gate_excludes_holding_from_md_html() -> None:
-    from tools.enhanced_reporting import EnhancedReportGenerator
+def _human_approval(note: str = "reviewed") -> dict[str, str]:
+    return {"timestamp": "2026-01-01T00:00:00+00:00", "decision": "APPROVED", "note": note, "actor": "human"}
 
-    gen = EnhancedReportGenerator(db=None, mission_id="m", workspace=Path("."))
-    holding = _finding(
-        severity="High",
-        vuln_class="Other",
-        cvss={"base_score": 7.5},
-        confidence=0.5,
-        summary="candidate",
-        remediation="patch",
-    )
-    verified = _finding(
-        finding_id="F-verified",
-        title="verified finding",
-        verify_status=VERIFIED,
+
+def _renderable(**overrides: Any) -> dict[str, Any]:
+    """A finding with every key the md/html renderers index directly."""
+    finding = _finding(
         severity="High",
         vuln_class="Other",
         cvss={"base_score": 7.5},
@@ -327,30 +318,78 @@ def test_signoff_gate_excludes_holding_from_md_html() -> None:
         summary="confirmed",
         remediation="patch",
     )
+    finding.update(overrides)
+    return finding
+
+
+def test_lifecycle_gate_hides_undecided_and_terminal_from_md_html() -> None:
+    """Report render surfaces only APPROVED/VERIFIED/STILL_OPEN (P0-05/P1-02).
+
+    PROPOSED/HOLDING candidates and terminal REJECTED/FIXED findings never
+    leak titles — only the pending-count banner. (Supersedes the old
+    ``require_signoff`` metadata opt-in: the lifecycle gate is always on.)
+    """
+    from tools.enhanced_reporting import EnhancedReportGenerator
+
+    gen = EnhancedReportGenerator(db=None, mission_id="m", workspace=Path("."))
+    proposed = _finding()  # HOLDING, empty history -> PROPOSED
+    approved = _renderable(
+        finding_id="F-approved",
+        title="approved finding",
+        hitl_status="APPROVED",
+        hitl_history=[_human_approval()],
+    )
+    verified = _renderable(
+        finding_id="F-verified",
+        title="verified finding",
+        hitl_status="APPROVED",
+        hitl_history=[_human_approval()],
+        verify_status=VERIFIED,
+        verify_history=[{"timestamp": "2026-01-02T00:00:00+00:00", "verdict": VERIFIED, "evidence": "uid=0"}],
+    )
+    rejected = _finding(finding_id="F-rejected", title="rejected finding", hitl_status="REJECTED")
+    fixed = _renderable(
+        finding_id="F-fixed",
+        title="fixed finding",
+        hitl_status="APPROVED",
+        hitl_history=[_human_approval()],
+        verify_status=VERIFIED,
+        verify_history=[{"timestamp": "2026-01-02T00:00:00+00:00", "verdict": VERIFIED, "evidence": "uid=0"}],
+        retest_status="FIXED",
+        retest_history=[{"timestamp": "2026-01-03T00:00:00+00:00", "verdict": "FIXED", "evidence": "closed"}],
+    )
     report = {
         "report_metadata": {"mission_id": "m", "generated_at": "t", "total_targets": 1},
         "executive_summary": "e",
         "attack_timeline": [],
         "exploitation_chains": [],
-        "technical_findings": [holding, verified],
+        "technical_findings": [proposed, approved, verified, rejected, fixed],
         "failure_analysis": [],
     }
     md = gen._generate_markdown(report)
-    assert "demo finding" in md and "verified finding" in md  # gate off: everything renders
-
-    gated = dict(report, report_metadata={**report["report_metadata"], "require_signoff": True})
-    md = gen._generate_markdown(gated)
+    assert "approved finding" in md
     assert "verified finding" in md
-    assert "demo finding" not in md
-    html = gen._generate_html(gated)
+    assert "demo finding" not in md  # PROPOSED candidate hidden
+    assert "rejected finding" not in md  # terminal REJECTED hidden
+    assert "fixed finding" not in md  # terminal FIXED hidden
+    assert "awaiting human review" in md  # pending banner, zero titles
+    html = gen._generate_html(report)
+    assert "approved finding" in html
     assert "verified finding" in html
     assert "demo finding" not in html
+    assert "rejected finding" not in html
+    assert "fixed finding" not in html
 
 
 def test_signoff_gate_holds_tickets() -> None:
     from tools.ticketing import create_ticket
 
+    # PROPOSED candidate held; lifecycle state (not raw verify_status) decides.
     assert create_ticket(_finding(), {}, require_signoff=True)["created"] is False
     assert "held" in create_ticket(_finding(), {}, require_signoff=True)["status"]
     # Gate off: legacy behavior untouched (falls through to disabled without config).
     assert create_ticket(_finding(), {}) == {"created": False, "status": "disabled", "url": ""}
+    # APPROVED passes the signoff gate (falls through to disabled without config).
+    approved = _finding(hitl_status="APPROVED", hitl_history=[_human_approval()])
+    assert create_ticket(approved, {}) == {"created": False, "status": "disabled", "url": ""}
+    assert create_ticket(approved, {}, require_signoff=True)["status"] == "disabled"

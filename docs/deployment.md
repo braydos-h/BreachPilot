@@ -41,11 +41,13 @@ Release bootstrap (recommended): pinned installer asset + checksum +
 attestation from the GitHub release page (`install-<version>.sh` +
 `.sha256` + Sigstore attestation). Verify before executing:
 
+<!-- INSTALLER-VERSION: managed by scripts/bump-version.py (do not hand-edit the version below) -->
+
 ```bash
-curl -fsSLO https://github.com/braydos-h/BreachPilot/releases/download/v0.69.0/install-v0.69.0.sh
-curl -fsSLO https://github.com/braydos-h/BreachPilot/releases/download/v0.69.0/install-v0.69.0.sh.sha256
-bash scripts/verify-installer.sh install-v0.69.0.sh install-v0.69.0.sh.sha256
-less install-v0.69.0.sh && bash install-v0.69.0.sh
+curl -fsSLO https://github.com/braydos-h/BreachPilot/releases/download/v0.68.4/install-v0.68.4.sh
+curl -fsSLO https://github.com/braydos-h/BreachPilot/releases/download/v0.68.4/install-v0.68.4.sh.sha256
+bash scripts/verify-installer.sh install-v0.68.4.sh install-v0.68.4.sh.sha256
+less install-v0.68.4.sh && bash install-v0.68.4.sh
 ```
 
 Dev path (`main|bash`) is dev-only with a warning — the easy path must be the
@@ -464,6 +466,31 @@ Deployment-time verification for a box you intend to run for a while:
 | Long multi-hour campaigns | `--long-session` (config.yaml:319-326: real context window, 600s LLM timeout, checkpoints) |
 | Benchmarking | `--eval` → `reports/eval/<run_id>/` (config.yaml:305-310) |
 | Flow B research missions | `cli.py` + `mission.yaml`; state in `research_workspace/` (SQLite) |
+
+## Release version bump
+
+One command moves the advertised version everywhere — no hand-editing pins:
+
+```bash
+python scripts/bump-version.py 0.69.0
+```
+
+It updates `pyproject.toml` (`[project] version`), `tools/cli_args.py`
+(`__version__`, re-exported by `main.py`), `webui/package.json` (`version`), and every installer pin
+(`releases/download/vX.Y.Z` / `install-vX.Y.Z`) in `README.md`,
+`docs/deployment.md`, `install.sh`, and `scripts/verify-installer.sh`,
+then verifies with the docs-truth `versions` check. Verify-only mode
+(`python scripts/bump-version.py --check`) is the CI gate: the `lint` job
+runs it plus `python scripts/docs_truth_audit.py --check versions`, and the
+`release` workflow additionally refuses a tag whose `vX.Y.Z` disagrees with
+the tree version — so bump (and commit) before tagging.
+
+Why pinned versions instead of a `latest` redirect: the release workflow
+freezes a versioned asset per tag (`install-<tag>.sh`), and a
+`releases/latest/download/...` URL cannot address a versioned asset name.
+The quick-start therefore pins the exact version (marked
+`INSTALLER-VERSION`, managed by the bump script) and the checksum step
+verifies that exact asset.
 
 ## Further reading
 

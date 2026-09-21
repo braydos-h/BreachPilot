@@ -451,20 +451,10 @@ ics:
   allow_write: false
   destructive_ics: false
 plugins:
-  enabled:
-  - shodan_recon
-  - github_dorks
-  - webhook_notify
-  - sliver_c2
-  - bloodhound_ce
-  - zap_scan
-  - browser_attack
-  - mobile_attack
-  - wireless
-  - spiderfoot
-  - atomic_red_team
-  - caldera
-  - firmware_analysis
+  # Opt-in only: empty by default. Add a plugin name here to load it; every
+  # load emits a trust WARNING (plugins run with unsandboxed full
+  # operator-box privileges). See docs/plugin-development.md.
+  enabled: []
   disabled: []
   search_paths:
   - plugins
@@ -555,6 +545,10 @@ sandbox:
     tmpfs_size_mb: 256
   network:
     enforce: true
+    # Netns-firewall install failure: true (default) blocks execution
+    # (SANDBOX_POLICY_FAILED); false degrades to Docker-bridge isolation only
+    # (NOT containment) with a WARNING + audit row. Worker setup failures
+    # always fail closed regardless.
     fail_closed: true
     allow_dns: controlled
     map_host_loopback: false

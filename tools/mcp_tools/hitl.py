@@ -37,6 +37,14 @@ from pathlib import Path
 from typing import Any
 
 from tools.enhanced_reporting import EnhancedReportGenerator, approved_findings
+
+# Canonical lifecycle vocabulary — the ONLY definition lives in
+# tools.kernel.finding_lifecycle (re-exported here so existing
+# ``from tools.mcp_tools.hitl import APPROVED`` paths keep working).
+# Per-lane verdict sets are NOT duplicated here: record_hitl_decision
+# validates against the canonical (APPROVED, REJECTED) pair imported below
+# and every transition goes through check_transition.
+from tools.kernel.finding_lifecycle import APPROVED, PROPOSED, REJECTED
 from tools.mcp_tools.registry import ToolContext
 from tools.mcp_tools.retest import (
     _find_in_report,
@@ -45,14 +53,6 @@ from tools.mcp_tools.retest import (
     _reports_root,
     locate_finding,
 )
-
-# Canonical lifecycle vocabulary (single definition in
-# tools.kernel.finding_lifecycle; re-exported here so existing
-# ``from tools.mcp_tools.hitl import APPROVED`` paths keep working).
-from tools.kernel.finding_lifecycle import APPROVED, PROPOSED, REJECTED
-
-HITL_STATUSES = frozenset({PROPOSED, APPROVED, REJECTED})
-HITL_DECISIONS = frozenset({APPROVED, REJECTED})
 
 _HUMAN_ACTOR = "human"
 
@@ -86,7 +86,7 @@ def record_hitl_decision(
     re-stamp (same verdict as current) falls through without a transition.
     """
     verdict = (decision or "").strip().upper()
-    if verdict not in HITL_DECISIONS:
+    if verdict not in (APPROVED, REJECTED):
         raise ValueError(f"unknown HITL decision {decision!r} (want APPROVED|REJECTED)")
     if (actor or "").strip().lower() != _HUMAN_ACTOR:
         raise PermissionError("HITL decisions require actor='human' (operator-only; agents cannot self-approve)")
@@ -431,8 +431,6 @@ def register_hitl_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
 __all__ = [
     "APPROVED",
-    "HITL_DECISIONS",
-    "HITL_STATUSES",
     "PROPOSED",
     "REJECTED",
     "_slug",

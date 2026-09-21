@@ -30,12 +30,15 @@ and only two things:
 
 1. **Opt-in loading.** Plugins are disabled by default. A plugin is loaded
    only when it is explicitly enabled (see section 6).
-2. **The safety-decorator requirement (documented, not verified).** Any MCP
-   tool a plugin registers MUST wrap its handler with `ctx.require_allowlist()`
-   (target-touching tools) or `ctx.audit_tool` (free-text command tools) so
-   the **target-IP allowlist lock** and the **tamper-evident JSONL audit
-   trail** (`exploit_workspace/<ip>/exploit_audit.jsonl`) still apply. The
-   manager cannot check this at load time; it is the author's responsibility.
+2. **The safety-decorator requirement (enforced fail-closed at load time).**
+   Any MCP tool a plugin registers MUST wrap its handler with
+   `ctx.require_allowlist()` (target-touching tools) or `ctx.audit_tool`
+   (free-text command tools) so the **target-IP allowlist lock** and the
+   **tamper-evident JSONL audit trail** (`exploit_workspace/<ip>/exploit_audit.jsonl`)
+   still apply. The manager AST-checks every `@mcp.tool` handler in the
+   plugin's source before import (filesystem plugins) or at discovery
+   (entry-point plugins); a missing wrapper refuses the load (skip + audit
+   row, never a boot failure).
 
 Because the decorators wrap the handler at registration time, the allowlist
 lock + audit trail apply to plugin MCP tools **automatically** -- the author
@@ -309,16 +312,20 @@ enablement:
 
 | Key            | Type       | Default       | Meaning                                             |
 |----------------|------------|---------------|-----------------------------------------------------|
-| `enabled`      | `list[str]`| (none)        | Names to load. When present, a plugin loads if its   |
-|                |            |               | name is in this list OR its manifest `enabled: true`.|
-| `disabled`     | `list[str]`| `[]`          | Names to never load. Overrides manifest + enabled.   |
+| `enabled`      | `list[str]`| `[]`          | Names to load. When present, a plugin loads ONLY if  |
+|                |            |               | its name is in this list (`manifest.enabled` is      |
+|                |            |               | ignored). Empty = nothing loads (off by default).    |
+| `disabled`     | `list[str]`| `[]`          | Names to never load. Always wins (overrides enabled  |
+|                |            |               | list AND manifest).                                  |
 | `search_paths` | `list[str]`| `["plugins"]` | Filesystem plugin search roots.                      |
 | `entry_points` | `bool`     | `true`        | Whether to consult the `breachpilot.plugins` group.  |
 
 The exact rule (`PluginManager._is_enabled`): a plugin is loaded iff
-(`enabled` list is None -> use `manifest.enabled`; otherwise `name in enabled`
-OR `manifest.enabled`) AND `name` not in `disabled`. When `enabled` is unset
-and the manifest does not opt in, the plugin is **not** loaded.
+(`enabled` list is None -> use `manifest.enabled`, default `False`;
+otherwise ONLY `name in enabled`, `manifest.enabled` ignored) AND `name`
+not in `disabled` (`disabled` always wins). The shipped `config.yaml` sets
+`enabled: []`, so nothing loads until the operator opts in. When `enabled`
+is unset and the manifest does not opt in, the plugin is **not** loaded.
 
 Example enabling a plugin:
 
@@ -334,9 +341,13 @@ plugins:
 ```
 
 With the manifest above (`enabled: false`), this config still loads
-`example_recon_report` because its name is in `plugins.enabled`. To ship a
-plugin that loads with no config entry, set `enabled: true` in its manifest
-(and rely on `disabled` to turn it off).
+`example_recon_report` because its name is in `plugins.enabled`. A manifest
+`enabled: true` NEVER auto-loads on its own once `plugins.enabled` is set
+(the explicit list is the only opt-in); it only takes effect when
+`plugins.enabled` is unset (None), and `plugins.disabled` always wins.
+Every loaded plugin emits a WARNING trust log + boot line (name, version,
+source, capabilities) because plugins run with unsandboxed full
+operator-box privileges.
 
 ## 7. The reference plugin: `plugins/example_recon_report/`
 

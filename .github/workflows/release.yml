@@ -56,6 +56,15 @@ jobs:
         run: |
           gh api repos/${{ github.repository }}/rulesets > branch-rules.json || rm -f branch-rules.json
           ls -la branch-rules.json worker-digests.txt eval-artifacts 2>&1 || true
+      - name: Version truth (bump --check + tag == tree)
+        run: |
+          python scripts/bump-version.py --check
+          python scripts/docs_truth_audit.py --check versions
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            tag="${GITHUB_REF_NAME#v}"
+            tree="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+            test "$tag" = "$tree" || { echo "ERROR: tag v$tag != tree version $tree (run python scripts/bump-version.py $tag first)"; exit 1; }
+          fi
       - name: Run release gate
         id: gate
         run: |

@@ -4,8 +4,9 @@ Covers the GitHub-slug rules the guard depends on (code-span headings,
 underscores, duplicate `-1`/`-2` suffixes), code-fence/span blindness, and
 the tmp-repo link matrix (good file/anchor pass; dead file/anchor fail).
 The versions check runs against the real repo (read-only): the three
-packaging locations must agree and no stale `0.49.12`/old-branding claims
-may remain in the scanned docs.
+packaging locations must agree and no stale installer pins/old-branding
+claims may remain in the scanned docs. Negative cases (stale pin, desync)
+run against tmp repos via monkeypatched scan_files/read_version.
 """
 
 from __future__ import annotations
@@ -91,3 +92,38 @@ def test_check_links_tmp_repo(tmp_path: Path, monkeypatch):
 def test_check_versions_real_repo():
     mod = _load()
     assert mod.check_versions() == []
+
+
+def test_check_versions_stale_installer_pin(tmp_path: Path, monkeypatch):
+    """A README installer pin != pyproject version fails with file:line."""
+    import tomllib
+
+    mod = _load()
+    repo = Path(__file__).resolve().parent.parent
+    current = tomllib.loads((repo / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    stale = "0.0.0" if str(current) != "0.0.0" else "0.0.1"
+    doc = tmp_path / "README.md"
+    doc.write_text(
+        f"# Doc\n\n```bash\ncurl -fsSLO https://github.com/o/r/releases/download/v{stale}/install-v{stale}.sh\n```\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mod, "scan_files", lambda: [doc])
+    problems = mod.check_versions()
+    assert problems, "stale installer pin must fail"
+    assert any(str(doc) in p and ":4:" in p and f"v{stale}" in p for p in problems), problems
+
+
+def test_check_versions_desync_reported(monkeypatch):
+    """main.py __version__ != pyproject version is reported as a mismatch."""
+    mod = _load()
+    real_read_version = mod.read_version
+    monkeypatch.setattr(mod, "scan_files", lambda: [])
+
+    def _desynced(path):
+        if path.name == "main.py":
+            return "9.9.9-desync"
+        return real_read_version(path)
+
+    monkeypatch.setattr(mod, "read_version", _desynced)
+    problems = mod.check_versions()
+    assert any("version mismatch" in p and "9.9.9-desync" in p for p in problems), problems

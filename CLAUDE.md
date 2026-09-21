@@ -147,7 +147,7 @@ Mission scope (allowed/disallowed assets, forbidden_actions, risk_profile, testi
 
 ## High-Level Architecture
 
-Two control flows exist: **Flow A is the active engine**; **Flow B is frozen in `legacy/`** (see `legacy/README.md`). Knowing which one is in play matters when reading any file. Root shims (`cli.py`, `agent_loop.py`, etc.) are `DeprecationWarning` proxies to `legacy.*` for one release.
+Two control flows exist: **Flow A is the active engine**; **Flow B is frozen in `legacy/`** (see `legacy/README.md`). Knowing which one is in play matters when reading any file. Root shims (`cli.py`, `agent_loop.py`, etc.) are `DeprecationWarning` proxies to `legacy.*` (deprecated since 0.68, removal in 0.71); the canonical Flow B namespace is `legacy.*` (the `breachpilot.legacy.*` rename was dropped as churn — see `legacy/README.md` §Canonical namespace decision, enforced by `tests/test_legacy_shims.py`).
 
 ### Flow A — Exploitation engine (modern, `main.py` / `app.py`)
 The "what the user actually runs" path. Async, MCP-based, multi-agent-capable.

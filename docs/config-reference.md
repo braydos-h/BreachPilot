@@ -210,7 +210,7 @@ touching. CLI-runnable regardless; block supplies entrypoint defaults.
 |-----|------|---------|----------|-------------|
 | `enabled` | bool | `true` | Master switch for exploit path | mcp_shared.py:77 |
 | `mode` | str | `standalone` | Run mode | cli_exploit_settings.py:128 |
-| `permission` | enum | `full_access` | `full_access`/`approve_only`/`read_only`; unknown or **missing** → `read_only` (safe baseline) | cli_exploit_settings.py:12-30, mcp-tools.md:171 |
+| `permission` | enum | `full_access` | `full_access`/`approve_only`/`read_only`; unknown or **missing** → `read_only` (safe baseline); triple truth (schema `full_access`, file `full_access`, missing-key fallback `read_only`) spelled out in [safety-model.md](safety-model.md#exploit-permission-modes) | cli_exploit_settings.py:12-30, mcp-tools.md:171 |
 | `attack_mode` | bool | `true` | Live attack posture | cli_exploit_settings.py:131 |
 | `terminal` | str | `visible` | Terminal echo mode | cli_exploit_settings.py:131 |
 | `command_timeout_seconds` | int | `300` | Per-command timeout | cli_exploit_settings.py:132 |

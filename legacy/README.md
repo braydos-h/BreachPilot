@@ -13,8 +13,25 @@ Phase 2 ADR-001 (`docs/architecture.md`) kept both in one checkout for migration
 ## Import rules
 
 - New code MUST NOT import from Flow B. Use `tools/kernel/`, `tools/run_service/`, `tools/exploit_agent/`.
-- Root shims (`agent_loop.py`, `cli.py`, etc.) remain for one release (the ~250-file test suite still imports `import agent_loop`) and emit `DeprecationWarning`. They simply do `sys.modules[__name__] = importlib.import_module("legacy.<name>")`.
-- Shared kernel `db.py`, `scope_gate.py`, and `mission.py` schema are intentionally dual-homed: `legacy/mission.py` is canonical, root `mission.py` is a shim (likewise `db.py`/`scope_gate.py` stay at root until 0.50 for minimal diff).
+- Root shims (`agent_loop.py`, `cli.py`, etc.) remain until 0.71 (deprecated since 0.68; the ~250-file test suite still imports `import agent_loop`) and emit `DeprecationWarning`. They simply do `sys.modules[__name__] = importlib.import_module("legacy.<name>")`.
+- Shared kernel `db.py`, `scope_gate.py`, `outcome_judge.py`, `target_graph.py`, `summarizer.py` are real files at the repo root (NOT shims) used by both flows; they stay at root and remain importable as `from db import ...`. `legacy/mission.py` is canonical for mission schema, root `mission.py` is a shim.
+- Inside `legacy/`, Flow B siblings import each other via the canonical `legacy.*` path (`from legacy.mission import ...`), never via root-shim paths.
+
+## Canonical namespace decision (p2-05)
+
+The canonical Flow B namespace is **`legacy.*`**. The proposed
+`breachpilot.legacy.*` package rename is **dropped as unnecessary churn**:
+no `breachpilot` package exists (`pyproject.toml` exposes top-level
+`legacy` + `tools` packages and root `py-modules` shims), editable and
+wheel installs already import `legacy.*`, and a rename would touch every
+consumer for zero runtime benefit.
+
+Allowed `legacy.*` consumers outside `legacy/` (enforced by
+`tests/test_legacy_shims.py`, everything else importing `legacy` fails CI):
+
+- `tools/intelligence/adapters/{observer,memory,finding}_adapter.py` — frozen-surface bridges (defects C4/C5/C6)
+- `tools/interactive_menu.py` — mission-management submenu (`legacy.mission`)
+- `tools/run_service/tasks.py` — swarm bridge (`legacy.agent_loop`)
 
 ## If you thought Flow B was the product
 
@@ -22,4 +39,4 @@ Run `python main.py` (Flow A menu) or `python main.py --help` — not `python cl
 
 ## Deletion plan
 
-After 0.50, shims will be removed and `legacy/` may be deleted or archived. Do not add features here; add to Flow A.
+After 0.71, shims will be removed and `legacy/` may be deleted or archived. Do not add features here; add to Flow A. Import hygiene is enforced by `tests/test_legacy_shims.py` (shim warnings + canonical-namespace imports + banned-import lint).

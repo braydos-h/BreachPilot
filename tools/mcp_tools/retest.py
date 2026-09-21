@@ -41,13 +41,14 @@ from typing import Any
 from tools.enhanced_reporting import EnhancedReportGenerator
 from tools.exploit_agent.outcome_truth import ExploitOutcome, classify_exploit_outcome
 
-# Canonical lifecycle vocabulary (single definition in
-# tools.kernel.finding_lifecycle; re-exported here so existing
+# Canonical lifecycle vocabulary — the ONLY definition lives in
+# tools.kernel.finding_lifecycle (re-exported here so existing
 # ``from tools.mcp_tools.retest import FIXED`` paths keep working).
+# No per-lane frozenset is duplicated here: record_retest validates against
+# the canonical (STILL_OPEN, FIXED, INCONCLUSIVE) triple imported below and
+# every transition goes through check_transition.
 from tools.kernel.finding_lifecycle import FIXED, INCONCLUSIVE, STILL_OPEN
 from tools.mcp_tools.registry import ToolContext
-
-RETEST_VERDICTS = frozenset({STILL_OPEN, FIXED, INCONCLUSIVE})
 
 # Output markers that mean "the probe did not run to a verdict" — execution
 # containment / policy denials, never evidence the hole closed.
@@ -192,7 +193,7 @@ def record_retest(
     ``INCONCLUSIVE`` never transitions (it records an attempt, not a state
     change) so it stamps from any state, terminal included.
     """
-    if verdict not in RETEST_VERDICTS:
+    if verdict not in (STILL_OPEN, FIXED, INCONCLUSIVE):
         raise ValueError(f"unknown retest verdict {verdict!r}")
     from tools.kernel.finding_lifecycle import INCONCLUSIVE as _L_INCONCLUSIVE
     from tools.kernel.finding_lifecycle import check_transition, current_state
@@ -371,7 +372,6 @@ def register_retest_tools(mcp: Any, *, ctx: ToolContext) -> None:
 __all__ = [
     "FIXED",
     "INCONCLUSIVE",
-    "RETEST_VERDICTS",
     "STILL_OPEN",
     "classify_retest_output",
     "format_retest_block",

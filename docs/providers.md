@@ -37,7 +37,7 @@ Three distinct provider surfaces:
 
 | Surface | Abstraction | Providers today |
 |---|---|---|
-| Chat/generate | `tools/providers/` registry → `ModelClient` | `ollama` (default), `opencode_go`, `chatgpt` |
+| Chat/generate | `tools/providers/` registry → `ModelClient` | `ollama` (code default), `opencode_go`, `chatgpt` — the checked-in lab `config.yaml` ships `models.provider: opencode_go`; absent key → `ollama` (`tools/config/loader.py::get_ai_provider`) |
 | Embeddings | `tools/providers/embeddings.py` → `EmbeddingProvider` | `ollama` (default), `none` |
 | Research (web search/fetch) | `tools/web_researcher.py` → `ResearchProvider` | `ollama`, `serpapi` |
 
@@ -379,6 +379,23 @@ See [research.md](research.md) for the full walkthrough.
   options isolated there.
 - **Telemetry** — `record_model_usage` is provider-attributed;
   `read_usage_records` still filters by alias.
+
+## Data residency / privacy boundary
+
+Every provider row from `GET /api/v1/providers` carries `data_residency`
+(`local` | `cloud`) + `egress_target` (display string, no secrets), derived
+by `BaseProvider.privacy_boundary()` from the effective host/base_url at
+call time. The WebUI renders a badge + one-line notice from those two fields
+only (System → Models, provider setup, run wizard) and shows an explicit
+acknowledge gate on first use of a cloud route (persisted; any
+provider/target change re-prompts).
+
+| Provider | Residency | What leaves the box |
+|---|---|---|
+| `ollama` @ loopback (`localhost`, `127.0.0.0/8`, `::1`) | `local` | Nothing — "Stays on this host" |
+| `ollama` @ any other host (incl. the default `https://api.ollama.com`) | `cloud` | Prompts + target data → that host |
+| `opencode_go` | `cloud` | Prompts + target data → the configured `base_url` (`https://opencode.ai/zen/go/v1` by default) |
+| `chatgpt` (openai-oauth proxy) | `cloud` | Prompts + target data → OpenAI via your ChatGPT account (the loopback proxy URL is never presented as the destination) |
 
 ## Gotchas
 

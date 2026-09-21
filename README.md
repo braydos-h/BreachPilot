@@ -40,12 +40,14 @@ Requires Python 3.11+, Docker Engine, and nmap. `bp --doctor` verifies everythin
 
 Release path (recommended, pinned + verified):
 
+<!-- INSTALLER-VERSION: managed by scripts/bump-version.py (do not hand-edit the version below) -->
+
 ```bash
-curl -fsSLO https://github.com/braydos-h/BreachPilot/releases/download/v0.69.0/install-v0.69.0.sh
-curl -fsSLO https://github.com/braydos-h/BreachPilot/releases/download/v0.69.0/install-v0.69.0.sh.sha256
-bash scripts/verify-installer.sh install-v0.69.0.sh install-v0.69.0.sh.sha256
-less install-v0.69.0.sh
-bash install-v0.69.0.sh
+curl -fsSLO https://github.com/braydos-h/BreachPilot/releases/download/v0.68.4/install-v0.68.4.sh
+curl -fsSLO https://github.com/braydos-h/BreachPilot/releases/download/v0.68.4/install-v0.68.4.sh.sha256
+bash scripts/verify-installer.sh install-v0.68.4.sh install-v0.68.4.sh.sha256
+less install-v0.68.4.sh
+bash install-v0.68.4.sh
 bp --doctor
 bp   # opens the WebUI at http://127.0.0.1:8765
 ```
@@ -133,7 +135,7 @@ Encrypted credential vault, Impacket-based lateral execution, Kerberoast, hash c
 
 ### Reporting and integrations
 
-Markdown + HTML reports with timelines, CVSS, exploit chains, loot tables, and attack-graph evidence; MITRE ATT&CK Navigator export; Jira/GitHub issue creation. Plugin system (`plugins/`, e.g. Shodan, ZAP, Sliver, SpiderFoot) adds tools and enrichment — most require their own API keys. See `docs/plugin-development.md`.
+Markdown + HTML reports with timelines, CVSS, exploit chains, loot tables, and attack-graph evidence; MITRE ATT&CK Navigator export; Jira/GitHub issue creation. Plugin system (`plugins/`, e.g. Shodan, ZAP, Sliver, SpiderFoot) adds tools and enrichment — off by default (opt in via `plugins.enabled`), most require their own API keys. See `docs/plugin-development.md`.
 
 ### Tool and knowledge layer
 
@@ -172,6 +174,8 @@ Everything lives in `config.yaml` (validated against a schema), editable from th
 
 API keys (`OPENCODE_GO_API_KEY`, `OLLAMA_API_KEY`, optional NVD/GitHub/SerpAPI keys) live in the environment or gitignored `secr.json`. `bp --setup-api-keys` walks through setup.
 
+Data residency: loopback Ollama keeps prompts on-box (`local`); Ollama Cloud, OpenCode Go, and ChatGPT send prompts + target data off-box (`cloud`) — the WebUI badges each provider and asks for explicit acknowledgement before a cloud route is used. Boundary table: `docs/providers.md#data-residency--privacy-boundary`.
+
 ## Evaluation and quality
 
 - **Tests:** mocked pytest suite (no live Nmap) covering scope gates, recon, swarm, audit chains, credentials, and Metasploit. Run one file at a time per repo policy (see `AGENTS.md`).
@@ -195,7 +199,7 @@ See `docs/testing-guide.md`, `docs/evaluation.md`, `docs/benchmarks.md`.
 | Design | [Architecture](docs/architecture.md) · [Runtime Flows](docs/runtime-flows.md) · [Safety Model](docs/safety-model.md) · [Sandbox](docs/sandbox.md) |
 | Operating | [WebUI](docs/webui.md) · [API](docs/api.md) · [Deployment](docs/deployment.md) · [Config Reference](docs/config-reference.md) |
 | Capabilities | [Attack Modules](docs/attack-modules.md) · [Swarm](docs/swarm.md) · [Campaign](docs/campaign.md) · [MCP Tools](docs/mcp-tools.md) · [Providers](docs/providers.md) · [Skills](docs/skills.md) |
-| Assurance | [Evaluation](docs/evaluation.md) · [Benchmarks](docs/benchmarks.md) · [Testing Guide](docs/testing-guide.md) |
+| Assurance | [Evaluation](docs/evaluation.md) · [Benchmarks](docs/benchmarks.md) · [Testing Guide](docs/testing-guide.md) · [Release Checklist](docs/release-checklist.md) |
 
 Full index (40+ guides): `docs/README.md`.
 
@@ -203,8 +207,8 @@ Full index (40+ guides): `docs/README.md`.
 
 1. Read `AGENTS.md` (test-run rules and frozen-file constraints are mandatory).
 2. Run `bp --doctor && bp --self-test` after safety-area changes.
-3. Before a PR: one test file at a time, then `ruff check .`, `ruff format --check .`, `mypy --follow-imports=skip tools`, plus the WebUI build/tests. CI repeats all of this plus CodeQL.
-4. Never edit frozen Flow B files (`scope_gate.py`, `safety_reviewer.py`, `legacy/`). New MCP tools: add `@audit_tool` / `@require_allowlist()` in `tools/mcp_tools/<family>.py` — registration is automatic.
+3. Before a PR: one test file at a time, then `ruff check .`, `ruff format --check .`, `mypy --follow-imports=skip tools`, plus the WebUI build/tests. CI repeats all of this plus CodeQL. Release sign-off additionally requires every gate in `docs/release-checklist.md`.
+4. Never edit frozen Flow B files (`scope_gate.py`, `safety_reviewer.py`, `legacy/`). Root Flow B shims warn on import (removal in 0.71); canonical imports are `legacy.*` — see `legacy/README.md`. New MCP tools: add `@audit_tool` / `@require_allowlist()` in `tools/mcp_tools/<family>.py` — registration is automatic.
 
 ## License
 

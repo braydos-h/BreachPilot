@@ -52,7 +52,7 @@ Missing `ollama` / `models` / `mcp` / `exploit` → `warnings.append("Missing se
 |---------|-----|-------|------|
 | `ollama` | — | must be mapping; `host` missing → warn | warn |
 | `models` | `registry`/`default_alias` | missing → warn | warn |
-| `models` | `provider` | must be `ollama`\|`chatgpt` else warn | warn |
+| `models` | `provider` | must be a registered provider id (built-ins `ollama`\|`opencode_go`\|`chatgpt`) else **error**; absent → code default `ollama` | **error** |
 | `models` | `roles.*` | `roles` must be mapping; each value string; non-empty alias must be in `registry` else warn; empty string = default_alias | warn |
 | `chatgpt` | `port` | int 1–65535 else warn | warn |
 | `chatgpt` | `enabled`/`auto_start` | bool else warn | warn |

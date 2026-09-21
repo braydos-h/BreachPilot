@@ -6,7 +6,7 @@ import { isValidTarget } from "@/lib/targetValidation";
 import { Button } from "@/components/ui/button";
 import { useCapabilities, useConfig, useCreateRun, useGoals, useRun, useSkills } from "@/api/hooks";
 import { useRunEvents } from "@/api/ws";
-import { useDefaultModel, useProviderStatus } from "@/components/ProviderSetup";
+import { ProviderPrivacyNotice, useDefaultModel, useProviderStatus } from "@/components/ProviderSetup";
 import { ApiError } from "@/api/client";
 import type { GoalPreset, ObserverMode, RunCreateRequest, RunMode, SkillsMode } from "@/api/types";
 import { RunStepper, STEPS, type Step } from "./RunStepper";
@@ -444,6 +444,9 @@ export function RunWizard({ onCreated }: RunWizardProps) {
                   <Button type="button" variant="ghost" size="sm" onClick={() => setModelOverrideOpen((o) => !o)} aria-expanded={modelOverrideOpen}>
                     Change
                   </Button>
+                </div>
+                <div className="mt-1.5">
+                  <ProviderPrivacyNotice />
                 </div>
                 {modelOverrideOpen && (
                   <div className="mt-3">

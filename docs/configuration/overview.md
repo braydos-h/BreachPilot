@@ -137,7 +137,7 @@ Plugins (`plugins.enabled/disabled/search_paths/entry_points`) are merged via `t
 Per-section rules (warn-not-reject unless noted **ERROR**):
 
 - `ollama`: `host` missing → warning; `host` wrong type → warning.
-- `models`: `registry`/`default_alias` missing → warning; `provider` not `ollama|chatgpt` → warning; `roles.<role>` non-string or alias not in `registry` → warning (`config_manager.py:787`).
+- `models`: `registry`/`default_alias` missing → warning; `provider` unknown to the provider registry → **ERROR** (built-ins `ollama|opencode_go|chatgpt`; absent key → code default `ollama`, while the checked-in lab `config.yaml` ships `opencode_go`); `roles.<role>` non-string or alias not in `registry` → warning (`config_manager.py:787`).
 - `chatgpt`: `port` 1–65535 else warning; `enabled/auto_start` bool; `runtime` ∈ {auto,bun,node}; timeouts non-negative; `models` must be list.
 - `mcp`: `default_transport` ∈ {stdio,http,""} else warning; `http_port` 1–65535 else warning.
 - `exploit`: mapping check only; allowlist/target lock validated at tool layer (`terminal._target_lock_block`).

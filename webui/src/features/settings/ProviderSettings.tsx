@@ -23,7 +23,7 @@ import { SettingRow } from "./SettingRow";
 import { ConfigEditor } from "./ConfigEditor";
 import { StatusDot } from "./StatusOverview";
 import { useSettingsDraft } from "./useSettingsDraft";
-import { ChatGptControls, OpenCodeGoControls, ProviderPicker, useDefaultModel, useModelOptions, useProviderStatus } from "@/components/ProviderSetup";
+import { ChatGptControls, OpenCodeGoControls, ProviderPicker, ProviderPrivacyNotice, useDefaultModel, useModelOptions, useProviderStatus } from "@/components/ProviderSetup";
 import { useAddModel, useLiveModels, useModels, usePutSecrets, useRemoveModel, useSecrets } from "@/api/hooks";
 import { ApiError } from "@/api/client";
 import { SkeletonRows } from "@/components/Loading";
@@ -103,6 +103,9 @@ function ProviderStatusRow() {
             {manageOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
             Manage provider
           </Button>
+        </div>
+        <div className="mt-2">
+          <ProviderPrivacyNotice />
         </div>
       </SettingRow>
 

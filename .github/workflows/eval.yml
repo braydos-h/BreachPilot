@@ -88,6 +88,9 @@ jobs:
       - name: Run graded eval suite
         if: env.OLLAMA_API_KEY != ''
         run: python main.py --eval --save-baseline
+      - name: Regression gate (fail on hard regressions vs baseline)
+        if: env.OLLAMA_API_KEY != ''
+        run: python main.py --eval --check-regression
       - name: Stop eval target suite
         if: always() && env.OLLAMA_API_KEY != ''
         run: docker compose -f eval_targets/docker-compose.yml down

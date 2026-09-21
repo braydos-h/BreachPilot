@@ -456,7 +456,7 @@ class TasksMixin:
         reports_dir: Path,
         progress_heartbeat: Any,
     ) -> tuple[Any, asyncio.Task[Any] | None, Path]:
-        from agent_loop import AgentLoop
+        from legacy.agent_loop import AgentLoop
 
         exploit_cfg = config.get("exploit", {}) or {}
         from tools.run_service.models import is_agent_attack_mode as _swarm_is_attack
@@ -701,5 +701,15 @@ class TasksMixin:
                 try:
                     await swarm_task
                 except asyncio.CancelledError:
+                    pass
+            # Run manifest (p2-06): swarm teardown refreshes the manifest so
+            # the swarm's stores (swarm_state, findings) are indexed before
+            # the run-end finalize. Best-effort — never gates the result.
+            if reports_dir is not None:
+                try:
+                    from tools.kernel.run_manifest import update_manifest
+
+                    update_manifest(reports_dir)
+                except Exception:  # noqa: BLE001 -- teardown only, never gates
                     pass
         return result

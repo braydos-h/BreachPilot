@@ -26,6 +26,8 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from tools.kernel.finding_lifecycle import APPROVED, STILL_OPEN, VERIFIED, current_state
+
 log = logging.getLogger("tools.ticketing")
 
 _DEFAULTS = {
@@ -145,17 +147,22 @@ def create_ticket(
     Returns ``{"created": bool, "url": str, "status": str}``. On failure
     (API down, auth missing, rate limit) returns ``{"created": False, ...}``
     and never raises — ticketing is best-effort and must not block the run.
-    With ``require_signoff=True``, findings whose ``verify_status`` is not
-    ``VERIFIED`` (verify-or-it-didn't-happen) are held and never ticketed.
+    With ``require_signoff=True``, only findings whose canonical lifecycle
+    state (:func:`current_state`) is ``APPROVED`` / ``VERIFIED`` /
+    ``STILL_OPEN`` are ticketed — ``PROPOSED`` / ``HOLDING`` /
+    ``INCONCLUSIVE`` candidates and terminal ``REJECTED`` / ``FIXED``
+    findings are held and never ticketed.
     """
     global _logged_missing_token
     cfg = _load_ticketing_config(config)
-    if require_signoff and str(finding.get("verify_status") or "") != "VERIFIED":
-        return {
-            "created": False,
-            "status": f"held: finding not VERIFIED (verify_status={finding.get('verify_status') or 'HOLDING'})",
-            "url": "",
-        }
+    if require_signoff:
+        state = current_state(finding if isinstance(finding, dict) else None)
+        if state not in (APPROVED, VERIFIED, STILL_OPEN):
+            return {
+                "created": False,
+                "status": f"held: finding not reportable (lifecycle state={state})",
+                "url": "",
+            }
     if not cfg.get("enabled"):
         return {"created": False, "status": "disabled", "url": ""}
     provider = str(cfg.get("provider") or "").strip().lower()

@@ -140,7 +140,10 @@ def active_provider_metadata(config: Mapping[str, Any] | None = None) -> dict[st
     """Registry-driven provider selection metadata: ids + display names + capabilities.
 
     UI and API consumers render provider pickers from this instead of
-    hard-coding per-provider switch statements.
+    hard-coding per-provider switch statements. Each provider row carries
+    ``data_residency`` (``local`` | ``cloud``) + ``egress_target`` (display
+    string, no secrets) from ``BaseProvider.privacy_boundary`` so the UI can
+    badge the privacy boundary with zero per-provider branching.
     """
     _LazyDefaultRegistry._ensure()
     from tools.config.loader import get_ai_provider

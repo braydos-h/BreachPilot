@@ -259,6 +259,14 @@ jobs:
           echo "Docs truth guard (no-args startup): OK"
       - name: Docs truth audit (links + versions)
         run: python scripts/docs_truth_audit.py
+      - name: Version truth (bump --check + versions --check)
+        run: |
+          python scripts/bump-version.py --check
+          python scripts/docs_truth_audit.py --check versions
+      - name: Generated docs freshness (schema-derived)
+        run: |
+          python scripts/generate_config_reference.py --check
+          python scripts/generate_safety_defaults.py --check
       - name: Action SHA-pin guard (no mutable tags)
         run: |
           # Fail if any third-party Action is pinned to a mutable tag instead of

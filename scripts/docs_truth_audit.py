@@ -15,8 +15,11 @@ GitHub-slug heading (duplicate headings get ``-1``/``-2`` suffixes, explicit
 
 ``versions`` — the advertised package version must be single-sourced truth:
 ``pyproject.toml`` == ``main.py::__version__`` == ``webui/package.json``,
-and the scanned docs must contain no stale current-version claims
-(``0.49.12``) or old branding (``netcheck``, any case).
+and the scanned docs must contain no stale installer pins (``releases/download/vX.Y.Z``
+or ``install-vX.Y.Z`` where ``X.Y.Z`` != the current ``pyproject.toml`` version)
+or old branding (``netcheck``, any case). Installer pins live in fenced code
+blocks, so this check scans raw text (unlike ``links``). Use
+``scripts/bump-version.py`` to move every pin at once.
 
 Exit 0 with a summary when green, 1 listing every offender otherwise. Wired
 into the CI ``lint`` job so docs truth is part of the aggregate signal.
@@ -45,6 +48,13 @@ HTML_ANCHOR_RE = re.compile(r'<a\s+[^>]*(?:name|id)\s*=\s*["\']([^"\']+)["\']', 
 HEADING_ID_RE = re.compile(r'<h[1-6][^>]*\sid\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
 FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
 CODE_SPAN_RE = re.compile(r"`[^`]*`")
+
+# Installer pins are versioned asset names (release.yml freezes
+# ``install-<tag>.sh`` per tag), so a ``latest`` redirect cannot address them:
+# the README/deployment quick-start pins the exact version instead, and
+# scripts/bump-version.py moves every pin on release. Any installer-context
+# pin that disagrees with the current pyproject.toml version is stale.
+INSTALLER_PIN_RE = re.compile(r"(?:releases/download/v|install-v)(\d+\.\d+\.\d+)")
 
 
 def scan_files() -> list[Path]:
@@ -182,10 +192,22 @@ def read_version(path: Path) -> str:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
         return str(data["project"]["version"]).strip()
     if path.name == "main.py":
-        match = re.search(r"__version__\s*=\s*[\"']([^\"']+)[\"']", path.read_text(encoding="utf-8"))
-        if not match:
-            raise ValueError("main.py has no __version__")
-        return match.group(1).strip()
+        text = path.read_text(encoding="utf-8")
+        match = re.search(r"__version__\s*=\s*[\"']([^\"']+)[\"']", text)
+        if match:
+            return match.group(1).strip()
+        # p2-03 split: the literal lives in tools/cli_args.py and main.py
+        # re-exports it (`from tools.cli_args import __version__`). Follow
+        # the indirection instead of failing on the shim.
+        if re.search(r"from tools\.cli_args import[^\n]*__version__", text):
+            cli_args = REPO / "tools" / "cli_args.py"
+            cmatch = re.search(
+                r"__version__\s*=\s*[\"']([^\"']+)[\"']",
+                cli_args.read_text(encoding="utf-8"),
+            )
+            if cmatch:
+                return cmatch.group(1).strip()
+        raise ValueError("main.py has no __version__ (and no tools.cli_args re-export)")
     data = json.loads(path.read_text(encoding="utf-8"))
     return str(data["version"]).strip()
 
@@ -205,13 +227,17 @@ def check_versions() -> list[str]:
             problems.append(f"cannot read version from {label}: {exc}")
     if len(set(values.values())) > 1:
         problems.append("version mismatch: " + ", ".join(f"{label}={value!r}" for label, value in values.items()))
+    current = values.get("pyproject.toml")
     for path in scan_files():
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
             continue
-        if "0.49.12" in text:
-            problems.append(f"{path}: stale version claim 0.49.12 (current is {values.get('pyproject.toml', '?')})")
+        if current is not None:
+            for match in INSTALLER_PIN_RE.finditer(text):
+                if match.group(1) != current:
+                    line = text.count("\n", 0, match.start()) + 1
+                    problems.append(f"{path}:{line}: stale installer pin v{match.group(1)} (current is {current})")
         for match in re.finditer(r"netcheck", text, re.IGNORECASE):
             line = text.count("\n", 0, match.start()) + 1
             problems.append(f"{path}:{line}: stale branding {match.group(0)!r}")

@@ -5,6 +5,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-route
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Layout } from "@/components/Layout";
 import { OnboardingGate } from "@/components/OnboardingGate";
+import { ProviderPrivacyGate } from "@/components/ProviderSetup";
 import { TokenGate } from "@/components/TokenGate";
 import { WelcomeGate } from "@/components/WelcomeScreen";
 import { HomePage } from "@/routes/HomePage";
@@ -49,7 +50,8 @@ export default function App() {
       <BrowserRouter>
         <TokenGate>
           <OnboardingGate>
-            <WelcomeGate>
+            <ProviderPrivacyGate>
+              <WelcomeGate>
               <Suspense
                 fallback={
                   <div className="flex min-h-[50vh] items-center justify-center">
@@ -85,7 +87,8 @@ export default function App() {
                   </Route>
                 </Routes>
               </Suspense>
-            </WelcomeGate>
+              </WelcomeGate>
+            </ProviderPrivacyGate>
           </OnboardingGate>
         </TokenGate>
       </BrowserRouter>

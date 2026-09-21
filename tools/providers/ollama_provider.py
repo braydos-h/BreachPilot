@@ -24,7 +24,7 @@ import re
 import threading
 from typing import TYPE_CHECKING, Any, Mapping
 
-from .base import BaseProvider
+from .base import DATA_RESIDENCY_CLOUD, DATA_RESIDENCY_LOCAL, BaseProvider, is_loopback_url
 from .types import (
     ModelClient,
     ModelInfo,
@@ -412,6 +412,18 @@ class OllamaProvider(BaseProvider):
         from tools.config.loader import get_ollama_host
 
         return get_ollama_host(config or {})
+
+    def privacy_boundary(self, config: Mapping[str, Any] | None = None) -> dict[str, str]:
+        """Loopback/localhost Ollama stays on-box; any other host egresses.
+
+        Derived from the effective ``ollama.host`` at call time (host string
+        only — the API key is never read here). The default host is Ollama
+        Cloud, so a stock config resolves to ``cloud``.
+        """
+        host = self.default_host(config)
+        if is_loopback_url(host):
+            return {"data_residency": DATA_RESIDENCY_LOCAL, "egress_target": ""}
+        return {"data_residency": DATA_RESIDENCY_CLOUD, "egress_target": host}
 
     def build_router(
         self,

@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ChatGptControls, ProviderPicker, useProviderStatus } from "@/components/ProviderSetup";
+import { ChatGptControls, ProviderPicker, ProviderPrivacyNotice, useProviderStatus } from "@/components/ProviderSetup";
 import { useSecrets, usePutSecrets } from "@/api/hooks";
 import { ApiError } from "@/api/client";
 import { useToast } from "@/hooks/use-toast";
@@ -158,6 +158,7 @@ function OnboardingCard({ entries, onDone }: OnboardingCardProps) {
             <div className="space-y-2">
               <Label className="text-sm">AI provider</Label>
               <ProviderPicker />
+              <ProviderPrivacyNotice />
               <p className="text-[13px] text-muted-foreground">
                 Ollama runs locally; ChatGPT goes through the openai-oauth proxy. Switch any time.
               </p>

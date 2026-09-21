@@ -27,6 +27,7 @@ vi.mock("@/components/ProviderSetup", () => ({
   useModelOptions: vi.fn(),
   useDefaultModel: vi.fn(),
   useProviderStatus: vi.fn(),
+  ProviderPrivacyNotice: () => null,
 }));
 
 import {

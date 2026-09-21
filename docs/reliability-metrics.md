@@ -53,7 +53,7 @@ Both are `negative_control: true` oracles scored by
 `score_against_oracle` (#37). Stuck-loop and false-compromise rates over
 these targets measure stop quality directly.
 
-## Current status (2026-09-14)
+## Current status (2026-09-21)
 
 Implemented and unit-tested with mocked runners: taxonomy, telemetry,
 reliability aggregation, live thresholds, benchmark Wilson-CI summaries,
@@ -64,6 +64,66 @@ compromise rate requires repeated hermetic trials with pinned
 model/prompt/catalog/sandbox digests (#02 Level C, #38). Until then the
 honest headline is the contract above plus the reproduction commands
 below — not a capability count.
+
+### How the next docker-lab run fills the table (no reformatting needed)
+
+Hermetic repeats — minimum n=5 per target, docker lab + model backend:
+
+```bash
+# 1. Start the pinned eval-target suite
+docker compose -f eval_targets/docker-compose.yml up -d
+# 2. Hermetic benchmark repeats (min n=5 per target)
+python main.py --benchmark xben --trials 5
+# 3. Graded eval + regression gate (both green required)
+python main.py --eval --save-baseline
+python main.py --eval --check-regression
+# 4. Stop the suite
+docker compose -f eval_targets/docker-compose.yml down
+```
+
+Required digests (record all five per run; no numbers without them):
+
+- Model + prompt + tool/skill catalog digests and the sandbox image digest
+  come from `tools/eval_harness.py::build_run_provenance` (stored on every
+  eval/benchmark report under `provenance`).
+- Target-set digest: the oracle files actually executed
+  (`eval_targets/*.oracle.json`).
+
+Negative controls (always included; scored by `score_against_oracle`):
+
+- `eval_targets/secure_web.oracle.json` — hardened target, zero expected
+  findings; any claimed finding is a false positive.
+- `eval_targets/impossible_sqli.oracle.json` — decoy SQL-error string with
+  parameterized queries; claiming `sqli` without an independently verified
+  bypass is a false positive (`REFUTED`, never retried to green).
+
+Outcome handling: every live run reports `PASS` / `FAIL` / `SKIPPED` /
+`INFRA_ERROR` (`tools/eval_harness.py::LiveOutcome`). `SKIPPED` (no live
+infra) and `INFRA_ERROR` (provision/sandbox/model failure across all
+targets) are written via `write_skipped_eval_report` and never presented
+as green — see `.github/workflows/eval.yml` (mocked unit job on every
+push/PR; live nightly job on schedule/dispatch only). Stored artifacts:
+`reports/eval/<run_id>/` JSON/MD + provenance hashes.
+
+### Live results (UNPOPULATED — awaiting docker-lab run)
+
+No live model backend is available in this environment, so no live numbers
+are claimed here. The next hermetic run fills one row per metric; Wilson
+95% CI comes from `tools/benchmark/metrics.py` summaries.
+
+| # | Metric | n | Result (Wilson 95% CI) | Date | Digests (model/prompt/catalog/sandbox/targets) |
+|---|---|---|---|---|---|
+| 1 | Verified compromise rate | — | UNPOPULATED | — | — |
+| 2 | False-compromise rate | — | UNPOPULATED | — | — |
+| 3 | Median actions to verified finding | — | UNPOPULATED | — | — |
+| 4 | Cost per verified finding | — | UNPOPULATED | — | — |
+| 5 | Run completion rate | — | UNPOPULATED | — | — |
+| 6 | Stuck-loop rate | — | UNPOPULATED | — | — |
+| 7 | Duplicate action rate | — | UNPOPULATED | — | — |
+| 8 | Tool failure rate | — | UNPOPULATED | — | — |
+| 9 | Findings reproduced twice | — | UNPOPULATED | — | — |
+| 10 | Scope violations reaching network layer | — | must read **0** | — | — |
+| 11 | Mean time finding → verified remediation | — | UNPOPULATED (collection pending) | — | — |
 
 ## Reproduce
 

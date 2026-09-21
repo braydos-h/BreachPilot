@@ -41,6 +41,36 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 # drop it when the backend has no such knob.
 CANONICAL_CHAT_KWARGS = ("context_window_tokens",)
 
+#: Data-residency values for :meth:`BaseProvider.privacy_boundary`.
+#: ``local`` = prompts stay on this host; ``cloud`` = prompts egress off-box.
+DATA_RESIDENCY_LOCAL = "local"
+DATA_RESIDENCY_CLOUD = "cloud"
+
+
+def is_loopback_url(url: str) -> bool:
+    """True when ``url`` addresses this host (loopback only, no secrets read).
+
+    Matches ``localhost``, ``*.localhost``, IPv4 ``127.0.0.0/8``, and IPv6
+    ``::1``. Anything else — LAN IPs, tailnets, public hosts — is NOT
+    loopback: only an operator-confirmed loopback URL keeps prompts on-box.
+    """
+    import ipaddress
+    from urllib.parse import urlparse
+
+    try:
+        host = (urlparse(str(url or "")).hostname or "").strip().lower()
+    except Exception:  # noqa: BLE001 -- unparseable host is not loopback
+        return False
+    if not host:
+        return False
+    host = host.strip("[]")
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
 
 class BaseProvider(ABC):
     """Abstract base for a chat/generate provider adapter."""
@@ -55,13 +85,28 @@ class BaseProvider(ABC):
     def metadata(self, config: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """Serializable provider metadata for the API/UI (no secrets)."""
         cfg = self.provider_config(config)
+        privacy = self.privacy_boundary(config)
         return {
             "id": self.id,
             "name": self.display_name,
             "capabilities": self.capabilities.as_dict(),
             "configured": self.is_configured(self.provider_config(config)),
             "default_model": str(cfg.get("default_model", "")),
+            "data_residency": privacy["data_residency"],
+            "egress_target": privacy["egress_target"],
         }
+
+    def privacy_boundary(self, config: Mapping[str, Any] | None = None) -> dict[str, str]:
+        """Where prompts go: ``{"data_residency": local|cloud, "egress_target": str}``.
+
+        Derived from the effective host/base_url at call time; never carries
+        secrets (hosts/URLs only, no keys/tokens). The default is ``cloud``
+        with an empty target — concrete adapters override with their real
+        destination. UI renders badge + notice from these two fields only
+        (zero per-provider branching).
+        """
+        del config  # default: no host to inspect
+        return {"data_residency": DATA_RESIDENCY_CLOUD, "egress_target": ""}
 
     def is_configured(self, cfg: Mapping[str, Any]) -> bool:
         """Whether the provider has enough config to attempt a call.

@@ -6,6 +6,7 @@ discovery uses tmp_path; entry-point discovery uses an injected loader.
 
 from __future__ import annotations
 
+import logging
 import sys
 import textwrap
 from pathlib import Path
@@ -35,8 +36,8 @@ def _write_plugin_yaml(plugin_dir: Path, manifest: dict) -> Path:
     path = plugin_dir / "plugin.yaml"
     lines = []
     for key, val in manifest.items():
-        if key == "capabilities" and isinstance(val, (list, tuple)):
-            lines.append("capabilities:")
+        if key in ("capabilities", "provides_mcp_tools") and isinstance(val, (list, tuple)):
+            lines.append(f"{key}:")
             for item in val:
                 lines.append(f"  - {item}")
         elif key == "config_section" and isinstance(val, dict):
@@ -219,7 +220,15 @@ def test_get_plugin_registry_returns_singleton():
 
 def test_discover_filesystem_loads_plugin(tmp_path: Path):
     pdir = tmp_path / "foo"
-    _write_plugin_yaml(pdir, {"name": "foo", "version": "1.0.0", "capabilities": ["mcp_tool"]})
+    _write_plugin_yaml(
+        pdir,
+        {
+            "name": "foo",
+            "version": "1.0.0",
+            "capabilities": ["mcp_tool"],
+            "provides_mcp_tools": ["foo_tool"],
+        },
+    )
     _write_plugin_py(
         pdir,
         """
@@ -494,6 +503,135 @@ def test_load_all_entry_points_combined_with_filesystem(tmp_path: Path):
     )
     names = sorted(m.name for m in loaded)
     assert names == ["epplug", "fsplug"]
+
+
+# ─── _is_enabled matrix (off-by-default, BP-06) ─────────────────────────────
+
+
+def test_is_enabled_explicit_list_ignores_manifest_enabled_true():
+    reg = PluginRegistry()
+    mgr = PluginManager(reg, enabled=["foo"])
+    assert mgr._is_enabled(_make_manifest(name="foo", enabled=False)) is True
+    # manifest enabled:true does NOT auto-load when an explicit list is present
+    assert mgr._is_enabled(_make_manifest(name="bar", enabled=True)) is False
+    # unlisted + manifest false stays off
+    assert mgr._is_enabled(_make_manifest(name="baz", enabled=False)) is False
+
+
+def test_is_enabled_disabled_always_wins():
+    reg = PluginRegistry()
+    mgr = PluginManager(reg, enabled=["foo"], disabled=["foo"])
+    assert mgr._is_enabled(_make_manifest(name="foo", enabled=False)) is False
+    mgr2 = PluginManager(reg, enabled=None, disabled=["foo"])
+    assert mgr2._is_enabled(_make_manifest(name="foo", enabled=True)) is False
+
+
+def test_is_enabled_none_falls_back_to_manifest_default_off():
+    reg = PluginRegistry()
+    mgr = PluginManager(reg, enabled=None)
+    assert mgr._is_enabled(_make_manifest(name="a", enabled=True)) is True
+    assert mgr._is_enabled(_make_manifest(name="b", enabled=False)) is False
+
+
+def test_load_all_manifest_true_unlisted_is_not_loaded(tmp_path: Path):
+    _fs_plugin(tmp_path, "manifest_on", enabled=True)
+    _fs_plugin(tmp_path, "listed", enabled=False)
+    reg = PluginRegistry()
+    mgr = PluginManager(reg, enabled=["listed"])
+    loaded = mgr.load_all([tmp_path], entry_points=False)
+    assert [m.name for m in loaded] == ["listed"]
+    assert "manifest_on" not in reg.loaded_plugins
+
+
+# ─── fail-closed wrapper gate + trust UX ────────────────────────────────────
+
+_UNDECORATED_PLUGIN_PY = """
+from tools.plugins import Plugin, PluginManifest, PluginRegistry
+
+class _FakeMcp:
+    def tool(self):
+        def deco(fn):
+            return fn
+        return deco
+
+mcp = _FakeMcp()
+
+@mcp.tool()
+def evil_tool():
+    return "pwn"
+
+class P(Plugin):
+    def __init__(self):
+        self.manifest = PluginManifest(name="evil")
+    def register(self, registry: PluginRegistry) -> None:
+        pass
+
+def create_plugin():
+    return P()
+"""
+
+
+def test_filesystem_plugin_with_undecorated_mcp_tool_refused(tmp_path: Path):
+    pdir = tmp_path / "evil"
+    _write_plugin_yaml(pdir, {"name": "evil", "enabled": "true"})
+    _write_plugin_py(pdir, _UNDECORATED_PLUGIN_PY)
+    reg = PluginRegistry()
+    mgr = PluginManager(reg, enabled=None)
+    plugins = mgr.discover_filesystem([tmp_path])
+    assert plugins == []  # skipped, never raises
+    refused = [e for e in reg._plugin_audit if e["event"] == "refused" and e["plugin"] == "evil"]
+    assert len(refused) == 1
+    assert "missing wrapper" in refused[0]["detail"]
+
+
+def test_entry_point_plugin_with_undecorated_tool_refused(tmp_path: Path):
+    import importlib.util
+
+    (tmp_path / "plugin.py").write_text(textwrap.dedent(_UNDECORATED_PLUGIN_PY), encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("epevil_mod", str(tmp_path / "plugin.py"))
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    # Real entry-point plugins are normally imported (present in sys.modules),
+    # which is what inspect.getsourcefile() resolves through.
+    sys.modules["epevil_mod"] = mod
+    try:
+        spec.loader.exec_module(mod)
+        reg = PluginRegistry()
+        mgr = PluginManager(reg)
+        plugins = mgr.discover_entry_points(loader=lambda group: [_FakeEP("epevil", mod.create_plugin)])
+    finally:
+        del sys.modules["epevil_mod"]
+    assert plugins == []  # skipped, never raises boot
+    refused = [e for e in reg._plugin_audit if e["event"] == "refused" and e["plugin"] == "evil"]
+    assert len(refused) == 1
+
+
+def test_load_all_emits_trust_warning_and_boot_line(tmp_path: Path, caplog, capsys):
+    _fs_plugin(tmp_path, "trusted", enabled=False)
+    reg = PluginRegistry()
+    mgr = PluginManager(reg, enabled=["trusted"])
+    with caplog.at_level(logging.WARNING, logger="tools.plugins"):
+        loaded = mgr.load_all([tmp_path], entry_points=False)
+    assert [m.name for m in loaded] == ["trusted"]
+    trust_records = [r for r in caplog.records if "unsandboxed full operator-box privileges" in r.getMessage()]
+    assert trust_records, "expected a trust WARNING per loaded plugin"
+    assert any("trusted" in r.getMessage() for r in trust_records)
+    out = capsys.readouterr().out
+    assert "trusted" in out and "unsandboxed full operator-box privileges" in out
+
+
+def test_config_yaml_plugins_enabled_is_empty():
+    import yaml
+
+    repo_root = Path(__file__).resolve().parent.parent
+    cfg = yaml.safe_load((repo_root / "config.yaml").read_text(encoding="utf-8"))
+    assert cfg["plugins"]["enabled"] == []
+
+
+def test_schema_plugins_enabled_default_is_empty():
+    from tools.config.schema import CONFIG_SCHEMA
+
+    assert CONFIG_SCHEMA["plugins"]["enabled"] == []
 
 
 # ─── load_plugins / list_discovered_plugins ───────────────────────────────────

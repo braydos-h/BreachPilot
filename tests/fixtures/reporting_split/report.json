@@ -1,0 +1,161 @@
+{
+  "attack_timeline": [
+    {
+      "description": "pwned",
+      "event_type": "exploit_success",
+      "metadata": {},
+      "module": "eternalblue",
+      "result": "success",
+      "target": "10.0.0.5",
+      "timestamp": "2026-01-01T10:00:00+00:00"
+    }
+  ],
+  "executive_summary": "# Executive Summary\n\nTargets: 1",
+  "exploitation_chains": [
+    {
+      "chain_id": "CHAIN-10-0-0-5",
+      "entries": [
+        {
+          "module": "eternalblue",
+          "result": "success",
+          "timestamp": "2026-01-01T10:00:00+00:00"
+        }
+      ],
+      "final_privilege": "root",
+      "successful": true,
+      "target": "10.0.0.5",
+      "total_duration": 0.0
+    }
+  ],
+  "failure_analysis": [
+    {
+      "error_breakdown": {
+        "Timeout": 2
+      },
+      "failure_count": 2,
+      "mitigation_suggestion": "retry",
+      "operation": "smb_login",
+      "primary_error": "Timeout",
+      "recovery_actions": []
+    }
+  ],
+  "report_metadata": {
+    "generated_at": "2026-01-04T00:00:00+00:00",
+    "generator_version": "2.0",
+    "hitl_pending_count": 0,
+    "mission_id": "FIXTURE",
+    "total_exploits": 5,
+    "total_failures": 2,
+    "total_targets": 1
+  },
+  "technical_findings": [
+    {
+      "affected_asset": "10.0.0.5",
+      "attack_chain": null,
+      "confidence": 0.95,
+      "cvss": {
+        "base_score": 9.8,
+        "environmental_score": null,
+        "severity": "Critical",
+        "temporal_score": null,
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+      },
+      "evidence_refs": [
+        "E-1"
+      ],
+      "exploitation_result": "Shell access achieved",
+      "finding_id": "F-approved",
+      "hitl_history": [
+        {
+          "actor": "human",
+          "decision": "APPROVED",
+          "note": "",
+          "timestamp": "2026-01-01T00:00:00+00:00"
+        }
+      ],
+      "hitl_status": "APPROVED",
+      "persistence_achieved": true,
+      "privilege_level_gained": "root",
+      "references": [],
+      "remediation": "Patch now.",
+      "reproduction_steps": [
+        "nmap -sV 10.0.0.5"
+      ],
+      "retest_history": [],
+      "retest_status": "",
+      "severity": "Critical",
+      "summary": "Summary of Approved <script>alert(1)</script> <b>escape</b>",
+      "title": "Approved <script>alert(1)</script>",
+      "verification_probe": {
+        "exec": "id",
+        "type": "shell_command"
+      },
+      "verify_history": [
+        {
+          "evidence": "uid=0(root)",
+          "timestamp": "2026-01-02T00:00:00+00:00",
+          "verdict": "VERIFIED"
+        }
+      ],
+      "verify_status": "VERIFIED",
+      "vuln_class": "Known CVE"
+    },
+    {
+      "affected_asset": "10.0.0.5",
+      "attack_chain": null,
+      "confidence": 0.95,
+      "cvss": {
+        "base_score": 9.8,
+        "environmental_score": null,
+        "severity": "Critical",
+        "temporal_score": null,
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+      },
+      "evidence_refs": [
+        "E-1"
+      ],
+      "exploitation_result": "Shell access achieved",
+      "finding_id": "F-open",
+      "hitl_history": [
+        {
+          "actor": "human",
+          "decision": "APPROVED",
+          "note": "",
+          "timestamp": "2026-01-01T00:00:00+00:00"
+        }
+      ],
+      "hitl_status": "APPROVED",
+      "persistence_achieved": true,
+      "privilege_level_gained": "root",
+      "references": [],
+      "remediation": "Patch now.",
+      "reproduction_steps": [
+        "nmap -sV 10.0.0.5"
+      ],
+      "retest_history": [
+        {
+          "evidence": "open",
+          "timestamp": "2026-01-03T00:00:00+00:00",
+          "verdict": "STILL_OPEN"
+        }
+      ],
+      "retest_status": "STILL_OPEN",
+      "severity": "Critical",
+      "summary": "Summary of Still Open Finding <b>escape</b>",
+      "title": "Still Open Finding",
+      "verification_probe": {
+        "exec": "id",
+        "type": "shell_command"
+      },
+      "verify_history": [
+        {
+          "evidence": "x",
+          "timestamp": "2026-01-02T00:00:00+00:00",
+          "verdict": "VERIFIED"
+        }
+      ],
+      "verify_status": "VERIFIED",
+      "vuln_class": "Known CVE"
+    }
+  ]
+}

@@ -13,10 +13,68 @@ from __future__ import annotations
 import asyncio
 import re
 
-from tools.campaign.state import AttackPhase, AttackState, AttackTask, RetryEngine, TaskStatus
+from tools.campaign.state import (
+    AttackPhase,
+    AttackState,
+    AttackTask,
+    RetryEngine,
+    TaskStatus,
+    _report_autonomous_progress,
+)
 from tools.logging_setup import get_logger
 
 logger = get_logger()
+
+
+def _campaign_retries_left(self) -> int | None:
+    """Remaining campaign-level retries, or None when unbounded.
+
+    p2-09: ``max_campaign_retries`` (``mission_config["max_campaign_retries"]``,
+    0 = off) bounds total batch retries across the whole campaign. When the
+    budget is spent, failing tasks go to BLOCKED instead of retrying.
+    """
+    try:
+        budget = int(getattr(self, "_max_campaign_retries", 0) or 0)
+    except (TypeError, ValueError):
+        return None
+    if budget <= 0:
+        return None
+    try:
+        used = int(getattr(self, "_campaign_retries_used", 0) or 0)
+    except (TypeError, ValueError):
+        used = 0
+    return max(0, budget - used)
+
+
+def _consume_campaign_retry(self) -> bool:
+    """Consume one campaign-budget retry; False when the budget is spent."""
+    if _campaign_retries_left(self) == 0:
+        return False
+    try:
+        self._campaign_retries_used = int(getattr(self, "_campaign_retries_used", 0) or 0) + 1
+    except (TypeError, ValueError):
+        self._campaign_retries_used = 1
+    return True
+
+
+def _model_key_for_retry(self, task: AttackTask) -> str:
+    """Best-effort model key for the per-model rate-limit hook."""
+    try:
+        alias = getattr(getattr(self, "_executor", None), "_model_alias", "")
+    except Exception:  # noqa: BLE001 -- observability-adjacent, never gates
+        alias = ""
+    if alias:
+        return str(alias)
+    try:
+        mission = getattr(self, "_mission", None)
+        if isinstance(mission, dict):
+            for key in ("model_alias", "model"):
+                value = mission.get(key, "")
+                if value:
+                    return str(value)
+    except Exception:  # noqa: BLE001 -- never gates
+        pass
+    return ""
 
 
 async def _execute_task_batch(self, tasks: list[AttackTask], state: AttackState) -> None:
@@ -75,11 +133,60 @@ async def _execute_task_batch(self, tasks: list[AttackTask], state: AttackState)
                     task.retry_count,
                     task.max_retries,
                 ):
+                    err = str(result.get("error", ""))
+                    # p2-09: campaign-level retry budget. When spent, the
+                    # task goes to BLOCKED (never silently dropped, never
+                    # retried unboundedly).
+                    if not _consume_campaign_retry(self):
+                        task.status = TaskStatus.BLOCKED
+                        task.error = f"campaign retry budget exhausted: {err}"
+                        task.last_error = err
+                        state.last_error = err
+                        state.add_timeline_event(
+                            "retry_budget_exhausted",
+                            f"{task.module_name} blocked: campaign retry budget spent",
+                            {"task_id": task.task_id, "error": err[:500]},
+                        )
+                        logger.info(f"Not retrying {task.module_name}: campaign retry budget spent")
+                        return
                     task.retry_count += 1
                     task.parameters.update(RetryEngine.get_retry_parameters(task.module_name, task.retry_count))
                     task.status = TaskStatus.RETRYING
+                    # p2-09: persist retry accounting + emit a progress event
+                    # per retry so the operator sees the retry, not silence.
+                    task.error = err
+                    task.last_error = err
+                    try:
+                        from tools.failure_taxonomy import classify_failure
+
+                        task.failure_class = classify_failure(err).value
+                    except Exception:  # noqa: BLE001 -- taxonomy must never break retries
+                        pass
+                    state.last_error = err
+                    state.total_retries += 1
+                    state.add_timeline_event(
+                        "retry",
+                        f"Retrying {task.module_name} (attempt {task.retry_count}/{task.max_retries}): {err[:300]}",
+                        {"task_id": task.task_id, "attempt": task.retry_count, "failure_class": task.failure_class},
+                    )
+                    _report_autonomous_progress(
+                        action="retry",
+                        task_id=task.task_id,
+                        tool=task.module_name,
+                        attempt=task.retry_count,
+                        max_retries=task.max_retries,
+                        failure_class=task.failure_class,
+                        error=err[:500],
+                    )
                     logger.info(f"Retrying {task.module_name} with modified parameters (attempt {task.retry_count})")
-                    await asyncio.sleep(2**task.retry_count)  # Exponential backoff
+                    # p2-09: exponential backoff with jitter (capped 60s),
+                    # honoring the per-model rate-limit hook. The semaphore
+                    # was released above, so other tasks run during the sleep.
+                    delay = max(
+                        RetryEngine.compute_backoff(task.retry_count),
+                        RetryEngine.rate_limit_delay(_model_key_for_retry(self, task)),
+                    )
+                    await asyncio.sleep(delay)
                     continue
             return
 

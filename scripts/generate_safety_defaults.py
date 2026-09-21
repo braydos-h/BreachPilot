@@ -10,6 +10,7 @@ Usage (from repo root):
 
 from __future__ import annotations
 
+import argparse
 import datetime
 import sys
 from pathlib import Path
@@ -22,9 +23,8 @@ from tools.config.schema import CONFIG_SCHEMA  # noqa: E402
 DOC = REPO / "docs" / "generated" / "safety-defaults.md"
 
 
-def main() -> int:
+def render(today: str) -> str:
     sandbox = CONFIG_SCHEMA.get("sandbox", {})
-    today = datetime.date.today().isoformat()
     out = [
         "---",
         "title: Safety Defaults (Generated)",
@@ -68,8 +68,25 @@ def main() -> int:
         "- `pytest tests/test_config_semantic_truth.py -n 0`",
         "",
     ]
+    return "\n".join(out)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Generate safety-defaults.md from CONFIG_SCHEMA sandbox defaults.")
+    parser.add_argument(
+        "--check", action="store_true", help="fail (exit 1) when the checked-in file drifts; do not write"
+    )
+    args = parser.parse_args(argv)
+    today = datetime.date.today().isoformat()
+    text = render(today)
+    if args.check:
+        if DOC.read_text(encoding="utf-8") != text:
+            print("safety-defaults drift: run python scripts/generate_safety_defaults.py", file=sys.stderr)
+            return 1
+        print(f"safety-defaults fresh: date={today}")
+        return 0
     DOC.parent.mkdir(parents=True, exist_ok=True)
-    DOC.write_text("\n".join(out), encoding="utf-8")
+    DOC.write_text(text, encoding="utf-8")
     print(f"wrote {DOC}")
     return 0
 

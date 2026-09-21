@@ -11,6 +11,7 @@ config.yaml but missing from the schema are marked lab-only.
 
 import ast
 import re
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -198,8 +199,8 @@ def subsystem_for(key):
     return SUBSYSTEM_BY_TOP.get(key.split(".")[0], key.split(".")[0])
 
 
-def main():
-    today = date.today().isoformat()
+def render(today: str) -> tuple[str, int, dict, dict]:
+    """Build the regenerated file text without writing (shared by write + --check)."""
     raw_text = CONFIG_PATH.read_text()
     cfg = yaml.safe_load(raw_text)
     schema = load_schema_defaults()
@@ -267,12 +268,33 @@ def main():
     ]
     sep = text_lines[hdr + 1]
     new_text = "\n".join(head + [text_lines[hdr], sep] + out_rows + tail) + "\n"
+    return new_text, n_blocks, lab_leaves, existing
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Regenerate config-reference-generated.md from schema + config.yaml.")
+    parser.add_argument(
+        "--check", action="store_true", help="fail (exit 1) when the checked-in file drifts; do not write"
+    )
+    args = parser.parse_args(argv)
+    today = date.today().isoformat()
+    new_text, n_blocks, lab_leaves, existing = render(today)
+    schema_leaves = dict(walk_leaves(load_schema_defaults()))
+    if args.check:
+        if OUT_PATH.read_text() != new_text:
+            print(f"config-reference drift: run python scripts/{Path(__file__).name}", file=sys.stderr)
+            return 1
+        print(f"config-reference fresh: keys={len(lab_leaves)} blocks={n_blocks} date={today}")
+        return 0
     OUT_PATH.write_text(new_text)
 
     n_new = sum(1 for k in lab_leaves if k not in existing)
     n_lab_only = sum(1 for k in lab_leaves if k not in schema_leaves)
     print(f"keys={len(lab_leaves)} blocks={n_blocks} new={n_new} lab_only={n_lab_only} date={today}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

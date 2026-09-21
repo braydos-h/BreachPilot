@@ -64,7 +64,7 @@ DECISION: APPROVED (actor=human)
 
 ## Statuses and the Self-Approval Guard
 
-- Constants: `PROPOSED`, `APPROVED`, `REJECTED`; `HITL_STATUSES = frozenset({PROPOSED, APPROVED, REJECTED})`; `HITL_DECISIONS = frozenset({APPROVED, REJECTED})`.
+- Constants: `PROPOSED`, `APPROVED`, `REJECTED` — single-defined in `tools/kernel/finding_lifecycle.py` and re-exported by `tools/mcp_tools/hitl.py` (no per-module `HITL_STATUSES`/`HITL_DECISIONS` frozensets; decisions validate against the canonical `(APPROVED, REJECTED)` pair and every transition goes through `check_transition`).
 - `record_hitl_decision` raises `ValueError` on an unknown decision and `PermissionError` unless `actor == "human"` — enforced at both the helper and the `hitl_decide` wrapper (which `BLOCKED`s any other actor before lookup), and the REST decide route hardcodes `actor="human"`.
 - Every decision appends `{timestamp, decision, note, actor: "human"}` to `hitl_history[]` and lands in the JSONL audit trail with its actor.
 

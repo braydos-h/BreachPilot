@@ -92,7 +92,8 @@ Use this path when working on target fingerprinting, goal suggestions, or first-
 ```text
 main.py
   -> load config
-  -> select model with tools.model_router (provider = models.provider: ollama|opencode_go|chatgpt, default opencode_go)
+  -> select model with tools.model_router (provider = models.provider: ollama|opencode_go|chatgpt;
+     code default ollama, lab config.yaml ships opencode_go)
   -> start/connect mcp_exploit_server.py
   -> build tool list (OpenAI-shaped; forwarded unchanged to any provider)
   -> tools.exploit_agent.run_exploit_agent

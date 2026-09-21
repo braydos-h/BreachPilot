@@ -222,9 +222,12 @@ class TestRetryEngine:
         assert "timeout" in params
 
     def test_get_retry_parameters_exhausted(self) -> None:
+        # p2-09: frozen at the last strategy verbatim once the table is
+        # exhausted — no timeout*4, no forced aggressive escalation.
         params = RetryEngine.get_retry_parameters("SSHBruteForce", 10)
-        assert params["aggressive"] is True
-        assert params["timeout"] > 60
+        assert params == {"timeout": 20, "threads": 16, "wordlist": "large", "aggressive": True}
+        default_params = RetryEngine.get_retry_parameters("UnknownModule", 99)
+        assert default_params == {"timeout": 120, "retries": 3, "aggressive": True}
 
 
 # ── AttackModuleExecutor Tests ───────────────────────────────────────────────

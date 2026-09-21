@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Verify a pinned BreachPilot release installer before executing (TODO 013).
 #
-#   scripts/verify-installer.sh install-v0.69.0.sh install-v0.69.0.sh.sha256
+#   scripts/verify-installer.sh install-v0.68.4.sh install-v0.68.4.sh.sha256
 #
 # Checks SHA-256, then (when gh + attestation data are available) verifies the
 # Sigstore attestation via `gh attestation verify`. Fails closed on mismatch.

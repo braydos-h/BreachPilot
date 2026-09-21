@@ -11,12 +11,13 @@ SAFETY (lab build)
 ------------------
 Plugins are NOT sandboxed. They run with full operator-box privileges, exactly
 like the built-in ``tools/mcp_tools/*`` modules. The plugin manager enforces
-only **opt-in loading** (plugins are disabled by default) and documents the
-safety-decorator requirement: any MCP tool a plugin registers MUST wrap its
-handler with ``ctx.require_allowlist()`` (target-touching tools) or
-``ctx.audit_tool`` (free-text command tools) so the target-IP allowlist lock
-and JSONL audit trail still apply. The manager does not and cannot verify
-this at load time -- it is the plugin author's responsibility.
+**opt-in loading** (plugins are disabled by default: an explicit
+``plugins.enabled`` list is the only opt-in, and ``plugins.disabled`` always
+wins) plus a fail-closed load-time AST gate: any ``@mcp.tool`` handler in a
+plugin's source that lacks a ``require_allowlist``/``audit_tool`` wrapper
+refuses the load (skip + audit row, never a boot failure). Every successful
+load emits a WARNING trust log and a boot line naming the plugin, its
+version, source, and capabilities.
 
 Hard-blocked plugin behaviours (regardless of opt-in): log clearing,
 timestomping, EDR/AV defeat, denial of service, malware distribution. These
@@ -33,6 +34,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import importlib.util
+import inspect
 import logging
 import re
 import threading
@@ -498,14 +500,25 @@ class PluginManager:
         self._enabled = list(enabled) if enabled is not None else None
         self._disabled = list(disabled) if disabled is not None else []
         self._entry_point_group = entry_point_group
+        # plugin name -> human-readable source ("<dir>" or "entry-point:<name>").
+        # Used by the load-time trust log in load_all().
+        self._sources: dict[str, str] = {}
 
     # ── enablement ──────────────────────────────────────────────────────────
     def _is_enabled(self, manifest: PluginManifest) -> bool:
+        """Opt-in enablement: explicit list wins, manifest default is fallback.
+
+        ``disabled`` always wins. When the explicit ``enabled`` list is present
+        (not None), ONLY listing opts in -- ``manifest.enabled`` is ignored so
+        a manifest ``enabled: true`` can never auto-load without operator
+        opt-in. When the list is None (no config), fall back to
+        ``manifest.enabled`` (default False: off by default).
+        """
         name = manifest.name
         if name in self._disabled:
             return False
         if self._enabled is not None:
-            return name in self._enabled or bool(manifest.enabled)
+            return name in self._enabled and name not in self._disabled
         return bool(manifest.enabled)
 
     # ── filesystem discovery ────────────────────────────────────────────────
@@ -563,21 +576,28 @@ class PluginManager:
         manifest = PluginManifest.from_dict(manifest_dict)
         if not manifest.name:
             manifest.name = plugin_dir.name
+        self._sources[manifest.name] = str(plugin_dir)
         plugin_py = plugin_dir / "plugin.py"
         if not plugin_py.is_file():
             problems = validate_plugin_manifest(manifest, plugin_py_exists=False)
             if problems:
-                log.warning("plugin %s refused: %s", manifest.name, "; ".join(problems))
+                detail = "; ".join(problems)
+                log.warning("plugin %s refused: %s", manifest.name, detail)
+                self._registry.audit_plugin_event("refused", manifest, detail)
                 return None
             return _ManifestOnlyPlugin(manifest)
         # Fail-closed wrapper check before import: undeclared/unwrapped tools refuse load.
         offenders = validate_plugin_mcp_wrappers(plugin_py)
         if offenders:
-            log.warning("plugin %s refused (missing wrapper): %s", manifest.name, "; ".join(offenders[:3]))
+            detail = "; ".join(offenders[:3])
+            log.warning("plugin %s refused (missing wrapper): %s", manifest.name, detail)
+            self._registry.audit_plugin_event("refused", manifest, f"missing wrapper: {detail}")
             return None
         problems = validate_plugin_manifest(manifest, plugin_py_exists=True)
         if problems:
-            log.warning("plugin %s refused: %s", manifest.name, "; ".join(problems))
+            detail = "; ".join(problems)
+            log.warning("plugin %s refused: %s", manifest.name, detail)
+            self._registry.audit_plugin_event("refused", manifest, detail)
             return None
         try:
             module = self._load_module_from_file(plugin_py, plugin_dir.name)
@@ -639,16 +659,56 @@ class PluginManager:
             log.warning("entry-point discovery failed: %s", exc)
             return plugins
         for ep in eps:
+            ep_name = getattr(ep, "name", "?")
             try:
                 obj = ep.load()
             except Exception as exc:  # noqa: BLE001
-                log.warning("entry point %s: load() failed: %s", getattr(ep, "name", "?"), exc)
+                log.warning("entry point %s: load() failed: %s", ep_name, exc)
                 continue
-            plugin = self._coerce_entry_point(obj, getattr(ep, "name", "?"))
-            if plugin is not None:
-                plugins.append(plugin)
-                _DISCOVERED_PLUGINS.append(plugin.manifest)
+            plugin = self._coerce_entry_point(obj, ep_name)
+            if plugin is None:
+                continue
+            self._sources[plugin.manifest.name] = f"entry-point:{ep_name} (group {self._entry_point_group})"
+            if not self._check_entry_point_wrappers(plugin, ep_name):
+                continue
+            plugins.append(plugin)
+            _DISCOVERED_PLUGINS.append(plugin.manifest)
         return plugins
+
+    def _check_entry_point_wrappers(self, plugin: Plugin, ep_name: str) -> bool:
+        """Best-effort AST wrapper gate for entry-point plugins (fail closed).
+
+        Entry-point plugins arrive as already-imported objects, so there is no
+        ``plugin.py`` to gate before import. When the plugin class resolves to
+        a source file on disk, run the same ``@mcp.tool`` wrapper check as
+        filesystem plugins: offenders are refused (skip + audit row, never a
+        boot failure). When no source file is resolvable there is nothing to
+        establish the refusal condition, so the plugin is allowed with a
+        warning.
+        """
+        try:
+            src = inspect.getsourcefile(type(plugin))
+        except (OSError, TypeError):
+            src = None
+        if not src:
+            log.warning(
+                "entry point %s (plugin %s): source file unverifiable, wrapper check skipped",
+                ep_name,
+                plugin.manifest.name,
+            )
+            return True
+        offenders = validate_plugin_mcp_wrappers(Path(src))
+        if offenders:
+            detail = "; ".join(offenders[:3])
+            log.warning(
+                "entry point %s (plugin %s) refused (missing wrapper): %s",
+                ep_name,
+                plugin.manifest.name,
+                detail,
+            )
+            self._registry.audit_plugin_event("refused", plugin.manifest, f"missing wrapper: {detail}")
+            return False
+        return True
 
     def _entry_points(self, loader: Callable[[str], list[Any]] | None) -> list[Any]:
         if loader is not None:
@@ -710,10 +770,15 @@ class PluginManager:
 
         Returns the list of loaded :class:`PluginManifest`. A plugin is loaded
         iff (``self._enabled`` is None -> use ``manifest.enabled``; otherwise
-        ``name in self._enabled`` OR ``manifest.enabled``) AND ``name`` not in
-        ``self._disabled``. Default OFF when ``enabled`` is None and the
-        manifest does not opt in. Each ``register()`` is wrapped so one bad
-        plugin does not abort the rest.
+        ONLY ``name in self._enabled`` -- ``manifest.enabled`` is ignored) AND
+        ``name`` not in ``self._disabled`` (disabled always wins). Default OFF
+        when ``enabled`` is None and the manifest does not opt in. Each
+        ``register()`` is wrapped so one bad plugin does not abort the rest.
+        Every successful load emits a WARNING trust log plus a stdout boot
+        line (name, version, source, capabilities) because plugins run with
+        unsandboxed full operator-box privileges. Refusals (missing safety
+        wrappers, manifest problems, register() failures) skip the plugin
+        with an audit row and never raise.
         """
         _reset_discovered()
         discovered: list[Plugin] = self.discover_filesystem(search_paths)
@@ -732,9 +797,29 @@ class PluginManager:
                 log.warning("plugin %s: register() failed: %s", manifest.name, exc)
                 continue
             self._registry.mark_plugin_loaded(manifest)
+            self._log_plugin_trust(manifest)
             self._registry.audit_plugin_event("load", manifest, f"caps={','.join(manifest.capabilities)}")
             loaded.append(manifest)
         return loaded
+
+    def _log_plugin_trust(self, manifest: PluginManifest) -> None:
+        """Load-time trust UX: WARNING log + boot line per loaded plugin."""
+        source = self._sources.get(manifest.name, "<unknown source>")
+        caps = ",".join(manifest.capabilities) if manifest.capabilities else "(none)"
+        log.warning(
+            "plugin trust: loading '%s' v%s from %s with capabilities [%s] -- "
+            "plugins run with unsandboxed full operator-box privileges; "
+            "enable only plugins you trust",
+            manifest.name,
+            manifest.version,
+            source,
+            caps,
+        )
+        print(
+            f"[plugins] trust: loaded '{manifest.name}' v{manifest.version} "
+            f"from {source} capabilities=[{caps}] "
+            "(unsandboxed full operator-box privileges)"
+        )
 
 
 # ─── Module-level singleton + helpers ─────────────────────────────────────────

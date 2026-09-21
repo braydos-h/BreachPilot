@@ -42,7 +42,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator, Mapping
 
-from .base import BaseProvider, make_model_client
+from .base import DATA_RESIDENCY_CLOUD, BaseProvider, make_model_client
 from .types import ModelInfo, ProviderCapabilities, ProviderDiscoveryError, ProviderHealth, usage_report
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -750,6 +750,17 @@ class ChatGptProvider(BaseProvider):
         if not bool(cfg) or not bool(cfg.get("enabled")):
             return False
         return ChatGptProxyManager.get().is_authenticated(cfg)
+
+    def privacy_boundary(self, config: Mapping[str, Any] | None = None) -> dict[str, str]:
+        """The proxy is loopback, but prompts egress to OpenAI behind it.
+
+        The loopback ``base_url`` is deliberately NOT reported as the
+        destination — it would falsely imply prompts stay on-box. Auth state
+        is never inspected here (bool-only file-existence checks live in
+        ``is_configured``; tokens are never read).
+        """
+        del config  # destination is fixed regardless of proxy host/port
+        return {"data_residency": DATA_RESIDENCY_CLOUD, "egress_target": "OpenAI via ChatGPT account"}
 
     def build_router(
         self,

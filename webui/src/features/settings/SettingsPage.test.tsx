@@ -30,6 +30,7 @@ vi.mock("@/components/ProviderSetup", () => ({
   useProviderSwitch: vi.fn(),
   ProviderPicker: () => <div>ProviderPicker</div>,
   ChatGptControls: () => <div>ChatGptControls</div>,
+  ProviderPrivacyNotice: () => <div>PrivacyNotice</div>,
 }));
 
 import {

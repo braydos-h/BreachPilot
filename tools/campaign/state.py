@@ -104,6 +104,10 @@ class AttackTask:
     # (tools/failure_taxonomy.FailureClass value, "" = unclassified/success).
     # Additive with default; old state dicts load unchanged.
     failure_class: str = ""
+    # p2-09: last error text of the most recent attempt. Kept in sync with
+    # ``error`` by the executor/batch retry path so resume and the timeline
+    # can report what the latest failure was without re-reading the result.
+    last_error: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -128,6 +132,7 @@ class AttackTask:
             "prerequisites": self.prerequisites,
             "created_from": self.created_from,
             "failure_class": self.failure_class,
+            "last_error": self.last_error,
         }
 
     @classmethod
@@ -176,6 +181,7 @@ class AttackTask:
             prerequisites=list(data.get("prerequisites", []) or []),
             created_from=str(data.get("created_from", "") or ""),
             failure_class=str(data.get("failure_class", "") or ""),
+            last_error=str(data.get("last_error", "") or data.get("error", "") or ""),
         )
 
 
@@ -213,6 +219,11 @@ class AttackState:
     # ``hard_target_max_rounds`` the campaign gives up on this target instead
     # of burning the remaining ``max_cycles`` budget. Reset per target.
     hard_target_rounds: int = 0
+    # p2-09: retry accounting persisted per target. ``total_retries`` counts
+    # consumed batch retries (bounded by the campaign retry budget);
+    # ``last_error`` is the most recent attempt's error text.
+    total_retries: int = 0
+    last_error: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -237,6 +248,8 @@ class AttackState:
             "resolved_ip": self.resolved_ip,
             "discovered_subdomains": list(self.discovered_subdomains),
             "hard_target_rounds": int(self.hard_target_rounds),
+            "total_retries": int(self.total_retries),
+            "last_error": self.last_error,
         }
 
     @classmethod
@@ -286,6 +299,8 @@ class AttackState:
                 dict(s) for s in (data.get("discovered_subdomains", []) or []) if isinstance(s, dict)
             ],
             hard_target_rounds=int(data.get("hard_target_rounds", 0) or 0),
+            total_retries=int(data.get("total_retries", 0) or 0),
+            last_error=str(data.get("last_error", "") or ""),
         )
 
     def add_timeline_event(self, event_type: str, description: str, metadata: dict[str, Any] | None = None) -> None:
@@ -361,6 +376,14 @@ class AttackState:
 class RetryEngine:
     """Intelligent retry with parameter modification."""
 
+    # p2-09: per-model rate-limit hook. ``record_rate_limited`` notes a
+    # backend-throttle signal for a model key; ``rate_limit_delay`` returns
+    # the extra delay the batch loop must observe before the next attempt
+    # with that model. External code can replace the policy wholesale via
+    # ``register_model_rate_limit_hook`` (tests use it to avoid sleeping).
+    _MODEL_RATE_LIMIT_HITS: dict[str, list[float]] = {}
+    _MODEL_RATE_LIMIT_HOOK: Callable[[str], float] | None = None
+
     RETRY_STRATEGIES: dict[str, list[dict[str, Any]]] = {
         "SSHBruteForce": [
             {"timeout": 10, "threads": 4},
@@ -392,15 +415,18 @@ class RetryEngine:
 
     @classmethod
     def get_retry_parameters(cls, module_name: str, attempt: int) -> dict[str, Any]:
-        """Get modified parameters for retry attempt."""
+        """Get modified parameters for retry attempt.
+
+        p2-09: frozen at the last strategy verbatim once the table is
+        exhausted — the old ``timeout*4`` + forced ``aggressive=True``
+        escalation is deleted. Unbounded escalation burned time on doomed
+        tasks and escalated aggression without operator intent; the campaign
+        retry budget (see ``tools/campaign/batch.py``) is the bound now.
+        """
         strategies = cls.RETRY_STRATEGIES.get(module_name, cls.RETRY_STRATEGIES["default"])
         if attempt < len(strategies):
-            return strategies[attempt]
-        # If we've exhausted strategies, return the last one with extra aggression
-        params = dict(strategies[-1])
-        params["aggressive"] = True
-        params["timeout"] = params.get("timeout", 60) * 4
-        return params
+            return dict(strategies[attempt])
+        return dict(strategies[-1])
 
     @classmethod
     def should_retry(cls, module_name: str, error: str, attempt: int, max_attempts: int) -> bool:
@@ -439,3 +465,51 @@ class RetryEngine:
             return False
 
         return True
+
+    # ── p2-09: bounded backoff + per-model rate-limit hook ──────────────
+
+    @classmethod
+    def compute_backoff(cls, attempt: int, *, base: float = 2.0, cap: float = 60.0) -> float:
+        """Exponential backoff with jitter for retry ``attempt`` (1-based).
+
+        ``base**attempt`` seconds plus up-to-1s uniform jitter, capped at
+        ``cap`` (default 60s). Pure function of the attempt number so tests
+        can assert the bound without sleeping.
+        """
+        import random
+
+        return min(float(cap), float(base) ** max(0, int(attempt)) + random.uniform(0, 1))
+
+    @classmethod
+    def register_model_rate_limit_hook(cls, hook: Callable[[str], float] | None) -> None:
+        """Override the per-model rate-limit delay policy (tests/ops seam).
+
+        The hook receives a model key and returns extra seconds to wait
+        before the next attempt. ``None`` restores the default tracker.
+        """
+        cls._MODEL_RATE_LIMIT_HOOK = hook
+
+    @classmethod
+    def record_rate_limited(cls, model: str) -> None:
+        """Note a backend-throttle signal for ``model`` (decays after 60s)."""
+        if not model:
+            return
+        now = time.monotonic()
+        hits = cls._MODEL_RATE_LIMIT_HITS.setdefault(model, [])
+        hits.append(now)
+        del hits[:-10]
+
+    @classmethod
+    def rate_limit_delay(cls, model: str = "") -> float:
+        """Extra delay seconds for ``model`` from recent throttle signals."""
+        if cls._MODEL_RATE_LIMIT_HOOK is not None:
+            try:
+                return max(0.0, float(cls._MODEL_RATE_LIMIT_HOOK(model)))
+            except Exception:  # noqa: BLE001 -- a broken hook must never stall retries
+                return 0.0
+        if not model:
+            return 0.0
+        now = time.monotonic()
+        hits = [t for t in cls._MODEL_RATE_LIMIT_HITS.get(model, []) if now - t < 60.0]
+        cls._MODEL_RATE_LIMIT_HITS[model] = hits
+        return min(60.0, 5.0 * len(hits))

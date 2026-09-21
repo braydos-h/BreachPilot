@@ -163,6 +163,8 @@ class AttackModuleExecutor:
         if self._scope_gate is None:
             task.status = TaskStatus.BLOCKED
             task.error = "Scope blocked: no scope gate wired (fail-closed)"
+            task.last_error = task.error
+            task.failure_class = "scope_blocked"
             state.add_timeline_event("blocked", task.error)
             return {"success": False, "error": task.error, "blocked": True}
         scope_result = self._scope_gate.check_scope(
@@ -185,6 +187,8 @@ class AttackModuleExecutor:
                 )
             else:
                 task.error = f"Scope blocked: {scope_result.reason}"
+            task.last_error = task.error
+            task.failure_class = "scope_blocked"
             state.add_timeline_event("blocked", task.error)
             return {
                 "success": False,
@@ -198,6 +202,8 @@ class AttackModuleExecutor:
             if not self._risk_controller.can_proceed():
                 task.status = TaskStatus.BLOCKED
                 task.error = "Risk budget exhausted"
+                task.last_error = task.error
+                task.failure_class = classify_failure(task.error).value
                 return {"success": False, "error": task.error, "blocked": True}
 
         # Critic pre-check (Tier 0 item 0.6b): defense-in-depth on top of the
@@ -213,6 +219,8 @@ class AttackModuleExecutor:
             if decision == "deny":
                 task.status = TaskStatus.BLOCKED
                 task.error = f"Critic denied: {critic_decision.get('reasoning', '')}"
+                task.last_error = task.error
+                task.failure_class = classify_failure(task.error).value
                 state.add_timeline_event("critic_deny", task.error)
                 self._record_failure_on_blackboard(task.module_name)
                 return {
@@ -242,6 +250,8 @@ class AttackModuleExecutor:
         if not module:
             task.status = TaskStatus.FAILED
             task.error = f"Module {task.module_name} not found"
+            task.last_error = task.error
+            task.failure_class = classify_failure(task.error).value
             state.record_failure(task.module_name, task.error)
             self._record_failure_on_blackboard(task.module_name)
             return {"success": False, "error": task.error}
@@ -445,6 +455,8 @@ class AttackModuleExecutor:
                 await asyncio.to_thread(self._record_lesson_on_success, task, state, result)
             else:
                 task.error = result.get("note", "Module did not achieve exploitation")
+                task.last_error = task.error
+                task.failure_class = classify_failure(task.error).value
                 state.record_failure(task.module_name, task.error)
                 state.add_timeline_event("failure", f"{task.module_name} did not achieve exploitation")
                 self._record_failure_on_blackboard(task.module_name)
@@ -467,6 +479,8 @@ class AttackModuleExecutor:
         except asyncio.TimeoutError:
             task.status = TaskStatus.FAILED
             task.error = f"Timeout after {timeout}s"
+            task.last_error = task.error
+            task.failure_class = classify_failure(task.error).value
             state.record_failure(task.module_name, task.error)
             state.add_timeline_event("timeout", task.error)
             logger.warning(f"Module {task.module_name} timed out against {task.target}")
@@ -476,6 +490,8 @@ class AttackModuleExecutor:
         except Exception as exc:
             task.status = TaskStatus.FAILED
             task.error = str(exc)
+            task.last_error = task.error
+            task.failure_class = classify_failure(task.error).value
             state.record_failure(task.module_name, task.error)
             state.add_timeline_event("error", f"Exception in {task.module_name}: {task.error}")
             logger.exception(f"Module {task.module_name} failed against {task.target}")

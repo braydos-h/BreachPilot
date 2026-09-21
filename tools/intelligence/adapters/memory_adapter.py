@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from memory import MemoryManager
+from legacy.memory import MemoryManager
 
 
 class MemoryAdapter:

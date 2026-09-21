@@ -90,7 +90,7 @@ def _manage_missions() -> None:
         from pathlib import Path
 
         from db import DatabaseManager
-        from mission import MissionController
+        from legacy.mission import MissionController
 
         ws = Path(os.environ.get("RESEARCH_WORKSPACE", "research_workspace"))
         ws.mkdir(parents=True, exist_ok=True)

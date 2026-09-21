@@ -55,7 +55,7 @@ Internal helpers: `_write_config(merged)` and `_apply_config_patch(patch)` (`too
 
 ## `POST /api/v1/models/provider` — `set_model_provider`
 
-`tools/api/routes/system.py:323` — bearer. Body `{provider}` must be `ollama|chatgpt` else `400 invalid_provider`. Patches `models.provider`, returns `{status:"ok", provider}`.
+`tools/api/routes/system.py:323` — bearer. Body `{provider}` must be a registered provider id (built-ins `ollama|opencode_go|chatgpt`) else `400 invalid_provider`. Patches `models.provider`, returns `{status:"ok", provider}`.
 
 ## `POST /api/v1/models/refresh` — `refresh_models`
 

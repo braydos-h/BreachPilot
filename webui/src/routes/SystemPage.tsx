@@ -1,8 +1,16 @@
-// Thin route wrapper for /system — the real screen lives in
-// features/settings/SettingsPage. Kept so the lazy route + nav link stay put.
+// /system route: the Sandbox/Firewall posture card (effective mode, Docker
+// health, firewall enforcement, containment facts) above the settings screen.
 
 import { SettingsPage } from "@/features/settings/SettingsPage";
+import { SandboxFirewallCard } from "./SandboxFirewallCard";
 
 export function SystemPage() {
-  return <SettingsPage />;
+  return (
+    <>
+      <div className="w-full px-4 pt-4 md:px-6 md:pt-6">
+        <SandboxFirewallCard />
+      </div>
+      <SettingsPage />
+    </>
+  );
 }

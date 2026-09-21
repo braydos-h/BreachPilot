@@ -236,6 +236,10 @@ export interface ProviderMeta {
   capabilities: ProviderCapabilitiesInfo;
   configured?: boolean;
   default_model?: string;
+  /** Privacy boundary from BaseProvider.privacy_boundary (no secrets). */
+  data_residency?: "local" | "cloud";
+  /** Display-only egress destination ("" when local). Never a secret. */
+  egress_target?: string;
   health?: { ok: boolean; checks: { name: string; ok: boolean; hint?: string }[] };
   error?: string;
 }

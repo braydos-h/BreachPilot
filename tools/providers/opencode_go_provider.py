@@ -26,7 +26,7 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Any, Iterator, Mapping
 
-from .base import BaseProvider, make_model_client
+from .base import DATA_RESIDENCY_CLOUD, BaseProvider, make_model_client
 from .types import ModelInfo, ProviderCapabilities, ProviderDiscoveryError, ProviderHealth
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -1283,6 +1283,11 @@ class OpenCodeGoProvider(BaseProvider):
         # A missing API key must NOT block router construction / previews —
         # the first chat call surfaces a clear auth error (module contract).
         return bool(cfg) and (bool(cfg.get("enabled")) or bool(cfg.get("base_url")))
+
+    def privacy_boundary(self, config: Mapping[str, Any] | None = None) -> dict[str, str]:
+        """Hosted Responses API: prompts always egress to the configured base URL."""
+        base_url = str(self.provider_config(config).get("base_url") or _DEFAULT_BASE_URL).rstrip("/")
+        return {"data_residency": DATA_RESIDENCY_CLOUD, "egress_target": base_url}
 
     def build_router(
         self,

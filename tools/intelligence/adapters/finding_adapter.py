@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from finding_verifier import FindingVerifier
+from legacy.finding_verifier import FindingVerifier
 from target_graph import TargetGraph
 
 

@@ -96,7 +96,7 @@ Re-wrapped helpers (module-level re-exports for test patch points):
 
 All behavior via `config.yaml` top-level keys (see README §Configuration):
 
-- `models.provider` (`ollama` default | `chatgpt`), `ollama.host` (`https://api.ollama.com`), `ollama.embed_host`
+- `models.provider` (`ollama` code default | `opencode_go` | `chatgpt`; the checked-in lab `config.yaml` ships `opencode_go`), `ollama.host` (`https://api.ollama.com`), `ollama.embed_host`
 - `mcp`, `nmap`, `exploit` (permission, attack_mode, timeouts, `allowed_targets`), `swarm`, `api` (host/port, `event_buffer_size`, `serve_webui`, `multi_operator`)
 - CLI flags override config; `apply_skills_cli_overrides` merges `--skills*`.
 

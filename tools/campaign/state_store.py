@@ -41,6 +41,8 @@ def save_state(self, path: Path | None = None) -> Path:
         # IDs and overwriting them (silent data loss on every resume).
         "task_counter": self._task_counter,
         "prereq_tasks_added": self._prereq_tasks_added,
+        # p2-09: resume must not reset the spent campaign retry budget.
+        "campaign_retries_used": int(getattr(self, "_campaign_retries_used", 0) or 0),
     }
     atomic_write_json(save_path, data)
     logger.info(f"Attack state saved to {save_path}")
@@ -86,6 +88,12 @@ def load_state(self, path: Path) -> bool:
         self._prereq_tasks_added = int(data.get("prereq_tasks_added", 0))
     except (TypeError, ValueError):
         self._prereq_tasks_added = 0
+    # p2-09: restore the spent campaign retry budget so a resumed campaign
+    # does not get a fresh budget (which would defeat the bound).
+    try:
+        self._campaign_retries_used = int(data.get("campaign_retries_used", 0))
+    except (TypeError, ValueError):
+        self._campaign_retries_used = 0
     loaded_states = 0
     loaded_tasks = 0
     for target, sdict in states_data.items():

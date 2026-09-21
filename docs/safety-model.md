@@ -231,3 +231,13 @@ Evidence and auditability are part of the safety model:
 ## Plugin Safety
 
 Plugins (`tools/plugins.py`) are trusted Python with full operator-box privileges, OFF by default, enabled via `config plugins.enabled`. Every plugin MUST ship a capability manifest (`needs_host_fs`, `needs_net`, `target_touching`, `provides_mcp_tools[]`); the loader refuses undeclared capabilities fail-closed. Any MCP tool a plugin registers MUST wrap its handler with `ctx.require_allowlist()` (target-touching tools) or `ctx.audit_tool` (free-text command tools) so it inherits the same target-IP lock and audit trail as built-in tools — enforced at load time by AST check. Plugin load/unload + capability grants land in the SHA-256-chained audit trail. Run on a machine whose compromise is acceptable. See `docs/plugin-development.md` section 9 for the full normative checklist.
+
+## Release Acceptance Gates
+
+"Ready to release" means every gate in
+[release-checklist.md](release-checklist.md) is green: sliced mocked suite,
+`ruff check` / `ruff format`, `mypy` over `tools/`, coverage
+`--fail-under=80`, `integration`/`live_llm` deselected by default, and
+docs-truth (README/config/`pyproject.toml`–`requirements.txt` sync plus
+version-truth). `scripts/release_gate.py` must print `GO` before any tag
+publishes assets.

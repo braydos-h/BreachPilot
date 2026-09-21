@@ -761,3 +761,39 @@ def test_glm3_registry_and_info_have_no_silent_fallback(tmp_path):
     info = get_model_info("glm3", live["models"].get("info"))
     assert info["context_window"] == 128000
     assert "Unknown alias" not in info["description"]
+
+
+def test_nested_exploit_models_defaults_in_sync():
+    """P2-10: nested exploit.*/models.* defaults must not drift silently.
+
+    Locks the triple permission truth (schema full_access, lab file
+    full_access, missing-key fallback read_only) and the code-vs-lab
+    provider default (schema/code ollama, lab file opencode_go), plus the
+    live glm/glm3 registry aliases (distinct live aliases, not drift).
+    """
+    import yaml
+
+    from tools.cli_exploit_settings import _resolve_exploit_permission
+    from tools.config.loader import get_ai_provider
+    from tools.config.schema import CONFIG_SCHEMA
+    from tools.exploit_agent import ExploitPermission
+
+    assert CONFIG_SCHEMA["exploit"]["permission"] == "full_access"
+    assert CONFIG_SCHEMA["models"]["provider"] == "ollama"
+    assert CONFIG_SCHEMA["models"]["registry"]["glm"] == "glm-5.2:cloud"
+    assert CONFIG_SCHEMA["models"]["registry"]["glm3"] == "glm-5.3-flash"
+
+    lab = yaml.safe_load(Path("config.yaml").read_text(encoding="utf-8"))
+    assert lab["exploit"]["permission"] == "full_access"
+    # Documented divergence, not drift: the lab file ships opencode_go while
+    # the code default stays ollama (see docs/providers.md).
+    assert lab["models"]["provider"] == "opencode_go"
+    assert lab["models"]["registry"]["glm"] == CONFIG_SCHEMA["models"]["registry"]["glm"]
+    assert lab["models"]["registry"]["glm3"] == CONFIG_SCHEMA["models"]["registry"]["glm3"]
+
+    assert get_ai_provider({}) == "ollama"
+    assert get_ai_provider(None) == "ollama"
+    assert get_ai_provider({"models": {"provider": "opencode_go"}}) == "opencode_go"
+    assert _resolve_exploit_permission({}) == ExploitPermission.READ_ONLY
+    assert _resolve_exploit_permission({"permission": "bogus"}) == ExploitPermission.READ_ONLY
+    assert _resolve_exploit_permission({"permission": "full_access"}) == ExploitPermission.FULL_ACCESS
