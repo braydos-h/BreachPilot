@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from tools import nmap_priv
+from tools.sandbox.models import SandboxConfig as _SandboxConfig  # pure data; no Docker import, no cycle
 
 
 def _check_python() -> dict[str, Any]:
@@ -604,7 +605,7 @@ def _check_sandbox(config: dict[str, Any] | None = None) -> dict[str, Any]:
     informational pass with a note (legacy host-execution mode).
     """
     sandbox_cfg = (config or {}).get("sandbox", {}) or {}
-    enabled = bool(sandbox_cfg.get("enabled", False))
+    enabled = bool(_SandboxConfig.from_config(config).enabled)
     image = str(sandbox_cfg.get("image", "breachpilot-sandbox:latest") or "breachpilot-sandbox:latest")
     result: dict[str, Any] = {"name": "sandbox", "enabled": enabled, "image": image}
     if not enabled:
@@ -683,8 +684,7 @@ def _check_browser(config: dict[str, Any] | None = None) -> dict[str, Any]:
         {"name": "playwright_sdk", "ok": sdk_ok},
         {"name": "chromium_runtime", "ok": chromium_ok},
     ]
-    sandbox_cfg = (config or {}).get("sandbox", {}) or {}
-    sandbox_enabled = bool(sandbox_cfg.get("enabled", False))
+    sandbox_enabled = bool(_SandboxConfig.from_config(config).enabled)
     worker_image: str | None = None
     worker_ok: bool | None = None
     if sandbox_enabled:

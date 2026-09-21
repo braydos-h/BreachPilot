@@ -311,6 +311,11 @@ class EnhancedReportGenerator:
             evidence_store=evidence_store,
             outcome_assessments=outcome_assessments,
         )
+        # HITL gate: only human-APPROVED findings reach any output (JSON/MD/HTML).
+        # The pending count is threaded explicitly into the renderers: they
+        # re-filter defensively, and re-filtering this same (already filtered)
+        # dict would yield 0 and drop the banner.
+        pending = apply_hitl_filter(report_data)
 
         paths: dict[str, Path] = {}
 
@@ -322,14 +327,14 @@ class EnhancedReportGenerator:
 
         if output_format in ("markdown", "both", "all"):
             md_path = self._reports_dir / f"report_{self._mission_id}_{self._now()}.md"
-            md_content = self._generate_markdown(report_data)
+            md_content = self._generate_markdown(report_data, pending_count=pending)
             md_path.write_text(md_content, encoding="utf-8")
             paths["markdown"] = md_path
             logger.info(f"Markdown report saved to {md_path}")
 
         if output_format in ("html", "all"):
             html_path = self._reports_dir / f"report_{self._mission_id}_{self._now()}.html"
-            html_content = self._generate_html(report_data)
+            html_content = self._generate_html(report_data, pending_count=pending)
             html_path.write_text(html_content, encoding="utf-8")
             paths["html"] = html_path
             logger.info(f"HTML report saved to {html_path}")
@@ -884,8 +889,15 @@ class EnhancedReportGenerator:
             steps = [f"Execute {exploit} against the target and capture tool output."]
         return steps[:10]
 
-    def _generate_markdown(self, report_data: dict[str, Any]) -> str:
+    def _generate_markdown(self, report_data: dict[str, Any], *, pending_count: int | None = None) -> str:
         """Generate full markdown report from structured data."""
+        # HITL gate (also covers the hitl/verify/retest sibling-refresh path,
+        # which calls this renderer directly with stored JSON). The banner
+        # count is computed fresh here unless the caller passes the count from
+        # its own filter pass (generate_full_report filters once for the JSON
+        # write; re-filtering the same dict would yield 0).
+        fresh_pending = apply_hitl_filter(report_data)
+        pending = fresh_pending if pending_count is None else pending_count
         lines = [
             "# Red Team Assessment Report",
             "",
@@ -916,7 +928,7 @@ class EnhancedReportGenerator:
         lines.append("")
 
         # Technical Findings
-        lines.append(self._generate_findings_md(report_data["technical_findings"]))
+        lines.append(self._generate_findings_md(report_data["technical_findings"], pending_count=pending))
         lines.append("")
         lines.append("---")
         lines.append("")
@@ -929,13 +941,18 @@ class EnhancedReportGenerator:
 
     # ── HTML rendering ────────────────────────────────────────────────────
 
-    def _generate_html(self, report_data: dict[str, Any]) -> str:
+    def _generate_html(self, report_data: dict[str, Any], *, pending_count: int | None = None) -> str:
         """Generate a self-contained HTML report (inline CSS, no externals).
 
         All user-controlled strings (target IPs, exploit names, summaries,
         remediation text) are HTML-escaped. Empty sections are omitted.
         """
-        meta = report_data.get("report_metadata", {})
+        # HITL gate (also covers the hitl/verify/retest sibling-refresh path,
+        # which calls this renderer directly with stored JSON) — see
+        # _generate_markdown for the pending-count contract.
+        fresh_pending = apply_hitl_filter(report_data)
+        pending = fresh_pending if pending_count is None else pending_count
+        meta = report_data.get("report_metadata", {}) if isinstance(report_data, dict) else {}
         parts: list[str] = [
             "<!DOCTYPE html>",
             "<html lang='en'>",
@@ -974,9 +991,9 @@ class EnhancedReportGenerator:
         if chains:
             parts.append(self._generate_chains_html(chains))
 
-        findings = report_data.get("technical_findings", [])
-        if findings:
-            parts.append(self._generate_findings_html(findings))
+        findings = report_data.get("technical_findings", []) if isinstance(report_data, dict) else []
+        if findings or pending:
+            parts.append(self._generate_findings_html(findings, pending_count=pending))
 
         failures = report_data.get("failure_analysis", [])
         if failures:
@@ -1037,8 +1054,15 @@ class EnhancedReportGenerator:
         sections.append("</section>")
         return "".join(sections)
 
-    def _generate_findings_html(self, findings: list[dict]) -> str:
+    def _generate_findings_html(self, findings: list[dict], *, pending_count: int = 0) -> str:
         sections: list[str] = ["<section class='section'>", "<h2>Technical Findings</h2>"]
+        # Defensive: direct callers may pass unfiltered lists.
+        findings = approved_findings(findings) if isinstance(findings, list) else []
+        if pending_count > 0:
+            sections.append(
+                f"<p class='pending-banner'>{_esc(pending_count)} finding(s) awaiting human review "
+                "— hidden until approved.</p>"
+            )
         for finding in findings:
             cvss = finding.get("cvss", {}) or {}
             sections.append("<article class='finding'>")
@@ -1140,8 +1164,13 @@ class EnhancedReportGenerator:
             lines.append("")
         return "\n".join(lines)
 
-    def _generate_findings_md(self, findings: list[dict]) -> str:
+    def _generate_findings_md(self, findings: list[dict], *, pending_count: int = 0) -> str:
         lines = ["# Technical Findings", ""]
+        # Defensive: direct callers may pass unfiltered lists.
+        findings = approved_findings(findings) if isinstance(findings, list) else []
+        if pending_count > 0:
+            lines.append(f"> {pending_count} finding(s) awaiting human review — hidden until approved.")
+            lines.append("")
         if not findings:
             lines.append("No findings to report.")
             return "\n".join(lines)
@@ -1381,21 +1410,59 @@ def _sev_class(severity: str) -> str:
 
 
 def approved_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return only human-APPROVED findings (the HITL final-report filter).
+    """Return only reportable findings (the HITL final-report filter).
 
-    Agents propose candidates (``hitl_status=PROPOSED``); a human Approves /
-    Rejects them via the WebUI Evidence tab or ``hitl_decide``. Only
-    ``APPROVED`` findings surface in the final report — PROPOSED, REJECTED,
-    and undecided (missing status) findings are hidden. Never raises: a
+    Gated on the canonical lifecycle state (:func:`current_state`), not raw
+    status keys: only ``APPROVED`` / ``VERIFIED`` / ``STILL_OPEN`` surface.
+    ``PROPOSED`` / ``HOLDING`` / ``INCONCLUSIVE`` candidates stay hidden until
+    decided/proved, and terminal ``REJECTED`` / ``FIXED`` never surface (a
+    rejected candidate or a closed hole is not a finding). Never raises: a
     non-list input yields ``[]`` and non-dict rows are skipped.
     """
+    from tools.kernel.finding_lifecycle import APPROVED as _L_APPROVED
+    from tools.kernel.finding_lifecycle import STILL_OPEN as _L_STILL_OPEN
+    from tools.kernel.finding_lifecycle import VERIFIED as _L_VERIFIED
+    from tools.kernel.finding_lifecycle import current_state as _lifecycle_state
+
     if not isinstance(findings, list):
         return []
     return [
         item
         for item in findings
-        if isinstance(item, dict) and str(item.get("hitl_status") or "").strip().upper() == "APPROVED"
+        if isinstance(item, dict) and _lifecycle_state(item) in (_L_APPROVED, _L_VERIFIED, _L_STILL_OPEN)
     ]
+
+
+def apply_hitl_filter(report_data: dict[str, Any]) -> int:
+    """Filter ``report_data["technical_findings"]`` to APPROVED-only, in place.
+
+    The single chokepoint every render path funnels through: ``generate_full_report``
+    (JSON write), ``_generate_markdown`` / ``_generate_html`` (md/html writes AND
+    the hitl/verify/retest sibling-refresh path, which calls the renderers
+    directly). Returns the pending count (filtered-out items) and stashes it as
+    ``report_metadata["hitl_pending_count"]`` for JSON consumers. Content-wise
+    idempotent (re-filtering keeps the same list); the RETURNED count is only
+    fresh on the first pass over unfiltered data — callers that filter and then
+    render the same dict must thread the count explicitly (see the
+    ``pending_count`` params) instead of relying on a second call.
+    Fail-open: non-dict input or missing/non-list findings yield 0, never raise.
+    """
+    try:
+        if not isinstance(report_data, dict):
+            return 0
+        findings = report_data.get("technical_findings", [])
+        if not isinstance(findings, list):
+            report_data["technical_findings"] = []
+            return 0
+        kept = approved_findings(findings)
+        pending = len(findings) - len(kept)
+        report_data["technical_findings"] = kept
+        meta = report_data.get("report_metadata")
+        if isinstance(meta, dict):
+            meta["hitl_pending_count"] = pending
+        return pending
+    except Exception:  # noqa: BLE001 -- report filter must never break rendering
+        return 0
 
 
 def _confidence_from_verdict(verdict: str | None) -> float:

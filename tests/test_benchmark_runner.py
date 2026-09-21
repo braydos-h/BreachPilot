@@ -33,10 +33,14 @@ def _scenario(scenario_id: str = "s1", *, oracle_flags: list[dict] | None = None
 
 
 def _config(tmp_path: Path, **bm) -> dict[str, Any]:
+    # Explicit host-mode fixture: these tests exercise the runner/verifier,
+    # not containment, so they opt out of the sandbox the loud way (absent
+    # section now resolves to contained defaults -- see BP-02).
     return {
         "benchmark": {"output_dir": str(tmp_path / "bench"), "sandbox_required": False, **bm},
         "models": {"default_alias": "glm"},
         "mcp": {"http_port": 8001},
+        "sandbox": {"enabled": False},
     }
 
 

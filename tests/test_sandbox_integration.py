@@ -70,18 +70,32 @@ pytestmark = pytest.mark.skipif(
 
 
 def _target_ip_on(network: str) -> str:
-    """IP of the helper target container on ``network`` (empty when detached)."""
+    """IP of the helper target container on ``network`` (empty when detached).
+
+    Fail-closed: reads the address on the NAMED network only (the first
+    network in the inspect map may be a leftover bridge attachment, not the
+    sandbox bridge the firewall authorizes).
+    """
     rc, out, _err = _docker(
         "inspect",
         "-f",
-        "{{range $k, $v := .NetworkSettings.Networks}}{{$v.IPAddress}} {{end}}",
+        f"{{{{with index .NetworkSettings.Networks {network!r}}}}}{{{{.IPAddress}}}}{{{{end}}}}",
         TARGET_NAME,
     )
     if rc != 0:
         return ""
-    for entry in out.split():
-        return entry
-    return ""
+    return out.strip()
+
+
+def _tcp_reachable(host: str, port: int, timeout: float = 3.0) -> bool:
+    """True when host:port accepts TCP within timeout (no curl dependency)."""
+    import socket
+
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 def _ensure_target_container() -> None:
@@ -104,49 +118,93 @@ def _ensure_target_container() -> None:
         )
         if rc != 0:
             pytest.skip(f"cannot start integration target container: {err[:200]}")
+        # Ready-wait: http.server has no readiness signal; retry TCP connect
+        # up to 15s before any test touches it (flake source on loaded CI).
+        import time
+
+        deadline = time.monotonic() + 15.0
+        while time.monotonic() < deadline:
+            rc, out, _err = _docker("inspect", "-f", "{{.State.Running}}", TARGET_NAME)
+            if rc == 0 and out.strip() == "true":
+                tip = _target_ip_on_default()
+                if tip and _tcp_reachable(tip, 8090):
+                    return
+            time.sleep(0.5)
+        pytest.skip("integration target container did not become reachable on :8090 within 15s")
     else:
         # Reuse from a previous module run: make sure it is up.
         _docker("start", TARGET_NAME)
 
 
+def _target_ip_on_default() -> str:
+    """First IP across all attached networks (best-effort pre-attach probe)."""
+    rc, out, _err = _docker(
+        "inspect",
+        "-f",
+        "{{range $k, $v := .NetworkSettings.Networks}}{{$v.IPAddress}} {{end}}",
+        TARGET_NAME,
+    )
+    if rc != 0:
+        return ""
+    for entry in out.split():
+        return entry
+    return ""
+
+
 @pytest.fixture(scope="module")
 def it_env(tmp_path_factory) -> dict[str, Any]:
-    """One sandbox worker + one authorized helper target, shared by the module."""
+    """One sandbox worker + one authorized helper target, shared by the module.
+
+    Fail-safe teardown: the worker is destroyed and the target removed even
+    when setup skips partway (skip paths destroy before raising, so a
+    half-built module never leaks labeled resources into the next run).
+    """
     from tools.sandbox import resolve_manager
 
     ws = tmp_path_factory.mktemp("sandbox_it") / "ws"
     ws.mkdir(parents=True)
     _ensure_target_container()
 
-    config: dict[str, Any] = {
-        "exploit": {"allowed_targets": ["192.0.2.10"]},  # placeholder; real IP set below
-        "sandbox": {
-            "enabled": True,
-            "image": SANDBOX_IMAGE,
-            "resources": {"memory_mb": 1024, "cpus": 1.0, "pids": 256, "timeout_seconds": 60},
-            "network": {"allow_research_hosts": False},
-        },
-    }
-    mgr = resolve_manager(ws, config)
-    assert mgr is not None, "sandbox manager must build when enabled"
+    mgr = None
+    try:
+        config: dict[str, Any] = {
+            "exploit": {"allowed_targets": ["192.0.2.10"]},  # placeholder; real IP set below
+            "sandbox": {
+                "enabled": True,
+                "image": SANDBOX_IMAGE,
+                "resources": {"memory_mb": 1024, "cpus": 1.0, "pids": 256, "timeout_seconds": 60},
+                "network": {"allow_research_hosts": False},
+            },
+        }
+        mgr = resolve_manager(ws, config)
+        assert mgr is not None, "sandbox manager must build when enabled"
 
-    # Bring the worker up once, attach the helper target to ITS network, then
-    # authorize the target's concrete IP (worker + target share a bridge, so
-    # Docker inter-network isolation never confounds the firewall results).
-    mgr.execute("true", timeout=30)
-    rc, _o, err = _docker("network", "connect", mgr.network_name, TARGET_NAME)
-    if rc != 0:
-        mgr.destroy()
-        pytest.skip(f"cannot attach target container: {err[:200]}")
-    target_ip = _target_ip_on(mgr.network_name)
-    if not target_ip:
-        mgr.destroy()
-        pytest.skip("target container has no IP on the sandbox network")
-    mgr.config_dict["exploit"]["allowed_targets"] = [target_ip]
+        # Bring the worker up once, attach the helper target to ITS network, then
+        # authorize the target's concrete IP (worker + target share a bridge, so
+        # Docker inter-network isolation never confounds the firewall results).
+        mgr.execute("true", timeout=30)
+        rc, _o, err = _docker("network", "connect", mgr.network_name, TARGET_NAME)
+        if rc != 0:
+            pytest.skip(f"cannot attach target container: {err[:200]}")
+        target_ip = _target_ip_on(mgr.network_name)
+        if not target_ip:
+            pytest.skip("target container has no IP on the sandbox network")
+        mgr.config_dict["exploit"]["allowed_targets"] = [target_ip]
+    except Exception:
+        if mgr is not None:
+            mgr.destroy()
+        _docker("rm", "-f", TARGET_NAME)
+        raise
 
-    yield {"mgr": mgr, "target_ip": target_ip, "ws": ws}
-    mgr.destroy()
-    _docker("rm", "-f", TARGET_NAME)
+    try:
+        yield {"mgr": mgr, "target_ip": target_ip, "ws": ws}
+    finally:
+        try:
+            _docker("network", "disconnect", "-f", mgr.network_name, TARGET_NAME)
+        except Exception:  # noqa: BLE001 -- teardown best-effort
+            pass
+        mgr.destroy()
+        _docker("rm", "-f", TARGET_NAME)
 
 
 def _run(it_env: dict, command: str, timeout: int = 40) -> Any:
@@ -296,16 +354,37 @@ class TestCleanup:
         rc, _o2, _e2 = _docker("network", "inspect", network)
         assert rc != 0, "worker network must be gone after destroy"
 
-    def test_no_stale_labeled_resources_after_module(self, it_env):
-        # The module fixture destroyed its manager; nothing labeled with this
-        # run_id may remain.
+    def test_no_stale_labeled_resources_after_module(self, tmp_path):
+        # Function-scope manager, destroyed via yield-finally: assert AFTER
+        # destroy (the module it_env worker is still alive at this point, so
+        # asserting against the module run_id would always fail).
+        from tools.sandbox import resolve_manager
+
+        ws = tmp_path / "ws_stale"
+        ws.mkdir()
+        config: dict[str, Any] = {
+            "exploit": {"allowed_targets": ["192.0.2.10"]},
+            "sandbox": {
+                "enabled": True,
+                "image": SANDBOX_IMAGE,
+                "resources": {"memory_mb": 1024, "cpus": 1.0, "pids": 256, "timeout_seconds": 60},
+                "network": {"allow_research_hosts": False},
+            },
+        }
+        mgr = resolve_manager(ws, config)
+        assert mgr is not None
+        try:
+            mgr.execute("true", timeout=60)
+            run_id = mgr.run_id
+        finally:
+            mgr.destroy()
         rc, out, _e = _docker(
             "ps",
             "-a",
             "--filter",
             "label=breachpilot=true",
             "--filter",
-            f"label=run_id={it_env['mgr'].run_id}",
+            f"label=run_id={run_id}",
             "--format",
             "{{.Names}}",
         )

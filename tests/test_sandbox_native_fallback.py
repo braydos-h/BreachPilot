@@ -85,9 +85,24 @@ def test_fallback_native_explicit_true() -> None:
     assert cfg.fallback_native is True
 
 
-def test_missing_sandbox_section_is_disabled_untouched() -> None:
+def test_missing_sandbox_section_is_contained() -> None:
     cfg = SandboxConfig.from_config({})
-    assert cfg.enabled is False
+    assert cfg.enabled is True
+
+
+def test_absent_section_with_fallback_never_returns_none(tmp_path: Path) -> None:
+    # BP-02: a partial config (no sandbox section) must resolve to a
+    # fail-closed manager, never to None (silent host execution).
+    manager, notice = resolve_manager_with_fallback(tmp_path, {}, probe=_probe(False, "no daemon"))
+    assert manager is not None
+    assert notice == ""
+    assert read_boot_state({})["mode"] == "blocked"
+
+
+def test_absent_section_status_report_never_disabled() -> None:
+    report = status_report({})
+    assert report["enabled"] is True
+    assert report["mode"] == "blocked"
 
 
 # --------------------------------------------- resolve_manager_with_fallback

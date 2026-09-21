@@ -61,14 +61,71 @@ def _ip_version(token: str) -> int | None:
         return None
 
 
+# The single hook that makes the ruleset effective: without this jump,
+# packets traverse OUTPUT's default ACCEPT and never see NAI-OUTPUT.
+_OUTPUT_JUMP = "-A OUTPUT -j NAI-OUTPUT"
+
+# Docker's embedded resolver (the ONLY resolver the worker may use in
+# "controlled" mode). :53 ACCEPTs are scoped to this destination; every other
+# :53 is REJECTed — including via loopback, so a rogue in-worker resolver on
+# 127.0.0.1:53 or direct 8.8.8.8:53 gains nothing.
+_EMBEDDED_RESOLVER = "127.0.0.11"
+
+
 def _accept_rule(destination: str) -> str:
     return f"-A NAI-OUTPUT -d {destination} -j ACCEPT"
+
+
+def _effective_dns(policy: NetworkPolicy) -> str:
+    """Effective DNS posture for the :53 rules.
+
+    ``controlled`` with ZERO authorized names (no resolved domains — IP-only
+    allowlists, no research hosts) degrades to ``none``: DNS would only serve
+    names the worker cannot talk to, so fail closed instead of leaving a
+    DNS-protocol exfil/oracle path open for no authorized purpose.
+    """
+    if policy.allow_dns == "controlled" and not policy.resolved_domains and not policy.resolved_domain_addresses:
+        return "none"
+    return policy.allow_dns
+
+
+def _dns_v4_rules(policy: NetworkPolicy) -> list[str]:
+    """Port-53 rules for the v4 chain. MUST precede the blanket lo ACCEPT
+    (iptables first-match-wins: a later :53 REJECT would be shadowed)."""
+    if _effective_dns(policy) == "none":
+        # No DNS bypass: block resolver ports everywhere, loopback included.
+        return [
+            "-A NAI-OUTPUT -p udp --dport 53 -j REJECT",
+            "-A NAI-OUTPUT -p tcp --dport 53 -j REJECT",
+        ]
+    # controlled: the embedded resolver ONLY (udp+tcp); everything else :53
+    # is rejected, loopback-bypass included.
+    return [
+        f"-A NAI-OUTPUT -d {_EMBEDDED_RESOLVER} -p udp --dport 53 -j ACCEPT",
+        f"-A NAI-OUTPUT -d {_EMBEDDED_RESOLVER} -p tcp --dport 53 -j ACCEPT",
+        "-A NAI-OUTPUT -p udp --dport 53 -j REJECT",
+        "-A NAI-OUTPUT -p tcp --dport 53 -j REJECT",
+    ]
+
+
+def _dns_v6_rules(policy: NetworkPolicy) -> list[str]:
+    """Port-53 rules for the v6 chain. The embedded resolver is IPv4-only, so
+    v6 :53 is rejected in every mode (no legitimate v6 DNS path exists)."""
+    return [
+        "-A NAI-OUTPUT -p udp --dport 53 -j REJECT",
+        "-A NAI-OUTPUT -p tcp --dport 53 -j REJECT",
+    ]
 
 
 def build_ipv4_rules(policy: NetworkPolicy, *, gateway: str = "") -> list[str]:
     """iptables-restore lines for the worker netns (IPv4).
 
     Semantics:
+    - OUTPUT jumps to NAI-OUTPUT (the ONLY OUTPUT rule emitted; the chain
+      would otherwise never evaluate and egress would fall through to the
+      default ACCEPT policy)
+    - port-53 rules FIRST (scoped resolver ACCEPT / blanket REJECT precede the
+      lo ACCEPT, which would otherwise shadow them — first-match-wins)
     - loopback ACCEPT: sandbox-internal 127.0.0.1 (NOT operator-host 127.0.0.1;
       dev host-loopback mapping is an explicit config decision in policy.py)
     - ESTABLISHED/RELATED ACCEPT (replies to authorized connections)
@@ -79,6 +136,8 @@ def build_ipv4_rules(policy: NetworkPolicy, *, gateway: str = "") -> list[str]:
     lines = [
         "*filter",
         ":NAI-OUTPUT - [0:0]",
+        _OUTPUT_JUMP,
+        *_dns_v4_rules(policy),
         "-A NAI-OUTPUT -o lo -j ACCEPT",
         "-A NAI-OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT",
     ]
@@ -91,11 +150,6 @@ def build_ipv4_rules(policy: NetworkPolicy, *, gateway: str = "") -> list[str]:
         # and to the Docker daemon). The rest of the bridge subnet is handled
         # by the terminating default-DROP.
         lines.append(f"-A NAI-OUTPUT -d {gateway} -j DROP")
-    if policy.allow_dns == "none":
-        # No DNS bypass: block resolver ports everywhere, loopback included.
-        lines.append("-A NAI-OUTPUT -o lo -p udp --dport 53 -j REJECT")
-        lines.append("-A NAI-OUTPUT -p udp --dport 53 -j REJECT")
-        lines.append("-A NAI-OUTPUT -p tcp --dport 53 -j REJECT")
     # RFC1918 is NOT blanket-blocked: lab targets are usually RFC1918, so the
     # authorization set (which may contain private CIDRs) is the boundary.
     # Family-filtered: an IPv6 authorized destination must never reach
@@ -114,11 +168,14 @@ def build_ipv6_rules(policy: NetworkPolicy, *, gateway: str = "") -> list[str]:
     """ip6tables-restore lines: loopback + established only, then DROP.
 
     IPv6 egress stays denied unless an explicitly authorized destination is an
-    IPv6 address/CIDR (those get ACCEPT plumbed through here).
+    IPv6 address/CIDR (those get ACCEPT plumbed through here). v6 :53 is
+    always REJECTed (the embedded resolver is IPv4-only).
     """
     lines = [
         "*filter",
         ":NAI-OUTPUT - [0:0]",
+        _OUTPUT_JUMP,
+        *_dns_v6_rules(policy),
         "-A NAI-OUTPUT -o lo -j ACCEPT",
         "-A NAI-OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT",
     ]
@@ -135,6 +192,12 @@ def build_ipv6_rules(policy: NetworkPolicy, *, gateway: str = "") -> list[str]:
 
 
 def build_firewall_ruleset(policy: NetworkPolicy, *, gateway: str = "") -> str:
+    """IPv4-only convenience wrapper (feeds ``iptables-restore``).
+
+    IPv6 coverage is NOT included here -- apply ``build_ipv6_rules`` via
+    ``ip6tables-restore`` (as ``apply_network_policy`` does). Callers that
+    install only this string leave v6 egress unfiltered.
+    """
     return "\n".join(build_ipv4_rules(policy, gateway=gateway)) + "\n"
 
 

@@ -1,7 +1,8 @@
 """Unit tests for sandbox configuration parsing (tools/sandbox/models.py).
 
 Security invariants covered:
-- Missing ``sandbox`` section => sandbox DISABLED (explicit legacy host mode).
+- Missing ``sandbox`` section => CONTAINED defaults (never silent host mode;
+  only explicit ``enabled: false`` opts out).
 - Present-but-partial section => fail-closed defaults (enforce, fail_closed,
   read_only_rootfs), never silently uncontained.
 - Garbage values fall back to safe defaults instead of crashing.
@@ -14,14 +15,17 @@ from tools.sandbox.models import SandboxConfig
 
 
 class TestSandboxConfigFromConfig:
-    def test_missing_section_means_disabled(self):
+    def test_missing_section_means_contained(self):
         cfg = SandboxConfig.from_config({})
-        assert cfg.enabled is False
+        assert cfg.enabled is True
         assert cfg.network_enforce is True  # defaults stay fail-closed
         assert cfg.network_fail_closed is True
 
-    def test_none_config_means_disabled(self):
-        assert SandboxConfig.from_config(None).enabled is False
+    def test_none_config_means_contained(self):
+        assert SandboxConfig.from_config(None).enabled is True
+
+    def test_explicit_disabled_stays_disabled(self):
+        assert SandboxConfig.from_config({"sandbox": {"enabled": False}}).enabled is False
 
     def test_enabled_section_parses(self):
         cfg = SandboxConfig.from_config(
@@ -88,8 +92,8 @@ class TestSandboxConfigFromConfig:
                 }
             }
         )
-        # bool garbage -> default (False for enabled via _as_bool default False)
-        assert cfg.enabled is False
+        # bool garbage -> default (True for enabled: contained defaults)
+        assert cfg.enabled is True
         assert cfg.memory_mb == 4096
         assert cfg.cpus == 2.0
         # pids below minimum falls back to the default, never 0/negative

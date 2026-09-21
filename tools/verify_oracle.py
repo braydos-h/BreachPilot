@@ -36,11 +36,12 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from tools.exploit_agent.outcome_truth import ExploitOutcome, classify_exploit_outcome
-from tools.mcp_tools.retest import _INCONCLUSIVE_MARKERS
 
-VERIFIED = "VERIFIED"
-HOLDING = "HOLDING"
-INCONCLUSIVE = "INCONCLUSIVE"
+# Canonical lifecycle vocabulary (single definition in
+# tools.kernel.finding_lifecycle; re-exported here so engine-internal and
+# test ``from tools.verify_oracle import VERIFIED`` paths keep working).
+from tools.kernel.finding_lifecycle import HOLDING, INCONCLUSIVE, VERIFIED
+from tools.mcp_tools.retest import _INCONCLUSIVE_MARKERS
 
 VERIFY_VERDICTS = frozenset({VERIFIED, HOLDING, INCONCLUSIVE})
 

@@ -164,10 +164,15 @@ def test_no_registration_when_disabled(tmp_path):
 
 def test_no_registration_when_runtime_unavailable(tmp_path, monkeypatch):
     """SDK absent + sandbox disabled: declared but not runnable registers nothing."""
+    import copy
+
     from tools.browser import playwright_backend as _mod
 
     monkeypatch.setattr(_mod, "playwright_present", lambda: False)
-    mcp, _ctx = _register(ALLOW_CONFIG, tmp_path)
+    # Explicit host-mode fixture: absent section now means contained (BP-02).
+    config = copy.deepcopy(ALLOW_CONFIG)
+    config["sandbox"] = {"enabled": False}
+    mcp, _ctx = _register(config, tmp_path)
     assert mcp.tools == {}
 
 

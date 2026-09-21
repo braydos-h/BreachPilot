@@ -46,9 +46,10 @@ from tools.mcp_tools.retest import (
     locate_finding,
 )
 
-PROPOSED = "PROPOSED"
-APPROVED = "APPROVED"
-REJECTED = "REJECTED"
+# Canonical lifecycle vocabulary (single definition in
+# tools.kernel.finding_lifecycle; re-exported here so existing
+# ``from tools.mcp_tools.hitl import APPROVED`` paths keep working).
+from tools.kernel.finding_lifecycle import APPROVED, PROPOSED, REJECTED
 
 HITL_STATUSES = frozenset({PROPOSED, APPROVED, REJECTED})
 HITL_DECISIONS = frozenset({APPROVED, REJECTED})
@@ -78,13 +79,21 @@ def record_hitl_decision(
     Only ``actor == "human"`` may decide — any other actor (``""``,
     ``"agent"``, ``"llm"``, …) raises ``PermissionError`` so an LLM can
     never self-approve its own proposal. Unknown decisions raise
-    ``ValueError``.
+    ``ValueError``. The step is validated against the canonical lifecycle
+    (:func:`check_transition` with actor ``"human"``): terminal ``REJECTED``
+    / ``FIXED`` findings accept no new decision, and a ``VERIFIED`` finding
+    cannot be un-approved — these raise ``ValueError``. An idempotent
+    re-stamp (same verdict as current) falls through without a transition.
     """
     verdict = (decision or "").strip().upper()
     if verdict not in HITL_DECISIONS:
         raise ValueError(f"unknown HITL decision {decision!r} (want APPROVED|REJECTED)")
     if (actor or "").strip().lower() != _HUMAN_ACTOR:
         raise PermissionError("HITL decisions require actor='human' (operator-only; agents cannot self-approve)")
+    from tools.kernel.finding_lifecycle import check_transition, current_state
+
+    if current_state(finding) != verdict:
+        check_transition(current_state(finding), verdict, "human")
     finding["hitl_status"] = verdict
     history = finding.get("hitl_history")
     if not isinstance(history, list):

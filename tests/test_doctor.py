@@ -282,6 +282,8 @@ mcp:
   http_port: 8001
 exploit:
   permission: read_only
+sandbox:
+  enabled: false
 research:
   workspace_dir: research_workspace
 """,
@@ -329,6 +331,8 @@ mcp:
   http_port: 8001
 exploit:
   permission: read_only
+sandbox:
+  enabled: false
 research:
   workspace_dir: research_workspace
 """,
@@ -376,6 +380,8 @@ mcp:
   http_port: 8001
 exploit:
   permission: read_only
+sandbox:
+  enabled: false
 research:
   workspace_dir: research_workspace
 """,

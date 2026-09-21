@@ -42,7 +42,9 @@ def test_browser_playwright_ready_when_sdk_and_chromium(monkeypatch):
 
     monkeypatch.setattr(_probe, "playwright_present", lambda: True)
     monkeypatch.setattr(_probe, "chromium_present", lambda **kwargs: True)
-    check = _check_browser({"browser": {"enabled": True, "backend": "playwright"}})
+    # Explicit host-mode fixture: absent section now means contained (BP-02),
+    # which would append a (failing, unmocked-Docker) worker subcheck.
+    check = _check_browser({"browser": {"enabled": True, "backend": "playwright"}, "sandbox": {"enabled": False}})
     assert check["ok"] is True
     assert all(s["ok"] for s in check["subchecks"])
 

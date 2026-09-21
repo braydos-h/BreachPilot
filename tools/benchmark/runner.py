@@ -51,6 +51,7 @@ from tools.benchmark.storage import BenchmarkStorage
 from tools.benchmark.targets import TargetManager, TargetProvisionError
 from tools.benchmark.verifier import IndependentVerifier
 from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
+from tools.sandbox.models import SandboxConfig as _SandboxConfig  # pure data; no Docker import, no cycle
 
 __all__ = ["BenchmarkRunner", "mint_run_id"]
 
@@ -141,8 +142,7 @@ class BenchmarkRunner:
     ) -> dict[str, Any]:
         """Execute the configured suite. Returns a serializable run payload."""
         benchmark_cfg = self.config.get("benchmark", {}) or {}
-        sandbox_cfg = self.config.get("sandbox", {}) or {}
-        sandbox_enabled = bool(sandbox_cfg.get("enabled", False))
+        sandbox_enabled = bool(_SandboxConfig.from_config(self.config).enabled)
         sandbox_required = bool(run_config.sandbox_required)
 
         provider = get_provider(run_config.suite)
@@ -441,7 +441,7 @@ class BenchmarkRunner:
         # construction unless the dev-lab mapping is opted in. Fail fast as
         # INFRASTRUCTURE_ERROR instead of burning the mission budget on 50
         # doomed recon rounds against container-lo.
-        _sandbox_enabled = bool((self.config.get("sandbox") or {}).get("enabled", False))
+        _sandbox_enabled = bool(_SandboxConfig.from_config(self.config).enabled)
         if (
             _is_loopback_host(snapshot.host)
             and not sandbox_shortfall

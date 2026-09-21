@@ -40,11 +40,12 @@ from typing import Any
 
 from tools.enhanced_reporting import EnhancedReportGenerator
 from tools.exploit_agent.outcome_truth import ExploitOutcome, classify_exploit_outcome
-from tools.mcp_tools.registry import ToolContext
 
-STILL_OPEN = "STILL_OPEN"
-FIXED = "FIXED"
-INCONCLUSIVE = "INCONCLUSIVE"
+# Canonical lifecycle vocabulary (single definition in
+# tools.kernel.finding_lifecycle; re-exported here so existing
+# ``from tools.mcp_tools.retest import FIXED`` paths keep working).
+from tools.kernel.finding_lifecycle import FIXED, INCONCLUSIVE, STILL_OPEN
+from tools.mcp_tools.registry import ToolContext
 
 RETEST_VERDICTS = frozenset({STILL_OPEN, FIXED, INCONCLUSIVE})
 
@@ -179,9 +180,25 @@ def record_retest(
     *,
     now: str = "",
 ) -> dict[str, Any]:
-    """Stamp ``retest_status`` + append ``retest_history[]`` (mutates, returns finding)."""
+    """Stamp ``retest_status`` + append ``retest_history[]`` (mutates, returns finding).
+
+    The step is validated against the canonical lifecycle
+    (:func:`check_transition` with actor ``"retest"``): only ``VERIFIED``
+    findings open a retest (``-> STILL_OPEN`` / ``FIXED``) and only
+    ``STILL_OPEN`` findings close to ``FIXED`` — retesting a ``REJECTED`` /
+    ``FIXED`` / ``PROPOSED`` finding raises ``ValueError`` (a retest can
+    never revive a terminal state or skip verification). An idempotent
+    re-stamp (same verdict as current) falls through without a transition.
+    ``INCONCLUSIVE`` never transitions (it records an attempt, not a state
+    change) so it stamps from any state, terminal included.
+    """
     if verdict not in RETEST_VERDICTS:
         raise ValueError(f"unknown retest verdict {verdict!r}")
+    from tools.kernel.finding_lifecycle import INCONCLUSIVE as _L_INCONCLUSIVE
+    from tools.kernel.finding_lifecycle import check_transition, current_state
+
+    if verdict != _L_INCONCLUSIVE and current_state(finding) != verdict:
+        check_transition(current_state(finding), verdict, "retest")
     finding["retest_status"] = verdict
     history = finding.get("retest_history")
     if not isinstance(history, list):

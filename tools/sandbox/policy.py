@@ -185,9 +185,11 @@ def build_network_policy(
                 unresolved.append(f"{host} (unresolved at policy build)")
 
     # Controlled DNS: docker's embedded resolver listens on the container's
-    # loopback (127.0.0.11); loopback ACCEPT covers it. In "none" mode
-    # network.py adds explicit REJECT rules for port 53 (incl. lo) so no DNS
-    # bypass exists.
+    # loopback (127.0.0.11). network.py ACCEPTs :53 ONLY to 127.0.0.11 and
+    # REJECTs every other :53 (direct 8.8.8.8:53, rogue lo resolvers) — the
+    # rules precede the blanket lo ACCEPT so first-match-wins cannot shadow
+    # them. With zero authorized names, controlled degrades to none (fail
+    # closed: DNS would only serve names the worker cannot talk to).
     dns_servers = ["127.0.0.11"] if allow_dns == "controlled" else []
 
     return NetworkPolicy(
@@ -422,6 +424,11 @@ def audit_policy_payload(policy: NetworkPolicy) -> dict[str, Any]:
         "allow_dns": policy.allow_dns,
         "resolved_domains": dict(policy.resolved_domains),
         "resolved_domain_addresses": {k: list(v) for k, v in policy.resolved_domain_addresses.items()},
+        # Explicit DNS name allow/deny lists: allowed = authorized names (the
+        # only names the worker has any purpose resolving); denied = tokens
+        # that authorized nothing (unresolvable, wildcards, unknown shapes).
+        "allowed_dns_names": sorted(policy.resolved_domains),
+        "denied_dns_names": sorted({t for t in policy.unresolved_targets if isinstance(t, str)}),
         "discovered_provenance": snapshot(),
         "unresolved_targets": list(policy.unresolved_targets),
         "enforced": policy.enforced,

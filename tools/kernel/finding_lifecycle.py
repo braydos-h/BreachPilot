@@ -38,6 +38,7 @@ __all__ = [
     "FindingTransition",
     "allowed_transitions",
     "check_transition",
+    "current_state",
 ]
 
 LIFECYCLE_VERSION = 1
@@ -52,6 +53,10 @@ STILL_OPEN = "STILL_OPEN"
 FIXED = "FIXED"
 
 #: State -> {next_state: authorized actor}. Actors: agent, human, oracle, retest.
+# VERIFIED carries human review edges: the oracle fast-path (PROPOSED ->
+# VERIFIED) would otherwise strand the finding — machine-proved but never
+# human-approved for the report and never rejectable. A human blessing or
+# killing machine proof is the core HITL purpose, so both edges are human.
 _TRANSITIONS: dict[str, dict[str, str]] = {
     PROPOSED: {
         APPROVED: "human",
@@ -63,7 +68,7 @@ _TRANSITIONS: dict[str, dict[str, str]] = {
     APPROVED: {VERIFIED: "oracle", HOLDING: "oracle", INCONCLUSIVE: "oracle", REJECTED: "human"},
     HOLDING: {VERIFIED: "oracle", INCONCLUSIVE: "oracle", REJECTED: "human"},
     INCONCLUSIVE: {VERIFIED: "oracle", HOLDING: "oracle", REJECTED: "human"},
-    VERIFIED: {STILL_OPEN: "retest", FIXED: "retest"},
+    VERIFIED: {STILL_OPEN: "retest", FIXED: "retest", APPROVED: "human", REJECTED: "human"},
     STILL_OPEN: {FIXED: "retest"},
     REJECTED: {},
     FIXED: {},
@@ -102,3 +107,38 @@ def check_transition(from_state: str, to_state: str, actor: str) -> FindingTrans
     if want != str(actor or ""):
         raise ValueError(f"finding transition {from_state!r} -> {to_state!r} requires actor {want!r}, got {actor!r}")
     return FindingTransition(from_state=str(from_state), to_state=str(to_state), actor=str(actor))
+
+
+def current_state(finding: dict[str, Any] | None) -> str:
+    """Resolve a finding dict to its single lifecycle state.
+
+    Precedence (terminal wins, newest evidence wins): retest ``FIXED`` >
+    hitl ``REJECTED`` > retest ``STILL_OPEN`` > verify ``VERIFIED`` /
+    ``HOLDING`` / ``INCONCLUSIVE`` > hitl ``APPROVED`` / ``PROPOSED``.
+    Verify/retest lanes count only when their history is non-empty: a fresh
+    proposal carries ``verify_status=HOLDING`` as an unset default (empty
+    history), and that default must resolve to ``PROPOSED`` — otherwise the
+    primary propose→approve flow would misroute through ``HOLDING``.
+    Missing keys, non-dict input, and unknown status strings resolve to
+    ``PROPOSED`` — an unreviewed finding IS a proposal. Never raises.
+    """
+    try:
+        data = finding if isinstance(finding, dict) else {}
+        retest = str(data.get("retest_status") or "").strip().upper()
+        hitl = str(data.get("hitl_status") or "").strip().upper()
+        verify = str(data.get("verify_status") or "").strip().upper()
+        retest_ran = isinstance(data.get("retest_history"), list) and len(data["retest_history"]) > 0
+        verify_ran = isinstance(data.get("verify_history"), list) and len(data["verify_history"]) > 0
+        if retest == FIXED and retest_ran:
+            return FIXED
+        if hitl == REJECTED:
+            return REJECTED
+        if retest == STILL_OPEN and retest_ran:
+            return STILL_OPEN
+        if verify_ran and verify in (VERIFIED, HOLDING, INCONCLUSIVE):
+            return verify
+        if hitl in (PROPOSED, APPROVED, REJECTED):
+            return hitl
+        return PROPOSED
+    except Exception:  # noqa: BLE001 -- state resolution never breaks a read path
+        return PROPOSED

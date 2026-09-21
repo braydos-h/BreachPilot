@@ -125,8 +125,12 @@ def resolve_manager_or_none(config: dict, tmp_path: Path, backend: Any = None) -
 
 
 class TestResolveManager:
-    def test_missing_section_disables(self, tmp_path):
-        assert resolve_manager(tmp_path, {}) is None
+    def test_missing_section_returns_fail_closed_manager(self, tmp_path):
+        # BP-02: absent section => contained defaults, never silent None.
+        mgr = resolve_manager(tmp_path, {})
+        assert mgr is not None
+        assert mgr.cfg.enabled is True
+        mgr.destroy()
 
     def test_enabled_false_disables(self, tmp_path):
         assert resolve_manager(tmp_path, {"sandbox": {"enabled": False}}) is None
@@ -392,8 +396,21 @@ class TestStatusReport:
         assert report["image_present"] is None
         assert report["docker_error"] == "no daemon"
 
-    def test_image_unknown_when_disabled(self):
-        report = status_report({})
+    def test_image_unknown_when_explicitly_disabled(self):
+        report = status_report({"sandbox": {"enabled": False}})
         assert report["enabled"] is False
         assert report["image_present"] is None
         assert "note" in report
+
+    def test_absent_section_never_reports_disabled(self, tmp_path, monkeypatch):
+        # BP-02: absent section => contained defaults; without Docker info
+        # the posture is blocked, never disabled. Boot state is pinned to
+        # tmp (a real session's exploit_workspace/sandbox_boot_state.json
+        # would otherwise override the live decision -- by design).
+        from tools.sandbox import manager as _mgr
+
+        monkeypatch.setattr(_mgr, "boot_state_path", lambda config=None: tmp_path / "sandbox_boot_state.json")
+        monkeypatch.setattr("tools.sandbox.docker_backend.docker_version", lambda: (False, "no daemon"))
+        report = status_report({})
+        assert report["enabled"] is True
+        assert report["mode"] == "blocked"

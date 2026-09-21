@@ -35,7 +35,11 @@ from tools.mcp_tools.retest import (
     resolve_exec,
     resolve_probe,
 )
-from tools.verify_oracle import HOLDING, INCONCLUSIVE, VERIFIED, VerifyOracle
+# Canonical lifecycle vocabulary (single definition in
+# tools.kernel.finding_lifecycle; tools.verify_oracle re-exports the same
+# names so engine-internal imports keep working).
+from tools.kernel.finding_lifecycle import HOLDING, INCONCLUSIVE, VERIFIED
+from tools.verify_oracle import VerifyOracle
 
 VERIFY_VERDICTS = frozenset({VERIFIED, HOLDING, INCONCLUSIVE})
 
@@ -52,9 +56,24 @@ def record_verify(
     now: str = "",
     proof_capsule: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Stamp ``verify_status`` + append ``verify_history[]`` (mutates, returns finding)."""
+    """Stamp ``verify_status`` + append ``verify_history[]`` (mutates, returns finding).
+
+    The step is validated against the canonical lifecycle
+    (:func:`check_transition` with actor ``"oracle"``): only ``PROPOSED`` /
+    ``APPROVED`` / ``HOLDING`` / ``INCONCLUSIVE`` findings accept an oracle
+    verdict — terminal ``REJECTED`` / ``FIXED`` and ``STILL_OPEN`` findings
+    raise ``ValueError``. An idempotent re-stamp (same verdict as the
+    finding's current lifecycle state) falls through without a transition.
+    ``INCONCLUSIVE`` never transitions (it records an attempt, not a state
+    change) so it stamps from any state, terminal included.
+    """
     if verdict not in VERIFY_VERDICTS:
         raise ValueError(f"unknown verify verdict {verdict!r}")
+    from tools.kernel.finding_lifecycle import INCONCLUSIVE as _L_INCONCLUSIVE
+    from tools.kernel.finding_lifecycle import check_transition, current_state
+
+    if verdict != _L_INCONCLUSIVE and current_state(finding) != verdict:
+        check_transition(current_state(finding), verdict, "oracle")
     finding["verify_status"] = verdict
     history = finding.get("verify_history")
     if not isinstance(history, list):

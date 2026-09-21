@@ -339,20 +339,43 @@ def test_html_report_written_and_contains_findings(generator, evidence_store, tm
         outcome_assessments={"10.0.0.5": {"hypothesis_status": "confirmed"}},
     )
     assert "html" in paths
+    # HITL gate: campaign-built findings carry no hitl_status (undecided) so
+    # the fresh report shows the awaiting-review banner with zero finding
+    # titles/details. (Timeline/chains still record attack history; only the
+    # vetted findings surface is gated.)
     html_text = paths["html"].read_text(encoding="utf-8")
+    findings_section = html_text.split("<h2>Technical Findings</h2>", 1)[1].split("</section>", 1)[0]
+    assert "eternalblue" not in findings_section
+    assert "awaiting human review" in findings_section
+    json_data = json.loads(paths["json"].read_text(encoding="utf-8"))
+    assert json_data["technical_findings"] == []
+    assert json_data["report_metadata"]["hitl_pending_count"] == 1
+
+    # Human approves the finding (the Evidence-tab flow); the
+    # sibling-refresh render path then surfaces it with evidence intact.
+    from tools.mcp_tools.hitl import record_hitl_decision
+
+    report_data = generator._build_report_data(
+        _campaign(),
+        evidence_store=evidence_store,
+        outcome_assessments={"10.0.0.5": {"hypothesis_status": "confirmed"}},
+    )
+    for finding in report_data["technical_findings"]:
+        record_hitl_decision(finding, "APPROVED", "looks real", actor="human")
+    approved_html = generator._generate_html(report_data)
     # Finding title is present and escaped-content-safe.
-    assert "eternalblue" in html_text
-    assert "10.0.0.5" in html_text
+    assert "eternalblue" in approved_html
+    assert "10.0.0.5" in approved_html
     # Confidence rendered as 95%.
-    assert "95%" in html_text
+    assert "95%" in approved_html
     # Evidence refs appear in the HTML.
     eid = evidence_store.list_for_mission(limit=50, evidence_type="structured_json")[0]["evidence_id"]
-    assert eid in html_text
+    assert eid in approved_html
     # Reproduction steps section present.
-    assert "Reproduction Steps" in html_text
+    assert "Reproduction Steps" in approved_html
     # Self-contained: inline CSS, no external stylesheet link.
-    assert "<style>" in html_text
-    assert "<link" not in html_text
+    assert "<style>" in approved_html
+    assert "<link" not in approved_html
 
 
 def test_html_escates_user_content(generator):

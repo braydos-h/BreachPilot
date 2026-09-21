@@ -107,8 +107,8 @@ class TestConfigHierarchy:
         cfg = load_effective_config()
         scfg = SandboxConfig.from_config(cfg)
         assert scfg.enabled is True
-        assert SandboxConfig.from_config({}).enabled is False
-        assert SandboxConfig.from_config(None).enabled is False
+        assert SandboxConfig.from_config({}).enabled is True
+        assert SandboxConfig.from_config(None).enabled is True
 
 
 class TestSkillDiscoveryFromCleanCwd:

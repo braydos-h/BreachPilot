@@ -58,6 +58,8 @@ jobs:
           python -m pip install -c constraints-dev.txt -e ".[dev]"
       - name: Build sandbox worker image
         run: docker build -t breachpilot-sandbox:latest docker/sandbox
+      - name: Verify sandbox worker image
+        run: docker image inspect breachpilot-sandbox:latest
       - name: Sandbox unit + integration tests (real Docker containment)
         run: |
           python -m pytest tests/test_sandbox_models.py \
@@ -67,6 +69,12 @@ jobs:
             tests/test_sandbox_manager.py \
             tests/test_sandbox_mcp_exec.py \
             tests/test_sandbox_integration.py -v
+      - name: Dump sandbox diagnostics on failure
+        if: failure()
+        run: |
+          docker ps -a --filter "label=breachpilot=true" || true
+          docker network ls --filter "label=breachpilot=true" || true
+          for c in $(docker ps -aq --filter "label=breachpilot=true"); do docker logs "$c" 2>&1 | tail -50; done || true
 
   browser:
     name: Browser integration (Playwright + Chromium)

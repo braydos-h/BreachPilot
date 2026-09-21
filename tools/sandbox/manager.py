@@ -10,8 +10,9 @@ i.e. one per attack run):
 FAIL CLOSED contract: any creation, policy, scope, or workspace failure raises
 a ``SandboxError`` subclass with a structured ``code``; the MCP tools convert
 it into a ``SANDBOX_*`` result block and never fall back to host execution.
-``resolve_manager`` returns None when the sandbox is disabled so the
-documented legacy host-execution mode stays available as the explicit opt-out.
+``resolve_manager`` returns None ONLY for the explicit native opt-out
+(``sandbox.enabled: false`` + consent env); an absent section resolves to
+contained defaults, never to silent host execution.
 
 Audit: every execution writes sandbox-context rows (container id, image,
 network-authorization decision, authorized set, exit code, duration, cleanup
@@ -153,16 +154,37 @@ def _build_manager(cfg: SandboxConfig, workspace: Path, config: dict[str, Any] |
     return SandboxManager(cfg, workspace, config_dict=config, backend=_db.DockerBackend(cap_raw=cfg.multi_net_raw))
 
 
-def resolve_manager(workspace: Path, config: dict[str, Any] | None) -> SandboxManager | None:
-    """Build a SandboxManager from config; returns None when the sandbox is disabled.
+def _sandbox_explicitly_disabled(config: dict[str, Any] | None) -> bool:
+    """True ONLY when the operator explicitly opted out (``enabled: false``).
 
-    A MISSING ``sandbox`` section (tests, partial config dicts) means disabled =>
-    documented legacy host-execution mode. A PRESENT-but-broken section returns
-    a manager that fail-closes at execution time -- it never silently upgrades
-    to host execution.
+    An absent ``sandbox`` section (or absent ``enabled`` key) means contained
+    defaults -- never the legacy host-execution mode. This is the single
+    predicate both resolvers use so a partial config can never silently
+    resolve to ``None`` (uncontained host execution).
+    """
+    if not isinstance(config, dict):
+        return False
+    sec = config.get("sandbox")
+    return isinstance(sec, dict) and sec.get("enabled") is False
+
+
+def resolve_manager(workspace: Path, config: dict[str, Any] | None) -> SandboxManager | None:
+    """Build a SandboxManager from config; None ONLY for the explicit opt-out.
+
+    ``sandbox.enabled: false`` (+ native-execution consent, checked by the
+    caller) means the documented legacy host-execution mode. An ABSENT
+    section resolves to contained defaults (a fail-closed manager), never
+    ``None``. A PRESENT-but-broken section returns a manager that
+    fail-closes at execution time -- it never silently upgrades to host
+    execution.
     """
     cfg = SandboxConfig.from_config(config)
     if not cfg.enabled:
+        if not _sandbox_explicitly_disabled(config):
+            # Absent section with contained defaults cannot reach here today
+            # (from_config defaults absent to enabled); fail closed anyway so
+            # a future parse change can never silently resolve to None.
+            return _build_manager(cfg, workspace, config)
         return None
     return _build_manager(cfg, workspace, config)
 
@@ -249,6 +271,10 @@ def resolve_manager_with_fallback(
     """
     cfg = SandboxConfig.from_config(config)
     if not cfg.enabled:
+        if not _sandbox_explicitly_disabled(config):
+            # Absent section: contained defaults, never the native opt-out.
+            _record_boot_state(config, "blocked", "sandbox section absent; contained defaults apply")
+            return _build_manager(cfg, workspace, config), ""
         allowed, reason = native_execution_consent(config if isinstance(config, dict) else {})
         if not allowed:
             _record_boot_state(config, "blocked", reason)
@@ -799,7 +825,7 @@ def status_report(config: dict[str, Any] | None) -> dict[str, Any]:
     (operator starts Docker mid-run, daemon dies mid-run) must not flip the
     banner. When no boot state exists yet (fresh install / no session since
     the feature landed) the live probe decides, same as before:
-    - "disabled": sandbox.enabled false -- legacy host-execution mode.
+    - "disabled": explicit sandbox.enabled false + consent -- legacy host-execution mode.
     - "contained": Docker + worker image usable -- commands run contained.
     - "native_fallback": enabled but Docker/image unusable AND
       fallback_native=true -- the session degrades to uncontained host
@@ -808,6 +834,9 @@ def status_report(config: dict[str, Any] | None) -> dict[str, Any]:
       every execution fail-closes.
     """
     cfg = SandboxConfig.from_config(config)
+    # "disabled" is honest ONLY for the explicit opt-out; an absent section
+    # resolves to contained defaults, so its pre-probe posture is blocked.
+    initial_mode = "disabled" if _sandbox_explicitly_disabled(config) else "blocked"
     report: dict[str, Any] = {
         "enabled": cfg.enabled,
         "backend": cfg.backend,
@@ -816,7 +845,7 @@ def status_report(config: dict[str, Any] | None) -> dict[str, Any]:
         "read_only_rootfs": cfg.read_only_rootfs,
         "fallback_native": cfg.fallback_native,
         "auto_manage_docker": cfg.auto_manage_docker,
-        "mode": "disabled",
+        "mode": initial_mode,
         "fallback_reason": "",
         "docker_available": False,
         "docker_error": "",
@@ -838,6 +867,12 @@ def status_report(config: dict[str, Any] | None) -> dict[str, Any]:
         "cleanup": {"remove_on_exit": cfg.remove_on_exit, "remove_stale_on_startup": cfg.remove_stale_on_startup},
     }
     if not cfg.enabled:
+        if not _sandbox_explicitly_disabled(config):
+            # Absent section resolves to contained defaults; without Docker
+            # info yet the honest posture is blocked, never disabled.
+            report["mode"] = "blocked"
+            report["fallback_reason"] = "sandbox section absent; contained defaults apply"
+            return report
         report["note"] = "sandbox disabled -- documented legacy host-execution mode"
         return report
     boot = read_boot_state(config)

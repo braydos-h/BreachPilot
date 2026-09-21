@@ -4,8 +4,8 @@ Pure data + defensive config parsing. No Docker/network imports here so the
 whole configuration surface is unit-testable on any platform (including hosts
 without Docker). ``SandboxConfig.from_config`` is the ONLY sanctioned way to
 build sandbox configuration from a user config dict -- it reads defensively
-(``sandbox`` section absent => disabled) so the ~250 existing mocked tests that
-pass partial config dicts keep the documented legacy host-mode behavior.
+(``sandbox`` section absent => contained defaults) so partial config dicts
+never silently drift to uncontained host execution.
 """
 
 from __future__ import annotations
@@ -89,16 +89,22 @@ class SandboxConfig:
     def from_config(cls, config: dict[str, Any] | None) -> "SandboxConfig":
         """Parse the ``sandbox`` config section defensively.
 
-        A missing ``sandbox`` section (or missing ``enabled`` key) means the
-        sandbox is DISABLED -- this keeps partial config dicts (tests, legacy
-        callers, ``tools/config_cli.load_config`` which merges no defaults) on
-        the documented host-execution path instead of failing every run.
-        Real runs get ``enabled: true`` via CONFIG_SCHEMA defaults +
-        ``apply_defaults()``.
+        A missing ``sandbox`` section (or missing ``enabled`` key) means
+        CONTAINED defaults (``enabled: True``) -- partial config dicts
+        (tests, legacy callers) must never silently drift to uncontained
+        host execution. Only an explicit ``enabled: false`` disables the
+        sandbox (the documented legacy host-execution opt-out, additionally
+        gated by the native-execution consent env var).
         """
         sec = _as_dict((config or {}).get("sandbox"))
         if not sec:
-            return cls(enabled=False, backend="docker", image="", user="", read_only_rootfs=False)
+            return cls(
+                enabled=True,
+                backend="docker",
+                image="breachpilot-sandbox:latest",
+                user="sandbox",
+                read_only_rootfs=True,
+            )
         resources = _as_dict(sec.get("resources"))
         network = _as_dict(sec.get("network"))
         cleanup = _as_dict(sec.get("cleanup"))
@@ -111,8 +117,13 @@ class SandboxConfig:
         passthrough = [
             str(k).strip() for k in (sec.get("env_passthrough") or []) if isinstance(k, str) and str(k).strip()
         ]
+        # Missing key => contained (True); explicit non-bool garbage =>
+        # fail-closed ENABLED too (a typo must never silently opt out to
+        # host execution). Only explicit False disables.
+        raw_enabled = sec.get("enabled", True)
+        enabled = raw_enabled if isinstance(raw_enabled, bool) else True
         return cls(
-            enabled=_as_bool(sec.get("enabled"), False),
+            enabled=enabled,
             backend=str(sec.get("backend", "docker") or "docker").strip().lower(),
             image=str(sec.get("image", "breachpilot-sandbox:latest") or "").strip(),
             user=str(sec.get("user", "sandbox") or "sandbox").strip(),
@@ -209,7 +220,12 @@ class NetworkPolicy:
     allow_gateway: bool = False
 
     def fingerprint(self) -> str:
-        """Stable fingerprint for change detection (re-apply rules only when set changes)."""
+        """Stable fingerprint for change detection (re-apply rules only when set changes).
+
+        Includes the DNS name allowlist (resolved domains + their addresses):
+        dynamically discovered hosts refresh the policy, and the refresh must
+        re-apply rules when the name set changes — not just the IP set.
+        """
         import hashlib as _hashlib
         import json as _json
 
@@ -218,6 +234,8 @@ class NetworkPolicy:
                 "authorized": sorted(self.authorized_destinations),
                 "allow_dns": self.allow_dns,
                 "dns_servers": sorted(self.dns_servers),
+                "dns_names": sorted(self.resolved_domains),
+                "dns_addresses": sorted({ip for addrs in self.resolved_domain_addresses.values() for ip in addrs}),
                 "enforced": self.enforced,
             },
             sort_keys=True,
@@ -226,5 +244,10 @@ class NetworkPolicy:
 
 
 def deep_copy_default_sandbox_cfg() -> dict[str, Any]:
-    """Deep-copyable empty default (section absent) used by tests."""
+    """Deep-copyable empty default (section absent) used by tests.
+
+    NOTE: an absent section resolves to CONTAINED defaults via
+    ``SandboxConfig.from_config`` -- callers needing the explicit native
+    opt-out must pass ``{"sandbox": {"enabled": False}}`` explicitly.
+    """
     return copy.deepcopy({})

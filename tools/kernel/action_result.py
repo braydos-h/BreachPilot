@@ -21,7 +21,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from tools.exploit_agent.outcome_truth import ActionResult, ExploitOutcome, OperationalStatus
-from tools.kernel.finding_lifecycle import HOLDING, INCONCLUSIVE, VERIFIED
+from tools.kernel.finding_lifecycle import HOLDING, INCONCLUSIVE, PROPOSED, VERIFIED
 from tools.scope_verdict import ScopeVerdict
 
 __all__ = [
@@ -43,8 +43,12 @@ class EvidentialStatus:
     VERIFIED = VERIFIED
     HOLDING = HOLDING
     INCONCLUSIVE = INCONCLUSIVE
+    # REFUTED is a FlowB-mapping legacy ("hypothesis refuted"), NOT a canonical
+    # lifecycle state — it never enters check_transition and must never be
+    # stamped as a finding status. Swarm/campaign cap at HOLDING; only the
+    # oracle path sets VERIFIED.
     REFUTED = "REFUTED"
-    PROPOSED = "PROPOSED"
+    PROPOSED = PROPOSED
 
 
 @dataclass

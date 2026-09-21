@@ -153,6 +153,36 @@ class TestBuildNetworkPolicy:
         assert pol.allow_dns == "none"
         assert pol.dns_servers == []
 
+    def test_dns_name_allowlist_built_from_fqdn_allowlist(self):
+        # BP-03: the DNS name allowlist derives from authorized FQDNs (+
+        # research hosts when enabled); unauthorized names authorize nothing.
+        pol = build_network_policy(_cfg(["example.com"]), resolver_fn=lambda h: ["192.0.2.77"])
+        assert pol.resolved_domains.get("example.com") == "192.0.2.77"
+        assert pol.resolved_domain_addresses.get("example.com") == ["192.0.2.77"]
+        payload = audit_policy_payload(pol)
+        assert payload["allowed_dns_names"] == ["example.com"]
+        # Unauthorized name resolves nowhere through the policy seam.
+        pol2 = build_network_policy(_cfg(["192.0.2.5"]), resolver_fn=lambda h: ["198.51.100.9"])
+        assert audit_policy_payload(pol2)["allowed_dns_names"] == []
+
+    def test_dns_refresh_picks_up_discovered_hosts(self, monkeypatch):
+        # Discovered (subdomain-expansion) hosts join the allowlist via env and
+        # appear in the name set + fingerprint on rebuild.
+        import os
+
+        monkeypatch.setenv("EXPLOIT_DISCOVERED_TARGETS", "sub.example.com")
+        monkeypatch.setattr(
+            sandbox_policy, "_resolve_authorized", lambda d, c, **k: ["192.0.2.88"] if d == "sub.example.com" else []
+        )
+        pol = build_network_policy(_cfg(["example.com"]), resolver_fn=lambda h: [])
+        assert pol.resolved_domains.get("sub.example.com") == "192.0.2.88"
+        assert "sub.example.com" in audit_policy_payload(pol)["allowed_dns_names"]
+
+    def test_fingerprint_changes_with_dns_names(self):
+        p1 = build_network_policy(_cfg(["example.com"]), resolver_fn=lambda h: ["192.0.2.77"])
+        p2 = build_network_policy(_cfg(["example.com"]), resolver_fn=lambda h: ["192.0.2.78"])
+        assert p1.fingerprint() != p2.fingerprint()
+
     def test_research_hosts_denied_by_default(self, monkeypatch):
         # Default-deny: no explicit flag => research hosts add nothing, and
         # target-only traffic still works. Overrides the file's autouse

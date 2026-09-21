@@ -84,6 +84,20 @@ def _finding(**overrides: Any) -> dict[str, Any]:
     return base
 
 
+def _verified_finding(**overrides: Any) -> dict[str, Any]:
+    """Walk the legal lifecycle path (propose → approve → verify) with the
+    real record functions so retest tests start from VERIFIED — the only
+    state the retest machine accepts (plus STILL_OPEN for re-retest)."""
+    from tools.mcp_tools.hitl import record_hitl_decision
+    from tools.mcp_tools.verify import record_verify
+
+    finding = _finding(hitl_status="PROPOSED", hitl_history=[], verify_status="", verify_history=[])
+    record_hitl_decision(finding, "APPROVED", "reviewed", actor="human")
+    record_verify(finding, "VERIFIED", "probe output: uid=0(root)")
+    finding.update(overrides)
+    return finding
+
+
 def _register(
     tmp_path: Path,
     terminal_output: str = "",
@@ -145,6 +159,12 @@ def _write_full_report(root: Path, run_id: str) -> tuple[Path, str]:
         }
     }
     data = gen._build_report_data(campaign)
+    # HITL gate: retest operates on human-approved findings — approve the
+    # campaign-built candidate (the Evidence-tab review precedes retest).
+    from tools.mcp_tools.hitl import record_hitl_decision
+
+    for finding in data["technical_findings"]:
+        record_hitl_decision(finding, "APPROVED", "reviewed", actor="human")
     finding_id = data["technical_findings"][0]["finding_id"]
     assert data["technical_findings"][0]["verification_probe"] == PROBE
     enhanced = run_dir / "enhanced"
@@ -328,6 +348,10 @@ def test_finding_schema_and_report_rendering() -> None:
 
     gen = EnhancedReportGenerator(db=None, mission_id="m", workspace=Path("."))
     record_retest(data, FIXED, "ev")
+    # HITL gate: only APPROVED findings render — approve before rendering.
+    from tools.mcp_tools.hitl import record_hitl_decision
+
+    record_hitl_decision(data, "APPROVED", "reviewed", actor="human")
     md = gen._generate_markdown(
         {
             "report_metadata": {"mission_id": "m", "generated_at": "t", "total_targets": 1},

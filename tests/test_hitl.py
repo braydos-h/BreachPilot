@@ -330,6 +330,76 @@ def test_list_proposed_across_runs(tmp_path: Path) -> None:
         list_proposed_findings(tmp_path, "nope")
 
 
+# ── Final-report HITL filter contract (P0-05) ──────────────────────────
+
+
+def test_approved_findings_keeps_approved_only() -> None:
+    """Mixed APPROVED/PROPOSED/REJECTED/missing/non-dict/non-list → APPROVED only."""
+    from tools.enhanced_reporting import approved_findings
+
+    approved = {"finding_id": "F-a", "hitl_status": "APPROVED"}
+    mixed = [
+        approved,
+        {"finding_id": "F-p", "hitl_status": "PROPOSED"},
+        {"finding_id": "F-r", "hitl_status": "REJECTED"},
+        {"finding_id": "F-m"},  # undecided (missing status)
+        {"finding_id": "F-w", "hitl_status": "  approved  "},  # case/whitespace tolerant
+        "not-a-dict",
+        None,
+        42,
+    ]
+    assert approved_findings(mixed) == [approved, {"finding_id": "F-w", "hitl_status": "  approved  "}]
+    assert approved_findings([]) == []
+    assert approved_findings("not-a-list") == []  # type: ignore[arg-type]
+    assert approved_findings(None) == []  # type: ignore[arg-type]
+    assert approved_findings({"finding_id": "F-d"}) == []  # type: ignore[arg-type]
+
+
+def test_apply_hitl_filter_e2e_markdown(tmp_path: Path) -> None:
+    """Mixed report dict → markdown shows APPROVED-only + pending banner, zero leaked titles."""
+    from tools.enhanced_reporting import EnhancedReportGenerator, apply_hitl_filter
+    from tools.mcp_tools.hitl import propose_new_finding, record_hitl_decision
+
+    data: dict[str, Any] = {"technical_findings": []}
+    ok = propose_new_finding(data, title="ApprovedTitle", affected_asset="10.0.0.50", summary="s")
+    record_hitl_decision(ok, APPROVED, "real", actor="human")
+    propose_new_finding(data, title="SecretProposedTitle", affected_asset="10.0.0.50", summary="s")
+    gen = EnhancedReportGenerator(db=None, mission_id="m", workspace=tmp_path)
+    report = {
+        "report_metadata": {"mission_id": "m", "generated_at": "t", "total_targets": 1},
+        "executive_summary": "e",
+        "attack_timeline": [],
+        "exploitation_chains": [],
+        "technical_findings": data["technical_findings"],
+        "failure_analysis": [],
+    }
+    assert apply_hitl_filter(report) == 1
+    md = gen._generate_markdown(report, pending_count=1)
+    assert "ApprovedTitle" in md
+    assert "SecretProposedTitle" not in md
+    assert "1 finding(s) awaiting human review" in md
+
+
+def test_empty_report_regression(tmp_path: Path) -> None:
+    """Empty input renders 'No findings to report.' with no crash (JSON/MD/HTML)."""
+    from tools.enhanced_reporting import EnhancedReportGenerator, apply_hitl_filter
+
+    gen = EnhancedReportGenerator(db=None, mission_id="m", workspace=tmp_path)
+    report = {
+        "report_metadata": {"mission_id": "m", "generated_at": "t", "total_targets": 0},
+        "executive_summary": "",
+        "attack_timeline": [],
+        "exploitation_chains": [],
+        "technical_findings": [],
+        "failure_analysis": [],
+    }
+    assert apply_hitl_filter(report) == 0
+    assert "No findings to report." in gen._generate_markdown(report, pending_count=0)
+    assert "No findings to report." in gen._generate_findings_md([], pending_count=0)
+    assert "No findings to report." not in gen._generate_html(report)  # empty sections omitted in HTML
+    assert apply_hitl_filter("nope") == 0  # type: ignore[arg-type]
+
+
 # ── REST human path (WebUI Evidence tab) ───────────────────────────────
 
 
