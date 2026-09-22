@@ -545,7 +545,12 @@ class RunEventBroker:
     """
 
     _BATCH_MAX = 128
-    _BATCH_WAIT_SECONDS = 0.02
+    # No linger window: with P1-03 ack-per-emit, one loop cannot outpace the
+    # writer (each emit waits for its ack), so a linger would only tax
+    # sequential flows without batching anything. Concurrent bursts still
+    # batch: while the writer is busy, arrivals backlog and the non-blocking
+    # drain collects them (up to _BATCH_MAX) after each blocking take.
+    _BATCH_WAIT_SECONDS = 0.0
 
     def __init__(
         self, run_id: str, reports_dir: Path, *, buffer_size: int = 1000, durability: str = "balanced"
