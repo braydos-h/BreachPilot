@@ -31,7 +31,6 @@ from tools.mcp_session import (
     open_exploit_mcp_session,
 )
 from tools.model_router import build_router, format_model_choice
-from tools.model_telemetry import usage_log_path, workspace_root_from_sources  # noqa: F401 -- re-exported for historical import paths
 from tools.run_service.models import (
     RunPreview,
     RunRequest,

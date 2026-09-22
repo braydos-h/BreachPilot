@@ -39,8 +39,11 @@ def test_usage_cursor_skips_partial_tail(tmp_path):
     from tools.run_service.prepare import UsageLogCursor
 
     path = tmp_path / "llm_usage.jsonl"
-    path.write_bytes((json.dumps({"total_tokens": 1}) + "\n").encode())
+    path.write_bytes((json.dumps({"total_tokens": 0}) + "\n").encode())
     cur = UsageLogCursor(path)
+    assert cur.poll() == []  # starts at EOF: history is not re-read
+    with path.open("ab") as f:
+        f.write((json.dumps({"total_tokens": 1}) + "\n").encode())
     assert len(cur.poll()) == 1
     # Partial line without trailing newline: held back until complete.
     with path.open("ab") as f:

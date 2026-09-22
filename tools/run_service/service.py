@@ -10,12 +10,11 @@ from tools.run_service.prepare import (
     _DEFAULT_CALLABLES,
     Callables,
     PrepareMixin,
+    UsageLogCursor,
     _build_campaign_result_from_records,
     _config_cli_load,
-    _llm_usage_line_count,
     _read_swarm_snapshot,
     _request_to_args,
-    _run_telemetry,
     _TelemetryAccumulator,
 )
 from tools.run_service.tasks import TasksMixin
@@ -34,10 +33,9 @@ __all__ = [
     "Callables",
     "_COLD_INIT_LOCK",
     "_TelemetryAccumulator",
+    "UsageLogCursor",
     "_build_campaign_result_from_records",
     "_config_cli_load",
-    "_llm_usage_line_count",
     "_read_swarm_snapshot",
     "_request_to_args",
-    "_run_telemetry",
 ]

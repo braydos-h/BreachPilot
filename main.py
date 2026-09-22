@@ -42,7 +42,6 @@ from tools.exploit_agent import (
 from tools.goal_engine import AttackGoal, GoalEngine
 from tools.goal_suggester import ReconAssessment
 from tools.model_router import build_router
-from tools.model_telemetry import usage_log_path, workspace_root_from_sources
 from tools.safety_reviewer import SafetyReview
 from tools.swarm_bridge import SwarmMcpBridge as SwarmMcpBridge  # noqa: F401 - re-export for tests/back-compat
 from tools.webui_boot import (  # noqa: F401 -- back-compat re-exports; canonical home is tools.webui_boot
@@ -245,23 +244,6 @@ async def run_safety_review(
 from tools import recon_assessment_cli as _recon_assessment_cli
 
 
-def _llm_usage_line_count() -> int:
-    """Line count of the shared llm_usage.jsonl, or 0 if absent.
-
-    Used to snapshot the offset before a run so end-of-run telemetry reports
-    only THIS run's model calls (model_router appends every chat to one
-    cumulative file).
-    """
-    try:
-        path = usage_log_path(workspace_root_from_sources())
-        if not path.exists():
-            return 0
-        with path.open("r", encoding="utf-8", errors="replace") as handle:
-            return sum(1 for _ in handle)
-    except OSError:
-        return 0
-
-
 def _read_swarm_snapshot(swarm_workspace: Path) -> str:
     """One-line live progress string from swarm_state.json, or "" if unavailable.
 
@@ -291,62 +273,6 @@ def _read_swarm_snapshot(swarm_workspace: Path) -> str:
         if n:
             parts.append(f"{n} {label}")
     return ", ".join(parts)
-
-
-def _run_telemetry(start_lines: int) -> dict[str, Any] | None:
-    """Aggregate llm_usage.jsonl records appended after ``start_lines``.
-
-    Returns per-run totals (calls, total_tokens, avg/max context_usage_pct) by
-    parsing only the new lines since the snapshot, so the number is this run's
-    model usage rather than the all-history cumulative file. None if no new
-    records or the log can't be read.
-    """
-    import itertools as _it
-    import json as _json
-
-    try:
-        path = usage_log_path(workspace_root_from_sources())
-        if not path.exists():
-            return None
-        # ponytail perf: stream from the offset instead of read_text() of the
-        # whole cumulative file (was O(file) memory + parse per run).
-        calls = 0
-        total_tokens = 0
-        ctx_sum = 0.0
-        ctx_n = 0
-        ctx_max: float | None = None
-        with path.open("r", encoding="utf-8", errors="replace") as handle:
-            for line in _it.islice(handle, max(0, int(start_lines)), None):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    item = _json.loads(line)
-                except _json.JSONDecodeError:
-                    continue
-                if not isinstance(item, dict):
-                    continue
-                calls += 1
-                tok = item.get("total_tokens")
-                if isinstance(tok, (int, float)):
-                    total_tokens += int(tok)
-                ctx = item.get("context_usage_pct")
-                if isinstance(ctx, (int, float)):
-                    fctx = float(ctx)
-                    ctx_sum += fctx
-                    ctx_n += 1
-                    ctx_max = fctx if ctx_max is None or fctx > ctx_max else ctx_max
-    except OSError:
-        return None
-    if not calls:
-        return None
-    avg_ctx = (ctx_sum / ctx_n) if ctx_n else None
-    return {
-        "calls": calls,
-        "total_tokens": total_tokens,
-        "avg_ctx": avg_ctx,
-        "max_ctx": ctx_max,
-    }
 
 
 async def run_recon_assessment(
