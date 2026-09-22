@@ -8,13 +8,12 @@ run — the ring buffer holds recent events for reconnect.
 Plugin dispatch
 ---------------
 
-``RunEventBroker.emit()`` assigns ``sequence`` under ``_lock``, persists the
-event to JSONL off the event-loop thread (open/write/flush/fsync via
-``asyncio.to_thread``; the ``_lock`` is held across the await so file order
-matches sequence order while the loop stays unblocked), then fans out to WS
-subscribers. After the lock is released the event is handed to a bounded
-producer/consumer dispatcher for outbound-only plugin subscribers
-(``webhook_notify`` etc.).
+``RunEventBroker.emit()`` assigns ``sequence`` under ``_lock``, appends to
+the ring, fans out to WS subscribers, then hands the event to the single
+writer thread's ``queue.Queue`` (one open FD, batched flush — no per-event
+open/fsync, no ``asyncio.to_thread`` hop). After the lock is released the
+event is handed to a bounded producer/consumer dispatcher for outbound-only
+plugin subscribers (``webhook_notify`` etc.).
 
 * The dispatcher queue is bounded (``max_queue_size``) and workers are bounded
   (``max_workers``) — no unbounded ``create_task`` or thread explosion when
@@ -53,6 +52,7 @@ import asyncio
 import json
 import logging
 import os
+import queue as _queue
 import threading
 from collections import OrderedDict, deque
 from datetime import datetime, timezone
@@ -66,6 +66,46 @@ log = logging.getLogger("tools.api.event_broker")
 _DEFAULT_PLUGIN_QUEUE_SIZE = 100
 _DEFAULT_PLUGIN_WORKERS = 2
 _DEFAULT_DRAIN_TIMEOUT = 5.0
+
+
+class _CloseResult:
+    """Awaitable shim returned by ``RunEventBroker.close()``.
+
+    The drain is performed synchronously inside ``close()``; this object only
+    exists so ``await broker.close()`` type-checks and runs. Bare
+    ``broker.close()`` callers ignore it.
+    """
+
+    __slots__ = ()
+
+    def __await__(self):  # type: ignore[no-untyped-def]
+        async def _done() -> None:
+            return None
+
+        return _done().__await__()
+
+    def __bool__(self) -> bool:
+        return True
+
+
+_CLOSED_OK = _CloseResult()
+
+
+class _Barrier:
+    """Flush marker for read-your-writes consistency (P1-01).
+
+    ``replay`` / ``replay_page`` / ``subscribe`` enqueue a barrier before
+    reading the file; the writer flushes everything ahead of it and sets the
+    future, so readers never miss queued-but-unflushed tail events. Best
+    effort: on timeout the read proceeds anyway (never break serving).
+    """
+
+    __slots__ = ("future",)
+
+    def __init__(self) -> None:
+        import concurrent.futures as _futures
+
+        self.future = _futures.Future()
 
 
 class _PluginEventDispatcher:
@@ -436,7 +476,17 @@ class RunEventBroker:
     Events are written to ``reports/<run_id>/events.jsonl`` (authoritative)
     and held in a bounded in-memory ring for live WS delivery. Subscribers
     are notified via an ``asyncio.Condition``.
+
+    Persistence uses a single-writer batched pipeline (P1-01): ``emit()``
+    assigns ``sequence`` under ``_lock``, appends to the ring, fans out to WS
+    subscribers, then hands the event to a ``queue.Queue``. One dedicated
+    daemon thread owns a single open FD and drains up to 128 events (or every
+    ~20ms), writing + flushing once per batch. ``close()`` enqueues a sentinel,
+    joins the writer (tail flush + fsync), then stops fan-out queues.
     """
+
+    _BATCH_MAX = 128
+    _BATCH_WAIT_SECONDS = 0.02
 
     def __init__(self, run_id: str, reports_dir: Path, *, buffer_size: int = 1000) -> None:
         self._run_id = run_id
@@ -445,12 +495,82 @@ class RunEventBroker:
         self._ring: deque[dict[str, Any]] = deque(maxlen=buffer_size)
         self._seq = 0
         self._lock = asyncio.Lock()
-        self._file_lock = threading.Lock()
         self._closed = False
         self._subscribers: list[asyncio.Queue[dict[str, Any] | None]] = []
+        # P1-01: single-writer batched JSONL pipeline.
+        self._write_q: _queue.Queue = _queue.Queue()
+        self._writer_lock = threading.Lock()
+        self._writer_thread: threading.Thread | None = None
+
+    def _ensure_writer_locked(self) -> None:
+        """Start the writer thread (call with ``_writer_lock`` held)."""
+        thread = self._writer_thread
+        if thread is not None and thread.is_alive():
+            return
+        thread = threading.Thread(target=self._writer_loop, name=f"event-writer-{self._run_id}", daemon=True)
+        self._writer_thread = thread
+        thread.start()
+
+    def _ensure_writer(self) -> None:
+        with self._writer_lock:
+            self._ensure_writer_locked()
+
+    def _writer_loop(self) -> None:
+        self._events_path.parent.mkdir(parents=True, exist_ok=True)
+        f = self._events_path.open("a", encoding="utf-8")
+        try:
+            while True:
+                try:
+                    batch: list[Any] = [self._write_q.get()]
+                    while len(batch) < self._BATCH_MAX:
+                        try:
+                            batch.append(self._write_q.get(timeout=self._BATCH_WAIT_SECONDS))
+                        except _queue.Empty:
+                            break
+                except Exception:  # noqa: BLE001 -- queue glitch must never kill the writer
+                    log.warning("event writer queue error", exc_info=True)
+                    continue
+                done = False
+                try:
+                    for item in batch:
+                        if item is None:
+                            done = True
+                        elif isinstance(item, _Barrier):
+                            f.flush()
+                            os.fsync(f.fileno())
+                            if not item.future.done():
+                                item.future.set_result(None)
+                        else:
+                            f.write(json.dumps(item, default=str) + "\n")
+                        self._write_q.task_done()
+                    f.flush()
+                    os.fsync(f.fileno())
+                except Exception:  # noqa: BLE001 -- one bad batch must never kill the writer
+                    log.warning("event writer batch failed", exc_info=True)
+                    continue
+                if done:
+                    return
+        finally:
+            f.close()
+
+    def _writer_alive(self) -> bool:
+        thread = self._writer_thread
+        return thread is not None and thread.is_alive()
+
+    async def _drain_writer(self, timeout: float = 2.0) -> bool:
+        """Wait until all queued events are flushed (read-your-writes)."""
+        if not self._writer_alive():
+            return True
+        barrier = _Barrier()
+        self._write_q.put(barrier)
+        try:
+            await asyncio.wait_for(asyncio.wrap_future(barrier.future), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
 
     async def emit(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """Emit an event: assign sequence, sanitize, write JSONL, notify subscribers."""
+        """Emit an event: assign sequence, sanitize, queue for JSONL, notify subscribers."""
         # ponytail: sanitize (CPU) outside the lock — was holding lock across it.
         clean = sanitize(payload)
         async with self._lock:
@@ -465,11 +585,15 @@ class RunEventBroker:
                 "payload": clean,
             }
             subscribers = tuple(self._subscribers)
-        # ponytail perf: file IO outside the asyncio lock so concurrent emits
-        # only serialize on the file thread-lock, not on sequence assignment.
-        # File order may differ from sequence order under concurrency;
-        # replay sorts by sequence so ordering stays correct.
-        await asyncio.to_thread(self._append_event_sync, event)
+        # P1-01: hand to the single writer thread (single open FD, batched
+        # flush) instead of per-event open/write/flush/fsync + to_thread hop.
+        # The writer lock serializes against close()'s sentinel so no event
+        # can land behind the shutdown marker.
+        with self._writer_lock:
+            if self._closed:
+                raise RuntimeError("Event broker is closed.")
+            self._ensure_writer_locked()
+            self._write_q.put(event)
         async with self._lock:
             self._ring.append(event)
         for queue in subscribers:
@@ -481,21 +605,12 @@ class RunEventBroker:
                         self._subscribers.remove(queue)
                 self._stop_queue(queue)
         # Bounded dispatch for outbound-only plugin subscribers (webhook/ticketing).
-        # Enqueued AFTER JSONL persistence + WS fan-out so a slow/failed webhook
+        # Enqueued AFTER queueing JSONL persistence + WS fan-out so a slow/failed webhook
         # never blocks the run or drops the event. The dispatcher runs blocking
         # subscribers off the event-loop thread via ``asyncio.to_thread`` and
         # bounds queue/concurrency. See module docstring for shutdown semantics.
         _enqueue_plugin_event(event)
         return event
-
-    def _append_event_sync(self, event: dict[str, Any]) -> None:
-        """Blocking JSONL append (open/write/flush/fsync). Runs in a worker thread."""
-        self._events_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._file_lock:
-            with self._events_path.open("a", encoding="utf-8") as f:
-                f.write(json.dumps(event, default=str) + "\n")
-                f.flush()
-                os.fsync(f.fileno())
 
     async def replay(self, after: int = 0) -> list[dict[str, Any]]:
         """Replay events with sequence > ``after`` from JSONL."""
@@ -503,6 +618,9 @@ class RunEventBroker:
             if self._ring and after >= self._ring[0]["sequence"] - 1:
                 return [event for event in self._ring if event["sequence"] > after]
             path = self._events_path
+        # P1-01: the writer flushes asynchronously; drain it before reading
+        # the file so the tail is never missed (read-your-writes).
+        await self._drain_writer()
         # ponytail: file read off-loop without the lock (was a sync read
         # under the lock). Ring fast-path above keeps the common case lock-only.
         full = await asyncio.to_thread(self._read_jsonl_events, path)
@@ -590,6 +708,7 @@ class RunEventBroker:
                 full = []
                 path = self._events_path
         if path is not None:
+            await self._drain_writer()
             full = await asyncio.to_thread(self._read_jsonl_events, path)
 
         oldest = full[0]["sequence"] if full else None
@@ -658,6 +777,7 @@ class RunEventBroker:
 
     async def subscribe(self, after: int = 0) -> "EventSubscription":
         """Subscribe to live events. ``after`` replays from that cursor first."""
+        await self._drain_writer()
         async with self._lock:
             subscription = EventSubscription(
                 broker=self,
@@ -667,11 +787,27 @@ class RunEventBroker:
                 self._subscribers.append(subscription._queue)
             return subscription
 
-    def close(self) -> None:
-        self._closed = True
+    def close(self) -> "_CloseResult":
+        """Flush the tail, fsync, stop the writer, then stop WS fan-out queues.
+
+        Synchronous: drains the write queue via a sentinel + bounded thread
+        join, so bare ``broker.close()`` (existing callers) persists
+        everything. Returns an awaitable shim so ``await broker.close()``
+        works too; the drain is already complete in either case.
+        """
+        with self._writer_lock:
+            self._closed = True
+            thread = self._writer_thread
+            if thread is not None and thread.is_alive():
+                self._write_q.put(None)
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=10.0)
+        with self._writer_lock:
+            self._writer_thread = None
         for queue in self._subscribers:
             self._stop_queue(queue)
         self._subscribers.clear()
+        return _CLOSED_OK
 
     def reopen(self) -> None:
         """Re-arm a closed broker for post-run operator annotations.
@@ -680,9 +816,11 @@ class RunEventBroker:
         handling, but operator actions after the run (HITL decisions, …)
         still need a durable, sequenced event. Reopening resumes the stored
         sequence counter, so replay stays monotonic and future subscribers
-        (poll/WS/SSE) observe the late event. No-op on an open broker.
+        (poll/WS/SSE) observe the late event. No-op on an open broker. The
+        writer thread restarts lazily on the next emit.
         """
-        self._closed = False
+        with self._writer_lock:
+            self._closed = False
 
     @staticmethod
     def _stop_queue(queue: asyncio.Queue[dict[str, Any] | None]) -> None:
