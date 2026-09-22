@@ -448,6 +448,7 @@ api:
   token_file: .webui_secret_key
   allowed_origins: []
   event_buffer_size: 256
+  event_durability: balanced  # strict = fsync per event; balanced = per batch + decisions/transitions; fast = on checkpoint/close
   shutdown_timeout_seconds: 15
   serve_webui: true
   max_concurrent_runs: 3

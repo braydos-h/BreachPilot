@@ -90,7 +90,9 @@ def create_app(
     buffer_size = int(api_cfg.get("event_buffer_size", 256))
     if buffer_size < 1:
         raise ValueError("api.event_buffer_size must be at least 1.")
-    event_registry = EventBrokerRegistry(reports_dir, buffer_size=buffer_size)
+    event_registry = EventBrokerRegistry(
+        reports_dir, buffer_size=buffer_size, durability=str(api_cfg.get("event_durability", "balanced"))
+    )
 
     # Run manager.
     run_manager = RunManager(
