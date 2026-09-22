@@ -7,7 +7,9 @@ cancelling) is marked ``interrupted`` and pending decisions are ``expired``.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import sqlite3
 import threading
 import uuid
@@ -162,7 +164,100 @@ class ApiPersistence:
         self._path = reports_dir / _API_DB_NAME
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
+        self._conn: sqlite3.Connection | None = None
+        self._pid: int = os.getpid()
+        self._batch_depth = 0
         self._init_db()
+
+    def close(self) -> None:
+        """Checkpoint the WAL and close the persistent connection (idempotent).
+
+        Use-after-close raises ``RuntimeError`` cleanly from ``_live_conn``.
+        """
+        with self._lock:
+            conn, self._conn = self._conn, None
+        if conn is not None:
+            try:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except sqlite3.Error:
+                pass
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
+
+    def __del__(self) -> None:  # pragma: no cover - GC timing is nondeterministic
+        try:
+            self.close()
+        except Exception:  # noqa: BLE001 -- __del__ must never raise
+            pass
+
+    def _live_conn(self) -> sqlite3.Connection:
+        """The persistent connection (call with ``self._lock`` held).
+
+        Reconnects after a fork (PID change). Raises ``RuntimeError`` when
+        closed — never returns a dead handle, never opens per-op connections.
+        """
+        conn = self._conn
+        if conn is None:
+            raise RuntimeError("ApiPersistence is closed.")
+        if self._pid != os.getpid():
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
+            conn = self._connect()
+            self._conn = conn
+            self._pid = os.getpid()
+        return conn
+
+    def _release_conn(self, conn: sqlite3.Connection) -> None:
+        """Release a per-op handle: no-op for the persistent connection.
+
+        Every CRUD method routes through :meth:`_live_conn`, so the
+        ``try/finally`` release below never closes the live handle; it only
+        guards foreign handles.
+        """
+        if conn is not self._conn:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
+
+    def _commit(self, conn: sqlite3.Connection) -> None:
+        """Commit unless inside a :meth:`batched` block (P1-10 batching)."""
+        if self._batch_depth <= 0:
+            conn.commit()
+
+    @contextlib.contextmanager
+    def batched(self):  # type: ignore[no-untyped-def]
+        """Group a block of writes into one transaction (P1-10).
+
+        Intermediate :meth:`_commit` calls become no-ops; the block commits
+        once on clean exit, rolls back on exception. The caller must hold
+        ``self._lock`` (the DB actor does).
+        """
+        self._batch_depth += 1
+        try:
+            yield self
+        except BaseException:
+            self._batch_depth -= 1
+            if self._batch_depth <= 0:
+                self._batch_depth = 0
+                conn = self._conn
+                if conn is not None:
+                    try:
+                        conn.rollback()
+                    except sqlite3.Error:
+                        pass
+            raise
+        else:
+            self._batch_depth -= 1
+            if self._batch_depth <= 0:
+                self._batch_depth = 0
+                conn = self._conn
+                if conn is not None:
+                    conn.commit()
 
     @property
     def reports_dir(self) -> Path:
@@ -268,9 +363,17 @@ class ApiPersistence:
                     "INSERT OR IGNORE INTO _migrations (version, applied_at) VALUES (?, ?)",
                     (_SCHEMA_VERSION, _now_iso()),
                 )
-                conn.commit()
-            finally:
-                conn.close()
+                self._commit(conn)
+            except BaseException:
+                try:
+                    conn.close()
+                except sqlite3.Error:
+                    pass
+                raise
+            else:
+                # P1-09: the init connection becomes the persistent handle.
+                self._conn = conn
+                self._pid = os.getpid()
 
     # ── Runs ──────────────────────────────────────────────────────────────
 
@@ -287,7 +390,7 @@ class ApiPersistence:
     ) -> None:
         now = created_at or _now_iso()
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 conn.execute(
                     "INSERT INTO runs "
@@ -311,28 +414,28 @@ class ApiPersistence:
                         "INSERT OR IGNORE INTO app_state (key, value) VALUES (?, ?)",
                         ("demo_seed_version", "1"),
                     )
-                conn.commit()
+                self._commit(conn)
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def update_run_preview(self, run_id: str, preview: dict[str, Any]) -> None:
         """Persist the prepared preview (target/mode/goal/model/...) after background preparation."""
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 conn.execute(
                     "UPDATE runs SET preview_json=?, updated_at=? WHERE id=?",
                     (json.dumps(preview, default=str), _now_iso(), run_id),
                 )
-                conn.commit()
+                self._commit(conn)
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def update_run_state(
         self, run_id: str, state: str, *, error: str = "", result: dict[str, Any] | None = None
     ) -> None:
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 if result is not None:
                     conn.execute(
@@ -354,9 +457,9 @@ class ApiPersistence:
                         "cancelled_at=CASE WHEN ?='cancelled' THEN ? ELSE cancelled_at END WHERE id=?",
                         (state, _now_iso(), error, state, _now_iso(), run_id),
                     )
-                conn.commit()
+                self._commit(conn)
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def update_run_title(self, run_id: str, title: str) -> bool:
         """Persist an AI-generated (or manual) title for a run. Returns True if updated."""
@@ -364,20 +467,20 @@ class ApiPersistence:
         if not title:
             return False
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 cur = conn.execute(
                     "UPDATE runs SET title=?, updated_at=? WHERE id=?",
                     (title[:200], _now_iso(), run_id),
                 )
-                conn.commit()
+                self._commit(conn)
                 return cur.rowcount > 0
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 row = conn.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
                 if row is None:
@@ -387,7 +490,7 @@ class ApiPersistence:
                     d[key] = json.loads(d.get(key, "{}"))
                 return d
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def list_runs(
         self,
@@ -420,7 +523,7 @@ class ApiPersistence:
             params.extend([like, like])
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 # ``is_demo`` may be absent on a pre-migrated DB before _init_db
                 # ran; SELECT * would hide that, but the explicit column tolerates
@@ -456,7 +559,7 @@ class ApiPersistence:
                     result.append(d)
                 return result
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def count_runs(self, *, q: str = "", state: str = "") -> int:
         """Count runs matching the same filters as ``list_runs`` (for pagination)."""
@@ -471,7 +574,7 @@ class ApiPersistence:
             params.extend([like, like])
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 row = conn.execute(
                     f"SELECT COUNT(*) AS n FROM runs {where_sql}",
@@ -479,12 +582,12 @@ class ApiPersistence:
                 ).fetchone()
                 return int(row["n"]) if row else 0
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def get_active_run(self) -> dict[str, Any] | None:
         """Return the one live run (preparing/running/awaiting_input/queued/cancelling/...) if any."""
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 row = conn.execute(
                     "SELECT * FROM runs WHERE state IN "
@@ -493,12 +596,12 @@ class ApiPersistence:
                 ).fetchone()
                 return dict(row) if row else None
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def recover_interrupted(self) -> int:
         """Mark live runs as interrupted on startup; expire pending decisions."""
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 conn.execute(
                     "UPDATE runs SET state='interrupted', updated_at=? "
@@ -510,17 +613,17 @@ class ApiPersistence:
                     "UPDATE decisions SET status='expired' WHERE status='pending' "
                     "AND run_id IN (SELECT id FROM runs WHERE state='interrupted')"
                 )
-                conn.commit()
+                self._commit(conn)
                 return conn.total_changes
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     # ── Decisions ─────────────────────────────────────────────────────────
 
     def create_decision(self, decision: dict[str, Any]) -> str:
         did = decision.get("id") or _new_id("dec")
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 conn.execute(
                     "INSERT INTO decisions (id, run_id, kind, prompt_text, required_text, options_json, status, created_at) "
@@ -535,15 +638,15 @@ class ApiPersistence:
                         _now_iso(),
                     ),
                 )
-                conn.commit()
+                self._commit(conn)
             finally:
-                conn.close()
+                self._release_conn(conn)
         return did
 
     def answer_decision(self, decision_id: str, answer: str) -> dict[str, Any] | None:
         """Mark a decision as answered; returns the decision row or None if not found."""
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 row = conn.execute("SELECT * FROM decisions WHERE id=?", (decision_id,)).fetchone()
                 if row is None:
@@ -555,17 +658,17 @@ class ApiPersistence:
                     "UPDATE decisions SET status='answered', answer=?, answered_at=? WHERE id=?",
                     (answer, _now_iso(), decision_id),
                 )
-                conn.commit()
+                self._commit(conn)
                 d["status"] = "answered"
                 d["answer"] = answer
                 d["answered_at"] = _now_iso()
                 return d
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def get_decision(self, decision_id: str) -> dict[str, Any] | None:
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 row = conn.execute("SELECT * FROM decisions WHERE id=?", (decision_id,)).fetchone()
                 if row is None:
@@ -574,11 +677,11 @@ class ApiPersistence:
                 d["options_json"] = json.loads(d.get("options_json", "[]"))
                 return d
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def list_decisions(self, run_id: str) -> list[dict[str, Any]]:
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 rows = conn.execute(
                     "SELECT * FROM decisions WHERE run_id=? ORDER BY created_at",
@@ -591,19 +694,19 @@ class ApiPersistence:
                     result.append(d)
                 return result
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def expire_pending_decisions(self, run_id: str) -> None:
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 conn.execute(
                     "UPDATE decisions SET status='expired' WHERE run_id=? AND status='pending'",
                     (run_id,),
                 )
-                conn.commit()
+                self._commit(conn)
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def delete_run(self, run_id: str) -> bool:
         """Delete a run and its decisions (cascade). Returns True if a row was removed.
@@ -614,7 +717,7 @@ class ApiPersistence:
         API, direct) respects the tombstone without scattering checks.
         """
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 # Detect demo before deleting so the tombstone survives the FK cascade.
                 is_demo_row = None
@@ -629,15 +732,15 @@ class ApiPersistence:
                         "INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)",
                         ("demo_deleted", "1"),
                     )
-                conn.commit()
+                self._commit(conn)
                 return cur.rowcount > 0
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def is_demo_tombstoned(self) -> bool:
         """Return True when the demo was intentionally deleted (do not recreate)."""
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 try:
                     row = conn.execute("SELECT value FROM app_state WHERE key='demo_deleted'").fetchone()
@@ -645,12 +748,12 @@ class ApiPersistence:
                     return False
                 return bool(row and row["value"] == "1")
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def set_demo_tombstone(self, deleted: bool) -> None:
         """Explicitly set/clear the demo tombstone (for testing + restore path)."""
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 # Ensure app_state exists (old DBs migrated lazily).
                 conn.execute(
@@ -663,9 +766,9 @@ class ApiPersistence:
                     )
                 else:
                     conn.execute("DELETE FROM app_state WHERE key='demo_deleted'")
-                conn.commit()
+                self._commit(conn)
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def get_demo_tombstone(self) -> bool:
         return self.is_demo_tombstoned()
@@ -675,7 +778,7 @@ class ApiPersistence:
 
     def get_app_state(self, key: str) -> str | None:
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 try:
                     row = conn.execute("SELECT value FROM app_state WHERE key=?", (key,)).fetchone()
@@ -683,19 +786,19 @@ class ApiPersistence:
                     return None
                 return str(row["value"]) if row else None
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def set_app_state(self, key: str, value: str) -> None:
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 conn.execute(
                     "CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')"
                 )
                 conn.execute("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", (key, value))
-                conn.commit()
+                self._commit(conn)
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def reset_all(self) -> int:
         """Delete all runs, decisions, and annotations (users are kept).
@@ -705,13 +808,13 @@ class ApiPersistence:
         working after a reset.
         """
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 cur = conn.execute("DELETE FROM runs")
-                conn.commit()
+                self._commit(conn)
                 return cur.rowcount
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     # ── Users (D4: multi-operator accounts) ────────────────────────────────
 
@@ -719,59 +822,59 @@ class ApiPersistence:
         """Insert a user row. Returns the user id. Raises on duplicate username."""
         uid = _new_id("usr")
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 conn.execute(
                     "INSERT INTO users (id, username, password_hash, password_salt, created_at) VALUES (?, ?, ?, ?, ?)",
                     (uid, username, password_hash, password_salt, _now_iso()),
                 )
-                conn.commit()
+                self._commit(conn)
             except sqlite3.IntegrityError as exc:
                 raise ValueError(f"username {username!r} already exists") from exc
             finally:
-                conn.close()
+                self._release_conn(conn)
         return uid
 
     def get_user_by_username(self, username: str) -> dict[str, Any] | None:
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 row = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
                 return dict(row) if row else None
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def get_user(self, user_id: str) -> dict[str, Any] | None:
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
                 return dict(row) if row else None
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def list_users(self) -> list[dict[str, Any]]:
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 rows = conn.execute(
                     "SELECT id, username, created_at, last_login FROM users ORDER BY created_at"
                 ).fetchall()
                 return [dict(r) for r in rows]
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def touch_user_login(self, user_id: str) -> None:
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 conn.execute(
                     "UPDATE users SET last_login=? WHERE id=?",
                     (_now_iso(), user_id),
                 )
-                conn.commit()
+                self._commit(conn)
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     # ── Annotations (D4: operator comments on findings) ───────────────────
 
@@ -786,21 +889,21 @@ class ApiPersistence:
         """Attach an operator comment to a run. Returns the annotation id."""
         aid = _new_id("ann")
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 conn.execute(
                     "INSERT INTO annotations (id, run_id, user_id, username, body, finding_ref, created_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (aid, run_id, user_id, username, body, finding_ref, _now_iso()),
                 )
-                conn.commit()
+                self._commit(conn)
             finally:
-                conn.close()
+                self._release_conn(conn)
         return aid
 
     def list_annotations(self, run_id: str) -> list[dict[str, Any]]:
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 rows = conn.execute(
                     "SELECT id, run_id, user_id, username, body, finding_ref, created_at "
@@ -809,34 +912,34 @@ class ApiPersistence:
                 ).fetchall()
                 return [dict(r) for r in rows]
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def delete_annotation(self, annotation_id: str) -> bool:
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 cur = conn.execute("DELETE FROM annotations WHERE id=?", (annotation_id,))
-                conn.commit()
+                self._commit(conn)
                 return cur.rowcount > 0
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     # ── Custom goals (persistent user-created goals) ──────────────────────
 
     def list_custom_goals(self) -> list[dict[str, Any]]:
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 rows = conn.execute(
                     "SELECT id, name, objective, created_at, updated_at FROM custom_goals ORDER BY created_at"
                 ).fetchall()
                 return [dict(r) for r in rows]
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def get_custom_goal(self, goal_id: str) -> dict[str, Any] | None:
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 row = conn.execute(
                     "SELECT id, name, objective, created_at, updated_at FROM custom_goals WHERE id=?",
@@ -844,11 +947,11 @@ class ApiPersistence:
                 ).fetchone()
                 return dict(row) if row else None
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def get_custom_goal_by_name(self, name: str) -> dict[str, Any] | None:
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 row = conn.execute(
                     "SELECT id, name, objective, created_at, updated_at FROM custom_goals WHERE name=? COLLATE NOCASE",
@@ -856,32 +959,32 @@ class ApiPersistence:
                 ).fetchone()
                 return dict(row) if row else None
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def create_custom_goal(self, name: str, objective: str) -> dict[str, Any]:
         gid = _new_id("goal")
         now = _now_iso()
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 conn.execute(
                     "INSERT INTO custom_goals (id, name, objective, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
                     (gid, name, objective, now, now),
                 )
-                conn.commit()
+                self._commit(conn)
             except sqlite3.IntegrityError as exc:
                 # UNIQUE violation (case-insensitive) -> duplicate name
                 if "UNIQUE" in str(exc) or "unique" in str(exc).lower():
                     raise ValueError(f"custom goal name {name!r} already exists") from exc
                 raise
             finally:
-                conn.close()
+                self._release_conn(conn)
         return {"id": gid, "name": name, "objective": objective, "created_at": now, "updated_at": now}
 
     def update_custom_goal(self, goal_id: str, name: str, objective: str) -> dict[str, Any] | None:
         now = _now_iso()
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 # Verify existence first
                 row = conn.execute("SELECT id FROM custom_goals WHERE id=?", (goal_id,)).fetchone()
@@ -892,7 +995,7 @@ class ApiPersistence:
                         "UPDATE custom_goals SET name=?, objective=?, updated_at=? WHERE id=?",
                         (name, objective, now, goal_id),
                     )
-                    conn.commit()
+                    self._commit(conn)
                     if cur.rowcount == 0:
                         return None
                 except sqlite3.IntegrityError as exc:
@@ -905,14 +1008,14 @@ class ApiPersistence:
                 ).fetchone()
                 return dict(updated) if updated else None
             finally:
-                conn.close()
+                self._release_conn(conn)
 
     def delete_custom_goal(self, goal_id: str) -> bool:
         with self._lock:
-            conn = self._connect()
+            conn = self._live_conn()
             try:
                 cur = conn.execute("DELETE FROM custom_goals WHERE id=?", (goal_id,))
-                conn.commit()
+                self._commit(conn)
                 return cur.rowcount > 0
             finally:
-                conn.close()
+                self._release_conn(conn)
