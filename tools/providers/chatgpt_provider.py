@@ -150,6 +150,98 @@ def _auth_file_candidates(cfg: Mapping[str, Any]) -> list[str]:
 _DROP_KWARGS = ("options", "keep_alive", "format", "suffix", "think", "raw")
 
 
+# ---------------------------------------------------------------------------
+# Persistent HTTP plumbing (P1-04 connection reuse + P1-06 lifecycle)
+# ---------------------------------------------------------------------------
+
+# Owners of ChatGptProxyClient (P1-06 audit):
+#   - build_chatgpt_router() below (router-owned `shared`, closed via GC/__del__
+#     + close_all_chatgpt_clients() at shutdown)
+#   - ChatGptProvider.build_client() below (same ownership)
+# Probe (short-timeout, non-chat) HTTP goes through _probe_client() so the
+# hot-path pool never inherits probe timeouts.
+
+
+def _keepalive_limits() -> Any:
+    """Connection-pool limits for persistent clients (None when httpx is faked)."""
+    try:
+        return httpx.Limits(max_connections=20, max_keepalive_connections=10, keepalive_expiry=60.0)
+    except Exception:  # noqa: BLE001 -- test fakes have no Limits; fall back to defaults
+        return None
+
+
+def _http2_available() -> bool:
+    """True when the optional ``h2`` package is installed (import-time flag)."""
+    try:
+        import importlib.util
+
+        return importlib.util.find_spec("h2") is not None
+    except Exception:  # noqa: BLE001 -- missing import machinery means no h2
+        return False
+
+
+_HTTP2 = _http2_available()
+
+
+def _build_persistent_client(timeout: float | None) -> Any:
+    """One keep-alive httpx client (http2 opportunistic, no hard h2 dependency)."""
+    kwargs: dict[str, Any] = {"timeout": timeout, "http2": _HTTP2}
+    limits = _keepalive_limits()
+    if limits is not None:
+        kwargs["limits"] = limits
+    return httpx.Client(**kwargs)
+
+
+_PROBE_CLIENT: Any = None
+_PROBE_LOCK = threading.Lock()
+
+
+def _probe_client() -> Any:
+    """Process-wide short-timeout client for health/discovery probes (loopback)."""
+    global _PROBE_CLIENT
+    with _PROBE_LOCK:
+        if _PROBE_CLIENT is None:
+            _PROBE_CLIENT = _build_persistent_client(_HEALTH_TIMEOUT)
+        return _PROBE_CLIENT
+
+
+def close_probe_client() -> None:
+    """Close the shared probe client (idempotent; recreated lazily)."""
+    global _PROBE_CLIENT
+    with _PROBE_LOCK:
+        client, _PROBE_CLIENT = _PROBE_CLIENT, None
+    if client is not None:
+        try:
+            client.close()
+        except Exception:  # noqa: BLE001 -- shutdown path must never raise
+            pass
+
+
+_CHATGPT_LIVE_CLIENTS: Any = None
+
+
+def _live_clients() -> Any:
+    """Weak set of live ChatGptProxyClient instances (P1-06 shutdown sweep)."""
+    import weakref
+
+    global _CHATGPT_LIVE_CLIENTS
+    if _CHATGPT_LIVE_CLIENTS is None:
+        _CHATGPT_LIVE_CLIENTS = weakref.WeakSet()
+    return _CHATGPT_LIVE_CLIENTS
+
+
+def close_all_chatgpt_clients() -> None:
+    """Close every live ChatGptProxyClient + the probe client (idempotent)."""
+    live = _CHATGPT_LIVE_CLIENTS
+    if live is not None:
+        for client in list(live):
+            try:
+                client.close()
+            except Exception:  # noqa: BLE001 -- shutdown sweep must never raise
+                pass
+    close_probe_client()
+
+
 class ChatGptProxyClient:
     """OpenAI-compatible chat client that returns Ollama-shaped responses."""
 
@@ -158,6 +250,44 @@ class ChatGptProxyClient:
         self.timeout = timeout
         if httpx is None:  # pragma: no cover
             raise RuntimeError("httpx package not installed")
+        self._close_lock = threading.Lock()
+        self._closed = False
+        # Persistent keep-alive pool: one TCP+TLS setup per client lifetime,
+        # not per chat call. Default 300s matches the old per-call behavior.
+        self._http = _build_persistent_client(self.timeout if self.timeout is not None else 300.0)
+        try:
+            _live_clients().add(self)
+        except Exception:  # noqa: BLE001 -- tracking must never break construction
+            pass
+
+    def close(self) -> None:
+        """Close the persistent HTTP client. Idempotent, thread-safe, never raises."""
+        with self._close_lock:
+            http, self._http = self._http, None
+            if self._closed:
+                return
+            self._closed = True
+        if http is not None:
+            try:
+                http.close()
+            except Exception:  # noqa: BLE001 -- close/shutdown path must never raise
+                pass
+
+    def __enter__(self) -> "ChatGptProxyClient":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+    def __del__(self) -> None:  # pragma: no cover - GC timing is nondeterministic
+        try:
+            if not self._closed:
+                import warnings
+
+                warnings.warn("ChatGptProxyClient was not closed; closing on GC", ResourceWarning, stacklevel=2)
+            self.close()
+        except Exception:  # noqa: BLE001 -- __del__ must never raise
+            pass
 
     def _build_payload(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -203,19 +333,17 @@ class ChatGptProxyClient:
         payload = self._build_payload(raw)
         stream = bool(payload.get("stream", False))
         url = f"{self.base_url}/chat/completions"
-        timeout = self.timeout if self.timeout is not None else 300.0
 
         if stream:
-            return self._stream(url, payload, timeout)
-        return self._nonstream(url, payload, timeout)
+            return self._stream(url, payload)
+        return self._nonstream(url, payload)
 
-    def _nonstream(self, url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+    def _nonstream(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         payload = dict(payload)
         payload["stream"] = False
-        with httpx.Client(timeout=timeout) as client:
-            response = client.post(url, json=payload)
-            response.raise_for_status()
-            data = response.json()
+        response = self._http.post(url, json=payload)
+        response.raise_for_status()
+        data = response.json()
 
         choices = data.get("choices") or []
         choice = choices[0] if choices else {}
@@ -235,7 +363,7 @@ class ChatGptProxyClient:
             "usage": _normalize_usage(data.get("usage")),
         }
 
-    def _stream(self, url: str, payload: dict[str, Any], timeout: float) -> Iterator[dict[str, Any]]:
+    def _stream(self, url: str, payload: dict[str, Any]) -> Iterator[dict[str, Any]]:
         payload = dict(payload)
         payload["stream"] = True
         # ponytail: accumulate streaming tool-call fragments by index in case a
@@ -245,58 +373,57 @@ class ChatGptProxyClient:
         tool_accum: dict[int, dict[str, Any]] = {}
         final_usage: dict[str, Any] = {}
 
-        with httpx.Client(timeout=timeout) as client:
-            with client.stream("POST", url, json=payload) as response:
-                response.raise_for_status()
-                for line in response.iter_lines():
-                    if not line:
-                        continue
-                    if not line.startswith("data:"):
-                        # SSE comment / keepalive (`: ...`) — ignore.
-                        continue
-                    body = line[len("data:") :].strip()
-                    if body == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(body)
-                    except json.JSONDecodeError:
-                        continue
-                    usage = chunk.get("usage")
-                    if usage:
-                        final_usage = usage
-                    model = chunk.get("model") or payload.get("model")
-                    choices = chunk.get("choices") or []
-                    if not choices:
-                        # Final usage-only chunk (openai-oauth emits
-                        # choices:[] + usage:{} before [DONE]).
-                        continue
-                    delta = choices[0].get("delta") or {}
-                    content = delta.get("content")
-                    if content is None:
-                        content = ""
-                    for tc in delta.get("tool_calls") or []:
-                        idx = tc.get("index", 0)
-                        slot = tool_accum.setdefault(
-                            idx,
-                            {
-                                "id": tc.get("id", ""),
-                                "type": tc.get("type", "function"),
-                                "function": {"name": "", "arguments": ""},
-                            },
-                        )
-                        fn = tc.get("function") or {}
-                        if fn.get("name"):
-                            slot["function"]["name"] = slot["function"]["name"] + fn["name"]
-                        if fn.get("arguments") is not None:
-                            slot["function"]["arguments"] = slot["function"]["arguments"] + fn["arguments"]
-                    yield {
-                        "model": model,
-                        "message": {
-                            "role": "assistant",
-                            "content": content,
-                            "thinking": "",
+        with self._http.stream("POST", url, json=payload) as response:
+            response.raise_for_status()
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                if not line.startswith("data:"):
+                    # SSE comment / keepalive (`: ...`) — ignore.
+                    continue
+                body = line[len("data:") :].strip()
+                if body == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(body)
+                except json.JSONDecodeError:
+                    continue
+                usage = chunk.get("usage")
+                if usage:
+                    final_usage = usage
+                model = chunk.get("model") or payload.get("model")
+                choices = chunk.get("choices") or []
+                if not choices:
+                    # Final usage-only chunk (openai-oauth emits
+                    # choices:[] + usage:{} before [DONE]).
+                    continue
+                delta = choices[0].get("delta") or {}
+                content = delta.get("content")
+                if content is None:
+                    content = ""
+                for tc in delta.get("tool_calls") or []:
+                    idx = tc.get("index", 0)
+                    slot = tool_accum.setdefault(
+                        idx,
+                        {
+                            "id": tc.get("id", ""),
+                            "type": tc.get("type", "function"),
+                            "function": {"name": "", "arguments": ""},
                         },
-                    }
+                    )
+                    fn = tc.get("function") or {}
+                    if fn.get("name"):
+                        slot["function"]["name"] = slot["function"]["name"] + fn["name"]
+                    if fn.get("arguments") is not None:
+                        slot["function"]["arguments"] = slot["function"]["arguments"] + fn["arguments"]
+                yield {
+                    "model": model,
+                    "message": {
+                        "role": "assistant",
+                        "content": content,
+                        "thinking": "",
+                    },
+                }
 
         assembled = [tool_accum[i] for i in sorted(tool_accum)]
         yield {
@@ -405,9 +532,8 @@ class ChatGptProxyManager:
         if httpx is None:
             return False
         try:
-            with httpx.Client(timeout=_HEALTH_TIMEOUT) as client:
-                resp = client.get(f"{_root_url(cfg)}/health")
-                return resp.status_code < 500
+            resp = _probe_client().get(f"{_root_url(cfg)}/health")
+            return resp.status_code < 500
         except Exception:  # noqa: BLE001 -- health probe: any transport error means not-healthy (fail-closed)
             return False
 
@@ -595,10 +721,9 @@ class ChatGptProxyManager:
         if httpx is None:
             return []
         try:
-            with httpx.Client(timeout=_HEALTH_TIMEOUT) as client:
-                resp = client.get(f"{url_base}/models")
-                resp.raise_for_status()
-                data = resp.json()
+            resp = _probe_client().get(f"{url_base}/models")
+            resp.raise_for_status()
+            data = resp.json()
         except Exception:  # noqa: BLE001 -- model discovery probe: failure degrades to registry mode, never raises
             return []
         ids: list[str] = []
@@ -645,6 +770,10 @@ class ChatGptProxyManager:
 
 
 def _atexit_shutdown() -> None:
+    try:
+        close_all_chatgpt_clients()
+    except Exception:  # noqa: BLE001 -- atexit shutdown must never raise during interpreter teardown
+        pass
     try:
         ChatGptProxyManager.get().shutdown()
     except Exception:  # noqa: BLE001 -- atexit shutdown must never raise during interpreter teardown
@@ -818,12 +947,9 @@ class ChatGptProvider(BaseProvider):
             raise ProviderDiscoveryError(msg, fallback_models=[default_model])
         base_url = str(running.get("base_url") or _v1_url(cfg))
         try:
-            import httpx
-
-            with httpx.Client(timeout=5.0) as client:
-                resp = client.get(f"{base_url.rstrip('/')}/models")
-                resp.raise_for_status()
-                data = resp.json()
+            resp = _probe_client().get(f"{base_url.rstrip('/')}/models", timeout=5.0)
+            resp.raise_for_status()
+            data = resp.json()
         except Exception as exc:
             raise ProviderDiscoveryError(f"ChatGPT proxy unreachable: {exc}", fallback_models=[default_model]) from exc
         ids = [str(m.get("id", "")) for m in data.get("data", []) if isinstance(m, dict) and m.get("id")]
