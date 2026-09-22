@@ -89,38 +89,202 @@ class AttackGraphService:
         )
 
     def _entry(self, run: dict[str, Any]) -> _Store:
-        """Return the cached store for ``run``, rebuilding when artifacts change."""
+        """Return the cached store for ``run``, ingesting deltas when artifacts change.
+
+        Growing runs cost O(new evidence): when only the audit file grew (and
+        the report is unchanged), the delta from the tracked byte offset is
+        merged into the existing store. Anything else (report change, audit
+        shrink, missing/corrupt store) takes a full rebuild.
+        """
+        import logging
+        import sqlite3
+
         run_id = str(run.get("id") or "")
         run_dir = self._run_dir(run_id)
         fingerprint = self._fingerprint(run, run_dir)
         entry = self._cache.get(run_id)
         if entry is not None and entry.fingerprint == fingerprint:
+            self._cache[run_id] = self._cache.pop(run_id)  # LRU touch
             return entry
+        if entry is not None:
+            try:
+                if self._ingest_delta(entry, run, run_dir, fingerprint):
+                    self._cache[run_id] = self._cache.pop(run_id)
+                    return entry
+            except (OSError, sqlite3.DatabaseError, ValueError) as exc:
+                logging.getLogger(__name__).warning("graph delta ingest failed for %s: %s", run_id, exc)
+        return self._build_fresh(run_id, run, run_dir, fingerprint)
+
+    def _audit_state(self, run_dir: Path) -> tuple[str, int, int]:
+        """(rel, size, mtime) of the live audit file, or ("", 0, 0)."""
+        for rel in ("exploit_audit.jsonl", "exploit_workspace/exploit_audit.jsonl"):
+            path = run_dir / rel
+            try:
+                st = path.stat()
+                return (rel, st.st_size, int(st.st_mtime))
+            except OSError:
+                continue
+        return ("", 0, 0)
+
+    def _ingest_delta(self, entry: _Store, run: dict[str, Any], run_dir: Path, fingerprint: tuple[Any, ...]) -> bool:
+        """Merge only new evidence into an existing store; False → rebuild."""
+        audit_rel, audit_size, audit_mtime = self._audit_state(run_dir)
+        report_key = _state_enhanced(run_dir)
+        if report_key != entry.report_key:
+            return False  # report changed: full rebuild retracts removals
+        if not audit_rel or audit_rel != entry.audit_rel or audit_size < entry.audit_offset:
+            return False  # switched/shrunk audit file: rebuild from 0
+        records, new_offset, _path = read_audit_from(run_dir, entry.audit_offset)
+        with entry.store.transaction():
+            ingest_run_metadata(entry.store, run, entry.conflicts)
+            ingest_audit_records(entry.store, records, entry.conflicts)
+        entry.audit_offset = new_offset
+        entry.audit_size = audit_size
+        entry.audit_mtime = audit_mtime
+        entry.fingerprint = fingerprint
+        self._write_offsets(entry, audit_rel, new_offset, audit_size, audit_mtime, report_key)
+        return True
+
+    @staticmethod
+    def _write_offsets(
+        entry: _Store,
+        audit_rel: str,
+        offset: int,
+        size: int,
+        mtime: int,
+        report_key: tuple[Any, ...],
+    ) -> None:
+        entry.audit_rel = audit_rel
+        try:
+            entry.store.set_meta("graph_store_version", _GRAPH_STORE_VERSION)
+            entry.store.set_meta("graph_audit_rel", audit_rel)
+            entry.store.set_meta("graph_audit_offset", str(offset))
+            entry.store.set_meta("graph_audit_size", str(size))
+            entry.store.set_meta("graph_audit_mtime", str(mtime))
+            entry.store.set_meta("graph_report_size", str(report_key[1]))
+            entry.store.set_meta("graph_report_mtime", str(report_key[2]))
+        except Exception:  # noqa: BLE001 -- offset persistence is best-effort
+            pass
+
+    def _build_fresh(self, run_id: str, run: dict[str, Any], run_dir: Path, fingerprint: tuple[Any, ...]) -> _Store:
+        """Full rebuild: discard any stale store file and re-ingest everything."""
+        import sqlite3
+        from datetime import datetime, timezone
 
         # Evict LRU (dict preserves insertion order; re-insert moves to end).
         if run_id in self._cache:
-            self._cache.pop(run_id)
+            old = self._cache.pop(run_id)
+            try:
+                old.store.close()
+            except Exception:  # noqa: BLE001 -- best-effort eviction
+                pass
         while len(self._cache) >= _CACHE_MAX:
             oldest = next(iter(self._cache))
             try:
                 self._cache[oldest].store.close()
-            except Exception:
+            except Exception:  # noqa: BLE001 -- best-effort eviction
                 pass
             self._cache.pop(oldest)
 
-        from datetime import datetime, timezone
-
-        store = AttackGraphStore(":memory:", scope=scope_for_run(run_id))
+        db_path = run_dir / _GRAPH_DB_NAME
+        store: AttackGraphStore | None = None
+        if db_path.is_file():
+            # Restart recovery: adopt the file-backed store when its offsets
+            # still describe the artifacts, then ingest just the delta.
+            try:
+                candidate = AttackGraphStore(db_path, scope=scope_for_run(run_id))
+                adopted = self._adopt_store(candidate, run, run_dir, fingerprint)
+                if adopted is not None:
+                    self._cache[run_id] = adopted
+                    return adopted
+                candidate.close()
+            except (OSError, sqlite3.DatabaseError, ValueError):
+                pass
+            try:
+                db_path.unlink()
+            except OSError:
+                pass
+        store = AttackGraphStore(db_path, scope=scope_for_run(run_id))
         conflicts: list[GraphMergeConflict] = []
         build_graph_store(store, run, run_dir, conflicts)
+        audit_rel, audit_size, audit_mtime = self._audit_state(run_dir)
+        report_key = _state_enhanced(run_dir)
         entry = _Store(
             store=store,
             conflicts=conflicts,
             fingerprint=fingerprint,
             built_at=datetime.now(timezone.utc).isoformat(),
+            audit_rel=audit_rel,
+            audit_offset=audit_size,
+            audit_size=audit_size,
+            audit_mtime=audit_mtime,
+            report_key=report_key,
         )
+        self._write_offsets(entry, audit_rel, audit_size, audit_size, audit_mtime, report_key)
         self._cache[run_id] = entry
         return entry
+
+    def _adopt_store(
+        self, store: AttackGraphStore, run: dict[str, Any], run_dir: Path, fingerprint: tuple[Any, ...]
+    ) -> _Store | None:
+        """Adopt a file-backed store from a previous process; None → rebuild."""
+        import sqlite3
+        from datetime import datetime, timezone
+
+        try:
+            meta = {k: store.get_meta(k) for k in ("graph_store_version",)}
+            if meta["graph_store_version"] != _GRAPH_STORE_VERSION:
+                return None
+            audit_rel = store.get_meta("graph_audit_rel") or ""
+            offset = int(store.get_meta("graph_audit_offset") or "-1")
+            size = int(store.get_meta("graph_audit_size") or "-1")
+            mtime = int(store.get_meta("graph_audit_mtime") or "-1")
+            report_size = store.get_meta("graph_report_size")
+            report_mtime = store.get_meta("graph_report_mtime")
+        except (TypeError, ValueError, sqlite3.DatabaseError):
+            return None
+        if offset < 0 or not audit_rel:
+            return None
+        live_rel, live_size, live_mtime = self._audit_state(run_dir)
+        live_report = _state_enhanced(run_dir)
+        if live_rel != audit_rel or (report_size, report_mtime) != (str(live_report[1]), str(live_report[2])):
+            return None
+        if live_size < offset:
+            return None  # shrunk while away: rebuild
+        run_id = str(run.get("id") or "")
+        if store.scope != scope_for_run(run_id):
+            return None
+        entry = _Store(
+            store=store,
+            conflicts=[],
+            fingerprint=fingerprint,
+            built_at=datetime.now(timezone.utc).isoformat(),
+            audit_rel=audit_rel,
+            audit_offset=offset,
+            audit_size=size,
+            audit_mtime=mtime,
+            report_key=live_report,
+        )
+        # Catch up on anything appended while away, then adopt.
+        if not self._ingest_delta(entry, run, run_dir, fingerprint):
+            return None
+        return entry
+
+    def rebuild(self, run: dict[str, Any]) -> _Store:
+        """Explicit full rebuild (schema bump / corruption / operator request)."""
+        run_id = str(run.get("id") or "")
+        run_dir = self._run_dir(run_id)
+        if run_id in self._cache:
+            old = self._cache.pop(run_id)
+            try:
+                old.store.close()
+            except Exception:  # noqa: BLE001 -- best-effort
+                pass
+        try:
+            (run_dir / _GRAPH_DB_NAME).unlink(missing_ok=True)
+        except OSError:
+            pass
+        return self._build_fresh(run_id, run, run_dir, self._fingerprint(run, run_dir))
 
     def _run_dir(self, run_id: str) -> Path:
         base = self._reports_dir.resolve()

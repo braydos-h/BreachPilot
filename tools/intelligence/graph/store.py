@@ -716,6 +716,21 @@ class AttackGraphStore:
             return node
         return replace(node, node_id=_new_id())
 
+    def get_meta(self, key: str) -> str | None:
+        """Read a metadata value (P2-04 offset persistence)."""
+        with self._lock:
+            try:
+                row = self._conn.execute("SELECT value FROM agv2_meta WHERE key=?", (key,)).fetchone()
+            except sqlite3.Error:
+                return None
+            return str(row["value"]) if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        """Write a metadata value (P2-04 offset persistence)."""
+        with self._lock:
+            self._conn.execute("INSERT OR REPLACE INTO agv2_meta(key, value) VALUES (?, ?)", (key, value))
+            self._commit_or_defer()
+
     def close(self) -> None:
         """Close the underlying connection."""
         with self._lock:
