@@ -23,7 +23,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, TypedDict, cast
+from typing import Any, Literal, TypedDict
 
 from tools.kernel.allowlist import (
     _check_allowlist,
@@ -768,9 +768,7 @@ def _parse_envelope(line: bytes, kind: str, index: int) -> tuple[dict[str, Any] 
     return obj, ""
 
 
-def _verify_chained_objects(
-    objs: list[Any], start_prev: str, label: str
-) -> tuple[bool, str, str]:
+def _verify_chained_objects(objs: list[Any], start_prev: str, label: str) -> tuple[bool, str, str]:
     """Thread record-level hash/prev_hash linkage (mirrors verify_audit_chain).
 
     Rows carrying ``hash`` are recomputed (canonical JSON excluding ``hash``)
@@ -785,25 +783,37 @@ def _verify_chained_objects(
         if not rec_hash:
             prev_hash = obj.get("prev_hash", "")
             if prev_hash and prev_hash != running:
-                return False, (
-                    f"{label}: record {pos} prev_hash mismatch (chain broken, "
-                    f"expected {str(running)[:12]!r}, got {str(prev_hash)[:12]!r})"
-                ), running
+                return (
+                    False,
+                    (
+                        f"{label}: record {pos} prev_hash mismatch (chain broken, "
+                        f"expected {str(running)[:12]!r}, got {str(prev_hash)[:12]!r})"
+                    ),
+                    running,
+                )
             continue
         prev_hash = obj.get("prev_hash", "")
         if prev_hash != running:
-            return False, (
-                f"{label}: record {pos} prev_hash mismatch (chain broken, "
-                f"expected {str(running)[:12]!r}, got {str(prev_hash)[:12]!r})"
-            ), running
+            return (
+                False,
+                (
+                    f"{label}: record {pos} prev_hash mismatch (chain broken, "
+                    f"expected {str(running)[:12]!r}, got {str(prev_hash)[:12]!r})"
+                ),
+                running,
+            )
         payload = {k: v for k, v in obj.items() if k != "hash"}
         canonical = json.dumps(payload, sort_keys=True, default=str, ensure_ascii=True)
         expected = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
         if rec_hash != expected:
-            return False, (
-                f"{label}: record {pos} hash mismatch (entry tampered with, "
-                f"expected {expected[:12]!r}, got {str(rec_hash)[:12]!r})"
-            ), running
+            return (
+                False,
+                (
+                    f"{label}: record {pos} hash mismatch (entry tampered with, "
+                    f"expected {expected[:12]!r}, got {str(rec_hash)[:12]!r})"
+                ),
+                running,
+            )
         running = str(rec_hash)
     return True, f"{label}: chain ok", running
 
@@ -873,9 +883,7 @@ def quarantine_segment(path: Path | str) -> Path:
     return dest
 
 
-def _rescan_sealed_segment(
-    path: Path, index: int, start_prev: str
-) -> tuple[bool, str, str, str, str]:
+def _rescan_sealed_segment(path: Path, index: int, start_prev: str) -> tuple[bool, str, str, str, str]:
     """Full parse of a sealed segment. Returns (ok, reason, root, digest, tail)."""
     try:
         raw = path.read_bytes()
@@ -941,13 +949,18 @@ def verify_segmented_chain(base_path: Path | str) -> tuple[bool, str]:
     except OSError as exc:
         return False, f"segment unreadable: {exc}"
     # Cross-segment links first (fresh digests only).
-    headers: dict[int, dict[str, Any]] = {}
+    last = indexes[-1]
     for i in indexes:
+        seg_i = audit_segment_path(base, i)
         try:
-            first = audit_segment_path(base, i).read_bytes().split(b"\n")[0]
+            raw_i = seg_i.read_bytes()
         except OSError as exc:
             return False, f"segment {i:04d}: unreadable: {exc}"
-        header, reason = _parse_envelope(first, _SEGMENT_HEADER, i)
+        if not raw_i:
+            if i != last:
+                return False, f"segment {i:04d}: empty (missing header)"
+            continue  # Empty active tail: no header to link yet; checked below.
+        header, reason = _parse_envelope(raw_i.split(b"\n")[0], _SEGMENT_HEADER, i)
         if header is None:
             return False, reason
         expected_prev = _GENESIS_SEGMENT_HASH if i == 1 else fresh[i - 1]
@@ -956,12 +969,10 @@ def verify_segmented_chain(base_path: Path | str) -> tuple[bool, str]:
                 f"segment {i:04d}: previous_segment_hash mismatch (chain broken; "
                 "segment rewrite detected even if the checkpoint was updated)"
             )
-        headers[i] = header
     # Sealed content: fast digest path or full rescan.
     running = ""
     fast = 0
     rescanned = 0
-    last = indexes[-1]
     try:
         last_blob = audit_segment_path(base, last).read_bytes().rstrip(b"\n").split(b"\n")[-1]
     except OSError as exc:
@@ -987,7 +998,7 @@ def verify_segmented_chain(base_path: Path | str) -> tuple[bool, str]:
             and entry.get("size") == stat.st_size
             and entry.get("digest") == fresh[i]
         )
-        if use_fast:
+        if use_fast and isinstance(entry, dict):
             # Digest covers the footer, so the recorded tail_hash is trusted.
             running = str(entry.get("tail_hash", ""))
             fast += 1
@@ -1004,7 +1015,10 @@ def verify_segmented_chain(base_path: Path | str) -> tuple[bool, str]:
         if not ok:
             return False, reason
     mode = "full rescan (no checkpoint)" if full_rescan else f"fast-path {fast}, rescanned {rescanned}"
-    return True, f"segments ok ({len(sealed)} sealed [{mode}], tail {tail_records} records across {len(indexes)} segments)"
+    return (
+        True,
+        f"segments ok ({len(sealed)} sealed [{mode}], tail {tail_records} records across {len(indexes)} segments)",
+    )
 
 
 def _verify_tail_segment(base: Path, index: int, start_prev: str) -> tuple[bool, str, str, int]:
@@ -1060,11 +1074,14 @@ class SegmentedAuditWriter:
         self._durability = durability
         self._lock = threading.Lock()
         self._base.parent.mkdir(parents=True, exist_ok=True)
+        self._records = 0
+        self._bytes = 0
+        self._root = hashlib.sha256()
+        self._last_hash = ""
+        self._fresh_header: str | None = None
         indexes = _list_segment_indexes(self._base)
         self._active_index = self._adopt_or_roll(indexes)
-        self._writer = AppendLogWriter(
-            audit_segment_path(self._base, self._active_index), durability=durability
-        )
+        self._writer = AppendLogWriter(audit_segment_path(self._base, self._active_index), durability=durability)
         if self._fresh_header is not None:
             header_line = self._fresh_header
             self._fresh_header = None
@@ -1078,7 +1095,7 @@ class SegmentedAuditWriter:
         self._bytes = 0
         self._root = hashlib.sha256()
         self._last_hash = ""
-        self._fresh_header: str | None = None
+        self._fresh_header = None
 
     def _adopt_or_roll(self, indexes: list[int]) -> int:
         """Adopt the tail segment (quarantining corruption) or roll a new one."""
@@ -1163,9 +1180,30 @@ class SegmentedAuditWriter:
             return self._last_hash
 
     def append(self, line: str) -> None:
-        """Append one data line, rotating first when the segment is full."""
+        """Append data line(s), rotating first when the segment is full.
+
+        Lines must be JSON objects (the envelope/rescan/chain machinery
+        requires it); invalid input raises ``ValueError`` before anything is
+        written, so corruption surfaces at the call site instead of as a
+        quarantined tail at the next startup.
+        """
         if not line.endswith("\n"):
             line += "\n"
+        objs: list[dict[str, Any]] = []
+        for part in line.split("\n")[:-1]:
+            try:
+                obj = json.loads(part)
+            except ValueError as exc:
+                raise ValueError(f"segmented audit log requires JSON object lines: {exc}") from exc
+            if not isinstance(obj, dict):
+                raise ValueError("segmented audit log requires JSON object lines")
+            if obj.get(_SEGMENT_ENVELOPE_KEY) in (_SEGMENT_HEADER, _SEGMENT_FOOTER):
+                # Envelope-shaped data would confuse seal detection (only
+                # blines[0]/blines[-1] are parsed as envelopes).
+                raise ValueError("segmented audit log data lines must not use the 'segment_record' key")
+            objs.append(obj)
+        if not objs:
+            raise ValueError("segmented audit log requires a non-empty line")
         encoded = line.encode("utf-8")
         with self._lock:
             if self._records >= self._max_records or self._bytes + len(encoded) > self._max_bytes:
@@ -1173,13 +1211,10 @@ class SegmentedAuditWriter:
             self._writer.append(line)
             self._root.update(encoded)
             self._bytes += len(encoded)
-            self._records += 1
-            try:
-                obj = json.loads(line)
-                if isinstance(obj, dict) and obj.get("hash"):
+            self._records += len(objs)
+            for obj in objs:
+                if obj.get("hash"):
                     self._last_hash = str(obj["hash"])
-            except ValueError:
-                pass
 
     def _rotate_locked(self) -> None:
         footer = {
@@ -1204,15 +1239,15 @@ class SegmentedAuditWriter:
         if not isinstance(segments, dict):
             segments = {}
             checkpoint["segments"] = segments
-        segments[str(self._active_index)] = {
-            "digest": digest_hex,
-            "root_hash": self._root.hexdigest(),
-            "records": self._records,
-            "bytes": self._bytes,
-            "tail_hash": self._last_hash,
-            "mtime_ns": stat.st_mtime_ns,
-            "size": stat.st_size,
-        }
+        segments[str(self._active_index)] = _SegmentEntry(
+            digest=digest_hex,
+            root_hash=self._root.hexdigest(),
+            records=self._records,
+            bytes=self._bytes,
+            tail_hash=self._last_hash,
+            mtime_ns=stat.st_mtime_ns,
+            size=stat.st_size,
+        )
         new_index = self._active_index + 1
         checkpoint["active"] = new_index
         writer = AppendLogWriter(audit_segment_path(self._base, new_index), durability=self._durability)
