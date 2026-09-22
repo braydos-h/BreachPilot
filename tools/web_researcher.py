@@ -683,16 +683,35 @@ class WebResearcher:
 
         fetched_sources: list[ResearchSource] = []
         fact_inputs: list[tuple[str, str]] = []
-        for result in fetch_candidates[: self.settings.max_fetch_depth]:
+        # ponytail perf: fetches are independent read-only HTTP — run them
+        # concurrently (was serial await, up to max_fetch_depth × timeout).
+        # gather preserves candidate order so downstream ranking is unchanged.
+        fetch_targets = fetch_candidates[: self.settings.max_fetch_depth]
+
+        async def _fetch_one(
+            result: SearchResult,
+        ) -> tuple[SearchResult, FetchResult | None, list[str], bool, str]:
             try:
                 fetched, fetch_warnings, fetch_fallback = await self._fetch_structured_async(result.url)
-                warnings.extend(fetch_warnings)
-                fallback_used = fallback_used or fetch_fallback
+                return (result, fetched, list(fetch_warnings), bool(fetch_fallback), "")
             except ResearchProviderError as exc:
-                source = self._source_from_search_result(result, warning=exc.public_message())
+                return (result, None, [], False, exc.public_message())
+
+        fetch_outcomes: list[Any] = []
+        if fetch_targets:
+            fetch_outcomes = await asyncio.gather(*(_fetch_one(r) for r in fetch_targets), return_exceptions=True)
+        for outcome in fetch_outcomes:
+            if isinstance(outcome, Exception):
+                warnings.append(f"Fetch failed: {outcome}")
+                continue
+            result, fetched, fetch_warnings, fetch_fallback, err_code = outcome
+            warnings.extend(fetch_warnings)
+            fallback_used = fallback_used or fetch_fallback
+            if fetched is None:
+                source = self._source_from_search_result(result, warning=err_code)
                 fetched_sources.append(source)
                 fact_inputs.append((source.snippet, source.url))
-                warnings.append(f"Only snippet available for {result.url}: {exc.public_message()}")
+                warnings.append(f"Only snippet available for {result.url}: {err_code}")
                 continue
 
             if fetched.ok and fetched.content:

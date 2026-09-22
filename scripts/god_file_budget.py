@@ -39,7 +39,6 @@ GRANDFATHERED = frozenset(
         "tools/eval_harness.py",
         "tools/enhanced_reporting.py",
         "tools/web_researcher.py",
-        "main.py",
         "tools/attack_modules/modules/ics_iot.py",
         "tools/browser/playwright_backend.py",
         "tools/providers/opencode_go_provider.py",
@@ -85,6 +84,28 @@ def load_baseline() -> dict[str, tuple[int, int]]:
     return baseline
 
 
+def classify_growth(old: tuple[int, int], new: tuple[int, int]) -> str | None:
+    """Classify grandfathered-file drift as None (silent), "warn", or "fail".
+
+    Small drift warns (a one-line fix must not fail CI); growth past
+    tolerance fails so the budget has teeth:
+
+    - LOC growth beyond ``max(20, 10% of baseline LOC)`` fails.
+    - Bytes growth beyond ``max(4096, 25% of baseline bytes)`` fails.
+
+    Anything else that grew warns; shrinks and ties are silent.
+    """
+    old_loc, old_size = old
+    new_loc, new_size = new
+    loc_delta = new_loc - old_loc
+    size_delta = new_size - old_size
+    if loc_delta > max(20, old_loc // 10) or size_delta > max(4096, old_size // 4):
+        return "fail"
+    if loc_delta > 0 or size_delta > 0:
+        return "warn"
+    return None
+
+
 def write_baseline(entries: dict[str, tuple[int, int]]) -> None:
     lines = [
         "# God-file baseline — see scripts/god_file_budget.py.",
@@ -116,13 +137,24 @@ def main(argv: list[str]) -> int:
         write_baseline(current)
         print(f"god-file baseline rewritten: {len(current)} grandfathered files")
         return 0
-    # Grandfathered growth tracking: warning annotations, never failures.
-    # (Deliberate: a one-line fix to a god-file must not fail CI. Extract a
-    # logical submodule to shrink one, then --update the baseline.)
+    # Grandfathered growth tracking: small drift keeps the warning annotation
+    # (a one-line fix to a god-file must not fail CI); growth past the
+    # classify_growth tolerance fails the gate. Extract a logical submodule
+    # to shrink one, then --update the baseline.
     for rel in sorted(current):
         loc, size = current[rel]
         old_loc, old_size = baseline.get(rel, (loc, size))
-        if loc > old_loc or size > old_size:
+        verdict = classify_growth((old_loc, old_size), (loc, size))
+        if verdict == "fail":
+            print(
+                f"::error file={rel},line=1::grandfathered god-file grew significantly "
+                f"({old_loc} LOC/{old_size} B -> {loc} LOC/{size} B). "
+                "Extract a logical submodule instead of growing it further."
+            )
+            violations.append(
+                f"{rel} grew significantly ({old_loc} LOC/{old_size} B -> {loc} LOC/{size} B)"
+            )
+        elif verdict == "warn":
             print(
                 f"::warning file={rel},line=1::grandfathered god-file grew "
                 f"({old_loc} LOC/{old_size} B -> {loc} LOC/{size} B). "
@@ -131,7 +163,7 @@ def main(argv: list[str]) -> int:
         elif (loc, size) != (old_loc, old_size):
             print(f"grandfathered {rel} shrank ({old_loc} LOC -> {loc} LOC) — nice.")
     if violations:
-        print("god-file budget FAILED — new non-grandfathered files over budget (OR threshold):")
+        print("god-file budget FAILED:")
         for violation in violations:
             print(f"  - {violation}")
         print("Extract logical responsibilities into submodules; do not split cohesively just to meter-dodge.")

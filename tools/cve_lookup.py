@@ -254,6 +254,20 @@ class NVDClient:
         self._epss = EPSSClient(settings) if settings.epss_enabled else None
         self._kev = KEVCatalog(settings) if settings.kev_enabled else None
 
+    def _effective_rate_limit(self) -> float:
+        """NVD without a key allows ~5 req/30s (6s gap); with a key ~50 req/30s.
+
+        The configured ``rate_limit_seconds`` is the no-key budget. When an
+        API key is present, use a 0.7s gap instead of sleeping 6s per query —
+        this turns 8 unique CVE lookups from ~48s into ~6s.
+        """
+        try:
+            if os.environ.get(self.settings.api_key_env, "").strip():
+                return min(float(self.settings.rate_limit_seconds or 6.0), 0.7)
+        except Exception:
+            pass
+        return float(self.settings.rate_limit_seconds or 6.0)
+
     async def search(self, query: str) -> list[CVEEntry]:
         if not self.settings.enabled:
             return []
@@ -287,9 +301,10 @@ class NVDClient:
             await self._rate_limiter.acquire("nvd")
         else:
             async with self._lock:
+                gap = self._effective_rate_limit()
                 elapsed = time.monotonic() - self._last_request_time
-                if elapsed < self.settings.rate_limit_seconds:
-                    await asyncio.sleep(self.settings.rate_limit_seconds - elapsed)
+                if elapsed < gap:
+                    await asyncio.sleep(gap - elapsed)
                 self._last_request_time = time.monotonic()
 
         try:
@@ -319,10 +334,11 @@ class NVDClient:
             # Tier 1.8: shared limiter path (sync variant).
             self._rate_limiter.acquire_sync("nvd")
         else:
+            gap = self._effective_rate_limit()
             with self._throttle_lock:
                 elapsed = time.monotonic() - self._last_request_time
-                if elapsed < self.settings.rate_limit_seconds:
-                    time.sleep(self.settings.rate_limit_seconds - elapsed)
+                if elapsed < gap:
+                    time.sleep(gap - elapsed)
                 self._last_request_time = time.monotonic()
 
     def search_sync(self, query: str) -> list[CVEEntry]:

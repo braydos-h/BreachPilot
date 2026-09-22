@@ -174,8 +174,17 @@ class PrimaryReconScanner:
             elif nmap_result:
                 result.errors.extend(nmap_result.errors)
                 result.warnings.extend(nmap_result.warnings)
+                # ponytail perf: clean Nmap run with 0 ports means filtered/closed,
+                # not tool failure — RustScan/Masscan will find the same 0 while
+                # each burning a full timeout. Skip them, keep socket fallback
+                # for the unprivileged-box case only when Nmap errored.
+                if not nmap_result.errors:
+                    result.scan_duration = max(time.monotonic() - start_time, 0.0001)
+                    if not result.errors:
+                        result.errors.append("All scanning tools failed or found no open ports.")
+                    return result
 
-        # Fallback to RustScan
+        # Fallback to RustScan (only when Nmap errored/missing, see above)
         if self._config.fallback_enabled and ToolAvailability.check(self._config.rustscan_path):
             logger.info(f"Falling back to RustScan for {target}")
             rust_result = await self._run_rustscan(target)
@@ -186,8 +195,13 @@ class PrimaryReconScanner:
                 return result
             elif rust_result:
                 result.errors.extend(rust_result.errors)
+                if not rust_result.errors:
+                    result.scan_duration = max(time.monotonic() - start_time, 0.0001)
+                    if not result.errors:
+                        result.errors.append("All scanning tools failed or found no open ports.")
+                    return result
 
-        # Fallback to Masscan
+        # Fallback to Masscan (only when previous tools errored/missing)
         if self._config.fallback_enabled and ToolAvailability.check(self._config.masscan_path):
             logger.info(f"Falling back to Masscan for {target}")
             mass_result = await self._run_masscan(target)
@@ -198,6 +212,11 @@ class PrimaryReconScanner:
                 return result
             elif mass_result:
                 result.errors.extend(mass_result.errors)
+                if not mass_result.errors:
+                    result.scan_duration = max(time.monotonic() - start_time, 0.0001)
+                    if not result.errors:
+                        result.errors.append("All scanning tools failed or found no open ports.")
+                    return result
 
         # Final fallback: native Python socket scan (no privileges needed).
         # Used when nmap/rustscan/masscan are unavailable OR failed for lack of

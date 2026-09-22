@@ -205,6 +205,9 @@ autonomous:
   dedup_targets: false
   skip_non_routable: false
   hard_target_max_rounds: 0
+  # Retry-multiplication ceiling (tools/kernel/inference_budget.py): bounds total
+  # inference calls across campaign x worker x swarm. 0 (default) = unbounded.
+  max_inference_calls: 0
 fsm:
   enabled: false
   max_retries_per_step: 3

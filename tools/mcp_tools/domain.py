@@ -784,6 +784,28 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
         # and auto-authorize each discovered host via add_discovered_target.
         takeover_candidates: list[dict[str, str]] = []
         resolved_pairs: list[tuple[str, str]] = []
+        # ponytail perf: passive sources can yield hundreds of subs; resolving
+        # them serially at 5s each stalls for minutes. Resolve concurrently.
+        pending = [s for s in sorted(subs.keys())[:max_results] if not subs.get(s)]
+        if pending:
+            from concurrent.futures import ThreadPoolExecutor as _TPE
+
+            def _resolve_pending(sub: str) -> tuple[str, str | None]:
+                try:
+                    ip, _domain = resolve_target_bounded(sub, timeout_seconds=5.0)
+                    return sub, ip
+                except (TimeoutError, OSError):
+                    return sub, None
+                except Exception:
+                    return sub, None
+
+            try:
+                with _TPE(max_workers=16) as _pool:
+                    for sub, ip in _pool.map(_resolve_pending, pending):
+                        if ip:
+                            subs[sub] = ip
+            except Exception:
+                pass
         for sub in sorted(subs.keys())[:max_results]:
             ip = subs[sub]
             if ip is None:

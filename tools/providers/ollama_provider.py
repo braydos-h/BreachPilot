@@ -24,12 +24,7 @@ import re
 import threading
 from typing import TYPE_CHECKING, Any, Mapping
 
-<<<<<<< Updated upstream
 from .base import DATA_RESIDENCY_CLOUD, DATA_RESIDENCY_LOCAL, BaseProvider, is_loopback_url
-=======
-from .base import BaseProvider
-from .base import DATA_RESIDENCY_CLOUD, DATA_RESIDENCY_LOCAL, is_loopback_url
->>>>>>> Stashed changes
 from .types import (
     ModelClient,
     ModelInfo,

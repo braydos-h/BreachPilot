@@ -57,6 +57,25 @@ def _consume_campaign_retry(self) -> bool:
     return True
 
 
+def _consume_inference_call(self) -> bool:
+    """Consume one inference-budget call; False when the ceiling is spent.
+
+    Fail-open: an absent or unbounded budget (the default) always grants, so
+    existing configs behave byte-identically. Only a configured
+    ``max_inference_calls`` ceiling can deny.
+    """
+    try:
+        budget = getattr(self, "_inference_budget", None)
+    except Exception:  # noqa: BLE001 -- fail-open
+        return True
+    if budget is None:
+        return True
+    try:
+        return bool(budget.consume())
+    except Exception:  # noqa: BLE001 -- budget must never break retries
+        return True
+
+
 def _model_key_for_retry(self, task: AttackTask) -> str:
     """Best-effort model key for the per-model rate-limit hook."""
     try:
@@ -148,6 +167,21 @@ async def _execute_task_batch(self, tasks: list[AttackTask], state: AttackState)
                             {"task_id": task.task_id, "error": err[:500]},
                         )
                         logger.info(f"Not retrying {task.module_name}: campaign retry budget spent")
+                        return
+                    # Inference ceiling: when a shared InferenceBudget is
+                    # configured and spent, the task goes to BLOCKED instead
+                    # of consuming another model round. Unbounded by default.
+                    if not _consume_inference_call(self):
+                        task.status = TaskStatus.BLOCKED
+                        task.error = f"inference budget exhausted: {err}"
+                        task.last_error = err
+                        state.last_error = err
+                        state.add_timeline_event(
+                            "inference_budget_exhausted",
+                            f"{task.module_name} blocked: inference budget spent",
+                            {"task_id": task.task_id, "error": err[:500]},
+                        )
+                        logger.info(f"Not retrying {task.module_name}: inference budget spent")
                         return
                     task.retry_count += 1
                     task.parameters.update(RetryEngine.get_retry_parameters(task.module_name, task.retry_count))

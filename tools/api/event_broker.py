@@ -445,6 +445,7 @@ class RunEventBroker:
         self._ring: deque[dict[str, Any]] = deque(maxlen=buffer_size)
         self._seq = 0
         self._lock = asyncio.Lock()
+        self._file_lock = threading.Lock()
         self._closed = False
         self._subscribers: list[asyncio.Queue[dict[str, Any] | None]] = []
 
@@ -463,13 +464,14 @@ class RunEventBroker:
                 "type": event_type,
                 "payload": clean,
             }
-            # ponytail: fsync off the event-loop thread — a sync fsync here
-            # stalled every emitter/subscriber on the loop. The asyncio lock
-            # is held across the await (waiters yield, they don't stall), so
-            # sequence order == file order is preserved.
-            await asyncio.to_thread(self._append_event_sync, event)
-            self._ring.append(event)
             subscribers = tuple(self._subscribers)
+        # ponytail perf: file IO outside the asyncio lock so concurrent emits
+        # only serialize on the file thread-lock, not on sequence assignment.
+        # File order may differ from sequence order under concurrency;
+        # replay sorts by sequence so ordering stays correct.
+        await asyncio.to_thread(self._append_event_sync, event)
+        async with self._lock:
+            self._ring.append(event)
         for queue in subscribers:
             try:
                 queue.put_nowait(event)
@@ -489,10 +491,11 @@ class RunEventBroker:
     def _append_event_sync(self, event: dict[str, Any]) -> None:
         """Blocking JSONL append (open/write/flush/fsync). Runs in a worker thread."""
         self._events_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._events_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(event, default=str) + "\n")
-            f.flush()
-            os.fsync(f.fileno())
+        with self._file_lock:
+            with self._events_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(event, default=str) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
 
     async def replay(self, after: int = 0) -> list[dict[str, Any]]:
         """Replay events with sequence > ``after`` from JSONL."""
@@ -547,6 +550,13 @@ class RunEventBroker:
                 except json.JSONDecodeError:
                     continue
                 events.append(evt)
+        # ponytail perf: concurrent emits may append out of sequence order
+        # (sequence is assigned under the asyncio lock, file write happens
+        # outside it). Sort so replay cursors stay correct.
+        try:
+            events.sort(key=lambda e: e.get("sequence", 0) if isinstance(e, dict) else 0)
+        except TypeError:
+            pass
         return events
 
     async def replay_page(

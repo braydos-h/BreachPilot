@@ -427,6 +427,10 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "adaptive_replan": False,  # Phase 2.4: per-target multi-round replan + vuln-chaining
         "max_cycles": 100,  # round cap when adaptive_replan is on
         "max_pivot_depth": 0,  # already consumed by the orchestrator (single-IP lock default)
+        # Retry-multiplication ceiling (tools/kernel/inference_budget.py): bounds
+        # total inference calls across campaign x worker x swarm. 0 (default) =
+        # unbounded, byte-identical to previous behavior.
+        "max_inference_calls": 0,
     },
     # FSM / planner-executor split (tools/attack_planner.py). Opt-in
     # (default OFF): when enabled, campaign code may route plan execution

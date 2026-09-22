@@ -42,12 +42,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator, Mapping
 
-<<<<<<< Updated upstream
 from .base import DATA_RESIDENCY_CLOUD, BaseProvider, make_model_client
-=======
-from .base import BaseProvider, make_model_client
-from .base import DATA_RESIDENCY_CLOUD
->>>>>>> Stashed changes
 from .types import ModelInfo, ProviderCapabilities, ProviderDiscoveryError, ProviderHealth
 
 if TYPE_CHECKING:  # pragma: no cover - typing only

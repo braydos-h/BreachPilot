@@ -293,6 +293,9 @@ multiplication (model retry × task retry × campaign retry is bounded).
 
 Retry interaction: `campaign.max_cycles` bounds outer loops; `RetryEngine`
 bounds task retries; model-level retries are inside the worker's tool budget.
+`tools/kernel/inference_budget.py:InferenceBudget` (opt-in via
+`autonomous.max_inference_calls`, 0 = off) threads one shared ceiling across
+campaign x worker x swarm so the per-layer bounds cannot multiply unboundedly.
 Documented interaction tested in `tests/test_campaign_retry_bounds.py` (outer ×
 inner never unbounded). Legacy execution emits `DeprecationWarning` and
 delegates to the canonical layer.

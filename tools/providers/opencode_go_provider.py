@@ -24,14 +24,10 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from collections import deque
 from typing import TYPE_CHECKING, Any, Iterator, Mapping
 
-<<<<<<< Updated upstream
 from .base import DATA_RESIDENCY_CLOUD, BaseProvider, make_model_client
-=======
-from .base import BaseProvider, make_model_client
-from .base import DATA_RESIDENCY_CLOUD
->>>>>>> Stashed changes
 from .types import ModelInfo, ProviderCapabilities, ProviderDiscoveryError, ProviderHealth
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -195,7 +191,8 @@ def _convert_messages_to_input(messages: Any) -> list[dict[str, Any]]:
     #   ("orphan", (tool_name, text)) -> tool result with no pending call;
     #                                    demoted to a user item at its position
     seq: list[tuple[str, Any]] = []
-    pending: list[dict[str, Any]] = []
+    pending: deque[dict[str, Any]] = deque()
+    pending_by_id: dict[str, dict[str, Any]] = {}
     counter = 0
     used_ids: set[str] = set()
 
@@ -212,6 +209,7 @@ def _convert_messages_to_input(messages: Any) -> list[dict[str, Any]]:
         entry = {"call_id": call_id, "name": name, "arguments": args_str, "output": None}
         used_ids.add(call_id)
         pending.append(entry)
+        pending_by_id[call_id] = entry
         seq.append(("call", entry))
         return entry
 
@@ -219,13 +217,15 @@ def _convert_messages_to_input(messages: Any) -> list[dict[str, Any]]:
         entry: dict[str, Any] | None = None
         if explicit_id:
             wanted = str(explicit_id)
-            for cand in pending:
-                if cand["call_id"] == wanted:
-                    entry = cand
-                    pending.remove(cand)
-                    break
+            entry = pending_by_id.pop(wanted, None)
+            if entry is not None:
+                try:
+                    pending.remove(entry)
+                except ValueError:
+                    pass
         if entry is None and pending:
-            entry = pending.pop(0)
+            entry = pending.popleft()
+            pending_by_id.pop(str(entry.get("call_id", "")), None)
         if entry is not None:
             entry["output"] = content if content else "(empty result)"
         else:

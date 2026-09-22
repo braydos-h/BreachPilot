@@ -373,6 +373,50 @@ def record_model_usage(
     return record
 
 
+def _iter_tail_lines(path: Path, *, block_size: int = 65536):
+    """Yield file lines from newest to oldest without loading the whole file.
+
+    Reads binary blocks from the end so a large cumulative ``llm_usage.jsonl``
+    costs O(needed) not O(file) for the common tail queries.
+    """
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return
+    if size <= 0:
+        return
+    try:
+        handle = path.open("rb")
+    except OSError:
+        return
+    with handle:
+        leftover = b""
+        pos = size
+        while pos > 0:
+            chunk_size = block_size if pos >= block_size else pos
+            pos -= chunk_size
+            try:
+                handle.seek(pos)
+                block = handle.read(chunk_size)
+            except OSError:
+                return
+            data = block + leftover
+            lines = data.split(b"\n")
+            leftover = lines[0]
+            for raw in reversed(lines[1:]):
+                if not raw.strip():
+                    continue
+                try:
+                    yield raw.decode("utf-8", errors="replace")
+                except Exception:
+                    continue
+        if leftover.strip():
+            try:
+                yield leftover.decode("utf-8", errors="replace")
+            except Exception:
+                return
+
+
 def read_usage_records(
     workspace_root: Path,
     *,
@@ -387,22 +431,27 @@ def read_usage_records(
 
     capped = max(1, min(int(limit), int(max_limit)))
     start = max(0, int(offset))
+    need = start + capped
     records: list[dict[str, Any]] = []
     try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        line_iter = _iter_tail_lines(path)
+    except Exception:
+        return []
+    try:
+        for line in line_iter:
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(item, dict):
+                continue
+            if alias and str(item.get("alias", "")) != alias:
+                continue
+            records.append({key: item.get(key) for key in PUBLIC_USAGE_FIELDS if key in item})
+            if len(records) >= need:
+                break
     except OSError:
         return []
-
-    for line in reversed(lines):
-        try:
-            item = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(item, dict):
-            continue
-        if alias and str(item.get("alias", "")) != alias:
-            continue
-        records.append({key: item.get(key) for key in PUBLIC_USAGE_FIELDS if key in item})
 
     return records[start : start + capped]
 
@@ -425,34 +474,83 @@ def _average(records: Iterable[Mapping[str, Any]], field: str) -> float | None:
 
 
 def usage_summary(workspace_root: Path, *, alias: str = "") -> dict[str, Any]:
-    records = read_usage_records(
-        workspace_root,
-        alias=alias,
-        limit=1_000_000,
-        offset=0,
-        max_limit=1_000_000,
-    )
-    aliases = sorted({str(item.get("alias", "")) for item in records if item.get("alias")})
-    context_values = [
-        _as_float(item.get("context_usage_pct"))
-        for item in records
-        if _as_float(item.get("context_usage_pct")) is not None
-    ]
-    last_call_at = records[0].get("ended_at", "") if records else ""
-    failed = sum(1 for item in records if item.get("error"))
+    # ponytail perf: stream aggregates in one pass instead of materializing
+    # up to 1M record dicts via read_usage_records.
+    path = usage_log_path(workspace_root)
+    aliases: set[str] = set()
+    calls = 0
+    failed = 0
+    prompt_tokens = 0
+    completion_tokens = 0
+    total_tokens = 0
+    tps_sum = 0.0
+    tps_n = 0
+    ctps_sum = 0.0
+    ctps_n = 0
+    ctx_sum = 0.0
+    ctx_n = 0
+    ctx_max: float | None = None
+    last_call_at = ""
+    seen_first = False
+    if path.exists() and path.is_file():
+        try:
+            for line in _iter_tail_lines(path):
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(item, dict):
+                    continue
+                if alias and str(item.get("alias", "")) != alias:
+                    continue
+                calls += 1
+                if calls > 1_000_000:
+                    break
+                a = str(item.get("alias", "") or "")
+                if a:
+                    aliases.add(a)
+                if not seen_first:
+                    last_call_at = str(item.get("ended_at", "") or "")
+                    seen_first = True
+                if item.get("error"):
+                    failed += 1
+                pt = _as_int(item.get("prompt_tokens"))
+                if pt is not None:
+                    prompt_tokens += pt
+                ct = _as_int(item.get("completion_tokens"))
+                if ct is not None:
+                    completion_tokens += ct
+                tt = _as_int(item.get("total_tokens"))
+                if tt is not None:
+                    total_tokens += tt
+                tps = _as_float(item.get("tokens_per_second"))
+                if tps is not None:
+                    tps_sum += tps
+                    tps_n += 1
+                ctps = _as_float(item.get("completion_tokens_per_second"))
+                if ctps is not None:
+                    ctps_sum += ctps
+                    ctps_n += 1
+                ctx = _as_float(item.get("context_usage_pct"))
+                if ctx is not None:
+                    ctx_sum += ctx
+                    ctx_n += 1
+                    ctx_max = ctx if ctx_max is None or ctx > ctx_max else ctx_max
+        except OSError:
+            pass
 
     return {
         "alias": alias,
-        "aliases": aliases,
-        "calls": len(records),
-        "successful_calls": len(records) - failed,
+        "aliases": sorted(aliases),
+        "calls": calls,
+        "successful_calls": calls - failed,
         "failed_calls": failed,
-        "prompt_tokens": _sum_int(records, "prompt_tokens"),
-        "completion_tokens": _sum_int(records, "completion_tokens"),
-        "total_tokens": _sum_int(records, "total_tokens"),
-        "average_tokens_per_second": _average(records, "tokens_per_second"),
-        "average_completion_tokens_per_second": _average(records, "completion_tokens_per_second"),
-        "average_context_usage_pct": _average(records, "context_usage_pct"),
-        "max_context_usage_pct": max(context_values) if context_values else None,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+        "average_tokens_per_second": (tps_sum / tps_n) if tps_n else None,
+        "average_completion_tokens_per_second": (ctps_sum / ctps_n) if ctps_n else None,
+        "average_context_usage_pct": (ctx_sum / ctx_n) if ctx_n else None,
+        "max_context_usage_pct": ctx_max,
         "last_call_at": last_call_at,
     }

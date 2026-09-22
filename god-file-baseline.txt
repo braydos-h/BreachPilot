@@ -1,7 +1,6 @@
 # God-file baseline — see scripts/god_file_budget.py.
 # Grandfathered files only: `path loc bytes`. Generated with --update.
-# Growth vs this baseline is reported as a CI warning annotation.
-main.py 1521 60877
+# Small drift is a CI warning; growth past tolerance fails the gate.
 outcome_judge.py 1081 44069
 tools/api/routes/runs.py 1011 46123
 tools/api/routes/system.py 1808 79629

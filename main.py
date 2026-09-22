@@ -301,42 +301,51 @@ def _run_telemetry(start_lines: int) -> dict[str, Any] | None:
     model usage rather than the all-history cumulative file. None if no new
     records or the log can't be read.
     """
+    import itertools as _it
     import json as _json
 
     try:
         path = usage_log_path(workspace_root_from_sources())
         if not path.exists():
             return None
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        # ponytail perf: stream from the offset instead of read_text() of the
+        # whole cumulative file (was O(file) memory + parse per run).
+        calls = 0
+        total_tokens = 0
+        ctx_sum = 0.0
+        ctx_n = 0
+        ctx_max: float | None = None
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            for line in _it.islice(handle, max(0, int(start_lines)), None):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    item = _json.loads(line)
+                except _json.JSONDecodeError:
+                    continue
+                if not isinstance(item, dict):
+                    continue
+                calls += 1
+                tok = item.get("total_tokens")
+                if isinstance(tok, (int, float)):
+                    total_tokens += int(tok)
+                ctx = item.get("context_usage_pct")
+                if isinstance(ctx, (int, float)):
+                    fctx = float(ctx)
+                    ctx_sum += fctx
+                    ctx_n += 1
+                    ctx_max = fctx if ctx_max is None or fctx > ctx_max else ctx_max
     except OSError:
         return None
-    new_lines = lines[start_lines:] if start_lines <= len(lines) else lines
-    calls = 0
-    total_tokens = 0
-    ctx_values: list[float] = []
-    for line in new_lines:
-        try:
-            item = _json.loads(line)
-        except _json.JSONDecodeError:
-            continue
-        if not isinstance(item, dict):
-            continue
-        calls += 1
-        tok = item.get("total_tokens")
-        if isinstance(tok, (int, float)):
-            total_tokens += int(tok)
-        ctx = item.get("context_usage_pct")
-        if isinstance(ctx, (int, float)):
-            ctx_values.append(float(ctx))
     if not calls:
         return None
-    avg_ctx = (sum(ctx_values) / len(ctx_values)) if ctx_values else None
-    max_ctx = max(ctx_values) if ctx_values else None
+    avg_ctx = (ctx_sum / ctx_n) if ctx_n else None
     return {
         "calls": calls,
         "total_tokens": total_tokens,
         "avg_ctx": avg_ctx,
-        "max_ctx": max_ctx,
+        "max_ctx": ctx_max,
     }
 
 

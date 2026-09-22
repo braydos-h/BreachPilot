@@ -203,6 +203,17 @@ class AutonomousOrchestrator:
         except (TypeError, ValueError):
             self._max_campaign_retries = 0
         self._campaign_retries_used = 0
+        # Inference budget (retry-multiplication ceiling): one shared object
+        # bounding total inference calls across campaign x worker x swarm so
+        # the per-layer bounds cannot multiply unboundedly. Built best-effort;
+        # unbounded (default ``max_inference_calls: 0``) preserves previous
+        # behavior byte-for-byte. See tools/kernel/inference_budget.py.
+        try:
+            from tools.kernel.inference_budget import InferenceBudget
+
+            self._inference_budget = InferenceBudget.from_config(mission_config or {})
+        except Exception:  # noqa: BLE001 -- budget must never block orchestration setup
+            self._inference_budget = None
         # Pivot-depth cap (Tier 0 item 0.6a): the lateral-movement phase recurses
         # into each discovered pivot target via _attack_target, which previously
         # had NO depth bound -- unbounded pivoting is a safety hole. Depth 0 is
