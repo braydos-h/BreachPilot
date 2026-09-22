@@ -7,6 +7,7 @@ edge updates. stdlib + sqlite3 only.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 import threading
@@ -87,6 +88,42 @@ def _merge_refs(new_refs: tuple[str, ...], old_refs: tuple[str, ...]) -> tuple[s
     return tuple(out)
 
 
+def _sql_merge_refs(old: Any, new: Any) -> str:
+    """SQLite scalar function: order-preserving refs union over '|' strings.
+
+    Same function the Python merge uses, so native UPSERT stays byte-identical.
+    """
+    old_refs = tuple(r for r in str(old or "").split("|") if r)
+    new_refs = tuple(r for r in str(new or "").split("|") if r)
+    return "|".join(_merge_refs(new_refs, old_refs))
+
+
+def _sql_merge_props(old: Any, new: Any) -> str:
+    """SQLite scalar function: shallow JSON merge (``{**old, **new}``), sorted keys."""
+    try:
+        old_obj = json.loads(old) if isinstance(old, str) and old else {}
+    except json.JSONDecodeError:
+        old_obj = {}
+    try:
+        new_obj = json.loads(new) if isinstance(new, str) and new else {}
+    except json.JSONDecodeError:
+        new_obj = {}
+    if not isinstance(old_obj, dict):
+        old_obj = {}
+    if not isinstance(new_obj, dict):
+        new_obj = {}
+    return json.dumps({**old_obj, **new_obj}, sort_keys=True)
+
+
+def _sqlite_supports_upsert() -> bool:
+    """UPSERT + RETURNING need SQLite 3.35+ (2021; every CPython 3.11+ bundle)."""
+    try:
+        major, minor, *_ = (int(p) for p in sqlite3.sqlite_version.split("."))
+        return (major, minor) >= (3, 35)
+    except (ValueError, AttributeError):
+        return False
+
+
 class AttackGraphStore:
     """SQLite-backed graph store with typed node/edge upserts and traversal."""
 
@@ -95,17 +132,82 @@ class AttackGraphStore:
         self.scope = scope
         # ponytail: one global lock; per-connection locks if write concurrency
         # ever matters. Held per public method so read+write pairs stay atomic.
+        # RLock: transaction() nests inside upsert_* bulk paths.
         self._lock = threading.RLock()
+        self._txn_depth = 0
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
+        # P2-03: Python-identical merge helpers callable from UPSERT SQL.
+        self._conn.create_function("_py_merge_refs", 2, _sql_merge_refs)
+        self._conn.create_function("_py_merge_props", 2, _sql_merge_props)
         with self._lock:
             self._conn.executescript(_CREATE_SQL)
+            # P2-03: edge dedup key needs a real UNIQUE index (CREATE TABLE
+            # never had one). Older DBs with duplicate edges keep the SELECT
+            # path: the index build fails and _edges_upsert_ok stays False.
+            self._edges_upsert_ok = True
+            try:
+                self._conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_agv2_edges_dedup "
+                    "ON agv2_edges(source_node_id, target_node_id, edge_type, scope)"
+                )
+            except sqlite3.OperationalError:
+                self._edges_upsert_ok = False
+            self._nodes_upsert_ok = _sqlite_supports_upsert() and self._has_unique_node_key()
             self._conn.execute(
                 "INSERT OR REPLACE INTO agv2_meta(key, value) VALUES (?, ?)",
                 ("agv2_schema_version", _SCHEMA_VERSION),
             )
+            self._conn.commit()
+
+    def _has_unique_node_key(self) -> bool:
+        """True when a UNIQUE index covers (scope, node_type, value).
+
+        Fresh DBs get it from CREATE TABLE; older files predate the clause
+        and keep the SELECT fallback (P2-03 constraint).
+        """
+        try:
+            for row in self._conn.execute("PRAGMA index_list(agv2_nodes)").fetchall():
+                if not row["unique"]:
+                    continue
+                cols = [r["name"] for r in self._conn.execute(f"PRAGMA index_info({row['name']})").fetchall()]
+                if cols == ["scope", "node_type", "value"]:
+                    return True
+        except sqlite3.Error:
+            pass
+        return False
+
+    @contextlib.contextmanager
+    def transaction(self):  # type: ignore[no-untyped-def]
+        """Single BEGIN/COMMIT block for bulk ingests (P2-02).
+
+        Re-entrant (counter, not double-BEGIN): nested ``transaction()``
+        joins the outer one. Rollback on exception leaves no half-merged
+        graph. One lock hold for the whole batch is fine at this scale.
+        """
+        with self._lock:
+            self._txn_depth += 1
+        try:
+            yield self
+        except BaseException:
+            with self._lock:
+                self._txn_depth -= 1
+                if self._txn_depth <= 0:
+                    self._txn_depth = 0
+                    self._conn.rollback()
+            raise
+        else:
+            with self._lock:
+                self._txn_depth -= 1
+                if self._txn_depth <= 0:
+                    self._txn_depth = 0
+                    self._conn.commit()
+
+    def _commit_or_defer(self) -> None:
+        """Commit unless inside :meth:`transaction` (then the block commits once)."""
+        if self._txn_depth <= 0:
             self._conn.commit()
 
     # -- value normalization -------------------------------------------------
@@ -189,6 +291,24 @@ class AttackGraphStore:
 
     # -- node upsert ---------------------------------------------------------
 
+    _NODE_UPSERT_SQL = (
+        "INSERT INTO agv2_nodes (node_id, node_type, value, scope, properties, confidence, status, "
+        "first_seen, last_seen, evidence_refs, observation_count, contradiction_count, source) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(scope, node_type, value) DO UPDATE SET "
+        "properties=_py_merge_props(agv2_nodes.properties, excluded.properties), "
+        "confidence=max(agv2_nodes.confidence, excluded.confidence), "
+        "status=excluded.status, "
+        "first_seen=agv2_nodes.first_seen, "
+        "last_seen=max(agv2_nodes.last_seen, excluded.last_seen), "
+        "evidence_refs=_py_merge_refs(agv2_nodes.evidence_refs, excluded.evidence_refs), "
+        "observation_count=agv2_nodes.observation_count + excluded.observation_count, "
+        "contradiction_count=agv2_nodes.contradiction_count + "
+        "(agv2_nodes.status='confirmed' AND excluded.status='refuted'), "
+        "source=CASE WHEN excluded.source != '' THEN excluded.source ELSE agv2_nodes.source END "
+        "RETURNING node_id"
+    )
+
     def upsert_node(self, node: GraphNode) -> str:
         """Insert or merge ``node`` by UNIQUE(scope, type, value); returns node_id.
 
@@ -199,48 +319,73 @@ class AttackGraphStore:
         decision upstream; here we just count it).
         """
         with self._lock:
-            norm_value = self._norm_value(node)
-            row = self._conn.execute(
-                "SELECT * FROM agv2_nodes WHERE scope=? AND node_type=? AND value=?",
-                (node.scope, node.node_type.value, norm_value),
-            ).fetchone()
-            if row is None:
-                node = self._dedupe_node_id(node)
-                self._conn.execute(
-                    "INSERT INTO agv2_nodes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    self._node_to_row(node),
-                )
-                self._conn.commit()
-                return node.node_id
+            return self._upsert_node_locked(node)
 
-            node_id = row["node_id"]
-            merged_props = {**json.loads(row["properties"]), **node.properties}
-            merged_refs = _merge_refs(
-                node.evidence_refs, tuple(row["evidence_refs"].split("|")) if row["evidence_refs"] else ()
-            )
-            is_contradiction = int(row["status"] == NodeStatus.CONFIRMED.value and node.status == NodeStatus.REFUTED)
+    def _upsert_node_locked(self, node: GraphNode) -> str:
+        if self._nodes_upsert_ok:
+            try:
+                return self._upsert_node_native(node)
+            except sqlite3.OperationalError:
+                # UNIQUE key missing on older DBs: permanent SELECT fallback.
+                self._nodes_upsert_ok = False
+        return self._upsert_node_select(node)
+
+    def _upsert_node_native(self, node: GraphNode) -> str:
+        """One-statement UPSERT; merges computed in SQL (Python-identical fns)."""
+        node = self._dedupe_node_id(node)
+        row = self._conn.execute(self._NODE_UPSERT_SQL, self._node_to_row(node)).fetchone()
+        self._commit_or_defer()
+        return row["node_id"]
+
+    def _upsert_node_select(self, node: GraphNode) -> str:
+        """Legacy SELECT→INSERT/UPDATE path (older DBs without the UNIQUE key)."""
+        norm_value = self._norm_value(node)
+        row = self._conn.execute(
+            "SELECT * FROM agv2_nodes WHERE scope=? AND node_type=? AND value=?",
+            (node.scope, node.node_type.value, norm_value),
+        ).fetchone()
+        if row is None:
+            node = self._dedupe_node_id(node)
             self._conn.execute(
-                "UPDATE agv2_nodes SET node_type=?, value=?, scope=?, properties=?, "
-                "confidence=?, status=?, first_seen=?, last_seen=?, evidence_refs=?, "
-                "observation_count=?, contradiction_count=?, source=? WHERE node_id=?",
-                (
-                    node.node_type.value,
-                    norm_value,
-                    node.scope,
-                    json.dumps(merged_props, sort_keys=True),
-                    max(row["confidence"], node.confidence),
-                    node.status.value,
-                    row["first_seen"],
-                    max(row["last_seen"], node.last_seen),
-                    "|".join(merged_refs),
-                    row["observation_count"] + node.observation_count,
-                    row["contradiction_count"] + is_contradiction,
-                    node.source or row["source"],
-                    node_id,
-                ),
+                "INSERT INTO agv2_nodes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                self._node_to_row(node),
             )
-            self._conn.commit()
-            return node_id
+            self._commit_or_defer()
+            return node.node_id
+
+        node_id = row["node_id"]
+        merged_props = {**json.loads(row["properties"]), **node.properties}
+        merged_refs = _merge_refs(
+            node.evidence_refs, tuple(row["evidence_refs"].split("|")) if row["evidence_refs"] else ()
+        )
+        is_contradiction = int(row["status"] == NodeStatus.CONFIRMED.value and node.status == NodeStatus.REFUTED)
+        self._conn.execute(
+            "UPDATE agv2_nodes SET node_type=?, value=?, scope=?, properties=?, "
+            "confidence=?, status=?, first_seen=?, last_seen=?, evidence_refs=?, "
+            "observation_count=?, contradiction_count=?, source=? WHERE node_id=?",
+            (
+                node.node_type.value,
+                norm_value,
+                node.scope,
+                json.dumps(merged_props, sort_keys=True),
+                max(row["confidence"], node.confidence),
+                node.status.value,
+                row["first_seen"],
+                max(row["last_seen"], node.last_seen),
+                "|".join(merged_refs),
+                row["observation_count"] + node.observation_count,
+                row["contradiction_count"] + is_contradiction,
+                node.source or row["source"],
+                node_id,
+            ),
+        )
+        self._commit_or_defer()
+        return node_id
+
+    def upsert_nodes(self, nodes: list[GraphNode]) -> list[str]:
+        """Bulk node upsert: one transaction, O(1) commits (P2-02)."""
+        with self._lock, self.transaction():
+            return [self._upsert_node_locked(node) for node in nodes]
 
     def get_node(self, node_id: str) -> GraphNode | None:
         """Fetch a node by id, or None."""
@@ -260,6 +405,22 @@ class AttackGraphStore:
 
     # -- edge API -------------------------------------------------------------
 
+    _EDGE_UPSERT_SQL = (
+        "INSERT INTO agv2_edges (edge_id, source_node_id, target_node_id, edge_type, scope, properties, "
+        "confidence, source, first_seen, last_seen, evidence_refs, observation_count, contradiction_count) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(source_node_id, target_node_id, edge_type, scope) DO UPDATE SET "
+        "properties=_py_merge_props(agv2_edges.properties, excluded.properties), "
+        "confidence=max(agv2_edges.confidence, excluded.confidence), "
+        "source=CASE WHEN excluded.source != '' THEN excluded.source ELSE agv2_edges.source END, "
+        "first_seen=agv2_edges.first_seen, "
+        "last_seen=max(agv2_edges.last_seen, excluded.last_seen), "
+        "evidence_refs=_py_merge_refs(agv2_edges.evidence_refs, excluded.evidence_refs), "
+        "observation_count=agv2_edges.observation_count + excluded.observation_count, "
+        "contradiction_count=agv2_edges.contradiction_count + excluded.contradiction_count "
+        "RETURNING edge_id"
+    )
+
     def upsert_edge(self, edge: GraphEdge) -> str:
         """Insert or merge ``edge``; raises ValueError if an endpoint is missing.
 
@@ -268,45 +429,73 @@ class AttackGraphStore:
         unions evidence refs, and keeps the newer source.
         """
         with self._lock:
+            return self._upsert_edge_locked(edge)
+
+    def _upsert_edge_locked(self, edge: GraphEdge, known_ids: set[str] | None = None) -> str:
+        if known_ids is None:
             for node_id in (edge.source_node_id, edge.target_node_id):
                 exists = self._conn.execute("SELECT 1 FROM agv2_nodes WHERE node_id=?", (node_id,)).fetchone()
                 if exists is None:
                     raise ValueError(f"edge references missing node: {node_id}")
-
-            row = self._conn.execute(
-                "SELECT * FROM agv2_edges WHERE source_node_id=? AND target_node_id=? AND edge_type=? AND scope=?",
-                (edge.source_node_id, edge.target_node_id, edge.edge_type.value, edge.scope),
-            ).fetchone()
-            if row is None:
-                self._conn.execute(
-                    "INSERT INTO agv2_edges VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    self._edge_to_row(edge),
-                )
-                self._conn.commit()
-                return edge.edge_id
-
-            merged_props = {**json.loads(row["properties"]), **edge.properties}
-            merged_refs = _merge_refs(
-                edge.evidence_refs, tuple(row["evidence_refs"].split("|")) if row["evidence_refs"] else ()
+        elif edge.source_node_id not in known_ids or edge.target_node_id not in known_ids:
+            raise ValueError(
+                f"edge references missing node: {edge.source_node_id} -> {edge.target_node_id}",
             )
+        if self._edges_upsert_ok:
+            try:
+                return self._upsert_edge_native(edge)
+            except sqlite3.OperationalError:
+                self._edges_upsert_ok = False
+        return self._upsert_edge_select(edge)
+
+    def _upsert_edge_native(self, edge: GraphEdge) -> str:
+        """One-statement edge UPSERT (requires the dedup UNIQUE index)."""
+        row = self._conn.execute(self._EDGE_UPSERT_SQL, self._edge_to_row(edge)).fetchone()
+        self._commit_or_defer()
+        return row["edge_id"]
+
+    def _upsert_edge_select(self, edge: GraphEdge) -> str:
+        """Legacy SELECT→INSERT/UPDATE edge path (DBs without the dedup index)."""
+        row = self._conn.execute(
+            "SELECT * FROM agv2_edges WHERE source_node_id=? AND target_node_id=? AND edge_type=? AND scope=?",
+            (edge.source_node_id, edge.target_node_id, edge.edge_type.value, edge.scope),
+        ).fetchone()
+        if row is None:
             self._conn.execute(
-                "UPDATE agv2_edges SET properties=?, confidence=?, source=?, "
-                "first_seen=?, last_seen=?, evidence_refs=?, observation_count=?, "
-                "contradiction_count=? WHERE edge_id=?",
-                (
-                    json.dumps(merged_props, sort_keys=True),
-                    max(row["confidence"], edge.confidence),
-                    edge.source or row["source"],
-                    row["first_seen"],
-                    max(row["last_seen"], edge.last_seen),
-                    "|".join(merged_refs),
-                    row["observation_count"] + edge.observation_count,
-                    row["contradiction_count"] + edge.contradiction_count,
-                    row["edge_id"],
-                ),
+                "INSERT INTO agv2_edges VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                self._edge_to_row(edge),
             )
-            self._conn.commit()
-            return row["edge_id"]
+            self._commit_or_defer()
+            return edge.edge_id
+
+        merged_props = {**json.loads(row["properties"]), **edge.properties}
+        merged_refs = _merge_refs(
+            edge.evidence_refs, tuple(row["evidence_refs"].split("|")) if row["evidence_refs"] else ()
+        )
+        self._conn.execute(
+            "UPDATE agv2_edges SET properties=?, confidence=?, source=?, "
+            "first_seen=?, last_seen=?, evidence_refs=?, observation_count=?, "
+            "contradiction_count=? WHERE edge_id=?",
+            (
+                json.dumps(merged_props, sort_keys=True),
+                max(row["confidence"], edge.confidence),
+                edge.source or row["source"],
+                row["first_seen"],
+                max(row["last_seen"], edge.last_seen),
+                "|".join(merged_refs),
+                row["observation_count"] + edge.observation_count,
+                row["contradiction_count"] + edge.contradiction_count,
+                row["edge_id"],
+            ),
+        )
+        self._commit_or_defer()
+        return row["edge_id"]
+
+    def upsert_edges(self, edges: list[GraphEdge]) -> list[str]:
+        """Bulk edge upsert: one transaction, preloaded endpoint set (P2-02)."""
+        with self._lock, self.transaction():
+            known_ids = {row[0] for row in self._conn.execute("SELECT node_id FROM agv2_nodes").fetchall()}
+            return [self._upsert_edge_locked(edge, known_ids) for edge in edges]
 
     def delete_node(self, node_id: str) -> None:
         """Delete ``node_id`` and every edge touching it (manual two-statement cascade)."""
@@ -316,7 +505,7 @@ class AttackGraphStore:
                 (node_id, node_id),
             )
             self._conn.execute("DELETE FROM agv2_nodes WHERE node_id=?", (node_id,))
-            self._conn.commit()
+            self._commit_or_defer()
 
     # -- queries ----------------------------------------------------------------
 
