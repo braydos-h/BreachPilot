@@ -59,7 +59,11 @@ def test_ledger_tool_calls_and_overhead_match():
     ledger = ContextLedger()
     msgs = deepcopy(
         [
-            {"role": "assistant", "content": "", "tool_calls": [{"name": "run_exploit_terminal", "args": {"cmd": "id"}}]},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"name": "run_exploit_terminal", "args": {"cmd": "id"}}],
+            },
             {"role": "user", "content": "out", "tool_name": "run_exploit_terminal"},
         ]
     )
