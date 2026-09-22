@@ -98,14 +98,44 @@ class _Barrier:
     reading the file; the writer flushes everything ahead of it and sets the
     future, so readers never miss queued-but-unflushed tail events. Best
     effort: on timeout the read proceeds anyway (never break serving).
+    ``checkpoint()`` uses a barrier with ``fsync=True`` to force durability
+    regardless of mode.
     """
 
-    __slots__ = ("future",)
+    __slots__ = ("fsync", "future")
 
-    def __init__(self) -> None:
+    def __init__(self, *, fsync: bool = False) -> None:
         import concurrent.futures as _futures
 
+        self.fsync = fsync
         self.future = _futures.Future()
+
+
+_DURABILITY_MODES = ("strict", "balanced", "fast")
+_FSYNC_INTERVAL_SECONDS = 0.25
+# Events that force an fsync even in `balanced` (never lose decisions /
+# terminal transitions to a crash inside the 250ms window).
+_IMPORTANT_EVENT_TYPES = frozenset(
+    {
+        "run_finished",
+        "run_failed",
+        "run_checkpoint",
+        "decision",
+        "decision_created",
+        "hitl_decision",
+        "approval",
+    }
+)
+_TERMINAL_STATES = frozenset({"completed", "failed", "cancelled", "interrupted"})
+
+
+def _is_important_event(event_type: str, payload: Any) -> bool:
+    """True when an event must survive a crash even in `balanced` mode."""
+    if event_type in _IMPORTANT_EVENT_TYPES:
+        return True
+    if event_type == "state" and isinstance(payload, dict):
+        return str(payload.get("state", "")) in _TERMINAL_STATES
+    return False
 
 
 class _PluginEventDispatcher:
@@ -488,7 +518,9 @@ class RunEventBroker:
     _BATCH_MAX = 128
     _BATCH_WAIT_SECONDS = 0.02
 
-    def __init__(self, run_id: str, reports_dir: Path, *, buffer_size: int = 1000) -> None:
+    def __init__(
+        self, run_id: str, reports_dir: Path, *, buffer_size: int = 1000, durability: str = "balanced"
+    ) -> None:
         self._run_id = run_id
         self._reports_dir = reports_dir
         self._events_path = reports_dir / "events.jsonl"
@@ -497,10 +529,22 @@ class RunEventBroker:
         self._lock = asyncio.Lock()
         self._closed = False
         self._subscribers: list[asyncio.Queue[dict[str, Any] | None]] = []
+        if durability not in _DURABILITY_MODES:
+            log.warning(
+                "unknown event durability %r — falling back to 'balanced' (never silently 'fast')",
+                durability,
+            )
+            durability = "balanced"
+        self._durability = durability
         # P1-01: single-writer batched JSONL pipeline.
         self._write_q: _queue.Queue = _queue.Queue()
         self._writer_lock = threading.Lock()
         self._writer_thread: threading.Thread | None = None
+
+    @property
+    def durability(self) -> str:
+        """Effective durability mode (`strict` | `balanced` | `fast`)."""
+        return self._durability
 
     def _ensure_writer_locked(self) -> None:
         """Start the writer thread (call with ``_writer_lock`` held)."""
@@ -516,8 +560,12 @@ class RunEventBroker:
             self._ensure_writer_locked()
 
     def _writer_loop(self) -> None:
+        import time as _time
+
         self._events_path.parent.mkdir(parents=True, exist_ok=True)
         f = self._events_path.open("a", encoding="utf-8")
+        durability = self._durability
+        last_fsync = _time.monotonic()
         try:
             while True:
                 try:
@@ -532,24 +580,60 @@ class RunEventBroker:
                     continue
                 done = False
                 try:
-                    for item in batch:
-                        if item is None:
-                            done = True
-                        elif isinstance(item, _Barrier):
+                    if durability == "strict":
+                        # Old behavior, kept for forensics: fsync per event.
+                        for item in batch:
+                            if item is None:
+                                done = True
+                            elif isinstance(item, _Barrier):
+                                f.flush()
+                                os.fsync(f.fileno())
+                                if not item.future.done():
+                                    item.future.set_result(None)
+                            else:
+                                f.write(json.dumps(item, default=str) + "\n")
+                                f.flush()
+                                os.fsync(f.fileno())
+                            self._write_q.task_done()
+                        last_fsync = _time.monotonic()
+                    else:
+                        important = False
+                        for item in batch:
+                            if item is None:
+                                done = True
+                            elif isinstance(item, _Barrier):
+                                f.flush()
+                                if item.fsync or durability == "balanced":
+                                    # checkpoint() forces durability in any
+                                    # mode; balanced also fsyncs read barriers
+                                    # so replay cursors are crash-consistent.
+                                    os.fsync(f.fileno())
+                                    last_fsync = _time.monotonic()
+                                if not item.future.done():
+                                    item.future.set_result(None)
+                            else:
+                                f.write(json.dumps(item, default=str) + "\n")
+                                if _is_important_event(str(item.get("type", "")), item.get("payload")):
+                                    important = True
+                            self._write_q.task_done()
+                        f.flush()
+                        now = _time.monotonic()
+                        if durability == "balanced":
+                            if important or (now - last_fsync) >= _FSYNC_INTERVAL_SECONDS or done:
+                                os.fsync(f.fileno())
+                                last_fsync = now
+                        # `fast`: fsync only on sentinel/close + checkpoint().
+                    if done:
+                        # Sentinel/close always fsyncs regardless of mode.
+                        try:
                             f.flush()
                             os.fsync(f.fileno())
-                            if not item.future.done():
-                                item.future.set_result(None)
-                        else:
-                            f.write(json.dumps(item, default=str) + "\n")
-                        self._write_q.task_done()
-                    f.flush()
-                    os.fsync(f.fileno())
+                        except OSError:
+                            pass
+                        return
                 except Exception:  # noqa: BLE001 -- one bad batch must never kill the writer
                     log.warning("event writer batch failed", exc_info=True)
                     continue
-                if done:
-                    return
         finally:
             f.close()
 
@@ -567,6 +651,24 @@ class RunEventBroker:
             await asyncio.wait_for(asyncio.wrap_future(barrier.future), timeout=timeout)
             return True
         except asyncio.TimeoutError:
+            return False
+
+    def checkpoint(self, timeout: float = 10.0) -> bool:
+        """Force an fsync of everything queued so far, regardless of mode.
+
+        Used by `fast` mode callers at safe points (and available in every
+        mode). Synchronous; returns False on timeout instead of raising.
+        """
+        import concurrent.futures as _futures
+
+        if not self._writer_alive():
+            return True
+        barrier = _Barrier(fsync=True)
+        self._write_q.put(barrier)
+        try:
+            barrier.future.result(timeout=timeout)
+            return True
+        except _futures.TimeoutError:
             return False
 
     async def emit(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -869,10 +971,13 @@ class EventSubscription:
 class EventBrokerRegistry:
     """Registry of per-run event brokers. One active broker at a time."""
 
-    def __init__(self, reports_dir: Path, *, buffer_size: int = 1000, max_brokers: int = 10) -> None:
+    def __init__(
+        self, reports_dir: Path, *, buffer_size: int = 1000, max_brokers: int = 10, durability: str = "balanced"
+    ) -> None:
         self._reports_dir = reports_dir
         self._buffer_size = buffer_size
         self._max_brokers = max_brokers
+        self._durability = durability
         self._brokers: OrderedDict[str, RunEventBroker] = OrderedDict()
 
     def get_or_create(self, run_id: str, *, reports_dir: Path | None = None) -> RunEventBroker:
@@ -881,7 +986,7 @@ class EventBrokerRegistry:
             self._brokers.move_to_end(run_id)
             return broker
         rd = reports_dir or self._reports_dir / run_id
-        broker = RunEventBroker(run_id, rd, buffer_size=self._buffer_size)
+        broker = RunEventBroker(run_id, rd, buffer_size=self._buffer_size, durability=self._durability)
         self._brokers[run_id] = broker
         while len(self._brokers) > self._max_brokers:
             _, evicted = self._brokers.popitem(last=False)
