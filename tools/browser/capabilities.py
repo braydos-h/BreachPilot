@@ -155,10 +155,17 @@ def register_playwright_backend(config: dict[str, Any] | None = None) -> bool:
 
 def _sandbox_execution_possible(config: dict[str, Any] | None) -> bool:
     """Whether contained browser execution is configured (worker at runtime)."""
+    sandbox = (config or {}).get("sandbox")
+    # SandboxConfig intentionally defaults a missing section to enabled so
+    # generic execution paths fail closed. Browser capability metadata has a
+    # stricter contract: do not advertise a contained browser worker unless
+    # the caller explicitly supplied the sandbox configuration that owns it.
+    if not isinstance(sandbox, dict):
+        return False
     try:
         from tools.sandbox.models import SandboxConfig
 
-        return bool(SandboxConfig.from_config(config).enabled)
+        return bool(SandboxConfig.from_config({"sandbox": sandbox}).enabled)
     except Exception:  # noqa: BLE001 — config probing never raises
         return False
 
