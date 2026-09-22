@@ -15,6 +15,22 @@ MCP registry call sites) with a registry lookup:
 Adding provider #4 = implement an adapter (``BaseProvider``), register it
 below (or via ``PROVIDERS.register``), add config metadata, add tests.  No
 agent/swarm/run-service edits.
+
+Provider HTTP client lifecycle (P1-06)
+--------------------------------------
+``chatgpt`` / ``opencode_go`` raw clients own one persistent keep-alive
+``httpx.Client`` each. Owners:
+
+- router/client builders (``build_chatgpt_router``,
+  ``ChatGptProvider.build_client``, opencode_go equivalents) — router-owned,
+  reclaimed via ``__del__`` + ``shutdown_provider_clients()`` at process exit;
+- ``discover_opencode_go_models`` + the interactive-menu picker — temp
+  instances, closed in ``finally`` at the call site;
+- health/discovery probes — the shared probe client (chatgpt), closed by
+  ``shutdown_provider_clients()``.
+
+Use :func:`close_provider_client` (duck-typed, never raises) on any raw
+client you constructed, and :func:`shutdown_provider_clients` on teardown.
 """
 
 from __future__ import annotations
@@ -24,6 +40,34 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 from .base import BaseProvider
 from .types import ModelClient, ModelInfo, ProviderCapabilities, ProviderError, ProviderHealth  # noqa: F401
+
+
+def close_provider_client(client: Any) -> None:
+    """Close a provider raw client if it supports ``close()``. Never raises."""
+    close = getattr(client, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:  # noqa: BLE001 -- teardown must never raise
+            pass
+
+
+def shutdown_provider_clients() -> None:
+    """Close all persistent provider HTTP clients (idempotent, never raises)."""
+    for closer in (
+        "tools.providers.chatgpt_provider.close_all_chatgpt_clients",
+        "tools.providers.opencode_go_provider.close_all_opencode_go_clients",
+    ):
+        try:
+            module_name, func_name = closer.rsplit(".", 1)
+            import importlib
+
+            func = getattr(importlib.import_module(module_name), func_name, None)
+            if callable(func):
+                func()
+        except Exception:  # noqa: BLE001 -- teardown must never raise
+            pass
+
 
 #: Provider-adapter contract version, pinned into RunProvenance (TODO 018).
 ADAPTER_VERSION = "1"

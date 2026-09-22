@@ -432,9 +432,15 @@ def _edit_settings() -> None:
                     timeout=float(og_cfg.get("request_timeout_seconds") or 300),
                     config=og_cfg,
                 )
-                proxy_models = client.discover_models(
-                    str(og_cfg.get("base_url") or "https://opencode.ai/zen/go/v1"), og_cfg
-                )
+                try:
+                    proxy_models = client.discover_models(
+                        str(og_cfg.get("base_url") or "https://opencode.ai/zen/go/v1"), og_cfg
+                    )
+                finally:
+                    try:
+                        client.close()
+                    except Exception:  # noqa: BLE001 -- menu probe teardown must never raise
+                        pass
             except Exception as exc:
                 print(f"\n  OpenCode Go discovery failed: {exc}")
                 proxy_models = []
