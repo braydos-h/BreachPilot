@@ -302,7 +302,7 @@ The `opsec` block is the **active** detection-evasion / pacing / UA-rotation / D
 | `session_timeout_seconds` | float | — (300s default) | Plain-run swarm wall clock (schema-only override; long-session raises it via `long_session.swarm_session_timeout_minutes`) | cli_exploit_settings.py:33-49 |
 | `critic_enabled` / `reflection_enabled` | bool | `true` | Agent enablement | cli_exploit_settings.py:106-107 |
 
-### `autonomous:` (config.yaml:239-244) — orchestrator Phase 2 (opt-in)
+### `autonomous:` (config.yaml:201-213) — orchestrator Phase 2 (opt-in)
 
 Read by the orchestrator from mission_config (merged from `config["autonomous"]`).
 
@@ -313,6 +313,7 @@ Read by the orchestrator from mission_config (merged from `config["autonomous"]`
 | `adaptive_replan` | bool | `false` | Per-target replan + vuln-chaining | autonomous_orchestrator.py:1106 |
 | `max_cycles` | int | `100` | Round cap when adaptive_replan is on | autonomous_orchestrator.py:1077 |
 | `max_pivot_depth` | int | `0` | Single-IP lock default | autonomous_orchestrator.py:1091 |
+| `max_inference_calls` | int | `0` | Shared inference ceiling across campaign × worker × swarm (0=off) | tools/kernel/inference_budget.py, tools/campaign/batch.py |
 
 ### `orchestrator:` (config.yaml) — cross-mission learning consumer
 

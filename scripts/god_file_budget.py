@@ -36,7 +36,6 @@ GRANDFATHERED = frozenset(
     {
         "tools/exploit_agent/runner/_impl.py",
         "tools/eval_harness.py",
-        "tools/enhanced_reporting.py",
         "tools/web_researcher.py",
         "tools/memory_service.py",
         "tools/recon/service.py",
