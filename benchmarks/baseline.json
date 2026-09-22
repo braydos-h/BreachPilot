@@ -1,0 +1,61 @@
+{
+  "metadata": {
+    "timestamp": "2026-09-22T01:33:24Z",
+    "host": "braydens-laptop",
+    "platform": "Linux-7.1.8+deb13-amd64-x86_64-with-glibc2.41",
+    "cpu_count": 16,
+    "python": "3.13.5",
+    "code_revision": "b65bc8f"
+  },
+  "scenarios": {
+    "events_n10000_payload1024_emit_ms": {
+      "p50": 0.078,
+      "p95": 0.106,
+      "p99": 0.19,
+      "n": 10000
+    },
+    "events_n10000_payload1024_replay_ms": {
+      "p50": 62.545,
+      "p95": 62.545,
+      "p99": 62.545,
+      "n": 1
+    },
+    "event_emit_ms_n10000": {
+      "p50": 0.078,
+      "p95": 0.106,
+      "p99": 0.19,
+      "n": 10000
+    },
+    "event_replay_ms_n10000": {
+      "p50": 62.545,
+      "p95": 62.545,
+      "p99": 62.545,
+      "n": 1
+    },
+    "events_n100000_payload1024_emit_ms": {
+      "p50": 0.095,
+      "p95": 0.205,
+      "p99": 0.277,
+      "n": 100000
+    },
+    "events_n100000_payload1024_replay_ms": {
+      "p50": 672.08,
+      "p95": 672.08,
+      "p99": 672.08,
+      "n": 1
+    },
+    "event_emit_ms_n100000": {
+      "p50": 0.095,
+      "p95": 0.205,
+      "p99": 0.277,
+      "n": 100000
+    },
+    "event_replay_ms_n100000": {
+      "p50": 672.08,
+      "p95": 672.08,
+      "p99": 672.08,
+      "n": 1
+    }
+  },
+  "notes": "Pre-change baseline at b65bc8f before PERF P0/P1/P2. Events-only: persistence/telemetry/audit sections hang pre-P0-01 (ApiPersistence first-construction self-deadlock); events recorded via --sections events --payload-bytes 1024."
+}

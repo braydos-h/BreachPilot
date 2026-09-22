@@ -16,8 +16,11 @@ Prints p50/p95/p99 latencies + throughput for:
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
+import platform
+import subprocess
 import sys
 import tempfile
 import time
@@ -86,18 +89,66 @@ async def _bench_events(reports_dir: Path, n: int, payload_size: int):
     return throughput, p50, p95, p99, replay_ms, len(events)
 
 
-def _run_events(tmp: Path) -> None:
+def _code_revision() -> str:
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return out.stdout.strip() or "unknown"
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
+def _metadata() -> dict:
+    return {
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "host": platform.node(),
+        "platform": platform.platform(),
+        "cpu_count": __import__("os").cpu_count(),
+        "python": platform.python_version(),
+        "code_revision": _code_revision(),
+    }
+
+
+def _run_events(
+    tmp: Path,
+    *,
+    event_counts: tuple[int, ...] = (256, 1_000, 10_000, 100_000),
+    payload_sizes: tuple[int, ...] = (1024, 16 * 1024),
+    collect: dict | None = None,
+) -> None:
     if RunEventBroker is None:
         print(f"event broker: skipped ({_EVENT_BROKER_ERR})")
         return
     print("Event broker (emit + replay):")
     print(f"  {'events':>8} {'payload':>8} {'emit/s':>10} {'p50 ms':>8} {'p95 ms':>8} {'p99 ms':>8} {'replay ms':>10}")
-    for n in (256, 1_000, 10_000, 100_000):
-        for size in (1024, 16 * 1024):
+    for n in event_counts:
+        for size in payload_sizes:
             sub = tmp / f"events-{n}-{size}"
             sub.mkdir(parents=True, exist_ok=True)
             throughput, p50, p95, p99, replay_ms, count = asyncio.run(_bench_events(sub, n, size))
             print(f"  {n:>8} {size:>8} {throughput:>10.0f} {p50:>8.3f} {p95:>8.3f} {p99:>8.3f} {replay_ms:>10.1f}")
+            if collect is not None:
+                key = f"events_n{n}_payload{size}"
+                collect[f"{key}_emit_ms"] = {
+                    "p50": round(p50, 3),
+                    "p95": round(p95, 3),
+                    "p99": round(p99, 3),
+                    "n": n,
+                }
+                collect[f"{key}_replay_ms"] = {
+                    "p50": round(replay_ms, 3),
+                    "p95": round(replay_ms, 3),
+                    "p99": round(replay_ms, 3),
+                    "n": 1,
+                }
+                # Pinned-history aliases for bench_compare (10k/100k, 1KB payload).
+                if size == 1024 and n in (10_000, 100_000):
+                    collect[f"event_emit_ms_n{n}"] = collect[f"{key}_emit_ms"]
+                    collect[f"event_replay_ms_n{n}"] = collect[f"{key}_replay_ms"]
 
 
 # ── Persistence ────────────────────────────────────────────────────────────
@@ -194,20 +245,57 @@ def _run_audit(tmp: Path) -> None:
     print(f"  read: {ms:.3f} ms over {len(records)} records")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="WebUI hot-path benchmark (mock I/O only, no live Nmap/LLM).")
+    parser.add_argument("--json", type=Path, default=None, help="Write machine-readable p50/p95/p99 results here.")
+    parser.add_argument(
+        "--events",
+        type=int,
+        action="append",
+        default=None,
+        help="Restrict event matrix to this history size (repeatable). Default: 256/1k/10k/100k.",
+    )
+    parser.add_argument(
+        "--payload-bytes",
+        type=int,
+        action="append",
+        default=None,
+        help="Restrict event matrix to this payload size (repeatable). Default: 1024/16384.",
+    )
+    parser.add_argument(
+        "--sections",
+        type=str,
+        action="append",
+        default=None,
+        help="Restrict to these sections (repeatable): events, persistence, telemetry, audit. Default: all.",
+    )
+    args = parser.parse_args(argv)
+    event_counts = tuple(args.events) if args.events else (256, 1_000, 10_000, 100_000)
+    payload_sizes = tuple(args.payload_bytes) if args.payload_bytes else (1024, 16 * 1024)
+    sections = set(args.sections) if args.sections else {"events", "persistence", "telemetry", "audit"}
+
     print("WebUI hot-path benchmark")
     print("=" * 60)
+    scenarios: dict = {}
     with tempfile.TemporaryDirectory(prefix="webui-bench-") as td:
         tmp = Path(td)
-        _run_events(tmp)
-        print()
-        _run_persistence(tmp)
-        print()
-        _run_telemetry(tmp)
-        print()
-        _run_audit(tmp)
+        if "events" in sections:
+            _run_events(tmp, event_counts=event_counts, payload_sizes=payload_sizes, collect=scenarios)
+            print()
+        if "persistence" in sections:
+            _run_persistence(tmp)
+            print()
+        if "telemetry" in sections:
+            _run_telemetry(tmp)
+            print()
+        if "audit" in sections:
+            _run_audit(tmp)
     print("=" * 60)
     print("done")
+    if args.json is not None:
+        doc = {"metadata": _metadata(), "scenarios": scenarios}
+        args.json.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+        print(f"wrote {args.json} ({len(scenarios)} scenarios)")
 
 
 if __name__ == "__main__":
