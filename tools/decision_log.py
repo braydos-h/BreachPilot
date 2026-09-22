@@ -39,6 +39,8 @@ def log_decision(
 ) -> None:
     """Append one decision record. Never raises (observability is best-effort)."""
     try:
+        from tools.kernel.append_log import get_append_writer
+
         record: dict[str, Any] = {
             "ts": time.time(),
             "round": round_num,
@@ -55,8 +57,7 @@ def log_decision(
             "evidence_refs": list(evidence_refs or [])[:20],
         }
         path = decision_log_path(run_dir)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, default=str) + "\n")
+        # P2-07: single-FD batched writer (no per-record open/close).
+        get_append_writer(path).append(json.dumps(record, default=str) + "\n")
     except Exception:  # noqa: BLE001 -- logging must never break the loop
         pass

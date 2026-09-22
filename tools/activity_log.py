@@ -100,12 +100,17 @@ class ActivityLog:
                 self._flush_audit()
 
     def _flush_audit(self) -> None:
+        # P2-07: the whole 10-line buffer goes through the shared single-FD
+        # writer as one batch (no per-flush open/close). Ordering holds: one
+        # writer per path, and the buffer is joined under _buf_lock.
+        from tools.kernel.append_log import get_append_writer
+
         with self._buf_lock:
             if not self._buf:
                 return
-            with self.audit_path.open("a", encoding="utf-8") as f:
-                f.writelines(self._buf)
+            batch = "".join(self._buf)
             self._buf.clear()
+        get_append_writer(self.audit_path).append(batch)
 
     def _fmt_line(self, event: ActivityEvent) -> str:
         icon = ICONS.get(event.category, "*")

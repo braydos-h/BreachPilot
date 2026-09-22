@@ -3,13 +3,23 @@
 // legacy runGraph key. Live runs invalidate via the WS event broker's
 // artifact event (see api/ws.ts patchCaches) — the graph is rebuilt lazily by
 // the backend when artifact fingerprints change, so a light invalidation is
-// all the UI needs.
+// all the UI needs. The 10s interval in useGraphPolling is only a backstop
+// for an unhealthy stream (see WS_UNHEALTHY_DEBOUNCE_MS); a healthy stream
+// keeps the graph fresher than any poll cadence could.
+//
+// Background tabs: browsers throttle setInterval (>=1/min) and pause
+// requestAnimationFrame, and the shared query client disables
+// refetchOnWindowFocus — so useGraphPolling refetches explicitly on
+// visibilitychange while the run is active. The stream itself keeps cache
+// patching on message (patchCaches runs synchronously, not via rAF), and its
+// watchdog + wake handlers reconnect a socket that died while throttled.
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, ApiError } from "@/api/client";
 import { queryKeys } from "@/api/hooks";
 import { isActiveState } from "@/api/types";
+import { useRunEvents } from "@/api/ws";
 import type { RunDetail } from "@/api/types";
 import type {
   GraphConflictsResponse,
@@ -146,7 +156,24 @@ export function useInvalidateGraph(runId: string) {
   }, [qc, runId]);
 }
 
-/** Poll the explorer graph only while the run is in an active state. */
+// Fallback-poll tuning for useGraphPolling below.
+// How long the event stream must stay continuously unhealthy before the
+// fallback poll starts. Flapping (open/closed/open faster than this) resets
+// the timer, so it never thrashes invalidations.
+const WS_UNHEALTHY_DEBOUNCE_MS = 30_000;
+// Fallback cadence while the stream is unhealthy — matches the old always-on
+// poll so the degraded path is no worse than today.
+const GRAPH_POLL_MS = 10_000;
+
+/**
+ * Keep the explorer graph fresh while the run is active.
+ *
+ * Primary path is WS-driven: this hook owns the run's event stream and
+ * api/ws.ts patchCaches invalidates the explorer queries on every artifact
+ * event (immediate — strictly fresher than the old 10s cadence). The 10s
+ * interval below is a backstop that only runs after 30s of continuous
+ * stream failure, and is torn down on unmount, run finish, or recovery.
+ */
 export function useGraphPolling(runId: string | null | undefined, enabled = true) {
   const qc = useQueryClient();
   const { data: run } = useQuery<RunDetail>({
@@ -156,14 +183,64 @@ export function useGraphPolling(runId: string | null | undefined, enabled = true
   });
   const active = !!run && isActiveState(run.state);
 
-  // Lightweight: while active, refetch the graph queries every 10s so new
-  // audit/report artifacts show up without streaming the whole graph.
+  // AttackGraphPage mounts no other stream for the run — without this, the
+  // page would have no WS-driven invalidation at all. The stream closes when
+  // the run finishes (active=false) or the component unmounts.
+  const streamEnabled = enabled && !!runId && active;
+  const stream = useRunEvents(runId, { enabled: streamEnabled });
+  const streamHealthy = stream.status === "open" && !stream.stale;
+
+  // Debounced unhealthy gate: true only after WS_UNHEALTHY_DEBOUNCE_MS of
+  // continuous failure; false the moment the stream is healthy again.
+  const [wsUnhealthy, setWsUnhealthy] = useState(false);
   useEffect(() => {
-    if (!enabled || !active || !runId) return;
+    if (!streamEnabled || streamHealthy) {
+      setWsUnhealthy(false);
+      return;
+    }
+    const timer = setTimeout(() => setWsUnhealthy(true), WS_UNHEALTHY_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [streamEnabled, streamHealthy]);
+
+  // Re-arm the catch-up below when switching runs.
+  const wasHealthyRef = useRef(false);
+  useEffect(() => {
+    wasHealthyRef.current = false;
+  }, [runId]);
+
+  // Catch-up on (re)connect: the replay/seed paths move the cursor without
+  // running patchCaches, so invalidate once per unhealthy->healthy
+  // transition to cover artifacts that landed mid-outage.
+  useEffect(() => {
+    if (runId && streamHealthy && !wasHealthyRef.current) {
+      void qc.invalidateQueries({ queryKey: graphKeys.all(runId) });
+    }
+    wasHealthyRef.current = streamHealthy;
+  }, [qc, runId, streamHealthy]);
+
+  // Fallback poll — active runs with a long-unhealthy stream only. The
+  // cleanup clears the timer on unmount, run finish, disable, or recovery.
+  useEffect(() => {
+    if (!enabled || !active || !runId || !wsUnhealthy) return;
     const timer = setInterval(() => {
       void qc.invalidateQueries({ queryKey: graphKeys.all(runId) });
-    }, 10_000);
+    }, GRAPH_POLL_MS);
     return () => clearInterval(timer);
+  }, [qc, runId, active, enabled, wsUnhealthy]);
+
+  // Refocus refresh: setInterval is throttled in background tabs and the
+  // shared client disables refetchOnWindowFocus, so refresh explicitly when
+  // the tab becomes visible again during an active run.
+  useEffect(() => {
+    if (!enabled || !active || !runId) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void qc.invalidateQueries({ queryKey: graphKeys.all(runId) });
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
   }, [qc, runId, active, enabled]);
+
   return active;
 }

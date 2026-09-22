@@ -21,7 +21,6 @@ except ImportError:  # pragma: no cover - PyYAML is a runtime dependency
 
 
 USAGE_LOG_NAME = "llm_usage.jsonl"
-_WRITE_LOCK = threading.Lock()
 PUBLIC_USAGE_FIELDS = (
     "schema_version",
     "alias",
@@ -329,11 +328,12 @@ def build_usage_record(
 def record_usage(record: Mapping[str, Any], workspace_root: Path | None = None) -> None:
     path = usage_log_path(workspace_root)
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
+        # P2-07: single-FD batched writer (no per-record open/close). The
+        # writer serializes appends; schema unchanged.
+        from tools.kernel.append_log import get_append_writer
+
         line = json.dumps(dict(record), sort_keys=True, default=str)
-        with _WRITE_LOCK:
-            with path.open("a", encoding="utf-8") as handle:
-                handle.write(line + "\n")
+        get_append_writer(path).append(line)
     except Exception:
         # Telemetry must never break a model call.
         return
