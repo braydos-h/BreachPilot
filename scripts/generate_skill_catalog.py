@@ -163,7 +163,9 @@ def _normalized(text: str) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Regenerate docs/skills/catalog.md from skills/*/SKILL.md frontmatter.")
+    parser = argparse.ArgumentParser(
+        description="Regenerate docs/skills/catalog.md from skills/*/SKILL.md frontmatter."
+    )
     parser.add_argument("--check", action="store_true", help="fail (exit 1) when the catalog drifts; do not write")
     args = parser.parse_args(argv)
     skills = collect_skills()

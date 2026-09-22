@@ -271,6 +271,15 @@ def render(today: str) -> tuple[str, int, dict, dict]:
     return new_text, n_blocks, lab_leaves, existing
 
 
+def _normalized(text: str) -> str:
+    """Date-stamps are metadata: normalize them so --check tracks content drift.
+
+    Without this the check fails every day after generation day even when
+    nothing changed, training the team to ignore it.
+    """
+    return re.sub(r"\d{4}-\d{2}-\d{2}", "DATE", text)
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
@@ -283,7 +292,7 @@ def main(argv: list[str] | None = None) -> int:
     new_text, n_blocks, lab_leaves, existing = render(today)
     schema_leaves = dict(walk_leaves(load_schema_defaults()))
     if args.check:
-        if OUT_PATH.read_text() != new_text:
+        if _normalized(OUT_PATH.read_text()) != _normalized(new_text):
             print(f"config-reference drift: run python scripts/{Path(__file__).name}", file=sys.stderr)
             return 1
         print(f"config-reference fresh: keys={len(lab_leaves)} blocks={n_blocks} date={today}")

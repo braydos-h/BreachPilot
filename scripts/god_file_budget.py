@@ -151,9 +151,7 @@ def main(argv: list[str]) -> int:
                 f"({old_loc} LOC/{old_size} B -> {loc} LOC/{size} B). "
                 "Extract a logical submodule instead of growing it further."
             )
-            violations.append(
-                f"{rel} grew significantly ({old_loc} LOC/{old_size} B -> {loc} LOC/{size} B)"
-            )
+            violations.append(f"{rel} grew significantly ({old_loc} LOC/{old_size} B -> {loc} LOC/{size} B)")
         elif verdict == "warn":
             print(
                 f"::warning file={rel},line=1::grandfathered god-file grew "

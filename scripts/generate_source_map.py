@@ -134,8 +134,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"source-map missing: {exc}", file=sys.stderr)
             return 1
 
-        # Freshness: same row set (ignore generated date line).
+        # Freshness: same row set (ignore date-stamps, which change daily).
         def _norm(s: str) -> str:
+            s = re.sub(r"\d{4}-\d{2}-\d{2}", "DATE", s)
             return "\n".join(line for line in s.splitlines() if not line.startswith("generated:"))
 
         if _norm(committed) != _norm(text):

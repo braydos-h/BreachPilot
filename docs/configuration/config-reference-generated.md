@@ -160,8 +160,8 @@ _Generated 2026-09-21 from `config.yaml` (445 leaf keys, 46 top-level blocks). L
 | `exploit.terminal` | `str` | `'visible'` | `visible` \| `hidden` | `config.yaml:61` + `CONFIG_SCHEMA['exploit'].terminal` | cli_exploit_settings.py, mcp_tools/terminal, mcp_shared | Attack posture/budgets/allowlist lock | — | no | exploit/agent | tests/test_scope_gate.py |
 | `exploit.web_search` | `bool` | `True` | — | `config.yaml:61` + `CONFIG_SCHEMA['exploit'].web_search` | cli_exploit_settings.py, mcp_tools/terminal, mcp_shared | Attack posture/budgets/allowlist lock | — | no | exploit/agent | tests/test_scope_gate.py |
 | `exploit.workspace_dir` | `str` | `'exploit_workspace'` | — | `config.yaml:61` + `CONFIG_SCHEMA['exploit'].workspace_dir` | cli_exploit_settings.py, mcp_tools/terminal, mcp_shared | Attack posture/budgets/allowlist lock | `EXPLOIT_WORKSPACE` | no | exploit/agent | tests/test_scope_gate.py |
-| `fsm.enabled` | `bool` | `False` | — | `config.yaml:208` + `CONFIG_SCHEMA['fsm'].enabled` |  | — | — | no | fsm | — |
-| `fsm.max_retries_per_step` | `int` | `3` | — | `config.yaml:208` + `CONFIG_SCHEMA['fsm'].max_retries_per_step` |  | — | — | no | fsm | — |
+| `fsm.enabled` | `bool` | `False` | — | `config.yaml:214` + `CONFIG_SCHEMA['fsm'].enabled` |  | — | — | no | fsm | — |
+| `fsm.max_retries_per_step` | `int` | `3` | — | `config.yaml:214` + `CONFIG_SCHEMA['fsm'].max_retries_per_step` |  | — | — | no | fsm | — |
 | `hitl.enabled` | `bool` | `True` | — | `config.yaml:367` + `CONFIG_SCHEMA['hitl'].enabled` |  | — | — | no | hitl | — |
 | `ics.allow_write` | `bool` | `False` | — | `config.yaml:456` + `CONFIG_SCHEMA['ics'].allow_write` | attack_modules/modules/ics_iot.py | ICS write gates | — | no | ics | tests/test_ics*.py |
 | `ics.destructive_ics` | `bool` | `False` | — | `config.yaml:456` + `CONFIG_SCHEMA['ics'].destructive_ics` | attack_modules/modules/ics_iot.py | ICS write gates | — | no | ics | tests/test_ics*.py |

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import re
 import sys
 from pathlib import Path
 
@@ -71,6 +72,15 @@ def render(today: str) -> str:
     return "\n".join(out)
 
 
+def _normalized(text: str) -> str:
+    """Date-stamps are metadata: normalize them so --check tracks content drift.
+
+    Without this the check fails every day after generation day even when
+    nothing changed, training the team to ignore it.
+    """
+    return re.sub(r"\d{4}-\d{2}-\d{2}", "DATE", text)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate safety-defaults.md from CONFIG_SCHEMA sandbox defaults.")
     parser.add_argument(
@@ -80,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
     today = datetime.date.today().isoformat()
     text = render(today)
     if args.check:
-        if DOC.read_text(encoding="utf-8") != text:
+        if _normalized(DOC.read_text(encoding="utf-8")) != _normalized(text):
             print("safety-defaults drift: run python scripts/generate_safety_defaults.py", file=sys.stderr)
             return 1
         print(f"safety-defaults fresh: date={today}")

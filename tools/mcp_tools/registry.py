@@ -10,13 +10,11 @@ import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from db import get_default_db
 from tools.config_manager import CONFIG_SCHEMA
-from tools.cve_lookup import NVDClient
 from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
-from tools.exploit_search import ExploitSearch
 from tools.kernel.allowlist import _extract_scanner_targets
 from tools.kernel.workspace import read_workspace
 from tools.mcp_shared import (
@@ -27,7 +25,11 @@ from tools.mcp_shared import (
 from tools.mcp_shared import (
     _run_with_pgrp_timeout as _shared_run_with_pgrp_timeout,
 )
-from tools.web_researcher import WebResearcher
+
+if TYPE_CHECKING:  # ponytail: annotation-only (ToolContext fields); runtime objects arrive via builders
+    from tools.cve_lookup import NVDClient
+    from tools.exploit_search import ExploitSearch
+    from tools.web_researcher import WebResearcher
 
 _ORIGINAL_SUBPROCESS_RUN = subprocess.run
 

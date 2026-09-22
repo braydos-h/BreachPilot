@@ -51,7 +51,9 @@ def _ensure_webui_build(ui: Any, *, force: bool = False) -> int:
     # fall back to `npm install` for source checkouts without a lockfile.
     lockfile = webui_dir / "package-lock.json"
     install_argv = (
-        [npm_cmd, "ci", "--no-audit", "--no-fund"] if lockfile.is_file() else [npm_cmd, "install", "--no-audit", "--no-fund"]
+        [npm_cmd, "ci", "--no-audit", "--no-fund"]
+        if lockfile.is_file()
+        else [npm_cmd, "install", "--no-audit", "--no-fund"]
     )
     for step in (("install", install_argv), ("build", [npm_cmd, "run", "build"])):
         label, argv = step
