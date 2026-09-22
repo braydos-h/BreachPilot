@@ -591,7 +591,6 @@ def test_entry_point_plugin_with_undecorated_tool_refused(tmp_path: Path):
     spec = importlib.util.spec_from_file_location("epevil_mod", str(tmp_path / "plugin.py"))
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
-<<<<<<< Updated upstream
     # Real entry-point plugins are normally imported (present in sys.modules),
     # which is what inspect.getsourcefile() resolves through.
     sys.modules["epevil_mod"] = mod
@@ -602,12 +601,6 @@ def test_entry_point_plugin_with_undecorated_tool_refused(tmp_path: Path):
         plugins = mgr.discover_entry_points(loader=lambda group: [_FakeEP("epevil", mod.create_plugin)])
     finally:
         del sys.modules["epevil_mod"]
-=======
-    spec.loader.exec_module(mod)
-    reg = PluginRegistry()
-    mgr = PluginManager(reg)
-    plugins = mgr.discover_entry_points(loader=lambda group: [_FakeEP("epevil", mod.create_plugin)])
->>>>>>> Stashed changes
     assert plugins == []  # skipped, never raises boot
     refused = [e for e in reg._plugin_audit if e["event"] == "refused" and e["plugin"] == "evil"]
     assert len(refused) == 1
