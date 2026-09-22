@@ -98,6 +98,41 @@ def _usage_field(usage: Any, *names: str) -> int | None:
     return None
 
 
+def extract_token_counts(response: Any | None) -> tuple[int | None, int | None, int | None]:
+    """Single source for prompt/completion/total token extraction.
+
+    Consolidates the Ollama (``prompt_eval_count``/``eval_count``) vs
+    OpenAI/Responses (``usage.prompt_tokens``/``input_tokens``,
+    ``usage.completion_tokens``/``output_tokens``) mapping previously
+    duplicated between ``build_usage_record`` here and the provider adapters'
+    ``_normalize_usage`` helpers. Returns
+    ``(prompt_tokens, completion_tokens, total_tokens)`` with ``total``
+    derived when both parts are known.
+    """
+    usage = _field(response, "usage", {}) or {}
+    prompt_tokens = _as_int(_field(response, "prompt_eval_count"))
+    if prompt_tokens is None:
+        prompt_tokens = _usage_field(usage, "prompt_tokens", "input_tokens")
+
+    completion_tokens = _as_int(_field(response, "eval_count"))
+    if completion_tokens is None:
+        completion_tokens = _usage_field(usage, "completion_tokens", "output_tokens")
+
+    total_tokens = _usage_field(usage, "total_tokens")
+    if total_tokens is None and prompt_tokens is not None and completion_tokens is not None:
+        total_tokens = prompt_tokens + completion_tokens
+    return prompt_tokens, completion_tokens, total_tokens
+
+
+def extract_durations(response: Any | None) -> tuple[float | None, float | None, float | None]:
+    """Single source for (total, prompt_eval, completion_eval) durations in seconds."""
+    return (
+        _ns_to_seconds(_field(response, "total_duration")),
+        _ns_to_seconds(_field(response, "prompt_eval_duration")),
+        _ns_to_seconds(_field(response, "eval_duration")),
+    )
+
+
 _CONFIG_CACHE: dict[str, Any] = {"mtime": 0.0, "size": -1, "config": {}}
 _CONFIG_CACHE_LOCK = threading.Lock()
 
@@ -253,22 +288,8 @@ def build_usage_record(
     error: str = "",
     provider: str = "ollama",
 ) -> dict[str, Any]:
-    usage = _field(response, "usage", {}) or {}
-    prompt_tokens = _as_int(_field(response, "prompt_eval_count"))
-    if prompt_tokens is None:
-        prompt_tokens = _usage_field(usage, "prompt_tokens", "input_tokens")
-
-    completion_tokens = _as_int(_field(response, "eval_count"))
-    if completion_tokens is None:
-        completion_tokens = _usage_field(usage, "completion_tokens", "output_tokens")
-
-    total_tokens = _usage_field(usage, "total_tokens")
-    if total_tokens is None and prompt_tokens is not None and completion_tokens is not None:
-        total_tokens = prompt_tokens + completion_tokens
-
-    prompt_eval_duration = _ns_to_seconds(_field(response, "prompt_eval_duration"))
-    completion_eval_duration = _ns_to_seconds(_field(response, "eval_duration"))
-    total_duration = _ns_to_seconds(_field(response, "total_duration"))
+    prompt_tokens, completion_tokens, total_tokens = extract_token_counts(response)
+    total_duration, prompt_eval_duration, completion_eval_duration = extract_durations(response)
 
     estimated_context = estimate_context_tokens(messages)
     ctx_window = _as_int(context_window_tokens)

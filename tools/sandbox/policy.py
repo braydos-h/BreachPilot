@@ -427,7 +427,7 @@ def audit_policy_payload(policy: NetworkPolicy) -> dict[str, Any]:
         # Explicit DNS name allow/deny lists: allowed = authorized names (the
         # only names the worker has any purpose resolving); denied = tokens
         # that authorized nothing (unresolvable, wildcards, unknown shapes).
-        "allowed_dns_names": sorted(policy.resolved_domains),
+        "allowed_dns_names": policy.allowed_dns_names,
         "denied_dns_names": sorted({t for t in policy.unresolved_targets if isinstance(t, str)}),
         "discovered_provenance": snapshot(),
         "unresolved_targets": list(policy.unresolved_targets),

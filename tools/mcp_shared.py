@@ -11,10 +11,8 @@ import os
 import signal
 import subprocess
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
-from tools.cve_lookup import CVESearchSettings, NVDClient
-from tools.exploit_search import ExploitSearch, ExploitSearchSettings
 from tools.kernel.allowlist import (
     _MSF_LHOST_RE,
     _MSF_PIVOT_RE,
@@ -63,12 +61,16 @@ from tools.kernel.workspace import (
     read_workspace,
 )
 from tools.reliability import RateLimiter
-from tools.web_researcher import (
-    OllamaResearchSettings,
-    SerpAPIResearchSettings,
-    WebResearcher,
-    WebResearcherSettings,
-)
+
+if TYPE_CHECKING:  # pragma: no cover - typing only, keeps cold import light
+    from tools.cve_lookup import CVESearchSettings, NVDClient
+    from tools.exploit_search import ExploitSearch, ExploitSearchSettings
+    from tools.web_researcher import (
+        OllamaResearchSettings,
+        SerpAPIResearchSettings,
+        WebResearcher,
+        WebResearcherSettings,
+    )
 
 __all__ = [  # re-exports for backwards compat (F401 suppression via __all__)
     "_MSF_LHOST_RE",
@@ -173,8 +175,15 @@ def _cfg_bool(cfg: Mapping[str, object], key: str, default: bool) -> bool:
     return default
 
 
-def build_search(config: Mapping[str, object]) -> ExploitSearch:
-    """Build an ``ExploitSearch`` from the ``exploit``/``search`` config blocks."""
+def build_search(config: Mapping[str, object]) -> "ExploitSearch":
+    """Build an ``ExploitSearch`` from the ``exploit``/``search`` config blocks.
+
+    Heavy ``tools.exploit_search`` import is function-local so importing this
+    shared module (every MCP boot) stays cheap; the cost moves to the phased
+    server boot where it belongs.
+    """
+    from tools.exploit_search import ExploitSearch, ExploitSearchSettings
+
     exploit_cfg_raw = config.get("exploit", {})
     exploit_cfg: Mapping[str, object] = exploit_cfg_raw if isinstance(exploit_cfg_raw, Mapping) else {}
     research_cfg_raw = config.get("research", {})

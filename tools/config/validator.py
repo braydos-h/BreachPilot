@@ -8,7 +8,7 @@ from typing import Any
 
 import yaml
 
-from .schema import CONFIG_SCHEMA, KNOWN_TOP_KEYS
+from .schema import CONFIG_SCHEMA, DEPRECATED_TOP_KEYS, KNOWN_TOP_KEYS
 
 logger = logging.getLogger(__name__)
 
@@ -262,6 +262,19 @@ class ConfigValidator:
                 if perm is not None:
                     if perm not in ("read_only", "approve_only", "full_access"):
                         result.errors.append("exploit.permission must be one of: read_only, approve_only, full_access")
+
+        # Deprecated blocks: warn (never error) when the operator customized
+        # them away from schema defaults. A block sitting at defaults — like
+        # the checked-in lab file's inert ``stealth`` block — stays silent so
+        # existing files keep validating warning-free.
+        for dep_key, dep_msg in DEPRECATED_TOP_KEYS.items():
+            block = self._config.get(dep_key)
+            if isinstance(block, dict):
+                schema_block = CONFIG_SCHEMA.get(dep_key, {})
+                if isinstance(schema_block, dict) and any(
+                    block.get(key) != schema_block.get(key) for key in set(block) | set(schema_block)
+                ):
+                    result.warnings.append(f"'{dep_key}' is deprecated: {dep_msg}")
 
         # Validate cve_lookup section (Tier 1.2: circuit-breaker tuning)
         if "cve_lookup" in self._config:

@@ -20,8 +20,16 @@ def validate_config_file(path: Path | str = "config.yaml") -> ConfigValidationRe
     return result
 
 
-def load_validated_config(path: Path | str = "config.yaml") -> dict[str, Any]:
-    """Load config with validation and defaults applied. Raises on errors."""
+def load_validated_config(path: Path | str = "config.yaml", profile: str | None = None) -> dict[str, Any]:
+    """Load config with validation and defaults applied. Raises on errors.
+
+    ``profile`` optionally names a layered preset (``lab`` | ``recon`` |
+    ``ci`` — see ``tools/config/profiles.py``) whose overlay is deep-merged
+    onto the validated config before it is returned. ``None`` (default)
+    preserves the legacy behavior byte-for-byte.
+    """
+    from .profiles import apply_profile
+
     validator = ConfigValidator(path)
     config, result = validator.load_and_validate()
 
@@ -35,7 +43,10 @@ def load_validated_config(path: Path | str = "config.yaml") -> dict[str, Any]:
         for uk in result.unknown_keys:
             logger.warning("Unknown config key: %s", uk)
 
-    return validator.apply_defaults()
+    merged = validator.apply_defaults()
+    if profile is not None:
+        merged = apply_profile(merged, profile)
+    return merged
 
 
 def get_ai_provider(config: dict[str, Any] | None = None) -> str:

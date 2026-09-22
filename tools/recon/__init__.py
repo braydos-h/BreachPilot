@@ -10,12 +10,24 @@ if TYPE_CHECKING:
     from tools.recon.enumerator import SecondaryEnumerator
     from tools.recon.pipeline import ReconPipeline
     from tools.recon.scanner import PrimaryReconScanner, _kill_process, run_command
+    from tools.recon.service import (
+        CveEnrichmentCache,
+        FastReconConfig,
+        FastReconCoordinator,
+        FastReconResult,
+        ReconService,
+    )
 
 __all__ = [
+    "CveEnrichmentCache",
+    "FastReconConfig",
+    "FastReconCoordinator",
+    "FastReconResult",
     "HostReconResult",
     "PrimaryReconScanner",
     "ReconConfig",
     "ReconPipeline",
+    "ReconService",
     "SecondaryEnumerator",
     "ServiceInfo",
     "ToolAvailability",
@@ -33,6 +45,11 @@ _ATTR_MAP: dict[str, str] = {
     "run_command": "tools.recon.scanner",
     "SecondaryEnumerator": "tools.recon.enumerator",
     "ReconPipeline": "tools.recon.pipeline",
+    "CveEnrichmentCache": "tools.recon.service",
+    "FastReconConfig": "tools.recon.service",
+    "FastReconCoordinator": "tools.recon.service",
+    "FastReconResult": "tools.recon.service",
+    "ReconService": "tools.recon.service",
 }
 
 

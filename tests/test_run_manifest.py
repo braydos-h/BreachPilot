@@ -192,3 +192,17 @@ def test_import_rejects_bad_hash(tmp_path):
             dst.writestr(info.filename, data)
     with pytest.raises(ValueError, match="[Hh]ash|rejected"):
         import_run_bundle(tampered, tmp_path / "dest3")
+
+
+def test_manifest_indexes_witness_and_workspaces(tmp_path):
+    """The manifest must index every fragmented store (witness, swarm + exploit workspaces)."""
+    reports = tmp_path / "reports"
+    run_dir = _seed_run(reports, "run11")
+    (run_dir / "witness.jsonl").write_text("{}\n", encoding="utf-8")
+    m = build_manifest(run_id="run11", reports_dir=reports)
+    for key in ("witness", "swarm_workspace", "exploit_workspace"):
+        assert key in m.state_stores, f"manifest missing store {key!r}"
+    write_manifest(reports, m)
+    updated = update_manifest(run_dir)
+    assert updated.state_stores["witness"] == str(run_dir / "witness.jsonl")
+    assert str(run_dir / "witness.jsonl") in updated.evidence_index

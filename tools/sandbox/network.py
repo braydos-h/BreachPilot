@@ -16,6 +16,16 @@ destroys the partial sandbox rather than proceeding with an uncontained worker.
 Rules are (re-)applied before each command when the authorization fingerprint
 changes, so dynamically discovered (allowlist-validated) targets are picked up
 deliberately.
+
+Resolver-layer name enforcement (deliberate subset, no in-container dnsmasq):
+in-container name blocking is enforced via IP authorization plus
+``127.0.0.11``-only ``:53`` — the host resolves ONLY allowlisted names
+(``NetworkPolicy.allowed_dns_names``), so an unauthorized name can resolve at
+best to an unauthorized IP, which the default-DROP ruleset denies. The
+``:53`` ACCEPTs are scoped to the embedded resolver and every other ``:53``
+(direct ``8.8.8.8:53``, rogue loopback resolvers) is REJECTed ahead of the
+blanket ``lo`` ACCEPT, so DNS-protocol exfil/tunneling/oracle paths gain
+nothing beyond what the IP authorization already permits.
 """
 
 from __future__ import annotations

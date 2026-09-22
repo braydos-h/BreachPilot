@@ -87,10 +87,17 @@ _Generated 2026-09-21 from `config.yaml` (444 leaf keys, 46 top-level blocks). L
 | `browser.persist_storage` | `bool` | `False` | — | `config.yaml:299` + `CONFIG_SCHEMA['browser'].persist_storage` |  | — | — | no | browser | — |
 | `browser.session_timeout_seconds` | `int` | `300` | — | `config.yaml:299` + `CONFIG_SCHEMA['browser'].session_timeout_seconds` |  | — | — | no | browser | — |
 | `browser.worker_image` | `str` | `''` | — | `config.yaml:299` + `CONFIG_SCHEMA['browser'].worker_image` |  | — | — | no | browser | — |
+<<<<<<< Updated upstream
 | `caldera.api_key_env` | `str` | `'CALDERA_API_KEY'` | — | `config.yaml:499` + `CONFIG_SCHEMA['caldera'].api_key_env` | plugins/caldera/plugin.py | Caldera emulation | `CALDERA_API_KEY` | no | ad |  |
 | `caldera.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:499` + `CONFIG_SCHEMA['caldera'].enabled` | plugins/caldera/plugin.py | Caldera emulation | — | no | ad |  |
 | `caldera.url` | `str` | `''` | — | `config.yaml:499` + `CONFIG_SCHEMA['caldera'].url` | plugins/caldera/plugin.py | Caldera emulation | — | no | ad |  |
 | `chatgpt.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:562` + `CONFIG_SCHEMA['chatgpt'].enabled` | providers/chatgpt_provider.py, model_router.py, doctor.py | ChatGPT proxy | — | yes | providers | tests/test_chatgpt*.py |
+=======
+| `caldera.api_key_env` | `str` | `'CALDERA_API_KEY'` | — | `config.yaml:509` + `CONFIG_SCHEMA['caldera'].api_key_env` | plugins/caldera/plugin.py | Caldera emulation | `CALDERA_API_KEY` | no | ad |  |
+| `caldera.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:509` + `CONFIG_SCHEMA['caldera'].enabled` | plugins/caldera/plugin.py | Caldera emulation | — | no | ad |  |
+| `caldera.url` | `str` | `''` | — | `config.yaml:509` + `CONFIG_SCHEMA['caldera'].url` | plugins/caldera/plugin.py | Caldera emulation | — | no | ad |  |
+| `chatgpt.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:572` + `CONFIG_SCHEMA['chatgpt'].enabled` | providers/chatgpt_provider.py, model_router.py, doctor.py | ChatGPT proxy | — | yes | providers | tests/test_chatgpt*.py |
+>>>>>>> Stashed changes
 | `cve_lookup.api_key_env` | `str` | `'NVD_API_KEY'` | — | `config.yaml:112` + `CONFIG_SCHEMA['cve_lookup'].api_key_env` | mcp_shared, cve_lookup.py | NVD + KEV/EPSS | `NVD_API_KEY` | no | research/cve | tests/test_cve_lookup.py |
 | `cve_lookup.cache_max_entries` | `int` | `100` | — | `config.yaml:112` + `CONFIG_SCHEMA['cve_lookup'].cache_max_entries` | mcp_shared, cve_lookup.py | NVD + KEV/EPSS | — | no | research/cve | tests/test_cve_lookup.py |
 | `cve_lookup.cache_ttl_seconds` | `int` | `3600` | — | `config.yaml:112` + `CONFIG_SCHEMA['cve_lookup'].cache_ttl_seconds` | mcp_shared, cve_lookup.py | NVD + KEV/EPSS | — | no | research/cve | tests/test_cve_lookup.py |
@@ -232,6 +239,7 @@ _Generated 2026-09-21 from `config.yaml` (444 leaf keys, 46 top-level blocks). L
 | `ollama.embed_host` | `str` | `'http://localhost:11434'` | — | `config.yaml:1` + `CONFIG_SCHEMA['ollama'].embed_host` | config_manager.py, tools/exploit_agent/runner/_impl.py | Embedding host fallback | — | yes | memory/embeddings | tests/test_config_manager.py |
 | `ollama.host` | `str` | `'https://api.ollama.com'` | — | `config.yaml:1` + `CONFIG_SCHEMA['ollama'].host` | model_router.py, doctor.py | Ollama endpoint for chat/generate | — | yes | models/provider | tests/test_config_manager.py |
 | `ollama.model` | `str` | `'glm-5.2:cloud'` | — | `config.yaml:1` + `CONFIG_SCHEMA['ollama'].model` | config_manager.py, interactive_menu.py | Default concrete model id | — | yes | models | tests/test_config_manager.py |
+<<<<<<< Updated upstream
 | `opencode_go.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:564` + `CONFIG_SCHEMA['opencode_go'].enabled` |  | — | — | yes | providers | — |
 | `operator_connection.auto_start_listener` | `bool` | `True` | — | `config.yaml:520` + `CONFIG_SCHEMA['operator_connection'].auto_start_listener` |  | — | — | no | operator | — |
 | `operator_connection.beacon_interval_seconds` | `int` | `300` | — | `config.yaml:520` + `CONFIG_SCHEMA['operator_connection'].beacon_interval_seconds` |  | — | — | no | operator | — |
@@ -240,6 +248,16 @@ _Generated 2026-09-21 from `config.yaml` (444 leaf keys, 46 top-level blocks). L
 | `operator_connection.enabled` | `bool` | `True` | — | `config.yaml:520` + `CONFIG_SCHEMA['operator_connection'].enabled` |  | — | — | no | operator | — |
 | `operator_connection.health_check_interval_seconds` | `int` | `60` | — | `config.yaml:520` + `CONFIG_SCHEMA['operator_connection'].health_check_interval_seconds` |  | — | — | no | operator | — |
 | `operator_connection.workspace_dir` | `str` | `'exploit_workspace'` | — | `config.yaml:520` + `CONFIG_SCHEMA['operator_connection'].workspace_dir` |  | — | — | no | operator | — |
+=======
+| `opencode_go.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:574` + `CONFIG_SCHEMA['opencode_go'].enabled` |  | — | — | yes | providers | — |
+| `operator_connection.auto_start_listener` | `bool` | `True` | — | `config.yaml:530` + `CONFIG_SCHEMA['operator_connection'].auto_start_listener` |  | — | — | no | operator | — |
+| `operator_connection.beacon_interval_seconds` | `int` | `300` | — | `config.yaml:530` + `CONFIG_SCHEMA['operator_connection'].beacon_interval_seconds` |  | — | — | no | operator | — |
+| `operator_connection.default_callback_port` | `int` | `4444` | — | `config.yaml:530` + `CONFIG_SCHEMA['operator_connection'].default_callback_port` |  | — | — | no | operator | — |
+| `operator_connection.default_listener_type` | `str` | `'netcat'` | — | `config.yaml:530` + `CONFIG_SCHEMA['operator_connection'].default_listener_type` |  | — | — | no | operator | — |
+| `operator_connection.enabled` | `bool` | `True` | — | `config.yaml:530` + `CONFIG_SCHEMA['operator_connection'].enabled` |  | — | — | no | operator | — |
+| `operator_connection.health_check_interval_seconds` | `int` | `60` | — | `config.yaml:530` + `CONFIG_SCHEMA['operator_connection'].health_check_interval_seconds` |  | — | — | no | operator | — |
+| `operator_connection.workspace_dir` | `str` | `'exploit_workspace'` | — | `config.yaml:530` + `CONFIG_SCHEMA['operator_connection'].workspace_dir` |  | — | — | no | operator | — |
+>>>>>>> Stashed changes
 | `opsec.doh` | `bool` | `False` | — | `config.yaml:255` + `CONFIG_SCHEMA['opsec'].doh` | opsec.py, validation_utils.is_private_or_local_target | OPSEC hardening | — | no | opsec | tests/test_opsec.py |
 | `opsec.doh_provider` | `str` | `'cloudflare'` | `cloudflare` \| `google` | `config.yaml:255` + `CONFIG_SCHEMA['opsec'].doh_provider` | opsec.py, validation_utils.is_private_or_local_target | OPSEC hardening | — | no | opsec | tests/test_opsec.py |
 | `opsec.enabled` | `bool` | `False` | — | `config.yaml:255` + `CONFIG_SCHEMA['opsec'].enabled` | opsec.py, validation_utils.is_private_or_local_target | OPSEC hardening | — | no | opsec | tests/test_opsec.py |

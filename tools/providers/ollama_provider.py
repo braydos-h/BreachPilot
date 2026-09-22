@@ -24,7 +24,12 @@ import re
 import threading
 from typing import TYPE_CHECKING, Any, Mapping
 
+<<<<<<< Updated upstream
 from .base import DATA_RESIDENCY_CLOUD, DATA_RESIDENCY_LOCAL, BaseProvider, is_loopback_url
+=======
+from .base import BaseProvider
+from .base import DATA_RESIDENCY_CLOUD, DATA_RESIDENCY_LOCAL, is_loopback_url
+>>>>>>> Stashed changes
 from .types import (
     ModelClient,
     ModelInfo,
@@ -143,16 +148,16 @@ def apply_context_window(raw_kwargs: dict[str, Any], context_window_tokens: Any)
 
     Only sends ``num_ctx`` when the caller asks (long-session mode), so
     non-long runs stay byte-identical to the pre-registry behavior.
+    Thin wrapper over ``tools.providers.base.prepare_chat_kwargs`` (single
+    source for the canonical-kwarg translation).
     """
-    try:
-        tokens = int(context_window_tokens)
-    except (TypeError, ValueError):
-        return raw_kwargs
-    if tokens > 0:
-        options = dict(raw_kwargs.get("options") or {})
-        options["num_ctx"] = tokens
-        return {**raw_kwargs, "options": options}  # never mutate the caller's dict
-    return raw_kwargs
+    from .base import prepare_chat_kwargs
+
+    merged = dict(raw_kwargs)
+    if context_window_tokens is not None:
+        merged["context_window_tokens"] = context_window_tokens
+    out = prepare_chat_kwargs(merged, "ollama")
+    return out
 
 
 # ---------------------------------------------------------------------------

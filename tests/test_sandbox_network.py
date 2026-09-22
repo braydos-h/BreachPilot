@@ -104,6 +104,34 @@ class TestIpv4Rules:
             if "--dport 53" in r:
                 assert rules.index(r) < lo_idx
 
+    def test_dns_controlled_rejects_direct_and_loopback_resolvers(self):
+        from tools.sandbox.models import NetworkPolicy
+
+        pol = NetworkPolicy(
+            authorized_destinations=["192.0.2.5"],
+            explicitly_blocked=list(COMMON_BLOCKED_NETS),
+            allow_dns="controlled",
+            enforced=True,
+            resolved_domains={"example.com": "93.184.216.34"},
+            resolved_domain_addresses={"example.com": ["93.184.216.34"]},
+        )
+        rules = build_ipv4_rules(pol)
+        port53 = [r for r in rules if "--dport 53" in r]
+        assert port53, "controlled mode must emit explicit :53 rules"
+        # Every :53 ACCEPT is scoped to the embedded resolver ONLY: no direct
+        # 8.8.8.8:53, no rogue loopback-resolver (127.0.0.1:53) bypass.
+        for rule in port53:
+            if "-j ACCEPT" in rule:
+                assert "-d 127.0.0.11" in rule, f"unexpected :53 ACCEPT: {rule}"
+        joined = "\n".join(rules)
+        assert "-d 8.8.8.8" not in joined
+        assert "-d 127.0.0.1 " not in joined and "-d 127.0.0.1 -p" not in joined
+        # Blanket :53 REJECTs precede the lo ACCEPT (first-match-wins).
+        lo_idx = rules.index("-A NAI-OUTPUT -o lo -j ACCEPT")
+        for rej in ("-A NAI-OUTPUT -p udp --dport 53 -j REJECT", "-A NAI-OUTPUT -p tcp --dport 53 -j REJECT"):
+            assert rej in rules
+            assert rules.index(rej) < lo_idx
+
     def test_dns_controlled_with_no_names_fails_closed_to_none(self):
         # IP-only allowlist: DNS serves no authorized purpose → none-style REJECTs.
         rules = "\n".join(build_ipv4_rules(_pol(["192.0.2.5"], allow_dns="controlled")))

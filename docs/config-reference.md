@@ -737,7 +737,7 @@ never an automatic fallback. Full architecture + threat model:
 | `resources.timeout_seconds` | int | `300` | Per-command default timeout | `tools/sandbox/manager.py:execute` |
 | `resources.output_max_bytes` | int | `2000000` | Per-stream output clamp (min 1024) | `tools/sandbox/manager.py:_clamp_output` |
 | `network.enforce` | bool | `true` | Install the netns firewall; `false` = Docker bridge isolation only (NOT containment) | `tools/sandbox/manager.py:_apply_policy` |
-| `network.fail_closed` | bool | `true` | Policy failures block execution | `tools/sandbox/*` |
+| `network.fail_closed` | bool | `true` | Netns-firewall install failure blocks execution (`SANDBOX_POLICY_FAILED` + audit row) when `true`; `false` degrades to Docker-bridge isolation only (NOT containment) with WARNING + `degraded` audit row. Worker setup failures always fail closed. | `tools/sandbox/manager.py:_apply_policy` |
 | `network.allow_dns` | str | `controlled` | `controlled` (host-side validated resolution) or `none` (port 53 blocked everywhere) | `tools/sandbox/policy.py`, `network.py` |
 | `network.map_host_loopback` | bool | `false` | Dev-only mapping of sandbox loopback targets to the host gateway; never enable for production runs | `tools/sandbox/policy.py` |
 | `network.extra_allow_cidrs` | list[str] | `[]` | Operator-authorized extra CIDRs | `tools/sandbox/policy.py` |

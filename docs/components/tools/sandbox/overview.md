@@ -112,7 +112,7 @@ def apply_network_policy(policy: NetworkPolicy, *, container_id: str, image: str
 
 Always denied: `METADATA_DESTINATIONS` (`169.254.169.254`, `169.254.0.0/16`, `fd00:ec2::254`, `100.100.100.200`, `fe80::/10`) plus the Docker bridge gateway unless `allow_gateway` is set. `RESEARCH_HOSTS` (`github.com`, `api.github.com`, `codeload.github.com`, `objects.githubusercontent.com`, `raw.githubusercontent.com`, `gitlab.com`) are resolved host-side and authorized only when `allow_research_hosts` is explicitly true (default false). `allow_dns: controlled` keeps the container resolver (`127.0.0.11`); `none` adds explicit port-53 REJECTs.
 
-`network.py` renders default-DROP `iptables-restore` / `ip6tables-restore` rulesets installed by the ephemeral `--rm` sidecar sharing the worker netns (`run_netns_sidecar`). Re-application happens at each command boundary only when `NetworkPolicy.fingerprint()` changes, so dynamic targets are picked up deliberately. With `network.enforce: false` no firewall is installed — Docker bridge isolation only, explicitly not containment, and logged as such.
+`network.py` renders default-DROP `iptables-restore` / `ip6tables-restore` rulesets installed by the ephemeral `--rm` sidecar sharing the worker netns (`run_netns_sidecar`). Re-application happens at each command boundary only when `NetworkPolicy.fingerprint()` changes, so dynamic targets are picked up deliberately. With `network.enforce: false` no firewall is installed — Docker bridge isolation only, explicitly not containment, and logged as such. A firewall-install failure honors `network.fail_closed` (default `true`): block with `SANDBOX_POLICY_FAILED` + audit row when `true`, degraded-allow with WARNING + `degraded` audit row when `false` (worker runs without the netns firewall). Worker-creation/setup failures always fail closed regardless.
 
 `authorize_destinations` is the command-level scope re-check (`SANDBOX_SCOPE_DENIED`) using the shared `check_targets_allowlist` matcher; `_enforce_scope` (`manager.py:500`) additionally denies target-less execution whenever any authorization material exists.
 
@@ -152,7 +152,7 @@ Historical note (fixed 2026-09-15): `docs/sandbox.md` previously misstated this 
 | `sandbox.env_passthrough` | `[]` | Extra host env names the worker may receive |
 | `sandbox.resources.memory_mb` / `cpus` / `pids` / `timeout_seconds` / `output_max_bytes` / `tmpfs_size_mb` | `4096` / `2` / `512` / `300` / `2000000` / `256` | Limits; invalid values fall back to defaults, never to host execution |
 | `sandbox.network.enforce` | `true` | `false` disables the netns firewall (not containment) |
-| `sandbox.network.fail_closed` | `true` | Policy posture flag |
+| `sandbox.network.fail_closed` | `true` | Firewall-install failure blocks (`SANDBOX_POLICY_FAILED` + audit) when `true`; degraded-allow + WARNING/`degraded` audit when `false` (worker setup failures always block) |
 | `sandbox.network.allow_dns` | `controlled` | `controlled` or `none` (port 53 fully blocked) |
 | `sandbox.network.map_host_loopback` | `false` | Dev-only host-loopback mapping |
 | `sandbox.network.extra_allow_cidrs` | `[]` | Operator-authorized extra CIDRs; invalid entries warn and skip |

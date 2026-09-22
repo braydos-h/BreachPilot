@@ -106,6 +106,16 @@ class TestSandboxConfigFromConfig:
         assert cfg.network_enforce is False  # honored, but must be explicit
         assert cfg.network_fail_closed is True
 
+    def test_fail_closed_false_is_explicit_only(self):
+        # Wired flag (manager._apply_policy): explicit false degrades
+        # firewall-install failures to bridge-isolation-only + WARNING/audit
+        # instead of blocking; absent/garbage stays fail-closed true.
+        cfg = SandboxConfig.from_config({"sandbox": {"enabled": True, "network": {"fail_closed": False}}})
+        assert cfg.network_fail_closed is False
+        assert SandboxConfig.from_config({"sandbox": {"enabled": True}}).network_fail_closed is True
+        garbage = SandboxConfig.from_config({"sandbox": {"enabled": True, "network": {"fail_closed": "sometimes"}}})
+        assert garbage.network_fail_closed is True
+
     def test_config_schema_default_is_enabled(self):
         # The shipped default (CONFIG_SCHEMA + config.yaml) enables the sandbox
         # with enforcement on: the documented secure-by-default posture.

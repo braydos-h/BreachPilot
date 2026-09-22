@@ -2,6 +2,8 @@
   // Repo-level guard: agents must NEVER push or create branches.
   // Mirrors ~/.config/opencode/opencode.json permission.bash denies.
   // AGENTS.md #9 / CLAUDE.md "Things To Watch Out For" is canonical.
+  // Agents must NEVER run pytest (any invocation — operator hardware
+  // constraint; full-suite verification is CI's job).
   "$schema": "https://opencode.ai/config.json",
   "permission": {
     "bash": {
@@ -14,7 +16,10 @@
       "git switch -C*": "deny",
       "gh repo create*": "deny",
       "gh repo fork*": "deny",
-      "gh pr create*": "deny"
+      "gh pr create*": "deny",
+      "*pytest*": "deny",
+      "pytest*": "deny",
+      "make test*": "deny"
     }
   }
 }

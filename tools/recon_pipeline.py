@@ -7,10 +7,21 @@ import tools.recon.config as _cfg
 import tools.recon.enumerator as _enum
 import tools.recon.pipeline as _pipe
 import tools.recon.scanner as _scan
+import tools.recon.service as _svc
 from tools.recon.config import HostReconResult, ReconConfig, ServiceInfo, ToolAvailability  # noqa: F401
 from tools.recon.enumerator import SecondaryEnumerator  # noqa: F401
 from tools.recon.pipeline import ReconPipeline  # noqa: F401
 from tools.recon.scanner import PrimaryReconScanner, _kill_process, run_command  # noqa: F401
+from tools.recon.service import (  # noqa: F401
+    CveEnrichmentCache,
+    FastReconConfig,
+    FastReconCoordinator,
+    FastReconResult,
+    ReconService,
+    cve_query_from_banner,
+    extract_tool_text,
+    plan_cve_queries,
+)
 
 # Mapping of shim attribute -> canonical modules that also hold that name.
 # Patching the shim (e.g. in tests) must propagate to the real implementation
@@ -18,7 +29,7 @@ from tools.recon.scanner import PrimaryReconScanner, _kill_process, run_command 
 # old object and mocks have no effect (Windows nmap-not-found vs Linux).
 # ponytail: generic propagation -- every canonical module holding that name is
 # updated, so no per-name map to keep in sync when helpers move modules.
-_CANONICAL_MODULES: tuple[ModuleType, ...] = (_cfg, _enum, _pipe, _scan)
+_CANONICAL_MODULES: tuple[ModuleType, ...] = (_cfg, _enum, _pipe, _scan, _svc)
 
 
 class _ReconPipelineProxy(ModuleType):

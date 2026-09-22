@@ -441,7 +441,50 @@ class SandboxManager:
             self._policy_valid_until = now + _HOT_PATH_TTL_S
             return pol
         if self.cfg.network_enforce:
-            apply_network_policy(pol, container_id=self.container_id, image=self.cfg.image, gateway=self.gateway)
+            try:
+                apply_network_policy(pol, container_id=self.container_id, image=self.cfg.image, gateway=self.gateway)
+            except SandboxError as exc:
+                # Wired `sandbox.network.fail_closed` (default true):
+                # - true  -> fail-closed block: audit row, then raise (the
+                #   caller destroys partial resources; the MCP layer renders
+                #   SANDBOX_POLICY_FAILED; execution never proceeds unfirewalled).
+                # - false -> degraded-allow: explicit WARNING + audit row, and
+                #   the worker runs WITHOUT the netns firewall (Docker bridge
+                #   isolation only -- explicitly NOT containment).
+                # Worker-creation/setup failures (no worker exists) always fail
+                # closed regardless of this flag -- there is no worker to
+                # degrade to. Only the firewall-install step honors it.
+                payload = _policy.audit_policy_payload(pol)
+                payload["enforcement_error"] = str(exc)[:300]
+                if self.cfg.network_fail_closed:
+                    self._audit(
+                        target_ip="",
+                        tool_name="network_policy",
+                        status="blocked",
+                        command="",
+                        extra_env={},
+                        policy_payload=payload,
+                        exit_code=None,
+                        duration=None,
+                    )
+                    raise
+                logger.warning(
+                    "sandbox network.fail_closed=false: netns firewall install failed (%s); "
+                    "worker %s runs WITHOUT netns firewall "
+                    "(Docker bridge isolation only -- this is NOT containment)",
+                    exc,
+                    self.container_id,
+                )
+                self._audit(
+                    target_ip="",
+                    tool_name="network_policy",
+                    status="degraded",
+                    command="",
+                    extra_env={},
+                    policy_payload=payload,
+                    exit_code=None,
+                    duration=None,
+                )
         else:
             logger.warning(
                 "sandbox network.enforce=false: worker runs WITHOUT netns firewall "

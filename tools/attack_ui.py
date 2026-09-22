@@ -18,7 +18,19 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
+
+if TYPE_CHECKING:
+    # Static names for the PEP 562 lazy questionary imports below. This block
+    # never executes at runtime (questionary stays unimported until the --menu
+    # path needs it); it exists so mypy resolves ``questionary`` / ``Choice``
+    # / ``Style`` / ``_CUSTOM_STYLE`` / ``_HAS_QUESTIONARY`` without turning
+    # the lazy import into an eager one.
+    import questionary as questionary
+    from questionary import Choice, Style
+
+    _CUSTOM_STYLE: Any
+    _HAS_QUESTIONARY: bool
 
 
 class _FallbackChoice:

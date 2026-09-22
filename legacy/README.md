@@ -40,3 +40,36 @@ Run `python main.py` (Flow A menu) or `python main.py --help` — not `python cl
 ## Deletion plan
 
 After 0.71, shims will be removed and `legacy/` may be deleted or archived. Do not add features here; add to Flow A. Import hygiene is enforced by `tests/test_legacy_shims.py` (shim warnings + canonical-namespace imports + banned-import lint).
+
+### Removal checklist (0.71)
+
+Do NOT delete the shims early — the ~250-file test suite and packaging still
+reference them, and the deprecation window (deprecated 0.68 → removal 0.71)
+is a compatibility promise. When 0.71 lands, work top-down:
+
+1. **Gate is green** — `python -m pytest tests/test_legacy_shims.py -q -p no:cacheprovider -n 0`
+   passes (shim markers, warning text, canonical imports, banned-import lint).
+2. **No root-shim consumers left** — `test_no_root_shim_deep_imports` reports
+   zero violations; grep for `^import (cli|agent_loop|mission|...)$` /
+   `^from (cli|agent_loop|...) import` outside the shims themselves and
+   migrate every hit to `legacy.*` first.
+3. **No `legacy.*` consumers left outside the allowlist** — resolve or port
+   the five allowlisted bridges (`tools/intelligence/adapters/*`,
+   `tools/interactive_menu.py`, `tools/run_service/tasks.py`), then `legacy/`
+   itself can go.
+4. **Delete the shims** — remove the 13 `Legacy shim --` root files
+   (`agent_loop.py`, `cli.py`, `evidence.py`, `executor.py`,
+   `finding_verifier.py`, `memory.py`, `mission.py`, `observer.py`,
+   `planner.py`, `report_generator.py`, `risk_controller.py`, `task_queue.py`,
+   `tool_router.py`). Shared-kernel roots (`db.py`, `scope_gate.py`,
+   `outcome_judge.py`, `target_graph.py`, `summarizer.py`) are REAL files used
+   by both flows — they stay.
+5. **Shrink the wheel** — drop the deleted names from `pyproject.toml`
+   `[tool.setuptools] py-modules` in the same commit (until then the entries
+   must stay: removing them early breaks the removal policy, and the shims
+   are ~10 lines each so the wheel cost is packaging surface, not bytes).
+6. **Docs + tests** — update this README, `docs/architecture.md`,
+   `docs/runtime-flows.md`, and delete/retarget `tests/test_legacy_shims.py`
+   (its marker-detection asserts "no root legacy shims detected" once they
+   are gone — that failure is the signal to retire the file, not to restore
+   the shims).

@@ -42,7 +42,6 @@ from tools.model_telemetry import (
 from tools.providers.ollama_provider import (
     DEFAULT_MODEL_REGISTRY,
     OLLAMA_CLOUD_HOST,
-    apply_context_window,
     load_client_cls,
 )
 from tools.providers.types import ModelClient
@@ -322,23 +321,11 @@ def _context_window_for(alias: str, model_name: str) -> int | None:
 
 
 def _normalize_chat_args(args: tuple[Any, ...], kwargs: dict[str, Any], model_name: str) -> dict[str, Any]:
-    raw_kwargs = dict(kwargs)
-    positional = list(args)
+    # Single source lives in tools.providers.base.normalize_chat_args; this
+    # wrapper preserves the historical import path for callers/tests.
+    from tools.providers.base import normalize_chat_args
 
-    # Existing call sites use both client.chat(model, messages=...) and
-    # client.chat(messages=...). The wrapped Ollama client always receives the
-    # concrete configured model id.
-    if positional and isinstance(positional[0], str):
-        positional.pop(0)
-    if positional and "messages" not in raw_kwargs:
-        raw_kwargs["messages"] = positional.pop(0)
-    if "model" in raw_kwargs:
-        raw_kwargs.pop("model", None)
-    raw_kwargs.setdefault("messages", [])
-    if not raw_kwargs.get("tools"):
-        raw_kwargs.pop("tools", None)
-    raw_kwargs["model"] = model_name
-    return raw_kwargs
+    return normalize_chat_args(args, kwargs, model_name)
 
 
 def _stream_with_telemetry(
@@ -437,18 +424,26 @@ def _build_model_client(
     telemetry_alias = alias or model_name
     context_window_tokens = _context_window_for(telemetry_alias, model_name)
 
+    # Single telemetry/streaming closure lives in BaseProvider consolidation
+    # (tools.providers.base.wrap_raw_client_with_telemetry); this factory only
+    # owns Ollama raw-client construction + context-window lookup, then
+    # delegates so every provider shares one chat path.
+    if provider == "ollama":
+        from tools.providers.base import wrap_raw_client_with_telemetry
+
+        return wrap_raw_client_with_telemetry(
+            model_name=model_name,
+            raw_client=raw_client,
+            alias=telemetry_alias,
+            provider=provider,
+            context_window_tokens=context_window_tokens,
+        )
+
     def chat(*args: Any, **kwargs: Any) -> Any:
         source = str(kwargs.pop("telemetry_source", "") or "") or infer_source()
-        raw_kwargs = _normalize_chat_args(args, kwargs, model_name)
-        # Canonical context-window kwarg: pop it before dispatch. Only the
-        # Ollama adapter has a translation (options.num_ctx); other providers
-        # simply don't receive Ollama-only kwargs.
-        canonical_ctx = raw_kwargs.pop("context_window_tokens", None)
-        if provider != "ollama":
-            for ollama_only in ("options", "keep_alive", "format", "suffix", "think", "raw", "num_ctx"):
-                raw_kwargs.pop(ollama_only, None)
-        elif canonical_ctx is not None:
-            raw_kwargs = apply_context_window(raw_kwargs, canonical_ctx)
+        from tools.providers.base import prepare_chat_kwargs
+
+        raw_kwargs = prepare_chat_kwargs(_normalize_chat_args(args, kwargs, model_name), provider)
         messages = raw_kwargs.get("messages", [])
         stream = bool(raw_kwargs.get("stream", False))
         started_at = now_iso()

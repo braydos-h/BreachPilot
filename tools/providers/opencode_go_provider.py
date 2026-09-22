@@ -26,7 +26,12 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Any, Iterator, Mapping
 
+<<<<<<< Updated upstream
 from .base import DATA_RESIDENCY_CLOUD, BaseProvider, make_model_client
+=======
+from .base import BaseProvider, make_model_client
+from .base import DATA_RESIDENCY_CLOUD
+>>>>>>> Stashed changes
 from .types import ModelInfo, ProviderCapabilities, ProviderDiscoveryError, ProviderHealth
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -76,16 +81,9 @@ def _opencode_go_defaults() -> dict[str, Any]:
 
 
 def _coalesce(cfg: Mapping[str, Any] | None) -> dict[str, Any]:
-    merged = _opencode_go_defaults()
-    if cfg:
-        for k, v in cfg.items():
-            if v is not None:
-                merged[k] = v
-    # Ensure nested defaults cleanly
-    for key, default in _opencode_go_defaults().items():
-        if key not in merged:
-            merged[key] = default
-    return merged
+    from .base import coalesce_config
+
+    return coalesce_config(_opencode_go_defaults(), cfg)
 
 
 def _get_api_key(cfg: Mapping[str, Any] | None = None, direct_key: str | None = None) -> str:
@@ -364,28 +362,13 @@ def _convert_messages_to_input(messages: Any) -> list[dict[str, Any]]:
 
 
 def _normalize_usage(raw: Any) -> dict[str, Any]:
+    """Single usage normalizer — delegates to the shared base helper."""
+    from .base import normalize_provider_usage
+
     if not isinstance(raw, dict):
         return {}
-    # Already desired shape
-    out: dict[str, Any] = {}
-    # Map alternative keys
-    if "input_tokens" in raw:
-        out["input_tokens"] = raw["input_tokens"]
-    elif "prompt_tokens" in raw:
-        out["input_tokens"] = raw["prompt_tokens"]
-    if "output_tokens" in raw:
-        out["output_tokens"] = raw["output_tokens"]
-    elif "completion_tokens" in raw:
-        out["output_tokens"] = raw["completion_tokens"]
-    if "total_tokens" in raw:
-        out["total_tokens"] = raw["total_tokens"]
-    else:
-        # Derive if missing
-        inp = out.get("input_tokens")
-        oup = out.get("output_tokens")
-        if isinstance(inp, int) and isinstance(oup, int):
-            out["total_tokens"] = inp + oup
-    # Preserve any other numeric usages
+    out = normalize_provider_usage(raw)
+    # Preserve legacy alias keys when the gateway sends them (additive).
     for k in ("prompt_tokens", "completion_tokens"):
         if k in raw and k not in out:
             out[k] = raw[k]
@@ -1192,12 +1175,9 @@ def build_opencode_go_router(
     api_key = (os.environ.get(env_name, "") or "").strip()
     # Do NOT raise here — defer to chat-time so run previews still succeed.
     base_url = str(cfg.get("base_url") or _DEFAULT_BASE_URL).rstrip("/")
-    timeout = request_timeout_seconds
-    if timeout is None and cfg.get("request_timeout_seconds") is not None:
-        try:
-            timeout = float(cfg["request_timeout_seconds"])
-        except (TypeError, ValueError):
-            timeout = None
+    from .base import resolve_request_timeout
+
+    timeout = resolve_request_timeout(request_timeout_seconds, cfg.get("request_timeout_seconds"))
     if timeout is None:
         timeout = 300.0
 
@@ -1311,12 +1291,9 @@ class OpenCodeGoProvider(BaseProvider):
 
         env_name = str(cfg.get("api_key_env") or "OPENCODE_GO_API_KEY").strip() or "OPENCODE_GO_API_KEY"
         api_key = (os.environ.get(env_name, "") or "").strip()
-        timeout = request_timeout_seconds
-        if timeout is None and cfg.get("request_timeout_seconds") is not None:
-            try:
-                timeout = float(cfg["request_timeout_seconds"])
-            except (TypeError, ValueError):
-                timeout = None
+        from .base import resolve_request_timeout
+
+        timeout = resolve_request_timeout(request_timeout_seconds, cfg.get("request_timeout_seconds"))
         base_url = str(cfg.get("base_url") or _DEFAULT_BASE_URL).rstrip("/")
         shared = OpenCodeGoResponsesClient(
             base_url=base_url,
@@ -1346,20 +1323,11 @@ class OpenCodeGoProvider(BaseProvider):
         cfg = self.provider_config(config)
         configured = [str(m).strip() for m in (cfg.get("models") or []) if str(m).strip()]
         default_model = str(cfg.get("default_model") or _DEFAULT_MODEL)
-        context_window = cfg.get("context_window")
-        ctx = int(context_window) if isinstance(context_window, (int, float)) else None
+
+        from .base import provider_model_infos
 
         def _infos(ids: list[str]) -> list[ModelInfo]:
-            infos: list[ModelInfo] = []
-            seen: set[str] = set()
-            for model_id in ids:
-                if model_id in seen:
-                    continue
-                seen.add(model_id)
-                infos.append(
-                    ModelInfo(id=model_id, label=model_id, context_window=ctx, default=(model_id == default_model))
-                )
-            return infos
+            return provider_model_infos(ids, default_model, cfg.get("context_window"))
 
         if configured:
             return _infos(configured)

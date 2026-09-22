@@ -42,8 +42,13 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator, Mapping
 
+<<<<<<< Updated upstream
 from .base import DATA_RESIDENCY_CLOUD, BaseProvider, make_model_client
-from .types import ModelInfo, ProviderCapabilities, ProviderDiscoveryError, ProviderHealth, usage_report
+=======
+from .base import BaseProvider, make_model_client
+from .base import DATA_RESIDENCY_CLOUD
+>>>>>>> Stashed changes
+from .types import ModelInfo, ProviderCapabilities, ProviderDiscoveryError, ProviderHealth
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from tools.model_router import ModelRouter
@@ -91,23 +96,16 @@ def _chatgpt_defaults() -> dict[str, Any]:
 
 
 def _coalesce(cfg: Mapping[str, Any] | None) -> dict[str, Any]:
-    merged = _chatgpt_defaults()
-    if cfg:
-        for key, value in cfg.items():
-            if value is not None:
-                merged[key] = value
-    return merged
+    from .base import coalesce_config
+
+    return coalesce_config(_chatgpt_defaults(), cfg)
 
 
 def _normalize_usage(raw: Any) -> dict[str, Any]:
-    """Normalize an OpenAI usage payload via ``usage_report``."""
-    if not isinstance(raw, dict) or not raw:
-        return {}
-    return usage_report(
-        raw.get("prompt_tokens", raw.get("input_tokens")),
-        raw.get("completion_tokens", raw.get("output_tokens")),
-        raw.get("total_tokens"),
-    )
+    """Normalize an OpenAI usage payload via the shared base helper."""
+    from .base import normalize_provider_usage
+
+    return normalize_provider_usage(raw)
 
 
 def _root_url(cfg: Mapping[str, Any]) -> str:
@@ -721,15 +719,9 @@ def build_chatgpt_router(
 
 def resolve_chatgpt_timeout(cfg: Mapping[str, Any], request_timeout_seconds: float | None = None) -> float | None:
     """Explicit timeout kwarg wins; else ``request_timeout_seconds`` from config."""
-    if request_timeout_seconds is not None:
-        return request_timeout_seconds
-    raw = cfg.get("request_timeout_seconds")
-    if raw is None:
-        return None
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return None
+    from .base import resolve_request_timeout
+
+    return resolve_request_timeout(request_timeout_seconds, cfg.get("request_timeout_seconds"))
 
 
 class ChatGptProvider(BaseProvider):
@@ -807,14 +799,11 @@ class ChatGptProvider(BaseProvider):
         cfg = self.provider_config(config)
         configured = [str(m) for m in (cfg.get("models") or []) if str(m).strip()]
         default_model = str(cfg.get("default_model") or "gpt-5.2")
-        context_window = cfg.get("context_window")
-        ctx = int(context_window) if isinstance(context_window, (int, float)) else None
+
+        from .base import provider_model_infos
 
         def _infos(ids: list[str]) -> list[ModelInfo]:
-            return [
-                ModelInfo(id=m, label=m, context_window=ctx, default=(m == default_model))
-                for m in (ids or [default_model])
-            ]
+            return provider_model_infos(ids, default_model, cfg.get("context_window"))
 
         if configured:
             return _infos(configured)

@@ -13,7 +13,15 @@ from tools.config.loader import (
     load_validated_config,
     validate_config_file,
 )
-from tools.config.schema import CONFIG_SCHEMA, DEFAULT_CONFIG, KNOWN_TOP_KEYS
+from tools.config.profiles import (
+    PROFILE_DESCRIPTIONS,
+    PROFILES,
+    apply_profile,
+    describe_profiles,
+    get_profile,
+    list_profiles,
+)
+from tools.config.schema import CONFIG_SCHEMA, DEFAULT_CONFIG, DEPRECATED_TOP_KEYS, KNOWN_TOP_KEYS
 from tools.config.validator import ConfigValidationResult, ConfigValidator
 
 
@@ -40,16 +48,23 @@ def resolve_known_provider_ids() -> list[str]:
 __all__ = [
     "CONFIG_SCHEMA",
     "DEFAULT_CONFIG",
+    "DEPRECATED_TOP_KEYS",
     "KNOWN_TOP_KEYS",
+    "PROFILE_DESCRIPTIONS",
+    "PROFILES",
     "ConfigValidationResult",
     "ConfigValidator",
+    "apply_profile",
+    "describe_profiles",
     "get_ai_provider",
     "get_chatgpt_config",
     "get_embeddings_config",
     "get_model_host",
     "get_ollama_host",
     "get_opencode_go_config",
+    "get_profile",
     "get_provider_config",
+    "list_profiles",
     "load_validated_config",
     "resolve_known_provider_ids",
     "validate_config_file",

@@ -203,6 +203,7 @@ See `docs/configuration/environment.md` for full `.env.example` mapping and `doc
 ## Related
 
 - `docs/configuration/config-reference-generated.md` — machine-readable table for every key.
+- `docs/configuration/profiles.md` — layered lab / recon / ci presets + the deprecated `stealth` block.
 - `docs/configuration/validation.md` — validator error modes.
 - `docs/configuration/environment.md` — `.env` + env var reference.
 - `docs/configuration/secrets.md` — `secr.json` / `.webui_secret_key` / ChatGPT OAuth.

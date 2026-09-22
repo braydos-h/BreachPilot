@@ -44,10 +44,16 @@ def _ensure_webui_build(ui: Any, *, force: bool = False) -> int:
     node_cmd = shutil.which("node") or shutil.which("nodejs")
     if not npm_cmd or not node_cmd:
         ui.error("Node/npm not found on PATH. Install Node.js, or build the WebUI manually:")
-        ui.error(f"  cd {webui_dir} && npm install && npm run build")
+        ui.error(f"  cd {webui_dir} && npm ci && npm run build")
         return 1
     ui.status("Rebuilding the WebUI..." if force else "Building the WebUI (first run only)...")
-    for step in (("install", [npm_cmd, "install", "--no-audit", "--no-fund"]), ("build", [npm_cmd, "run", "build"])):
+    # Prefer `npm ci` for reproducible installs when package-lock.json exists;
+    # fall back to `npm install` for source checkouts without a lockfile.
+    lockfile = webui_dir / "package-lock.json"
+    install_argv = (
+        [npm_cmd, "ci", "--no-audit", "--no-fund"] if lockfile.is_file() else [npm_cmd, "install", "--no-audit", "--no-fund"]
+    )
+    for step in (("install", install_argv), ("build", [npm_cmd, "run", "build"])):
         label, argv = step
         ui.status(f"  npm {label}...")
         try:

@@ -271,6 +271,8 @@ CONFIG_SCHEMA: dict[str, Any] = {
         },
     },
     # ponytail: stealth is inert/UI-only legacy; canonical is opsec (tools/opsec.py). Kept for compat.
+    # Deprecated: see DEPRECATED_TOP_KEYS below and docs/configuration/profiles.md.
+    # Profiles (tools/config/profiles.py) omit this block entirely.
     "stealth": {
         "rotate_ua": False,
         "dns_over_https": False,
@@ -898,6 +900,11 @@ CONFIG_SCHEMA: dict[str, Any] = {
         },
         "network": {
             "enforce": True,
+            # Wired flag (manager._apply_policy): a netns-firewall install
+            # failure blocks execution when true (default); when false the
+            # worker degrades to Docker-bridge isolation only (NOT
+            # containment) with an explicit WARNING + audit row. Worker
+            # creation/setup failures always fail closed regardless.
             "fail_closed": True,
             # "controlled": in-container DNS only reaches host-side-validated
             # resolutions; "none": port 53 blocked entirely (no DNS bypass).
@@ -926,6 +933,17 @@ CONFIG_SCHEMA: dict[str, Any] = {
 
 # Known top-level keys
 KNOWN_TOP_KEYS = set(CONFIG_SCHEMA.keys())
+
+# Deprecated top-level blocks — kept in the schema/loader so existing files
+# keep validating, but new posture work must not target them.
+# ``stealth`` is inert/UI-only legacy (the live block is ``opsec``; see
+# CLAUDE.md "Configuration" and tools/opsec.py). The validator warns only
+# when a stealth value deviates from these defaults, so the checked-in lab
+# file (which carries the block at defaults) stays warning-free.
+# Layered presets live in tools/config/profiles.py and omit stealth entirely.
+DEPRECATED_TOP_KEYS: dict[str, str] = {
+    "stealth": "inert/UI-only legacy; configure opsec.* instead (see docs/configuration/profiles.md)",
+}
 
 # Alias for the schema-with-defaults dict, used by tests and downstream code
 # that refers to it as the default config.

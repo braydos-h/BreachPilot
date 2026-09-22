@@ -219,6 +219,27 @@ class NetworkPolicy:
     # the Docker daemon) is authorized. Default False: the gateway is DROPped.
     allow_gateway: bool = False
 
+    @property
+    def allowed_dns_names(self) -> list[str]:
+        """In-container DNS name allowlist (resolver-layer enforcement view).
+
+        Built from the authorized FQDN set (``resolved_domains`` keys, which
+        already include pinned research hosts when
+        ``allow_research_hosts`` is enabled — see ``build_network_policy``).
+        Unauthorized names resolve only to unauthorized IPs, which the
+        default-DROP ruleset denies; the ``:53`` rules additionally confine
+        DNS traffic to the embedded resolver (``127.0.0.11``) so no
+        in-worker resolver or direct external ``:53`` can serve as a bypass.
+        An empty list under ``controlled`` degrades to ``none``
+        (see ``network._effective_dns``) — fail closed, never open.
+        """
+        return sorted(self.resolved_domains)
+
+    @property
+    def dns_allowlist(self) -> list[str]:
+        """Alias for :meth:`allowed_dns_names` (config-adjacent naming)."""
+        return self.allowed_dns_names
+
     def fingerprint(self) -> str:
         """Stable fingerprint for change detection (re-apply rules only when set changes).
 
@@ -234,7 +255,7 @@ class NetworkPolicy:
                 "authorized": sorted(self.authorized_destinations),
                 "allow_dns": self.allow_dns,
                 "dns_servers": sorted(self.dns_servers),
-                "dns_names": sorted(self.resolved_domains),
+                "dns_names": self.allowed_dns_names,
                 "dns_addresses": sorted({ip for addrs in self.resolved_domain_addresses.values() for ip in addrs}),
                 "enforced": self.enforced,
             },

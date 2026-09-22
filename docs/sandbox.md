@@ -125,6 +125,13 @@ Invariant: `require_explicit_allowlist: true` + empty effective allowlist ⇒
 **DENY all target-touching execution** (enforced in `tools/kernel/allowlist.py`,
 the sandbox scope gate, and the empty netns policy simultaneously).
 
+`sandbox.network.fail_closed` (default `true`) decides what a **netns-firewall
+install failure** does: `true` blocks execution (`SANDBOX_POLICY_FAILED`, audit
+row, partial resources destroyed); `false` degrades to Docker-bridge isolation
+only — explicitly NOT containment — with a loud `WARNING` log plus a
+`degraded` audit row. Worker-creation/setup failures (no worker exists) always
+fail closed regardless of this flag: there is no worker to degrade to.
+
 The ONE sanctioned host-execution fallback is the boot-time decision in
 `tools/sandbox/manager.py::resolve_manager_with_fallback`: with
 `sandbox.fallback_native: true` (explicit opt-in, default `false`), a server whose Docker stack is
@@ -281,7 +288,8 @@ sandbox:
     tmpfs_size_mb: 256         # /tmp tmpfs size (MB, min 64)
   network:
     enforce: true              # false = no netns firewall (NOT containment)
-    fail_closed: true
+    fail_closed: true          # firewall-install failure: true blocks (SANDBOX_POLICY_FAILED);
+                               # false degrades to bridge isolation only (NOT containment) + WARNING/audit
     allow_dns: controlled      # controlled | none
     map_host_loopback: false   # dev-only host-loopback mapping
     extra_allow_cidrs: []      # operator-authorized extra CIDRs

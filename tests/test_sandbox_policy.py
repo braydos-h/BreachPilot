@@ -165,6 +165,21 @@ class TestBuildNetworkPolicy:
         pol2 = build_network_policy(_cfg(["192.0.2.5"]), resolver_fn=lambda h: ["198.51.100.9"])
         assert audit_policy_payload(pol2)["allowed_dns_names"] == []
 
+    def test_dns_name_allowlist_property_matches_audit_payload(self):
+        # The resolver-layer view (NetworkPolicy.allowed_dns_names /
+        # dns_allowlist) derives from the authorized FQDN set; the audit
+        # payload surfaces the same list, and unauthorized names authorize
+        # nothing (they resolve only to unauthorized IPs, which default-DROP
+        # denies).
+        pol = build_network_policy(_cfg(["example.com"]), resolver_fn=lambda h: ["192.0.2.77"])
+        assert pol.allowed_dns_names == ["example.com"]
+        assert pol.dns_allowlist == ["example.com"]
+        assert audit_policy_payload(pol)["allowed_dns_names"] == ["example.com"]
+        pol2 = build_network_policy(_cfg(["192.0.2.5"]), resolver_fn=lambda h: ["198.51.100.9"])
+        assert pol2.allowed_dns_names == []
+        assert pol2.dns_allowlist == []
+        assert audit_policy_payload(pol2)["allowed_dns_names"] == []
+
     def test_dns_refresh_picks_up_discovered_hosts(self, monkeypatch):
         # Discovered (subdomain-expansion) hosts join the allowlist via env and
         # appear in the name set + fingerprint on rebuild.

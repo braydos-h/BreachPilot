@@ -33,15 +33,16 @@ eval:
 	$(BIN)/python main.py --eval
 
 test:
-	$(BIN)/python -m pytest tests/ -v
+	$(BIN)/python -m pytest tests/ -q -p no:cacheprovider -n 0 -m "not integration and not live_llm"
 
 # Parallel suite (~4x faster locally; needs pip install -e ".[dev]" for pytest-xdist)
+# Capped at -n 2 per AGENTS.md TEST-RUN RULES (operator hardware constraint).
 test-fast:
-	$(BIN)/python -m pytest tests/ -q -n 2
+	$(BIN)/python -m pytest tests/ -q -p no:cacheprovider -n 2 -m "not integration and not live_llm"
 
 # Run a focused file, e.g. `make test-one F=tests/test_scope_gate.py`
 test-one:
-	$(BIN)/python -m pytest $(F) -v
+	$(BIN)/python -m pytest $(F) -q -p no:cacheprovider -n 0
 
 run:
 	$(BIN)/python main.py
