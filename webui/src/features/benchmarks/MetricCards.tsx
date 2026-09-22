@@ -1,6 +1,6 @@
 // BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 // Dashboard metric cards for a benchmark run summary.
-import { AlertTriangle, CheckCircle2, Clock3, Coins, Flame, ShieldAlert, Target } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock3, Coins, Flame, ListChecks, OctagonAlert, ShieldAlert, Target, Timer } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { formatCost, formatDuration, formatPct } from "@/features/benchmarks/format";
@@ -89,6 +89,56 @@ export function MetricCards({ summary }: MetricCardsProps) {
         sub={`${summary.infra_error_count} infra errors`}
         icon={summary.sandbox_blocked_actions > 0 ? ShieldAlert : Flame}
         tone={summary.sandbox_blocked_actions > 0 ? "danger" : infraTone}
+      />
+    </div>
+  );
+}
+
+// Reliability cards: stopping judgement, not activity — verified rates,
+// scope containment, and reproducibility from the same run summary.
+// Every value degrades to "n/a" when the summary predates the signal
+// (older persisted summaries carry no stuck/scope/repro fields), so the
+// dashboard never renders a fabricated zero as measured.
+export function ReliabilityCards({ summary }: MetricCardsProps) {
+  const scope = summary.scope_violation_count ?? null;
+  const stuckCount = summary.stuck_loop_count ?? null;
+  const stuckRate = summary.stuck_loop_rate ?? null;
+  const reproRate = summary.reproduced_twice_rate ?? null;
+  const reproCount = summary.scenarios_reproduced_twice ?? null;
+  const verifiedScenarios = (summary.scenarios ?? []).filter((s) => (s.verified ?? 0) > 0).length;
+  const medianActions = summary.median_tool_actions;
+  return (
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6" data-testid="benchmark-reliability-cards">
+      <MetricCard
+        title="Reproduced twice"
+        value={reproRate == null ? "n/a" : formatPct(reproRate)}
+        sub={
+          reproCount == null
+            ? "no repeat data in this summary"
+            : `${reproCount}/${verifiedScenarios} scenarios verified on ≥2 trials`
+        }
+        icon={ListChecks}
+        tone={reproRate == null ? "neutral" : reproRate >= 1 ? "success" : reproRate > 0 ? "warning" : "neutral"}
+      />
+      <MetricCard
+        title="Median actions"
+        value={medianActions == null ? "n/a" : String(Math.round(medianActions))}
+        sub="to verified finding"
+        icon={Timer}
+      />
+      <MetricCard
+        title="Stuck loops"
+        value={stuckCount == null ? "n/a" : String(stuckCount)}
+        sub={stuckRate == null ? "no loop signal in this summary" : `${formatPct(stuckRate)} of completed trials`}
+        icon={OctagonAlert}
+        tone={stuckCount != null && stuckCount > 0 ? "warning" : "neutral"}
+      />
+      <MetricCard
+        title="Scope violations"
+        value={scope == null ? "n/a" : String(scope)}
+        sub="reaching network layer (must be 0)"
+        icon={ShieldAlert}
+        tone={scope == null ? "neutral" : scope > 0 ? "danger" : "success"}
       />
     </div>
   );

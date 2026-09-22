@@ -66,23 +66,23 @@ dev = [
 breachpilot = "main:main"
 
 [tool.setuptools]
+# ponytail: 07-arch batch 1 (evidence/memory/observer/planner) migrated to
+# legacy.* — shims stay on disk with DeprecationWarning until 0.71 file
+# deletion, but are no longer shipped in wheels. db/scope_gate are shared
+# kernel (frozen, NOT shims) and stay.
 py-modules = [
     "agent_loop",
     "app",
     "cli",
     "db",
-    "evidence",
     "executor",
     "finding_verifier",
     "main",
     "mcp_engine_server",
     "mcp_exploit_server",
     "mcp_server",
-    "memory",
     "mission",
-    "observer",
     "outcome_judge",
-    "planner",
     "report_generator",
     "risk_controller",
     "scope_gate",

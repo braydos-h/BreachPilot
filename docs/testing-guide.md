@@ -109,6 +109,27 @@ Some runtime features require tools that may not be present on every developer m
 
 Unit tests should mock these where possible. `--doctor` and `--self-test` are the right place to validate local machine readiness.
 
+## Browser Playwright-SDK Contract
+
+Canonical rule: **missing Playwright SDK = SKIP with install hint, not FAIL**.
+
+- `bp --doctor` reports the `browser` check as `ok: true, skipped: true,
+  status: "skip"` with hint `Install the optional extra: python -m pip
+  install -e ".[browser]"` (same for a missing Chromium runtime:
+  `python -m playwright install chromium`). Stock installs stay green.
+- Live-Chromium tests (`tests/test_browser_integration.py -m integration`)
+  skip with the identical hint strings (shared constants in
+  `tools/browser/doctor_check.py`), so the doctor message and the job
+  assertion match exactly.
+- SKIP never grants execution (fail closed): without the SDK the backend
+  raises `BrowserBackendUnavailable`, capabilities report unavailable, and
+  contained runs block with `SANDBOX_*` unless the browser worker image is
+  built. Misconfiguration (`browser.enabled` with `backend: none`, unknown
+  backends) still FAILs.
+- Contract pins: `tests/test_doctor_browser.py` (SKIP + ready + contained
+  states), CI `browser` job "Doctor browser SKIP contract" step (green with
+  and without the SDK).
+
 ## Outcome-Judgment Regressions
 
 `tests/test_outcome_judge.py` is deterministic and requires no network tools or

@@ -124,6 +124,66 @@ def persist_verify(
     return finding
 
 
+def is_reproduced_twice(finding: dict[str, Any], *, min_proof_runs: int = 2) -> bool:
+    """True when a finding re-verified on an independent re-run (metric #9).
+
+    Counts VERIFIED proof runs across the finding's ``verify_history``: each
+    ``VERIFIED`` entry contributes its proof capsule's ``n`` (defaulting to 1
+    for capsule-less entries from older runs). The finding counts as
+    reproduced-twice when the total reaches ``min_proof_runs`` — one
+    ``verify_finding`` call with the default ``repeats=2`` already qualifies
+    (two independent probe executions in one verdict), as do two separate
+    single-run VERIFIED verdicts. Pure function over stored artifacts.
+    """
+    try:
+        required = max(2, int(min_proof_runs or 2))
+    except (TypeError, ValueError):
+        required = 2
+    if not isinstance(finding, dict):
+        return False
+    history = finding.get("verify_history")
+    if not isinstance(history, list):
+        return False
+    runs = 0
+    for entry in history:
+        if not isinstance(entry, dict) or str(entry.get("verdict", "") or "") != VERIFIED:
+            continue
+        capsule = entry.get("proof_capsule")
+        n = 1
+        if isinstance(capsule, dict):
+            try:
+                n = max(1, int(capsule.get("n", 1) or 1))
+            except (TypeError, ValueError):
+                n = 1
+        runs += n
+        if runs >= required:
+            return True
+    return False
+
+
+def count_reproduced_twice(findings: list[dict[str, Any]], *, min_proof_runs: int = 2) -> "tuple[int, int]":
+    """Return ``(reproduced, denominator)`` over stored finding dicts.
+
+    The denominator is findings with at least one ``VERIFIED`` history entry
+    (only verified findings can reproduce); the numerator is the subset where
+    :func:`is_reproduced_twice` holds. Non-dict entries are ignored; an empty
+    input yields ``(0, 0)`` (rate undefined, never 0%-as-signal).
+    """
+    reproduced = 0
+    denominator = 0
+    for finding in findings or []:
+        if not isinstance(finding, dict):
+            continue
+        history = finding.get("verify_history")
+        entries = [e for e in history if isinstance(e, dict)] if isinstance(history, list) else []
+        if not any(str(e.get("verdict", "") or "") == VERIFIED for e in entries):
+            continue
+        denominator += 1
+        if is_reproduced_twice(finding, min_proof_runs=min_proof_runs):
+            reproduced += 1
+    return reproduced, denominator
+
+
 def format_verify_block(
     *,
     finding_id: str,
@@ -240,7 +300,9 @@ __all__ = [
     "HOLDING",
     "INCONCLUSIVE",
     "VERIFIED",
+    "count_reproduced_twice",
     "format_verify_block",
+    "is_reproduced_twice",
     "persist_verify",
     "record_verify",
     "register_verify_tools",

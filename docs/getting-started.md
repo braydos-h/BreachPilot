@@ -59,7 +59,12 @@ For editable package metadata and dev extras (either shell):
 python -m pip install -e ".[dev]"
 ```
 
-`requirements.txt` includes runtime dependencies plus Pytest for local development. `pyproject.toml` separates runtime and development dependencies for packaging. Prefer `requirements.txt` for a local checkout unless packaging is the specific task.
+`requirements.txt` includes runtime dependencies plus the optional `ollama`
+extra and the full dev extra (pytest, ruff, mypy, … — header: "Synced from
+pyproject.toml", `pip install -r requirements.txt` == `pip install -e
+".[ollama,dev]"`). `pyproject.toml` separates runtime (`dependencies`) from
+the `ollama` / `browser` / `dev` extras for packaging. Prefer
+`requirements.txt` for a local checkout unless packaging is the specific task.
 
 ## First Commands
 
@@ -171,6 +176,7 @@ For plugin authoring see `docs/plugin-development.md`; for the runtime skills sy
 
 1. Read the relevant module guide entry before editing.
 2. Add or update focused tests in `tests/`.
-3. Run the smallest matching test file.
-4. Run `python -m pytest` before handing off larger changes.
-5. For safety-sensitive changes, also run `python main.py --doctor` and `python main.py --self-test`.
+3. Run the smallest matching test file (one file at a time, `-n 0`; never
+   `pytest tests/` bare and never `-n auto` — see AGENTS.md TEST-RUN RULES;
+   full-suite verification is CI's job).
+4. For safety-sensitive changes, also run `python main.py --doctor` and `python main.py --self-test`.

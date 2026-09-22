@@ -9,7 +9,7 @@ guidance, and a production hardening checklist.
 > Attack mode ships as `full_access` (auto-approve, no content/scope
 > inspection) with an unrestricted operator-box filesystem. Deploy only on a
 > **throwaway lab VM** against targets you own or are explicitly authorized to
-> test. See [`README.md`](../README.md#safety-model) and
+> test. See [`README.md`](../README.md#safety-and-containment) and
 > [`docs/safety-model.md`](safety-model.md).
 
 ## Supported platforms
@@ -37,22 +37,34 @@ Python-only exploits, Linux attackers get the full Kali toolkit
 
 ## Install (step by step)
 
-Release bootstrap (recommended): pinned installer asset + checksum +
-attestation from the GitHub release page (`install-<version>.sh` +
-`.sha256` + Sigstore attestation). Verify before executing:
-
-<!-- INSTALLER-VERSION: managed by scripts/bump-version.py (do not hand-edit the version below) -->
+Checkout or pinned-tag install (what works today):
 
 ```bash
-curl -fsSLO https://github.com/braydos-h/BreachPilot/releases/download/v0.68.4/install-v0.68.4.sh
-curl -fsSLO https://github.com/braydos-h/BreachPilot/releases/download/v0.68.4/install-v0.68.4.sh.sha256
-bash scripts/verify-installer.sh install-v0.68.4.sh install-v0.68.4.sh.sha256
-less install-v0.68.4.sh && bash install-v0.68.4.sh
+git clone https://github.com/braydos-h/BreachPilot.git
+cd BreachPilot
+./install.sh
 ```
 
-Dev path (`main|bash`) is dev-only with a warning — the easy path must be the
-pinned release, not mutable `main`. Windows `install.ps1`/`install.bat` get
-the same checksum treatment per release.
+or pinned to the published tag (reproducible, no history needed):
+
+```bash
+curl -fsSL https://github.com/braydos-h/BreachPilot/archive/refs/tags/v0.49.2.tar.gz -o breachpilot-v0.49.2.tar.gz
+tar -xzf breachpilot-v0.49.2.tar.gz && cd BreachPilot-0.49.2 && ./install.sh
+```
+
+Versioned release assets (`install-<version>.sh` + `.sha256` + Sigstore
+attestation, verified with `scripts/verify-installer.sh` before executing)
+do not exist yet — the only GitHub release is the asset-less `beta` /
+`v0.49.2` prerelease, so `releases/download/…` URLs 404 today. The release
+workflow freezes those assets per tag on publish; from the first
+asset-bearing release on, the bootstrap above becomes the pinned release
+asset + checksum + attestation flow. The release-truth CI job curls every
+URL in this section so a 404 can never ship again.
+
+Dev path (`main|bash`) is dev-only with a warning — the easy path must be a
+pinned artifact (today: the `v0.49.2` tag tarball; once published: the
+versioned release asset), not mutable `main`. Windows `install.ps1` gets the
+same checksum treatment per release once assets are published.
 
 ### Windows (one-click)
 
@@ -101,10 +113,10 @@ bp                        # launch from any directory; opens http://127.0.0.1:87
 make install         # venv + pip install -r requirements.txt (Makefile:14-16)
 make install-dev     # venv + pip install -e ".[dev]" (Makefile:18-20)
 make doctor          # python main.py --doctor (Makefile:22-23)
-make self-test       # python main.py --self-test (Makefile:25-26)
-make run             # python main.py (Makefile:38-39)
-make test-one F=tests/test_scope_gate.py   # focused test (Makefile:35-36)
-make clean           # rm -rf .venv + caches (Makefile:50-53)
+make self-test       # python main.py --self-test (Makefile:29-30)
+make run             # python main.py (Makefile:47-48)
+make test-one F=tests/test_scope_gate.py   # focused test (Makefile:44-45)
+make clean           # rm -rf .venv + caches (Makefile:59-62)
 
 # Option B: lightweight alternative (venv + deps + external-tool checks +
 #           best-effort `ollama pull` + --doctor)
@@ -212,16 +224,19 @@ Validate with `bp --doctor`. Installer tests: `pytest tests/test_install_sh.py`
 
 ## Dependency installation: requirements.txt vs pyproject extras
 
-- **`requirements.txt`** — runtime deps **plus** pytest and pytest-asyncio for
-  local development (requirements.txt:9-10). Use this for a local checkout.
-- **`pyproject.toml`** — separates runtime (`dependencies`, pyproject.toml:27-38)
-  from dev extras (`[project.optional-dependencies].dev`: pytest,
-  pytest-asyncio, coverage, ruff — pyproject.toml:40-46). Use `.[dev]` when
-  packaging or when you want the lint tooling.
+- **`requirements.txt`** — header says "Synced from pyproject.toml": runtime
+  deps **plus** the optional `ollama` extra **plus** the full `dev` extra
+  (pytest, pytest-asyncio, pytest-xdist, pytest-timeout, coverage, ruff, mypy,
+  build, twine), so `pip install -r requirements.txt` equals
+  `pip install -e ".[ollama,dev]"`. Use this for a local checkout.
+- **`pyproject.toml`** — separates runtime (`dependencies`, pyproject.toml:27-41)
+  from optional extras (`[project.optional-dependencies]`: `ollama`,
+  `browser`, `dev` — pyproject.toml:43-63). Use `.[dev]` or `.[ollama]` when
+  packaging or when you want only a slice of the tooling.
 
-**Keep the two in sync.** Runtime deps appear in both files today — if you add
-a runtime dependency, add it to `requirements.txt` **and**
-`pyproject.toml:dependencies` (AGENTS.md "Toolchain notes"; getting-started.md:36).
+**Keep the two in sync.** If you add a runtime dependency, add it to
+`requirements.txt` **and** `pyproject.toml:dependencies`; extras go in both
+files' extra stanzas (AGENTS.md "Toolchain notes"; getting-started.md:62).
 
 ```bash
 python -m pip install -r requirements.txt    # local checkout (recommended)
@@ -235,30 +250,32 @@ daemon after a one-line config swap.
 
 | Setting | Default | Purpose |
 |---|---|---|
-| `ollama.host` (config.yaml:7) | `https://api.ollama.com` | Chat/generate endpoint |
-| `ollama.model` (config.yaml:8) | `glm-5.2:cloud` | Default model spec |
-| `ollama.api_key_env` (config.yaml:9) | `OLLAMA_API_KEY` | Env var for the cloud bearer token |
-| `ollama.embed_host` (config.yaml:14) | `http://localhost:11434` | Local embeddings endpoint; falls back to `host` when absent |
+| `ollama.host` (config.yaml:2) | `https://api.ollama.com` | Chat/generate endpoint |
+| `ollama.model` (config.yaml:3) | `glm-5.2:cloud` | Default model spec |
+| `ollama.api_key_env` (config.yaml:4) | `OLLAMA_API_KEY` | Env var for the cloud bearer token |
+| `ollama.embed_host` (config.yaml:5) | `http://localhost:11434` | Local embeddings endpoint; falls back to `host` when absent |
 
 - **Cloud (default):** export `OLLAMA_API_KEY` (or store via
   `python main.py --setup-api-keys` → `secr.json`, gitignored). Missing key
   surfaces as a 401 on the first chat. The ollama Python client auto-attaches
   `Authorization: Bearer $OLLAMA_API_KEY` to every request, so the host swap
-  is the entire wiring — no probe, no local→cloud fallback (config.yaml:2-6).
-- **Local daemon:** set `ollama.host: http://localhost:11434` (and `ollama pull
-  glm-5.2:cloud`). The `--doctor` model check runs a 1-token generation to
-  verify; local models report an `ollama pull <spec>` hint if missing
-  (README.md:170-172).
+  is the entire wiring — no probe, no local→cloud fallback (config.yaml:1-5).
+- **Local daemon:** set `ollama.host: http://localhost:11434` and pull a
+  local-weight model (e.g. `ollama pull gemma3:27b` — never a `:cloud` spec:
+  cloud pulls only register a pointer). The `--doctor` model check runs a
+  1-token generation to verify; local models report an `ollama pull <spec>`
+  hint if missing (README.md:170-172). Cloud specs are verified with
+  `ollama run <spec>` instead.
 - **Embeddings stay local by default:** `nomic-embed-text` via `embed_host`
-  (config.yaml:10-14, config.yaml:348). Required for semantic memory/skills;
-  `install.bat` pulls it when Ollama is available.
+  (config.yaml:5, config.yaml:504-505). Required for semantic memory/skills;
+  `install.bat`/`install.ps1` pulls it when Ollama is available.
 
 There is no `.env` auto-load — keys come from process environment variables or
 `secr.json` (README.md:143-160).
 
 ## nmap requirements
 
-`nmap` must be installed and on `PATH` (or set `nmap.path`, config.yaml:63).
+`nmap` must be installed and on `PATH` (or set `nmap.path`, config.yaml:58).
 
 - **Windows:** plain nmap works; `nmap.sudo`/`priv_fallback` are no-ops.
   Install from https://nmap.org/download.html or `winget install Insecure.Nmap`
@@ -266,7 +283,7 @@ There is no `.env` auto-load — keys come from process environment variables or
 - **Linux:** `-O`/`-sS` scans need root. Either set `nmap.sudo: true` (runs
   `sudo -n`), run as root, or leave `nmap.priv_fallback: true` (default) to
   auto-downgrade those flags instead of failing when unprivileged
-  (config.yaml:58-65, README.md:138-139).
+  (config.yaml:57-60, README.md:138-139).
   `nmap.sudo` uses `sudo -n` (non-interactive), so it needs a NOPASSWD rule
   for nmap — enabling `nmap.sudo: true` without one fails every `-O`/`-sS`
   scan. Add a sudoers.d exception, e.g.:
@@ -277,7 +294,6 @@ There is no `.env` auto-load — keys come from process environment variables or
 
   Verify the path first with `command -v nmap` and keep `nmap.priv_fallback:
   true` unless privileged scans must hard-fail instead of downgrading.
-
 ## WebUI build
 
 The SPA is a Vite + React + TypeScript app under `webui/`. It is **not**
@@ -309,7 +325,7 @@ python main.py --web                # build + serve SPA + open browser
   (main.py:427-428).
 - Config: `api.host` (default `127.0.0.1`), `api.port` (8765),
   `api.token_file` (`.webui_secret_key`), `api.allowed_origins`
-  (config.yaml:430-438).
+  (config.yaml:444-449).
 - Docs at `http://127.0.0.1:8765/docs`; OpenAPI at `/openapi.json`
   (main.py:546-547).
 - Re-entrancy: a second daemon start detects the running instance and exits 0
@@ -340,7 +356,7 @@ WantedBy=multi-user.target
 ### Loopback-only binding security note
 
 The API daemon is **loopback-only by design in v1 — there is no public-bind
-override** (config.yaml:424-429). `--api-host` accepts only
+override** (config.yaml:444-449). `--api-host` accepts only
 `127.0.0.1`/`localhost`/`::1` and exits with code 2 otherwise (main.py:515-518),
 and `create_app` re-validates via `assert_api_loopback` (tools/api/auth.py:30-36,
 docs/api.md:73). Never tunnel it to a public interface; use a VPN if remote
@@ -402,9 +418,9 @@ Deployment-time verification for a box you intend to run for a while:
 
 **Target allowlist (the one attack-mode lock)**
 
-- [ ] `exploit.require_explicit_allowlist: true` (config.yaml:100)
+- [ ] `exploit.require_explicit_allowlist: true` (config.yaml:86)
 - [ ] `exploit.allowed_targets` contains only authorized hosts/domains/CIDRs
-      (config.yaml:110-111); runtime `--target` is unioned via
+      (config.yaml:87-88); runtime `--target` is unioned via
       `EXPLOIT_TARGET`, so confirm each run's target, don't rely on it
 - [ ] Callback/C2 listener hosts added explicitly to `allowed_targets`
       (README.md:252)
@@ -412,9 +428,9 @@ Deployment-time verification for a box you intend to run for a while:
       (README.md:254-258); run on a throwaway VM
 - [ ] `exploit.permission` set deliberately — `full_access` is the shipped
       default; `read_only` for propose-only recon, `approve_only` for a
-      per-action banner (README.md:235-240, config.yaml:76)
+      per-action banner (README.md:235-240, config.yaml:64)
 - [ ] `exploit.forbidden_actions` / `disallowed_assets` reviewed (opt-out
-      categories, config.yaml:124-125)
+      categories, config.yaml:89-90)
 
 **Token auth (WebUI daemon)**
 
@@ -422,13 +438,13 @@ Deployment-time verification for a box you intend to run for a while:
       auto-generated `.webui_secret_key`; docs/api.md:75, docs/api.md:935)
 - [ ] `.webui_secret_key` perms `0o600` where supported
 - [ ] `api.allowed_origins` left `[]` or loopback-only entries
-      (config.yaml:435; non-loopback entries rejected by the config validator,
+      (config.yaml:449; non-loopback entries rejected by the config validator,
       docs/config-reference.md:24)
 - [ ] `GET /health` is the only unauthenticated route (docs/api.md:12)
 
 **Loopback bind**
 
-- [ ] `api.host: 127.0.0.1` (config.yaml:432) — v1 refuses public binds
+- [ ] `api.host: 127.0.0.1` (config.yaml:446) — v1 refuses public binds
       (main.py:515-518, tools/api/auth.py:30-36); never port-forward it
 - [ ] MCP HTTP servers run loopback-only unless the two-person rule
       (`MCP_ALLOW_PUBLIC_BIND`) is consciously invoked (docs/mcp-tools.md:19)
@@ -451,7 +467,7 @@ Deployment-time verification for a box you intend to run for a while:
 - [ ] `reports/` + `exploit_workspace/` backed up off-box (audit chain is the
       evidence record)
 - [ ] Linux: `nmap.sudo`/`priv_fallback` decided for the deploy account
-      (config.yaml:62-65)
+      (config.yaml:57-60)
 
 ## Deployment decision table
 
@@ -460,7 +476,7 @@ Deployment-time verification for a box you intend to run for a while:
 | Windows operator, no Kali tools | `install.bat` (or venv + `requirements.txt`); Python-only exploits; embed host `http://localhost:11434` |
 | Linux operator, full Kali arsenal | `./install.sh` (primary; `INSTALL_KALI_TOOLS=1 ./install.sh` for searchsploit/Metasploit/hydra/impacket; `scripts/setup-linux.sh` is the lightweight alternative); decide `nmap.sudo` |
 | Cloud-first LLM (default) | `ollama.host: https://api.ollama.com` + `OLLAMA_API_KEY`; embeddings stay local via `embed_host` |
-| Air-gapped / local LLM | `ollama.host: http://localhost:11434`, `ollama pull glm-5.2:cloud` + `nomic-embed-text`; no API key needed |
+| Air-gapped / local LLM | `ollama.host: http://localhost:11434`, pull local-weight models (e.g. `ollama pull gemma3:27b`) + `nomic-embed-text`; never a `:cloud` spec (cloud pulls only register a pointer); no API key needed |
 | Headless service (API only) | `--daemon` (optionally `--api-port`), daemonized via systemd/NSSM; skip the SPA |
 | SPA served locally | `--web` (builds `webui/dist/` once; requires Node/npm at build time only) |
 | Long multi-hour campaigns | `--long-session` (config.yaml:319-326: real context window, 600s LLM timeout, checkpoints) |
@@ -477,8 +493,10 @@ python scripts/bump-version.py 0.69.0
 
 It updates `pyproject.toml` (`[project] version`), `tools/cli_args.py`
 (`__version__`, re-exported by `main.py`), `webui/package.json` (`version`), and every installer pin
-(`releases/download/vX.Y.Z` / `install-vX.Y.Z`) in `README.md`,
-`docs/deployment.md`, `install.sh`, and `scripts/verify-installer.sh`,
+(`releases/download/vX.Y.Z` / `install-vX.Y.Z`) in `install.sh` and
+`scripts/verify-installer.sh` (`README.md` / `docs/deployment.md` re-adopt
+exact pins once release assets publish — today they install from the
+published tag tarball because no release assets exist yet),
 then verifies with the docs-truth `versions` check. Verify-only mode
 (`python scripts/bump-version.py --check`) is the CI gate: the `lint` job
 runs it plus `python scripts/docs_truth_audit.py --check versions`, and the
@@ -488,9 +506,11 @@ the tree version — so bump (and commit) before tagging.
 Why pinned versions instead of a `latest` redirect: the release workflow
 freezes a versioned asset per tag (`install-<tag>.sh`), and a
 `releases/latest/download/...` URL cannot address a versioned asset name.
-The quick-start therefore pins the exact version (marked
-`INSTALLER-VERSION`, managed by the bump script) and the checksum step
-verifies that exact asset.
+From the first asset-bearing release on, the quick-start therefore pins the
+exact version (managed by the bump script) and the checksum step verifies
+that exact asset. Until then the quick-start pins the published tag tarball
+instead, and the release-truth CI job (`scripts/check_release_urls.py`)
+curls every install-section URL so a 404 can never ship again.
 
 ## Further reading
 

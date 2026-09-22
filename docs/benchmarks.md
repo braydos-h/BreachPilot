@@ -139,8 +139,14 @@ median/mean solve time and tool actions, token totals, estimated cost,
 time-to-first-verified-success, sandbox-blocked action counts, and failure
 categories. With repeated trials (`--trials N`) each scenario gets a success
 probability, variance/standard deviation, and a Wilson 95% confidence
-interval. A single lucky trial never reads as reliable — with one trial the
-CI spans most of the range.
+interval, plus a `reproduced_twice` flag (verified on ≥2 independent trials
+— the repeated-trials gate; rolled up to `reproduced_twice_rate` over
+verified scenarios). Runs also aggregate `stuck_loop_rate` (mission-reported
+stuck-loop signals over completed trials) and `scope_violation_count`
+(violations observed reaching the network layer — must be 0; sandbox blocks
+are counted separately as containment working, not violations). A single
+lucky trial never reads as reliable — with one trial the CI spans most of
+the range and `reproduced_twice` stays false.
 
 ## Failure classification
 
@@ -200,7 +206,10 @@ links. Historical runs survive restarts (everything is on disk).
   secrets and the lab target suite up — no schedule trigger is configured
   (`.github/workflows/benchmark.yml` has none; adding one is benchmark-gating
   work). `--check-regression` exits non-zero on
-  hard regressions so it can gate CI.
+  hard regressions so it can gate CI: verified-success drop, false-positive
+  rise, any scope violation reaching the network layer, stuck-loop rise
+  beyond `benchmark.regression.stuck_loop_tolerance`, and any scenario solved
+  in the baseline but unsolved now.
 
 ## Repeated baseline (TODO 001) + XBEN (TODO 017)
 

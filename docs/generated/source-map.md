@@ -30,6 +30,7 @@ generated: 2026-09-22
 | `tools.kernel.run_manifest` | `tools/run_service/*` | Canonical run index | n/a |
 | `tools.kernel.action_result` | `tools.kernel.action_result` | Strict-tier canonical (new code here) | n/a |
 | `tools.kernel.allowlist` | `tools.kernel.allowlist` | Strict-tier canonical (new code here) | n/a |
+| `tools.kernel.append_log` | `tools.kernel.append_log` | Strict-tier canonical (new code here) | n/a |
 | `tools.kernel.audit` | `tools.kernel.audit` | Strict-tier canonical (new code here) | n/a |
 | `tools.kernel.budgets` | `tools.kernel.budgets` | Strict-tier canonical (new code here) | n/a |
 | `tools.kernel.config` | `tools.kernel.config` | Strict-tier canonical (new code here) | n/a |

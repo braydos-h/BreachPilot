@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from observer import Observation
+from legacy.observer import Observation
 from tools.intelligence.adapters.observer_adapter import ObserverAdapter
 from tools.intelligence.belief.state import EvidencePolarity
 

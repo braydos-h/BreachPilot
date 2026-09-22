@@ -3,18 +3,18 @@
 # Small drift is a CI warning; growth past tolerance fails the gate.
 # memory_service / recon/service byte counts are upper bounds (shell-free
 # session could not run --update); LOC is exact. Re-run --update to normalize.
-# eval_harness re-baselined 1597->2374 LOC after unreviewed past growth
-# (pre-existing +49%; gate now guards further growth — split tracked as
-# follow-up, do not grow it further).
+# eval_harness 2374->96, memory_service 1927->73, web_researcher 1565->83
+# after the todo-06 responsibility splits (implementations now live in
+# tools/eval/, tools/memory/, tools/research/; the old paths are shims).
 outcome_judge.py 1081 44069
 tools/api/routes/runs.py 1011 46123
-tools/memory_service.py 1927 75775
+tools/memory_service.py 73 1683
 tools/recon/service.py 1271 53247
 tools/attack_modules/modules/ics_iot.py 1517 58341
 tools/attack_ui.py 1392 64528
 tools/browser/playwright_backend.py 1443 60868
 tools/doctor.py 1032 44848
-tools/eval_harness.py 2374 91270
+tools/eval_harness.py 96 4068
 tools/exploit_agent/runner/_impl.py 2637 132994
 tools/mcp_tools/domain.py 1367 48980
 tools/mcp_tools/metasploit.py 1196 55376
@@ -24,4 +24,4 @@ tools/persistent_session_manager.py 1220 45366
 tools/providers/opencode_go_provider.py 1421 59398
 tools/recon/enumerator.py 1324 58521
 tools/sandbox/remediation.py 1072 44347
-tools/web_researcher.py 1565 57827
+tools/web_researcher.py 83 2156

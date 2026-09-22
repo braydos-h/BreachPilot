@@ -532,6 +532,7 @@ CONFIG_SCHEMA: dict[str, Any] = {
             "enabled": True,  # regression checks available (CLI exit code honors hard findings)
             "success_rate_tolerance": 0.02,  # verified-success-rate drop beyond this is a HARD regression
             "false_positive_tolerance": 0.01,  # false-positive-rate rise beyond this is a HARD regression
+            "stuck_loop_tolerance": 0.05,  # stuck-loop-rate rise beyond this is a HARD regression
             "median_time_tolerance": 0.20,  # relative median-solve-time rise beyond this is a warning
             "tool_actions_tolerance": 0.30,  # relative median-action rise beyond this is a warning
             "cost_tolerance": 0.30,  # relative estimated-cost rise beyond this is a warning

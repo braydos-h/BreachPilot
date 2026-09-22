@@ -103,6 +103,8 @@ export interface Trial {
   oracle_verified_success: boolean;
   false_positive: boolean;
   false_negative: boolean;
+  stuck_loop: boolean;
+  scope_violations: number;
   failure_category: FailureCategory;
   failure_detail: string;
   started_at: string;
@@ -164,6 +166,7 @@ export interface ScenarioSummary {
   success_stddev: number;
   ci95_low: number | null;
   ci95_high: number | null;
+  reproduced_twice: boolean;
   median_duration: number | null;
   mean_duration: number | null;
   median_actions: number | null;
@@ -195,6 +198,11 @@ export interface RunSummary {
   sandbox_blocked_actions: number;
   infra_error_count: number;
   timeout_count: number;
+  scenarios_reproduced_twice?: number;
+  reproduced_twice_rate?: number | null;
+  stuck_loop_count?: number;
+  stuck_loop_rate?: number | null;
+  scope_violation_count?: number;
   failure_categories: Record<string, number>;
   scenarios: ScenarioSummary[];
 }
@@ -322,6 +330,10 @@ export interface BaselineMeta {
   trials_total?: number;
   verified_success_rate?: number;
   false_positive_rate?: number;
+  stuck_loop_rate?: number;
+  scope_violation_count?: number;
+  reproduced_twice_rate?: number;
+  scenarios_reproduced_twice?: number;
   median_solve_time?: number | null;
   estimated_cost?: number | null;
   scenarios?: Record<string, { success_probability: number; verified: number; trials: number }>;

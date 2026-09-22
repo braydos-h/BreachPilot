@@ -306,7 +306,7 @@ class EnhancedReportGenerator:
                 lines.append(f"  - {error_type}: {count}")
 
             # Suggest mitigation
-            primary_error = max(error_types, key=error_types.get)
+            primary_error = max(error_types, key=lambda k: error_types[k])
             mitigation = self._suggest_mitigation(primary_error)
             lines.append(f"- **Suggested Mitigation**: {mitigation}")
             lines.append("")
@@ -521,7 +521,7 @@ class EnhancedReportGenerator:
             for error in errors:
                 et = self._categorize_error(error)
                 error_types[et] = error_types.get(et, 0) + 1
-            primary = max(error_types, key=error_types.get) if error_types else "Unknown"
+            primary = max(error_types, key=lambda k: error_types[k]) if error_types else "Unknown"
             failures.append(
                 FailureAnalysis(
                     operation=module,

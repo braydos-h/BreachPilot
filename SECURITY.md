@@ -43,8 +43,24 @@ relevant log lines). Reports with a reproduction get triaged first.
 - While a report is being handled, please do not disclose it publicly,
   and please do not probe other operators' systems with it.
 
-## Scope notes
+## Green-main release blocker
 
+Security fixes land on a green `main` so the advisory trail is verifiable:
+
+- `main` is protected by the `main-protection` ruleset (spec
+  `docs/governance/ruleset-main.json`, policy
+  `docs/governance/branch-protection.md`): PR-only merges, 1 approving
+  review, required `CI success` + CodeQL (`Analyze (python/javascript)`) +
+  `dependency-review` checks, no bypass actors, no force-push/deletion.
+- No tag, prerelease, or published artifact goes out while `main` is red.
+  The release commit must pass every gate in `docs/release-checklist.md`
+  plus `python scripts/release_gate.py` printing `GO`.
+- While `main` is red, feature work is frozen until green
+  (feature-freeze-until-green; red-fixing PRs jump the queue — see
+  `CONTRIBUTING.md` §11b). This keeps security backports bisectable and
+  prevents shipping an advisory against an unverified tree.
+
+## Scope notes
 - In scope: BreachPilot's own code — scope/allowlist enforcement, sandbox
   containment, audit behavior, credential handling, WebUI auth, packaging,
   and dependency supply chain.

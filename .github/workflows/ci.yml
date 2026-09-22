@@ -133,6 +133,47 @@ jobs:
             tests/test_api_capabilities_browser.py -v
       - name: Browser live-Chromium integration (loopback only)
         run: python -m pytest tests/test_browser_integration.py -v -m integration
+      - name: Doctor browser SKIP contract (with and without SDK)
+        run: |
+          python - <<'PY'
+          # With SDK + Chromium installed (this job): host-ready, green, not skipped.
+          from tools.doctor import _check_browser
+          from tools.browser.doctor_check import CHROMIUM_SKIP_HINT, SDK_SKIP_HINT
+          ready = _check_browser(
+              {"browser": {"enabled": True, "backend": "playwright"}, "sandbox": {"enabled": False}}
+          )
+          assert ready["name"] == "browser" and ready["ok"] is True, ready
+          assert not ready.get("skipped", False), ready
+          print(f"doctor with-SDK: ok={ready['ok']} value={ready.get('value')}")
+
+          # Without SDK (stock install simulation): SKIP with the install hint,
+          # not FAIL — same hint the live tests skip with.
+          import builtins, importlib.util as _ilu
+          _real_import, _real_find_spec = builtins.__import__, _ilu.find_spec
+          def _blocked(name, *a, **k):
+              if name == "playwright" or str(name).startswith("playwright."):
+                  raise ImportError("playwright blocked by browser CI contract step")
+              return _real_import(name, *a, **k)
+          def _no_pw(name, *a, **k):
+              if name == "playwright" or str(name).startswith("playwright."):
+                  return None
+              return _real_find_spec(name, *a, **k)
+          builtins.__import__, _ilu.find_spec = _blocked, _no_pw
+          try:
+              import sys
+              for mod in [m for m in sys.modules if m == "playwright" or m.startswith("playwright.")]:
+                  del sys.modules[mod]
+              skipped = _check_browser(
+                  {"browser": {"enabled": True, "backend": "playwright"}, "sandbox": {"enabled": False}}
+              )
+          finally:
+              builtins.__import__, _ilu.find_spec = _real_import, _real_find_spec
+          assert skipped["ok"] is True, skipped
+          assert skipped.get("skipped") is True and skipped.get("status") == "skip", skipped
+          assert skipped["hint"] == SDK_SKIP_HINT, skipped
+          print(f"doctor without-SDK: ok={skipped['ok']} skipped={skipped['skipped']} hint={skipped['hint']!r}")
+          print("doctor browser SKIP contract: OK (green with and without SDK)")
+          PY
 
   coverage:
     name: Coverage report
@@ -281,6 +322,8 @@ jobs:
         run: |
           python scripts/generate_config_reference.py --check
           python scripts/generate_safety_defaults.py --check
+          python scripts/generate_source_map.py --check
+          python scripts/generate_cli_reference.py --check
       - name: Action SHA-pin guard (no mutable tags)
         run: |
           # Fail if any third-party Action is pinned to a mutable tag instead of
@@ -525,12 +568,23 @@ jobs:
           print(f'constraints ok: {len(pins)} pins cover {len(reqs)} declared deps')
           "
 
+  release-truth:
+    name: Release truth (install URLs resolve)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Install-section URLs must resolve (README)
+        run: python3 scripts/check_release_urls.py
+      - name: Install-section URLs must resolve (deployment guide)
+        run: python3 scripts/check_release_urls.py --file docs/deployment.md --start "## Install (step by step)" --end "### Windows (one-click)"
+
   ci:
     name: CI success
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [tests, sandbox, browser, coverage, lint, types, package, webui, audit]
+    needs: [tests, sandbox, browser, coverage, lint, types, package, webui, audit, release-truth]
     steps:
       - name: Check all jobs passed
         run: |

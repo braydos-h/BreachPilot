@@ -304,6 +304,76 @@ def simulate_from_files(
     return simulate(plan, recon, model_client=model_client, model_alias=model_alias)
 
 
+@dataclass
+class RepeatedSimulation:
+    """Outcome of N independent critiques of one plan (repeated-trials gate).
+
+    Plan-level repeatability only: ``stable`` means the confidences agree
+    within ``tolerance`` across independent runs. It says nothing about
+    whether the plan would work — finding-level re-verification stays with
+    ``verify_finding`` (metric #9). A single run (``trials=1``) can never be
+    stable-by-evidence: ``stable`` is forced False so one lucky critique is
+    never presented as reproduced.
+    """
+
+    runs: list[SimulationResult] = field(default_factory=list)
+    trials: int = 0
+    tolerance: float = 0.15
+    stable: bool = False
+    mean_confidence: float = 0.0
+    confidence_spread: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "trials": self.trials,
+            "tolerance": self.tolerance,
+            "stable": self.stable,
+            "mean_confidence": round(self.mean_confidence, 4),
+            "confidence_spread": round(self.confidence_spread, 4),
+            "runs": [r.to_dict() for r in self.runs],
+        }
+
+
+def simulate_repeated(
+    plan: dict[str, Any],
+    recon: dict[str, Any],
+    *,
+    trials: int = 2,
+    tolerance: float = 0.15,
+    model_client: Any | None = None,
+    model_alias: str = "",
+) -> RepeatedSimulation:
+    """Critique ``plan`` N independent times and report agreement.
+
+    Each run goes through :func:`simulate` (LLM when available, else the
+    deterministic rules path). ``stable`` is True only when at least two runs
+    executed and every confidence falls within ``tolerance`` of the mean —
+    the repeated-trials gate (#02 Level C) applied to pre-commit plan review.
+    """
+    try:
+        n = max(1, int(trials or 2))
+    except (TypeError, ValueError):
+        n = 2
+    try:
+        tol = float(tolerance)
+    except (TypeError, ValueError):
+        tol = 0.15
+    tol = max(0.0, tol)
+    runs = [simulate(plan, recon, model_client=model_client, model_alias=model_alias) for _ in range(n)]
+    confidences = [r.confidence for r in runs]
+    mean_conf = sum(confidences) / len(confidences) if confidences else 0.0
+    spread = (max(confidences) - min(confidences)) if confidences else 0.0
+    stable = len(runs) >= 2 and all(abs(c - mean_conf) <= tol for c in confidences)
+    return RepeatedSimulation(
+        runs=runs,
+        trials=len(runs),
+        tolerance=tol,
+        stable=stable,
+        mean_confidence=mean_conf,
+        confidence_spread=spread,
+    )
+
+
 def render_simulation_result(result: SimulationResult) -> str:
     """Render the result as the MCP tool's text return."""
     branch_lines = (

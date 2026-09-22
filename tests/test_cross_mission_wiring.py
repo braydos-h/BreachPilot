@@ -423,7 +423,7 @@ def test_flowb_cross_mission_recall_empty_context_empty(tmp_path):
 
 def test_retrieve_relevant_embeds_context_not_bare_ip(temp_db):
     """The semantic fallback embeds the context, not the bare target IP."""
-    from memory import MemoryManager
+    from legacy.memory import MemoryManager
     from tools.semantic_memory import SemanticMemoryManager
 
     sem = SemanticMemoryManager(temp_db)
@@ -441,7 +441,7 @@ def test_retrieve_relevant_embeds_context_not_bare_ip(temp_db):
 
 def test_retrieve_relevant_context_back_compat(temp_db):
     """context defaults to "" -> pre-1.1 callers still work (embeds target)."""
-    from memory import MemoryManager
+    from legacy.memory import MemoryManager
     from tools.semantic_memory import SemanticMemoryManager
 
     sem = SemanticMemoryManager(temp_db)

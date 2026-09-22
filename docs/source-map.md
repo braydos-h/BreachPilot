@@ -23,7 +23,15 @@
 | `tools.config_manager` | `tools.config.*` | Re-export shim (canonical) | n/a |
 | `db.py`, `scope_gate.py` | shared kernel (dual-homed) | Frozen, not a shim | n/a |
 
-`pyproject.toml py-modules` still lists the root shims for one release so the
-~250-file test suite keeps importing; shrink toward `breachpilot.*` in TODO 020
-after the 0.69 freeze. Lowest-risk removal batch for 0.71: `evidence`,
-`memory`, `observer`, `planner` (pure re-exports, no logic).
+`pyproject.toml py-modules` listed the root shims for one release so the
+~250-file test suite keeps importing; it shrinks toward `breachpilot.*` in
+TODO 020 after the 0.69 freeze.
+
+Batch 1 (TODO 07 Step 1, done): `evidence`, `memory`, `observer`, `planner`
+— all internal + test imports now point at `legacy.*` (pure re-exports, no
+logic); their root shims stay on disk emitting `DeprecationWarning` until
+0.71 file deletion but are no longer listed in `py-modules` (not shipped in
+wheels). `db.py`/`scope_gate.py` are shared kernel (frozen, not shims) and
+stay. Next batches: `executor`, `finding_verifier`, `report_generator`,
+`task_queue`, then `agent_loop`, `cli`, `mission`, `tool_router`,
+`risk_controller`.

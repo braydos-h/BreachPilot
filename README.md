@@ -9,8 +9,6 @@ Open-source autonomous security-testing operator for authorized environments. Pl
 
 **[Quick start](#quick-start) · [Documentation](docs/README.md) · [Architecture](#how-it-works) · [Safety model](#safety-and-containment) · [Reliability metrics](docs/reliability-metrics.md) · [Live demo](https://breachpilot-site.vercel.app/)**
 
-![BreachPilot WebUI](docs/assets/breachpilot-webui.png)
-
 > [!WARNING]
 > **Authorized testing only.** Only test systems you own or have explicit written permission to assess. Run the operator from an isolated, throwaway machine or VM.
 
@@ -38,19 +36,35 @@ Requires Python 3.11+, Docker Engine, and nmap. `bp --doctor` verifies everythin
 
 ### Linux (primary)
 
-Release path (recommended, pinned + verified):
-
-<!-- INSTALLER-VERSION: managed by scripts/bump-version.py (do not hand-edit the version below) -->
+From a checkout (recommended — always works):
 
 ```bash
-curl -fsSLO https://github.com/braydos-h/BreachPilot/releases/download/v0.68.4/install-v0.68.4.sh
-curl -fsSLO https://github.com/braydos-h/BreachPilot/releases/download/v0.68.4/install-v0.68.4.sh.sha256
-bash scripts/verify-installer.sh install-v0.68.4.sh install-v0.68.4.sh.sha256
-less install-v0.68.4.sh
-bash install-v0.68.4.sh
+git clone https://github.com/braydos-h/BreachPilot.git
+cd BreachPilot
+./install.sh
 bp --doctor
 bp   # opens the WebUI at http://127.0.0.1:8765
 ```
+
+Pinned to the published tag (reproducible, no history needed):
+
+```bash
+curl -fsSL https://github.com/braydos-h/BreachPilot/archive/refs/tags/v0.49.2.tar.gz -o breachpilot-v0.49.2.tar.gz
+tar -xzf breachpilot-v0.49.2.tar.gz
+cd BreachPilot-0.49.2
+./install.sh
+bp --doctor
+bp   # opens the WebUI at http://127.0.0.1:8765
+```
+
+No versioned installer assets are published yet — the only GitHub release is
+the asset-less `beta` / `v0.49.2` prerelease, so there is nothing for
+`scripts/verify-installer.sh` to check today and `releases/download/…` URLs
+404. The release workflow freezes a pinned installer per tag on publish; from
+the first asset-bearing release on, the quick-start returns to
+`install-<version>.sh` + `.sha256`, verified before executing. The
+release-truth CI job curls every URL in this section so a 404 can never ship
+again.
 
 After an update (`git pull`), refresh the built interface with `bp --rebuild` (combine with `bp --web` to rebuild before serving).
 
@@ -181,7 +195,21 @@ Data residency: loopback Ollama keeps prompts on-box (`local`); Ollama Cloud, Op
 - **Tests:** mocked pytest suite (no live Nmap) covering scope gates, recon, swarm, audit chains, credentials, and Metasploit. Run one file at a time per repo policy (see `AGENTS.md`).
 - **CI:** pytest matrix (Python 3.11–3.13), coverage, CodeQL, dependency review on every push/PR.
 - **Lint/types:** `ruff check .` and `ruff format --check .` must be clean; `mypy` over `tools/`; WebUI via `tsc`, `vite build`, and `vitest`.
-- **Regression:** `bp --eval` (oracle-graded targets) and `bp --benchmark` (sandboxed suites) with `--save-baseline` / `--check-regression` gates, surfaced in the WebUI Benchmarks page and nightly workflows.
+- **Regression:** `bp --eval` (oracle-graded targets) and `bp --benchmark` (sandboxed suites) with `--save-baseline` / `--check-regression` gates, surfaced in the WebUI Benchmarks page and nightly workflows. The gates fail on score drift **and** on stopping-judgement drift: false-compromise rise, any scope violation reaching the network layer (>0), and stuck-loop rise.
+
+### Reliability over capability counts
+
+BreachPilot is graded on verified performance, not on how many tools or skills it ships. The headline numbers are the five release-grade rates in the [live reliability table](docs/reliability-metrics.md#live-results-unpopulated--awaiting-docker-lab-run) — verified compromise rate, false-compromise rate, scope violations reaching the network layer (must read 0), median actions to a verified finding, and findings reproduced twice — each with its reproduction command. No live numbers are claimed until hermetic trials produce them (minimum n=5 per target with pinned digests); until then the honest headline is the contract plus the commands, not a count.
+
+```bash
+docker compose -f eval_targets/docker-compose.yml up -d
+python main.py --benchmark xben --trials 5
+python main.py --eval --save-baseline
+python main.py --eval --check-regression
+docker compose -f eval_targets/docker-compose.yml down
+```
+
+Inventory counts never appear in headlines: tool and skill totals live only in the generated catalogs — the [MCP tool catalog](docs/mcp/tool-catalog-generated.md) and [skill catalog](docs/skills/catalog.md), with live numbers in [`docs/generated/capability-counts.json`](docs/generated/capability-counts.json) (`python scripts/generate_capability_counts.py --check` fails CI on drift).
 
 ```bash
 python3 -m pytest tests/test_scope_gate.py -v -p no:cacheprovider -n 0

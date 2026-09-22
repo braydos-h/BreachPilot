@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from db import DatabaseManager, _new_id
-from memory import MemoryManager
+from legacy.memory import MemoryManager
 from tools.intelligence.adapters.memory_adapter import MemoryAdapter
 
 

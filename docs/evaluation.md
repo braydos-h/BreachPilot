@@ -299,14 +299,20 @@ aggregate `EvalReport` folds totals across targets and writes
 - `save_baseline(report, baseline_path)` writes
   `{"run_id", "timestamp", "targets": {target_id: {score, flags_captured,
   flags_total, hosts_owned, hosts_total, findings_verified,
-  findings_claimed}}}`.
+  findings_claimed}}, "reliability": {false_compromise_rate,
+  stuck_loop_rate, scope_violation_count, verified_compromise_rate,
+  findings_reproduced_twice_rate, remediated_count}}`.
 - `check_regression(report, baseline_path, tolerance)` — a target **regresses**
   when `score < baseline_score - tolerance` (`tolerance` from
   `eval.regression_tolerance`, default `0.05`; path from `eval.baseline_path`,
   default `reports/eval/baseline.json`). Targets present in the report but not
   the baseline are new and skipped; targets in the baseline but not the report
   produce a warning line, **not** a failure. A missing or malformed baseline
-  **fails closed** (`passed=False`).
+  **fails closed** (`passed=False`). Reliability gates fail **HARD** alongside
+  score drift: false-compromise rise beyond tolerance, any scope violation
+  reaching the network layer (>0), and stuck-loop rise beyond tolerance.
+  Baselines saved before the reliability snapshot existed skip those gates
+  (`[skip]`, never a failure) until refreshed with `--save-baseline`.
 
 ## PoE Canary Verification (`tools/verification/poe_verifier.py`)
 

@@ -14,7 +14,7 @@ import hashlib
 import pytest
 
 from db import DatabaseManager, _new_id
-from evidence import EvidenceStore
+from legacy.evidence import EvidenceStore
 
 # ── Fixtures ───────────────────────────────────────────────────────────────
 

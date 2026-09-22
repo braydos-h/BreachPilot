@@ -389,6 +389,7 @@ See [docs/benchmarks.md](benchmarks.md). Defaults in `tools/config/schema.py`; v
 | `baseline_path` | str | `reports/benchmarks/baseline.json` | Baseline file written by `--save-baseline` / read by `--check-regression` | tools/benchmark/regression.py |
 | `regression.success_rate_tolerance` | float | `0.02` | Verified-success-rate drop beyond this is a HARD regression (CI exit 1) | tools/benchmark/regression.py |
 | `regression.false_positive_tolerance` | float | `0.01` | False-positive-rate rise beyond this is a HARD regression | tools/benchmark/regression.py |
+| `regression.stuck_loop_tolerance` | float | `0.05` | Stuck-loop-rate rise beyond this is a HARD regression | tools/benchmark/regression.py |
 | `regression.median_time_tolerance` | float | `0.20` | Relative median-solve-time rise beyond this is a warning | tools/benchmark/regression.py |
 | `regression.tool_actions_tolerance` | float | `0.30` | Relative median-action rise beyond this is a warning | tools/benchmark/regression.py |
 | `regression.cost_tolerance` | float | `0.30` | Relative estimated-cost rise beyond this is a warning | tools/benchmark/regression.py |

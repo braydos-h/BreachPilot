@@ -47,6 +47,7 @@ __all__ = [
     "docker_inspect_state",
     "docker_rm",
     "docker_network_rm",
+    "docker_network_disconnect",
     "run_netns_sidecar",
     "DockerBackend",
     "_build_create_args",
@@ -181,20 +182,161 @@ def docker_inspect_state(container_id: str) -> str:
     return out.strip() if rc == 0 else ""
 
 
+# ── Idempotent teardown helpers (network-lifecycle false-negative fix) ──────
+# ``docker rm`` / ``docker network rm`` report rc != 0 both for real failures
+# AND for the benign "already gone" case. Treating every non-zero as failure
+# makes a second delete (or a double delete from two teardown layers) report a
+# false-negative even though the desired end state (resource gone) holds.
+# These matchers distinguish the cases by error text instead of rc alone.
+_NOT_FOUND_SUBSTRINGS = (
+    "no such network",
+    "no such container",
+    "no such object",
+    "not found",
+    "error 404",
+    "404 not found",
+)
+# ``docker network rm`` fails transiently while a just-removed container's
+# endpoint is still detaching (async in the daemon): "has active endpoints".
+_ACTIVE_ENDPOINTS_SUBSTRINGS = (
+    "has active endpoint",
+    "active endpoint",
+    "has connections",
+    "is in use",
+    "endpoint is still",
+)
+
+
+def _combined_text(out: str, err: str) -> str:
+    return f"{out or ''}\n{err or ''}".lower()
+
+
+def _is_not_found_error(out: str, err: str) -> bool:
+    text = _combined_text(out, err)
+    return any(marker in text for marker in _NOT_FOUND_SUBSTRINGS)
+
+
+def _is_active_endpoints_error(out: str, err: str) -> bool:
+    text = _combined_text(out, err)
+    return any(marker in text for marker in _ACTIVE_ENDPOINTS_SUBSTRINGS)
+
+
+def _resolve_network_target(name: str) -> str:
+    """Canonical ``network rm`` token: prefer the inspected ID over a name.
+
+    Docker accepts names and IDs interchangeably, but error text and stale
+    listings mix the two (name vs ID confusion). Resolving to the daemon's
+    canonical ID makes delete + leaked-network scans unambiguous. Returns the
+    original token when inspection fails (the caller then lets ``rm`` report
+    the authoritative answer, mapping "not found" to success).
+    """
+    try:
+        info = docker_network_inspect(name)
+    except SandboxUnavailableError:
+        return name
+    if isinstance(info, dict):
+        nid = str(info.get("Id") or "").strip()
+        if nid:
+            return nid
+    return name
+
+
 def docker_rm(name: str) -> bool:
+    """Remove a container idempotently: missing/empty means already gone (True).
+
+    Query-then-delete: an inspect miss for "no such container" short-circuits
+    to success without attempting ``rm``; a post-``rm`` "not found" (lost race
+    with a concurrent deleter) also maps to success. Daemon errors stay False
+    so the caller can audit incomplete cleanup. Never raises.
+    """
+    token = str(name or "").strip()
+    if not token:
+        return True
     try:
-        rc, _out, _err = _docker("rm", "-f", name, timeout=90)
+        q_rc, q_out, q_err = _docker("inspect", token, timeout=20)
     except SandboxUnavailableError:
         return False
-    return rc == 0
-
-
-def docker_network_rm(name: str) -> bool:
+    if q_rc != 0 and _is_not_found_error(q_out, q_err):
+        return True
     try:
-        rc, _out, _err = _docker("network", "rm", name, timeout=60)
+        rc, out, err = _docker("rm", "-f", token, timeout=90)
     except SandboxUnavailableError:
         return False
-    return rc == 0
+    if rc == 0:
+        return True
+    return _is_not_found_error(out, err)
+
+
+def docker_network_disconnect(network: str, container: str) -> bool:
+    """Best-effort ``network disconnect`` for the detach race. Never raises.
+
+    Called before ``network rm`` when the container is known: after ``rm -f``
+    the daemon detaches the endpoint asynchronously, and ``network rm`` in
+    that window fails with "has active endpoints". An explicit forced
+    disconnect narrows the window; residual races are covered by the retry
+    loop in ``docker_network_rm``. Missing resources map to True (idempotent).
+    """
+    net = str(network or "").strip()
+    ctr = str(container or "").strip()
+    if not net or not ctr:
+        return True
+    try:
+        rc, out, err = _docker("network", "disconnect", "-f", net, ctr, timeout=30)
+    except SandboxUnavailableError:
+        return False
+    if rc == 0:
+        return True
+    return _is_not_found_error(out, err)
+
+
+def docker_network_rm(name: str, *, retries: int = 5, retry_delay: float = 0.5) -> bool:
+    """Remove a network idempotently with detach-race retries. Never raises.
+
+    Query-then-delete: ``network inspect`` resolves the canonical ID (name vs
+    ID confusion) and short-circuits "no such network" to success. ``rm``
+    "not found" (deleted between query and delete) also maps to success.
+    "Has active endpoints" (container still detaching) retries with backoff;
+    any other error maps to False so teardown audits stay honest. Empty names
+    are a no-op success. Fail-closed: daemon-unreachable maps to False, never
+    to a host-execution fallback (callers only audit/log the booleans).
+    """
+    token = str(name or "").strip()
+    if not token:
+        return True
+    try:
+        q_rc, q_out, q_err = _docker("network", "inspect", token, "--format", "{{json .}}", timeout=30)
+    except SandboxUnavailableError:
+        return False
+    if q_rc != 0 and _is_not_found_error(q_out, q_err):
+        return True
+    target = token
+    if q_rc == 0:
+        try:
+            import json
+
+            info = json.loads(q_out)
+            nid = str((info or {}).get("Id") or "").strip() if isinstance(info, dict) else ""
+            if nid:
+                target = nid
+        except (ValueError, TypeError, AttributeError):
+            target = token
+    attempts = max(1, int(retries or 1))
+    for attempt in range(attempts):
+        try:
+            rc, out, err = _docker("network", "rm", target, timeout=60)
+        except SandboxUnavailableError:
+            return False
+        if rc == 0:
+            return True
+        if _is_not_found_error(out, err):
+            return True
+        if _is_active_endpoints_error(out, err):
+            if attempt < attempts - 1:
+                time.sleep(max(0.0, float(retry_delay or 0.0)))
+                continue
+            return False
+        return False
+    return False
 
 
 def run_netns_sidecar(container_id: str, image: str, binary: str, rules_text: str) -> tuple[int, str, str]:
@@ -406,8 +548,22 @@ class DockerBackend:
             logger.warning("sandbox stop %s failed", container_id)
 
     def destroy(self, container_id: str, network_name: str) -> dict[str, bool]:
-        """Terminate + remove the worker and its dedicated network (best per-op answer)."""
-        results = {"container_removed": docker_rm(container_id), "network_removed": docker_network_rm(network_name)}
+        """Terminate + remove the worker and its dedicated network (best per-op answer).
+
+        Single owner of the network delete: removes the container idempotently,
+        best-effort disconnects its endpoint (narrows the detach race), then
+        removes the network with retries. Fail-closed: per-op booleans only,
+        never a host-subprocess fallback for agent commands (agent execution
+        stays inside ``docker exec``; these booleans only drive audit rows).
+        """
+        container_removed = docker_rm(container_id)
+        if str(network_name or "").strip() and str(container_id or "").strip():
+            try:
+                docker_network_disconnect(network_name, container_id)
+            except Exception:  # noqa: BLE001 -- disconnect is best-effort; rm retries cover residual races
+                pass
+        network_removed = docker_network_rm(network_name)
+        results = {"container_removed": container_removed, "network_removed": network_removed}
         if not all(results.values()):
             logger.warning("sandbox destroy incomplete: %s", results)
         return results

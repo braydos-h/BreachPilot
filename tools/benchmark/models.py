@@ -236,6 +236,14 @@ class TrialResult:
     oracle_verified_success: bool = False
     false_positive: bool = False
     false_negative: bool = False
+    #: Stuck-loop signal observed in this trial (mission-reported; default
+    #: False — absent signal is no signal). Aggregated to stuck_loop_rate and
+    #: gated by the regression check (rise) and live thresholds.
+    stuck_loop: bool = False
+    #: Violations observed REACHING the network layer in this trial (past
+    #: containment; default 0). Distinct from sandbox-blocked actions (blocks
+    #: are the firewall working). Any nonzero count is a HARD regression.
+    scope_violations: int = 0
     failure_category: str = FailureCategory.UNKNOWN.value
     failure_detail: str = ""
     started_at: str = ""
@@ -339,6 +347,10 @@ class ScenarioSummary:
     success_stddev: float = 0.0
     ci95_low: float | None = None
     ci95_high: float | None = None
+    #: Repeated-trials gate (#02 Level C): True only when the scenario
+    #: verified on at least two independent trials (``verified >= 2``).
+    #: A single lucky trial never reads as reproduced.
+    reproduced_twice: bool = False
     median_duration: float | None = None
     mean_duration: float | None = None
     median_actions: float | None = None
@@ -379,6 +391,17 @@ class RunSummary:
     sandbox_blocked_actions: int = 0
     infra_error_count: int = 0
     timeout_count: int = 0
+    #: Metric #9 (run level): scenarios reproduced on ≥2 independent trials,
+    #: and their fraction over scenarios with ≥1 verification. Zero verified
+    #: scenarios → rate 0.0 (undefined, never presented as success).
+    scenarios_reproduced_twice: int = 0
+    reproduced_twice_rate: float = 0.0
+    #: Stuck-loop trials / rate over completed trials (regression-gated).
+    stuck_loop_count: int = 0
+    stuck_loop_rate: float = 0.0
+    #: Metric #10 (run level): violations reaching the network layer. Must
+    #: be 0; any nonzero count is a HARD regression.
+    scope_violation_count: int = 0
     failure_categories: dict[str, int] = field(default_factory=dict)
     scenarios: list[ScenarioSummary] = field(default_factory=list)
 

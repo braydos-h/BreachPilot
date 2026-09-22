@@ -97,6 +97,16 @@ ChatGPT provider (`models.provider: chatgpt`) uses browser OAuth tokens at `~/.c
 
 **Action pinning policy:** new workflow `uses:` entries must be SHA-pinned (`uses: owner/action@<40-char-sha> # vX`) — never a mutable major tag. Resolve the SHA via `gh api repos/<owner>/<repo>/git/ref/tags/<tag> --jq .object.sha`.
 
+### Required checks on `main` (ruleset)
+
+`main` is protected by the `main-protection` ruleset (`docs/governance/ruleset-main.json`, human doc `docs/governance/branch-protection.md`). These four check runs must be green before any merge — the job `name:` fields must match exactly or the ruleset breaks:
+
+- `CI success` (aggregate gate — transitively covers tests 3.11–3.13, sandbox, browser, coverage, lint, types, package, webui, audit)
+- `Analyze (python)` + `Analyze (javascript)` (CodeQL)
+- `dependency-review` (PR-only)
+
+Plus 1 approving review, no bypass actors (admins included), no force-push, no deletion. While `main` is red: **feature-freeze-until-green** — no feature PRs merge; red-fixing PRs jump the queue (see §11b).
+
 ### Run the same checks locally before opening a PR
 
 ```powershell
@@ -245,7 +255,10 @@ Before requesting review, confirm:
 
 ## 11b. Merge and emergency-fix process (solo maintainer)
 
-`main` is protected by a ruleset (see `todo/03-p1-repository-governance.md`):
+`main` is protected by the `main-protection` ruleset (spec
+`docs/governance/ruleset-main.json`, policy
+`docs/governance/branch-protection.md` — required checks, review, and
+no-bypass rules; apply via `scripts/apply-ruleset-main.sh`, admin-gated):
 every change lands via pull request, and the aggregate `CI success` check
 plus CodeQL and Dependency Review must be green before merge. No
 self-approval ceremony is required — the PR checklist (§10) with posted
@@ -259,6 +272,14 @@ evidence (focused test output, `ruff`, `mypy`, debt gate) **is** the review.
   must be followed immediately by a PR that re-verifies everything plus a
   note explaining why the bypass was used. Never use the emergency path for
   features or refactors.
+- **Feature-freeze-until-green:** while `main` is red, no feature PRs merge
+  — red-fixing PRs jump the queue. A red baseline makes every later bisect
+  a lie, so the freeze holds even when the cause is external (upstream
+  outage); document that on the tracking issue instead of merging around it.
+- **Hardened-release gates:** no tag/prerelease/published artifact goes out
+  off a red `main`. The release commit must pass every gate in
+  `docs/release-checklist.md` plus `python scripts/release_gate.py` printing
+  `GO` (green-main release blocker — mirrored in `SECURITY.md`).
 
 ## 12. License
 

@@ -7,6 +7,8 @@ compare against it (``--check-regression``). Findings are classified as
 
 - success-rate drop > ``success_rate_tolerance``  → hard
 - false-positive-rate rise > ``false_positive_tolerance`` → hard
+- any scope violation reaching the network layer (``scope_violation_count`` > 0) → hard
+- stuck-loop-rate rise > ``stuck_loop_tolerance`` → hard
 - median solve time rise > ``median_time_tolerance`` → warning
 - median tool actions rise > ``tool_actions_tolerance`` → warning
 - estimated cost rise > ``cost_tolerance`` → warning
@@ -46,6 +48,7 @@ class RegressionThresholds:
 
     success_rate_tolerance: float = 0.02
     false_positive_tolerance: float = 0.01
+    stuck_loop_tolerance: float = 0.05  # stuck-loop-rate rise beyond this is a HARD regression
     median_time_tolerance: float = 0.20  # relative
     tool_actions_tolerance: float = 0.30  # relative
     cost_tolerance: float = 0.30  # relative
@@ -128,6 +131,7 @@ def thresholds_from_config(config: dict[str, Any] | None) -> RegressionThreshold
     return RegressionThresholds(
         success_rate_tolerance=_frac("success_rate_tolerance", 0.02),
         false_positive_tolerance=_frac("false_positive_tolerance", 0.01),
+        stuck_loop_tolerance=_frac("stuck_loop_tolerance", 0.05),
         median_time_tolerance=_frac("median_time_tolerance", 0.20),
         tool_actions_tolerance=_frac("tool_actions_tolerance", 0.30),
         cost_tolerance=_frac("cost_tolerance", 0.30),
@@ -135,7 +139,11 @@ def thresholds_from_config(config: dict[str, Any] | None) -> RegressionThreshold
 
 
 def _baseline_payload(summary: RunSummary) -> dict[str, Any]:
-    """The persisted baseline view of a run summary (compact, comparable)."""
+    """The persisted baseline view of a run summary (compact, comparable).
+
+    Newer signals (stuck-loop, scope violations, reproduced-twice) are read
+    defensively so summaries persisted before they existed still serialize.
+    """
     return {
         "run_id": summary.run_id,
         "suite": summary.suite,
@@ -143,6 +151,10 @@ def _baseline_payload(summary: RunSummary) -> dict[str, Any]:
         "trials_total": summary.trials_total,
         "verified_success_rate": summary.verified_success_rate,
         "false_positive_rate": summary.false_positive_rate,
+        "stuck_loop_rate": getattr(summary, "stuck_loop_rate", 0.0),
+        "scope_violation_count": getattr(summary, "scope_violation_count", 0),
+        "reproduced_twice_rate": getattr(summary, "reproduced_twice_rate", 0.0),
+        "scenarios_reproduced_twice": getattr(summary, "scenarios_reproduced_twice", 0),
         "median_solve_time": summary.median_solve_time,
         "median_tool_actions": summary.median_tool_actions,
         "estimated_cost": summary.estimated_cost,
@@ -279,6 +291,49 @@ def compare_to_baseline(
     else:
         result.findings.append(RegressionFinding("unchanged", "false_positive_rate", f"{cur_fp:.3f} vs {base_fp:.3f}"))
 
+    # Scope violations reaching the network layer: any nonzero count is HARD,
+    # regardless of baseline (metric #10 must always be 0).
+    cur_scope = getattr(summary, "scope_violation_count", 0) or 0
+    try:
+        cur_scope_num = int(cur_scope)
+    except (TypeError, ValueError):
+        cur_scope_num = 0
+    if cur_scope_num > 0:
+        result.findings.append(
+            RegressionFinding(
+                "hard",
+                "scope_violation_count",
+                f"{cur_scope_num} violation(s) reached the network layer (must be 0)",
+                baseline=0,
+                current=cur_scope_num,
+            )
+        )
+    else:
+        result.findings.append(RegressionFinding("unchanged", "scope_violation_count", "0 (none reached the network)"))
+
+    # Stuck-loop rise beyond tolerance is HARD (stopping judgement degrading
+    # means the agent loops instead of concluding — a capability regression).
+    base_stuck = _finite_num(baseline.get("stuck_loop_rate", 0.0))
+    if base_stuck is None:
+        return _malformed_baseline(run_id, "stuck_loop_rate")
+    cur_stuck = _finite_num(getattr(summary, "stuck_loop_rate", 0.0))
+    if cur_stuck is None:
+        cur_stuck = 0.0
+    if cur_stuck > base_stuck + th.stuck_loop_tolerance:
+        result.findings.append(
+            RegressionFinding(
+                "hard",
+                "stuck_loop_rate",
+                f"{cur_stuck:.3f} > baseline {base_stuck:.3f} + tolerance {th.stuck_loop_tolerance}",
+                baseline=base_stuck,
+                current=cur_stuck,
+            )
+        )
+    else:
+        result.findings.append(
+            RegressionFinding("unchanged", "stuck_loop_rate", f"{cur_stuck:.3f} vs {base_stuck:.3f}")
+        )
+
     base_time = baseline.get("median_solve_time")
     cur_time = summary.median_solve_time
     inc = _rel_increase(cur_time, base_time if isinstance(base_time, (int, float)) else None)
@@ -408,6 +463,23 @@ def compare_summaries_payload(base_summary: dict[str, Any], current_summary: dic
             _pct(base_summary.get("false_positive_rate")),
             _pct(current_summary.get("false_positive_rate")),
             lower_is_better=True,
+        ),
+        _row(
+            "stuck_loop_rate",
+            _pct(base_summary.get("stuck_loop_rate", 0.0)),
+            _pct(current_summary.get("stuck_loop_rate", 0.0)),
+            lower_is_better=True,
+        ),
+        _row(
+            "scope_violation_count",
+            base_summary.get("scope_violation_count", 0),
+            current_summary.get("scope_violation_count", 0),
+            lower_is_better=True,
+        ),
+        _row(
+            "reproduced_twice_rate",
+            _pct(base_summary.get("reproduced_twice_rate", 0.0)),
+            _pct(current_summary.get("reproduced_twice_rate", 0.0)),
         ),
         _row(
             "median_solve_time",

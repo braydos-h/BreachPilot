@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json.schemastore.org/github-ruleset.json",
+  "$comment": "BreachPilot main-branch protection ruleset (spec file, todo/12). Apply via Repository Settings > Rules > Rulesets in the GitHub UI, or with scripts/apply-ruleset-main.sh (requires admin). Verify with: gh api repos/braydos-h/BreachPilot/rulesets",
+  "name": "main-protection",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/heads/main"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 1,
+        "dismiss_stale_reviews_on_push": true,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": true
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          {
+            "context": "CI success",
+            "integration_id": 15342
+          },
+          {
+            "context": "Analyze (python)",
+            "integration_id": 15342
+          },
+          {
+            "context": "Analyze (javascript)",
+            "integration_id": 15342
+          },
+          {
+            "context": "dependency-review",
+            "integration_id": 15342
+          }
+        ]
+      }
+    }
+  ],
+  "bypass_actors": []
+}

@@ -16,7 +16,7 @@ def test_append_log_order_drain_and_perms(tmp_path):
     w.close()
     lines = path.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 500
-    assert [int(l.split(":")[1].rstrip(" }")) for l in lines] == list(range(500))
+    assert [int(line.split(":")[1].rstrip(" }")) for line in lines] == list(range(500))
     mode = stat.S_IMODE(os.stat(path).st_mode)
     assert mode == 0o600, f"{oct(mode)}"
     w.close()  # idempotent

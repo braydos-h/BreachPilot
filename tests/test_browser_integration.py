@@ -22,6 +22,7 @@ from typing import Any
 import pytest
 
 from tools.browser._pw_probe import chromium_present, playwright_present
+from tools.browser.doctor_check import CHROMIUM_SKIP_HINT, SDK_SKIP_HINT
 from tools.browser.errors import (
     BrowserCrashed,
     BrowserNavigationFailed,
@@ -274,8 +275,12 @@ def test_sandbox_resolution_has_no_host_fallback():
 
 
 def _live_backend_or_skip() -> PlaywrightBackend:
-    if not playwright_present() or not chromium_present():
-        pytest.skip("live-Chromium test: SDK + runtime required (browser extra)")
+    # Skip hints shared verbatim with the doctor SKIP contract
+    # (tools/browser/doctor_check.py) so both agree exactly.
+    if not playwright_present():
+        pytest.skip(f"live-Chromium test skipped: {SDK_SKIP_HINT}")
+    if not chromium_present():
+        pytest.skip(f"live-Chromium test skipped: {CHROMIUM_SKIP_HINT}")
     return PlaywrightBackend({"browser": {"enabled": True, "backend": "playwright"}})
 
 
@@ -316,8 +321,10 @@ def test_live_static_navigation_and_observation(local_app, _clean_engine_modules
 @pytest.mark.integration
 def test_live_js_render_xhr_storage_screenshot(local_app, tmp_path, _clean_engine_modules):
     backend = PlaywrightBackend({"browser": {"enabled": True, "backend": "playwright", "artifact_dir": str(tmp_path)}})
-    if not playwright_present() or not chromium_present():
-        pytest.skip("live-Chromium test: SDK + runtime required (browser extra)")
+    if not playwright_present():
+        pytest.skip(f"live-Chromium test skipped: {SDK_SKIP_HINT}")
+    if not chromium_present():
+        pytest.skip(f"live-Chromium test skipped: {CHROMIUM_SKIP_HINT}")
 
     async def _flow():
         session = await backend.start_session(target="127.0.0.1", run_id="run-live")

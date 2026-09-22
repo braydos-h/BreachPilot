@@ -1,13 +1,18 @@
-"""Regenerate docs/reference/cli-generated.md from main.py:parse_args.
+"""Regenerate docs/reference/cli-generated.md from tools/cli_args.py:parse_args.
 
-Stdlib only. Parses main.py with ast (never imports it) so flag facts —
+Stdlib only. Parses tools/cli_args.py with ast (never imports it) so flag facts —
 flag, aliases, type/choices, default, help — always match the source.
 Hand-curated columns (conflicts, runtime path, examples, config keys, exit)
 are preserved per flag from the existing doc; new flags get rows from
 NEW_ROWS below plus their live add_argument line number.
 
+p2-03 split: parse_args moved verbatim from main.py to tools/cli_args.py;
+main.py only re-exports it. The canonical scan target is tools/cli_args.py
+(main.py has zero add_argument calls); a main.py fallback remains so --check
+keeps working on pre-split checkouts.
+
 Usage (from repo root):
-    python scripts/generate_cli_reference.py
+    python scripts/generate_cli_reference.py [--check]
 """
 
 from __future__ import annotations
@@ -15,10 +20,14 @@ from __future__ import annotations
 import ast
 import datetime
 import re
+import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+# Canonical home of parse_args (p2-03 split moved it verbatim out of main.py).
+CLI_ARGS = REPO / "tools" / "cli_args.py"
 MAIN = REPO / "main.py"
+SRC_LABEL = "tools/cli_args.py"
 DOC = REPO / "docs" / "reference" / "cli-generated.md"
 
 DAEMON_CONFLICT_NOTE = "daemon/web"
@@ -128,8 +137,23 @@ class Flag:
         return f"`{d}`"
 
 
+def _scan_source() -> tuple[Path, str]:
+    """Return (path, label) of the file defining parse_args (canonical first)."""
+    for path, label in ((CLI_ARGS, SRC_LABEL), (MAIN, "main.py")):
+        if not path.is_file():
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError):
+            continue
+        if any(isinstance(n, ast.FunctionDef) and n.name == "parse_args" for n in ast.walk(tree)):
+            return path, label
+    raise SystemExit("no parse_args found in tools/cli_args.py or main.py — refusing to generate")
+
+
 def collect_flags() -> tuple[list[Flag], int, int]:
-    tree = ast.parse(MAIN.read_text(encoding="utf-8"))
+    src, _ = _scan_source()
+    tree = ast.parse(src.read_text(encoding="utf-8"))
     func = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "parse_args")
     flags: list[Flag] = []
     for node in ast.walk(func):
@@ -165,7 +189,9 @@ def parse_existing_rows(text: str) -> dict[str, list[str]]:
 
 
 def refresh_lineno(cell: str, lineno: int) -> str:
-    return re.sub(r"^`?main\.py:\d+`?", f"`main.py:{lineno}`", cell, count=1)
+    # Pre-split rows cite `main.py:NNN`; rewrite any scan-source prefix to the
+    # canonical label so every runtime path points at the file that defines it.
+    return re.sub(r"^`?(?:main\.py|tools/cli_args\.py):\d+`?", f"`{SRC_LABEL}:{lineno}`", cell, count=1)
 
 
 # Hand-curated columns for flags added since the last doc refresh
@@ -251,7 +277,7 @@ def build_row(f: Flag, old: list[str] | None) -> str:
     name = f"`{f.primary}`"
     if f.primary == "--eval":
         r = EVAL_ROW
-        runtime = f"`main.py:{f.lineno}` " + r["runtime"]
+        runtime = f"`{SRC_LABEL}:{f.lineno}` " + r["runtime"]
         return (
             f"| {name} | {r['aliases']} | {r['type']} | {r['default']} | {r['conflicts']} "
             f"| {runtime} | {r['examples']} | {r['config']} | {r['exit']} |"
@@ -295,7 +321,7 @@ def build_row(f: Flag, old: list[str] | None) -> str:
         aliases = esc(", ".join(f"`{o}`" for o in f.options if o != f.primary))
     return (
         f"| {name} | {aliases} | {type_cell} | {default_cell} | {n.get('conflicts', '—')} "
-        f"| `main.py:{f.lineno}` | {n.get('examples', '—')} | {n.get('config', '—')} "
+        f"| `{SRC_LABEL}:{f.lineno}` | {n.get('examples', '—')} | {n.get('config', '—')} "
         f"| {n.get('exit', '—')} |"
     )
 
@@ -303,15 +329,15 @@ def build_row(f: Flag, old: list[str] | None) -> str:
 HEADER = """\
 ---
 title: CLI Reference (Generated)
-description: Complete matrix for every python main.py flag — flag, aliases, type, default, conflicts, runtime path, examples, config keys, exit behavior. Verified against main.py:parse_args.
-source: [main.py]
-generated_from: main.py:parse_args
-verify: every flag exists in main.py:parse_args at time of generation ({today})
+description: Complete matrix for every python main.py flag — flag, aliases, type, default, conflicts, runtime path, examples, config keys, exit behavior. Verified against tools/cli_args.py:parse_args (re-exported by main).
+source: [tools/cli_args.py]
+generated_from: tools/cli_args.py:parse_args
+verify: every flag exists in tools/cli_args.py:parse_args at time of generation ({today})
 ---
 
 # CLI Reference (Generated)
 
-> Verified against `main.py:parse_args` (`main.py:{start}-{end}`). No invented flags. Run `python main.py --help` to cross-check. Dispatch order is in `main()`.
+> Verified against `tools/cli_args.py:parse_args` (`tools/cli_args.py:{start}-{end}`, re-exported by `main`). No invented flags. Run `python main.py --help` to cross-check. Dispatch order is in `main()`.
 
 - **Default no-args** → **WebUI daemon** (`--web`: build `webui/dist/` if needed, serve `http://127.0.0.1:8765/`, open a browser) via `main._run_daemon`. `--menu` forces the legacy interactive terminal menu instead.
 - **API-key bootstrap** → `tools/config_cli.bootstrap_startup_api_keys` with `prompt = --menu` only.
@@ -327,7 +353,13 @@ Exit codes: `0` success/clean abort, `1` run/config/auth failure (or `--check-re
 """
 
 
-def main() -> int:
+def _normalized(text: str) -> str:
+    """Date-stamps are metadata: normalize them so --check tracks content drift."""
+    return re.sub(r"\d{4}-\d{2}-\d{2}", "DATE", text)
+
+
+def render() -> tuple[str, list[Flag], int, int, dict[str, list[str]]]:
+    """Build the regenerated file text without writing (shared by write + --check)."""
     flags, start, end = collect_flags()
     old_text = DOC.read_text(encoding="utf-8")
     old_rows = parse_existing_rows(old_text)
@@ -344,9 +376,25 @@ def main() -> int:
     if tail_idx == -1:
         raise SystemExit("existing doc missing '### Flow B legacy' section — refusing to overwrite")
     tail = old_text[tail_idx:].rstrip() + "\n"
-    tail = tail.replace("from `main.py:342` epilog", f"from `main.py:{start + 8}` epilog")
+    tail = tail.replace("from `main.py:342` epilog", f"from `{SRC_LABEL}:{start + 8}` epilog")
     out.append(tail)
-    DOC.write_text("\n".join(out), encoding="utf-8")
+    return "\n".join(out), flags, start, end, old_rows
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Regenerate docs/reference/cli-generated.md from parse_args.")
+    parser.add_argument("--check", action="store_true", help="fail (exit 1) when the doc drifts; do not write")
+    args = parser.parse_args(argv)
+    new_text, flags, start, end, old_rows = render()
+    if args.check:
+        if _normalized(DOC.read_text(encoding="utf-8")) != _normalized(new_text):
+            print("cli-reference drift: run python scripts/generate_cli_reference.py", file=sys.stderr)
+            return 1
+        print(f"cli-reference fresh: flags={len(flags)} parse_args {start}-{end}")
+        return 0
+    DOC.write_text(new_text, encoding="utf-8")
 
     missing = [p for p in old_rows if p not in {f.primary for f in flags}]
     print(
@@ -355,7 +403,7 @@ def main() -> int:
     )
     if missing:
         print(f"WARNING: doc flags gone from parse_args (kept out): {missing}")
-    print(f"wrote {DOC} (verify {today}, parse_args {start}-{end})")
+    print(f"wrote {DOC} (parse_args {start}-{end})")
     return 0
 
 

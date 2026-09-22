@@ -143,7 +143,7 @@ class AutonomousOrchestrator:
             from tools.opsec import OpsecManager
             from tools.opsec import configure as _opsec_configure
 
-            self._opsec = OpsecManager.from_config(mission_config or {})
+            self._opsec: OpsecManager | None = OpsecManager.from_config(mission_config or {})
             _primary_target = (mission_config or {}).get("target") or os.environ.get("EXPLOIT_TARGET", "")
             _ua_profile = self._opsec.profile
             if _primary_target:
@@ -211,7 +211,7 @@ class AutonomousOrchestrator:
         try:
             from tools.kernel.inference_budget import InferenceBudget
 
-            self._inference_budget = InferenceBudget.from_config(mission_config or {})
+            self._inference_budget: InferenceBudget | None = InferenceBudget.from_config(mission_config or {})
         except Exception:  # noqa: BLE001 -- budget must never block orchestration setup
             self._inference_budget = None
         # Pivot-depth cap (Tier 0 item 0.6a): the lateral-movement phase recurses

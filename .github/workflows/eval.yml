@@ -45,7 +45,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
       - name: Run eval unit tests (all mocked)
-        run: python -m pytest tests/test_eval_harness.py tests/test_eval_suite.py tests/test_eval_cli.py -v
+        run: python -m pytest tests/test_eval_harness.py tests/test_eval_suite.py tests/test_eval_cli.py tests/test_eval_live_outcome.py tests/test_eval_provenance.py tests/test_benchmark_metrics.py -v
 
   nightly-eval:
     name: Nightly graded eval (live targets)
@@ -88,6 +88,9 @@ jobs:
       - name: Run graded eval suite
         if: env.OLLAMA_API_KEY != ''
         run: python main.py --eval --save-baseline
+      - name: Hermetic benchmark repeats (min n=5 per target)
+        if: env.OLLAMA_API_KEY != ''
+        run: python main.py --benchmark xben --trials 5
       - name: Regression gate (fail on hard regressions vs baseline)
         if: env.OLLAMA_API_KEY != ''
         run: python main.py --eval --check-regression
@@ -101,4 +104,12 @@ jobs:
           name: eval-reports
           path: reports/eval/
           if-no-files-found: error
+          retention-days: 14
+      - name: Upload benchmark reports (incl. provenance digests)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: benchmark-reports
+          path: reports/benchmarks/
+          if-no-files-found: warn
           retention-days: 14

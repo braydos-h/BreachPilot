@@ -244,6 +244,93 @@ def persist_retest(
     return finding
 
 
+def _parse_ts(value: Any) -> float | None:
+    """Parse an ISO-8601 timestamp to epoch seconds; None when absent/unparseable."""
+    from datetime import datetime
+
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    try:
+        return parsed.timestamp()
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _history_verdicts(finding: dict[str, Any], key: str) -> list[tuple[str, float | None]]:
+    """Return ``(verdict, epoch-or-None)`` pairs from a finding history list."""
+    entries = finding.get(key)
+    if not isinstance(entries, list):
+        return []
+    out: list[tuple[str, float | None]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        out.append((str(entry.get("verdict", "") or ""), _parse_ts(entry.get("timestamp", ""))))
+    return out
+
+
+def aggregate_retest_lifecycle(findings: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate the FIXED remediation lifecycle over stored finding dicts.
+
+    Pure function over the existing run-artifact shape (``verify_history[]`` /
+    ``retest_history[]`` + ``retest_status``); no I/O, no probe execution.
+    Feeds reliability metric #11 (mean time finding → verified remediation):
+
+    - a finding counts as *verified* when it carries at least one ``VERIFIED``
+      ``verify_history`` entry (or a ``verify_status`` of ``VERIFIED``);
+    - a finding counts as *remediated* (``FIXED``) when its ``retest_status``
+      is ``FIXED`` or any ``retest_history`` entry reads ``FIXED``;
+    - time-to-fix is the last ``FIXED`` timestamp minus the first ``VERIFIED``
+      timestamp, over findings where both parse; unparseable or missing
+      timestamps exclude that finding from the mean (never fabricated).
+    """
+    from tools.mcp_tools.verify import VERIFIED as _VERIFIED
+
+    total = 0
+    verified = 0
+    fixed_ids: list[str] = []
+    fix_times: list[float] = []
+    for finding in findings or []:
+        if not isinstance(finding, dict):
+            continue
+        total += 1
+        verify_entries = _history_verdicts(finding, "verify_history")
+        verified_here = (
+            any(v == _VERIFIED for v, _ in verify_entries)
+            or str(finding.get("verify_status", "") or "").strip() == _VERIFIED
+        )
+        if verified_here:
+            verified += 1
+        retest_entries = _history_verdicts(finding, "retest_history")
+        fixed_here = str(finding.get("retest_status", "") or "").strip() == FIXED or any(
+            v == FIXED for v, _ in retest_entries
+        )
+        if not fixed_here:
+            continue
+        fid = str(finding.get("finding_id", "") or "")
+        fixed_ids.append(fid)
+        first_verified = next((ts for v, ts in verify_entries if v == _VERIFIED and ts is not None), None)
+        fixed_times = [ts for v, ts in retest_entries if v == FIXED and ts is not None]
+        if first_verified is not None and fixed_times:
+            delta = max(fixed_times) - first_verified
+            if delta >= 0:
+                fix_times.append(delta)
+    mean_fix: float | None = round(sum(fix_times) / len(fix_times), 2) if fix_times else None
+    return {
+        "total_findings": total,
+        "verified_findings": verified,
+        "fixed_count": len(fixed_ids),
+        "fixed_finding_ids": fixed_ids,
+        "remediation_times_seconds": [round(t, 2) for t in fix_times],
+        "mean_time_to_fix_seconds": mean_fix,
+    }
+
+
 def _snapshot_note(config: dict[str, Any] | None, ctx: Any, target_ip: str) -> str:
     """Best-effort snapshot context (fail-open: any failure → "")."""
     try:
@@ -373,6 +460,7 @@ __all__ = [
     "FIXED",
     "INCONCLUSIVE",
     "STILL_OPEN",
+    "aggregate_retest_lifecycle",
     "classify_retest_output",
     "format_retest_block",
     "locate_finding",

@@ -90,7 +90,7 @@ def register(router: APIRouter, ctx: SystemContext) -> None:
                 raise HTTPException(status_code=404, detail="Skill not found")
             return {
                 "name": skill.name,
-                "description": skill.description,
+                "description": skill.metadata.description,
                 "body": skill.body,
                 "sections": skill.sections,
                 "tags": list(skill.metadata.tags or []),

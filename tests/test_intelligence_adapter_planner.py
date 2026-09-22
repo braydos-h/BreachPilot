@@ -6,7 +6,7 @@ Covers confidence defaults/derivation, metadata attachment, score mapping,
 
 from __future__ import annotations
 
-from planner import PlannerAgent
+from legacy.planner import PlannerAgent
 from tools.attack_planner import AttackPhase as AttackPlannerPhase
 from tools.autonomous_orchestrator import AttackPhase as OrchestratorPhase
 from tools.intelligence.adapters import (

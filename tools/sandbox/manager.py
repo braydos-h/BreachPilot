@@ -771,16 +771,22 @@ class SandboxManager:
         return results
 
     def _destroy_resources(self) -> dict[str, bool]:
+        # Single network-delete owner: backend.destroy() already removes the
+        # network idempotently (query-then-delete + detach-race retries). A
+        # second direct docker_network_rm here used to overwrite its True with
+        # a "No such network" False -- the network-lifecycle false-negative.
+        # Only networks without a container (worker never started) delete
+        # directly; every other path trusts the single backend answer.
         results = {"container_removed": False, "network_removed": False}
         if self.container_id:
             try:
                 self.backend.stop(self.container_id)
             except SandboxError:
                 logger.warning("sandbox stop %s failed", self.container_id)
-            results["container_removed"] = bool(
-                self.backend.destroy(self.container_id, self.network_name)["container_removed"]
-            )
-        if self.network_name:
+            backend_results = self.backend.destroy(self.container_id, self.network_name)
+            results["container_removed"] = bool(backend_results.get("container_removed", False))
+            results["network_removed"] = bool(backend_results.get("network_removed", False))
+        elif self.network_name:
             results["network_removed"] = bool(_db.docker_network_rm(self.network_name))
         self.container_id = ""
         self.network_name = ""

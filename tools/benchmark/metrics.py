@@ -2,8 +2,10 @@
 
 Pure statistics over :class:`tools.benchmark.models.TrialResult` lists —
 verified success rate, false-positive rate, median/mean solve time and
-actions, token/cost totals, failure categories, and per-scenario repeated-
-trial stats (success probability, variance, stddev, 95% Wilson CI). A single
+actions, token/cost totals, failure categories, per-scenario repeated-
+trial stats (success probability, variance, stddev, 95% Wilson CI,
+reproduced-twice via the repeated-trials gate), plus stuck-loop and
+network-layer scope-violation signals for the regression gate. A single
 lucky trial is never presented as a reliable success: with one trial the CI
 spans the whole range and summaries expose it.
 
@@ -28,6 +30,7 @@ from tools.benchmark.models import (
 __all__ = [
     "compute_run_summary",
     "compute_scenario_summary",
+    "meets_repeated_trials_gate",
     "wilson_interval",
     "is_false_positive",
     "is_false_negative",
@@ -64,6 +67,24 @@ def _mean_or_none(values: list[float]) -> float | None:
     return statistics.fmean(values) if values else None
 
 
+#: Minimum independent trials for a finding to count as reproduced
+#: (repeated-trials gate, #02 Level C). Metric #9 ("reproduced twice")
+#: requires at least this many trials with verification on ≥2 of them.
+MIN_TRIALS_FOR_REPRODUCED_TWICE = 2
+
+
+def meets_repeated_trials_gate(trials: int, minimum: int = MIN_TRIALS_FOR_REPRODUCED_TWICE) -> bool:
+    """True when ``trials`` independent trials ran (gate for reproduced-twice).
+
+    Non-numeric or sub-minimum input is False — a single trial can never
+    satisfy the gate, so one lucky verification never reads as reproduced.
+    """
+    try:
+        return int(trials) >= max(2, int(minimum or 2))
+    except (TypeError, ValueError):
+        return False
+
+
 def compute_scenario_summary(
     trials: list[TrialResult], scenario_id: str, name: str = "", **meta: Any
 ) -> ScenarioSummary:
@@ -84,6 +105,9 @@ def compute_scenario_summary(
     summary.claimed = claimed
     summary.false_positives = sum(1 for t in trials if is_false_positive(t))
     summary.false_negatives = sum(1 for t in trials if is_false_negative(t))
+    # Repeated-trials gate: reproduced only on ≥2 independent verifications
+    # across ≥2 executed trials — never on a single lucky trial.
+    summary.reproduced_twice = verified >= MIN_TRIALS_FOR_REPRODUCED_TWICE and meets_repeated_trials_gate(len(trials))
     summary.timeouts = sum(1 for t in trials if t.status == TrialStatus.TIMEOUT.value)
     summary.infra_errors = sum(1 for t in trials if t.status == TrialStatus.INFRASTRUCTURE_ERROR.value)
     for t in trials:
@@ -165,6 +189,21 @@ def compute_run_summary(
     )
     summary.infra_error_count = sum(1 for t in trials if t.status == TrialStatus.INFRASTRUCTURE_ERROR.value)
     summary.timeout_count = sum(1 for t in trials if t.status == TrialStatus.TIMEOUT.value)
+    # Stuck-loop + scope-violation signals (mission-reported; absent = none).
+    # Stuck-loop rate shares the run rate denominator (completed trials —
+    # infra errors and skips say nothing about ability). Scope violations
+    # reaching the network layer must be 0 — the regression gate treats any
+    # nonzero count as HARD.
+    stuck = sum(1 for t in trials if bool(getattr(t, "stuck_loop", False)))
+    summary.stuck_loop_count = stuck
+    summary.stuck_loop_rate = (stuck / denom) if denom else 0.0
+    scope_total = 0
+    for t in trials:
+        try:
+            scope_total += max(0, int(getattr(t, "scope_violations", 0) or 0))
+        except (TypeError, ValueError):
+            continue
+    summary.scope_violation_count = scope_total
     for t in trials:
         if t.oracle_verified_success:
             continue
@@ -179,6 +218,13 @@ def compute_run_summary(
     for scenario_id in sorted(by_scenario):
         m = dict(meta.get(scenario_id, {}))
         summary.scenarios.append(compute_scenario_summary(by_scenario[scenario_id], scenario_id, **m))
+    # Metric #9 (run level): reproduced scenarios over scenarios with ≥1
+    # verification. No verified scenario → rate 0.0 (undefined, never green).
+    verified_scenarios = [s for s in summary.scenarios if s.verified > 0]
+    summary.scenarios_reproduced_twice = sum(1 for s in verified_scenarios if s.reproduced_twice)
+    summary.reproduced_twice_rate = (
+        (summary.scenarios_reproduced_twice / len(verified_scenarios)) if verified_scenarios else 0.0
+    )
     return summary
 
 

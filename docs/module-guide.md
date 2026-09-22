@@ -33,16 +33,16 @@
 | --- | --- |
 | Model and reasoning | `providers/` (pkg: `types/base/registry` + `ollama_provider.py`, `opencode_go_provider.py`, `chatgpt_provider.py`, `embeddings.py`), `model_router.py`, `model_telemetry.py`, `goal_engine.py`, `goal_suggester.py`, `semantic_memory.py` |
 | Safety and validation | `tools/config/` (pkg: `schema.py`, `validator.py`, `loader.py`; `config_manager.py` is a re-export shim), `doctor.py`, `safety_reviewer.py`, `validation_utils.py`, `command_analyzer.py`, `exceptions.py`, `env_probe.py` |
-| Recon and research | `tools/recon/` (pkg: `pipeline.py`, `scanner.py`, `enumerator.py`, `config.py`; `recon_pipeline.py` is a deprecated shim), `fast_recon.py`, `cve_lookup.py`, `exploit_search.py`, `web_researcher.py`, `recon_enrichers.py`, `recon_diff.py`, `recon_osint.py`, `nmap_priv.py`, `socket_scan.py` |
+| Recon and research | `tools/recon/` (pkg: `pipeline.py`, `scanner.py`, `enumerator.py`, `config.py`; `recon_pipeline.py` is a deprecated shim), `tools/research/` (pkg: `models.py`, `providers.py`, `facade.py`, `text_utils.py`; `web_researcher.py` is a re-export shim), `fast_recon.py`, `cve_lookup.py`, `exploit_search.py`, `recon_enrichers.py`, `recon_diff.py`, `recon_osint.py`, `nmap_priv.py`, `socket_scan.py` |
 | Exploit orchestration | `tools/exploit_agent/runner/_impl.py` (**canonical agent loop**; loaded by `tools/exploit_agent/runner/loop.py`), `exploit_agent/` (pkg: `policy.py`, `phase_tracker.py`, `context.py`, `prompt.py`, `reflection.py`, `skills.py`, `tool_calls.py`, `tool_catalog.py`, `model_client.py` (`ollama_client.py` is its deprecation shim), `research_assistant.py`, `outcome_classify.py`, `outcome_truth.py`, `outcome_adapter.py`; `loop.py` is a deprecated re-export shim), `tools/campaign/` (pkg behind the `autonomous_orchestrator.py` facade), `attack_planner.py`, `attack_modules/` (pkg: `base.py`, `registry.py`, `modules/`), `payload_crafter.py`, `exploit_mutator.py`, `post_exploit.py` |
 | Kill-chain state machine | `tools/killchain/` (pkg: machine, stages, edges, persistence; conditional on `killchain.enabled`) + `tools/mcp_tools/killchain.py` (MCP family) |
 | Snapshots / rollback | `snapshots.py` (providers + `SnapshotManager`), `tools/mcp_tools/snapshots.py` (MCP family), counterfactual replay in `tools/exploit_agent/runner/_impl.py` |
 | OPSEC and detection | `opsec.py`, `detection_coverage.py` |
 | External tooling | `metasploit_bridge.py`, `mcp_shared.py` |
-| Persistence and learning | `session_manager.py`, `persistent_session_manager.py`, `experience_store.py`, `credential_store.py`, `activity_log.py`, `attack_memory.py`, `api_key_store.py` |
+| Persistence and learning | `tools/memory/` (pkg: `helpers.py`, `attack_store.py`, `experience.py`, `semantic.py`, `session.py`, `service.py`; `memory_service.py` + `attack_memory.py` / `experience_store.py` / `semantic_memory.py` / `session_manager.py` / `resume_state.py` are re-export shims), `persistent_session_manager.py`, `credential_store.py`, `activity_log.py`, `api_key_store.py` |
 | Skills | `skill_registry.py`, `skill_selector.py`, `skill_embeddings.py`, `skill_pipeline.py`, `skill_feedback.py`, `skill_registry_cache.py` |
 | Flow A CLI orchestration | `config_cli.py`, `cli_exploit_settings.py`, `exploit_session.py`, `mcp_session.py`, `recon_assessment_cli.py`, `resume_state.py`, `safety_review_cli.py`, `skills_cli.py`, `swarm_bridge.py` |
-| Reporting and UX | `enhanced_reporting.py`, `interactive_menu.py`, `attack_ui.py`, `demo_mode.py`, `logging_setup.py`, `self_test.py`, `reliability.py`, `eval_harness.py` |
+| Reporting and UX | `tools/eval/` (pkg: `metrics.py`, `single_run.py`, `suite.py`, `graded.py`, `baseline.py`, `live.py`; `eval_harness.py` is a re-export shim), `enhanced_reporting.py`, `interactive_menu.py`, `attack_ui.py`, `demo_mode.py`, `logging_setup.py`, `self_test.py`, `reliability.py`, `eval_checks.py` |
 
 ### Attack Modules
 

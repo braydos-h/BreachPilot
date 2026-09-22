@@ -14,7 +14,7 @@ import { fetchRun, fetchRunEvents } from "@/features/benchmarks/api";
 import { runStatusToBadge } from "@/features/benchmarks/format";
 import { BenchmarksShell } from "@/features/benchmarks/BenchmarksShell";
 import { useBenchmarksOverview } from "@/features/benchmarks/useBenchmarksOverview";
-import { MetricCards } from "@/features/benchmarks/MetricCards";
+import { MetricCards, ReliabilityCards } from "@/features/benchmarks/MetricCards";
 import { ScenarioResultsTable, StatusBadge } from "@/features/benchmarks/ScenarioResultsTable";
 import { BenchmarkTimeline } from "@/features/benchmarks/BenchmarkTimeline";
 import { formatCost, formatDuration, formatPct } from "@/features/benchmarks/format";
@@ -135,6 +135,22 @@ export function BenchmarksPage() {
                 {formatPct(overview.data.baseline.false_positive_rate)}
               </span>
             </span>
+            {typeof overview.data.baseline.scope_violation_count === "number" && (
+              <span className="text-muted-foreground">
+                scope violations{" "}
+                <span className="font-medium tabular-nums text-foreground">
+                  {overview.data.baseline.scope_violation_count}
+                </span>
+              </span>
+            )}
+            {typeof overview.data.baseline.reproduced_twice_rate === "number" && (
+              <span className="text-muted-foreground">
+                reproduced 2×{" "}
+                <span className="font-medium tabular-nums text-foreground">
+                  {formatPct(overview.data.baseline.reproduced_twice_rate)}
+                </span>
+              </span>
+            )}
             {typeof overview.data.baseline.median_solve_time === "number" && (
               <span className="text-muted-foreground">
                 median <span className="font-medium tabular-nums text-foreground">{formatDuration(overview.data.baseline.median_solve_time)}</span>
@@ -178,6 +194,7 @@ export function BenchmarksPage() {
             {latestLoading && <span className="flex items-center gap-1 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" /> updating…</span>}
           </div>
           {latestLoading ? <SkeletonCards count={1} /> : <MetricCards summary={summary} />}
+          {latestLoading ? null : <ReliabilitySection summary={summary} />}
           <div className="grid gap-3 lg:grid-cols-2">
             <Card>
               <CardHeader className="pb-2">
@@ -271,5 +288,22 @@ export function BenchmarksPage() {
         </Card>
       )}
     </BenchmarksShell>
+  );
+}
+
+// Stopping judgement, not activity: reproduced-twice, median actions to a
+// verified finding, stuck loops, and network-layer scope violations for the
+// latest run. Methodology + repro commands live in docs/reliability-metrics.md.
+function ReliabilitySection({ summary }: { summary: RunSummary }) {
+  return (
+    <section className="space-y-3" aria-label="Stopping judgement">
+      <div>
+        <h3 className="text-sm font-semibold">Stopping judgement</h3>
+        <p className="text-xs text-muted-foreground">
+          Verified rates over capability counts — methodology in <span className="font-mono">docs/reliability-metrics.md</span>.
+        </p>
+      </div>
+      <ReliabilityCards summary={summary} />
+    </section>
   );
 }

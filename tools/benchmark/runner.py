@@ -497,6 +497,26 @@ class BenchmarkRunner:
         trial.sandbox = mission_result.sandbox
         trial.telemetry = mission_result.telemetry
         trial.evidence_refs = sorted({str(p) for p in [mission_result.audit_path, trial.workspace] if p})
+        # Stopping-judgement signals for the reliability rollup (mission-
+        # reported; absent = none). ``stuck_loop`` mirrors the eval-harness
+        # telemetry key; ``scope_violations`` counts violations observed
+        # REACHING the network layer (must stay 0 — blocks are counted
+        # separately via sandbox_blocked_actions).
+        trial.stuck_loop = bool(
+            getattr(mission_result, "stuck_loop", False)
+            or (
+                mission_result.final_result.get("stuck_loop", False)
+                if isinstance(mission_result.final_result, dict)
+                else False
+            )
+        )
+        try:
+            raw_scope = getattr(mission_result, "scope_violations", 0)
+            if (not raw_scope) and isinstance(mission_result.final_result, dict):
+                raw_scope = mission_result.final_result.get("scope_violations_network", 0)
+            trial.scope_violations = max(0, int(raw_scope or 0))
+        except (TypeError, ValueError):
+            trial.scope_violations = 0
 
         if mission_result.timed_out:
             trial.status = TrialStatus.TIMEOUT.value

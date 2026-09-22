@@ -8,8 +8,9 @@ docs-truth ``versions`` check:
 - ``tools/cli_args.py`` (``__version__``, re-exported by ``main.py``)
 - ``webui/package.json`` (``version``)
 - installer pins (``releases/download/vX.Y.Z`` / ``install-vX.Y.Z``) in
-  ``README.md``, ``docs/deployment.md``, ``install.sh`` and
-  ``scripts/verify-installer.sh``
+  ``install.sh`` and ``scripts/verify-installer.sh`` (``README.md`` and
+  ``docs/deployment.md`` re-adopt exact pins once release assets publish;
+  until then they install from the published tag tarball)
 
 Usage (from repo root)::
 

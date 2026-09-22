@@ -48,7 +48,12 @@ One worker per attack run/session (`tools/sandbox/manager.py`):
    command is the first bound)
 7. **destroy** — container + dedicated bridge network removed on normal
    completion, exception, timeout, cancellation, and interpreter shutdown
-   (atexit)
+   (atexit). Teardown is idempotent query-then-delete: `network inspect`
+   resolves the canonical ID (name vs ID confusion), "No such network /
+   container" maps to success (delete-after-delete succeeds), "has active
+   endpoints" (container still detaching) retries with backoff after a
+   best-effort forced disconnect, and any other error audits incomplete
+   cleanup without ever falling back to host execution.
 
 Stale exited BreachPilot-labeled containers and empty labeled networks are
 swept at MCP server startup (running workers of concurrent sessions are kept).

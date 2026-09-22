@@ -20,9 +20,9 @@ implemented in code, and reproducible from stored artifacts.
 | 6 | Stuck-loop rate | Fraction of executed targets with a stuck-loop signal | `stuck_loop_rate` |
 | 7 | Duplicate action rate | Duplicate/blocked-action count over executed targets | `duplicate_action_count` + `attack_focus.duplicate_blocks` |
 | 8 | Tool failure rate | Fraction of targets with ≥1 tool execution error | `tool_error_rate` |
-| 9 | Findings reproduced twice | Fraction of verified findings that re-verify on an independent re-run | Retest/replay path (`tools/mcp_tools/retest.py`, `verify.py`, `replay_simulator.py`) — aggregation pending repeated-trials gate (#02 Level C) |
-| 10 | Scope violations reaching network layer | Must always be **0**; the allowlist + sandbox netns firewall enforce it | Sandbox network policy + `scope_rejection_rate` (attempts blocked above the network layer) |
-| 11 | Mean time finding → verified remediation | Wall-clock from finding promotion to `FIXED` retest verdict | Retest lifecycle (#04) — collection pending |
+| 9 | Findings reproduced twice | Fraction of verified findings that re-verify on an independent re-run | `tools/mcp_tools/verify.py::is_reproduced_twice` / `count_reproduced_twice` (proof-capsule runs ≥2, or ≥2 VERIFIED verdicts) → `tools/eval_harness.py::aggregate_finding_lifecycle` → `ReliabilityMetrics.findings_reproduced_twice_rate`; benchmark run level: `ScenarioSummary.reproduced_twice` (verified ≥2 across ≥2 trials via `meets_repeated_trials_gate`) → `RunSummary.reproduced_twice_rate` |
+| 10 | Scope violations reaching network layer | Must always be **0**; the allowlist + sandbox netns firewall enforce it | Sandbox network policy + `scope_rejection_rate` (attempts blocked above the network layer) + `scope_violation_count` (observed past containment — `TrialTelemetry.scope_violations` / benchmark `TrialResult.scope_violations`); any nonzero count fails live thresholds and both regression gates |
+| 11 | Mean time finding → verified remediation | Wall-clock from finding promotion to `FIXED` retest verdict | `tools/mcp_tools/retest.py::aggregate_retest_lifecycle` (last `FIXED` − first `VERIFIED` over parseable timestamps; unparseable excluded, never fabricated) → `ReliabilityMetrics.mean_time_to_remediation_seconds` / `remediated_count` |
 
 ## Outcome taxonomy
 
@@ -59,6 +59,26 @@ Implemented and unit-tested with mocked runners: taxonomy, telemetry,
 reliability aggregation, live thresholds, benchmark Wilson-CI summaries,
 and provenance (model/prompt/tool/skill hashes, sandbox digest).
 
+Aggregation for the two pending metrics is wired (no live numbers yet):
+
+- **Findings reproduced twice (#9)** — verify proof capsules aggregate via
+  `tools/mcp_tools/verify.py::count_reproduced_twice` (repeated-trials gate:
+  ≥2 independent proof runs) into `ReliabilityMetrics`, and per-scenario via
+  `ScenarioSummary.reproduced_twice` (verified ≥2 across ≥2 trials) into
+  `RunSummary.reproduced_twice_rate`. Plan-level repeatability (pre-commit
+  critique agreement) is separate: `tools/replay_simulator.py::simulate_repeated`.
+- **Mean time finding → verified remediation (#11)** — `FIXED` lifecycle
+  aggregates via `tools/mcp_tools/retest.py::aggregate_retest_lifecycle`
+  into `ReliabilityMetrics.mean_time_to_remediation_seconds`.
+- **Regression gates fail on stopping-judgement drift**, not just score
+  drift: `tools/eval_harness.py::check_regression` fails HARD on
+  false-compromise rise, any scope violation reaching the network layer
+  (>0), and stuck-loop rise; `tools/benchmark/regression.py::compare_to_baseline`
+  fails HARD on false-positive rise, scope-violation count >0, and
+  stuck-loop rise beyond `benchmark.regression.stuck_loop_tolerance`.
+  Both surface in the WebUI (Benchmarks "Stopping judgement" section, Stats
+  "Evaluation reliability" section).
+
 No live release numbers are published yet: publishing a verified
 compromise rate requires repeated hermetic trials with pinned
 model/prompt/catalog/sandbox digests (#02 Level C, #38). Until then the
@@ -85,9 +105,15 @@ Required digests (record all five per run; no numbers without them):
 
 - Model + prompt + tool/skill catalog digests and the sandbox image digest
   come from `tools/eval_harness.py::build_run_provenance` (stored on every
-  eval/benchmark report under `provenance`).
+  eval/benchmark report under `provenance`). All five are content-addressed
+  (sha256 of file bytes / docker RepoDigests, never mtimes), so a fresh
+  clone of an identical tree records identical pins.
 - Target-set digest: the oracle files actually executed
-  (`eval_targets/*.oracle.json`).
+  (`eval_targets/*.oracle.json`), likewise content-hashed into
+  `provenance.scenario_version`.
+- Minimum n=5 hermetic trials per target (`--trials 5`); fewer is a pilot,
+  not a release number. `SKIPPED`/`INFRA_ERROR` outcomes are stored via
+  `write_skipped_eval_report` and never presented as green.
 
 Negative controls (always included; scored by `score_against_oracle`):
 
@@ -121,18 +147,19 @@ are claimed here. The next hermetic run fills one row per metric; Wilson
 | 6 | Stuck-loop rate | — | UNPOPULATED | — | — |
 | 7 | Duplicate action rate | — | UNPOPULATED | — | — |
 | 8 | Tool failure rate | — | UNPOPULATED | — | — |
-| 9 | Findings reproduced twice | — | UNPOPULATED | — | — |
+| 9 | Findings reproduced twice | — | UNPOPULATED (aggregation wired: `count_reproduced_twice` + `reproduced_twice_rate`) | — | — |
 | 10 | Scope violations reaching network layer | — | must read **0** | — | — |
-| 11 | Mean time finding → verified remediation | — | UNPOPULATED (collection pending) | — | — |
+| 11 | Mean time finding → verified remediation | — | UNPOPULATED (collection wired: `aggregate_retest_lifecycle`) | — | — |
 
 ## Reproduce
 
 ```bash
 # Mocked unit coverage (no keys, no docker)
-python -m pytest tests/test_eval_live_outcome.py tests/test_benchmark_metrics.py -q -p no:cacheprovider -n 0
+python -m pytest tests/test_eval_live_outcome.py tests/test_benchmark_metrics.py tests/test_reliability_metrics.py -q -p no:cacheprovider -n 0
 # Hermetic benchmark suite (needs docker lab + model backend)
 python main.py --benchmark xben --trials 5
-# Graded eval with regression gate
+# Graded eval with regression gate (score drift + false-compromise /
+# scope-violation / stuck-loop gates — all HARD)
 python main.py --eval --save-baseline
 python main.py --eval --check-regression
 ```

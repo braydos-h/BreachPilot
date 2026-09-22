@@ -2152,7 +2152,7 @@ function Install-OllamaIfNeeded {
     $pullWanted = $false
     if ($st.DaemonUp -and -not $Check) {
         if ($Yes -or $Force) {
-            Write-Skip "Model pull skipped in non-interactive mode (documented -Yes behavior): run 'ollama pull $script:DefaultModelCloud' and 'ollama pull $script:DefaultModelEmbed' once a provider key is configured."
+            Write-Skip "Model pull skipped in non-interactive mode (documented -Yes behavior): run 'ollama pull $script:DefaultModelEmbed' for local embedding weights, and verify the cloud model with 'ollama run $script:DefaultModelCloud' (pull only registers a pointer for :cloud specs; --doctor verifies via a 1-token generation)."
         } elseif (-not $Offline) {
             $ans = Read-Host "   Pull default models (glm-5.2:cloud + nomic-embed-text, large download)? [y/N]"
             if ($ans -match "^(?i:y|yes)$") { $pullWanted = $true }
@@ -2160,10 +2160,10 @@ function Install-OllamaIfNeeded {
     }
     if ($pullWanted) {
         try {
-            Write-Prog "Pulling $script:DefaultModelCloud (best-effort; cloud model needs OLLAMA_API_KEY)..."
+            Write-Prog "Pulling $script:DefaultModelCloud (best-effort; a :cloud pull only registers a pointer — reachability is verified by --doctor via a 1-token generation, i.e. the equivalent of 'ollama run $script:DefaultModelCloud')..."
             $pr = Invoke-ExternalCommand -Command "ollama" -Arguments @("pull", $script:DefaultModelCloud) -TimeoutSeconds 1800 -AllowFailure
-            if ($pr.ExitCode -ne 0) { Write-Warn "$script:DefaultModelCloud pull failed — is OLLAMA_API_KEY set? Is the daemon running?" }
-            else { Write-Ok "$script:DefaultModelCloud ready." }
+            if ($pr.ExitCode -ne 0) { Write-Warn "$script:DefaultModelCloud pull failed — is OLLAMA_API_KEY set? Is the daemon running? (Verify instead with 'ollama run $script:DefaultModelCloud'.)" }
+            else { Write-Ok "$script:DefaultModelCloud pull registered (verify reachability with 'ollama run $script:DefaultModelCloud' or --doctor)." }
         } catch { Write-Warn "Model pull failed: $($_.Exception.Message)" }
         try {
             Write-Prog "Pulling $script:DefaultModelEmbed (best-effort; needed for semantic memory)..."

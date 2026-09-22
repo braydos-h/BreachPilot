@@ -502,7 +502,7 @@ async def test_run_exploit_agent_phase_enforcement_prevents_early_exit() -> None
 class TestAgentLoopReplanning:
     def test_failure_driven_replanning_creates_retry_task(self) -> None:
         """Planner should retry only when it can select a different check."""
-        from planner import PlannerAgent
+        from legacy.planner import PlannerAgent
 
         planner = PlannerAgent(risk_profile="standard_authorized")
         failed_task = planner._create_task(
@@ -526,7 +526,7 @@ class TestAgentLoopReplanning:
 
     def test_failure_driven_replanning_refuses_permanent_errors(self) -> None:
         """Permanent errors should not generate retry tasks."""
-        from planner import PlannerAgent
+        from legacy.planner import PlannerAgent
 
         planner = PlannerAgent(risk_profile="standard_authorized")
         failed_task = planner._create_task(

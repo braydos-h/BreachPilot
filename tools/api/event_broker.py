@@ -109,7 +109,7 @@ class _Pending:
         self.event_type = event_type
         self.payload = payload
         self.timestamp = timestamp
-        self.future = _futures.Future()
+        self.future: _futures.Future[Any] = _futures.Future()
 
 
 class _Barrier:
@@ -129,7 +129,7 @@ class _Barrier:
         import concurrent.futures as _futures
 
         self.fsync = fsync
-        self.future = _futures.Future()
+        self.future: _futures.Future[Any] = _futures.Future()
 
 
 _DURABILITY_MODES = ("strict", "balanced", "fast")
@@ -908,7 +908,7 @@ class RunEventBroker:
                     # Phase 1: sequence pendings in queue order, then write.
                     # File order == sequence order by construction (P1-03):
                     # the writer is the only sequencer.
-                    events: list[dict[str, Any] | None] = []
+                    events: list[dict[str, Any] | _Barrier | _Pending | None] = []
                     if durability == "strict":
                         # Old behavior, kept for forensics: fsync per event.
                         for item in batch:

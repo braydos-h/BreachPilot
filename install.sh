@@ -2,7 +2,8 @@
 #
 # BreachPilot installer — Linux/macOS bootstrap, update, repair, and uninstall.
 #
-#   Release path (recommended, pinned + verified):
+#   Release path (pinned + verified — active once a GitHub Release publishes
+#   versioned assets; none published yet, so these URLs 404 today):
 #     curl -fsSLO https://github.com/braydos-h/BreachPilot/releases/download/v0.68.4/install-v0.68.4.sh
 #     curl -fsSLO https://github.com/braydos-h/BreachPilot/releases/download/v0.68.4/install-v0.68.4.sh.sha256
 #     bash ../scripts/verify-installer.sh install-v0.68.4.sh install-v0.68.4.sh.sha256

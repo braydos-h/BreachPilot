@@ -66,8 +66,14 @@ fi
 if [[ "$OLLAMA_PROVIDER" == "ollama" ]]; then
     check ollama    "curl -fsSL https://ollama.com/install.sh | sh  (or: brew install ollama)"
 
-    echo "==> Pulling default model (best-effort)"
-    ollama pull glm-5.2:cloud 2>/dev/null || echo "  [--] ollama pull skipped (is the ollama daemon running?)"
+    echo "==> Pulling default models (best-effort)"
+    # NOTE: glm-5.2:cloud is a cloud spec, not local weights — `ollama pull`
+    # only registers a pointer. Reachability is verified by `python main.py
+    # --doctor` via a 1-token generation (the equivalent of `ollama run
+    # <spec>`), never by the pull alone.
+    ollama pull glm-5.2:cloud 2>/dev/null || echo "  [--] cloud-model pull skipped (verify with --doctor once OLLAMA_API_KEY is set)"
+    # Local embedding weights (needed for semantic memory/skills).
+    ollama pull nomic-embed-text 2>/dev/null || echo "  [--] embedding-model pull skipped (is the ollama daemon running?)"
 else
     echo "==> Skipping Ollama daemon checks/models (models.provider: $OLLAMA_PROVIDER — no Ollama needed)"
 fi

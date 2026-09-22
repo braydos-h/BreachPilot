@@ -1041,7 +1041,8 @@ async def run_sequential_assessment(
             line,
         )
         if port_match:
-            open_ports.append(port_match.groups())
+            port, proto, service, banner = port_match.groups()
+            open_ports.append((str(port), str(proto), str(service), str(banner)))
 
     if open_ports:
         # Shared planner: pre-filter to the queryable subset (banner identifies

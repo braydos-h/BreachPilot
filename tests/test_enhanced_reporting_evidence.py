@@ -21,7 +21,7 @@ from typing import Any
 import pytest
 
 from db import DatabaseManager, _new_id
-from evidence import EvidenceStore, promote_exploit_audit
+from legacy.evidence import EvidenceStore, promote_exploit_audit
 from tools.enhanced_reporting import (
     EnhancedReportGenerator,
     _bump_cia,

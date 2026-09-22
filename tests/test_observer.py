@@ -7,7 +7,7 @@ dispatch including the semantic-memory wiring branch.
 
 from __future__ import annotations
 
-from observer import Observation, ObserverAgent, _compact_output
+from legacy.observer import Observation, ObserverAgent, _compact_output
 
 # ── Observation dataclass ────────────────────────────────────────────────────
 
