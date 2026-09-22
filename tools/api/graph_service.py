@@ -1,10 +1,20 @@
 """AttackGraph explorer service: builds + caches a per-run graph.
 
 Wraps ``tools/intelligence/graph`` (AttackGraphStore / GraphTraversal /
-GraphMergeEngine) and the ``graph_builder`` ingestion. One store per run,
-rebuilt lazily when the run's artifact fingerprint changes (audit + enhanced
-report mtimes/sizes + run updated_at). All query surfaces are bounded and
+GraphMergeEngine) and the ``graph_builder`` ingestion. One file-backed store
+per run (``<run_dir>/attack_graph.db``), ingested incrementally: the writer
+tracks the audit byte offset (+ artifact sizes/mtimes) in ``agv2_meta`` and
+on fingerprint change ingests only new audit records via the P2-02 batch
+API instead of discarding the store. All query surfaces are bounded and
 scope-isolated (scope = run id).
+
+Deletion/retraction semantics: audit records are append-only, so deltas
+merge cleanly. The enhanced report is NOT incrementally merged (re-ingesting
+it would double-count findings): when the report content changes, or the
+audit file shrinks, or the store is corrupt, the service does a full rebuild
+(the stale store is discarded, so removals retract). Daemon restarts reopen
+the file-backed store and resume from the persisted offset — one full rebuild
+only when the offsets no longer describe the artifacts.
 
 Read-only: never touches a target, never mutates run artifacts.
 """
@@ -15,7 +25,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from tools.api.graph_builder import build_graph_store, scope_for_run
+from tools.api.graph_builder import (
+    build_graph_store,
+    ingest_audit_records,
+    ingest_run_metadata,
+    read_audit_from,
+    scope_for_run,
+)
 from tools.intelligence.graph.merge import GraphMergeConflict
 from tools.intelligence.graph.store import AttackGraphStore
 from tools.intelligence.graph.types import GraphNode, NodeStatus, NodeType
@@ -34,6 +50,15 @@ class _Store:
     conflicts: list[GraphMergeConflict]
     fingerprint: tuple[Any, ...]
     built_at: str
+    audit_rel: str = ""
+    audit_offset: int = 0
+    audit_size: int = 0
+    audit_mtime: int = 0
+    report_key: tuple[Any, ...] = ()
+
+
+_GRAPH_STORE_VERSION = "1"
+_GRAPH_DB_NAME = "attack_graph.db"
 
 
 class AttackGraphService:
