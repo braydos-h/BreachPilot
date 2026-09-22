@@ -31,13 +31,21 @@ from tools.mcp_session import (
     open_exploit_mcp_session,
 )
 from tools.model_router import build_router, format_model_choice
-from tools.model_telemetry import usage_log_path, workspace_root_from_sources
+from tools.model_telemetry import usage_log_path, workspace_root_from_sources  # noqa: F401 -- re-exported for historical import paths
 from tools.run_service.models import (
     RunPreview,
     RunRequest,
 )
 
 log = logging.getLogger("breachpilot.run_create")
+
+# P2-06 llm_usage.jsonl readers (all byte-offset; no full scans on tick paths):
+# - UsageLogCursor (this module): the canonical per-reader primitive.
+# - _TelemetryAccumulator (this module): incremental snapshot for the 15s
+#   ticker (tools/run_service/execute.py).
+# - tools/model_telemetry.py: bounded tail-block readers.
+# Deleted full-scan paths (zero callers repo-wide): _llm_usage_line_count,
+# _run_telemetry (prepare.py + main.py copies), service.py re-exports.
 
 # Human-readable text for preparation progress events (safe for the UI — no
 # targets, config values, or internals; stage ids are what clients key on).
@@ -219,70 +227,71 @@ ui = get_ui()
 _COLD_INIT_LOCK = threading.Lock()
 
 
-def _llm_usage_line_count() -> int:
-    """Line count of the shared llm_usage.jsonl, or 0 if absent."""
-    try:
-        path = usage_log_path(workspace_root_from_sources())
-        if not path.exists():
-            return 0
-        with path.open("r", encoding="utf-8", errors="replace") as handle:
-            return sum(1 for _ in handle)
-    except OSError:
-        return 0
+class UsageLogCursor:
+    """Byte-offset reader for a shared append-only JSONL log (P2-06).
 
+    Per-reader state (never shared across concurrent runs): ``poll()``
+    returns only records completed since the last poll. A trailing partial
+    line (writer mid-flush) is held back until newline-terminated.
+    Truncation/rotation resets the offset and counters together.
+    """
 
-def _run_telemetry(start_lines: int) -> dict[str, Any] | None:
-    """Aggregate llm_usage.jsonl records appended after ``start_lines``."""
-    import json as _json
-
-    try:
-        path = usage_log_path(workspace_root_from_sources())
-        if not path.exists():
-            return None
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return None
-    new_lines = lines[start_lines:] if start_lines <= len(lines) else lines
-    calls = 0
-    total_tokens = 0
-    ctx_values: list[float] = []
-    last_ctx_pct: float | None = None
-    last_ctx_window: int | None = None
-    last_est_ctx: int | None = None
-    for line in new_lines:
+    def __init__(self, path: Path) -> None:
+        self._path = path
         try:
-            item = _json.loads(line)
-        except _json.JSONDecodeError:
-            continue
-        if not isinstance(item, dict):
-            continue
-        calls += 1
-        tok = item.get("total_tokens")
-        if isinstance(tok, (int, float)):
-            total_tokens += int(tok)
-        ctx = item.get("context_usage_pct")
-        if isinstance(ctx, (int, float)):
-            ctx_values.append(float(ctx))
-            last_ctx_pct = float(ctx)
-        win = item.get("context_window_tokens")
-        if isinstance(win, int):
-            last_ctx_window = win
-        est = item.get("estimated_context_tokens")
-        if isinstance(est, int):
-            last_est_ctx = est
-    if not calls:
-        return None
-    avg_ctx = (sum(ctx_values) / len(ctx_values)) if ctx_values else None
-    max_ctx = max(ctx_values) if ctx_values else None
-    return {
-        "calls": calls,
-        "total_tokens": total_tokens,
-        "avg_ctx": avg_ctx,
-        "max_ctx": max_ctx,
-        "context_window_tokens": last_ctx_window,
-        "last_ctx_pct": last_ctx_pct,
-        "last_estimated_context_tokens": last_est_ctx,
-    }
+            self._offset = path.stat().st_size
+        except OSError:
+            self._offset = 0
+        self._calls = 0
+
+    @property
+    def calls(self) -> int:
+        """Records seen by this reader (O(1), no recount)."""
+        return self._calls
+
+    @property
+    def offset(self) -> int:
+        """Current byte offset."""
+        return self._offset
+
+    def poll(self) -> list[dict[str, Any]]:
+        """Return newly completed records (possibly empty, never None)."""
+        import json as _json
+
+        try:
+            size = self._path.stat().st_size
+        except OSError:
+            return []
+        if size < self._offset:
+            self._offset = 0
+            self._calls = 0
+        if size <= self._offset:
+            return []
+        try:
+            with self._path.open("rb") as handle:
+                handle.seek(self._offset)
+                data = handle.read()
+        except OSError:
+            return []
+        last_nl = data.rfind(b"\n")
+        if last_nl == -1:
+            return []
+        complete = data[: last_nl + 1]
+        self._offset += len(complete)
+        out: list[dict[str, Any]] = []
+        for raw in complete.splitlines():
+            line = raw.decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+            try:
+                item = _json.loads(line)
+            except _json.JSONDecodeError:
+                continue
+            if not isinstance(item, dict):
+                continue
+            self._calls += 1
+            out.append(item)
+        return out
 
 
 class _TelemetryAccumulator:
