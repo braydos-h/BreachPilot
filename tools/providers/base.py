@@ -41,6 +41,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 # drop it when the backend has no such knob.
 CANONICAL_CHAT_KWARGS = ("context_window_tokens",)
 
+<<<<<<< Updated upstream
 #: Ollama-only chat kwargs with no meaning on other backends. Dropped
 #: centrally (see ``prepare_chat_kwargs``) so the ChatGPT / OpenCode Go raw
 #: clients and ``model_router`` stop maintaining three copies of the list.

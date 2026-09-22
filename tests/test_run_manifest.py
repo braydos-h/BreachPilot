@@ -192,6 +192,7 @@ def test_import_rejects_bad_hash(tmp_path):
             dst.writestr(info.filename, data)
     with pytest.raises(ValueError, match="[Hh]ash|rejected"):
         import_run_bundle(tampered, tmp_path / "dest3")
+<<<<<<< Updated upstream
 
 
 def test_manifest_indexes_witness_and_workspaces(tmp_path):
@@ -206,3 +207,5 @@ def test_manifest_indexes_witness_and_workspaces(tmp_path):
     updated = update_manifest(run_dir)
     assert updated.state_stores["witness"] == str(run_dir / "witness.jsonl")
     assert str(run_dir / "witness.jsonl") in updated.evidence_index
+=======
+>>>>>>> Stashed changes

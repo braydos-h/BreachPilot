@@ -80,10 +80,15 @@ def _candidate_stores(run_dir: Path) -> dict[str, str]:
     """All known store locations for a run (existing or not).
 
     Extends the original TODO 007 set with ``loot/``, campaign state
+<<<<<<< Updated upstream
     (``attack_states.json``), the kill-chain graph (``killchain_graph.db``),
     the snapshot index (``snapshots_index.json``), the witness stream
     (``witness.jsonl``), the swarm blackboard (``swarm_workspace/``) and the
     per-target exploit workspaces (``exploit_workspace/``) when present — the
+=======
+    (``attack_states.json``), the kill-chain graph (``killchain_graph.db``)
+    and the snapshot index (``snapshots_index.json``) when present — the
+>>>>>>> Stashed changes
     refresh path prunes absent entries, so listing them here is free.
     """
     return {
@@ -99,9 +104,12 @@ def _candidate_stores(run_dir: Path) -> dict[str, str]:
         "loot": str(run_dir / "loot"),
         "killchain_graph": str(run_dir / "killchain_graph.db"),
         "snapshots_index": str(run_dir / "snapshots_index.json"),
+<<<<<<< Updated upstream
         "witness": str(run_dir / "witness.jsonl"),
         "swarm_workspace": "swarm_workspace",
         "exploit_workspace": "exploit_workspace",
+=======
+>>>>>>> Stashed changes
     }
 
 
