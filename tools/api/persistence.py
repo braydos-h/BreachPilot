@@ -157,8 +157,6 @@ def _new_id(prefix: str) -> str:
 class ApiPersistence:
     """Thread-safe SQLite access for API runs + decisions."""
 
-    _PRAGMAS_SET = False
-
     def __init__(self, reports_dir: Path) -> None:
         self._reports_dir = reports_dir
         self._path = reports_dir / _API_DB_NAME
@@ -171,6 +169,13 @@ class ApiPersistence:
         return self._reports_dir
 
     def _connect(self) -> sqlite3.Connection:
+        """Open a connection: no locking, no persistent PRAGMAs.
+
+        Only per-connection settings live here (``foreign_keys``, busy
+        timeout). ``journal_mode``/``synchronous`` are persistent DB settings
+        owned by :meth:`_init_db`, which holds ``self._lock`` — acquiring the
+        non-reentrant lock here would self-deadlock first construction.
+        """
         conn = sqlite3.connect(str(self._path), check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
@@ -178,27 +183,21 @@ class ApiPersistence:
             conn.execute("PRAGMA busy_timeout=5000")
         except sqlite3.Error:
             pass
-        # ponytail perf: journal_mode/synchronous are persistent DB settings —
-        # set them once in _init_db, not on every per-op connect.
-        if not ApiPersistence._PRAGMAS_SET:
-            with self._lock:
-                if not ApiPersistence._PRAGMAS_SET:
-                    try:
-                        conn.execute("PRAGMA journal_mode=WAL")
-                    except sqlite3.Error:
-                        pass
-                    try:
-                        # FULL (not NORMAL) so a crash can't lose the WAL tail.
-                        conn.execute("PRAGMA synchronous=FULL")
-                    except sqlite3.Error:
-                        pass
-                    ApiPersistence._PRAGMAS_SET = True
         return conn
 
     def _init_db(self) -> None:
         with self._lock:
             conn = self._connect()
             try:
+                try:
+                    conn.execute("PRAGMA journal_mode=WAL")
+                except sqlite3.Error:
+                    pass
+                try:
+                    # FULL (not NORMAL) so a crash can't lose the WAL tail.
+                    conn.execute("PRAGMA synchronous=FULL")
+                except sqlite3.Error:
+                    pass
                 conn.executescript(_DDL)
                 # Apply incremental migrations for DBs created at an older
                 # schema version. Each migration is gated on its column/idx
