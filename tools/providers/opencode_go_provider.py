@@ -21,7 +21,9 @@ Design notes:
 
 from __future__ import annotations
 
+import atexit
 import json
+import threading
 import time
 import uuid
 from collections import deque
@@ -57,6 +59,80 @@ def opencode_session_id() -> str:
 
 # Ollama-only kwargs that Responses does not understand.
 _DROP_KWARGS = ("options", "keep_alive", "format", "suffix", "think", "raw", "num_ctx")
+
+# ---------------------------------------------------------------------------
+# Persistent HTTP plumbing (P1-05 connection reuse + P1-06 lifecycle)
+# ---------------------------------------------------------------------------
+
+# Owners of OpenCodeGoResponsesClient (P1-06 audit):
+#   - build router below (`shared`, router-owned)
+#   - OpenCodeGoProvider.build_client() below (`shared`, client-owned)
+#   - discover_opencode_go_models() below (temp instance, closed in finally)
+#   - tools/interactive_menu.py model picker (temp instance, closed in finally)
+
+
+def _keepalive_limits() -> Any:
+    """Connection-pool limits for persistent clients (None when httpx is faked)."""
+    try:
+        return httpx.Limits(max_connections=20, max_keepalive_connections=10, keepalive_expiry=60.0)
+    except Exception:  # noqa: BLE001 -- test fakes have no Limits; fall back to defaults
+        return None
+
+
+def _http2_available() -> bool:
+    """True when the optional ``h2`` package is installed (import-time flag)."""
+    try:
+        import importlib.util
+
+        return importlib.util.find_spec("h2") is not None
+    except Exception:  # noqa: BLE001 -- missing import machinery means no h2
+        return False
+
+
+_HTTP2 = _http2_available()
+
+
+def _build_persistent_client(timeout: float | None) -> Any:
+    """One keep-alive httpx client (http2 opportunistic, no hard h2 dependency)."""
+    kwargs: dict[str, Any] = {"timeout": timeout, "http2": _HTTP2}
+    limits = _keepalive_limits()
+    if limits is not None:
+        kwargs["limits"] = limits
+    return httpx.Client(**kwargs)
+
+
+_OPENCODE_GO_LIVE_CLIENTS: Any = None
+
+
+def _live_clients() -> Any:
+    """Weak set of live OpenCodeGoResponsesClient instances (P1-06 shutdown sweep)."""
+    import weakref
+
+    global _OPENCODE_GO_LIVE_CLIENTS
+    if _OPENCODE_GO_LIVE_CLIENTS is None:
+        _OPENCODE_GO_LIVE_CLIENTS = weakref.WeakSet()
+    return _OPENCODE_GO_LIVE_CLIENTS
+
+
+def close_all_opencode_go_clients() -> None:
+    """Close every live OpenCodeGoResponsesClient (idempotent, never raises)."""
+    live = _OPENCODE_GO_LIVE_CLIENTS
+    if live is not None:
+        for client in list(live):
+            try:
+                client.close()
+            except Exception:  # noqa: BLE001 -- shutdown sweep must never raise
+                pass
+
+
+def _atexit_close_clients() -> None:
+    try:
+        close_all_opencode_go_clients()
+    except Exception:  # noqa: BLE001 -- atexit shutdown must never raise during interpreter teardown
+        pass
+
+
+atexit.register(_atexit_close_clients)
 
 # ---------------------------------------------------------------------------
 # Config helpers
@@ -827,6 +903,45 @@ class OpenCodeGoResponsesClient:
         # Cache for model discovery (instance-local to avoid cross-test pollution)
         self._models_cache: tuple[float, list[str]] | None = None
 
+        self._close_lock = threading.Lock()
+        self._closed = False
+        # Persistent keep-alive pool: one TCP+TLS setup per client lifetime,
+        # not per request. Default timeout matches the old per-call behavior.
+        self._http = _build_persistent_client(self.timeout)
+        try:
+            _live_clients().add(self)
+        except Exception:  # noqa: BLE001 -- tracking must never break construction
+            pass
+
+    def close(self) -> None:
+        """Close the persistent HTTP client. Idempotent, thread-safe, never raises."""
+        with self._close_lock:
+            http, self._http = self._http, None
+            if self._closed:
+                return
+            self._closed = True
+        if http is not None:
+            try:
+                http.close()
+            except Exception:  # noqa: BLE001 -- close/shutdown path must never raise
+                pass
+
+    def __enter__(self) -> "OpenCodeGoResponsesClient":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+    def __del__(self) -> None:  # pragma: no cover - GC timing is nondeterministic
+        try:
+            if not self._closed:
+                import warnings
+
+                warnings.warn("OpenCodeGoResponsesClient was not closed; closing on GC", ResourceWarning, stacklevel=2)
+            self.close()
+        except Exception:  # noqa: BLE001 -- __del__ must never raise
+            pass
+
     # -------------------------------------------------------------------
     # Helpers
     # -------------------------------------------------------------------
@@ -975,11 +1090,10 @@ class OpenCodeGoResponsesClient:
         payload["stream"] = False
         headers = self._headers()
         try:
-            with httpx.Client(timeout=timeout) as client:  # type: ignore[attr-defined]
-                response = client.post(url, json=payload, headers=headers)
-                if response.status_code >= 400:
-                    self._handle_http_error(response)
-                data = response.json()
+            response = self._http.post(url, json=payload, headers=headers, timeout=timeout)
+            if response.status_code >= 400:
+                self._handle_http_error(response)
+            data = response.json()
         except httpx.HTTPStatusError as exc:  # type: ignore[attr-defined]
             # Map to typed errors without leaking key
             status = getattr(exc.response, "status_code", 0) if hasattr(exc, "response") else 0
@@ -1006,13 +1120,12 @@ class OpenCodeGoResponsesClient:
         payload = dict(payload)
         payload["stream"] = True
         headers = self._headers()
-        # httpx streaming
+        # httpx streaming over the persistent pool (per-request timeout override).
         try:
-            with httpx.Client(timeout=timeout) as client:  # type: ignore[attr-defined]
-                with client.stream("POST", url, json=payload, headers=headers) as response:  # type: ignore[attr-defined]
-                    if response.status_code >= 400:
-                        self._handle_http_error(response)
-                    yield from _parse_sse_stream(response)
+            with self._http.stream("POST", url, json=payload, headers=headers, timeout=timeout) as response:
+                if response.status_code >= 400:
+                    self._handle_http_error(response)
+                yield from _parse_sse_stream(response)
         except httpx.HTTPStatusError as exc:  # type: ignore[attr-defined]
             status = getattr(exc.response, "status_code", 0) if hasattr(exc, "response") else 0
             fake = type("R", (), {"status_code": status, "text": str(exc)})()
@@ -1050,12 +1163,11 @@ class OpenCodeGoResponsesClient:
 
         headers = self._headers()
         try:
-            with httpx.Client(timeout=5.0) as client:  # type: ignore[attr-defined]
-                resp = client.get(f"{url_base}/models", headers=headers)
-                if resp.status_code >= 400:
-                    # Don't cache failures
-                    return []
-                data = resp.json()
+            resp = self._http.get(f"{url_base}/models", headers=headers, timeout=5.0)
+            if resp.status_code >= 400:
+                # Don't cache failures
+                return []
+            data = resp.json()
         except Exception:  # noqa: BLE001 -- discovery probe: failure degrades to registry mode, never raises
             return []
 
@@ -1093,7 +1205,10 @@ def discover_opencode_go_models(
 ) -> list[str]:
     """Stateless discovery helper (for tests)."""
     client = OpenCodeGoResponsesClient(base_url=base_url, api_key=api_key or "", timeout=timeout, config=cfg)
-    return client.discover_models(base_url, cfg)
+    try:
+        return client.discover_models(base_url, cfg)
+    finally:
+        client.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1342,13 +1457,17 @@ class OpenCodeGoProvider(BaseProvider):
                 fallback_models=[default_model],
             )
         try:
-            import httpx
-
             headers = {"Authorization": f"Bearer {api_key}", _SESSION_HEADER: _SESSION_ID}
-            with httpx.Client(timeout=5.0, headers=headers) as client:
-                resp = client.get(f"{base_url}/models")
+            probe = _build_persistent_client(5.0)
+            try:
+                resp = probe.get(f"{base_url}/models", headers=headers)
                 resp.raise_for_status()
                 data = resp.json()
+            finally:
+                try:
+                    probe.close()
+                except Exception:  # noqa: BLE001 -- probe teardown must never raise
+                    pass
         except Exception as exc:
             err_text = str(exc)
             if api_key and api_key in err_text:
