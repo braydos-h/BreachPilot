@@ -298,10 +298,24 @@ class _TelemetryAccumulator:
         self._offset = path.stat().st_size if path.exists() else 0
         self._calls = 0
         self._total_tokens = 0
-        self._ctx_values: list[float] = []
+        self._ctx_sum = 0.0
+        self._ctx_count = 0
+        self._ctx_max: float | None = None
         self._last_ctx_pct: float | None = None
         self._last_ctx_window: int | None = None
         self._last_est_ctx: int | None = None
+
+    def _reset(self) -> None:
+        """Reset all four aggregation counters together (or none)."""
+        self._offset = 0
+        self._calls = 0
+        self._total_tokens = 0
+        self._ctx_sum = 0.0
+        self._ctx_count = 0
+        self._ctx_max = None
+        self._last_ctx_pct = None
+        self._last_ctx_window = None
+        self._last_est_ctx = None
 
     def snapshot(self) -> dict[str, Any] | None:
         import json as _json
@@ -312,13 +326,7 @@ class _TelemetryAccumulator:
             return self._aggregate()
         if size < self._offset:
             # Truncated (rotated/reset) — start over.
-            self._offset = 0
-            self._calls = 0
-            self._total_tokens = 0
-            self._ctx_values = []
-            self._last_ctx_pct = None
-            self._last_ctx_window = None
-            self._last_est_ctx = None
+            self._reset()
         if size > self._offset:
             try:
                 with self._path.open("rb") as handle:
@@ -346,8 +354,12 @@ class _TelemetryAccumulator:
                         self._total_tokens += int(tok)
                     ctx = item.get("context_usage_pct")
                     if isinstance(ctx, (int, float)):
-                        self._ctx_values.append(float(ctx))
-                        self._last_ctx_pct = float(ctx)
+                        ctx_f = float(ctx)
+                        self._ctx_sum += ctx_f
+                        self._ctx_count += 1
+                        if self._ctx_max is None or ctx_f > self._ctx_max:
+                            self._ctx_max = ctx_f
+                        self._last_ctx_pct = ctx_f
                     win = item.get("context_window_tokens")
                     if isinstance(win, int):
                         self._last_ctx_window = win
@@ -359,13 +371,12 @@ class _TelemetryAccumulator:
     def _aggregate(self) -> dict[str, Any] | None:
         if not self._calls:
             return None
-        avg_ctx = (sum(self._ctx_values) / len(self._ctx_values)) if self._ctx_values else None
-        max_ctx = max(self._ctx_values) if self._ctx_values else None
+        avg_ctx = (self._ctx_sum / self._ctx_count) if self._ctx_count else None
         return {
             "calls": self._calls,
             "total_tokens": self._total_tokens,
             "avg_ctx": avg_ctx,
-            "max_ctx": max_ctx,
+            "max_ctx": self._ctx_max,
             "context_window_tokens": self._last_ctx_window,
             "last_ctx_pct": self._last_ctx_pct,
             "last_estimated_context_tokens": self._last_est_ctx,
