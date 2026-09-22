@@ -695,6 +695,7 @@ reflection by `swarm.reflection_enabled`.
 | `token_file` | str | `.webui_secret_key` | Auto-generated bearer token file (gitignored); `BREACHPILOT_API_TOKEN` env overrides | app.py:70, tools/api/auth.py:42-46 |
 | `allowed_origins` | list[str] | `[]` | Extra loopback origins for CORS/WS; `null` and non-loopback always rejected | app.py:108 |
 | `event_buffer_size` | int | `256` | In-memory ring buffer per run for WS subscribers | app.py:81 |
+| `event_durability` | str | `balanced` | Event fsync policy: `strict` (per event), `balanced` (per batch + decisions/terminal transitions), `fast` (checkpoint/close only) | tools/api/event_broker.py |
 | `shutdown_timeout_seconds` | int | `15` | Graceful shutdown wait | tools/api/run_manager.py:320 |
 | `serve_webui` | bool | `false` | Mount `webui/dist/` at `/`; `--web` sets this **in memory only** | app.py:145, main.py:542 |
 | `max_concurrent_runs` | int | `3` | D3: N concurrent runs (1 = legacy 409) | `tools/api/run_manager.py`, `tools/config/schema.py` |

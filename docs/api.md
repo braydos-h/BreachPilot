@@ -1422,6 +1422,7 @@ api:
   token_file: .webui_secret_key   # gitignored; created on first boot
   allowed_origins: []          # extra loopback origins for CORS/WS
   event_buffer_size: 256       # in-memory ring buffer per run
+  event_durability: balanced   # strict = fsync per event; balanced = per batch + decisions/transitions; fast = checkpoint/close only
   shutdown_timeout_seconds: 15 # graceful shutdown wait
   serve_webui: false           # mount built webui/dist/ at / when true (--web sets this in memory)
   max_concurrent_runs: 3       # D3: N concurrent runs (lab default 3; 1 = legacy single-run 409)
@@ -1437,6 +1438,7 @@ api:
 | `token_file` | str | `.webui_secret_key` | 256-bit token written here; `0o600` |
 | `allowed_origins` | str[] | `[]` | Extra loopback HTTP(S) origins for CORS/WS |
 | `event_buffer_size` | int | 256 | In-memory ring per run; ≥ 1 |
+| `event_durability` | str | `balanced` | Event fsync policy: `strict` (per event), `balanced` (per batch + decisions/terminal transitions), `fast` (checkpoint/close only) |
 | `shutdown_timeout_seconds` | int | 15 | Graceful cancel wait before forcing cleanup |
 | `serve_webui` | bool | false | Mount `webui/dist/` at `/` when true. `--web` sets this in memory only (never written to `config.yaml`). Requires `webui/dist/index.html` to exist. |
 | `max_concurrent_runs` | int | 3 | D3: N concurrent runs; 1 = legacy single-run 409 (`tools/api/run_manager.py:22`) |

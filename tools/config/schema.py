@@ -800,6 +800,7 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "token_file": ".webui_secret_key",
         "allowed_origins": [],
         "event_buffer_size": 256,
+        "event_durability": "balanced",
         "shutdown_timeout_seconds": 15,
         "serve_webui": False,
         # D3: attack-path DAG API route. Lab build: enabled true.

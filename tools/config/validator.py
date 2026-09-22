@@ -692,6 +692,9 @@ class ConfigValidator:
                     value = ap.get(key)
                     if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 0):
                         result.errors.append(f"api.{key} must be a non-negative integer.")
+                durability = ap.get("event_durability")
+                if durability is not None and durability not in ("strict", "balanced", "fast"):
+                    result.errors.append("api.event_durability must be one of: strict, balanced, fast.")
                 serve_webui = ap.get("serve_webui")
                 if serve_webui is not None and not isinstance(serve_webui, bool):
                     result.errors.append("api.serve_webui must be a boolean.")
