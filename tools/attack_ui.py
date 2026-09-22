@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     # / ``Style`` / ``_CUSTOM_STYLE`` / ``_HAS_QUESTIONARY`` without turning
     # the lazy import into an eager one.
     import questionary as questionary
-    from questionary import Choice, Style
+    from questionary import Choice
 
     _CUSTOM_STYLE: Any
     _HAS_QUESTIONARY: bool

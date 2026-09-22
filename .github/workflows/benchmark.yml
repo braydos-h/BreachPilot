@@ -91,6 +91,7 @@ jobs:
           tmp = Path(tempfile.mkdtemp())
           config = {
               "benchmark": {"output_dir": str(tmp / "bench"), "sandbox_required": False},
+              "sandbox": {"enabled": False},
               "models": {"default_alias": "smoke-model"},
               "mcp": {"http_port": 8001},
           }

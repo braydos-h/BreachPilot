@@ -33,6 +33,7 @@ def _config(tmp_path: Path, **bm) -> dict[str, Any]:
         "benchmark": {"output_dir": str(tmp_path / "bench"), "sandbox_required": False, **bm},
         "models": {"default_alias": "glm"},
         "mcp": {"http_port": 8001},
+        "sandbox": {"enabled": False},
     }
 
 

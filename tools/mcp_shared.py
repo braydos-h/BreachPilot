@@ -64,7 +64,7 @@ from tools.reliability import RateLimiter
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, keeps cold import light
     from tools.cve_lookup import CVESearchSettings, NVDClient
-    from tools.exploit_search import ExploitSearch, ExploitSearchSettings
+    from tools.exploit_search import ExploitSearch
     from tools.web_researcher import (
         OllamaResearchSettings,
         SerpAPIResearchSettings,

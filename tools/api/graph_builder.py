@@ -87,12 +87,16 @@ def _edge_id(src: str, dst: str, edge_type: EdgeType) -> str:
 # ── artifact readers (tolerant, mirror the legacy graph route) ──────────────
 
 
-def read_audit(run_dir: Path) -> list[dict[str, Any]]:
-    """Read exploit_audit.jsonl records (tries the two on-disk locations)."""
-    for candidate in (
+def _audit_candidates(run_dir: Path) -> list[Path]:
+    return [
         run_dir / "exploit_audit.jsonl",
         run_dir / "exploit_workspace" / "exploit_audit.jsonl",
-    ):
+    ]
+
+
+def read_audit(run_dir: Path) -> list[dict[str, Any]]:
+    """Read exploit_audit.jsonl records (tries the two on-disk locations)."""
+    for candidate in _audit_candidates(run_dir):
         if not candidate.is_file():
             continue
         records: list[dict[str, Any]] = []
@@ -112,6 +116,54 @@ def read_audit(run_dir: Path) -> list[dict[str, Any]]:
                 records.append(rec)
         return records
     return []
+
+
+def read_audit_from(run_dir: Path, offset: int) -> tuple[list[dict[str, Any]], int, Path | None]:
+    """Read audit records appended after ``offset`` (P2-04 incremental ingest).
+
+    Returns ``(records, new_offset, path)``. A trailing partial line (writer
+    mid-flush) is excluded from both the records and the new offset so the
+    next call retries it. ``path`` is None when no audit file exists; a
+    shrunk file reports offset 0 so the caller rebuilds from scratch.
+    """
+    for candidate in _audit_candidates(run_dir):
+        if not candidate.is_file():
+            continue
+        try:
+            size = candidate.stat().st_size
+        except OSError:
+            return [], offset, None
+        if size < offset:
+            return [], 0, candidate  # shrunk/rotated: caller rebuilds from 0
+        try:
+            with candidate.open("rb") as f:
+                f.seek(offset)
+                chunk = f.read()
+        except OSError:
+            return [], offset, candidate
+        if not chunk:
+            return [], offset, candidate
+        ends_newline = chunk.endswith(b"\n")
+        raw_lines = chunk.split(b"\n")
+        # Drop the trailing fragment when the chunk lacks a terminating newline.
+        complete = raw_lines if ends_newline else raw_lines[:-1]
+        records: list[dict[str, Any]] = []
+        pos = offset
+        for raw in complete:
+            pos += len(raw) + 1
+            line = raw.decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(rec, dict):
+                records.append(rec)
+        if not complete:
+            return [], offset, candidate
+        return records, pos, candidate
+    return [], offset, None
 
 
 def read_enhanced_report(run_dir: Path) -> dict[str, Any]:
@@ -271,18 +323,17 @@ def ingest_run_metadata(
 # ── ingest exploit audit ────────────────────────────────────────────────────
 
 
-def ingest_audit(
+def ingest_audit_records(
     store: AttackGraphStore,
-    run_dir: Path,
+    records: list[dict[str, Any]],
     conflicts: list[GraphMergeConflict],
 ) -> None:
-    """OBSERVATION nodes per (tool, target) + OBSERVED_ON edges to IP nodes."""
-    scope = store.scope
-    records = read_audit(run_dir)
+    """Ingest already-read audit records (P2-04 incremental path)."""
     if not records:
         return
     update = GraphUpdate(source_agent="exploit_audit", reason="exploit audit trail")
     ts = _now_iso()
+    scope = store.scope
     for rec in records:
         tool = str(rec.get("tool_name") or "").strip()
         if not tool:
@@ -313,6 +364,16 @@ def ingest_audit(
                 _edge(obs_id, _node_id(scope, NodeType.IP, t), EdgeType.OBSERVED_ON, rec_ts, source=tool)
             )
     _safe_apply(store, update, conflicts)
+
+
+def ingest_audit(
+    store: AttackGraphStore,
+    run_dir: Path,
+    conflicts: list[GraphMergeConflict],
+) -> None:
+    """OBSERVATION nodes per (tool, target) + OBSERVED_ON edges to IP nodes."""
+    records = read_audit(run_dir)
+    ingest_audit_records(store, records, conflicts)
 
 
 # ── ingest enhanced report ──────────────────────────────────────────────────
