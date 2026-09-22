@@ -7,7 +7,6 @@ When ``webui/package-lock.json`` exists the install step must run
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 from tools import webui_boot

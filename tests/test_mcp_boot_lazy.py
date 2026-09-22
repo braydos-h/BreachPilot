@@ -13,8 +13,6 @@ from __future__ import annotations
 import subprocess
 import sys
 
-HEAVY = ("tools.web_researcher", "tools.exploit_search", "tools.cve_lookup")
-
 
 def test_mcp_exploit_server_import_stays_lazy():
     proc = subprocess.run(

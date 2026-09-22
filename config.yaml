@@ -105,6 +105,9 @@ exploit:
     dns: false
     https_beacon: false
     socks_pivot: false
+# DEPRECATED (inert/UI-only legacy): the live block is `opsec` below. Kept so
+# older checkouts keep validating; new posture work targets `opsec.*`.
+# See tools/config/schema.py DEPRECATED_TOP_KEYS.
 stealth:
   rotate_ua: false
   dns_over_https: false

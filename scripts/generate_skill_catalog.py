@@ -11,8 +11,10 @@ Usage (from repo root):
 
 from __future__ import annotations
 
+import argparse
 import datetime
 import re
+import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -97,12 +99,16 @@ def short(desc: str, limit: int = 160) -> str:
     return cut + "…"
 
 
-def main() -> int:
+def collect_skills() -> list[Skill]:
+    """Parse every SKILL.md; return skills sorted by name (case-insensitive)."""
     files = sorted(SKILLS.glob("**/SKILL.md"))
     skills = [Skill(p) for p in files]
     skills.sort(key=lambda s: s.name.lower())
-    today = datetime.date.today().isoformat()
+    return skills
 
+
+def render(skills: list[Skill], today: str) -> str:
+    """Build the catalog text without writing (shared by write + --check)."""
     by_domain: dict[str, list[Skill]] = {}
     for s in skills:
         by_domain.setdefault(s.domain, []).append(s)
@@ -148,8 +154,35 @@ def main() -> int:
             f"| `{s.name}` | `{s.domain}` | `{s.subdomain}` | `{s.version}` | {_cell(', '.join(s.tags)) or '—'} |"
         )
     out.append("")
+    return "\n".join(out)
+
+
+def _normalized(text: str) -> str:
+    """Normalize the regeneration date symmetrically (descriptions are content)."""
+    return re.sub(r"\d{4}-\d{2}-\d{2}", "DATE", text).strip() + "\n"
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Regenerate docs/skills/catalog.md from skills/*/SKILL.md frontmatter.")
+    parser.add_argument("--check", action="store_true", help="fail (exit 1) when the catalog drifts; do not write")
+    args = parser.parse_args(argv)
+    skills = collect_skills()
+    today = datetime.date.today().isoformat()
+    if args.check:
+        if not DOC.is_file():
+            print(f"skill-catalog missing: run python scripts/{Path(__file__).name}", file=sys.stderr)
+            return 1
+        if _normalized(DOC.read_text(encoding="utf-8")) != _normalized(render(skills, today)):
+            print(f"skill-catalog drift: run python scripts/{Path(__file__).name}", file=sys.stderr)
+            return 1
+        print(f"skill-catalog fresh: {len(skills)} skills")
+        return 0
     DOC.parent.mkdir(parents=True, exist_ok=True)
-    DOC.write_text("\n".join(out), encoding="utf-8")
+    DOC.write_text(render(skills, today), encoding="utf-8")
+    by_domain: dict[str, list[Skill]] = {}
+    for s in skills:
+        by_domain.setdefault(s.domain, []).append(s)
+    n_maybe = sum(1 for s in skills if s.maybe)
     missing = [s.dir for s in skills if not s.name or not s.description or s.domain == "(none)"]
     print(f"skills: {len(skills)} ({len(skills) - n_maybe} top-level + {n_maybe} maybe/)")
     print(f"domains: {{{', '.join(f'{d}: {len(g)}' for d, g in sorted(by_domain.items()))}}}")

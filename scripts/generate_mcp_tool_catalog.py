@@ -11,8 +11,10 @@ gate variants and docstring first lines), plus ``mcp_server.py``
 
 from __future__ import annotations
 
+import argparse
 import ast
 import re
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -99,8 +101,8 @@ def family_title(rel: str) -> str:
     return f"`{rel}`"
 
 
-def main() -> None:
-    today = date.today().isoformat()
+def collect_families() -> tuple[list[dict], list[str]]:
+    """Parse live sources; return (families, source rel paths)."""
     files: list[Path] = []
     for d in TOOL_GLOBS:
         if d.is_dir():
@@ -116,6 +118,12 @@ def main() -> None:
             continue
         families.append({"rel": rel, "registrars": registrars, "tools": tools})
     families.sort(key=lambda f: f["rel"])
+    return families, sources
+
+
+def render(today: str) -> str:
+    """Build the catalog text without writing (shared by write + --check)."""
+    families, sources = collect_families()
 
     total = sum(len(f["tools"]) for f in families)
     gate_counts: dict[str, int] = {}
@@ -190,10 +198,45 @@ def main() -> None:
         lines.append(f"| `{_esc(key)}` | {gate_counts[key]} |")
     lines.append("")
 
+    return "\n".join(lines)
+
+
+def _normalized(text: str) -> str:
+    """Normalize volatile cells so --check tracks content drift, not churn.
+
+    Dates (regeneration day), per-tool line numbers (shift on any nearby
+    edit), and trailing-newline convention are normalized away symmetrically
+    — added/removed tools, gate changes, and purpose changes still fail the
+    check.
+    """
+    text = re.sub(r"\d{4}-\d{2}-\d{2}", "DATE", text)
+    text = re.sub(r"`([^`]+?):\d+`", r"`\1:N`", text)
+    return text.strip() + "\n"
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Regenerate docs/mcp/tool-catalog-generated.md from MCP tool sources.")
+    parser.add_argument("--check", action="store_true", help="fail (exit 1) when the catalog drifts; do not write")
+    args = parser.parse_args(argv)
+    today = date.today().isoformat()
+    if args.check:
+        if not OUT.is_file():
+            print(f"tool-catalog missing: run python scripts/{Path(__file__).name}", file=sys.stderr)
+            return 1
+        if _normalized(OUT.read_text(encoding="utf-8")) != _normalized(render(today)):
+            print(f"tool-catalog drift: run python scripts/{Path(__file__).name}", file=sys.stderr)
+            return 1
+        families, _ = collect_families()
+        total = sum(len(f["tools"]) for f in families)
+        print(f"tool-catalog fresh: {total} tools across {len(families)} families")
+        return 0
+    families, _ = collect_families()
+    total = sum(len(f["tools"]) for f in families)
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text("\n".join(lines), encoding="utf-8")
+    OUT.write_text(render(today), encoding="utf-8")
     print(f"Wrote {OUT} ({total} tools, {len(families)} families)")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
