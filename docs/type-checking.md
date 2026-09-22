@@ -11,27 +11,46 @@ is rejected**.
    `disable_error_code` suppressions in `pyproject.toml`. Must pass with
    zero errors. This is the primary gate: no new *unsuppressed* errors.
 2. **Debt gate** — `python scripts/mypy_debt.py` runs mypy with *zero*
-   suppressions (hermetic temp config, fixed `python_version = 3.12`) and
+   suppressions (hermetic temp config, fixed `python_version = 3.12`, fresh
+   temp cache dir — the repo's ambient `.mypy_cache` is written by the
+   permissive gate with different suppressions and otherwise skews the
+   measurement) and
    compares against `mypy-baseline.txt` (total + per-file counts). Fails on
    **any increase** — a higher total, a higher per-file count, or errors in
    a previously clean file. Paying debt down always passes.
 3. **Strict subsystems** — per-module overrides in `pyproject.toml` with
    `disable_error_code = []` plus the full `enable_error_code` list.
    Currently strict: `tools.validation_utils`, `tools.exceptions`,
-   `tools.mcp_shared`, `tools.kernel.*`, `tools.sandbox.*`.
+   `tools.mcp_shared`, `tools.kernel.*`, `tools.sandbox.*` (Tier 1,
+   2026-09-07), plus `tools.api.run_manager`, `tools.run_service.execute`,
+   `tools.run_service.tasks`, `tools.exploit_agent.model_client`,
+   `tools.exploit_agent.context`, `tools.config.loader`, `tools.providers`
+   and `tools.providers.*` (Tier 2, 2026-09-22, todo 08).
 
 ## Graduation order
 
 1. `tools/kernel` — done (2026-09-07).
-2. `tools/api` — next. `run_manager.py` holds 35 errors, nearly all
-   `union-attr` on `handle.event_broker` (`RunEventBroker | None`); fixing
-   them means deciding the None-contract at each emit site, not sprinkling
-   asserts.
+2. `tools/api` — `run_manager.py` done (2026-09-22, todo 08: the
+   `union-attr` cluster on `handle.event_broker` is decided per site via
+   `RunHandle.emit` / `close_broker` None-tolerant helpers, not asserts;
+   `request`/`preview` narrowed once at the top of `_execute_run`).
 3. `tools/sandbox` — done (2026-09-07).
 4. Orchestration/session code (`run_service/`, `mcp_session.py`,
-   `campaign/`, `swarm/`) — largest remaining clusters
-   (`run_service/execute.py`, `mcp_session.py`, `attack_ui.py`).
-5. Remaining modules, highest-count first (`mypy-baseline.txt` is sorted
+   `campaign/`, `swarm/`) — `run_service/execute.py` + `tasks.py` done
+   (2026-09-22, todo 08: cross-mixin members declared under
+   `TYPE_CHECKING` so the `AssessmentService` MRO is untouched at runtime;
+   `except (..., *_EXC_GROUP_CATCH)` simplified to `except _EXC_GROUP_CATCH`
+   — the tuple already covers every listed class). Remaining clusters:
+   `mcp_session.py`, `attack_ui.py`.
+5. Providers (`tools/providers/*` + `tools/config/loader.py`) — done
+   (2026-09-22, todo 08: config accessors accept `Mapping`, not just
+   `dict`; `make_model_client(host=None)` falls back to the Ollama Cloud
+   default instead of forwarding None; fixed a real `config=` vs `cfg=`
+   kwarg mismatch in `_get_api_key`).
+6. Runner context (`tools/exploit_agent/context.py`, `model_client.py`)
+   — done (2026-09-22, todo 08: retry state typed as `BaseException`,
+   matching `_EXC_GROUP_CATCH`).
+7. Remaining modules, highest-count first (`mypy-baseline.txt` is sorted
    for triage; error codes are dominated by `union-attr`, `attr-defined`,
    `name-defined`).
 

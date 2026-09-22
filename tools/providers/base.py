@@ -469,13 +469,16 @@ def make_model_client(
     """Shared ``ModelClient`` factory (telemetry + canonical-arg closure).
 
     Thin wrapper over ``tools.model_router._build_model_client`` imported
-    lazily so the providers package stays import-cycle-free.
+    lazily so the providers package stays import-cycle-free. ``host=None``
+    falls back to the Ollama Cloud default (a None host is never forwarded:
+    ``_build_model_client`` requires a usable URL string).
     """
     from tools.model_router import _build_model_client
+    from tools.providers.ollama_provider import OLLAMA_CLOUD_HOST
 
     return _build_model_client(
         model_name,
-        host=host,
+        host=host or OLLAMA_CLOUD_HOST,
         alias=alias,
         request_timeout_seconds=request_timeout_seconds,
         raw_client=raw_client,

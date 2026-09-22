@@ -22,12 +22,12 @@ import time
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from tools.activity_log import ActivityLog
 from tools.attack_ui import get_ui
 from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
-from tools.goal_engine import AttackGoal
+from tools.goal_engine import AttackGoal, GoalEngine
 from tools.goal_suggester import ReconAssessment
 from tools.mcp_session import _RunHeartbeat
 from tools.model_telemetry import usage_log_path, workspace_root_from_sources
@@ -46,6 +46,7 @@ from tools.run_service.models import (
     RunState,
 )
 from tools.run_service.prepare import (
+    Callables,
     _build_campaign_result_from_records,
     _request_to_args,
     _TelemetryAccumulator,
@@ -57,10 +58,126 @@ from tools.run_service.providers import (
 )
 from tools.swarm_bridge import SwarmMcpBridge
 
+if TYPE_CHECKING:
+    # Typing-only: resolved without a runtime import so the service stays
+    # importable even when the agent package is partially initialized.
+    from tools.exploit_agent import ExploitSettings
+
 ui = get_ui()
 
 
 class ExecuteMixin:
+    # Composition contract: AssessmentService mixes Prepare + Tasks with this
+    # mixin (see tools/run_service/service.py). ``_c`` is provided by
+    # PrepareMixin.__init__ / AssessmentService.__init__; declared here (no
+    # value) so the attribute typechecks without touching runtime behavior.
+    _c: Callables
+
+    if TYPE_CHECKING:
+        # Cross-mixin methods (canonical definitions live in PrepareMixin /
+        # TasksMixin). Declared under TYPE_CHECKING so they never exist at
+        # runtime: defining them for real would shadow the sibling mixin's
+        # implementation in the AssessmentService MRO and break execution.
+        def _build_router_for_config(self, config: dict[str, Any], req_timeout: float | None) -> Any: ...
+        def _ensure_client_registered(
+            self, router: Any, config: dict[str, Any], model_alias: str, req_timeout: float | None
+        ) -> None: ...
+        def _resolve_model_alias(self, config: dict[str, Any], request: RunRequest) -> str: ...
+        def _find_resume_match(self, reports_dir: Path, resume_key: str) -> Path | None: ...
+        async def _recon_first(
+            self,
+            *,
+            request: RunRequest,
+            config: dict[str, Any],
+            config_path: Path,
+            target_ip: str,
+            original_target: str,
+            resolved_ip: str | None,
+            resolved_domain: str | None,
+            reports_dir: Path,
+            model_client: Any,
+            model_alias: str,
+            risk_profile: str,
+            goal_engine: GoalEngine,
+            decision_provider: DecisionProvider,
+            event_sink: EventSink,
+            cancellation: CancellationToken,
+        ) -> tuple[ReconAssessment, AttackGoal]: ...
+        async def _fast_recon(
+            self,
+            *,
+            request: RunRequest,
+            config: dict[str, Any],
+            config_path: Path,
+            target_ip: str,
+            original_target: str,
+            resolved_ip: str | None,
+            resolved_domain: str | None,
+            reports_dir: Path,
+            model_client: Any,
+            model_alias: str,
+            risk_profile: str,
+            goal_engine: GoalEngine,
+            decision_provider: DecisionProvider,
+            event_sink: EventSink,
+            cancellation: CancellationToken,
+        ) -> tuple[ReconAssessment, AttackGoal]: ...
+        async def _setup_swarm(
+            self,
+            *,
+            request: RunRequest,
+            config: dict[str, Any],
+            target_ip: str,
+            goal: AttackGoal,
+            mode: str,
+            exploit_settings: ExploitSettings,
+            model_client: Any,
+            model_alias: str,
+            swarm_bridge: SwarmMcpBridge,
+            original_target: str,
+            resolved_ip: str | None,
+            resolved_domain: str | None,
+            event_sink: EventSink,
+            reports_dir: Path,
+            progress_heartbeat: Any,
+        ) -> tuple[Any, asyncio.Task[Any] | None, Path]: ...
+        async def _run_session(
+            self,
+            *,
+            model_client: Any,
+            model_alias: str,
+            target_ip: str,
+            mode: str,
+            goal: AttackGoal,
+            exploit_settings: ExploitSettings,
+            config_path: Path,
+            reports_dir: Path,
+            assessment: ReconAssessment | None,
+            approval_prompt: Any,
+            approval_provider: Any,
+            swarm_attach: Any,
+            heartbeat: Any,
+            original_target: str | None,
+            resolved_ip: str | None,
+            recon_first: bool,
+            resume_state: tuple[Any, str, str] | None,
+            event_sink: EventSink,
+            cancellation: CancellationToken,
+            checkpoint_hook: Any = None,
+        ) -> dict[str, Any]: ...
+        async def _wait_swarm(
+            self,
+            *,
+            swarm_task: asyncio.Task[Any],
+            swarm_bridge: SwarmMcpBridge,
+            swarm_workspace: Path,
+            config: dict[str, Any],
+            request: RunRequest,
+            result: dict[str, Any],
+            event_sink: EventSink,
+            reports_dir: Path | None = None,
+        ) -> dict[str, Any]: ...
+
     async def execute(
         self,
         request: RunRequest,
@@ -409,7 +526,10 @@ class ExecuteMixin:
                 _goal_opts = [{"name": k, "description": d} for k, d in _presets] + [
                     {"name": "custom", "description": "Type your own goal"},
                 ]
-                options = [
+                # Mixed shapes (plain actions + actions carrying a "goals"
+                # list); declared against Decision.options so the join stays
+                # list[dict[str, Any]] instead of degrading to list[object].
+                options: list[dict[str, Any]] = [
                     {"action": "privesc", "label": "Escalate privileges on this target"},
                     {
                         "action": "another_goal",
@@ -616,11 +736,14 @@ class ExecuteMixin:
                     _wit_audit = str(result.get("audit_path", "") or "") if isinstance(result, dict) else ""
                     if _wit_audit and witness_agent.add_audit_path(_wit_audit):
                         witness_agent.scan_once()
-                except (AttributeError, TypeError, RuntimeError, *_EXC_GROUP_CATCH):
+                except _EXC_GROUP_CATCH:
+                    # _EXC_GROUP_CATCH is (Exception, BaseExceptionGroup): it
+                    # already covers AttributeError/TypeError/RuntimeError, so
+                    # no explicit tuple prefix is needed here.
                     pass
                 try:
                     witness_agent.stop()
-                except (AttributeError, TypeError, RuntimeError, *_EXC_GROUP_CATCH):
+                except _EXC_GROUP_CATCH:
                     pass
             if witness_task is not None:
                 witness_task.cancel()
@@ -851,7 +974,7 @@ class ExecuteMixin:
         def _on_witness_flag(event: str, payload: dict[str, Any]) -> None:
             try:
                 loop.create_task(event_sink.emit(event, payload))
-            except (RuntimeError, *_EXC_GROUP_CATCH):
+            except _EXC_GROUP_CATCH:
                 pass
 
         try:
@@ -865,7 +988,7 @@ class ExecuteMixin:
                 audit_paths=[reports_dir / "activity.jsonl"],
                 event_callback=_on_witness_flag if escalate else None,
             )
-        except (TypeError, ValueError, RuntimeError, *_EXC_GROUP_CATCH) as exc:
+        except _EXC_GROUP_CATCH as exc:
             ui.warning(f"Witness watcher unavailable (advisory, run continues): {exc}")
             return None, None
 

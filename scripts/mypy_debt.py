@@ -27,6 +27,7 @@ explicit Optional types.
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -57,6 +58,11 @@ def run_mypy() -> tuple[dict[str, int], int, str]:
     with tempfile.NamedTemporaryFile(mode="w", suffix=".ini", delete=False) as tmp:
         tmp.write(_INLINE_CONFIG)
         config_path = tmp.name
+    # Fresh cache dir every run: the repo's ambient ``.mypy_cache`` (written
+    # by the permissive ``mypy --follow-imports=skip tools`` gate with
+    # different suppressions) otherwise skews this measurement by tens of
+    # errors in either direction. True hermeticity needs both.
+    cache_dir = tempfile.mkdtemp(prefix="mypy-debt-")
     try:
         proc = subprocess.run(
             [
@@ -65,6 +71,8 @@ def run_mypy() -> tuple[dict[str, int], int, str]:
                 "mypy",
                 "--config-file",
                 config_path,
+                "--cache-dir",
+                cache_dir,
                 "--follow-imports=skip",
                 "--no-error-summary",
                 "--show-error-codes",
@@ -77,6 +85,7 @@ def run_mypy() -> tuple[dict[str, int], int, str]:
         )
     finally:
         Path(config_path).unlink(missing_ok=True)
+        shutil.rmtree(cache_dir, ignore_errors=True)
     counts: dict[str, int] = {}
     for line in (proc.stdout + proc.stderr).splitlines():
         match = _ERROR_RE.match(line)

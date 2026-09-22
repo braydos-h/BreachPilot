@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from .schema import CONFIG_SCHEMA
 from .validator import ConfigValidationResult, ConfigValidator
@@ -49,14 +49,15 @@ def load_validated_config(path: Path | str = "config.yaml", profile: str | None 
     return merged
 
 
-def get_ai_provider(config: dict[str, Any] | None = None) -> str:
+def get_ai_provider(config: Mapping[str, Any] | None = None) -> str:
     """Return the active chat/generate provider (``ollama`` | ``chatgpt`` | ``opencode_go``).
 
     Reads ``models.provider``; defaults to ``ollama`` so an absent key (the
-    common case) is unchanged. Tolerates a None config.
+    common case) is unchanged. Tolerates a None config. Accepts any read-only
+    mapping (provider adapters pass ``Mapping`` views, not just ``dict``).
     """
     cfg = config or {}
-    models = cfg.get("models") if isinstance(cfg, dict) else None
+    models = cfg.get("models") if isinstance(cfg, Mapping) else None
     if isinstance(models, dict):
         provider = models.get("provider")
         if provider:
@@ -64,16 +65,16 @@ def get_ai_provider(config: dict[str, Any] | None = None) -> str:
     return "ollama"
 
 
-def get_chatgpt_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
+def get_chatgpt_config(config: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Return the ``chatgpt`` block with schema defaults applied.
 
     The merge is shallow-over-defaults; used by the model-router and proxy
-    manager. Never returns None.
+    manager. Never returns None. Accepts any read-only mapping.
     """
 
     base = copy.deepcopy(CONFIG_SCHEMA.get("chatgpt", {}))
     cfg = config or {}
-    overlay = cfg.get("chatgpt") if isinstance(cfg, dict) else None
+    overlay = cfg.get("chatgpt") if isinstance(cfg, Mapping) else None
     if isinstance(overlay, dict):
         for key, value in overlay.items():
             if value is not None:
@@ -81,16 +82,16 @@ def get_chatgpt_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
     return base
 
 
-def get_opencode_go_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
+def get_opencode_go_config(config: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Return the ``opencode_go`` block with schema defaults applied.
 
     The merge is shallow-over-defaults; used by the model-router and discovery.
-    Never returns None.
+    Never returns None. Accepts any read-only mapping.
     """
 
     base = copy.deepcopy(CONFIG_SCHEMA.get("opencode_go", {}))
     cfg = config or {}
-    overlay = cfg.get("opencode_go") if isinstance(cfg, dict) else None
+    overlay = cfg.get("opencode_go") if isinstance(cfg, Mapping) else None
     if isinstance(overlay, dict):
         for key, value in overlay.items():
             if value is not None:
@@ -98,10 +99,10 @@ def get_opencode_go_config(config: dict[str, Any] | None = None) -> dict[str, An
     return base
 
 
-def get_ollama_host(config: dict[str, Any] | None = None) -> str:
-    """Return ``ollama.host`` from a config dict (module-level convenience)."""
+def get_ollama_host(config: Mapping[str, Any] | None = None) -> str:
+    """Return ``ollama.host`` from a config mapping (module-level convenience)."""
     cfg = config or {}
-    ollama = cfg.get("ollama") if isinstance(cfg, dict) else None
+    ollama = cfg.get("ollama") if isinstance(cfg, Mapping) else None
     if isinstance(ollama, dict):
         return str(ollama.get("host", "https://api.ollama.com"))
     return "https://api.ollama.com"
@@ -112,7 +113,7 @@ def get_ollama_host(config: dict[str, Any] | None = None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def get_provider_config(config: dict[str, Any] | None = None, provider_id: str = "") -> dict[str, Any]:
+def get_provider_config(config: Mapping[str, Any] | None = None, provider_id: str = "") -> dict[str, Any]:
     """Return provider ``provider_id``'s merged config block (never None).
 
     Single normalization layer for the provider architecture:
@@ -129,7 +130,7 @@ def get_provider_config(config: dict[str, Any] | None = None, provider_id: str =
     cfg = config or {}
     pid = str(provider_id or "").strip().lower()
 
-    providers_block = cfg.get("providers") if isinstance(cfg, dict) else None
+    providers_block = cfg.get("providers") if isinstance(cfg, Mapping) else None
     modern = providers_block.get(pid) if isinstance(providers_block, dict) else None
     if isinstance(modern, dict):
         if pid == "chatgpt":
@@ -138,7 +139,7 @@ def get_provider_config(config: dict[str, Any] | None = None, provider_id: str =
             base = get_opencode_go_config(cfg)
         elif pid == "ollama":
             base = copy.deepcopy(CONFIG_SCHEMA.get("ollama", {}))
-            overlay = cfg.get("ollama") if isinstance(cfg, dict) else None
+            overlay = cfg.get("ollama") if isinstance(cfg, Mapping) else None
             if isinstance(overlay, dict):
                 for key, value in overlay.items():
                     if value is not None:
@@ -156,7 +157,7 @@ def get_provider_config(config: dict[str, Any] | None = None, provider_id: str =
         return get_opencode_go_config(cfg)
     if pid == "ollama":
         ollama = copy.deepcopy(CONFIG_SCHEMA.get("ollama", {}))
-        overlay = cfg.get("ollama") if isinstance(cfg, dict) else None
+        overlay = cfg.get("ollama") if isinstance(cfg, Mapping) else None
         if isinstance(overlay, dict):
             for key, value in overlay.items():
                 if value is not None:

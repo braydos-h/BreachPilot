@@ -35,7 +35,7 @@ from tools.run_service.models import (
     DecisionKind,
     RunRequest,
 )
-from tools.run_service.prepare import _config_cli_load, _read_swarm_snapshot, _request_to_args
+from tools.run_service.prepare import Callables, _config_cli_load, _read_swarm_snapshot, _request_to_args
 from tools.run_service.providers import (
     CancellationToken,
     DecisionProvider,
@@ -81,6 +81,12 @@ async def _emit_swarm_deep_error(
 
 
 class TasksMixin:
+    # Composition contract: AssessmentService mixes Prepare + Execute with
+    # this mixin (see tools/run_service/service.py). ``_c`` is provided by
+    # PrepareMixin.__init__ / AssessmentService.__init__; declared here (no
+    # value) so the attribute typechecks without touching runtime behavior.
+    _c: Callables
+
     def _find_resume_match(self, reports_dir: Path, resume_key: str) -> Path | None:
         """Find a run subdir matching ``resume_key`` (name or session_id)."""
         for child in sorted(reports_dir.iterdir(), reverse=True):
@@ -357,6 +363,13 @@ class TasksMixin:
 
             ui.display_recon_assessment(assessment)
             await event_sink.emit(EVENT_RECON, {"assessment": assessment.to_dict()})
+
+        # Post-condition: both branches above guarantee an assessment (the
+        # resume path reuses a valid one; the coordinator path falls back to
+        # UNKNOWN on every failure). Re-assert here so the declared return
+        # type holds even if a future branch forgets its fallback.
+        if assessment is None:
+            assessment = ReconAssessment(target_ip=target_ip, os_verdict="UNKNOWN", services=[], cve_findings=[])
 
         # Goal suggestion + auto-selection (no blocking dialog unless required).
         suggestions = goal_engine.suggest_goals(assessment, risk_profile)
@@ -639,7 +652,8 @@ class TasksMixin:
 
         swarm_start = time.monotonic()
         swarm_timeout = _compute_swarm_timeout(config, _request_to_args(request))
-        swarm_result = None
+        # Task results are untyped payloads (dicts or futures of dicts).
+        swarm_result: Any = None
         try:
             _last_progress = 0.0
             while not swarm_task.done():

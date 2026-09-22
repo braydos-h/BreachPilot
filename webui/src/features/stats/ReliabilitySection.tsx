@@ -7,7 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, ListChecks, ShieldCheck } from "lucide-react";
 import { fetchOverview } from "@/features/benchmarks/api";
 import { formatPct as formatBenchmarkPct } from "@/features/benchmarks/format";
-import { StatCard } from "./KpiOverview";
+import { StatCard } from "./StatCard";
 import { UnavailableCard } from "./StatsStates";
 
 function formatRate01(value: number | null | undefined): string {

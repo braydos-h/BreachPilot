@@ -715,9 +715,9 @@ class ChatGptProxyManager:
         ttl = float(merged.get("discover_cache_seconds") or 300)
         with self._lock:
             if self._models_cache is not None:
-                fetched_at, ids = self._models_cache
+                fetched_at, cached_ids = self._models_cache
                 if time.monotonic() - fetched_at < ttl:
-                    return list(ids)
+                    return list(cached_ids)
         if httpx is None:
             return []
         try:

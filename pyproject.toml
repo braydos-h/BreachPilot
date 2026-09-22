@@ -268,11 +268,54 @@ enable_error_code = [
 # Tier 1 (2026-09-07): tools/kernel + tools/sandbox graduate to strict.
 # Both packages are fully annotated with zero errors under every code in the
 # list below (verified via scripts/mypy_debt.py hermetic pass + the
-# `Mypy strict subsystems` CI step). Next tiers per docs/type-checking.md:
-# tools/api (run_manager.py holds most of its 45), orchestration/session,
-# then remaining modules.
+# `Mypy strict subsystems` CI step).
 [[tool.mypy.overrides]]
 module = ["tools.kernel.*", "tools.sandbox.*"]
+disable_error_code = []
+enable_error_code = [
+    "no-any-return",
+    "attr-defined",
+    "union-attr",
+    "assignment",
+    "arg-type",
+    "call-arg",
+    "operator",
+    "index",
+    "list-item",
+    "return-value",
+    "type-var",
+    "valid-type",
+    "no-redef",
+    "var-annotated",
+    "misc",
+    "name-defined",
+    "truthy-function",
+    "func-returns-value",
+    "dict-item",
+    "no-untyped-def",
+    "has-type",
+    "str-unpack",
+    "call-overload",
+]
+
+# Tier 2 (2026-09-22): run_manager + run_service + providers + runner
+# context/model_client + config loader graduate to strict (todo 08).
+# None-contracts decided per site (RunHandle.emit/close_broker helpers;
+# mixin deps declared under TYPE_CHECKING so the AssessmentService MRO is
+# untouched); provider Mapping widening lives in tools/config/loader.py.
+# Next tiers per docs/type-checking.md: orchestration/session, then
+# remaining modules highest-count first.
+[[tool.mypy.overrides]]
+module = [
+    "tools.api.run_manager",
+    "tools.run_service.execute",
+    "tools.run_service.tasks",
+    "tools.exploit_agent.model_client",
+    "tools.exploit_agent.context",
+    "tools.config.loader",
+    "tools.providers",
+    "tools.providers.*",
+]
 disable_error_code = []
 enable_error_code = [
     "no-any-return",

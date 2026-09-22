@@ -888,7 +888,7 @@ class OpenCodeGoResponsesClient:
             resolved_key = (os.environ.get(str(api_key_env), "") or "").strip()
         else:
             # Use provided config's api_key_env
-            resolved_key = _get_api_key(config=merged, direct_key=None)
+            resolved_key = _get_api_key(cfg=merged, direct_key=None)
             # If merged had no env, _get_api_key will have checked OPENCODE_GO_API_KEY already.
             # Directly also check OPENCODE_GO_API_KEY as fallback if config resolution gave empty.
             if not resolved_key:
@@ -1154,9 +1154,9 @@ class OpenCodeGoResponsesClient:
 
         # Cache check (instance-local)
         if self._models_cache is not None:
-            fetched_at, ids = self._models_cache
+            fetched_at, cached_ids = self._models_cache
             if with_time - fetched_at < ttl:
-                return list(ids)
+                return list(cached_ids)
 
         if httpx is None:
             return []

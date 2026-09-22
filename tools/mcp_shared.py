@@ -62,13 +62,16 @@ from tools.kernel.workspace import (
 )
 from tools.reliability import RateLimiter
 
+# Canonical homes (not the tools.web_researcher compat shim): the shim's
+# re-exports resolve at runtime, but mypy's full-build pass does not see
+# through the second re-export hop for SerpAPIResearchSettings.
 if TYPE_CHECKING:  # pragma: no cover - typing only, keeps cold import light
     from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch
-    from tools.web_researcher import (
+    from tools.research.facade import WebResearcher
+    from tools.research.models import (
         OllamaResearchSettings,
         SerpAPIResearchSettings,
-        WebResearcher,
         WebResearcherSettings,
     )
 
