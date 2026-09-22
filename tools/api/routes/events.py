@@ -61,7 +61,7 @@ def create_router(
         returns the newest N events; ``before`` + ``limit`` pages older events
         (newest-first). Paged responses include cursor metadata.
         """
-        if persistence.get_run(run_id) is None:
+        if await persistence.actor.arun(persistence.get_run, run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
         broker = events.get_or_create(run_id)
         if tail is not None or before is not None or limit is not None:
@@ -99,7 +99,7 @@ def create_router(
         annotation without raising ``PydanticUserError`` (ForwardRef 'Response'
         not fully defined), which previously made ``/openapi.json`` return 500.
         """
-        if persistence.get_run(run_id) is None:
+        if await persistence.actor.arun(persistence.get_run, run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
 
         broker = events.get_or_create(run_id)
@@ -134,7 +134,7 @@ def create_router(
         auth_message = await authenticate_websocket(ws, token, allowed_origins)
         if auth_message is None:
             return
-        if persistence.get_run(run_id) is None:
+        if await persistence.actor.arun(persistence.get_run, run_id) is None:
             await ws.close(code=4404, reason="Run not found")
             return
         # Get the broker (creates one if the run is active; for completed runs,

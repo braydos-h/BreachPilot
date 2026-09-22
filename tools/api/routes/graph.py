@@ -160,7 +160,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, config: dict[st
         """
         if not graph_route_enabled:
             raise HTTPException(status_code=404, detail="Graph route disabled (api.graph_route=false)")
-        if persistence.get_run(run_id) is None:
+        if await persistence.actor.arun(persistence.get_run, run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
         run_dir = _run_dir(run_id)
         records = _read_audit(run_dir)

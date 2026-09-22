@@ -11,22 +11,31 @@ unblocks cleanly.
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
-from tools.api.persistence import ApiPersistence
+from tools.api.persistence import ApiPersistence, DbActor
 from tools.run_service.models import Decision, DecisionKind, RunState
 
 
 class DecisionBroker:
     """Manages pending decisions for one run."""
 
-    def __init__(self, run_id: str, persistence: ApiPersistence) -> None:
+    def __init__(self, run_id: str, persistence: ApiPersistence, actor: DbActor | None = None) -> None:
         self._run_id = run_id
         self._persistence = persistence
+        self._actor = actor
         self._pending: dict[str, asyncio.Future[str]] = {}
+
+    async def _run_db(self, fn: Any, *args: Any, **kwargs: Any) -> Any:
+        """Run a persistence op on the actor when present (P1-10), else direct."""
+        if self._actor is not None:
+            return await self._actor.arun(fn, *args, **kwargs)
+        return fn(*args, **kwargs)
 
     async def create(self, decision: Decision) -> str:
         """Persist a decision row and register an awaitable future."""
-        did = self._persistence.create_decision(
+        did = await self._run_db(
+            self._persistence.create_decision,
             {
                 "id": decision.id,
                 "run_id": self._run_id,
@@ -34,14 +43,15 @@ class DecisionBroker:
                 "prompt_text": decision.prompt_text,
                 "required_text": decision.required_text,
                 "options": decision.options,
-            }
+            },
         )
         decision.id = did
         decision.run_id = self._run_id
         loop = asyncio.get_running_loop()
         self._pending[did] = loop.create_future()
         if decision.kind != DecisionKind.START_CONFIRM:
-            self._persistence.update_run_state(
+            await self._run_db(
+                self._persistence.update_run_state,
                 self._run_id,
                 RunState.AWAITING_INPUT.value,
             )
@@ -55,7 +65,7 @@ class DecisionBroker:
         try:
             return await asyncio.wait_for(fut, timeout)
         except asyncio.TimeoutError:
-            self._persistence.expire_pending_decisions(self._run_id)
+            await self._run_db(self._persistence.expire_pending_decisions, self._run_id)
             return ""
         finally:
             self._pending.pop(decision_id, None)

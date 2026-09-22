@@ -144,7 +144,7 @@ def register(router: APIRouter, ctx: SystemContext) -> None:
         reports_dir = ctx.run_manager._persistence.reports_dir.resolve()
         # The api_runtime.db file lives inside reports_dir and is held open by the
         # live ApiPersistence instance, so clear its rows first and keep the file.
-        runs_deleted = ctx.run_manager._persistence.reset_all()
+        runs_deleted = await ctx.run_manager._persistence.actor.arun(ctx.run_manager._persistence.reset_all)
         removed: list[str] = []
         for target in [
             reports_dir,

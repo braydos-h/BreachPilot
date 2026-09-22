@@ -57,8 +57,8 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, config: dict[st
     def _service() -> AttackGraphService:
         return service
 
-    def _get_run(run_id: str) -> dict[str, Any]:
-        run = persistence.get_run(run_id)
+    async def _get_run(run_id: str) -> dict[str, Any]:
+        run = await persistence.actor.arun(persistence.get_run, run_id)
         if run is None:
             raise APIError("run_not_found", f"Run {run_id} not found", status_code=404)
         return run
@@ -74,7 +74,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, config: dict[st
     ) -> dict[str, Any]:
         """Filtered nodes + edges for a run. ``truncated`` true when ``limit`` hit."""
         _gate()
-        run = _get_run(run_id)
+        run = await _get_run(run_id)
         limit = _clamp(limit, 300, 1, _MAX_LIMIT)
         return _service().graph(run, node_types=node_type, statuses=status, search=q, limit=limit)
 
@@ -84,7 +84,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, config: dict[st
         auth: str = Depends(_require_auth),
     ) -> dict[str, Any]:
         _gate()
-        return _service().summary(_get_run(run_id))
+        return _service().summary(await _get_run(run_id))
 
     @router.get("/runs/{run_id}/conflicts", response_model=None)
     async def get_conflicts(
@@ -92,7 +92,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, config: dict[st
         auth: str = Depends(_require_auth),
     ) -> dict[str, Any]:
         _gate()
-        return {"run_id": run_id, "conflicts": _service().conflicts(_get_run(run_id))}
+        return {"run_id": run_id, "conflicts": _service().conflicts(await _get_run(run_id))}
 
     @router.get("/runs/{run_id}/nodes/{node_id}", response_model=None)
     async def get_node(
@@ -101,7 +101,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, config: dict[st
         auth: str = Depends(_require_auth),
     ) -> dict[str, Any]:
         _gate()
-        detail = _service().node(_get_run(run_id), node_id)
+        detail = _service().node(await _get_run(run_id), node_id)
         if detail is None:
             raise APIError("node_not_found", f"Node {node_id} not found in run {run_id}", status_code=404)
         return {"run_id": run_id, **detail}
@@ -117,7 +117,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, config: dict[st
         _gate()
         svc = _service()
         result = svc.neighbors(
-            _get_run(run_id),
+            await _get_run(run_id),
             node_id,
             max_hops=_clamp(max_hops, 1, 1, _MAX_NEIGHBOR_HOPS),
             max_nodes=_clamp(max_nodes, 50, 1, _MAX_NEIGHBOR_NODES),
@@ -137,7 +137,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, config: dict[st
     ) -> dict[str, Any]:
         _gate()
         result = _service().paths(
-            _get_run(run_id),
+            await _get_run(run_id),
             start,
             end,
             max_length=_clamp(max_length, 4, 1, _MAX_PATH_LENGTH),

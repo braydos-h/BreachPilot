@@ -186,6 +186,9 @@ class RunManager:
         # key every caller already has.
         self._active: dict[str, RunHandle] = {}
         self._lifecycle_lock = asyncio.Lock()
+        # P1-10: async server paths run persistence ops on the DB actor so
+        # the event loop never blocks on SQLite I/O. Sync shims stay direct.
+        self._db = persistence.actor
         # Explicit constructor injection (was a private cross-link poked by
         # app.create_app): the benchmark service occupies one concurrency
         # slot via ``max_concurrent_runs``. None = standalone (back-compat).
@@ -268,7 +271,8 @@ class RunManager:
 
             # Persist the run row up-front so the id exists (and events/WS
             # routes can find it) before preparation finishes.
-            self._persistence.create_run(
+            await self._db.arun(
+                self._persistence.create_run,
                 run_id=run_id,
                 request=_request_to_dict(request),
                 preview={},
@@ -284,7 +288,7 @@ class RunManager:
             handle.config_snapshot = copy.deepcopy(self._config)
             # Per-run allowlist snapshot is filled in when prepare() returns.
             handle.event_broker = event_broker
-            handle.decision_broker = DecisionBroker(run_id, self._persistence)
+            handle.decision_broker = DecisionBroker(run_id, self._persistence, actor=self._db)
             self._active[run_id] = handle
 
             await event_broker.emit("state", {"state": RunState.PREPARING.value})
@@ -334,7 +338,7 @@ class RunManager:
             # settle the run to ``cancelled`` here (mirror _execute_run) and
             # release the event broker so no zombie active handle/broker stays.
             try:
-                self._persistence.update_run_state(handle.run_id, RunState.CANCELLED.value)
+                await self._db.arun(self._persistence.update_run_state, handle.run_id, RunState.CANCELLED.value)
                 await handle.event_broker.emit("state", {"state": RunState.CANCELLED.value})
             except Exception:  # noqa: BLE001 -- broker may already be closed
                 pass
@@ -353,7 +357,7 @@ class RunManager:
             # removed while preparing.
             if self._active.get(handle.run_id) is not handle:
                 return
-            current = self._persistence.get_run(handle.run_id) or {}
+            current = await self._db.arun(self._persistence.get_run, handle.run_id) or {}
             if current.get("state") == RunState.CANCELLED.value:
                 self._active.pop(handle.run_id, None)
                 return
@@ -366,14 +370,16 @@ class RunManager:
                 preview.original_target or preview.target_ip,
             )
             # Persist the prepared preview (target/mode/goal/model/...).
-            self._persistence.update_run_preview(handle.run_id, _preview_to_dict(preview))
+            await self._db.arun(self._persistence.update_run_preview, handle.run_id, _preview_to_dict(preview))
             try:
                 await handle.event_broker.emit(
                     "preparing",
                     {"stage": "done", "message": "Run prepared", "timings": dict(preview.timings or {})},
                 )
                 if not request.yes:
-                    self._persistence.update_run_state(handle.run_id, RunState.AWAITING_CONFIRMATION.value)
+                    await self._db.arun(
+                        self._persistence.update_run_state, handle.run_id, RunState.AWAITING_CONFIRMATION.value
+                    )
                     await handle.event_broker.emit("state", {"state": RunState.AWAITING_CONFIRMATION.value})
                     decision = Decision(
                         id="",
@@ -393,14 +399,15 @@ class RunManager:
                         },
                     )
                 else:
-                    self._persistence.update_run_state(handle.run_id, RunState.QUEUED.value)
+                    await self._db.arun(self._persistence.update_run_state, handle.run_id, RunState.QUEUED.value)
                     await handle.event_broker.emit("state", {"state": RunState.QUEUED.value})
                     handle.task = asyncio.create_task(self._execute_run(handle))
             except BaseException:
                 handle.decision_broker.cancel_all()
                 handle.event_broker.close()
                 self._active.pop(handle.run_id, None)
-                self._persistence.update_run_state(
+                await self._db.arun(
+                    self._persistence.update_run_state,
                     handle.run_id,
                     RunState.FAILED.value,
                     error="Run setup failed.",
@@ -423,7 +430,7 @@ class RunManager:
             pass
         finally:
             handle.event_broker.close()
-        self._persistence.update_run_state(handle.run_id, RunState.FAILED.value, error=error_text)
+        await self._db.arun(self._persistence.update_run_state, handle.run_id, RunState.FAILED.value, error=error_text)
 
     async def wait_for_prepared(self, run_id: str, timeout: float = 10.0) -> RunHandle:
         """Wait until ``run_id`` leaves the ``preparing`` state (tests + callers).
@@ -459,7 +466,7 @@ class RunManager:
                 valid = answer.strip().lower() in {"y", "yes"}
             if not valid:
                 raise APIError("invalid_confirmation", "Confirmation text does not match.", status_code=400)
-            self._persistence.update_run_state(run_id, RunState.QUEUED.value)
+            await self._db.arun(self._persistence.update_run_state, run_id, RunState.QUEUED.value)
             await handle.event_broker.emit("state", {"state": RunState.QUEUED.value})
             if not handle.decision_broker or not handle.decision_broker.resolve(decision_id, answer):
                 raise APIError("decision_not_found", "Decision not found or already answered.", status_code=404)
@@ -486,7 +493,7 @@ class RunManager:
         )
 
         try:
-            self._persistence.update_run_state(handle.run_id, RunState.RUNNING.value)
+            await self._db.arun(self._persistence.update_run_state, handle.run_id, RunState.RUNNING.value)
             await handle.event_broker.emit("state", {"state": RunState.RUNNING.value})
             result = await service.execute(
                 handle.request,
@@ -515,7 +522,8 @@ class RunManager:
             else:
                 state = RunState.COMPLETED.value
             result_dict = _result_to_dict(result)
-            self._persistence.update_run_state(
+            await self._db.arun(
+                self._persistence.update_run_state,
                 handle.run_id,
                 state,
                 error=result.error,
@@ -524,14 +532,16 @@ class RunManager:
             await handle.event_broker.emit("state", {"state": state, "result": result_dict})
             await self._maybe_title_run(handle, result_dict)
         except asyncio.CancelledError:
-            self._persistence.update_run_state(handle.run_id, RunState.CANCELLED.value)
+            await self._db.arun(self._persistence.update_run_state, handle.run_id, RunState.CANCELLED.value)
             await handle.event_broker.emit("state", {"state": RunState.CANCELLED.value})
             raise
         except _EXC_GROUP_CATCH as exc:
             # Catch BaseExceptionGroup too (MCP subprocess death raises it,
             # and it is NOT a subclass of Exception). Without this the run
             # would stay "running" forever. See tools/exceptions.py.
-            self._persistence.update_run_state(handle.run_id, RunState.FAILED.value, error=str(exc))
+            await self._db.arun(
+                self._persistence.update_run_state, handle.run_id, RunState.FAILED.value, error=str(exc)
+            )
             await handle.event_broker.emit("error", {"message": str(exc)})
             if _is_exception_group(exc):
                 _log_nested_exceptions(exc)
@@ -558,7 +568,7 @@ class RunManager:
         or failing titler never delays the state transition.
         """
         try:
-            existing = self._persistence.get_run(handle.run_id) or {}
+            existing = await self._db.arun(self._persistence.get_run, handle.run_id) or {}
             if existing.get("title"):
                 return
             host = str((self._config.get("ollama") or {}).get("host") or "https://api.ollama.com")
@@ -570,7 +580,7 @@ class RunManager:
                 config=self._config,
             )
             if title:
-                self._persistence.update_run_title(handle.run_id, title)
+                await self._db.arun(self._persistence.update_run_title, handle.run_id, title)
                 await handle.event_broker.emit("title", {"title": title})
         except Exception as exc:  # best-effort — never propagate
             import logging as _logging
@@ -587,7 +597,7 @@ class RunManager:
             handle = self._require_active(run_id)
             event_error: Exception | None = None
             try:
-                self._persistence.update_run_state(run_id, RunState.CANCELLING.value)
+                await self._db.arun(self._persistence.update_run_state, run_id, RunState.CANCELLING.value)
                 await handle.event_broker.emit("state", {"state": RunState.CANCELLING.value})
             except Exception as exc:
                 event_error = exc
@@ -604,7 +614,7 @@ class RunManager:
             task = handle.task or handle.prep_task
             if task is None:
                 try:
-                    self._persistence.update_run_state(run_id, RunState.CANCELLED.value)
+                    await self._db.arun(self._persistence.update_run_state, run_id, RunState.CANCELLED.value)
                     if event_error is None:
                         await handle.event_broker.emit("state", {"state": RunState.CANCELLED.value})
                 finally:
@@ -674,7 +684,7 @@ class RunManager:
                 if self._active.get(run_id) is handle:
                     self._active.pop(run_id, None)
                     try:
-                        self._persistence.update_run_state(run_id, RunState.CANCELLED.value)
+                        await self._db.arun(self._persistence.update_run_state, run_id, RunState.CANCELLED.value)
                         if event_error is None:
                             await handle.event_broker.emit("state", {"state": RunState.CANCELLED.value})
                     except Exception:  # noqa: BLE001 -- broker may already be closed
@@ -689,7 +699,7 @@ class RunManager:
         handle = self._require_active(run_id)
         if handle.decision_broker is None:
             raise APIError("no_decisions", "No decision broker for this run.", status_code=400)
-        decision = self._persistence.get_decision(decision_id)
+        decision = await self._db.arun(self._persistence.get_decision, decision_id)
         if decision is None or decision["run_id"] != run_id or decision["status"] != "pending":
             raise APIError("decision_not_found", "Decision not found or already answered.", status_code=404)
         if decision["kind"] == DecisionKind.START_CONFIRM.value:
@@ -706,15 +716,15 @@ class RunManager:
                 "answer": answer,
             },
         )
-        if not any(row["status"] == "pending" for row in self._persistence.list_decisions(run_id)):
-            self._persistence.update_run_state(run_id, RunState.RUNNING.value)
+        if not any(row["status"] == "pending" for row in await self._db.arun(self._persistence.list_decisions, run_id)):
+            await self._db.arun(self._persistence.update_run_state, run_id, RunState.RUNNING.value)
             await handle.event_broker.emit("state", {"state": RunState.RUNNING.value})
         return {"decision_id": decision_id, "status": "answered"}
 
     async def list_decisions(self, run_id: str) -> list[dict[str, Any]]:
-        if self._persistence.get_run(run_id) is None:
+        if await self._db.arun(self._persistence.get_run, run_id) is None:
             raise APIError("not_found", "Run not found.", status_code=404)
-        return self._persistence.list_decisions(run_id)
+        return await self._db.arun(self._persistence.list_decisions, run_id)
 
     async def call_tool(self, run_id: str, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Policy-gated REST bridge for manual WebUI tool calls."""
@@ -782,6 +792,11 @@ class RunManager:
                     pass
         finally:
             self._events.close_all()
+            # P1-10: drain the DB actor, checkpoint the WAL, close SQLite.
+            try:
+                self._persistence.close()
+            except Exception:  # noqa: BLE001 -- shutdown must never block exit
+                pass
             # Bounded drain of pending webhook deliveries (outbound-only). The
             # dispatcher queue is best-effort; shutdown waits at most 5 s then
             # logs and discards any remainder so a down webhook (20+ s retry

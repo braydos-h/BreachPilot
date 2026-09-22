@@ -55,7 +55,7 @@ def create_router(auth: BearerAuth, run_manager: RunManager) -> APIRouter:
         persistence: ApiPersistence | None = getattr(_rm(), "_persistence", None)
         if persistence is None:
             raise HTTPException(status_code=500, detail="Persistence not configured.")
-        decision = persistence.get_decision(decision_id)
+        decision = await persistence.actor.arun(persistence.get_decision, decision_id)
         if decision is None:
             raise HTTPException(status_code=404, detail="Decision not found")
         if decision.get("run_id") != run_id:

@@ -418,8 +418,8 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
         ``q`` filters on title/target/mode/goal; ``state`` filters on the exact
         run state. ``total`` is the filtered count (for pagination).
         """
-        runs = _ps().list_runs(limit=limit, offset=offset, sort=sort, q=q, state=state)
-        total = _ps().count_runs(q=q, state=state)
+        runs = await _ps().actor.arun(_ps().list_runs, limit=limit, offset=offset, sort=sort, q=q, state=state)
+        total = await _ps().actor.arun(_ps().count_runs, q=q, state=state)
         out: list[dict[str, Any]] = []
         for r in runs:
             req = r.get("request_json", {}) or {}
@@ -1043,7 +1043,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
 
                 shutil.rmtree(run_dir, ignore_errors=True)
                 purged = True
-        _ps().delete_run(run_id)
+        await _ps().actor.arun(_ps().delete_run, run_id)
         return {"run_id": run_id, "deleted": True, "purged": purged}
 
     return router

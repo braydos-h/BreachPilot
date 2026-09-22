@@ -51,7 +51,7 @@ def _validate_custom_goal_objective(objective: Any) -> str:
     return cleaned
 
 
-def _check_duplicate_custom_goal_name(ctx: SystemContext, name: str, exclude_id: str | None = None) -> None:
+async def _check_duplicate_custom_goal_name(ctx: SystemContext, name: str, exclude_id: str | None = None) -> None:
     from tools.api.errors import APIError
     from tools.goal_engine import PRESET_GOALS
 
@@ -63,7 +63,7 @@ def _check_duplicate_custom_goal_name(ctx: SystemContext, name: str, exclude_id:
     persistence = ctx.get_persistence()
     if persistence is None:
         return
-    existing = persistence.get_custom_goal_by_name(name)
+    existing = await persistence.actor.arun(persistence.get_custom_goal_by_name, name)
     if existing and (exclude_id is None or existing["id"] != exclude_id):
         raise APIError("duplicate_goal", f"A custom goal with name '{name}' already exists.", status_code=409)
 
@@ -104,7 +104,7 @@ def register(router: APIRouter, ctx: SystemContext) -> None:
         persistence = ctx.get_persistence()
         if persistence is not None:
             try:
-                rows = persistence.list_custom_goals()
+                rows = await persistence.actor.arun(persistence.list_custom_goals)
                 for row in rows:
                     custom_goals.append(
                         {
@@ -136,13 +136,13 @@ def register(router: APIRouter, ctx: SystemContext) -> None:
             raise APIError("invalid_body", "Expected a JSON object.", status_code=400)
         name = _validate_custom_goal_name(body.get("name"))
         objective = _validate_custom_goal_objective(body.get("objective"))
-        _check_duplicate_custom_goal_name(ctx, name)
+        await _check_duplicate_custom_goal_name(ctx, name)
 
         persistence = ctx.get_persistence()
         if persistence is None:
             raise APIError("internal_error", "Persistence not configured.", status_code=500)
         try:
-            row = persistence.create_custom_goal(name, objective)
+            row = await persistence.actor.arun(persistence.create_custom_goal, name, objective)
         except ValueError as exc:
             raise APIError("duplicate_goal", str(exc), status_code=409) from exc
         return {
@@ -169,7 +169,7 @@ def register(router: APIRouter, ctx: SystemContext) -> None:
         persistence = ctx.get_persistence()
         if persistence is None:
             raise APIError("internal_error", "Persistence not configured.", status_code=500)
-        existing = persistence.get_custom_goal(goal_id)
+        existing = await persistence.actor.arun(persistence.get_custom_goal, goal_id)
         if existing is None:
             raise HTTPException(status_code=404, detail="Custom goal not found")
 
@@ -185,10 +185,10 @@ def register(router: APIRouter, ctx: SystemContext) -> None:
         new_objective = _validate_custom_goal_objective(body["objective"]) if has_objective else existing["objective"]
 
         if new_name.lower() != existing["name"].lower():
-            _check_duplicate_custom_goal_name(ctx, new_name, exclude_id=goal_id)
+            await _check_duplicate_custom_goal_name(ctx, new_name, exclude_id=goal_id)
 
         try:
-            updated = persistence.update_custom_goal(goal_id, new_name, new_objective)
+            updated = await persistence.actor.arun(persistence.update_custom_goal, goal_id, new_name, new_objective)
         except ValueError as exc:
             raise APIError("duplicate_goal", str(exc), status_code=409) from exc
         if updated is None:
@@ -214,10 +214,10 @@ def register(router: APIRouter, ctx: SystemContext) -> None:
         persistence = ctx.get_persistence()
         if persistence is None:
             raise APIError("internal_error", "Persistence not configured.", status_code=500)
-        existing = persistence.get_custom_goal(goal_id)
+        existing = await persistence.actor.arun(persistence.get_custom_goal, goal_id)
         if existing is None:
             raise HTTPException(status_code=404, detail="Custom goal not found")
-        ok = persistence.delete_custom_goal(goal_id)
+        ok = await persistence.actor.arun(persistence.delete_custom_goal, goal_id)
         if not ok:
             raise HTTPException(status_code=404, detail="Custom goal not found")
         return {"deleted": True, "id": goal_id}
