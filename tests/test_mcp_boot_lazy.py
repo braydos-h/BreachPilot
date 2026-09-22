@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
 
 
 def test_mcp_exploit_server_import_stays_lazy():
@@ -25,6 +28,7 @@ def test_mcp_exploit_server_import_stays_lazy():
             "print(','.join(sorted(heavy))); "
             "assert not heavy, f'eager heavy imports: {heavy}'",
         ],
+        cwd=str(REPO),
         capture_output=True,
         text=True,
         timeout=120,

@@ -49,6 +49,7 @@ jobs:
             if [ $((i % TOTAL)) -eq $((SHARD - 1)) ]; then SELECTED+=("${FILES[$i]}"); fi
           done
           echo "shard $SHARD/$TOTAL: ${#SELECTED[@]} files"
+          if [ ${#SELECTED[@]} -eq 0 ]; then echo "shard selected no files" >&2; exit 1; fi
           python -m pytest "${SELECTED[@]}" -q -n 2 -m "not integration and not live_llm"
 
   sandbox:

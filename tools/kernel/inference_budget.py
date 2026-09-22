@@ -20,13 +20,13 @@ to a positive int to bound a campaign.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Mapping
 
 
 @dataclass
 class InferenceBudget:
-    """Thread-compatible counter bounding total inference calls.
+    """Counter bounding total inference calls.
 
     ``max_calls <= 0`` means unbounded (fail-open default). Not thread-safe
     under true parallelism — call sites hold their own locks; the counter

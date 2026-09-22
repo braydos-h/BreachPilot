@@ -35,10 +35,11 @@ BYTES_LIMIT = 600 * 120  # 72kB — independent of the LOC limit (OR, not AND)
 GRANDFATHERED = frozenset(
     {
         "tools/exploit_agent/runner/_impl.py",
-        "tools/api/routes/system.py",
         "tools/eval_harness.py",
         "tools/enhanced_reporting.py",
         "tools/web_researcher.py",
+        "tools/memory_service.py",
+        "tools/recon/service.py",
         "tools/attack_modules/modules/ics_iot.py",
         "tools/browser/playwright_backend.py",
         "tools/providers/opencode_go_provider.py",

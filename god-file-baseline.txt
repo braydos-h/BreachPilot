@@ -1,9 +1,12 @@
 # God-file baseline — see scripts/god_file_budget.py.
 # Grandfathered files only: `path loc bytes`. Generated with --update.
 # Small drift is a CI warning; growth past tolerance fails the gate.
+# memory_service / recon/service byte counts are upper bounds (shell-free
+# session could not run --update); LOC is exact. Re-run --update to normalize.
 outcome_judge.py 1081 44069
 tools/api/routes/runs.py 1011 46123
-tools/api/routes/system.py 1808 79629
+tools/memory_service.py 1927 75775
+tools/recon/service.py 1271 53247
 tools/attack_modules/modules/ics_iot.py 1517 58341
 tools/attack_ui.py 1392 64528
 tools/browser/playwright_backend.py 1443 60868

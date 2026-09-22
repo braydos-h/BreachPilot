@@ -49,15 +49,21 @@ def test_classify_growth_large_bytes_fails():
 
 
 def test_no_graduated_files_remain_grandfathered():
-    """Every grandfathered file must still be over budget.
+    """Every grandfathered file must exist and still be over budget.
 
-    main.py was split (p2-03) below both thresholds — it must graduate out
-    of GRANDFATHERED + god-file-baseline.txt instead of lingering.
+    main.py was split (p2-03) below both thresholds and
+    tools/api/routes/system.py was split into a package (p2-02) — both must
+    graduate out of GRANDFATHERED + god-file-baseline.txt instead of
+    lingering as dead config.
     """
     mod = _load()
-    graduated = []
+    stale: list[str] = []
     for rel in sorted(mod.GRANDFATHERED):
-        loc, size = mod._measure(REPO / rel)
+        path = REPO / rel
+        if not path.is_file():
+            stale.append(f"{rel} (deleted — drop from GRANDFATHERED)")
+            continue
+        loc, size = mod._measure(path)
         if loc <= mod.LOC_LIMIT and size < mod.BYTES_LIMIT:
-            graduated.append(f"{rel} ({loc} LOC, {size} B)")
-    assert not graduated, f"files below budget must graduate out of GRANDFATHERED: {graduated}"
+            stale.append(f"{rel} ({loc} LOC, {size} B — below budget, graduate it)")
+    assert not stale, f"stale grandfather entries: {stale}"
