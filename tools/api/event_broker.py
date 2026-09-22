@@ -91,6 +91,26 @@ class _CloseResult:
 _CLOSED_OK = _CloseResult()
 
 
+class _Pending:
+    """Unsequenced emit waiting for the writer thread (P1-03).
+
+    The writer assigns ``sequence`` in queue order, persists, appends to the
+    ring, then resolves ``future`` with the full event dict. ``emit()`` awaits
+    the future (no thread hop) so its return value still carries ``sequence``.
+    """
+
+    __slots__ = ("event", "event_type", "future", "payload", "timestamp")
+
+    def __init__(self, event_type: str, payload: dict[str, Any], timestamp: str) -> None:
+        import concurrent.futures as _futures
+
+        self.event: dict[str, Any] | None = None
+        self.event_type = event_type
+        self.payload = payload
+        self.timestamp = timestamp
+        self.future = _futures.Future()
+
+
 class _Barrier:
     """Flush marker for read-your-writes consistency (P1-01).
 
@@ -508,11 +528,20 @@ class RunEventBroker:
     are notified via an ``asyncio.Condition``.
 
     Persistence uses a single-writer batched pipeline (P1-01): ``emit()``
-    assigns ``sequence`` under ``_lock``, appends to the ring, fans out to WS
-    subscribers, then hands the event to a ``queue.Queue``. One dedicated
-    daemon thread owns a single open FD and drains up to 128 events (or every
-    ~20ms), writing + flushing once per batch. ``close()`` enqueues a sentinel,
-    joins the writer (tail flush + fsync), then stops fan-out queues.
+    sanitizes, then hands an unsequenced pending item to a ``queue.Queue``.
+    One dedicated daemon thread owns a single open FD and drains up to 128
+    events (or every ~20ms), writing + flushing once per batch. fsync policy
+    follows the durability mode (P1-02: ``strict`` per event, ``balanced``
+    per batch window + important transitions, ``fast`` on checkpoint/close).
+
+    Sequencing is writer-side (P1-03): the writer is the only sequencer, so
+    file order == sequence order, gapless, even under concurrent ``emit()``.
+    The writer appends to the ring in batch order and resolves each pending
+    future with the full event dict; ``emit()`` awaits the ack (no thread
+    hop) and then fans out to WS subscribers + the plugin dispatcher.
+    ``close()`` enqueues a sentinel, joins the writer (tail flush + fsync),
+    then stops fan-out queues. Replay paths drain the writer first so the
+    file tail is never missed (read-your-writes).
     """
 
     _BATCH_MAX = 128
@@ -527,6 +556,10 @@ class RunEventBroker:
         self._ring: deque[dict[str, Any]] = deque(maxlen=buffer_size)
         self._seq = 0
         self._lock = asyncio.Lock()
+        # Guards the ring: the writer thread appends (P1-03) while the event
+        # loop reads. Short critical sections, never held across awaits.
+        # Lock order: _lock -> _ring_lock (the writer takes only _ring_lock).
+        self._ring_lock = threading.Lock()
         self._closed = False
         self._subscribers: list[asyncio.Queue[dict[str, Any] | None]] = []
         if durability not in _DURABILITY_MODES:
@@ -559,6 +592,23 @@ class RunEventBroker:
         with self._writer_lock:
             self._ensure_writer_locked()
 
+    def _sequence_pending(self, item: _Pending) -> dict[str, Any]:
+        """Assign the next sequence number and build the event dict.
+
+        Runs only on the writer thread: the single sequencer, so file order
+        == sequence order with no gaps even under concurrent emit().
+        """
+        self._seq += 1
+        event = {
+            "sequence": self._seq,
+            "timestamp": item.timestamp,
+            "run_id": self._run_id,
+            "type": item.event_type,
+            "payload": item.payload,
+        }
+        item.event = event
+        return event
+
     def _writer_loop(self) -> None:
         import time as _time
 
@@ -580,42 +630,49 @@ class RunEventBroker:
                     continue
                 done = False
                 try:
+                    # Phase 1: sequence pendings in queue order, then write.
+                    # File order == sequence order by construction (P1-03):
+                    # the writer is the only sequencer.
+                    events: list[dict[str, Any] | None] = []
                     if durability == "strict":
                         # Old behavior, kept for forensics: fsync per event.
                         for item in batch:
                             if item is None:
                                 done = True
+                                events.append(None)
                             elif isinstance(item, _Barrier):
+                                events.append(item)
                                 f.flush()
                                 os.fsync(f.fileno())
-                                if not item.future.done():
-                                    item.future.set_result(None)
-                            else:
-                                f.write(json.dumps(item, default=str) + "\n")
+                                last_fsync = _time.monotonic()
+                            elif isinstance(item, _Pending):
+                                event = self._sequence_pending(item)
+                                f.write(json.dumps(event, default=str) + "\n")
                                 f.flush()
                                 os.fsync(f.fileno())
+                                last_fsync = _time.monotonic()
+                                events.append(item)
+                            else:  # pragma: no cover - defensive: unknown item
+                                log.warning("event writer: unknown queue item %r", type(item))
                             self._write_q.task_done()
-                        last_fsync = _time.monotonic()
                     else:
                         important = False
                         for item in batch:
                             if item is None:
                                 done = True
+                                events.append(None)
                             elif isinstance(item, _Barrier):
-                                f.flush()
-                                if item.fsync or durability == "balanced":
-                                    # checkpoint() forces durability in any
-                                    # mode; balanced also fsyncs read barriers
-                                    # so replay cursors are crash-consistent.
-                                    os.fsync(f.fileno())
-                                    last_fsync = _time.monotonic()
-                                if not item.future.done():
-                                    item.future.set_result(None)
-                            else:
-                                f.write(json.dumps(item, default=str) + "\n")
-                                if _is_important_event(str(item.get("type", "")), item.get("payload")):
+                                events.append(item)
+                            elif isinstance(item, _Pending):
+                                event = self._sequence_pending(item)
+                                f.write(json.dumps(event, default=str) + "\n")
+                                events.append(item)
+                                if _is_important_event(str(event.get("type", "")), event.get("payload")):
                                     important = True
+                            else:  # pragma: no cover - defensive: unknown item
+                                log.warning("event writer: unknown queue item %r", type(item))
                             self._write_q.task_done()
+                        # Phase 2: flush once per batch; fsync per policy.
                         f.flush()
                         now = _time.monotonic()
                         if durability == "balanced":
@@ -623,6 +680,27 @@ class RunEventBroker:
                                 os.fsync(f.fileno())
                                 last_fsync = now
                         # `fast`: fsync only on sentinel/close + checkpoint().
+                        for item in events:
+                            if isinstance(item, _Barrier) and (item.fsync or durability == "balanced"):
+                                # checkpoint() forces durability in any mode;
+                                # balanced also fsyncs read barriers so replay
+                                # cursors are crash-consistent.
+                                os.fsync(f.fileno())
+                                last_fsync = _time.monotonic()
+                    # Phase 3: publish in batch order — ring append, then
+                    # resolve futures/barriers so emit() callers observe
+                    # sequence order and read-your-writes holds.
+                    with self._ring_lock:
+                        for item in events:
+                            if isinstance(item, _Pending) and item.event is not None:
+                                self._ring.append(item.event)
+                    for item in events:
+                        if isinstance(item, _Barrier):
+                            if not item.future.done():
+                                item.future.set_result(None)
+                        elif isinstance(item, _Pending):
+                            if not item.future.done() and item.event is not None:
+                                item.future.set_result(item.event)
                     if done:
                         # Sentinel/close always fsyncs regardless of mode.
                         try:
@@ -672,32 +750,33 @@ class RunEventBroker:
             return False
 
     async def emit(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """Emit an event: assign sequence, sanitize, queue for JSONL, notify subscribers."""
-        # ponytail: sanitize (CPU) outside the lock — was holding lock across it.
+        """Emit an event: sanitize, queue, await the writer's ack, fan out.
+
+        P1-03 writer-side sequencing: the writer thread assigns ``sequence``
+        in queue order (the single sequencer), persists, appends to the ring,
+        then resolves the pending future. ``emit()`` awaits the ack off the
+        event loop (no thread hop) so the return value still carries the full
+        event dict with ``sequence``. File order == sequence order, gapless.
+        """
+        # ponytail: sanitize (CPU) outside any lock.
         clean = sanitize(payload)
         async with self._lock:
             if self._closed:
                 raise RuntimeError("Event broker is closed.")
-            self._seq += 1
-            event = {
-                "sequence": self._seq,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "run_id": self._run_id,
-                "type": event_type,
-                "payload": clean,
-            }
-            subscribers = tuple(self._subscribers)
-        # P1-01: hand to the single writer thread (single open FD, batched
-        # flush) instead of per-event open/write/flush/fsync + to_thread hop.
         # The writer lock serializes against close()'s sentinel so no event
         # can land behind the shutdown marker.
+        pending = _Pending(event_type, clean, datetime.now(timezone.utc).isoformat())
         with self._writer_lock:
             if self._closed:
                 raise RuntimeError("Event broker is closed.")
             self._ensure_writer_locked()
-            self._write_q.put(event)
+            self._write_q.put(pending)
+        try:
+            event = await asyncio.wait_for(asyncio.wrap_future(pending.future), timeout=30.0)
+        except asyncio.TimeoutError as exc:
+            raise RuntimeError("Event broker writer did not acknowledge emit.") from exc
         async with self._lock:
-            self._ring.append(event)
+            subscribers = tuple(self._subscribers)
         for queue in subscribers:
             try:
                 queue.put_nowait(event)
@@ -707,18 +786,19 @@ class RunEventBroker:
                         self._subscribers.remove(queue)
                 self._stop_queue(queue)
         # Bounded dispatch for outbound-only plugin subscribers (webhook/ticketing).
-        # Enqueued AFTER queueing JSONL persistence + WS fan-out so a slow/failed webhook
-        # never blocks the run or drops the event. The dispatcher runs blocking
-        # subscribers off the event-loop thread via ``asyncio.to_thread`` and
-        # bounds queue/concurrency. See module docstring for shutdown semantics.
+        # Enqueued AFTER the writer persisted + published (ack) so a slow/failed
+        # webhook never blocks the run or drops the event. The dispatcher runs
+        # blocking subscribers off the event-loop thread via ``asyncio.to_thread``
+        # and bounds queue/concurrency. See module docstring for shutdown semantics.
         _enqueue_plugin_event(event)
         return event
 
     async def replay(self, after: int = 0) -> list[dict[str, Any]]:
         """Replay events with sequence > ``after`` from JSONL."""
         async with self._lock:
-            if self._ring and after >= self._ring[0]["sequence"] - 1:
-                return [event for event in self._ring if event["sequence"] > after]
+            with self._ring_lock:
+                if self._ring and after >= self._ring[0]["sequence"] - 1:
+                    return [event for event in self._ring if event["sequence"] > after]
             path = self._events_path
         # P1-01: the writer flushes asynchronously; drain it before reading
         # the file so the tail is never missed (read-your-writes).
@@ -735,8 +815,9 @@ class RunEventBroker:
         ]
 
     def _replay_locked(self, after: int) -> list[dict[str, Any]]:
-        if self._ring and after >= self._ring[0]["sequence"] - 1:
-            return [event for event in self._ring if event["sequence"] > after]
+        with self._ring_lock:
+            if self._ring and after >= self._ring[0]["sequence"] - 1:
+                return [event for event in self._ring if event["sequence"] > after]
         events: list[dict[str, Any]] = []
         if not self._events_path.exists():
             return events
@@ -803,12 +884,13 @@ class RunEventBroker:
         # off-loop without the lock (was holding the lock across the await,
         # stalling every emitter/subscriber for the whole file read).
         async with self._lock:
-            if self._ring and self._ring[0]["sequence"] == 1:
-                full: list[dict[str, Any]] = list(self._ring)
-                path: Path | None = None
-            else:
-                full = []
-                path = self._events_path
+            with self._ring_lock:
+                if self._ring and self._ring[0]["sequence"] == 1:
+                    full: list[dict[str, Any]] = list(self._ring)
+                    path: Path | None = None
+                else:
+                    full = []
+                    path = self._events_path
         if path is not None:
             await self._drain_writer()
             full = await asyncio.to_thread(self._read_jsonl_events, path)
