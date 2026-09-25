@@ -30,7 +30,7 @@ Auditable, evidence-driven autonomous security testing — scope → containment
 - **Multi-agent when it helps.** A six-specialist swarm for single high-value targets, and a persistent campaign orchestrator for multi-target, multi-phase operations.
 - **Extensible without forking.** Auto-discovered MCP tools, advisory skills, attack modules, and a plugin system with a reference example. Inventory counts live in the generated appendix (`docs/generated/capability-counts.json`), never the headline.
 
-## Quick start
+## Quick-start
 
 Requires Python 3.11+, Docker Engine, and nmap. `bp --doctor` verifies everything, including the active AI provider.
 
