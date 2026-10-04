@@ -15,10 +15,9 @@ audit, and the target-IP allowlist lock live in `tools/mcp_shared.py`.
 | Legacy (defensive) | `mcp_server.py` | Scope-enforced Nmap scanning against `research.allowed_assets`. No exploit tools; every tool checks `_is_in_allowlist` (`mcp_server.py:79-108`) and the terminal is allowlisted Nmap shapes only (`mcp_server.py:283-312`). | `run_nmap_ping_sweep`, `run_nmap_triage_scan`, `run_nmap_basic_scan`, `run_nmap_service_scan`, `run_nmap_vuln_scan`, `run_limited_terminal`, `search_vulnerability_intel`, `search_cve_intel` |
 
 All three share the HTTP transport hardening from
-`tools/mcp_shared.run_mcp_http_server` (`tools/mcp_shared.py:1064-1084`):
-loopback-only bind unless `--allow-public-bind` AND `MCP_ALLOW_PUBLIC_BIND=1`
-(two-person rule, `tools/mcp_shared.py:1011-1030`), optional
-`MCP_HTTP_TOKEN` bearer auth (`tools/mcp_shared.py:1033-1061`).
+`tools/mcp_shared.run_mcp_http_server`: loopback-only by default; non-loopback
+binds require both `--allow-public-bind` and `MCP_ALLOW_PUBLIC_BIND=1`, plus
+`MCP_HTTP_TOKEN` bearer authentication. Loopback binds may omit the token.
 
 ## Central Registry Wiring
 

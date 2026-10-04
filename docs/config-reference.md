@@ -73,7 +73,7 @@ reachability, model registry, port conflicts) and `python main.py --self-test`
 | `CALDERA_API_KEY` | — | Caldera server API key (env-only, never config) | `caldera.api_key_env` | plugins/caldera/plugin.py:42 |
 | `TICKETING_TOKEN` | — | Jira/GitHub ticketing token (env-only) | `ticketing.token_env` | tools/ticketing.py:33 |
 | `PROXMOX_API_TOKEN` | — | Proxmox snapshot provider token (env-only, never logged) | — (provider `proxmox`) | tools/snapshots.py ProxmoxProvider |
-| `MCP_HTTP_TOKEN` | — | Optional bearer auth for MCP HTTP transport | — | mcp_shared.run_mcp_http_server, mcp_engine_server.py:27 |
+| `MCP_HTTP_TOKEN` | — | Bearer auth for MCP HTTP; required on non-loopback binds, optional on loopback | — | mcp_shared.run_mcp_http_server, mcp_engine_server.py:27 |
 | `MCP_ALLOW_PUBLIC_BIND` | — | Second half of the two-person rule for non-loopback MCP binds | — | mcp_shared.run_mcp_http_server |
 | `AI_NMAP_ACTIVE_MODEL_ALIAS` | — | Active model alias threaded into the MCP server subprocess | set by mcp_session.py:270 | tools/mcp_tools/registry.py:201, peer_models.py:80 |
 | `AI_NMAP_DEBUG` | — | Debug logging switch | set by main.py:590 from `--debug` | exploit_agent |

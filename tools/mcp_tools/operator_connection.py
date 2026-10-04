@@ -39,6 +39,7 @@ import subprocess
 import time
 from typing import Any
 
+from tools.kernel.workspace import write_workspace_file
 from tools.mcp_shared import _attempt_dir, check_targets_allowlist
 from tools.mcp_tools.registry import ToolContext
 from tools.mcp_tools.terminal import _target_lock_block
@@ -200,14 +201,12 @@ def register_operator_connection_tools(mcp: Any, *, ctx: ToolContext) -> None:
         except ValueError as exc:
             return f"BLOCKED: {exc}"
 
-        attempt_dir, attempt_id = _attempt_dir(workspace)
-        attempt_dir.mkdir(parents=True, exist_ok=True)
+        _, attempt_id = _attempt_dir(workspace)
         implant_filename = f"implant_{m}_{target_ip.replace('.', '_')}.py"
-        implant_path = attempt_dir / implant_filename
         try:
-            implant_path.write_text(script, encoding="utf-8")
-        except OSError as exc:
-            return f"ERROR: could not write implant script: {exc}"
+            implant_path = write_workspace_file(workspace, f"{attempt_id}/{implant_filename}", script.encode("utf-8"))
+        except (OSError, ValueError) as exc:
+            return f"BLOCKED: implant script could not be written safely ({type(exc).__name__})."
 
         # Optionally auto-start the operator-side listener that the implant
         # will beacon to. Uses PersistentSessionManager so the listener is

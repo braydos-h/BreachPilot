@@ -80,7 +80,7 @@ Allowlist check is `tools/validation_utils.is_target_in_allowlist` — supports 
 | Env var | Purpose | Default | Read at |
 |---------|---------|---------|---------|
 | `BREACHPILOT_API_TOKEN` | Bearer token override for `--demon/--daemon/--web` (`app.py` / `tools/api/auth.py`) | `api.token_file` (`.webui_secret_key`) | `app.py:71`, `tools/api/auth.py:46`, `load_or_create_token` |
-| `MCP_HTTP_TOKEN` | Optional bearer for MCP HTTP transport (`streamable_http`) | — (loopback-only, no auth) | `mcp_shared.run_mcp_http_server` — wraps ASGI with `_wrap_http_auth` |
+| `MCP_HTTP_TOKEN` | Bearer token for MCP HTTP transport (`streamable_http`) | — on loopback; required for non-loopback binds | `mcp_shared.run_mcp_http_server` — wraps ASGI with `_wrap_http_auth` |
 | `MCP_ALLOW_PUBLIC_BIND` | Second half of two-person rule for non-loopback MCP bind (`1/true/yes/on`) | — | `mcp_shared.assert_loopback_bind` — requires CLI `--allow-public-bind` AND env `1` |
 
 ### Behavior / debug

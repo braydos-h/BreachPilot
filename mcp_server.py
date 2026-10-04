@@ -378,7 +378,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         # HTTP transport is loopback-only by default; a non-loopback bind
         # requires --allow-public-bind AND MCP_ALLOW_PUBLIC_BIND=1, and an
-        # optional MCP_HTTP_TOKEN bearer secret is honored when set. See
+        # public binds also require an MCP_HTTP_TOKEN bearer secret. See
         # tools.mcp_shared.run_mcp_http_server (shared with mcp_exploit_server).
         run_mcp_http_server(server, args.host, args.port, allow_public_bind=args.allow_public_bind)
     return 0

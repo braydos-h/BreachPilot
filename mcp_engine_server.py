@@ -24,7 +24,7 @@ Run:
 HTTP transport is loopback-only by default; a non-loopback bind requires
 ``--allow-public-bind`` AND ``MCP_ALLOW_PUBLIC_BIND=1`` (two-person rule,
 shared with the other two servers via ``tools.mcp_shared.run_mcp_http_server``).
-Optional bearer auth via ``MCP_HTTP_TOKEN``.
+Non-loopback binds also require ``MCP_HTTP_TOKEN`` bearer authentication.
 """
 
 from __future__ import annotations

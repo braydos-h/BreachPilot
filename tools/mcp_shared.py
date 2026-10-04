@@ -410,16 +410,11 @@ def _run_with_pgrp_timeout(
     return returncode, out, err
 
 
-# ── HTTP transport hardening (loopback gate + optional shared-secret auth) ──
+# ── HTTP transport hardening (loopback gate + public-bind authentication) ──
 #
-# CLAUDE.md documents that the MCP HTTP transport "refuses to bind to non-
-# loopback interfaces unless ``--allow-public-bind`` AND
-# ``MCP_ALLOW_PUBLIC_BIND=1`` are both set", and that there is no auth on the
-# streamable-http endpoint. The loopback gate previously existed only in
-# mcp_exploit_server.py (and the documented override flag did not exist at
-# all); mcp_server.py (defensive) had no gate. These helpers give both servers
-# the same gate + an optional ``MCP_HTTP_TOKEN`` bearer-token check so a
-# public bind is not unauthenticated.
+# The MCP HTTP transport is loopback-only by default. An explicitly authorized
+# non-loopback bind also requires bearer authentication. Centralize these
+# controls so each server applies the same checks.
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
@@ -460,7 +455,8 @@ def _wrap_http_auth(app: Callable[..., Awaitable[None]], token: str) -> Callable
         receive: Callable[[], Awaitable[Mapping[str, object]]],
         send: Callable[[Mapping[str, object]], Awaitable[None]],
     ) -> None:
-        if scope.get("type") != "http":
+        scope_type = scope.get("type")
+        if scope_type not in {"http", "websocket"}:
             return await app(scope, receive, send)
         raw_headers = scope.get("headers", [])
         headers: dict[bytes, bytes] = {}
@@ -470,6 +466,9 @@ def _wrap_http_auth(app: Callable[..., Awaitable[None]], token: str) -> Callable
                     headers[k.lower()] = v
         if hmac.compare_digest(headers.get(b"authorization", b""), expected):
             return await app(scope, receive, send)
+        if scope_type == "websocket":
+            await send({"type": "websocket.close", "code": 4401, "reason": "MCP_HTTP_TOKEN required"})
+            return
         await send(
             {
                 "type": "http.response.start",
@@ -486,14 +485,18 @@ def _wrap_http_auth(app: Callable[..., Awaitable[None]], token: str) -> Callable
 
 
 def run_mcp_http_server(mcp: object, host: str, port: int, *, allow_public_bind: bool = False) -> None:
-    """Run a FastMCP server over streamable-http with loopback + optional auth.
+    """Run a FastMCP server over streamable-http with loopback + public auth.
 
     Centralizes the HTTP serving for both MCP servers so the loopback gate,
     the ``--allow-public-bind`` override, and the ``MCP_HTTP_TOKEN`` bearer
-    auth live in one place. Uses ``mcp.streamable_http_app()`` + ``uvicorn.run``
+    auth live in one place. Public binds require a token; loopback binds may
+    omit it. Uses ``mcp.streamable_http_app()`` + ``uvicorn.run``
     (the current SDK path) instead of the legacy ``server.run(transport="http")``.
     """
     assert_loopback_bind(host, allow_public_bind=allow_public_bind)
+    token = os.environ.get("MCP_HTTP_TOKEN", "").strip()
+    if host.strip().lower() not in _LOOPBACK_HOSTS and not token:
+        raise ValueError("MCP_HTTP_TOKEN is required when binding MCP HTTP to a non-loopback host")
     try:
         import uvicorn
 
@@ -502,7 +505,6 @@ def run_mcp_http_server(mcp: object, host: str, port: int, *, allow_public_bind:
         raise RuntimeError(
             "HTTP MCP transport needs uvicorn and starlette. Run: python -m pip install -r requirements.txt"
         ) from exc
-    token = os.environ.get("MCP_HTTP_TOKEN", "").strip()
     if token:
         app = _wrap_http_auth(app, token)
     uvicorn.run(app, host=host, port=port, log_level="info")

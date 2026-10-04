@@ -31,6 +31,7 @@ import yaml
 
 from tools.enhanced_reporting import CVSSScore, TechnicalFinding
 from tools.kernel.allowlist import _scanner_token_is_host
+from tools.kernel.workspace import write_workspace_file
 from tools.mcp_shared import _attempt_dir, check_targets_allowlist
 from tools.mcp_tools.registry import (
     ToolContext,
@@ -405,7 +406,6 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
             from tools.sandbox.exceptions import SandboxError
 
             attempt_dir, attempt_id = nuclei_attempt if nuclei_attempt is not None else _attempt_dir(workspace)
-            log_path = attempt_dir / f"{sc}.log"
             start = time.monotonic()
             _elapsed = 0.0
             try:
@@ -437,8 +437,8 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
             except SandboxError as exc:
                 return f"WEB_SCAN_RESULT: blocked\n{sandbox_error_block(exc, tool_name='run_web_scan')}"
             try:
-                log_path.write_text(str(output), encoding="utf-8")
-            except OSError:
+                write_workspace_file(workspace, f"{attempt_id}/{sc}.log", str(output).encode("utf-8"))
+            except (OSError, ValueError):
                 pass
             return (
                 f"WEB_SCAN_RESULT: {status}\n"
@@ -452,7 +452,6 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
             )
 
         attempt_dir, attempt_id = nuclei_attempt if nuclei_attempt is not None else _attempt_dir(workspace)
-        log_path = attempt_dir / f"{sc}.log"
         start = time.monotonic()
         try:
             returncode, out, err = _run_with_pgrp_timeout(
@@ -478,8 +477,8 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
         # Persist the raw scan log for the audit trail / later read_workspace_file.
         try:
-            log_path.write_text(str(output), encoding="utf-8")
-        except OSError:
+            write_workspace_file(workspace, f"{attempt_id}/{sc}.log", str(output).encode("utf-8"))
+        except (OSError, ValueError):
             pass
 
         return (
@@ -546,10 +545,12 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
             by_id[fid] = finding
         records = [f.to_dict() for f in by_id.values()]
         try:
-            (attempt_dir / _NUCLEI_FINDINGS_NAME).write_text(
-                json.dumps(records, indent=2, default=str), encoding="utf-8"
+            write_workspace_file(
+                workspace,
+                f"{aid}/{_NUCLEI_FINDINGS_NAME}",
+                json.dumps(records, indent=2, default=str).encode("utf-8"),
             )
-        except OSError:
+        except (OSError, ValueError):
             pass
         lines = [f"NUCLEI_FINDINGS: {len(records)} confirmed-candidate", f"ATTEMPT_ID: {aid}"]
         for finding in list(by_id.values())[:20]:
@@ -599,8 +600,12 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
         template_text, template_slug = _render_nuclei_template(record)
         out_path = source_dir / f"{_NUCLEI_TEMPLATE_PREFIX}{fid}.yaml"
         try:
-            out_path.write_text(template_text, encoding="utf-8")
-        except OSError as exc:
+            write_workspace_file(
+                workspace,
+                f"{source_dir.name}/{out_path.name}",
+                template_text.encode("utf-8"),
+            )
+        except (OSError, ValueError) as exc:
             return f"NUCLEI_TEMPLATE: INVALID\nFINDING: {fid}\nDETAIL: could not write template: {exc}"
         verdict, detail = _validate_nuclei_template(out_path, template_text)
         try:

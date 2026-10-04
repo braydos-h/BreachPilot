@@ -109,7 +109,7 @@ python3 mcp_server.py --transport stdio --approved-subnets 192.168.1.0/24
 python3 mcp_server.py --transport http --host 127.0.0.1 --port 8000 --approved-subnets 192.168.1.0/24
 python3 mcp_exploit_server.py   # defaults: stdio, port 8001
 ```
-The HTTP transport refuses to bind to non-loopback interfaces unless `--allow-public-bind` AND `MCP_ALLOW_PUBLIC_BIND=1` are both set.
+The HTTP transport refuses non-loopback binds unless `--allow-public-bind` AND `MCP_ALLOW_PUBLIC_BIND=1` are both set. A non-loopback bind also requires `MCP_HTTP_TOKEN`; loopback may omit it.
 
 ### Lint / type-check (CI-enforced, repo-wide)
 ```bash
@@ -331,7 +331,7 @@ The exploit MCP server's tool implementations live in a structured subpackage, r
 The MCP exploit session is opened by `tools/mcp_session.py:open_exploit_mcp_session` (an async context manager, re-wrapped at `main.py:open_exploit_mcp_session` and re-bound into `tools/exploit_session.py`). It emits `[BOOT]`/`[OK]` progress markers via `AttackUi.boot_step` / `boot_section` (grep `boot_step` to find them), then per transport:
 
 - **stdio** (default): spawns the exploit MCP server subprocess, wraps `mcp.client.stdio.stdio_client`, and calls `session.initialize()` capped at `MCP_BOOT_TIMEOUT_SECONDS` (30s). The subprocess env gets `EXPLOIT_TARGET` (the runtime `--target`), `EXPLOIT_WORKSPACE`, and the active-model/multi-model flags — this is how the target-IP lock reaches the server (see Permission Model).
-- **http**: starts the loopback HTTP child in its own process group, waits for its listener within the same 30s cold-start budget, then opens and initializes the live `streamable_http_client` session. Startup/readiness/initialization failures safely fall back to stdio; failures after a live session has been yielded never fall back (to avoid repeating a partially completed tool call). `MCP_HTTP_TOKEN`, when configured, is sent by the live client. HTTP shutdown signals the process group and escalates to descendant-tree termination on Windows. Startup errors include a bounded, credential-redacted tail of `mcp_exploit_server.log`.
+- **http**: starts the loopback HTTP child in its own process group, waits for its listener within the same 30s cold-start budget, then opens and initializes the live `streamable_http_client` session. Startup/readiness/initialization failures safely fall back to stdio; failures after a live session has been yielded never fall back (to avoid repeating a partially completed tool call). `MCP_HTTP_TOKEN`, when configured, is sent by the live client; public binds require it. HTTP shutdown signals the process group and escalates to descendant-tree termination on Windows. Startup errors include a bounded, credential-redacted tail of `mcp_exploit_server.log`.
 
 `soft_fail=True` yields `None` so the recon-first path can degrade when MCP is unavailable; hard-fail re-raises. The old runtime recon-module checklist is gone — heavy modules (`exploit_search`, `cve_lookup`, `web_researcher`, `recon_pipeline`, `attack_planner`, `attack_modules`, `payload_crafter`, `metasploit_runner`) are now imported by the server at subprocess boot (enumerated in the `MCP_BOOT_TIMEOUT_SECONDS` comment, not a runtime-checked list).
 

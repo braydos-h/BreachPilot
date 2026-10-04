@@ -13,6 +13,7 @@ import re
 import shutil
 from typing import Any
 
+from tools.kernel.workspace import write_workspace_file
 from tools.mcp_shared import _attempt_dir
 from tools.mcp_tools.modules.hash import _identify_hash_modes
 from tools.mcp_tools.registry import ToolContext, run_argv_captured
@@ -171,9 +172,8 @@ def register_cracking_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if rules_path and not os.path.exists(rules_path):
             return f"RULES_NOT_FOUND: rule file '{rules_path}' does not exist on the operator box."
 
-        attempt_dir, attempt_id = _attempt_dir(workspace)
-        hashfile = attempt_dir / "hash.txt"
-        hashfile.write_text(h + "\n", encoding="utf-8")
+        _, attempt_id = _attempt_dir(workspace)
+        hashfile = write_workspace_file(workspace, f"{attempt_id}/hash.txt", (h + "\n").encode("utf-8"))
 
         cracked: list[tuple[str, str]] = []
         crack_argv: list[str]

@@ -26,6 +26,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from tools.kernel.workspace import write_workspace_file
 from tools.mcp_shared import _allowed_target_list, _attempt_dir, check_targets_allowlist
 from tools.mcp_tools.registry import ToolContext, _run_with_pgrp_timeout, run_argv_captured
 from tools.validation_utils import is_fqdn, validate_nt_hash, validate_ntlm_hash, validate_target_or_ip
@@ -647,9 +648,15 @@ def register_ad_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if not targets:
             return "BLOCKED: no allowlisted relay targets (exploit.allowed_targets empty and no runtime target)."
 
-        attempt_dir, attempt_id = _attempt_dir(workspace)
-        targets_file = attempt_dir / "relay_targets.txt"
-        targets_file.write_text("\n".join(targets) + "\n")
+        _, attempt_id = _attempt_dir(workspace)
+        try:
+            targets_file = write_workspace_file(
+                workspace,
+                f"{attempt_id}/relay_targets.txt",
+                ("\n".join(targets) + "\n").encode("utf-8"),
+            )
+        except (OSError, ValueError) as exc:
+            return f"BLOCKED: relay target list could not be written safely ({type(exc).__name__})."
 
         ntlmrelayx = shutil.which("ntlmrelayx.py") or "ntlmrelayx.py"
         argv = [ntlmrelayx, "-tf", str(targets_file), "-smb2support"]

@@ -35,7 +35,7 @@ Three MCP servers share one lifecycle, one transport hardening layer, and one se
 | Exploit | `mcp_exploit_server.py` | `AI Exploitation Tools` | Permissive exploitation surface for the exploit agent / recon-first paths; ~120 tools across 30 families | 30 families in `tools/mcp_tools/` (24 top-level incl. `terminal/` + 6 in `modules/`) | `8001` (`mcp_exploit_server.py:206-208`) |
 | Engine | `mcp_engine_server.py` | `breachpilot-engine` | Read-only advisory + history for foreign assistants (Claude Desktop, Cursor) | 5 tools | `8002` (`mcp_engine_server.py:200-203`) |
 
-All three call `tools.mcp_shared.run_mcp_http_server` (`tools/mcp_shared.py:384-405`) for HTTP: `mcp.streamable_http_app()` + `uvicorn.run` with loopback gate and optional `MCP_HTTP_TOKEN` bearer auth.
+All three call `tools.mcp_shared.run_mcp_http_server` for HTTP: `mcp.streamable_http_app()` + `uvicorn.run` with a loopback gate. Non-loopback binds require both public-bind opt-ins and `MCP_HTTP_TOKEN` bearer auth; loopback may omit the token.
 
 ## Transports
 
@@ -75,7 +75,7 @@ graph TD
 1. `tools/mcp_session.open_exploit_mcp_session` (`tools/mcp_session.py:117-196`) orchestrates boot. HTTP is tried first with `startup_soft_fail=True`; only HTTP-startup failures fall back to stdio. A live HTTP session is never replaced after `yield`.
 2. Each boot path caps `ClientSession.initialize()` at `MCP_BOOT_TIMEOUT_SECONDS = 30` (`tools/mcp_session.py:32`).
 3. Mid-session death is caught with `_EXC_GROUP_CATCH` (`tools/exceptions.py:38-41`) so `BaseExceptionGroup` from anyio task groups is not silently missed.
-4. Env vars `EXPLOIT_TARGET` / `EXPLOIT_TARGET_IP` / `EXPLOIT_TARGET_DOMAIN` / `EXPLOIT_DISCOVERED_TARGETS` / `EXPLOIT_WORKSPACE` / `AI_NMAP_*` / `MCP_HTTP_TOKEN` are injected into the child (`tools/mcp_session.py:256-272`) and consumed by the allowlist lock.
+4. Env vars `EXPLOIT_TARGET` / `EXPLOIT_TARGET_IP` / `EXPLOIT_TARGET_DOMAIN` / `EXPLOIT_DISCOVERED_TARGETS` / `EXPLOIT_WORKSPACE` / `AI_NMAP_*` / `MCP_HTTP_TOKEN` are injected into the child and used by the target lock and HTTP bearer auth.
 5. The exploit server auto-discovers every `register_*_tools` via `tools/mcp_tools/registry.collect_tools` (`tools/mcp_tools/registry.py:391-405`) and validates `@audit_tool`/`@require_allowlist` via AST on every file (`tools/mcp_tools/registry.py:345-388`).
 
 ## Shared Kernel

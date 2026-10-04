@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -55,18 +56,38 @@ def _text(result) -> str:
     return "".join(parts)
 
 
-def _patch_pgrp(monkeypatch, returncode=0, out="ok\n", err=""):
-    """Patch ``_run_with_pgrp_timeout`` and return the captured-argv list."""
-    import mcp_exploit_server as mes
+def _attach_fake_sandbox(monkeypatch, tmp_path: Path, *, result=None):
+    """Keep scanner regression tests inside a deterministic worker boundary."""
+    from tools.sandbox.models import SandboxResult
 
-    captured: list[Any] = []
+    class FakeSandbox:
+        def __init__(self) -> None:
+            self.workspace = tmp_path.resolve()
+            self.cfg = SimpleNamespace(remove_stale_on_startup=False)
+            self.calls: list[dict[str, Any]] = []
 
-    def _fake(args, timeout, stdout=None, stderr=None, cwd=None, env=None, input_text=None, **popen_kwargs):
-        captured.append(list(args))
-        return returncode, out, err
+        def container_path(self, path: str | Path) -> str:
+            relative = Path(path).resolve().relative_to(self.workspace).as_posix()
+            return f"/workspace/{relative}"
 
-    monkeypatch.setattr(mes, "_run_with_pgrp_timeout", _fake)
-    return captured
+        def _enforce_scope(self, target: str) -> None:
+            self.calls.append({"kind": "scope", "target": target})
+
+        def execute_argv(self, argv: list[str], **kwargs: Any) -> SandboxResult:
+            self.calls.append({"kind": "argv", "argv": list(argv), **kwargs})
+            return result or SandboxResult(
+                exit_code=0,
+                stdout="Server: nginx\n",
+                stderr="",
+                timed_out=False,
+                duration_seconds=0.1,
+                sandbox_id="test-worker",
+                status="completed",
+            )
+
+    sandbox = FakeSandbox()
+    monkeypatch.setattr("tools.sandbox.resolve_manager_with_fallback", lambda *_args: (sandbox, ""))
+    return sandbox
 
 
 @pytest.mark.asyncio
@@ -99,7 +120,7 @@ async def test_run_web_scan_rejects_invalid_target_ip(tmp_path: Path) -> None:
         )
     )
     assert text.startswith("BLOCKED:")
-    assert "valid IP address or domain" in text
+    assert "not-an-ip" in text
 
 
 @pytest.mark.asyncio
@@ -131,9 +152,9 @@ async def test_run_web_scan_rejects_shell_metachar_options(tmp_path: Path) -> No
 
 @pytest.mark.asyncio
 async def test_run_web_scan_happy_path(tmp_path: Path, monkeypatch) -> None:
+    sandbox = _attach_fake_sandbox(monkeypatch, tmp_path)
     mcp = _make_server(tmp_path, require_allowlist=False)
     monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
-    captured = _patch_pgrp(monkeypatch, returncode=0, out="Server: nginx\n", err="")
 
     text = _text(
         await mcp.call_tool(
@@ -144,15 +165,30 @@ async def test_run_web_scan_happy_path(tmp_path: Path, monkeypatch) -> None:
     assert "WEB_SCAN_RESULT: completed" in text
     assert "SCANNER: nikto" in text
     assert "TARGET: 10.0.0.50:8080" in text
-    # argv was a list (no shell) and targeted the allowlisted host.
-    assert captured, "_run_with_pgrp_timeout was not invoked"
-    assert captured[0][0] == "nikto"
-    assert "10.0.0.50" in captured[0]
-    assert "8080" in captured[0]
+    # argv is delivered to the worker, not to a host subprocess.
+    argv = next(call["argv"] for call in sandbox.calls if call["kind"] == "argv")
+    assert argv[0] == "nikto"
+    assert "10.0.0.50" in argv
+    assert "8080" in argv
 
 
 @pytest.mark.asyncio
 async def test_run_web_scan_not_installed(tmp_path: Path, monkeypatch) -> None:
+    from tools.sandbox.models import SandboxResult
+
+    sandbox = _attach_fake_sandbox(
+        monkeypatch,
+        tmp_path,
+        result=SandboxResult(
+            exit_code=127,
+            stdout="",
+            stderr="nikto: not found",
+            timed_out=False,
+            duration_seconds=0.1,
+            sandbox_id="test-worker",
+            status="failed",
+        ),
+    )
     mcp = _make_server(tmp_path, require_allowlist=False)
     monkeypatch.setattr(shutil, "which", lambda name: None)
     text = _text(
@@ -161,20 +197,22 @@ async def test_run_web_scan_not_installed(tmp_path: Path, monkeypatch) -> None:
             {"scanner": "nikto", "target_ip": "10.0.0.50"},
         )
     )
-    assert text.startswith("SCANNER_NOT_INSTALLED:")
+    assert "WEB_SCAN_RESULT: failed" in text
+    assert "scanner 'nikto' is not installed in the sandbox worker image" in text
+    assert sandbox.calls
 
 
 @pytest.mark.asyncio
 async def test_run_web_scan_builds_url_scanner_argv(tmp_path: Path, monkeypatch) -> None:
     """nuclei/sqlmap/whatweb/wpscan take a URL, not -h; confirm the argv shape."""
+    sandbox = _attach_fake_sandbox(monkeypatch, tmp_path)
     mcp = _make_server(tmp_path, require_allowlist=False)
     monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
-    captured = _patch_pgrp(monkeypatch)
-
     await mcp.call_tool(
         "run_web_scan",
         {"scanner": "nuclei", "target_ip": "10.0.0.50", "port": 80, "path": "/"},
     )
-    assert captured[0][0] == "nuclei"
-    assert "-u" in captured[0]
-    assert "http://10.0.0.50:80/" in captured[0]
+    argv = next(call["argv"] for call in sandbox.calls if call["kind"] == "argv")
+    assert argv[0] == "nuclei"
+    assert "-u" in argv
+    assert "http://10.0.0.50:80/" in argv

@@ -180,7 +180,7 @@ Runtime target-lock env (threaded by `tools/mcp_session.py:255`):
 - `EXPLOIT_DISCOVERED_TARGETS` — CSV of subdomain / IP discovered mid-run (`mcp_shared.add_discovered_target`).
 - `EXPLOIT_WORKSPACE` — workspace root override; also influences KEV cache path (`cve_lookup.py:171`).
 
-Other: `MCP_ALLOW_PUBLIC_BIND=1` + `--allow-public-bind` two-person rule; `MCP_HTTP_TOKEN` optional bearer for MCP HTTP; `AI_NMAP_DEBUG=1` (`--debug`); `AI_NMAP_ACTIVE_MODEL_ALIAS`, `AI_NMAP_MULTI_MODEL_ENABLED` threaded into MCP server.
+Other: `MCP_ALLOW_PUBLIC_BIND=1` + `--allow-public-bind` two-person rule; `MCP_HTTP_TOKEN` required for non-loopback MCP HTTP binds and optional on loopback; `AI_NMAP_DEBUG=1` (`--debug`); `AI_NMAP_ACTIVE_MODEL_ALIAS`, `AI_NMAP_MULTI_MODEL_ENABLED` threaded into MCP server.
 
 See `docs/configuration/environment.md` for full `.env.example` mapping and `docs/configuration/secrets.md` for `secr.json` + provider auth.
 

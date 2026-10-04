@@ -6,10 +6,10 @@ CLAUDE.md documents but were previously missing or only partially present:
 1. ``assert_loopback_bind`` -- refuse a non-loopback bind unless BOTH the
    caller's ``allow_public_bind`` flag (the ``--allow-public-bind`` CLI arg)
    AND the ``MCP_ALLOW_PUBLIC_BIND`` env var are set (two-person rule).
-2. ``_wrap_http_auth`` -- when ``MCP_HTTP_TOKEN`` is set, require an
-   ``Authorization: Bearer <token>`` header on the streamable-http app;
-   reject without/wrong token with 401. Constant-time compare.
-3. ``run_mcp_http_server`` -- wires both servers through one path
+2. ``_wrap_http_auth`` -- require an ``Authorization: Bearer <token>``
+   header on the streamable-http app; reject without/wrong token with 401.
+   Constant-time compare.
+3. ``run_mcp_http_server`` -- requires a token for public binds and wires both servers through one path
    (``mcp.streamable_http_app()`` + ``uvicorn.run``) so the gate + auth
    live in one place.
 
@@ -20,11 +20,13 @@ uvicorn bind), which is all that is needed on a box without the deps.
 from __future__ import annotations
 
 import asyncio
+import sys
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from tools.mcp_shared import _wrap_http_auth, assert_loopback_bind
+from tools.mcp_shared import _wrap_http_auth, assert_loopback_bind, run_mcp_http_server
 
 # ── assert_loopback_bind ───────────────────────────────────────────────────────
 
@@ -66,6 +68,33 @@ def test_public_bind_refused_when_env_falsy(monkeypatch):
     monkeypatch.setenv("MCP_ALLOW_PUBLIC_BIND", "0")
     with pytest.raises(ValueError, match="non-loopback"):
         assert_loopback_bind("0.0.0.0", allow_public_bind=True)
+
+
+def test_public_http_server_requires_bearer_token(monkeypatch):
+    monkeypatch.setenv("MCP_ALLOW_PUBLIC_BIND", "1")
+    monkeypatch.delenv("MCP_HTTP_TOKEN", raising=False)
+
+    with pytest.raises(ValueError, match="MCP_HTTP_TOKEN is required"):
+        run_mcp_http_server(SimpleNamespace(), "0.0.0.0", 8001, allow_public_bind=True)
+
+
+def test_public_http_server_wraps_app_with_configured_auth(monkeypatch):
+    monkeypatch.setenv("MCP_ALLOW_PUBLIC_BIND", "1")
+    monkeypatch.setenv("MCP_HTTP_TOKEN", "test-token")
+    original_app = _dummy_app()
+    seen: dict[str, Any] = {}
+    monkeypatch.setitem(
+        sys.modules, "uvicorn", SimpleNamespace(run=lambda app, **kwargs: seen.update(app=app, **kwargs))
+    )
+    mcp = SimpleNamespace(streamable_http_app=lambda: original_app)
+
+    run_mcp_http_server(mcp, "0.0.0.0", 8001, allow_public_bind=True)
+
+    assert seen["app"] is not original_app
+    assert (seen["host"], seen["port"]) == ("0.0.0.0", 8001)
+    status, body = _run_asgi(seen["app"], [])
+    assert status == 401
+    assert b"MCP_HTTP_TOKEN" in body
 
 
 # ── _wrap_http_auth (ASGI middleware) ──────────────────────────────────────────
@@ -127,9 +156,8 @@ def test_auth_wrapper_rejects_wrong_token():
     assert b"MCP_HTTP_TOKEN" in body
 
 
-def test_auth_wrapper_passes_non_http_scope():
-    """Lifespan/other non-http scopes must pass through untouched."""
-    wrapped = _wrap_http_auth(_dummy_app(), "s3cret")
+def test_auth_wrapper_passes_lifespan_scope():
+    """ASGI lifespan is not a request and must pass through untouched."""
     seen: list[str] = []
 
     async def passthrough_app(scope, receive, send):
@@ -143,6 +171,47 @@ def test_auth_wrapper_passes_non_http_scope():
 
     asyncio.run(run())
     assert seen == ["lifespan"]
+
+
+def test_auth_wrapper_rejects_websocket_without_token():
+    wrapped = _wrap_http_auth(_dummy_app(), "s3cret")
+    sent: list[dict[str, Any]] = []
+
+    async def run():
+        await wrapped(
+            {"type": "websocket", "headers": []},
+            _noop_receive,
+            lambda message: _collect(sent, message),
+        )
+
+    asyncio.run(run())
+    assert sent == [{"type": "websocket.close", "code": 4401, "reason": "MCP_HTTP_TOKEN required"}]
+
+
+def test_auth_wrapper_passes_websocket_with_token():
+    seen: list[str] = []
+
+    async def websocket_app(scope, receive, send):
+        seen.append(scope["type"])
+        await send({"type": "websocket.accept"})
+
+    wrapped = _wrap_http_auth(websocket_app, "s3cret")
+    sent: list[dict[str, Any]] = []
+
+    async def run():
+        await wrapped(
+            {"type": "websocket", "headers": [(b"authorization", b"Bearer s3cret")]},
+            _noop_receive,
+            lambda message: _collect(sent, message),
+        )
+
+    asyncio.run(run())
+    assert seen == ["websocket"]
+    assert sent == [{"type": "websocket.accept"}]
+
+
+async def _collect(sent: list[dict[str, Any]], message: dict[str, Any]) -> None:
+    sent.append(message)
 
 
 async def _noop_receive():

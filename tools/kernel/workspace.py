@@ -103,11 +103,20 @@ def _find_file(workspace: Path, filename: str) -> Path | None:
 
 
 def _attempt_dir(workspace: Path) -> tuple[Path, str]:
+    workspace.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
-    attempt_id = f"{stamp}_{secrets.token_hex(4)}"
-    attempt_dir = workspace / attempt_id
-    attempt_dir.mkdir(parents=True, exist_ok=True)
-    return attempt_dir, attempt_id
+    # Do not accept an existing directory or symlink on a random-name
+    # collision. The sandbox can write to this tree, so every attempt path
+    # must be one the host created itself.
+    for _ in range(8):
+        attempt_id = f"{stamp}_{secrets.token_hex(4)}"
+        attempt_dir = workspace / attempt_id
+        try:
+            attempt_dir.mkdir()
+        except FileExistsError:
+            continue
+        return attempt_dir, attempt_id
+    raise FileExistsError("could not allocate a unique workspace attempt directory")
 
 
 def write_workspace_file(workspace: Path, relative_path: str, data: bytes, *, mode: int = 0o600) -> Path:
@@ -120,10 +129,14 @@ def write_workspace_file(workspace: Path, relative_path: str, data: bytes, *, mo
     rel = Path(relative_path)
     if rel.is_absolute() or not rel.parts or any(part in {"", ".", ".."} for part in rel.parts):
         raise ValueError("workspace file path must be a non-empty relative path without traversal")
+    workspace.mkdir(parents=True, exist_ok=True)
     root = workspace.resolve()
     dir_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
     nofollow = getattr(os, "O_NOFOLLOW", 0)
-    root_fd = os.open(root, dir_flags | nofollow)
+    # Open the configured workspace path itself without following a symlink.
+    # The descriptor then pins the root while all child components are opened
+    # relative to it, even if an untrusted worker mutates the shared tree.
+    root_fd = os.open(workspace, dir_flags | nofollow)
     current_fd = root_fd
     try:
         for component in rel.parts[:-1]:

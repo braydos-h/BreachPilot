@@ -21,6 +21,7 @@ from tools.kernel.target_network import (
     is_metadata_destination,
     is_public_destination,
 )
+from tools.kernel.workspace import write_workspace_file
 from tools.mcp_shared import _attempt_dir
 from tools.mcp_tools.registry import ToolContext, _platform_system
 from tools.recon_pipeline import HostReconResult, ReconConfig, ReconPipeline
@@ -409,11 +410,11 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
             pipeline = ReconPipeline(recon_config)
             result: HostReconResult = await pipeline.recon_host(resolved_ip)
 
-            attempt_dir, attempt_id = _attempt_dir(workspace)
-            json_path = attempt_dir / "recon_result.json"
-            json_path.write_text(
-                json.dumps(result.to_dict(), indent=2, default=str),
-                encoding="utf-8",
+            _, attempt_id = _attempt_dir(workspace)
+            json_path = write_workspace_file(
+                workspace,
+                f"{attempt_id}/recon_result.json",
+                json.dumps(result.to_dict(), indent=2, default=str).encode("utf-8"),
             )
 
             lines = [

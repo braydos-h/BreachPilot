@@ -35,6 +35,7 @@ import urllib.request
 from typing import Any
 
 from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
+from tools.kernel.workspace import write_workspace_file
 from tools.mcp_shared import _attempt_dir, _check_allowlist, add_discovered_target
 from tools.mcp_tools.registry import ToolContext, _run_with_pgrp_timeout
 from tools.validation_utils import (
@@ -1070,10 +1071,14 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 lines.append(f"  {r}")
 
         # Persist the full result for the audit trail.
-        attempt_dir, attempt_id = _attempt_dir(workspace)
+        _, attempt_id = _attempt_dir(workspace)
         try:
-            (attempt_dir / "dns_recon.json").write_text(json.dumps(records, indent=2, default=str), encoding="utf-8")
-        except OSError:
+            write_workspace_file(
+                workspace,
+                f"{attempt_id}/dns_recon.json",
+                json.dumps(records, indent=2, default=str).encode("utf-8"),
+            )
+        except (OSError, ValueError):
             pass
 
         return "\n".join(lines)

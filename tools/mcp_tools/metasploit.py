@@ -16,9 +16,11 @@ import os
 import re
 import signal
 import subprocess
+import tempfile
 import time
 from typing import Any
 
+from tools.kernel.workspace import write_workspace_file
 from tools.mcp_shared import (
     _attempt_dir,
     _extract_msf_option_hosts,
@@ -310,7 +312,6 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return "BLOCKED: target_ip must be a valid IP address or domain."
 
         attempt_dir, attempt_id = _attempt_dir(workspace)
-        log_path = attempt_dir / "msf_output.log"
 
         # Parse the FULL options string first (RULE-LOCK-FIRST); only display
         # tails are truncated later. Shared parser rejects shell metacharacters
@@ -335,12 +336,18 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
         # msfconsole with an argv list (no shell). This replaces the previous
         # bash -c / cmd /c ``msfconsole -x "..."`` wrappers that were shell-
         # injectable via the module/opts/target_ip string.
-        rc_path = attempt_dir / "msf_run.rc"
         rc_lines = [f"use {module}", f"set RHOSTS {target_ip}"]
         rc_lines.extend(set_lines)
         rc_lines.append("run")
         rc_lines.append("exit -y")
-        rc_path.write_text("\n".join(rc_lines) + "\n", encoding="utf-8")
+        try:
+            rc_path = write_workspace_file(
+                workspace,
+                f"{attempt_id}/msf_run.rc",
+                ("\n".join(rc_lines) + "\n").encode("utf-8"),
+            )
+        except (OSError, ValueError) as exc:
+            return f"MSF_RESULT: blocked\nBLOCKED: resource file could not be written safely ({type(exc).__name__})."
 
         # ---- sandbox path: msfconsole runs INSIDE the disposable worker from
         # the resource file bound under /workspace (no host metasploit).
@@ -368,8 +375,10 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
             if result.stderr:
                 merged = f"{merged}\n{result.stderr}" if merged else result.stderr
             try:
-                log_path.write_text(merged, encoding="utf-8", errors="replace")
-            except OSError:
+                write_workspace_file(
+                    workspace, f"{attempt_id}/msf_output.log", merged.encode("utf-8", errors="replace")
+                )
+            except (OSError, ValueError):
                 pass
             return (
                 f"MSF_RESULT: {result.status} (exit_code={result.exit_code}, "
@@ -405,11 +414,11 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 exit_code = None
                 status = "timed_out"
         else:
-            with open(str(log_path), "w") as fh:
+            with tempfile.TemporaryFile(mode="w+b") as capture:
                 proc = subprocess.Popen(
                     msf_argv,
                     cwd=str(attempt_dir),
-                    stdout=fh,
+                    stdout=capture,
                     stderr=subprocess.STDOUT,
                     start_new_session=True,
                 )
@@ -426,14 +435,25 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
                             proc.kill()
                         except ProcessLookupError:
                             pass
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        pass
                     exit_code = None
                     status = "timed_out"
+                capture.seek(0)
+                captured_output = capture.read().decode("utf-8", errors="replace")
+            try:
+                write_workspace_file(
+                    workspace,
+                    f"{attempt_id}/msf_output.log",
+                    captured_output.encode("utf-8"),
+                )
+            except (OSError, ValueError):
+                pass
 
         elapsed = time.monotonic() - start
-        log_tail = ""
-        if log_path.exists():
-            text = log_path.read_text(encoding="utf-8", errors="replace")
-            log_tail = _tail(text, _MAX_LOG_CHARS)
+        log_tail = _tail(captured_output, _MAX_LOG_CHARS) if _platform_system() != "Windows" else ""
 
         return (
             f"MSF_RESULT: {status} (exit_code={exit_code}, duration={elapsed:.1f}s)\n"

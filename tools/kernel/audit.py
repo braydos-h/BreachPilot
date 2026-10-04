@@ -146,7 +146,7 @@ _MASK_RES = (
     _MASK_PY_AUTH_TUPLE_RE,
 )
 
-_WHOLESALE_REDACT_FIELDS = frozenset({"input_text", "notes"})
+_WHOLESALE_REDACT_FIELDS = frozenset({"input_text", "notes", "code"})
 
 
 def _mask_secret_content(value: Any) -> Any:
@@ -187,6 +187,13 @@ def _redact_args(args: dict[str, Any] | None) -> dict[str, Any]:
         lname = name.lower() if isinstance(name, str) else ""
         if lname in _SECRET_ARG_NAMES:
             redacted[name] = _REDACTED
+        elif lname == "code":
+            raw = value if isinstance(value, str) else str(value)
+            redacted[name] = {
+                "redacted": True,
+                "chars": len(raw),
+                "sha256": hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest(),
+            }
         elif lname in _WHOLESALE_REDACT_FIELDS and value:
             redacted[name] = _REDACTED
         elif isinstance(value, str):

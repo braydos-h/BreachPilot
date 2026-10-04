@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -48,6 +49,53 @@ def _make_server(
         }
     }
     return create_mcp_server(search, nvd, WebResearcher(WebResearcherSettings()), tmp_path, config)
+
+
+def _attach_fake_sandbox(monkeypatch, tmp_path: Path):
+    """Use a deterministic worker double; tests must not start Docker or network tools."""
+    from tools.sandbox.models import SandboxResult
+
+    class FakeSandbox:
+        def __init__(self) -> None:
+            self.workspace = tmp_path.resolve()
+            self.cfg = SimpleNamespace(remove_stale_on_startup=False)
+            self.calls: list[dict[str, Any]] = []
+
+        def container_path(self, path: str | Path) -> str:
+            resolved = Path(path).resolve()
+            relative = resolved.relative_to(self.workspace).as_posix()
+            return f"/workspace/{relative}"
+
+        def _enforce_scope(self, target: str) -> None:
+            self.calls.append({"kind": "scope", "target": target})
+
+        def execute_argv(self, argv: list[str], **kwargs: Any) -> SandboxResult:
+            self.calls.append({"kind": "argv", "argv": list(argv), **kwargs})
+            return SandboxResult(
+                exit_code=0,
+                stdout="ok\n",
+                stderr="",
+                timed_out=False,
+                duration_seconds=0.1,
+                sandbox_id="test-worker",
+                status="completed",
+            )
+
+        def execute(self, command: str, **kwargs: Any) -> SandboxResult:
+            self.calls.append({"kind": "command", "command": command, **kwargs})
+            return SandboxResult(
+                exit_code=0,
+                stdout="ok\n",
+                stderr="",
+                timed_out=False,
+                duration_seconds=0.1,
+                sandbox_id="test-worker",
+                status="completed",
+            )
+
+    sandbox = FakeSandbox()
+    monkeypatch.setattr("tools.sandbox.resolve_manager_with_fallback", lambda *_args: (sandbox, ""))
+    return sandbox
 
 
 def _text(result) -> str:
@@ -172,20 +220,13 @@ async def test_run_msf_module_rejects_metachar_option_value(tmp_path: Path) -> N
         )
     )
     assert text.startswith("BLOCKED:")
-    assert "forbidden characters" in text
+    assert "forbidden shell metacharacters" in text
 
 
 @pytest.mark.asyncio
 async def test_run_msf_module_uses_argv_list_no_shell(monkeypatch, tmp_path: Path) -> None:
     """Valid call invokes msfconsole as an argv list (no bash -c)."""
-    captured: list[Any] = []
-
-    class _CapturingPopen(_Popen):
-        def __init__(self, argv, **kwargs):
-            super().__init__(argv)
-            captured.append(list(argv))
-
-    monkeypatch.setattr(subprocess, "Popen", _CapturingPopen)
+    sandbox = _attach_fake_sandbox(monkeypatch, tmp_path)
     mcp = _make_server(tmp_path)
     text = _text(
         await mcp.call_tool(
@@ -198,16 +239,45 @@ async def test_run_msf_module_uses_argv_list_no_shell(monkeypatch, tmp_path: Pat
         )
     )
     assert "MSF_RESULT:" in text
-    # The Popen argv must be a list with msfconsole and a resource file, never
-    # a shell string.
-    assert captured, "subprocess.Popen was not invoked"
-    argv = captured[0]
+    # The worker receives argv with msfconsole and a resource file; the test
+    # never starts a host process or a real container.
+    argv = next(call["argv"] for call in sandbox.calls if call["kind"] == "argv")
     assert isinstance(argv, list)
     assert argv[0] == "msfconsole"
     assert "-r" in argv
     assert not any("bash" in str(a) for a in argv)
     # No argv element may contain a shell-injected semicolon.
     assert not any(";" in str(a) for a in argv if a not in ("exit -y",))
+
+
+@pytest.mark.asyncio
+async def test_establish_persistence_refuses_symlinked_attempt_directory(monkeypatch, tmp_path: Path) -> None:
+    """A worker-created attempt symlink cannot redirect the host implant write."""
+    monkeypatch.setattr("tools.sandbox.resolve_manager_with_fallback", lambda *_args: (None, ""))
+    mcp = _make_server(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    attempt_id = "worker-controlled-attempt"
+    (tmp_path / attempt_id).symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(
+        "tools.mcp_tools.operator_connection._attempt_dir",
+        lambda workspace: (workspace / attempt_id, attempt_id),
+    )
+
+    text = _text(
+        await mcp.call_tool(
+            "establish_persistence",
+            {
+                "target_ip": "10.0.0.1",
+                "method": "linux_cron",
+                "callback_host": "10.0.0.2",
+                "auto_start_listener": False,
+            },
+        )
+    )
+
+    assert text.startswith("BLOCKED: implant script could not be written safely")
+    assert not list(outside.glob("implant_*.py"))
 
 
 # ── H1: lateral_exec / dump_credentials / kerberoast ───────────────────────
@@ -355,7 +425,7 @@ async def test_git_clone_rejects_traversal_target_dir(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_git_clone_uses_argv_list(monkeypatch, tmp_path: Path) -> None:
-    captured = _patch_pgrp(monkeypatch)
+    sandbox = _attach_fake_sandbox(monkeypatch, tmp_path)
     mcp = _make_server(tmp_path)
     text = _text(
         await mcp.call_tool(
@@ -364,11 +434,10 @@ async def test_git_clone_uses_argv_list(monkeypatch, tmp_path: Path) -> None:
         )
     )
     assert "GIT_CLONE_RESULT:" in text
-    argv = captured[0]
-    assert argv[:3] == ["git", "clone", "--"]
-    # URL and dir are literal argv elements (no shell concatenation).
-    assert "https://github.com/user/repo.git" in argv
-    assert not any(a == "-c" for a in argv)
+    command = next(call["command"] for call in sandbox.calls if call["kind"] == "command")
+    assert command.startswith("git clone -- ")
+    assert "https://github.com/user/repo.git" in command
+    assert command.endswith(" repo")
 
 
 # ── H4: run_exploit_terminal allowlist covers IPv6/hostname ─────────────────

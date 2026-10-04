@@ -511,13 +511,13 @@ an exact fix. When in doubt, start with the diagnostics table below — the
 
 ### MCP_HTTP_TOKEN mismatch
 
-- **Symptoms:** HTTP-transport MCP calls fail with
-  `Unauthorized: MCP_HTTP_TOKEN required` (`tools/mcp_shared.py:471`).
-- **Cause:** the server wraps its HTTP app in bearer auth whenever
-  `MCP_HTTP_TOKEN` is set (`tools/mcp_shared.py:493`), and the live client
-  attaches `Authorization: Bearer <token>` only when its own env has the same
-  value (`tools/mcp_session.py:518`, `:760`). Set on one side but missing or
-  different on the other = every call 401s.
+- **Symptoms:** a public MCP HTTP server refuses to start without
+  `MCP_HTTP_TOKEN`, or HTTP calls fail with
+  `Unauthorized: MCP_HTTP_TOKEN required`.
+- **Cause:** non-loopback binds require a token, and the live client attaches
+  `Authorization: Bearer <token>` only when its environment has the same value
+  as the server (`tools/mcp_session.py`). A missing or different client token
+  makes every call return 401.
 - **Check:** confirm the variable is present (not its value) in both
   environments:
   ```bash

@@ -19,6 +19,30 @@ from typing import Any
 import pytest
 
 
+def test_workspace_writer_creates_missing_root(tmp_path: Path) -> None:
+    from tools.kernel.workspace import write_workspace_file
+
+    root = tmp_path / "new-workspace"
+
+    written = write_workspace_file(root, "payload.bin", b"safe")
+
+    assert written.read_bytes() == b"safe"
+    assert written.parent == root
+
+
+def test_workspace_writer_refuses_symlink_root(tmp_path: Path) -> None:
+    from tools.kernel.workspace import write_workspace_file
+
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    workspace.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(OSError):
+        write_workspace_file(workspace, "payload.bin", b"must not escape")
+    assert not (outside / "payload.bin").exists()
+
+
 def test_workspace_writer_refuses_symlink_parent(tmp_path: Path) -> None:
     """A worker-created directory symlink cannot redirect a later host write."""
     from tools.kernel.workspace import write_workspace_file
