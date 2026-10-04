@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
+import secrets
 from typing import Any
 
 from tools.attack_modules import ModuleContext, get_module, list_modules
 from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
+from tools.kernel.workspace import write_workspace_file
 from tools.mcp_tools.modules.hash import _identify_hash_modes
 from tools.mcp_tools.registry import ToolContext
 from tools.validation_utils import validate_target_or_ip
@@ -27,6 +28,20 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
     researcher = ctx.researcher
     audit_tool = ctx.audit_tool
     require_allowlist = ctx.require_allowlist
+
+    def save_generated_script(module_name: str, target_ip: str, script_text: str) -> str:
+        """Create a generated script without following worker-created paths.
+
+        The sandbox worker can write to the shared workspace, so directory
+        components beneath it are untrusted. Keep generated scripts flat and
+        use the kernel's exclusive, no-follow writer to avoid symlink escapes.
+        """
+        # run_python_file accepts a basename stem of at most 80 characters.
+        # Reserve 17 characters for the separator and 64-bit random suffix.
+        safe_stem = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{module_name}_{target_ip}")[:60].strip("._-")
+        filename = f"{safe_stem or 'attack_module'}_{secrets.token_hex(8)}.py"
+        path = write_workspace_file(workspace, filename, script_text.encode("utf-8"))
+        return str(path)
 
     @mcp.tool()
     @audit_tool
@@ -191,22 +206,14 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
             script_path = ""
             script_text = result.get("script", "")
             if script_text:
-                modules_dir = workspace / "modules"
-                modules_dir.mkdir(parents=True, exist_ok=True)
-                safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{module_name}_{target_ip}.py")
-                script_path = str(modules_dir / safe_name)
-                Path(script_path).write_text(script_text, encoding="utf-8")
+                script_path = save_generated_script(module_name, target_ip, script_text)
 
             # Also try generate_python_script if run didn't produce one
             if not script_text:
                 try:
                     script_text = module.generate_python_script(ctx)
                     if script_text:
-                        modules_dir = workspace / "modules"
-                        modules_dir.mkdir(parents=True, exist_ok=True)
-                        safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{module_name}_{target_ip}.py")
-                        script_path = str(modules_dir / safe_name)
-                        Path(script_path).write_text(script_text, encoding="utf-8")
+                        script_path = save_generated_script(module_name, target_ip, script_text)
                 except Exception:  # ponytail: bare except intentional
                     pass
 
