@@ -51,6 +51,10 @@ show_error_codes = true
 """
 
 
+class MypyRunError(RuntimeError):
+    """The checker did not produce a trustworthy type-debt measurement."""
+
+
 def run_mypy() -> tuple[dict[str, int], int, str]:
     """Run the unsuppressed mypy pass. Returns (per-file counts, total, raw output)."""
     import tempfile
@@ -83,15 +87,25 @@ def run_mypy() -> tuple[dict[str, int], int, str]:
             text=True,
             timeout=570,
         )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise MypyRunError(f"cannot complete mypy measurement: {exc}") from exc
     finally:
         Path(config_path).unlink(missing_ok=True)
         shutil.rmtree(cache_dir, ignore_errors=True)
     counts: dict[str, int] = {}
-    for line in (proc.stdout + proc.stderr).splitlines():
+    raw = proc.stdout + proc.stderr
+    for line in raw.splitlines():
         match = _ERROR_RE.match(line)
         if match:
             counts[match.group(1)] = counts.get(match.group(1), 0) + 1
-    return counts, sum(counts.values()), proc.stdout + proc.stderr
+    # Mypy returns 0 for a clean check, 1 for reported type errors, and 2
+    # for configuration/internal failures. Never interpret failed execution
+    # or unparseable diagnostics as a clean run, especially before --update.
+    if proc.returncode not in (0, 1):
+        raise MypyRunError(f"mypy exited {proc.returncode}: {raw.strip()}")
+    if (proc.returncode == 0 and counts) or (proc.returncode == 1 and not counts):
+        raise MypyRunError(f"mypy exit {proc.returncode} disagrees with parsed diagnostics: {raw.strip()}")
+    return counts, sum(counts.values()), raw
 
 
 def load_baseline() -> tuple[dict[str, int], int]:
@@ -138,7 +152,11 @@ def print_trend() -> int:
 def main(argv: list[str]) -> int:
     if "--trend" in argv:
         return print_trend()
-    counts, total, _raw = run_mypy()
+    try:
+        counts, total, _raw = run_mypy()
+    except MypyRunError as exc:
+        print(f"mypy type-debt gate FAILED (checker failure; baseline unchanged): {exc}")
+        return 1
     if "--update" in argv:
         write_baseline(counts)
         print(f"baseline rewritten: {total} errors in {len(counts)} files")
