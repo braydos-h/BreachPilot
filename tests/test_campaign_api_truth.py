@@ -1,7 +1,11 @@
 """Campaign reporting must not mistake module names for compromised hosts."""
 
 from tools.campaign.state import AttackState
-from tools.mcp_tools.modules.campaign import _compromised_hosts_for_state, _record_campaign_step_result
+from tools.mcp_tools.modules.campaign import (
+    _compromised_hosts_for_state,
+    _record_campaign_step_result,
+    _valid_campaign_id,
+)
 
 
 def test_campaign_report_excludes_claimed_success_without_verified_access() -> None:
@@ -42,3 +46,9 @@ def test_failed_campaign_step_does_not_add_a_compromised_host() -> None:
 
     assert state_data["tasks"] == {"completed": 0, "failed": 1}
     assert state_data["compromised_hosts"] == []
+
+
+def test_campaign_id_validation_rejects_path_components() -> None:
+    assert _valid_campaign_id("campaign-20260504_120000-abc12345")
+    for invalid in ("", "../state", "campaign-20260504_120000-abc12345/..", "campaign-20260504_120000-ABC12345"):
+        assert not _valid_campaign_id(invalid)

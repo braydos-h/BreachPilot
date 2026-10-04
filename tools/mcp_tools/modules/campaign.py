@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -27,6 +28,17 @@ _running_campaign_tasks: set = set()
 # graceful stop. Popped when the background task finishes (see the done
 # callback in start_autonomous_campaign).
 _campaign_orchestrators: dict[str, Any] = {}
+_CAMPAIGN_ID_RE = re.compile(r"campaign-\d{8}_\d{6}-[a-f0-9]{8}\Z")
+
+
+def _valid_campaign_id(campaign_id: str) -> bool:
+    """Accept only IDs produced by ``start_autonomous_campaign``.
+
+    Campaign IDs become path components in workspace reads and writes. Keep
+    the accepted shape narrow so caller-controlled separators or traversal
+    components cannot escape ``workspace/campaigns``.
+    """
+    return isinstance(campaign_id, str) and _CAMPAIGN_ID_RE.fullmatch(campaign_id) is not None
 
 
 def _compromised_hosts_for_state(state: Any) -> list[str]:
@@ -277,8 +289,8 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
         Example:
             get_campaign_status("campaign-20260504_120000-abc12345")
         """
-        if not campaign_id or not campaign_id.strip():
-            return "ERROR: campaign_id is required."
+        if not _valid_campaign_id(campaign_id):
+            return "ERROR: campaign_id is invalid."
 
         try:
             state_path = workspace / "campaigns" / campaign_id / "state.json"
@@ -336,8 +348,8 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
         Example:
             run_campaign_step("campaign-20260504_120000-abc12345")
         """
-        if not campaign_id or not campaign_id.strip():
-            return "ERROR: campaign_id is required."
+        if not _valid_campaign_id(campaign_id):
+            return "ERROR: campaign_id is invalid."
 
         try:
             campaign_dir = workspace / "campaigns" / campaign_id
@@ -511,8 +523,8 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
         Example:
             stop_campaign("campaign-20260504_120000-abc12345")
         """
-        if not campaign_id or not campaign_id.strip():
-            return "ERROR: campaign_id is required."
+        if not _valid_campaign_id(campaign_id):
+            return "ERROR: campaign_id is invalid."
 
         orchestrator = _campaign_orchestrators.get(campaign_id)
         if orchestrator is None:
