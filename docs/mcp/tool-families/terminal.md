@@ -44,19 +44,19 @@ subsystem: mcp
 | `run_exploit_terminal` | execute | `command: str` | `TERMINAL_RESULT: completed\|failed\|timed_out\|blocked (exit_code, duration)\nATTEMPT_ID: ...\nCOMMAND_ORIGINAL: ...\nCOMMAND_SANITIZED: ...\nPREFLIGHT_WARNING? / PREFLIGHT_CORRECTIONS?\nOPSEC_ADVISORY? (advisory)\nWORKSPACE: <attempt_dir>\nOUTPUT: <tail4000>` | `@audit_tool` + manual `_target_lock_block` on the FULL sanitized command (RULE-LOCK-FIRST). Empty → `BLOCKED: empty command.`; over the 10 MiB anti-fill cap → `BLOCKED: ... anti-fill cap...`. Preflight via `preflight_command_check` (sanitizes IP typos, warns on missing tools, never blocks except empty). Host path preserves `&&`/pipes/redirects through a wrapper script (`run_exploit.sh` / `run_exploit.cmd`; Windows prefers Git Bash via `_find_windows_bash`, else cmd.exe; Linux via the configured shell). |
 | `run_as_root` | execute | `command: str` | `ROOT_CMD_RESULT: completed\|failed\|timed_out\|blocked ...\nCOMMAND: ...\nOUTPUT:` | `@audit_tool` + preflight + manual `_target_lock_block` on the FULL sanitized command **before** the sudo pivot (off-target reports the lock, not the pivot) + `_require_sudo_or_pivot`. Host path runs `sudo <command> 2>&1` via `_run_with_pgrp_timeout`; in-sandbox it runs as container root (`SUDO: not required (executed as container root)`). |
 | `git_clone` | execute | `repo_url: str`, `target_dir: str=""` | `GIT_CLONE_RESULT: completed\|failed\|timed_out (exit_code)\nREPO: ...\nPATH: ...\nOUTPUT:` (+ `PREFLIGHT_WARNING` prefix when the URL existence probe fails) | Local-only `@audit_tool` (never an allowlist). URL must match `https?://...\.git` or `https?://github.com/...`; `target_dir` must match `[A-Za-z0-9._-]{1,80}` with workspace containment via `_is_inside_workspace` (fail closed). Existence preflight via `url_exists` warns only, never blocks (private repos still clone). Pure argv list (`git clone -- url dir`), no shell anywhere. Timeout from `exploit.command_timeout_seconds`, default 120 s here. |
-| `check_environment` | privilege | `tools: str=""` | `ENVIRONMENT_CHECK:\nOS: ...\nPython: ...\n[+/-] tool: path (version)\nSUMMARY: N/M\nMISSING: ...\nHINT: ...` | Local-only `@audit_tool`. Default list from `_check_env_default_tools` = `tools.env_probe.ENV_TOOLS` + extras (`masscan rustscan feroxbuster nuclei metasploit-framework ldapsearch aircrack-ng wireshark tcpdump wget ruby gem npm go cargo snap`), deduped. Per tool: `shutil.which` + `--version` then `-version` probe. `HINT` is sudo-aware (install commands when sudo exists, `write_python_file` pivot otherwise). |
+| `check_environment` | privilege | `tools: str=""` | `ENVIRONMENT_CHECK:\nEXECUTION_ENVIRONMENT?\n[+/-] tool: path/version\nSUMMARY: N/M\nMISSING: ...\nHINT: ...` | Local-only `@audit_tool`; tool names must be executable basenames. Probes run in one worker command when sandboxed; native host probes require explicit consent and reject binaries under the shared workspace. |
 | `preflight_env_check` | privilege | — | `render_env_context(preflight_env_probe())` or `ENV_OK: all standard pentest tools present.` or `PREFLIGHT_ENV_CHECK_ERROR: ...` | Local-only `@audit_tool`. Probes sudo/pip installability plus per-tool fallback (`install_via_apt / install_via_pip / write_python_fallback`). Call once at session start or after installing a tool. |
-| `apt_install` | package | `packages: str` (space-separated) | `APT_INSTALL_RESULT: completed\|failed\|timed_out (exit_code=...)\nPACKAGES: ...\nOUTPUT:` | Per-package regex `[a-zA-Z0-9_.+-]{1,60}`; `_require_sudo_or_pivot` short-circuits without passwordless sudo. Runs `sudo apt install -y ...` (300 s timeout, 4000-char tail). |
-| `pip_install` | package | `packages: str` | `PIP_INSTALL_RESULT: ... (exit_code=...)\nPACKAGES: ...\nOUTPUT:` | Per-package regex `[A-Za-z0-9_.\-]{1,60}`; `pip install ...` via `bash -c` (120 s, 3000-char tail). No sudo gate. |
-| `install_package` | package | `manager: str`, `packages: str` | `INSTALL_RESULT: completed\|failed\|timed_out (exit_code)\nMANAGER: ...\nPACKAGES: ...\nOUTPUT:` | `manager` in `apt|pip|gem|npm|go|cargo|snap` else `BLOCKED: unsupported manager ...`; packages `^[A-Za-z0-9_.+\-/@]{1,80}$`. Commands: apt `sudo apt install -y` (600 s), pip `pip install`, gem `gem install`, npm `npm install -g`, go `go install`, cargo `cargo install`, snap `sudo snap install` (600 s); default 300 s. `sudo` branches gated by `_require_sudo_or_pivot`. |
-| `download_and_install` | package | `url: str`, `install_type: str="auto"`, `target_name: str=""` | `DOWNLOAD_RESULT: failed ...` or `INSTALL_RESULT: ...\nTYPE: deb\|tarball\|zip\|binary\n...` | URL `^https?://[A-Za-z0-9._/\-:@%+?=~&]+$`; `auto` detects from suffix (`.deb` → deb, `.tar.gz`/`.tgz` → tarball, `.zip` → zip, else binary); `target_name` basename `[A-Za-z0-9._-]{1,120}`. `curl -fsSL -o` into the attempt dir, then deb (`sudo dpkg -i` + `sudo apt-get install -f -y`), tarball (`tar -xzf`), zip (`unzip -q`), or binary (`shutil.move` → `/usr/local/bin`, workspace-only `chmod 0o755` fallback). |
-| `update_system` | package | `upgrade: bool=True` | `UPDATE_RESULT: ... (apt update only)` or `UPDATE_RESULT: ... (update) / ... (upgrade)\nUPDATE_OUTPUT:...\nUPGRADE_OUTPUT:...` | `sudo apt update 2>&1` (300 s), then optionally `sudo apt upgrade -y 2>&1` (600 s). |
+| `apt_install` | package | `packages: str` (space-separated) | `APT_INSTALL_RESULT: completed\|failed\|timed_out (exit_code=...)\nPACKAGES: ...\nOUTPUT:` or `SANDBOX_UNSUPPORTED` | Host-mode gate; per-package regex `[a-zA-Z0-9_.+-]{1,60}`; `_require_sudo_or_pivot` short-circuits without passwordless sudo. Runs `sudo apt install -y ...` only in explicitly consented native mode. |
+| `pip_install` | package | `packages: str` | `PIP_INSTALL_RESULT: ... (exit_code=...)\nPACKAGES: ...\nOUTPUT:` or `SANDBOX_UNSUPPORTED` | Host-mode gate; per-package regex `[A-Za-z0-9_.\-]{1,60}`; native mode runs `pip install ...` via `bash -c` (120 s, 3000-char tail). No sudo gate. |
+| `install_package` | package | `manager: str`, `packages: str` | `INSTALL_RESULT: completed\|failed\|timed_out (exit_code)` or `SANDBOX_UNSUPPORTED` | Host-mode gate; `manager` in `apt|pip|gem|npm|go|cargo|snap` else `BLOCKED`; commands run only in explicitly consented native mode. `sudo` branches also use `_require_sudo_or_pivot`. |
+| `download_and_install` | package | `url: str`, `install_type: str="auto"`, `target_name: str=""` | `DOWNLOAD_RESULT: failed ...` or `INSTALL_RESULT: ...` or `SANDBOX_UNSUPPORTED` | Host-mode gate before any download/write; validates URL and target basename, then downloads/installs only in explicitly consented native mode. |
+| `update_system` | package | `upgrade: bool=True` | `UPDATE_RESULT: ...` or `SANDBOX_UNSUPPORTED` | Host-mode gate; `sudo apt update` then optional `sudo apt upgrade -y` only in explicitly consented native mode. |
 
 ## Gates
 
 - **Target-IP lock (`_target_lock_block`, `terminal/allowlist.py:203`).** The one attack-mode safety kept: free-text commands in `run_exploit_terminal` / `run_as_root` are scanned for every destination (command-analyzer dests + bare IPs + scanner-verb targets, including hostnames and encoded forms) and every one must be in `_allowed_target_list(config)`. RULE-LOCK-FIRST — the gate sees the FULL untruncated input; only display OUTPUT tails are cut (with a `[truncated]` marker from `_tail`). Listen-all wildcards (`0.0.0.0`, `::`) are exempt (bind listens, it does not pivot); loopback (`127.0.0.1`, `::1`, `localhost`) stays gated. `RHOSTS/RHOST/LHOST file:...` indirection is denied outright, never expanded. Fail-closed when `require_explicit_allowlist` is set with an empty union.
-- **Sudo pivot (`_require_sudo_or_pivot`, `terminal/privilege.py:34`).** `apt_install`, the apt/snap branches of `install_package`, and `run_as_root` short-circuit with a `BLOCKED: ... requires passwordless sudo ... PIVOT: call preflight_env_check ... write_python_file + run_python_file ...` message when passwordless sudo is unavailable — instead of hanging on an interactive password prompt. Never raises (falls through to the legacy spawn path when sudo status is undeterminable); always pivots on Windows.
-- **Local-only tools skip the lock:** `git_clone`, `check_environment`, `preflight_env_check`, and all of `package.py` (except via the sudo pivot) are `@audit_tool` only — no target touch, no allowlist.
+- **Sudo pivot (`_require_sudo_or_pivot`, `terminal/privilege.py:34`).** `apt_install`, the apt/snap branches of `install_package`, and `run_as_root` short-circuit with a `BLOCKED: ... requires passwordless sudo ... PIVOT: call preflight_env_check ... write_python_file + run_python_file ...` message when passwordless sudo is unavailable — instead of hanging on an interactive password prompt. Host package tools also require the explicit native-mode gate; contained mode blocks before subprocesses or downloads.
+- **Local-only tools skip the target lock:** `git_clone`, `check_environment`, `preflight_env_check`, and all of `package.py` do not touch targets. `check_environment` probes in the worker while contained; package tools require explicitly consented native mode because they have no worker implementation.
 - **OPSEC advisory (`_opsec_advisory_block`, `terminal/allowlist.py:134`).** Advisory only, never blocks: appends noise score + quieter rewrite + pacing posture to `run_exploit_terminal` results when OPSEC is enabled for the target; empty for local/private targets or on any build error.
 
 ## Result Shape — Common
@@ -135,6 +135,11 @@ def _is_union_entry_local(entry: str, extra_local_cidrs: Any = None) -> bool
 
 ### `terminal/package.py` — package management
 
+These package and download/install operations have no contained worker
+implementation. They return `SANDBOX_UNSUPPORTED` when the sandbox is active;
+host installs require explicit native-mode configuration and the exact
+`BREACHPILOT_ALLOW_NATIVE_EXECUTION=I_UNDERSTAND_THIS_RUNS_ON_THE_HOST` consent.
+
 ```python
 def _register_package_tools(mcp: Any, *, ctx: ToolContext) -> None
 def apt_install(packages: str) -> str
@@ -144,7 +149,7 @@ def download_and_install(url: str, install_type: str = "auto", target_name: str 
 def update_system(upgrade: bool = True) -> str
 ```
 
-- All five are local-only `@audit_tool` (no allowlist — no target touch); only the `sudo` branches consult `_require_sudo_or_pivot` (from `privilege.py`).
+- All five are local-only `@audit_tool` (no allowlist — no target touch) and apply the host-execution mode gate before any subprocess or file operation; only the `sudo` branches additionally consult `_require_sudo_or_pivot` (from `privilege.py`).
 - `apt_install` / `pip_install`: single-manager shorthands with per-package regex gates (`[a-zA-Z0-9_.+-]{1,60}` / `[A-Za-z0-9_.\-]{1,60}`); `sudo apt install -y` (300 s) / `pip install` (120 s) via `bash -c`.
 - `install_package`: `manager` in `apt|pip|gem|npm|go|cargo|snap` (else `BLOCKED`); packages `^[A-Za-z0-9_.+\-/@]{1,80}$`; apt/snap branches (`sudo apt install -y` 600 s, `sudo snap install` 600 s) pivot-gated, the rest run directly (default 300 s).
 - `download_and_install`: URL `^https?://…$`; `auto` detects `deb` / `tarball` / `zip` / `binary` from suffix; `curl -fsSL -o` into the attempt dir, then `sudo dpkg -i` + `apt-get install -f -y` (deb), `tar -xzf` / `unzip -q` into the attempt dir, or `shutil.move` → `/usr/local/bin` with workspace-only `chmod 0o755` fallback (binary). `target_name` basename-gated `[A-Za-z0-9._-]{1,120}`.
@@ -161,6 +166,11 @@ update_system(upgrade=False)
 
 ### `terminal/privilege.py` — environment probes + privilege helpers
 
+`check_environment` executes its version probes inside the sandbox worker when
+contained. Native host probes require explicit native-mode consent, reject
+path-shaped tool names, and refuse binaries resolved inside the shared
+workspace.
+
 ```python
 def _register_privilege_tools(mcp: Any, *, ctx: ToolContext) -> None
 def check_environment(tools: str = "") -> str
@@ -171,8 +181,8 @@ def _find_windows_bash(config: Any) -> str | None
 def _platform_system() -> str
 ```
 
-- `check_environment(tools="")`: local-only `@audit_tool`; empty arg checks `_check_env_default_tools()` (`tools.env_probe.ENV_TOOLS` + extras, deduped). Per tool: `shutil.which` + `--version` then `-version` probe; returns `ENVIRONMENT_CHECK:` with OS/Python lines, per-tool `[+]/[-]` lines, `SUMMARY: N/M`, `MISSING: …`, and a sudo-aware `HINT` (install commands when passwordless sudo exists, `preflight_env_check` + `write_python_file` pivot otherwise).
-- `preflight_env_check()`: local-only `@audit_tool`; renders `render_env_context(preflight_env_probe())` — sudo/pip installability plus per-missing-tool fallback (`install_via_apt` / `install_via_pip` / `write_python_fallback`). Call once at session start or after installing a tool.
+- `check_environment(tools="")`: local-only `@audit_tool`; empty arg checks `_check_env_default_tools()` (`tools.env_probe.ENV_TOOLS` + extras, deduped). Tool names must be executable basenames. In sandbox mode, probes run in one worker command and report worker availability; in explicit native mode, `shutil.which` + `--version` then `-version` probes are allowed only outside the shared workspace. Returns `ENVIRONMENT_CHECK:` with per-tool status, `SUMMARY: N/M`, `MISSING: …`, and a sudo-aware `HINT`.
+- `preflight_env_check()`: local-only `@audit_tool`; in native mode renders `render_env_context(preflight_env_probe())` — sudo/pip installability plus per-missing-tool fallback. While contained it returns guidance to inspect worker tools with `check_environment`; it does not probe host sudo or package availability.
 - `_require_sudo_or_pivot`: returns a `BLOCKED: … PIVOT: …` message when `_can_passwordless_sudo()` is false (always pivots on Windows); never raises — undeterminable sudo status falls through to the legacy spawn path. Ordering: the target lock fires before this pivot.
 - `_find_windows_bash`: configured `exploit.shell` on `PATH`, then common Git Bash install paths; `None` → cmd.exe fallback.
 - Lifecycle: probes run at call time (no caching); `check_environment` is the fast `which` sweep, `preflight_env_check` the deeper installability probe.

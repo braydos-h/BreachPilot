@@ -215,13 +215,13 @@ registration, `—` = neither (no target touch).
 | `run_exploit_terminal` | `command` | free text | lock via `_target_lock_block` + audit |
 | `run_exploit_terminals` | `commands` (1-20) | free text (joined) | lock via `_target_lock_block` on joined text + audit — one sandbox round-trip |
 | `run_as_root` | `command` | free text | lock via `_target_lock_block` + audit |
-| `apt_install` | `packages` | — | audit |
-| `pip_install` | `packages` | — | audit |
+| `apt_install` | `packages` | — | audit + explicit native-mode gate |
+| `pip_install` | `packages` | — | audit + explicit native-mode gate |
 | `git_clone` | `repo_url`, `target_dir` | — | audit |
-| `install_package` | `manager`, `packages` | — | audit |
-| `download_and_install` | `url`, `install_type`, `target_name` | — | audit |
-| `update_system` | `upgrade` | — | audit |
-| `check_environment` | `tools` | — | — |
+| `install_package` | `manager`, `packages` | — | audit + explicit native-mode gate |
+| `download_and_install` | `url`, `install_type`, `target_name` | — | audit + explicit native-mode gate |
+| `update_system` | `upgrade` | — | audit + explicit native-mode gate |
+| `check_environment` | `tools` | — | audit + worker execution or explicit native-mode gate |
 | `preflight_env_check` | — | — | — |
 
 All subprocesses use `_run_with_pgrp_timeout`; long scans should redirect to a
@@ -430,6 +430,13 @@ Runs hashcat/john locally, auto-identifies mode, returns recovered plaintext
 via `--show`.
 
 ### Sessions — `tools/mcp_tools/sessions.py`
+
+Every operation backed by `PersistentSessionManager` checks the host-execution
+mode before manager access. This manager launches host processes and does not
+have a sandbox backend, so its tools return `SANDBOX_UNSUPPORTED` while the
+sandbox is active. Explicit native mode also requires
+`BREACHPILOT_ALLOW_NATIVE_EXECUTION=I_UNDERSTAND_THIS_RUNS_ON_THE_HOST`; a
+missing sandbox manager alone never enables host sessions.
 
 | Tool | Params | Target | Lock |
 |---|---|---|---|

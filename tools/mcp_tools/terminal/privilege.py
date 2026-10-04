@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import platform
+import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -12,6 +14,9 @@ from typing import Any
 
 from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
 from tools.mcp_tools.registry import ToolContext
+from tools.mcp_tools.sandbox_exec import run_argv_in_sandbox, sandbox_error_block
+from tools.mcp_tools.session_safety import host_execution_block
+from tools.sandbox.exceptions import SandboxError
 
 __all__ = [
     "_check_env_default_tools",
@@ -136,23 +141,87 @@ def _register_privilege_tools(mcp: Any, *, ctx: ToolContext) -> None:
     @mcp.tool()
     @audit_tool
     def check_environment(tools: str = "") -> str:
-        """Check which security testing tools are installed and available on the system.
-        Provide a space-separated list of tool names (e.g., 'nmap metasploit-framework hydra gobuster'),
-        or leave empty to check a default set of common pentesting tools.
-        Returns version info and install status for each tool, plus OS details.
+        """Check security tool availability in the sandbox worker or consented native environment.
+        Provide executable basenames only (e.g., 'nmap metasploit-framework hydra gobuster'),
+        or leave empty to check the default set. Path-shaped names are rejected.
         """
         default_tools = _check_env_default_tools()
         check_list = [t.strip() for t in tools.split() if t.strip()] if tools else default_tools
+        invalid = [t for t in check_list if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.+-]{0,63}", t)]
+        if invalid:
+            return "BLOCKED: tool names must be executable basenames without path separators."
+
+        sandbox_active = getattr(ctx, "sandbox", None) is not None
+        if not sandbox_active:
+            if block := host_execution_block(ctx, operation="host-side environment probes"):
+                return block
 
         result_lines = ["ENVIRONMENT_CHECK:", ""]
-        result_lines.append(f"OS: {_platform_system()} {platform.release()} ({platform.machine()})")
-        result_lines.append(f"Python: {sys.version.split()[0]}")
+        if sandbox_active:
+            result_lines.append("EXECUTION_ENVIRONMENT: sandbox worker")
+        else:
+            result_lines.append(f"OS: {_platform_system()} {platform.release()} ({platform.machine()})")
+            result_lines.append(f"Python: {sys.version.split()[0]}")
         result_lines.append("")
 
         installed: list[str] = []
         missing: list[str] = []
+        if sandbox_active:
+            probes = "; ".join(
+                "if p=$(command -v "
+                + shlex.quote(tool)
+                + " 2>/dev/null); then v=$(\"$p\" --version 2>&1 | sed -n '1p'); "
+                + 'if [ -z "$v" ]; then v=$("$p" -version 2>&1 | sed -n \'1p\'); fi; '
+                + "printf 'AVAILABLE\\t%s\\t%s\\n' "
+                + shlex.quote(tool)
+                + " \"${v:-unknown}\"; else printf 'MISSING\\t%s\\t\\n' "
+                + shlex.quote(tool)
+                + "; fi"
+                for tool in check_list
+            )
+            try:
+                ran, proc = run_argv_in_sandbox(
+                    ctx,
+                    ["sh", "-c", probes],
+                    timeout=60,
+                    tool_name="check_environment",
+                )
+            except SandboxError as exc:
+                return sandbox_error_block(exc, tool_name="check_environment")
+            if not ran:
+                return host_execution_block(ctx, operation="host-side environment probes") or (
+                    "BLOCKED: SANDBOX_UNAVAILABLE — environment probes were not run."
+                )
+            records = {
+                parts[1]: (parts[0] == "AVAILABLE", parts[2] if len(parts) > 2 else "unknown")
+                for line in str(getattr(proc, "stdout", "")).splitlines()
+                if len(parts := line.split("\t", 2)) >= 2 and parts[0] in {"AVAILABLE", "MISSING"}
+            }
+            for tool in check_list:
+                available, version = records.get(tool, (False, ""))
+                if available:
+                    installed.append(tool)
+                    result_lines.append(f"  [+] {tool}: sandbox PATH  ({version[:100] or 'unknown'})")
+                else:
+                    missing.append(tool)
+                    result_lines.append(f"  [-] {tool}: NOT FOUND in sandbox")
+
         for tool in check_list:
+            if sandbox_active:
+                continue
             path = shutil.which(tool)
+            if path:
+                try:
+                    resolved_path = Path(path).resolve()
+                    workspace_path = ctx.workspace.resolve()
+                except (OSError, RuntimeError):
+                    return "BLOCKED: refusing to resolve an environment probe executable safely."
+                try:
+                    resolved_path.relative_to(workspace_path)
+                except ValueError:
+                    pass
+                else:
+                    return "BLOCKED: refusing to execute a workspace-local environment probe on the host."
             if path:
                 installed.append(tool)
                 version = "unknown"
@@ -185,23 +254,29 @@ def _register_privilege_tools(mcp: Any, *, ctx: ToolContext) -> None:
         result_lines.append(f"SUMMARY: {len(installed)}/{len(check_list)} tools available")
         if missing:
             result_lines.append(f"MISSING: {', '.join(missing)}")
-            try:
-                from tools.env_probe import _can_passwordless_sudo
-
-                _has_sudo = _can_passwordless_sudo()
-            except _EXC_GROUP_CATCH:
-                _has_sudo = True
-            if _has_sudo:
+            if sandbox_active:
                 result_lines.append(
-                    "HINT: Use install_package or apt_install to install missing tools,"
-                    " or call preflight_env_check for a per-tool fallback plan."
+                    "HINT: Host package installation is unavailable while contained. "
+                    "Use a derived sandbox image to add worker tools."
                 )
             else:
-                result_lines.append(
-                    "HINT: sudo unavailable -- apt_install/install_package will fail. "
-                    "Call preflight_env_check for a per-tool fallback plan, then pivot to "
-                    "write_python_file Python implementations for missing tools."
-                )
+                try:
+                    from tools.env_probe import _can_passwordless_sudo
+
+                    _has_sudo = _can_passwordless_sudo()
+                except _EXC_GROUP_CATCH:
+                    _has_sudo = True
+                if _has_sudo:
+                    result_lines.append(
+                        "HINT: Use install_package or apt_install to install missing tools,"
+                        " or call preflight_env_check for a per-tool fallback plan."
+                    )
+                else:
+                    result_lines.append(
+                        "HINT: sudo unavailable -- apt_install/install_package will fail. "
+                        "Call preflight_env_check for a per-tool fallback plan, then pivot to "
+                        "write_python_file Python implementations for missing tools."
+                    )
         return "\n".join(result_lines)
 
     @mcp.tool()
@@ -211,7 +286,16 @@ def _register_privilege_tools(mcp: Any, *, ctx: ToolContext) -> None:
         recommended fallback (install_via_apt / install_via_pip / write_python_fallback)
         for each MISSING tool. Call once at session start (the system prompt
         already carries the startup probe) or after installing a tool to
-        re-probe. Local-only; touches no target."""
+        re-probe. Native mode only; while contained, use check_environment for
+        worker tools. Local-only; touches no target."""
+        if getattr(ctx, "sandbox", None) is not None:
+            return (
+                "PREFLIGHT_ENV_CHECK: host installability is not relevant while contained. "
+                "Use check_environment to inspect worker tools; package installation is "
+                "unavailable until a derived sandbox image is built."
+            )
+        if block := host_execution_block(ctx, operation="host-side environment preflight"):
+            return block
         try:
             from tools.env_probe import preflight_env_probe, render_env_context
 

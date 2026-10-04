@@ -13,9 +13,10 @@ This module is the explicit, reviewable registry of every tool family in
                       intentional — this registry is enforced by test.
 
 ``audit_families()`` scans the package for modules that reference
-``subprocess`` and asserts each is accounted for (sandboxed or registered
-exception). The test suite fails when a new subprocess-using tool family
-appears without a registry entry, so containment can never silently rot.
+``subprocess`` or delegate to ``PersistentSessionManager`` and asserts each is
+accounted for (sandboxed or registered exception). The test suite fails when
+a new process-using tool family appears without a registry entry, so
+containment can never silently rot.
 """
 
 from __future__ import annotations
@@ -109,8 +110,9 @@ HOST_EXCEPTIONS: dict[str, FamilyStatus] = {
         module="terminal/package",
         status="host_exception",
         reason=(
-            "apt/pip/git-clone install primitives execute on the operator host "
-            "(pending sandbox migration; lab-only convenience tools, target-locked)"
+            "package and download/install primitives have no worker implementation and "
+            "return SANDBOX_UNSUPPORTED while contained; host installs require the "
+            "explicit native-mode consent gate"
         ),
         target_touching=False,
     ),
@@ -118,10 +120,12 @@ HOST_EXCEPTIONS: dict[str, FamilyStatus] = {
         module="terminal/privilege",
         status="host_exception",
         reason=(
-            "run_as_root and the Windows bash-locator execute on the operator host "
-            "(pending sandbox migration; operator-box privilege helper)"
+            "environment probes use the worker while contained and require explicit "
+            "native-mode consent for host probes; run_as_root uses its sandbox path "
+            "when available"
         ),
         target_touching=False,
+        notes=["check_environment uses the worker when contained; the native-only preflight helper remains local"],
     ),
     "recon": FamilyStatus(
         module="recon",
@@ -171,8 +175,22 @@ HOST_EXCEPTIONS: dict[str, FamilyStatus] = {
     "operator_connection": FamilyStatus(
         module="operator_connection",
         status="host_exception",
-        reason="operator-directed connection lifecycle (RDP/VNC client launch) is an interactive operator tool, not agent offense",
+        reason=(
+            "operator listener lifecycle delegates to PersistentSessionManager; MCP listener "
+            "access is blocked while contained and requires explicit native-mode consent"
+        ),
         target_touching=False,
+    ),
+    "sessions": FamilyStatus(
+        module="sessions",
+        status="host_exception",
+        reason=(
+            "persistent tmux/nohup/listener and process controls delegate to the host-side "
+            "PersistentSessionManager; the MCP family returns SANDBOX_UNSUPPORTED while "
+            "contained and requires sandbox.enabled is false plus explicit native-mode "
+            "consent; free-text session commands retain the target-IP lock"
+        ),
+        target_touching=True,
     ),
     "registry": FamilyStatus(
         module="registry",
@@ -212,6 +230,18 @@ def _uses_subprocess(path: Path) -> bool:
     return False
 
 
+def _uses_persistent_session_manager(path: Path) -> bool:
+    """Detect MCP wrappers that delegate process control to the session manager."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, SyntaxError):
+        return False
+    return any(
+        isinstance(node, ast.ImportFrom) and node.module == "tools.persistent_session_manager"
+        for node in ast.walk(tree)
+    )
+
+
 def _uses_sandbox_seam(path: Path) -> bool:
     try:
         tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
@@ -242,16 +272,18 @@ def audit_families(mcp_tools_dir: Path | None = None) -> list[dict[str, Any]]:
     for path in sorted(root.rglob("*.py")):
         if path.name == "__init__.py" or "__pycache__" in path.parts:
             continue
-        if not _uses_subprocess(path):
+        if not (_uses_subprocess(path) or _uses_persistent_session_manager(path)):
             continue
         key = _module_key(path)
         entry = SANDBOXED_FAMILIES.get(key) or HOST_EXCEPTIONS.get(key)
         if entry is not None:
             row = entry.to_dict()
             row["problem"] = ""
-            # A module that spawns subprocesses AND imports the sandbox seam
-            # but is registered as a host exception is a registry bug.
-            if entry.status == "host_exception" and _uses_sandbox_seam(path):
+            # Dual-mode families may use the funnel for contained operations
+            # while retaining a separately gated local-only helper. Require
+            # that mixed behavior to be explicitly declared in the registry.
+            mixed_is_documented = any("uses the worker when contained" in note for note in entry.notes)
+            if entry.status == "host_exception" and _uses_sandbox_seam(path) and not mixed_is_documented:
                 row["problem"] = "registered host_exception but module imports the sandbox seam"
         else:
             row = FamilyStatus(module=key, status="unregistered", reason="").to_dict()

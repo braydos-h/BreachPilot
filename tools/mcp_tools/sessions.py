@@ -6,6 +6,7 @@ from typing import Any
 
 from tools.mcp_shared import check_targets_allowlist
 from tools.mcp_tools.registry import ToolContext
+from tools.mcp_tools.session_safety import host_execution_block
 from tools.mcp_tools.terminal import _target_lock_block
 from tools.persistent_session_manager import PersistentSessionManager, get_session_manager
 
@@ -27,16 +28,21 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
             mcp._session_mgr = get_session_manager(workspace)
         return mcp._session_mgr
 
+    def _host_session_block() -> str | None:
+        return host_execution_block(ctx, operation="persistent host sessions and listeners")
+
     @mcp.tool()
     @audit_tool
     def start_tmux_session(name: str, command: str) -> str:
-        """Start a named persistent tmux session for interactive commands. The session runs in the background and can be interacted with later via send_to_session and read_session_output. Use for: reverse shells, interactive msfconsole, long-running scans, ssh sessions, etc."""
+        """Start a persistent host tmux session in explicitly consented native mode. The sandbox has no persistent-session backend, so this returns SANDBOX_UNSUPPORTED while contained. In native mode the session can be used with send_to_session and read_session_output."""
         # Target-IP lock: the session command may connect to an off-allowlist host
         # (reverse shell callback, ssh, scanner). Gate it the same way as
         # run_exploit_terminal so free-text commands can't pivot past the target.
         _lock_reason = _target_lock_block(command, config)
         if _lock_reason:
             return f"BLOCKED: target-IP lock — {_lock_reason}"
+        if block := _host_session_block():
+            return block
         mgr = _get_session_mgr()
         result = mgr.start_tmux_session(name, command, cwd=workspace)
         if result["success"]:
@@ -46,13 +52,15 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
     @mcp.tool()
     @audit_tool
     def send_to_session(name: str, input_text: str) -> str:
-        """Send text/keystrokes to a named tmux session. The text is sent followed by Enter. Use this to interact with running sessions: type commands in a shell, navigate msfconsole menus, respond to prompts, etc."""
+        """Send text/keystrokes to a named host tmux session in explicitly consented native mode. The sandbox has no persistent-session backend, so this returns SANDBOX_UNSUPPORTED while contained. The text is sent followed by Enter."""
         # Target-IP lock: keystrokes sent into a running session can issue a
         # command that pivots to an off-allowlist host. Gate the input text the
         # same way as a free-text terminal command (defense-in-depth).
         _lock_reason = _target_lock_block(input_text, config)
         if _lock_reason:
             return f"BLOCKED: target-IP lock — {_lock_reason}"
+        if block := _host_session_block():
+            return block
         mgr = _get_session_mgr()
         result = mgr.send_to_session(name, input_text)
         if result["success"]:
@@ -62,7 +70,9 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
     @mcp.tool()
     @audit_tool
     def read_session_output(name: str, lines: int = 100) -> str:
-        """Read the last N lines from a named tmux session. Use this to see the output after sending commands via send_to_session."""
+        """Read the last N lines from a named host tmux session in explicitly consented native mode. Returns SANDBOX_UNSUPPORTED while contained."""
+        if block := _host_session_block():
+            return block
         mgr = _get_session_mgr()
         result = mgr.read_session_output(name, lines=lines)
         if result["success"]:
@@ -72,7 +82,9 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
     @mcp.tool()
     @audit_tool
     def kill_session(name: str) -> str:
-        """Kill a named persistent session (tmux, background job, or listener)."""
+        """Kill a named host session or listener in explicitly consented native mode. Returns SANDBOX_UNSUPPORTED while contained."""
+        if block := _host_session_block():
+            return block
         mgr = _get_session_mgr()
         result = mgr.kill_session(name)
         return f"SESSION_KILLED: {name}\nSUCCESS: {result['success']}\nMESSAGE: {result.get('message', '')}"
@@ -80,11 +92,13 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
     @mcp.tool()
     @audit_tool
     def start_background_job(name: str, command: str) -> str:
-        """Start a named background job using nohup. The job runs detached from the terminal and logs output to a file. Use for: long-running scans, listeners, file transfers, brute force attacks that take hours, etc."""
+        """Start a named host background job using nohup in explicitly consented native mode. The sandbox has no persistent-job backend, so this returns SANDBOX_UNSUPPORTED while contained."""
         # Target-IP lock: same gate as start_tmux_session / run_exploit_terminal.
         _lock_reason = _target_lock_block(command, config)
         if _lock_reason:
             return f"BLOCKED: target-IP lock — {_lock_reason}"
+        if block := _host_session_block():
+            return block
         mgr = _get_session_mgr()
         result = mgr.start_background_job(name, command, cwd=workspace)
         if result["success"]:
@@ -101,7 +115,9 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
     @mcp.tool()
     @audit_tool
     def read_job_output(name: str, lines: int = 100) -> str:
-        """Read the last N lines from a background job's log file."""
+        """Read a host background job's log in explicitly consented native mode. Returns SANDBOX_UNSUPPORTED while contained."""
+        if block := _host_session_block():
+            return block
         mgr = _get_session_mgr()
         result = mgr.read_job_output(name, lines=lines)
         return (
@@ -114,7 +130,9 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
     @mcp.tool()
     @audit_tool
     def stop_background_job(name: str) -> str:
-        """Stop a named background job."""
+        """Stop a host background job in explicitly consented native mode. Returns SANDBOX_UNSUPPORTED while contained."""
+        if block := _host_session_block():
+            return block
         mgr = _get_session_mgr()
         result = mgr.stop_background_job(name)
         return f"JOB_STOPPED: {name}\nSUCCESS: {result['success']}\nMESSAGE: {result.get('message', '')}"
@@ -130,7 +148,7 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
         upstream_host: str = "",
         upstream_port: int = 0,
     ) -> str:
-        """Start a named network listener. Types: netcat (nc/ncat), socat, http (python http.server), tls (openssl/socat TLS), dns (dnscat2), https-beacon (socat TLS HTTP), socks_pivot (chisel/ligolo-ng/socat TCP forward). socks_pivot forwards to upstream_host:upstream_port which MUST be in allowed_targets (pivot lock)."""
+        """Start a host network listener in explicitly consented native mode. The sandbox has no persistent-listener backend, so this returns SANDBOX_UNSUPPORTED while contained. socks_pivot upstream_host must be allowlisted."""
         # Phase 3 config-off guard for the new C2 listener types. The legacy
         # netcat/socat/http types stay ungated (pre-existing behavior).
         _NEW_LISTENER_TYPES = {"tls", "dns", "https-beacon", "socks_pivot"}
@@ -147,6 +165,8 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 allowed, reason = check_targets_allowlist([upstream_host], config)
                 if not allowed:
                     return f"BLOCKED: {reason}\nTOOL: start_listener\nUPSTREAM: {upstream_host}"
+        if block := _host_session_block():
+            return block
         mgr = _get_session_mgr()
         result = mgr.start_listener(name, port, listener_type, protocol, directory, upstream_host, upstream_port)
         if result["success"]:
@@ -163,7 +183,9 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
     @mcp.tool()
     @audit_tool
     def read_listener_output(name: str, lines: int = 100) -> str:
-        """Read the last N lines from a listener's log file."""
+        """Read a host listener's log in explicitly consented native mode. Returns SANDBOX_UNSUPPORTED while contained."""
+        if block := _host_session_block():
+            return block
         mgr = _get_session_mgr()
         result = mgr.read_listener_output(name, lines=lines)
         return (
@@ -176,7 +198,9 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
     @mcp.tool()
     @audit_tool
     def stop_listener(name: str) -> str:
-        """Stop a named network listener."""
+        """Stop a host listener in explicitly consented native mode. Returns SANDBOX_UNSUPPORTED while contained."""
+        if block := _host_session_block():
+            return block
         mgr = _get_session_mgr()
         result = mgr.stop_listener(name)
         return f"LISTENER_STOPPED: {name}\nSUCCESS: {result['success']}\nMESSAGE: {result.get('message', '')}"
@@ -184,7 +208,9 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
     @mcp.tool()
     @audit_tool
     def list_sessions() -> str:
-        """List all persistent sessions (tmux, background jobs, listeners) with their status, PIDs, and types."""
+        """List host sessions, jobs, and listeners in explicitly consented native mode. Returns SANDBOX_UNSUPPORTED while contained."""
+        if block := _host_session_block():
+            return block
         mgr = _get_session_mgr()
         sessions = mgr.list_all_sessions()
         if not sessions:
@@ -203,7 +229,9 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
     @mcp.tool()
     @audit_tool
     def list_processes(pattern: str = "") -> str:
-        """List system processes. Optionally filter by a pattern string. Use to find running tools, check if a listener is active, or locate a specific process."""
+        """List host processes in explicitly consented native mode. Returns SANDBOX_UNSUPPORTED while contained."""
+        if block := _host_session_block():
+            return block
         mgr = _get_session_mgr()
         processes = mgr.list_processes(pattern)
         if not processes:
@@ -221,7 +249,9 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
     @mcp.tool()
     @audit_tool
     def kill_process(name_or_pid: str) -> str:
-        """Kill a process by tracked name or raw PID. Use to stop runaway processes, kill old listeners, or clean up after exploitation."""
+        """Kill a host process by tracked name or raw PID in explicitly consented native mode. Returns SANDBOX_UNSUPPORTED while contained."""
+        if block := _host_session_block():
+            return block
         mgr = _get_session_mgr()
         result = mgr.kill_process(name_or_pid)
         return f"KILL_RESULT: {name_or_pid}\nSUCCESS: {result['success']}\nMESSAGE: {result.get('message', '')}"

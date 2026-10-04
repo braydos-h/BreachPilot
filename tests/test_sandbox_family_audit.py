@@ -9,6 +9,9 @@ This test enforces ``tools/sandbox/family_audit.py``: EVERY module under
 - registered as ``sandboxed`` (funnels through ``tools/mcp_tools/sandbox_exec``),
 - or registered as a documented ``host_exception`` with a stated reason.
 
+Wrappers that delegate process control to ``PersistentSessionManager`` are
+included even when they do not import ``subprocess`` themselves.
+
 A new subprocess-using family without a registry entry FAILS this test —
 containment coverage can never silently rot. The audit summary itself is
 surfaced to the WebUI benchmark pages via the sandbox status.
@@ -20,12 +23,12 @@ from tools.sandbox.family_audit import HOST_EXCEPTIONS, SANDBOXED_FAMILIES, audi
 
 
 def test_every_subprocess_family_is_registered():
-    """No module under tools/mcp_tools may use subprocess without a registry entry."""
+    """No process-spawning or persistent-session wrapper may lack a registry entry."""
     rows = audit_families()
     assert rows, "audit must find the subprocess-using families"
     unregistered = [r["module"] for r in rows if r.get("problem")]
     assert not unregistered, (
-        "unregistered subprocess-using tool families: "
+        "unregistered process/session tool families: "
         f"{unregistered} — add a sandboxed or documented host_exception entry "
         "to tools/sandbox/family_audit.py"
     )
@@ -41,6 +44,13 @@ def test_registered_entries_reference_real_registry():
         else:
             assert row["module"] in HOST_EXCEPTIONS
             assert row["reason"], "host exceptions must document a reason"
+
+
+def test_persistent_session_wrappers_are_explicitly_audited():
+    rows = {row["module"]: row for row in audit_families()}
+    assert rows["sessions"]["status"] == "host_exception"
+    assert "SANDBOX_UNSUPPORTED" in rows["sessions"]["reason"]
+    assert rows["operator_connection"]["status"] == "host_exception"
 
 
 def test_sandboxed_families_use_the_sandbox_funnel():

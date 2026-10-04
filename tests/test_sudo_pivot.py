@@ -22,15 +22,20 @@ from typing import Any
 import pytest
 
 
-def _make_server(tmp_path: Path):
+def _make_server(monkeypatch, tmp_path: Path):
     from mcp_exploit_server import create_mcp_server
     from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
+    from tools.sandbox.manager import NATIVE_CONSENT_ENV, NATIVE_CONSENT_VALUE
     from tools.web_researcher import WebResearcher, WebResearcherSettings
 
+    monkeypatch.setenv(NATIVE_CONSENT_ENV, NATIVE_CONSENT_VALUE)
     search = ExploitSearch(ExploitSearchSettings())
     nvd = NVDClient(CVESearchSettings())
-    config: dict[str, Any] = {"exploit": {"require_explicit_allowlist": False, "allowed_targets": []}}
+    config: dict[str, Any] = {
+        "exploit": {"require_explicit_allowlist": False, "allowed_targets": []},
+        "sandbox": {"enabled": False},
+    }
     return create_mcp_server(search, nvd, WebResearcher(WebResearcherSettings()), tmp_path, config)
 
 
@@ -81,7 +86,7 @@ async def test_apt_install_pivots_without_sudo(monkeypatch, tmp_path: Path) -> N
     monkeypatch.setattr("tools.env_probe._can_passwordless_sudo", lambda: False)
     _patch_subprocess_run_nospawn(monkeypatch)
     _patch_pgrp_nospawn(monkeypatch)
-    mcp = _make_server(tmp_path)
+    mcp = _make_server(monkeypatch, tmp_path)
     text = _text(await mcp.call_tool("apt_install", {"packages": "nmap hydra"}))
     assert text.startswith("BLOCKED:")
     assert "passwordless sudo" in text
@@ -98,7 +103,7 @@ async def test_apt_install_proceeds_with_sudo(monkeypatch, tmp_path: Path) -> No
         "run",
         lambda *a, **k: subprocess.CompletedProcess(args=a, returncode=0, stdout="", stderr=""),
     )
-    mcp = _make_server(tmp_path)
+    mcp = _make_server(monkeypatch, tmp_path)
     text = _text(await mcp.call_tool("apt_install", {"packages": "nmap"}))
     assert text.startswith("APT_INSTALL_RESULT: completed")
 
@@ -111,7 +116,7 @@ async def test_run_as_root_pivots_without_sudo(monkeypatch, tmp_path: Path) -> N
     """No passwordless sudo -> BLOCKED pivot, no subprocess spawned."""
     monkeypatch.setattr("tools.env_probe._can_passwordless_sudo", lambda: False)
     _patch_pgrp_nospawn(monkeypatch)
-    mcp = _make_server(tmp_path)
+    mcp = _make_server(monkeypatch, tmp_path)
     text = _text(await mcp.call_tool("run_as_root", {"command": "whoami"}))
     assert text.startswith("BLOCKED:")
     assert "passwordless sudo" in text
@@ -151,7 +156,7 @@ async def test_run_as_root_target_lock_still_wins(monkeypatch, tmp_path: Path) -
 async def test_install_package_apt_branch_pivots_without_sudo(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr("tools.env_probe._can_passwordless_sudo", lambda: False)
     _patch_subprocess_run_nospawn(monkeypatch)
-    mcp = _make_server(tmp_path)
+    mcp = _make_server(monkeypatch, tmp_path)
     text = _text(await mcp.call_tool("install_package", {"manager": "apt", "packages": "nmap"}))
     assert text.startswith("BLOCKED:")
     assert "passwordless sudo" in text
@@ -161,7 +166,7 @@ async def test_install_package_apt_branch_pivots_without_sudo(monkeypatch, tmp_p
 async def test_install_package_snap_branch_pivots_without_sudo(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr("tools.env_probe._can_passwordless_sudo", lambda: False)
     _patch_subprocess_run_nospawn(monkeypatch)
-    mcp = _make_server(tmp_path)
+    mcp = _make_server(monkeypatch, tmp_path)
     text = _text(await mcp.call_tool("install_package", {"manager": "snap", "packages": "nmap"}))
     assert text.startswith("BLOCKED:")
     assert "passwordless sudo" in text
@@ -176,7 +181,7 @@ async def test_install_package_pip_branch_unaffected_by_sudo(monkeypatch, tmp_pa
         "run",
         lambda *a, **k: subprocess.CompletedProcess(args=a, returncode=0, stdout="", stderr=""),
     )
-    mcp = _make_server(tmp_path)
+    mcp = _make_server(monkeypatch, tmp_path)
     text = _text(await mcp.call_tool("install_package", {"manager": "pip", "packages": "requests"}))
     assert text.startswith("INSTALL_RESULT: completed")
 
@@ -189,7 +194,7 @@ async def test_apt_install_pivots_on_windows(monkeypatch, tmp_path: Path) -> Non
     monkeypatch.setattr(ep.platform, "system", lambda: "Windows")
     # _can_passwordless_sudo checks platform.system() first -> returns False
     _patch_subprocess_run_nospawn(monkeypatch)
-    mcp = _make_server(tmp_path)
+    mcp = _make_server(monkeypatch, tmp_path)
     text = _text(await mcp.call_tool("apt_install", {"packages": "nmap"}))
     assert text.startswith("BLOCKED:")
     assert "passwordless sudo" in text

@@ -16,6 +16,12 @@ subsystem: mcp
 
 Authorized-testing-only: the operator-facing workflow for a persistent RCE channel against a victim the operator owns or is explicitly authorized to test. The flow is probe (`rce_exec`) → plant a beaconing implant (`establish_persistence`) → enumerate (`list_connections`) → health-check (`check_connection`) → tear down (`remove_persistence`), with explicit operator-side listener control (`rce_listener_start`) and a method catalog (`persistence_catalog`).
 
+Listener start/read/stop operations use the host-side `PersistentSessionManager`,
+which has no sandbox-backed implementation. MCP calls that access it are blocked
+while the sandbox is active. `establish_persistence` may prepare an implant
+artifact with `auto_start_listener=false`; starting or checking a listener
+requires explicit native mode and the documented native-execution consent.
+
 - **Registration source:** `tools/mcp_tools/operator_connection.py:83 register_operator_connection_tools(mcp, *, ctx)` — auto-discovered via `collect_tools()`; no edit to `mcp_exploit_server.py` needed.
 - **Backing store:** `ConnectionManager` (`tools/operator_connection/manager.py`) persists `ConnectionRecord` rows to `<workspace>/operator_connections.json` plus per-target shards under `<workspace>/connections/<target_ip>.json`, so channels survive restarts. The same manager is exposed over HTTP by `tools/api/routes/connections.py` (which never reads/writes the JSON directly).
 - **Implants run ON the victim only.** Every implant is workspace-contained Python the caller must dispatch via `run_python_file` (or the autonomous orchestrator); the operator box never executes victim code and only hosts the listener via `PersistentSessionManager.start_listener`.

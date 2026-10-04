@@ -59,7 +59,7 @@ Boot sequence for the exploit MCP session (`tools/mcp_session.py`), stdio/HTTP t
 | `MCP_HTTP_RETRY_INITIAL_SECONDS` | `0.2` | `mcp_session.py:33` | Initial poll delay in `wait_for_mcp_http_ready` |
 | HTTP read timeout | `1800s` | `mcp_session.py:734` | `httpx.Timeout` read for `_streamable_http_transport` (covers 600s msf/long terminal calls + idle) |
 | HTTP boot `(connect+write)` | `30s` | `mcp_session.py:734` | Same timeout object first arg |
-| Tool timeouts | 10..600s per tool | families | `check_environment 10s`, `git_clone 120s`, `run_exploit_terminal 300s`, `install_package apt 600s` (`tools/mcp_tools/*.py`) |
+| Tool timeouts | 10..600s per tool | families | `check_environment` probes up to 60s in the worker, `git_clone 120s`, `run_exploit_terminal 300s`, `install_package apt 600s` in explicitly consented native mode (`tools/mcp_tools/*.py`) |
 | `stop_process` wait | `5s` TERM + `5s` KILL | `mcp_session.py:846-855` | Graceful → hard kill escalation |
 | `_verify_port_freed` | `3s` + `2s` retry | `mcp_session.py:868-903` | Port-release poll after Windows tree-kill (prevents 30s×2 readiness probe stall) |
 

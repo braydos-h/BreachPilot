@@ -14,7 +14,8 @@ subsystem: mcp
 # Tool Family: sessions
 
 - **Registration source:** `tools/mcp_tools/sessions.py:9 register_session_tools(mcp, *, ctx)` — auto-discovered. Thin wrappers over `PersistentSessionManager` (`tools/persistent_session_manager.py`).
-- **Gate:** free-text command/session creation via `@audit_tool` + manual `_target_lock_block(command, config)`; pure read/stop/list via `@audit_tool` only or no lock.
+- **Gate:** command/session creation keeps the target lock and audit gate. Every operation that accesses `PersistentSessionManager` also checks `host_execution_block(ctx)` before looking up the manager.
+- **Execution mode:** `PersistentSessionManager` launches host processes and has no sandbox-backed persistent-session implementation. With the default contained sandbox, all manager-backed tools return `SANDBOX_UNSUPPORTED` without touching the manager. They are available only when native mode was explicitly selected and the exact `BREACHPILOT_ALLOW_NATIVE_EXECUTION=I_UNDERSTAND_THIS_RUNS_ON_THE_HOST` acknowledgement is present. A missing manager never implies native mode.
 
 ## Tools Exported (13)
 
@@ -65,7 +66,7 @@ subsystem: mcp
 
 ## Sandbox execution + egress guard (zero-tool helpers)
 
-`sandbox_exec.py` and `egress_guard.py` register no `@mcp.tool` — they are the shared execution plane that sessions, terminal, Metasploit, and scanner tools funnel through. Documented here because background sessions/listeners run on the same contained-vs-host path.
+`sandbox_exec.py` and `egress_guard.py` register no `@mcp.tool`. Terminal and scanner tools use the shared contained-execution funnel. Persistent sessions/listeners do not have a contained implementation yet, so their wrappers fail closed while a sandbox manager is active; they do not fall back to host `tmux`, `nohup`, or listener processes.
 
 ### `sandbox_exec.py` — contained-execution funnel
 

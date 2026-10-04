@@ -29,6 +29,7 @@ from tools.mcp_shared import (
 )
 from tools.mcp_tools.registry import ToolContext, _platform_system, parse_extra_options
 from tools.mcp_tools.sandbox_exec import sandbox_error_block
+from tools.mcp_tools.session_safety import host_execution_block
 from tools.metasploit_bridge import MSF_RECIPES, MetasploitBridge, get_metasploit_bridge, get_msf_recipe
 from tools.sandbox.exceptions import SandboxError
 from tools.validation_utils import validate_target_or_ip
@@ -474,24 +475,20 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
         Returns:
             The shared host-side ``MetasploitBridge``.
         Gates:
-            Sandbox presence: when ``ctx.sandbox`` is set, raises
-            ``SandboxUnsupportedError`` (a ``SandboxError``) instead of
-            touching the host loopback bridge. Every bridge tool catches it
-            and returns a canonical SANDBOX_* block — never a traceback,
-            never a silent host fallback. Workarounds: drive msfconsole
-            inside the worker via run_exploit_terminal / run_msf_module, or
-            deliberately set ``sandbox.enabled: false`` for legacy host mode.
+            A sandbox manager blocks access with ``SandboxUnsupportedError``.
+            Without a manager, native mode must be explicit and carry the
+            operator consent token. Every bridge tool catches the error and
+            returns a canonical SANDBOX_* block — never a traceback or silent
+            host fallback. Workarounds: use run_exploit_terminal /
+            run_msf_module in the worker, or deliberately select native mode
+            with the required operator consent.
         Side-effects: Lazily creates and caches the bridge on ``mcp``.
         """
-        if getattr(ctx, "sandbox", None) is not None:
+        block = host_execution_block(ctx, operation="the host-side Metasploit console and session bridge")
+        if block:
             from tools.sandbox.exceptions import SandboxUnsupportedError
 
-            raise SandboxUnsupportedError(
-                "Metasploit RPC bridge cannot execute inside the disposable sandbox "
-                "(host-side loopback process). Use msfconsole inside the worker via "
-                "run_exploit_terminal / run_msf_module, or set sandbox.enabled: false "
-                "to deliberately restore host-mode metasploit."
-            )
+            raise SandboxUnsupportedError(block)
         return _get_msf_bridge()
 
     def _get_msf_bridge() -> MetasploitBridge:

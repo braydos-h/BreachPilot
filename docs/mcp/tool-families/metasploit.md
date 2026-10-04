@@ -16,6 +16,7 @@ subsystem: mcp
 
 - **Registration source:** `tools/mcp_tools/metasploit.py:11 register_metasploit_tools(mcp, *, ctx)` — auto-discovered. Bridges `msfconsole` (resource-file argv + persistent tmux bridge).
 - **Gate:** structured targets `@require_allowlist()`; free-text / callback tools `@audit_tool` + manual `check_targets_allowlist` on extracted `RHOSTS/RHOST` + pivot hosts.
+- **Host bridge:** tmux/RPC-backed console and session operations fail closed while the sandbox is active. Host bridge access requires explicit native mode and `BREACHPILOT_ALLOW_NATIVE_EXECUTION=I_UNDERSTAND_THIS_RUNS_ON_THE_HOST`; `run_msf_module` remains the contained execution path.
 
 ## Tools Exported (19)
 

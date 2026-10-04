@@ -1,9 +1,9 @@
 ---
 title: MCP Tool Catalog (Generated)
 description: Machine-readable table for every MCP tool — gates, purpose, source location. Verified against tools/mcp_tools/ + mcp_server.py + mcp_engine_server.py.
-source: [tools/mcp_tools/ad.py, tools/mcp_tools/assessment_state.py, tools/mcp_tools/attack_modules.py, tools/mcp_tools/browser.py, tools/mcp_tools/cracking.py, tools/mcp_tools/credentials.py, tools/mcp_tools/domain.py, tools/mcp_tools/egress_guard.py, tools/mcp_tools/hitl.py, tools/mcp_tools/killchain.py, tools/mcp_tools/manifest.py, tools/mcp_tools/metasploit.py, tools/mcp_tools/mitre.py, tools/mcp_tools/operator_connection.py, tools/mcp_tools/parallel_agents.py, tools/mcp_tools/payloads.py, tools/mcp_tools/peer_models.py, tools/mcp_tools/poc_verifier.py, tools/mcp_tools/recon.py, tools/mcp_tools/registry.py, tools/mcp_tools/replay_simulator.py, tools/mcp_tools/research.py, tools/mcp_tools/retest.py, tools/mcp_tools/runtime_skills.py, tools/mcp_tools/sandbox_exec.py, tools/mcp_tools/sessions.py, tools/mcp_tools/snapshots.py, tools/mcp_tools/verify.py, tools/mcp_tools/web_scan.py, tools/mcp_tools/workspace.py, tools/mcp_tools/terminal/allowlist.py, tools/mcp_tools/terminal/execute.py, tools/mcp_tools/terminal/package.py, tools/mcp_tools/terminal/privilege.py, tools/mcp_tools/modules/adaptive.py, tools/mcp_tools/modules/campaign.py, tools/mcp_tools/modules/hash.py, tools/mcp_tools/modules/planning.py, tools/mcp_tools/modules/synthesis.py, tools/mcp_tools/modules/web.py, mcp_server.py, mcp_engine_server.py]
-generated_from: [tools/mcp_tools/ad.py, tools/mcp_tools/assessment_state.py, tools/mcp_tools/attack_modules.py, tools/mcp_tools/browser.py, tools/mcp_tools/cracking.py, tools/mcp_tools/credentials.py, tools/mcp_tools/domain.py, tools/mcp_tools/egress_guard.py, tools/mcp_tools/hitl.py, tools/mcp_tools/killchain.py, tools/mcp_tools/manifest.py, tools/mcp_tools/metasploit.py, tools/mcp_tools/mitre.py, tools/mcp_tools/operator_connection.py, tools/mcp_tools/parallel_agents.py, tools/mcp_tools/payloads.py, tools/mcp_tools/peer_models.py, tools/mcp_tools/poc_verifier.py, tools/mcp_tools/recon.py, tools/mcp_tools/registry.py, tools/mcp_tools/replay_simulator.py, tools/mcp_tools/research.py, tools/mcp_tools/retest.py, tools/mcp_tools/runtime_skills.py, tools/mcp_tools/sandbox_exec.py, tools/mcp_tools/sessions.py, tools/mcp_tools/snapshots.py, tools/mcp_tools/verify.py, tools/mcp_tools/web_scan.py, tools/mcp_tools/workspace.py, tools/mcp_tools/terminal/allowlist.py, tools/mcp_tools/terminal/execute.py, tools/mcp_tools/terminal/package.py, tools/mcp_tools/terminal/privilege.py, tools/mcp_tools/modules/adaptive.py, tools/mcp_tools/modules/campaign.py, tools/mcp_tools/modules/hash.py, tools/mcp_tools/modules/planning.py, tools/mcp_tools/modules/synthesis.py, tools/mcp_tools/modules/web.py, mcp_server.py, mcp_engine_server.py]
-verify: every tool listed exists as an @mcp.tool def at time of generation (2026-09-15).
+source: [tools/mcp_tools/ad.py, tools/mcp_tools/assessment_state.py, tools/mcp_tools/attack_modules.py, tools/mcp_tools/browser.py, tools/mcp_tools/cracking.py, tools/mcp_tools/credentials.py, tools/mcp_tools/domain.py, tools/mcp_tools/egress_guard.py, tools/mcp_tools/hitl.py, tools/mcp_tools/killchain.py, tools/mcp_tools/manifest.py, tools/mcp_tools/metasploit.py, tools/mcp_tools/mitre.py, tools/mcp_tools/operator_connection.py, tools/mcp_tools/parallel_agents.py, tools/mcp_tools/payloads.py, tools/mcp_tools/peer_models.py, tools/mcp_tools/poc_verifier.py, tools/mcp_tools/recon.py, tools/mcp_tools/registry.py, tools/mcp_tools/replay_simulator.py, tools/mcp_tools/research.py, tools/mcp_tools/retest.py, tools/mcp_tools/runtime_skills.py, tools/mcp_tools/sandbox_exec.py, tools/mcp_tools/session_safety.py, tools/mcp_tools/sessions.py, tools/mcp_tools/snapshots.py, tools/mcp_tools/verify.py, tools/mcp_tools/web_scan.py, tools/mcp_tools/workspace.py, tools/mcp_tools/terminal/allowlist.py, tools/mcp_tools/terminal/execute.py, tools/mcp_tools/terminal/package.py, tools/mcp_tools/terminal/privilege.py, tools/mcp_tools/modules/adaptive.py, tools/mcp_tools/modules/campaign.py, tools/mcp_tools/modules/hash.py, tools/mcp_tools/modules/planning.py, tools/mcp_tools/modules/synthesis.py, tools/mcp_tools/modules/web.py, mcp_server.py, mcp_engine_server.py]
+generated_from: [tools/mcp_tools/ad.py, tools/mcp_tools/assessment_state.py, tools/mcp_tools/attack_modules.py, tools/mcp_tools/browser.py, tools/mcp_tools/cracking.py, tools/mcp_tools/credentials.py, tools/mcp_tools/domain.py, tools/mcp_tools/egress_guard.py, tools/mcp_tools/hitl.py, tools/mcp_tools/killchain.py, tools/mcp_tools/manifest.py, tools/mcp_tools/metasploit.py, tools/mcp_tools/mitre.py, tools/mcp_tools/operator_connection.py, tools/mcp_tools/parallel_agents.py, tools/mcp_tools/payloads.py, tools/mcp_tools/peer_models.py, tools/mcp_tools/poc_verifier.py, tools/mcp_tools/recon.py, tools/mcp_tools/registry.py, tools/mcp_tools/replay_simulator.py, tools/mcp_tools/research.py, tools/mcp_tools/retest.py, tools/mcp_tools/runtime_skills.py, tools/mcp_tools/sandbox_exec.py, tools/mcp_tools/session_safety.py, tools/mcp_tools/sessions.py, tools/mcp_tools/snapshots.py, tools/mcp_tools/verify.py, tools/mcp_tools/web_scan.py, tools/mcp_tools/workspace.py, tools/mcp_tools/terminal/allowlist.py, tools/mcp_tools/terminal/execute.py, tools/mcp_tools/terminal/package.py, tools/mcp_tools/terminal/privilege.py, tools/mcp_tools/modules/adaptive.py, tools/mcp_tools/modules/campaign.py, tools/mcp_tools/modules/hash.py, tools/mcp_tools/modules/planning.py, tools/mcp_tools/modules/synthesis.py, tools/mcp_tools/modules/web.py, mcp_server.py, mcp_engine_server.py]
+verify: every tool listed exists as an @mcp.tool def at time of generation (2026-10-04).
 ---
 
 # MCP Tool Catalog (Generated)
@@ -13,7 +13,7 @@ verify: every tool listed exists as an @mcp.tool def at time of generation (2026
 Source locations use `<file>:<line>` relative to the repo root. Registration functions (`register_*_tools`) are auto-discovered via `tools/mcp_tools/registry.py:collect_tools()`; no manual list edit is needed.
 
 
-_Generated 2026-09-15 from `42 source files` (167 tools across 37 families)._
+_Generated 2026-10-04 from `43 source files` (167 tools across 37 families)._
 
 ## engine (`mcp_engine_server.py`) (5)
 
@@ -44,17 +44,17 @@ _Generated 2026-09-15 from `42 source files` (167 tools across 37 families)._
 
 ## `tools/mcp_tools/ad.py` (7)
 
-- **Registration:** `register_ad_tools()` (`tools/mcp_tools/ad.py:348`) — auto-discovered; no edit to `mcp_exploit_server.py`.
+- **Registration:** `register_ad_tools()` (`tools/mcp_tools/ad.py:349`) — auto-discovered; no edit to `mcp_exploit_server.py`.
 
 | Tool | Gates | Purpose | Source |
 |------|-------|---------|--------|
-| `asrep_roast` | `@require_allowlist()` | AS-REP Roast accounts with preauth disabled (impacket-GetNPUsers) for offline cracking. | `tools/mcp_tools/ad.py:365` |
-| `pass_the_hash` | `@require_allowlist()` | Execute a command on a Windows target via NTLM hash (no plaintext). | `tools/mcp_tools/ad.py:442` |
-| `adcs_enum` | `@require_allowlist()` | Enumerate AD Certificate Services templates via certipy (ESC1-8). | `tools/mcp_tools/ad.py:498` |
-| `bloodhound_collect` | `@require_allowlist()` | Collect BloodHound data (users/groups/sessions/acls) for graph attack-path analysis. | `tools/mcp_tools/ad.py:553` |
-| `responder_relay` | `@require_allowlist()` | Relay coerced NTLM auth via impacket ntlmrelayx. | `tools/mcp_tools/ad.py:607` |
-| `smb_signing_check` | `@require_allowlist()` | Check whether the target requires SMB signing (relay feasibility). | `tools/mcp_tools/ad.py:673` |
-| `golden_ticket` | `@require_allowlist()` | Mint a Kerberos golden ticket (TGT) from a stolen krbtgt NTLM hash. | `tools/mcp_tools/ad.py:710` |
+| `asrep_roast` | `@require_allowlist()` | AS-REP Roast accounts with preauth disabled (impacket-GetNPUsers) for offline cracking. | `tools/mcp_tools/ad.py:366` |
+| `pass_the_hash` | `@require_allowlist()` | Execute a command on a Windows target via NTLM hash (no plaintext). | `tools/mcp_tools/ad.py:443` |
+| `adcs_enum` | `@require_allowlist()` | Enumerate AD Certificate Services templates via certipy (ESC1-8). | `tools/mcp_tools/ad.py:499` |
+| `bloodhound_collect` | `@require_allowlist()` | Collect BloodHound data (users/groups/sessions/acls) for graph attack-path analysis. | `tools/mcp_tools/ad.py:554` |
+| `responder_relay` | `@require_allowlist()` | Relay coerced NTLM auth via impacket ntlmrelayx. | `tools/mcp_tools/ad.py:608` |
+| `smb_signing_check` | `@require_allowlist()` | Check whether the target requires SMB signing (relay feasibility). | `tools/mcp_tools/ad.py:680` |
+| `golden_ticket` | `@require_allowlist()` | Mint a Kerberos golden ticket (TGT) from a stolen krbtgt NTLM hash. | `tools/mcp_tools/ad.py:717` |
 
 ## `tools/mcp_tools/assessment_state.py` (6)
 
@@ -100,11 +100,11 @@ _Generated 2026-09-15 from `42 source files` (167 tools across 37 families)._
 
 ## `tools/mcp_tools/cracking.py` (1)
 
-- **Registration:** `register_cracking_tools()` (`tools/mcp_tools/cracking.py:21`) — auto-discovered; no edit to `mcp_exploit_server.py`.
+- **Registration:** `register_cracking_tools()` (`tools/mcp_tools/cracking.py:22`) — auto-discovered; no edit to `mcp_exploit_server.py`.
 
 | Tool | Gates | Purpose | Source |
 |------|-------|---------|--------|
-| `run_hash_crack` | `@audit_tool` | Crack a hash locally with hashcat or john. | `tools/mcp_tools/cracking.py:72` |
+| `run_hash_crack` | `@audit_tool` | Crack a hash locally with hashcat or john. | `tools/mcp_tools/cracking.py:73` |
 
 ## `tools/mcp_tools/credentials.py` (7)
 
@@ -122,25 +122,25 @@ _Generated 2026-09-15 from `42 source files` (167 tools across 37 families)._
 
 ## `tools/mcp_tools/domain.py` (5)
 
-- **Registration:** `register_domain_tools()` (`tools/mcp_tools/domain.py:584`) — auto-discovered; no edit to `mcp_exploit_server.py`.
+- **Registration:** `register_domain_tools()` (`tools/mcp_tools/domain.py:585`) — auto-discovered; no edit to `mcp_exploit_server.py`.
 
 | Tool | Gates | Purpose | Source |
 |------|-------|---------|--------|
-| `resolve_domain` | `@require_allowlist("domain")` | Resolve DNS records for a domain (A, AAAA, MX, NS, TXT, CNAME, SOA, CAA). | `tools/mcp_tools/domain.py:594` |
-| `enumerate_subdomains` | `@require_allowlist("domain")` | Enumerate subdomains of a domain via passive + active sources. | `tools/mcp_tools/domain.py:660` |
-| `dns_recon` | `@require_allowlist("domain")` | Full DNS reconnaissance against a domain. | `tools/mcp_tools/domain.py:879` |
-| `vhost_enum` | `@require_allowlist(host_param="domain")` | Enumerate virtual hosts on a web server via Host-header rotation. | `tools/mcp_tools/domain.py:1069` |
-| `domain_whois` | `@require_allowlist("domain")` | WHOIS lookup + DNS-provider profiling for a domain. | `tools/mcp_tools/domain.py:1232` |
+| `resolve_domain` | `@require_allowlist("domain")` | Resolve DNS records for a domain (A, AAAA, MX, NS, TXT, CNAME, SOA, CAA). | `tools/mcp_tools/domain.py:595` |
+| `enumerate_subdomains` | `@require_allowlist("domain")` | Enumerate subdomains of a domain via passive + active sources. | `tools/mcp_tools/domain.py:661` |
+| `dns_recon` | `@require_allowlist("domain")` | Full DNS reconnaissance against a domain. | `tools/mcp_tools/domain.py:902` |
+| `vhost_enum` | `@require_allowlist(host_param="domain")` | Enumerate virtual hosts on a web server via Host-header rotation. | `tools/mcp_tools/domain.py:1096` |
+| `domain_whois` | `@require_allowlist("domain")` | WHOIS lookup + DNS-provider profiling for a domain. | `tools/mcp_tools/domain.py:1259` |
 
 ## `tools/mcp_tools/hitl.py` (3)
 
-- **Registration:** `register_hitl_tools()` (`tools/mcp_tools/hitl.py:301`) — auto-discovered; no edit to `mcp_exploit_server.py`.
+- **Registration:** `register_hitl_tools()` (`tools/mcp_tools/hitl.py:310`) — auto-discovered; no edit to `mcp_exploit_server.py`.
 
 | Tool | Gates | Purpose | Source |
 |------|-------|---------|--------|
-| `propose_finding` | `@audit_tool` | Propose a candidate finding for human review (agents propose, human decides). Appends a PROPOSED finding to reports/<run_id>/enhanced/enhanced_report.json — never APPROVED. A human promotes it via hitl_decide (operator path) or the WebUI Ev… | `tools/mcp_tools/hitl.py:309` |
-| `hitl_decide` | `@audit_tool` | Record a human Approve/Reject decision on a proposed finding (operator-only human path — no target touch). Persists APPROVED/REJECTED + hitl_history[] (with actor) into the run artifact JSON. Only actor='human' is accepted — any other actor… | `tools/mcp_tools/hitl.py:370` |
-| `list_proposed` | `@audit_tool` | List findings awaiting human review (hitl_status=PROPOSED). Empty run_id scans all runs (newest first). Zero target touch — reads the run artifact JSON only. Approved/rejected findings are hidden here; the final report surfaces APPROVED fin… | `tools/mcp_tools/hitl.py:403` |
+| `propose_finding` | `@audit_tool` | Propose a candidate finding for human review (agents propose, human decides). Appends a PROPOSED finding to reports/<run_id>/enhanced/enhanced_report.json — never APPROVED. A human promotes it via hitl_decide (operator path) or the WebUI Ev… | `tools/mcp_tools/hitl.py:318` |
+| `hitl_decide` | `@audit_tool` | Record a human Approve/Reject decision on a proposed finding (operator-only human path — no target touch). Persists APPROVED/REJECTED + hitl_history[] (with actor) into the run artifact JSON. Only actor='human' is accepted — any other actor… | `tools/mcp_tools/hitl.py:379` |
+| `list_proposed` | `@audit_tool` | List findings awaiting human review (hitl_status=PROPOSED). Empty run_id scans all runs (newest first). Zero target touch — reads the run artifact JSON only. Approved/rejected findings are hidden here; the final report surfaces APPROVED fin… | `tools/mcp_tools/hitl.py:412` |
 
 ## `tools/mcp_tools/killchain.py` (3)
 
@@ -154,29 +154,29 @@ _Generated 2026-09-15 from `42 source files` (167 tools across 37 families)._
 
 ## `tools/mcp_tools/metasploit.py` (19)
 
-- **Registration:** `register_metasploit_tools()` (`tools/mcp_tools/metasploit.py:262`) — auto-discovered; no edit to `mcp_exploit_server.py`.
+- **Registration:** `register_metasploit_tools()` (`tools/mcp_tools/metasploit.py:265`) — auto-discovered; no edit to `mcp_exploit_server.py`.
 
 | Tool | Gates | Purpose | Source |
 |------|-------|---------|--------|
-| `run_msf_module` | `@require_allowlist()` | Run a Metasploit module against the target. Pass the module path (e.g. 'exploit/multi/http/log4shell_header_injection') and key=value options separated by spaces. The module runs in a visible terminal. | `tools/mcp_tools/metasploit.py:284` |
-| `msfconsole_start` | `@audit_tool` | Start an interactive msfconsole session in a tmux session. This is a persistent session that stays running in the background. Use msfconsole_command to send commands to it. | `tools/mcp_tools/metasploit.py:484` |
-| `msfconsole_stop` | `@audit_tool` | Stop the interactive msfconsole session. | `tools/mcp_tools/metasploit.py:511` |
-| `msfconsole_command` | `@audit_tool` | Execute a command in the interactive msfconsole session. Use for: loading modules, setting options, running exploits, checking sessions, etc. The command is sent to the persistent msfconsole and output is captured. | `tools/mcp_tools/metasploit.py:530` |
-| `msf_run_exploit` | `@require_allowlist()` | Run a Metasploit exploit module against a target using the persistent msfconsole. Provide module path (e.g., 'exploit/multi/http/log4shell_header_injection'), target IP, and optional key=value options separated by spaces. Returns the full e… | `tools/mcp_tools/metasploit.py:570` |
-| `msf_run_auxiliary` | `@require_allowlist()` | Run a Metasploit auxiliary module (scanner, fuzzer, dos, etc.) against a target. Use for: port scanning, service enumeration, vulnerability checking. | `tools/mcp_tools/metasploit.py:634` |
-| `msf_list_sessions` | `@audit_tool` | List all active Metasploit sessions (meterpreter, shell, cmd). Returns session IDs, types, target IPs, and platforms. | `tools/mcp_tools/metasploit.py:675` |
-| `msf_interact_session` | `@audit_tool` | Send a command to a specific Metasploit session (meterpreter or shell). Use for: running post-exploitation commands, gathering system info, pivoting, etc. The session is backgrounded after the command completes. | `tools/mcp_tools/metasploit.py:707` |
-| `msf_run_post_module` | `@audit_tool` | Run a post-exploitation module against a specific Metasploit session. Use for: privilege escalation, credential harvesting, persistence, keylogging, screenshot, etc. | `tools/mcp_tools/metasploit.py:751` |
-| `msf_kill_session` | `@audit_tool` | Kill a specific Metasploit session. | `tools/mcp_tools/metasploit.py:787` |
-| `msf_generate_payload` | `@audit_tool` | Generate a payload using msfvenom through the Metasploit bridge. Supports encoders and bad character avoidance. Returns the path to the generated payload file. | `tools/mcp_tools/metasploit.py:814` |
-| `msf_run_resource_script` | `@audit_tool` | Create and run a Metasploit resource script in the persistent msfconsole. Resource scripts automate sequences of msfconsole commands. Use for: automated exploitation chains, mass scanning, post-exploitation workflows. | `tools/mcp_tools/metasploit.py:904` |
-| `msf_run_recipe` | `@audit_tool` | Run a named Metasploit recipe (curated module+option preset). Recipes: smb_version, bluekeep, psexec, cred_gather_win, local_exploit_suggester, hashdump, getsystem, handler. Pass target_ip for exploit/auxiliary kinds, session_id for post ki… | `tools/mcp_tools/metasploit.py:945` |
-| `msf_start_handler` | `@audit_tool` | Start exploit/multi/handler as a backgrounded job to catch a generated payload. lhost is the operator callback host (must be in allowed_targets). Pairs with msf_generate_payload: generate a reverse payload, then start a handler on the same … | `tools/mcp_tools/metasploit.py:1004` |
-| `msf_stop_handler` | `@audit_tool` | Stop all backgrounded handler jobs in the persistent msfconsole (jobs -K). | `tools/mcp_tools/metasploit.py:1058` |
-| `msf_post_hashdump` | `@audit_tool` | Dump SAM hashes from a Windows meterpreter session (post/windows/gather/hashdump). | `tools/mcp_tools/metasploit.py:1107` |
-| `msf_post_getsystem` | `@audit_tool` | Attempt SYSTEM elevation on a Windows meterpreter session (post/windows/escalate/getsystem). | `tools/mcp_tools/metasploit.py:1120` |
-| `msf_post_portfwd` | `@audit_tool` | Forward a local port through a meterpreter session to a remote host (portfwd). remote_host must be in allowed_targets (the allowlist is the pivot lock). | `tools/mcp_tools/metasploit.py:1133` |
-| `msf_post_route` | `@audit_tool` | Add a route through a meterpreter session to a target subnet (post/multi/manage/autoroute). The subnet's network address must be in allowed_targets (pivot lock). | `tools/mcp_tools/metasploit.py:1170` |
+| `run_msf_module` | `@require_allowlist()` | Run a Metasploit module against the target. Pass the module path (e.g. 'exploit/multi/http/log4shell_header_injection') and key=value options separated by spaces. The module runs in a visible terminal. | `tools/mcp_tools/metasploit.py:287` |
+| `msfconsole_start` | `@audit_tool` | Start an interactive msfconsole session in a tmux session. This is a persistent session that stays running in the background. Use msfconsole_command to send commands to it. | `tools/mcp_tools/metasploit.py:501` |
+| `msfconsole_stop` | `@audit_tool` | Stop the interactive msfconsole session. | `tools/mcp_tools/metasploit.py:528` |
+| `msfconsole_command` | `@audit_tool` | Execute a command in the interactive msfconsole session. Use for: loading modules, setting options, running exploits, checking sessions, etc. The command is sent to the persistent msfconsole and output is captured. | `tools/mcp_tools/metasploit.py:547` |
+| `msf_run_exploit` | `@require_allowlist()` | Run a Metasploit exploit module against a target using the persistent msfconsole. Provide module path (e.g., 'exploit/multi/http/log4shell_header_injection'), target IP, and optional key=value options separated by spaces. Returns the full e… | `tools/mcp_tools/metasploit.py:587` |
+| `msf_run_auxiliary` | `@require_allowlist()` | Run a Metasploit auxiliary module (scanner, fuzzer, dos, etc.) against a target. Use for: port scanning, service enumeration, vulnerability checking. | `tools/mcp_tools/metasploit.py:651` |
+| `msf_list_sessions` | `@audit_tool` | List all active Metasploit sessions (meterpreter, shell, cmd). Returns session IDs, types, target IPs, and platforms. | `tools/mcp_tools/metasploit.py:692` |
+| `msf_interact_session` | `@audit_tool` | Send a command to a specific Metasploit session (meterpreter or shell). Use for: running post-exploitation commands, gathering system info, pivoting, etc. The session is backgrounded after the command completes. | `tools/mcp_tools/metasploit.py:724` |
+| `msf_run_post_module` | `@audit_tool` | Run a post-exploitation module against a specific Metasploit session. Use for: privilege escalation, credential harvesting, persistence, keylogging, screenshot, etc. | `tools/mcp_tools/metasploit.py:768` |
+| `msf_kill_session` | `@audit_tool` | Kill a specific Metasploit session. | `tools/mcp_tools/metasploit.py:804` |
+| `msf_generate_payload` | `@audit_tool` | Generate a payload using msfvenom through the Metasploit bridge. Supports encoders and bad character avoidance. Returns the path to the generated payload file. | `tools/mcp_tools/metasploit.py:831` |
+| `msf_run_resource_script` | `@audit_tool` | Create and run a Metasploit resource script in the persistent msfconsole. Resource scripts automate sequences of msfconsole commands. Use for: automated exploitation chains, mass scanning, post-exploitation workflows. | `tools/mcp_tools/metasploit.py:921` |
+| `msf_run_recipe` | `@audit_tool` | Run a named Metasploit recipe (curated module+option preset). Recipes: smb_version, bluekeep, psexec, cred_gather_win, local_exploit_suggester, hashdump, getsystem, handler. Pass target_ip for exploit/auxiliary kinds, session_id for post ki… | `tools/mcp_tools/metasploit.py:962` |
+| `msf_start_handler` | `@audit_tool` | Start exploit/multi/handler as a backgrounded job to catch a generated payload. lhost is the operator callback host (must be in allowed_targets). Pairs with msf_generate_payload: generate a reverse payload, then start a handler on the same … | `tools/mcp_tools/metasploit.py:1021` |
+| `msf_stop_handler` | `@audit_tool` | Stop all backgrounded handler jobs in the persistent msfconsole (jobs -K). | `tools/mcp_tools/metasploit.py:1075` |
+| `msf_post_hashdump` | `@audit_tool` | Dump SAM hashes from a Windows meterpreter session (post/windows/gather/hashdump). | `tools/mcp_tools/metasploit.py:1124` |
+| `msf_post_getsystem` | `@audit_tool` | Attempt SYSTEM elevation on a Windows meterpreter session (post/windows/escalate/getsystem). | `tools/mcp_tools/metasploit.py:1137` |
+| `msf_post_portfwd` | `@audit_tool` | Forward a local port through a meterpreter session to a remote host (portfwd). remote_host must be in allowed_targets (the allowlist is the pivot lock). | `tools/mcp_tools/metasploit.py:1150` |
+| `msf_post_route` | `@audit_tool` | Add a route through a meterpreter session to a target subnet (post/multi/manage/autoroute). The subnet's network address must be in allowed_targets (pivot lock). | `tools/mcp_tools/metasploit.py:1187` |
 
 ## `tools/mcp_tools/mitre.py` (1)
 
@@ -197,14 +197,14 @@ _Generated 2026-09-15 from `42 source files` (167 tools across 37 families)._
 
 ## `tools/mcp_tools/modules/campaign.py` (4)
 
-- **Registration:** `register_campaign_tools()` (`tools/mcp_tools/modules/campaign.py:32`) — auto-discovered; no edit to `mcp_exploit_server.py`.
+- **Registration:** `register_campaign_tools()` (`tools/mcp_tools/modules/campaign.py:61`) — auto-discovered; no edit to `mcp_exploit_server.py`.
 
 | Tool | Gates | Purpose | Source |
 |------|-------|---------|--------|
-| `start_autonomous_campaign` | `@require_allowlist()` | Start a fully autonomous attack campaign against a target IP. | `tools/mcp_tools/modules/campaign.py:43` |
-| `get_campaign_status` | `@audit_tool` | Get the current status of a running or completed autonomous campaign. | `tools/mcp_tools/modules/campaign.py:247` |
-| `run_campaign_step` | `@audit_tool` | Execute a single pending task from an autonomous campaign synchronously. | `tools/mcp_tools/modules/campaign.py:306` |
-| `stop_campaign` | `@audit_tool` | Gracefully stop a running autonomous campaign. | `tools/mcp_tools/modules/campaign.py:486` |
+| `start_autonomous_campaign` | `@require_allowlist()` | Start a fully autonomous attack campaign against a target IP. | `tools/mcp_tools/modules/campaign.py:72` |
+| `get_campaign_status` | `@audit_tool` | Get the current status of a running or completed autonomous campaign. | `tools/mcp_tools/modules/campaign.py:276` |
+| `run_campaign_step` | `@audit_tool` | Execute a single pending task from an autonomous campaign synchronously. | `tools/mcp_tools/modules/campaign.py:335` |
+| `stop_campaign` | `@audit_tool` | Gracefully stop a running autonomous campaign. | `tools/mcp_tools/modules/campaign.py:509` |
 
 ## `tools/mcp_tools/modules/hash.py` (1)
 
@@ -248,17 +248,17 @@ _Generated 2026-09-15 from `42 source files` (167 tools across 37 families)._
 
 ## `tools/mcp_tools/operator_connection.py` (7)
 
-- **Registration:** `register_operator_connection_tools()` (`tools/mcp_tools/operator_connection.py:83`) — auto-discovered; no edit to `mcp_exploit_server.py`.
+- **Registration:** `register_operator_connection_tools()` (`tools/mcp_tools/operator_connection.py:85`) — auto-discovered; no edit to `mcp_exploit_server.py`.
 
 | Tool | Gates | Purpose | Source |
 |------|-------|---------|--------|
-| `rce_exec` | `@require_allowlist()` | Execute a one-shot RCE command against an authorized victim host and return output. | `tools/mcp_tools/operator_connection.py:92` |
-| `establish_persistence` | `@require_allowlist()` | Deploy a persistence implant on an authorized victim that beacons back to the operator box. | `tools/mcp_tools/operator_connection.py:138` |
-| `list_connections` | `@audit_tool` | List operator-box -> victim persistence connections. | `tools/mcp_tools/operator_connection.py:282` |
-| `check_connection` | `@require_allowlist()` | Health-check a persistence channel: verify implant still present on victim and listener running. | `tools/mcp_tools/operator_connection.py:322` |
-| `remove_persistence` | `@require_allowlist()` | Remove a persistence implant from a victim and optionally stop its operator listener. | `tools/mcp_tools/operator_connection.py:397` |
-| `rce_listener_start` | `@audit_tool` | Start an operator-side listener for persistence beacons (reverse shells). | `tools/mcp_tools/operator_connection.py:492` |
-| `persistence_catalog` | `@audit_tool` | List available persistence implant methods (operator catalog). | `tools/mcp_tools/operator_connection.py:549` |
+| `rce_exec` | `@require_allowlist()` | Execute a one-shot RCE command against an authorized victim host and return output. | `tools/mcp_tools/operator_connection.py:97` |
+| `establish_persistence` | `@require_allowlist()` | Deploy a persistence implant on an authorized victim that beacons back to the operator box. | `tools/mcp_tools/operator_connection.py:143` |
+| `list_connections` | `@audit_tool` | List operator-box -> victim persistence connections. | `tools/mcp_tools/operator_connection.py:289` |
+| `check_connection` | `@require_allowlist()` | Health-check a persistence channel: verify implant still present on victim and listener running. | `tools/mcp_tools/operator_connection.py:329` |
+| `remove_persistence` | `@require_allowlist()` | Remove a persistence implant from a victim and optionally stop its operator listener. | `tools/mcp_tools/operator_connection.py:408` |
+| `rce_listener_start` | `@audit_tool` | Start an operator-side listener for persistence beacons (reverse shells). | `tools/mcp_tools/operator_connection.py:507` |
+| `persistence_catalog` | `@audit_tool` | List available persistence implant methods (operator catalog). | `tools/mcp_tools/operator_connection.py:567` |
 
 ## `tools/mcp_tools/parallel_agents.py` (3)
 
@@ -297,17 +297,17 @@ _Generated 2026-09-15 from `42 source files` (167 tools across 37 families)._
 
 ## `tools/mcp_tools/recon.py` (7)
 
-- **Registration:** `register_recon_tools()` (`tools/mcp_tools/recon.py:29`) — auto-discovered; no edit to `mcp_exploit_server.py`.
+- **Registration:** `register_recon_tools()` (`tools/mcp_tools/recon.py:116`) — auto-discovered; no edit to `mcp_exploit_server.py`.
 
 | Tool | Gates | Purpose | Source |
 |------|-------|---------|--------|
-| `check_os` | `@require_allowlist()` | Probe the target to determine its operating system. Uses ping TTL analysis, banner grabs, and HTTP header probes on common ports. Returns the detected OS and guidance for exploitation tools. | `tools/mcp_tools/recon.py:40` |
-| `quick_scan` | `@require_allowlist()` | Fast multi-port TCP scanner with banner grabbing. MUCH faster than nmap for quick recon. Provide a comma-separated list of ports (default: common + eval-target lab ports). Returns which ports are open and any banners received. Use this FIRS… | `tools/mcp_tools/recon.py:255` |
-| `run_full_recon` | `@require_allowlist()` | Run a comprehensive reconnaissance pipeline against a target IP. | `tools/mcp_tools/recon.py:280` |
-| `get_service_fingerprint` | `@require_allowlist()` | Perform a deep service fingerprint on a specific port. | `tools/mcp_tools/recon.py:352` |
-| `run_udp_recon` | `@require_allowlist()` | Run a UDP port scan against the single target. | `tools/mcp_tools/recon.py:496` |
-| `run_osint_recon` | `@require_allowlist()` | Run passive OSINT aggregation against the single target. | `tools/mcp_tools/recon.py:543` |
-| `diff_recon_runs` | `@require_allowlist()` | Compare two persisted recon_result.json snapshots. | `tools/mcp_tools/recon.py:591` |
+| `check_os` | `@require_allowlist()` | Probe the target to determine its operating system. Uses ping TTL analysis, banner grabs, and HTTP header probes on common ports. Returns the detected OS and guidance for exploitation tools. | `tools/mcp_tools/recon.py:127` |
+| `quick_scan` | `@require_allowlist()` | Fast multi-port TCP scanner with banner grabbing. MUCH faster than nmap for quick recon. Provide a comma-separated list of ports (default: common + eval-target lab ports). Returns which ports are open and any banners received. Use this FIRS… | `tools/mcp_tools/recon.py:346` |
+| `run_full_recon` | `@require_allowlist()` | Run a comprehensive reconnaissance pipeline against a target IP. | `tools/mcp_tools/recon.py:376` |
+| `get_service_fingerprint` | `@require_allowlist()` | Perform a deep service fingerprint on a specific port. | `tools/mcp_tools/recon.py:451` |
+| `run_udp_recon` | `@require_allowlist()` | Run a UDP port scan against the single target. | `tools/mcp_tools/recon.py:601` |
+| `run_osint_recon` | `@require_allowlist()` | Run passive OSINT aggregation against the single target. | `tools/mcp_tools/recon.py:651` |
+| `diff_recon_runs` | `@require_allowlist()` | Compare two persisted recon_result.json snapshots. | `tools/mcp_tools/recon.py:703` |
 
 ## `tools/mcp_tools/replay_simulator.py` (1)
 
@@ -333,11 +333,11 @@ _Generated 2026-09-15 from `42 source files` (167 tools across 37 families)._
 
 ## `tools/mcp_tools/retest.py` (1)
 
-- **Registration:** `register_retest_tools()` (`tools/mcp_tools/retest.py:273`) — auto-discovered; no edit to `mcp_exploit_server.py`.
+- **Registration:** `register_retest_tools()` (`tools/mcp_tools/retest.py:378`) — auto-discovered; no edit to `mcp_exploit_server.py`.
 
 | Tool | Gates | Purpose | Source |
 |------|-------|---------|--------|
-| `retest_finding` | `@require_allowlist()` | Re-run a confirmed finding's stored PoC probe against the current target (prove the fix). Reloads the finding's verification_probe from reports/<run_id>/enhanced/enhanced_report.json (latest run containing it when run_id is empty) and re-ex… | `tools/mcp_tools/retest.py:279` |
+| `retest_finding` | `@require_allowlist()` | Re-run a confirmed finding's stored PoC probe against the current target (prove the fix). Reloads the finding's verification_probe from reports/<run_id>/enhanced/enhanced_report.json (latest run containing it when run_id is empty) and re-ex… | `tools/mcp_tools/retest.py:384` |
 
 ## `tools/mcp_tools/runtime_skills.py` (4)
 
@@ -352,23 +352,23 @@ _Generated 2026-09-15 from `42 source files` (167 tools across 37 families)._
 
 ## `tools/mcp_tools/sessions.py` (13)
 
-- **Registration:** `register_session_tools()` (`tools/mcp_tools/sessions.py:13`) — auto-discovered; no edit to `mcp_exploit_server.py`.
+- **Registration:** `register_session_tools()` (`tools/mcp_tools/sessions.py:14`) — auto-discovered; no edit to `mcp_exploit_server.py`.
 
 | Tool | Gates | Purpose | Source |
 |------|-------|---------|--------|
-| `start_tmux_session` | `@audit_tool` | Start a named persistent tmux session for interactive commands. The session runs in the background and can be interacted with later via send_to_session and read_session_output. Use for: reverse shells, interactive msfconsole, long-running s… | `tools/mcp_tools/sessions.py:32` |
-| `send_to_session` | `@audit_tool` | Send text/keystrokes to a named tmux session. The text is sent followed by Enter. Use this to interact with running sessions: type commands in a shell, navigate msfconsole menus, respond to prompts, etc. | `tools/mcp_tools/sessions.py:48` |
-| `read_session_output` | `@audit_tool` | Read the last N lines from a named tmux session. Use this to see the output after sending commands via send_to_session. | `tools/mcp_tools/sessions.py:64` |
-| `kill_session` | `@audit_tool` | Kill a named persistent session (tmux, background job, or listener). | `tools/mcp_tools/sessions.py:74` |
-| `start_background_job` | `@audit_tool` | Start a named background job using nohup. The job runs detached from the terminal and logs output to a file. Use for: long-running scans, listeners, file transfers, brute force attacks that take hours, etc. | `tools/mcp_tools/sessions.py:82` |
-| `read_job_output` | `@audit_tool` | Read the last N lines from a background job's log file. | `tools/mcp_tools/sessions.py:103` |
-| `stop_background_job` | `@audit_tool` | Stop a named background job. | `tools/mcp_tools/sessions.py:116` |
-| `start_listener` | `@audit_tool` | Start a named network listener. Types: netcat (nc/ncat), socat, http (python http.server), tls (openssl/socat TLS), dns (dnscat2), https-beacon (socat TLS HTTP), socks_pivot (chisel/ligolo-ng/socat TCP forward). socks_pivot forwards to upst… | `tools/mcp_tools/sessions.py:124` |
-| `read_listener_output` | `@audit_tool` | Read the last N lines from a listener's log file. | `tools/mcp_tools/sessions.py:165` |
-| `stop_listener` | `@audit_tool` | Stop a named network listener. | `tools/mcp_tools/sessions.py:178` |
-| `list_sessions` | `@audit_tool` | List all persistent sessions (tmux, background jobs, listeners) with their status, PIDs, and types. | `tools/mcp_tools/sessions.py:186` |
-| `list_processes` | `@audit_tool` | List system processes. Optionally filter by a pattern string. Use to find running tools, check if a listener is active, or locate a specific process. | `tools/mcp_tools/sessions.py:205` |
-| `kill_process` | `@audit_tool` | Kill a process by tracked name or raw PID. Use to stop runaway processes, kill old listeners, or clean up after exploitation. | `tools/mcp_tools/sessions.py:223` |
+| `start_tmux_session` | `@audit_tool` | Start a persistent host tmux session in explicitly consented native mode. The sandbox has no persistent-session backend, so this returns SANDBOX_UNSUPPORTED while contained. In native mode the session can be used with send_to_session and re… | `tools/mcp_tools/sessions.py:36` |
+| `send_to_session` | `@audit_tool` | Send text/keystrokes to a named host tmux session in explicitly consented native mode. The sandbox has no persistent-session backend, so this returns SANDBOX_UNSUPPORTED while contained. The text is sent followed by Enter. | `tools/mcp_tools/sessions.py:54` |
+| `read_session_output` | `@audit_tool` | Read the last N lines from a named host tmux session in explicitly consented native mode. Returns SANDBOX_UNSUPPORTED while contained. | `tools/mcp_tools/sessions.py:72` |
+| `kill_session` | `@audit_tool` | Kill a named host session or listener in explicitly consented native mode. Returns SANDBOX_UNSUPPORTED while contained. | `tools/mcp_tools/sessions.py:84` |
+| `start_background_job` | `@audit_tool` | Start a named host background job using nohup in explicitly consented native mode. The sandbox has no persistent-job backend, so this returns SANDBOX_UNSUPPORTED while contained. | `tools/mcp_tools/sessions.py:94` |
+| `read_job_output` | `@audit_tool` | Read a host background job's log in explicitly consented native mode. Returns SANDBOX_UNSUPPORTED while contained. | `tools/mcp_tools/sessions.py:117` |
+| `stop_background_job` | `@audit_tool` | Stop a host background job in explicitly consented native mode. Returns SANDBOX_UNSUPPORTED while contained. | `tools/mcp_tools/sessions.py:132` |
+| `start_listener` | `@audit_tool` | Start a host network listener in explicitly consented native mode. The sandbox has no persistent-listener backend, so this returns SANDBOX_UNSUPPORTED while contained. socks_pivot upstream_host must be allowlisted. | `tools/mcp_tools/sessions.py:142` |
+| `read_listener_output` | `@audit_tool` | Read a host listener's log in explicitly consented native mode. Returns SANDBOX_UNSUPPORTED while contained. | `tools/mcp_tools/sessions.py:185` |
+| `stop_listener` | `@audit_tool` | Stop a host listener in explicitly consented native mode. Returns SANDBOX_UNSUPPORTED while contained. | `tools/mcp_tools/sessions.py:200` |
+| `list_sessions` | `@audit_tool` | List host sessions, jobs, and listeners in explicitly consented native mode. Returns SANDBOX_UNSUPPORTED while contained. | `tools/mcp_tools/sessions.py:210` |
+| `list_processes` | `@audit_tool` | List host processes in explicitly consented native mode. Returns SANDBOX_UNSUPPORTED while contained. | `tools/mcp_tools/sessions.py:231` |
+| `kill_process` | `@audit_tool` | Kill a host process by tracked name or raw PID in explicitly consented native mode. Returns SANDBOX_UNSUPPORTED while contained. | `tools/mcp_tools/sessions.py:251` |
 
 ## `tools/mcp_tools/snapshots.py` (3)
 
@@ -393,53 +393,53 @@ _Generated 2026-09-15 from `42 source files` (167 tools across 37 families)._
 
 ## `tools/mcp_tools/terminal/package.py` (5)
 
-- **Registration:** `_register_package_tools()` (`tools/mcp_tools/terminal/package.py:18`) — auto-discovered; no edit to `mcp_exploit_server.py`.
+- **Registration:** `_register_package_tools()` (`tools/mcp_tools/terminal/package.py:19`) — auto-discovered; no edit to `mcp_exploit_server.py`.
 
 | Tool | Gates | Purpose | Source |
 |------|-------|---------|--------|
-| `apt_install` | `@audit_tool` | Install Kali Linux packages via apt. Provide a space-separated list of package names (e.g., 'nmap hydra gobuster'). Runs 'sudo apt install -y <packages>'. Use this to install missing tools before exploitation. | `tools/mcp_tools/terminal/package.py:24` |
-| `pip_install` | `@audit_tool` | Install Python packages via pip. Provide a space-separated list of package names (e.g., 'impacket pwntools requests'). Runs 'pip install <packages>'. Use for Python exploit dependencies. | `tools/mcp_tools/terminal/package.py:55` |
-| `install_package` | `@audit_tool` | Install packages using the specified package manager. | `tools/mcp_tools/terminal/package.py:83` |
-| `download_and_install` | `@audit_tool` | Download and install a tool from a URL. | `tools/mcp_tools/terminal/package.py:153` |
-| `update_system` | `@audit_tool` | Update the system's package lists and optionally upgrade all packages. | `tools/mcp_tools/terminal/package.py:301` |
+| `apt_install` | `@audit_tool` | Install Kali packages on the host in explicitly consented native mode. Returns SANDBOX_UNSUPPORTED while contained; extend a derived sandbox image for worker tools. | `tools/mcp_tools/terminal/package.py:28` |
+| `pip_install` | `@audit_tool` | Install Python packages on the host in explicitly consented native mode. Returns SANDBOX_UNSUPPORTED while contained; extend a derived sandbox image for worker tools. | `tools/mcp_tools/terminal/package.py:61` |
+| `install_package` | `@audit_tool` | Install packages using the specified package manager. | `tools/mcp_tools/terminal/package.py:91` |
+| `download_and_install` | `@audit_tool` | Download and install a tool from a URL. | `tools/mcp_tools/terminal/package.py:163` |
+| `update_system` | `@audit_tool` | Update the system's package lists and optionally upgrade all packages. | `tools/mcp_tools/terminal/package.py:313` |
 
 ## `tools/mcp_tools/terminal/privilege.py` (2)
 
-- **Registration:** `_register_privilege_tools()` (`tools/mcp_tools/terminal/privilege.py:131`) — auto-discovered; no edit to `mcp_exploit_server.py`.
+- **Registration:** `_register_privilege_tools()` (`tools/mcp_tools/terminal/privilege.py:136`) — auto-discovered; no edit to `mcp_exploit_server.py`.
 
 | Tool | Gates | Purpose | Source |
 |------|-------|---------|--------|
-| `check_environment` | `@audit_tool` | Check which security testing tools are installed and available on the system. | `tools/mcp_tools/terminal/privilege.py:138` |
-| `preflight_env_check` | `@audit_tool` | Probe installed pentest tools, sudo/pip installability, and the | `tools/mcp_tools/terminal/privilege.py:209` |
+| `check_environment` | `@audit_tool` | Check security tool availability in the sandbox worker or consented native environment. | `tools/mcp_tools/terminal/privilege.py:143` |
+| `preflight_env_check` | `@audit_tool` | Probe installed pentest tools, sudo/pip installability, and the | `tools/mcp_tools/terminal/privilege.py:279` |
 
 ## `tools/mcp_tools/verify.py` (1)
 
-- **Registration:** `register_verify_tools()` (`tools/mcp_tools/verify.py:133`) — auto-discovered; no edit to `mcp_exploit_server.py`.
+- **Registration:** `register_verify_tools()` (`tools/mcp_tools/verify.py:214`) — auto-discovered; no edit to `mcp_exploit_server.py`.
 
 | Tool | Gates | Purpose | Source |
 |------|-------|---------|--------|
-| `verify_finding` | `@require_allowlist()` | Re-prove a candidate finding N times via its stored verification probe (verify-or-it-didn't-happen). Reloads the finding's verification_probe from reports/<run_id>/enhanced/enhanced_report.json (latest run containing it when run_id is empty… | `tools/mcp_tools/verify.py:139` |
+| `verify_finding` | `@require_allowlist()` | Re-prove a candidate finding N times via its stored verification probe (verify-or-it-didn't-happen). Reloads the finding's verification_probe from reports/<run_id>/enhanced/enhanced_report.json (latest run containing it when run_id is empty… | `tools/mcp_tools/verify.py:220` |
 
 ## `tools/mcp_tools/web_scan.py` (3)
 
-- **Registration:** `register_web_scan_tools()` (`tools/mcp_tools/web_scan.py:285`) — auto-discovered; no edit to `mcp_exploit_server.py`.
+- **Registration:** `register_web_scan_tools()` (`tools/mcp_tools/web_scan.py:286`) — auto-discovered; no edit to `mcp_exploit_server.py`.
 
 | Tool | Gates | Purpose | Source |
 |------|-------|---------|--------|
-| `run_web_scan` | `@require_allowlist()` | Run a web scanner (nikto/nuclei/sqlmap/gobuster/feroxbuster/whatweb/wpscan/dirb/dirbuster) against the target. Returns the scanner's parsed output. The target must be in the explicit allowlist. ``options`` are extra scanner flags (space-sep… | `tools/mcp_tools/web_scan.py:335` |
-| `parse_nuclei_results` | `@audit_tool` | Parse a prior nuclei scan's JSONL events into confirmed-candidate TechnicalFindings (local only: no target arg, no network). Returns a NUCLEI_FINDINGS summary; full records are saved as nuclei-findings.json in the attempt dir. | `tools/mcp_tools/web_scan.py:498` |
-| `generate_nuclei_template` | `@audit_tool` | Generate a reusable Nuclei template YAML from a confirmed finding (local only: no target arg, no network). Validates by parsing the YAML back plus nuclei -validate when on PATH; reports VALID/INVALID. | `tools/mcp_tools/web_scan.py:569` |
+| `run_web_scan` | `@require_allowlist()` | Run a web scanner (nikto/nuclei/sqlmap/gobuster/feroxbuster/whatweb/wpscan/dirb/dirbuster) against the target. Returns the scanner's parsed output. The target must be in the explicit allowlist. ``options`` are extra scanner flags (space-sep… | `tools/mcp_tools/web_scan.py:336` |
+| `parse_nuclei_results` | `@audit_tool` | Parse a prior nuclei scan's JSONL events into confirmed-candidate TechnicalFindings (local only: no target arg, no network). Returns a NUCLEI_FINDINGS summary; full records are saved as nuclei-findings.json in the attempt dir. | `tools/mcp_tools/web_scan.py:497` |
+| `generate_nuclei_template` | `@audit_tool` | Generate a reusable Nuclei template YAML from a confirmed finding (local only: no target arg, no network). Validates by parsing the YAML back plus nuclei -validate when on PATH; reports VALID/INVALID. | `tools/mcp_tools/web_scan.py:570` |
 
 ## `tools/mcp_tools/workspace.py` (4)
 
-- **Registration:** `register_workspace_tools()` (`tools/mcp_tools/workspace.py:121`) — auto-discovered; no edit to `mcp_exploit_server.py`.
+- **Registration:** `register_workspace_tools()` (`tools/mcp_tools/workspace.py:115`) — auto-discovered; no edit to `mcp_exploit_server.py`.
 
 | Tool | Gates | Purpose | Source |
 |------|-------|---------|--------|
-| `write_python_file` | `@audit_tool` | Write an AI-generated Python exploit script. | `tools/mcp_tools/workspace.py:131` |
-| `run_python_file` | `@require_allowlist()` | Execute a previously written Python exploit script against the target IP. | `tools/mcp_tools/workspace.py:217` |
-| `read_workspace_file` | `@audit_tool` | Read a file inside the run workspace by path. | `tools/mcp_tools/workspace.py:444` |
-| `list_workspace` | `@audit_tool` | List all files in the exploit workspace directory. | `tools/mcp_tools/workspace.py:465` |
+| `write_python_file` | `@audit_tool` | Write an AI-generated Python exploit script. | `tools/mcp_tools/workspace.py:125` |
+| `run_python_file` | `@require_allowlist()` | Execute a previously written Python exploit script against the target IP. | `tools/mcp_tools/workspace.py:209` |
+| `read_workspace_file` | `@audit_tool` | Read a file inside the run workspace by path. | `tools/mcp_tools/workspace.py:388` |
+| `list_workspace` | `@audit_tool` | List all files in the exploit workspace directory. | `tools/mcp_tools/workspace.py:409` |
 
 ## Totals
 

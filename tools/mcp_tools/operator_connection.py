@@ -42,6 +42,7 @@ from typing import Any
 from tools.kernel.workspace import write_workspace_file
 from tools.mcp_shared import _attempt_dir, check_targets_allowlist
 from tools.mcp_tools.registry import ToolContext
+from tools.mcp_tools.session_safety import host_execution_block
 from tools.mcp_tools.terminal import _target_lock_block
 from tools.operator_connection.implants import (
     IMPLANT_METHODS,
@@ -86,6 +87,9 @@ def register_operator_connection_tools(mcp: Any, *, ctx: ToolContext) -> None:
     config = ctx.config
     audit_tool = ctx.audit_tool
     require_allowlist = ctx.require_allowlist
+
+    def _host_session_block() -> str | None:
+        return host_execution_block(ctx, operation="persistent host listeners")
 
     # ------------------------------------------------------------------ rce_exec
     @mcp.tool()
@@ -160,12 +164,16 @@ def register_operator_connection_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
         Callback host must be in exploit.allowed_targets (pivot lock) — the only
         exception is when exploit.require_explicit_allowlist is false (lab allowlist
-        disabled), in which case any callback_host is accepted.
+        disabled), in which case any callback_host is accepted. Auto-starting the
+        operator listener is blocked while the sandbox is active because the
+        persistent listener backend runs on the host.
         """
         if not target_ip or not target_ip.strip():
             return "BLOCKED: target_ip is required."
         if not validate_target_or_ip(target_ip):
             return "BLOCKED: target_ip must be a valid IP or domain."
+        if auto_start_listener and (block := _host_session_block()):
+            return block
         m = (method or "").strip().lower()
         if not m:
             return "BLOCKED: method is required."
@@ -325,11 +333,15 @@ def register_operator_connection_tools(mcp: Any, *, ctx: ToolContext) -> None:
         checks every active connection for that victim. Returns per-connection
         verify commands the operator (or the AI via rce_exec / run_exploit_terminal)
         can use to confirm the implant and the listener status on the operator box.
+        This tool is unavailable while the sandbox is active because it reads
+        host listener/session state.
         """
         if not target_ip or not target_ip.strip():
             return "BLOCKED: target_ip is required."
         if not validate_target_or_ip(target_ip):
             return "BLOCKED: target_ip must be a valid IP or domain."
+        if block := _host_session_block():
+            return block
 
         try:
             mgr = get_connection_manager(workspace)
@@ -407,11 +419,15 @@ def register_operator_connection_tools(mcp: Any, *, ctx: ToolContext) -> None:
         Returns the remove command to execute ON the victim via RCE and tears down
         the operator-side ConnectionRecord. With stop_listener=True, also stops the
         operator listener.
+        Stopping the host listener requires explicit native mode and is blocked
+        while the sandbox is active.
         """
         if not target_ip or not target_ip.strip():
             return "BLOCKED: target_ip is required."
         if not validate_target_or_ip(target_ip):
             return "BLOCKED: target_ip must be a valid IP or domain."
+        if stop_listener and (block := _host_session_block()):
+            return block
 
         try:
             mgr = get_connection_manager(workspace)
@@ -501,6 +517,7 @@ def register_operator_connection_tools(mcp: Any, *, ctx: ToolContext) -> None:
         stop_listener workflow. The listener binds on the operator box only;
         beacons from victims must target a host:port in exploit.allowed_targets
         or the implant's beacon is blocked by the target-IP lock.
+        Host listeners are unavailable while the sandbox is active.
         """
         if isinstance(port, str) and port.strip().isdigit():
             port = int(port.strip())
@@ -521,6 +538,8 @@ def register_operator_connection_tools(mcp: Any, *, ctx: ToolContext) -> None:
         lname = (name or f"persist-beacon-{port}").strip()
         if not lname or len(lname) > 64:
             return "BLOCKED: name must be 1-64 chars."
+        if block := _host_session_block():
+            return block
 
         try:
             from tools.persistent_session_manager import get_session_manager

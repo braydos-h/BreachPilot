@@ -10,6 +10,7 @@ from typing import Any
 
 from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
 from tools.mcp_tools.registry import ToolContext, _attempt_dir, _run_with_pgrp_timeout
+from tools.mcp_tools.session_safety import host_execution_block
 from tools.mcp_tools.terminal.privilege import _require_sudo_or_pivot
 
 __all__ = ["_register_package_tools"]
@@ -19,10 +20,15 @@ def _register_package_tools(mcp: Any, *, ctx: ToolContext) -> None:
     workspace = ctx.workspace
     audit_tool = ctx.audit_tool
 
+    def _host_install_block() -> str | None:
+        return host_execution_block(ctx, operation="host-side package installation")
+
     @mcp.tool()
     @audit_tool
     def apt_install(packages: str) -> str:
-        """Install Kali Linux packages via apt. Provide a space-separated list of package names (e.g., 'nmap hydra gobuster'). Runs 'sudo apt install -y <packages>'. Use this to install missing tools before exploitation."""
+        """Install Kali packages on the host in explicitly consented native mode. Returns SANDBOX_UNSUPPORTED while contained; extend a derived sandbox image for worker tools."""
+        if block := _host_install_block():
+            return block
         if not packages or not packages.strip():
             return "BLOCKED: no packages specified."
         pkg_list = [
@@ -53,7 +59,9 @@ def _register_package_tools(mcp: Any, *, ctx: ToolContext) -> None:
     @mcp.tool()
     @audit_tool
     def pip_install(packages: str) -> str:
-        """Install Python packages via pip. Provide a space-separated list of package names (e.g., 'impacket pwntools requests'). Runs 'pip install <packages>'. Use for Python exploit dependencies."""
+        """Install Python packages on the host in explicitly consented native mode. Returns SANDBOX_UNSUPPORTED while contained; extend a derived sandbox image for worker tools."""
+        if block := _host_install_block():
+            return block
         if not packages or not packages.strip():
             return "BLOCKED: no packages specified."
         pkg_list = [
@@ -84,8 +92,10 @@ def _register_package_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Install packages using the specified package manager.
         Supported managers: apt, pip, gem, npm, go, cargo, snap.
         Provide a space-separated list of package names.
-        Use this to install missing tools or dependencies the AI discovers it needs during an engagement.
+        Native mode only; returns SANDBOX_UNSUPPORTED while contained. Extend a derived sandbox image for worker tools.
         """
+        if block := _host_install_block():
+            return block
         if not manager or not manager.strip():
             return "BLOCKED: manager is required."
         if not packages or not packages.strip():
@@ -154,8 +164,10 @@ def _register_package_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Download and install a tool from a URL.
         Supports .deb (auto-installs with dpkg), .tar.gz/.tgz (extracts to /opt or workspace),
         .zip (extracts), and raw binaries (makes executable).
-        Use this when a tool isn't in apt repos and must be fetched from GitHub releases or vendor sites.
+        Native mode only; returns SANDBOX_UNSUPPORTED before downloading while contained.
         """
+        if block := _host_install_block():
+            return block
         if not url or not url.strip():
             return "BLOCKED: url is required."
         url = url.strip()
@@ -301,8 +313,10 @@ def _register_package_tools(mcp: Any, *, ctx: ToolContext) -> None:
     def update_system(upgrade: bool = True) -> str:
         """Update the system's package lists and optionally upgrade all packages.
         Runs 'apt update' and optionally 'apt upgrade -y'.
-        Use this to ensure the system has the latest tool versions before starting an engagement.
+        Native mode only; returns SANDBOX_UNSUPPORTED while contained.
         """
+        if block := _host_install_block():
+            return block
         try:
             proc = subprocess.run(
                 ["bash", "-c", "sudo apt update 2>&1"],

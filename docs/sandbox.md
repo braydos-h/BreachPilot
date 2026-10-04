@@ -161,9 +161,12 @@ without any Docker probing.
 | curl / wget | sandbox |
 | sqlmap / nikto / gobuster-class scanners | sandbox |
 | Metasploit (`msfconsole`) / msfvenom | sandbox |
+| Persistent tmux/nohup sessions, host listeners, host-side Metasploit bridge | blocked with `SANDBOX_UNSUPPORTED`; no contained persistence backend is implemented |
 | Impacket / SMB tooling | sandbox |
 | hashcat / john | sandbox when the worker image provides them (GPU passthrough is out of scope; document CPU-only runs) |
 | Exploit scripts / general terminal commands | sandbox |
+| Environment version probes (`check_environment`) | sandbox worker; custom names are basenames only |
+| Host package managers and download/install tools | blocked with `SANDBOX_UNSUPPORTED`; no worker-backed installer is implemented |
 | Browser ops (`browser_*`: navigate/observe/screenshot/JS) | sandbox browser worker (`breachpilot-sandbox:browser`: base worker + Playwright/Chromium; one Chromium op per docker exec, strict fail-closed — never host fallback, never the native fallback) |
 | Recon pipeline (host-side, no agent-generated code execution) | host (unchanged, scope-gated) |
 | PoC verifier (`poc_verifier`) compile gate | host docker (isolated, network `none` — pre-existing separate mechanism) |
