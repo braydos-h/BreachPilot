@@ -171,6 +171,7 @@ class TestNameVsIdAndErrors:
             "404: network not found",
         ]
         for text in variants:
+
             def handler(argv: tuple[str, ...], _t: str = text) -> tuple[int, str, str]:
                 if argv[:2] == ("network", "inspect"):
                     return 1, "", _t
@@ -298,9 +299,7 @@ class TestFailClosed:
         block = sandbox_error_block(SandboxUnavailableError("docker daemon down"), tool_name="run_exploit_terminal")
         assert "SANDBOX_UNAVAILABLE" in block
         assert "nowhere" in block, "fail-closed block must state the command ran nowhere"
-        assert "host" not in block.lower().replace("not run on the host", ""), (
-            "block must never direct host execution"
-        )
+        assert "host" not in block.lower().replace("not run on the host", ""), "block must never direct host execution"
 
     def test_manager_execute_failure_raises_without_host_subprocess(self, monkeypatch, tmp_path) -> None:
         import subprocess as _subprocess

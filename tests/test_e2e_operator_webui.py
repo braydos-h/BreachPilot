@@ -70,8 +70,7 @@ def _make_client(tmp_path, monkeypatch, token: str = TOKEN):
             encoding="utf-8",
         )
         (reports_dir / "exploit_audit.jsonl").write_text(
-            json.dumps({"tool_name": "e2e_probe", "status": "completed", "target_ip": kwargs.get("target_ip")})
-            + "\n",
+            json.dumps({"tool_name": "e2e_probe", "status": "completed", "target_ip": kwargs.get("target_ip")}) + "\n",
             encoding="utf-8",
         )
         return {"total_actions": 1, "workspace": str(reports_dir), "audit_path": ""}
