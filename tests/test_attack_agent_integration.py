@@ -74,7 +74,8 @@ async def test_exploit_hypothesis_chooses_relevant_tool(tmp_path: Path):
     # we verify the authoritative classifier and that the harness can still drive universal tools.
     strong_success = "meterpreter session 1 opened"
     result = normalize_action_result(tool_name="run_msf_module", result_text=strong_success)
-    assert result.verified_success is True
+    assert result.verified_success is False
+    assert result.exploit_outcome == "unverified_claim"
     # Harness smoke: two universal tools in recon-allowed order should both execute
     specs = [
         FakeToolSpec(name="read_workspace_file", handler_result="CVE-2023-1234 nginx 1.18"),
@@ -153,9 +154,10 @@ async def test_failed_exploit_does_not_mark_success_and_replans(tmp_path: Path):
     first_res = normalize_action_result(tool_name="run_msf_module", result_text=fail_text)
     assert first_res.verified_success is False
     assert first_res.exploit_outcome in ("failure", "unknown")
-    # Second result IS success
+    # A worker-generated marker is a claim, not target-bound proof.
     second_res = normalize_action_result(tool_name="run_exploit_terminal", result_text=alt_success)
-    assert second_res.verified_success is True
+    assert second_res.verified_success is False
+    assert second_res.exploit_outcome == "unverified_claim"
     assert trace.selected_tools == ["run_msf_module", "run_exploit_terminal"]
 
 
@@ -256,7 +258,7 @@ def test_allowlist_blocks_non_allowlisted_target():
 
 
 def test_sandbox_failure_fails_closed_no_host_fallback():
-    """With sandbox_required but sandbox disabled, every trial is INFRASTRUCTURE_ERROR."""
+    """A missing required sandbox is an infrastructure issue, not an exploit failure."""
     # This is enforced in BenchmarkRunner; verify the model enum distinguishes infra vs exploit
     assert TrialStatus.INFRASTRUCTURE_ERROR.value != TrialStatus.FAILED.value
 

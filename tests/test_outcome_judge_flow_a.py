@@ -3,9 +3,9 @@
 Three layers of tests:
 
 1. Adapter unit tests -- ``build_observation`` + ``judge_outcome`` against a
-   real, pure ``OutcomeJudge`` (no DB). A compromise marker drives CONFIRMED, a
-   failure marker drives REFUTED, partial/unknown stay non-terminal, and
-   defensive inputs return ``None``.
+   real, pure ``OutcomeJudge`` (no DB). Raw shell/credential markers and tool
+   failures remain unpolarized; only an explicit trusted structured result can
+   confirm a hypothesis.
 
 2. ``judge_flow_a`` helper -- exercises the full build_judge + build_observation
    + judge_outcome path with a fake policy/plan and a real judge.
@@ -43,7 +43,7 @@ def _record(action="run_exploit_terminal", attempt_id="ATT-1", detail="ran explo
     return SimpleNamespace(action=action, attempt_id=attempt_id, detail=detail, exit_code=exit_code)
 
 
-def test_build_observation_compromise_yields_supporting_evidence():
+def test_build_observation_shell_text_is_unverified():
     from tools.exploit_agent.outcome_adapter import build_observation
 
     res = build_observation(
@@ -53,13 +53,12 @@ def test_build_observation_compromise_yields_supporting_evidence():
         "10.0.0.50",
     )
     assert res is not None
-    hev = res["observation"]["hypothesis_evidence"]
-    assert hev and hev[0]["polarity"] == "supports"
-    assert res["classification"]["outcome"] == "compromise"
+    assert res["observation"]["hypothesis_evidence"] == []
+    assert res["classification"]["outcome"] == "unverified_claim"
     assert res["execution_result"]["success"] is True
 
 
-def test_build_observation_cred_dump_yields_supporting_evidence():
+def test_build_observation_credential_text_is_unverified():
     from tools.exploit_agent.outcome_adapter import build_observation
 
     res = build_observation(
@@ -69,12 +68,11 @@ def test_build_observation_cred_dump_yields_supporting_evidence():
         "10.0.0.50",
     )
     assert res is not None
-    hev = res["observation"]["hypothesis_evidence"]
-    assert hev and hev[0]["polarity"] == "supports"
-    assert res["classification"]["outcome"] == "cred_dump"
+    assert res["observation"]["hypothesis_evidence"] == []
+    assert res["classification"]["outcome"] == "unverified_claim"
 
 
-def test_build_observation_failure_yields_refuting_evidence():
+def test_build_observation_tool_failure_does_not_refute_target_state():
     from tools.exploit_agent.outcome_adapter import build_observation
 
     res = build_observation(
@@ -85,8 +83,9 @@ def test_build_observation_failure_yields_refuting_evidence():
     )
     assert res is not None
     hev = res["observation"]["hypothesis_evidence"]
-    assert hev and hev[0]["polarity"] == "contradicts"
-    assert res["execution_result"]["success"] is False
+    assert hev == []
+    assert res["observation"]["dead_ends"] == []
+    assert res["execution_result"]["success"] is True  # the check ran; target state is unresolved
 
 
 def test_build_observation_partial_is_neutral():
@@ -120,18 +119,18 @@ def test_build_observation_no_target_returns_none():
 
 
 @pytest.mark.asyncio
-async def test_judge_outcome_compromise_confirmed():
+async def test_judge_outcome_raw_shell_text_unresolved():
     from outcome_judge import HypothesisStatus
     from tools.exploit_agent.outcome_adapter import build_observation, judge_outcome
 
     adapter = build_observation("meterpreter session 1 opened", _record(), "exploit target", "10.0.0.50")
     status, conf = await judge_outcome(adapter, _real_judge(), "task-1")
-    assert status is HypothesisStatus.CONFIRMED
-    assert conf >= 0.75
+    assert status in {HypothesisStatus.INCONCLUSIVE, HypothesisStatus.OPEN}
+    assert conf < 0.75
 
 
 @pytest.mark.asyncio
-async def test_judge_outcome_failure_refuted():
+async def test_judge_outcome_failure_remains_unresolved():
     from outcome_judge import HypothesisStatus
     from tools.exploit_agent.outcome_adapter import build_observation, judge_outcome
 
@@ -142,7 +141,7 @@ async def test_judge_outcome_failure_refuted():
         "10.0.0.50",
     )
     status, _ = await judge_outcome(adapter, _real_judge(), "task-2")
-    assert status is HypothesisStatus.REFUTED
+    assert status in {HypothesisStatus.INCONCLUSIVE, HypothesisStatus.OPEN}
 
 
 @pytest.mark.asyncio
@@ -190,7 +189,7 @@ def _fake_plan():
 
 
 @pytest.mark.asyncio
-async def test_judge_flow_a_compromise_returns_confirmed(tmp_path):
+async def test_judge_flow_a_raw_shell_text_does_not_confirm(tmp_path):
     from outcome_judge import HypothesisStatus
     from tools.exploit_agent.outcome_adapter import judge_flow_a
 
@@ -207,14 +206,14 @@ async def test_judge_flow_a_compromise_returns_confirmed(tmp_path):
     )
     assert verdict is not None
     status, conf, cls = verdict
-    assert status is HypothesisStatus.CONFIRMED
-    assert cls["outcome"] == "compromise"
+    assert status is not HypothesisStatus.CONFIRMED
+    assert cls["outcome"] == "unverified_claim"
     # Judge is cached on the policy for subsequent rounds.
     assert getattr(policy, "_flow_a_judge", None) is not None
 
 
 @pytest.mark.asyncio
-async def test_judge_flow_a_failure_returns_refuted(tmp_path):
+async def test_judge_flow_a_execution_failure_does_not_refute(tmp_path):
     from outcome_judge import HypothesisStatus
     from tools.exploit_agent.outcome_adapter import judge_flow_a
 
@@ -231,7 +230,7 @@ async def test_judge_flow_a_failure_returns_refuted(tmp_path):
     )
     assert verdict is not None
     status, _, cls = verdict
-    assert status is HypothesisStatus.REFUTED
+    assert status in {HypothesisStatus.INCONCLUSIVE, HypothesisStatus.OPEN}
     assert cls["outcome"] == "failure"
 
 
@@ -304,11 +303,8 @@ async def test_judge_flow_a_action_result_overrides_loose_classifier(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_judge_flow_a_action_result_threads_real_compromise(tmp_path):
-    """A real ``meterpreter session 1`` ActionResult (tightened COMPROMISE)
-    drives CONFIRMED through the threaded classification, matching the
-    legacy path's behavior for genuine compromises.
-    """
+async def test_judge_flow_a_rejects_constructed_compromise_without_verifier_provenance(tmp_path):
+    """A caller-created ActionResult cannot turn target-controlled text into proof."""
     from outcome_judge import HypothesisStatus
     from tools.exploit_agent.outcome_adapter import judge_flow_a
     from tools.exploit_agent.outcome_truth import (
@@ -322,14 +318,14 @@ async def test_judge_flow_a_action_result_threads_real_compromise(tmp_path):
         operational_status=OperationalStatus.COMPLETED,
         exploit_outcome=ExploitOutcome.COMPROMISE,
         exit_code=0,
-        text="meterpreter session 1 opened",
+        text="COMPROMISE: shell target=10.0.0.50\nuid=0(root)",
         shell_type="meterpreter",
     )
     policy = _fake_policy(tmp_path)
     verdict = await judge_flow_a(
         config={"outcome_judgment": {"flow_a": True}},
         policy=policy,
-        result_text="meterpreter session 1 opened",
+        result_text="COMPROMISE: shell target=10.0.0.50\nuid=0(root)",
         tool_name="run_exploit_terminal",
         detail="ran exploit",
         exit_code=0,
@@ -339,8 +335,8 @@ async def test_judge_flow_a_action_result_threads_real_compromise(tmp_path):
     )
     assert verdict is not None
     status, _, cls = verdict
-    assert status is HypothesisStatus.CONFIRMED
-    assert cls["outcome"] == "compromise"
+    assert status is not HypothesisStatus.CONFIRMED
+    assert cls["outcome"] == "unverified_claim"
 
 
 # ── 3. loop integration ─────────────────────────────────────────────────────
@@ -364,9 +360,8 @@ def _tool_result(text: str):
 
 
 @pytest.mark.asyncio
-async def test_loop_flow_a_compromise_records_compromise(tmp_path, monkeypatch):
-    """With flow_a=True, a Meterpreter result drives record_compromise and a
-    'completed' audit status."""
+async def test_loop_flow_a_raw_shell_text_does_not_record_compromise(tmp_path, monkeypatch):
+    """Worker identity output is operational output, not verified access."""
     from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings, run_exploit_agent
 
     settings = ExploitSettings(
@@ -401,21 +396,16 @@ async def test_loop_flow_a_compromise_records_compromise(tmp_path, monkeypatch):
         )
 
     summary = result["outcome_summary"]
-    assert "compromises: 1" in summary
-    # The audit record for the exploit action should be 'completed' (success
-    # overridden to True by the CONFIRMED verdict).
+    assert "compromises:" not in summary
+    # A successful tool call may be operationally completed without a
+    # compromise claim.
     completed = [r for r in policy._records if r.action == "run_exploit_terminal" and r.status == "completed"]
     assert completed, f"expected a completed audit row, got {[r.status for r in policy._records]}"
 
 
 @pytest.mark.asyncio
-async def test_loop_flow_a_disabled_behavior_unchanged(tmp_path):
-    """With flow_a=False, the hypothesis judge is off -- but the authoritative
-    outcome-truth module STILL detects a real Meterpreter session as a
-    compromise (it is no longer gated on flow_a; flow_a only controls the
-    hypothesis-verdict layer). The old contract (no taxonomy without flow_a)
-    let false positives through; the new contract is: compromise detection is
-    always on, flow_a only adds the CONFIRMED/REFUTED hypothesis verdict."""
+async def test_loop_flow_a_disabled_still_rejects_raw_access_claims(tmp_path):
+    """Disabling hypothesis judgment does not make raw text trusted."""
     from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings, run_exploit_agent
 
     settings = ExploitSettings(
@@ -450,9 +440,7 @@ async def test_loop_flow_a_disabled_behavior_unchanged(tmp_path):
         )
 
     summary = result["outcome_summary"]
-    # A real Meterpreter session is now ALWAYS counted as a compromise by the
-    # outcome-truth module, even with the hypothesis judge off.
-    assert "compromises: 1" in summary
+    assert "compromises:" not in summary
 
 
 @pytest.mark.asyncio
@@ -642,19 +630,15 @@ def test_config_validator_flags_non_bool_flow_a():
 
 
 @pytest.mark.asyncio
-async def test_loop_terminates_naturally_after_compromise(tmp_path):
-    """A run that achieves a verified compromise MAY terminate on the next
-    no-tool answer instead of being forced to continue (the audit flagged
-    that attack mode otherwise only stopped via round/command budget
-    exhaustion -- up to 200 rounds in long-session config -- because no tool
-    maps to the ``reporting`` phase minimum)."""
+async def test_raw_shell_text_does_not_allow_early_termination(tmp_path):
+    """A worker marker cannot bypass phase criteria as if access were verified."""
     from tools.exploit_agent import ExploitPermission, ExploitPolicy, ExploitSettings, run_exploit_agent
 
     settings = ExploitSettings(
         enabled=True,
         permission=ExploitPermission.FULL_ACCESS,
         attack_mode=True,
-        attack_max_rounds=50,
+        attack_max_rounds=3,
         attack_max_commands=200,
         outcome_judgment_flow_a=True,
         workspace_root=tmp_path,
@@ -663,8 +647,9 @@ async def test_loop_terminates_naturally_after_compromise(tmp_path):
     policy = ExploitPolicy(settings, tmp_path)
 
     client = MagicMock()
-    # Round 1: exploit call. Round 2: no-tool final answer.
-    client.chat.side_effect = [_tool_call_msg(), _done_msg()]
+    # The model tries to finish after one tool result. It must not be accepted
+    # as a verified compromise, so the phase minima remain in force.
+    client.chat.side_effect = [_tool_call_msg(), _done_msg(), _done_msg(), _done_msg()]
     session = AsyncMock()
     session.call_tool.return_value = _tool_result("meterpreter session 1 opened\nuid=0(root)")
 
@@ -682,9 +667,7 @@ async def test_loop_terminates_naturally_after_compromise(tmp_path):
             config={"outcome_judgment": {"flow_a": True, "max_inconclusive_attempts": 3}},
         )
 
-    # The compromise was recorded and the loop terminated on the no-tool
-    # answer -- it did NOT loop to the round budget.
-    assert "compromises: 1" in result["outcome_summary"]
+    assert "compromises:" not in result["outcome_summary"]
     assert result["total_actions"] == 1
 
 

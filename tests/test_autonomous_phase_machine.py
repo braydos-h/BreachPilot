@@ -1,4 +1,4 @@
-"""Phase 2.1 regression tests: the autonomous phase machine actually fires.
+"""Regression tests for campaign dispatch and evidence-gated state.
 
 The autonomous orchestrator's ``AttackModuleExecutor.execute`` historically
 treated a module's ``suggested_command`` / ``script`` keys as dead data: it
@@ -10,22 +10,19 @@ and ``_phase_lateral_movement`` are gated on ``access_achieved`` /
 never ran for script-generating modules.
 
 Phase 2.1 wires an optional ``tool_executor`` into ``AttackModuleExecutor`` so
-a module's runnable artifact is dispatched, the real output is classified via
-``classify_exploit_result`` (Phase 1.1), and ``shell_type`` /
-``privilege_level`` are only set when a strong compromise marker
-(meterpreter / uid=0 / NT AUTHORITY\\SYSTEM) appears. These tests pin that:
+a module's runnable artifact is dispatched. Raw worker output is not
+target-bound proof, so shell and credential markers must not promote access.
+These tests pin that:
 
-1. A shell-compromise module (script + meterpreter output) flips
-   ``access_achieved`` and sets ``shell_type``.
+1. A shell-shaped worker result does not flip ``access_achieved`` or set
+   ``shell_type``.
 2. An info-stub module (status=info, suggested_command only) does NOT falsely
    set ``access_achieved`` -- dispatch is skipped for status=info.
-3. A credential-dump module populates ``credentials_found`` without setting
-   ``access_achieved``.
+3. Credential-shaped worker output does not populate trusted credentials.
 4. A script-generated module whose dispatch output signals failure is marked
    FAILED (not silently succeeded), so the retry loop can re-attempt it.
-5. ``_phase_privilege_escalation`` runs after access is achieved (vs no-op
-   before), and does NOT run when access is absent.
-6. ``_phase_lateral_movement`` runs when ``pivot_targets`` is populated.
+5. Raw module or worker claims cannot unlock privilege escalation.
+6. A nested ``BaseExceptionGroup`` from dispatch is contained and logged.
 """
 
 from __future__ import annotations
@@ -41,6 +38,7 @@ from typing import Any
 import pytest
 
 import tools.autonomous_orchestrator as orch_mod
+import tools.campaign.executor as campaign_executor_mod
 from tools.attack_modules import AttackModule, ModuleContext
 from tools.attack_modules.base import ModuleResult
 from tools.autonomous_orchestrator import (
@@ -50,6 +48,7 @@ from tools.autonomous_orchestrator import (
     AttackState,
     AttackTask,
     AutonomousOrchestrator,
+    TaskStatus,
     observe_autonomous_progress,
 )
 from tools.recon_pipeline import HostReconResult, ServiceInfo
@@ -67,10 +66,10 @@ def _patch_get_module(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class _ShellCompromiseModule(AttackModule):
-    """Returns a script; the fake tool_executor will emit a meterpreter marker."""
+    """Returns a script; the fake tool_executor will emit an unverified claim."""
 
     name = "_ShellCompromise"
-    description = "test module that produces a verified shell"
+    description = "test module that reports a shell-shaped worker result"
     target_services = ["http"]
     target_ports = [80]
 
@@ -116,6 +115,28 @@ class _CredDumpModule(AttackModule):
         }
 
 
+class _SelfReportedCompromiseModule(AttackModule):
+    """A plugin-shaped result that claims proof fields without verification."""
+
+    name = "_SelfReportedCompromise"
+    description = "test module that supplies untrusted compromise fields"
+    target_services = ["http"]
+    target_ports = [80]
+
+    def run(self, ctx: ModuleContext) -> dict[str, Any]:
+        return {
+            "status": "success",
+            "module": self.name,
+            "shell_type": "meterpreter",
+            "privilege_level": "root",
+            "credentials": [{"username": "admin", "password": "claimed"}],
+            "pivot_targets": ["10.0.0.99"],
+            "success": True,
+            "verified_success": True,
+            "verdict": "confirmed",
+        }
+
+
 class _NoCompromiseModule(AttackModule):
     """Returns a script; the fake tool_executor emits 'exploit failed'."""
 
@@ -152,6 +173,7 @@ _FAKE_MODULES: dict[str, AttackModule] = {
     "_ShellCompromise": _ShellCompromiseModule(),
     "_InfoStub": _InfoStubModule(),
     "_CredDump": _CredDumpModule(),
+    "_SelfReportedCompromise": _SelfReportedCompromiseModule(),
     "_NoCompromise": _NoCompromiseModule(),
     "_Pivot": _PivotModule(),
 }
@@ -261,14 +283,12 @@ async def test_campaign_script_write_does_not_follow_workspace_modules_symlink(
     assert (workspace / "modules").is_symlink()
 
 
-# ── 1. Shell compromise sets access_achieved ────────────────────────────────
+# ── 1. Worker shell markers do not set access_achieved ──────────────────────
 
 
 @pytest.mark.asyncio
-async def test_shell_compromise_sets_access_achieved(tmp_path: Path) -> None:
-    """A script-generated module whose dispatch output contains a meterpreter
-    marker must flip ``access_achieved`` and set ``shell_type`` -- the bit the
-    privesc/lateral call-site gate reads."""
+async def test_shell_marker_output_does_not_set_access(tmp_path: Path) -> None:
+    """A sandbox worker's meterpreter/id text is not proof of target access."""
     captured: list[str] = []
 
     def _exec(cmd: str, ctx: dict[str, Any]) -> str:
@@ -280,13 +300,38 @@ async def test_shell_compromise_sets_access_achieved(tmp_path: Path) -> None:
 
     out = await ex.execute(_task("_ShellCompromise"), state)
 
-    assert out["success"] is True
-    assert state.access_achieved is True, "meterpreter output must set access_achieved"
-    assert state.shell_type == "meterpreter"
-    assert state.privilege_level == "root", "uid=0 marker must set privilege_level=root"
-    assert "_ShellCompromise" in state.successful_exploits
+    assert out["success"] is False
+    assert out["verified_success"] is False
+    assert out["completed"] is True
+    assert state.access_achieved is False
+    assert state.shell_type == ""
+    assert state.privilege_level == "none"
+    assert state.successful_exploits == []
+    assert state.failed_attempts == {}
     assert captured, "the module's script must have been dispatched"
-    assert "compromise_verified" in _timeline_types(state)
+    assert "compromise_verified" not in _timeline_types(state)
+
+
+@pytest.mark.asyncio
+async def test_plugin_supplied_proof_fields_do_not_mutate_campaign_state(tmp_path: Path) -> None:
+    ex = _executor(tmp_path, tool_executor=None)
+    state = AttackState(target="10.0.0.5", recon_result=_recon_with_http())
+    task = _task("_SelfReportedCompromise")
+
+    out = await ex.execute(task, state)
+
+    assert out["success"] is False
+    assert out["verified_success"] is False
+    assert out["completed"] is True
+    assert task.status == TaskStatus.COMPLETED
+    assert state.access_achieved is False
+    assert state.shell_type == ""
+    assert state.privilege_level == "none"
+    assert state.credentials_found == []
+    assert state.pivot_targets == []
+    assert state.successful_exploits == []
+    assert out["result"]["verified_success"] is False
+    assert not {"shell_type", "credentials", "pivot_targets", "verdict", "success"} & out["result"].keys()
 
 
 @pytest.mark.asyncio
@@ -353,10 +398,8 @@ async def test_info_stub_does_not_set_access(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_cred_dump_populates_credentials(tmp_path: Path) -> None:
-    """A module whose dispatch output shows a credential dump must populate
-    ``credentials_found`` WITHOUT setting ``access_achieved`` (a cred dump is
-    not a shell)."""
+async def test_credential_marker_output_does_not_populate_credentials(tmp_path: Path) -> None:
+    """Credential-shaped worker text is not proof that target creds were read."""
 
     def _exec(cmd: str, ctx: dict[str, Any]) -> str:
         return "dumping hashes ... SAM dumped ; ntlm hashes: admin:8846F7EAEE8FB117"
@@ -366,11 +409,12 @@ async def test_cred_dump_populates_credentials(tmp_path: Path) -> None:
 
     out = await ex.execute(_task("_CredDump"), state)
 
-    assert out["success"] is True
+    assert out["success"] is False
+    assert out["completed"] is True
     assert state.access_achieved is False, "cred dump is not a shell compromise"
-    assert state.credentials_found, "credentials_found must be populated"
-    assert any("dump" in c for c in state.credentials_found)
-    assert "cred_dump_verified" in _timeline_types(state)
+    assert state.credentials_found == []
+    assert state.successful_exploits == []
+    assert "cred_dump_verified" not in _timeline_types(state)
 
 
 # ── 4. Dispatch failure marks the module FAILED ─────────────────────────────
@@ -391,26 +435,51 @@ async def test_dispatch_failure_marks_module_failed(tmp_path: Path) -> None:
     out = await ex.execute(_task("_NoCompromise"), state)
 
     assert out["success"] is False, "dispatch failure must NOT be a success"
+    assert out["completed"] is False
     assert state.access_achieved is False
     assert "_NoCompromise" in state.failed_attempts, "failure must be recorded for retry"
     assert "dispatch_failure" in _timeline_types(state)
 
 
-# ── 5. No tool_executor -> legacy behavior preserved ────────────────────────
+@pytest.mark.asyncio
+async def test_dispatch_exception_group_is_contained_and_nested_errors_logged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    logged: list[BaseException] = []
+    monkeypatch.setattr(campaign_executor_mod, "_log_nested_exceptions", logged.append)
+
+    def _raise_group(_command: str, _ctx: dict[str, Any]) -> str:
+        raise BaseExceptionGroup("worker failed", [KeyboardInterrupt("worker interrupted")])
+
+    ex = _executor(tmp_path, tool_executor=_raise_group)
+    state = AttackState(target="10.0.0.5", recon_result=_recon_with_http())
+
+    out = await ex.execute(_task("_ShellCompromise"), state)
+
+    assert out["success"] is False
+    assert out["completed"] is False
+    assert state.access_achieved is False
+    assert len(logged) == 1
+    assert isinstance(logged[0], BaseExceptionGroup)
+    assert "dispatch_err" in _timeline_types(state)
+
+
+# ── 5. No tool_executor -> generated artifact remains unverified ────────────
 
 
 @pytest.mark.asyncio
-async def test_no_tool_executor_preserves_legacy_behavior(tmp_path: Path) -> None:
-    """Without a tool_executor, execute() must not dispatch and must pass the
-    module dict through unchanged -- a script_generated module still counts as
-    succeeded (legacy contract) but does NOT set access_achieved (no shell
-    marker without dispatch)."""
+async def test_no_tool_executor_keeps_generated_artifact_unverified(tmp_path: Path) -> None:
+    """Generating an artifact without dispatch completes generation only; it
+    cannot count as a successful exploit or promote campaign access."""
     ex = _executor(tmp_path, tool_executor=None)
     state = AttackState(target="10.0.0.5", recon_result=_recon_with_http())
 
     out = await ex.execute(_task("_ShellCompromise"), state)
 
-    assert out["success"] is True, "legacy path still counts script_generated as succeeded"
+    assert out["success"] is False
+    assert out["verified_success"] is False
+    assert out["completed"] is True
+    assert state.successful_exploits == []
     assert state.access_achieved is False, "no dispatch -> no shell verification -> no access"
     # The module's own dict keys survive the round-trip.
     assert out["result"].get("script") == "print('meterpreter session 1 opened')"
@@ -456,13 +525,8 @@ def test_module_result_non_dict_degrades_safely() -> None:
 
 
 @pytest.mark.asyncio
-async def test_phase_privilege_escalation_runs_after_access(tmp_path: Path) -> None:
-    """End-to-end: a shell-compromise module dispatched through the orchestrator
-    flips ``access_achieved`` (with privilege_level=user, not yet maxed), so the
-    call-site gate at ``_attack_target`` :857 fires and
-    ``_phase_privilege_escalation`` runs. With privilege_level already at root,
-    the gate would skip privesc -- so we set privilege_level='user' post-shell
-    to assert the phase fires."""
+async def test_phase_privilege_escalation_skips_unverified_shell_text(tmp_path: Path) -> None:
+    """Raw worker output cannot unlock privilege escalation against a target."""
 
     def _exec(cmd: str, ctx: dict[str, Any]) -> str:
         return "meterpreter session 1 opened"  # no uid=0 -> privilege_level stays ""
@@ -474,17 +538,12 @@ async def test_phase_privilege_escalation_runs_after_access(tmp_path: Path) -> N
         scope_gate=_AllowScopeGate(),
     )
     orch._phase_reconnaissance = _async_noop  # type: ignore[assignment]
-    # Stub _phase_exploitation to run the shell-compromise module through the
-    # executor (the real path), then drop privilege to 'user' so the privesc
-    # call-site gate (access_achieved AND privilege not in maxed set) fires.
+    # Stub _phase_exploitation to run the module through the executor.
     privesc_called = {"v": False}
 
     async def _fake_exploit(state: AttackState) -> None:
         task = _task("_ShellCompromise", state.target)
         await orch._executor.execute(task, state)
-        # Force a non-maxed privilege so the privesc gate fires (the meterpreter
-        # output above sets no privilege_level).
-        state.privilege_level = "user"
 
     async def _fake_privesc(state: AttackState) -> None:
         privesc_called["v"] = True
@@ -504,8 +563,8 @@ async def test_phase_privilege_escalation_runs_after_access(tmp_path: Path) -> N
 
     assert result["status"] == "complete"
     state = orch.get_state("10.0.0.5")
-    assert state.access_achieved is True, "shell module must have flipped access_achieved"
-    assert privesc_called["v"] is True, "privesc phase must run after access is achieved"
+    assert state.access_achieved is False
+    assert privesc_called["v"] is False
 
 
 @pytest.mark.asyncio

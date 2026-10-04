@@ -191,9 +191,8 @@ async def test_duplicate_repeat_refused_without_progress(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_verified_compromise_wins_immediately(tmp_path):
-    """A COMPROMISE marker mid-branch marks the branch succeeded and the run
-    terminates via the existing goal-complete path."""
+async def test_unverified_compromise_claim_does_not_complete_branch(tmp_path):
+    """Worker output markers must not claim target access or finish a branch."""
     from tools.exploit_agent import run_exploit_agent
 
     policy = _policy(tmp_path)
@@ -222,8 +221,115 @@ async def test_verified_compromise_wins_immediately(tmp_path):
             config=_base_config(),
         )
     focus = result["attack_focus"]
-    assert focus["branches"][0]["status"] in ("succeeded", "active")
-    assert any(b["status"] == "succeeded" for b in focus["branches"])
+    assert not any(b["status"] == "succeeded" for b in focus["branches"])
+    assert all(hypothesis["status"] == "open" for branch in focus["branches"] for hypothesis in branch["hypotheses"])
+
+
+@pytest.mark.asyncio
+async def test_unverified_claim_does_not_clear_exploit_failure_streak(tmp_path):
+    from tools.exploit_agent import run_exploit_agent
+    from tools.exploit_agent.tool_calls import _ToolOutcomeTracker
+
+    tracker = _ToolOutcomeTracker()
+    policy = _policy(tmp_path)
+    client = MagicMock()
+    client.chat.side_effect = [
+        _tool_call_msg("quick_scan", {"target_ip": "10.0.0.50"}),
+        _tool_call_msg("run_exploit_terminal", {"command": "hydra -l admin -p bad ssh://10.0.0.50"}),
+        _tool_call_msg("run_python_file", {"path": "proof_probe.py", "target_ip": "10.0.0.50"}),
+        _done_msg(),
+    ]
+    session = AsyncMock()
+    session.call_tool.side_effect = [
+        _tool_result(RECON_443),
+        _tool_result("connection refused\nexit_code=1"),
+        _tool_result("COMPROMISE: shell target=10.0.0.50\nuid=0(root)\nexit_code=0"),
+    ]
+
+    with patch("tools.exploit_agent.runner._impl._ToolOutcomeTracker", return_value=tracker):
+        with patch("tools.exploit_agent._stream_ollama", new_callable=AsyncMock) as stream:
+            stream.return_value = {"role": "assistant", "content": "final summary"}
+            result = await run_exploit_agent(
+                client=client,
+                model="glm",
+                session=session,
+                exploit_tools=_MINIMA_TOOLS,
+                policy=policy,
+                target_ip="10.0.0.50",
+                config=_base_config(),
+            )
+
+    assert tracker.consecutive_exploit_failures == 1
+    assert not any(branch["status"] == "succeeded" for branch in result["attack_focus"]["branches"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "output",
+    [
+        "VULN_NOT_CONFIRMED: not vulnerable\nexit_code=0",
+        "ERROR: VULN_NOT_CONFIRMED: not vulnerable\nexit_code=1",
+    ],
+)
+async def test_raw_refutation_marker_does_not_resolve_hypotheses(tmp_path, output):
+    from tools.exploit_agent import run_exploit_agent
+
+    policy = _policy(tmp_path)
+    client = MagicMock()
+    client.chat.side_effect = [
+        _tool_call_msg("quick_scan", {"target_ip": "10.0.0.50"}),
+        _tool_call_msg("run_exploit_terminal", {"command": "curl -sk https://10.0.0.50/"}),
+        _done_msg(),
+    ]
+    session = AsyncMock()
+    session.call_tool.side_effect = [_tool_result(RECON_443), _tool_result(output)]
+
+    with patch("tools.exploit_agent._stream_ollama", new_callable=AsyncMock) as stream:
+        stream.return_value = {"role": "assistant", "content": "done"}
+        result = await run_exploit_agent(
+            client=client,
+            model="glm",
+            session=session,
+            exploit_tools=_MINIMA_TOOLS,
+            policy=policy,
+            target_ip="10.0.0.50",
+            config=_base_config(),
+        )
+
+    hypotheses = [hypothesis for branch in result["attack_focus"]["branches"] for hypothesis in branch["hypotheses"]]
+    assert hypotheses
+    assert all(hypothesis["status"] == "open" for hypothesis in hypotheses)
+
+
+@pytest.mark.asyncio
+async def test_repeated_provider_error_rounds_emit_circuit_open_before_phase_continue(tmp_path):
+    from tools.exploit_agent import run_exploit_agent
+
+    policy = _policy(tmp_path, attack_max_rounds=4)
+    client = MagicMock()
+    client.chat.side_effect = [
+        {"message": {"role": "assistant", "content": "ERROR: provider unavailable", "tool_calls": []}} for _ in range(4)
+    ]
+    session = AsyncMock()
+
+    with patch("tools.exploit_agent._stream_ollama", new_callable=AsyncMock) as stream:
+        stream.return_value = {"role": "assistant", "content": "provider unavailable"}
+        with patch("tools.exploit_agent.runner._impl._deep_error", new_callable=AsyncMock) as deep_error:
+            result = await run_exploit_agent(
+                client=client,
+                model="glm",
+                session=session,
+                exploit_tools=_MINIMA_TOOLS,
+                policy=policy,
+                target_ip="10.0.0.50",
+                config=_base_config(),
+            )
+
+    circuit_events = [call for call in deep_error.await_args_list if call.args[2] == "circuit_open"]
+    assert len(circuit_events) == 1
+    assert circuit_events[0].args[4]["retry"] == 4
+    assert result["total_actions"] == 0
+    session.call_tool.assert_not_called()
 
 
 @pytest.mark.asyncio

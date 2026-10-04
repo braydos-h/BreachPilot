@@ -10,13 +10,13 @@ import pytest
 from db import _SCHEMA_VERSION, DatabaseManager, _new_id
 from executor import ExecutionResult
 from legacy.observer import Observation
+from legacy.planner import PlannerAgent
 from outcome_judge import (
     DuplicateInvestigationError,
     HypothesisRepository,
     HypothesisStatus,
     OutcomeJudge,
 )
-from legacy.planner import PlannerAgent
 from task_queue import TaskQueue
 from tools.experience_store import ExperienceStore
 

@@ -101,6 +101,7 @@ class TestAttackState:
                 "shell_type": "reverse",
                 "privilege_level": "user",
                 "credentials": [{"user": "admin", "pass": "password"}],
+                "verified_success": True,
             },
         )
         assert state.access_achieved is True
@@ -108,6 +109,26 @@ class TestAttackState:
         assert state.privilege_level == "user"
         assert len(state.credentials_found) == 1
         assert "TestModule" in state.successful_exploits
+
+    def test_record_success_ignores_unverified_claims(self) -> None:
+        state = AttackState(target="10.0.0.50")
+        state.record_success(
+            "UntrustedModule",
+            {
+                "shell_type": "reverse",
+                "privilege_level": "root",
+                "credentials": [{"user": "admin", "pass": "claimed"}],
+                "pivot_targets": ["10.0.0.51"],
+                "verified_success": False,
+            },
+        )
+
+        assert state.access_achieved is False
+        assert state.shell_type == ""
+        assert state.privilege_level == "none"
+        assert state.credentials_found == []
+        assert state.pivot_targets == []
+        assert state.successful_exploits == []
 
     def test_record_failure(self) -> None:
         state = AttackState(target="10.0.0.50")
@@ -157,7 +178,7 @@ class TestAttackState:
 
     def test_to_dict(self) -> None:
         state = AttackState(target="10.0.0.50")
-        state.record_success("Test", {"shell_type": "reverse"})
+        state.record_success("Test", {"shell_type": "reverse", "verified_success": True})
         d = state.to_dict()
         assert d["target"] == "10.0.0.50"
         assert d["access_achieved"] is True
@@ -281,7 +302,7 @@ class TestAttackModuleExecutor:
         assert "budget" in result["error"].lower()
 
     @pytest.mark.asyncio
-    async def test_execute_success(self, mock_scope_gate: MagicMock) -> None:
+    async def test_execute_unverified_artifact_is_not_success(self, mock_scope_gate: MagicMock) -> None:
         executor = AttackModuleExecutor(mock_scope_gate)
         task = AttackTask(
             task_id="ATK-00001",
@@ -291,7 +312,10 @@ class TestAttackModuleExecutor:
         )
         state = AttackState(target="10.0.0.50")
         result = await executor.execute(task, state)
-        assert result["success"] is True
+        assert result["success"] is False
+        assert result["verified_success"] is False
+        assert result["completed"] is True
+        assert state.successful_exploits == []
         assert "result" in result
 
     @pytest.mark.asyncio
@@ -491,7 +515,7 @@ class TestAutonomousOrchestrator:
             workspace_root=workspace,
         )
         state = orchestrator.get_state("10.0.0.50")
-        state.record_success("Test", {"shell_type": "reverse"})
+        state.record_success("Test", {"shell_type": "reverse", "verified_success": True})
 
         save_path = orchestrator.save_state()
         assert save_path.exists()
@@ -604,7 +628,8 @@ class TestSwarmUnification:
         )
         state = AttackState(target="10.0.0.50")
         result = await executor.execute(task, state)
-        assert result["success"] is True  # module still runs after a modify
+        assert result["success"] is False  # modification does not verify the result
+        assert result["completed"] is True
         assert task.aggression == AggressionLevel.AGGRESSIVE
         assert task.parameters.get("critic_risk_downgrade") == "high->medium"
 
@@ -680,7 +705,7 @@ class TestSwarmUnification:
         assert second.parameters.get("critic_require_mutation") is True
 
     @pytest.mark.asyncio
-    async def test_module_success_clears_from_failed_on_blackboard(self) -> None:
+    async def test_unverified_module_result_does_not_clear_failure_blackboard(self) -> None:
         blackboard = {"failed_modules": ["APIFuzzer"], "successful_modules": []}
         executor = AttackModuleExecutor(_allowing_scope_gate(), blackboard=blackboard)
         task = AttackTask(
@@ -690,12 +715,13 @@ class TestSwarmUnification:
             target="10.0.0.50",
         )
         state = AttackState(target="10.0.0.50")
-        await executor.execute(task, state)
-        assert "APIFuzzer" not in blackboard["failed_modules"]
-        assert "APIFuzzer" in blackboard["successful_modules"]
+        result = await executor.execute(task, state)
+        assert result["verified_success"] is False
+        assert "APIFuzzer" in blackboard["failed_modules"]
+        assert "APIFuzzer" not in blackboard["successful_modules"]
 
     @pytest.mark.asyncio
-    async def test_reflection_publishes_to_blackboard_after_success(self) -> None:
+    async def test_reflection_publishes_unverified_result_as_failure(self) -> None:
         blackboard: dict = {}
         executor = AttackModuleExecutor(
             _allowing_scope_gate(),
@@ -713,11 +739,11 @@ class TestSwarmUnification:
         # ReflectionAgent.run writes last_reflection / strategy_shift itself.
         assert "last_reflection" in blackboard
         assert isinstance(blackboard["last_reflection"].get("what_worked"), list)
-        assert blackboard["strategy_shift"].startswith("ACCELERATE")
+        assert blackboard["strategy_shift"].startswith("MAJOR PIVOT")
 
     @pytest.mark.asyncio
-    async def test_legacy_executor_unwired_behaves_unchanged(self) -> None:
-        # No blackboard / critic / reflection wired -> exactly the old behavior.
+    async def test_legacy_executor_unwired_keeps_artifact_unverified(self) -> None:
+        # No tool_executor means script generation did not verify a target result.
         executor = AttackModuleExecutor(_allowing_scope_gate())
         task = AttackTask(
             task_id="ATK-00001",
@@ -727,7 +753,9 @@ class TestSwarmUnification:
         )
         state = AttackState(target="10.0.0.50")
         result = await executor.execute(task, state)
-        assert result["success"] is True
+        assert result["success"] is False
+        assert result["completed"] is True
+        assert result["result"]["status"] == "script_generated"
         assert "critic" not in result  # no critic decision attached
         assert task.parameters.get("critic_require_mutation") is None
         assert task.parameters.get("critic_risk_downgrade") is None

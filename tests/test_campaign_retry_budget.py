@@ -66,26 +66,27 @@ def test_rate_limit_hook():
 
 
 class _FakeExecutor:
-    def __init__(self, error: str = "boom timeout") -> None:
+    def __init__(self, error: str = "boom timeout", *, completed: bool = False) -> None:
         self.calls = 0
         self.error = error
+        self.completed = completed
 
     async def execute(self, task: AttackTask, state: AttackState) -> dict[str, Any]:
         self.calls += 1
         task.status = TaskStatus.FAILED
         task.error = self.error
-        return {"success": False, "error": self.error}
+        return {"success": False, "completed": self.completed, "error": self.error}
 
 
 class _FakeOrchestrator:
     """Minimal surface tools/campaign/batch.py needs (no campaign import)."""
 
-    def __init__(self, *, budget: int = 0, error: str = "boom timeout") -> None:
+    def __init__(self, *, budget: int = 0, error: str = "boom timeout", completed: bool = False) -> None:
         self._max_campaign_retries = budget
         self._campaign_retries_used = 0
         self._mission: dict[str, Any] = {}
         self._tasks: dict[str, AttackTask] = {}
-        self._executor = _FakeExecutor(error)
+        self._executor = _FakeExecutor(error, completed=completed)
 
     def _maybe_schedule_prereq(self, task: AttackTask, state: AttackState, error: str) -> AttackTask | None:
         return None
@@ -180,6 +181,23 @@ async def test_batch_never_retries_permanent_failure(monkeypatch):
     assert fake._executor.calls == 1
     assert task.retry_count == 0
     assert fake._campaign_retries_used == 0
+
+
+@pytest.mark.asyncio
+async def test_batch_does_not_retry_completed_but_unverified_attempt(monkeypatch):
+    async def _no_sleep(delay: float) -> None:
+        raise AssertionError("a completed attempt must not be retried")
+
+    monkeypatch.setattr(asyncio, "sleep", _no_sleep)
+    fake = _FakeOrchestrator(budget=0, completed=True)
+    state = AttackState(target="10.0.0.50")
+    task = _make_task(max_retries=3)
+
+    await batch_mod._execute_task_batch(fake, [task], state)
+
+    assert fake._executor.calls == 1
+    assert task.retry_count == 0
+    assert task.status == TaskStatus.FAILED
 
 
 def test_retry_accounting_round_trips():

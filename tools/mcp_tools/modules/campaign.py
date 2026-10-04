@@ -29,6 +29,23 @@ _running_campaign_tasks: set = set()
 _campaign_orchestrators: dict[str, Any] = {}
 
 
+def _compromised_hosts_for_state(state: Any) -> list[str]:
+    """Return verified target hosts, never module names or self-reported status."""
+    if not (getattr(state, "access_achieved", False) or getattr(state, "credentials_found", [])):
+        return []
+    host = str(getattr(state, "resolved_ip", "") or getattr(state, "target", "") or "").strip()
+    return [host] if host else []
+
+
+def _record_campaign_step_result(state: Any, state_data: dict[str, Any], status: str) -> None:
+    """Persist operational completion separately from verified compromise."""
+    tasks = state_data.get("tasks", {})
+    counter = "completed" if status in ("success", "exploited", "script_generated") else "failed"
+    tasks[counter] = tasks.get(counter, 0) + 1
+    state_data["tasks"] = tasks
+    state_data["compromised_hosts"] = _compromised_hosts_for_state(state)
+
+
 def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
     workspace = ctx.workspace
     config = ctx.config
@@ -193,7 +210,7 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
                             "failed": sum(1 for t in orchestrator._tasks.values() if t.status == TaskStatus.FAILED),
                             "pending": sum(1 for t in orchestrator._tasks.values() if t.status == TaskStatus.PENDING),
                         },
-                        "compromised_hosts": state.successful_exploits,
+                        "compromised_hosts": _compromised_hosts_for_state(state),
                         "last_error": "",
                     }
                     (campaign_dir / "state.json").write_text(
@@ -451,16 +468,10 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
             best_score, best_module = scored[0]
             result = best_module.run(ctx)
 
-            # Update state
-            tasks = state_data.get("tasks", {})
-            if result.get("status") in ("success", "exploited", "script_generated"):
-                tasks["completed"] = tasks.get("completed", 0) + 1
-                state.successful_exploits.append(best_module.name)
-                state_data["compromised_hosts"] = state.successful_exploits
-            else:
-                tasks["failed"] = tasks.get("failed", 0) + 1
-
-            state_data["tasks"] = tasks
+            # Module output is an operational result, not target-bound proof.
+            # Do not append a module name to successful_exploits or report it
+            # as a compromised host merely because script generation worked.
+            _record_campaign_step_result(state, state_data, str(result.get("status", "")))
             state_data["current_phase"] = "exploit"
             (campaign_dir / "state.json").write_text(json.dumps(state_data, indent=2, default=str), encoding="utf-8")
 
