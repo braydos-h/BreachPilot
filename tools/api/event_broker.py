@@ -233,27 +233,65 @@ def _parse_first_seq(path: Path) -> int | None:
 
 
 def _parse_last_seq(path: Path, file_size: int) -> int | None:
-    """Sequence of the last event (tail block parsed, no full scan)."""
+    """Sequence of the final non-empty event, including oversized JSONL rows.
+
+    Walk backward in bounded blocks to locate the final record boundary, then
+    read that complete record. A fixed-size tail can begin in the middle of a
+    valid event and incorrectly reset sequence numbering after restart.
+    """
     if file_size <= 0:
         return None
     try:
         with path.open("rb") as f:
-            tail = min(file_size, 65536)
-            f.seek(file_size - tail)
-            chunk = f.read(tail).decode("utf-8", errors="replace")
+            end = file_size
+            while end > 0:
+                # Find the last non-whitespace byte without assuming an
+                # event-size limit. Typical files need one read; larger tail
+                # records continue in fixed-size blocks.
+                scan_end = end
+                while scan_end > 0:
+                    start = max(0, scan_end - 65536)
+                    f.seek(start)
+                    chunk = f.read(scan_end - start)
+                    content = chunk.rstrip(b" \t\r\n")
+                    if content:
+                        content_end = start + len(content)
+                        break
+                    scan_end = start
+                else:
+                    return None
+
+                # Find the newline preceding that byte; if none exists, the
+                # file contains a single JSONL record.
+                scan_end = content_end
+                while scan_end > 0:
+                    start = max(0, scan_end - 65536)
+                    f.seek(start)
+                    chunk = f.read(scan_end - start)
+                    newline = chunk.rfind(b"\n")
+                    if newline >= 0:
+                        line_start = start + newline + 1
+                        break
+                    if start == 0:
+                        line_start = 0
+                        break
+                    scan_end = start
+
+                f.seek(line_start)
+                try:
+                    evt = json.loads(f.read(content_end - line_start).decode("utf-8"))
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    evt = None
+                seq = evt.get("sequence") if isinstance(evt, dict) else None
+                if isinstance(seq, int) and not isinstance(seq, bool):
+                    return seq
+                # Preserve a prior valid sequence when the log ends in a
+                # partial or malformed row, matching recovery from older logs.
+                if line_start == 0:
+                    return None
+                end = line_start - 1
     except OSError:
         return None
-    for line in reversed(chunk.splitlines()):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            evt = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        seq = evt.get("sequence") if isinstance(evt, dict) else None
-        if isinstance(seq, int) and not isinstance(seq, bool):
-            return seq
     return None
 
 
@@ -808,7 +846,13 @@ class RunEventBroker:
         self._reports_dir = reports_dir
         self._events_path = reports_dir / "events.jsonl"
         self._ring: deque[dict[str, Any]] = deque(maxlen=buffer_size)
-        self._seq = 0
+        try:
+            events_size = self._events_path.stat().st_size
+        except OSError:
+            self._seq = 0
+        else:
+            last_seq = _parse_last_seq(self._events_path, events_size)
+            self._seq = last_seq if last_seq is not None else 0
         self._lock = asyncio.Lock()
         # Guards the ring: the writer thread appends (P1-03) while the event
         # loop reads. Short critical sections, never held across awaits.
@@ -816,6 +860,7 @@ class RunEventBroker:
         self._ring_lock = threading.Lock()
         self._closed = False
         self._subscribers: list[asyncio.Queue[dict[str, Any] | None]] = []
+        self._replay_watermarks: dict[asyncio.Queue[dict[str, Any] | None], int] = {}
         if durability not in _DURABILITY_MODES:
             log.warning(
                 "unknown event durability %r — falling back to 'balanced' (never silently 'fast')",
@@ -1057,14 +1102,20 @@ class RunEventBroker:
         except asyncio.TimeoutError as exc:
             raise RuntimeError("Event broker writer did not acknowledge emit.") from exc
         async with self._lock:
-            subscribers = tuple(self._subscribers)
-        for queue in subscribers:
+            subscribers = tuple((queue, self._replay_watermarks.get(queue, 0)) for queue in self._subscribers)
+        for queue, replay_through in subscribers:
+            # Persistence publishes to replay before emit's acknowledgement.
+            # A subscriber may already have captured this event in its replay
+            # while emit was awaiting that acknowledgement.
+            if event["sequence"] <= replay_through:
+                continue
             try:
                 queue.put_nowait(event)
             except asyncio.QueueFull:
                 async with self._lock:
                     if queue in self._subscribers:
                         self._subscribers.remove(queue)
+                    self._replay_watermarks.pop(queue, None)
                 self._stop_queue(queue)
         # Bounded dispatch for outbound-only plugin subscribers (webhook/ticketing).
         # Enqueued AFTER the writer persisted + published (ack) so a slow/failed
@@ -1330,12 +1381,16 @@ class RunEventBroker:
         """Subscribe to live events. ``after`` replays from that cursor first."""
         await self._drain_writer()
         async with self._lock:
+            initial = self._replay_locked(after)
             subscription = EventSubscription(
                 broker=self,
-                initial=self._replay_locked(after),
+                initial=initial,
             )
             if not self._closed:
                 self._subscribers.append(subscription._queue)
+                self._replay_watermarks[subscription._queue] = max(
+                    (event["sequence"] for event in initial), default=after
+                )
             return subscription
 
     def close(self) -> "_CloseResult":
@@ -1358,6 +1413,7 @@ class RunEventBroker:
         for queue in self._subscribers:
             self._stop_queue(queue)
         self._subscribers.clear()
+        self._replay_watermarks.clear()
         return _CLOSED_OK
 
     def reopen(self) -> None:
@@ -1415,19 +1471,48 @@ class EventSubscription:
         self._closed = True
         if self._queue in self._broker._subscribers:
             self._broker._subscribers.remove(self._queue)
+        self._broker._replay_watermarks.pop(self._queue, None)
 
 
 class EventBrokerRegistry:
-    """Registry of per-run event brokers. One active broker at a time."""
+    """Owned run brokers plus a bounded LRU cache of unowned brokers.
+
+    Active run owners acquire/release their broker. Archived-history reads
+    can evict cache entries, but never a broker still owned by a live run.
+    """
 
     def __init__(
         self, reports_dir: Path, *, buffer_size: int = 1000, max_brokers: int = 10, durability: str = "balanced"
     ) -> None:
         self._reports_dir = reports_dir
         self._buffer_size = buffer_size
-        self._max_brokers = max_brokers
+        self._max_brokers = max(1, max_brokers)
         self._durability = durability
         self._brokers: OrderedDict[str, RunEventBroker] = OrderedDict()
+        self._owners: dict[str, int] = {}
+
+    def acquire(self, run_id: str, *, reports_dir: Path | None = None) -> RunEventBroker:
+        """Pin the broker until the owner calls release (no eviction window)."""
+        self._owners[run_id] = self._owners.get(run_id, 0) + 1
+        try:
+            return self.get_or_create(run_id, reports_dir=reports_dir)
+        except BaseException:
+            self.release(run_id)
+            raise
+
+    def release(self, run_id: str) -> None:
+        """Release one owner; the broker becomes evictable after the last."""
+        owners = self._owners.get(run_id, 0)
+        if owners > 1:
+            self._owners[run_id] = owners - 1
+        else:
+            self._owners.pop(run_id, None)
+        self._trim_cache()
+
+    def _trim_cache(self) -> None:
+        unowned = [run_id for run_id in self._brokers if run_id not in self._owners]
+        for run_id in unowned[: max(0, len(unowned) - self._max_brokers)]:
+            self._brokers.pop(run_id).close()
 
     def get_or_create(self, run_id: str, *, reports_dir: Path | None = None) -> RunEventBroker:
         broker = self._brokers.get(run_id)
@@ -1437,9 +1522,7 @@ class EventBrokerRegistry:
         rd = reports_dir or self._reports_dir / run_id
         broker = RunEventBroker(run_id, rd, buffer_size=self._buffer_size, durability=self._durability)
         self._brokers[run_id] = broker
-        while len(self._brokers) > self._max_brokers:
-            _, evicted = self._brokers.popitem(last=False)
-            evicted.close()
+        self._trim_cache()
         return broker
 
     def get(self, run_id: str) -> RunEventBroker | None:
@@ -1449,6 +1532,7 @@ class EventBrokerRegistry:
         for b in self._brokers.values():
             b.close()
         self._brokers.clear()
+        self._owners.clear()
 
 
 def _fire_plugin_event_subscribers(event: dict[str, Any]) -> None:
