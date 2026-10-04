@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.kernel.audit import _mask_secret_content
+from tools.kernel.workspace import write_workspace_file
 from tools.mcp_shared import _is_inside_workspace
 from tools.mcp_tools.registry import ToolContext, _attempt_dir, _positive_int, _run_with_pgrp_timeout
 from tools.mcp_tools.sandbox_exec import (
@@ -140,6 +141,25 @@ def _sandbox_terminal_ok(result: Any) -> tuple[str, str, int | None, float]:
     if result.stderr:
         merged = f"{merged}\n{result.stderr}" if merged else result.stderr
     return result.status, _tail(merged, _OUTPUT_CHARS), result.exit_code, result.duration_seconds
+
+
+def _write_sandbox_terminal_log(workspace: Path, attempt_id: str, content: str) -> str:
+    """Persist a masked log without following worker-controlled workspace links.
+
+    The worker can create files in the shared attempt directory. The safe
+    writer uses descriptor-relative no-follow opens and exclusive creation,
+    so a worker-created symlink or existing leaf can never redirect a host
+    write. The terminal result still carries the bounded output if persistence
+    is refused.
+    """
+    try:
+        write_workspace_file(workspace, f"{attempt_id}/terminal.log", content.encode("utf-8", errors="replace"))
+    except (OSError, ValueError):
+        return (
+            "LOG_PERSISTENCE: skipped because the worker modified the terminal log path; "
+            "the returned OUTPUT is available.\n"
+        )
+    return ""
 
 
 def _sandbox_status_line(manager: Any) -> str:
@@ -318,12 +338,12 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
             except Exception:  # ponytail: bare except intentional -- hint is advisory only
                 _hint = ""
             _logged = _mask_secret_content((result.stdout or "") + ("\n" + result.stderr if result.stderr else ""))
-            log_path.write_text(
+            log_note = _write_sandbox_terminal_log(
+                workspace,
+                attempt_id,
                 f"{'=' * 60}\nCOMMAND: {_mask_secret_content(joined)}\n{'=' * 60}\n"
                 + _tail(_logged, _MAX_LOG_FILE_CHARS)
                 + f"\nEXIT_CODE: {_exit_code if _exit_code is not None else 'timed_out'}\n",
-                encoding="utf-8",
-                errors="replace",
             )
             return (
                 f"BATCH_TERMINAL_RESULT: {_sstatus} (exit_code={_exit_code}, duration={_elapsed:.1f}s)\n"
@@ -331,6 +351,7 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 f"COMMANDS: {json.dumps(shown_parts)}\n"
                 f"COMMAND_SANITIZED: {shown_sanitized}\n"
                 f"{preflight_note}"
+                f"{log_note}"
                 f"{_sandbox_status_line(ctx.sandbox)}"
                 f"{_opsec_advisory}"
                 f"{_hint}"
@@ -561,12 +582,12 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
             # dumped hashes, tokens, or key material that must neither sit on
             # disk nor echo verbatim in results/events in the clear.
             _logged = _mask_secret_content((result.stdout or "") + ("\n" + result.stderr if result.stderr else ""))
-            log_path.write_text(
+            log_note = _write_sandbox_terminal_log(
+                workspace,
+                attempt_id,
                 f"{'=' * 60}\nCOMMAND: {_mask_secret_content(sanitized_command)}\n{'=' * 60}\n"
                 + _tail(_logged, _MAX_LOG_FILE_CHARS)
                 + f"\nEXIT_CODE: {_exit_code if _exit_code is not None else 'timed_out'}\n",
-                encoding="utf-8",
-                errors="replace",
             )
             return (
                 f"TERMINAL_RESULT: {_sstatus} (exit_code={_exit_code}, duration={_elapsed:.1f}s)\n"
@@ -574,6 +595,7 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 f"COMMAND_ORIGINAL: {shown_original}\n"
                 f"COMMAND_SANITIZED: {shown_sanitized}\n"
                 f"{preflight_note}"
+                f"{log_note}"
                 f"{_sandbox_status_line(ctx.sandbox)}"
                 f"{_opsec_advisory}"
                 f"{_hint}"
