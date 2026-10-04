@@ -10,6 +10,8 @@ so the doctor message and the job assertion match exactly.
 
 from __future__ import annotations
 
+import pytest
+
 from tools.browser.doctor_check import (
     CHROMIUM_SKIP_HINT,
     CHROMIUM_SKIP_NOTE,
@@ -152,3 +154,43 @@ def test_browser_skip_never_grants_execution(monkeypatch):
     from tools.browser.capabilities import browser_runtime_available
 
     assert browser_runtime_available(config) is False
+
+
+@pytest.mark.parametrize(
+    "executable",
+    [
+        "chromium-1234/chrome-linux/chrome",
+        "chromium-1243/chrome-linux64/chrome",
+        "chromium_headless_shell-1234/chrome-linux/headless_shell",
+        "chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell",
+    ],
+)
+def test_browser_doctor_discovers_installed_linux_runtimes(monkeypatch, tmp_path, executable):
+    """Both old Chromium and Chrome for Testing installations report ready."""
+    import tools.browser._pw_probe as probe
+
+    binary = tmp_path / executable
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"chromium fixture")
+    monkeypatch.setattr(probe, "playwright_present", lambda: True)
+    monkeypatch.setattr(probe, "_browsers_dirs", lambda: [tmp_path])
+
+    check = _check_browser({"browser": {"enabled": True, "backend": "playwright"}, "sandbox": {"enabled": False}})
+
+    assert check["ok"] is True
+    assert not check.get("skipped", False)
+    assert check["subchecks"][1] == {"name": "chromium_runtime", "ok": True}
+
+
+def test_browser_doctor_does_not_treat_download_directory_as_runtime(monkeypatch, tmp_path):
+    """An incomplete modern download must still be unavailable."""
+    import tools.browser._pw_probe as probe
+
+    (tmp_path / "chromium-1243" / "chrome-linux64").mkdir(parents=True)
+    monkeypatch.setattr(probe, "playwright_present", lambda: True)
+    monkeypatch.setattr(probe, "_browsers_dirs", lambda: [tmp_path])
+
+    check = _check_browser({"browser": {"enabled": True, "backend": "playwright"}, "sandbox": {"enabled": False}})
+
+    assert check["skipped"] is True
+    assert check["hint"] == CHROMIUM_SKIP_HINT

@@ -90,10 +90,12 @@ def _browsers_dirs() -> list[Path]:
 #: on every OS plus the headless shell, which is sufficient for headless use).
 _CHROMIUM_EXECUTABLE_GLOBS = (
     "chromium-*/chrome-linux/chrome",
+    "chromium-*/chrome-linux64/chrome",
     "chromium-*/chrome-win/chrome.exe",
     "chromium-*/chrome-win64/chrome.exe",
     "chromium-*/chrome-mac/Chromium.app/Contents/MacOS/Chromium",
     "chromium_headless_shell-*/chrome-linux/headless_shell",
+    "chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell",
     "chromium_headless_shell-*/chrome-win/headless_shell.exe",
     "chromium_headless_shell-*/chrome-win64/headless_shell.exe",
 )
