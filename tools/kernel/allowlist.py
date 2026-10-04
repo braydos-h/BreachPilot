@@ -88,6 +88,45 @@ def _allowed_target_list(config: dict[str, Any] | None) -> list[str]:
     return allowed
 
 
+def _explicit_ip_allowlist_targets(config: dict[str, Any] | None) -> list[str]:
+    """Return operator-declared scope entries used to approve private DNS answers.
+
+    ``EXPLOIT_TARGET_IP`` and the matching ``EXPLOIT_TARGET`` are populated by
+    the run service from the selected hostname's DNS result. They identify the
+    current run target, but cannot independently authorize that DNS answer.
+    Only configured targets and the explicit ``EXPLOIT_ALLOWED_TARGETS``
+    override can satisfy the separate-IP/CIDR requirement.
+    """
+    targets = _config_only_targets(config)
+    raw = os.environ.get("EXPLOIT_ALLOWED_TARGETS", "").strip()
+    if raw:
+        for token in raw.split(","):
+            token = token.strip()
+            if token and token not in targets:
+                targets.append(token)
+    return targets
+
+
+def _network_target_list(config: dict[str, Any] | None) -> list[str]:
+    """Effective worker egress scope without an implicit domain-pinned IP grant."""
+    allowed = _allowed_target_list(config)
+    runtime_domain = os.environ.get("EXPLOIT_TARGET_DOMAIN", "").strip()
+    runtime_ip = os.environ.get("EXPLOIT_TARGET_IP", "").strip()
+    if not runtime_domain or not runtime_ip:
+        return allowed
+    # Preserve a real operator IP/CIDR grant if it independently covers the
+    # runtime address. Otherwise remove only the exact auto-derived target
+    # tokens; the authorized domain is still resolved and checked normally.
+    explicit = _explicit_ip_allowlist_targets(config)
+    if is_target_in_allowlist(runtime_ip, explicit):
+        return allowed
+    runtime_target = os.environ.get("EXPLOIT_TARGET", "").strip()
+    implicit_tokens = {runtime_ip}
+    if runtime_target == runtime_ip:
+        implicit_tokens.add(runtime_target)
+    return [token for token in allowed if token not in implicit_tokens]
+
+
 def _env_widening_note(config: dict[str, Any] | None) -> str:
     """Human-readable note naming env entries that widen the lock beyond config.
 

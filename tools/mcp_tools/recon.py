@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
+import os
 import re
 import socket
 import ssl as _ssl_module
@@ -12,18 +14,102 @@ import time
 from typing import Any
 
 from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
+from tools.kernel.allowlist import _explicit_ip_allowlist_targets
+from tools.kernel.target_network import (
+    METADATA_DESTINATIONS,
+    embedded_ipv4_address,
+    is_metadata_destination,
+    is_public_destination,
+)
 from tools.mcp_shared import _attempt_dir
 from tools.mcp_tools.registry import ToolContext, _platform_system
 from tools.recon_pipeline import HostReconResult, ReconConfig, ReconPipeline
-from tools.validation_utils import validate_target_or_ip
+from tools.validation_utils import is_fqdn, is_target_in_allowlist, resolve_target_bounded, validate_target_or_ip
 
 # ponytail: short-TTL cache for get_service_fingerprint results. A planning
 # loop re-fingerprints the same (ip, port) every cycle at ~8s socket+TLS per
 # call; banners don't change minute-to-minute. 300s matches the FastRecon
 # disk-cache precedent (tools/fast_recon.py).
 _FINGERPRINT_TTL_S = 300.0
-_FINGERPRINT_CACHE: dict[tuple[str, int], tuple[float, str]] = {}
+_FINGERPRINT_CACHE: dict[tuple[str, str, int], tuple[float, str]] = {}
 _fingerprint_lock = threading.Lock()
+
+
+def _resolve_recon_target(
+    target: str,
+    config: dict[str, Any] | None,
+) -> tuple[str | None, str | None]:
+    """Resolve a scoped recon target once and return its pinned IP.
+
+    The allowlist decorator authorizes the supplied hostname or IP. Native
+    host-side recon has no worker firewall, so DNS answers must be pinned here
+    before they reach sockets or scanner subprocesses. Non-public answers are
+    accepted only when that address is independently present in the effective
+    IP/CIDR allowlist; cloud metadata and link-local ranges are always denied.
+    """
+    if not isinstance(target, str) or not target.strip():
+        return None, "target is required"
+    target = target.strip()
+    if not validate_target_or_ip(target):
+        return None, "Invalid target (IP or domain)"
+
+    runtime_domain = os.environ.get("EXPLOIT_TARGET_DOMAIN", "").strip()
+    runtime_ip = os.environ.get("EXPLOIT_TARGET_IP", "").strip()
+    domain_origin = target if is_fqdn(target) else ""
+    resolved_ip: str | None
+    if (
+        runtime_domain
+        and runtime_ip
+        and (
+            (is_fqdn(target) and runtime_domain.lower().rstrip(".") == target.lower().rstrip("."))
+            or target == runtime_ip
+        )
+    ):
+        # The recon-first service passes the pinned IP to IP-oriented tools
+        # (check_os/quick_scan), while retaining the original FQDN separately.
+        # Keep that provenance so the IP literal cannot bypass the separate
+        # private-address grant required for a domain-originated destination.
+        domain_origin = runtime_domain
+        resolved_ip = runtime_ip
+    else:
+        try:
+            resolved_ip, _resolved_domain = resolve_target_bounded(target)
+        except (OSError, TimeoutError, ValueError) as exc:
+            return None, f"target resolution failed: {exc}"
+    if not resolved_ip:
+        return None, "target did not resolve to an IP address"
+
+    try:
+        address = ipaddress.ip_address(resolved_ip)
+    except ValueError:
+        return None, "target resolution returned an invalid IP address"
+
+    policy_address = embedded_ipv4_address(address) or address
+
+    if is_metadata_destination(address):
+        return None, "target resolves to a blocked metadata or link-local address"
+
+    # A hostname grants scope to that name, not to an arbitrary private or
+    # special-use address that DNS may return. Operators can intentionally
+    # scan internal lab targets by listing the concrete IP or containing CIDR.
+    if domain_origin and not is_public_destination(address):
+        allowed_ips = _explicit_ip_allowlist_targets(config)
+        if not is_target_in_allowlist(str(policy_address), allowed_ips):
+            return None, f"domain resolves to non-public address {policy_address}, which is not separately allowlisted"
+
+    # Reject scoped IPv6 literals: these are interface-relative and are not
+    # supported by the IPv4 socket paths used by the host-side recon tools.
+    if isinstance(address, ipaddress.IPv6Address) and address.scope_id:
+        return None, "scoped IPv6 targets are not supported by host-side recon"
+
+    return str(address), None
+
+
+def _recon_target_error(message: str) -> str:
+    """Render target validation failures consistently for MCP callers."""
+    if message == "Invalid target (IP or domain)":
+        return f"ERROR: {message}."
+    return f"BLOCKED: {message}."
 
 
 def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
@@ -41,10 +127,14 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Probe the target to determine its operating system. Uses ping TTL analysis, banner grabs, and HTTP header probes on common ports. Returns the detected OS and guidance for exploitation tools."""
         if not target_ip or not target_ip.strip():
             return "BLOCKED: target_ip is required."
+        resolved_ip, target_error = _resolve_recon_target(target_ip, config)
+        if target_error:
+            return _recon_target_error(target_error)
+        assert resolved_ip is not None
 
         import socket
 
-        result_lines = ["OS_CHECK_RESULTS:", f"TARGET: {target_ip}", ""]
+        result_lines = ["OS_CHECK_RESULTS:", f"TARGET: {target_ip.strip()}", f"RESOLVED_IP: {resolved_ip}", ""]
         hints: list[str] = []
         windows_score = 0
         linux_score = 0
@@ -59,7 +149,7 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
         try:
             proc = subprocess.run(
-                ping_cmd + [target_ip],
+                ping_cmd + [resolved_ip],
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -118,7 +208,7 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     s.settimeout(2)
-                    if s.connect_ex((target_ip, port)) != 0:
+                    if s.connect_ex((resolved_ip, port)) != 0:
                         return None
                     banner = ""
                     try:
@@ -262,14 +352,19 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
         port_list = [int(p.strip()) for p in ports.split(",") if p.strip().isdigit()]
         if not port_list:
             return "BLOCKED: no valid ports provided."
+        resolved_ip, target_error = _resolve_recon_target(target_ip, config)
+        if target_error:
+            return _recon_target_error(target_error)
+        assert resolved_ip is not None
 
         # Delegate to the shared native socket scanner (also used by the recon
         # pipeline's no-privilege fallback tier) so there is one implementation
         # of the TCP-connect + banner-grab logic.
         from tools.socket_scan import format_socket_scan_results, socket_scan_sync
 
-        results = socket_scan_sync(target_ip, port_list)
-        return format_socket_scan_results(target_ip, results)
+        results = socket_scan_sync(resolved_ip, port_list)
+        summary = format_socket_scan_results(target_ip.strip(), results)
+        return f"{summary}\nRESOLVED_IP: {resolved_ip}"
 
     # Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
     # 1. Reconnaissance & Intelligence (tools.recon_pipeline)
@@ -297,8 +392,10 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
         Example:
             run_full_recon("192.168.1.100", "aggressive")
         """
-        if not validate_target_or_ip(target_ip):
-            return "ERROR: Invalid target (IP or domain)."
+        resolved_ip, target_error = _resolve_recon_target(target_ip, config)
+        if target_error:
+            return _recon_target_error(target_error)
+        assert resolved_ip is not None
         aggression_map = {
             "stealth": "stealth",
             "normal": "normal",
@@ -310,7 +407,7 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
         try:
             recon_config = ReconConfig.from_config(config, aggression_level=agg_level)
             pipeline = ReconPipeline(recon_config)
-            result: HostReconResult = await pipeline.recon_host(target_ip)
+            result: HostReconResult = await pipeline.recon_host(resolved_ip)
 
             attempt_dir, attempt_id = _attempt_dir(workspace)
             json_path = attempt_dir / "recon_result.json"
@@ -322,7 +419,8 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
             lines = [
                 "RECON_RESULT: completed",
                 f"ATTEMPT_ID: {attempt_id}",
-                f"TARGET: {target_ip}",
+                f"TARGET: {target_ip.strip()}",
+                f"RESOLVED_IP: {resolved_ip}",
                 f"OS: {result.os_name or 'Unknown'} (family: {result.os_family}, accuracy: {result.os_accuracy}%)",
                 f"TTL: {result.ttl if result.ttl is not None else 'N/A'}",
                 f"SCAN_DURATION: {result.scan_duration:.1f}s",
@@ -366,21 +464,27 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
         Example:
             get_service_fingerprint("192.168.1.100", 443)
         """
-        if not validate_target_or_ip(target_ip):
-            return "ERROR: Invalid target (IP or domain)."
         if isinstance(port, str) and port.strip().isdigit():
             port = int(port.strip())
         if not isinstance(port, int) or isinstance(port, bool) or port < 1 or port > 65535:
             return "ERROR: Port must be an integer between 1 and 65535."
+        resolved_ip, target_error = _resolve_recon_target(target_ip, config)
+        if target_error:
+            return _recon_target_error(target_error)
+        assert resolved_ip is not None
 
-        _fp_key = (target_ip, port)
+        _fp_key = (target_ip.strip(), resolved_ip, port)
         with _fingerprint_lock:
             _fp_hit = _FINGERPRINT_CACHE.get(_fp_key)
             if _fp_hit is not None and time.monotonic() - _fp_hit[0] < _FINGERPRINT_TTL_S:
                 return _fp_hit[1]
 
         try:
-            lines = [f"SERVICE_FINGERPRINT: {target_ip}:{port}", ""]
+            lines = [
+                f"SERVICE_FINGERPRINT: {target_ip.strip()}:{port}",
+                f"RESOLVED_IP: {resolved_ip}",
+                "",
+            ]
             banner = ""
             ssl_info: dict[str, Any] = {}
 
@@ -393,11 +497,11 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 try:
                     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                         sock.settimeout(8)
-                        sock.connect((target_ip, port))
+                        sock.connect((resolved_ip, port))
                         ctx = _ssl_module.create_default_context()
                         ctx.check_hostname = False
                         ctx.verify_mode = _ssl_module.CERT_NONE
-                        with ctx.wrap_socket(sock, server_hostname=target_ip) as tls_sock:
+                        with ctx.wrap_socket(sock, server_hostname=target_ip.strip()) as tls_sock:
                             cert = tls_sock.getpeercert()
                             if cert:
                                 ssl_info["issuer"] = ", ".join(
@@ -414,7 +518,7 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     # Not actually TLS or handshake failed Ã¢â‚¬â€ fall back to plain
                     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                         sock.settimeout(8)
-                        sock.connect((target_ip, port))
+                        sock.connect((resolved_ip, port))
                         try:
                             banner = sock.recv(512).decode("utf-8", errors="replace").strip()[:200]
                         except Exception:  # ponytail: bare except intentional
@@ -423,11 +527,11 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 # Plain TCP banner grab
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                     sock.settimeout(8)
-                    sock.connect((target_ip, port))
+                    sock.connect((resolved_ip, port))
                     try:
                         # Send a probe for HTTP-like services
                         if port in (80, 8080, 8000, 3000, 5000):
-                            sock.sendall(f"HEAD / HTTP/1.0\r\nHost: {target_ip}\r\n\r\n".encode())
+                            sock.sendall(f"HEAD / HTTP/1.0\r\nHost: {target_ip.strip()}\r\n\r\n".encode())
                         banner = sock.recv(512).decode("utf-8", errors="replace").strip()[:200]
                     except Exception:  # ponytail: bare except intentional
                         pass
@@ -508,19 +612,22 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
         Returns:
             UDP_PORTS summary listing the discovered UDP ports and services.
         """
-        if not validate_target_or_ip(target_ip):
-            return "ERROR: Invalid target (IP or domain)."
         if not isinstance(top_ports, int) or top_ports <= 0:
             top_ports = 100
+        resolved_ip, target_error = _resolve_recon_target(target_ip, config)
+        if target_error:
+            return _recon_target_error(target_error)
+        assert resolved_ip is not None
         try:
             recon_config = ReconConfig.from_config(config)
             pipeline = ReconPipeline(recon_config)
-            result: HostReconResult = await pipeline.recon_udp(target_ip, top_ports=top_ports)
+            result: HostReconResult = await pipeline.recon_udp(resolved_ip, top_ports=top_ports)
 
             udp_services = [s for s in result.services if s.protocol == "udp"]
             lines = [
                 "UDP_PORTS: completed",
-                f"TARGET: {target_ip}",
+                f"TARGET: {target_ip.strip()}",
+                f"RESOLVED_IP: {resolved_ip}",
                 f"SCAN_TOOL: {result.scan_tool}",
                 f"UDP_PORT_COUNT: {len(result.udp_ports)}",
                 f"UDP_PORTS: {result.udp_ports}",
@@ -555,12 +662,15 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
             OSINT summary: ipv6 addresses, reverse dns, cert-transparency count,
             shodan enabled/disabled.
         """
-        if not validate_target_or_ip(target_ip):
-            return "ERROR: Invalid target (IP or domain)."
+        resolved_ip, target_error = _resolve_recon_target(target_ip, config)
+        if target_error:
+            return _recon_target_error(target_error)
+        assert resolved_ip is not None
         from tools.recon_osint import run_osint
 
         try:
-            osint = run_osint(target_ip)
+            target_domain = target_ip.strip() if is_fqdn(target_ip.strip()) else ""
+            osint = run_osint(resolved_ip, hostname=target_domain)
             if not isinstance(osint, dict):
                 return "OSINT: no result"
             ipv6 = osint.get("ipv6_addresses") or []
@@ -572,7 +682,8 @@ def register_recon_tools(mcp: Any, *, ctx: ToolContext) -> None:
             hostname = osint.get("hostname") or ""
             lines = [
                 "OSINT: completed",
-                f"TARGET: {target_ip}",
+                f"TARGET: {target_ip.strip()}",
+                f"RESOLVED_IP: {resolved_ip}",
                 f"HOSTNAME: {hostname or '(none)'}",
                 f"REVERSE_DNS: {rev or '(none)'}",
                 f"IPV6_ADDRESSES: {ipv6 if ipv6 else '(none)'}",

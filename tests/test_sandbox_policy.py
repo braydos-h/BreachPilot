@@ -102,18 +102,73 @@ class TestBuildNetworkPolicy:
         # Production seam: inject via resolver_fn (threaded to
         # resolve_all_addresses), not by mocking resolve_target_to_ip which
         # this path no longer calls.
-        pol = build_network_policy(_cfg(["example.com"]), resolver_fn=lambda h: ["192.0.2.77"])
-        assert "192.0.2.77" in pol.authorized_destinations
-        assert pol.resolved_domains.get("example.com") == "192.0.2.77"
+        pol = build_network_policy(_cfg(["example.com"]), resolver_fn=lambda h: ["93.184.216.34"])
+        assert "93.184.216.34" in pol.authorized_destinations
+        assert pol.resolved_domains.get("example.com") == "93.184.216.34"
+
+    @pytest.mark.parametrize("answer", ["10.23.0.7", "64:ff9b::a9fe:a9fe"])
+    def test_domain_dns_cannot_authorize_private_or_translated_metadata(self, answer):
+        pol = build_network_policy(_cfg(["owned.example.com"]), resolver_fn=lambda _host: [answer])
+        assert answer not in pol.authorized_destinations
+        assert "owned.example.com" not in pol.resolved_domain_addresses
+        assert any("owned.example.com" in item for item in pol.unresolved_targets)
+
+    def test_private_domain_answer_needs_separate_ip_or_cidr_authorization(self):
+        pol = build_network_policy(_cfg(["owned.example.com", "10.23.0.0/24"]), resolver_fn=lambda _host: ["10.23.0.7"])
+        assert "10.23.0.7" in pol.authorized_destinations
+        assert pol.resolved_domain_addresses["owned.example.com"] == ["10.23.0.7"]
+
+    def test_runtime_pinned_private_ip_does_not_authorize_its_domain(self, monkeypatch):
+        domain = "owned.example.com"
+        address = "10.23.0.7"
+        monkeypatch.setenv("EXPLOIT_TARGET", address)
+        monkeypatch.setenv("EXPLOIT_TARGET_IP", address)
+        monkeypatch.setenv("EXPLOIT_TARGET_DOMAIN", domain)
+
+        pol = build_network_policy(_cfg([domain]), resolver_fn=lambda _host: [address])
+
+        assert address not in pol.authorized_destinations
+        assert domain not in pol.resolved_domain_addresses
+        assert any(domain in item and address in item for item in pol.unresolved_targets)
+
+    def test_explicit_environment_ip_scope_authorizes_private_domain_target(self, monkeypatch):
+        domain = "owned.example.com"
+        address = "10.23.0.7"
+        monkeypatch.setenv("EXPLOIT_TARGET", address)
+        monkeypatch.setenv("EXPLOIT_TARGET_IP", address)
+        monkeypatch.setenv("EXPLOIT_TARGET_DOMAIN", domain)
+        monkeypatch.setenv("EXPLOIT_ALLOWED_TARGETS", "10.23.0.0/24")
+
+        pol = build_network_policy(_cfg([domain]), resolver_fn=lambda _host: [address])
+
+        assert address in pol.authorized_destinations
+        assert pol.resolved_domain_addresses[domain] == [address]
+
+    def test_filtered_dns_answers_are_auditable_but_never_recorded(self, monkeypatch):
+        recorded: list[tuple[str, list[str], str]] = []
+        monkeypatch.setattr(
+            "tools.kernel.discovered.record_discovered_host",
+            lambda host, addresses, *, source: recorded.append((host, list(addresses), source)),
+        )
+        pol = build_network_policy(
+            _cfg(["owned.example.com"]),
+            resolver_fn=lambda _host: ["93.184.216.34", "10.23.0.7"],
+        )
+
+        assert "93.184.216.34" in pol.authorized_destinations
+        assert "10.23.0.7" not in pol.authorized_destinations
+        assert pol.resolved_domain_addresses["owned.example.com"] == ["93.184.216.34"]
+        assert any("10.23.0.7" in item and "excluded unsafe DNS answers" in item for item in pol.unresolved_targets)
+        assert recorded == [("owned.example.com", ["93.184.216.34"], "sandbox:policy")]
 
     def test_mixed_scope_ip_and_domain_both_authorized(self):
         # Mixed-scope allowlist (bare IP + domain) resolves through the same
         # production seam: the IP normalizes to /32, the domain contributes
         # its injected addresses.
-        pol = build_network_policy(_cfg(["192.0.2.5", "example.com"]), resolver_fn=lambda h: ["192.0.2.77"])
+        pol = build_network_policy(_cfg(["192.0.2.5", "example.com"]), resolver_fn=lambda h: ["93.184.216.34"])
         assert "192.0.2.5/32" in pol.authorized_destinations
-        assert "192.0.2.77" in pol.authorized_destinations
-        assert pol.resolved_domains.get("example.com") == "192.0.2.77"
+        assert "93.184.216.34" in pol.authorized_destinations
+        assert pol.resolved_domains.get("example.com") == "93.184.216.34"
 
     def test_resolution_validation_rejects_unallowlisted_domain(self):
         # An unlisted domain contributes nothing via the production path:
@@ -143,22 +198,33 @@ class TestBuildNetworkPolicy:
         assert "10.99.0.0/16" in pol.authorized_destinations
         assert "not-a-cidr" not in pol.authorized_destinations
 
-    def test_allow_dns_controlled_uses_embedded_resolver(self):
+    @pytest.mark.parametrize("cidr", ["0.0.0.0/0", "::/0"])
+    def test_extra_cidrs_reject_default_routes(self, cidr):
+        with pytest.raises(ValueError, match="authorizes all destinations"):
+            build_network_policy(_cfg(["10.0.0.5"], extra_allow_cidrs=[cidr]))
+
+    def test_allow_dns_controlled_uses_host_pinned_names_not_worker_resolver(self):
         pol = build_network_policy(_cfg(["10.0.0.5"]))
         assert pol.allow_dns == "controlled"
-        assert pol.dns_servers == ["127.0.0.11"]
+        assert pol.dns_servers == []
 
     def test_allow_dns_none_recorded(self):
         pol = build_network_policy(_cfg(["10.0.0.5"], allow_dns="none"))
         assert pol.allow_dns == "none"
         assert pol.dns_servers == []
 
+    def test_allow_dns_none_does_not_publish_host_pinned_names(self):
+        pol = build_network_policy(_cfg(["example.com"], allow_dns="none"), resolver_fn=lambda _host: ["93.184.216.34"])
+        assert pol.resolved_domains == {"example.com": "93.184.216.34"}
+        assert pol.allowed_dns_names == []
+        assert pol.dns_servers == []
+
     def test_dns_name_allowlist_built_from_fqdn_allowlist(self):
         # BP-03: the DNS name allowlist derives from authorized FQDNs (+
         # research hosts when enabled); unauthorized names authorize nothing.
-        pol = build_network_policy(_cfg(["example.com"]), resolver_fn=lambda h: ["192.0.2.77"])
-        assert pol.resolved_domains.get("example.com") == "192.0.2.77"
-        assert pol.resolved_domain_addresses.get("example.com") == ["192.0.2.77"]
+        pol = build_network_policy(_cfg(["example.com"]), resolver_fn=lambda h: ["93.184.216.34"])
+        assert pol.resolved_domains.get("example.com") == "93.184.216.34"
+        assert pol.resolved_domain_addresses.get("example.com") == ["93.184.216.34"]
         payload = audit_policy_payload(pol)
         assert payload["allowed_dns_names"] == ["example.com"]
         # Unauthorized name resolves nowhere through the policy seam.
@@ -171,7 +237,7 @@ class TestBuildNetworkPolicy:
         # payload surfaces the same list, and unauthorized names authorize
         # nothing (they resolve only to unauthorized IPs, which default-DROP
         # denies).
-        pol = build_network_policy(_cfg(["example.com"]), resolver_fn=lambda h: ["192.0.2.77"])
+        pol = build_network_policy(_cfg(["example.com"]), resolver_fn=lambda h: ["93.184.216.34"])
         assert pol.allowed_dns_names == ["example.com"]
         assert pol.dns_allowlist == ["example.com"]
         assert audit_policy_payload(pol)["allowed_dns_names"] == ["example.com"]
@@ -187,15 +253,15 @@ class TestBuildNetworkPolicy:
 
         monkeypatch.setenv("EXPLOIT_DISCOVERED_TARGETS", "sub.example.com")
         monkeypatch.setattr(
-            sandbox_policy, "_resolve_authorized", lambda d, c, **k: ["192.0.2.88"] if d == "sub.example.com" else []
+            sandbox_policy, "_resolve_authorized", lambda d, c, **k: ["93.184.216.35"] if d == "sub.example.com" else []
         )
         pol = build_network_policy(_cfg(["example.com"]), resolver_fn=lambda h: [])
-        assert pol.resolved_domains.get("sub.example.com") == "192.0.2.88"
+        assert pol.resolved_domains.get("sub.example.com") == "93.184.216.35"
         assert "sub.example.com" in audit_policy_payload(pol)["allowed_dns_names"]
 
     def test_fingerprint_changes_with_dns_names(self):
-        p1 = build_network_policy(_cfg(["example.com"]), resolver_fn=lambda h: ["192.0.2.77"])
-        p2 = build_network_policy(_cfg(["example.com"]), resolver_fn=lambda h: ["192.0.2.78"])
+        p1 = build_network_policy(_cfg(["example.com"]), resolver_fn=lambda h: ["93.184.216.34"])
+        p2 = build_network_policy(_cfg(["example.com"]), resolver_fn=lambda h: ["93.184.216.35"])
         assert p1.fingerprint() != p2.fingerprint()
 
     def test_research_hosts_denied_by_default(self, monkeypatch):
@@ -205,7 +271,7 @@ class TestBuildNetworkPolicy:
         monkeypatch.setattr(
             sandbox_policy,
             "_resolve_authorized",
-            lambda domain, config, **kwargs: ["203.0.113.9"] if domain in sandbox_policy.RESEARCH_HOSTS else [],
+            lambda domain, config, **kwargs: ["93.184.216.35"] if domain in sandbox_policy.RESEARCH_HOSTS else [],
         )
         pol = build_network_policy(
             {
@@ -214,13 +280,13 @@ class TestBuildNetworkPolicy:
             }
         )
         assert pol.authorized_destinations == ["192.0.2.5/32"]
-        assert "203.0.113.9" not in pol.authorized_destinations
+        assert "93.184.216.35" not in pol.authorized_destinations
 
     def test_research_hosts_authorized_only_on_explicit_opt_in(self, monkeypatch):
         monkeypatch.setattr(
             sandbox_policy,
             "_resolve_authorized",
-            lambda domain, config, **kwargs: ["203.0.113.9"] if domain in sandbox_policy.RESEARCH_HOSTS else [],
+            lambda domain, config, **kwargs: ["93.184.216.35"] if domain in sandbox_policy.RESEARCH_HOSTS else [],
         )
         pol = build_network_policy(
             {
@@ -228,7 +294,7 @@ class TestBuildNetworkPolicy:
                 "sandbox": {"enabled": True, "network": {"allow_research_hosts": True}},
             }
         )
-        assert "203.0.113.9" in pol.authorized_destinations
+        assert "93.184.216.35" in pol.authorized_destinations
         assert "192.0.2.5/32" in pol.authorized_destinations
 
 

@@ -21,9 +21,19 @@ import ipaddress
 import logging
 from typing import Any
 
-from tools.kernel.allowlist import _allowed_target_list
+from tools.kernel.allowlist import _explicit_ip_allowlist_targets, _network_target_list
+from tools.kernel.target_network import (
+    METADATA_DESTINATIONS,
+    is_public_destination,
+)
+from tools.kernel.target_network import (
+    embedded_ipv4_address as _embedded_ipv4_address,
+)
+from tools.kernel.target_network import (
+    is_metadata_destination as _is_metadata_destination,
+)
 from tools.sandbox.models import NetworkPolicy
-from tools.validation_utils import is_fqdn
+from tools.validation_utils import is_fqdn, is_target_in_allowlist
 
 logger = logging.getLogger(__name__)
 
@@ -33,16 +43,6 @@ __all__ = [
     "build_network_policy",
     "authorize_destinations",
     "is_pure_local_computation",
-]
-
-# Cloud-metadata / link-local destinations always denied. Implicit in the
-# default-DROP ruleset but enforced explicitly so policy audits show it.
-METADATA_DESTINATIONS = [
-    "169.254.169.254",  # AWS/GCP/Azure IMDS
-    "169.254.0.0/16",  # RFC3927 link-local (incl. metadata)
-    "fd00:ec2::254",  # AWS IMDS IPv6
-    "100.100.100.200",  # Alibaba metadata
-    "fe80::/10",  # IPv6 link-local
 ]
 
 # Targets that mean "everywhere" when they appear in the allowlist; a sandbox
@@ -110,7 +110,7 @@ def build_network_policy(
     unresolved: list[str] = []
 
     loopback_hits = False
-    for token in _allowed_target_list(config):
+    for token in _network_target_list(config):
         tok = str(token).strip()
         if not tok:
             continue
@@ -132,7 +132,10 @@ def build_network_policy(
                 raise
         # Bare IP?
         try:
-            ipaddress.ip_address(tok)
+            address = ipaddress.ip_address(tok)
+            if _is_metadata_destination(address):
+                unresolved.append(f"{tok} (metadata destination blocked)")
+                continue
             _append_unique(authorized, tok)
             continue
         except ValueError:
@@ -149,13 +152,16 @@ def build_network_policy(
         # the provenance (hostname, addresses, timestamp, source) is recorded
         # for the audit trail — never as bare reusable entries.
         if is_fqdn(tok):
-            resolved = _resolve_authorized(tok, config, resolver_fn=resolver_fn)
+            excluded_dns_answers: list[str] = []
+            resolved = _resolve_authorized(tok, config, resolver_fn=resolver_fn, excluded_out=excluded_dns_answers)
             for ip in resolved:
                 _append_unique(authorized, ip)
             if resolved:
                 resolved_domains[tok] = resolved[0]
                 resolved_domain_addresses[tok] = list(resolved)
-            else:
+            if excluded_dns_answers:
+                unresolved.append(f"{tok} (excluded unsafe DNS answers: {', '.join(excluded_dns_answers)})")
+            elif not resolved:
                 unresolved.append(tok)
             continue
         # Unknown shape: record as unresolved so audits show what was NOT authorized.
@@ -164,33 +170,42 @@ def build_network_policy(
     if extra_cidrs:
         for cidr in extra_cidrs:
             try:
-                ipaddress.ip_network(cidr, strict=False)
+                network = ipaddress.ip_network(cidr, strict=False)
             except ValueError:
                 logger.warning("sandbox extra_allow_cidrs ignored (invalid): %s", cidr)
                 continue
-            _append_unique(authorized, cidr)
+            if network.prefixlen == 0:
+                raise ValueError(f"extra CIDR {cidr!r} authorizes all destinations; sandbox policy refuses it")
+            _append_unique(authorized, str(network))
 
     if map_loopback and loopback_hits and gateway:
         _append_unique(authorized, gateway)
 
     if bool(network_cfg.get("allow_research_hosts", False)):
         for host in RESEARCH_HOSTS:
-            ips = _resolve_authorized(host, config, _skip_allowlist=True, resolver_fn=resolver_fn)
+            excluded_research_answers: list[str] = []
+            ips = _resolve_authorized(
+                host,
+                config,
+                _skip_allowlist=True,
+                resolver_fn=resolver_fn,
+                excluded_out=excluded_research_answers,
+            )
             for ip in ips:
                 _append_unique(authorized, ip)
             if ips:
                 resolved_domains[host] = ips[0]
                 resolved_domain_addresses[host] = list(ips)
-            else:
+            if excluded_research_answers:
+                unresolved.append(f"{host} (excluded unsafe DNS answers: {', '.join(excluded_research_answers)})")
+            elif not ips:
                 unresolved.append(f"{host} (unresolved at policy build)")
 
-    # Controlled DNS: docker's embedded resolver listens on the container's
-    # loopback (127.0.0.11). network.py ACCEPTs :53 ONLY to 127.0.0.11 and
-    # REJECTs every other :53 (direct 8.8.8.8:53, rogue lo resolvers) — the
-    # rules precede the blanket lo ACCEPT so first-match-wins cannot shadow
-    # them. With zero authorized names, controlled degrades to none (fail
-    # closed: DNS would only serve names the worker cannot talk to).
-    dns_servers = ["127.0.0.11"] if allow_dns == "controlled" else []
+    # The worker never sends DNS packets. In controlled mode, the host resolves
+    # allowlisted names and installs pinned /etc/hosts mappings; in none mode,
+    # hostnames are not usable as a resolver shortcut. network.py blocks the
+    # embedded resolver and all destination-port-53 traffic in either mode.
+    dns_servers: list[str] = []
 
     return NetworkPolicy(
         authorized_destinations=authorized,
@@ -200,7 +215,7 @@ def build_network_policy(
         resolved_domains=resolved_domains,
         resolved_domain_addresses=resolved_domain_addresses,
         unresolved_targets=unresolved,
-        enforced=bool(network_cfg.get("enforce", True)),
+        enforced=True,
     )
 
 
@@ -215,6 +230,7 @@ def _resolve_authorized(
     *,
     _skip_allowlist: bool = False,
     resolver_fn: Any | None = None,
+    excluded_out: list[str] | None = None,
 ) -> list[str]:
     """Resolve a domain host-side and return ALL its allowed IPs (A+AAAA).
 
@@ -246,8 +262,41 @@ def _resolve_authorized(
     addrs = resolve_all_addresses(domain, resolver_fn=resolver_fn)
     if not addrs:
         return []
-    record_discovered_host(domain, addrs, source="sandbox:policy")
-    return list(addrs)
+    allowed_targets = _explicit_ip_allowlist_targets(config)
+    safe_addrs: list[str] = []
+    excluded: list[str] = []
+    for candidate in addrs:
+        try:
+            address = ipaddress.ip_address(candidate)
+        except ValueError:
+            excluded.append(str(candidate))
+            continue
+        if _is_metadata_destination(address):
+            excluded.append(str(address))
+            continue
+        embedded = _embedded_ipv4_address(address)
+        if _skip_allowlist:
+            safe = address.is_global and (embedded is None or embedded.is_global)
+        else:
+            independently_allowed = is_target_in_allowlist(str(embedded or address), allowed_targets)
+            safe = is_public_destination(address) or independently_allowed
+        if safe:
+            canonical = str(address)
+            if canonical not in safe_addrs:
+                safe_addrs.append(canonical)
+        else:
+            excluded.append(str(address))
+    if excluded:
+        # Never persist a rejected answer into provenance, pinned hosts, or
+        # firewall authorization. The warning names the domain and exact
+        # excluded addresses for host-side diagnostics.
+        logger.warning("sandbox policy excluded unsafe DNS answers for %s: %s", domain, ", ".join(excluded))
+        if excluded_out is not None:
+            excluded_out.extend(excluded)
+    if not safe_addrs:
+        return []
+    record_discovered_host(domain, safe_addrs, source="sandbox:policy")
+    return safe_addrs
 
 
 def authorize_destinations(destinations: list[str], config: dict[str, Any] | None) -> tuple[bool, str]:

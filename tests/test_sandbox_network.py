@@ -59,6 +59,46 @@ class TestIpv4Rules:
         assert "-d 169.254.169.254 -j DROP" in rules
         assert "-d 169.254.0.0/16 -j DROP" in rules
 
+    def test_translated_metadata_drop_precedes_broad_nat64_allow(self):
+        policy = NetworkPolicy(
+            authorized_destinations=["64:ff9b::/96"],
+            explicitly_blocked=["64:ff9b::a9fe:a9fe"],
+            allow_dns="controlled",
+            enforced=True,
+        )
+        rules = build_ipv6_rules(policy)
+        drop = "-A NAI-OUTPUT -d 64:ff9b::a9fe:a9fe -j DROP"
+        allow = "-A NAI-OUTPUT -d 64:ff9b::/96 -j ACCEPT"
+        assert drop in rules
+        assert allow in rules
+        assert rules.index(drop) < rules.index(allow)
+
+    def test_embedded_metadata_ranges_drop_before_translation_cidr_accepts(self):
+        policy = NetworkPolicy(
+            authorized_destinations=["64:ff9b::/96", "2002::/16", "::ffff:0:0/96"],
+            explicitly_blocked=[],
+            allow_dns="controlled",
+            enforced=True,
+        )
+        rules = build_ipv6_rules(policy)
+        expected_drops = (
+            "-A NAI-OUTPUT -d 64:ff9b::a9fe:0/112 -j DROP",
+            "-A NAI-OUTPUT -d 64:ff9b:1:a9fe::/64 -j DROP",
+            "-A NAI-OUTPUT -d 2002:a9fe::/32 -j DROP",
+            "-A NAI-OUTPUT -d ::ffff:0:0/96 -j DROP",
+            "-A NAI-OUTPUT -d 2001::/32 -j DROP",
+        )
+        for drop in expected_drops:
+            assert drop in rules
+        for allow in (
+            "-A NAI-OUTPUT -d 64:ff9b::/96 -j ACCEPT",
+            "-A NAI-OUTPUT -d 2002::/16 -j ACCEPT",
+            "-A NAI-OUTPUT -d ::ffff:0:0/96 -j ACCEPT",
+        ):
+            assert allow in rules
+            for drop in expected_drops:
+                assert rules.index(drop) < rules.index(allow)
+
     def test_authorized_destination_accepted(self):
         rules = "\n".join(build_ipv4_rules(_pol(["192.0.2.5", "10.0.0.0/24"])))
         assert "-A NAI-OUTPUT -d 192.0.2.5 -j ACCEPT" in rules
@@ -72,14 +112,14 @@ class TestIpv4Rules:
 
     def test_dns_none_blocks_port53_everywhere(self):
         rules = build_ipv4_rules(_pol([], allow_dns="none"))
-        # REJECTs must PRECEDE the blanket lo ACCEPT (first-match-wins would
-        # otherwise shadow them and leave a lo DNS bypass).
+        # Port-53 DROPs must PRECEDE the blanket lo ACCEPT (first-match-wins
+        # would otherwise shadow them and leave a lo DNS bypass).
         lo_idx = rules.index("-A NAI-OUTPUT -o lo -j ACCEPT")
-        for rej in ("-A NAI-OUTPUT -p udp --dport 53 -j REJECT", "-A NAI-OUTPUT -p tcp --dport 53 -j REJECT"):
-            assert rej in rules
-            assert rules.index(rej) < lo_idx
+        for drop in ("-A NAI-OUTPUT -p udp --dport 53 -j DROP", "-A NAI-OUTPUT -p tcp --dport 53 -j DROP"):
+            assert drop in rules
+            assert rules.index(drop) < lo_idx
 
-    def test_dns_controlled_scopes_port53_to_embedded_resolver(self):
+    def test_dns_controlled_blocks_embedded_resolver_even_with_authorized_names(self):
         from tools.sandbox.models import NetworkPolicy
 
         pol = _pol([], allow_dns="controlled")
@@ -93,12 +133,14 @@ class TestIpv4Rules:
             resolved_domain_addresses={"example.com": ["93.184.216.34"]},
         )
         rules = build_ipv4_rules(pol)
-        # :53 ACCEPT only to 127.0.0.11; everything else :53 REJECTed —
-        # including the lo bypass (rogue in-worker resolver, direct 8.8.8.8).
-        assert "-A NAI-OUTPUT -d 127.0.0.11 -p udp --dport 53 -j ACCEPT" in rules
-        assert "-A NAI-OUTPUT -d 127.0.0.11 -p tcp --dport 53 -j ACCEPT" in rules
-        assert "-A NAI-OUTPUT -p udp --dport 53 -j REJECT" in rules
-        assert "-A NAI-OUTPUT -p tcp --dport 53 -j REJECT" in rules
+        # Docker NAT rewrites DNS to a high port; the whole resolver address
+        # must be blocked before lo ACCEPT, even with authorized domain names.
+        resolver_drop = "-A NAI-OUTPUT -d 127.0.0.11 -j DROP"
+        assert resolver_drop in rules
+        assert rules.index(resolver_drop) < rules.index("-A NAI-OUTPUT -o lo -j ACCEPT")
+        assert not any("--dport 53" in rule and "-j ACCEPT" in rule for rule in rules)
+        assert "-A NAI-OUTPUT -p udp --dport 53 -j DROP" in rules
+        assert "-A NAI-OUTPUT -p tcp --dport 53 -j DROP" in rules
         lo_idx = rules.index("-A NAI-OUTPUT -o lo -j ACCEPT")
         for r in rules:
             if "--dport 53" in r:
@@ -118,33 +160,30 @@ class TestIpv4Rules:
         rules = build_ipv4_rules(pol)
         port53 = [r for r in rules if "--dport 53" in r]
         assert port53, "controlled mode must emit explicit :53 rules"
-        # Every :53 ACCEPT is scoped to the embedded resolver ONLY: no direct
-        # 8.8.8.8:53, no rogue loopback-resolver (127.0.0.1:53) bypass.
-        for rule in port53:
-            if "-j ACCEPT" in rule:
-                assert "-d 127.0.0.11" in rule, f"unexpected :53 ACCEPT: {rule}"
+        assert not any("-j ACCEPT" in rule for rule in port53)
+        assert "-A NAI-OUTPUT -d 127.0.0.11 -j DROP" in rules
         joined = "\n".join(rules)
         assert "-d 8.8.8.8" not in joined
         assert "-d 127.0.0.1 " not in joined and "-d 127.0.0.1 -p" not in joined
-        # Blanket :53 REJECTs precede the lo ACCEPT (first-match-wins).
+        # Blanket :53 DROPs precede the lo ACCEPT (first-match-wins).
         lo_idx = rules.index("-A NAI-OUTPUT -o lo -j ACCEPT")
-        for rej in ("-A NAI-OUTPUT -p udp --dport 53 -j REJECT", "-A NAI-OUTPUT -p tcp --dport 53 -j REJECT"):
-            assert rej in rules
-            assert rules.index(rej) < lo_idx
+        for drop in ("-A NAI-OUTPUT -p udp --dport 53 -j DROP", "-A NAI-OUTPUT -p tcp --dport 53 -j DROP"):
+            assert drop in rules
+            assert rules.index(drop) < lo_idx
 
     def test_dns_controlled_with_no_names_fails_closed_to_none(self):
-        # IP-only allowlist: DNS serves no authorized purpose → none-style REJECTs.
+        # IP-only allowlist: DNS serves no authorized purpose → port-53 DROPs.
         rules = "\n".join(build_ipv4_rules(_pol(["192.0.2.5"], allow_dns="controlled")))
-        assert "127.0.0.11" not in rules
-        assert "-p udp --dport 53 -j REJECT" in rules
-        assert "-p tcp --dport 53 -j REJECT" in rules
+        assert "-d 127.0.0.11 -j DROP" in rules
+        assert "-p udp --dport 53 -j DROP" in rules
+        assert "-p tcp --dport 53 -j DROP" in rules
 
-    def test_dns_v6_always_rejected(self):
+    def test_dns_v6_always_dropped(self):
         # The embedded resolver is IPv4-only: no legitimate v6 :53 path exists.
         for mode in ("controlled", "none"):
             rules = "\n".join(build_ipv6_rules(_pol([], allow_dns=mode)))
-            assert "-p udp --dport 53 -j REJECT" in rules
-            assert "-p tcp --dport 53 -j REJECT" in rules
+            assert "-p udp --dport 53 -j DROP" in rules
+            assert "-p tcp --dport 53 -j DROP" in rules
             assert "127.0.0.11" not in rules
 
     def test_empty_authorization_is_default_deny(self):

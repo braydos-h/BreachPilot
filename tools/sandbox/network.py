@@ -7,7 +7,7 @@ Two halves:
    container that SHARES the worker's network namespace and holds the ONLY
    ``NET_ADMIN`` grant. The sidecar installs a default-DROP iptables/ip6tables
    ruleset and exits before the first agent command. The worker itself gets
-   ``--cap-drop ALL`` (optionally ``NET_RAW`` for raw packet scanning) and
+   ``--cap-drop ALL`` and
    therefore CANNOT loosen, remove, or enumerate the rules even when running
    tools as root inside the container.
 
@@ -17,15 +17,12 @@ Rules are (re-)applied before each command when the authorization fingerprint
 changes, so dynamically discovered (allowlist-validated) targets are picked up
 deliberately.
 
-Resolver-layer name enforcement (deliberate subset, no in-container dnsmasq):
-in-container name blocking is enforced via IP authorization plus
-``127.0.0.11``-only ``:53`` — the host resolves ONLY allowlisted names
-(``NetworkPolicy.allowed_dns_names``), so an unauthorized name can resolve at
-best to an unauthorized IP, which the default-DROP ruleset denies. The
-``:53`` ACCEPTs are scoped to the embedded resolver and every other ``:53``
-(direct ``8.8.8.8:53``, rogue loopback resolvers) is REJECTed ahead of the
-blanket ``lo`` ACCEPT, so DNS-protocol exfil/tunneling/oracle paths gain
-nothing beyond what the IP authorization already permits.
+Resolver containment: only the host resolves authorized names and supplies
+pinned worker hosts mappings. Worker DNS traffic is denied, including the
+entire Docker embedded resolver address before loopback ACCEPT. This closes
+DNS query exfiltration even when Docker NAT rewrites the resolver's port.
+Workers also have no ``NET_RAW``, so packet sockets cannot bypass these IP
+firewall rules.
 """
 
 from __future__ import annotations
@@ -34,6 +31,7 @@ import ipaddress
 import logging
 from typing import Any
 
+from tools.kernel.target_network import translated_metadata_networks
 from tools.sandbox.exceptions import SandboxPolicyError
 from tools.sandbox.models import NetworkPolicy
 
@@ -55,7 +53,10 @@ COMMON_BLOCKED_NETS = ["169.254.169.254", "169.254.0.0/16", "fd00:ec2::254", "10
 
 # IPv6 link-local always denied in the v6 ruleset (not in COMMON_BLOCKED_NETS,
 # which policy.py also surfaces for v4-side audits).
-_IPV6_EXTRA_BLOCKED = ("fe80::/10",)
+# IPv4-mapped IPv6 addresses have no legitimate distinct egress use and are
+# blocked as a whole so they cannot bypass IPv4 metadata CIDR drops. Teredo is
+# likewise denied whole because its embedded IPv4 client bits are noncontiguous.
+_IPV6_EXTRA_BLOCKED = ("fe80::/10", "::ffff:0:0/96", "2001::/32")
 
 
 def _ip_version(token: str) -> int | None:
@@ -75,10 +76,8 @@ def _ip_version(token: str) -> int | None:
 # packets traverse OUTPUT's default ACCEPT and never see NAI-OUTPUT.
 _OUTPUT_JUMP = "-A OUTPUT -j NAI-OUTPUT"
 
-# Docker's embedded resolver (the ONLY resolver the worker may use in
-# "controlled" mode). :53 ACCEPTs are scoped to this destination; every other
-# :53 is REJECTed — including via loopback, so a rogue in-worker resolver on
-# 127.0.0.1:53 or direct 8.8.8.8:53 gains nothing.
+# Docker embedded resolver: its whole address is denied because NAT can
+# rewrite port 53 to a high port before the filter chain sees the packet.
 _EMBEDDED_RESOLVER = "127.0.0.11"
 
 
@@ -86,44 +85,26 @@ def _accept_rule(destination: str) -> str:
     return f"-A NAI-OUTPUT -d {destination} -j ACCEPT"
 
 
-def _effective_dns(policy: NetworkPolicy) -> str:
-    """Effective DNS posture for the :53 rules.
-
-    ``controlled`` with ZERO authorized names (no resolved domains — IP-only
-    allowlists, no research hosts) degrades to ``none``: DNS would only serve
-    names the worker cannot talk to, so fail closed instead of leaving a
-    DNS-protocol exfil/oracle path open for no authorized purpose.
-    """
-    if policy.allow_dns == "controlled" and not policy.resolved_domains and not policy.resolved_domain_addresses:
-        return "none"
-    return policy.allow_dns
-
-
 def _dns_v4_rules(policy: NetworkPolicy) -> list[str]:
-    """Port-53 rules for the v4 chain. MUST precede the blanket lo ACCEPT
-    (iptables first-match-wins: a later :53 REJECT would be shadowed)."""
-    if _effective_dns(policy) == "none":
-        # No DNS bypass: block resolver ports everywhere, loopback included.
-        return [
-            "-A NAI-OUTPUT -p udp --dport 53 -j REJECT",
-            "-A NAI-OUTPUT -p tcp --dport 53 -j REJECT",
-        ]
-    # controlled: the embedded resolver ONLY (udp+tcp); everything else :53
-    # is rejected, loopback-bypass included.
+    """No worker DNS egress, even for domain-authorized missions.
+
+    Host-side resolution supplies pinned hosts mappings. Docker rewrites its
+    embedded resolver's port in NAT, so block the complete resolver address
+    before loopback ACCEPT rather than relying only on destination port 53.
+    """
     return [
-        f"-A NAI-OUTPUT -d {_EMBEDDED_RESOLVER} -p udp --dport 53 -j ACCEPT",
-        f"-A NAI-OUTPUT -d {_EMBEDDED_RESOLVER} -p tcp --dport 53 -j ACCEPT",
-        "-A NAI-OUTPUT -p udp --dport 53 -j REJECT",
-        "-A NAI-OUTPUT -p tcp --dport 53 -j REJECT",
+        f"-A NAI-OUTPUT -d {_EMBEDDED_RESOLVER} -j DROP",
+        "-A NAI-OUTPUT -p udp --dport 53 -j DROP",
+        "-A NAI-OUTPUT -p tcp --dport 53 -j DROP",
     ]
 
 
 def _dns_v6_rules(policy: NetworkPolicy) -> list[str]:
     """Port-53 rules for the v6 chain. The embedded resolver is IPv4-only, so
-    v6 :53 is rejected in every mode (no legitimate v6 DNS path exists)."""
+    v6 :53 is dropped in every mode (no legitimate v6 DNS path exists)."""
     return [
-        "-A NAI-OUTPUT -p udp --dport 53 -j REJECT",
-        "-A NAI-OUTPUT -p tcp --dport 53 -j REJECT",
+        "-A NAI-OUTPUT -p udp --dport 53 -j DROP",
+        "-A NAI-OUTPUT -p tcp --dport 53 -j DROP",
     ]
 
 
@@ -134,8 +115,8 @@ def build_ipv4_rules(policy: NetworkPolicy, *, gateway: str = "") -> list[str]:
     - OUTPUT jumps to NAI-OUTPUT (the ONLY OUTPUT rule emitted; the chain
       would otherwise never evaluate and egress would fall through to the
       default ACCEPT policy)
-    - port-53 rules FIRST (scoped resolver ACCEPT / blanket REJECT precede the
-      lo ACCEPT, which would otherwise shadow them — first-match-wins)
+    - DNS rules FIRST (embedded resolver DROP and blanket port-53 DROP
+      precede lo ACCEPT, which would otherwise shadow them)
     - loopback ACCEPT: sandbox-internal 127.0.0.1 (NOT operator-host 127.0.0.1;
       dev host-loopback mapping is an explicit config decision in policy.py)
     - ESTABLISHED/RELATED ACCEPT (replies to authorized connections)
@@ -151,7 +132,7 @@ def build_ipv4_rules(policy: NetworkPolicy, *, gateway: str = "") -> list[str]:
         "-A NAI-OUTPUT -o lo -j ACCEPT",
         "-A NAI-OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT",
     ]
-    for blocked in COMMON_BLOCKED_NETS:
+    for blocked in dict.fromkeys((*COMMON_BLOCKED_NETS, *policy.explicitly_blocked)):
         if _ip_version(blocked) != 4:
             continue
         lines.append(f"-A NAI-OUTPUT -d {blocked} -j DROP")
@@ -179,7 +160,7 @@ def build_ipv6_rules(policy: NetworkPolicy, *, gateway: str = "") -> list[str]:
 
     IPv6 egress stays denied unless an explicitly authorized destination is an
     IPv6 address/CIDR (those get ACCEPT plumbed through here). v6 :53 is
-    always REJECTed (the embedded resolver is IPv4-only).
+    always DROPped (the embedded resolver is IPv4-only).
     """
     lines = [
         "*filter",
@@ -189,7 +170,17 @@ def build_ipv6_rules(policy: NetworkPolicy, *, gateway: str = "") -> list[str]:
         "-A NAI-OUTPUT -o lo -j ACCEPT",
         "-A NAI-OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT",
     ]
-    for blocked in (*_IPV6_EXTRA_BLOCKED, *(b for b in COMMON_BLOCKED_NETS if _ip_version(b) == 6)):
+    translated_metadata = tuple(str(network) for network in translated_metadata_networks())
+    for blocked in dict.fromkeys(
+        (
+            *_IPV6_EXTRA_BLOCKED,
+            *(b for b in COMMON_BLOCKED_NETS if _ip_version(b) == 6),
+            *policy.explicitly_blocked,
+            *translated_metadata,
+        )
+    ):
+        if _ip_version(blocked) != 6:
+            continue
         lines.append(f"-A NAI-OUTPUT -d {blocked} -j DROP")
 
     for dest in policy.authorized_destinations:
@@ -237,8 +228,7 @@ def apply_network_policy(
         if rc != 0:
             raise SandboxPolicyError(f"{proto} failed in sandbox netns (rc={rc}): {(err or out).strip()[:300]}")
     logger.info(
-        "sandbox network policy installed: %d authorized destinations, dns=%s",
+        "sandbox network policy installed: %d authorized destinations, worker DNS packets blocked",
         len(policy.authorized_destinations),
-        policy.allow_dns,
     )
     return True
