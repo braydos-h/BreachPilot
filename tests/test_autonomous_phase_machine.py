@@ -31,6 +31,7 @@ a module's runnable artifact is dispatched, the real output is classified via
 from __future__ import annotations
 
 import asyncio
+import shlex
 import threading
 import time
 from dataclasses import dataclass
@@ -220,6 +221,44 @@ def _task(module_name: str, target: str = "10.0.0.5") -> AttackTask:
         aggression=AggressionLevel.NORMAL,
         priority=50,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("script_source", ["module_result", "generator"])
+async def test_campaign_script_write_does_not_follow_workspace_modules_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, script_source: str
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (workspace / "modules").symlink_to(outside, target_is_directory=True)
+
+    script = "print('safe generated script')\n"
+    module = _ShellCompromiseModule()
+    module.generate_python_script = lambda _ctx: script
+    mresult = ModuleResult(status="script_generated", script=script if script_source == "module_result" else "")
+    commands: list[str] = []
+
+    def fake_executor(command: str, _ctx: dict[str, Any]) -> str:
+        commands.append(command)
+        return "ordinary output"
+
+    executor = _executor(tmp_path, tool_executor=fake_executor)
+    monkeypatch.setattr(executor, "_dispatch_block_reason", lambda _command, _task: None)
+    ctx = ModuleContext(target_ip="10.0.0.5", workspace=workspace)
+    state = AttackState(target="10.0.0.5", recon_result=_recon_with_http())
+
+    dispatched = await executor._dispatch_module_artifact(module, mresult, ctx, _task(module.name), state)
+
+    assert dispatched is not None
+    argv = shlex.split(commands[0])
+    assert argv[0] == "python"
+    saved_path = Path(argv[1])
+    assert saved_path.parent == workspace
+    assert saved_path.read_text(encoding="utf-8") == script
+    assert list(outside.iterdir()) == []
+    assert (workspace / "modules").is_symlink()
 
 
 # ── 1. Shell compromise sets access_achieved ────────────────────────────────

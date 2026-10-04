@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 12237)
+Total output lines: 975
+
 """Campaign executor — AttackModuleExecutor.
 
 Canonical source for AttackModuleExecutor.
@@ -8,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import re
+import shlex
 import time
 from typing import Any, Callable
 
@@ -17,6 +20,7 @@ from tools.attack_planner import StepContext
 from tools.attack_ui import get_ui
 from tools.exceptions import _EXC_GROUP_CATCH
 from tools.failure_taxonomy import classify_failure
+from tools.kernel.workspace import write_workspace_script
 from tools.logging_setup import get_logger
 from tools.scope_verdict import ScopeVerdict, verdict_for
 
@@ -383,169 +387,7 @@ class AttackModuleExecutor:
                             mresult.note = "Dispatched artifact reported failure markers"
                         state.add_timeline_event(
                             "dispatch_failure",
-                            f"{task.module_name} dispatch output signalled failure",
-                            {"evidence": classification.get("evidence", [])},
-                        )
-                    # 'partial' / 'unknown' -> ran but no verified compromise;
-                    # leave shell_type empty so access_achieved stays False.
-
-            # Convert the (possibly enriched) ModuleResult back to the dict shape
-            # the renderer / record_success / task.result expect. Pass-through
-            # extra keys are preserved by to_dict().
-            result = mresult.to_dict()
-
-            # Phase 1: feed this module run into the ExperienceStore so the
-            # Bayesian learning loop reflects orchestrator history, not just
-            # the exploit-agent loop. Best-effort -- a None store (legacy
-            # callers) or a module with no target signature (no target_services)
-            # is silently skipped. Maps info -> partial (neutral), real
-            # compromise -> success, failure -> failure. This is the missing
-            # wiring that makes find_modules on the next campaign prefer
-            # proven modules and demote known-bad ones.
-            if self._experience_store is not None:
-                try:
-                    sig = _module_target_signature(module, ctx)
-                    if sig is not None:
-                        self._experience_store.record_module_outcome(
-                            target_signature=sig,
-                            module_name=module.name,
-                            status_str=str(result.get("status", "")),
-                            metadata={"target": task.target, "phase": state.current_phase.value},
-                        )
-                except Exception:  # noqa: BLE001 -- learning loop is best-effort
-                    logger.debug(f"ExperienceStore record skipped for {module.name}")
-
-            # Process result
-            task.result = result
-            # A module that ran but did not achieve exploitation is NOT a success:
-            # the retry/mutation loop (_execute_task_batch), lateral recursion
-            # (_attack_target), and reflection (_run_reflection) all key off
-            # result["success"] / task.status, so a ran-but-failed module must
-            # report success=False and TaskStatus.FAILED -- otherwise failed
-            # modules are counted as completed and never retried.
-            # Phase 1: stop counting status="info" as _succeeded. Info-stub
-            # modules produce no runnable artifact and no compromise signal --
-            # counting them as success was a silent false-positive that left
-            # ValidateFinding/LateralMovement "succeeding" without ever
-            # dispatching (the dispatcher at line 659 correctly skips info
-            # status, but _succeeded then counted them as wins). Now only
-            # success/exploited/script_generated count as succeeded; info
-            # modules are recorded as failures so the retry loop can re-queue
-            # them with a dispatchable status (the module recipe must emit
-            # script/suggested_command to actually win).
-            _succeeded = result.get("status") in ("success", "exploited", "script_generated") and not dispatch_failure
-            task.status = TaskStatus.COMPLETED if _succeeded else TaskStatus.FAILED
-            task.completed_at = time.monotonic()
-
-            if _succeeded:
-                state.record_success(task.module_name, result)
-                state.add_timeline_event(
-                    "success",
-                    f"{task.module_name} succeeded against {task.target}",
-                    {"result_type": result.get("status")},
-                )
-                logger.info(f"Module {task.module_name} succeeded against {task.target}")
-                self._record_success_on_blackboard(task.module_name)
-                # D1: persist a cross-mission lesson on a confirmed win so the
-                # campaign learns across missions, not just within the exploit
-                # loop. Best-effort — store_lesson skips + logs when Ollama is
-                # down, and a None manager makes this a no-op. Distinct
-                # action_type keeps this from polluting the operational
-                # exploit-action confidence rows in the ExperienceStore.
-                await asyncio.to_thread(self._record_lesson_on_success, task, state, result)
-            else:
-                task.error = result.get("note", "Module did not achieve exploitation")
-                task.last_error = task.error
-                task.failure_class = classify_failure(task.error).value
-                state.record_failure(task.module_name, task.error)
-                state.add_timeline_event("failure", f"{task.module_name} did not achieve exploitation")
-                self._record_failure_on_blackboard(task.module_name)
-
-            # Reflection post-check (Tier 0 item 0.6b): feed this attempt into the
-            # ReflectionAgent. The agent updates the shared blackboard itself
-            # (last_reflection / strategy_shift / failed_modules); it is
-            # heuristic-only when no model_client is wired, so per-module cost is
-            # low. Advisory -- exceptions are swallowed so reflection can't stall
-            # the campaign. No-op when no reflection agent is wired.
-            await asyncio.to_thread(
-                self._run_reflection,
-                task,
-                state,
-                {"success": _succeeded, "result": result},
-            )
-
-            return {"success": _succeeded, "result": result}
-
-        except asyncio.TimeoutError:
-            task.status = TaskStatus.FAILED
-            task.error = f"Timeout after {timeout}s"
-            task.last_error = task.error
-            task.failure_class = classify_failure(task.error).value
-            state.record_failure(task.module_name, task.error)
-            state.add_timeline_event("timeout", task.error)
-            logger.warning(f"Module {task.module_name} timed out against {task.target}")
-            self._record_failure_on_blackboard(task.module_name)
-            return {"success": False, "error": task.error, "timeout": True}
-
-        except Exception as exc:
-            task.status = TaskStatus.FAILED
-            task.error = str(exc)
-            task.last_error = task.error
-            task.failure_class = classify_failure(task.error).value
-            state.record_failure(task.module_name, task.error)
-            state.add_timeline_event("error", f"Exception in {task.module_name}: {task.error}")
-            logger.exception(f"Module {task.module_name} failed against {task.target}")
-            self._record_failure_on_blackboard(task.module_name)
-            return {"success": False, "error": task.error}
-
-    async def execute_plan_step(self, step: StepContext) -> dict[str, Any]:
-        """Run ONE planner step with no cross-step memory (FSM executor role).
-
-        Takes only a StepContext (target/tool/arguments/expected evidence) --
-        never a plan, battle log, or history. Builds an ephemeral AttackTask /
-        AttackState, runs it through execute(), and folds the outcome into
-        ``{"success", "evidence", "failure_class"}`` for
-        ``tools.attack_planner.record_step_result``. Scope gating stays inside
-        execute() (fail-closed); a scope block maps to ``scope_blocked``.
-        """
-        task = AttackTask(
-            task_id=f"FSM-{self._action_count + 1:05d}",
-            phase=self._campaign_phase_for(step.phase),
-            module_name=step.tool,
-            target=step.target_ip,
-            parameters=dict(step.arguments),
-        )
-        state = AttackState(target=step.target_ip)
-        try:
-            raw = await self.execute(task, state)
-        except _EXC_GROUP_CATCH as exc:
-            err = f"{type(exc).__name__}: {exc}"[:2000]
-            task.failure_class = classify_failure(err).value
-            return {
-                "success": False,
-                "evidence": [err],
-                "failure_class": task.failure_class,
-                "tool": step.tool,
-                "target_ip": step.target_ip,
-            }
-        if raw.get("success"):
-            task.failure_class = ""
-            return {
-                "success": True,
-                "evidence": _result_evidence(raw.get("result")),
-                "failure_class": "",
-                "tool": step.tool,
-                "target_ip": step.target_ip,
-            }
-        err = str(raw.get("error") or "unknown failure")[:2000]
-        # Fail-closed scope blocks are scope_blocked even when the message
-        # misses the taxonomy regexes (never retry a blocked step blindly).
-        task.failure_class = "scope_blocked" if raw.get("blocked") else classify_failure(err).value
-        return {
-            "success": False,
-            "evidence": [err],
-            "failure_class": task.failure_class,
-            "tool": step.tool,
+       …2237 tokens truncated…           "tool": step.tool,
             "target_ip": step.target_ip,
         }
 
@@ -611,12 +453,8 @@ class AttackModuleExecutor:
                     script_text = ""
             if script_text:
                 try:
-                    modules_dir = ctx.workspace / "modules"
-                    modules_dir.mkdir(parents=True, exist_ok=True)
-                    safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{module.name}_{ctx.target_ip}.py")
-                    script_path = modules_dir / safe_name
-                    script_path.write_text(script_text, encoding="utf-8")
-                    command = f"python {script_path} {ctx.target_ip}"
+                    script_path = write_workspace_script(ctx.workspace, f"{module.name}_{ctx.target_ip}", script_text)
+                    command = f"python {shlex.quote(str(script_path))} {shlex.quote(ctx.target_ip)}"
                 except Exception as exc:  # noqa: BLE001 -- best-effort
                     state.add_timeline_event(
                         "dispatch_write_err",
