@@ -13,6 +13,15 @@ exploit_workspace
 test_workspace*
 secr.json
 .env
+.env.*
+!.env.example
 *.log
+.webui_secret_key
+.vault_key
+*.pem
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
 webui/dist
 Dockerfile
