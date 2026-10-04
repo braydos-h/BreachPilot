@@ -383,11 +383,17 @@ class RunManager:
                 return
 
             handle.preview = preview
+            # Preparation already resolved the target with a bounded DNS
+            # timeout. Reuse that identity: resolving again here would block
+            # the event loop under the lifecycle lock and could change the IP
+            # the operator is about to confirm.
+            handle.resolved_ip = preview.resolved_ip or preview.target_ip
             # Per-run allowlist snapshot — Run A's target never appears in
             # Run B's allowlist even when N runs are live concurrently.
             handle.allowlist = _snapshot_allowlist(
                 handle.config_snapshot,
                 preview.original_target or preview.target_ip,
+                resolved_ip=handle.resolved_ip,
             )
             # Persist the prepared preview (target/mode/goal/model/...).
             await self._db.arun(self._persistence.update_run_preview, handle.run_id, _preview_to_dict(preview))

@@ -169,6 +169,37 @@ async def test_per_run_allowlist_scoping_no_cross_leak(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("target", ["assessment.example", "10.0.0.50"])
+async def test_prepared_allowlist_reuses_target_resolution(tmp_path, monkeypatch, target):
+    """Finalizing preparation preserves its IP without another DNS lookup."""
+    manager = _make_manager(tmp_path, monkeypatch)
+    manager.config["exploit"] = {"allowed_targets": ["10.0.0.99"]}
+
+    class PreparedService(_FakeService):
+        async def prepare(self, request, *, run_id=None, progress=None):
+            preview = _preview(run_id, request.target, tmp_path)
+            preview.target_ip = "10.0.0.50"
+            if target == "assessment.example":
+                preview.resolved_ip = "10.0.0.50"
+                preview.resolved_domain = target
+            return preview
+
+    def unexpected_resolution(_target):
+        pytest.fail("Prepared targets must not be resolved again")
+
+    monkeypatch.setattr("tools.run_service.AssessmentService", PreparedService)
+    monkeypatch.setattr("tools.api.run_manager.resolve_target_to_ip", unexpected_resolution)
+    try:
+        run_id, _, _ = await manager.create_run(RunRequest(target=target))
+        handle = await manager.wait_for_prepared(run_id)
+        assert handle.preview.target_ip == "10.0.0.50"
+        assert handle.resolved_ip == "10.0.0.50"
+        assert set(handle.allowlist) == {"10.0.0.99", target, "10.0.0.50"}
+    finally:
+        await manager.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_snapshot_allowlist_unions_config_targets(tmp_path):
     """``_snapshot_allowlist`` unions config ``exploit.allowed_targets`` + target."""
     config = {"exploit": {"allowed_targets": ["127.0.0.1", "10.0.0.99"]}}
