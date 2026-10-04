@@ -661,7 +661,7 @@ CONFIG_SCHEMA: dict[str, Any] = {
     },
     # Proxy-backed HITL evidence loop (Flow A): agents propose candidate
     # findings (PROPOSED), a human Approves/Rejects them in the WebUI
-    # Evidence tab (or hitl_decide / POST /runs/{id}/decide). Default ON —
+    # Evidence tab (POST /runs/{id}/decide). Default ON —
     # the gate is additive (undecided findings render with their PROPOSED
     # badge; only APPROVED surface via approved_findings). No new DB/infra.
     "hitl": {

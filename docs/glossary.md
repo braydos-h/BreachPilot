@@ -232,7 +232,7 @@ Quick index (see one-line definitions below):
 - **decision broker** — Per-run approval-decision futures between agent, server, and WebUI (`tools/api/decision_broker.py:19 DecisionBroker`, `:50 await_answer`, `:63 resolve`).
 - **event broker** — Per-run JSONL plus ring-buffer pub/sub feeding SSE/WS (`tools/api/event_broker.py:431 RunEventBroker`, `:692 EventBrokerRegistry`; reconnect note `:6`).
 - **exploit policy** — Attack-path approval object auto-approving everything on `full_access` except the threaded mission ScopeGate consult (`tools/exploit_agent/policy.py:292 ExploitPolicy`, `:382 approve_action`).
-- **HITL proposal** — Agent-submitted `PROPOSED` candidate finding awaiting a human `APPROVED`/`REJECTED` decision (`tools/mcp_tools/hitl.py:49 PROPOSED`, `:155 propose_new_finding`, `:301 register_hitl_tools`, `:370 hitl_decide` operator-only).
+- **HITL proposal** — Agent-submitted `PROPOSED` candidate finding awaiting a human `APPROVED`/`REJECTED` decision (`tools/mcp_tools/hitl.py:47 PROPOSED`, `:154 propose_new_finding`, `:309 register_hitl_tools`; the authenticated API route is the only decision path).
 - **killchain** — Opt-in evidence-verified stage machine (`tools/killchain/machine.py:45 KillChainMachine`; goal `tools/killchain/states.py:49 SHELL_AS_ROOT`; default `tools/config/schema.py:547 goal_state`).
 - **operator connection** — Persistent RCE callback session management (`tools/operator_connection/manager.py:106 ConnectionManager`, `:47 ConnectionRecord`).
 - **oracle** — Per-target expected-findings JSON used for scoring, never the agent's own claim (`tools/eval_harness.py:635 load_target_oracle`, `:646 score_against_oracle`).

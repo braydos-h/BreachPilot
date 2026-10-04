@@ -2,30 +2,31 @@
 
 Agent candidates land as ``PROPOSED`` findings in the run artifact
 (``reports/<run_id>/enhanced/enhanced_report.json``); only a human decision
-(``APPROVED``/``REJECTED`` via ``hitl_decide`` or ``POST /runs/{id}/decide``)
-promotes them. LLM verdicts (``verify_poc``/``verify_finding``/
+(``APPROVED``/``REJECTED`` via the bearer-authenticated
+``POST /runs/{id}/decide`` API) promotes them. LLM verdicts
+(``verify_poc``/``verify_finding``/
 ``retest_finding``) never write ``hitl_status`` — they stay machine evidence
 (``verify_status``/``retest_status``) until a human signs off.
 
 Reuse (no new execution paths, no new stores):
 
-- finding lookup + reports-root resolution from ``tools/mcp_tools/retest.py``
-  (``locate_finding`` / ``_reports_root`` / ``_finding_file``);
+- reports-root and artifact path resolution from ``tools/mcp_tools/retest.py``
+  (``_reports_root`` / ``_finding_file``);
 - ``record_*``/``persist_*`` shape from ``retest.py``/``verify.py``
   (status stamp + ``history[]`` append, sibling ``.md``/``.html``
   regenerated when present);
 - the proof capsule shown to the human is read-only from the existing
   ``verification_probe`` + ``verify_history[]`` + ``retest_history[]`` —
-  this module executes NOTHING (all three tools are local-only
+  this module executes NOTHING (both registered tools are local-only
   ``@audit_tool``; probe re-exec stays inside ``verify_finding`` /
   ``retest_finding`` via ``run_exploit_terminal``).
 
-Self-approval guard: ``record_hitl_decision`` raises ``PermissionError``
-unless ``actor == "human"``; the MCP ``hitl_decide`` wrapper refuses any
-other actor (BLOCKED). The REST decide route hardcodes ``actor="human"``
-(the bearer-gated WebUI IS the human path) and never accepts it from the
-client. Every decision lands in ``hitl_history[]`` and the JSONL audit
-trail with its actor.
+Decision boundary: MCP agents can propose and list findings but have no
+decision tool. The bearer-authenticated REST route hardcodes
+``actor="human"`` server-side and never accepts it from the client.
+``record_hitl_decision`` and ``persist_hitl_decision`` retain an actor guard
+for trusted in-process callers. Decisions persist in ``hitl_history[]``;
+the API emits a ``hitl_decision`` run event for live WebUI refresh.
 """
 
 from __future__ import annotations
@@ -51,7 +52,6 @@ from tools.mcp_tools.retest import (
     _finding_file,
     _read_report_json,
     _reports_root,
-    locate_finding,
 )
 
 _HUMAN_ACTOR = "human"
@@ -325,7 +325,7 @@ def register_hitl_tools(mcp: Any, *, ctx: ToolContext) -> None:
         severity: str = "Medium",
         vuln_class: str = "",
     ) -> str:
-        """Propose a candidate finding for human review (agents propose, human decides). Appends a PROPOSED finding to reports/<run_id>/enhanced/enhanced_report.json — never APPROVED. A human promotes it via hitl_decide (operator path) or the WebUI Evidence tab. Zero target touch — pure local artifact write.
+        """Propose a candidate finding for human review (agents propose, human decides). Appends a PROPOSED finding to reports/<run_id>/enhanced/enhanced_report.json — never APPROVED. A human promotes it through the bearer-authenticated API / WebUI Evidence tab; no MCP decision tool is exposed. Zero target touch — pure local artifact write.
 
         Args:
             run_id: Run to attach the proposal to (must exist under the reports dir).
@@ -373,39 +373,6 @@ def register_hitl_tools(mcp: Any, *, ctx: ToolContext) -> None:
             f"STATUS: {PROPOSED} (awaiting human Approve/Reject in the Evidence tab)\n"
             f"TITLE: {finding['title']}"
         )
-
-    @mcp.tool()
-    @audit_tool
-    def hitl_decide(finding_id: str, decision: str, note: str = "", run_id: str = "", actor: str = "") -> str:
-        """Record a human Approve/Reject decision on a proposed finding (operator-only human path — no target touch). Persists APPROVED/REJECTED + hitl_history[] (with actor) into the run artifact JSON. Only actor='human' is accepted — any other actor (including the agent itself) is BLOCKED so an LLM can never self-approve: agents propose via propose_finding, humans decide here or in the WebUI Evidence tab.
-
-        Args:
-            finding_id: Proposed finding to decide on.
-            decision: APPROVED or REJECTED.
-            note: Reviewer note recorded in hitl_history[].
-            run_id: Run holding the finding; empty = latest run containing it.
-            actor: Must be 'human' (the operator); anything else is refused.
-        """
-        if not (finding_id or "").strip():
-            return "BLOCKED: finding_id is required."
-        if (actor or "").strip().lower() != _HUMAN_ACTOR:
-            return "BLOCKED: hitl_decide requires actor='human' (operator-only; agents cannot self-approve)."
-        try:
-            _data, _finding, json_path, resolved_run = locate_finding(
-                _reports_root(config), finding_id.strip(), (run_id or "").strip()
-            )
-        except LookupError as exc:
-            return f"ERROR: hitl_decide: {exc}"
-        try:
-            persist_hitl_decision(json_path, finding_id.strip(), decision, note, actor=_HUMAN_ACTOR)
-        except PermissionError as exc:
-            return f"BLOCKED: hitl_decide: {exc}"
-        except (ValueError, LookupError) as exc:
-            return f"ERROR: hitl_decide: {exc}"
-        except OSError as exc:
-            return f"ERROR: hitl_decide: cannot persist {json_path}: {exc}"
-        verdict = (decision or "").strip().upper()
-        return f"HITL_DECIDED:\nFINDING: {finding_id.strip()}\nRUN: {resolved_run}\nDECISION: {verdict} (actor=human)"
 
     @mcp.tool()
     @audit_tool

@@ -1,10 +1,9 @@
 """Proxy-backed HITL evidence loop tests (mocked I/O — no live network).
 
-Covers the hitl MCP tools end to end through FakeMCP/FakeCtx:
-propose→approve→APPROVED, propose→reject→hidden, LLM self-approval
-refusal (helper + tool layers), list_proposed scoping, the hitl.enabled
-gate, the approved_findings final-report filter, and proof-capsule
-read-back from stored machine evidence.
+Covers the agent-callable hitl MCP tools through FakeMCP/FakeCtx and the
+separate bearer-authenticated human API path: agents can propose/list but
+cannot decide; the API can approve/reject; lifecycle helpers enforce actor
+and status transitions.
 """
 
 from __future__ import annotations
@@ -120,7 +119,7 @@ def _read_finding(path: Path, finding_id: str) -> dict[str, Any]:
 # ── propose → decide ─────────────────────────────────────────────────────
 
 
-def test_propose_approve_report_shows_approved(tmp_path: Path) -> None:
+def test_agent_proposal_stays_pending_for_human_review(tmp_path: Path) -> None:
     _write_report(tmp_path, "run1", [])
     mcp = _register(tmp_path)
     out = str(
@@ -141,32 +140,16 @@ def test_propose_approve_report_shows_approved(tmp_path: Path) -> None:
             "technical_findings"
         ]
     )
-    out = str(mcp.tools["hitl_decide"](finding_id=finding_id, decision="approved", actor="human", run_id="run1"))
-    assert "DECISION: APPROVED" in out
     path = tmp_path / "run1" / "enhanced" / "enhanced_report.json"
     saved = _read_finding(path, finding_id)
-    assert saved["hitl_status"] == APPROVED
-    assert saved["hitl_history"][-1] == {
-        "timestamp": saved["hitl_history"][-1]["timestamp"],
-        "decision": APPROVED,
-        "note": "",
-        "actor": "human",
-    }
-    # Final-report filter surfaces it; report renderers carry the badge.
-    assert [
-        f["finding_id"] for f in approved_findings(json.loads(path.read_text(encoding="utf-8"))["technical_findings"])
-    ] == [finding_id]
+    assert saved["hitl_status"] == PROPOSED
+    assert saved["hitl_history"][-1]["actor"] == "agent"
+    assert approved_findings(json.loads(path.read_text(encoding="utf-8"))["technical_findings"]) == []
 
 
 def test_propose_reject_hidden_from_approved(tmp_path: Path) -> None:
     path = _write_report(tmp_path, "run1", [_proposed_finding()])
-    mcp = _register(tmp_path)
-    out = str(
-        mcp.tools["hitl_decide"](
-            finding_id="F-10-0-0-50-demo", decision="REJECTED", note="false positive", actor="human"
-        )
-    )
-    assert "DECISION: REJECTED" in out
+    persist_hitl_decision(path, "F-10-0-0-50-demo", REJECTED, note="false positive", actor="human")
     saved = _read_finding(path, "F-10-0-0-50-demo")
     assert saved["hitl_status"] == REJECTED
     assert saved["hitl_history"][-1]["note"] == "false positive"
@@ -175,17 +158,17 @@ def test_propose_reject_hidden_from_approved(tmp_path: Path) -> None:
 
 
 def test_list_proposed_hides_decided(tmp_path: Path) -> None:
-    _write_report(tmp_path, "run1", [_proposed_finding(), _proposed_finding(finding_id="F-other")])
+    path = _write_report(tmp_path, "run1", [_proposed_finding(), _proposed_finding(finding_id="F-other")])
     mcp = _register(tmp_path)
     assert "2 awaiting review" in str(mcp.tools["list_proposed"](run_id="run1"))
-    mcp.tools["hitl_decide"](finding_id="F-10-0-0-50-demo", decision="APPROVED", actor="human", run_id="run1")
+    persist_hitl_decision(path, "F-10-0-0-50-demo", APPROVED, actor="human")
     out = str(mcp.tools["list_proposed"](run_id="run1"))
     assert "1 awaiting review" in out
     assert "F-other" in out
     assert "F-10-0-0-50-demo" not in out
 
 
-# ── LLM cannot self-approve ──────────────────────────────────────────────
+# ── Agent decision boundary ──────────────────────────────────────────────
 
 
 def test_agent_actor_refused_at_helper() -> None:
@@ -199,20 +182,18 @@ def test_agent_actor_refused_at_helper() -> None:
     assert finding["hitl_status"] == APPROVED
 
 
-def test_agent_actor_blocked_at_tool(tmp_path: Path) -> None:
-    path = _write_report(tmp_path, "run1", [_proposed_finding()])
+def test_mcp_does_not_register_human_decision_tool(tmp_path: Path) -> None:
+    _write_report(tmp_path, "run1", [_proposed_finding()])
     mcp = _register(tmp_path)
-    for actor in ("", "agent", "llm"):
-        out = str(mcp.tools["hitl_decide"](finding_id="F-10-0-0-50-demo", decision="APPROVED", actor=actor))
-        assert out.startswith("BLOCKED:"), out
-    assert _read_finding(path, "F-10-0-0-50-demo")["hitl_status"] == PROPOSED
+    assert "propose_finding" in mcp.tools
+    assert "list_proposed" in mcp.tools
+    assert "hitl_decide" not in mcp.tools
 
 
 def test_unknown_decision_rejected(tmp_path: Path) -> None:
-    _write_report(tmp_path, "run1", [_proposed_finding()])
-    mcp = _register(tmp_path)
-    out = str(mcp.tools["hitl_decide"](finding_id="F-10-0-0-50-demo", decision="MAYBE", actor="human"))
-    assert out.startswith("ERROR:")
+    path = _write_report(tmp_path, "run1", [_proposed_finding()])
+    with pytest.raises(ValueError):
+        persist_hitl_decision(path, "F-10-0-0-50-demo", "MAYBE", actor="human")
     with pytest.raises(ValueError):
         record_hitl_decision(_proposed_finding(), "BOGUS", actor="human")
 
@@ -232,8 +213,7 @@ def test_propose_validates_input(tmp_path: Path) -> None:
     assert str(mcp.tools["propose_finding"](run_id="nope", title="t", affected_asset=TARGET, summary="s")).startswith(
         "ERROR:"
     )
-    assert str(mcp.tools["hitl_decide"](finding_id="", decision="APPROVED", actor="human")).startswith("BLOCKED:")
-    assert str(mcp.tools["hitl_decide"](finding_id="F-nope", decision="APPROVED", actor="human")).startswith("ERROR:")
+    assert "hitl_decide" not in mcp.tools
 
 
 def test_propose_never_approves_and_ids_unique(tmp_path: Path) -> None:
@@ -458,6 +438,21 @@ def test_api_proposed_and_decide_live(tmp_path: Path, monkeypatch) -> None:
     proposed = resp.json()["proposed"]
     assert [f["finding_id"] for f in proposed] == ["F-10-0-0-50-demo"]
     assert proposed[0]["proof"]["probe_exec"] == "curl -s http://10.0.0.50/poc"
+
+    # The API remains the human decision path and requires its bearer token.
+    # A caller cannot supply an actor field to turn an unauthenticated request
+    # into a human decision.
+    resp = client.post(
+        f"/api/v1/runs/{run_id}/decide",
+        json={"finding_id": "F-10-0-0-50-demo", "decision": "APPROVED", "actor": "human"},
+    )
+    assert resp.status_code == 401
+    assert (
+        _read_finding(tmp_path / "reports" / run_id / "enhanced" / "enhanced_report.json", "F-10-0-0-50-demo")[
+            "hitl_status"
+        ]
+        == PROPOSED
+    )
 
     # The REST decide route takes no actor — the server stamps human.
     resp = client.post(

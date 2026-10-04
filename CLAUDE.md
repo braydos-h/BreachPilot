@@ -249,7 +249,7 @@ The exploit MCP server's tool implementations live in a structured subpackage, r
 | `mitre.py` | MITRE ATT&CK technique mapping / Navigator layer export |
 | `operator_connection.py` | RCE beacons, listeners, callback management |
 | `ad.py` | Active Directory modules (BloodHound CE, AS-REP roast, pass-the-hash, ADCS/Certipy, SMB signing checks) |
-| `hitl.py` | `propose_finding` / `hitl_decide` / `list_proposed` — agents propose candidates (`PROPOSED`); humans Approve/Reject in the WebUI Evidence tab; only `APPROVED` becomes a finding |
+| `hitl.py` | `propose_finding` / `list_proposed` — agents propose candidates (`PROPOSED`); a human approves/rejects through the bearer-authenticated API / WebUI Evidence tab; no MCP decision tool is exposed; only `APPROVED` becomes a finding |
 | `retest.py` | `retest_finding` — re-runs a confirmed finding's stored PoC probe (`STILL_OPEN` / `FIXED` / `INCONCLUSIVE`) |
 | `verify.py` | `verify_finding` — re-proves a candidate's stored probe N/N times (`VERIFIED` / `HOLDING` / `INCONCLUSIVE` + proof capsule) |
 | `assessment_state.py` | Per-target `AssessmentState` (`record_hypothesis` / `update_task`, allowlist re-validated before writes) |

@@ -13,7 +13,7 @@ verify: every tool listed exists as an @mcp.tool def at time of generation (2026
 Source locations use `<file>:<line>` relative to the repo root. Registration functions (`register_*_tools`) are auto-discovered via `tools/mcp_tools/registry.py:collect_tools()`; no manual list edit is needed.
 
 
-_Generated 2026-10-04 from `43 source files` (167 tools across 37 families)._
+_Generated 2026-10-04 from `43 source files` (166 tools across 37 families)._
 
 ## engine (`mcp_engine_server.py`) (5)
 
@@ -132,15 +132,14 @@ _Generated 2026-10-04 from `43 source files` (167 tools across 37 families)._
 | `vhost_enum` | `@require_allowlist(host_param="domain")` | Enumerate virtual hosts on a web server via Host-header rotation. | `tools/mcp_tools/domain.py:1096` |
 | `domain_whois` | `@require_allowlist("domain")` | WHOIS lookup + DNS-provider profiling for a domain. | `tools/mcp_tools/domain.py:1259` |
 
-## `tools/mcp_tools/hitl.py` (3)
+## `tools/mcp_tools/hitl.py` (2)
 
 - **Registration:** `register_hitl_tools()` (`tools/mcp_tools/hitl.py:310`) — auto-discovered; no edit to `mcp_exploit_server.py`.
 
 | Tool | Gates | Purpose | Source |
 |------|-------|---------|--------|
-| `propose_finding` | `@audit_tool` | Propose a candidate finding for human review (agents propose, human decides). Appends a PROPOSED finding to reports/<run_id>/enhanced/enhanced_report.json — never APPROVED. A human promotes it via hitl_decide (operator path) or the WebUI Ev… | `tools/mcp_tools/hitl.py:318` |
-| `hitl_decide` | `@audit_tool` | Record a human Approve/Reject decision on a proposed finding (operator-only human path — no target touch). Persists APPROVED/REJECTED + hitl_history[] (with actor) into the run artifact JSON. Only actor='human' is accepted — any other actor… | `tools/mcp_tools/hitl.py:379` |
-| `list_proposed` | `@audit_tool` | List findings awaiting human review (hitl_status=PROPOSED). Empty run_id scans all runs (newest first). Zero target touch — reads the run artifact JSON only. Approved/rejected findings are hidden here; the final report surfaces APPROVED fin… | `tools/mcp_tools/hitl.py:412` |
+| `propose_finding` | `@audit_tool` | Propose a candidate finding for human review (agents propose, human decides). Appends a PROPOSED finding to reports/<run_id>/enhanced/enhanced_report.json — never APPROVED. A human promotes it through the bearer-authenticated API / WebUI Ev… | `tools/mcp_tools/hitl.py:318` |
+| `list_proposed` | `@audit_tool` | List findings awaiting human review (hitl_status=PROPOSED). Empty run_id scans all runs (newest first). Zero target touch — reads the run artifact JSON only. Approved/rejected findings are hidden here; the final report surfaces APPROVED fin… | `tools/mcp_tools/hitl.py:379` |
 
 ## `tools/mcp_tools/killchain.py` (3)
 
@@ -382,14 +381,14 @@ _Generated 2026-10-04 from `43 source files` (167 tools across 37 families)._
 
 ## `tools/mcp_tools/terminal/execute.py` (4)
 
-- **Registration:** `_register_execute_tools()` (`tools/mcp_tools/terminal/execute.py:193`) — auto-discovered; no edit to `mcp_exploit_server.py`.
+- **Registration:** `_register_execute_tools()` (`tools/mcp_tools/terminal/execute.py:213`) — auto-discovered; no edit to `mcp_exploit_server.py`.
 
 | Tool | Gates | Purpose | Source |
 |------|-------|---------|--------|
-| `run_exploit_terminals` | `@audit_tool` | Run several short shell probes as ONE sandbox round-trip. | `tools/mcp_tools/terminal/execute.py:217` |
-| `run_exploit_terminal` | `@audit_tool` | Run any shell command in a dedicated visible terminal window. The command executes synchronously; output is captured and RETURNED in the result under an OUTPUT: section. Use for running Kali tools, nmap, curl, netcat, searchsploit, etc. IMP… | `tools/mcp_tools/terminal/execute.py:448` |
-| `run_as_root` | `@audit_tool` | Run ANY command with sudo (root privileges). Use for commands that require root: tcpdump, iptables, systemctl, writing to /etc, raw socket operations, etc. The command runs synchronously and output is captured. | `tools/mcp_tools/terminal/execute.py:703` |
-| `git_clone` | `@audit_tool` | Clone a Git repository (GitHub exploit/PoC/tool) into the workspace. Provide the full repo URL (e.g., 'https://github.com/user/repo.git'). Optional target_dir for a custom folder name. | `tools/mcp_tools/terminal/execute.py:797` |
+| `run_exploit_terminals` | `@audit_tool` | Run several short shell probes as ONE sandbox round-trip. | `tools/mcp_tools/terminal/execute.py:237` |
+| `run_exploit_terminal` | `@audit_tool` | Run any shell command in a dedicated visible terminal window. The command executes synchronously; output is captured and RETURNED in the result under an OUTPUT: section. Use for running Kali tools, nmap, curl, netcat, searchsploit, etc. IMP… | `tools/mcp_tools/terminal/execute.py:469` |
+| `run_as_root` | `@audit_tool` | Run ANY command with sudo (root privileges). Use for commands that require root: tcpdump, iptables, systemctl, writing to /etc, raw socket operations, etc. The command runs synchronously and output is captured. | `tools/mcp_tools/terminal/execute.py:725` |
+| `git_clone` | `@audit_tool` | Clone a Git repository (GitHub exploit/PoC/tool) into the workspace. Provide the full repo URL (e.g., 'https://github.com/user/repo.git'). Optional target_dir for a custom folder name. | `tools/mcp_tools/terminal/execute.py:819` |
 
 ## `tools/mcp_tools/terminal/package.py` (5)
 
@@ -410,7 +409,7 @@ _Generated 2026-10-04 from `43 source files` (167 tools across 37 families)._
 | Tool | Gates | Purpose | Source |
 |------|-------|---------|--------|
 | `check_environment` | `@audit_tool` | Check security tool availability in the sandbox worker or consented native environment. | `tools/mcp_tools/terminal/privilege.py:143` |
-| `preflight_env_check` | `@audit_tool` | Probe installed pentest tools, sudo/pip installability, and the | `tools/mcp_tools/terminal/privilege.py:279` |
+| `preflight_env_check` | `@audit_tool` | Probe installed pentest tools, sudo/pip installability, and the | `tools/mcp_tools/terminal/privilege.py:284` |
 
 ## `tools/mcp_tools/verify.py` (1)
 
@@ -443,11 +442,11 @@ _Generated 2026-10-04 from `43 source files` (167 tools across 37 families)._
 
 ## Totals
 
-- **Tools:** 167 across 37 families.
+- **Tools:** 166 across 37 families.
 
 | Gates | Count |
 |-------|-------|
-| `@audit_tool` | 82 |
+| `@audit_tool` | 81 |
 | `@require_allowlist()` | 50 |
 | `@require_allowlist("target")` | 14 |
 | `—` | 13 |

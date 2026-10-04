@@ -557,23 +557,23 @@ regenerated when present); snapshot state is attached best-effort via
 
 Proxy-backed HITL evidence loop, Flow A only ("agents propose, human
 decides" — Caido Replay / Burp AT style). Agent candidates land as
-`PROPOSED` findings; only a human `APPROVED`/`REJECTED` promotes them:
+`PROPOSED` findings; MCP agents can propose/list, while a human approves or
+rejects through the bearer-authenticated WebUI API:
 
 | Tool | Params | Target | Lock |
 |---|---|---|---|
 | `propose_finding` | `run_id`, `title`, `affected_asset`, `summary`, `probe_exec`, `evidence`, `severity`, `vuln_class` | no | audit |
-| `hitl_decide` | `finding_id`, `decision` (`APPROVED`/`REJECTED`), `note`, `run_id` (optional), `actor` (must be `'human'`) | no | audit |
 | `list_proposed` | `run_id` (optional; empty = all runs, newest first) | no | audit |
 
-All three are local-only `@audit_tool` (zero target touch — probe re-exec
+Both registered tools are local-only `@audit_tool` (zero target touch — probe re-exec
 stays inside `verify_finding`/`retest_finding`). `verify_poc` /
 `verify_finding` / `retest_finding` never write `hitl_status`, so machine
-verdicts stay `PROPOSED` until a human signs off; `record_hitl_decision`
-raises `PermissionError` for any non-`human` actor, so an LLM can never
-self-approve (every decision lands in `hitl_history[]` and the JSONL audit
-trail with its actor). Decisions persist into `hitl_status`/`hitl_history[]`
+verdicts stay `PROPOSED` until a human signs off. The MCP server exposes no
+decision tool; the bearer-authenticated REST route stamps `actor="human"`
+server-side (each decision lands in `hitl_history[]` and emits a
+`hitl_decision` run event). Decisions persist into `hitl_status`/`hitl_history[]`
 in the run artifact JSON (sibling `.md`/`.html` regenerated when present).
-Returned blocks: `HITL_PROPOSED:` / `HITL_DECIDED:`. WebUI: the Evidence tab
+Returned blocks: `HITL_PROPOSED:`. WebUI: the Evidence tab
 on the run page (`GET /runs/{id}/proposed`, `POST /runs/{id}/decide`, live
 via the `hitl_decision` event); `approved_findings()` is the final-report
 filter (APPROVED-only).
