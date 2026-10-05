@@ -50,7 +50,7 @@ from tools.benchmark.report import render_report_html, render_report_markdown
 from tools.benchmark.storage import BenchmarkStorage
 from tools.benchmark.targets import TargetManager, TargetProvisionError
 from tools.benchmark.verifier import IndependentVerifier
-from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
+from tools.exceptions import _EXC_GROUP_CATCH, _find_cancellation, _is_exception_group, _log_nested_exceptions
 from tools.sandbox.models import SandboxConfig as _SandboxConfig  # pure data; no Docker import, no cycle
 
 __all__ = ["BenchmarkRunner", "mint_run_id"]
@@ -604,6 +604,9 @@ class BenchmarkRunner:
             session = await cm.__aenter__()
             loop = asyncio.get_running_loop()
         except _EXC_GROUP_CATCH as exc:
+            cancellation = _find_cancellation(exc)
+            if cancellation is not None:
+                raise cancellation from exc
             if _is_exception_group(exc):
                 _log_nested_exceptions(exc)
             event_logger.log(
@@ -635,6 +638,9 @@ class BenchmarkRunner:
                 except _EXC_GROUP_CATCH as exc:
                     if _is_exception_group(exc):
                         _log_nested_exceptions(exc)
+                    cancellation = _find_cancellation(exc)
+                    if cancellation is not None:
+                        raise cancellation from exc
                 except Exception:  # noqa: BLE001 -- teardown best-effort
                     pass
 

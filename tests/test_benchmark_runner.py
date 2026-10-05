@@ -144,6 +144,33 @@ def test_false_positive(tmp_path, runner_cls_patched):
     assert payload["summary"]["false_positive_rate"] == 1.0
 
 
+@pytest.mark.asyncio
+async def test_verify_propagates_cancellation_group_from_session_start(monkeypatch, tmp_path):
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    from tools.benchmark.models import TrialResult
+
+    @asynccontextmanager
+    async def cancelled_session(**_kwargs):
+        raise BaseExceptionGroup("verifier startup", [asyncio.CancelledError("run cancelled")])
+        yield None  # pragma: no cover
+
+    monkeypatch.setattr("tools.mcp_session.open_exploit_mcp_session", cancelled_session)
+    runner = BenchmarkRunner(_config(tmp_path), Path("config.yaml"), verifier_factory=lambda _s: pytest.fail("verify"))
+
+    class EventLogger:
+        def log(self, *_args, **_kwargs):
+            pytest.fail("cancellation must not be reported as a verifier soft failure")
+
+    with pytest.raises(asyncio.CancelledError, match="run cancelled"):
+        await runner._verify(
+            SimpleNamespace(target_host="192.0.2.10", scenario_id="s1"),
+            TrialResult(trial_id="trial-1", scenario_id="s1"),
+            EventLogger(),
+        )
+
+
 def test_failed_trial_no_exploit_path(tmp_path, runner_cls_patched):
     seed_fake_suite([_scenario("s1")])
     runner_cls_patched([MissionResult(total_actions=4, telemetry=TrialTelemetry(tool_calls=4))])

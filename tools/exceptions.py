@@ -9,6 +9,7 @@ task groups raise ``BaseExceptionGroup`` on subprocess death, which is
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import traceback
 from typing import TypeGuard
@@ -20,6 +21,30 @@ def _is_exception_group(exc: BaseException) -> TypeGuard[BaseExceptionGroup]:
         return True
     attr = getattr(exc, "exceptions", None)
     return isinstance(attr, tuple)
+
+
+def _find_cancellation(exc: BaseException) -> asyncio.CancelledError | None:
+    """Return a nested asyncio cancellation, if an exception group contains one.
+
+    MCP task-group teardown can combine cancellation with a transport error.
+    Callers may handle the transport failure, but must preserve cancellation
+    instead of returning a normal result or soft-failure sentinel.
+    """
+    if isinstance(exc, asyncio.CancelledError):
+        return exc
+    if _is_exception_group(exc):
+        for nested in exc.exceptions:
+            cancellation = _find_cancellation(nested)
+            if cancellation is not None:
+                return cancellation
+    return None
+
+
+def _reraise_if_cancelled(exc: BaseException) -> None:
+    """Propagate cancellation found inside ``exc`` instead of soft-failing it."""
+    cancellation = _find_cancellation(exc)
+    if cancellation is not None:
+        raise cancellation from exc
 
 
 def _log_nested_exceptions(exc: BaseException, *, prefix: str = "") -> None:

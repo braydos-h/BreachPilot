@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 from urllib.parse import urlsplit
 
 from tools.attack_ui import get_ui
-from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
+from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions, _reraise_if_cancelled
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from tools.runtime_context import RuntimeContext
@@ -214,6 +214,7 @@ async def open_exploit_mcp_session(
                 stdio_session_started = True
             yield session
     except _EXC_GROUP_CATCH as exc:
+        _reraise_if_cancelled(exc)
         if stdio_session_started or not http_startup_errors:
             raise
         http_detail = _concise_startup_error(http_startup_errors[-1])
@@ -407,6 +408,7 @@ async def _open_exploit_mcp_session_once(
                             stdio_yielded = True
                             yield session
                         except _EXC_GROUP_CATCH as exc:
+                            _reraise_if_cancelled(exc)
                             if soft_fail:
                                 _ui.warning(f"MCP session closed mid-recon: {exc}")
                                 if _is_exception_group(exc):
@@ -415,6 +417,7 @@ async def _open_exploit_mcp_session_once(
                                 return
                             raise RuntimeError(f"MCP session closed due to error: {exc}") from exc
             except _EXC_GROUP_CATCH as exc:
+                _reraise_if_cancelled(exc)
                 startup_errors.append(exc)
                 # Log the exact error before re-raising so the user always sees it.
                 # anyio's task groups (used by ``stdio_client``) raise
@@ -575,6 +578,7 @@ async def _open_exploit_mcp_session_once(
                             f"{_server_log_tail(http_log_path, secret_values=http_log_secrets)}"
                         )
                     except _EXC_GROUP_CATCH as exc:
+                        _reraise_if_cancelled(exc)
                         startup_errors.append(exc)
                         # The server died mid-handshake. anyio's task group
                         # raises ``BaseExceptionGroup`` — which is NOT an
@@ -614,6 +618,7 @@ async def _open_exploit_mcp_session_once(
                     try:
                         yield session
                     except _EXC_GROUP_CATCH as exc:
+                        _reraise_if_cancelled(exc)
                         if soft_fail:
                             _ui.warning(f"MCP session closed mid-recon: {exc}")
                             if _is_exception_group(exc):
@@ -622,6 +627,7 @@ async def _open_exploit_mcp_session_once(
                             return
                         raise RuntimeError(f"MCP session closed due to error: {exc}") from exc
     except _EXC_GROUP_CATCH as exc:
+        _reraise_if_cancelled(exc)
         # Transport-level failure: ``streamable_http_client`` or
         # ``ClientSession`` entry raised ``BaseExceptionGroup`` (anyio's task
         # group on a dead/reset connection. Even after a successful MCP

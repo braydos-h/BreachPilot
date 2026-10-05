@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from tools.activity_log import ActivityLog
 from tools.attack_ui import get_ui
-from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
+from tools.exceptions import _EXC_GROUP_CATCH, _find_cancellation, _is_exception_group, _log_nested_exceptions
 from tools.goal_engine import AttackGoal, GoalEngine
 from tools.goal_suggester import ReconAssessment
 from tools.mcp_session import _RunHeartbeat
@@ -678,6 +678,9 @@ class ExecuteMixin:
                     reports_dir=reports_dir,
                 )
         except _EXC_GROUP_CATCH as exc:
+            cancellation_error = _find_cancellation(exc)
+            if cancellation_error is not None:
+                raise cancellation_error from exc
             log_path = reports_dir / "session_error.log"
             try:
                 log_path.write_text(

@@ -175,6 +175,17 @@ async def test_ctx_selects_loader_and_factory(tmp_path: Path):
     assert len(_fake_agent.seen) == 1
 
 
+@pytest.mark.asyncio
+async def test_run_exploit_session_preserves_cancellation_nested_in_exception_group(tmp_path: Path):
+    async def cancel_agent(**_kwargs: Any) -> dict[str, Any]:
+        raise BaseExceptionGroup("worker and transport stopped", [asyncio.CancelledError("run cancelled")])
+
+    ctx = _ctx("cancel", tmp_path, run_exploit_agent_fn=cancel_agent)
+
+    with pytest.raises(asyncio.CancelledError, match="run cancelled"):
+        await _run(ctx, tmp_path, "10.0.0.1")
+
+
 # ── No module-global mutation ────────────────────────────────────────────
 
 
@@ -249,7 +260,16 @@ async def test_omitted_ctx_keeps_legacy_behavior(tmp_path: Path):
     """No ctx → module globals, exactly as before (existing tests rely on it)."""
     from tools import exploit_session as _es
 
-    await _run(RuntimeContext(ui=_FakeUI("Z"), config_loader=lambda p: {"exploit": {}}), tmp_path, "10.0.0.4")
+    await _run(
+        RuntimeContext(
+            ui=_FakeUI("Z"),
+            config_loader=lambda p: {"exploit": {}},
+            open_mcp_session=_fake_open_session,
+            run_exploit_agent_fn=_fake_agent,
+        ),
+        tmp_path,
+        "10.0.0.4",
+    )
     # The tools module still exposes its patchable globals for legacy tests.
     assert hasattr(_es, "ui")
     assert hasattr(_es, "load_config")

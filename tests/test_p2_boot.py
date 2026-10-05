@@ -224,3 +224,44 @@ async def test_soft_fail_never_swallows_cancellation(monkeypatch, tmp_path):
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+def test_soft_fail_preserves_cancellation_nested_in_startup_group(monkeypatch, tmp_path):
+    @contextlib.asynccontextmanager
+    async def _cancelled_stdio(_params):
+        raise BaseExceptionGroup(
+            "stdio teardown included cancellation",
+            [
+                ConnectionError("transport closed"),
+                BaseExceptionGroup("nested cancellation", [asyncio.CancelledError("run cancelled")]),
+            ],
+        )
+        yield ("read", "write")  # pragma: no cover
+
+    _patch_stdio(monkeypatch, stdio_factory=_cancelled_stdio)
+
+    with pytest.raises(asyncio.CancelledError, match="run cancelled"):
+        asyncio.run(_drive(tmp_path, soft_fail=True)())
+
+
+def test_soft_fail_preserves_cancellation_nested_in_session_body_group(monkeypatch, tmp_path):
+    async def _run():
+        async with ms.open_exploit_mcp_session(
+            transport="stdio",
+            config_path=Path("config.yaml"),
+            target_ip=_TARGET,
+            exploit_port=8001,
+            workspace=tmp_path,
+            soft_fail=True,
+        ):
+            raise BaseExceptionGroup(
+                "tool and task cancelled",
+                [
+                    RuntimeError("tool transport failed"),
+                    BaseExceptionGroup("nested", [asyncio.CancelledError("run cancelled")]),
+                ],
+            )
+
+    _patch_stdio(monkeypatch)
+    with pytest.raises(asyncio.CancelledError, match="run cancelled"):
+        asyncio.run(_run())

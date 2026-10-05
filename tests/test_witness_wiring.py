@@ -381,5 +381,33 @@ def test_witness_log_shape_matches_api_route_contract(tmp_path: Path) -> None:
         assert flag.get("timestamp"), flag
 
 
+def test_grouped_run_cancellation_propagates_instead_of_returning_error(tmp_path: Path) -> None:
+    config_path, _log_path = _write_config(tmp_path, witness_enabled=False)
+    service, reports_root = _make_service(tmp_path, config_path, WitnessAgent)
+
+    async def _cancelled_run_session(**_kwargs: Any) -> dict[str, Any]:
+        raise BaseExceptionGroup("session teardown", [asyncio.CancelledError("run cancelled")])
+
+    service._c.run_session = _cancelled_run_session  # type: ignore[union-attr]
+
+    async def _main() -> None:
+        request = _run_request(config_path, reports_root)
+        preview = await service.prepare(request)
+        sink = _CaptureSink()
+        with pytest.raises(asyncio.CancelledError, match="run cancelled"):
+            await service.execute(
+                request,
+                preview,
+                decision_provider=_NoDecisionProvider(),
+                event_sink=sink,
+                cancellation=CancellationToken(),
+                model_client=object(),
+                config=None,
+            )
+        assert not any(event[0] == "error" for event in sink.events)
+
+    asyncio.run(_main())
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-v"]))
