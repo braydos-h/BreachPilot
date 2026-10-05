@@ -56,9 +56,11 @@ def test_recon_first_emits_recon_assessment_event(tmp_path):
         cve_findings=[{"service": "ssh", "count": 3}],
         overall_risk_score=65,
     )
+    session_arguments: dict[str, Any] = {}
 
     @contextlib.asynccontextmanager
-    async def _open_session(**_kw):
+    async def _open_session(**kwargs):
+        session_arguments.update(kwargs)
         yield MagicMock()  # non-None so run_recon_assessment is invoked
 
     async def _run_recon(**_kw):
@@ -68,7 +70,8 @@ def test_recon_first_emits_recon_assessment_event(tmp_path):
     service = AssessmentService(callables=callables)
 
     sink = _RecordingSink()
-    config = {"mcp": {"http_port": 8001}}
+    shared_workspace_root = tmp_path / "absolute-workspace-root"
+    config = {"mcp": {"http_port": 8001}, "exploit": {"workspace_dir": str(shared_workspace_root)}}
     request = RunRequest(target="10.0.0.50", mode="recon", config_path=tmp_path / "config.yaml")
 
     async def _go():
@@ -102,6 +105,8 @@ def test_recon_first_emits_recon_assessment_event(tmp_path):
     assert recon_payload["assessment"] == assessment.to_dict()
     assert recon_payload["assessment"]["os_verdict"] == "LINUX"
     assert result_goal.name == "recon_only"
+    assert session_arguments["workspace"].parent == shared_workspace_root.resolve()
+    assert session_arguments["workspace"] != shared_workspace_root.resolve()
 
 
 # ── 2. RunManager allowlist auto-save ──────────────────────────────────────

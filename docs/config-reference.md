@@ -222,7 +222,7 @@ touching. CLI-runnable regardless; block supplies entrypoint defaults.
 | `context_summarize_every` | int | `50` | Min gap between context compactions | cli_exploit_settings.py:140, exploit_agent/context.py:596 |
 | `auto_post_exploit` | bool | `true` | Auto-run post-exploit phase | cli_exploit_settings.py:141 |
 | `max_pivot_depth` | int | `2` | Pivot recursion cap | cli_exploit_settings.py:142, autonomous_orchestrator.py:1091,1638 |
-| `workspace_dir` | str | `exploit_workspace` | Workspace root | cli_exploit_settings.py:148, interactive_menu.py:417 |
+| `workspace_dir` | str | `exploit_workspace` | Relative paths are placed inside each run's report directory. Absolute paths are treated as shared roots and get a stable per-run child directory. | cli_exploit_settings.py:148, tools/kernel/workspace_isolation.py |
 | `loot_workspace` | str | `exploit_workspace/loot` | Loot dir | cli_exploit_settings.py:144 |
 | `attacker_os` | str | `auto` | OS-aware instructions/tools | tools/exploit_agent/runner/_impl.py (`_resolve_attacker_os`) |
 | `searchsploit_path` | str | `searchsploit` | Searchsploit binary | mcp_shared.py:78, doctor.py:123 |

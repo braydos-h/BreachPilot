@@ -19,11 +19,17 @@ Runtime source of truth is `config.yaml` at the repo root. `tools/config_manager
 | `.env` / `.env.example` | Template env file; `.env` never committed. Documents NVD/GITHUB/OLLAMA/SERPAPI + runtime locks. | `.env.example` at root | `python -m dotenv` or manual export | `.env` yes |
 | `.webui_secret_key` | WebUI API bearer token (256-bit `secrets.token_urlsafe(32)`, `0o600` best-effort). | `.webui_secret_key` (`config.yaml:390`, `tools/api/auth.py:46`) | `BREACHPILOT_API_TOKEN` env or `api.token_file` | yes |
 | `~/.codex/auth.json` / `$CODEX_HOME/auth.json` | ChatGPT OAuth tokens (openai-oauth). Existence-only check; never read/logged. | `~/.codex/auth.json` | `chatgpt.oauth_file` when set (`tools/providers/chatgpt_provider.py`) | n/a (outside repo) |
-| `exploit_workspace/` | Per-target attempt artifacts + threat-intel cache | `exploit_workspace` (`exploit.workspace_dir`) | `EXPLOIT_WORKSPACE` env | yes |
+| `exploit_workspace/` | Agent worker files and threat-intel cache | `exploit_workspace` (`exploit.workspace_dir`) | `EXPLOIT_WORKSPACE` env | yes |
 | `reports/<run_id>/` | Per-run audit, nmap, session logs | `reports` (`--reports-dir`) | `--reports-dir` | yes |
 | `webui/dist/` | Built SPA | `webui/dist/index.html` | n/a (built via `npm run build`) | yes (dist) |
 
-All workspace/run dirs are gitignored. First `--web` run does `npm install && npm run build` (`main.py:565`).
+The default workspace and report locations are gitignored; custom absolute
+workspace roots follow the operator's selected location. First `--web` run does
+`npm install && npm run build` (`main.py:565`).
+
+Agent worker workspaces are isolated per run. Relative `exploit.workspace_dir`
+values are resolved beneath that run's report directory; an absolute value is
+treated as a shared root and receives a stable child directory for each run.
 
 ## Packaged vs runtime paths (wheel vs checkout)
 

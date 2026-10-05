@@ -27,6 +27,7 @@ from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_
 from tools.exploit_agent import ExploitSettings
 from tools.goal_engine import AttackGoal, GoalEngine
 from tools.goal_suggester import ReconAssessment
+from tools.kernel.workspace_isolation import resolve_run_workspace
 from tools.run_service.models import (
     EVENT_ARTIFACT,
     EVENT_RECON,
@@ -127,7 +128,8 @@ class TasksMixin:
         ui.status("RECON-FIRST MODE: Scanning target before goal selection...")
         ui.divider()
 
-        workspace = Path("exploit_workspace")
+        workspace_root = Path(str((config.get("exploit", {}) or {}).get("workspace_dir", "exploit_workspace")))
+        workspace = resolve_run_workspace(workspace_root, reports_dir)
         workspace.mkdir(parents=True, exist_ok=True)
 
         http_port = int(config.get("mcp", {}).get("http_port", 8001))
@@ -264,7 +266,8 @@ class TasksMixin:
         ui.status("FAST MODE: Running parallel recon preset before AI takeover...")
         ui.divider()
 
-        workspace = Path("exploit_workspace")
+        workspace_root = Path(str((config.get("exploit", {}) or {}).get("workspace_dir", "exploit_workspace")))
+        workspace = resolve_run_workspace(workspace_root, reports_dir)
         workspace.mkdir(parents=True, exist_ok=True)
         http_port = int(config.get("mcp", {}).get("http_port", 8001))
 
