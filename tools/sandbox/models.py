@@ -221,18 +221,16 @@ class NetworkPolicy:
 
     @property
     def allowed_dns_names(self) -> list[str]:
-        """In-container DNS name allowlist (resolver-layer enforcement view).
+        """Names available through the controlled DNS allowlist.
 
         Built from the authorized FQDN set (``resolved_domains`` keys, which
         already include pinned research hosts when
         ``allow_research_hosts`` is enabled — see ``build_network_policy``).
-        Unauthorized names resolve only to unauthorized IPs, which the
-        default-DROP ruleset denies; the ``:53`` rules additionally confine
-        DNS traffic to the embedded resolver (``127.0.0.11``) so no
-        in-worker resolver or direct external ``:53`` can serve as a bypass.
-        An empty list under ``controlled`` degrades to ``none``
-        (see ``network._effective_dns``) — fail closed, never open.
+        In ``none`` mode, return no names while retaining ``resolved_domains``
+        as host-side resolution provenance and concrete authorized IPs.
         """
+        if self.allow_dns != "controlled":
+            return []
         return sorted(self.resolved_domains)
 
     @property

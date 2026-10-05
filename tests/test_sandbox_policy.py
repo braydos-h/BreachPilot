@@ -213,10 +213,11 @@ class TestBuildNetworkPolicy:
         assert pol.allow_dns == "none"
         assert pol.dns_servers == []
 
-    def test_allow_dns_none_does_not_publish_host_pinned_names(self):
+    def test_allow_dns_none_has_no_dns_names_in_policy_metadata(self):
         pol = build_network_policy(_cfg(["example.com"], allow_dns="none"), resolver_fn=lambda _host: ["93.184.216.34"])
         assert pol.resolved_domains == {"example.com": "93.184.216.34"}
         assert pol.allowed_dns_names == []
+        assert audit_policy_payload(pol)["allowed_dns_names"] == []
         assert pol.dns_servers == []
 
     def test_dns_name_allowlist_built_from_fqdn_allowlist(self):
